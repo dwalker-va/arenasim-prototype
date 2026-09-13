@@ -237,8 +237,7 @@ fn crescent_texture() -> Image {
 
             // The spine bows off the straight line, deepest at the middle.
             let spine = CRESCENT_BOW * profile;
-            let half_width =
-                CRESCENT_THICKNESS * (CRESCENT_TIP + (1.0 - CRESCENT_TIP) * profile);
+            let half_width = CRESCENT_THICKNESS * (CRESCENT_TIP + (1.0 - CRESCENT_TIP) * profile);
 
             let d = (dy - spine) / half_width.max(1.0e-4);
             let band = (-(d * d)).exp();
@@ -328,10 +327,7 @@ pub fn spawn_crescent_fan(
                     + Vec3::Y * (a.sin() * HALO_TILT * spec.reach)
             }
             CrescentLayout::CasterSweep => {
-                anchor
-                    + Vec3::Y * spec.height
-                    + forward * spec.reach
-                    + across * (t * spec.spread)
+                anchor + Vec3::Y * spec.height + forward * spec.reach + across * (t * spec.spread)
             }
         };
         // Each crescent is also rolled, so successive slashes are angled rather
@@ -340,9 +336,7 @@ pub fn spawn_crescent_fan(
         let roll = match spec.layout {
             // Each crescent lies tangent to the ring, so together they trace the
             // ellipse instead of pointing every which way.
-            CrescentLayout::VictimHalo => {
-                i as f32 / spec.count as f32 * TAU + spec.roll_step
-            }
+            CrescentLayout::VictimHalo => i as f32 / spec.count as f32 * TAU + spec.roll_step,
             CrescentLayout::CasterSweep => {
                 (i as f32 - (spec.count as f32 - 1.0) * 0.5) * spec.roll_step
             }
@@ -522,7 +516,10 @@ mod tests {
         // barely half the sprite.
         let img = crescent_texture();
         // On the spine, which bows away from y = 0 at the middle.
-        assert!(alpha_at(&img, 0.0, CRESCENT_BOW) > 200, "the belly is missing");
+        assert!(
+            alpha_at(&img, 0.0, CRESCENT_BOW) > 200,
+            "the belly is missing"
+        );
         assert!(
             alpha_at(&img, 0.7, CRESCENT_BOW * 0.51) > 60,
             "the stroke does not carry out toward its tips"
@@ -548,7 +545,10 @@ mod tests {
         let belly = column(0.0);
         let tip = column(0.85);
         assert!(belly > 0, "nothing lit at the belly at all");
-        assert!(belly > tip, "belly {belly}px is not fatter than tip {tip}px");
+        assert!(
+            belly > tip,
+            "belly {belly}px is not fatter than tip {tip}px"
+        );
     }
 
     #[test]
@@ -619,5 +619,4 @@ mod tests {
             "fan runs {last}s but the stroke is only {stroke}s"
         );
     }
-
 }

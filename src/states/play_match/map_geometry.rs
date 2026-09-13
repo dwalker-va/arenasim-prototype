@@ -487,9 +487,7 @@ pub fn resolve_movement(obstacles: &[ObstacleVolume], pos: Vec3, desired: Vec3) 
 /// (e.g. BasicArena) always return `false`, so the mask is a no-op there.
 pub fn position_blocked(obstacles: &[ObstacleVolume], p: Vec3) -> bool {
     let p_xz = Vec2::new(p.x, p.z);
-    obstacles
-        .iter()
-        .any(|v| penetrates_footprint(v, p_xz, p.y))
+    obstacles.iter().any(|v| penetrates_footprint(v, p_xz, p.y))
 }
 
 /// Whether the mover's XZ collision disc strictly penetrates the volume's
@@ -656,7 +654,12 @@ const STEER_TIE_EPS: f32 = 1e-4;
 /// decide whether a goal-directed mover can walk straight at its goal, and to
 /// pick the nearest obstacle in the way. Honors each volume's `y` span, so an
 /// elevated platform never blocks a ground path.
-fn footprint_sweep_entry(volume: &ObstacleVolume, from: Vec2, to: Vec2, mover_y: f32) -> Option<f32> {
+fn footprint_sweep_entry(
+    volume: &ObstacleVolume,
+    from: Vec2,
+    to: Vec2,
+    mover_y: f32,
+) -> Option<f32> {
     if !volume.y_span_contains(mover_y) {
         return None;
     }
@@ -989,7 +992,14 @@ mod tests {
         }
     }
 
-    fn aabb(min_x: f32, min_y: f32, min_z: f32, max_x: f32, max_y: f32, max_z: f32) -> ObstacleVolume {
+    fn aabb(
+        min_x: f32,
+        min_y: f32,
+        min_z: f32,
+        max_x: f32,
+        max_y: f32,
+        max_z: f32,
+    ) -> ObstacleVolume {
         ObstacleVolume::Aabb {
             min: Vec3::new(min_x, min_y, min_z),
             max: Vec3::new(max_x, max_y, max_z),
@@ -1013,7 +1023,10 @@ mod tests {
         let pillar = cylinder(0.0, 0.0, 5.0, 0.0, 3.0); // top at y = 3
         let from = Vec3::new(-10.0, 5.0, 0.0);
         let to = Vec3::new(10.0, 5.0, 0.0);
-        assert!(!segment_intersects(&pillar, from, to), "y=5 clears the y∈[0,3] pillar");
+        assert!(
+            !segment_intersects(&pillar, from, to),
+            "y=5 clears the y∈[0,3] pillar"
+        );
         assert!(has_line_of_sight(&[pillar], from, to));
     }
 
@@ -1036,7 +1049,10 @@ mod tests {
         // Line z = 5 is tangent to the r=5 circle at (0, 5).
         let from = Vec3::new(-10.0, 1.0, 5.0);
         let to = Vec3::new(10.0, 1.0, 5.0);
-        assert!(segment_intersects(&pillar, from, to), "tangent contact must count as blocked");
+        assert!(
+            segment_intersects(&pillar, from, to),
+            "tangent contact must count as blocked"
+        );
     }
 
     /// Scenario 4: a segment ending inside a volume is blocked.
@@ -1060,7 +1076,10 @@ mod tests {
         // From the ground up through the platform.
         let below_from = Vec3::new(0.0, 0.0, 0.0);
         let below_to = Vec3::new(0.0, 10.0, 0.0);
-        assert!(segment_intersects(&platform, below_from, below_to), "rising through y∈[5,7] is blocked");
+        assert!(
+            segment_intersects(&platform, below_from, below_to),
+            "rising through y∈[5,7] is blocked"
+        );
 
         // Standing atop the platform (body center above the y=7 surface),
         // looking up/away is clear.
@@ -1087,7 +1106,11 @@ mod tests {
             "resolved position {:?} must be outside the r=5 footprint",
             out
         );
-        assert!(out.z > pos.z, "lateral (Z) progress must be preserved, got z={}", out.z);
+        assert!(
+            out.z > pos.z,
+            "lateral (Z) progress must be preserved, got z={}",
+            out.z
+        );
     }
 
     /// Scenario 7: a mover boxed in by geometry (every candidate lands inside a
@@ -1104,7 +1127,11 @@ mod tests {
         let out = resolve_movement(&[inner, outer], pos, desired);
 
         assert!(out.is_finite(), "no NaN/inf");
-        assert!(out.distance(pos) < 1e-3, "enclosed mover must stay put, got {:?}", out);
+        assert!(
+            out.distance(pos) < 1e-3,
+            "enclosed mover must stay put, got {:?}",
+            out
+        );
     }
 
     /// Scenario 8: a zero-length segment has sight unless the point is inside a
@@ -1115,9 +1142,18 @@ mod tests {
         let outside = Vec3::new(20.0, 1.0, 0.0);
         let inside = Vec3::new(0.0, 1.0, 0.0);
 
-        assert!(has_line_of_sight(&[pillar], outside, outside), "a point outside sees itself");
-        assert!(!has_line_of_sight(&[pillar], inside, inside), "a point inside a volume is blocked");
-        assert!(has_line_of_sight(&[], outside, outside), "no obstacles → always sight");
+        assert!(
+            has_line_of_sight(&[pillar], outside, outside),
+            "a point outside sees itself"
+        );
+        assert!(
+            !has_line_of_sight(&[pillar], inside, inside),
+            "a point inside a volume is blocked"
+        );
+        assert!(
+            has_line_of_sight(&[], outside, outside),
+            "no obstacles → always sight"
+        );
     }
 
     /// Scenario 9: with no obstacles, `resolve_movement` returns `desired`
@@ -1147,8 +1183,16 @@ mod tests {
             "resolved position {:?} must sit outside the inflated footprint",
             out
         );
-        assert!(out.z > pos.z, "lateral (Z) progress must be preserved, got z={}", out.z);
-        assert!(out.x <= -5.0, "must be clamped to the -X face, got x={}", out.x);
+        assert!(
+            out.z > pos.z,
+            "lateral (Z) progress must be preserved, got z={}",
+            out.z
+        );
+        assert!(
+            out.x <= -5.0,
+            "must be clamped to the -X face, got x={}",
+            out.x
+        );
     }
 
     /// Scenario 10b: the Z-face mirror — approaching a box's `-Z` face from
@@ -1167,8 +1211,16 @@ mod tests {
             "resolved position {:?} must sit outside the inflated footprint",
             out
         );
-        assert!(out.x > pos.x, "lateral (X) progress must be preserved, got x={}", out.x);
-        assert!(out.z <= -5.0, "must be clamped to the -Z face, got z={}", out.z);
+        assert!(
+            out.x > pos.x,
+            "lateral (X) progress must be preserved, got x={}",
+            out.x
+        );
+        assert!(
+            out.z <= -5.0,
+            "must be clamped to the -Z face, got z={}",
+            out.z
+        );
     }
 
     /// Scenario 10c: a corner approach (mover outside on BOTH axes) exercises the
@@ -1179,8 +1231,8 @@ mod tests {
     fn resolve_movement_box_corner_clamps_least_penetration_axis() {
         let box_vol = aabb(-5.0, 0.0, -5.0, 5.0, 2.0, 5.0);
         let pos = Vec3::new(-8.0, 1.0, -8.0); // diagonally outside the corner (both axes)
-        // Shallow X penetration (just past the -5.5 inflated face), deep Z
-        // penetration (well inside), so the tie-break clamps X.
+                                              // Shallow X penetration (just past the -5.5 inflated face), deep Z
+                                              // penetration (well inside), so the tie-break clamps X.
         let desired = Vec3::new(-4.0, 1.0, 0.0);
         let out = resolve_movement(&[box_vol], pos, desired);
 
@@ -1214,7 +1266,11 @@ mod tests {
         let out = resolve_movement(&[inner, outer], pos, desired);
 
         assert!(out.is_finite(), "no NaN/inf");
-        assert!(out.distance(pos) < 1e-3, "enclosed mover must stay put, got {:?}", out);
+        assert!(
+            out.distance(pos) < 1e-3,
+            "enclosed mover must stay put, got {:?}",
+            out
+        );
     }
 
     /// Scenario 10e: a box whose Y-span sits entirely above the mover's `y ≈ 1.0`
@@ -1269,7 +1325,10 @@ mod tests {
         let from = Vec2::new(-20.0, 0.0);
         let goal = Vec2::new(20.0, 0.0);
         let dir = steer_toward_goal(&[pillar], from, goal, 1.0).expect("path is blocked");
-        assert!((dir.length() - 1.0).abs() < 1e-4, "direction must be unit, got {dir:?}");
+        assert!(
+            (dir.length() - 1.0).abs() < 1e-4,
+            "direction must be unit, got {dir:?}"
+        );
 
         let goal_dir = (goal - from).normalize();
         assert!(
@@ -1329,7 +1388,10 @@ mod tests {
         // Sanity: convergence took real work but a bounded amount (a clean arc
         // around a r=3 inflated circle from 20yd out is well under 200 steps).
         assert!(steps > 0, "the path should have been blocked initially");
-        assert!(steps < 200, "convergence took {steps} steps — unexpectedly long");
+        assert!(
+            steps < 200,
+            "convergence took {steps} steps — unexpectedly long"
+        );
     }
 
     /// Box analog: goal behind an AABB ⇒ steer toward a visible silhouette corner
@@ -1340,8 +1402,14 @@ mod tests {
         let from = Vec2::new(-20.0, 0.0);
         let goal = Vec2::new(20.0, 0.0);
         let dir = steer_toward_goal(&[box_vol], from, goal, 1.0).expect("path is blocked");
-        assert!((dir.length() - 1.0).abs() < 1e-4, "unit direction, got {dir:?}");
-        assert!(dir.x > 0.0, "must still make +x progress toward the goal, got {dir:?}");
+        assert!(
+            (dir.length() - 1.0).abs() < 1e-4,
+            "unit direction, got {dir:?}"
+        );
+        assert!(
+            dir.x > 0.0,
+            "must still make +x progress toward the goal, got {dir:?}"
+        );
         assert!(
             dir.y.abs() > 1e-3,
             "must deflect off-axis toward a corner, got {dir:?}"
@@ -1358,7 +1426,10 @@ mod tests {
         let from = Vec2::new(-2.9, 0.0);
         let goal = Vec2::new(20.0, 0.0); // straight through the pillar
         let dir = steer_toward_goal(&[pillar], from, goal, 1.0).expect("path is blocked");
-        assert!((dir.length() - 1.0).abs() < 1e-4, "unit direction, got {dir:?}");
+        assert!(
+            (dir.length() - 1.0).abs() < 1e-4,
+            "unit direction, got {dir:?}"
+        );
         // Perpendicular to the center direction (which is +x here) ⇒ ~pure ±z.
         assert!(dir.y.abs() > 0.9, "should peel sideways (±z), got {dir:?}");
     }
@@ -1427,8 +1498,14 @@ mod tests {
         let n = Vec2::from_angle(std::f32::consts::TAU / 16.0);
         let just_in = n * (apothem - 0.01);
         let just_out = n * (apothem + 0.01);
-        assert!(contains_point(&pillar, Vec3::new(just_in.x, 1.0, just_in.y)));
-        assert!(!contains_point(&pillar, Vec3::new(just_out.x, 1.0, just_out.y)));
+        assert!(contains_point(
+            &pillar,
+            Vec3::new(just_in.x, 1.0, just_in.y)
+        ));
+        assert!(!contains_point(
+            &pillar,
+            Vec3::new(just_out.x, 1.0, just_out.y)
+        ));
 
         // The discriminating case: radius 2.4 sits between apothem and R, so it
         // is inside toward a vertex and outside toward an edge.
@@ -1462,7 +1539,10 @@ mod tests {
         // +x was a vertex direction unrotated; after a half-step turn it is an
         // edge normal, so a point that was inside is now outside.
         let mid = 2.4_f32;
-        assert!(contains_point(&octagon(0.0, 0.0, r), Vec3::new(mid, 1.0, 0.0)));
+        assert!(contains_point(
+            &octagon(0.0, 0.0, r),
+            Vec3::new(mid, 1.0, 0.0)
+        ));
         assert!(!contains_point(&rotated, Vec3::new(mid, 1.0, 0.0)));
     }
 
@@ -1503,7 +1583,10 @@ mod tests {
             base_y: 0.0,
             height: 5.0,
         };
-        assert!(prism_apothem(2.5, 8) < 2.4, "test premise: apothem is inside 2.4");
+        assert!(
+            prism_apothem(2.5, 8) < 2.4,
+            "test premise: apothem is inside 2.4"
+        );
         assert!(has_line_of_sight(
             &[turned],
             Vec3::new(-20.0, EYE_HEIGHT, 2.4),
@@ -1548,8 +1631,14 @@ mod tests {
         let n = Vec2::from_angle(std::f32::consts::TAU / 16.0);
         let inside = n * (apothem + MOVER_RADIUS - 0.05);
         let outside = n * (apothem + MOVER_RADIUS + 0.05);
-        assert!(position_blocked(&[pillar], Vec3::new(inside.x, 1.0, inside.y)));
-        assert!(!position_blocked(&[pillar], Vec3::new(outside.x, 1.0, outside.y)));
+        assert!(position_blocked(
+            &[pillar],
+            Vec3::new(inside.x, 1.0, inside.y)
+        ));
+        assert!(!position_blocked(
+            &[pillar],
+            Vec3::new(outside.x, 1.0, outside.y)
+        ));
     }
 
     /// Walking straight into a prism resolves to a non-penetrating position that
@@ -1559,7 +1648,10 @@ mod tests {
         let pillar = octagon(0.0, 0.0, 2.5);
         let pos = Vec3::new(-4.0, 1.0, 0.3);
         let desired = Vec3::new(-2.0, 1.0, 0.3); // into the footprint
-        assert!(position_blocked(&[pillar], desired), "test setup: step is blocked");
+        assert!(
+            position_blocked(&[pillar], desired),
+            "test setup: step is blocked"
+        );
 
         let resolved = resolve_movement(&[pillar], pos, desired);
         assert!(
@@ -1605,7 +1697,10 @@ mod tests {
             }
         }
         assert!(steps > 0, "the path should have been blocked initially");
-        assert!(steps < 200, "convergence took {steps} steps — unexpectedly long");
+        assert!(
+            steps < 200,
+            "convergence took {steps} steps — unexpectedly long"
+        );
     }
 
     /// Steering is a deterministic function of geometry: same inputs, same
@@ -1634,7 +1729,12 @@ mod tests {
             height: 2.0,
         };
         assert_eq!(
-            steer_toward_goal(&[elevated], Vec2::new(-20.0, 0.0), Vec2::new(20.0, 0.0), 1.0),
+            steer_toward_goal(
+                &[elevated],
+                Vec2::new(-20.0, 0.0),
+                Vec2::new(20.0, 0.0),
+                1.0
+            ),
             None
         );
     }

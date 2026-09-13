@@ -34,17 +34,21 @@ const STATES_MOD_FILE_REL: &str = "src/states/mod.rs";
 const ALLOWLIST: &[(&str, &str)] = &[
     // CombatSnapshot::build takes Bevy queries by reference (not by value) to
     // construct a per-frame view inside `decide_abilities`. Not a Bevy system.
-    ("build", "CombatSnapshot::build helper called from decide_abilities"),
+    (
+        "build",
+        "CombatSnapshot::build helper called from decide_abilities",
+    ),
 ];
 
 #[test]
 fn audit_combat_system_registration() {
-    let core_registered = extract_registered_in_function(SYSTEMS_FILE_REL, "add_core_combat_systems")
-        .expect("failed to extract core-registered set from systems.rs");
+    let core_registered =
+        extract_registered_in_function(SYSTEMS_FILE_REL, "add_core_combat_systems")
+            .expect("failed to extract core-registered set from systems.rs");
     let graphical_registered = extract_registered_in_states_plugin_build()
         .expect("failed to extract graphical-registered set from states/mod.rs");
-    let candidates = walk_play_match_fns()
-        .expect("failed to walk play_match for candidate pub fn items");
+    let candidates =
+        walk_play_match_fns().expect("failed to walk play_match for candidate pub fn items");
 
     let allowlist: BTreeSet<&str> = ALLOWLIST.iter().map(|(name, _)| *name).collect();
 
@@ -70,14 +74,18 @@ fn audit_combat_system_registration() {
             msg.push_str(&format!("  {} at {}:{}\n", name, display_path, line));
         }
         msg.push_str("\nFor each function listed above, do ONE of:\n");
-        msg.push_str("  - Register it via add_core_combat_systems in src/states/play_match/systems.rs\n");
+        msg.push_str(
+            "  - Register it via add_core_combat_systems in src/states/play_match/systems.rs\n",
+        );
         msg.push_str("    (for systems that run in BOTH headless and graphical modes)\n");
         msg.push_str("  - Register it via StatesPlugin::build in src/states/mod.rs\n");
         msg.push_str("    (for systems that run in graphical mode only)\n");
         msg.push_str("  - Add it to ALLOWLIST in tests/registration_audit.rs with a one-line\n");
         msg.push_str("    justification (for helpers that take SystemParam types by value but\n");
         msg.push_str("    are not themselves registered as systems)\n\n");
-        msg.push_str("See docs/plans/2026-04-26-001-refactor-system-registration-architecture-plan.md\n");
+        msg.push_str(
+            "See docs/plans/2026-04-26-001-refactor-system-registration-architecture-plan.md\n",
+        );
         msg.push_str("for the rationale.\n");
         panic!("{}", msg);
     }
@@ -85,7 +93,10 @@ fn audit_combat_system_registration() {
 
 // ---- registered-set extraction ----
 
-fn extract_registered_in_function(rel_path: &str, fn_name: &str) -> std::io::Result<BTreeSet<String>> {
+fn extract_registered_in_function(
+    rel_path: &str,
+    fn_name: &str,
+) -> std::io::Result<BTreeSet<String>> {
     let text = fs::read_to_string(repo_path(rel_path))?;
     let body = find_fn_body(&text, fn_name).unwrap_or_default();
     Ok(collect_registered_identifiers(&body))
@@ -190,12 +201,44 @@ fn find_impl_body(text: &str, trait_name: &str, type_name: &str) -> Option<Strin
 }
 
 const SCHEDULE_AND_KEYWORDS: &[&str] = &[
-    "chain", "in_set", "after", "before", "run_if", "in_state",
-    "apply_deferred", "OnEnter", "OnExit", "Update", "FixedUpdate",
-    "Startup", "PreUpdate", "PostUpdate", "PreStartup", "PostStartup",
-    "GameState", "Schedule", "self", "app", "let", "if", "else", "match",
-    "for", "while", "loop", "return", "fn", "use", "mut", "ref", "true",
-    "false", "Some", "None", "Ok", "Err",
+    "chain",
+    "in_set",
+    "after",
+    "before",
+    "run_if",
+    "in_state",
+    "apply_deferred",
+    "OnEnter",
+    "OnExit",
+    "Update",
+    "FixedUpdate",
+    "Startup",
+    "PreUpdate",
+    "PostUpdate",
+    "PreStartup",
+    "PostStartup",
+    "GameState",
+    "Schedule",
+    "self",
+    "app",
+    "let",
+    "if",
+    "else",
+    "match",
+    "for",
+    "while",
+    "loop",
+    "return",
+    "fn",
+    "use",
+    "mut",
+    "ref",
+    "true",
+    "false",
+    "Some",
+    "None",
+    "Ok",
+    "Err",
 ];
 
 /// Within a function body, scan every `.add_systems(...)` call and extract
@@ -203,6 +246,7 @@ const SCHEDULE_AND_KEYWORDS: &[&str] = &[
 ///   1. `.add_systems(SCHEDULE, single_system)` — one system
 ///   2. `.add_systems(SCHEDULE, (a, b, c).chain())` — tuple of systems
 ///   3. `.add_systems(SCHEDULE, (a, b.after(x), c).chain())` — chained methods
+///
 /// The line-based extraction is permissive (catches identifiers from anywhere
 /// inside the call), filtered by an exclude list of Rust idioms.
 fn collect_registered_identifiers(body: &str) -> BTreeSet<String> {
@@ -213,10 +257,8 @@ fn collect_registered_identifiers(body: &str) -> BTreeSet<String> {
     let line_re = Regex::new(r"(?m)^\s*(?:[\w:]+::)?([a-z_][a-z0-9_]*)\s*[,.\(]").unwrap();
     // Single-system shortcut: SCHEDULE, IDENT (e.g. OnEnter(...), play_match::setup_play_match)
     // Operates on the captured block (without the leading .add_systems prefix).
-    let single_re = Regex::new(
-        r"(?m)^\s*[\w:]+(?:\([^)]*\))?\s*,\s*(?:[\w:]+::)?([a-z_][a-z0-9_]*)",
-    )
-    .unwrap();
+    let single_re =
+        Regex::new(r"(?m)^\s*[\w:]+(?:\([^)]*\))?\s*,\s*(?:[\w:]+::)?([a-z_][a-z0-9_]*)").unwrap();
 
     let mut i = 0usize;
     while let Some(m) = add_systems_re.find(&body[i..]) {
@@ -240,7 +282,11 @@ fn collect_registered_identifiers(body: &str) -> BTreeSet<String> {
             let token = cap[1].split("::").last().unwrap_or("").to_string();
             if !SCHEDULE_AND_KEYWORDS.contains(&token.as_str())
                 && !token.is_empty()
-                && token.chars().next().map(|c| c.is_ascii_lowercase()).unwrap_or(false)
+                && token
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_lowercase())
+                    .unwrap_or(false)
             {
                 registered.insert(token);
             }

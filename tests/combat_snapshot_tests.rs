@@ -100,7 +100,10 @@ fn reflect_instant_cc_makes_target_visible_as_ccd() {
     snapshot.reflect_instant_cc(target, &stun);
 
     // The reflected aura now shows up in the snapshot's active_auras...
-    let auras = snapshot.active_auras.get(&target).expect("aura was inserted");
+    let auras = snapshot
+        .active_auras
+        .get(&target)
+        .expect("aura was inserted");
     assert!(auras.iter().any(|a| a.effect_type == AuraType::Stun));
 
     // ...and a CombatContext built from this snapshot reports the target as CC'd.
@@ -130,7 +133,11 @@ fn reflect_instant_cc_advances_existing_dr_tracker() {
     // The reflected aura's duration should be DR-scaled by the SECOND application,
     // since one was already applied above. DR multipliers are monotonically
     // decreasing, so applying again must produce <= multiplier_first.
-    let aura = snapshot.active_auras.get(&target).and_then(|a| a.first()).expect("aura inserted");
+    let aura = snapshot
+        .active_auras
+        .get(&target)
+        .and_then(|a| a.first())
+        .expect("aura inserted");
     let multiplier_used = aura.duration / 4.0;
     assert!(multiplier_used <= multiplier_first);
 }
@@ -142,7 +149,10 @@ fn reflect_instant_cc_skips_target_with_damage_immunity() {
     let mut snapshot = empty_snapshot_with(caster, target);
 
     // Pre-existing Divine Shield on the target.
-    snapshot.active_auras.insert(target, vec![make_aura(AuraType::DamageImmunity, "Divine Shield")]);
+    snapshot.active_auras.insert(
+        target,
+        vec![make_aura(AuraType::DamageImmunity, "Divine Shield")],
+    );
 
     let stun = make_aura(AuraType::Stun, "Cheap Shot");
     snapshot.reflect_instant_cc(target, &stun);
@@ -152,7 +162,7 @@ fn reflect_instant_cc_skips_target_with_damage_immunity() {
     let auras = snapshot.active_auras.get(&target).expect("auras present");
     assert_eq!(auras.len(), 1);
     assert_eq!(auras[0].effect_type, AuraType::DamageImmunity);
-    assert!(snapshot.dr_trackers.get(&target).is_none());
+    assert!(!snapshot.dr_trackers.contains_key(&target));
 }
 
 #[test]
@@ -174,7 +184,10 @@ fn reflect_instant_cc_respects_existing_dr_immunity() {
     snapshot.reflect_instant_cc(target, &stun);
 
     // DR-immune targets reject the reflection — no aura was added.
-    assert!(snapshot.active_auras.get(&target).map_or(true, |a| a.is_empty()));
+    assert!(snapshot
+        .active_auras
+        .get(&target)
+        .is_none_or(|a| a.is_empty()));
 }
 
 // ---------------------------------------------------------------------------
@@ -191,25 +204,59 @@ fn reflect_instant_cc_respects_existing_dr_immunity() {
 fn build_snapshot_from_world(world: &mut World) -> CombatSnapshot {
     let mut state: SystemState<(
         Query<
-            (Entity, &'static mut Combatant, &'static Transform, Option<&'static mut ActiveAuras>, Option<&'static ChargingState>, Option<&'static DisengagingState>),
+            (
+                Entity,
+                &'static mut Combatant,
+                &'static Transform,
+                Option<&'static mut ActiveAuras>,
+                Option<&'static ChargingState>,
+                Option<&'static DisengagingState>,
+            ),
             (Without<CastingState>, Without<ChannelingState>),
         >,
         Query<
-            (Entity, &'static Combatant, &'static Transform, Option<&'static ActiveAuras>, &'static CastingState),
+            (
+                Entity,
+                &'static Combatant,
+                &'static Transform,
+                Option<&'static ActiveAuras>,
+                &'static CastingState,
+            ),
             With<CastingState>,
         >,
         Query<
-            (Entity, &'static Combatant, &'static Transform, Option<&'static ActiveAuras>, &'static ChannelingState),
+            (
+                Entity,
+                &'static Combatant,
+                &'static Transform,
+                Option<&'static ActiveAuras>,
+                &'static ChannelingState,
+            ),
             (With<ChannelingState>, Without<CastingState>),
         >,
         Query<(Entity, &'static DRTracker)>,
         Query<&'static Pet>,
     )> = SystemState::new(world);
     let (aura_q, casting_q, channeling_q, dr_q, pet_q) = state.get_mut(world);
-    CombatSnapshot::build(&aura_q, &casting_q, &channeling_q, &dr_q, &pet_q, &[], Default::default(), Default::default())
+    CombatSnapshot::build(
+        &aura_q,
+        &casting_q,
+        &channeling_q,
+        &dr_q,
+        &pet_q,
+        &[],
+        Default::default(),
+        Default::default(),
+    )
 }
 
-fn spawn_combatant(world: &mut World, team: u8, slot: u8, class: CharacterClass, pos: Vec3) -> Entity {
+fn spawn_combatant(
+    world: &mut World,
+    team: u8,
+    slot: u8,
+    class: CharacterClass,
+    pos: Vec3,
+) -> Entity {
     world
         .spawn((
             Combatant::new(team, slot, class),
@@ -222,11 +269,23 @@ fn spawn_combatant(world: &mut World, team: u8, slot: u8, class: CharacterClass,
 fn build_includes_mid_cast_enemy_with_readable_target() {
     let mut world = World::new();
     let me = spawn_combatant(&mut world, 1, 0, CharacterClass::Priest, Vec3::ZERO);
-    let enemy = spawn_combatant(&mut world, 2, 0, CharacterClass::Mage, Vec3::new(20.0, 0.0, 0.0));
+    let enemy = spawn_combatant(
+        &mut world,
+        2,
+        0,
+        CharacterClass::Mage,
+        Vec3::new(20.0, 0.0, 0.0),
+    );
 
     // The enemy Mage is mid-Frostbolt at me.
-    world.entity_mut(enemy).get_mut::<Combatant>().unwrap().target = Some(me);
-    world.entity_mut(enemy).insert(CastingState::new(AbilityType::Frostbolt, me, 2.5));
+    world
+        .entity_mut(enemy)
+        .get_mut::<Combatant>()
+        .unwrap()
+        .target = Some(me);
+    world
+        .entity_mut(enemy)
+        .insert(CastingState::new(AbilityType::Frostbolt, me, 2.5));
 
     let snapshot = build_snapshot_from_world(&mut world);
 
@@ -234,7 +293,11 @@ fn build_includes_mid_cast_enemy_with_readable_target() {
         .combatants
         .get(&enemy)
         .expect("mid-cast enemy must be present in the snapshot");
-    assert_eq!(info.target, Some(me), "casting enemy's target must be readable");
+    assert_eq!(
+        info.target,
+        Some(me),
+        "casting enemy's target must be readable"
+    );
     assert_eq!(info.team, 2);
     assert_eq!(info.position, Vec3::new(20.0, 0.0, 0.0));
     assert!(info.is_alive);
@@ -251,8 +314,20 @@ fn build_includes_mid_cast_enemy_with_readable_target() {
 fn build_exposes_casting_ally_hp() {
     let mut world = World::new();
     let healer = spawn_combatant(&mut world, 1, 0, CharacterClass::Priest, Vec3::ZERO);
-    let ally = spawn_combatant(&mut world, 1, 1, CharacterClass::Mage, Vec3::new(5.0, 0.0, 0.0));
-    let _enemy = spawn_combatant(&mut world, 2, 0, CharacterClass::Warrior, Vec3::new(30.0, 0.0, 0.0));
+    let ally = spawn_combatant(
+        &mut world,
+        1,
+        1,
+        CharacterClass::Mage,
+        Vec3::new(5.0, 0.0, 0.0),
+    );
+    let _enemy = spawn_combatant(
+        &mut world,
+        2,
+        0,
+        CharacterClass::Warrior,
+        Vec3::new(30.0, 0.0, 0.0),
+    );
 
     // The ally is mid-cast at 40% HP — the healer must see that HP.
     {
@@ -260,15 +335,25 @@ fn build_exposes_casting_ally_hp() {
         let mut combatant = c.get_mut::<Combatant>().unwrap();
         combatant.current_health = combatant.max_health * 0.4;
     }
-    world.entity_mut(ally).insert(CastingState::new(AbilityType::Frostbolt, healer, 2.5));
+    world
+        .entity_mut(ally)
+        .insert(CastingState::new(AbilityType::Frostbolt, healer, 2.5));
 
     let snapshot = build_snapshot_from_world(&mut world);
 
-    let info = snapshot.combatants.get(&ally).expect("casting ally must be in snapshot");
-    assert!((info.health_pct() - 0.4).abs() < 1e-6, "casting ally HP must be visible");
+    let info = snapshot
+        .combatants
+        .get(&ally)
+        .expect("casting ally must be in snapshot");
+    assert!(
+        (info.health_pct() - 0.4).abs() < 1e-6,
+        "casting ally HP must be visible"
+    );
 
     let ctx = snapshot.context_for(healer);
-    let lowest = ctx.lowest_health_ally().expect("healer sees at least one ally");
+    let lowest = ctx
+        .lowest_health_ally()
+        .expect("healer sees at least one ally");
     assert_eq!(
         lowest.entity, ally,
         "the casting ally at 40% must be the lowest-health ally the healer sees"
@@ -279,9 +364,19 @@ fn build_exposes_casting_ally_hp() {
 fn build_includes_channeling_combatant_with_auras() {
     let mut world = World::new();
     let me = spawn_combatant(&mut world, 1, 0, CharacterClass::Warrior, Vec3::ZERO);
-    let enemy = spawn_combatant(&mut world, 2, 0, CharacterClass::Warlock, Vec3::new(15.0, 0.0, 0.0));
+    let enemy = spawn_combatant(
+        &mut world,
+        2,
+        0,
+        CharacterClass::Warlock,
+        Vec3::new(15.0, 0.0, 0.0),
+    );
 
-    world.entity_mut(enemy).get_mut::<Combatant>().unwrap().target = Some(me);
+    world
+        .entity_mut(enemy)
+        .get_mut::<Combatant>()
+        .unwrap()
+        .target = Some(me);
     world.entity_mut(enemy).insert((
         ChannelingState {
             ability: AbilityType::DrainLife,
@@ -293,7 +388,9 @@ fn build_includes_channeling_combatant_with_auras() {
             interrupted_display_time: 0.0,
             ticks_applied: 0,
         },
-        ActiveAuras { auras: vec![make_aura(AuraType::MovementSpeedSlow, "Concussive Shot")] },
+        ActiveAuras {
+            auras: vec![make_aura(AuraType::MovementSpeedSlow, "Concussive Shot")],
+        },
     ));
 
     let snapshot = build_snapshot_from_world(&mut world);
@@ -305,6 +402,11 @@ fn build_includes_channeling_combatant_with_auras() {
     assert_eq!(info.target, Some(me));
 
     // Aura harvesting for channeling entities (pre-existing behavior) still works.
-    let auras = snapshot.active_auras.get(&enemy).expect("channeling enemy auras harvested");
-    assert!(auras.iter().any(|a| a.effect_type == AuraType::MovementSpeedSlow));
+    let auras = snapshot
+        .active_auras
+        .get(&enemy)
+        .expect("channeling enemy auras harvested");
+    assert!(auras
+        .iter()
+        .any(|a| a.effect_type == AuraType::MovementSpeedSlow));
 }

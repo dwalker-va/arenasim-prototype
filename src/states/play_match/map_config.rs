@@ -340,7 +340,13 @@ fn in_arena_bounds(bounds: &ArenaBounds, x: f32, z: f32) -> bool {
 /// `(-, +)` or `(+, -)` quadrant. On the circular bowl a pillar at
 /// `(-40, +40)` with `circumradius` 6 validated clean while actually reaching
 /// 62.6yd from centre, i.e. ~3yd through a 59.72yd wall.
-fn rect_in_arena_bounds(bounds: &ArenaBounds, min_x: f32, min_z: f32, max_x: f32, max_z: f32) -> bool {
+fn rect_in_arena_bounds(
+    bounds: &ArenaBounds,
+    min_x: f32,
+    min_z: f32,
+    max_x: f32,
+    max_z: f32,
+) -> bool {
     in_arena_bounds(bounds, min_x, min_z)
         && in_arena_bounds(bounds, max_x, min_z)
         && in_arena_bounds(bounds, min_x, max_z)
@@ -411,6 +417,9 @@ fn validate_bounds(map: &str, bounds: &ArenaBounds, issues: &mut Vec<String>) {
 }
 
 /// Validate one map's bounds, volumes, and cover anchors, pushing every violation.
+// `!(x > 0.0)` is deliberate, not a clumsy `<=`: it also rejects NaN,
+// which is exactly what a geometry validator must do.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
 fn validate_map(map: &str, def: &MapDef, issues: &mut Vec<String>) {
     let bounds = &def.bounds;
     validate_bounds(map, bounds, issues);
@@ -563,12 +572,19 @@ pub struct ActiveMapGeometry {
 
 /// Parse a map geometry config from RON text. `source` names the origin for
 /// error messages (a path, or "inline" in tests).
-pub fn parse_map_geometry_config(contents: &str, source: &str) -> Result<MapGeometryConfig, String> {
+pub fn parse_map_geometry_config(
+    contents: &str,
+    source: &str,
+) -> Result<MapGeometryConfig, String> {
     let config: MapGeometryConfig =
         ron::from_str(contents).map_err(|e| format!("Failed to parse {}: {}", source, e))?;
 
     config.validate().map_err(|issues| {
-        format!("Invalid map geometry config in {}:\n  {}", source, issues.join("\n  "))
+        format!(
+            "Invalid map geometry config in {}:\n  {}",
+            source,
+            issues.join("\n  ")
+        )
     })?;
 
     Ok(config)
@@ -661,8 +677,10 @@ mod tests {
             .validate()
             .expect_err("out-of-bounds pillar must fail validation");
         assert!(
-            issues.iter().any(|i| i.contains("pillared_arena.volumes[0]")
-                && i.contains("outside pillared_arena bounds")),
+            issues
+                .iter()
+                .any(|i| i.contains("pillared_arena.volumes[0]")
+                    && i.contains("outside pillared_arena bounds")),
             "issues should flag the out-of-bounds pillar: {:?}",
             issues
         );
@@ -728,7 +746,9 @@ mod tests {
                 Ok(()) => panic!("{bounds:?} must fail validation"),
             };
             assert!(
-                issues.iter().any(|i| i.contains("basic_arena") && i.contains(expected)),
+                issues
+                    .iter()
+                    .any(|i| i.contains("basic_arena") && i.contains(expected)),
                 "{bounds:?} should be flagged with {expected:?}: {issues:?}"
             );
         }
@@ -779,7 +799,9 @@ mod tests {
             .validate()
             .expect_err("cover anchor inside a pillar must fail");
         assert!(
-            issues.iter().any(|i| i.contains("cover_anchors[0]") && i.contains("inside")),
+            issues
+                .iter()
+                .any(|i| i.contains("cover_anchors[0]") && i.contains("inside")),
             "issues should flag the anchor inside a volume: {:?}",
             issues
         );

@@ -307,8 +307,14 @@ mod tests {
         let settings = settings_path_from(Some(data.path()));
         let logs = match_log_dir_from(Some(data.path()));
 
-        assert!(settings.starts_with(data.path()), "settings under data dir: {settings:?}");
-        assert!(logs.starts_with(data.path()), "logs under data dir: {logs:?}");
+        assert!(
+            settings.starts_with(data.path()),
+            "settings under data dir: {settings:?}"
+        );
+        assert!(
+            logs.starts_with(data.path()),
+            "logs under data dir: {logs:?}"
+        );
         assert_ne!(settings, logs);
     }
 
@@ -348,8 +354,10 @@ mod tests {
     /// hand back today's relative asset path.
     #[test]
     fn the_running_test_binary_reads_assets_relatively() {
-        assert_eq!(asset_path("config/abilities.ron"),
-                   PathBuf::from("assets/config/abilities.ron"));
+        assert_eq!(
+            asset_path("config/abilities.ron"),
+            PathBuf::from("assets/config/abilities.ron")
+        );
     }
 
     /// `ProjectDirs` resolving to nothing must degrade to today's behavior

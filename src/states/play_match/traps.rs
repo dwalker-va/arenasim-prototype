@@ -5,13 +5,13 @@
 //! - `trap_system()` — arm timer, proximity trigger, effect application
 //! - `slow_zone_system()` — zone duration tick, slow aura refresh
 
-use bevy::prelude::*;
-use std::f32::consts::PI;
-use crate::combat::log::{CombatLog, CombatLogEventType};
+use super::abilities::SpellSchool;
 use super::components::*;
 use super::constants::*;
-use super::abilities::SpellSchool;
 use super::utils::combat_log_id_for;
+use crate::combat::log::{CombatLog, CombatLogEventType};
+use bevy::prelude::*;
+use std::f32::consts::PI;
 
 /// Single system handling the full trap lifecycle:
 /// 1. Decrement arm_timer, consider armed when timer hits 0
@@ -187,7 +187,10 @@ pub fn slow_zone_system(
     mut commands: Commands,
     time: Res<Time>,
     mut zones: Query<(Entity, &mut SlowZone, &Transform)>,
-    mut combatants: Query<(Entity, &Combatant, &Transform, Option<&mut ActiveAuras>), Without<SlowZone>>,
+    mut combatants: Query<
+        (Entity, &Combatant, &Transform, Option<&mut ActiveAuras>),
+        Without<SlowZone>,
+    >,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't apply slow zone auras during victory celebration
@@ -208,7 +211,9 @@ pub fn slow_zone_system(
         let zone_pos = zone_transform.translation;
 
         // Check all enemy combatants for proximity
-        for (target_entity, target_combatant, target_transform, active_auras) in combatants.iter_mut() {
+        for (target_entity, target_combatant, target_transform, active_auras) in
+            combatants.iter_mut()
+        {
             // Skip dead combatants
             if !target_combatant.is_alive() {
                 continue;
@@ -223,7 +228,11 @@ pub fn slow_zone_system(
             if distance <= zone.radius {
                 // Skip immune targets (Divine Shield)
                 if let Some(ref auras) = active_auras {
-                    if auras.auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity) {
+                    if auras
+                        .auras
+                        .iter()
+                        .any(|a| a.effect_type == AuraType::DamageImmunity)
+                    {
                         continue;
                     }
                 }
@@ -296,7 +305,9 @@ pub fn move_trap_launch_projectiles(
     mut combat_log: ResMut<CombatLog>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
-    if celebration.is_some() { return; }
+    if celebration.is_some() {
+        return;
+    }
     let dt = time.delta_secs();
 
     for (entity, mut transform, mut proj) in projectiles.iter_mut() {
@@ -331,7 +342,11 @@ pub fn move_trap_launch_projectiles(
         // Interpolate position along parabolic arc
         let t = proj.distance_traveled / proj.total_distance;
         let horizontal = proj.origin.lerp(
-            Vec3::new(proj.landing_position.x, proj.origin.y, proj.landing_position.z),
+            Vec3::new(
+                proj.landing_position.x,
+                proj.origin.y,
+                proj.landing_position.z,
+            ),
             t,
         );
         let arc_y = (t * PI).sin() * TRAP_LAUNCH_ARC_HEIGHT;

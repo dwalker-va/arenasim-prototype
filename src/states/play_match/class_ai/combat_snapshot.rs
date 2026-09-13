@@ -20,13 +20,13 @@ use bevy::prelude::*;
 
 use super::{CombatContext, CombatantInfo};
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::auras::reflect_instant_cc_in_snapshot;
-use crate::states::play_match::components::{
-    ActiveAuras, Aura, CastingState, ChannelingState, ChargingState, Combatant, DisengagingState,
-    DRTracker, Pet,
-};
 use crate::states::play_match::ai_profile::AiProfiles;
 use crate::states::play_match::arena_bounds::ArenaBounds;
+use crate::states::play_match::auras::reflect_instant_cc_in_snapshot;
+use crate::states::play_match::components::{
+    ActiveAuras, Aura, CastingState, ChannelingState, ChargingState, Combatant, DRTracker,
+    DisengagingState, Pet,
+};
 use crate::states::play_match::map_geometry::ObstacleVolume;
 
 /// Per-frame snapshot of every combatant's stats, auras, and DR state.
@@ -78,15 +78,34 @@ impl CombatSnapshot {
     /// `.iter_mut()` after this call returns.
     pub fn build(
         aura_query: &Query<
-            (Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>, Option<&ChargingState>, Option<&DisengagingState>),
+            (
+                Entity,
+                &mut Combatant,
+                &Transform,
+                Option<&mut ActiveAuras>,
+                Option<&ChargingState>,
+                Option<&DisengagingState>,
+            ),
             (Without<CastingState>, Without<ChannelingState>),
         >,
         casting_auras: &Query<
-            (Entity, &Combatant, &Transform, Option<&ActiveAuras>, &CastingState),
+            (
+                Entity,
+                &Combatant,
+                &Transform,
+                Option<&ActiveAuras>,
+                &CastingState,
+            ),
             With<CastingState>,
         >,
         channeling_auras: &Query<
-            (Entity, &Combatant, &Transform, Option<&ActiveAuras>, &ChannelingState),
+            (
+                Entity,
+                &Combatant,
+                &Transform,
+                Option<&ActiveAuras>,
+                &ChannelingState,
+            ),
             (With<ChannelingState>, Without<CastingState>),
         >,
         dr_tracker_query: &Query<(Entity, &DRTracker)>,
@@ -117,68 +136,90 @@ impl CombatSnapshot {
         }
 
         // Shared insert for all three sources: full CombatantInfo + cooldowns.
-        let insert_combatant = |entity: Entity,
-                                    combatant: &Combatant,
-                                    transform: &Transform,
-                                    casting_ability: Option<AbilityType>,
-                                    combatants: &mut BTreeMap<Entity, CombatantInfo>,
-                                    ability_cooldowns: &mut BTreeMap<
-            Entity,
-            BTreeMap<AbilityType, f32>,
-        >| {
-            let pet_comp = pet_query.get(entity).ok();
-            // Estimated planar velocity: heading (Transform faces travel
-            // direction) × base speed, zeroed while casting/channeling (planted).
-            let velocity = if casting_ability.is_some() {
-                Vec3::ZERO
-            } else {
-                let fwd = transform.rotation * Vec3::Z;
-                Vec3::new(fwd.x, 0.0, fwd.z).normalize_or_zero() * combatant.base_movement_speed
+        let insert_combatant =
+            |entity: Entity,
+             combatant: &Combatant,
+             transform: &Transform,
+             casting_ability: Option<AbilityType>,
+             combatants: &mut BTreeMap<Entity, CombatantInfo>,
+             ability_cooldowns: &mut BTreeMap<Entity, BTreeMap<AbilityType, f32>>| {
+                let pet_comp = pet_query.get(entity).ok();
+                // Estimated planar velocity: heading (Transform faces travel
+                // direction) × base speed, zeroed while casting/channeling (planted).
+                let velocity = if casting_ability.is_some() {
+                    Vec3::ZERO
+                } else {
+                    let fwd = transform.rotation * Vec3::Z;
+                    Vec3::new(fwd.x, 0.0, fwd.z).normalize_or_zero() * combatant.base_movement_speed
+                };
+                combatants.insert(
+                    entity,
+                    CombatantInfo {
+                        entity,
+                        team: combatant.team,
+                        slot: combatant.slot,
+                        class: combatant.class,
+                        current_health: combatant.current_health,
+                        max_health: combatant.max_health,
+                        current_mana: combatant.current_mana,
+                        max_mana: combatant.max_mana,
+                        position: transform.translation,
+                        velocity,
+                        is_alive: combatant.is_alive(),
+                        stealthed: combatant.stealthed,
+                        target: combatant.target,
+                        is_pet: pet_comp.is_some(),
+                        casting_ability,
+                        pet_type: pet_comp.map(|p| p.pet_type),
+                        pet: owner_to_pet.get(&entity).copied(),
+                    },
+                );
+                // Clone Combatant.ability_cooldowns (HashMap) into a BTreeMap so
+                // downstream iteration is deterministic.
+                let cooldowns: BTreeMap<AbilityType, f32> = combatant
+                    .ability_cooldowns
+                    .iter()
+                    .map(|(k, v)| (*k, *v))
+                    .collect();
+                ability_cooldowns.insert(entity, cooldowns);
             };
-            combatants.insert(entity, CombatantInfo {
-                entity,
-                team: combatant.team,
-                slot: combatant.slot,
-                class: combatant.class,
-                current_health: combatant.current_health,
-                max_health: combatant.max_health,
-                current_mana: combatant.current_mana,
-                max_mana: combatant.max_mana,
-                position: transform.translation,
-                velocity,
-                is_alive: combatant.is_alive(),
-                stealthed: combatant.stealthed,
-                target: combatant.target,
-                is_pet: pet_comp.is_some(),
-                casting_ability,
-                pet_type: pet_comp.map(|p| p.pet_type),
-                pet: owner_to_pet.get(&entity).copied(),
-            });
-            // Clone Combatant.ability_cooldowns (HashMap) into a BTreeMap so
-            // downstream iteration is deterministic.
-            let cooldowns: BTreeMap<AbilityType, f32> = combatant
-                .ability_cooldowns
-                .iter()
-                .map(|(k, v)| (*k, *v))
-                .collect();
-            ability_cooldowns.insert(entity, cooldowns);
-        };
 
         for (entity, combatant, transform, auras_opt, _, _) in aura_query.iter() {
-            insert_combatant(entity, &combatant, transform, None, &mut combatants, &mut ability_cooldowns);
+            insert_combatant(
+                entity,
+                combatant,
+                transform,
+                None,
+                &mut combatants,
+                &mut ability_cooldowns,
+            );
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());
             }
         }
 
         for (entity, combatant, transform, auras_opt, cast_state) in casting_auras.iter() {
-            insert_combatant(entity, combatant, transform, Some(cast_state.ability), &mut combatants, &mut ability_cooldowns);
+            insert_combatant(
+                entity,
+                combatant,
+                transform,
+                Some(cast_state.ability),
+                &mut combatants,
+                &mut ability_cooldowns,
+            );
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());
             }
         }
         for (entity, combatant, transform, auras_opt, channel_state) in channeling_auras.iter() {
-            insert_combatant(entity, combatant, transform, Some(channel_state.ability), &mut combatants, &mut ability_cooldowns);
+            insert_combatant(
+                entity,
+                combatant,
+                transform,
+                Some(channel_state.ability),
+                &mut combatants,
+                &mut ability_cooldowns,
+            );
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());
             }
@@ -189,7 +230,15 @@ impl CombatSnapshot {
             .map(|(entity, tracker)| (entity, tracker.clone()))
             .collect();
 
-        Self { combatants, active_auras, dr_trackers, ability_cooldowns, obstacles: obstacles.to_vec(), bounds, ai_profile }
+        Self {
+            combatants,
+            active_auras,
+            dr_trackers,
+            ability_cooldowns,
+            obstacles: obstacles.to_vec(),
+            bounds,
+            ai_profile,
+        }
     }
 
     /// Borrow a `CombatContext` view of this snapshot for the given combatant.

@@ -93,17 +93,15 @@ pub fn setup_menu_scene(
     commands.insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)));
 
     // The title backdrop is an open arena — no obstacle meshes.
-    for entity in
-        spawn_arena_environment(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &mut images,
-            // Menu backdrop: the classic octagon, independent of map selection.
-            &Default::default(),
-            &[],
-        )
-    {
+    for entity in spawn_arena_environment(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut images,
+        // Menu backdrop: the classic octagon, independent of map selection.
+        &Default::default(),
+        &[],
+    ) {
         commands.entity(entity).insert(MenuSceneEntity);
     }
 
@@ -127,10 +125,7 @@ pub fn setup_menu_scene(
 /// Slowly orbits the menu camera around the arena. The angle is derived from
 /// absolute elapsed time (not incremented per frame), so re-entering the menu
 /// resumes the orbit exactly where it would have been — no drift, no jump.
-pub fn orbit_menu_camera(
-    time: Res<Time>,
-    mut cameras: Query<(&mut Transform, &MenuOrbitCamera)>,
-) {
+pub fn orbit_menu_camera(time: Res<Time>, mut cameras: Query<(&mut Transform, &MenuOrbitCamera)>) {
     for (mut transform, orbit) in &mut cameras {
         let angle = time.elapsed_secs() * orbit.speed_rad_per_sec;
         transform.translation = Vec3::new(
@@ -216,8 +211,7 @@ pub fn draw_main_menu(ctx: &egui::Context, time_secs: f32) -> Option<MenuAction>
                 // Crisp pulse, no halo copies (offset-text halos read as
                 // blur): the glyph brightness breathes, and a gold accent
                 // rule under the title widens/brightens in sync.
-                let brighten =
-                    |c: u8| (c as f32 + (255 - c) as f32 * 0.35 * pulse).round() as u8;
+                let brighten = |c: u8| (c as f32 + (255 - c) as f32 * 0.35 * pulse).round() as u8;
                 let gold = egui::Color32::from_rgb(brighten(230), brighten(204), brighten(153));
                 let painter = ui.painter();
                 painter.text(
@@ -331,10 +325,8 @@ fn paint_class_accent_row(ui: &mut egui::Ui) {
         CharacterClass::Hunter,
         CharacterClass::Shaman,
     ];
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 14.0),
-        egui::Sense::hover(),
-    );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 14.0), egui::Sense::hover());
     let painter = ui.painter();
     let spacing = 30.0;
     let start_x = rect.center().x - spacing * (CLASSES.len() as f32 - 1.0) / 2.0;
@@ -452,7 +444,9 @@ pub fn main_menu_ui(
 ) {
     // Use try_ctx_mut to gracefully handle window close (the context
     // dies with the primary window; ctx_mut panics on the final frame)
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     match draw_main_menu(ctx, time.elapsed_secs()) {
         Some(MenuAction::StartMatch) => {

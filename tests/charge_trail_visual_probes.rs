@@ -57,7 +57,9 @@ fn run_dash(app: &mut App, charger: Entity, from: Vec3, to: Vec3, ticks: usize) 
 }
 
 fn streaks(app: &mut App) -> Vec<Transform> {
-    let mut q = app.world_mut().query::<(&ChargeStreakSegment, &Transform)>();
+    let mut q = app
+        .world_mut()
+        .query::<(&ChargeStreakSegment, &Transform)>();
     q.iter(app.world()).map(|(_, t)| *t).collect()
 }
 
@@ -86,8 +88,8 @@ fn the_trail_is_laid_along_the_dash_path_not_parked_at_the_origin() {
         found.len()
     );
     let xs: Vec<f32> = found.iter().map(|t| t.translation.x).collect();
-    let span = xs.iter().cloned().fold(f32::MIN, f32::max)
-        - xs.iter().cloned().fold(f32::MAX, f32::min);
+    let span =
+        xs.iter().cloned().fold(f32::MIN, f32::max) - xs.iter().cloned().fold(f32::MAX, f32::min);
     assert!(
         span >= 4.0,
         "streak segments span {span:.2} yd of a 7 yd dash — the trail is parked, not laid along the path"
@@ -166,8 +168,16 @@ fn streak_segments_leave_visible_gaps_and_fade_as_a_comet_tail() {
         v
     };
     let mats = app.world().resource::<Assets<StandardMaterial>>();
-    let newest = mats.get(&by_age.first().unwrap().1).unwrap().base_color.alpha();
-    let oldest = mats.get(&by_age.last().unwrap().1).unwrap().base_color.alpha();
+    let newest = mats
+        .get(&by_age.first().unwrap().1)
+        .unwrap()
+        .base_color
+        .alpha();
+    let oldest = mats
+        .get(&by_age.last().unwrap().1)
+        .unwrap()
+        .base_color
+        .alpha();
     assert!(
         oldest < 0.5 * newest,
         "the oldest streak segment (alpha {oldest:.3}) must be clearly dissolving while the \
@@ -265,7 +275,9 @@ fn dust_puffs_sit_at_ground_level_along_the_path() {
     // bound is generous upward but still far under the old 0.16-radius pearl
     // at full body scale).
     let sized: Vec<(Handle<Mesh>, f32)> = {
-        let mut q = app.world_mut().query::<(&ChargeDustPuff, &Transform, &Mesh3d)>();
+        let mut q = app
+            .world_mut()
+            .query::<(&ChargeDustPuff, &Transform, &Mesh3d)>();
         q.iter(app.world())
             .map(|(_, t, m)| (m.0.clone(), t.scale.x))
             .collect()
@@ -273,7 +285,16 @@ fn dust_puffs_sit_at_ground_level_along_the_path() {
     let meshes = app.world().resource::<Assets<Mesh>>();
     let mut radii: Vec<f32> = sized
         .iter()
-        .map(|(h, s)| meshes.get(h).unwrap().compute_aabb().unwrap().half_extents.x * s)
+        .map(|(h, s)| {
+            meshes
+                .get(h)
+                .unwrap()
+                .compute_aabb()
+                .unwrap()
+                .half_extents
+                .x
+                * s
+        })
         .collect();
     for r in &radii {
         assert!(
@@ -332,14 +353,19 @@ fn elements_fade_over_life_and_despawn_without_leaking() {
     }
 
     // Dash ends: the emitter disarms and every element fades out and despawns.
-    app.world_mut().entity_mut(charger).remove::<ChargingState>();
+    app.world_mut()
+        .entity_mut(charger)
+        .remove::<ChargingState>();
     for _ in 0..24 {
         app.update();
     }
     assert_eq!(streaks(&mut app).len(), 0, "streak segments must not leak");
     assert_eq!(puffs(&mut app).len(), 0, "dust puffs must not leak");
     assert!(
-        app.world().entity(charger).get::<ChargeTrailEmitter>().is_none(),
+        app.world()
+            .entity(charger)
+            .get::<ChargeTrailEmitter>()
+            .is_none(),
         "the emitter must disarm when the dash ends"
     );
 }
@@ -362,7 +388,9 @@ fn a_charging_pet_gets_the_same_trail_scaled_to_its_body() {
     let body = app
         .world_mut()
         .spawn((
-            VisualBody { rest_y: PET_MESH_Y - PET_SIM_Y },
+            VisualBody {
+                rest_y: PET_MESH_Y - PET_SIM_Y,
+            },
             Transform::from_xyz(0.0, PET_MESH_Y - PET_SIM_Y, 0.0),
         ))
         .id();

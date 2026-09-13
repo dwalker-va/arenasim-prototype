@@ -877,7 +877,8 @@ fn spawn_apply_burst(
     // The ring and the sparks share the burst's ramping palette: one material
     // each, mutated along the green→violet→dark track by burst age.
     let ring_material = additive_material(materials, APPLY_COLOR[0], 2.2, None);
-    let spark_material = additive_material(materials, APPLY_COLOR[0], 2.4, Some(assets.star.clone()));
+    let spark_material =
+        additive_material(materials, APPLY_COLOR[0], 2.4, Some(assets.star.clone()));
 
     let ring = commands
         .spawn((
@@ -1004,12 +1005,14 @@ fn spawn_curse_apparition(
         }
     };
 
-    let spark_material = spec.spark.as_ref().map(|e| {
-        additive_material(materials, e.color, e.emissive, Some(assets.star.clone()))
-    });
-    let fall_material = spec.fall.as_ref().map(|e| {
-        additive_material(materials, e.color, e.emissive, Some(assets.dot.clone()))
-    });
+    let spark_material = spec
+        .spark
+        .as_ref()
+        .map(|e| additive_material(materials, e.color, e.emissive, Some(assets.star.clone())));
+    let fall_material = spec
+        .fall
+        .as_ref()
+        .map(|e| additive_material(materials, e.color, e.emissive, Some(assets.dot.clone())));
     // Every rig carries both mote slots; a spec without an emitter simply
     // never emits into its slot, so the placeholder is never rendered.
     // DORMANT TODAY: all three curses declare a spark emitter, so this arm is
@@ -1197,8 +1200,7 @@ fn spawn_rune_circle_pieces(
     // Untextured, like the apply burst's shadow ring: the soft radial sprite
     // tiles around a torus's tube and would read as a string of blobs rather
     // than a clean glowing rune circle.
-    let disc_material =
-        additive_material(materials, spec.shell_color, spec.shell_emissive, None);
+    let disc_material = additive_material(materials, spec.shell_color, spec.shell_emissive, None);
     let mut pieces = Vec::new();
     for height in RUNE_DISC_HEIGHTS {
         let radius = RUNE_DISC_RADIUS * s;
@@ -1363,7 +1365,11 @@ pub fn animate_dot_apply_bursts(
         (With<Combatant>, Without<DotApplyBurst>, Without<DotSprite>),
     >,
     mut rings: Query<
-        (&DotSprite, &mut Transform, &MeshMaterial3d<StandardMaterial>),
+        (
+            &DotSprite,
+            &mut Transform,
+            &MeshMaterial3d<StandardMaterial>,
+        ),
         (Without<DotApplyBurst>, Without<DotMote>),
     >,
 ) {
@@ -1464,12 +1470,13 @@ pub fn animate_corruption_shrouds(
     )>,
     targets: Query<
         (&Transform, Option<&Pet>),
-        (With<Combatant>, Without<CorruptionShroudRig>, Without<DotSprite>),
+        (
+            With<Combatant>,
+            Without<CorruptionShroudRig>,
+            Without<DotSprite>,
+        ),
     >,
-    shells: Query<
-        (&DotSprite, &MeshMaterial3d<StandardMaterial>),
-        Without<CorruptionShroudRig>,
-    >,
+    shells: Query<(&DotSprite, &MeshMaterial3d<StandardMaterial>), Without<CorruptionShroudRig>>,
 ) {
     let dt = time.delta_secs();
     for (entity, mut rig, rig_assets, mut transform, children) in rigs.iter_mut() {
@@ -1477,8 +1484,7 @@ pub fn animate_corruption_shrouds(
         let age = rig.age;
         let mut stature = 1.0;
         if let Ok((target, pet)) = targets.get(rig.target) {
-            transform.translation =
-                dot_anchor(SHROUD_CENTER_Y, target.translation, pet.is_some());
+            transform.translation = dot_anchor(SHROUD_CENTER_Y, target.translation, pet.is_some());
             stature = dot_stature(pet.is_some());
         }
 
@@ -1588,10 +1594,18 @@ pub fn animate_curse_apparitions(
     )>,
     targets: Query<
         (&Transform, Option<&Pet>),
-        (With<Combatant>, Without<CurseApparitionRig>, Without<DotSprite>),
+        (
+            With<Combatant>,
+            Without<CurseApparitionRig>,
+            Without<DotSprite>,
+        ),
     >,
     mut pieces: Query<
-        (&DotSprite, &mut Transform, &MeshMaterial3d<StandardMaterial>),
+        (
+            &DotSprite,
+            &mut Transform,
+            &MeshMaterial3d<StandardMaterial>,
+        ),
         (Without<CurseApparitionRig>, Without<DotMote>),
     >,
 ) {
@@ -1783,7 +1797,11 @@ pub fn animate_ua_states(
         (With<Combatant>, Without<UaStateRig>, Without<DotSprite>),
     >,
     mut pieces: Query<
-        (&DotSprite, &mut Transform, &MeshMaterial3d<StandardMaterial>),
+        (
+            &DotSprite,
+            &mut Transform,
+            &MeshMaterial3d<StandardMaterial>,
+        ),
         (Without<UaStateRig>, Without<DotMote>),
     >,
 ) {
@@ -1801,8 +1819,13 @@ pub fn animate_ua_states(
         // deterministic (entity index + a 50 ms time bucket), never game_rng.
         let pulse = 0.5 + 0.5 * (age * TAU / UA_PULSE_PERIOD).sin();
         let bucket = (age / 0.05) as u32;
-        let flicker =
-            1.0 - UA_FLICKER_AMOUNT * dot_jitter(entity.index().wrapping_add(bucket.wrapping_mul(0xB529_7A4D)));
+        let flicker = 1.0
+            - UA_FLICKER_AMOUNT
+                * dot_jitter(
+                    entity
+                        .index()
+                        .wrapping_add(bucket.wrapping_mul(0xB529_7A4D)),
+                );
         let glow_level = (0.45 + 0.55 * pulse) * flicker;
 
         let crackle = ua_crackle_k(age);
@@ -1872,8 +1895,8 @@ pub fn animate_ua_states(
                     let pitch_axis = Vec3::Y.cross(dir).normalize_or_zero();
                     let pitch = Quat::from_axis_angle(pitch_axis, (j(2) - 0.5) * 1.0);
                     dir = (pitch * yaw * dir).normalize_or_zero();
-                    let len = UA_BOLT_SEGMENT_LEN * UA_CRACKLE_INTENSITY * stature
-                        * (0.8 + 0.4 * j(3));
+                    let len =
+                        UA_BOLT_SEGMENT_LEN * UA_CRACKLE_INTENSITY * stature * (0.8 + 0.4 * j(3));
                     let to = from + dir * len;
                     let mid = (from + to) / 2.0;
                     let rotation = Quat::from_rotation_arc(Vec3::Y, dir);
@@ -1921,9 +1944,17 @@ pub fn age_warlock_dot_particles(
     mut commands: Commands,
     time: Res<Time>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut motes: Query<(Entity, &mut DotMote, &mut Transform), (Without<DotWisp>, Without<DotSprite>)>,
+    mut motes: Query<
+        (Entity, &mut DotMote, &mut Transform),
+        (Without<DotWisp>, Without<DotSprite>),
+    >,
     mut wisps: Query<
-        (Entity, &mut DotWisp, &mut Transform, &MeshMaterial3d<StandardMaterial>),
+        (
+            Entity,
+            &mut DotWisp,
+            &mut Transform,
+            &MeshMaterial3d<StandardMaterial>,
+        ),
         (Without<DotMote>, Without<DotSprite>),
     >,
     mut sprites: Query<
@@ -2130,7 +2161,12 @@ pub fn cleanup_warlock_dot_visuals(
     apparitions: Query<(Entity, &CurseApparitionRig)>,
     bursts: Query<(Entity, &DotApplyBurst)>,
     marked: Query<
-        (Entity, &Combatant, Option<&ActiveAuras>, &CurseApparitionsFired),
+        (
+            Entity,
+            &Combatant,
+            Option<&ActiveAuras>,
+            &CurseApparitionsFired,
+        ),
         With<CurseApparitionsFired>,
     >,
     targets: Query<(&Combatant, Option<&ActiveAuras>)>,
@@ -2142,7 +2178,10 @@ pub fn cleanup_warlock_dot_visuals(
             .unwrap_or(false)
     };
     let target_alive = |target: Entity| -> bool {
-        targets.get(target).map(|(c, _)| c.is_alive()).unwrap_or(false)
+        targets
+            .get(target)
+            .map(|(c, _)| c.is_alive())
+            .unwrap_or(false)
     };
 
     for (entity, rig) in shrouds.iter() {

@@ -185,7 +185,10 @@ fn run_clicks(data: TeamFramesData, pointer: Option<egui::Pos2>) -> Vec<CallClic
     // need separate passes.
     harness.run();
     if let Some(pos) = pointer {
-        harness.input_mut().events.push(egui::Event::PointerMoved(pos));
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::PointerMoved(pos));
         harness.run();
         for pressed in [true, false] {
             harness.input_mut().events.push(egui::Event::PointerButton {
@@ -313,9 +316,11 @@ fn clicks_are_ignored_while_the_affordance_is_hidden() {
     assert!(clicks.is_empty(), "a hidden affordance senses nothing");
 
     // ...and the stored calls stay exactly as they were.
-    let mut config = MatchConfig::default();
-    config.team1_kill_target = Some(0);
-    config.team2_kill_target = Some(1);
+    let mut config = MatchConfig {
+        team1_kill_target: Some(0),
+        team2_kill_target: Some(1),
+        ..Default::default()
+    };
     for click in &clicks {
         apply_call_click(&mut config, *click);
     }
@@ -330,12 +335,10 @@ fn team_frames_2v2() {
     let class_icons = ClassIcons::default(); // no textures -> class-color fallback squares
     let spell_icons = SpellIcons::default(); // no textures -> gold/red fallback blocks
 
-    let mut harness = Harness::builder()
-        .with_size(SCREEN)
-        .build(move |ctx| {
-            install_game_fonts(ctx);
-            draw_team_frames(ctx, &data, &class_icons, &spell_icons);
-        });
+    let mut harness = Harness::builder().with_size(SCREEN).build(move |ctx| {
+        install_game_fonts(ctx);
+        draw_team_frames(ctx, &data, &class_icons, &spell_icons);
+    });
 
     harness.run();
     harness.snapshot("team_frames");
@@ -362,12 +365,10 @@ fn team_frames_with_calls() {
     let class_icons = ClassIcons::default();
     let spell_icons = SpellIcons::default();
 
-    let mut harness = Harness::builder()
-        .with_size(SCREEN)
-        .build(move |ctx| {
-            install_game_fonts(ctx);
-            draw_team_frames(ctx, &data, &class_icons, &spell_icons);
-        });
+    let mut harness = Harness::builder().with_size(SCREEN).build(move |ctx| {
+        install_game_fonts(ctx);
+        draw_team_frames(ctx, &data, &class_icons, &spell_icons);
+    });
 
     harness.run();
     harness.snapshot("team_frames_with_calls");

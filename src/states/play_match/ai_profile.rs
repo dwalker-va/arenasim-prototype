@@ -140,7 +140,10 @@ mod tests {
         let legacy_gate = ai_profile_is(AiProfile::Legacy);
         let team_gate = ai_profile_is(AiProfile::TeamPlan);
         assert!(legacy_gate(None), "absent resource should satisfy Legacy");
-        assert!(!team_gate(None), "absent resource must NOT satisfy TeamPlan");
+        assert!(
+            !team_gate(None),
+            "absent resource must NOT satisfy TeamPlan"
+        );
     }
 
     /// The gate must read the resource that is actually INSERTED (`AiProfiles`),
@@ -159,12 +162,21 @@ mod tests {
                 .expect("gate system runs")
         };
 
-        assert!(fires(AiProfiles::uniform(AiProfile::TeamPlan)), "uniform TeamPlan");
         assert!(
-            fires(AiProfiles { team1: AiProfile::Legacy, team2: AiProfile::TeamPlan }),
+            fires(AiProfiles::uniform(AiProfile::TeamPlan)),
+            "uniform TeamPlan"
+        );
+        assert!(
+            fires(AiProfiles {
+                team1: AiProfile::Legacy,
+                team2: AiProfile::TeamPlan
+            }),
             "one side on TeamPlan must still schedule the system"
         );
-        assert!(!fires(AiProfiles::uniform(AiProfile::Legacy)), "neither side wants it");
+        assert!(
+            !fires(AiProfiles::uniform(AiProfile::Legacy)),
+            "neither side wants it"
+        );
     }
 }
 
@@ -191,13 +203,20 @@ impl AiProfiles {
     /// Both teams on the same implementation — the historical behaviour, and
     /// what a bare `ai_profile` in a match config still means.
     pub fn uniform(profile: AiProfile) -> Self {
-        Self { team1: profile, team2: profile }
+        Self {
+            team1: profile,
+            team2: profile,
+        }
     }
 
     /// The profile `team` runs under. Out-of-range team ids resolve to team 1
     /// rather than panicking, matching `TeamPlans::for_team`.
     pub fn for_team(&self, team: u8) -> AiProfile {
-        if team == 2 { self.team2 } else { self.team1 }
+        if team == 2 {
+            self.team2
+        } else {
+            self.team1
+        }
     }
 
     /// True when the two teams differ — i.e. this match is a head-to-head of the
@@ -242,7 +261,10 @@ mod profiles_tests {
 
     #[test]
     fn teams_resolve_independently() {
-        let p = AiProfiles { team1: AiProfile::TeamPlan, team2: AiProfile::Legacy };
+        let p = AiProfiles {
+            team1: AiProfile::TeamPlan,
+            team2: AiProfile::Legacy,
+        };
         assert_eq!(p.for_team(1), AiProfile::TeamPlan);
         assert_eq!(p.for_team(2), AiProfile::Legacy);
         assert!(p.is_head_to_head());
@@ -251,7 +273,10 @@ mod profiles_tests {
     /// A bad team id must not panic mid-match.
     #[test]
     fn out_of_range_team_ids_clamp() {
-        let p = AiProfiles { team1: AiProfile::TeamPlan, team2: AiProfile::Legacy };
+        let p = AiProfiles {
+            team1: AiProfile::TeamPlan,
+            team2: AiProfile::Legacy,
+        };
         for team in [0u8, 3, 255] {
             assert_eq!(p.for_team(team), AiProfile::TeamPlan);
         }
@@ -266,11 +291,19 @@ mod profiles_tests {
             assert_eq!(AiProfile::parse(label).unwrap(), p, "{label}");
         }
         assert_eq!(
-            AiProfiles { team1: AiProfile::TeamPlan, team2: AiProfile::Legacy }.trace_label(),
+            AiProfiles {
+                team1: AiProfile::TeamPlan,
+                team2: AiProfile::Legacy
+            }
+            .trace_label(),
             "TeamPlan/Legacy"
         );
         assert_eq!(
-            AiProfiles { team1: AiProfile::Legacy, team2: AiProfile::TeamPlan }.trace_label(),
+            AiProfiles {
+                team1: AiProfile::Legacy,
+                team2: AiProfile::TeamPlan
+            }
+            .trace_label(),
             "Legacy/TeamPlan"
         );
     }

@@ -5,8 +5,8 @@
 //! - Match results are accessible programmatically
 //! - Seeded RNG produces deterministic results
 
-use arenasim::headless::{run_headless_match_with, HeadlessMatchConfig, MatchResult};
 use arenasim::headless::runner::TraceConfig;
+use arenasim::headless::{run_headless_match_with, HeadlessMatchConfig, MatchResult};
 
 /// Helper to create a basic match config
 fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>) -> HeadlessMatchConfig {
@@ -96,23 +96,63 @@ fn seeded_matches_are_deterministic() {
     assert_eq!(r1.team1_combatants.len(), r2.team1_combatants.len());
     assert_eq!(r1.team2_combatants.len(), r2.team2_combatants.len());
 
-    for (i, (a, b)) in r1.team1_combatants.iter().zip(r2.team1_combatants.iter()).enumerate() {
+    for (i, (a, b)) in r1
+        .team1_combatants
+        .iter()
+        .zip(r2.team1_combatants.iter())
+        .enumerate()
+    {
         assert_eq!(a.class_name, b.class_name, "team1 slot {} class drifted", i);
-        assert!((a.final_health - b.final_health).abs() < 0.01,
-            "team1 slot {} final_health drift: {} vs {}", i, a.final_health, b.final_health);
-        assert!((a.damage_dealt - b.damage_dealt).abs() < 0.01,
-            "team1 slot {} damage_dealt drift: {} vs {}", i, a.damage_dealt, b.damage_dealt);
-        assert!((a.damage_taken - b.damage_taken).abs() < 0.01,
-            "team1 slot {} damage_taken drift: {} vs {}", i, a.damage_taken, b.damage_taken);
+        assert!(
+            (a.final_health - b.final_health).abs() < 0.01,
+            "team1 slot {} final_health drift: {} vs {}",
+            i,
+            a.final_health,
+            b.final_health
+        );
+        assert!(
+            (a.damage_dealt - b.damage_dealt).abs() < 0.01,
+            "team1 slot {} damage_dealt drift: {} vs {}",
+            i,
+            a.damage_dealt,
+            b.damage_dealt
+        );
+        assert!(
+            (a.damage_taken - b.damage_taken).abs() < 0.01,
+            "team1 slot {} damage_taken drift: {} vs {}",
+            i,
+            a.damage_taken,
+            b.damage_taken
+        );
     }
-    for (i, (a, b)) in r1.team2_combatants.iter().zip(r2.team2_combatants.iter()).enumerate() {
+    for (i, (a, b)) in r1
+        .team2_combatants
+        .iter()
+        .zip(r2.team2_combatants.iter())
+        .enumerate()
+    {
         assert_eq!(a.class_name, b.class_name, "team2 slot {} class drifted", i);
-        assert!((a.final_health - b.final_health).abs() < 0.01,
-            "team2 slot {} final_health drift: {} vs {}", i, a.final_health, b.final_health);
-        assert!((a.damage_dealt - b.damage_dealt).abs() < 0.01,
-            "team2 slot {} damage_dealt drift: {} vs {}", i, a.damage_dealt, b.damage_dealt);
-        assert!((a.damage_taken - b.damage_taken).abs() < 0.01,
-            "team2 slot {} damage_taken drift: {} vs {}", i, a.damage_taken, b.damage_taken);
+        assert!(
+            (a.final_health - b.final_health).abs() < 0.01,
+            "team2 slot {} final_health drift: {} vs {}",
+            i,
+            a.final_health,
+            b.final_health
+        );
+        assert!(
+            (a.damage_dealt - b.damage_dealt).abs() < 0.01,
+            "team2 slot {} damage_dealt drift: {} vs {}",
+            i,
+            a.damage_dealt,
+            b.damage_dealt
+        );
+        assert!(
+            (a.damage_taken - b.damage_taken).abs() < 0.01,
+            "team2 slot {} damage_taken drift: {} vs {}",
+            i,
+            a.damage_taken,
+            b.damage_taken
+        );
     }
 }
 
@@ -156,7 +196,6 @@ fn trace_on_matches_trace_off_outcomes() {
 
         let trace_config = Some(TraceConfig {
             output_path: trace_path,
-
         });
 
         let cfg = create_config(team1.clone(), team2.clone(), Some(*seed));
@@ -173,7 +212,11 @@ fn trace_on_matches_trace_off_outcomes() {
         assert!(
             (with_trace.match_time - without_trace.match_time).abs() < 0.01,
             "{:?} v {:?} seed={}: match_time drift {} vs {}",
-            team1, team2, seed, with_trace.match_time, without_trace.match_time
+            team1,
+            team2,
+            seed,
+            with_trace.match_time,
+            without_trace.match_time
         );
 
         for (i, (a, b)) in with_trace
@@ -185,12 +228,22 @@ fn trace_on_matches_trace_off_outcomes() {
             assert!(
                 (a.final_health - b.final_health).abs() < 0.01,
                 "{:?} v {:?} seed={} team1 slot {}: final_health drift {} vs {}",
-                team1, team2, seed, i, a.final_health, b.final_health
+                team1,
+                team2,
+                seed,
+                i,
+                a.final_health,
+                b.final_health
             );
             assert!(
                 (a.damage_dealt - b.damage_dealt).abs() < 0.01,
                 "{:?} v {:?} seed={} team1 slot {}: damage_dealt drift {} vs {}",
-                team1, team2, seed, i, a.damage_dealt, b.damage_dealt
+                team1,
+                team2,
+                seed,
+                i,
+                a.damage_dealt,
+                b.damage_dealt
             );
         }
         for (i, (a, b)) in with_trace
@@ -202,12 +255,22 @@ fn trace_on_matches_trace_off_outcomes() {
             assert!(
                 (a.final_health - b.final_health).abs() < 0.01,
                 "{:?} v {:?} seed={} team2 slot {}: final_health drift {} vs {}",
-                team1, team2, seed, i, a.final_health, b.final_health
+                team1,
+                team2,
+                seed,
+                i,
+                a.final_health,
+                b.final_health
             );
             assert!(
                 (a.damage_dealt - b.damage_dealt).abs() < 0.01,
                 "{:?} v {:?} seed={} team2 slot {}: damage_dealt drift {} vs {}",
-                team1, team2, seed, i, a.damage_dealt, b.damage_dealt
+                team1,
+                team2,
+                seed,
+                i,
+                a.damage_dealt,
+                b.damage_dealt
             );
         }
     }
@@ -226,8 +289,10 @@ fn self_mirror_determinism_without_trace() {
     let mut failures: Vec<String> = Vec::new();
     for c in CLASSES {
         let seed = 12_345;
-        let a = run_headless_match_with(create_config(vec![c], vec![c], Some(seed)), true, None).unwrap();
-        let b = run_headless_match_with(create_config(vec![c], vec![c], Some(seed)), true, None).unwrap();
+        let a = run_headless_match_with(create_config(vec![c], vec![c], Some(seed)), true, None)
+            .unwrap();
+        let b = run_headless_match_with(create_config(vec![c], vec![c], Some(seed)), true, None)
+            .unwrap();
         let mut diffs: Vec<String> = Vec::new();
         if a.winner != b.winner {
             diffs.push(format!("winner {:?} vs {:?}", a.winner, b.winner));
@@ -235,20 +300,42 @@ fn self_mirror_determinism_without_trace() {
         if (a.match_time - b.match_time).abs() >= 0.01 {
             diffs.push(format!("time {} vs {}", a.match_time, b.match_time));
         }
-        for (i, (x, y)) in a.team1_combatants.iter().zip(b.team1_combatants.iter()).enumerate() {
+        for (i, (x, y)) in a
+            .team1_combatants
+            .iter()
+            .zip(b.team1_combatants.iter())
+            .enumerate()
+        {
             if (x.final_health - y.final_health).abs() >= 0.01 {
-                diffs.push(format!("t1[{}].hp {} vs {}", i, x.final_health, y.final_health));
+                diffs.push(format!(
+                    "t1[{}].hp {} vs {}",
+                    i, x.final_health, y.final_health
+                ));
             }
             if (x.damage_dealt - y.damage_dealt).abs() >= 0.01 {
-                diffs.push(format!("t1[{}].dmg {} vs {}", i, x.damage_dealt, y.damage_dealt));
+                diffs.push(format!(
+                    "t1[{}].dmg {} vs {}",
+                    i, x.damage_dealt, y.damage_dealt
+                ));
             }
         }
-        for (i, (x, y)) in a.team2_combatants.iter().zip(b.team2_combatants.iter()).enumerate() {
+        for (i, (x, y)) in a
+            .team2_combatants
+            .iter()
+            .zip(b.team2_combatants.iter())
+            .enumerate()
+        {
             if (x.final_health - y.final_health).abs() >= 0.01 {
-                diffs.push(format!("t2[{}].hp {} vs {}", i, x.final_health, y.final_health));
+                diffs.push(format!(
+                    "t2[{}].hp {} vs {}",
+                    i, x.final_health, y.final_health
+                ));
             }
             if (x.damage_dealt - y.damage_dealt).abs() >= 0.01 {
-                diffs.push(format!("t2[{}].dmg {} vs {}", i, x.damage_dealt, y.damage_dealt));
+                diffs.push(format!(
+                    "t2[{}].dmg {} vs {}",
+                    i, x.damage_dealt, y.damage_dealt
+                ));
             }
         }
         if !diffs.is_empty() {
@@ -256,7 +343,10 @@ fn self_mirror_determinism_without_trace() {
         }
     }
     if !failures.is_empty() {
-        panic!("Self-mirror non-determinism (trace OFF on both runs):\n{}", failures.join("\n"));
+        panic!(
+            "Self-mirror non-determinism (trace OFF on both runs):\n{}",
+            failures.join("\n")
+        );
     }
 }
 
@@ -289,7 +379,6 @@ fn trace_on_matches_trace_off_all_class_pairings() {
 
             let trace_config = Some(TraceConfig {
                 output_path: trace_path,
-
             });
 
             let with_trace = run_headless_match_with(
@@ -297,16 +386,16 @@ fn trace_on_matches_trace_off_all_class_pairings() {
                 true,
                 trace_config,
             );
-            let without_trace = run_headless_match_with(
-                create_config(vec![c1], vec![c2], Some(seed)),
-                true,
-                None,
-            );
+            let without_trace =
+                run_headless_match_with(create_config(vec![c1], vec![c2], Some(seed)), true, None);
 
             let (with_trace, without_trace) = match (with_trace, without_trace) {
                 (Ok(a), Ok(b)) => (a, b),
                 (Err(e), _) | (_, Err(e)) => {
-                    failures.push(format!("{} v {} seed={}: match failed: {}", c1, c2, seed, e));
+                    failures.push(format!(
+                        "{} v {} seed={}: match failed: {}",
+                        c1, c2, seed, e
+                    ));
                     continue;
                 }
             };
@@ -336,7 +425,14 @@ fn trace_on_matches_trace_off_all_class_pairings() {
                 {
                     failures.push(format!(
                         "{} v {} seed={} team1 slot {}: hp {} vs {} | dmg {} vs {}",
-                        c1, c2, seed, slot, a.final_health, b.final_health, a.damage_dealt, b.damage_dealt
+                        c1,
+                        c2,
+                        seed,
+                        slot,
+                        a.final_health,
+                        b.final_health,
+                        a.damage_dealt,
+                        b.damage_dealt
                     ));
                 }
             }
@@ -351,7 +447,14 @@ fn trace_on_matches_trace_off_all_class_pairings() {
                 {
                     failures.push(format!(
                         "{} v {} seed={} team2 slot {}: hp {} vs {} | dmg {} vs {}",
-                        c1, c2, seed, slot, a.final_health, b.final_health, a.damage_dealt, b.damage_dealt
+                        c1,
+                        c2,
+                        seed,
+                        slot,
+                        a.final_health,
+                        b.final_health,
+                        a.damage_dealt,
+                        b.damage_dealt
                     ));
                 }
             }
@@ -395,10 +498,12 @@ fn trace_file_deterministic_all_class_pairings() {
                 true,
                 Some(TraceConfig {
                     output_path: path1.clone(),
-    
                 }),
             ) {
-                failures.push(format!("{} v {} seed={}: first run failed: {}", c1, c2, seed, e));
+                failures.push(format!(
+                    "{} v {} seed={}: first run failed: {}",
+                    c1, c2, seed, e
+                ));
                 continue;
             }
             if let Err(e) = run_headless_match_with(
@@ -406,10 +511,12 @@ fn trace_file_deterministic_all_class_pairings() {
                 true,
                 Some(TraceConfig {
                     output_path: path2.clone(),
-    
                 }),
             ) {
-                failures.push(format!("{} v {} seed={}: second run failed: {}", c1, c2, seed, e));
+                failures.push(format!(
+                    "{} v {} seed={}: second run failed: {}",
+                    c1, c2, seed, e
+                ));
                 continue;
             }
 
@@ -418,7 +525,11 @@ fn trace_file_deterministic_all_class_pairings() {
             if a != b {
                 failures.push(format!(
                     "{} v {} seed={}: trace files differ (len {} vs {})",
-                    c1, c2, seed, a.len(), b.len()
+                    c1,
+                    c2,
+                    seed,
+                    a.len(),
+                    b.len()
                 ));
             }
 
@@ -459,7 +570,6 @@ fn trace_file_is_deterministic_at_same_seed() {
         true,
         Some(TraceConfig {
             output_path: path1.clone(),
-
         }),
     )
     .expect("first trace run");
@@ -470,7 +580,6 @@ fn trace_file_is_deterministic_at_same_seed() {
         true,
         Some(TraceConfig {
             output_path: path2.clone(),
-
         }),
     )
     .expect("second trace run");
@@ -484,7 +593,10 @@ fn trace_file_is_deterministic_at_same_seed() {
         a.len(),
         b.len()
     );
-    assert_eq!(a, b, "trace files differ at same seed — non-deterministic event ordering");
+    assert_eq!(
+        a, b,
+        "trace files differ at same seed — non-deterministic event ordering"
+    );
 
     std::fs::remove_file(&path1).ok();
     std::fs::remove_file(&path2).ok();
@@ -511,9 +623,15 @@ fn assert_results_equal(a: &MatchResult, b: &MatchResult, ctx: &str) {
         b.team2_combatants.len(),
         "{ctx}: team2 length"
     );
-    for (side, (ca, cb)) in [(1u8, (&a.team1_combatants, &b.team1_combatants)), (2, (&a.team2_combatants, &b.team2_combatants))] {
+    for (side, (ca, cb)) in [
+        (1u8, (&a.team1_combatants, &b.team1_combatants)),
+        (2, (&a.team2_combatants, &b.team2_combatants)),
+    ] {
         for (i, (x, y)) in ca.iter().zip(cb.iter()).enumerate() {
-            assert_eq!(x.class_name, y.class_name, "{ctx}: team{side} slot {i} class");
+            assert_eq!(
+                x.class_name, y.class_name,
+                "{ctx}: team{side} slot {i} class"
+            );
             assert!(
                 (x.final_health - y.final_health).abs() < 0.01,
                 "{ctx}: team{side} slot {i} final_health {} vs {}",
@@ -552,7 +670,11 @@ fn pillared_arena_same_seed_is_deterministic() {
     };
     let r1 = run_headless_match_with(make(), true, None).expect("first PillaredArena run");
     let r2 = run_headless_match_with(make(), true, None).expect("second PillaredArena run");
-    assert_results_equal(&r1, &r2, "PillaredArena Warrior+Priest v Mage+Priest seed 7");
+    assert_results_equal(
+        &r1,
+        &r2,
+        "PillaredArena Warrior+Priest v Mage+Priest seed 7",
+    );
 }
 
 /// Within-build determinism with obstacles active, including the decision
@@ -567,7 +689,11 @@ fn pillared_arena_same_seed_is_deterministic() {
 fn pillared_arena_determinism_with_trace() {
     let seed = 7_u64;
     let make = || {
-        let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Mage", "Priest"], Some(seed));
+        let mut cfg = create_config(
+            vec!["Warrior", "Priest"],
+            vec!["Mage", "Priest"],
+            Some(seed),
+        );
         cfg.map = "TwinPillars".to_string();
         cfg
     };
@@ -582,13 +708,17 @@ fn pillared_arena_determinism_with_trace() {
     let r1 = run_headless_match_with(
         make(),
         true,
-        Some(TraceConfig { output_path: path1.clone() }),
+        Some(TraceConfig {
+            output_path: path1.clone(),
+        }),
     )
     .expect("first traced PillaredArena run");
     let r2 = run_headless_match_with(
         make(),
         true,
-        Some(TraceConfig { output_path: path2.clone() }),
+        Some(TraceConfig {
+            output_path: path2.clone(),
+        }),
     )
     .expect("second traced PillaredArena run");
 
@@ -617,11 +747,19 @@ fn different_seeds_produce_different_matches() {
 
     let differs = r1.winner != r2.winner
         || r1.match_time != r2.match_time
-        || r1.team1_combatants.iter().zip(r2.team1_combatants.iter())
-            .any(|(a, b)| (a.final_health - b.final_health).abs() > 0.01
-                || (a.damage_dealt - b.damage_dealt).abs() > 0.01);
+        || r1
+            .team1_combatants
+            .iter()
+            .zip(r2.team1_combatants.iter())
+            .any(|(a, b)| {
+                (a.final_health - b.final_health).abs() > 0.01
+                    || (a.damage_dealt - b.damage_dealt).abs() > 0.01
+            });
 
-    assert!(differs, "seeds 1 and 2 produced identical results — RNG may not be wired");
+    assert!(
+        differs,
+        "seeds 1 and 2 produced identical results — RNG may not be wired"
+    );
 }
 
 /// A kill call outlives the combatant it named, and the team moves on.
@@ -646,7 +784,11 @@ fn different_seeds_produce_different_matches() {
 /// Covers the plan's AE5 (`docs/plans/2026-08-06-001-feat-in-match-kill-call-and-banter-plan.md`).
 #[test]
 fn a_call_survives_its_target_s_death_and_the_team_retargets() {
-    let mut config = create_config(vec!["Mage", "Priest"], vec!["Warrior", "Priest"], Some(424242));
+    let mut config = create_config(
+        vec!["Mage", "Priest"],
+        vec!["Warrior", "Priest"],
+        Some(424242),
+    );
     config.max_duration_secs = 300.0;
     // Call the enemy Priest (slot 1); the Warrior in slot 0 is never called.
     config.team1_kill_target = Some(1);
@@ -655,8 +797,14 @@ fn a_call_survives_its_target_s_death_and_the_team_retargets() {
 
     let called = &result.team2_combatants[1];
     let never_called = &result.team2_combatants[0];
-    assert_eq!(called.class_name, "Priest", "fixture: slot 1 is the called Priest");
-    assert_eq!(never_called.class_name, "Warrior", "fixture: slot 0 is never called");
+    assert_eq!(
+        called.class_name, "Priest",
+        "fixture: slot 1 is the called Priest"
+    );
+    assert_eq!(
+        never_called.class_name, "Warrior",
+        "fixture: slot 0 is never called"
+    );
 
     assert!(
         !called.survived,

@@ -18,10 +18,10 @@ use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
-use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{
     calculate_cast_time, clamp_to_arena, get_spell_power_bonus,
 };
+use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{GCD, WEAKENED_SOUL_DURATION};
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
@@ -116,14 +116,23 @@ pub fn decide_priest_action(
         return false;
     }
 
-    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos) else {
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos)
+    else {
         return false;
     };
 
     // Priority 1: Power Word: Fortitude (buff allies)
     if try_fortitude(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        fortified_this_frame, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        fortified_this_frame,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -131,8 +140,16 @@ pub fn decide_priest_action(
 
     // Priority 2: Dispel Magic - Urgent (Polymorph, Freezing Trap, UA Silence, Fear)
     if try_dispel_magic(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        90, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        90,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -143,10 +160,22 @@ pub fn decide_priest_action(
     // outranks everything below the urgent dispel. On success the posture
     // returns to FREE (DipComplete) and the walk directive dies with it; the
     // return to backline happens naturally via FREE formation.
-    if let ScreamDipPlan::DipCast { target, completed_state } = &plan.scream_dip {
+    if let ScreamDipPlan::DipCast {
+        target,
+        completed_state,
+    } = &plan.scream_dip
+    {
         if try_dip_psychic_scream(
-            commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-            same_frame_cc_queue, &mut builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            same_frame_cc_queue,
+            &mut builder,
         ) {
             // `builder` exclusively borrows the trace; finish it before
             // emitting the DipComplete movement event.
@@ -173,8 +202,18 @@ pub fn decide_priest_action(
     // pressured, so the two are mutually exclusive — the pressured gate is the
     // scream's reservation (no explicit Reserved state needed, R14).
     if try_psychic_scream(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        plan.pressured, &movement.shared, same_frame_cc_queue, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        plan.pressured,
+        &movement.shared,
+        same_frame_cc_queue,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -182,8 +221,16 @@ pub fn decide_priest_action(
 
     // Priority 4: Power Word: Shield
     if try_power_word_shield(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        shielded_this_frame, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        shielded_this_frame,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -199,8 +246,17 @@ pub fn decide_priest_action(
     // Heal's own trigger), so ordering is safe. Safety gates (escape/
     // pressured/focus/stealth) live inside and are traced.
     if try_mana_burn(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        escape_defer, plan.pressured, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        escape_defer,
+        plan.pressured,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -208,28 +264,52 @@ pub fn decide_priest_action(
 
     // Priority 5: Flash Heal
     if try_flash_heal(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        escape_defer, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        escape_defer,
+        &mut builder,
     ) {
         builder.finish();
         return true;
     }
 
     // Priority 6: Dispel Magic - Maintenance (only when team healthy)
-    if ctx.is_team_healthy(0.70, my_pos) {
-        if try_dispel_magic(
-            commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-            50, &mut builder,
-        ) {
-            builder.finish();
-            return true;
-        }
+    if ctx.is_team_healthy(0.70, my_pos)
+        && try_dispel_magic(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            50,
+            &mut builder,
+        )
+    {
+        builder.finish();
+        return true;
     }
 
     // Priority 7: Mind Blast
     if try_mind_blast(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        escape_defer, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        escape_defer,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -270,10 +350,14 @@ fn try_psychic_scream(
     let scream_def = abilities.get_unchecked(&scream);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(scream, scream_def, combatant, my_pos, auras, None, ctx, opts) {
+    if !pre_cast_ok(
+        scream, scream_def, combatant, my_pos, auras, None, ctx, opts,
+    ) {
         builder.reject(
             scream,
-            classify_pre_cast_failure(scream, scream_def, combatant, my_pos, auras, None, ctx, opts),
+            classify_pre_cast_failure(
+                scream, scream_def, combatant, my_pos, auras, None, ctx, opts,
+            ),
         );
         return false;
     }
@@ -284,7 +368,9 @@ fn try_psychic_scream(
     if !pressured {
         builder.reject(
             scream,
-            RejectionReason::PreconditionUnmet { note: "not pressured".into() },
+            RejectionReason::PreconditionUnmet {
+                note: "not pressured".into(),
+            },
         );
         return false;
     }
@@ -300,7 +386,9 @@ fn try_psychic_scream(
     {
         builder.reject(
             scream,
-            RejectionReason::PreconditionUnmet { note: "critical heal pending".into() },
+            RejectionReason::PreconditionUnmet {
+                note: "critical heal pending".into(),
+            },
         );
         return false;
     }
@@ -312,14 +400,22 @@ fn try_psychic_scream(
     // real threat are still feared — this only blocks a pet-only cast.
     let has_real_threat = targets
         .iter()
-        .any(|e| ctx.combatants.get(e).map_or(false, |i| !i.is_pet));
+        .any(|e| ctx.combatants.get(e).is_some_and(|i| !i.is_pet));
     if !has_real_threat {
         builder.reject(scream, RejectionReason::NoValidTarget);
         return false;
     }
 
     fire_psychic_scream(
-        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, ctx, builder,
+        commands,
+        combat_log,
+        scream_def,
+        entity,
+        combatant,
+        same_frame_cc_queue,
+        &targets,
+        ctx,
+        builder,
     );
     true
 }
@@ -327,12 +423,7 @@ fn try_psychic_scream(
 /// Fear-eligible enemies within `radius` of `my_pos`: visible + alive (helper),
 /// not immune, not Fear-DR-immune. Shared by the defensive predicate and the
 /// offensive dip cast. AoE filtering is the caller's job (R5).
-fn scream_targets(
-    ctx: &CombatContext,
-    entity: Entity,
-    my_pos: Vec3,
-    radius: f32,
-) -> Vec<Entity> {
+fn scream_targets(ctx: &CombatContext, entity: Entity, my_pos: Vec3, radius: f32) -> Vec<Entity> {
     // Returns just entities (Copy) — this is a per-tick *predicate* helper whose
     // result is usually discarded, so it must not allocate. The pet-aware id is
     // resolved lazily in `fire_psychic_scream`, which only runs on the committed
@@ -380,9 +471,21 @@ fn fire_psychic_scream(
         .insert(AbilityType::PsychicScream, scream_def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Psychic Scream", None, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Psychic Scream",
+        None,
+        "casts",
+    );
 
-    let fear_duration = scream_def.applies_aura.as_ref().map(|a| a.duration).unwrap_or(0.0);
+    let fear_duration = scream_def
+        .applies_aura
+        .as_ref()
+        .map(|a| a.duration)
+        .unwrap_or(0.0);
     let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
     for target_entity in targets {
         // Resolve the pet-aware id here (committed cast only, not per predicate
@@ -440,10 +543,14 @@ fn try_dip_psychic_scream(
     let scream_def = abilities.get_unchecked(&scream);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(scream, scream_def, combatant, my_pos, auras, None, ctx, opts) {
+    if !pre_cast_ok(
+        scream, scream_def, combatant, my_pos, auras, None, ctx, opts,
+    ) {
         builder.reject(
             scream,
-            classify_pre_cast_failure(scream, scream_def, combatant, my_pos, auras, None, ctx, opts),
+            classify_pre_cast_failure(
+                scream, scream_def, combatant, my_pos, auras, None, ctx, opts,
+            ),
         );
         return false;
     }
@@ -455,7 +562,15 @@ fn try_dip_psychic_scream(
     }
 
     fire_psychic_scream(
-        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, ctx, builder,
+        commands,
+        combat_log,
+        scream_def,
+        entity,
+        combatant,
+        same_frame_cc_queue,
+        &targets,
+        ctx,
+        builder,
     );
     true
 }
@@ -482,9 +597,14 @@ fn try_fortitude(
         if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
             continue;
         }
-        let has_fortitude = ctx.active_auras
+        let has_fortitude = ctx
+            .active_auras
             .get(ally_entity)
-            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::MaxHealthIncrease))
+            .map(|auras| {
+                auras
+                    .iter()
+                    .any(|a| a.effect_type == AuraType::MaxHealthIncrease)
+            })
             .unwrap_or(false);
         if has_fortitude {
             continue;
@@ -503,14 +623,26 @@ fn try_fortitude(
 
     let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        ability, def, combatant, my_pos, auras,
-        Some((buff_target, target_pos)), ctx, opts,
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((buff_target, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, def, combatant, my_pos, auras,
-                Some((buff_target, target_pos)), ctx, opts,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((buff_target, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -522,7 +654,15 @@ fn try_fortitude(
     combatant.global_cooldown = GCD;
 
     let target_tuple = ctx.combatants.get(&buff_target).map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Power Word: Fortitude", target_tuple, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Power Word: Fortitude",
+        target_tuple,
+        "casts",
+    );
 
     if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
         commands.spawn(aura_pending);
@@ -573,12 +713,15 @@ fn try_power_word_shield(
             continue;
         }
         let ally_auras = ctx.active_auras.get(ally_entity);
-        let has_weakened_soul = ally_auras
-            .map_or(false, |auras| auras.iter().any(|a| a.effect_type == AuraType::WeakenedSoul));
-        let has_pw_shield = ally_auras.map_or(false, |auras| {
+        let has_weakened_soul = ally_auras.is_some_and(|auras| {
             auras
                 .iter()
-                .any(|a| a.effect_type == AuraType::Absorb && a.ability_name == "Power Word: Shield")
+                .any(|a| a.effect_type == AuraType::WeakenedSoul)
+        });
+        let has_pw_shield = ally_auras.is_some_and(|auras| {
+            auras.iter().any(|a| {
+                a.effect_type == AuraType::Absorb && a.ability_name == "Power Word: Shield"
+            })
         });
         let shielded_this_frame_check = shielded_this_frame.contains(ally_entity);
 
@@ -608,14 +751,26 @@ fn try_power_word_shield(
 
     let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        pw_shield, pw_shield_def, combatant, my_pos, auras,
-        Some((shield_entity, target_pos)), ctx, opts,
+        pw_shield,
+        pw_shield_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((shield_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             pw_shield,
             classify_pre_cast_failure(
-                pw_shield, pw_shield_def, combatant, my_pos, auras,
-                Some((shield_entity, target_pos)), ctx, opts,
+                pw_shield,
+                pw_shield_def,
+                combatant,
+                my_pos,
+                auras,
+                Some((shield_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -627,7 +782,15 @@ fn try_power_word_shield(
     combatant.global_cooldown = GCD;
 
     let target_tuple = ctx.combatants.get(&shield_entity).map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Power Word: Shield", target_tuple, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Power Word: Shield",
+        target_tuple,
+        "casts",
+    );
 
     // Absorb scales with the Priest's effective spell power (base + gear +
     // aura bonuses) via magnitude_coefficient — same stat the heals use.
@@ -742,14 +905,26 @@ fn try_flash_heal(
 
     let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        ability, def, combatant, my_pos, auras,
-        Some((heal_target, target_pos)), ctx, opts,
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((heal_target, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, def, combatant, my_pos, auras,
-                Some((heal_target, target_pos)), ctx, opts,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((heal_target, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -760,12 +935,20 @@ fn try_flash_heal(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState::new(ability, heal_target, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, heal_target, cast_time));
 
-    let target_tuple = ctx.combatants
-        .get(&heal_target)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
+    let target_tuple = ctx.combatants.get(&heal_target).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "begins casting",
+    );
 
     info!(
         "Team {} {} starts casting {} on ally",
@@ -826,14 +1009,26 @@ fn try_mind_blast(
         ..Default::default()
     };
     if !pre_cast_ok(
-        ability, def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -845,12 +1040,20 @@ fn try_mind_blast(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, target_entity, cast_time));
 
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "begins casting",
+    );
 
     info!(
         "Team {} {} starts casting {} on enemy",
@@ -886,7 +1089,7 @@ const MANA_BURN_SURPLUS_HEALTH_FLOOR: f32 = 0.90;
 /// deliberately NOT Root: a rooted caster still casts). Same set as
 /// `CombatContext::enemy_healer_is_cced`.
 fn attack_prevented_by_cc(ctx: &CombatContext, entity: Entity) -> bool {
-    ctx.active_auras.get(&entity).map_or(false, |auras| {
+    ctx.active_auras.get(&entity).is_some_and(|auras| {
         auras.iter().any(|a| {
             matches!(
                 a.effect_type,
@@ -1082,14 +1285,26 @@ fn try_mana_burn(
         ..Default::default()
     };
     if !pre_cast_ok(
-        ability, def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -1101,12 +1316,20 @@ fn try_mana_burn(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, target_entity, cast_time));
 
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "begins casting",
+    );
 
     info!(
         "Team {} {} starts casting {} on enemy healer",
@@ -1207,7 +1430,13 @@ fn evaluate_scream_dip_entry(
     let def = abilities.get_unchecked(&AbilityType::PsychicScream);
 
     if !pre_cast_ok(
-        AbilityType::PsychicScream, def, combatant, my_pos, auras, None, ctx,
+        AbilityType::PsychicScream,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
         PreCastOpts::default(),
     ) {
         return None;
@@ -1329,7 +1558,7 @@ fn priest_dip_tick(
     let in_range = ctx
         .combatants
         .get(&target)
-        .map_or(false, |t| my_pos.distance(t.position) <= def.range);
+        .is_some_and(|t| my_pos.distance(t.position) <= def.range);
     if in_range {
         let mut completed = *state;
         completed.posture = Posture::Free;
@@ -1514,7 +1743,16 @@ pub fn evaluate_priest_posture(
     // dying teammate is occluded — walk around cover to regain sight and heal.
     if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
         medic_chase_tick(
-            commands, entity, my_pos, ally, state, directive, shared, now, decision_trace, ctx,
+            commands,
+            entity,
+            my_pos,
+            ally,
+            state,
+            directive,
+            shared,
+            now,
+            decision_trace,
+            ctx,
         );
     } else {
         if state.medic_target.is_some() {
@@ -1525,22 +1763,61 @@ pub fn evaluate_priest_posture(
         }
         match next {
             Posture::Escape => escape_tick(
-                commands, entity, my_pos, ctx, state, directive, shared,
-                &movement.priest.weights, decision_trace, transitioned, prev,
+                commands,
+                entity,
+                my_pos,
+                ctx,
+                state,
+                directive,
+                shared,
+                &movement.priest.weights,
+                decision_trace,
+                transitioned,
+                prev,
             ),
             Posture::Pressured => pressured_tick(
-                commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
-                decision_trace, transitioned, prev,
+                commands,
+                entity,
+                combatant,
+                my_pos,
+                ctx,
+                state,
+                directive,
+                movement,
+                now,
+                decision_trace,
+                transitioned,
+                prev,
             ),
             Posture::Dip => {
                 scream_dip = priest_dip_tick(
-                    commands, abilities, entity, my_pos, ctx, state, directive, now,
-                    decision_trace, transitioned, prev,
+                    commands,
+                    abilities,
+                    entity,
+                    my_pos,
+                    ctx,
+                    state,
+                    directive,
+                    now,
+                    decision_trace,
+                    transitioned,
+                    prev,
                 );
             }
             _ => free_tick(
-                commands, abilities, entity, combatant, my_pos, ctx, state, directive, movement, now,
-                decision_trace, transitioned, prev,
+                commands,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                ctx,
+                state,
+                directive,
+                movement,
+                now,
+                decision_trace,
+                transitioned,
+                prev,
             ),
         }
     }
@@ -1642,7 +1919,8 @@ fn free_tick(
         commands.entity(entity).remove::<MovementDirective>();
     }
 
-    let Some(point) = compute_formation_point(abilities, entity, combatant, my_pos, ctx, movement) else {
+    let Some(point) = compute_formation_point(abilities, entity, combatant, my_pos, ctx, movement)
+    else {
         // DEGENERATE (R5/AE4): no formation directive; fall through to the
         // legacy ladder. Exit transitions still emit — goal_kind
         // Entity records "legacy target pursuit governs".
@@ -1664,7 +1942,7 @@ fn free_tick(
     let my_xz = Vec2::new(my_pos.x, my_pos.z);
     let moved = state
         .last_point
-        .map_or(true, |lp| lp.distance(point_xz) > movement.priest.formation_shift_threshold);
+        .is_none_or(|lp| lp.distance(point_xz) > movement.priest.formation_shift_threshold);
     let near = my_xz.distance(point_xz) <= movement.priest.formation_deadzone;
 
     let issue = |commands: &mut Commands| {
@@ -1706,7 +1984,7 @@ fn free_tick(
             builder.finish();
         }
     } else if !near
-        && directive.map_or(true, |d| d.expires - now < movement.priest.directive_refresh_margin)
+        && directive.is_none_or(|d| d.expires - now < movement.priest.directive_refresh_margin)
     {
         // Keep the standing walk alive (post-cast gaps, TTL expiry) without
         // re-scoring or emitting — refreshes are not decisions.
@@ -1776,13 +2054,14 @@ fn compute_formation_point(
                 .unwrap()
         });
     let away = match nearest_enemy {
-        Some(e) => Vec2::new(centroid.x - e.position.x, centroid.z - e.position.z)
-            .normalize_or_zero(),
+        Some(e) => {
+            Vec2::new(centroid.x - e.position.x, centroid.z - e.position.z).normalize_or_zero()
+        }
         None => Vec2::new(centroid.x, centroid.z).normalize_or_zero(),
     };
     let to_center = Vec2::new(-centroid.x, -centroid.z).normalize_or_zero();
-    let mut dir = (away * (1.0 - shared.center_bias) + to_center * shared.center_bias)
-        .normalize_or_zero();
+    let mut dir =
+        (away * (1.0 - shared.center_bias) + to_center * shared.center_bias).normalize_or_zero();
     if dir == Vec2::ZERO {
         dir = away;
     }

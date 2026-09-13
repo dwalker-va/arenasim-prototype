@@ -1,6 +1,6 @@
-use bevy::prelude::*;
 use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
+use bevy::prelude::*;
 use bevy::render::mesh::{ConeAnchor, Indices, PrimitiveTopology};
 use std::f32::consts::TAU;
 
@@ -570,7 +570,8 @@ pub fn spawn_bolt_visuals(
     if new_projectiles.is_empty() {
         return;
     }
-    let assets = assets.get_or_insert_with(|| BoltAssets::build(&mut meshes, &mut materials, &mut images));
+    let assets =
+        assets.get_or_insert_with(|| BoltAssets::build(&mut meshes, &mut materials, &mut images));
 
     for (entity, projectile, transform) in new_projectiles.iter() {
         let Some(kind) = bolt_kind_for(projectile.ability) else {
@@ -812,8 +813,11 @@ pub fn animate_bolts(
                         // X spans the band's length, Y its width — a
                         // `Rectangle` meshes into XY facing +Z, and
                         // `trail_segment_rotation` puts local X on `dir`.
-                        Transform::from_translation(at + side)
-                            .with_scale(Vec3::new(length, half_width * 2.0, 1.0)),
+                        Transform::from_translation(at + side).with_scale(Vec3::new(
+                            length,
+                            half_width * 2.0,
+                            1.0,
+                        )),
                         // Glowing spell effects do not cast shadows. Without
                         // this the trail painted a dotted black line across the
                         // arena floor beside itself.
@@ -1435,8 +1439,8 @@ pub fn spawn_bolt_impacts(
                             },
                             Mesh3d(assets.blot.clone()),
                             MeshMaterial3d(materials.add(StandardMaterial {
-                                base_color: SHADOW_IMPACT_BLOT_COLOR
-                                    .with_alpha(SHADOW_IMPACT_BLOT_ALPHA),
+                                base_color:
+                                    SHADOW_IMPACT_BLOT_COLOR.with_alpha(SHADOW_IMPACT_BLOT_ALPHA),
                                 // Blend, NOT Add — the whole point is to darken.
                                 alpha_mode: AlphaMode::Blend,
                                 perceptual_roughness: 0.7,
@@ -1587,7 +1591,14 @@ pub fn animate_bolt_impacts(
 /// sprites — the rig's own rotation has to be cancelled out. The arcs keep
 /// their roll: `side` flips one of them so the pair opens away from each other.
 pub fn billboard_bolt_impacts(
-    camera: Query<&Transform, (With<Camera3d>, Without<BoltImpact>, Without<BoltImpactSprite>)>,
+    camera: Query<
+        &Transform,
+        (
+            With<Camera3d>,
+            Without<BoltImpact>,
+            Without<BoltImpactSprite>,
+        ),
+    >,
     rigs: Query<(&Transform, &Children), With<BoltImpact>>,
     mut sprites: Query<
         (&BoltImpactSprite, &mut Transform),
@@ -1615,8 +1626,7 @@ pub fn billboard_bolt_impacts(
                     // projects to on screen — see [`arc_roll`].
                     BoltImpactRole::Arc => {
                         let lateral = rig.rotation * Vec3::X;
-                        facing
-                            * Quat::from_rotation_z(arc_roll(lateral, cam.rotation, sprite.side))
+                        facing * Quat::from_rotation_z(arc_roll(lateral, cam.rotation, sprite.side))
                     }
                     _ => facing,
                 };

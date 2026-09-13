@@ -46,9 +46,6 @@
 //! └──────────────────────────┴─────────────────────────┘
 //! ```
 
-use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
-use super::{GameState, play_match::{MatchResults, CombatantStats}};
 use super::configure_match_ui::ClassIcons;
 use super::encyclopedia::{widget, EncyclopediaData, EncyclopediaState, Topic};
 use super::match_config::CharacterClass;
@@ -56,7 +53,13 @@ use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::equipment::ItemDefinitions;
 use super::play_match::AbilityType;
 use super::view_combatant_ui::{AbilityIcons, ItemIcons};
+use super::{
+    play_match::{CombatantStats, MatchResults},
+    GameState,
+};
 use crate::combat::log::CombatLog;
+use bevy::prelude::*;
+use bevy_egui::{egui, EguiContexts};
 
 // --- Layout constants (fixed widths keep numeric columns aligned across the
 //     header, every combatant row, and the Σ TOTAL row) ---
@@ -184,7 +187,9 @@ pub fn results_ui(
     mut next_state: ResMut<NextState<GameState>>,
     mut commands: Commands,
 ) {
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     let data = EncyclopediaData {
         items: &item_definitions,
@@ -260,65 +265,79 @@ pub fn draw_results_screen(
                 .inner_margin(egui::Margin::same(24)),
         )
         .show(ctx, |ui| {
-          ui.vertical_centered(|ui| {
-            ui.set_max_width(CONTENT_MAX_W);
+            ui.vertical_centered(|ui| {
+                ui.set_max_width(CONTENT_MAX_W);
 
-            let Some(results) = results else {
-                ui.add_space(40.0);
-                ui.vertical_centered(|ui| {
-                    ui.heading(
-                        egui::RichText::new("No match results available")
-                            .size(28.0)
-                            .color(C_DEAD),
+                let Some(results) = results else {
+                    ui.add_space(40.0);
+                    ui.vertical_centered(|ui| {
+                        ui.heading(
+                            egui::RichText::new("No match results available")
+                                .size(28.0)
+                                .color(C_DEAD),
+                        );
+                    });
+                    return;
+                };
+
+                render_banner(ui, results.winner, results.duration_secs);
+                ui.add_space(24.0);
+
+                // Bar scaling shared across both teams so lengths are comparable.
+                let max_damage = results
+                    .team1_combatants
+                    .iter()
+                    .chain(results.team2_combatants.iter())
+                    .map(|s| s.damage_dealt)
+                    .fold(0.0_f32, f32::max)
+                    .max(1.0);
+
+                // Two face-off panels. `columns` gives each panel its own
+                // top-down layout (a plain `horizontal` wrapper would make the
+                // panel interiors inherit a left-to-right layout and collapse
+                // every row onto one line).
+                ui.columns(2, |columns| {
+                    render_team_panel(
+                        &mut columns[0],
+                        "TEAM 1",
+                        1,
+                        &results.team1_combatants,
+                        combat_log,
+                        &mut links,
+                        egui::Color32::from_rgb(90, 140, 230),
+                        results.winner,
+                        max_damage,
+                        &results.pet_damage_links,
+                    );
+                    render_team_panel(
+                        &mut columns[1],
+                        "TEAM 2",
+                        2,
+                        &results.team2_combatants,
+                        combat_log,
+                        &mut links,
+                        egui::Color32::from_rgb(230, 90, 90),
+                        results.winner,
+                        max_damage,
+                        &results.pet_damage_links,
                     );
                 });
-                return;
-            };
 
-            render_banner(ui, results.winner, results.duration_secs);
-            ui.add_space(24.0);
+                ui.add_space(28.0);
 
-            // Bar scaling shared across both teams so lengths are comparable.
-            let max_damage = results
-                .team1_combatants
-                .iter()
-                .chain(results.team2_combatants.iter())
-                .map(|s| s.damage_dealt)
-                .fold(0.0_f32, f32::max)
-                .max(1.0);
+                ui.vertical_centered(|ui| {
+                    let button = egui::Button::new(
+                        egui::RichText::new("DONE")
+                            .size(22.0)
+                            .color(egui::Color32::from_rgb(230, 242, 230)),
+                    )
+                    .min_size(egui::vec2(200.0, 48.0));
 
-            // Two face-off panels. `columns` gives each panel its own
-            // top-down layout (a plain `horizontal` wrapper would make the
-            // panel interiors inherit a left-to-right layout and collapse
-            // every row onto one line).
-            ui.columns(2, |columns| {
-                render_team_panel(
-                    &mut columns[0], "TEAM 1", 1, &results.team1_combatants, combat_log,
-                    &mut links, egui::Color32::from_rgb(90, 140, 230),
-                    results.winner, max_damage, &results.pet_damage_links,
-                );
-                render_team_panel(
-                    &mut columns[1], "TEAM 2", 2, &results.team2_combatants, combat_log,
-                    &mut links, egui::Color32::from_rgb(230, 90, 90),
-                    results.winner, max_damage, &results.pet_damage_links,
-                );
+                    if ui.add(button).clicked() {
+                        done = true;
+                    }
+                });
             });
-
-            ui.add_space(28.0);
-
-            ui.vertical_centered(|ui| {
-                let button = egui::Button::new(
-                    egui::RichText::new("DONE")
-                        .size(22.0)
-                        .color(egui::Color32::from_rgb(230, 242, 230)),
-                )
-                .min_size(egui::vec2(200.0, 48.0));
-
-                if ui.add(button).clicked() {
-                    done = true;
-                }
-            });
-          });
         });
 
     // A click on a linked icon wins over DONE: they cannot both happen in one
@@ -334,8 +353,14 @@ pub fn draw_results_screen(
 fn render_banner(ui: &mut egui::Ui, winner: Option<u8>, duration_secs: f32) {
     let (text, color) = match winner {
         None => ("DRAW".to_string(), egui::Color32::from_rgb(210, 200, 120)),
-        Some(1) => ("TEAM 1 VICTORY".to_string(), egui::Color32::from_rgb(110, 160, 255)),
-        Some(2) => ("TEAM 2 VICTORY".to_string(), egui::Color32::from_rgb(255, 110, 110)),
+        Some(1) => (
+            "TEAM 1 VICTORY".to_string(),
+            egui::Color32::from_rgb(110, 160, 255),
+        ),
+        Some(2) => (
+            "TEAM 2 VICTORY".to_string(),
+            egui::Color32::from_rgb(255, 110, 110),
+        ),
         Some(_) => ("MATCH COMPLETE".to_string(), HEADER_GREY),
     };
     let star = if winner.is_some() { "★ " } else { "" };
@@ -439,7 +464,9 @@ fn render_team_panel(
             // saved report to this screen always finds the same label, and two
             // same-class teammates are never ambiguous.
             for stats in combatants {
-                combatant_block(ui, stats, team, combat_log, links, max_damage, dimf, pet_links);
+                combatant_block(
+                    ui, stats, team, combat_log, links, max_damage, dimf, pet_links,
+                );
             }
 
             // Σ TOTAL row.
@@ -489,9 +516,27 @@ fn combatant_block(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = STAT_GAP;
             num_cell(ui, W_K, kills.to_string(), dim(C_KILL, dimf), false);
-            num_cell(ui, W_TKN, fmt_k(stats.damage_taken), dim(C_TKN, dimf), false);
-            num_cell(ui, W_HEAL, fmt_opt(stats.healing_done), dim(C_HEAL, dimf), false);
-            num_cell(ui, W_DMG, fmt_k(stats.damage_dealt), dim(C_DMG, dimf), false);
+            num_cell(
+                ui,
+                W_TKN,
+                fmt_k(stats.damage_taken),
+                dim(C_TKN, dimf),
+                false,
+            );
+            num_cell(
+                ui,
+                W_HEAL,
+                fmt_opt(stats.healing_done),
+                dim(C_HEAL, dimf),
+                false,
+            );
+            num_cell(
+                ui,
+                W_DMG,
+                fmt_k(stats.damage_dealt),
+                dim(C_DMG, dimf),
+                false,
+            );
         });
     });
 
@@ -592,14 +637,22 @@ fn render_ability_details(
 
     let damage = combat_log.damage_by_ability_including_pets(cid, pet_links);
     if !damage.is_empty() {
-        ui.label(egui::RichText::new("Damage").size(10.0).color(dim(C_DMG, dimf)));
+        ui.label(
+            egui::RichText::new("Damage")
+                .size(10.0)
+                .color(dim(C_DMG, dimf)),
+        );
         render_ability_bars(ui, &damage, dim(C_DMG, dimf), dim(BAR_TEXT, dimf), links);
     }
 
     let healing = combat_log.healing_by_ability(cid);
     if !healing.is_empty() {
         ui.add_space(5.0);
-        ui.label(egui::RichText::new("Healing").size(10.0).color(dim(C_HEAL, dimf)));
+        ui.label(
+            egui::RichText::new("Healing")
+                .size(10.0)
+                .color(dim(C_HEAL, dimf)),
+        );
         render_ability_bars(ui, &healing, dim(C_HEAL, dimf), dim(BAR_TEXT, dimf), links);
     }
 
@@ -647,14 +700,19 @@ fn render_ability_bars(
         let pct = if total > 0.0 { amount / total } else { 0.0 };
         let width = ui.available_width().min(260.0);
         let topic = links.ability_topic(ability);
-        let sense = if topic.is_some() { egui::Sense::click() } else { egui::Sense::hover() };
+        let sense = if topic.is_some() {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        };
         let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 16.0), sense);
         if !ui.is_rect_visible(rect) {
             continue;
         }
         let painter = ui.painter();
         painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(34, 34, 46));
-        let fill = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * pct, rect.height()));
+        let fill =
+            egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * pct, rect.height()));
         painter.rect_filled(fill, 2.0, bar_color.linear_multiply(0.5));
         let icon_rect = egui::Rect::from_center_size(
             egui::pos2(rect.left() + BAR_PAD + BAR_ICON / 2.0, rect.center().y),
@@ -765,7 +823,13 @@ fn num_cell(ui: &mut egui::Ui, width: f32, text: String, color: egui::Color32, s
     let painter = ui.painter();
     // Faux-bold for totals: a second pass nudged a fraction of a pixel.
     if strong {
-        painter.text(pos + egui::vec2(0.6, 0.0), egui::Align2::RIGHT_CENTER, &text, font.clone(), color);
+        painter.text(
+            pos + egui::vec2(0.6, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            &text,
+            font.clone(),
+            color,
+        );
     }
     painter.text(pos, egui::Align2::RIGHT_CENTER, &text, font, color);
 }

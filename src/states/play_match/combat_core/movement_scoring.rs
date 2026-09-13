@@ -61,11 +61,11 @@
 
 use bevy::prelude::*;
 
-use super::is_in_arena_bounds;
+use super::super::arena_bounds::{ArenaBounds, EDGE_PENALTY_ONSET_FRACTION};
 use super::super::map_geometry::{has_line_of_sight, position_blocked, ObstacleVolume, EYE_HEIGHT};
 use super::super::movement_config::MovementWeights;
-use super::super::arena_bounds::{ArenaBounds, EDGE_PENALTY_ONSET_FRACTION};
 use super::super::ARENA_CORNER_SUM;
+use super::is_in_arena_bounds;
 
 /// Mask bit: candidate's lookahead position is out of arena bounds.
 pub const MASK_BOUNDARY: u16 = 1 << 0;
@@ -455,8 +455,13 @@ pub fn score_directions(
         return dir;
     }
     // Fallback rung 3: lift everything; executor clamps the step in-bounds.
-    argmax_interest(candidates, inputs, weights, MASK_BOUNDARY | MASK_ANCHOR | MASK_LOS)
-        .unwrap_or(Vec2::ZERO)
+    argmax_interest(
+        candidates,
+        inputs,
+        weights,
+        MASK_BOUNDARY | MASK_ANCHOR | MASK_LOS,
+    )
+    .unwrap_or(Vec2::ZERO)
 }
 
 #[cfg(test)]
@@ -475,11 +480,20 @@ mod tests {
     fn compass_directions_are_unit_and_distinct() {
         let dirs = compass_directions_16();
         for (i, dir) in dirs.iter().enumerate() {
-            assert!((dir.length() - 1.0).abs() < 1e-5, "dir {} not unit length", i);
+            assert!(
+                (dir.length() - 1.0).abs() < 1e-5,
+                "dir {} not unit length",
+                i
+            );
         }
         for i in 0..dirs.len() {
             for j in (i + 1)..dirs.len() {
-                assert!(dirs[i].distance(dirs[j]) > 0.1, "dirs {} and {} coincide", i, j);
+                assert!(
+                    dirs[i].distance(dirs[j]) > 0.1,
+                    "dirs {} and {} coincide",
+                    i,
+                    j
+                );
             }
         }
     }
@@ -540,7 +554,10 @@ mod tests {
         let outward_next = my_pos + Vec3::new(2.0, 0.0, 0.0);
         let outward_dist =
             Vec2::new(outward_next.x - anchor.pos.x, outward_next.z - anchor.pos.z).length();
-        assert!(outward_dist > anchor.heal_range, "test setup: +X must violate heal range");
+        assert!(
+            outward_dist > anchor.heal_range,
+            "test setup: +X must violate heal range"
+        );
     }
 
     /// (c) Corner setup: directions deeper into the corner lose to
@@ -579,7 +596,10 @@ mod tests {
     /// term contributes exactly nothing, so it cannot blunt an escape.
     #[test]
     fn healer_leash_does_nothing_inside_heal_range() {
-        let weights = MovementWeights { healer_leash: 4.0, ..priest_weights() };
+        let weights = MovementWeights {
+            healer_leash: 4.0,
+            ..priest_weights()
+        };
         let dirs = compass_directions_16();
         let mut inputs = ScorerInputs {
             my_pos: Vec3::new(0.0, 1.0, 0.0),
@@ -678,7 +698,10 @@ mod tests {
     #[test]
     fn empty_candidates_yield_zero() {
         let inputs = ScorerInputs::default();
-        assert_eq!(score_directions(&[], &inputs, &priest_weights()), Vec2::ZERO);
+        assert_eq!(
+            score_directions(&[], &inputs, &priest_weights()),
+            Vec2::ZERO
+        );
     }
 
     /// Oracle reproducing the OLD penalty scheme: soft interest terms minus a
@@ -728,7 +751,10 @@ mod tests {
         let dirs = compass_directions_16();
         // Anchor near the +X wall so positions near it can be simultaneously
         // close to the heal-range edge AND close to the boundary.
-        let anchor = AnchorConstraint { pos: Vec3::new(34.0, 1.0, 0.0), heal_range: 40.0 };
+        let anchor = AnchorConstraint {
+            pos: Vec3::new(34.0, 1.0, 0.0),
+            heal_range: 40.0,
+        };
         let threat = Vec3::new(0.0, 1.0, 0.0);
 
         let mut checked = 0u32;
@@ -751,8 +777,8 @@ mod tests {
 
                 let masks: Vec<u16> = dirs.iter().map(|&d| candidate_mask(d, &inputs)).collect();
                 let survivors = masks.iter().filter(|&&m| m == 0).count();
-                let boundary_only = masks.iter().any(|&m| m == MASK_BOUNDARY);
-                let anchor_only = masks.iter().any(|&m| m == MASK_ANCHOR);
+                let boundary_only = masks.contains(&MASK_BOUNDARY);
+                let anchor_only = masks.contains(&MASK_ANCHOR);
                 if boundary_only {
                     saw_boundary_only += 1;
                 }
@@ -776,9 +802,18 @@ mod tests {
 
         // The sweep must be non-vacuous on every masking shape, or it proves
         // nothing about the cases that matter.
-        assert!(checked > 50, "expected a broad sweep, only checked {checked} frames");
-        assert!(saw_boundary_only > 0, "sweep never produced a boundary-only-masked candidate");
-        assert!(saw_anchor_only > 0, "sweep never produced an anchor-only-masked candidate");
+        assert!(
+            checked > 50,
+            "expected a broad sweep, only checked {checked} frames"
+        );
+        assert!(
+            saw_boundary_only > 0,
+            "sweep never produced a boundary-only-masked candidate"
+        );
+        assert!(
+            saw_anchor_only > 0,
+            "sweep never produced an anchor-only-masked candidate"
+        );
         // Note: a single frame holding BOTH an anchor-only and a boundary-only
         // candidate is geometrically coupled at this lookahead (near a flat
         // wall, the outward step exits bounds and heal-range together, masking
@@ -801,32 +836,50 @@ mod tests {
             my_pos: Vec3::new(0.0, 1.0, 0.0),
             lookahead: 2.0,
             threats: vec![Vec3::new(5.0, 1.0, 0.0)],
-            anchor: Some(AnchorConstraint { pos: Vec3::new(0.0, 1.0, -50.0), heal_range: 10.0 }),
+            anchor: Some(AnchorConstraint {
+                pos: Vec3::new(0.0, 1.0, -50.0),
+                heal_range: 10.0,
+            }),
             wand_range: 30.0,
             ..Default::default()
         };
         assert!(
-            dirs.iter().all(|&d| candidate_mask(d, &inputs) & MASK_ANCHOR != 0),
+            dirs.iter()
+                .all(|&d| candidate_mask(d, &inputs) & MASK_ANCHOR != 0),
             "setup: every candidate must be anchor-masked",
         );
         let chosen = score_directions(&dirs, &inputs, &weights);
-        assert_ne!(chosen, Vec2::ZERO, "anchor-drop fallback must return a direction");
+        assert_ne!(
+            chosen,
+            Vec2::ZERO,
+            "anchor-drop fallback must return a direction"
+        );
         assert_eq!(
             candidate_mask(chosen, &inputs) & MASK_BOUNDARY,
             0,
             "chosen direction must remain in bounds",
         );
         // Threat at +X: with the anchor mask dropped, repulsion still points -X.
-        assert!(chosen.x < -0.9, "expected ~(-1,0) away from a +X threat, got {chosen:?}");
+        assert!(
+            chosen.x < -0.9,
+            "expected ~(-1,0) away from a +X threat, got {chosen:?}"
+        );
     }
 
     /// range_band: pull inward when beyond `max`, push outward when inside
     /// `min`, no contribution while in-band or when the target is absent.
     #[test]
     fn range_band_pulls_toward_band_and_pushes_out_of_min() {
-        let weights = MovementWeights { range_band: 1.0, ..MovementWeights::default() };
+        let weights = MovementWeights {
+            range_band: 1.0,
+            ..MovementWeights::default()
+        };
         let dirs = compass_directions_16();
-        let band = RangeBand { target: Vec3::new(40.0, 1.0, 0.0), min: 8.0, max: 30.0 };
+        let band = RangeBand {
+            target: Vec3::new(40.0, 1.0, 0.0),
+            min: 8.0,
+            max: 30.0,
+        };
 
         // (a) FAR (>max): kill target at +X 40yd away → pull toward +X.
         let far = ScorerInputs {
@@ -837,28 +890,49 @@ mod tests {
             ..Default::default()
         };
         let chosen = score_directions(&dirs, &far, &weights);
-        assert!(chosen.x > 0.9, "far from band must pull toward +X target, got {chosen:?}");
+        assert!(
+            chosen.x > 0.9,
+            "far from band must pull toward +X target, got {chosen:?}"
+        );
 
         // (b) TOO CLOSE (<min): target 4yd away at +X → push toward -X.
         let near = ScorerInputs {
             my_pos: Vec3::new(36.0, 1.0, 0.0),
-            range_band: Some(RangeBand { target: Vec3::new(40.0, 1.0, 0.0), min: 8.0, max: 30.0 }),
+            range_band: Some(RangeBand {
+                target: Vec3::new(40.0, 1.0, 0.0),
+                min: 8.0,
+                max: 30.0,
+            }),
             ..far.clone()
         };
         let chosen = score_directions(&dirs, &near, &weights);
-        assert!(chosen.x < -0.9, "inside min must push away from target, got {chosen:?}");
+        assert!(
+            chosen.x < -0.9,
+            "inside min must push away from target, got {chosen:?}"
+        );
 
         // (c) IN-BAND (min<=d<=max): target 20yd away → range_band silent, so a
         // lone threat term decides. Threat at +X → away (-X).
         let in_band = ScorerInputs {
             my_pos: Vec3::new(20.0, 1.0, 0.0),
             threats: vec![Vec3::new(25.0, 1.0, 0.0)],
-            range_band: Some(RangeBand { target: Vec3::new(40.0, 1.0, 0.0), min: 8.0, max: 30.0 }),
+            range_band: Some(RangeBand {
+                target: Vec3::new(40.0, 1.0, 0.0),
+                min: 8.0,
+                max: 30.0,
+            }),
             ..far.clone()
         };
-        let w2 = MovementWeights { range_band: 1.0, threat_repulsion: 3.0, ..MovementWeights::default() };
+        let w2 = MovementWeights {
+            range_band: 1.0,
+            threat_repulsion: 3.0,
+            ..MovementWeights::default()
+        };
         let chosen = score_directions(&dirs, &in_band, &w2);
-        assert!(chosen.x < -0.9, "in-band range_band is silent; threat repulsion decides, got {chosen:?}");
+        assert!(
+            chosen.x < -0.9,
+            "in-band range_band is silent; threat repulsion decides, got {chosen:?}"
+        );
 
         // (d) No target → term contributes nothing (no panic, threat decides).
         let none = ScorerInputs {
@@ -868,7 +942,10 @@ mod tests {
             ..far.clone()
         };
         let chosen = score_directions(&dirs, &none, &w2);
-        assert!(chosen.x < -0.9, "no band target → threat repulsion decides, got {chosen:?}");
+        assert!(
+            chosen.x < -0.9,
+            "no band target → threat repulsion decides, got {chosen:?}"
+        );
     }
 
     /// AE4: arc-kiting — a Mage fleeing a pursuer while its kill target is a
@@ -893,7 +970,11 @@ mod tests {
             my_pos,
             lookahead: 2.0,
             threats: vec![pursuer],
-            range_band: Some(RangeBand { target: kill_target, min: 8.0, max: 30.0 }),
+            range_band: Some(RangeBand {
+                target: kill_target,
+                min: 8.0,
+                max: 30.0,
+            }),
             wand_range: 30.0,
             ..Default::default()
         };
@@ -909,7 +990,10 @@ mod tests {
             "arc-kite step must keep the kill target within max range, got {dist_after}",
         );
         // And it must still move away from the pursuer (z component positive).
-        assert!(chosen.y > 0.0, "must still gain separation from the −Z pursuer, got {chosen:?}");
+        assert!(
+            chosen.y > 0.0,
+            "must still gain separation from the −Z pursuer, got {chosen:?}"
+        );
     }
 
     /// Corner-escape (the Hunter migration's load-bearing fix): a kiter pinned
@@ -962,7 +1046,11 @@ mod tests {
                 ..Default::default()
             };
             let chosen = score_directions(&dirs, &inputs, &weights);
-            assert_ne!(chosen, Vec2::ZERO, "step {step}: must pick a direction, not pin");
+            assert_ne!(
+                chosen,
+                Vec2::ZERO,
+                "step {step}: must pick a direction, not pin"
+            );
             pos += Vec3::new(chosen.x, 0.0, chosen.y) * 2.0;
             // Never pinned against the octagon wall (the corner-stuck symptom).
             assert!(
@@ -997,12 +1085,20 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            dirs.iter().all(|&d| candidate_mask(d, &inputs) & MASK_BOUNDARY != 0),
+            dirs.iter()
+                .all(|&d| candidate_mask(d, &inputs) & MASK_BOUNDARY != 0),
             "setup: every candidate must be boundary-masked",
         );
         let chosen = score_directions(&dirs, &inputs, &weights);
-        assert_ne!(chosen, Vec2::ZERO, "boundary-lift fallback must return a direction");
-        assert!(chosen.is_finite(), "chosen direction must be finite, got {chosen:?}");
+        assert_ne!(
+            chosen,
+            Vec2::ZERO,
+            "boundary-lift fallback must return a direction"
+        );
+        assert!(
+            chosen.is_finite(),
+            "chosen direction must be finite, got {chosen:?}"
+        );
     }
 
     // ---- obstacle (LoS) mask + terms ----------------------------------
@@ -1053,7 +1149,11 @@ mod tests {
         );
         // -X steps to (-8, 0), clear of the footprint → no LoS mask, survives.
         let away = Vec2::new(-1.0, 0.0);
-        assert_eq!(candidate_mask(away, &inputs), 0, "an open step must be unmasked");
+        assert_eq!(
+            candidate_mask(away, &inputs),
+            0,
+            "an open step must be unmasked"
+        );
     }
 
     /// The fallback ladder drops the ANCHOR mask before the LoS mask.
@@ -1067,17 +1167,31 @@ mod tests {
         let inputs = ScorerInputs {
             my_pos: Vec3::new(0.0, 1.0, 0.0),
             lookahead: 2.0,
-            anchor: Some(AnchorConstraint { pos: Vec3::new(-10.0, 1.0, 0.0), heal_range: 11.0 }),
+            anchor: Some(AnchorConstraint {
+                pos: Vec3::new(-10.0, 1.0, 0.0),
+                heal_range: 11.0,
+            }),
             obstacles: vec![pillar(-2.0, 0.0, 1.0)],
             ..Default::default()
         };
         let a = Vec2::new(1.0, 0.0); // +X: out of heal range → anchor-masked
         let b = Vec2::new(-1.0, 0.0); // -X: into the pillar → LoS-masked
-        assert_ne!(candidate_mask(a, &inputs) & MASK_ANCHOR, 0, "setup: +X anchor-masked");
-        assert_ne!(candidate_mask(b, &inputs) & MASK_LOS, 0, "setup: -X LoS-masked");
+        assert_ne!(
+            candidate_mask(a, &inputs) & MASK_ANCHOR,
+            0,
+            "setup: +X anchor-masked"
+        );
+        assert_ne!(
+            candidate_mask(b, &inputs) & MASK_LOS,
+            0,
+            "setup: -X LoS-masked"
+        );
         // Ladder: rung 1 drops anchor → +X becomes eligible while -X (LoS) does not.
         let chosen = score_directions(&[a, b], &inputs, &weights);
-        assert_eq!(chosen, a, "anchor must lift before LoS, choosing the anchor-only candidate");
+        assert_eq!(
+            chosen, a,
+            "anchor must lift before LoS, choosing the anchor-only candidate"
+        );
     }
 
     /// The fallback ladder drops the LoS mask before the BOUNDARY mask.
@@ -1095,10 +1209,21 @@ mod tests {
         };
         let c = Vec2::new(0.0, -1.0); // -Z: into the pillar, still in bounds
         let d = Vec2::new(1.0, 0.0); // +X: out of arena bounds
-        assert_eq!(candidate_mask(c, &inputs), MASK_LOS, "setup: -Z LoS-masked only");
-        assert_eq!(candidate_mask(d, &inputs), MASK_BOUNDARY, "setup: +X boundary-masked only");
+        assert_eq!(
+            candidate_mask(c, &inputs),
+            MASK_LOS,
+            "setup: -Z LoS-masked only"
+        );
+        assert_eq!(
+            candidate_mask(d, &inputs),
+            MASK_BOUNDARY,
+            "setup: +X boundary-masked only"
+        );
         let chosen = score_directions(&[c, d], &inputs, &weights);
-        assert_eq!(chosen, c, "LoS must lift before boundary, choosing the in-bounds candidate");
+        assert_eq!(
+            chosen, c,
+            "LoS must lift before boundary, choosing the in-bounds candidate"
+        );
     }
 
     /// With every candidate masked, the ladder still returns a direction
@@ -1128,7 +1253,10 @@ mod tests {
     /// pillar clears it (proving occlusion, not distance, caused the mask).
     #[test]
     fn anchor_masked_when_occluded_in_range() {
-        let anchor = AnchorConstraint { pos: Vec3::new(0.0, 1.0, -5.0), heal_range: 40.0 };
+        let anchor = AnchorConstraint {
+            pos: Vec3::new(0.0, 1.0, -5.0),
+            heal_range: 40.0,
+        };
         let candidate = Vec2::new(0.0, 1.0); // +Z: steps to (0, 2), 7yd from anchor (in range)
         let occluded = ScorerInputs {
             my_pos: Vec3::new(0.0, 1.0, 0.0),
@@ -1142,7 +1270,10 @@ mod tests {
             0,
             "in range but occluded → anchor-masked",
         );
-        let clear = ScorerInputs { obstacles: vec![], ..occluded.clone() };
+        let clear = ScorerInputs {
+            obstacles: vec![],
+            ..occluded.clone()
+        };
         assert_eq!(
             candidate_mask(candidate, &clear) & MASK_ANCHOR,
             0,
@@ -1157,7 +1288,10 @@ mod tests {
         let inputs = ScorerInputs {
             my_pos: Vec3::new(0.0, 1.0, 0.0),
             lookahead: 2.0,
-            anchor: Some(AnchorConstraint { pos: Vec3::new(0.0, 1.0, -50.0), heal_range: 10.0 }),
+            anchor: Some(AnchorConstraint {
+                pos: Vec3::new(0.0, 1.0, -50.0),
+                heal_range: 10.0,
+            }),
             obstacles: vec![], // clear sight
             ..Default::default()
         };
@@ -1188,7 +1322,10 @@ mod tests {
             obstacles: obstacles.clone(),
             ..Default::default()
         };
-        let cover_w = MovementWeights { cover_pull: 1.0, ..zeroed_weights() };
+        let cover_w = MovementWeights {
+            cover_pull: 1.0,
+            ..zeroed_weights()
+        };
         assert!(
             score_direction(hiding, &cover_inputs, &cover_w)
                 > score_direction(exposed, &cover_inputs, &cover_w),
@@ -1203,7 +1340,10 @@ mod tests {
             obstacles,
             ..Default::default()
         };
-        let seek_w = MovementWeights { los_seek: 1.0, ..zeroed_weights() };
+        let seek_w = MovementWeights {
+            los_seek: 1.0,
+            ..zeroed_weights()
+        };
         assert!(
             score_direction(exposed, &seek_inputs, &seek_w)
                 > score_direction(hiding, &seek_inputs, &seek_w),
@@ -1218,7 +1358,10 @@ mod tests {
         let inputs = ScorerInputs {
             my_pos: Vec3::new(-6.0, 1.0, 0.0),
             lookahead: 2.0,
-            anchor: Some(AnchorConstraint { pos: Vec3::new(-20.0, 1.0, 0.0), heal_range: 18.0 }),
+            anchor: Some(AnchorConstraint {
+                pos: Vec3::new(-20.0, 1.0, 0.0),
+                heal_range: 18.0,
+            }),
             obstacles: vec![pillar(0.0, 0.0, 5.0), pillar(-10.0, 4.0, 2.0)],
             ..Default::default()
         };
@@ -1226,8 +1369,16 @@ mod tests {
         let first = mask_bitmask(&dirs, &inputs);
         let first_los = los_mask_bitmask(&dirs, &inputs);
         for _ in 0..8 {
-            assert_eq!(mask_bitmask(&dirs, &inputs), first, "combined mask must be stable");
-            assert_eq!(los_mask_bitmask(&dirs, &inputs), first_los, "LoS mask must be stable");
+            assert_eq!(
+                mask_bitmask(&dirs, &inputs),
+                first,
+                "combined mask must be stable"
+            );
+            assert_eq!(
+                los_mask_bitmask(&dirs, &inputs),
+                first_los,
+                "LoS mask must be stable"
+            );
         }
         // The LoS-only mask is a subset of the combined mask.
         assert_eq!(first_los & !first, 0, "los_mask must be a subset of mask");
@@ -1251,7 +1402,8 @@ mod tests {
         };
         // No candidate can ever be LoS-masked without obstacles.
         assert!(
-            dirs.iter().all(|&d| candidate_mask(d, &base) & MASK_LOS == 0),
+            dirs.iter()
+                .all(|&d| candidate_mask(d, &base) & MASK_LOS == 0),
             "empty obstacles must never set MASK_LOS",
         );
         let weights = priest_weights();
@@ -1260,8 +1412,15 @@ mod tests {
         // Same inputs + a target, with los_seek/cover_pull turned way up: on an
         // obstacle-free map cover_pull never fires and los_seek adds a uniform
         // constant, so the argmax is unchanged.
-        let with_target = ScorerInputs { los_target: Some(threat), ..base.clone() };
-        let loud = MovementWeights { los_seek: 100.0, cover_pull: 100.0, ..weights };
+        let with_target = ScorerInputs {
+            los_target: Some(threat),
+            ..base.clone()
+        };
+        let loud = MovementWeights {
+            los_seek: 100.0,
+            cover_pull: 100.0,
+            ..weights
+        };
         let chosen_loud = score_directions(&dirs, &with_target, &loud);
         assert_eq!(
             chosen_plain, chosen_loud,

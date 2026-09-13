@@ -7,10 +7,13 @@ use bevy::prelude::*;
 
 pub mod log;
 
-pub use log::{CombatLog, CombatLogEntry, CombatLogEventType, MatchMetadata, CombatantMetadata, PositionData, StructuredEventData, CombatantId};
+pub use log::{
+    CombatLog, CombatLogEntry, CombatLogEventType, CombatantId, CombatantMetadata, MatchMetadata,
+    PositionData, StructuredEventData,
+};
 
 /// Plugin for the combat system.
-/// 
+///
 /// Currently only initializes the `CombatLog` resource.
 /// All combat logic is in `states/play_match.rs`.
 pub struct CombatPlugin;

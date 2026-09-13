@@ -133,14 +133,12 @@ pub fn dip_target_candidate(
         .min_by(|a, b| {
             // Healers first (`!is_healer` is false=0 for healers, sorts first),
             // then nearest.
-            (!a.class.is_healer())
-                .cmp(&!b.class.is_healer())
-                .then(
-                    my_pos
-                        .distance(a.position)
-                        .partial_cmp(&my_pos.distance(b.position))
-                        .unwrap_or(std::cmp::Ordering::Equal),
-                )
+            (!a.class.is_healer()).cmp(&!b.class.is_healer()).then(
+                my_pos
+                    .distance(a.position)
+                    .partial_cmp(&my_pos.distance(b.position))
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
         })
         .map(|e| e.entity)
 }
@@ -220,7 +218,13 @@ pub fn evaluate_hunter_dip(
             if directive.is_some() {
                 commands.entity(entity).remove::<MovementDirective>();
             }
-            emit_dip(decision_trace, ctx, target, my_pos, MovementTrigger::DipAbort);
+            emit_dip(
+                decision_trace,
+                ctx,
+                target,
+                my_pos,
+                MovementTrigger::DipAbort,
+            );
             return HunterDipPlan::Rotation;
         }
 
@@ -228,7 +232,7 @@ pub fn evaluate_hunter_dip(
         let plant_close = ctx
             .combatants
             .get(&target)
-            .map_or(false, |t| my_pos.distance(t.position) <= HUNTER_TRAP_PLANT_RANGE);
+            .is_some_and(|t| my_pos.distance(t.position) <= HUNTER_TRAP_PLANT_RANGE);
         if plant_close {
             let mut completed = *state;
             completed.dip_target = None;
@@ -275,7 +279,7 @@ pub fn evaluate_hunter_dip(
     let plant_close = ctx
         .combatants
         .get(&target)
-        .map_or(false, |t| my_pos.distance(t.position) <= HUNTER_TRAP_PLANT_RANGE);
+        .is_some_and(|t| my_pos.distance(t.position) <= HUNTER_TRAP_PLANT_RANGE);
     if plant_close {
         return HunterDipPlan::Rotation;
     }
@@ -288,7 +292,13 @@ pub fn evaluate_hunter_dip(
         expires: state.dip_until,
         committed_until: state.dip_until,
     });
-    emit_dip(decision_trace, ctx, target, my_pos, MovementTrigger::DipEnter);
+    emit_dip(
+        decision_trace,
+        ctx,
+        target,
+        my_pos,
+        MovementTrigger::DipEnter,
+    );
     HunterDipPlan::Walking
 }
 
@@ -314,7 +324,13 @@ pub fn emit_dip_complete(
     target: Entity,
     my_pos: Vec3,
 ) {
-    emit_dip(decision_trace, ctx, target, my_pos, MovementTrigger::DipComplete);
+    emit_dip(
+        decision_trace,
+        ctx,
+        target,
+        my_pos,
+        MovementTrigger::DipComplete,
+    );
 }
 
 fn emit_dip(

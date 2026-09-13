@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use crate::states::play_match::components::*;
 use super::transform_puffs::spawn_transform_puff;
+use crate::states::play_match::components::*;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Polymorph Visual Effect System
@@ -66,7 +66,9 @@ pub fn update_polymorph_visuals(
         // or the loser stays a sheep for the rest of the match.
         let is_polymorphed = combatant.is_alive()
             && auras.is_some_and(|a| {
-                a.auras.iter().any(|au| au.effect_type == AuraType::Polymorph)
+                a.auras
+                    .iter()
+                    .any(|au| au.effect_type == AuraType::Polymorph)
             });
 
         if is_polymorphed && polymorphed_marker.is_none() {
@@ -103,13 +105,15 @@ pub fn update_polymorph_visuals(
             // The torso is the body's OWN mesh, whose transform belongs to
             // the walk bob and the death sink, so its offset and squash are
             // baked into the mesh instead of applied as a scale.
-            *mesh3d = Mesh3d(meshes.add(
-                Sphere::new(1.0)
-                    .mesh()
-                    .uv(24, 12)
-                    .scaled_by(SHEEP_TORSO_HALF)
-                    .translated_by(Vec3::Y * torso_y),
-            ));
+            *mesh3d = Mesh3d(
+                meshes.add(
+                    Sphere::new(1.0)
+                        .mesh()
+                        .uv(24, 12)
+                        .scaled_by(SHEEP_TORSO_HALF)
+                        .translated_by(Vec3::Y * torso_y),
+                ),
+            );
             commands
                 .entity(body_child)
                 .try_insert(OriginalBodyMaterial(material.0.clone()));
@@ -126,7 +130,11 @@ pub fn update_polymorph_visuals(
                 torso_y,
             );
             commands.entity(entity).try_insert(PolymorphedVisual);
-            spawn_transform_puff(&mut commands, transform.translation, Some(body_rest_world_y));
+            spawn_transform_puff(
+                &mut commands,
+                transform.translation,
+                Some(body_rest_world_y),
+            );
         } else if !is_polymorphed && polymorphed_marker.is_some() {
             // Just restored — by expiry, damage break, dispel or death. Death is
             // one of those paths, so this doubles as the death-break puff.
@@ -183,17 +191,18 @@ fn spawn_sheep_parts(
 
     let head_y = torso_y + 0.14;
     let head_z = SHEEP_TORSO_HALF.z * 0.85;
-    let mut part = |mesh: Handle<Mesh>, material: Handle<StandardMaterial>, transform: Transform| {
-        let child = commands
-            .spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                transform,
-                SheepPart { owner },
-            ))
-            .id();
-        commands.entity(body).add_child(child);
-    };
+    let mut part =
+        |mesh: Handle<Mesh>, material: Handle<StandardMaterial>, transform: Transform| {
+            let child = commands
+                .spawn((
+                    Mesh3d(mesh),
+                    MeshMaterial3d(material),
+                    transform,
+                    SheepPart { owner },
+                ))
+                .id();
+            commands.entity(body).add_child(child);
+        };
 
     // Head, with a darker muzzle poking out of the fleece.
     part(
@@ -239,4 +248,3 @@ fn spawn_sheep_parts(
             .with_scale(Vec3::new(0.09, 0.11, 0.09)),
     );
 }
-

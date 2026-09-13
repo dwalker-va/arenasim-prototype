@@ -240,7 +240,11 @@ pub struct Ramp {
 
 impl Ramp {
     pub const fn flat(v: f32) -> Self {
-        Ramp { start: v, mid: v, end: v }
+        Ramp {
+            start: v,
+            mid: v,
+            end: v,
+        }
     }
 
     /// Value at normalized window position `k` in 0..1.
@@ -327,11 +331,7 @@ impl HealStyle {
     /// How long the whole landing plays: the emit window plus the longest
     /// mote life (never shorter than the flash).
     pub fn life(&self) -> f32 {
-        let tail = self
-            .emitters
-            .iter()
-            .map(|e| e.life)
-            .fold(0.0_f32, f32::max);
+        let tail = self.emitters.iter().map(|e| e.life).fold(0.0_f32, f32::max);
         let mut life = self.emit_secs + tail;
         if let Some(flash) = &self.flash {
             life = life.max(flash.secs);
@@ -403,8 +403,16 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     origin: Vec3::new(0.0, 0.63, 0.0),
                     speed: 2.22,
                     life: 0.9,
-                    rate: Ramp { start: 11.0, mid: 15.0, end: 0.0 },
-                    area: Ramp { start: 0.14, mid: 0.69, end: 0.14 },
+                    rate: Ramp {
+                        start: 11.0,
+                        mid: 15.0,
+                        end: 0.0,
+                    },
+                    area: Ramp {
+                        start: 0.14,
+                        mid: 0.69,
+                        end: 0.14,
+                    },
                     spread: 0.0,
                     kind: HealMoteKind::Ribbon,
                     size: 0.09,
@@ -413,8 +421,16 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     origin: Vec3::new(0.0, 1.35, 0.0),
                     speed: 2.22,
                     life: 0.9,
-                    rate: Ramp { start: 11.0, mid: 15.0, end: 0.0 },
-                    area: Ramp { start: 0.14, mid: 0.69, end: 0.14 },
+                    rate: Ramp {
+                        start: 11.0,
+                        mid: 15.0,
+                        end: 0.0,
+                    },
+                    area: Ramp {
+                        start: 0.14,
+                        mid: 0.69,
+                        end: 0.14,
+                    },
                     spread: 0.0,
                     kind: HealMoteKind::Ribbon,
                     size: 0.09,
@@ -438,8 +454,16 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     origin: Vec3::new(0.0, 1.35, 0.0),
                     speed: 2.22,
                     life: 0.9,
-                    rate: Ramp { start: 15.0, mid: 20.0, end: 5.0 },
-                    area: Ramp { start: 0.14, mid: 0.69, end: 0.14 },
+                    rate: Ramp {
+                        start: 15.0,
+                        mid: 20.0,
+                        end: 5.0,
+                    },
+                    area: Ramp {
+                        start: 0.14,
+                        mid: 0.69,
+                        end: 0.14,
+                    },
                     spread: 0.0,
                     kind: HealMoteKind::Ribbon,
                     size: 0.09,
@@ -544,8 +568,16 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     origin: Vec3::new(0.0, 2.66, 0.0),
                     speed: 2.78,
                     life: 0.7,
-                    rate: Ramp { start: 17.85, mid: 35.25, end: 13.25 },
-                    area: Ramp { start: 0.2, mid: 1.03, end: 0.2 },
+                    rate: Ramp {
+                        start: 17.85,
+                        mid: 35.25,
+                        end: 13.25,
+                    },
+                    area: Ramp {
+                        start: 0.2,
+                        mid: 1.03,
+                        end: 0.2,
+                    },
                     spread: 0.0,
                     kind: HealMoteKind::Star,
                     size: 0.08,
@@ -609,7 +641,11 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     origin: Vec3::new(0.0, 0.47, 0.0),
                     speed: 2.22,
                     life: 0.5,
-                    rate: Ramp { start: 8.0, mid: 6.0, end: 0.0 },
+                    rate: Ramp {
+                        start: 8.0,
+                        mid: 6.0,
+                        end: 0.0,
+                    },
                     area: Ramp::flat(0.14),
                     spread: 0.0,
                     kind: HealMoteKind::Ribbon,
@@ -650,7 +686,11 @@ fn holy_light_style(duration: f32, intensity: f32) -> HealStyle {
                 area: Ramp::flat(area),
                 spread: HOLY_LIGHT_CONE_SPREAD,
                 // Stars on the upper bands, cloud puffs on the lower.
-                kind: if y >= 0.3 { HealMoteKind::Star } else { HealMoteKind::Puff },
+                kind: if y >= 0.3 {
+                    HealMoteKind::Star
+                } else {
+                    HealMoteKind::Puff
+                },
                 size: if y >= 0.3 { 0.09 } else { 0.26 },
             }
         })
@@ -1130,7 +1170,11 @@ pub fn animate_heal_impacts(
                 let (scale, alpha) = match sprite.role {
                     HealSpriteRole::Ray { .. } => {
                         let secs = style.flash.as_ref().map(|f| f.secs).unwrap_or(0.0);
-                        let k = if secs > 0.0 { (age / secs).clamp(0.0, 1.0) } else { 1.0 };
+                        let k = if secs > 0.0 {
+                            (age / secs).clamp(0.0, 1.0)
+                        } else {
+                            1.0
+                        };
                         if age > secs {
                             (Vec3::ZERO, 0.0)
                         } else {
@@ -1148,7 +1192,11 @@ pub fn animate_heal_impacts(
                     }
                     HealSpriteRole::LensFlare => {
                         let secs = style.flash.as_ref().map(|f| f.secs).unwrap_or(0.0);
-                        let k = if secs > 0.0 { (age / secs).clamp(0.0, 1.0) } else { 1.0 };
+                        let k = if secs > 0.0 {
+                            (age / secs).clamp(0.0, 1.0)
+                        } else {
+                            1.0
+                        };
                         if age > secs {
                             (Vec3::ZERO, 0.0)
                         } else {
@@ -1227,8 +1275,8 @@ pub fn animate_heal_impacts(
                 // The wing quad lies flat (normal up), hinged at the body,
                 // extending sideways; the flap folds it about the body axis.
                 part.rotation = heading * fold * Quat::from_rotation_x(-FRAC_PI_2);
-                part.translation =
-                    center + heading * (fold * Vec3::new(wing.side * BUTTERFLY_WING_SPAN * 0.5, 0.0, 0.0));
+                part.translation = center
+                    + heading * (fold * Vec3::new(wing.side * BUTTERFLY_WING_SPAN * 0.5, 0.0, 0.0));
                 part.scale = Vec3::ONE;
                 if let Some(material) = materials.get_mut(&material.0) {
                     material.base_color.set_alpha(0.9 * envelope);

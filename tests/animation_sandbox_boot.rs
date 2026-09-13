@@ -166,7 +166,9 @@ fn leaving_the_sandbox_does_not_strand_the_rng() {
 /// each entry the way the panel does and asks for the ribbon.
 #[test]
 fn every_dispel_entry_strips_something_in_the_sandbox() {
-    use arenasim::states::animation_sandbox::playback::{EntryFamily, SandboxEntry, SandboxPlayback};
+    use arenasim::states::animation_sandbox::playback::{
+        EntryFamily, SandboxEntry, SandboxPlayback,
+    };
     use arenasim::states::animation_sandbox::SandboxConfig;
     use arenasim::states::match_config::CharacterClass;
     use arenasim::states::play_match::abilities::AbilityType;
@@ -175,15 +177,33 @@ fn every_dispel_entry_strips_something_in_the_sandbox() {
     use std::time::Duration;
 
     for (ability, family, class) in [
-        (AbilityType::DispelMagic, EntryFamily::Component, CharacterClass::Priest),
-        (AbilityType::PaladinCleanse, EntryFamily::Component, CharacterClass::Paladin),
-        (AbilityType::Purge, EntryFamily::Component, CharacterClass::Shaman),
-        (AbilityType::DevourMagic, EntryFamily::Entity, CharacterClass::Warlock),
+        (
+            AbilityType::DispelMagic,
+            EntryFamily::Component,
+            CharacterClass::Priest,
+        ),
+        (
+            AbilityType::PaladinCleanse,
+            EntryFamily::Component,
+            CharacterClass::Paladin,
+        ),
+        (
+            AbilityType::Purge,
+            EntryFamily::Component,
+            CharacterClass::Shaman,
+        ),
+        (
+            AbilityType::DevourMagic,
+            EntryFamily::Entity,
+            CharacterClass::Warlock,
+        ),
     ] {
         let mut app = boot_app();
         // The resolution systems run in FixedUpdate; a tight test loop advances
         // real time by microseconds, so drive the clock by hand.
-        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(16)));
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            16,
+        )));
         app.update();
         app.insert_resource(SandboxConfig {
             caster_class: class,

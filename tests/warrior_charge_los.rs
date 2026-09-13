@@ -31,7 +31,12 @@ use arenasim::states::play_match::{
 
 use arenasim::combat::log::CombatLog;
 
-fn combatant_info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> CombatantInfo {
+fn combatant_info(
+    entity: Entity,
+    team: u8,
+    class: CharacterClass,
+    position: Vec3,
+) -> CombatantInfo {
     CombatantInfo {
         entity,
         team,

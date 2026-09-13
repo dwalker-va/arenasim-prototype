@@ -32,74 +32,76 @@
 // Submodules
 pub mod abilities;
 pub mod ability_config;
-pub mod movement_config;
-pub mod banter_config;
-pub mod banter;
-pub mod equipment;
-pub mod components;
-pub mod camera;
-pub mod projectiles;
-pub mod rendering;
-pub mod auras;
-pub mod effects;
-pub mod match_flow;
 pub mod ai_profile;
-pub mod team_plan;
-pub mod team_solve;
 pub mod arena_bounds;
-pub mod map_geometry;
-pub mod map_config;
-pub mod traps;
-pub mod totems;
+pub mod auras;
+pub mod banter;
+pub mod banter_config;
+pub mod camera;
+pub mod class_ai;
 pub mod combat_ai;
 pub mod combat_core;
-pub mod shadow_sight;
-pub mod systems;
-pub mod utils;
-pub mod class_ai;
+pub mod components;
 pub mod constants;
 pub mod decision_trace;
+pub mod effects;
+pub mod equipment;
+pub mod map_config;
+pub mod map_geometry;
+pub mod match_flow;
+pub mod movement_config;
+pub mod projectiles;
+pub mod rendering;
 pub mod selection;
+pub mod shadow_sight;
+pub mod systems;
+pub mod team_plan;
+pub mod team_solve;
+pub mod totems;
+pub mod traps;
+pub mod utils;
 
 // Re-exports
 pub use abilities::*;
 pub use ability_config::*;
-pub use movement_config::*;
-pub use banter_config::*;
-pub use banter::*;
-pub use map_config::*;
-pub use components::*;
-pub use camera::*;
-pub use projectiles::*;
-pub use rendering::*;
 pub use auras::*;
-pub use match_flow::*;
+pub use banter::*;
+pub use banter_config::*;
+pub use camera::*;
+pub use class_ai::pet_ai::pet_ai_system;
 pub use combat_ai::*;
 pub use combat_core::*;
-pub use shadow_sight::*;
-pub use utils::*;
+pub use components::*;
 pub use constants::*;
 pub use effects::*;
-pub use traps::*;
-pub use totems::*;
-pub use class_ai::pet_ai::pet_ai_system;
+pub use map_config::*;
+pub use match_flow::*;
+pub use movement_config::*;
+pub use projectiles::*;
+pub use rendering::*;
 pub use selection::{
-    pick_selected_combatant, sync_selection_ring, follow_selection_ring,
-    reset_selection_on_exit, Selection,
+    follow_selection_ring, pick_selected_combatant, reset_selection_on_exit, sync_selection_ring,
+    Selection,
 };
+pub use shadow_sight::*;
+pub use totems::*;
+pub use traps::*;
+pub use utils::*;
 
-use bevy::prelude::*;
-use bevy::core_pipeline::bloom::Bloom;
-use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::pbr::CascadeShadowConfigBuilder;
-use bevy::math::Affine2;
-use bevy::image::{ImageSampler, ImageSamplerDescriptor, ImageAddressMode};
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::render::render_asset::RenderAssetUsages;
 use super::match_config::{self, MatchConfig};
 use super::GameState;
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use equipment::{ItemDefinitions, DefaultLoadouts, Loadout, resolve_equipped_loadout, format_loadout};
+use bevy::core_pipeline::bloom::Bloom;
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::math::Affine2;
+use bevy::pbr::CascadeShadowConfigBuilder;
+use bevy::prelude::*;
+use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use equipment::{
+    format_loadout, resolve_equipped_loadout, DefaultLoadouts, ItemDefinitions, Loadout,
+};
 
 // ============================================================================
 // Helper Functions
@@ -130,9 +132,7 @@ fn hash_u32(mut x: u32) -> u32 {
 
 /// Deterministic white noise in 0..1 for a texel coordinate.
 fn texel_noise(x: u32, y: u32) -> f32 {
-    let h = hash_u32(
-        x.wrapping_mul(73_856_093) ^ y.wrapping_mul(19_349_663),
-    );
+    let h = hash_u32(x.wrapping_mul(73_856_093) ^ y.wrapping_mul(19_349_663));
     h as f32 / u32::MAX as f32
 }
 
@@ -148,7 +148,12 @@ fn texel_noise(x: u32, y: u32) -> f32 {
 /// - `blotch_amp` / `grain_amp`: multiplicative variation strength.
 /// - `courses`: number of horizontal stone courses across the image height
 ///   (`0` disables — used by the floor).
-pub(crate) fn create_surface_texture(base: [f32; 3], blotch_amp: f32, grain_amp: f32, courses: u32) -> Image {
+pub(crate) fn create_surface_texture(
+    base: [f32; 3],
+    blotch_amp: f32,
+    grain_amp: f32,
+    courses: u32,
+) -> Image {
     const SIZE: u32 = 512;
     let mut data = vec![0u8; (SIZE * SIZE * 4) as usize];
 
@@ -369,7 +374,7 @@ pub(crate) fn class_mesh_color(class: match_config::CharacterClass) -> Color {
         match_config::CharacterClass::Warlock => Color::srgb(0.58, 0.41, 0.93), // Purple
         match_config::CharacterClass::Paladin => Color::srgb(0.96, 0.55, 0.73), // Pink (WoW Paladin)
         match_config::CharacterClass::Hunter => Color::srgb(0.67, 0.83, 0.45), // Green (WoW Hunter)
-        match_config::CharacterClass::Shaman => Color::srgb(0.0, 0.44, 0.87), // Blue (WoW Shaman)
+        match_config::CharacterClass::Shaman => Color::srgb(0.0, 0.44, 0.87),  // Blue (WoW Shaman)
     }
 }
 
@@ -439,7 +444,7 @@ pub(crate) fn spawn_arena_environment(
                     base_color: Color::WHITE,
                     base_color_texture: Some(floor_texture),
                     perceptual_roughness: 0.95, // Matte dirt/sand texture
-                    cull_mode: None, // Render both sides
+                    cull_mode: None,            // Render both sides
                     ..default()
                 })),
             ))
@@ -526,7 +531,6 @@ pub(crate) fn spawn_arena_environment(
         );
     }
 
-
     // Cosmetic obstacle meshes for the active map's line-of-sight volumes
     // (pillars, platforms). Solid stone architecture — reuses the wall texture
     // and roughness so they read as the same masonry family. Positioned to
@@ -609,7 +613,7 @@ pub(crate) fn spawn_arena_environment(
 // ============================================================================
 
 /// Setup system: Spawns the 3D arena, camera, lighting, and combatants.
-/// 
+///
 /// This runs once when entering the PlayMatch state.
 /// Reads the `MatchConfig` resource to determine team compositions.
 pub fn setup_play_match(
@@ -642,7 +646,8 @@ pub fn setup_play_match(
     commands.insert_resource(SpellIcons::default());
     commands.insert_resource(SpellIconHandles::default());
     commands.insert_resource(crate::states::play_match::rendering::emoji::EmojiIcons::default());
-    commands.insert_resource(crate::states::play_match::rendering::emoji::EmojiIconHandles::default());
+    commands
+        .insert_resource(crate::states::play_match::rendering::emoji::EmojiIconHandles::default());
 
     // Resolved BEFORE the camera so the camera can be framed to the map. The
     // resource is inserted further down; this is just the lookup.
@@ -693,10 +698,10 @@ pub fn setup_play_match(
     // Deep cool background so the warm sandy arena reads against a cohesive
     // backdrop instead of Bevy's default flat gray.
     commands.insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)));
-    
+
     // Initialize simulation speed control
     commands.insert_resource(SimulationSpeed { multiplier: 1.0 });
-    
+
     // Initialize camera controller
     // Framed to the map THROUGH the controller, not the spawn Transform:
     // `update_camera_position` rewrites the camera's translation from
@@ -707,7 +712,7 @@ pub fn setup_play_match(
         zoom_distance: 60.0 * view_scale,
         ..Default::default()
     });
-    
+
     // Initialize match countdown (10 seconds before gates open)
     commands.insert_resource(MatchCountdown::default());
 
@@ -783,21 +788,46 @@ pub fn setup_play_match(
             combat_log.register_combatant(combatant_id(1, i as u8, *character));
 
             // Get rogue opener preference for this slot
-            let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
-            let rogue_poison = config.team1_rogue_poisons.get(i).copied().unwrap_or_default();
+            let rogue_opener = config
+                .team1_rogue_openers
+                .get(i)
+                .copied()
+                .unwrap_or_default();
+            let rogue_poison = config
+                .team1_rogue_poisons
+                .get(i)
+                .copied()
+                .unwrap_or_default();
 
             // Get warlock curse preferences for this slot (empty vec if none configured)
-            let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
+            let warlock_curse_prefs = config
+                .team1_warlock_curse_prefs
+                .get(i)
+                .cloned()
+                .unwrap_or_default();
 
             // Get class-specific strategic option preferences
-            let warrior_shout = config.team1_warrior_shouts.get(i).copied().unwrap_or_default();
+            let warrior_shout = config
+                .team1_warrior_shouts
+                .get(i)
+                .copied()
+                .unwrap_or_default();
             let mage_armor = config.team1_mage_armors.get(i).copied().unwrap_or_default();
-            let paladin_aura = config.team1_paladin_auras.get(i).copied().unwrap_or_default();
+            let paladin_aura = config
+                .team1_paladin_auras
+                .get(i)
+                .copied()
+                .unwrap_or_default();
 
             // Resolve equipment loadout (defaults + overrides), enforcing every
             // equip constraint — class/proficiency, two-hand, unique-equipped.
             let equipment_overrides = config.team1_equipment.get(i).cloned().unwrap_or_default();
-            let loadout = resolve_equipped_loadout(*character, &default_loadouts, &equipment_overrides, &item_defs);
+            let loadout = resolve_equipped_loadout(
+                *character,
+                &default_loadouts,
+                &equipment_overrides,
+                &item_defs,
+            );
 
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let (entity, combatant) = spawn_combatant(
@@ -823,7 +853,11 @@ pub fn setup_play_match(
             // Log equipment loadout
             combat_log.log(
                 CombatLogEventType::MatchEvent,
-                format!("[EQUIPMENT] {}: {}", combatant_id(1, i as u8, *character), format_loadout(&loadout, &item_defs)),
+                format!(
+                    "[EQUIPMENT] {}: {}",
+                    combatant_id(1, i as u8, *character),
+                    format_loadout(&loadout, &item_defs)
+                ),
             );
 
             // Spawn Felhunter pet for Warlocks
@@ -842,7 +876,11 @@ pub fn setup_play_match(
 
             // Spawn pet for Hunters (based on configured pet type)
             if *character == match_config::CharacterClass::Hunter {
-                let pet_type_pref = config.team1_hunter_pet_types.get(i).copied().unwrap_or_default();
+                let pet_type_pref = config
+                    .team1_hunter_pet_types
+                    .get(i)
+                    .copied()
+                    .unwrap_or_default();
                 let pet_type = match pet_type_pref {
                     match_config::HunterPetType::Spider => PetType::Spider,
                     match_config::HunterPetType::Boar => PetType::Boar,
@@ -875,21 +913,46 @@ pub fn setup_play_match(
             combat_log.register_combatant(combatant_id(2, i as u8, *character));
 
             // Get rogue opener preference for this slot
-            let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
-            let rogue_poison = config.team2_rogue_poisons.get(i).copied().unwrap_or_default();
+            let rogue_opener = config
+                .team2_rogue_openers
+                .get(i)
+                .copied()
+                .unwrap_or_default();
+            let rogue_poison = config
+                .team2_rogue_poisons
+                .get(i)
+                .copied()
+                .unwrap_or_default();
 
             // Get warlock curse preferences for this slot (empty vec if none configured)
-            let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
+            let warlock_curse_prefs = config
+                .team2_warlock_curse_prefs
+                .get(i)
+                .cloned()
+                .unwrap_or_default();
 
             // Get class-specific strategic option preferences
-            let warrior_shout = config.team2_warrior_shouts.get(i).copied().unwrap_or_default();
+            let warrior_shout = config
+                .team2_warrior_shouts
+                .get(i)
+                .copied()
+                .unwrap_or_default();
             let mage_armor = config.team2_mage_armors.get(i).copied().unwrap_or_default();
-            let paladin_aura = config.team2_paladin_auras.get(i).copied().unwrap_or_default();
+            let paladin_aura = config
+                .team2_paladin_auras
+                .get(i)
+                .copied()
+                .unwrap_or_default();
 
             // Resolve equipment loadout (defaults + overrides), enforcing every
             // equip constraint — class/proficiency, two-hand, unique-equipped.
             let equipment_overrides = config.team2_equipment.get(i).cloned().unwrap_or_default();
-            let loadout = resolve_equipped_loadout(*character, &default_loadouts, &equipment_overrides, &item_defs);
+            let loadout = resolve_equipped_loadout(
+                *character,
+                &default_loadouts,
+                &equipment_overrides,
+                &item_defs,
+            );
 
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let (entity, combatant) = spawn_combatant(
@@ -915,7 +978,11 @@ pub fn setup_play_match(
             // Log equipment loadout
             combat_log.log(
                 CombatLogEventType::MatchEvent,
-                format!("[EQUIPMENT] {}: {}", combatant_id(2, i as u8, *character), format_loadout(&loadout, &item_defs)),
+                format!(
+                    "[EQUIPMENT] {}: {}",
+                    combatant_id(2, i as u8, *character),
+                    format_loadout(&loadout, &item_defs)
+                ),
             );
 
             // Spawn Felhunter pet for Warlocks
@@ -934,7 +1001,11 @@ pub fn setup_play_match(
 
             // Spawn pet for Hunters (based on configured pet type)
             if *character == match_config::CharacterClass::Hunter {
-                let pet_type_pref = config.team2_hunter_pet_types.get(i).copied().unwrap_or_default();
+                let pet_type_pref = config
+                    .team2_hunter_pet_types
+                    .get(i)
+                    .copied()
+                    .unwrap_or_default();
                 let pet_type = match pet_type_pref {
                     match_config::HunterPetType::Spider => PetType::Spider,
                     match_config::HunterPetType::Boar => PetType::Boar,
@@ -955,10 +1026,16 @@ pub fn setup_play_match(
             warn!("Team 2 slot {} is empty — skipping spawn", i);
         }
     }
-    
+
     // Spawn starting gate bars for both teams
     let (gate_x, gate_half_width) = active_map_geometry.bounds.gate_plane();
-    spawn_gate_bars(&mut commands, &mut meshes, &mut materials, gate_x, gate_half_width);
+    spawn_gate_bars(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        gate_x,
+        gate_half_width,
+    );
 }
 
 /// Spawn visual gate bars that lower when countdown ends
@@ -980,9 +1057,9 @@ fn spawn_gate_bars(
     let bar_width = 0.5;
     let bar_depth = 0.5;
     let num_bars = 7; // Number of vertical bars per gate
-    // Distribute across the mouth: `num_bars - 1` gaps spanning the full width.
+                      // Distribute across the mouth: `num_bars - 1` gaps spanning the full width.
     let spacing = (gate_half_width * 2.0) / (num_bars as f32 - 1.0);
-    
+
     // Dark metal material for the bars
     let bar_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.2, 0.2, 0.2), // Dark gray/metal
@@ -990,7 +1067,7 @@ fn spawn_gate_bars(
         perceptual_roughness: 0.3,
         ..default()
     });
-    
+
     // Team 1 gate (-x side)
     for i in 0..num_bars {
         let z_offset = (i as f32 - (num_bars as f32 - 1.0) / 2.0) * spacing;
@@ -1005,7 +1082,7 @@ fn spawn_gate_bars(
             PlayMatchEntity,
         ));
     }
-    
+
     // Team 2 gate (+x side)
     for i in 0..num_bars {
         let z_offset = (i as f32 - (num_bars as f32 - 1.0) / 2.0) * spacing;
@@ -1033,7 +1110,9 @@ fn walk_phase_seed(xz: Vec2) -> f32 {
 /// so the deferred equipment-keyed lookup can replace this one match without
 /// touching the animation layer. Classes not listed hold nothing (casters,
 /// Shaman) — their auto-attack swing signals no-op against zero sockets.
-fn class_weapon_loadout(class: match_config::CharacterClass) -> &'static [(WeaponKind, WeaponHand)] {
+fn class_weapon_loadout(
+    class: match_config::CharacterClass,
+) -> &'static [(WeaponKind, WeaponHand)] {
     use match_config::CharacterClass as C;
     match class {
         C::Warrior => &[(WeaponKind::TwoHandAxe, WeaponHand::Main)],
@@ -1152,13 +1231,20 @@ pub(crate) fn spawn_combatant(
     let material = materials.add(StandardMaterial {
         base_color: combatant_color,
         perceptual_roughness: 0.5, // More reflective for better color visibility
-        metallic: 0.2, // Slight metallic sheen for color pop
+        metallic: 0.2,             // Slight metallic sheen for color pop
         // Enable alpha mode for stealth transparency
         alpha_mode: bevy::prelude::AlphaMode::Blend,
         ..default()
     });
 
-    let mut combatant = Combatant::new_with_curse_prefs(team, slot, class, rogue_opener, rogue_poison, warlock_curse_prefs);
+    let mut combatant = Combatant::new_with_curse_prefs(
+        team,
+        slot,
+        class,
+        rogue_opener,
+        rogue_poison,
+        warlock_curse_prefs,
+    );
     combatant.warrior_shout = warrior_shout;
     combatant.mage_armor = mage_armor;
     combatant.paladin_aura = paladin_aura;
@@ -1177,22 +1263,23 @@ pub(crate) fn spawn_combatant(
     // weapon spin is solved on the weapon side instead: sockets spawn aimed
     // at arena center, and `animate_weapon_swings` absorbs large one-frame
     // parent-facing snaps into the local yaw.
-    let entity = commands.spawn((
-        Transform::from_translation(position),
-        Visibility::default(),
-        combatant,
-        DRTracker::default(),
-        FloatingTextState {
-            next_pattern_index: 0,
-        },
-        PlayMatchEntity,
-        WalkAnim {
-            phase: walk_phase_seed(position.xz()),
-            previous_xz: position.xz(),
-            idle_time: 0.0,
-        },
-    ))
-    .id();
+    let entity = commands
+        .spawn((
+            Transform::from_translation(position),
+            Visibility::default(),
+            combatant,
+            DRTracker::default(),
+            FloatingTextState {
+                next_pattern_index: 0,
+            },
+            PlayMatchEntity,
+            WalkAnim {
+                phase: walk_phase_seed(position.xz()),
+                previous_xz: position.xz(),
+                idle_time: 0.0,
+            },
+        ))
+        .id();
     // Spawned separately (not via `.with_child`) because the weapon sockets
     // below need the VisualBody's OWN entity id as their parent — a chained
     // `.with_child` only ever returns the top-level combatant id.
@@ -1221,11 +1308,9 @@ pub(crate) fn spawn_combatant(
         let rest = weapon_mount(kind, hand);
         let socket = commands
             .spawn((
-                SceneRoot(
-                    asset_server.load(
-                        bevy::gltf::GltfAssetLabel::Scene(0).from_asset(weapon_asset_path(kind)),
-                    ),
-                ),
+                SceneRoot(asset_server.load(
+                    bevy::gltf::GltfAssetLabel::Scene(0).from_asset(weapon_asset_path(kind)),
+                )),
                 WeaponSocket {
                     kind,
                     hand,
@@ -1250,7 +1335,9 @@ pub(crate) fn spawn_combatant(
         commands.entity(body).add_child(socket);
     }
     if let Some(buff) = weapon_poison_buff {
-        commands.entity(entity).insert(ActiveAuras { auras: vec![buff] });
+        commands
+            .entity(entity)
+            .insert(ActiveAuras { auras: vec![buff] });
     }
 
     (entity, combatant_clone)
@@ -1268,7 +1355,8 @@ pub(crate) fn spawn_pet(
     pet_type: PetType,
 ) {
     let pet_slot = PET_SLOT_BASE + owner_combatant.slot;
-    let pet_combatant = Combatant::new_pet(owner_combatant.team, pet_slot, pet_type, owner_combatant);
+    let pet_combatant =
+        Combatant::new_pet(owner_combatant.team, pet_slot, pet_type, owner_combatant);
     // MUST match the headless spawn offsets in `headless/runner.rs` exactly, or a
     // seed stops reproducing between the two modes.
     //
@@ -1287,7 +1375,11 @@ pub(crate) fn spawn_pet(
     // is not free. 0.75 is headless's value, and headless is what every recorded
     // baseline runs.
     let pet_position = owner_position
-        + Vec3::new(if owner_combatant.team == 1 { -2.0 } else { 2.0 }, 0.75, 1.5);
+        + Vec3::new(
+            if owner_combatant.team == 1 { -2.0 } else { 2.0 },
+            0.75,
+            1.5,
+        );
 
     let pet_color = pet_type.color();
     // Stocky capsule for quadruped (tilted horizontal by apply_pet_mesh_tilt system)
@@ -1312,48 +1404,50 @@ pub(crate) fn spawn_pet(
     // difference as a local offset. Splitting the two is what lets the gameplay
     // height and the rendered height disagree without either being wrong.
     const PET_MESH_Y: f32 = 0.3;
-    commands.spawn((
-        Transform::from_translation(pet_position).with_rotation(initial_facing),
-        Visibility::default(),
-        pet_combatant,
-        DRTracker::default(),
-        Pet {
-            owner: owner_entity,
-            pet_type,
-        },
-        FloatingTextState {
-            next_pattern_index: 0,
-        },
-        PlayMatchEntity,
-        WalkAnim {
-            phase: walk_phase_seed(pet_position.xz()),
-            previous_xz: pet_position.xz(),
-            idle_time: 0.0,
-        },
-    ))
-    .with_child((
-        Mesh3d(mesh_handle.clone()),
-        MeshMaterial3d(material),
-        OriginalMesh(mesh_handle),
-        VisualBody { rest_y: PET_MESH_Y - pet_position.y },
-        Transform::from_xyz(0.0, PET_MESH_Y - pet_position.y, 0.0),
-    ));
+    commands
+        .spawn((
+            Transform::from_translation(pet_position).with_rotation(initial_facing),
+            Visibility::default(),
+            pet_combatant,
+            DRTracker::default(),
+            Pet {
+                owner: owner_entity,
+                pet_type,
+            },
+            FloatingTextState {
+                next_pattern_index: 0,
+            },
+            PlayMatchEntity,
+            WalkAnim {
+                phase: walk_phase_seed(pet_position.xz()),
+                previous_xz: pet_position.xz(),
+                idle_time: 0.0,
+            },
+        ))
+        .with_child((
+            Mesh3d(mesh_handle.clone()),
+            MeshMaterial3d(material),
+            OriginalMesh(mesh_handle),
+            VisualBody {
+                rest_y: PET_MESH_Y - pet_position.y,
+            },
+            Transform::from_xyz(0.0, PET_MESH_Y - pet_position.y, 0.0),
+        ));
 
     // Register pet with combat log
-    combat_log.register_combatant(pet_combatant_id(owner_combatant.team, owner_combatant.slot, pet_type));
+    combat_log.register_combatant(pet_combatant_id(
+        owner_combatant.team,
+        owner_combatant.slot,
+        pet_type,
+    ));
 }
 
-/// Handle camera input for mode switching, zoom, rotation, and drag
-
 /// Cleanup system: Despawns all Play Match entities when exiting the state.
-pub fn cleanup_play_match(
-    mut commands: Commands,
-    query: Query<Entity, With<PlayMatchEntity>>,
-) {
+pub fn cleanup_play_match(mut commands: Commands, query: Query<Entity, With<PlayMatchEntity>>) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
     }
-    
+
     // Remove resources
     commands.remove_resource::<AmbientLight>();
     commands.remove_resource::<SimulationSpeed>();
@@ -1381,20 +1475,6 @@ pub fn cleanup_play_match(
 // Update & Input Systems
 // ============================================================================
 
-/// Countdown system: Manage pre-combat countdown and gate opening.
-/// 
-/// During countdown (10 seconds):
-/// - Mana is restored to 100% every second (encourages pre-buffing)
-/// - Combatants can cast buffs but cannot move or attack
-/// - Countdown timer ticks down
-/// 
-/// When countdown reaches 0:
-/// - Gates open (sets gates_opened flag)
-/// - Combat begins normally
-
-/// Render time control UI panel in the top-right corner.
-/// 
-/// Shows current speed and clickable buttons for speed control.
 /// Handle player input during the match.
 /// Currently only handles ESC key to return to main menu.
 pub fn update_play_match(
@@ -1403,7 +1483,7 @@ pub fn update_play_match(
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     use crate::keybindings::GameAction;
-    
+
     if keybindings.action_just_pressed(GameAction::Back, &keyboard) {
         next_state.set(GameState::MainMenu);
     }
@@ -1412,7 +1492,6 @@ pub fn update_play_match(
 // ============================================================================
 // Combat Systems (see submodules: combat_ai, combat_core, auras, projectiles)
 // ============================================================================
-
 
 // ============================================================================
 // Mesh construction tests
@@ -1452,7 +1531,11 @@ mod mesh_tests {
     fn assert_winding_matches_normals(mesh: &Mesh, label: &str) {
         let (pos, nrm, idx) = mesh_parts(mesh);
         assert!(!idx.is_empty(), "{label}: mesh has no triangles");
-        assert_eq!(idx.len() % 3, 0, "{label}: index count is not a multiple of 3");
+        assert_eq!(
+            idx.len() % 3,
+            0,
+            "{label}: index count is not a multiple of 3"
+        );
 
         for tri in idx.chunks(3) {
             let v: Vec<Vec3> = tri
@@ -1534,9 +1617,17 @@ mod mesh_tests {
         let outline = arena_bounds::ArenaBounds::default().outline(WALL_ARC_SEGMENTS);
         let mesh = create_arena_floor_mesh(&outline, 1.0 / 12.0);
         let (pos, nrm, idx) = mesh_parts(&mesh);
-        assert_eq!(pos.len(), outline.len() + 1, "fan is outline + centre vertex");
+        assert_eq!(
+            pos.len(),
+            outline.len() + 1,
+            "fan is outline + centre vertex"
+        );
         assert_eq!(nrm.len(), pos.len(), "one normal per vertex");
-        assert_eq!(idx.len(), outline.len() * 3, "one triangle per outline edge");
+        assert_eq!(
+            idx.len(),
+            outline.len() * 3,
+            "one triangle per outline edge"
+        );
         for p in &pos {
             assert!(
                 p.iter().all(|c| c.is_finite()),
@@ -1582,7 +1673,11 @@ mod view_scale_tests {
     /// framing — clamping at 1.0 is deliberate.
     #[test]
     fn a_smaller_map_is_never_scaled_below_one() {
-        let tiny = ArenaBounds::Octagon { half_x: 10.0, half_z: 8.0, corner_sum: 14.0 };
+        let tiny = ArenaBounds::Octagon {
+            half_x: 10.0,
+            half_z: 8.0,
+            corner_sum: 14.0,
+        };
         assert_eq!(arena_view_scale(&tiny), 1.0);
     }
 }

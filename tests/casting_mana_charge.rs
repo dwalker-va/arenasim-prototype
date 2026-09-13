@@ -60,7 +60,10 @@ fn harness_app(obstacles: Vec<ObstacleVolume>) -> App {
 
 fn spawn_combatant(app: &mut App, class: CharacterClass, pos: Vec3) -> Entity {
     app.world_mut()
-        .spawn((Transform::from_translation(pos), Combatant::new(1, 0, class)))
+        .spawn((
+            Transform::from_translation(pos),
+            Combatant::new(1, 0, class),
+        ))
         .id()
 }
 
@@ -175,7 +178,10 @@ fn instant_effect_dead_target_charges_no_mana() {
     let priest = spawn_combatant(&mut app, CharacterClass::Priest, Vec3::new(0.0, 1.0, 0.0));
     let ally = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(2.0, 1.0, 0.0));
     // Kill the heal target before the cast completes.
-    app.world_mut().get_mut::<Combatant>(ally).unwrap().current_health = 0.0;
+    app.world_mut()
+        .get_mut::<Combatant>(ally)
+        .unwrap()
+        .current_health = 0.0;
     let before = mana(&app, priest);
     begin_completing_cast(&mut app, priest, AbilityType::FlashHeal, ally);
 

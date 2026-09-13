@@ -24,23 +24,24 @@ use bevy::prelude::*;
 use super::super::match_config::CharacterClass;
 use super::super::play_match::abilities::AbilityType;
 use super::super::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
-use super::super::play_match::components::{
-    ActiveAuras, AuraPending, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
-    ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState, DispelPending,
-    DivineShieldPending, HealImpact, HolyShockDamagePending, HolyShockHealPending, InstantAbilityFired,
-    MatchResults, Pet, SchoolImpact,
-    PetType, PlayMatchEntity, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration,
-    VisualBody,
-};
 use super::super::play_match::class_ai::hunter::spawn_trap;
 use super::super::play_match::class_ai::pet_ai::{
     execute_boar_charge, execute_masters_call, execute_spell_lock, execute_spider_web,
 };
-use super::super::play_match::class_ai::shaman::{totem_spec, totem_spacing_offset};
+use super::super::play_match::class_ai::shaman::{totem_spacing_offset, totem_spec};
+use super::super::play_match::components::{
+    ActiveAuras, AuraPending, AuraType, BerserkerRagePending, CastingState, Celebrating,
+    ChannelingState, ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState,
+    DispelPending, DivineShieldPending, HealImpact, HolyShockDamagePending, HolyShockHealPending,
+    InstantAbilityFired, MatchResults, Pet, PetType, PlayMatchEntity, SchoolImpact, ScreamBurst,
+    Totem, TotemElement, TrapType, VictoryCelebration, VisualBody,
+};
 use super::super::play_match::spawn_pet;
-use super::super::play_match::{heal_style, landing_style, DISENGAGE_SPEED, MELEE_RANGE, TOTEM_DURATION, TOTEM_RADIUS};
-use crate::combat::log::CombatLog;
+use super::super::play_match::{
+    heal_style, landing_style, DISENGAGE_SPEED, MELEE_RANGE, TOTEM_DURATION, TOTEM_RADIUS,
+};
 use super::{SandboxEntity, SandboxStage};
+use crate::combat::log::CombatLog;
 
 /// Seconds the match's victory clock is seeded with when the sandbox plays the
 /// winner bounce, and the floor it is never allowed to fall below.
@@ -414,13 +415,29 @@ pub fn drive_playback(
     if playback.stop_requested {
         playback.stop_requested = false;
         playback.playing = false;
-        clear_body_state(&mut commands, &stage, &children, &mut bodies, &mut auras, &mut combatants, &leftovers);
+        clear_body_state(
+            &mut commands,
+            &stage,
+            &children,
+            &mut bodies,
+            &mut auras,
+            &mut combatants,
+            &leftovers,
+        );
         return;
     }
 
     if playback.restart_requested {
         playback.restart_requested = false;
-        clear_body_state(&mut commands, &stage, &children, &mut bodies, &mut auras, &mut combatants, &leftovers);
+        clear_body_state(
+            &mut commands,
+            &stage,
+            &children,
+            &mut bodies,
+            &mut auras,
+            &mut combatants,
+            &leftovers,
+        );
         // Snapshot the caster's identity/stats for component-mechanism entries
         // whose `*Pending` carries them to its resolver (Holy Shock scales off
         // spell power / crit; Divine Shield / Berserker Rage / dispels need
@@ -432,7 +449,15 @@ pub fn drive_playback(
             spell_power: c.spell_power,
             crit_chance: c.crit_chance,
         });
-        if start_entry(&mut commands, &playback, caster, stage.caster_home, stage.dummy, &defs, caster_info) {
+        if start_entry(
+            &mut commands,
+            &playback,
+            caster,
+            stage.caster_home,
+            stage.dummy,
+            &defs,
+            caster_info,
+        ) {
             playback.playing = true;
             playback.elapsed = 0.0;
             playback.duration = entry_duration(&playback, &defs);
@@ -441,8 +466,7 @@ pub fn drive_playback(
             // entry leaves it cleared so nothing swings under the animation
             // being judged.
             if playback.selected == Some(SandboxEntry::Body(BodyAnimation::AutoAttack)) {
-                if let (Some(dummy), Ok(mut combatant)) =
-                    (stage.dummy, combatants.get_mut(caster))
+                if let (Some(dummy), Ok(mut combatant)) = (stage.dummy, combatants.get_mut(caster))
                 {
                     combatant.target = Some(dummy);
                 }
@@ -461,8 +485,7 @@ pub fn drive_playback(
             // `can_be_dispelled` rejects, so every dispel entry stripped
             // nothing and previewed nothing — pinned by
             // `every_dispel_entry_strips_something_in_the_sandbox`.
-            if let (Some(SandboxEntry::Ability(ab)), Some(dummy)) =
-                (playback.selected, stage.dummy)
+            if let (Some(SandboxEntry::Ability(ab)), Some(dummy)) = (playback.selected, stage.dummy)
             {
                 if matches!(
                     ab,
@@ -506,7 +529,15 @@ pub fn drive_playback(
             playback.restart_requested = true;
         } else {
             playback.playing = false;
-            clear_body_state(&mut commands, &stage, &children, &mut bodies, &mut auras, &mut combatants, &leftovers);
+            clear_body_state(
+                &mut commands,
+                &stage,
+                &children,
+                &mut bodies,
+                &mut auras,
+                &mut combatants,
+                &leftovers,
+            );
         }
     }
 }
@@ -570,7 +601,9 @@ pub fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> 
             // moment of release, exactly the projectile bug in another shape.
             let landing = if config.projectile_speed.is_none() {
                 match SchoolImpact::anchor_for(ability) {
-                    Some(_) => landing_style(ability, config.spell_school).life() + IMPACT_TAIL_SECS,
+                    Some(_) => {
+                        landing_style(ability, config.spell_school).life() + IMPACT_TAIL_SECS
+                    }
                     None => 0.0,
                 }
             } else {
@@ -749,9 +782,12 @@ fn start_component_entry(
                 Option<Vec<AuraType>>,
             ) = match ability {
                 AbilityType::PaladinCleanse => ("[CLEANSE]", true, None, None),
-                AbilityType::Purge => {
-                    ("[PURGE]", false, None, Some(vec![AuraType::MaxManaIncrease]))
-                }
+                AbilityType::Purge => (
+                    "[PURGE]",
+                    false,
+                    None,
+                    Some(vec![AuraType::MaxManaIncrease]),
+                ),
                 _ => ("[DISPEL]", false, None, None),
             };
             commands.spawn((
@@ -768,9 +804,9 @@ fn start_component_entry(
             ));
         }
         AbilityType::Charge => {
-            commands
-                .entity(caster)
-                .insert(ChargingState { target: dummy.unwrap_or(caster) });
+            commands.entity(caster).insert(ChargingState {
+                target: dummy.unwrap_or(caster),
+            });
         }
         AbilityType::Disengage => {
             // The caster stages at -x with the dummy at +x, so the retreat leap
@@ -885,9 +921,11 @@ fn start_entry(
             match playback.family {
                 // M1 / hard casts — resolve through process_casting.
                 Some(EntryFamily::Cast) => {
-                    commands
-                        .entity(caster)
-                        .insert(CastingState::new(ability, target, config.cast_time));
+                    commands.entity(caster).insert(CastingState::new(
+                        ability,
+                        target,
+                        config.cast_time,
+                    ));
                     true
                 }
                 // M2 channels — shared entry point (mirror warlock.rs:819);
@@ -914,9 +952,11 @@ fn start_entry(
                     start_entity_entry(commands, ability, caster, caster_home, caster_info)
                 }
                 Some(EntryFamily::Residue) => {
-                    commands
-                        .entity(caster)
-                        .insert(CastingState::new(ability, target, config.cast_time));
+                    commands.entity(caster).insert(CastingState::new(
+                        ability,
+                        target,
+                        config.cast_time,
+                    ));
                     spawn_sandbox_cosmetic(commands, ability, caster, target);
                     true
                 }
@@ -1331,8 +1371,13 @@ pub fn drive_sandbox_pet(
     if let Some((pet, _)) = pets.iter().find(|(_, p)| p.owner == caster) {
         // The spawn resolved — bind it and fire the ability ONCE from the same
         // code gameplay uses.
-        let Some(def) = defs.get(&ability) else { return };
-        let pet_pos = positions.get(pet).map(|t| t.translation).unwrap_or(stage.caster_home);
+        let Some(def) = defs.get(&ability) else {
+            return;
+        };
+        let pet_pos = positions
+            .get(pet)
+            .map(|t| t.translation)
+            .unwrap_or(stage.caster_home);
         if let Ok(mut pet_combatant) = combatants.get_mut(pet) {
             match ability {
                 AbilityType::SpiderWeb => execute_spider_web(
@@ -1344,12 +1389,22 @@ pub fn drive_sandbox_pet(
                     pet_pos,
                     target,
                 ),
-                AbilityType::BoarCharge => {
-                    execute_boar_charge(&mut commands, &mut combat_log, def, pet, &mut pet_combatant, target)
-                }
-                AbilityType::MastersCall => {
-                    execute_masters_call(&mut commands, &mut combat_log, def, pet, &mut pet_combatant, target)
-                }
+                AbilityType::BoarCharge => execute_boar_charge(
+                    &mut commands,
+                    &mut combat_log,
+                    def,
+                    pet,
+                    &mut pet_combatant,
+                    target,
+                ),
+                AbilityType::MastersCall => execute_masters_call(
+                    &mut commands,
+                    &mut combat_log,
+                    def,
+                    pet,
+                    &mut pet_combatant,
+                    target,
+                ),
                 AbilityType::SpellLock => execute_spell_lock(
                     &mut commands,
                     &mut combat_log,
@@ -1447,9 +1502,11 @@ mod tests {
     fn a_projectile_preview_outlasts_its_own_cast() {
         let defs = AbilityDefinitions::default();
         let window = |ability: AbilityType| {
-            let mut playback = SandboxPlayback::default();
-            playback.selected = Some(SandboxEntry::Ability(ability));
-            playback.family = defs.get(&ability).map(|c| mechanism_for(ability, c));
+            let playback = SandboxPlayback {
+                selected: Some(SandboxEntry::Ability(ability)),
+                family: defs.get(&ability).map(|c| mechanism_for(ability, c)),
+                ..Default::default()
+            };
             entry_duration(&playback, &defs)
         };
 
@@ -1567,7 +1624,11 @@ mod tests {
             .filter(|(a, c)| mechanism_for(**a, c) == EntryFamily::Unsupported)
             .map(|(a, _)| *a)
             .collect();
-        assert_eq!(unsupported.len(), 2, "unexpected Unsupported set: {unsupported:?}");
+        assert_eq!(
+            unsupported.len(),
+            2,
+            "unexpected Unsupported set: {unsupported:?}"
+        );
         assert!(unsupported.contains(&AbilityType::WindShear));
         assert!(unsupported.contains(&AbilityType::HeroicStrike));
     }
@@ -1688,8 +1749,10 @@ mod tests {
             let entries = entries_for_class(class, &defs);
             for &ab in pet_abilities {
                 assert!(
-                    entries.iter().any(|l| l.entry == SandboxEntry::Ability(ab)
-                        && l.family == EntryFamily::Entity),
+                    entries
+                        .iter()
+                        .any(|l| l.entry == SandboxEntry::Ability(ab)
+                            && l.family == EntryFamily::Entity),
                     "{class:?} entries missing playable {ab:?}"
                 );
             }
@@ -1874,6 +1937,8 @@ mod tests {
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn the_victory_clock_outlasts_a_bounce_pass_without_reaching_its_floor() {
         // `update_victory_celebration` derives the bounce phase from
         // `CELEBRATION_SECS - time_remaining`, and the floor freezes that phase.
@@ -1917,6 +1982,9 @@ mod tests {
         assert_eq!(playback.family, None);
         assert!(!playback.playing);
         assert!(!playback.restart_requested);
-        assert!(playback.stop_requested, "the driver must tear body state down");
+        assert!(
+            playback.stop_requested,
+            "the driver must tear body state down"
+        );
     }
 }

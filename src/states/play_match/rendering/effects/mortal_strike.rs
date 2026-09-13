@@ -16,12 +16,12 @@
 //! `game_rng`, and every system here is registered in `states/mod.rs` only, so
 //! headless stays byte-identical.
 
-use bevy::prelude::*;
+use crate::states::play_match::components::*;
 use bevy::color::LinearRgba;
+use bevy::prelude::*;
 use bevy::render::mesh::Indices;
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::PrimitiveTopology;
-use crate::states::play_match::components::*;
 
 // --- Tuning knobs -----------------------------------------------------------
 
@@ -183,7 +183,11 @@ pub fn spawn_mortal_strike_flourish(
 
     // The impact waits for the blade; only the trail starts now.
     commands.spawn((
-        MortalStrikePendingImpact { delay: impact_at, impact, is_crit },
+        MortalStrikePendingImpact {
+            delay: impact_at,
+            impact,
+            is_crit,
+        },
         PlayMatchEntity,
     ));
 
@@ -211,7 +215,6 @@ pub fn spawn_mortal_strike_flourish(
         Transform::IDENTITY,
         PlayMatchEntity,
     ));
-
 }
 
 /// Update (graphical-only): fire each held impact once the blade arrives.
@@ -306,7 +309,11 @@ fn spawn_impact_burst(
         );
         let life = SPARK_LIFETIME * (0.7 + 0.6 * j3);
         commands.spawn((
-            MortalStrikeSpark { velocity, lifetime: life, initial_lifetime: life },
+            MortalStrikeSpark {
+                velocity,
+                lifetime: life,
+                initial_lifetime: life,
+            },
             Mesh3d(spark_mesh.clone()),
             MeshMaterial3d(spark_material.clone()),
             Transform::from_translation(impact),
@@ -361,8 +368,7 @@ pub fn update_mortal_strike_trail(
             let segment = sockets.iter().find_map(|(socket, global)| {
                 (socket.owner == trail.owner && socket.hand == WeaponHand::Main).then(|| {
                     let tip = global.transform_point(Vec3::Y * TRAIL_TIP_LOCAL);
-                    let inner =
-                        global.transform_point(Vec3::Y * (TRAIL_TIP_LOCAL - TRAIL_SPAN));
+                    let inner = global.transform_point(Vec3::Y * (TRAIL_TIP_LOCAL - TRAIL_SPAN));
                     (tip, inner)
                 })
             });
@@ -597,6 +603,8 @@ mod tests {
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn sparks_outlive_the_flash() {
         // The debris must still be on screen after the flash collapses, so the
         // last thing the eye reads is the spray, not the glow.
@@ -618,8 +626,14 @@ mod tests {
         };
         let peak = scale_at(FLASH_SNAP);
         assert!(peak > scale_at(0.0), "the flash snaps open");
-        assert!(peak > scale_at(0.6), "and is already collapsing by mid-life");
-        assert!(scale_at(1.0) < scale_at(0.6), "and keeps shrinking to the end");
+        assert!(
+            peak > scale_at(0.6),
+            "and is already collapsing by mid-life"
+        );
+        assert!(
+            scale_at(1.0) < scale_at(0.6),
+            "and keeps shrinking to the end"
+        );
     }
 
     #[test]
@@ -627,6 +641,9 @@ mod tests {
         let a = spark_jitter(1);
         let b = spark_jitter(2);
         assert!((0.0..1.0).contains(&a) && (0.0..1.0).contains(&b));
-        assert!((a - b).abs() > f32::EPSILON, "distinct seeds give distinct jitter");
+        assert!(
+            (a - b).abs() > f32::EPSILON,
+            "distinct seeds give distinct jitter"
+        );
     }
 }

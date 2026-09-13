@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use crate::states::play_match::components::*;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Pet Mesh Tilt (Quadruped Orientation)
@@ -29,4 +29,3 @@ pub fn apply_pet_mesh_tilt(
         }
     }
 }
-

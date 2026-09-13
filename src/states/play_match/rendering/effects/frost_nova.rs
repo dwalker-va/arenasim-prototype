@@ -1,8 +1,8 @@
 use bevy::color::LinearRgba;
 use bevy::prelude::*;
+use bevy::render::mesh::ConeAnchor;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
-use bevy::render::mesh::ConeAnchor;
 use std::f32::consts::TAU;
 
 use crate::states::play_match::components::*;
@@ -115,7 +115,11 @@ pub fn nova_wobble(ring: u32, angle: f32) -> f32 {
 /// run the whole window. Each is held back by `NOVA_RING_STAGGER` so they
 /// separate rather than travelling as one thick band.
 pub fn nova_ring_progress(ring: u32, age: f32) -> f32 {
-    let span = if ring == 0 { NOVA_RING1_FULL } else { NOVA_SECS };
+    let span = if ring == 0 {
+        NOVA_RING1_FULL
+    } else {
+        NOVA_SECS
+    };
     let delay = ring as f32 * NOVA_RING_STAGGER;
     ((age - delay) / (span - delay).max(0.001)).clamp(0.0, 1.0)
 }
@@ -279,7 +283,11 @@ pub fn spawn_frost_nova(
 /// Expands and fades the three rings.
 pub fn update_nova_rings(
     time: Res<Time>,
-    mut rings: Query<(&mut NovaRing, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut rings: Query<(
+        &mut NovaRing,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let dt = time.delta_secs();
@@ -319,16 +327,13 @@ pub fn update_nova_rings(
 }
 
 /// Stabs each crystal up as the wave passes it, then sinks it.
-pub fn update_nova_shards(
-    time: Res<Time>,
-    mut shards: Query<(&mut NovaShard, &mut Transform)>,
-) {
+pub fn update_nova_shards(time: Res<Time>, mut shards: Query<(&mut NovaShard, &mut Transform)>) {
     let dt = time.delta_secs();
 
     for (mut shard, mut transform) in shards.iter_mut() {
         shard.age += dt;
         let since = shard.age - shard.born_at;
-        if since < 0.0 || since > NOVA_CRYSTAL_LIFE {
+        if !(0.0..=NOVA_CRYSTAL_LIFE).contains(&since) {
             transform.scale = Vec3::ZERO;
             continue;
         }
@@ -558,7 +563,10 @@ mod tests {
         app.add_systems(Update, expire_nova_freeze_delays);
         let unit = app
             .world_mut()
-            .spawn(NovaFreezeDelay { secs: 0.4, age: 0.0 })
+            .spawn(NovaFreezeDelay {
+                secs: 0.4,
+                age: 0.0,
+            })
             .id();
 
         app.update();
@@ -600,8 +608,7 @@ mod tests {
         // transparent and the spine opaque, or the ring is a hard-edged strip.
         use bevy::render::mesh::VertexAttributeValues;
         let mesh = build_ragged_ring(0);
-        let Some(VertexAttributeValues::Float32x4(colors)) =
-            mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+        let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR)
         else {
             panic!("the ring must carry Float32x4 vertex colours");
         };

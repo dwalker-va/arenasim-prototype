@@ -14,36 +14,38 @@
 //! Shared helpers like `CombatContext`, `CombatantInfo`, and healer utilities
 //! live in this module and are used by all class AI files.
 
-pub mod mage;
-pub mod dps_postures;
-pub mod priest;
-pub mod warrior;
-pub mod rogue;
-pub mod warlock;
-pub mod paladin;
-pub mod hunter;
-pub mod shaman;
-pub mod hunter_dip;
-pub mod pet_ai;
 pub mod cast_guard;
 pub mod combat_snapshot;
+pub mod dps_postures;
 pub(crate) mod healer_postures;
+pub mod hunter;
+pub mod hunter_dip;
+pub mod mage;
+pub mod paladin;
 pub(crate) mod paladin_postures;
+pub mod pet_ai;
+pub mod priest;
+pub mod rogue;
+pub mod shaman;
+pub mod warlock;
+pub mod warrior;
 
 use bevy::prelude::*;
 use std::collections::BTreeMap;
 
-use crate::combat::log::CombatLog;
-use super::match_config::CharacterClass;
 use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
-use super::components::{Aura, ActiveAuras, Combatant, AuraType, DispelPending, PetType, DRCategory, DRTracker};
-use super::constants::GCD;
-use super::{is_spell_school_locked, is_silenced};
 use super::ai_profile::AiProfile;
 use super::arena_bounds::ArenaBounds;
+use super::components::{
+    ActiveAuras, Aura, AuraType, Combatant, DRCategory, DRTracker, DispelPending, PetType,
+};
+use super::constants::GCD;
 use super::map_geometry::ObstacleVolume;
+use super::match_config::CharacterClass;
 use super::utils::log_ability_use;
+use super::{is_silenced, is_spell_school_locked};
+use crate::combat::log::CombatLog;
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
 #[derive(Clone, Copy, Debug)]
@@ -236,7 +238,10 @@ impl<'a> CombatContext<'a> {
     /// NOTE: The canonical CC type list lives in `utils::is_incapacitated`.
     /// CombatContext can't delegate because it stores auras as `&[Aura]`, not `&ActiveAuras`.
     pub fn is_incapacitated(&self) -> bool {
-        self.has_aura(AuraType::Stun) || self.has_aura(AuraType::Fear) || self.has_aura(AuraType::Polymorph) || self.has_aura(AuraType::Incapacitate)
+        self.has_aura(AuraType::Stun)
+            || self.has_aura(AuraType::Fear)
+            || self.has_aura(AuraType::Polymorph)
+            || self.has_aura(AuraType::Incapacitate)
     }
 
     /// Check if an entity is currently CC'd (Stun, Fear, Root, or Polymorph).
@@ -248,7 +253,11 @@ impl<'a> CombatContext<'a> {
                 auras.iter().any(|a| {
                     matches!(
                         a.effect_type,
-                        AuraType::Stun | AuraType::Fear | AuraType::Root | AuraType::Polymorph | AuraType::Incapacitate
+                        AuraType::Stun
+                            | AuraType::Fear
+                            | AuraType::Root
+                            | AuraType::Polymorph
+                            | AuraType::Incapacitate
                     )
                 })
             })
@@ -277,14 +286,11 @@ impl<'a> CombatContext<'a> {
         let Some(healer) = self.enemy_healer() else {
             return false;
         };
-        self.active_auras.get(&healer).map_or(false, |auras| {
+        self.active_auras.get(&healer).is_some_and(|auras| {
             auras.iter().any(|a| {
                 matches!(
                     a.effect_type,
-                    AuraType::Stun
-                        | AuraType::Fear
-                        | AuraType::Polymorph
-                        | AuraType::Incapacitate
+                    AuraType::Stun | AuraType::Fear | AuraType::Polymorph | AuraType::Incapacitate
                 )
             })
         })
@@ -334,7 +340,8 @@ impl<'a> CombatContext<'a> {
 
     /// Returns true if all allies are above the given HP threshold.
     pub fn is_team_healthy(&self, threshold: f32, my_pos: Vec3) -> bool {
-        self.lowest_health_ally_below(threshold, f32::MAX, my_pos).is_none()
+        self.lowest_health_ally_below(threshold, f32::MAX, my_pos)
+            .is_none()
     }
 
     /// Team-HP-fraction advantage of the deciding combatant's team — the
@@ -398,10 +405,7 @@ impl<'a> CombatContext<'a> {
         self.combatants
             .values()
             .filter(|c| {
-                c.team != my_team
-                    && c.is_alive
-                    && c.target == Some(me)
-                    && self.visible_to(me, c)
+                c.team != my_team && c.is_alive && c.target == Some(me) && self.visible_to(me, c)
             })
             .collect()
     }
@@ -410,7 +414,12 @@ impl<'a> CombatContext<'a> {
     /// the proximity half of the PRESSURED threat set (an enemy in your face
     /// is a threat even when it currently targets someone else). Same stealth
     /// filtering as `enemies_targeting`; same deterministic BTree order.
-    pub fn visible_enemies_within(&self, me: Entity, pos: Vec3, radius: f32) -> Vec<&CombatantInfo> {
+    pub fn visible_enemies_within(
+        &self,
+        me: Entity,
+        pos: Vec3,
+        radius: f32,
+    ) -> Vec<&CombatantInfo> {
         let Some(my_team) = self.combatants.get(&me).map(|i| i.team) else {
             return Vec::new();
         };
@@ -430,14 +439,12 @@ impl<'a> CombatContext<'a> {
     /// for determinism.
     pub fn primary_attacker(&self, me: Entity) -> Option<&CombatantInfo> {
         let my_pos = self.combatants.get(&me)?.position;
-        self.enemies_targeting(me)
-            .into_iter()
-            .min_by(|a, b| {
-                my_pos
-                    .distance(a.position)
-                    .partial_cmp(&my_pos.distance(b.position))
-                    .unwrap()
-            })
+        self.enemies_targeting(me).into_iter().min_by(|a, b| {
+            my_pos
+                .distance(a.position)
+                .partial_cmp(&my_pos.distance(b.position))
+                .unwrap()
+        })
     }
 
     /// Remaining movement-impairment window on `attacker`: the longest
@@ -540,7 +547,11 @@ impl<'a> CombatContext<'a> {
     pub fn entity_is_immune(&self, entity: Entity) -> bool {
         self.active_auras
             .get(&entity)
-            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity))
+            .map(|auras| {
+                auras
+                    .iter()
+                    .any(|a| a.effect_type == AuraType::DamageImmunity)
+            })
             .unwrap_or(false)
     }
 
@@ -634,9 +645,7 @@ where
         .into_iter()
         .filter(|(_, distance, _)| *distance <= swap_range)
         .filter(|(_, _, health)| *health <= threshold)
-        .min_by(|(ea, _, ha), (eb, _, hb)| {
-            ha.partial_cmp(hb).unwrap().then(ea.cmp(eb))
-        })
+        .min_by(|(ea, _, ha), (eb, _, hb)| ha.partial_cmp(hb).unwrap().then(ea.cmp(eb)))
         .map(|(entity, _, _)| entity)
 }
 
@@ -857,7 +866,9 @@ pub fn try_dispel_ally(
     if is_spell_school_locked(def.spell_school, auras) {
         trace.reject(
             ability_type,
-            RejectionReason::SilencedOrLocked { school: def.spell_school },
+            RejectionReason::SilencedOrLocked {
+                school: def.spell_school,
+            },
         );
         return false;
     }
@@ -867,7 +878,9 @@ pub fn try_dispel_ally(
     if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
         trace.reject(
             ability_type,
-            RejectionReason::SilencedOrLocked { school: def.spell_school },
+            RejectionReason::SilencedOrLocked {
+                school: def.spell_school,
+            },
         );
         return false;
     }
@@ -907,7 +920,7 @@ pub fn try_dispel_ally(
         // Find highest priority dispellable debuff on this ally
         let mut highest_priority = -1;
         for aura in ally_auras {
-            if !aura.can_be_dispelled() && !(removes_poison && aura.is_cleansable_poison()) {
+            if !(aura.can_be_dispelled() || removes_poison && aura.is_cleansable_poison()) {
                 continue;
             }
 
@@ -953,7 +966,15 @@ pub fn try_dispel_ally(
 
     // Log
     let target_tuple = ctx.combatants.get(&dispel_target).map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, log_name, target_tuple, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        log_name,
+        target_tuple,
+        "casts",
+    );
 
     // Spawn pending dispel
     commands.spawn(DispelPending {
@@ -1082,10 +1103,28 @@ pub fn try_purge_enemy(
         check_target_immune: true,
         bypass_silence: false,
     };
-    if !pre_cast_ok(ability, def, combatant, my_pos, auras, Some((target_entity, target_pos)), ctx, opts) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
+    ) {
         trace.reject(
             ability,
-            classify_pre_cast_failure(ability, def, combatant, my_pos, auras, Some((target_entity, target_pos)), ctx, opts),
+            classify_pre_cast_failure(
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
+            ),
         );
         return false;
     }
@@ -1100,7 +1139,15 @@ pub fn try_purge_enemy(
     }
 
     let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "casts",
+    );
 
     // Pin the filter to the chosen (highest-priority) buff type so process_dispels
     // targets that valuable buff rather than any purgeable aura. If the enemy
@@ -1175,15 +1222,30 @@ mod dispel_reach_tests {
             let removes_poison = dispel_removes_poison(ability);
             // The filter `process_dispels` applies, spelled once here so the
             // matrix tests the real expression and not a paraphrase of it.
-            let removes = |a: &Aura| {
-                a.can_be_dispelled() || (removes_poison && a.is_cleansable_poison())
-            };
+            let removes =
+                |a: &Aura| a.can_be_dispelled() || (removes_poison && a.is_cleansable_poison());
 
-            assert_eq!(removes(&corruption), magic, "{ability:?} vs Corruption (magic)");
-            assert_eq!(removes(&frost_nova), magic, "{ability:?} vs Frost Nova (magic)");
-            assert_eq!(removes(&crippling), poison, "{ability:?} vs Crippling Poison");
+            assert_eq!(
+                removes(&corruption),
+                magic,
+                "{ability:?} vs Corruption (magic)"
+            );
+            assert_eq!(
+                removes(&frost_nova),
+                magic,
+                "{ability:?} vs Frost Nova (magic)"
+            );
+            assert_eq!(
+                removes(&crippling),
+                poison,
+                "{ability:?} vs Crippling Poison"
+            );
             assert_eq!(removes(&agony), curse, "{ability:?} vs Curse of Agony");
-            assert_eq!(removes(&concussive), physical, "{ability:?} vs Concussive Shot");
+            assert_eq!(
+                removes(&concussive),
+                physical,
+                "{ability:?} vs Concussive Shot"
+            );
             assert_eq!(removes(&rend), physical, "{ability:?} vs Rend");
         }
     }

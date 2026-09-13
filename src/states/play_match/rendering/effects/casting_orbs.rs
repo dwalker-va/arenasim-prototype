@@ -1,7 +1,7 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Casting Orb (gathering-orb casting animation)
@@ -72,9 +72,11 @@ pub fn spawn_casting_orbs(
                 Some(c.time_remaining),
             )
         })
-        .chain(new_channels.iter().map(|(e, c)| {
-            (e, c.ability, c.interrupted, CastingOrbPhase::Holding, None)
-        }));
+        .chain(
+            new_channels
+                .iter()
+                .map(|(e, c)| (e, c.ability, c.interrupted, CastingOrbPhase::Holding, None)),
+        );
 
     for (caster_entity, ability, interrupted, phase, time_remaining) in starts {
         if interrupted {
@@ -85,14 +87,16 @@ pub fn spawn_casting_orbs(
         // client's cast-side vocabulary for heals lives on the caster's spell
         // hands, not on a gathering point. Everything else (non-heal casts,
         // and every channel — no heal channels exist) keeps the orb.
-        if matches!(phase, CastingOrbPhase::Growing)
-            && HealCastKind::for_ability(ability).is_some()
+        if matches!(phase, CastingOrbPhase::Growing) && HealCastKind::for_ability(ability).is_some()
         {
             continue;
         }
         if existing_orbs.iter().any(|orb| {
             orb.caster == caster_entity
-                && matches!(orb.phase, CastingOrbPhase::Growing | CastingOrbPhase::Holding)
+                && matches!(
+                    orb.phase,
+                    CastingOrbPhase::Growing | CastingOrbPhase::Holding
+                )
         }) {
             continue;
         }
@@ -176,7 +180,11 @@ pub fn update_casting_orbs(
     time: Res<Time>,
     abilities: Res<AbilityDefinitions>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut orbs: Query<(&mut CastingOrb, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut orbs: Query<(
+        &mut CastingOrb,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     casters: Query<&Transform, (With<Combatant>, Without<CastingOrb>)>,
     cast_states: Query<&CastingState>,
     channel_states: Query<&ChannelingState>,
@@ -201,8 +209,7 @@ pub fn update_casting_orbs(
                         def.cast_time
                     };
                     if total > 0.0 {
-                        orb.intensity =
-                            (1.0 - casting.time_remaining / total).clamp(0.0, 1.0);
+                        orb.intensity = (1.0 - casting.time_remaining / total).clamp(0.0, 1.0);
                     }
                 }
                 let target_pos = casting
@@ -213,8 +220,7 @@ pub fn update_casting_orbs(
                     casting_orb_anchor(caster_transform.translation, target_pos);
                 // Ease-in growth: quadratic reads as "gathering power".
                 let eased = orb.intensity * orb.intensity;
-                orb_transform.scale =
-                    Vec3::splat((0.15 + 0.85 * eased) * CASTING_ORB_FULL_SCALE);
+                orb_transform.scale = Vec3::splat((0.15 + 0.85 * eased) * CASTING_ORB_FULL_SCALE);
             }
             CastingOrbPhase::Holding => {
                 let target_pos = channel_states
@@ -232,9 +238,8 @@ pub fn update_casting_orbs(
                 let t = (orb.ending_remaining / CASTING_ORB_SPUTTER_SECS).clamp(0.0, 1.0);
                 // Shrink from the captured intensity down to nothing, with a
                 // slight sag — reads as the gathered power dissipating.
-                let scale = (0.15 + 0.85 * orb.intensity * orb.intensity)
-                    * CASTING_ORB_FULL_SCALE
-                    * t;
+                let scale =
+                    (0.15 + 0.85 * orb.intensity * orb.intensity) * CASTING_ORB_FULL_SCALE * t;
                 orb_transform.scale = Vec3::splat(scale.max(0.001));
                 orb_transform.translation.y -= 0.4 * dt;
             }
@@ -257,8 +262,7 @@ pub fn update_casting_orbs(
                     material.alpha_mode = AlphaMode::Add;
                     material.base_color.set_alpha(1.0 - t);
                 }
-                orb_transform.scale =
-                    Vec3::splat(CASTING_ORB_FULL_SCALE * (1.0 + 1.5 * t));
+                orb_transform.scale = Vec3::splat(CASTING_ORB_FULL_SCALE * (1.0 + 1.5 * t));
             }
         }
     }
@@ -271,12 +275,20 @@ pub fn spawn_casting_orb_motes(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     time: Res<Time>,
-    mut orbs: Query<(Entity, &mut CastingOrb, &Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut orbs: Query<(
+        Entity,
+        &mut CastingOrb,
+        &Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
 ) {
     let dt = time.delta_secs();
 
     for (orb_entity, mut orb, orb_transform, orb_material) in orbs.iter_mut() {
-        if !matches!(orb.phase, CastingOrbPhase::Growing | CastingOrbPhase::Holding) {
+        if !matches!(
+            orb.phase,
+            CastingOrbPhase::Growing | CastingOrbPhase::Holding
+        ) {
             continue;
         }
 
@@ -331,7 +343,10 @@ pub fn update_casting_orb_motes(
             commands.entity(mote_entity).despawn();
             continue;
         };
-        if !matches!(orb.phase, CastingOrbPhase::Growing | CastingOrbPhase::Holding) {
+        if !matches!(
+            orb.phase,
+            CastingOrbPhase::Growing | CastingOrbPhase::Holding
+        ) {
             commands.entity(mote_entity).despawn();
             continue;
         }
@@ -365,7 +380,10 @@ pub fn consume_cast_ending_signals(
             if orb.caster != ending.caster {
                 continue;
             }
-            if !matches!(orb.phase, CastingOrbPhase::Growing | CastingOrbPhase::Holding) {
+            if !matches!(
+                orb.phase,
+                CastingOrbPhase::Growing | CastingOrbPhase::Holding
+            ) {
                 continue; // already ending; nothing to do
             }
             match ending.kind {
@@ -375,7 +393,9 @@ pub fn consume_cast_ending_signals(
                     // The Flash phase renders additively (update_casting_orbs
                     // swaps the material); a glow must not keep the solid
                     // orb's shadow while it fades.
-                    commands.entity(orb_entity).insert(bevy::pbr::NotShadowCaster);
+                    commands
+                        .entity(orb_entity)
+                        .insert(bevy::pbr::NotShadowCaster);
                 }
                 CastEndingKind::Fizzled | CastEndingKind::Interrupted => {
                     orb.phase = CastingOrbPhase::Sputter;

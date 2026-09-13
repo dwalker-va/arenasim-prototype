@@ -1,11 +1,13 @@
-use bevy::prelude::*;
-use super::super::match_config::{self, RogueOpener, RoguePoison, WarlockCurse, WarriorShout, MageArmor, PaladinAura};
 use super::super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::super::ability_config::AbilityConfig;
-use super::super::equipment::{ItemSlot, Loadout, ItemDefinitions};
+use super::super::equipment::{ItemDefinitions, ItemSlot, Loadout};
+use super::super::match_config::{
+    self, MageArmor, PaladinAura, RogueOpener, RoguePoison, WarlockCurse, WarriorShout,
+};
 use super::auras::AuraType;
 use super::pets::PetType;
 use super::resources::GameRng;
+use bevy::prelude::*;
 
 // ============================================================================
 // Enums
@@ -638,7 +640,13 @@ impl Combatant {
     /// `self.attack_power`. Pass 0.0 when no aura bonus applies.
     ///
     /// Uses the provided GameRng for deterministic results when seeded.
-    pub fn calculate_ability_damage_config(&self, ability_config: &AbilityConfig, rng: &mut GameRng, ap_bonus: f32, sp_bonus: f32) -> f32 {
+    pub fn calculate_ability_damage_config(
+        &self,
+        ability_config: &AbilityConfig,
+        rng: &mut GameRng,
+        ap_bonus: f32,
+        sp_bonus: f32,
+    ) -> f32 {
         // Calculate base damage (random between min and max)
         let damage_range = ability_config.damage_base_max - ability_config.damage_base_min;
         let base_damage = ability_config.damage_base_min + (rng.random_f32() * damage_range);
@@ -659,7 +667,12 @@ impl Combatant {
     /// Formula: Base Healing + (Spell Power × Coefficient)
     ///
     /// Uses the provided GameRng for deterministic results when seeded.
-    pub fn calculate_ability_healing_config(&self, ability_config: &AbilityConfig, rng: &mut GameRng, sp_bonus: f32) -> f32 {
+    pub fn calculate_ability_healing_config(
+        &self,
+        ability_config: &AbilityConfig,
+        rng: &mut GameRng,
+        sp_bonus: f32,
+    ) -> f32 {
         // Calculate base healing (random between min and max)
         let healing_range = ability_config.healing_base_max - ability_config.healing_base_min;
         let base_healing = ability_config.healing_base_min + (rng.random_f32() * healing_range);
@@ -939,18 +952,36 @@ mod tests {
         for &class in match_config::CharacterClass::all() {
             let base = class_base_stats(class);
             let c = Combatant::new(1, 0, class);
-            assert_eq!(c.resource_type, base.resource_type, "{class:?} resource_type");
+            assert_eq!(
+                c.resource_type, base.resource_type,
+                "{class:?} resource_type"
+            );
             assert_eq!(c.max_health, base.max_health, "{class:?} max_health");
-            assert_eq!(c.current_health, base.max_health, "{class:?} current_health");
+            assert_eq!(
+                c.current_health, base.max_health,
+                "{class:?} current_health"
+            );
             assert_eq!(c.max_mana, base.max_resource, "{class:?} max_resource");
-            assert_eq!(c.current_mana, base.starting_resource, "{class:?} starting_resource");
-            assert_eq!(c.mana_regen, base.resource_regen, "{class:?} resource_regen");
-            assert_eq!(c.attack_damage, base.attack_damage, "{class:?} attack_damage");
+            assert_eq!(
+                c.current_mana, base.starting_resource,
+                "{class:?} starting_resource"
+            );
+            assert_eq!(
+                c.mana_regen, base.resource_regen,
+                "{class:?} resource_regen"
+            );
+            assert_eq!(
+                c.attack_damage, base.attack_damage,
+                "{class:?} attack_damage"
+            );
             assert_eq!(c.attack_speed, base.attack_speed, "{class:?} attack_speed");
             assert_eq!(c.attack_power, base.attack_power, "{class:?} attack_power");
             assert_eq!(c.spell_power, base.spell_power, "{class:?} spell_power");
             assert_eq!(c.crit_chance, base.crit_chance, "{class:?} crit_chance");
-            assert_eq!(c.base_movement_speed, base.movement_speed, "{class:?} movement_speed");
+            assert_eq!(
+                c.base_movement_speed, base.movement_speed,
+                "{class:?} movement_speed"
+            );
             assert_eq!(c.armor, base.armor, "{class:?} armor");
         }
     }
@@ -964,29 +995,144 @@ mod tests {
         // (class, health, max_resource, regen, starting, attack_damage,
         //  attack_speed, attack_power, spell_power, crit, move_speed)
         let expected: &[(C, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32)] = &[
-            (C::Warrior, 300.0, 100.0, 0.0, 0.0, 12.0, 1.0, 30.0, 0.0, 0.08, 5.0),
-            (C::Mage, 250.0, 200.0, 0.0, 200.0, 10.0, 0.7, 0.0, 50.0, 0.06, 4.5),
-            (C::Rogue, 275.0, 100.0, 20.0, 100.0, 10.0, 1.3, 35.0, 0.0, 0.10, 6.0),
-            (C::Priest, 250.0, 150.0, 0.0, 150.0, 6.0, 0.8, 0.0, 40.0, 0.04, 5.0),
-            (C::Warlock, 280.0, 180.0, 0.0, 180.0, 8.0, 0.7, 0.0, 45.0, 0.05, 4.5),
-            (C::Paladin, 275.0, 160.0, 0.0, 160.0, 8.0, 0.9, 20.0, 35.0, 0.06, 5.0),
-            (C::Hunter, 265.0, 240.0, 0.0, 240.0, 18.0, 0.4, 30.0, 0.0, 0.07, 5.0),
-            (C::Shaman, 265.0, 160.0, 0.0, 160.0, 7.0, 0.8, 0.0, 42.0, 0.05, 5.0),
+            (
+                C::Warrior,
+                300.0,
+                100.0,
+                0.0,
+                0.0,
+                12.0,
+                1.0,
+                30.0,
+                0.0,
+                0.08,
+                5.0,
+            ),
+            (
+                C::Mage,
+                250.0,
+                200.0,
+                0.0,
+                200.0,
+                10.0,
+                0.7,
+                0.0,
+                50.0,
+                0.06,
+                4.5,
+            ),
+            (
+                C::Rogue,
+                275.0,
+                100.0,
+                20.0,
+                100.0,
+                10.0,
+                1.3,
+                35.0,
+                0.0,
+                0.10,
+                6.0,
+            ),
+            (
+                C::Priest,
+                250.0,
+                150.0,
+                0.0,
+                150.0,
+                6.0,
+                0.8,
+                0.0,
+                40.0,
+                0.04,
+                5.0,
+            ),
+            (
+                C::Warlock,
+                280.0,
+                180.0,
+                0.0,
+                180.0,
+                8.0,
+                0.7,
+                0.0,
+                45.0,
+                0.05,
+                4.5,
+            ),
+            (
+                C::Paladin,
+                275.0,
+                160.0,
+                0.0,
+                160.0,
+                8.0,
+                0.9,
+                20.0,
+                35.0,
+                0.06,
+                5.0,
+            ),
+            (
+                C::Hunter,
+                265.0,
+                240.0,
+                0.0,
+                240.0,
+                18.0,
+                0.4,
+                30.0,
+                0.0,
+                0.07,
+                5.0,
+            ),
+            (
+                C::Shaman,
+                265.0,
+                160.0,
+                0.0,
+                160.0,
+                7.0,
+                0.8,
+                0.0,
+                42.0,
+                0.05,
+                5.0,
+            ),
         ];
-        assert_eq!(expected.len(), C::all().len(), "a class is missing from the pin");
+        assert_eq!(
+            expected.len(),
+            C::all().len(),
+            "a class is missing from the pin"
+        );
         for &(class, hp, res, regen, start, dmg, spd, ap, sp, crit, mv) in expected {
             let b = class_base_stats(class);
             assert_eq!(
-                (b.max_health, b.max_resource, b.resource_regen, b.starting_resource,
-                 b.attack_damage, b.attack_speed, b.attack_power, b.spell_power,
-                 b.crit_chance, b.movement_speed),
+                (
+                    b.max_health,
+                    b.max_resource,
+                    b.resource_regen,
+                    b.starting_resource,
+                    b.attack_damage,
+                    b.attack_speed,
+                    b.attack_power,
+                    b.spell_power,
+                    b.crit_chance,
+                    b.movement_speed
+                ),
                 (hp, res, regen, start, dmg, spd, ap, sp, crit, mv),
                 "{class:?} base stats changed"
             );
             assert_eq!(b.armor, 0.0, "{class:?} base armor is equipment-only");
         }
-        assert_eq!(class_base_stats(C::Warrior).resource_type, ResourceType::Rage);
-        assert_eq!(class_base_stats(C::Rogue).resource_type, ResourceType::Energy);
+        assert_eq!(
+            class_base_stats(C::Warrior).resource_type,
+            ResourceType::Rage
+        );
+        assert_eq!(
+            class_base_stats(C::Rogue).resource_type,
+            ResourceType::Energy
+        );
         assert_eq!(class_base_stats(C::Mage).resource_type, ResourceType::Mana);
     }
 }

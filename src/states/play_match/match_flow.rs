@@ -6,15 +6,15 @@
 //! - Match end detection
 //! - Victory celebration and transition to Results
 
-use bevy::prelude::*;
-use crate::combat::log::{CombatLog, CombatLogEventType, MatchMetadata, CombatantMetadata};
-use crate::states::GameState;
-use super::match_config::MatchConfig;
 use super::components::*;
+use super::match_config::MatchConfig;
 use super::utils::{combatant_id, pet_combatant_id};
+use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
+use crate::states::GameState;
+use bevy::prelude::*;
 
 /// Update the pre-combat countdown timer.
-/// 
+///
 /// During countdown:
 /// - Tick down the timer
 /// - Restore all combatants' mana to full (no penalty for buffing)
@@ -28,22 +28,22 @@ pub fn update_countdown(
     if countdown.gates_opened {
         return; // Gates already opened, nothing to do
     }
-    
+
     let dt = time.delta_secs();
     countdown.time_remaining -= dt;
-    
+
     // Restore all combatants' mana to full during countdown (every frame)
     // This ensures no penalty for pre-match buffing
     for mut combatant in combatants.iter_mut() {
         combatant.current_mana = combatant.max_mana;
     }
-    
+
     // Check if countdown finished
     if countdown.time_remaining <= 0.0 {
         countdown.gates_opened = true;
         combat_log.log(
             CombatLogEventType::MatchEvent,
-            "Gates open! Combat begins!".to_string()
+            "Gates open! Combat begins!".to_string(),
         );
         info!("Gates opened - combat begins!");
     }
@@ -56,7 +56,7 @@ pub fn animate_gate_bars(
 ) {
     // Gates lower during the last 2 seconds
     const GATE_OPEN_DURATION: f32 = 2.0;
-    
+
     if countdown.gates_opened {
         // Gates fully open - hide all bars completely
         for (_gate_bar, mut transform, mut visibility) in gate_bars.iter_mut() {
@@ -66,15 +66,15 @@ pub fn animate_gate_bars(
         }
         return;
     }
-    
+
     // Calculate how much the gates should be lowered
     if countdown.time_remaining <= GATE_OPEN_DURATION {
         let progress = 1.0 - (countdown.time_remaining / GATE_OPEN_DURATION); // 0.0 to 1.0
-        
+
         for (gate_bar, mut transform, mut visibility) in gate_bars.iter_mut() {
             // Keep visible during lowering
             *visibility = Visibility::Visible;
-            
+
             // Scale down the height
             let current_height = gate_bar.initial_height * (1.0 - progress);
             transform.scale.y = 1.0 - progress;
@@ -85,7 +85,7 @@ pub fn animate_gate_bars(
 }
 
 /// Handle time control keyboard shortcuts and apply time multiplier to simulation.
-/// 
+///
 /// **Keyboard Shortcuts:**
 /// - `Space`: Pause/Unpause
 /// - `1`: 0.5x speed
@@ -99,10 +99,10 @@ pub fn handle_time_controls(
     mut time: ResMut<Time<Virtual>>,
 ) {
     use crate::keybindings::GameAction;
-    
+
     let mut speed_changed = false;
     let old_multiplier = sim_speed.multiplier;
-    
+
     // Pause/Play toggle
     if keybindings.action_just_pressed(GameAction::PausePlay, &keyboard) {
         if sim_speed.is_paused() {
@@ -112,7 +112,7 @@ pub fn handle_time_controls(
         }
         speed_changed = true;
     }
-    
+
     // Speed presets
     if keybindings.action_just_pressed(GameAction::SpeedSlow, &keyboard) {
         sim_speed.multiplier = 0.5;
@@ -130,11 +130,11 @@ pub fn handle_time_controls(
         sim_speed.multiplier = 3.0;
         speed_changed = true;
     }
-    
+
     // Apply speed to virtual time if changed
     if speed_changed {
         time.set_relative_speed(sim_speed.multiplier);
-        
+
         if sim_speed.is_paused() {
             info!("Simulation PAUSED");
         } else if old_multiplier == 0.0 {
@@ -183,14 +183,17 @@ pub fn update_dampening(
         let pct = DAMPENING_MILESTONES[dampening.next_milestone] * 100.0;
         combat_log.log(
             CombatLogEventType::MatchEvent,
-            format!("Arena dampening reaches {:.0}% — healing and absorbs reduced", pct),
+            format!(
+                "Arena dampening reaches {:.0}% — healing and absorbs reduced",
+                pct
+            ),
         );
         dampening.next_milestone += 1;
     }
 }
 
 /// Check if the match has ended (one or both teams eliminated).
-/// 
+///
 /// When the match ends:
 /// 1. Determine winner (or draw if both teams die simultaneously)
 /// 2. Collect final stats for all combatants
@@ -216,9 +219,13 @@ pub fn check_match_end(
     if celebration.is_some() {
         return;
     }
-    
-    let team1_alive = combatants.iter().any(|(_, c, _)| c.team == 1 && c.is_alive());
-    let team2_alive = combatants.iter().any(|(_, c, _)| c.team == 2 && c.is_alive());
+
+    let team1_alive = combatants
+        .iter()
+        .any(|(_, c, _)| c.team == 1 && c.is_alive());
+    let team2_alive = combatants
+        .iter()
+        .any(|(_, c, _)| c.team == 2 && c.is_alive());
 
     if !team1_alive || !team2_alive {
         // Determine winner: None if both dead (draw), otherwise winning team
@@ -232,7 +239,7 @@ pub fn check_match_end(
             info!("Match ended! Team 2 wins!");
             Some(2)
         };
-        
+
         // Collect final stats for all combatants (for Results scene)
         let mut team1_stats = Vec::new();
         let mut team2_stats = Vec::new();
@@ -246,7 +253,8 @@ pub fn check_match_end(
         // (or a Hunter's pet) leave a gap between the owner's DMG and the enemy's
         // TAKEN — pets aren't shown as their own card in the report, so their
         // contribution would otherwise be invisible.
-        let mut pet_damage_by_owner: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
+        let mut pet_damage_by_owner: std::collections::HashMap<Entity, f32> =
+            std::collections::HashMap::new();
         // Also map each pet's combat-log source id to its owner's id + display
         // name, so the Results screen can fold pet damage into the owner's
         // per-ability breakdown (which reads the CombatLog by source string).
@@ -291,7 +299,7 @@ pub fn check_match_end(
                     transform.translation.z,
                 ),
             };
-            
+
             if combatant.team == 1 {
                 team1_stats.push(stats);
                 team1_metadata.push(metadata);
@@ -299,14 +307,16 @@ pub fn check_match_end(
                 team2_stats.push(stats);
                 team2_metadata.push(metadata);
             }
-            
+
             // Mark winners as celebrating (for bounce animation)
             if combatant.is_alive() && Some(combatant.team) == winner {
                 // Stagger bounce timing for visual variety
                 let bounce_offset = (team1_stats.len() + team2_stats.len()) as f32 * 0.2;
-                commands.entity(entity).insert(Celebrating { bounce_offset });
+                commands
+                    .entity(entity)
+                    .insert(Celebrating { bounce_offset });
             }
-            
+
             // Cancel any active casts to avoid frozen cast bars during celebration.
             // ChannelingState too: process_channeling early-returns during
             // VictoryCelebration, so without this a Drain Life active at match end
@@ -314,12 +324,12 @@ pub fn check_match_end(
             commands.entity(entity).remove::<CastingState>();
             commands.entity(entity).remove::<ChannelingState>();
         }
-        
+
         // Despawn all active projectiles to avoid frozen projectiles during celebration
         for projectile_entity in projectiles.iter() {
             commands.entity(projectile_entity).despawn();
         }
-        
+
         // Despawn all shared school impacts still playing (e.g. a Mind Blast smoulder)
         for effect_entity in spell_effects.iter() {
             commands.entity(effect_entity).despawn();
@@ -357,7 +367,7 @@ pub fn check_match_end(
             team1: team1_metadata,
             team2: team2_metadata,
         };
-        
+
         match combat_log.save_to_file(&match_metadata, None) {
             Ok(filename) => {
                 info!("Combat log saved to: {}", filename);
@@ -366,7 +376,7 @@ pub fn check_match_end(
                 error!("Failed to save combat log: {}", e);
             }
         }
-        
+
         // Start victory celebration (5 seconds before transitioning to Results)
         commands.insert_resource(VictoryCelebration {
             winner,
@@ -379,18 +389,18 @@ pub fn check_match_end(
                 pet_damage_links,
             },
         });
-        
+
         info!("Victory celebration started! {} seconds", 5.0);
     }
 }
 
 /// Update victory celebration: animate winners bouncing and countdown to Results.
-/// 
+///
 /// During celebration (5 seconds):
 /// - Winning combatants bounce up and down
 /// - Victory text is displayed (via rendering system)
 /// - Timer counts down
-/// 
+///
 /// When timer reaches 0:
 /// - Store match results for Results scene
 /// - Transition to Results state
@@ -410,7 +420,7 @@ pub fn update_victory_celebration(
     };
     let dt = time.delta_secs();
     celebration.time_remaining -= dt;
-    
+
     // Animate celebrating combatants (bounce up and down)
     let celebration_time = 5.0 - celebration.time_remaining; // Elapsed time
     for (celebrating, children) in celebrating_combatants.iter() {
@@ -427,7 +437,7 @@ pub fn update_victory_celebration(
             }
         }
     }
-    
+
     // Check if celebration finished
     if celebration.time_remaining <= 0.0 {
         // Store match results for Results scene
@@ -441,8 +451,8 @@ pub fn update_victory_celebration(
 
 #[cfg(test)]
 mod tests {
-    use super::dampening_reduction;
     use super::super::constants::{DAMPENING_RAMP_SECS, DAMPENING_START_SECS};
+    use super::dampening_reduction;
 
     #[test]
     fn dampening_zero_before_start() {
@@ -458,15 +468,19 @@ mod tests {
 
     #[test]
     fn dampening_caps_at_full() {
-        assert_eq!(dampening_reduction(DAMPENING_START_SECS + DAMPENING_RAMP_SECS), 1.0);
+        assert_eq!(
+            dampening_reduction(DAMPENING_START_SECS + DAMPENING_RAMP_SECS),
+            1.0
+        );
         assert_eq!(dampening_reduction(10_000.0), 1.0);
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn dampening_full_before_match_cap() {
         // Matches time out at 300s of combat; full dampening must land well
         // before that so zero-healing attrition has time to resolve the match.
         assert!(DAMPENING_START_SECS + DAMPENING_RAMP_SECS <= 240.0);
     }
 }
-

@@ -4,7 +4,7 @@
 //!
 //! ## Priority Order
 //! 1. Paladin Aura (buff all allies pre-combat — Devotion/Shadow Resistance/Concentration)
-//! 1.5. Divine Shield (emergency: self < 30% HP, or CC break for teammate)
+//!    1.5. Divine Shield (emergency: self < 30% HP, or CC break for teammate)
 //! 2. Cleanse - Urgent (Polymorph, Freezing Trap, UA Silence, Fear on allies)
 //! 3. Emergency healing (ally < 40% HP) - Holy Shock (heal)
 //! 4. Hammer of Justice (stun enemy in melee range)
@@ -154,14 +154,23 @@ pub fn decide_paladin_action(
         return false;
     }
 
-    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos) else {
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos)
+    else {
         return false;
     };
 
     // Priority 1: Paladin Aura.
     if try_paladin_aura(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        paladin_aura_this_frame, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        paladin_aura_this_frame,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -169,7 +178,14 @@ pub fn decide_paladin_action(
 
     // Priority 1.5: Divine Shield (emergency defensive).
     if try_divine_shield(
-        commands, combat_log, abilities, entity, combatant, auras, ctx, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        auras,
+        ctx,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -177,8 +193,16 @@ pub fn decide_paladin_action(
 
     // Priority 2: Cleanse - Urgent (Polymorph, Freezing Trap, UA Silence, Fear).
     if try_cleanse(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        90, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        90,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -189,10 +213,23 @@ pub fn decide_paladin_action(
     // below the urgent dispel. On success the posture returns to FREE
     // (DipComplete) and the walk directive dies with it; the return to the
     // kill target happens naturally via FREE's legacy melee pursuit.
-    if let HojPlan::DipCast { target, completed_state } = &plan.hoj {
+    if let HojPlan::DipCast {
+        target,
+        completed_state,
+    } = &plan.hoj
+    {
         if try_dip_hammer_of_justice(
-            commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-            *target, same_frame_cc_queue, &mut builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            *target,
+            same_frame_cc_queue,
+            &mut builder,
         ) {
             // `builder` exclusively borrows the trace; finish it before
             // emitting the DipComplete movement event.
@@ -217,7 +254,14 @@ pub fn decide_paladin_action(
     // Priority 3: Emergency healing via Holy Shock.
     if has_emergency_target(combatant.team, ctx.combatants) {
         if try_holy_shock_heal(
-            commands, combat_log, abilities, combatant, my_pos, auras, ctx, &mut builder,
+            commands,
+            combat_log,
+            abilities,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            &mut builder,
         ) {
             builder.finish();
             return true;
@@ -237,8 +281,16 @@ pub fn decide_paladin_action(
     // the Paladin's own attacker is never starved.
     if matches!(plan.hoj, HojPlan::Rotation) {
         if try_hammer_of_justice(
-            commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-            same_frame_cc_queue, &mut builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            same_frame_cc_queue,
+            &mut builder,
         ) {
             builder.finish();
             return true;
@@ -254,8 +306,16 @@ pub fn decide_paladin_action(
 
     // Priority 5: Flash of Light.
     if try_flash_of_light(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        plan.cast_defer, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        plan.cast_defer,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -263,28 +323,51 @@ pub fn decide_paladin_action(
 
     // Priority 6: Holy Light.
     if try_holy_light(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        plan.cast_defer, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        plan.cast_defer,
+        &mut builder,
     ) {
         builder.finish();
         return true;
     }
 
     // Priority 7: Cleanse - Maintenance (team-healthy only).
-    if ctx.is_team_healthy(HEALTHY_HP_THRESHOLD, my_pos) {
-        if try_cleanse(
-            commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-            50, &mut builder,
-        ) {
-            builder.finish();
-            return true;
-        }
+    if ctx.is_team_healthy(HEALTHY_HP_THRESHOLD, my_pos)
+        && try_cleanse(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            50,
+            &mut builder,
+        )
+    {
+        builder.finish();
+        return true;
     }
 
     // Priority 8: Holy Shock (damage) — team-healthy only.
     if ctx.is_team_healthy(HEALTHY_HP_THRESHOLD, my_pos) {
         if try_holy_shock_damage(
-            commands, combat_log, abilities, combatant, my_pos, auras, ctx, &mut builder,
+            commands,
+            combat_log,
+            abilities,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            &mut builder,
         ) {
             builder.finish();
             return true;
@@ -319,13 +402,27 @@ pub fn try_divine_shield(
         None => return false,
     };
 
-    if combatant.ability_cooldowns.get(&ability).copied().unwrap_or(0.0) > 0.0 {
-        let remaining = combatant.ability_cooldowns.get(&ability).copied().unwrap_or(0.0);
+    if combatant
+        .ability_cooldowns
+        .get(&ability)
+        .copied()
+        .unwrap_or(0.0)
+        > 0.0
+    {
+        let remaining = combatant
+            .ability_cooldowns
+            .get(&ability)
+            .copied()
+            .unwrap_or(0.0);
         builder.reject(ability, RejectionReason::OnCooldown { remaining });
         return false;
     }
 
-    if auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::DamageImmunity)) {
+    if auras.is_some_and(|a| {
+        a.auras
+            .iter()
+            .any(|aura| aura.effect_type == AuraType::DamageImmunity)
+    }) {
         builder.reject(ability, RejectionReason::AlreadyApplied);
         return false;
     }
@@ -364,7 +461,15 @@ pub fn try_divine_shield(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Divine Shield", None, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Divine Shield",
+        None,
+        "casts",
+    );
 
     true
 }
@@ -419,13 +524,27 @@ pub fn try_divine_shield_while_cc(
         None => return false,
     };
 
-    if combatant.ability_cooldowns.get(&ability).copied().unwrap_or(0.0) > 0.0 {
-        let remaining = combatant.ability_cooldowns.get(&ability).copied().unwrap_or(0.0);
+    if combatant
+        .ability_cooldowns
+        .get(&ability)
+        .copied()
+        .unwrap_or(0.0)
+        > 0.0
+    {
+        let remaining = combatant
+            .ability_cooldowns
+            .get(&ability)
+            .copied()
+            .unwrap_or(0.0);
         builder.reject(ability, RejectionReason::OnCooldown { remaining });
         return false;
     }
 
-    if auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::DamageImmunity)) {
+    if auras.is_some_and(|a| {
+        a.auras
+            .iter()
+            .any(|aura| aura.effect_type == AuraType::DamageImmunity)
+    }) {
         builder.reject(ability, RejectionReason::AlreadyApplied);
         return false;
     }
@@ -493,16 +612,21 @@ pub fn try_divine_shield_while_cc(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Divine Shield", None, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Divine Shield",
+        None,
+        "casts",
+    );
 
     true
 }
 
 /// Check if any ally is in an emergency situation (below critical HP threshold).
-fn has_emergency_target(
-    team: u8,
-    combatant_info: &BTreeMap<Entity, CombatantInfo>,
-) -> bool {
+fn has_emergency_target(team: u8, combatant_info: &BTreeMap<Entity, CombatantInfo>) -> bool {
     combatant_info.values().any(|info| {
         info.team == team
             && !info.is_pet
@@ -568,14 +692,26 @@ fn try_flash_of_light(
 
     let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        ability, def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -586,9 +722,19 @@ fn try_flash_of_light(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, target_entity, cast_time));
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_info.log_id()), "begins casting");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        Some(target_info.log_id()),
+        "begins casting",
+    );
 
     true
 }
@@ -625,7 +771,9 @@ fn try_holy_light(
         return false;
     }
 
-    let Some(target_info) = ctx.lowest_health_ally_below(SAFE_HEAL_MAX_THRESHOLD, def.range, my_pos) else {
+    let Some(target_info) =
+        ctx.lowest_health_ally_below(SAFE_HEAL_MAX_THRESHOLD, def.range, my_pos)
+    else {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
@@ -654,14 +802,26 @@ fn try_holy_light(
 
     let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        ability, def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -672,9 +832,19 @@ fn try_holy_light(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, target_entity, cast_time));
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_info.log_id()), "begins casting");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        Some(target_info.log_id()),
+        "begins casting",
+    );
 
     true
 }
@@ -702,7 +872,8 @@ fn try_holy_shock_heal(
         return false;
     }
 
-    let Some(target_info) = ctx.lowest_health_ally_below(LOW_HP_THRESHOLD, def.range, my_pos) else {
+    let Some(target_info) = ctx.lowest_health_ally_below(LOW_HP_THRESHOLD, def.range, my_pos)
+    else {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
@@ -714,7 +885,15 @@ fn try_holy_shock_heal(
     combatant.global_cooldown = GCD;
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Holy Shock (Heal)", Some(target_info.log_id()), "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Holy Shock (Heal)",
+        Some(target_info.log_id()),
+        "casts",
+    );
 
     commands.spawn(HolyShockHealPending {
         caster_spell_power: combatant.spell_power,
@@ -751,7 +930,8 @@ fn try_holy_shock_damage(
         return false;
     }
 
-    let damage_target = ctx.combatants
+    let damage_target = ctx
+        .combatants
         .iter()
         .filter(|(_, info)| {
             info.team != combatant.team && info.current_health > 0.0 && !info.stealthed
@@ -779,14 +959,26 @@ fn try_holy_shock_damage(
         ..Default::default()
     };
     if !pre_cast_ok(
-        ability, def, combatant, my_pos, auras,
-        Some((*target_entity, target_pos)), ctx, target_opts,
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((*target_entity, target_pos)),
+        ctx,
+        target_opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, def, combatant, my_pos, auras,
-                Some((*target_entity, target_pos)), ctx, target_opts,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((*target_entity, target_pos)),
+                ctx,
+                target_opts,
             ),
         );
         return false;
@@ -798,7 +990,15 @@ fn try_holy_shock_damage(
     combatant.global_cooldown = GCD;
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Holy Shock (Damage)", Some(target_id), "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Holy Shock (Damage)",
+        Some(target_id),
+        "casts",
+    );
 
     commands.spawn(HolyShockDamagePending {
         caster_spell_power: combatant.spell_power,
@@ -842,7 +1042,8 @@ fn try_hammer_of_justice(
     // Carry the pet-aware id (hoj_target_eligible already excludes pets, but the
     // id is resolved via log_id so this can't silently break if that changes);
     // class is kept only for the healer-preferring pick.
-    let enemies_in_range: Vec<(&Entity, CharacterClass, crate::combat::log::CombatantId)> = ctx.combatants
+    let enemies_in_range: Vec<(&Entity, CharacterClass, crate::combat::log::CombatantId)> = ctx
+        .combatants
         .iter()
         .filter(|(e, _)| hoj_target_eligible(ctx, combatant.team, **e))
         .filter_map(|(e, info)| {
@@ -866,8 +1067,15 @@ fn try_hammer_of_justice(
     };
 
     cast_hammer_of_justice(
-        commands, combat_log, entity, def, combatant, *target_entity, target_id,
-        same_frame_cc_queue, builder,
+        commands,
+        combat_log,
+        entity,
+        def,
+        combatant,
+        *target_entity,
+        target_id,
+        same_frame_cc_queue,
+        builder,
     );
 
     true
@@ -907,16 +1115,32 @@ fn try_dip_hammer_of_justice(
         builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     }
-    let info = ctx.combatants.get(&target).expect("eligible target is in snapshot");
+    let info = ctx
+        .combatants
+        .get(&target)
+        .expect("eligible target is in snapshot");
     let distance = my_pos.distance(info.position);
     if distance > def.range {
-        builder.reject(ability, RejectionReason::OutOfRange { distance, max: def.range });
+        builder.reject(
+            ability,
+            RejectionReason::OutOfRange {
+                distance,
+                max: def.range,
+            },
+        );
         return false;
     }
 
     cast_hammer_of_justice(
-        commands, combat_log, entity, def, combatant, target, info.log_id(),
-        same_frame_cc_queue, builder,
+        commands,
+        combat_log,
+        entity,
+        def,
+        combatant,
+        target,
+        info.log_id(),
+        same_frame_cc_queue,
+        builder,
     );
 
     true
@@ -962,10 +1186,20 @@ fn cast_hammer_of_justice(
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
-    combatant.ability_cooldowns.insert(AbilityType::HammerOfJustice, def.cooldown);
+    combatant
+        .ability_cooldowns
+        .insert(AbilityType::HammerOfJustice, def.cooldown);
 
     let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_id.clone()), "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        Some(target_id.clone()),
+        "casts",
+    );
 
     if let Some(aura_def) = def.applies_aura.as_ref() {
         combat_log.log_crowd_control(
@@ -1081,28 +1315,36 @@ fn try_paladin_aura(
         ctx.active_auras
             .get(e)
             .map(|active| {
-                active.iter().any(|a| {
-                    a.effect_type == aura_check_type
-                        && a.ability_name == aura_name
-                })
+                active
+                    .iter()
+                    .any(|a| a.effect_type == aura_check_type && a.ability_name == aura_name)
             })
             .unwrap_or(false)
     };
 
-    let allies: Vec<(&Entity, CharacterClass)> = ctx.combatants
+    let allies: Vec<(&Entity, CharacterClass)> = ctx
+        .combatants
         .iter()
-        .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0 && !info.is_pet)
+        .filter(|(_, info)| {
+            info.team == combatant.team && info.current_health > 0.0 && !info.is_pet
+        })
         .map(|(e, info)| (e, info.class))
         .collect();
 
-    if allies.iter().any(|(e, _)| has_aura(e) || paladin_aura_this_frame.contains(*e)) {
+    if allies
+        .iter()
+        .any(|(e, _)| has_aura(e) || paladin_aura_this_frame.contains(*e))
+    {
         builder.reject(ability, RejectionReason::AlreadyApplied);
         return false;
     }
 
-    let allies_to_buff: Vec<&Entity> = ctx.combatants
+    let allies_to_buff: Vec<&Entity> = ctx
+        .combatants
         .iter()
-        .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0 && !info.is_pet)
+        .filter(|(_, info)| {
+            info.team == combatant.team && info.current_health > 0.0 && !info.is_pet
+        })
         .filter_map(|(e, info)| {
             if my_pos.distance(info.position) <= def.range && !paladin_aura_this_frame.contains(e) {
                 Some(e)
@@ -1121,7 +1363,15 @@ fn try_paladin_aura(
 
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, aura_name, None, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        aura_name,
+        None,
+        "casts",
+    );
 
     for ally_entity in allies_to_buff {
         paladin_aura_this_frame.insert(*ally_entity);

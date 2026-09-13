@@ -482,9 +482,7 @@ pub fn spray_direction(i: u32, n: u32, lift: f32, back: f32) -> Vec3 {
 
 /// Cheap deterministic jitter in [0, 1). Visual only.
 fn impact_jitter(seed: u32) -> f32 {
-    let s = seed
-        .wrapping_mul(747_796_405)
-        .wrapping_add(2_891_336_453);
+    let s = seed.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
     let s = ((s >> ((s >> 28) + 4)) ^ s).wrapping_mul(277_803_737);
     ((s >> 22) ^ s) as f32 / u32::MAX as f32
 }
@@ -705,9 +703,9 @@ pub fn spawn_school_impacts(
             }
         }
 
-        let smoulder_material = style.smoulder.map(|_| {
-            mote_material(&mut materials, SprayKind::Spark, true, style.color)
-        });
+        let smoulder_material = style
+            .smoulder
+            .map(|_| mote_material(&mut materials, SprayKind::Spark, true, style.color));
 
         commands.entity(entity).insert((
             Transform::from_translation(at).with_rotation(impact_rotation(impact.from)),
@@ -799,7 +797,11 @@ pub fn animate_school_impacts(
                         .spawn((
                             ImpactMote {
                                 kind: SprayKind::Spark,
-                                velocity: Vec3::new(a.cos() * drift, smoulder.rise, a.sin() * drift),
+                                velocity: Vec3::new(
+                                    a.cos() * drift,
+                                    smoulder.rise,
+                                    a.sin() * drift,
+                                ),
                                 gravity: 0.0,
                                 spin: 0.0,
                                 age: 0.0,
@@ -892,7 +894,8 @@ pub fn animate_school_impacts(
                     SprayKind::Spark => {
                         // A soft glow: swells slightly then dies.
                         let swell = 1.0 + 0.4 * (1.0 - k) * k * 4.0;
-                        part.scale = Vec3::splat((mote.radius * 2.0 * swell * k.powf(0.6)).max(1e-4));
+                        part.scale =
+                            Vec3::splat((mote.radius * 2.0 * swell * k.powf(0.6)).max(1e-4));
                     }
                 }
             }
@@ -918,11 +921,19 @@ pub fn billboard_school_impacts(
     rigs: Query<(&Transform, &Children), With<SchoolImpact>>,
     mut sprites: Query<
         (&ImpactSprite, &mut Transform),
-        (Without<SchoolImpact>, Without<Camera3d>, Without<ImpactMote>),
+        (
+            Without<SchoolImpact>,
+            Without<Camera3d>,
+            Without<ImpactMote>,
+        ),
     >,
     mut motes: Query<
         (&ImpactMote, &mut Transform),
-        (Without<SchoolImpact>, Without<Camera3d>, Without<ImpactSprite>),
+        (
+            Without<SchoolImpact>,
+            Without<Camera3d>,
+            Without<ImpactSprite>,
+        ),
     >,
 ) {
     let Some(cam) = camera.iter().next() else {

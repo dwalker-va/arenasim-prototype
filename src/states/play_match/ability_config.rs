@@ -348,8 +348,7 @@ impl Default for AbilityDefinitions {
     /// Load ability definitions from the default config file.
     /// Panics if the file cannot be loaded - use for tests only.
     fn default() -> Self {
-        load_ability_definitions()
-            .expect("Failed to load ability definitions in Default impl")
+        load_ability_definitions().expect("Failed to load ability definitions in Default impl")
     }
 }
 
@@ -369,7 +368,8 @@ impl AbilityDefinitions {
     /// Get the configuration for an ability type, panicking if not found.
     /// Use this when you know the ability must exist (validated at startup).
     pub fn get_unchecked(&self, ability: &AbilityType) -> &AbilityConfig {
-        self.definitions.get(ability)
+        self.definitions
+            .get(ability)
             .unwrap_or_else(|| panic!("Ability {:?} not found in definitions", ability))
     }
 
@@ -549,7 +549,10 @@ impl AbilityDefinitions {
     ///
     /// This is the shape a "class page -> Pet subsection labeled by pet"
     /// display needs: the `PetType` is the subsection label.
-    pub fn pet_abilities_for_class(&self, class: CharacterClass) -> Vec<(PetType, Vec<AbilityType>)> {
+    pub fn pet_abilities_for_class(
+        &self,
+        class: CharacterClass,
+    ) -> Vec<(PetType, Vec<AbilityType>)> {
         let mut by_pet: Vec<(PetType, Vec<AbilityType>)> = Vec::new();
         let mut entries: Vec<(PetType, AbilityType)> = self
             .definitions
@@ -598,19 +601,21 @@ pub fn load_ability_definitions() -> Result<AbilityDefinitions, String> {
     let contents = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read {}: {}", config_path, e))?;
 
-    let config: AbilitiesConfig = ron::from_str(&contents)
-        .map_err(|e| format!("Failed to parse {}: {}", config_path, e))?;
+    let config: AbilitiesConfig =
+        ron::from_str(&contents).map_err(|e| format!("Failed to parse {}: {}", config_path, e))?;
 
     let definitions = AbilityDefinitions::new(config);
 
     // Validate all expected abilities are defined
-    definitions.validate()
-        .map_err(|missing| format!(
-            "Missing ability definitions: {:?}",
-            missing
-        ))?;
+    definitions
+        .validate()
+        .map_err(|missing| format!("Missing ability definitions: {:?}", missing))?;
 
-    info!("Loaded {} ability definitions from {}", definitions.definitions.len(), config_path);
+    info!(
+        "Loaded {} ability definitions from {}",
+        definitions.definitions.len(),
+        config_path
+    );
 
     Ok(definitions)
 }
@@ -745,7 +750,10 @@ mod tests {
                 AbilityType::BoarCharge,
                 AbilityType::MastersCall,
             ] {
-                assert!(!own.contains(&pet_ability), "{pet_ability:?} leaked into an own-kit");
+                assert!(
+                    !own.contains(&pet_ability),
+                    "{pet_ability:?} leaked into an own-kit"
+                );
             }
         }
     }
@@ -934,15 +942,24 @@ mod tests {
             let expected = saturate(school.color_rgb8());
             for i in 0..3 {
                 assert!((base[i] - expected[i]).abs() < 1e-6, "{school:?} base");
-                assert!((emissive[i] - expected[i] * 2.0).abs() < 1e-6, "{school:?} emissive");
+                assert!(
+                    (emissive[i] - expected[i] * 2.0).abs() < 1e-6,
+                    "{school:?} emissive"
+                );
             }
         }
         // The two spells reported as washed-out must resolve red-dominant
         // (Fire/Immolate) and blue-dominant (Shadow/Fear), not near-white.
         let fire = saturate(SpellSchool::Fire.color_rgb8());
-        assert!(fire[0] > 2.0 * fire[1] && fire[0] > 2.0 * fire[2], "Fire must read red");
+        assert!(
+            fire[0] > 2.0 * fire[1] && fire[0] > 2.0 * fire[2],
+            "Fire must read red"
+        );
         let shadow = saturate(SpellSchool::Shadow.color_rgb8());
-        assert!(shadow[2] > 1.5 * shadow[1], "Shadow must read purple, not white");
+        assert!(
+            shadow[2] > 1.5 * shadow[1],
+            "Shadow must read purple, not white"
+        );
     }
 
     #[test]
@@ -962,7 +979,10 @@ mod tests {
             let mut config = base_test_config();
             config.spell_school = school;
             let (base, _) = config.cast_color();
-            assert!(base.iter().any(|&c| c > 0.0), "{school:?} resolved to black");
+            assert!(
+                base.iter().any(|&c| c > 0.0),
+                "{school:?} resolved to black"
+            );
         }
     }
 

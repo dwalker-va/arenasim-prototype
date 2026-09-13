@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Psychic Scream Burst (self-centered AoE fear)
@@ -50,7 +50,11 @@ pub fn spawn_scream_burst(
 /// Update Psychic Scream bursts: expand outward toward the AoE radius and fade.
 pub fn update_scream_bursts(
     time: Res<Time>,
-    mut bursts: Query<(&mut ScreamBurst, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut bursts: Query<(
+        &mut ScreamBurst,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     transforms: Query<&Transform, Without<ScreamBurst>>,
 ) {
@@ -94,4 +98,3 @@ pub fn cleanup_expired_scream_bursts(
         }
     }
 }
-

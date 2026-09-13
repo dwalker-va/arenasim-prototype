@@ -12,10 +12,10 @@ use arenasim::cli;
 use arenasim::combat::CombatPlugin;
 use arenasim::headless;
 use arenasim::settings::{GameSettings, SettingsPlugin};
+use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::play_match::{
     AbilityConfigPlugin, BanterConfigPlugin, MapConfigPlugin, MovementConfigPlugin,
 };
-use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::ui::fonts::install_game_fonts;
 use arenasim::ui::UiPlugin;
@@ -51,7 +51,14 @@ fn main() {
         // 7×7 matchup matrix mode — defaults to trace `on` so every cell's
         // trace is on disk when an anomaly surfaces; explicit `off` opts out.
         let trace_mode = args.trace_mode.unwrap_or(cli::TraceMode::On);
-        if let Err(e) = headless::run_matrix(n, args.seed_base, args.save_logs, trace_mode, args.matrix_map, args.ai_profile) {
+        if let Err(e) = headless::run_matrix(
+            n,
+            args.seed_base,
+            args.save_logs,
+            trace_mode,
+            args.matrix_map,
+            args.ai_profile,
+        ) {
             eprintln!("Matrix run failed: {}", e);
             std::process::exit(1);
         }
@@ -101,8 +108,7 @@ fn run_headless_mode(
             .map(|d| d.as_secs())
             .unwrap_or(0);
         Some(headless::runner::TraceConfig {
-            output_path: arenasim::paths::match_log_dir()
-                .join(format!("match_{}_trace.jsonl", ts)),
+            output_path: arenasim::paths::match_log_dir().join(format!("match_{}_trace.jsonl", ts)),
         })
     } else {
         None
@@ -156,7 +162,9 @@ fn build_graphical_app(replay: Option<headless::HeadlessMatchConfig>) -> App {
         }))
         // Our game plugins
         .add_plugins((
-            EguiPlugin { enable_multipass_for_primary_context: false },
+            EguiPlugin {
+                enable_multipass_for_primary_context: false,
+            },
             SettingsPlugin,
             AbilityConfigPlugin,
             MovementConfigPlugin,
@@ -179,15 +187,17 @@ fn build_graphical_app(replay: Option<headless::HeadlessMatchConfig>) -> App {
         // and comps already inserted — `setup_play_match` honours all three
         // rather than overwriting them.
         Some(cfg) => {
-            let match_config = cfg
-                .to_match_config()
-                .unwrap_or_else(|e| { eprintln!("Invalid replay config: {e}"); std::process::exit(1) });
+            let match_config = cfg.to_match_config().unwrap_or_else(|e| {
+                eprintln!("Invalid replay config: {e}");
+                std::process::exit(1)
+            });
             // Single-authority resolution (bare `ai_profile` = both teams,
             // per-team fields override) — same method the headless runner and
             // `validate()` use, so a replay can never disagree with them.
-            let profile = cfg
-                .ai_profiles()
-                .unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
+            let profile = cfg.ai_profiles().unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(1)
+            });
             let rng = match cfg.random_seed {
                 Some(seed) => arenasim::states::play_match::GameRng::from_seed(seed),
                 None => arenasim::states::play_match::GameRng::default(),
@@ -209,14 +219,14 @@ fn build_graphical_app(replay: Option<headless::HeadlessMatchConfig>) -> App {
 }
 
 fn run_replay_mode(path: std::path::PathBuf) {
-    let cfg = headless::HeadlessMatchConfig::load_from_file(&path)
-        .unwrap_or_else(|e| { eprintln!("Error loading replay config: {e}"); std::process::exit(1) });
+    let cfg = headless::HeadlessMatchConfig::load_from_file(&path).unwrap_or_else(|e| {
+        eprintln!("Error loading replay config: {e}");
+        std::process::exit(1)
+    });
     build_graphical_app(Some(cfg)).run();
 }
 
-fn setup_custom_font(
-    mut contexts: EguiContexts,
-) {
+fn setup_custom_font(mut contexts: EguiContexts) {
     // Deliberately ctx_mut (not try_ctx_mut): this is a run-once Startup
     // system — silently skipping would permanently lose the custom font.
     // A missing context here should fail loudly.
@@ -226,4 +236,3 @@ fn setup_custom_font(
     // snapshot harnesses install the SAME fonts the player sees.
     install_game_fonts(ctx);
 }
-

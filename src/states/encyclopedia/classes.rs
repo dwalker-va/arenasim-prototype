@@ -41,7 +41,11 @@ pub fn search_entries(out: &mut Vec<SearchEntry>) {
 /// rows and the tooltip.
 pub fn subtitle(class: CharacterClass) -> String {
     let stats = class_base_stats(class);
-    format!("{} · {:.0} health", stats.resource_type.name(), stats.max_health)
+    format!(
+        "{} · {:.0} health",
+        stats.resource_type.name(),
+        stats.max_health
+    )
 }
 
 // ============================================================================
@@ -56,8 +60,16 @@ pub fn tooltip(ui: &mut egui::Ui, class: CharacterClass, data: &EncyclopediaData
             .color(Topic::Class(class).accent(data))
             .strong(),
     );
-    ui.label(egui::RichText::new(subtitle(class)).size(12.0).color(super::DIM));
-    ui.label(egui::RichText::new(class.description()).size(12.0).color(super::MUTED));
+    ui.label(
+        egui::RichText::new(subtitle(class))
+            .size(12.0)
+            .color(super::DIM),
+    );
+    ui.label(
+        egui::RichText::new(class.description())
+            .size(12.0)
+            .color(super::MUTED),
+    );
 }
 
 // ============================================================================
@@ -148,20 +160,38 @@ fn stat_rows(stats: &ClassBaseStats) -> Vec<(String, String)> {
         (resource.to_string(), format!("{:.0}", stats.max_resource)),
     ];
     if stats.resource_regen != 0.0 {
-        rows.push((format!("{} regen", resource), format!("+{:.0}/sec", stats.resource_regen)));
+        rows.push((
+            format!("{} regen", resource),
+            format!("+{:.0}/sec", stats.resource_regen),
+        ));
     }
     rows.push((
         "Attack damage".to_string(),
-        format!("{:.0} per swing · {:.1}/sec", stats.attack_damage, stats.attack_speed),
+        format!(
+            "{:.0} per swing · {:.1}/sec",
+            stats.attack_damage, stats.attack_speed
+        ),
     ));
     if stats.attack_power != 0.0 {
-        rows.push(("Attack power".to_string(), format!("{:.0}", stats.attack_power)));
+        rows.push((
+            "Attack power".to_string(),
+            format!("{:.0}", stats.attack_power),
+        ));
     }
     if stats.spell_power != 0.0 {
-        rows.push(("Spell power".to_string(), format!("{:.0}", stats.spell_power)));
+        rows.push((
+            "Spell power".to_string(),
+            format!("{:.0}", stats.spell_power),
+        ));
     }
-    rows.push(("Crit chance".to_string(), format!("{:.0}%", stats.crit_chance * 100.0)));
-    rows.push(("Movement speed".to_string(), format!("{:.1} yd/sec", stats.movement_speed)));
+    rows.push((
+        "Crit chance".to_string(),
+        format!("{:.0}%", stats.crit_chance * 100.0),
+    ));
+    rows.push((
+        "Movement speed".to_string(),
+        format!("{:.1} yd/sec", stats.movement_speed),
+    ));
     if stats.armor != 0.0 {
         rows.push(("Armor".to_string(), format!("{:.0}", stats.armor)));
     }
@@ -204,7 +234,10 @@ mod tests {
         for class in CharacterClass::all() {
             let stats = class_base_stats(*class);
             let rows = stat_rows(&stats);
-            let health = rows.iter().find(|(k, _)| k == "Health").expect("health row");
+            let health = rows
+                .iter()
+                .find(|(k, _)| k == "Health")
+                .expect("health row");
             assert_eq!(health.1, format!("{:.0}", stats.max_health));
             // A class shows exactly one of the two power stats today, and never
             // a zeroed one.
@@ -222,7 +255,10 @@ mod tests {
             .copied()
             .filter(|c| !abilities.pet_abilities_for_class(*c).is_empty())
             .collect();
-        assert_eq!(with_pets, vec![CharacterClass::Warlock, CharacterClass::Hunter]);
+        assert_eq!(
+            with_pets,
+            vec![CharacterClass::Warlock, CharacterClass::Hunter]
+        );
         for class in with_pets {
             for (pet, list) in abilities.pet_abilities_for_class(class) {
                 assert!(!pet.name().is_empty());

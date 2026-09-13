@@ -56,8 +56,7 @@ pub fn process_dispels(
                         filter.contains(&a.effect_type)
                     } else {
                         // Cleanse also lifts poison/disease; Dispel Magic doesn't.
-                        a.can_be_dispelled()
-                            || (pending.removes_poison && a.is_cleansable_poison())
+                        a.can_be_dispelled() || (pending.removes_poison && a.is_cleansable_poison())
                     }
                 })
                 .map(|(i, _)| i)
@@ -72,8 +71,10 @@ pub fn process_dispels(
                 // variance and forces heavier purge investment to reliably strip
                 // the buff you want. Do NOT change this to a deterministic
                 // highest-magnitude pick.
-                let random_idx = (game_rng.random_f32() * dispellable_indices.len() as f32) as usize;
-                let idx_to_remove = dispellable_indices[random_idx.min(dispellable_indices.len() - 1)];
+                let random_idx =
+                    (game_rng.random_f32() * dispellable_indices.len() as f32) as usize;
+                let idx_to_remove =
+                    dispellable_indices[random_idx.min(dispellable_indices.len() - 1)];
 
                 let removed_aura = active_auras.auras.remove(idx_to_remove);
 
@@ -83,17 +84,13 @@ pub fn process_dispels(
                     CombatLogEventType::Buff,
                     format!(
                         "{} {} removed from {}",
-                        pending.log_prefix,
-                        removed_aura.ability_name,
-                        target_id
+                        pending.log_prefix, removed_aura.ability_name, target_id
                     ),
                 );
 
                 info!(
                     "{} {} removed from {}",
-                    pending.log_prefix,
-                    removed_aura.ability_name,
-                    target_id
+                    pending.log_prefix, removed_aura.ability_name, target_id
                 );
 
                 // Spawn dispel visual effect — the ribbon that coils around the
@@ -122,15 +119,15 @@ pub fn process_dispels(
                 // to mirror the pattern used elsewhere (e.g., Corruption / try_corruption).
                 // The ability_name field is the canonical source of truth for which
                 // ability spawned the aura, even if the same AuraType is reused.
-                if removed_aura.ability_name == "Unstable Affliction"
-                    && removed_aura.caster.is_some()
-                {
-                    // Snapshot data needed after the borrow is released.
-                    deferred_backlashes.push((
-                        pending.dispeller,
-                        removed_aura.caster.unwrap(),
-                        removed_aura.backlash_damage.unwrap_or(0.0),
-                    ));
+                if removed_aura.ability_name == "Unstable Affliction" {
+                    if let Some(caster) = removed_aura.caster {
+                        // Snapshot data needed after the borrow is released.
+                        deferred_backlashes.push((
+                            pending.dispeller,
+                            caster,
+                            removed_aura.backlash_damage.unwrap_or(0.0),
+                        ));
+                    }
                 }
             }
         }
@@ -182,8 +179,12 @@ pub fn process_dispels(
     };
 
     for (dispeller, caster, damage) in deferred_backlashes {
-        let Some(dispeller_team) = team_of(dispeller) else { continue };
-        let Some(caster_team) = team_of(caster) else { continue };
+        let Some(dispeller_team) = team_of(dispeller) else {
+            continue;
+        };
+        let Some(caster_team) = team_of(caster) else {
+            continue;
+        };
         if dispeller_team == caster_team {
             continue;
         }

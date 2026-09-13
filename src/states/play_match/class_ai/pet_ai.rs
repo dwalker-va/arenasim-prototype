@@ -6,16 +6,16 @@
 
 use bevy::prelude::*;
 
+use super::super::utils::pet_combatant_id;
+use super::CombatContext;
 use crate::combat::log::CombatLog;
+use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionEventBuilder, DecisionTrace, RejectionReason, TargetView,
 };
-use crate::states::match_config::CharacterClass;
-use super::CombatContext;
-use super::super::utils::pet_combatant_id;
 
 /// Render a PetType variant into a stable string for pet_decision events.
 fn pet_type_str(pt: PetType) -> &'static str {
@@ -45,11 +45,21 @@ pub fn pet_ai_system(
     mut combat_log: ResMut<CombatLog>,
     abilities: Res<AbilityDefinitions>,
     mut pets: Query<
-        (Entity, &mut Combatant, &Transform, &Pet, Option<&ActiveAuras>, Option<&PetCommand>),
+        (
+            Entity,
+            &mut Combatant,
+            &Transform,
+            &Pet,
+            Option<&ActiveAuras>,
+            Option<&PetCommand>,
+        ),
         (Without<CastingState>, Without<ChannelingState>),
     >,
     casting_targets: Query<(Entity, &Combatant, &CastingState), Without<Pet>>,
-    channeling_targets: Query<(Entity, &Combatant, &ChannelingState), (Without<CastingState>, Without<Pet>)>,
+    channeling_targets: Query<
+        (Entity, &Combatant, &ChannelingState),
+        (Without<CastingState>, Without<Pet>),
+    >,
     all_combatants: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), Without<Pet>>,
     dr_tracker_query: Query<(Entity, &DRTracker)>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -71,26 +81,29 @@ pub fn pet_ai_system(
     let combatant_info: std::collections::BTreeMap<Entity, super::CombatantInfo> = all_combatants
         .iter()
         .map(|(entity, combatant, transform, _)| {
-            (entity, super::CombatantInfo {
+            (
                 entity,
-                team: combatant.team,
-                slot: combatant.slot,
-                class: combatant.class,
-                current_health: combatant.current_health,
-                max_health: combatant.max_health,
-                current_mana: combatant.current_mana,
-                max_mana: combatant.max_mana,
-                position: transform.translation,
-                velocity: Vec3::ZERO,
-                is_alive: combatant.is_alive(),
-                stealthed: combatant.stealthed,
-                target: combatant.target,
-                is_pet: false,
-                // Pet AI doesn't read casts; this coarse snapshot omits CastingState.
-                casting_ability: None,
-                pet_type: None,
-                pet: owner_to_pet.get(&entity).copied(),
-            })
+                super::CombatantInfo {
+                    entity,
+                    team: combatant.team,
+                    slot: combatant.slot,
+                    class: combatant.class,
+                    current_health: combatant.current_health,
+                    max_health: combatant.max_health,
+                    current_mana: combatant.current_mana,
+                    max_mana: combatant.max_mana,
+                    position: transform.translation,
+                    velocity: Vec3::ZERO,
+                    is_alive: combatant.is_alive(),
+                    stealthed: combatant.stealthed,
+                    target: combatant.target,
+                    is_pet: false,
+                    // Pet AI doesn't read casts; this coarse snapshot omits CastingState.
+                    casting_ability: None,
+                    pet_type: None,
+                    pet: owner_to_pet.get(&entity).copied(),
+                },
+            )
         })
         .collect();
 
@@ -109,18 +122,20 @@ pub fn pet_ai_system(
     // Per-entity ability cooldowns snapshot (BTreeMap for determinism). Pet AI
     // doesn't currently read this from `ctx`, but keeping it consistent with
     // CombatSnapshot::build avoids drift if future pet AI code reads cooldowns.
-    let ability_cooldowns: std::collections::BTreeMap<Entity, std::collections::BTreeMap<crate::states::play_match::abilities::AbilityType, f32>> =
-        all_combatants
-            .iter()
-            .map(|(entity, combatant, _, _)| {
-                let cds: std::collections::BTreeMap<_, _> = combatant
-                    .ability_cooldowns
-                    .iter()
-                    .map(|(k, v)| (*k, *v))
-                    .collect();
-                (entity, cds)
-            })
-            .collect();
+    let ability_cooldowns: std::collections::BTreeMap<
+        Entity,
+        std::collections::BTreeMap<crate::states::play_match::abilities::AbilityType, f32>,
+    > = all_combatants
+        .iter()
+        .map(|(entity, combatant, _, _)| {
+            let cds: std::collections::BTreeMap<_, _> = combatant
+                .ability_cooldowns
+                .iter()
+                .map(|(k, v)| (*k, *v))
+                .collect();
+            (entity, cds)
+        })
+        .collect();
 
     for (entity, mut combatant, transform, pet, auras, pet_command) in pets.iter_mut() {
         if !combatant.is_alive() {
@@ -188,7 +203,9 @@ pub fn pet_ai_system(
             builder.finish();
             continue;
         } else {
-            combatant.target = combatant_info.get(&pet.owner).and_then(|owner_info| owner_info.target);
+            combatant.target = combatant_info
+                .get(&pet.owner)
+                .and_then(|owner_info| owner_info.target);
         }
 
         let my_pos = transform.translation;
@@ -238,7 +255,9 @@ pub fn pet_ai_system(
         // dispatch (cooldown rolled, target died, friendly CC landed), the
         // command is rejected and despawned without firing.
         if let Some(command) = pet_command.copied() {
-            let dispatch_target_view = ctx.combatants.get(&command.target)
+            let dispatch_target_view = ctx
+                .combatants
+                .get(&command.target)
                 .map(|info| TargetView::from_info(info, my_pos));
             let mut builder = decision_trace.start_pet_dispatch_decision(
                 actor_view.clone(),
@@ -250,25 +269,37 @@ pub fn pet_ai_system(
 
             let ability = command.ability;
             if let Some(def) = abilities.get(&ability) {
-                let rejection = pet_command_rejection(
-                    ability, def, &combatant, my_pos, command.target, &ctx,
-                );
+                let rejection =
+                    pet_command_rejection(ability, def, &combatant, my_pos, command.target, &ctx);
                 if let Some(reason) = rejection {
                     builder.reject(ability, reason);
                 } else {
                     builder.choose(ability, Some(command.target), true);
                     match ability {
                         AbilityType::SpiderWeb => execute_spider_web(
-                            &mut commands, &mut combat_log, def, entity,
-                            &mut combatant, my_pos, command.target,
+                            &mut commands,
+                            &mut combat_log,
+                            def,
+                            entity,
+                            &mut combatant,
+                            my_pos,
+                            command.target,
                         ),
                         AbilityType::BoarCharge => execute_boar_charge(
-                            &mut commands, &mut combat_log, def, entity,
-                            &mut combatant, command.target,
+                            &mut commands,
+                            &mut combat_log,
+                            def,
+                            entity,
+                            &mut combatant,
+                            command.target,
                         ),
                         AbilityType::MastersCall => execute_masters_call(
-                            &mut commands, &mut combat_log, def, entity,
-                            &mut combatant, command.target,
+                            &mut commands,
+                            &mut combat_log,
+                            def,
+                            entity,
+                            &mut combatant,
+                            command.target,
                         ),
                         _ => {
                             // Unsupported ability via PetCommand. Drop with no
@@ -317,26 +348,55 @@ pub fn pet_ai_system(
         match pet.pet_type {
             PetType::Felhunter => {
                 felhunter_ai(
-                    &mut commands, &mut combat_log, &abilities, entity, &mut combatant,
-                    my_pos, &ctx, &casting_targets, &channeling_targets, &mut builder,
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    &ctx,
+                    &casting_targets,
+                    &channeling_targets,
+                    &mut builder,
                 );
             }
             PetType::Spider => {
                 spider_autonomous_dispatch(
-                    &mut commands, &mut combat_log, &abilities, entity, &mut combatant,
-                    my_pos, pet, &ctx, &mut builder,
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    pet,
+                    &ctx,
+                    &mut builder,
                 );
             }
             PetType::Boar => {
                 boar_autonomous_dispatch(
-                    &mut commands, &mut combat_log, &abilities, entity, &mut combatant,
-                    my_pos, pet, &ctx, &mut builder,
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    pet,
+                    &ctx,
+                    &mut builder,
                 );
             }
             PetType::Bird => {
                 bird_autonomous_dispatch(
-                    &mut commands, &mut combat_log, &abilities, entity, &mut combatant,
-                    my_pos, pet, &ctx, &mut builder,
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    pet,
+                    &ctx,
+                    &mut builder,
                 );
             }
         }
@@ -358,10 +418,14 @@ fn pet_command_rejection(
     ctx: &CombatContext,
 ) -> Option<RejectionReason> {
     if combatant.global_cooldown > 0.0 {
-        return Some(RejectionReason::OnCooldown { remaining: combatant.global_cooldown });
+        return Some(RejectionReason::OnCooldown {
+            remaining: combatant.global_cooldown,
+        });
     }
     if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        return Some(RejectionReason::OnCooldown { remaining: *remaining });
+        return Some(RejectionReason::OnCooldown {
+            remaining: *remaining,
+        });
     }
 
     let Some(target_info) = ctx.combatants.get(&target) else {
@@ -374,11 +438,12 @@ fn pet_command_rejection(
     if matches!(ability, AbilityType::SpiderWeb | AbilityType::BoarCharge) {
         let dist = my_pos.distance(target_info.position);
         if dist > def.range {
-            return Some(RejectionReason::OutOfRange { distance: dist, max: def.range });
+            return Some(RejectionReason::OutOfRange {
+                distance: dist,
+                max: def.range,
+            });
         }
-        if ability == AbilityType::BoarCharge
-            && dist < super::super::constants::CHARGE_MIN_RANGE
-        {
+        if ability == AbilityType::BoarCharge && dist < super::super::constants::CHARGE_MIN_RANGE {
             return Some(RejectionReason::WithinDeadZone {
                 distance: dist,
                 min: super::super::constants::CHARGE_MIN_RANGE,
@@ -406,20 +471,34 @@ fn felhunter_ai(
     my_pos: Vec3,
     ctx: &CombatContext,
     casting_targets: &Query<(Entity, &Combatant, &CastingState), Without<Pet>>,
-    channeling_targets: &Query<(Entity, &Combatant, &ChannelingState), (Without<CastingState>, Without<Pet>)>,
+    channeling_targets: &Query<
+        (Entity, &Combatant, &ChannelingState),
+        (Without<CastingState>, Without<Pet>),
+    >,
     builder: &mut DecisionEventBuilder<'_>,
 ) {
     if combatant.global_cooldown > 0.0 {
         return;
     }
 
-    if try_spell_lock(commands, combat_log, abilities, entity, combatant, my_pos, ctx, casting_targets, channeling_targets, builder) {
+    if try_spell_lock(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        ctx,
+        casting_targets,
+        channeling_targets,
+        builder,
+    ) {
         return;
     }
 
-    if try_devour_magic(commands, combat_log, abilities, entity, combatant, my_pos, ctx, builder) {
-        return;
-    }
+    try_devour_magic(
+        commands, combat_log, abilities, entity, combatant, my_pos, ctx, builder,
+    );
 }
 
 /// Try to interrupt an enemy cast with Spell Lock.
@@ -432,14 +511,22 @@ fn try_spell_lock(
     my_pos: Vec3,
     ctx: &CombatContext,
     casting_targets: &Query<(Entity, &Combatant, &CastingState), Without<Pet>>,
-    channeling_targets: &Query<(Entity, &Combatant, &ChannelingState), (Without<CastingState>, Without<Pet>)>,
+    channeling_targets: &Query<
+        (Entity, &Combatant, &ChannelingState),
+        (Without<CastingState>, Without<Pet>),
+    >,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::SpellLock;
     let def = abilities.get_unchecked(&ability);
 
     if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
+        builder.reject(
+            ability,
+            RejectionReason::OnCooldown {
+                remaining: *remaining,
+            },
+        );
         return false;
     }
 
@@ -462,9 +549,12 @@ fn try_spell_lock(
         if ctx.entity_is_immune(target_entity) {
             continue;
         }
-        let distance = my_pos.distance(ctx.combatants.get(&target_entity)
-            .map(|i| i.position)
-            .unwrap_or(Vec3::ZERO));
+        let distance = my_pos.distance(
+            ctx.combatants
+                .get(&target_entity)
+                .map(|i| i.position)
+                .unwrap_or(Vec3::ZERO),
+        );
         if distance > def.range {
             continue;
         }
@@ -477,7 +567,15 @@ fn try_spell_lock(
     }
     if let Some(target_entity) = heal_caster.or(first_caster) {
         builder.choose(ability, Some(target_entity), true);
-        execute_spell_lock(commands, combat_log, abilities, entity, combatant, target_entity, &def.name);
+        execute_spell_lock(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            target_entity,
+            &def.name,
+        );
         return true;
     }
 
@@ -488,14 +586,25 @@ fn try_spell_lock(
         if ctx.entity_is_immune(target_entity) {
             continue;
         }
-        let distance = my_pos.distance(ctx.combatants.get(&target_entity)
-            .map(|i| i.position)
-            .unwrap_or(Vec3::ZERO));
+        let distance = my_pos.distance(
+            ctx.combatants
+                .get(&target_entity)
+                .map(|i| i.position)
+                .unwrap_or(Vec3::ZERO),
+        );
         if distance > def.range {
             continue;
         }
         builder.choose(ability, Some(target_entity), true);
-        execute_spell_lock(commands, combat_log, abilities, entity, combatant, target_entity, &def.name);
+        execute_spell_lock(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            target_entity,
+            &def.name,
+        );
         return true;
     }
 
@@ -517,7 +626,11 @@ pub(crate) fn execute_spell_lock(
 
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
-    let caster_id = pet_combatant_id(combatant.team, combatant.owner_relative_slot(), PetType::Felhunter);
+    let caster_id = pet_combatant_id(
+        combatant.team,
+        combatant.owner_relative_slot(),
+        PetType::Felhunter,
+    );
     combat_log.log_ability_cast(
         caster_id.clone(),
         ability_name.to_string(),
@@ -548,7 +661,12 @@ fn try_devour_magic(
     let def = abilities.get_unchecked(&ability);
 
     if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
+        builder.reject(
+            ability,
+            RejectionReason::OnCooldown {
+                remaining: *remaining,
+            },
+        );
         return false;
     }
 
@@ -563,7 +681,8 @@ fn try_devour_magic(
         if distance > def.range {
             continue;
         }
-        let has_dispellable = ctx.active_auras
+        let has_dispellable = ctx
+            .active_auras
             .get(ally_entity)
             .map(|auras| auras.iter().any(|a| a.can_be_dispelled()))
             .unwrap_or(false);
@@ -589,7 +708,11 @@ fn try_devour_magic(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = pet_combatant_id(combatant.team, combatant.owner_relative_slot(), PetType::Felhunter);
+    let caster_id = pet_combatant_id(
+        combatant.team,
+        combatant.owner_relative_slot(),
+        PetType::Felhunter,
+    );
     combat_log.log_ability_cast(
         caster_id.clone(),
         def.name.to_string(),
@@ -647,7 +770,11 @@ pub(crate) fn execute_spider_web(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = pet_combatant_id(combatant.team, combatant.owner_relative_slot(), PetType::Spider);
+    let caster_id = pet_combatant_id(
+        combatant.team,
+        combatant.owner_relative_slot(),
+        PetType::Spider,
+    );
     combat_log.log_ability_cast(
         caster_id.clone(),
         def.name.to_string(),
@@ -676,7 +803,11 @@ pub(crate) fn execute_boar_charge(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = pet_combatant_id(combatant.team, combatant.owner_relative_slot(), PetType::Boar);
+    let caster_id = pet_combatant_id(
+        combatant.team,
+        combatant.owner_relative_slot(),
+        PetType::Boar,
+    );
     combat_log.log_ability_cast(
         caster_id.clone(),
         def.name.to_string(),
@@ -720,7 +851,11 @@ pub(crate) fn execute_masters_call(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = pet_combatant_id(combatant.team, combatant.owner_relative_slot(), PetType::Bird);
+    let caster_id = pet_combatant_id(
+        combatant.team,
+        combatant.owner_relative_slot(),
+        PetType::Bird,
+    );
     combat_log.log_ability_cast(
         caster_id.clone(),
         def.name.to_string(),
@@ -759,7 +894,9 @@ fn spider_autonomous_dispatch(
         return;
     }
     let ability = AbilityType::SpiderWeb;
-    let Some(def) = abilities.get(&ability) else { return };
+    let Some(def) = abilities.get(&ability) else {
+        return;
+    };
 
     // Heel suppression — pet AI already handled HP<25% via continue above,
     // but defensively skip dispatch if the pet is heeling.
@@ -773,7 +910,12 @@ fn spider_autonomous_dispatch(
     }
 
     if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
+        builder.reject(
+            ability,
+            RejectionReason::OnCooldown {
+                remaining: *remaining,
+            },
+        );
         return;
     }
 
@@ -789,7 +931,9 @@ fn spider_autonomous_dispatch(
         builder.reject(ability, RejectionReason::NoValidTarget);
         return;
     };
-    if !target_info.is_alive || target_info.is_pet || target_info.stealthed
+    if !target_info.is_alive
+        || target_info.is_pet
+        || target_info.stealthed
         || target_info.team == combatant.team
     {
         builder.reject(ability, RejectionReason::NoValidTarget);
@@ -798,7 +942,13 @@ fn spider_autonomous_dispatch(
 
     let dist = my_pos.distance(target_info.position);
     if dist > def.range {
-        builder.reject(ability, RejectionReason::OutOfRange { distance: dist, max: def.range });
+        builder.reject(
+            ability,
+            RejectionReason::OutOfRange {
+                distance: dist,
+                max: def.range,
+            },
+        );
         return;
     }
 
@@ -830,7 +980,9 @@ fn boar_autonomous_dispatch(
         return;
     }
     let ability = AbilityType::BoarCharge;
-    let Some(def) = abilities.get(&ability) else { return };
+    let Some(def) = abilities.get(&ability) else {
+        return;
+    };
 
     let hp_ratio = if combatant.max_health > 0.0 {
         combatant.current_health / combatant.max_health
@@ -842,7 +994,12 @@ fn boar_autonomous_dispatch(
     }
 
     if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
+        builder.reject(
+            ability,
+            RejectionReason::OnCooldown {
+                remaining: *remaining,
+            },
+        );
         return;
     }
 
@@ -858,7 +1015,9 @@ fn boar_autonomous_dispatch(
         builder.reject(ability, RejectionReason::NoValidTarget);
         return;
     };
-    if !target_info.is_alive || target_info.is_pet || target_info.stealthed
+    if !target_info.is_alive
+        || target_info.is_pet
+        || target_info.stealthed
         || target_info.team == combatant.team
     {
         builder.reject(ability, RejectionReason::NoValidTarget);
@@ -867,7 +1026,13 @@ fn boar_autonomous_dispatch(
 
     let dist = my_pos.distance(target_info.position);
     if dist > def.range {
-        builder.reject(ability, RejectionReason::OutOfRange { distance: dist, max: def.range });
+        builder.reject(
+            ability,
+            RejectionReason::OutOfRange {
+                distance: dist,
+                max: def.range,
+            },
+        );
         return;
     }
     if dist < super::super::constants::CHARGE_MIN_RANGE {
@@ -906,7 +1071,9 @@ fn bird_autonomous_dispatch(
         return;
     }
     let ability = AbilityType::MastersCall;
-    let Some(def) = abilities.get(&ability) else { return };
+    let Some(def) = abilities.get(&ability) else {
+        return;
+    };
 
     let hp_ratio = if combatant.max_health > 0.0 {
         combatant.current_health / combatant.max_health
@@ -918,15 +1085,19 @@ fn bird_autonomous_dispatch(
     }
 
     if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
+        builder.reject(
+            ability,
+            RejectionReason::OnCooldown {
+                remaining: *remaining,
+            },
+        );
         return;
     }
 
-    let owner_needs_cleanse = ctx.active_auras.get(&pet.owner).map_or(false, |auras| {
-        auras.iter().any(|a| matches!(
-            a.effect_type,
-            AuraType::Root | AuraType::MovementSpeedSlow,
-        ))
+    let owner_needs_cleanse = ctx.active_auras.get(&pet.owner).is_some_and(|auras| {
+        auras
+            .iter()
+            .any(|a| matches!(a.effect_type, AuraType::Root | AuraType::MovementSpeedSlow,))
     });
     let target = if owner_needs_cleanse {
         Some(pet.owner)
@@ -937,10 +1108,10 @@ fn bird_autonomous_dispatch(
                 continue;
             }
             if let Some(auras) = ctx.active_auras.get(ally_entity) {
-                if auras.iter().any(|a| matches!(
-                    a.effect_type,
-                    AuraType::Root | AuraType::MovementSpeedSlow,
-                )) {
+                if auras
+                    .iter()
+                    .any(|a| matches!(a.effect_type, AuraType::Root | AuraType::MovementSpeedSlow,))
+                {
                     fallback = Some(*ally_entity);
                     break;
                 }
@@ -958,7 +1129,13 @@ fn bird_autonomous_dispatch(
     if let Some(target_info) = ctx.combatants.get(&target) {
         let dist = _my_pos.distance(target_info.position);
         if dist > def.range {
-            builder.reject(ability, RejectionReason::OutOfRange { distance: dist, max: def.range });
+            builder.reject(
+                ability,
+                RejectionReason::OutOfRange {
+                    distance: dist,
+                    max: def.range,
+                },
+            );
             return;
         }
     }

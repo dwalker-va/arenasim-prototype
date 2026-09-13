@@ -6,7 +6,9 @@
 //! - Damage/healing abilities have appropriate scaling
 //! - Spell schools are correctly assigned
 
-use arenasim::states::play_match::{AbilityType, AuraType, SpellSchool, ScalingStat, AbilityDefinitions};
+use arenasim::states::play_match::{
+    AbilityDefinitions, AbilityType, AuraType, ScalingStat, SpellSchool,
+};
 
 // =============================================================================
 // Ability Definition Validation Tests
@@ -400,9 +402,9 @@ fn test_instant_abilities_have_no_projectile() {
 fn test_cc_abilities_apply_auras() {
     let abilities = load_abilities();
     let cc_abilities = vec![
-        AbilityType::FrostNova,   // Root
-        AbilityType::KidneyShot,  // Stun
-        AbilityType::Fear,        // Fear
+        AbilityType::FrostNova,  // Root
+        AbilityType::KidneyShot, // Stun
+        AbilityType::Fear,       // Fear
     ];
 
     for ability in cc_abilities {
@@ -441,9 +443,9 @@ fn test_dot_abilities_apply_auras() {
 fn test_buff_abilities_apply_auras() {
     let abilities = load_abilities();
     let buff_abilities = vec![
-        AbilityType::PowerWordFortitude,  // Max HP
-        AbilityType::ArcaneIntellect,     // Max Mana
-        AbilityType::BattleShout,         // Attack Power
+        AbilityType::PowerWordFortitude, // Max HP
+        AbilityType::ArcaneIntellect,    // Max Mana
+        AbilityType::BattleShout,        // Attack Power
     ];
 
     for ability in buff_abilities {

@@ -1,7 +1,7 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
-use crate::states::play_match::components::*;
 use crate::states::match_config::CharacterClass;
+use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Dispel Burst Visual Effects
@@ -73,7 +73,11 @@ pub fn spawn_dispel_visuals(
 /// Update dispel bursts: expand sphere and fade out.
 pub fn update_dispel_bursts(
     time: Res<Time>,
-    mut bursts: Query<(&mut DispelBurst, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut bursts: Query<(
+        &mut DispelBurst,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     transforms: Query<&Transform, Without<DispelBurst>>,
 ) {
@@ -117,4 +121,3 @@ pub fn cleanup_expired_dispel_bursts(
         }
     }
 }
-

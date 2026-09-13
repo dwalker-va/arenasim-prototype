@@ -8,10 +8,10 @@
 //! All systems here are graphical-only. Headless mode never registers them.
 //! Registration lives in `src/states/mod.rs` (`StatesPlugin::build()`).
 
-use bevy::prelude::*;
 use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
-use super::components::{ArenaCamera, Combatant, CameraController, PlayMatchEntity, SelectionRing};
+use super::components::{ArenaCamera, CameraController, Combatant, PlayMatchEntity, SelectionRing};
 
 // =============================================================================
 // Tunables
@@ -223,7 +223,11 @@ mod tests {
 
     #[test]
     fn is_click_gesture_within_threshold() {
-        assert!(is_click_gesture(Vec2::new(100.0, 100.0), Vec2::new(102.0, 99.0), 5.0));
+        assert!(is_click_gesture(
+            Vec2::new(100.0, 100.0),
+            Vec2::new(102.0, 99.0),
+            5.0
+        ));
     }
 
     #[test]
@@ -236,12 +240,20 @@ mod tests {
     #[test]
     fn is_click_gesture_at_threshold_is_drag() {
         // Strict less-than: exactly the threshold counts as a drag.
-        assert!(!is_click_gesture(Vec2::new(0.0, 0.0), Vec2::new(5.0, 0.0), 5.0));
+        assert!(!is_click_gesture(
+            Vec2::new(0.0, 0.0),
+            Vec2::new(5.0, 0.0),
+            5.0
+        ));
     }
 
     #[test]
     fn is_click_gesture_over_threshold_is_drag() {
-        assert!(!is_click_gesture(Vec2::new(100.0, 100.0), Vec2::new(200.0, 100.0), 5.0));
+        assert!(!is_click_gesture(
+            Vec2::new(100.0, 100.0),
+            Vec2::new(200.0, 100.0),
+            5.0
+        ));
     }
 
     #[test]
@@ -289,7 +301,9 @@ mod tests {
 
     #[test]
     fn selection_ring_can_be_constructed() {
-        let ring = SelectionRing { target: Entity::from_raw(7) };
+        let ring = SelectionRing {
+            target: Entity::from_raw(7),
+        };
         assert_eq!(ring.target, Entity::from_raw(7));
     }
 }

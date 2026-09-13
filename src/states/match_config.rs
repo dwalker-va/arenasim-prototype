@@ -266,7 +266,9 @@ impl PaladinAura {
         match self {
             PaladinAura::DevotionAura => "Reduces damage taken by nearby allies",
             PaladinAura::ShadowResistanceAura => "Increases shadow resistance of nearby allies",
-            PaladinAura::ConcentrationAura => "Reduces interrupt lockout duration for nearby allies",
+            PaladinAura::ConcentrationAura => {
+                "Reduces interrupt lockout duration for nearby allies"
+            }
         }
     }
 
@@ -346,19 +348,25 @@ impl CharacterClass {
             CharacterClass::Priest => Color::srgb(1.0, 1.0, 1.0),     // White
             CharacterClass::Warlock => Color::srgb(0.58, 0.51, 0.79), // Purple
             CharacterClass::Paladin => Color::srgb(0.96, 0.55, 0.73), // Pink (WoW Paladin color)
-            CharacterClass::Hunter => Color::srgb(0.67, 0.83, 0.45),   // Green (WoW Hunter color #ABD473)
-            CharacterClass::Shaman => Color::srgb(0.0, 0.44, 0.87),    // Blue (WoW Shaman color #0070DE)
+            CharacterClass::Hunter => Color::srgb(0.67, 0.83, 0.45), // Green (WoW Hunter color #ABD473)
+            CharacterClass::Shaman => Color::srgb(0.0, 0.44, 0.87), // Blue (WoW Shaman color #0070DE)
         }
     }
 
     /// Whether this class attacks in melee range (vs. ranged/wand).
     pub fn is_melee(&self) -> bool {
-        matches!(self, CharacterClass::Warrior | CharacterClass::Rogue | CharacterClass::Paladin)
+        matches!(
+            self,
+            CharacterClass::Warrior | CharacterClass::Rogue | CharacterClass::Paladin
+        )
     }
 
     /// Whether this class is primarily a healer (for CC target prioritization).
     pub fn is_healer(&self) -> bool {
-        matches!(self, CharacterClass::Priest | CharacterClass::Paladin | CharacterClass::Shaman)
+        matches!(
+            self,
+            CharacterClass::Priest | CharacterClass::Paladin | CharacterClass::Shaman
+        )
     }
 
     /// Whether this class converts damage taken into rage (see the 15%
@@ -375,7 +383,12 @@ impl CharacterClass {
     pub fn uses_mana(&self) -> bool {
         matches!(
             self,
-            CharacterClass::Mage | CharacterClass::Priest | CharacterClass::Warlock | CharacterClass::Paladin | CharacterClass::Hunter | CharacterClass::Shaman
+            CharacterClass::Mage
+                | CharacterClass::Priest
+                | CharacterClass::Warlock
+                | CharacterClass::Paladin
+                | CharacterClass::Hunter
+                | CharacterClass::Shaman
         )
     }
 
@@ -439,7 +452,11 @@ impl ArenaMap {
     /// test asset and must not surface in the map-select UI, which iterates
     /// this list.
     pub fn all() -> &'static [ArenaMap] {
-        &[ArenaMap::BasicArena, ArenaMap::TwinPillars, ArenaMap::PillaredArena]
+        &[
+            ArenaMap::BasicArena,
+            ArenaMap::TwinPillars,
+            ArenaMap::PillaredArena,
+        ]
     }
 
     /// Get the display name
@@ -529,8 +546,8 @@ impl Default for MatchConfig {
             map: ArenaMap::BasicArena,
             team1_kill_target: Some(0), // Default to enemy slot 0 — opt out by clicking again
             team2_kill_target: Some(0), // Default to enemy slot 0 — opt out by clicking again
-            team1_cc_target: None,   // Use heuristics by default
-            team2_cc_target: None,   // Use heuristics by default
+            team1_cc_target: None,      // Use heuristics by default
+            team2_cc_target: None,      // Use heuristics by default
             team1_rogue_openers: vec![RogueOpener::default()],
             team2_rogue_openers: vec![RogueOpener::default()],
             team1_rogue_poisons: vec![RoguePoison::default()],
@@ -564,17 +581,22 @@ impl MatchConfig {
                 self.team2_kill_target = Some(0);
             }
         }
-        self.team1_rogue_openers.resize(size, RogueOpener::default());
-        self.team1_rogue_poisons.resize(size, RoguePoison::default());
+        self.team1_rogue_openers
+            .resize(size, RogueOpener::default());
+        self.team1_rogue_poisons
+            .resize(size, RoguePoison::default());
         // Resize curse prefs: one inner vec per slot, each sized to enemy team
         let enemy_size = self.team2_size;
-        self.team1_warlock_curse_prefs.resize(size, vec![WarlockCurse::default(); enemy_size]);
+        self.team1_warlock_curse_prefs
+            .resize(size, vec![WarlockCurse::default(); enemy_size]);
         for prefs in &mut self.team1_warlock_curse_prefs {
             prefs.resize(enemy_size, WarlockCurse::default());
         }
-        self.team1_warrior_shouts.resize(size, WarriorShout::default());
+        self.team1_warrior_shouts
+            .resize(size, WarriorShout::default());
         self.team1_mage_armors.resize(size, MageArmor::default());
-        self.team1_paladin_auras.resize(size, PaladinAura::default());
+        self.team1_paladin_auras
+            .resize(size, PaladinAura::default());
         self.team1_equipment.resize(size, Loadout::new());
     }
 
@@ -589,11 +611,14 @@ impl MatchConfig {
                 self.team1_kill_target = Some(0);
             }
         }
-        self.team2_rogue_openers.resize(size, RogueOpener::default());
-        self.team2_rogue_poisons.resize(size, RoguePoison::default());
+        self.team2_rogue_openers
+            .resize(size, RogueOpener::default());
+        self.team2_rogue_poisons
+            .resize(size, RoguePoison::default());
         // Resize curse prefs: one inner vec per slot, each sized to enemy team
         let enemy_size = self.team1_size;
-        self.team2_warlock_curse_prefs.resize(size, vec![WarlockCurse::default(); enemy_size]);
+        self.team2_warlock_curse_prefs
+            .resize(size, vec![WarlockCurse::default(); enemy_size]);
         for prefs in &mut self.team2_warlock_curse_prefs {
             prefs.resize(enemy_size, WarlockCurse::default());
         }
@@ -601,16 +626,17 @@ impl MatchConfig {
         for prefs in &mut self.team1_warlock_curse_prefs {
             prefs.resize(size, WarlockCurse::default());
         }
-        self.team2_warrior_shouts.resize(size, WarriorShout::default());
+        self.team2_warrior_shouts
+            .resize(size, WarriorShout::default());
         self.team2_mage_armors.resize(size, MageArmor::default());
-        self.team2_paladin_auras.resize(size, PaladinAura::default());
+        self.team2_paladin_auras
+            .resize(size, PaladinAura::default());
         self.team2_equipment.resize(size, Loadout::new());
     }
 
     /// Check if the match configuration is valid (all slots filled)
     pub fn is_valid(&self) -> bool {
-        self.team1.iter().all(|slot| slot.is_some())
-            && self.team2.iter().all(|slot| slot.is_some())
+        self.team1.iter().all(|slot| slot.is_some()) && self.team2.iter().all(|slot| slot.is_some())
     }
 
     /// Assign a class to a team slot, dropping that slot's equipment overrides
@@ -665,7 +691,13 @@ impl MatchConfig {
     }
 
     /// Set the curse preference for a specific warlock slot and enemy target
-    pub fn set_curse_pref(&mut self, team: u8, slot: usize, enemy_target: usize, curse: WarlockCurse) {
+    pub fn set_curse_pref(
+        &mut self,
+        team: u8,
+        slot: usize,
+        enemy_target: usize,
+        curse: WarlockCurse,
+    ) {
         let prefs = if team == 1 {
             &mut self.team1_warlock_curse_prefs
         } else {
@@ -673,7 +705,11 @@ impl MatchConfig {
         };
         // Ensure the outer vec is large enough
         if prefs.len() <= slot {
-            let enemy_size = if team == 1 { self.team2_size } else { self.team1_size };
+            let enemy_size = if team == 1 {
+                self.team2_size
+            } else {
+                self.team1_size
+            };
             prefs.resize(slot + 1, vec![WarlockCurse::default(); enemy_size]);
         }
         // Ensure the inner vec is large enough
@@ -686,8 +722,8 @@ impl MatchConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::play_match::equipment::{ItemId, ItemSlot};
+    use super::*;
 
     /// Changing a slot's class drops its equipment overrides, so the new class
     /// arrives wearing its own defaults rather than the previous class's picks

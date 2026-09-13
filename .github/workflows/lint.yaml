@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Lint
+
+# Split out of ci.yaml rather than bolted onto it. `ci.yaml` builds release AND
+# tests dev, compiling the Bevy graph twice for 16-18 minutes cached; clippy
+# needs neither codegen nor a test binary, so a formatting slip or a lint
+# regression gets its own answer in a fraction of that instead of waiting
+# behind the suite.
+#
+# Same trigger shape as ci.yaml, and for the same reason: on `main` after each
+# merge, never on pull_request. Per-PR CI was declined on cost, and a job being
+# cheap is not a reason to reopen that. A contributor who wants the verdict on
+# a branch first starts one by hand:
+# `gh workflow run lint.yaml --ref <branch>`.
+#
+# `paths-ignore` mirrors ci.yaml exactly — docs and agent-harness config that
+# no cargo step reads. GitHub evaluates the filter only on push, never on a
+# dispatch.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".claude/**"
+      - "LICENSE"
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: fmt + clippy
+    # macos-latest to match ci.yaml's runner, so both jobs restore the same
+    # Swatinem cache rather than each paying for its own.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rustfmt and clippy ship with the stable toolchain; named explicitly so
+      # a component that stops being default fails here instead of skipping the
+      # step that needed it.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # No --locked: this step reads no lockfile-sensitive output, and ci.yaml
+      # already fails on a stale Cargo.lock.
+      - name: Format
+        run: cargo fmt --check
+
+      # Default target set (lib + bins), which is what the repo's shipping code
+      # is. The tree is also clean under `--all-targets`, but adding it here
+      # would compile every integration-test target and is the slow half of the
+      # job it exists to avoid.
+      - name: Clippy
+        run: cargo clippy -- -D warnings

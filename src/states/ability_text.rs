@@ -58,7 +58,10 @@ pub fn totem_description(ability: AbilityType) -> Option<String> {
         ),
         _ => return None,
     };
-    Some(format!("Summons a totem that {}. Lasts {:.0} sec.", effect, TOTEM_DURATION))
+    Some(format!(
+        "Summons a totem that {}. Lasts {:.0} sec.",
+        effect, TOTEM_DURATION
+    ))
 }
 
 /// The ability's PRECONDITIONS, as a trailing sentence — what must be true to
@@ -68,7 +71,9 @@ pub fn totem_description(ability: AbilityType) -> Option<String> {
 /// the aura sentence: Cheap Shot's whole effect is its stun, and a description
 /// that led with "Must be stealthed." made its one-line summary say only that.
 pub fn requirement_sentence(config: &AbilityConfig) -> Option<String> {
-    config.requires_stealth.then(|| "Must be stealthed.".to_string())
+    config
+        .requires_stealth
+        .then(|| "Must be stealthed.".to_string())
 }
 
 /// An ability's EFFECT half, before the aura sentence and the precondition are
@@ -122,7 +127,10 @@ fn effect_parts(ability: AbilityType, config: &AbilityConfig, stats: &ClassBaseS
         let max_damage = config.damage_base_max + damage_bonus;
         if config.channel_duration.is_some() {
             // Channeled damage - show per tick
-            parts.push(format!("Deals {:.0}-{:.0} damage per tick.", min_damage, max_damage));
+            parts.push(format!(
+                "Deals {:.0}-{:.0} damage per tick.",
+                min_damage, max_damage
+            ));
         } else {
             parts.push(format!("Deals {:.0}-{:.0} damage.", min_damage, max_damage));
         }
@@ -137,13 +145,19 @@ fn effect_parts(ability: AbilityType, config: &AbilityConfig, stats: &ClassBaseS
 
     // Channel healing (Drain Life style)
     if config.channel_healing_per_tick > 0.0 {
-        parts.push(format!("Restores {:.0} health to the caster per tick.", config.channel_healing_per_tick));
+        parts.push(format!(
+            "Restores {:.0} health to the caster per tick.",
+            config.channel_healing_per_tick
+        ));
     }
 
     // Interrupt
     if config.is_interrupt {
         if config.lockout_duration > 0.0 {
-            parts.push(format!("Interrupts spellcasting and locks out the school for {:.1} sec.", config.lockout_duration));
+            parts.push(format!(
+                "Interrupts spellcasting and locks out the school for {:.1} sec.",
+                config.lockout_duration
+            ));
         } else {
             parts.push("Interrupts spellcasting.".to_string());
         }
@@ -222,11 +236,17 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
     match aura.aura_type {
         AuraType::MovementSpeedSlow => {
             let slow_pct = ((1.0 - aura.magnitude) * 100.0) as i32;
-            format!("Slows movement speed by {}% for {:.0} sec.", slow_pct, aura.duration)
+            format!(
+                "Slows movement speed by {}% for {:.0} sec.",
+                slow_pct, aura.duration
+            )
         }
         AuraType::Root => {
             if aura.break_on_damage > 0.0 {
-                format!("Roots the target for {:.0} sec. Breaks after {:.0} damage.", aura.duration, aura.break_on_damage)
+                format!(
+                    "Roots the target for {:.0} sec. Breaks after {:.0} damage.",
+                    aura.duration, aura.break_on_damage
+                )
             } else {
                 format!("Roots the target for {:.0} sec.", aura.duration)
             }
@@ -235,31 +255,55 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
             format!("Stuns the target for {:.0} sec.", aura.duration)
         }
         AuraType::Fear => {
-            format!("Causes the target to flee in fear for {:.0} sec. Breaks on damage.", aura.duration)
+            format!(
+                "Causes the target to flee in fear for {:.0} sec. Breaks on damage.",
+                aura.duration
+            )
         }
         AuraType::Polymorph => {
-            format!("Transforms the target into a sheep for {:.0} sec. Breaks on any damage.", aura.duration)
+            format!(
+                "Transforms the target into a sheep for {:.0} sec. Breaks on any damage.",
+                aura.duration
+            )
         }
         AuraType::DamageOverTime => {
             let total_ticks = (aura.duration / aura.tick_interval).ceil() as i32;
             let total_damage = aura.magnitude * total_ticks as f32;
-            format!("Deals {:.0} damage over {:.0} sec.", total_damage, aura.duration)
+            format!(
+                "Deals {:.0} damage over {:.0} sec.",
+                total_damage, aura.duration
+            )
         }
         AuraType::HealingReduction => {
             let reduction_pct = ((1.0 - aura.magnitude) * 100.0) as i32;
-            format!("Reduces healing received by {}% for {:.0} sec.", reduction_pct, aura.duration)
+            format!(
+                "Reduces healing received by {}% for {:.0} sec.",
+                reduction_pct, aura.duration
+            )
         }
         AuraType::Absorb => {
-            format!("Absorbs {:.0} damage for {:.0} sec.", aura.magnitude, aura.duration)
+            format!(
+                "Absorbs {:.0} damage for {:.0} sec.",
+                aura.magnitude, aura.duration
+            )
         }
         AuraType::MaxHealthIncrease => {
-            format!("Increases maximum health by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+            format!(
+                "Increases maximum health by {:.0} for {:.0} sec.",
+                aura.magnitude, aura.duration
+            )
         }
         AuraType::MaxManaIncrease => {
-            format!("Increases maximum mana by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+            format!(
+                "Increases maximum mana by {:.0} for {:.0} sec.",
+                aura.magnitude, aura.duration
+            )
         }
         AuraType::AttackPowerIncrease => {
-            format!("Increases attack power by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+            format!(
+                "Increases attack power by {:.0} for {:.0} sec.",
+                aura.magnitude, aura.duration
+            )
         }
         AuraType::SpellSchoolLockout => {
             format!("Locks out a spell school for {:.0} sec.", aura.duration)
@@ -268,65 +312,113 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
             format!("Reveals stealthed enemies for {:.0} sec.", aura.duration)
         }
         AuraType::WeakenedSoul => {
-            format!("Cannot receive Power Word: Shield for {:.0} sec.", aura.duration)
+            format!(
+                "Cannot receive Power Word: Shield for {:.0} sec.",
+                aura.duration
+            )
         }
         AuraType::DamageReduction => {
             let reduction_pct = (aura.magnitude * 100.0) as i32;
-            format!("Reduces physical damage dealt by {}% for {:.0} sec.", reduction_pct, aura.duration)
+            format!(
+                "Reduces physical damage dealt by {}% for {:.0} sec.",
+                reduction_pct, aura.duration
+            )
         }
         AuraType::CastTimeIncrease => {
             let increase_pct = (aura.magnitude * 100.0) as i32;
-            format!("Increases cast time by {}% for {:.0} sec.", increase_pct, aura.duration)
+            format!(
+                "Increases cast time by {}% for {:.0} sec.",
+                increase_pct, aura.duration
+            )
         }
         AuraType::DamageTakenReduction => {
             let reduction_pct = (aura.magnitude * 100.0) as i32;
-            format!("Reduces damage taken by {}% for {:.0} sec.", reduction_pct, aura.duration)
+            format!(
+                "Reduces damage taken by {}% for {:.0} sec.",
+                reduction_pct, aura.duration
+            )
         }
         AuraType::DamageImmunity => {
-            format!("Immune to all damage for {:.0} sec. Reduces damage dealt by 50%.", aura.duration)
+            format!(
+                "Immune to all damage for {:.0} sec. Reduces damage dealt by 50%.",
+                aura.duration
+            )
         }
         AuraType::Incapacitate => {
             if aura.break_on_damage > 0.0 {
-                format!("Incapacitates the target for {:.0} sec. Breaks on any damage.", aura.duration)
+                format!(
+                    "Incapacitates the target for {:.0} sec. Breaks on any damage.",
+                    aura.duration
+                )
             } else {
                 format!("Incapacitates the target for {:.0} sec.", aura.duration)
             }
         }
         AuraType::SpellResistanceBuff => {
-            format!("Increases spell resistance by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+            format!(
+                "Increases spell resistance by {:.0} for {:.0} sec.",
+                aura.magnitude, aura.duration
+            )
         }
         AuraType::AttackPowerReduction => {
-            format!("Reduces attack power by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+            format!(
+                "Reduces attack power by {:.0} for {:.0} sec.",
+                aura.magnitude, aura.duration
+            )
         }
         AuraType::CritChanceIncrease => {
             let crit_pct = (aura.magnitude * 100.0) as i32;
-            format!("Increases critical strike chance by {}% for {:.0} sec.", crit_pct, aura.duration)
+            format!(
+                "Increases critical strike chance by {}% for {:.0} sec.",
+                crit_pct, aura.duration
+            )
         }
         AuraType::ManaRegenIncrease => {
-            format!("Increases mana regeneration by {:.0}/sec for {:.0} sec.", aura.magnitude, aura.duration)
+            format!(
+                "Increases mana regeneration by {:.0}/sec for {:.0} sec.",
+                aura.magnitude, aura.duration
+            )
         }
         AuraType::AttackSpeedSlow => {
             let slow_pct = (aura.magnitude * 100.0) as i32;
-            format!("Reduces attack speed by {}% for {:.0} sec.", slow_pct, aura.duration)
+            format!(
+                "Reduces attack speed by {}% for {:.0} sec.",
+                slow_pct, aura.duration
+            )
         }
         AuraType::LockoutDurationReduction => {
             let reduction_pct = (aura.magnitude * 100.0) as i32;
-            format!("Reduces interrupt lockout duration by {}% for {:.0} sec.", reduction_pct, aura.duration)
+            format!(
+                "Reduces interrupt lockout duration by {}% for {:.0} sec.",
+                reduction_pct, aura.duration
+            )
         }
         AuraType::FrostArmorBuff => {
-            format!("Frost Armor active for {:.0} sec. Slows melee attackers.", aura.duration)
+            format!(
+                "Frost Armor active for {:.0} sec. Slows melee attackers.",
+                aura.duration
+            )
         }
         AuraType::Silence => {
-            format!("Silenced for {:.0} sec. Cannot cast mana-cost abilities.", aura.duration)
+            format!(
+                "Silenced for {:.0} sec. Cannot cast mana-cost abilities.",
+                aura.duration
+            )
         }
         AuraType::WeaponPoison => {
             "Weapon coated with poison. Attacks may apply a poison debuff.".to_string()
         }
         AuraType::SpellPowerIncrease => {
-            format!("Increases spell power by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+            format!(
+                "Increases spell power by {:.0} for {:.0} sec.",
+                aura.magnitude, aura.duration
+            )
         }
         AuraType::HealingOverTime => {
-            format!("Heals {:.0} every {:.0} sec for {:.0} sec.", aura.magnitude, aura.tick_interval, aura.duration)
+            format!(
+                "Heals {:.0} every {:.0} sec for {:.0} sec.",
+                aura.magnitude, aura.tick_interval, aura.duration
+            )
         }
         AuraType::WindfuryBuff => {
             format!("Empowers melee auto-attacks for {:.0} sec.", aura.duration)
@@ -455,7 +547,8 @@ mod tests {
         let totem = abilities.get_unchecked(&AbilityType::WaterTotem);
         let stats = class_base_stats(totem.class);
         assert!(
-            build_ability_description(AbilityType::WaterTotem, totem, &stats).starts_with("Summons a totem"),
+            build_ability_description(AbilityType::WaterTotem, totem, &stats)
+                .starts_with("Summons a totem"),
             "the totem spec must win"
         );
 
@@ -463,7 +556,10 @@ mod tests {
         // `abilities.ron` carries prose for it.
         let burn = abilities.get_unchecked(&AbilityType::ManaBurn);
         let burn_stats = class_base_stats(burn.class);
-        assert!(!burn.description.is_empty(), "Mana Burn carries hand-written text");
+        assert!(
+            !burn.description.is_empty(),
+            "Mana Burn carries hand-written text"
+        );
         assert_eq!(
             build_ability_description(AbilityType::ManaBurn, burn, &burn_stats),
             burn.description

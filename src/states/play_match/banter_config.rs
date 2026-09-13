@@ -259,10 +259,7 @@ pub struct BanterConfig {
 
 impl BanterConfig {
     /// Every exchange authored for `context`, in file order.
-    pub fn exchanges_for(
-        &self,
-        context: BanterContext,
-    ) -> impl Iterator<Item = &BanterExchange> {
+    pub fn exchanges_for(&self, context: BanterContext) -> impl Iterator<Item = &BanterExchange> {
         self.exchanges.iter().filter(move |e| e.context == context)
     }
 
@@ -332,6 +329,9 @@ impl BanterConfig {
 
     /// Check value and pool sanity. Returns the list of violations on
     /// failure — every offender is named, so one load reports every problem.
+    // `!(x > 0.0)` is deliberate, not a clumsy `<=`: it also rejects NaN,
+    // which is exactly what a config validator must do.
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut issues: Vec<String> = Vec::new();
         let t = &self.timing;
@@ -410,7 +410,10 @@ impl BanterConfig {
             // Roles are exchange-local labels; duplicates make role binding
             // ambiguous (which combatant is "caller"?).
             for (i, speaker) in exchange.speakers.iter().enumerate() {
-                if exchange.speakers[..i].iter().any(|s| s.role == speaker.role) {
+                if exchange.speakers[..i]
+                    .iter()
+                    .any(|s| s.role == speaker.role)
+                {
                     issues.push(format!(
                         "{}: duplicate speaker role '{}' — roles must be unique within an exchange",
                         label, speaker.role
@@ -517,9 +520,13 @@ pub fn parse_banter_config(contents: &str, source: &str) -> Result<BanterConfig,
     let config: BanterConfig =
         ron::from_str(contents).map_err(|e| format!("Failed to parse {}: {}", source, e))?;
 
-    config
-        .validate()
-        .map_err(|issues| format!("Invalid banter config in {}:\n  {}", source, issues.join("\n  ")))?;
+    config.validate().map_err(|issues| {
+        format!(
+            "Invalid banter config in {}:\n  {}",
+            source,
+            issues.join("\n  ")
+        )
+    })?;
 
     Ok(config)
 }
@@ -566,6 +573,26 @@ impl Plugin for BanterConfigPlugin {
     }
 }
 
+/// Every `{emoji:<name>}` referenced by a line.
+///
+/// A tiny scanner rather than a call into `banter::vocab::parse`, so config
+/// validation does not depend on the renderer's span model — the two answer
+/// different questions and should be able to change independently.
+fn emoji_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("{emoji:") {
+        let after = &rest[start + "{emoji:".len()..];
+        let Some(end) = after.find('}') else { break };
+        let name = &after[..end];
+        if !name.is_empty() {
+            names.push(name.to_string());
+        }
+        rest = &after[end + 1..];
+    }
+    names
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -575,8 +602,14 @@ mod tests {
         BanterExchange {
             context,
             speakers: vec![
-                BanterSpeaker { role: "caller".to_string(), class: ClassConstraint::Any },
-                BanterSpeaker { role: "responder".to_string(), class: ClassConstraint::Any },
+                BanterSpeaker {
+                    role: "caller".to_string(),
+                    class: ClassConstraint::Any,
+                },
+                BanterSpeaker {
+                    role: "responder".to_string(),
+                    class: ClassConstraint::Any,
+                },
             ],
             target: ClassConstraint::Any,
             beats: vec![
@@ -584,7 +617,10 @@ mod tests {
                     role: "caller".to_string(),
                     text: "{ability:Mortal Strike} {emoji:arrow} {target}".to_string(),
                 },
-                BanterBeat { role: "responder".to_string(), text: "{emoji:yes}".to_string() },
+                BanterBeat {
+                    role: "responder".to_string(),
+                    text: "{emoji:yes}".to_string(),
+                },
             ],
         }
     }
@@ -594,7 +630,11 @@ mod tests {
     fn covered_config() -> BanterConfig {
         BanterConfig {
             timing: BanterTiming::default(),
-            exchanges: BanterContext::all().iter().copied().map(generic_exchange).collect(),
+            exchanges: BanterContext::all()
+                .iter()
+                .copied()
+                .map(generic_exchange)
+                .collect(),
         }
     }
 
@@ -791,9 +831,7 @@ mod tests {
         let mut config = covered_config();
         config.exchanges[0].speakers[1].role = "caller".to_string();
         config.exchanges[0].beats[1].role = "caller".to_string();
-        let issues = config
-            .validate()
-            .expect_err("duplicate roles must fail");
+        let issues = config.validate().expect_err("duplicate roles must fail");
         assert!(
             issues.iter().any(|i| i.contains("duplicate speaker role")),
             "issues should report the duplicate: {:?}",
@@ -837,7 +875,9 @@ mod tests {
             .validate()
             .expect_err("specificity_weight below 1.0 must fail");
         assert!(
-            issues.iter().any(|i| i.contains("timing.specificity_weight")),
+            issues
+                .iter()
+                .any(|i| i.contains("timing.specificity_weight")),
             "issues should name specificity_weight: {:?}",
             issues
         );
@@ -863,8 +903,8 @@ mod tests {
     /// an exchange-less pool cannot meet the coverage floor.
     #[test]
     fn partial_ron_uses_defaults() {
-        let config: BanterConfig = ron::from_str("(timing: (beat_gap: 9.5))")
-            .expect("partial config must parse");
+        let config: BanterConfig =
+            ron::from_str("(timing: (beat_gap: 9.5))").expect("partial config must parse");
         assert_eq!(config.timing.beat_gap, 9.5, "the stated field wins");
         // Compared against the default rather than a literal: this test is
         // about serde filling the gaps, not about the current pacing, and
@@ -875,7 +915,10 @@ mod tests {
             "unspecified fields use defaults"
         );
         assert_eq!(config.timing.specificity_weight, 3.0);
-        assert!(config.exchanges.is_empty(), "an omitted pool defaults to empty");
+        assert!(
+            config.exchanges.is_empty(),
+            "an omitted pool defaults to empty"
+        );
     }
 
     /// A partially-specified exchange also fills from defaults — an entry
@@ -964,24 +1007,4 @@ mod tests {
             t.beat_start(BanterContext::Opening, 0),
         );
     }
-}
-
-/// Every `{emoji:<name>}` referenced by a line.
-///
-/// A tiny scanner rather than a call into `banter::vocab::parse`, so config
-/// validation does not depend on the renderer's span model — the two answer
-/// different questions and should be able to change independently.
-fn emoji_names(text: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("{emoji:") {
-        let after = &rest[start + "{emoji:".len()..];
-        let Some(end) = after.find('}') else { break };
-        let name = &after[..end];
-        if !name.is_empty() {
-            names.push(name.to_string());
-        }
-        rest = &after[end + 1..];
-    }
-    names
 }

@@ -473,6 +473,8 @@ mod tests {
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn units_are_separated_enough_for_travel_to_read() {
         // A projectile that spawns already touching its target shows no travel,
         // which is most of what a projectile animation is.

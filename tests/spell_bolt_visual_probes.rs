@@ -26,8 +26,8 @@ use arenasim::states::play_match::components::{
     BoltRig, BoltShard, BoltSprite, BoltTrail, Combatant, Projectile,
 };
 use arenasim::states::play_match::{
-    animate_bolt_impacts, animate_bolts, bolt_billboard_rotation, bolt_impact_life,
-    bolt_impact_origin, bolt_kind_for, bolt_ribbon_geometry, arc_roll, build_arc_band,
+    animate_bolt_impacts, animate_bolts, arc_roll, bolt_billboard_rotation, bolt_impact_life,
+    bolt_impact_origin, bolt_kind_for, bolt_ribbon_geometry, build_arc_band,
     frostbolt_shard_extent, shadowbolt_glow_width, spawn_bolt_impacts, spawn_bolt_visuals,
     trail_segment_rotation, update_bolt_motes, update_bolt_trails,
 };
@@ -109,7 +109,10 @@ impl Harness {
             self.app.update();
             let dt = TICK.as_secs_f32();
             let mut moved: Vec<(Entity, Vec3)> = Vec::new();
-            let mut q = self.app.world_mut().query::<(Entity, &Transform, &Projectile)>();
+            let mut q = self
+                .app
+                .world_mut()
+                .query::<(Entity, &Transform, &Projectile)>();
             for (e, t, p) in q.iter(self.app.world()) {
                 moved.push((e, t.translation + (t.rotation * Vec3::Z) * p.speed * dt));
             }
@@ -127,7 +130,10 @@ impl Harness {
 
     /// Every entity carrying `T`, with its propagated world transform.
     fn global<T: Component>(&mut self) -> Vec<(Entity, GlobalTransform)> {
-        let mut q = self.app.world_mut().query_filtered::<(Entity, &GlobalTransform), With<T>>();
+        let mut q = self
+            .app
+            .world_mut()
+            .query_filtered::<(Entity, &GlobalTransform), With<T>>();
         q.iter(self.app.world()).map(|(e, g)| (e, *g)).collect()
     }
 
@@ -218,7 +224,10 @@ fn the_shard_runs_along_the_flight_path() {
             .collect();
 
         let forward = shard_children.iter().filter(|d| d.dot(aim) > 0.999).count();
-        let backward = shard_children.iter().filter(|d| d.dot(aim) < -0.999).count();
+        let backward = shard_children
+            .iter()
+            .filter(|d| d.dot(aim) < -0.999)
+            .count();
         assert_eq!(
             forward, 1,
             "aim {aim:?}: exactly one cone must point down the flight path, got {shard_children:?}"
@@ -325,7 +334,11 @@ fn the_ribbons_straddle_the_axis_for_every_bearing() {
         h.fire(AbilityType::Frostbolt, origin, aim);
         h.fly(6);
 
-        let trails: Vec<Vec3> = h.global::<BoltTrail>().iter().map(|(_, g)| g.translation()).collect();
+        let trails: Vec<Vec3> = h
+            .global::<BoltTrail>()
+            .iter()
+            .map(|(_, g)| g.translation())
+            .collect();
         assert!(
             trails.len() >= 4,
             "aim {aim:?}: expected a laid trail, got {} segments",
@@ -558,7 +571,11 @@ fn shed_sprites_scatter_off_the_head() {
     h.fly(10);
 
     let early = h.global::<BoltMote>();
-    assert!(early.len() >= 2, "expected shed flakes, got {}", early.len());
+    assert!(
+        early.len() >= 2,
+        "expected shed flakes, got {}",
+        early.len()
+    );
 
     let spread_of = |v: &Vec<(Entity, GlobalTransform)>| {
         let pts: Vec<Vec3> = v.iter().map(|(_, g)| g.translation()).collect();
@@ -732,7 +749,11 @@ fn the_frost_chips_spread_over_a_sphere() {
         .iter()
         .map(|(_, g)| g.translation())
         .collect();
-    assert!(chips.len() >= 8, "expected a fan of chips, got {}", chips.len());
+    assert!(
+        chips.len() >= 8,
+        "expected a fan of chips, got {}",
+        chips.len()
+    );
 
     let chest = bolt_impact_origin(Vec3::ZERO);
     // Extent on all three axes: a fan that clumps has none, and one that is
@@ -845,7 +866,11 @@ fn the_shockwave_ring_is_closed_and_soft_rimmed() {
     else {
         panic!("the ring must carry Float32x4 vertex colours");
     };
-    assert_eq!(colors.len(), (segments * 3) as usize, "the ring repeats its seam");
+    assert_eq!(
+        colors.len(),
+        (segments * 3) as usize,
+        "the ring repeats its seam"
+    );
     for (i, c) in colors.iter().enumerate() {
         if i % 3 == 1 {
             assert_eq!(c[3], 1.0, "the ring's spine must hold full strength");
@@ -884,10 +909,7 @@ fn bursts_expire_and_only_the_two_bolts_raise_them() {
 
     // Longest burst is well under a second.
     h.fly(80);
-    assert!(
-        h.global::<BoltImpact>().is_empty(),
-        "a burst never expired"
-    );
+    assert!(h.global::<BoltImpact>().is_empty(), "a burst never expired");
     assert!(
         h.global::<BoltImpactSprite>().is_empty() && h.global::<BoltImpactShard>().is_empty(),
         "burst parts outlived their rig"

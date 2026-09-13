@@ -63,8 +63,14 @@ const SCAN_REL: &str = "src";
 /// `(ability_name, effect_type)` pairs that are NOT real auras and must not be
 /// catalogued. Each entry names why.
 const ALLOWLIST: &[(&str, &str)] = &[
-    ("Test", "unit-test fixture in combat_core/mod.rs — never applied in a match"),
-    ("TestCC", "unit-test fixture in auras.rs — never applied in a match"),
+    (
+        "Test",
+        "unit-test fixture in combat_core/mod.rs — never applied in a match",
+    ),
+    (
+        "TestCC",
+        "unit-test fixture in auras.rs — never applied in a match",
+    ),
 ];
 
 /// One `Aura { .. }` literal found in the sources.
@@ -276,8 +282,7 @@ fn the_catalog_disambiguates_every_reused_engine_name() {
 fn scan_aura_literals() -> std::io::Result<Vec<ScannedAura>> {
     let open = Regex::new(r"\bAura\s*\{").unwrap();
     let name_re = Regex::new(r#"ability_name:\s*"([^"]*)""#).unwrap();
-    let mechanic_re =
-        Regex::new(r"effect_type:\s*(?:\w+::)*AuraType::(\w+)").unwrap();
+    let mechanic_re = Regex::new(r"effect_type:\s*(?:\w+::)*AuraType::(\w+)").unwrap();
 
     let mut out = Vec::new();
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(SCAN_REL);
@@ -285,9 +290,13 @@ fn scan_aura_literals() -> std::io::Result<Vec<ScannedAura>> {
         let text = fs::read_to_string(&path)?;
         for open_match in open.find_iter(&text) {
             let start = open_match.end() - 1; // the `{`
-            let Some(end) = matching_brace(&text, start) else { continue };
+            let Some(end) = matching_brace(&text, start) else {
+                continue;
+            };
             let body = &text[start..=end];
-            let Some(name) = name_re.captures(body) else { continue };
+            let Some(name) = name_re.captures(body) else {
+                continue;
+            };
             out.push(ScannedAura {
                 name: name[1].to_string(),
                 mechanic: mechanic_re.captures(body).map(|c| c[1].to_string()),

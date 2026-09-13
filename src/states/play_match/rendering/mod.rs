@@ -22,10 +22,10 @@ pub use hud::*;
 pub use overlays::*;
 pub use team_frames::*;
 
+use super::ability_config::AbilityDefinitions;
+use super::components::{Aura, AuraType, SpellIconHandles, SpellIcons};
 use bevy::prelude::*;
 use bevy_egui::egui;
-use super::ability_config::AbilityDefinitions;
-use super::components::{SpellIcons, SpellIconHandles, Aura, AuraType};
 
 // ==============================================================================
 // Aura Icon Constants and Helpers
@@ -44,7 +44,10 @@ pub const GENERIC_AURA_ICONS: &[(&str, &str)] = &[
     ("aura_fear", "icons/auras/fear.jpg"),
     ("aura_dot", "icons/auras/dot.jpg"),
     ("aura_absorb", "icons/auras/absorb.jpg"),
-    ("aura_healing_reduction", "icons/auras/healing_reduction.jpg"),
+    (
+        "aura_healing_reduction",
+        "icons/auras/healing_reduction.jpg",
+    ),
     ("aura_max_health", "icons/auras/max_health_buff.jpg"),
     ("aura_lockout", "icons/auras/lockout.jpg"),
     ("aura_weakened_soul", "icons/auras/weakened_soul.jpg"),
@@ -54,9 +57,9 @@ pub const GENERIC_AURA_ICONS: &[(&str, &str)] = &[
 /// Returns the ability name if it has a specific icon, otherwise returns a generic key.
 pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) -> String {
     // Check if the ability that created this aura has a specific icon
-    let has_icon = ability_definitions.iter().any(|(_, config)| {
-        config.name == aura.ability_name && !config.icon.is_empty()
-    });
+    let has_icon = ability_definitions
+        .iter()
+        .any(|(_, config)| config.name == aura.ability_name && !config.icon.is_empty());
     if has_icon {
         return aura.ability_name.clone();
     }
@@ -81,12 +84,12 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         AuraType::CastTimeIncrease => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
         AuraType::DamageTakenReduction => "aura_max_health".to_string(), // Devotion Aura buff, reuse buff icon
         AuraType::DamageImmunity => "aura_absorb".to_string(), // Divine Shield, reuse absorb icon as fallback
-        AuraType::Incapacitate => "aura_stun".to_string(), // Reuse stun icon (frozen in place)
+        AuraType::Incapacitate => "aura_stun".to_string(),     // Reuse stun icon (frozen in place)
         AuraType::SpellResistanceBuff => "aura_max_health".to_string(), // Resistance buff, reuse buff icon
-        AuraType::AttackPowerReduction => "aura_dot".to_string(), // Debuff, reuse DoT icon
-        AuraType::CritChanceIncrease => "aura_max_health".to_string(), // Buff, reuse buff icon
-        AuraType::ManaRegenIncrease => "aura_max_health".to_string(), // Buff, reuse buff icon
-        AuraType::AttackSpeedSlow => "aura_slow".to_string(), // Slow debuff
+        AuraType::AttackPowerReduction => "aura_dot".to_string(),       // Debuff, reuse DoT icon
+        AuraType::CritChanceIncrease => "aura_max_health".to_string(),  // Buff, reuse buff icon
+        AuraType::ManaRegenIncrease => "aura_max_health".to_string(),   // Buff, reuse buff icon
+        AuraType::AttackSpeedSlow => "aura_slow".to_string(),           // Slow debuff
         AuraType::LockoutDurationReduction => "aura_max_health".to_string(), // Buff, reuse buff icon
         AuraType::FrostArmorBuff => "aura_absorb".to_string(), // Self-buff, reuse absorb icon
         AuraType::Silence => "aura_silence".to_string(),
@@ -205,22 +208,34 @@ pub fn load_spell_icons(
     // Register textures with egui (skip any that failed to load)
     for (ability_name, handle) in &icon_handles.handles {
         if !images.contains(handle) {
-            warn!("Spell icon for '{}' failed to load; rendering without it", ability_name);
+            warn!(
+                "Spell icon for '{}' failed to load; rendering without it",
+                ability_name
+            );
             continue;
         }
         let texture_id = contexts.add_image(handle.clone());
-        spell_icons.textures.insert(ability_name.clone(), texture_id);
+        spell_icons
+            .textures
+            .insert(ability_name.clone(), texture_id);
     }
 
     // Register variant keys for abilities logged with suffixed names (e.g., Paladin AI
     // logs "Holy Shock (Heal)" and "Holy Shock (Damage)" but the canonical name is "Holy Shock")
     if let Some(texture_id) = spell_icons.textures.get("Holy Shock").copied() {
-        spell_icons.textures.insert("Holy Shock (Heal)".to_string(), texture_id);
-        spell_icons.textures.insert("Holy Shock (Damage)".to_string(), texture_id);
+        spell_icons
+            .textures
+            .insert("Holy Shock (Heal)".to_string(), texture_id);
+        spell_icons
+            .textures
+            .insert("Holy Shock (Damage)".to_string(), texture_id);
     }
 
     spell_icons.loaded = true;
-    info!("Spell icons loaded and registered with egui ({} icons)", spell_icons.textures.len());
+    info!(
+        "Spell icons loaded and registered with egui ({} icons)",
+        spell_icons.textures.len()
+    );
 }
 
 // ==============================================================================
@@ -240,9 +255,14 @@ pub fn draw_text_with_outline(
 ) {
     // Draw black outline (8 directions)
     let offsets = [
-        (-outline_size, 0.0), (outline_size, 0.0), (0.0, -outline_size), (0.0, outline_size),
-        (-outline_size * 0.7, -outline_size * 0.7), (outline_size * 0.7, -outline_size * 0.7),
-        (-outline_size * 0.7, outline_size * 0.7), (outline_size * 0.7, outline_size * 0.7),
+        (-outline_size, 0.0),
+        (outline_size, 0.0),
+        (0.0, -outline_size),
+        (0.0, outline_size),
+        (-outline_size * 0.7, -outline_size * 0.7),
+        (outline_size * 0.7, -outline_size * 0.7),
+        (-outline_size * 0.7, outline_size * 0.7),
+        (outline_size * 0.7, outline_size * 0.7),
     ];
 
     for (dx, dy) in offsets {

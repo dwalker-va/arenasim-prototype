@@ -1,7 +1,7 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::abilities::SpellSchool;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Shield Bubble Visual Effects
@@ -31,11 +31,19 @@ pub fn update_shield_bubbles(
     for (entity, transform, auras) in combatants.iter() {
         if let Some(auras) = auras {
             // Check for DamageImmunity auras (Divine Shield) — takes priority over absorb
-            let has_immunity = auras.auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity);
+            let has_immunity = auras
+                .auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::DamageImmunity);
             if has_immunity {
                 combatants_with_shield.insert(entity);
                 if !combatants_with_bubbles.contains(&entity) {
-                    combatants_needing_bubbles.push((entity, transform.translation, SpellSchool::Holy, true));
+                    combatants_needing_bubbles.push((
+                        entity,
+                        transform.translation,
+                        SpellSchool::Holy,
+                        true,
+                    ));
                 }
                 continue; // Don't also spawn absorb bubble
             }
@@ -54,7 +62,12 @@ pub fn update_shield_bubbles(
 
                     // If combatant doesn't have a bubble yet, spawn one
                     if !combatants_with_bubbles.contains(&entity) {
-                        combatants_needing_bubbles.push((entity, transform.translation, spell_school, false));
+                        combatants_needing_bubbles.push((
+                            entity,
+                            transform.translation,
+                            spell_school,
+                            false,
+                        ));
                     }
                     break; // Only need one absorb aura to spawn bubble
                 }
@@ -75,11 +88,11 @@ pub fn update_shield_bubbles(
         } else {
             match spell_school {
                 SpellSchool::Frost => (
-                    Color::srgba(0.4, 0.7, 1.0, 0.25), // Light blue, translucent
+                    Color::srgba(0.4, 0.7, 1.0, 0.25),   // Light blue, translucent
                     LinearRgba::new(0.4, 1.0, 2.0, 1.0), // Blue glow (2x scaled)
                 ),
                 SpellSchool::Holy => (
-                    Color::srgba(1.0, 0.95, 0.7, 0.25), // Golden/white, translucent
+                    Color::srgba(1.0, 0.95, 0.7, 0.25),  // Golden/white, translucent
                     LinearRgba::new(2.0, 1.8, 1.0, 1.0), // Golden glow (2x scaled)
                 ),
                 _ => (
@@ -105,8 +118,11 @@ pub fn update_shield_bubbles(
         // Combatant transform is at capsule center (~y=1.0), so no Y offset needed
         // Divine Shield bubble is 1.3x larger than absorb shields
         let scale_factor = if is_immunity { 1.3 } else { 1.0 };
-        let transform = Transform::from_translation(position)
-            .with_scale(Vec3::new(0.9 * scale_factor, 1.4 * scale_factor, 0.9 * scale_factor));
+        let transform = Transform::from_translation(position).with_scale(Vec3::new(
+            0.9 * scale_factor,
+            1.4 * scale_factor,
+            0.9 * scale_factor,
+        ));
 
         commands.spawn((
             Mesh3d(mesh),
@@ -145,13 +161,9 @@ pub fn follow_shield_bubbles(
             if bubble.is_immunity {
                 let pulse = 1.0 + 0.05 * (time.elapsed_secs() * 3.0).sin();
                 let base = 1.3; // Immunity base scale factor
-                bubble_transform.scale = Vec3::new(
-                    0.9 * base * pulse,
-                    1.4 * base * pulse,
-                    0.9 * base * pulse,
-                );
+                bubble_transform.scale =
+                    Vec3::new(0.9 * base * pulse, 1.4 * base * pulse, 0.9 * base * pulse);
             }
         }
     }
 }
-

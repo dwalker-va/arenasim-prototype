@@ -462,9 +462,11 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
                 // Sits with the control that fixes it, not buried at the far
                 // right of the transport bar.
                 ui.label(
-                    egui::RichText::new("Beams, projectiles and impacts\nwill not read without one.")
-                        .color(WARN_AMBER)
-                        .size(11.0),
+                    egui::RichText::new(
+                        "Beams, projectiles and impacts\nwill not read without one.",
+                    )
+                    .color(WARN_AMBER)
+                    .size(11.0),
                 );
             }
         });
@@ -542,17 +544,13 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
                     ui.add_space(4.0);
                     for (key, value) in &view.selected_details {
                         ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(key).color(MUTED_TEXT).size(12.0),
-                            );
+                            ui.label(egui::RichText::new(key).color(MUTED_TEXT).size(12.0));
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     ui.add_space(PANEL_INSET);
                                     ui.label(
-                                        egui::RichText::new(value)
-                                            .color(BUTTON_TEXT)
-                                            .size(12.0),
+                                        egui::RichText::new(value).color(BUTTON_TEXT).size(12.0),
                                     );
                                 },
                             );
@@ -575,11 +573,9 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
                 if ui
                     .add_enabled(
                         has_selection,
-                        egui::Button::new(
-                            egui::RichText::new("\u{25b6}  Play").color(TITLE_GOLD),
-                        )
-                        .stroke(egui::Stroke::new(1.0, TITLE_GOLD))
-                        .min_size(egui::vec2(72.0, 22.0)),
+                        egui::Button::new(egui::RichText::new("\u{25b6}  Play").color(TITLE_GOLD))
+                            .stroke(egui::Stroke::new(1.0, TITLE_GOLD))
+                            .min_size(egui::vec2(72.0, 22.0)),
                     )
                     .clicked()
                 {
@@ -617,9 +613,7 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
                 }
 
                 ui.separator();
-                ui.label(
-                    egui::RichText::new("SPEED").color(MUTED_TEXT).size(12.0),
-                );
+                ui.label(egui::RichText::new("SPEED").color(MUTED_TEXT).size(12.0));
                 for speed in SPEEDS {
                     let active = (view.speed - speed).abs() < f32::EPSILON;
                     if ui.selectable_label(active, format!("{speed}x")).clicked() {
@@ -640,7 +634,11 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
                     } else {
                         "\u{2014} / \u{2014}".to_string()
                     })
-                    .color(if has_selection { BUTTON_TEXT } else { MUTED_TEXT })
+                    .color(if has_selection {
+                        BUTTON_TEXT
+                    } else {
+                        MUTED_TEXT
+                    })
                     .monospace(),
                 );
             });

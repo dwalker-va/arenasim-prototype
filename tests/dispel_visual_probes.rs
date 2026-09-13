@@ -104,7 +104,12 @@ impl Harness {
     fn ribbon_vertices(&mut self) -> Vec<[f32; 3]> {
         let handle = {
             let mut q = self.app.world_mut().query::<(&DispelRibbon, &Mesh3d)>();
-            q.iter(self.app.world()).next().expect("a ribbon mesh").1 .0.clone()
+            q.iter(self.app.world())
+                .next()
+                .expect("a ribbon mesh")
+                .1
+                 .0
+                .clone()
         };
         let meshes = self.app.world().resource::<Assets<Mesh>>();
         match meshes
@@ -144,7 +149,12 @@ impl Harness {
                 .app
                 .world_mut()
                 .query::<(&DispelRibbon, &MeshMaterial3d<StandardMaterial>)>();
-            q.iter(self.app.world()).next().expect("a ribbon material").1 .0.clone()
+            q.iter(self.app.world())
+                .next()
+                .expect("a ribbon material")
+                .1
+                 .0
+                .clone()
         };
         let materials = self.app.world().resource::<Assets<StandardMaterial>>();
         let e = materials.get(&handle).expect("material").emissive;
@@ -160,7 +170,10 @@ impl Harness {
 #[test]
 fn the_coil_wraps_outside_the_body() {
     let (radius, body) = ribbon_radii();
-    assert!(radius > body, "coil radius {radius} must clear the body radius {body}");
+    assert!(
+        radius > body,
+        "coil radius {radius} must clear the body radius {body}"
+    );
     for age in [-1.0f32, 0.0, 0.1, 0.25, 0.4, 0.6, 0.9] {
         let verts = ribbon_positions(2.5, ribbon_height(), 0.26, radius, 96, age, 0.0);
         let nearest = verts
@@ -188,10 +201,13 @@ fn the_ribbon_climbs_the_body_and_never_floats_off_it() {
         let start = ribbon_origin(class, Vec3::ZERO, 1.0).y;
         let end = ribbon_origin(class, Vec3::ZERO, 0.0).y;
         assert!(
-            start >= -HALF_HEIGHT - 1e-3 && start < HALF_HEIGHT,
+            (-HALF_HEIGHT - 1e-3..HALF_HEIGHT).contains(&start),
             "{class:?}: helix bottom starts at {start}, off the capsule (-1.25..1.25)"
         );
-        assert!(end > start + 0.4, "{class:?}: the ribbon should climb, {start} -> {end}");
+        assert!(
+            end > start + 0.4,
+            "{class:?}: the ribbon should climb, {start} -> {end}"
+        );
         assert!(
             end < HALF_HEIGHT,
             "{class:?}: at the end the helix bottom ({end}) is above the crown — floating"
@@ -228,11 +244,22 @@ fn the_rendered_ribbon_tracks_its_origin_and_its_victim() {
     );
 
     let moved = Vec3::new(3.0, 0.0, -2.0);
-    h.app.world_mut().get_mut::<Transform>(victim).unwrap().translation = moved;
+    h.app
+        .world_mut()
+        .get_mut::<Transform>(victim)
+        .unwrap()
+        .translation = moved;
     h.tick(30);
     let at = h.global::<DispelRibbon>()[0].1.translation();
-    assert!((at.x - moved.x).abs() < 1e-3 && (at.z - moved.z).abs() < 1e-3, "did not follow: {at:?}");
-    assert!(at.y > y0 + 0.4, "should have climbed by half-life: {y0} -> {}", at.y);
+    assert!(
+        (at.x - moved.x).abs() < 1e-3 && (at.z - moved.z).abs() < 1e-3,
+        "did not follow: {at:?}"
+    );
+    assert!(
+        at.y > y0 + 0.4,
+        "should have climbed by half-life: {y0} -> {}",
+        at.y
+    );
     assert!(at.y < HALF_HEIGHT, "climbed off the body: {}", at.y);
 }
 
@@ -246,13 +273,18 @@ fn the_rendered_ribbon_tracks_its_origin_and_its_victim() {
 fn a_fold_rolls_up_the_ribbon() {
     let n = 200;
     let profile = |age: f32| -> Vec<f32> {
-        (0..=n).map(|i| ribbon_fold(i as f32 / n as f32, age)).collect()
+        (0..=n)
+            .map(|i| ribbon_fold(i as f32 / n as f32, age))
+            .collect()
     };
     let peak_at = |p: &[f32]| -> (usize, f32) {
         p.iter()
             .enumerate()
             .map(|(i, v)| (i, v.abs()))
-            .fold((0, 0.0), |best, cur| if cur.1 > best.1 { cur } else { best })
+            .fold(
+                (0, 0.0),
+                |best, cur| if cur.1 > best.1 { cur } else { best },
+            )
     };
 
     let early = profile(0.08);
@@ -261,8 +293,14 @@ fn a_fold_rolls_up_the_ribbon() {
     let (i0, a0) = peak_at(&early);
     let (i1, a1) = peak_at(&mid);
     let (i2, a2) = peak_at(&late);
-    assert!(i0 < i1 && i1 < i2, "the fold must travel up the strip: {i0} -> {i1} -> {i2}");
-    assert!(a0 > a1 && a1 > a2, "the fold must shrink as it travels: {a0} -> {a1} -> {a2}");
+    assert!(
+        i0 < i1 && i1 < i2,
+        "the fold must travel up the strip: {i0} -> {i1} -> {i2}"
+    );
+    assert!(
+        a0 > a1 && a1 > a2,
+        "the fold must shrink as it travels: {a0} -> {a1} -> {a2}"
+    );
     assert!(a0 > 0.12, "the first fold must be big enough to see: {a0}");
     assert!(
         (ribbon_fold_centre(0.25) - i1 as f32 / n as f32).abs() < 0.15,
@@ -272,14 +310,20 @@ fn a_fold_rolls_up_the_ribbon() {
     // Up then down: a lifted lobe ahead of a pulled-down lobe, not a bump.
     let up = mid.iter().cloned().fold(f32::MIN, f32::max);
     let down = mid.iter().cloned().fold(f32::MAX, f32::min);
-    assert!(up > 0.05 && down < -0.05, "the fold needs both lobes: {up} / {down}");
+    assert!(
+        up > 0.05 && down < -0.05,
+        "the fold needs both lobes: {up} / {down}"
+    );
     let first_up = mid.iter().position(|v| *v > 0.03).unwrap();
     let first_down = mid.iter().position(|v| *v < -0.03).unwrap();
     assert!(first_up < first_down, "lift leads, pull follows");
 
     // The fold is LOCAL: most of the strip is still at any moment.
     let still = mid.iter().filter(|v| v.abs() < 0.01).count();
-    assert!(still > n / 2, "a fold is a local event; {still} of {n} samples were still");
+    assert!(
+        still > n / 2,
+        "a fold is a local event; {still} of {n} samples were still"
+    );
 
     // The held end and the free end stay put.
     for age in [0.05f32, 0.3, 0.6] {
@@ -295,7 +339,11 @@ fn a_fold_rolls_up_the_ribbon() {
     let a = h.ribbon_vertices();
     h.tick(6);
     let b = h.ribbon_vertices();
-    assert_eq!(a.len(), b.len(), "the fold must not change the vertex layout");
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "the fold must not change the vertex layout"
+    );
     let biggest = a
         .iter()
         .zip(b.iter())
@@ -329,7 +377,7 @@ fn the_ribbon_ignites_then_settles() {
 /// meshes are sorted by distance without depth writes, so a blended ribbon
 /// lost the draw-order fight and was painted over even where it was in front
 /// of the body. It cannot fade, so it plays out instead.
-
+///
 /// The play-out: the climb completes, then the TOP end holds still in world
 /// space while the BOTTOM end rises through the strip until nothing is left —
 /// and sparks stream off the fixed top the whole time, and only then.
@@ -337,12 +385,19 @@ fn the_ribbon_ignites_then_settles() {
 fn the_ribbon_plays_out_from_the_bottom_while_sparks_leave_the_top() {
     // The two curves hand over exactly once.
     assert!(ribbon_climb(1.0) < 1e-6 && ribbon_consumed(1.0) < 1e-6);
-    let handover = (0..=100).rev()
+    let handover = (0..=100)
+        .rev()
         .map(|i| i as f32 / 100.0)
         .find(|p| ribbon_climb(*p) >= 1.0 - 1e-6)
         .expect("the climb completes");
-    assert!(ribbon_consumed(handover + 0.02) < 1e-6, "nothing is consumed before the climb ends");
-    assert!(ribbon_consumed(handover - 0.05) > 0.0, "consumption starts as the climb ends");
+    assert!(
+        ribbon_consumed(handover + 0.02) < 1e-6,
+        "nothing is consumed before the climb ends"
+    );
+    assert!(
+        ribbon_consumed(handover - 0.05) > 0.0,
+        "consumption starts as the climb ends"
+    );
 
     let mut h = Harness::new();
     let victim = h.spawn_victim(Vec3::ZERO);
@@ -350,10 +405,16 @@ fn the_ribbon_plays_out_from_the_bottom_while_sparks_leave_the_top() {
     // Climb phase: no sparks, both ends rising.
     h.tick(10);
     let (b0, t0) = h.strip_span();
-    assert!(h.sparks().is_empty(), "no sparks while the ribbon is still climbing");
+    assert!(
+        h.sparks().is_empty(),
+        "no sparks while the ribbon is still climbing"
+    );
     h.tick(20);
     let (b1, t1) = h.strip_span();
-    assert!(b1 > b0 + 0.2 && t1 > t0 + 0.2, "the whole strip climbs first: {b0}->{b1}, {t0}->{t1}");
+    assert!(
+        b1 > b0 + 0.2 && t1 > t0 + 0.2,
+        "the whole strip climbs first: {b0}->{b1}, {t0}->{t1}"
+    );
 
     // Play-out: the top holds, the bottom keeps rising, the strip shortens.
     let frames_to_fix = ((RIBBON_LIFE * (1.0 - handover)) / TICK.as_secs_f32()).ceil() as u32 + 2;
@@ -366,13 +427,23 @@ fn the_ribbon_plays_out_from_the_bottom_while_sparks_leave_the_top() {
         + h.global::<DispelRibbon>()[0].1.rotation() * ribbon_top_local();
     h.tick(12);
     let (bm, tm) = h.strip_span();
-    assert!((tm - tf).abs() < 0.03, "the top end must hold once fixed: {tf} -> {tm}");
-    assert!(bm > bf + 0.15, "the bottom end must keep rising: {bf} -> {bm}");
+    assert!(
+        (tm - tf).abs() < 0.03,
+        "the top end must hold once fixed: {tf} -> {tm}"
+    );
+    assert!(
+        bm > bf + 0.15,
+        "the bottom end must keep rising: {bf} -> {bm}"
+    );
     assert!(tm - bm < tf - bf - 0.15, "the strip must be shortening");
 
     // Sparks come from the fixed top, and rise.
     let sparks = h.sparks();
-    assert!(sparks.len() >= 5, "sparks should stream during the play-out, got {}", sparks.len());
+    assert!(
+        sparks.len() >= 5,
+        "sparks should stream during the play-out, got {}",
+        sparks.len()
+    );
     for (at, v) in &sparks {
         assert!(v.y > 0.5, "a spark must rise: {v:?}");
         let horizontal = Vec2::new(at.x - top_world.x, at.z - top_world.z).length();
@@ -387,11 +458,20 @@ fn the_ribbon_plays_out_from_the_bottom_while_sparks_leave_the_top() {
     let frames_to_end = (RIBBON_LIFE / TICK.as_secs_f32()).ceil() as u32;
     h.tick(frames_to_end - frames_to_fix - 12 - 2);
     let (be, te) = h.strip_span();
-    assert!(te - be < 0.2, "the strip should be nearly consumed: {be}..{te}");
+    assert!(
+        te - be < 0.2,
+        "the strip should be nearly consumed: {be}..{te}"
+    );
     h.tick(6);
-    assert!(h.global::<DispelRibbon>().is_empty(), "the ribbon should be gone");
+    assert!(
+        h.global::<DispelRibbon>().is_empty(),
+        "the ribbon should be gone"
+    );
     h.tick(45);
-    assert!(h.sparks().is_empty(), "sparks should have finished after the ribbon");
+    assert!(
+        h.sparks().is_empty(),
+        "sparks should have finished after the ribbon"
+    );
 }
 
 #[test]
@@ -405,13 +485,21 @@ fn the_ribbon_writes_depth() {
             .app
             .world_mut()
             .query::<(&DispelRibbon, &MeshMaterial3d<StandardMaterial>)>();
-        q.iter(h.app.world()).next().expect("a ribbon material").1 .0.clone()
+        q.iter(h.app.world())
+            .next()
+            .expect("a ribbon material")
+            .1
+             .0
+            .clone()
     };
     let materials = h.app.world().resource::<Assets<StandardMaterial>>();
     let material = materials.get(&handle).expect("material");
     assert_eq!(material.alpha_mode, AlphaMode::Opaque);
     // And the ending exists in another form: the strip is consumed, not faded.
-    assert!(ribbon_consumed(1.0) < 1e-6 && ribbon_consumed(0.6) < 1e-6, "whole while climbing");
+    assert!(
+        ribbon_consumed(1.0) < 1e-6 && ribbon_consumed(0.6) < 1e-6,
+        "whole while climbing"
+    );
     assert!(ribbon_consumed(0.2) > 0.4 && ribbon_consumed(0.2) < 0.7);
     assert!((ribbon_consumed(0.0) - 1.0).abs() < 1e-6, "gone by the end");
 }
@@ -448,6 +536,9 @@ fn the_ribbon_expires_and_survives_losing_its_victim() {
     assert_eq!(h.global::<DispelRibbon>().len(), 1);
     h.app.world_mut().despawn(victim);
     h.tick(150);
-    assert!(h.global::<DispelRibbon>().is_empty(), "ribbon never expired");
+    assert!(
+        h.global::<DispelRibbon>().is_empty(),
+        "ribbon never expired"
+    );
     assert!(h.global::<DispelSpark>().is_empty(), "sparks never expired");
 }

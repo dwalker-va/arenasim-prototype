@@ -26,14 +26,14 @@
 //! `CombatSystemPhase::CombatResolution`: `FixedUpdate` can tick several times
 //! per rendered frame, and a marker consumed a tick late desyncs from its hit.
 
-use bevy::prelude::*;
+use super::frost_nova::spawn_frost_nova;
+use super::holy_justice::spawn_holy_justice;
+use super::mortal_strike::spawn_mortal_strike_flourish;
+use super::rogue_crescents::{spawn_crescent_fan, CHEAP_SHOT_CRESCENTS, KIDNEY_SHOT_CRESCENTS};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use super::mortal_strike::spawn_mortal_strike_flourish;
-use super::frost_nova::spawn_frost_nova;
-use super::holy_justice::spawn_holy_justice;
-use super::rogue_crescents::{spawn_crescent_fan, CHEAP_SHOT_CRESCENTS, KIDNEY_SHOT_CRESCENTS};
+use bevy::prelude::*;
 
 /// Height above the target's origin at which a melee hit registers.
 const IMPACT_HEIGHT: f32 = 1.45;
@@ -101,7 +101,10 @@ pub fn consume_instant_ability_signals(
             .target
             .and_then(|t| positions.get(t).map(|tf| tf.translation).ok());
         let style = swing_style_for_ability(signal.ability);
-        let caster_team = teams.get(signal.caster).map(|(_, _, c)| c.team).unwrap_or(0);
+        let caster_team = teams
+            .get(signal.caster)
+            .map(|(_, _, c)| c.team)
+            .unwrap_or(0);
 
         // ---- Weapon stroke (only for abilities that swing something) --------
         //

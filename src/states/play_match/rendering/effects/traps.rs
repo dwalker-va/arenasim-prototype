@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Trap Visual Helpers
@@ -48,10 +48,9 @@ pub fn spawn_trap_visuals(
             ..default()
         });
 
-        commands.entity(trap_entity).try_insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-        ));
+        commands
+            .entity(trap_entity)
+            .try_insert((Mesh3d(mesh), MeshMaterial3d(material)));
     }
 }
 
@@ -120,10 +119,9 @@ pub fn spawn_trap_burst_visuals(
             ..default()
         });
 
-        commands.entity(burst_entity).try_insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-        ));
+        commands
+            .entity(burst_entity)
+            .try_insert((Mesh3d(mesh), MeshMaterial3d(material)));
     }
 }
 
@@ -131,7 +129,12 @@ pub fn spawn_trap_burst_visuals(
 pub fn update_and_cleanup_trap_bursts(
     mut commands: Commands,
     time: Res<Time>,
-    mut bursts: Query<(Entity, &mut TrapBurst, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut bursts: Query<(
+        Entity,
+        &mut TrapBurst,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let dt = time.delta_secs();
@@ -169,7 +172,10 @@ pub fn spawn_trap_launch_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    new_projectiles: Query<(Entity, &TrapLaunchProjectile), (Added<TrapLaunchProjectile>, Without<Mesh3d>)>,
+    new_projectiles: Query<
+        (Entity, &TrapLaunchProjectile),
+        (Added<TrapLaunchProjectile>, Without<Mesh3d>),
+    >,
 ) {
     for (entity, proj) in new_projectiles.iter() {
         let mesh = meshes.add(Sphere::new(0.3));
@@ -184,10 +190,9 @@ pub fn spawn_trap_launch_visuals(
             ..default()
         });
 
-        commands.entity(entity).try_insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-        ));
+        commands
+            .entity(entity)
+            .try_insert((Mesh3d(mesh), MeshMaterial3d(material)));
     }
 }
 
@@ -257,8 +262,10 @@ pub fn cleanup_ice_blocks(
                     true
                 } else {
                     // Despawn if target no longer has Incapacitate aura
-                    auras.map_or(true, |a| {
-                        !a.auras.iter().any(|aura| aura.effect_type == AuraType::Incapacitate)
+                    auras.is_none_or(|a| {
+                        !a.auras
+                            .iter()
+                            .any(|aura| aura.effect_type == AuraType::Incapacitate)
                     })
                 }
             }
@@ -270,4 +277,3 @@ pub fn cleanup_ice_blocks(
         }
     }
 }
-

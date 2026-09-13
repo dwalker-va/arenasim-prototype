@@ -1,6 +1,6 @@
+use crate::states::play_match::components::*;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use crate::states::play_match::components::*;
 
 // ==============================================================================
 // Floating Combat Text Systems
@@ -36,7 +36,9 @@ pub fn render_floating_combat_text(
     camera_query: Query<(&Camera, &GlobalTransform)>,
 ) {
     // Use try_ctx_mut to gracefully handle window close
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     let Ok((camera, camera_transform)) = camera_query.single() else {
         return;
@@ -52,7 +54,9 @@ pub fn render_floating_combat_text(
                 }
 
                 // Project 3D position to 2D screen space
-                if let Ok(screen_pos) = camera.world_to_viewport(camera_transform, fct.world_position) {
+                if let Ok(screen_pos) =
+                    camera.world_to_viewport(camera_transform, fct.world_position)
+                {
                     // Calculate alpha based on remaining lifetime
                     // Fade out in the last 0.5 seconds
                     let alpha = if fct.lifetime < 0.5 {
@@ -77,16 +81,34 @@ pub fn render_floating_combat_text(
                         let label_font = egui::FontId::proportional(14.0);
 
                         // Calculate positions - number centered, label to the right
-                        let number_galley = ui.painter().layout_no_wrap(number_str.to_string(), number_font.clone(), color_with_alpha);
-                        let label_galley = ui.painter().layout_no_wrap("absorbed".to_string(), label_font.clone(), color_with_alpha);
+                        let number_galley = ui.painter().layout_no_wrap(
+                            number_str.to_string(),
+                            number_font.clone(),
+                            color_with_alpha,
+                        );
+                        let label_galley = ui.painter().layout_no_wrap(
+                            "absorbed".to_string(),
+                            label_font.clone(),
+                            color_with_alpha,
+                        );
                         let total_width = number_galley.size().x + 4.0 + label_galley.size().x;
-                        let number_x = screen_pos.x - total_width / 2.0 + number_galley.size().x / 2.0;
-                        let label_x = number_x + number_galley.size().x / 2.0 + 4.0 + label_galley.size().x / 2.0;
+                        let number_x =
+                            screen_pos.x - total_width / 2.0 + number_galley.size().x / 2.0;
+                        let label_x = number_x
+                            + number_galley.size().x / 2.0
+                            + 4.0
+                            + label_galley.size().x / 2.0;
 
                         // Draw number outline
                         for (dx, dy) in [
-                            (-2.0, 0.0), (2.0, 0.0), (0.0, -2.0), (0.0, 2.0),
-                            (-1.5, -1.5), (1.5, -1.5), (-1.5, 1.5), (1.5, 1.5),
+                            (-2.0, 0.0),
+                            (2.0, 0.0),
+                            (0.0, -2.0),
+                            (0.0, 2.0),
+                            (-1.5, -1.5),
+                            (1.5, -1.5),
+                            (-1.5, 1.5),
+                            (1.5, 1.5),
                         ] {
                             ui.painter().text(
                                 egui::pos2(number_x + dx, screen_pos.y + dy),
@@ -107,8 +129,14 @@ pub fn render_floating_combat_text(
 
                         // Draw label outline (smaller offset for smaller text)
                         for (dx, dy) in [
-                            (-1.5, 0.0), (1.5, 0.0), (0.0, -1.5), (0.0, 1.5),
-                            (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0),
+                            (-1.5, 0.0),
+                            (1.5, 0.0),
+                            (0.0, -1.5),
+                            (0.0, 1.5),
+                            (-1.0, -1.0),
+                            (1.0, -1.0),
+                            (-1.0, 1.0),
+                            (1.0, 1.0),
                         ] {
                             ui.painter().text(
                                 egui::pos2(label_x + dx, screen_pos.y + 2.0 + dy),
@@ -138,8 +166,14 @@ pub fn render_floating_combat_text(
 
                         // Draw thick black outline (8 directions for smooth outline)
                         for (dx, dy) in [
-                            (-2.0, 0.0), (2.0, 0.0), (0.0, -2.0), (0.0, 2.0),
-                            (-1.5, -1.5), (1.5, -1.5), (-1.5, 1.5), (1.5, 1.5),
+                            (-2.0, 0.0),
+                            (2.0, 0.0),
+                            (0.0, -2.0),
+                            (0.0, 2.0),
+                            (-1.5, -1.5),
+                            (1.5, -1.5),
+                            (-1.5, 1.5),
+                            (1.5, 1.5),
                         ] {
                             ui.painter().text(
                                 egui::pos2(screen_pos.x + dx, screen_pos.y + dy),
@@ -177,4 +211,3 @@ pub fn cleanup_expired_floating_text(
         }
     }
 }
-

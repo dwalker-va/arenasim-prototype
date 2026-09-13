@@ -2,15 +2,15 @@
 //!
 //! Handles spell projectiles that travel from caster to target.
 
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
-use bevy_egui::egui;
-use crate::combat::log::CombatLog;
-use super::components::*;
 use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
+use super::components::*;
 use super::constants::CRIT_DAMAGE_MULTIPLIER;
-use super::utils::{combatant_id, pet_combatant_id, combat_log_id_for, get_next_fct_offset};
+use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset, pet_combatant_id};
+use crate::combat::log::CombatLog;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
+use bevy_egui::egui;
 
 /// Returns true if the ability should use an arrow (cuboid) mesh instead of sphere.
 fn is_arrow_projectile(ability: AbilityType) -> bool {
@@ -69,7 +69,11 @@ pub fn spawn_projectile_visuals(
             if let Some(visuals) = &def.projectile_visuals {
                 (
                     Color::srgb(visuals.color[0], visuals.color[1], visuals.color[2]),
-                    LinearRgba::rgb(visuals.emissive[0], visuals.emissive[1], visuals.emissive[2]),
+                    LinearRgba::rgb(
+                        visuals.emissive[0],
+                        visuals.emissive[1],
+                        visuals.emissive[2],
+                    ),
                 )
             } else {
                 default_projectile_colors(projectile.ability)
@@ -85,28 +89,18 @@ pub fn spawn_projectile_visuals(
         });
 
         // Add visual mesh to the projectile entity (Transform already exists from process_casting)
-        commands.entity(projectile_entity).insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-        ));
+        commands
+            .entity(projectile_entity)
+            .insert((Mesh3d(mesh), MeshMaterial3d(material)));
     }
 }
 
 /// Fallback colors for projectiles without projectile_visuals config.
 fn default_projectile_colors(ability: AbilityType) -> (Color, LinearRgba) {
     match ability {
-        AbilityType::Shadowbolt => (
-            Color::srgb(0.6, 0.3, 0.8),
-            LinearRgba::rgb(0.8, 0.4, 1.2),
-        ),
-        AbilityType::Frostbolt => (
-            Color::srgb(0.4, 0.7, 1.0),
-            LinearRgba::rgb(0.6, 0.9, 1.5),
-        ),
-        _ => (
-            Color::srgb(1.0, 0.8, 0.3),
-            LinearRgba::rgb(1.2, 1.0, 0.5),
-        ),
+        AbilityType::Shadowbolt => (Color::srgb(0.6, 0.3, 0.8), LinearRgba::rgb(0.8, 0.4, 1.2)),
+        AbilityType::Frostbolt => (Color::srgb(0.4, 0.7, 1.0), LinearRgba::rgb(0.6, 0.9, 1.5)),
+        _ => (Color::srgb(1.0, 0.8, 0.3), LinearRgba::rgb(1.2, 1.0, 0.5)),
     }
 }
 
@@ -118,24 +112,24 @@ pub fn move_projectiles(
     targets: Query<&Transform, (With<Combatant>, Without<Projectile>)>,
 ) {
     let dt = time.delta_secs();
-    
+
     for (projectile, mut projectile_transform) in projectiles.iter_mut() {
         // Get target position
         let Ok(target_transform) = targets.get(projectile.target) else {
             continue; // Target no longer exists
         };
-        
+
         let target_pos = target_transform.translation + Vec3::new(0.0, 1.0, 0.0); // Aim at center mass
         let current_pos = projectile_transform.translation;
-        
+
         // Calculate direction to target
         let direction = (target_pos - current_pos).normalize_or_zero();
-        
+
         if direction != Vec3::ZERO {
             // Move towards target
             let move_distance = projectile.speed * dt;
             projectile_transform.translation += direction * move_distance;
-            
+
             // Rotate to face direction of travel
             let target_rotation = Quat::from_rotation_arc(Vec3::Z, direction);
             projectile_transform.rotation = target_rotation;
@@ -168,8 +162,19 @@ pub fn process_projectile_hits(
     // the resolved, pet-aware combat-log id — a pet's projectile (Spider Web)
     // attributes to the pet, not its owner.
     // Format: (projectile_entity, caster_entity, target_entity, ability, caster_id, caster_pos, target_pos, ability_damage, ability_healing, is_crit)
-    let mut hits_to_process: Vec<(Entity, Entity, Entity, AbilityType, crate::combat::log::CombatantId, Vec3, Vec3, f32, f32, bool)> = Vec::new();
-    
+    let mut hits_to_process: Vec<(
+        Entity,
+        Entity,
+        Entity,
+        AbilityType,
+        crate::combat::log::CombatantId,
+        Vec3,
+        Vec3,
+        f32,
+        f32,
+        bool,
+    )> = Vec::new();
+
     for (projectile_entity, projectile, projectile_transform) in projectiles.iter() {
         // Get target position (immutable borrow)
         let Ok((target_transform, target, _)) = combatants.get(projectile.target) else {
@@ -191,7 +196,9 @@ pub fn process_projectile_hits(
         // Check if projectile has reached target
         if distance <= HIT_DISTANCE {
             // Get caster data (position, combatant stats, auras) in a single query
-            let Ok((caster_transform, caster_combatant, caster_auras)) = combatants.get(projectile.caster) else {
+            let Ok((caster_transform, caster_combatant, caster_auras)) =
+                combatants.get(projectile.caster)
+            else {
                 // Caster no longer exists, despawn projectile
                 commands.entity(projectile_entity).despawn();
                 continue;
@@ -201,27 +208,40 @@ pub fn process_projectile_hits(
             let target_world_pos = target_transform.translation;
 
             let def = abilities.get_unchecked(&projectile.ability);
-            let ap_bonus = super::combat_core::get_attack_power_bonus(caster_auras.as_deref());
-            let sp_bonus = super::combat_core::get_spell_power_bonus(caster_auras.as_deref());
-            let crit_bonus = super::combat_core::get_crit_chance_bonus(caster_auras.as_deref());
-            let mut ability_damage = caster_combatant.calculate_ability_damage_config(def, &mut game_rng, ap_bonus, sp_bonus);
-            let ability_healing = caster_combatant.calculate_ability_healing_config(def, &mut game_rng, sp_bonus);
+            let ap_bonus = super::combat_core::get_attack_power_bonus(caster_auras);
+            let sp_bonus = super::combat_core::get_spell_power_bonus(caster_auras);
+            let crit_bonus = super::combat_core::get_crit_chance_bonus(caster_auras);
+            let mut ability_damage = caster_combatant.calculate_ability_damage_config(
+                def,
+                &mut game_rng,
+                ap_bonus,
+                sp_bonus,
+            );
+            let ability_healing =
+                caster_combatant.calculate_ability_healing_config(def, &mut game_rng, sp_bonus);
 
             // Roll crit at impact time using caster's live crit_chance + dynamic aura bonus
-            let is_crit = super::combat_core::roll_crit(caster_combatant.crit_chance + crit_bonus, &mut game_rng);
+            let is_crit = super::combat_core::roll_crit(
+                caster_combatant.crit_chance + crit_bonus,
+                &mut game_rng,
+            );
             if is_crit {
                 ability_damage *= CRIT_DAMAGE_MULTIPLIER;
             }
 
             // Apply Divine Shield outgoing damage penalty (50%) at impact time
-            let ds_penalty = super::combat_core::get_divine_shield_damage_penalty(caster_auras.as_deref());
+            let ds_penalty = super::combat_core::get_divine_shield_damage_penalty(caster_auras);
             ability_damage = (ability_damage * ds_penalty).max(0.0);
 
             // Resolve the caster's combat-log id once, pet-aware: a Spider's
             // Spider Web attributes to "Team 1 Spider #2", not its Hunter owner.
             let caster_id = match projectile.caster_pet_type {
                 Some(pt) => pet_combatant_id(projectile.caster_team, projectile.caster_slot, pt),
-                None => combatant_id(projectile.caster_team, projectile.caster_slot, projectile.caster_class),
+                None => combatant_id(
+                    projectile.caster_team,
+                    projectile.caster_slot,
+                    projectile.caster_class,
+                ),
             };
 
             // Queue this hit for processing
@@ -239,9 +259,21 @@ pub fn process_projectile_hits(
             ));
         }
     }
-    
+
     // Process all queued hits
-    for (projectile_entity, caster_entity, target_entity, ability, caster_id, caster_pos, target_pos, ability_damage, _ability_healing, is_crit) in hits_to_process {
+    for (
+        projectile_entity,
+        caster_entity,
+        target_entity,
+        ability,
+        caster_id,
+        caster_pos,
+        target_pos,
+        ability_damage,
+        _ability_healing,
+        is_crit,
+    ) in hits_to_process
+    {
         let def = abilities.get_unchecked(&ability);
         let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
         let _ability_range = caster_pos.distance(target_pos);
@@ -255,8 +287,16 @@ pub fn process_projectile_hits(
             let damage = ability_damage;
 
             // Get target info and apply damage
-            let (actual_damage, absorbed, target_id, is_killing_blow, is_first_death, target_max_health) = {
-                let Ok((_, mut target, mut target_auras)) = combatants.get_mut(target_entity) else {
+            let (
+                actual_damage,
+                absorbed,
+                target_id,
+                is_killing_blow,
+                is_first_death,
+                target_max_health,
+            ) = {
+                let Ok((_, mut target, mut target_auras)) = combatants.get_mut(target_entity)
+                else {
                     commands.entity(projectile_entity).despawn();
                     continue;
                 };
@@ -289,9 +329,16 @@ pub fn process_projectile_hits(
                 if is_first_death {
                     target.is_dead = true;
                 }
-                (actual_damage, absorbed, target_id, is_killing_blow, is_first_death, target.max_health)
+                (
+                    actual_damage,
+                    absorbed,
+                    target_id,
+                    is_killing_blow,
+                    is_first_death,
+                    target.max_health,
+                )
             }; // target borrow dropped here
-            // Cosmetic: how hard the hit was, for the shared impact below.
+               // Cosmetic: how hard the hit was, for the shared impact below.
             impact_magnitude = (actual_damage + absorbed) / target_max_health.max(1.0);
 
             // Update caster damage dealt (include absorbed damage - caster dealt it)
@@ -309,7 +356,8 @@ pub fn process_projectile_hits(
                     // Arena dampening applies to lifesteal like any other healing
                     let lifesteal = dampening.apply(actual_damage);
                     let effective = lifesteal.min(caster.max_health - caster.current_health);
-                    caster.current_health = (caster.current_health + lifesteal).min(caster.max_health);
+                    caster.current_health =
+                        (caster.current_health + lifesteal).min(caster.max_health);
                     caster.healing_done += effective;
                     if effective > 0.0 {
                         combat_log.log_healing(
@@ -323,10 +371,11 @@ pub fn process_projectile_hits(
                     }
                 }
             } // caster borrow dropped here
-            
+
             // Spawn yellow floating combat text for ability damage
             // Get deterministic offset based on pattern state
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity)
+            {
                 get_next_fct_offset(&mut fct_state)
             } else {
                 (0.0, 0.0)
@@ -345,14 +394,16 @@ pub fn process_projectile_hits(
 
             // Spawn light blue floating combat text for absorbed damage
             if absorbed > 0.0 {
-                let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
-                    get_next_fct_offset(&mut fct_state)
-                } else {
-                    (0.0, 0.0)
-                };
+                let (absorb_offset_x, absorb_offset_y) =
+                    if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
                 commands.spawn((
                     FloatingCombatText {
-                        world_position: text_position + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
+                        world_position: text_position
+                            + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
                         text: format!("{:.0} absorbed", absorbed),
                         color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                         lifetime: 1.5,
@@ -402,16 +453,14 @@ pub fn process_projectile_hits(
                 commands.entity(target_entity).remove::<ChannelingState>();
 
                 let death_message = format!("{} has been eliminated", target_id);
-                combat_log.log_death(
-                    target_id.clone(),
-                    Some(caster_id.clone()),
-                    death_message,
-                );
+                combat_log.log_death(target_id.clone(), Some(caster_id.clone()), death_message);
             }
-            
+
             // Apply aura if ability has one (skip if target was killed — don't CC dead combatants)
             if !is_killing_blow {
-                if let Some(aura_pending) = AuraPending::from_ability(target_entity, caster_entity, def) {
+                if let Some(aura_pending) =
+                    AuraPending::from_ability(target_entity, caster_entity, def)
+                {
                     commands.spawn(aura_pending);
                 }
             }
@@ -419,7 +468,8 @@ pub fn process_projectile_hits(
 
         // Apply aura for non-damage projectiles (e.g., Spider Web Root)
         if !def.is_damage() {
-            if let Some(aura_pending) = AuraPending::from_ability(target_entity, caster_entity, def) {
+            if let Some(aura_pending) = AuraPending::from_ability(target_entity, caster_entity, def)
+            {
                 commands.spawn(aura_pending);
             }
         }
@@ -480,4 +530,3 @@ pub fn process_projectile_hits(
         commands.entity(projectile_entity).despawn();
     }
 }
-

@@ -323,6 +323,8 @@ mod tests {
     use super::*;
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn test_range_constants_are_positive() {
         assert!(MELEE_RANGE > 0.0);
         assert!(WAND_RANGE > 0.0);
@@ -331,6 +333,8 @@ mod tests {
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn test_hp_thresholds_are_valid() {
         assert!(DEFENSIVE_HP_THRESHOLD > 0.0 && DEFENSIVE_HP_THRESHOLD <= 1.0);
         assert!(EMERGENCY_HEAL_THRESHOLD > 0.0 && EMERGENCY_HEAL_THRESHOLD <= 1.0);
@@ -363,6 +367,8 @@ mod tests {
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn test_stat_weights_are_positive() {
         assert!(WEIGHT_MAX_HEALTH > 0.0);
         assert!(WEIGHT_MAX_MANA > 0.0);

@@ -246,7 +246,11 @@ fn assert_results_identical(a: &MatchResult, b: &MatchResult, context: &str) {
                 "{}: team{} slot {} class differs",
                 context, team, slot
             );
-            assert_eq!(x.survived, y.survived, "{}: team{} slot {} survived differs", context, team, slot);
+            assert_eq!(
+                x.survived, y.survived,
+                "{}: team{} slot {} survived differs",
+                context, team, slot
+            );
             for (field, fa, fb) in [
                 ("max_health", x.max_health, y.max_health),
                 ("final_health", x.final_health, y.final_health),
@@ -310,11 +314,7 @@ fn observed_run_does_not_perturb_outcomes() {
 /// `alive: false`; the alive count never increases).
 #[test]
 fn observer_sees_monotonic_time_and_all_combatants() {
-    let cfg = create_config(
-        vec!["Warrior", "Priest"],
-        vec!["Mage", "Rogue"],
-        Some(42),
-    );
+    let cfg = create_config(vec!["Warrior", "Priest"], vec!["Mage", "Rogue"], Some(42));
 
     let mut times: Vec<f32> = Vec::new();
     let mut entity_sets: Vec<BTreeSet<Entity>> = Vec::new();
@@ -337,12 +337,21 @@ fn observer_sees_monotonic_time_and_all_combatants() {
     })
     .expect("observed run");
 
-    assert!(times.len() > 100, "expected a multi-second match, got {} frames", times.len());
+    assert!(
+        times.len() > 100,
+        "expected a multi-second match, got {} frames",
+        times.len()
+    );
 
     // Monotonic sim time: never decreasing, and strictly increasing after the
     // first frame (Bevy's first Time update has zero delta).
     for w in times.windows(2) {
-        assert!(w[1] >= w[0], "sim_time went backwards: {} -> {}", w[0], w[1]);
+        assert!(
+            w[1] >= w[0],
+            "sim_time went backwards: {} -> {}",
+            w[0],
+            w[1]
+        );
     }
     let strict_increases = times.windows(2).filter(|w| w[1] > w[0]).count();
     assert!(
@@ -433,7 +442,11 @@ fn time_within_range_known_value() {
         .collect();
     // Intervals starting at distance <= 2.0: [0,1), [1,2), [2,3) => 3 seconds.
     let t = time_within_range_of(&a, &b, 2.0);
-    assert!((t - 3.0).abs() < 1e-6, "expected 3.0s within range, got {}", t);
+    assert!(
+        (t - 3.0).abs() < 1e-6,
+        "expected 3.0s within range, got {}",
+        t
+    );
 }
 
 #[test]
@@ -452,7 +465,11 @@ fn time_within_range_entity_death_mid_timeline() {
         .map(|i| (i as f32, Vec3::new(1.0, 0.0, 0.0)))
         .collect();
     let t = time_within_range_of(&a, &b, 5.0);
-    assert!((t - 2.0).abs() < 1e-6, "expected 2.0s (b died at t=2), got {}", t);
+    assert!(
+        (t - 2.0).abs() < 1e-6,
+        "expected 2.0s (b died at t=2), got {}",
+        t
+    );
 }
 
 #[test]
@@ -463,11 +480,19 @@ fn separation_gained_known_value() {
         .map(|i| (i as f32, Vec3::new(1.0 + i as f32, 0.0, 0.0)))
         .collect();
     let gained = separation_gained_during(&a, &b, (0.0, 4.0)).expect("window has samples");
-    assert!((gained - 4.0).abs() < 1e-6, "expected +4.0 separation, got {}", gained);
+    assert!(
+        (gained - 4.0).abs() < 1e-6,
+        "expected +4.0 separation, got {}",
+        gained
+    );
 
     // Sub-window [1.0, 3.0]: distance 2.0 -> 4.0.
     let gained = separation_gained_during(&a, &b, (1.0, 3.0)).expect("sub-window has samples");
-    assert!((gained - 2.0).abs() < 1e-6, "expected +2.0 separation, got {}", gained);
+    assert!(
+        (gained - 2.0).abs() < 1e-6,
+        "expected +2.0 separation, got {}",
+        gained
+    );
 }
 
 #[test]
@@ -608,11 +633,7 @@ mod priest_postures {
 
     /// Per-frame `(sim_time, min distance)` from `me` to the nearest of
     /// `others`, matched on identical frame stamps.
-    fn min_distance_series(
-        timeline: &Timeline,
-        me: Entity,
-        others: &[Entity],
-    ) -> Vec<(f32, f32)> {
+    fn min_distance_series(timeline: &Timeline, me: Entity, others: &[Entity]) -> Vec<(f32, f32)> {
         let me_samples = timeline.samples.get(&me).cloned().unwrap_or_default();
         // Keyed by f32 bits — sim_time is positive and increasing, so bit
         // order equals numeric order.
@@ -730,9 +751,8 @@ mod priest_postures {
         // un-CC'd segments only. Trace sim_time is combat time — shift by
         // gate_time to compare against timeline timestamps.
         use arenasim::states::play_match::abilities::AbilityType;
-        let ability_defs =
-            arenasim::states::play_match::ability_config::load_ability_definitions()
-                .expect("abilities.ron loads");
+        let ability_defs = arenasim::states::play_match::ability_config::load_ability_definitions()
+            .expect("abilities.ron loads");
         let stun_spans: Vec<(f32, f32)> = trace
             .iter()
             .filter(|v| {
@@ -847,7 +867,10 @@ mod priest_postures {
 
         // Last priest sample (combat time) bounds any unclosed window.
         let priest_samples = timeline.samples.get(&priest).cloned().unwrap_or_default();
-        let end = priest_samples.last().map(|(t, _)| t - gate_time).unwrap_or(0.0);
+        let end = priest_samples
+            .last()
+            .map(|(t, _)| t - gate_time)
+            .unwrap_or(0.0);
         let windows = pressured_windows(&events, 1, 1, end);
         assert_min_occurrences("PRESSURED windows (focused Priest)", windows.len(), 1);
 
@@ -933,7 +956,6 @@ mod priest_postures {
             );
         }
     }
-
 
     /// (d) TIME-IN-FREE PROBE — Warrior+Priest mirror, unforced targeting:
     /// each Priest spends substantial time in FREE. Kill-target acquisition
@@ -1197,11 +1219,11 @@ mod priest_postures {
 //   that would pin into the wall).
 
 mod escape_windows {
-    use super::priest_postures::{movement_events, pressured_windows, run_observed_traced, MovementEvent};
-    use super::*;
-    use arenasim::states::play_match::constants::{
-        ARENA_CORNER_SUM, ARENA_HALF_X, ARENA_HALF_Z,
+    use super::priest_postures::{
+        movement_events, pressured_windows, run_observed_traced, MovementEvent,
     };
+    use super::*;
+    use arenasim::states::play_match::constants::{ARENA_CORNER_SUM, ARENA_HALF_X, ARENA_HALF_Z};
     use arenasim::states::play_match::movement_config::load_movement_config;
 
     /// Separation floor asserted per window (units of XZ distance gained
@@ -1251,12 +1273,12 @@ mod escape_windows {
                     && v["actor"]["class"] == "Priest"
             })
             .filter(|v| {
-                v["candidates"].as_array().map_or(false, |cands| {
+                v["candidates"].as_array().is_some_and(|cands| {
                     cands.iter().any(|c| {
                         c["ability"] == "FlashHeal"
                             && c["reason"]["PreconditionUnmet"]["note"]
                                 .as_str()
-                                .map_or(false, |n| n.starts_with("escape window"))
+                                .is_some_and(|n| n.starts_with("escape window"))
                     })
                 })
             })
@@ -1414,11 +1436,7 @@ mod escape_windows {
             .shared
             .urgency_hp_threshold;
 
-        let mut cfg = create_config(
-            vec!["Priest", "Paladin"],
-            vec!["Rogue", "Mage"],
-            Some(16),
-        );
+        let mut cfg = create_config(vec!["Priest", "Paladin"], vec!["Rogue", "Mage"], Some(16));
         // Pin the Rogue's original Ambush opener: this probe tests the Priest's
         // critical-heal-during-escape-window behavior, with the Rogue as
         // incidental melee pressure. The new CheapShot→Kidney default is covered
@@ -1446,7 +1464,6 @@ mod escape_windows {
             1,
         );
     }
-
 
     /// (d) MULTI-ATTACKER PROBE — two melee on the Priest, only one stunned:
     /// no EscapeWindowOpen ever fires. Non-vacuity is established
@@ -1512,9 +1529,7 @@ mod escape_windows {
                 .get(&entity)
                 .and_then(|s| {
                     s.iter()
-                        .min_by(|a, b| {
-                            (a.0 - t).abs().partial_cmp(&(b.0 - t).abs()).unwrap()
-                        })
+                        .min_by(|a, b| (a.0 - t).abs().partial_cmp(&(b.0 - t).abs()).unwrap())
                         .map(|(_, p)| *p)
                 })
                 .expect("entity has samples")
@@ -1634,9 +1649,7 @@ mod escape_windows {
 // ---------------------------------------------------------------------------
 
 mod escape_window_math {
-    use arenasim::states::play_match::class_ai::priest::{
-        escape_distance_gained, escape_window,
-    };
+    use arenasim::states::play_match::class_ai::priest::{escape_distance_gained, escape_window};
 
     /// (f) Window math: a 50% slow on the Priest halves the effective window
     /// distance.
@@ -1644,7 +1657,11 @@ mod escape_window_math {
     fn fifty_percent_slow_halves_effective_distance() {
         let full = escape_distance_gained(2.0, 5.0, 1.0);
         let slowed = escape_distance_gained(2.0, 5.0, 0.5);
-        assert!((full - 10.0).abs() < 1e-6, "2s at speed 5 = 10 units, got {}", full);
+        assert!(
+            (full - 10.0).abs() < 1e-6,
+            "2s at speed 5 = 10 units, got {}",
+            full
+        );
         assert!(
             (slowed - full / 2.0).abs() < 1e-6,
             "50% slow must halve the distance: {} vs {}",
@@ -1713,11 +1730,11 @@ mod directive_executor {
 
     use arenasim::states::play_match::abilities::AbilityType;
     use arenasim::states::play_match::combat_core::{move_to_target, DIRECTIVE_POINT_EPSILON};
-    use arenasim::states::play_match::map_config::ActiveMapGeometry;
     use arenasim::states::play_match::components::{
         ActiveAuras, Aura, AuraType, CastingState, Combatant, MatchCountdown, MovementDirective,
         MovementGoal,
     };
+    use arenasim::states::play_match::map_config::ActiveMapGeometry;
     use arenasim::CharacterClass;
     use bevy::prelude::*;
     use bevy::time::TimeUpdateStrategy;
@@ -1792,11 +1809,13 @@ mod directive_executor {
         let mut app = executor_app();
         let start = Vec3::new(0.0, 1.0, 0.0);
         let (entity, speed) = spawn_combatant(&mut app, start);
-        app.world_mut().entity_mut(entity).insert(MovementDirective {
-            goal: MovementGoal::Direction(Vec2::new(1.0, 0.0)),
-            expires: 100.0,
-            committed_until: 100.0,
-        });
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(MovementDirective {
+                goal: MovementGoal::Direction(Vec2::new(1.0, 0.0)),
+                expires: 100.0,
+                committed_until: 100.0,
+            });
 
         for _ in 0..30 {
             app.update();
@@ -1898,11 +1917,13 @@ mod directive_executor {
         app.update();
         let (entity, _) = spawn_combatant(&mut app, Vec3::new(0.0, 1.0, 0.0));
         let deadline = now(&app) + 0.2;
-        app.world_mut().entity_mut(entity).insert(MovementDirective {
-            goal: MovementGoal::Direction(Vec2::new(1.0, 0.0)),
-            expires: deadline,
-            committed_until: deadline,
-        });
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(MovementDirective {
+                goal: MovementGoal::Direction(Vec2::new(1.0, 0.0)),
+                expires: deadline,
+                committed_until: deadline,
+            });
 
         for _ in 0..30 {
             app.update();
@@ -1914,11 +1935,18 @@ mod directive_executor {
         );
 
         let frozen = pos_of(&app, entity);
-        assert!(frozen.x > 0.0, "directive should have moved the entity before expiry");
+        assert!(
+            frozen.x > 0.0,
+            "directive should have moved the entity before expiry"
+        );
         for _ in 0..10 {
             app.update();
         }
-        assert_eq!(pos_of(&app, entity), frozen, "movement must stop after expiry");
+        assert_eq!(
+            pos_of(&app, entity),
+            frozen,
+            "movement must stop after expiry"
+        );
     }
 
     /// (g) Casting blocks directive execution (R12: the casting-locks-movement
@@ -1941,7 +1969,11 @@ mod directive_executor {
         for _ in 0..30 {
             app.update();
         }
-        assert_eq!(pos_of(&app, entity), start, "casting must block directive movement");
+        assert_eq!(
+            pos_of(&app, entity),
+            start,
+            "casting must block directive movement"
+        );
         assert!(
             app.world().get::<MovementDirective>(entity).is_some(),
             "unexpired directive must survive the cast"
@@ -1965,11 +1997,13 @@ mod directive_executor {
         let mut app = executor_app();
         let (entity, speed) = spawn_combatant(&mut app, Vec3::new(0.0, 1.0, 0.0));
         let point = Vec3::new(3.0, 1.0, 1.0);
-        app.world_mut().entity_mut(entity).insert(MovementDirective {
-            goal: MovementGoal::Point(point),
-            expires: 100.0,
-            committed_until: 100.0,
-        });
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(MovementDirective {
+                goal: MovementGoal::Point(point),
+                expires: 100.0,
+                committed_until: 100.0,
+            });
 
         // More than enough frames to cover the ~3.2-unit walk.
         let frames = ((4.0 / speed) * 60.0) as usize + 30;
@@ -1990,7 +2024,11 @@ mod directive_executor {
         for _ in 0..20 {
             app.update();
         }
-        assert_eq!(pos_of(&app, entity), settled, "entity must hold at the point");
+        assert_eq!(
+            pos_of(&app, entity),
+            settled,
+            "entity must hold at the point"
+        );
     }
 }
 
@@ -2040,7 +2078,9 @@ mod directive_executor {
 //   released under PRESSURED).
 
 mod paladin_postures {
-    use super::priest_postures::{movement_events, pressured_windows, run_observed_traced, MovementEvent};
+    use super::priest_postures::{
+        movement_events, pressured_windows, run_observed_traced, MovementEvent,
+    };
     use super::*;
 
     /// Paladin (team 1 slot 0) HoJ casts: (combat-time, target entity_id).
@@ -2151,7 +2191,9 @@ mod paladin_postures {
         let hojs = paladin_hoj_casts(&trace);
         let in_dip_on_healer = hojs.iter().any(|(t, tgt)| {
             *tgt == priest_id
-                && completed.iter().any(|(s, e, _)| *t >= *s - 1e-3 && *t <= *e + 1e-3)
+                && completed
+                    .iter()
+                    .any(|(s, e, _)| *t >= *s - 1e-3 && *t <= *e + 1e-3)
         });
         eprintln!(
             "dip probe: spans={:?} hojs={:?} enemy_priest=e{}",
@@ -2173,14 +2215,21 @@ mod paladin_postures {
         let ps = timeline.samples.get(&paladin).cloned().unwrap_or_default();
         let ks = timeline.samples.get(&kt).cloned().unwrap_or_default();
         let dist_at = |t: f32| -> Option<f32> {
-            let p = ps.iter().min_by(|a, b| (a.0 - t).abs().partial_cmp(&(b.0 - t).abs()).unwrap())?;
-            let k = ks.iter().min_by(|a, b| (a.0 - t).abs().partial_cmp(&(b.0 - t).abs()).unwrap())?;
+            let p = ps
+                .iter()
+                .min_by(|a, b| (a.0 - t).abs().partial_cmp(&(b.0 - t).abs()).unwrap())?;
+            let k = ks
+                .iter()
+                .min_by(|a, b| (a.0 - t).abs().partial_cmp(&(b.0 - t).abs()).unwrap())?;
             Some(p.1.distance(k.1))
         };
         let dmin: f32 = (0..150)
             .filter_map(|i| dist_at(complete_t + gate + i as f32 * 0.1))
             .fold(f32::MAX, f32::min);
-        eprintln!("dip probe: post-DipComplete min dist to kill target = {:.1}", dmin);
+        eprintln!(
+            "dip probe: post-DipComplete min dist to kill target = {:.1}",
+            dmin
+        );
         assert!(
             dmin <= 5.0,
             "Paladin did not return toward its kill target after the dip \
@@ -2196,11 +2245,7 @@ mod paladin_postures {
     /// teammate-HP-dive flavor is not naturally stageable here.
     #[test]
     fn dip_aborts_without_casting() {
-        let mut cfg = create_config(
-            vec!["Paladin", "Mage"],
-            vec!["Priest", "Rogue"],
-            Some(1),
-        );
+        let mut cfg = create_config(vec!["Paladin", "Mage"], vec!["Priest", "Rogue"], Some(1));
         cfg.team1_kill_target = Some(1);
         cfg.team2_kill_target = Some(1);
         let (result, _timeline, trace) = run_observed_traced(cfg);
@@ -2241,7 +2286,10 @@ mod paladin_postures {
         // assertion above suffices; this is the readable restatement.
         for (s, e, k) in &spans {
             if *k == "preempt" {
-                eprintln!("preempt probe: dip [{:.1},{:.1}] replaced by PressuredEnter", s, e);
+                eprintln!(
+                    "preempt probe: dip [{:.1},{:.1}] replaced by PressuredEnter",
+                    s, e
+                );
             }
         }
     }
@@ -2271,8 +2319,9 @@ mod paladin_postures {
         for (a, b) in &windows {
             let (w0, w1) = (a + gate, b + gate);
             for (t, p) in ps.iter().filter(|(t, _)| *t >= w0 && *t <= w1) {
-                if let Some((_, kp)) =
-                    ks.iter().min_by(|x, y| (x.0 - t).abs().partial_cmp(&(y.0 - t).abs()).unwrap())
+                if let Some((_, kp)) = ks
+                    .iter()
+                    .min_by(|x, y| (x.0 - t).abs().partial_cmp(&(y.0 - t).abs()).unwrap())
                 {
                     dist_sum += p.distance(*kp);
                     n += 1;
@@ -2366,14 +2415,23 @@ mod paladin_postures {
             timeline
                 .samples
                 .get(e)
-                .and_then(|s| s.iter().min_by(|x, y| (x.0 - t).abs().partial_cmp(&(y.0 - t).abs()).unwrap()))
+                .and_then(|s| {
+                    s.iter()
+                        .min_by(|x, y| (x.0 - t).abs().partial_cmp(&(y.0 - t).abs()).unwrap())
+                })
                 .map(|(_, p)| *p)
         };
 
         // First contact (Paladin within 4yd of any enemy) bounds the window.
-        let first_contact = ps.iter().find(|(t, p)| {
-            enemies.iter().filter_map(|e| at(e, *t)).any(|ep| p.distance(ep) <= 4.0)
-        }).map(|(t, _)| *t);
+        let first_contact = ps
+            .iter()
+            .find(|(t, p)| {
+                enemies
+                    .iter()
+                    .filter_map(|e| at(e, *t))
+                    .any(|ep| p.distance(ep) <= 4.0)
+            })
+            .map(|(t, _)| *t);
         let first_contact = first_contact.expect("Paladin must reach melee at least once");
 
         let mut hp: BTreeMap<u8, f32> = BTreeMap::new();
@@ -2407,7 +2465,10 @@ mod paladin_postures {
         let frac = melee_time / healthy_time.max(f32::EPSILON);
         eprintln!(
             "identity probe: match={:.0}s healthy-post-contact={:.1}s melee={:.1}s ({:.0}%)",
-            result.match_time, healthy_time, melee_time, frac * 100.0
+            result.match_time,
+            healthy_time,
+            melee_time,
+            frac * 100.0
         );
         assert!(
             healthy_time >= 3.0,
@@ -2421,7 +2482,6 @@ mod paladin_postures {
             frac * 100.0
         );
     }
-
 
     /// (f) CHIP-DAMAGE PROBE — a teammate takes light damage (stays above
     /// the urgency threshold) mid-dip: the dip still completes (the cast
@@ -2465,7 +2525,8 @@ mod paladin_postures {
                 *hp > urgency,
                 "teammate dropped to {:.2} (<= urgency {}) during a COMPLETED dip — \
                  the abort should have fired",
-                hp, urgency
+                hp,
+                urgency
             );
         }
     }
@@ -2582,9 +2643,12 @@ mod paladin_unit {
 
     fn snapshot(self_entity: Entity) -> CombatSnapshot {
         let mut combatants = BTreeMap::new();
-        combatants.insert(self_entity, info(self_entity, 1, CharacterClass::Paladin, Vec3::ZERO));
+        combatants.insert(
+            self_entity,
+            info(self_entity, 1, CharacterClass::Paladin, Vec3::ZERO),
+        );
         CombatSnapshot {
-        ai_profile: Default::default(),
+            ai_profile: Default::default(),
             bounds: Default::default(),
             combatants,
             active_auras: BTreeMap::new(),
@@ -2611,15 +2675,36 @@ mod paladin_unit {
     #[test]
     fn reservation_only_when_healer_alive_and_unpressured() {
         // No enemy healer: rotation always allowed, every posture.
-        for p in [Posture::Free, Posture::Pressured, Posture::Escape, Posture::Dip] {
-            assert!(rotation_hoj_allowed(p, false), "no healer → rotation allowed in {:?}", p);
+        for p in [
+            Posture::Free,
+            Posture::Pressured,
+            Posture::Escape,
+            Posture::Dip,
+        ] {
+            assert!(
+                rotation_hoj_allowed(p, false),
+                "no healer → rotation allowed in {:?}",
+                p
+            );
         }
         // Living enemy healer: suppressed in FREE/DIP, released under
         // PRESSURED/ESCAPE (self-peel never starved).
-        assert!(!rotation_hoj_allowed(Posture::Free, true), "FREE + healer → reserved");
-        assert!(!rotation_hoj_allowed(Posture::Dip, true), "DIP + healer → reserved");
-        assert!(rotation_hoj_allowed(Posture::Pressured, true), "PRESSURED + healer → released");
-        assert!(rotation_hoj_allowed(Posture::Escape, true), "ESCAPE + healer → released");
+        assert!(
+            !rotation_hoj_allowed(Posture::Free, true),
+            "FREE + healer → reserved"
+        );
+        assert!(
+            !rotation_hoj_allowed(Posture::Dip, true),
+            "DIP + healer → reserved"
+        );
+        assert!(
+            rotation_hoj_allowed(Posture::Pressured, true),
+            "PRESSURED + healer → released"
+        );
+        assert!(
+            rotation_hoj_allowed(Posture::Escape, true),
+            "ESCAPE + healer → released"
+        );
     }
 
     /// (h) DIP entry rejected when the HoJ eligibility predicate fails:
@@ -2631,7 +2716,12 @@ mod paladin_unit {
         let mut snap = snapshot(me);
         snap.combatants.insert(
             enemy_priest,
-            info(enemy_priest, 2, CharacterClass::Priest, Vec3::new(5.0, 0.0, 0.0)),
+            info(
+                enemy_priest,
+                2,
+                CharacterClass::Priest,
+                Vec3::new(5.0, 0.0, 0.0),
+            ),
         );
 
         // Eligible while not DR-immune → a candidate.
@@ -2644,7 +2734,10 @@ mod paladin_unit {
         // DR-immune to Stuns → not eligible, not a candidate.
         snap.dr_trackers.insert(enemy_priest, dr_immune_tracker());
         assert!(!hoj_target_eligible(&snap.context_for(me), 1, enemy_priest));
-        assert_eq!(dip_target_candidate(&snap.context_for(me), 1, Vec3::ZERO, 100.0), None);
+        assert_eq!(
+            dip_target_candidate(&snap.context_for(me), 1, Vec3::ZERO, 100.0),
+            None
+        );
     }
 
     /// (h) Divine Shield (DamageImmunity) and stealth also fail eligibility.
@@ -2653,8 +2746,10 @@ mod paladin_unit {
         let me = Entity::from_raw(1);
         let enemy = Entity::from_raw(2);
         let mut snap = snapshot(me);
-        snap.combatants
-            .insert(enemy, info(enemy, 2, CharacterClass::Paladin, Vec3::new(5.0, 0.0, 0.0)));
+        snap.combatants.insert(
+            enemy,
+            info(enemy, 2, CharacterClass::Paladin, Vec3::new(5.0, 0.0, 0.0)),
+        );
 
         // Divine Shield.
         snap.active_auras.insert(
@@ -2666,12 +2761,18 @@ mod paladin_unit {
                 ..Default::default()
             }],
         );
-        assert!(!hoj_target_eligible(&snap.context_for(me), 1, enemy), "immune → ineligible");
+        assert!(
+            !hoj_target_eligible(&snap.context_for(me), 1, enemy),
+            "immune → ineligible"
+        );
 
         // Stealthed.
         snap.active_auras.remove(&enemy);
         snap.combatants.get_mut(&enemy).unwrap().stealthed = true;
-        assert!(!hoj_target_eligible(&snap.context_for(me), 1, enemy), "stealthed → ineligible");
+        assert!(
+            !hoj_target_eligible(&snap.context_for(me), 1, enemy),
+            "stealthed → ineligible"
+        );
     }
 
     /// (h) Reach gate: an eligible enemy healer beyond reach is not a dip
@@ -2683,7 +2784,12 @@ mod paladin_unit {
         let mut snap = snapshot(me);
         snap.combatants.insert(
             enemy_priest,
-            info(enemy_priest, 2, CharacterClass::Priest, Vec3::new(20.0, 0.0, 0.0)),
+            info(
+                enemy_priest,
+                2,
+                CharacterClass::Priest,
+                Vec3::new(20.0, 0.0, 0.0),
+            ),
         );
         assert_eq!(
             dip_target_candidate(&snap.context_for(me), 1, Vec3::ZERO, 10.0),
@@ -2706,7 +2812,12 @@ mod paladin_unit {
         let mut snap = snapshot(me);
         snap.combatants.insert(
             enemy_warrior,
-            info(enemy_warrior, 2, CharacterClass::Warrior, Vec3::new(3.0, 0.0, 0.0)),
+            info(
+                enemy_warrior,
+                2,
+                CharacterClass::Warrior,
+                Vec3::new(3.0, 0.0, 0.0),
+            ),
         );
         assert_eq!(
             dip_target_candidate(&snap.context_for(me), 1, Vec3::ZERO, 100.0),
@@ -2733,7 +2844,12 @@ mod paladin_unit {
         // Living, still-eligible enemy healer = the committed dip target.
         snap.combatants.insert(
             enemy_priest,
-            info(enemy_priest, 2, CharacterClass::Priest, Vec3::new(5.0, 0.0, 0.0)),
+            info(
+                enemy_priest,
+                2,
+                CharacterClass::Priest,
+                Vec3::new(5.0, 0.0, 0.0),
+            ),
         );
         // Wounded ally at the urgency threshold — triggers the abort.
         let mut ally_info = info(ally, 1, CharacterClass::Warrior, Vec3::new(3.0, 0.0, 0.0));
@@ -2836,7 +2952,12 @@ mod bucket_a_unit {
         combatants.insert(me, info(me, 1, CharacterClass::Warrior, 100.0));
         combatants.insert(
             healer,
-            info(healer, 2, CharacterClass::Priest, if healer_alive { 100.0 } else { 0.0 }),
+            info(
+                healer,
+                2,
+                CharacterClass::Priest,
+                if healer_alive { 100.0 } else { 0.0 },
+            ),
         );
         let mut active_auras = BTreeMap::new();
         if let Some(a) = aura {
@@ -2844,8 +2965,8 @@ mod bucket_a_unit {
         }
         (
             CombatSnapshot {
-        ai_profile: Default::default(),
-            bounds: Default::default(),
+                ai_profile: Default::default(),
+                bounds: Default::default(),
                 combatants,
                 active_auras,
                 dr_trackers: BTreeMap::new(),
@@ -2858,7 +2979,12 @@ mod bucket_a_unit {
 
     #[test]
     fn healer_cc_detects_cast_preventing_cc() {
-        for cc in [AuraType::Stun, AuraType::Fear, AuraType::Polymorph, AuraType::Incapacitate] {
+        for cc in [
+            AuraType::Stun,
+            AuraType::Fear,
+            AuraType::Polymorph,
+            AuraType::Incapacitate,
+        ] {
             let (snap, me) = snap_with_healer_aura(Some(cc_aura(cc)), true);
             assert!(
                 snap.context_for(me).enemy_healer_is_cced(),
@@ -2872,16 +2998,28 @@ mod bucket_a_unit {
     fn healer_cc_ignores_root_and_healthy_and_missing() {
         // Root does NOT stop a heal — must not open a burst window.
         let (snap, me) = snap_with_healer_aura(Some(cc_aura(AuraType::Root)), true);
-        assert!(!snap.context_for(me).enemy_healer_is_cced(), "Root must not open a burst window");
+        assert!(
+            !snap.context_for(me).enemy_healer_is_cced(),
+            "Root must not open a burst window"
+        );
 
         // No aura at all → healer free → no window.
         let (snap, me) = snap_with_healer_aura(None, true);
-        assert!(!snap.context_for(me).enemy_healer_is_cced(), "free healer → no window");
-        assert_eq!(snap.context_for(me).enemy_healer(), Some(Entity::from_raw(2)));
+        assert!(
+            !snap.context_for(me).enemy_healer_is_cced(),
+            "free healer → no window"
+        );
+        assert_eq!(
+            snap.context_for(me).enemy_healer(),
+            Some(Entity::from_raw(2))
+        );
 
         // Dead healer → no living healer → no window, no healer.
         let (snap, me) = snap_with_healer_aura(Some(cc_aura(AuraType::Stun)), false);
-        assert!(!snap.context_for(me).enemy_healer_is_cced(), "dead healer → no window");
+        assert!(
+            !snap.context_for(me).enemy_healer_is_cced(),
+            "dead healer → no window"
+        );
         assert_eq!(snap.context_for(me).enemy_healer(), None);
     }
 
@@ -2893,12 +3031,8 @@ mod bucket_a_unit {
         let a = Entity::from_raw(10);
         let b = Entity::from_raw(11);
         // a: 80 HP @ 3yd (qualifies), b: 50 HP @ 2yd (qualifies, softer) → b.
-        let chosen = select_softer_melee_target(
-            100.0,
-            vec![(a, 3.0, 80.0), (b, 2.0, 50.0)],
-            4.0,
-            0.15,
-        );
+        let chosen =
+            select_softer_melee_target(100.0, vec![(a, 3.0, 80.0), (b, 2.0, 50.0)], 4.0, 0.15);
         assert_eq!(chosen, Some(b), "lowest-HP qualifying candidate wins");
     }
 
@@ -2906,9 +3040,15 @@ mod bucket_a_unit {
     fn swap_respects_range_and_margin_and_emptiness() {
         let a = Entity::from_raw(10);
         // Out of range (5 > 4) → no swap.
-        assert_eq!(select_softer_melee_target(100.0, vec![(a, 5.0, 10.0)], 4.0, 0.15), None);
+        assert_eq!(
+            select_softer_melee_target(100.0, vec![(a, 5.0, 10.0)], 4.0, 0.15),
+            None
+        );
         // In range but not softer enough (90 > 85 threshold) → no swap.
-        assert_eq!(select_softer_melee_target(100.0, vec![(a, 1.0, 90.0)], 4.0, 0.15), None);
+        assert_eq!(
+            select_softer_melee_target(100.0, vec![(a, 1.0, 90.0)], 4.0, 0.15),
+            None
+        );
         // No candidates → None.
         assert_eq!(
             select_softer_melee_target(100.0, Vec::<(Entity, f32, f32)>::new(), 4.0, 0.15),
@@ -2921,8 +3061,10 @@ mod bucket_a_unit {
         let lo = Entity::from_raw(10);
         let hi = Entity::from_raw(11);
         // Equal HP + equal range: deterministic lowest-entity wins regardless of order.
-        let fwd = select_softer_melee_target(100.0, vec![(lo, 2.0, 50.0), (hi, 2.0, 50.0)], 4.0, 0.15);
-        let rev = select_softer_melee_target(100.0, vec![(hi, 2.0, 50.0), (lo, 2.0, 50.0)], 4.0, 0.15);
+        let fwd =
+            select_softer_melee_target(100.0, vec![(lo, 2.0, 50.0), (hi, 2.0, 50.0)], 4.0, 0.15);
+        let rev =
+            select_softer_melee_target(100.0, vec![(hi, 2.0, 50.0), (lo, 2.0, 50.0)], 4.0, 0.15);
         assert_eq!(fwd, Some(lo));
         assert_eq!(rev, Some(lo), "tie-break is order-independent");
     }
@@ -2954,13 +3096,17 @@ mod mage_postures {
         let result = run_headless_match_observed(
             config,
             true,
-            Some(TraceConfig { output_path: path.clone() }),
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
             |frame| timeline.record(frame),
         )
         .expect("observed traced match failed");
         let body = std::fs::read_to_string(&path).expect("read trace");
-        let events: Vec<serde_json::Value> =
-            body.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let events: Vec<serde_json::Value> = body
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
         let _ = std::fs::remove_file(path);
         (result, timeline, events)
     }
@@ -3038,7 +3184,10 @@ mod mage_postures {
     fn mage_kite_does_not_strobe() {
         let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(SEED));
         let (_result, _timeline, trace) = run_traced(cfg);
-        let enters = mage_events(&trace).iter().filter(|e| e.trigger == "KiteEnter").count();
+        let enters = mage_events(&trace)
+            .iter()
+            .filter(|e| e.trigger == "KiteEnter")
+            .count();
         assert!(
             enters <= 10,
             "Mage entered KITE {enters} times in one 1v1 — strobing (kite_hold not holding)"
@@ -3079,8 +3228,8 @@ mod mage_postures {
         let make = || create_config(vec!["Mage"], vec!["Warrior"], Some(seed));
         let unobserved = run_headless_match_with(make(), true, None).expect("unobserved");
         let mut frames = 0usize;
-        let observed = run_headless_match_observed(make(), true, None, |_f| frames += 1)
-            .expect("observed");
+        let observed =
+            run_headless_match_observed(make(), true, None, |_f| frames += 1).expect("observed");
         assert!(frames > 0, "observer never invoked");
         assert_results_identical(&observed, &unobserved, "mage observed vs unobserved");
     }
@@ -3104,13 +3253,17 @@ mod hunter_postures {
         let result = run_headless_match_observed(
             config,
             true,
-            Some(TraceConfig { output_path: path.clone() }),
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
             |frame| timeline.record(frame),
         )
         .expect("observed traced match failed");
         let body = std::fs::read_to_string(&path).expect("read trace");
-        let events: Vec<serde_json::Value> =
-            body.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let events: Vec<serde_json::Value> = body
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
         let _ = std::fs::remove_file(path);
         (result, timeline, events)
     }
@@ -3127,9 +3280,11 @@ mod hunter_postures {
         let (_result, _timeline, trace) = run_traced(cfg);
         let enters = trace
             .iter()
-            .filter(|v| v["kind"] == "movement_decision"
-                && v["actor"]["class"] == "Hunter"
-                && v["trigger"] == "KiteEnter")
+            .filter(|v| {
+                v["kind"] == "movement_decision"
+                    && v["actor"]["class"] == "Hunter"
+                    && v["trigger"] == "KiteEnter"
+            })
             .count();
         assert_min_occurrences("Hunter KITE entries", enters, 1);
     }
@@ -3162,8 +3317,8 @@ mod hunter_postures {
         let make = || create_config(vec!["Hunter"], vec!["Warrior"], Some(SEED));
         let unobserved = run_headless_match_with(make(), true, None).expect("unobserved");
         let mut frames = 0usize;
-        let observed = run_headless_match_observed(make(), true, None, |_f| frames += 1)
-            .expect("observed");
+        let observed =
+            run_headless_match_observed(make(), true, None, |_f| frames += 1).expect("observed");
         assert!(frames > 0, "observer never invoked");
         assert_results_identical(&observed, &unobserved, "hunter observed vs unobserved");
     }
@@ -3263,9 +3418,10 @@ mod psychic_scream {
                     && v["actor"]["class"] == "Priest"
             })
             .filter(|v| {
-                v["candidates"].as_array().map_or(false, |c| {
-                    c.iter()
-                        .any(|cand| cand["ability"] == "PsychicScream" && cand["status"] == "chosen")
+                v["candidates"].as_array().is_some_and(|c| {
+                    c.iter().any(|cand| {
+                        cand["ability"] == "PsychicScream" && cand["status"] == "chosen"
+                    })
                 })
             })
             .map(|v| v["sim_time"].as_f64().unwrap() as f32)
@@ -3289,7 +3445,11 @@ mod psychic_scream {
     /// `healing_heavy_hp` so the dip's ally-HP deferral stays open.
     #[test]
     fn offensive_dip_fears_enemy_healer() {
-        let mut cfg = create_config(vec!["Priest", "Warrior"], vec!["Rogue", "Paladin"], Some(42));
+        let mut cfg = create_config(
+            vec!["Priest", "Warrior"],
+            vec!["Rogue", "Paladin"],
+            Some(42),
+        );
         cfg.team2_kill_target = Some(1); // focus team-1 Warrior, freeing the Priest to dip
         cfg.team1_kill_target = Some(0); // team kills the enemy Rogue, leaving the healer free
         let (_result, _timeline, trace) = run_observed_traced(cfg);
@@ -3325,7 +3485,10 @@ mod psychic_scream {
         let (_result, _timeline, trace) = run_observed_traced(cfg);
 
         let casts = scream_cast_times(&trace, 1);
-        eprintln!("defensive probe: team-1 Priest scream casts = {}", casts.len());
+        eprintln!(
+            "defensive probe: team-1 Priest scream casts = {}",
+            casts.len()
+        );
         assert_min_occurrences("team-1 Priest defensive scream cast", casts.len(), 1);
 
         // No DipComplete: a focused Priest peels defensively, it does not dip.
@@ -3631,7 +3794,11 @@ mod shaman_totems {
                 dist.unwrap_or(f32::INFINITY),
             );
         }
-        assert_min_occurrences("Warrior outside-radius (residual-expired) frames", tested, 30);
+        assert_min_occurrences(
+            "Warrior outside-radius (residual-expired) frames",
+            tested,
+            30,
+        );
     }
 
     /// (3) Totems spawn near the Shaman (within the spacing offset), not at the
@@ -3732,9 +3899,9 @@ mod u6_collision_smoke {
             .volumes
             .iter()
             .filter_map(|v| match v {
-                ObstacleVolume::Cylinder { center_xz, radius, .. } => {
-                    Some((center_xz.x, center_xz.y, *radius))
-                }
+                ObstacleVolume::Cylinder {
+                    center_xz, radius, ..
+                } => Some((center_xz.x, center_xz.y, *radius)),
                 // Octagonal pillars: the closest a unit may legally come to the
                 // center is the APOTHEM (flush against a flat face), which is
                 // inside the circumradius — using the circumradius here would
@@ -3752,7 +3919,10 @@ mod u6_collision_smoke {
                 _ => None,
             })
             .collect();
-        assert!(!pillars.is_empty(), "PillaredArena must carry pillar volumes");
+        assert!(
+            !pillars.is_empty(),
+            "PillaredArena must carry pillar volumes"
+        );
         pillars
     }
 
@@ -3781,13 +3951,25 @@ mod u6_collision_smoke {
                             d >= radius - 0.01,
                             "seed {}: team-{} {:?} (is_pet={}) at t={:.2} is inside pillar \
                              ({}, {}): center-dist {:.3} < {}",
-                            seed, info.team, info.class, info.is_pet, t, px, pz, d, radius
+                            seed,
+                            info.team,
+                            info.class,
+                            info.is_pet,
+                            t,
+                            px,
+                            pz,
+                            d,
+                            radius
                         );
                         checked += 1;
                     }
                 }
             }
-            assert!(checked > 0, "seed {}: no samples checked — timeline empty?", seed);
+            assert!(
+                checked > 0,
+                "seed {}: no samples checked — timeline empty?",
+                seed
+            );
         }
     }
 }
@@ -3803,12 +3985,14 @@ mod u6_collision_smoke {
 // OFF → cover_pull active) the Priest spends real sim-time OCCLUDED from the
 // Warrior, and its movement decisions carry the cover_pull scorer term.
 mod u8_healer_cover {
-    use super::*;
     use super::priest_postures::{movement_events, pressured_windows};
+    use super::*;
     use arenasim::headless::runner::TraceConfig;
     use arenasim::states::match_config::ArenaMap;
     use arenasim::states::play_match::map_config::load_map_geometry_config;
-    use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
+    use arenasim::states::play_match::map_geometry::{
+        has_line_of_sight, ObstacleVolume, EYE_HEIGHT,
+    };
     use arenasim::states::play_match::movement_config::load_movement_config;
 
     /// Warrior+Priest vs Priest+Mage on PillaredArena. Team-1's Warrior trains
@@ -3816,8 +4000,11 @@ mod u8_healer_cover {
     /// healthy through the early pressured windows — so the deny posture is
     /// active (urgency suppression off) exactly when we measure occlusion.
     fn train_config(seed: u64) -> HeadlessMatchConfig {
-        let mut cfg =
-            create_config(vec!["Warrior", "Priest"], vec!["Priest", "Mage"], Some(seed));
+        let mut cfg = create_config(
+            vec!["Warrior", "Priest"],
+            vec!["Priest", "Mage"],
+            Some(seed),
+        );
         cfg.map = "TwinPillars".to_string();
         cfg.team1_kill_target = Some(0); // team-1 focuses team-2's Priest
         cfg
@@ -3835,13 +4022,17 @@ mod u8_healer_cover {
         run_headless_match_observed(
             cfg,
             true,
-            Some(TraceConfig { output_path: path.clone() }),
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
             |frame| frames.push(frame.clone()),
         )
         .expect("observed traced headless match failed");
         let body = std::fs::read_to_string(&path).unwrap_or_default();
-        let events: Vec<serde_json::Value> =
-            body.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let events: Vec<serde_json::Value> = body
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
         let _ = std::fs::remove_file(path);
         (frames, events)
     }
@@ -3864,7 +4055,12 @@ mod u8_healer_cover {
             .filter(|(_, c)| c.team == team && c.class == class && !c.is_pet)
             .map(|(e, _)| *e)
             .collect();
-        assert_eq!(m.len(), 1, "expected one team-{team} {class:?}, found {}", m.len());
+        assert_eq!(
+            m.len(),
+            1,
+            "expected one team-{team} {class:?}, found {}",
+            m.len()
+        );
         m[0]
     }
 
@@ -3884,7 +4080,10 @@ mod u8_healer_cover {
             .expect("maps.ron loads")
             .active_for(ArenaMap::TwinPillars);
         let obstacles = geom.volumes;
-        assert!(!obstacles.is_empty(), "PillaredArena must carry cover volumes");
+        assert!(
+            !obstacles.is_empty(),
+            "PillaredArena must carry cover volumes"
+        );
 
         let mv = load_movement_config().expect("movement.ron loads");
         let urgency = mv.shared.urgency_hp_threshold;
@@ -3919,8 +4118,12 @@ mod u8_healer_cover {
             if !f.gates_open || !in_window(f.sim_time) {
                 continue;
             }
-            let Some(p) = f.combatants.get(&priest) else { continue };
-            let Some(w) = f.combatants.get(&warrior) else { continue };
+            let Some(p) = f.combatants.get(&priest) else {
+                continue;
+            };
+            let Some(w) = f.combatants.get(&warrior) else {
+                continue;
+            };
             if !p.alive || !w.alive {
                 continue;
             }
@@ -3956,7 +4159,11 @@ mod u8_healer_cover {
             })
             .count();
 
-        CoverStats { occluded_secs, qualifying_frames, pressured_cover_terms }
+        CoverStats {
+            occluded_secs,
+            qualifying_frames,
+            pressured_cover_terms,
+        }
     }
 
     /// The deny posture actively engages cover and buys a real (if brief)
@@ -4016,7 +4223,8 @@ mod u8_healer_cover {
     fn scan_cover_seeds() {
         for seed in 0u64..40 {
             let s = measure(seed);
-            let good = s.qualifying_frames >= 30 && s.occluded_secs >= 2.0 && s.pressured_cover_terms >= 1;
+            let good =
+                s.qualifying_frames >= 30 && s.occluded_secs >= 2.0 && s.pressured_cover_terms >= 1;
             eprintln!(
                 "seed {seed:2}: occl={:5.2} qframes={:4} coverterms={:3}{}",
                 s.occluded_secs,
@@ -4058,7 +4266,9 @@ mod u9_seek_reset {
     use arenasim::states::play_match::components::{
         ActiveAuras, Aura, AuraType, Combatant, MeleeResetState, MovementDirective, MovementGoal,
     };
-    use arenasim::states::play_match::decision_trace::{DecisionTrace, EventPayload, MovementTrigger};
+    use arenasim::states::play_match::decision_trace::{
+        DecisionTrace, EventPayload, MovementTrigger,
+    };
     use arenasim::states::play_match::movement_config::MeleeMovementConfig;
     use arenasim::states::play_match::{AbilityType, DispelType};
 
@@ -4080,8 +4290,14 @@ mod u9_seek_reset {
             map: map.to_string(),
             ..Default::default()
         };
-        run_headless_match_with(config, true, Some(TraceConfig { output_path: path.clone() }))
-            .expect("traced headless match failed");
+        run_headless_match_with(
+            config,
+            true,
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
+        )
+        .expect("traced headless match failed");
         std::fs::read_to_string(&path)
             .expect("read trace file")
             .lines()
@@ -4101,7 +4317,9 @@ mod u9_seek_reset {
             .iter()
             .filter(|v| {
                 v.get("kind").and_then(|k| k.as_str()) == Some("ability_decision")
-                    && v.get("actor").and_then(|a| a.get("class")).and_then(|c| c.as_str())
+                    && v.get("actor")
+                        .and_then(|a| a.get("class"))
+                        .and_then(|c| c.as_str())
                         == Some("Mage")
             })
             .filter_map(|v| {
@@ -4131,7 +4349,9 @@ mod u9_seek_reset {
             .iter()
             .filter(|v| {
                 v.get("kind").and_then(|k| k.as_str()) == Some("movement_decision")
-                    && v.get("actor").and_then(|a| a.get("class")).and_then(|c| c.as_str())
+                    && v.get("actor")
+                        .and_then(|a| a.get("class"))
+                        .and_then(|c| c.as_str())
                         == Some("Mage")
                     && v.get("trigger").and_then(|t| t.as_str()) == Some("SeekLos")
             })
@@ -4149,7 +4369,9 @@ mod u9_seek_reset {
         let mut max_span = 0.0f32;
         for v in lines {
             if v.get("kind").and_then(|k| k.as_str()) != Some("ability_decision")
-                || v.get("actor").and_then(|a| a.get("class")).and_then(|c| c.as_str())
+                || v.get("actor")
+                    .and_then(|a| a.get("class"))
+                    .and_then(|c| c.as_str())
                     != Some("Mage")
             {
                 continue;
@@ -4256,7 +4478,11 @@ mod u9_seek_reset {
             "TwinPillars",
         );
         let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
-        assert!(blocked.len() >= 3, "seed 13 must exercise occlusion, got {}", blocked.len());
+        assert!(
+            blocked.len() >= 3,
+            "seed 13 must exercise occlusion, got {}",
+            blocked.len()
+        );
         let span = max_contiguous_block_span(&lines);
         assert!(
             span <= 10.0,
@@ -4338,12 +4564,21 @@ mod u9_seek_reset {
 
     #[test]
     fn under_movement_cc_detects_root_and_stun_not_fear() {
-        let root = ActiveAuras { auras: vec![cc_aura(AuraType::Root)] };
-        let stun = ActiveAuras { auras: vec![cc_aura(AuraType::Stun)] };
-        let fear = ActiveAuras { auras: vec![cc_aura(AuraType::Fear)] };
+        let root = ActiveAuras {
+            auras: vec![cc_aura(AuraType::Root)],
+        };
+        let stun = ActiveAuras {
+            auras: vec![cc_aura(AuraType::Stun)],
+        };
+        let fear = ActiveAuras {
+            auras: vec![cc_aura(AuraType::Fear)],
+        };
         assert!(under_movement_cc(Some(&root)), "Root is a movement CC");
         assert!(under_movement_cc(Some(&stun)), "Stun is a movement CC");
-        assert!(!under_movement_cc(Some(&fear)), "Fear is not (feared warriors run)");
+        assert!(
+            !under_movement_cc(Some(&fear)),
+            "Fear is not (feared warriors run)"
+        );
         assert!(!under_movement_cc(None), "no auras → not CC'd");
     }
 
@@ -4403,10 +4638,19 @@ mod u9_seek_reset {
         }
 
         let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
-        combatants.insert(warrior, info(warrior, 1, CharacterClass::Warrior, my_pos, Some(target)));
-        combatants.insert(target, info(target, 2, CharacterClass::Mage, target_pos, None));
+        combatants.insert(
+            warrior,
+            info(warrior, 1, CharacterClass::Warrior, my_pos, Some(target)),
+        );
+        combatants.insert(
+            target,
+            info(target, 2, CharacterClass::Mage, target_pos, None),
+        );
         if with_healer {
-            combatants.insert(healer, info(healer, 1, CharacterClass::Priest, HEALER_POS, None));
+            combatants.insert(
+                healer,
+                info(healer, 1, CharacterClass::Priest, HEALER_POS, None),
+            );
         }
 
         let active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
@@ -4415,7 +4659,7 @@ mod u9_seek_reset {
         let obstacles = Vec::new();
 
         let ctx = CombatContext {
-        ai_profile: Default::default(),
+            ai_profile: Default::default(),
             bounds: Default::default(),
             combatants: &combatants,
             active_auras: &active_auras,
@@ -4425,7 +4669,10 @@ mod u9_seek_reset {
             self_entity: warrior,
         };
 
-        let mut reset_state = MeleeResetState { armed_until, active: false };
+        let mut reset_state = MeleeResetState {
+            armed_until,
+            active: false,
+        };
         let mut trace = DecisionTrace::default();
 
         let mut queue = CommandQueue::default();
@@ -4491,14 +4738,20 @@ mod u9_seek_reset {
     fn warrior_reset_silent_when_gap_closer_ready() {
         // Charge off cooldown → re-engage, no fallback directive.
         let (goal, traced) = run_reset(100.0, 1.0, false, 20.0, true, f32::MAX);
-        assert!(goal.is_none(), "gap closer ready must not issue a reset directive");
+        assert!(
+            goal.is_none(),
+            "gap closer ready must not issue a reset directive"
+        );
         assert!(!traced);
     }
 
     #[test]
     fn warrior_reset_silent_without_healer() {
         let (goal, _) = run_reset(100.0, 1.0, true, 20.0, false, f32::MAX);
-        assert!(goal.is_none(), "no healer ally → nothing to fall back toward");
+        assert!(
+            goal.is_none(),
+            "no healer ally → nothing to fall back toward"
+        );
     }
 
     #[test]
@@ -4532,7 +4785,9 @@ mod u9_seek_reset {
                 .filter(|v| {
                     v.get("kind").and_then(|k| k.as_str()) == Some("movement_decision")
                         && v.get("trigger").and_then(|t| t.as_str()) == Some("SeekLos")
-                        && v.get("scorer_terms").and_then(|s| s.get("los_seek")).is_some()
+                        && v.get("scorer_terms")
+                            .and_then(|s| s.get("los_seek"))
+                            .is_some()
                 })
                 .count();
             if blocked.len() >= 3 && seeks >= 1 && casts_after >= 1 && span <= 10.0 && term >= 1 {
@@ -4590,13 +4845,17 @@ mod u10_press {
         let result = run_headless_match_observed(
             cfg,
             true,
-            Some(TraceConfig { output_path: path.clone() }),
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
             |f| frames.push(f.clone()),
         )
         .expect("observed traced headless match failed");
         let body = std::fs::read_to_string(&path).unwrap_or_default();
-        let events: Vec<serde_json::Value> =
-            body.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let events: Vec<serde_json::Value> = body
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
         let _ = std::fs::remove_file(path);
         (result, frames, events)
     }
@@ -4619,7 +4878,11 @@ mod u10_press {
             }
         }
         let own = sums.get(&team).copied().unwrap_or(0.0);
-        let enemy: f32 = sums.iter().filter(|(t, _)| **t != team).map(|(_, v)| *v).sum();
+        let enemy: f32 = sums
+            .iter()
+            .filter(|(t, _)| **t != team)
+            .map(|(_, v)| *v)
+            .sum();
         Some(own - enemy)
     }
 
@@ -4913,8 +5176,11 @@ mod los_probes {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let path = tmp.path().to_path_buf();
         drop(tmp);
-        let mut cfg =
-            create_config(vec!["Mage", "Priest"], vec!["Warrior", "Priest"], Some(seed));
+        let mut cfg = create_config(
+            vec!["Mage", "Priest"],
+            vec!["Warrior", "Priest"],
+            Some(seed),
+        );
         cfg.map = "TwinPillars".to_string();
         cfg.max_duration_secs = 120.0;
         cfg.output_path = Some(path.to_string_lossy().into_owned());
@@ -4945,7 +5211,11 @@ mod los_probes {
                 "seed {seed:2}: fizzles={:2} impacts={:2}{}",
                 fizzles,
                 impacts,
-                if fizzles >= 1 && impacts >= 1 { " <-- GOOD" } else { "" },
+                if fizzles >= 1 && impacts >= 1 {
+                    " <-- GOOD"
+                } else {
+                    ""
+                },
             );
         }
     }
@@ -4969,17 +5239,9 @@ mod los_probes {
             );
 
             // AE2: at least one in-flight cast fizzled at completion for LoS.
-            assert_min_occurrences(
-                &format!("seed {seed} completion LoS fizzles"),
-                fizzles,
-                1,
-            );
+            assert_min_occurrences(&format!("seed {seed} completion LoS fizzles"), fizzles, 1);
             // AE3: launched projectiles still landed in the same match.
-            assert_min_occurrences(
-                &format!("seed {seed} Frostbolt impacts"),
-                impacts,
-                1,
-            );
+            assert_min_occurrences(&format!("seed {seed} Frostbolt impacts"), impacts, 1);
         }
     }
 }
@@ -5016,7 +5278,9 @@ mod chase_los {
 
     use arenasim::states::match_config::ArenaMap;
     use arenasim::states::play_match::map_config::load_map_geometry_config;
-    use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
+    use arenasim::states::play_match::map_geometry::{
+        has_line_of_sight, ObstacleVolume, EYE_HEIGHT,
+    };
 
     fn chase_config(seed: u64) -> HeadlessMatchConfig {
         HeadlessMatchConfig {
@@ -5066,7 +5330,10 @@ mod chase_los {
             .expect("maps.ron loads")
             .active_for(ArenaMap::TwinPillars)
             .volumes;
-        assert!(!obstacles.is_empty(), "PillaredArena must carry cover volumes");
+        assert!(
+            !obstacles.is_empty(),
+            "PillaredArena must carry cover volumes"
+        );
 
         let (result, timeline) = run_observed_collecting(chase_config(seed));
         let gate = timeline.gates_open_time.expect("gates opened");
@@ -5084,7 +5351,10 @@ mod chase_los {
             .and_then(|s| s.last())
             .map(|(t, _)| *t)
             .unwrap_or(gate);
-        let warrior_death = warrior_samples.last().map(|(t, _)| *t).filter(|t| *t < mage_end - 0.5);
+        let warrior_death = warrior_samples
+            .last()
+            .map(|(t, _)| *t)
+            .filter(|t| *t < mage_end - 0.5);
 
         // After the Warrior dies the Shaman is the lone enemy = Mage's kill
         // target. Match Mage/Shaman samples on identical frame stamps and walk
@@ -5184,7 +5454,11 @@ mod chase_los {
             s.warrior_death.is_some(),
             "seed {seed}: Warrior never died — no lone-Shaman endgame to bound",
         );
-        assert_min_occurrences(&format!("seed {seed} lone-Shaman samples"), s.lone_samples, 300);
+        assert_min_occurrences(
+            &format!("seed {seed} lone-Shaman samples"),
+            s.lone_samples,
+            300,
+        );
         assert!(
             s.total_occluded >= 2.0,
             "seed {seed}: only {:.2}s total occlusion after Warrior death — not exercising the \
@@ -5281,7 +5555,9 @@ mod juke_chase {
 
     use arenasim::states::match_config::ArenaMap;
     use arenasim::states::play_match::map_config::load_map_geometry_config;
-    use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
+    use arenasim::states::play_match::map_geometry::{
+        has_line_of_sight, ObstacleVolume, EYE_HEIGHT,
+    };
 
     /// A contiguous occluded run at least this long (sim-seconds) spans a full
     /// 1.5s Frostbolt cast → a completion fizzle. Slightly under the cast time so
@@ -5334,7 +5610,10 @@ mod juke_chase {
             .expect("maps.ron loads")
             .active_for(ArenaMap::TwinPillars)
             .volumes;
-        assert!(!obstacles.is_empty(), "PillaredArena must carry cover volumes");
+        assert!(
+            !obstacles.is_empty(),
+            "PillaredArena must carry cover volumes"
+        );
 
         let (result, timeline) = run_observed_collecting(juke_config(seed));
         let gate = timeline.gates_open_time.expect("gates opened");
@@ -5350,7 +5629,10 @@ mod juke_chase {
         // Warrior death = its last alive sample, if it predates the Mage's end
         // (samples are alive-only). The 2v1 opens there.
         let mage_end = mage_s.last().map(|(t, _)| *t).unwrap_or(gate);
-        let warrior_death = warrior_s.last().map(|(t, _)| *t).filter(|t| *t < mage_end - 0.5);
+        let warrior_death = warrior_s
+            .last()
+            .map(|(t, _)| *t)
+            .filter(|t| *t < mage_end - 0.5);
         let death_t = warrior_death.unwrap_or(f32::INFINITY);
 
         // Walk the post-death Mage/Shaman slice on identical frame stamps,
@@ -5409,12 +5691,12 @@ mod juke_chase {
     fn scan_seeds() {
         for seed in 0u64..60 {
             let s = measure(seed);
-            let flag = if s.warrior_death.is_some() && s.lone_samples >= 200 && s.total_occluded >= 2.0
-            {
-                " <-- CANDIDATE"
-            } else {
-                ""
-            };
+            let flag =
+                if s.warrior_death.is_some() && s.lone_samples >= 200 && s.total_occluded >= 2.0 {
+                    " <-- CANDIDATE"
+                } else {
+                    ""
+                };
             eprintln!(
                 "seed {seed:2}: winner={:?} dur={:5.1} wdeath={:>6} lone={:4} occl={:5.1} fizz_win={:2}{}",
                 s.winner,
@@ -5442,7 +5724,11 @@ mod juke_chase {
             s.warrior_death.is_some(),
             "seed {seed}: Warrior never died — no lone-Shaman 2v1 to bound",
         );
-        assert_min_occurrences(&format!("seed {seed} 2v1 (Mage,Shaman) samples"), s.lone_samples, 200);
+        assert_min_occurrences(
+            &format!("seed {seed} 2v1 (Mage,Shaman) samples"),
+            s.lone_samples,
+            200,
+        );
         assert!(
             s.total_occluded >= 1.0,
             "seed {seed}: only {:.2}s occlusion in the 2v1 — the juke dance did not start",
@@ -5550,7 +5836,9 @@ mod medic_chase {
 
     use arenasim::states::match_config::ArenaMap;
     use arenasim::states::play_match::map_config::load_map_geometry_config;
-    use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
+    use arenasim::states::play_match::map_geometry::{
+        has_line_of_sight, ObstacleVolume, EYE_HEIGHT,
+    };
 
     /// urgency_hp_threshold (movement.ron shipped default) — the medic-chase and
     /// deny-urgency threshold. The probe pins behavior at defaults.
@@ -5588,7 +5876,14 @@ mod medic_chase {
 
     /// Per-entity full timelines (all frames, alive flag carried) collected via
     /// the read-only observer.
-    fn collect(seed: u64) -> (Option<u8>, f32, BTreeMap<Entity, Vec<Sample>>, BTreeMap<Entity, EntityInfo>) {
+    fn collect(
+        seed: u64,
+    ) -> (
+        Option<u8>,
+        f32,
+        BTreeMap<Entity, Vec<Sample>>,
+        BTreeMap<Entity, EntityInfo>,
+    ) {
         let mut samples: BTreeMap<Entity, Vec<Sample>> = BTreeMap::new();
         let mut info: BTreeMap<Entity, EntityInfo> = BTreeMap::new();
         let result = run_headless_match_observed(medic_config(seed), true, None, |frame| {
@@ -5641,11 +5936,7 @@ mod medic_chase {
     }
 
     /// Measure medic behavior for healer H protecting ally A (same team).
-    fn measure_pair(
-        obstacles: &[ObstacleVolume],
-        healer: &[Sample],
-        ally: &[Sample],
-    ) -> PairStats {
+    fn measure_pair(obstacles: &[ObstacleVolume], healer: &[Sample], ally: &[Sample]) -> PairStats {
         // Match on identical frame stamps (both entities sampled every gated
         // frame until death).
         let mut matched: Vec<(f32, Sample, Sample)> = Vec::new();
@@ -5716,9 +6007,7 @@ mod medic_chase {
             }
             if !resolved {
                 // Reached ally death or end-of-match with no heal after start.
-                let ally_died = matched[k..]
-                    .iter()
-                    .any(|(_, _, am)| !am.alive);
+                let ally_died = matched[k..].iter().any(|(_, _, am)| !am.alive);
                 if ally_died {
                     died_before_heal += 1;
                 }
@@ -5748,7 +6037,10 @@ mod medic_chase {
             .expect("maps.ron loads")
             .active_for(ArenaMap::TwinPillars)
             .volumes;
-        assert!(!obstacles.is_empty(), "PillaredArena must carry cover volumes");
+        assert!(
+            !obstacles.is_empty(),
+            "PillaredArena must carry cover volumes"
+        );
 
         let (winner, duration, samples, info) = collect(seed);
 
@@ -5763,7 +6055,12 @@ mod medic_chase {
         let priest = measure_pair(&obstacles, g(&t1_priest), g(&t1_warrior));
         let shaman = measure_pair(&obstacles, g(&t2_shaman), g(&t2_warrior));
 
-        SeedStats { winner, duration, priest, shaman }
+        SeedStats {
+            winner,
+            duration,
+            priest,
+            shaman,
+        }
     }
 
     /// Exploratory seed scan — prints per-seed, per-pair medic stats so the
@@ -5986,7 +6283,12 @@ mod oom_wand {
             }
         }
 
-        Parsed { result, timeline, warrior_death_wall, mage_damage }
+        Parsed {
+            result,
+            timeline,
+            warrior_death_wall,
+            mage_damage,
+        }
     }
 
     fn xz_distance(a: Vec3, b: Vec3) -> f32 {
@@ -6057,8 +6359,11 @@ mod oom_wand {
         // lone-Shaman window the mana-only refractory previously left dead.
         // Before the fix this window held ~5 Mage damage events (with a ~20s dead
         // tail) and ZERO wand shots (it parked out of wand range).
-        let post: Vec<&MageDamage> =
-            p.mage_damage.iter().filter(|d| d.wall_time >= warrior_death).collect();
+        let post: Vec<&MageDamage> = p
+            .mage_damage
+            .iter()
+            .filter(|d| d.wall_time >= warrior_death)
+            .collect();
         let wand_shots = post.iter().filter(|d| d.is_wand).count();
         // Floors sit between the disabled baseline (0 wand shots, ~5 total
         // events) and the fixed run (8 wand shots, 13 total events post-mana-fix)
@@ -6089,7 +6394,11 @@ mod oom_wand {
         // (b) the wand chip filling the window (8 wand shots / 13 events here) —
         // duration is simply no longer a proxy for it. Bound the duration only
         // loosely, well under the 300s cap.
-        assert_eq!(p.result.winner, Some(1), "team 1 (Mage+Priest) should win the 2v1");
+        assert_eq!(
+            p.result.winner,
+            Some(1),
+            "team 1 (Mage+Priest) should win the 2v1"
+        );
         assert!(
             p.result.match_time < 200.0,
             "2v1 took {:.1}s combat — the dampening-gated endgame should still resolve \
@@ -6111,8 +6420,11 @@ mod oom_wand {
                 eprintln!("seed {seed:2}: no warrior death");
                 continue;
             };
-            let post: Vec<&MageDamage> =
-                p.mage_damage.iter().filter(|d| d.wall_time >= wdeath).collect();
+            let post: Vec<&MageDamage> = p
+                .mage_damage
+                .iter()
+                .filter(|d| d.wall_time >= wdeath)
+                .collect();
             let wand = post.iter().filter(|d| d.is_wand).count();
             let good = p.result.winner == Some(1)
                 && p.result.match_time < 68.0
@@ -6183,9 +6495,9 @@ mod warrior_pillar_pathing {
             .volumes
             .iter()
             .filter_map(|v| match v {
-                ObstacleVolume::Cylinder { center_xz, radius, .. } => {
-                    Some((center_xz.x, center_xz.y, *radius))
-                }
+                ObstacleVolume::Cylinder {
+                    center_xz, radius, ..
+                } => Some((center_xz.x, center_xz.y, *radius)),
                 _ => None,
             })
             .collect();
@@ -6194,7 +6506,11 @@ mod warrior_pillar_pathing {
     }
 
     fn config(seed: u64) -> HeadlessMatchConfig {
-        let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Mage", "Priest"], Some(seed));
+        let mut cfg = create_config(
+            vec!["Warrior", "Priest"],
+            vec!["Mage", "Priest"],
+            Some(seed),
+        );
         cfg.map = "TwinPillars".to_string();
         cfg
     }
@@ -6204,7 +6520,9 @@ mod warrior_pillar_pathing {
     fn shell_clearance(pos: Vec3, pillars: &[(f32, f32, f32)]) -> f32 {
         pillars
             .iter()
-            .map(|&(px, pz, r)| ((pos.x - px).powi(2) + (pos.z - pz).powi(2)).sqrt() - (r + MOVER_RADIUS))
+            .map(|&(px, pz, r)| {
+                ((pos.x - px).powi(2) + (pos.z - pz).powi(2)).sqrt() - (r + MOVER_RADIUS)
+            })
             .fold(f32::INFINITY, f32::min)
     }
 
@@ -6244,7 +6562,9 @@ mod warrior_pillar_pathing {
                 enemy_pos
                     .iter()
                     .filter_map(|m| m.get(&key).map(|p| wp.distance(*p)))
-                    .fold(None, |acc: Option<f32>, d| Some(acc.map_or(d, |a| a.min(d))))
+                    .fold(None, |acc: Option<f32>, d| {
+                        Some(acc.map_or(d, |a| a.min(d)))
+                    })
             };
 
             let samples = timeline.samples_from(warrior, gate);
@@ -6285,7 +6605,7 @@ mod warrior_pillar_pathing {
                 }
                 let speed = p0.distance(p1) / dt;
                 let near = shell_clearance(p1, &pillars) <= NEAR_BAND;
-                let chasing = gap_at(t1, p1).map_or(false, |g| g > CHASING_GAP);
+                let chasing = gap_at(t1, p1).is_some_and(|g| g > CHASING_GAP);
 
                 if near && chasing {
                     near_chase_speeds.push(speed);
@@ -6304,7 +6624,11 @@ mod warrior_pillar_pathing {
 
         // 1. Non-vacuity: the scenario must actually drive the Warrior against
         //    pillars while chasing, or the probe proves nothing.
-        assert_min_occurrences("Warrior near-pillar chasing samples", near_chase_speeds.len(), 30);
+        assert_min_occurrences(
+            "Warrior near-pillar chasing samples",
+            near_chase_speeds.len(),
+            30,
+        );
 
         // 2. No oozing: median near-pillar-chasing speed stays near full speed.
         near_chase_speeds.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -6464,7 +6788,11 @@ mod pillar_self_block {
 
     /// Per-frame Priest-vs-Warrior blocking stats for one TeamPlan match.
     fn measure(seed: u64) -> SelfBlockStats {
-        let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Warlock", "Priest"], Some(seed));
+        let mut cfg = create_config(
+            vec!["Warrior", "Priest"],
+            vec!["Warlock", "Priest"],
+            Some(seed),
+        );
         cfg.map = "PillaredArena".to_string();
         cfg.ai_profile = Some("TeamPlan".to_string());
         cfg.max_duration_secs = 300.0;
@@ -6718,8 +7046,11 @@ mod nagrand_teamplan {
     }
 
     fn measure_pillar(seed: u64) -> NagrandStats {
-        let mut cfg =
-            create_config(vec!["Warrior", "Priest"], vec!["Warlock", "Priest"], Some(seed));
+        let mut cfg = create_config(
+            vec!["Warrior", "Priest"],
+            vec!["Warlock", "Priest"],
+            Some(seed),
+        );
         cfg.map = "PillaredArena".to_string();
         cfg.ai_profile = Some("TeamPlan".to_string());
         cfg.max_duration_secs = 300.0;
@@ -6813,15 +7144,18 @@ mod nagrand_teamplan {
     /// soft weight (4.0, deliberately below `flee`'s 6.0 — escaping still
     /// wins), so any single seed can spend real time out of reach. Calibrated
     /// on seeds {2, 3, 10}: with the leash the total is 18.2s; without it
-    /// (Legacy) 119.2s. The 60s bound sits between the distributions with a
-    /// >3x margin either way. `scan_nagrand_teamplan` re-prints both
+    /// (Legacy) 119.2s. The 60s bound sits between the distributions with
+    /// a >3x margin either way. `scan_nagrand_teamplan` re-prints both
     /// distributions when pins need re-choosing.
     #[test]
     fn teamplan_hunter_stays_within_its_priests_reach() {
         let mut total_secs = 0.0f32;
         for seed in [2u64, 3, 10] {
-            let mut cfg =
-                create_config(vec!["Hunter", "Priest"], vec!["Rogue", "Priest"], Some(seed));
+            let mut cfg = create_config(
+                vec!["Hunter", "Priest"],
+                vec!["Rogue", "Priest"],
+                Some(seed),
+            );
             cfg.map = "PillaredArena".to_string();
             cfg.ai_profile = Some("TeamPlan".to_string());
             cfg.max_duration_secs = 300.0;
@@ -6866,8 +7200,11 @@ mod nagrand_teamplan {
     #[test]
     fn teamplan_healer_is_not_a_statue_on_basicarena() {
         for seed in [1u64, 4, 7] {
-            let mut cfg =
-                create_config(vec!["Warrior", "Priest"], vec!["Rogue", "Priest"], Some(seed));
+            let mut cfg = create_config(
+                vec!["Warrior", "Priest"],
+                vec!["Rogue", "Priest"],
+                Some(seed),
+            );
             cfg.map = "BasicArena".to_string();
             cfg.ai_profile = Some("TeamPlan".to_string());
             cfg.max_duration_secs = 300.0;
@@ -6933,8 +7270,11 @@ mod nagrand_teamplan {
         }
         for profile in ["TeamPlan", "Legacy"] {
             for seed in 1u64..=12 {
-                let mut cfg =
-                    create_config(vec!["Hunter", "Priest"], vec!["Rogue", "Priest"], Some(seed));
+                let mut cfg = create_config(
+                    vec!["Hunter", "Priest"],
+                    vec!["Rogue", "Priest"],
+                    Some(seed),
+                );
                 cfg.map = "PillaredArena".to_string();
                 cfg.ai_profile = Some(profile.to_string());
                 cfg.max_duration_secs = 300.0;
@@ -6955,7 +7295,10 @@ mod nagrand_teamplan {
                         }
                     }
                 }
-                println!("hunter {profile:8} seed {seed:2}: {:.1}s beyond heal range", out as f32 / 60.0);
+                println!(
+                    "hunter {profile:8} seed {seed:2}: {:.1}s beyond heal range",
+                    out as f32 / 60.0
+                );
             }
         }
     }

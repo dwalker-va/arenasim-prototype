@@ -1,7 +1,7 @@
-use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
 use crate::states::play_match::banter::vocab;
 use crate::states::play_match::components::*;
+use bevy::prelude::*;
+use bevy_egui::{egui, EguiContexts};
 
 // ==============================================================================
 // Speech Bubble Systems
@@ -22,7 +22,9 @@ pub fn render_speech_bubbles(
     };
 
     // Use try_ctx_mut to gracefully handle window close
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     for bubble in speech_bubbles.iter() {
         // Get owner's position
@@ -46,12 +48,13 @@ pub fn render_speech_bubbles(
             .into_iter()
             .map(|span| {
                 let width = match &span {
-                    vocab::Span::Text(text) => ctx
-                        .fonts(|f| {
+                    vocab::Span::Text(text) => {
+                        ctx.fonts(|f| {
                             f.layout_no_wrap(text.clone(), font_id.clone(), egui::Color32::BLACK)
                         })
                         .size()
-                        .x,
+                        .x
+                    }
                     // Icons are square and sized to the line's cap height so
                     // they sit on the same visual baseline as the glyphs.
                     _ => BUBBLE_ICON,
@@ -199,8 +202,7 @@ const BUBBLE_TEXT_SIZE: f32 = 18.0;
 /// Icon edge length inside a speech bubble, matched to the glyph size so
 /// portraits and symbols sit on one visual line.
 const BUBBLE_ICON: f32 = 20.0;
-const UV_FULL: egui::Rect =
-    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+const UV_FULL: egui::Rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
 
 /// A square icon slot at `x`, vertically centred on `mid_y`.
 fn icon_rect_at(x: f32, mid_y: f32) -> egui::Rect {
@@ -238,5 +240,3 @@ pub fn update_speech_bubbles(
         }
     }
 }
-
-

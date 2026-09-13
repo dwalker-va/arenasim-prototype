@@ -38,7 +38,10 @@ fn harness_app() -> App {
 
 fn spawn_combatant(app: &mut App, team: u8, class: CharacterClass, pos: Vec3) -> Entity {
     app.world_mut()
-        .spawn((Transform::from_translation(pos), Combatant::new(team, 0, class)))
+        .spawn((
+            Transform::from_translation(pos),
+            Combatant::new(team, 0, class),
+        ))
         .id()
 }
 
@@ -51,10 +54,23 @@ fn spawn_combatant(app: &mut App, team: u8, class: CharacterClass, pos: Vec3) ->
 fn match_end_clears_channel_and_cast_state_on_winner() {
     let mut app = harness_app();
 
-    let loser = spawn_combatant(&mut app, 1, CharacterClass::Warrior, Vec3::new(-5.0, 1.0, 0.0));
-    app.world_mut().get_mut::<Combatant>(loser).unwrap().current_health = 0.0;
+    let loser = spawn_combatant(
+        &mut app,
+        1,
+        CharacterClass::Warrior,
+        Vec3::new(-5.0, 1.0, 0.0),
+    );
+    app.world_mut()
+        .get_mut::<Combatant>(loser)
+        .unwrap()
+        .current_health = 0.0;
 
-    let winner = spawn_combatant(&mut app, 2, CharacterClass::Warlock, Vec3::new(5.0, 1.0, 0.0));
+    let winner = spawn_combatant(
+        &mut app,
+        2,
+        CharacterClass::Warlock,
+        Vec3::new(5.0, 1.0, 0.0),
+    );
     app.world_mut().entity_mut(winner).insert(ChannelingState {
         ability: AbilityType::DrainLife,
         duration_remaining: 3.0,

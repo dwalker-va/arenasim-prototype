@@ -68,7 +68,10 @@ pub fn load_emoji_icons(
         let Ok(entries) = std::fs::read_dir(&dir) else {
             // No directory is a legitimate state (nobody has added art yet).
             // Mark loaded so this does not re-scan every frame forever.
-            warn!("No emoji directory at {}; banter emoji will render as placeholders", dir.display());
+            warn!(
+                "No emoji directory at {}; banter emoji will render as placeholders",
+                dir.display()
+            );
             icons.loaded = true;
             return;
         };
@@ -81,8 +84,7 @@ pub fn load_emoji_icons(
                 continue;
             };
             // The asset server wants a path relative to `assets/`.
-            let handle: Handle<Image> =
-                asset_server.load(format!("{}/{}.png", EMOJI_DIR, stem));
+            let handle: Handle<Image> = asset_server.load(format!("{}/{}.png", EMOJI_DIR, stem));
             handles.handles.push((stem.to_string(), handle));
         }
         if handles.handles.is_empty() {
@@ -111,5 +113,9 @@ pub fn load_emoji_icons(
         icons.textures.insert(name.clone(), texture_id);
     }
     icons.loaded = true;
-    info!("Loaded {} emoji textures from assets/{}", icons.textures.len(), EMOJI_DIR);
+    info!(
+        "Loaded {} emoji textures from assets/{}",
+        icons.textures.len(),
+        EMOJI_DIR
+    );
 }

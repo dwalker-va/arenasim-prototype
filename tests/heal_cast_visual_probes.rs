@@ -32,11 +32,10 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     billboard_heal_cast_glows, cleanup_heal_cast_glows, consume_cast_ending_signals,
-    consume_heal_cast_endings, heal_cast_glow_sizes, heal_cast_wisp_length,
-    spawn_casting_orbs, spawn_heal_cast_glows, spell_hand_local,
-    update_heal_cast_glows, update_heal_cast_posture, FLASH_OF_LIGHT_HAS_LAUNCH_FLASH,
-    HEAL_CAST_WISP_LIFETIMES, HEAL_CAST_WISP_ORBIT_RADIUS, HOLY_CAST_WISP_WIDTH,
-    HOLY_LAUNCH_FLARE_SECS, NATURE_CAST_LEAF_SPEED, NATURE_CAST_WISP_WIDTH,
+    consume_heal_cast_endings, heal_cast_glow_sizes, heal_cast_wisp_length, spawn_casting_orbs,
+    spawn_heal_cast_glows, spell_hand_local, update_heal_cast_glows, update_heal_cast_posture,
+    FLASH_OF_LIGHT_HAS_LAUNCH_FLASH, HEAL_CAST_WISP_LIFETIMES, HEAL_CAST_WISP_ORBIT_RADIUS,
+    HOLY_CAST_WISP_WIDTH, HOLY_LAUNCH_FLARE_SECS, NATURE_CAST_LEAF_SPEED, NATURE_CAST_WISP_WIDTH,
     NATURE_LAUNCH_BURST_SECS, NATURE_LAUNCH_SPREAD, SPELL_HAND_X, SPELL_HAND_Y,
 };
 use arenasim::CharacterClass;
@@ -113,7 +112,9 @@ impl Harness {
     }
 
     fn begin_cast(&mut self, caster: Entity, ability: AbilityType) {
-        let cast_time = AbilityDefinitions::default().get_unchecked(&ability).cast_time;
+        let cast_time = AbilityDefinitions::default()
+            .get_unchecked(&ability)
+            .cast_time;
         self.app
             .world_mut()
             .entity_mut(caster)
@@ -134,7 +135,10 @@ impl Harness {
                 state.interrupted_display_time = 0.5;
             }
             _ => {
-                self.app.world_mut().entity_mut(caster).remove::<CastingState>();
+                self.app
+                    .world_mut()
+                    .entity_mut(caster)
+                    .remove::<CastingState>();
             }
         }
         self.app.world_mut().spawn(CastEnding { caster, kind });
@@ -156,7 +160,12 @@ impl Harness {
             &GlobalTransform,
             &MeshMaterial3d<StandardMaterial>,
         )>();
-        let rows: Vec<(HealCastPieceRole, f32, GlobalTransform, Handle<StandardMaterial>)> = q
+        let rows: Vec<(
+            HealCastPieceRole,
+            f32,
+            GlobalTransform,
+            Handle<StandardMaterial>,
+        )> = q
             .iter(self.app.world())
             .map(|(p, g, m)| (p.role, p.base_alpha, *g, m.0.clone()))
             .collect();
@@ -173,7 +182,10 @@ impl Harness {
     }
 
     fn leaves(&mut self) -> Vec<(Vec3, Vec3)> {
-        let mut q = self.app.world_mut().query::<(&HealCastLeaf, &GlobalTransform)>();
+        let mut q = self
+            .app
+            .world_mut()
+            .query::<(&HealCastLeaf, &GlobalTransform)>();
         q.iter(self.app.world())
             .map(|(l, g)| (l.velocity, g.translation()))
             .collect()
@@ -223,7 +235,9 @@ fn every_hard_cast_heal_reaches_a_cast_family() {
     let defs = AbilityDefinitions::default();
     let mut silent = Vec::new();
     for (ability, config) in defs.iter() {
-        if config.is_heal() && config.cast_time > 0.0 && HealCastKind::for_ability(*ability).is_none()
+        if config.is_heal()
+            && config.cast_time > 0.0
+            && HealCastKind::for_ability(*ability).is_none()
         {
             silent.push(*ability);
         }
@@ -234,8 +248,14 @@ fn every_hard_cast_heal_reaches_a_cast_family() {
          to HealCastKind::for_ability"
     );
     // The blessed family split: Holy for Priest+Paladin, Nature for Shaman.
-    assert_eq!(HealCastKind::for_ability(AbilityType::FlashHeal), Some(HealCastKind::Holy));
-    assert_eq!(HealCastKind::for_ability(AbilityType::HolyLight), Some(HealCastKind::Holy));
+    assert_eq!(
+        HealCastKind::for_ability(AbilityType::FlashHeal),
+        Some(HealCastKind::Holy)
+    );
+    assert_eq!(
+        HealCastKind::for_ability(AbilityType::HolyLight),
+        Some(HealCastKind::Holy)
+    );
     assert_eq!(
         HealCastKind::for_ability(AbilityType::FlashOfLight),
         Some(HealCastKind::Holy)
@@ -262,7 +282,11 @@ fn heals_replace_the_casting_orb_and_nothing_else_does() {
     h.tick(3);
 
     let rigs = h.rigs();
-    assert_eq!(rigs.len(), 2, "the heal lights BOTH hands, the bolt neither");
+    assert_eq!(
+        rigs.len(),
+        2,
+        "the heal lights BOTH hands, the bolt neither"
+    );
     let orbs = h.count::<CastingOrb>();
     assert_eq!(orbs, 1, "exactly the Frostbolt's orb survives the handoff");
 }
@@ -282,9 +306,16 @@ fn hand_glows_sit_at_the_rig_hand_sockets() {
     h.tick(4);
 
     let rigs = h.rigs();
-    assert_eq!(rigs.len(), 2, "both hands always — the source attaches 21 AND 22");
+    assert_eq!(
+        rigs.len(),
+        2,
+        "both hands always — the source attaches 21 AND 22"
+    );
     let sides: Vec<f32> = rigs.iter().map(|(s, ..)| *s).collect();
-    assert!(sides.contains(&1.0) && sides.contains(&-1.0), "one rig per hand: {sides:?}");
+    assert!(
+        sides.contains(&1.0) && sides.contains(&-1.0),
+        "one rig per hand: {sides:?}"
+    );
 
     for (side, phase, local, world) in &rigs {
         assert!(matches!(phase, HealCastPhase::Loop));
@@ -518,6 +549,8 @@ fn nature_hands_shed_drifting_leaves() {
 /// after the flare window. Flash of Light takes the same flare (the blessed
 /// FLASH_OF_LIGHT_HAS_LAUNCH_FLASH override of the source's silence).
 #[test]
+// Pinning a relationship between constants IS this test; const-folding is the point.
+#[allow(clippy::assertions_on_constants)]
 fn holy_launch_reflares_the_same_glow_then_retires() {
     for ability in [AbilityType::FlashHeal, AbilityType::FlashOfLight] {
         assert!(FLASH_OF_LIGHT_HAS_LAUNCH_FLASH, "blessed spec: FoL flares");
@@ -560,7 +593,11 @@ fn holy_launch_reflares_the_same_glow_then_retires() {
 
         // Spent: nothing survives the flare window.
         h.tick((HOLY_LAUNCH_FLARE_SECS / DT).ceil() as u32 + 3);
-        assert_eq!(h.rigs().len(), 0, "{ability:?}: rigs retire after the flare");
+        assert_eq!(
+            h.rigs().len(),
+            0,
+            "{ability:?}: rigs retire after the flare"
+        );
         assert_eq!(h.pieces().len(), 0, "{ability:?}: pieces die with the rigs");
     }
 }
@@ -643,7 +680,7 @@ fn cast_posture_leans_back_then_surges_forward() {
 
     h.begin_cast(caster, AbilityType::FlashHeal);
     h.tick(30); // past the 0.25s ease
-    // Leaning BACK: the head (+Y) tips away from the facing (+Z).
+                // Leaning BACK: the head (+Y) tips away from the facing (+Z).
     let head = h.body_rotation(body) * Vec3::Y;
     assert!(
         head.z < -0.05,
@@ -667,7 +704,11 @@ fn cast_posture_leans_back_then_surges_forward() {
         Quat::IDENTITY,
         "the body returns exactly to identity"
     );
-    assert_eq!(h.count::<HealCastPosture>(), 0, "the posture retires itself");
+    assert_eq!(
+        h.count::<HealCastPosture>(),
+        0,
+        "the posture retires itself"
+    );
 }
 
 // ── teardown ───────────────────────────────────────────────────────────────

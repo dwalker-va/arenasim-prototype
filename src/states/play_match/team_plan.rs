@@ -41,8 +41,8 @@
 use bevy::prelude::*;
 use std::collections::BTreeMap;
 
-use super::components::{Combatant, MatchCountdown};
 use super::ai_profile::AiProfiles;
+use super::components::{Combatant, MatchCountdown};
 use super::constants::PET_SLOT_BASE;
 use super::map_config::ActiveMapGeometry;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
@@ -156,7 +156,6 @@ impl TeamPlans {
     }
 }
 
-
 /// A team's composition, reduced to what plan selection needs.
 ///
 /// Deliberately coarse. The distinction that matters for a pillar camp is whether
@@ -226,7 +225,6 @@ pub fn choose_anchor(volumes: &[ObstacleVolume], spawn_x: f32) -> Option<Anchor>
     best.map(|(_, i)| Anchor::Obstacle(i))
 }
 
-
 /// One unit as the kill-target call sees it. Reduced and pure so the rule is
 /// testable without a `World`.
 #[derive(Clone, Copy, Debug)]
@@ -293,7 +291,11 @@ fn centroid(points: impl Iterator<Item = Vec2>) -> Vec2 {
         sum += p;
         n += 1;
     }
-    if n == 0 { Vec2::ZERO } else { sum / n as f32 }
+    if n == 0 {
+        Vec2::ZERO
+    } else {
+        sum / n as f32
+    }
 }
 
 fn choose_from(team: u8, units: &[CallCandidate], reference: Vec2) -> Option<Entity> {
@@ -413,7 +415,6 @@ pub fn hold_position(
         .or_else(|| candidates(false))
         .map(|(_, spot)| spot)
 }
-
 
 /// Ally HP fraction at or below which a camped healer breaks cover to get line of
 /// sight for a heal.
@@ -544,8 +545,16 @@ pub fn update_team_plans(
         if plans.has_contact(team) {
             continue;
         }
-        let own: Vec<Vec2> = living.iter().filter(|u| u.team == team).map(|u| u.pos).collect();
-        let foes: Vec<Vec2> = living.iter().filter(|u| u.team != team).map(|u| u.pos).collect();
+        let own: Vec<Vec2> = living
+            .iter()
+            .filter(|u| u.team == team)
+            .map(|u| u.pos)
+            .collect();
+        let foes: Vec<Vec2> = living
+            .iter()
+            .filter(|u| u.team != team)
+            .map(|u| u.pos)
+            .collect();
         if teams_in_contact(&own, &foes, CAMP_ENGAGE_RADIUS) {
             plans.contact[TeamPlans::index(team)] = true;
             // The camp is over. Fall back to today's behaviour — the posture layer
@@ -635,7 +644,11 @@ pub fn update_team_plans(
         plan.anchor = anchor;
         // Hold ground and make them come; without an anchor there is nothing to
         // hold, so fall back to today's behaviour.
-        plan.stance = if anchor.is_some() { Stance::Hold } else { Stance::Press };
+        plan.stance = if anchor.is_some() {
+            Stance::Hold
+        } else {
+            Stance::Press
+        };
         // RE-PICKED, never carried: the commonest replan trigger is a death,
         // and the dead unit is exactly the one most likely to be the stale
         // call. Recomputing from the live roster gives the step-5 semantics —
@@ -692,7 +705,10 @@ mod tests {
         roster: &[(u8, u8, CharacterClass)],
     ) -> TeamPlans {
         let mut app = App::new();
-        app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
+        app.insert_resource(MatchCountdown {
+            time_remaining: 0.0,
+            gates_opened: true,
+        });
         app.insert_resource(TeamPlans::default());
         app.insert_resource(AiProfiles::uniform(profile));
         app.insert_resource(ActiveMapGeometry {
@@ -706,7 +722,8 @@ mod tests {
             cover_anchors: Vec::new(),
         });
         for &(team, slot, class) in roster {
-            app.world_mut().spawn((Combatant::new(team, slot, class), spawn_pos(team)));
+            app.world_mut()
+                .spawn((Combatant::new(team, slot, class), spawn_pos(team)));
         }
         app.add_systems(Update, update_team_plans);
         app.update();
@@ -729,7 +746,10 @@ mod tests {
     #[test]
     fn plans_once_gates_are_open() {
         let plans = run_planner(true, &[(1, 0, true), (1, 1, true), (2, 0, true)]);
-        assert_eq!(plans.revisions, 1, "planner should have recomputed exactly once");
+        assert_eq!(
+            plans.revisions, 1,
+            "planner should have recomputed exactly once"
+        );
         assert_eq!(plans.roster, vec![(1, 0), (1, 1), (2, 0)]);
         // ...and with no `AiProfile` resource the output stays inert.
         for team in [1u8, 2u8] {
@@ -744,10 +764,18 @@ mod tests {
     fn legacy_profile_stays_inert_on_a_map_with_cover() {
         let plans = run_planner_with_profile(
             AiProfile::Legacy,
-            &[(1, 0, CharacterClass::Warrior), (1, 1, CharacterClass::Priest), (2, 0, CharacterClass::Mage)],
+            &[
+                (1, 0, CharacterClass::Warrior),
+                (1, 1, CharacterClass::Priest),
+                (2, 0, CharacterClass::Mage),
+            ],
         );
         for team in [1u8, 2u8] {
-            assert_eq!(plans.for_team(team).anchor, None, "Legacy must not select an anchor");
+            assert_eq!(
+                plans.for_team(team).anchor,
+                None,
+                "Legacy must not select an anchor"
+            );
             assert_eq!(plans.for_team(team).stance, Stance::Press);
         }
     }
@@ -759,20 +787,33 @@ mod tests {
     fn team_plan_profile_selects_a_same_side_anchor_for_a_camping_comp() {
         let plans = run_planner_with_profile(
             AiProfile::TeamPlan,
-            &[(1, 0, CharacterClass::Warrior), (1, 1, CharacterClass::Priest), (2, 0, CharacterClass::Mage)],
+            &[
+                (1, 0, CharacterClass::Warrior),
+                (1, 1, CharacterClass::Priest),
+                (2, 0, CharacterClass::Mage),
+            ],
         );
 
         // Team 1 is melee + healer on a map with cover: it camps, on a -x pillar.
         let p1 = plans.for_team(1);
         let Some(Anchor::Obstacle(i)) = p1.anchor else {
-            panic!("melee + healer on a map with cover should anchor, got {:?}", p1.anchor)
+            panic!(
+                "melee + healer on a map with cover should anchor, got {:?}",
+                p1.anchor
+            )
         };
-        assert!(matches!(i, 0 | 1), "team 1 must anchor on a -x pillar, got {i}");
+        assert!(
+            matches!(i, 0 | 1),
+            "team 1 must anchor on a -x pillar, got {i}"
+        );
         assert_eq!(p1.stance, Stance::Hold);
 
         // Team 2 is a lone Mage: nothing to camp with, so today's behaviour.
         let p2 = plans.for_team(2);
-        assert_eq!(p2.anchor, None, "a pure-ranged comp gains nothing from camping");
+        assert_eq!(
+            p2.anchor, None,
+            "a pure-ranged comp gains nothing from camping"
+        );
         assert_eq!(p2.stance, Stance::Press);
     }
 
@@ -781,7 +822,11 @@ mod tests {
     #[test]
     fn dead_combatants_are_excluded_from_the_roster() {
         let plans = run_planner(true, &[(1, 0, true), (1, 1, false), (2, 0, true)]);
-        assert_eq!(plans.roster, vec![(1, 0), (2, 0)], "dead slot 1 should be gone");
+        assert_eq!(
+            plans.roster,
+            vec![(1, 0), (2, 0)],
+            "dead slot 1 should be gone"
+        );
     }
 
     /// Pets must not drive replanning — a pet dying does not change what a team is
@@ -816,10 +861,15 @@ mod tests {
     #[test]
     fn stable_roster_does_not_replan() {
         let mut app = App::new();
-        app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
+        app.insert_resource(MatchCountdown {
+            time_remaining: 0.0,
+            gates_opened: true,
+        });
         app.insert_resource(TeamPlans::default());
-        app.world_mut().spawn((Combatant::new(1, 0, CharacterClass::Warrior), spawn_pos(1)));
-        app.world_mut().spawn((Combatant::new(2, 0, CharacterClass::Warrior), spawn_pos(2)));
+        app.world_mut()
+            .spawn((Combatant::new(1, 0, CharacterClass::Warrior), spawn_pos(1)));
+        app.world_mut()
+            .spawn((Combatant::new(2, 0, CharacterClass::Warrior), spawn_pos(2)));
         app.add_systems(Update, update_team_plans);
         for _ in 0..5 {
             app.update();
@@ -857,14 +907,13 @@ mod tests {
         ]
     }
 
-
     /// The hold spot must put the pillar BETWEEN the camper and the approach —
     /// that is the entire point of taking cover before contact.
     #[test]
     fn hold_position_is_on_the_far_side_from_the_threat() {
         let v = nagrand();
         let anchor = Anchor::Obstacle(0); // pillar at (-40, -20)
-        // Enemy approaching from the arena centre.
+                                          // Enemy approaching from the arena centre.
         let spot = hold_position(&v, anchor, &[Vec2::ZERO], None).expect("a far side exists");
         let (center, _) = v[0].footprint_disc();
 
@@ -880,7 +929,6 @@ mod tests {
             "hold spot must be clear of the pillar footprint"
         );
     }
-
 
     /// The healer-pinning case from the design doc: a spot that hides from the
     /// threat but ALSO keeps the partner in sight. A pure shadow point satisfies
@@ -911,8 +959,12 @@ mod tests {
         let v = nagrand();
         let (center, radius) = v[0].footprint_disc();
         let spot = hold_position(&v, Anchor::Obstacle(0), &[Vec2::ZERO], None).unwrap();
-        let expected = center + (center - Vec2::ZERO).normalize() * (radius + MOVER_RADIUS + CAMP_STANDOFF);
-        assert!(spot.distance(expected) < 1e-3, "melee should take the plain shadow point");
+        let expected =
+            center + (center - Vec2::ZERO).normalize() * (radius + MOVER_RADIUS + CAMP_STANDOFF);
+        assert!(
+            spot.distance(expected) < 1e-3,
+            "melee should take the plain shadow point"
+        );
     }
 
     /// Standing on the pillar is not holding it — the spot must clear the
@@ -934,7 +986,8 @@ mod tests {
     fn hold_position_follows_the_approach() {
         let v = nagrand();
         let from_centre = hold_position(&v, Anchor::Obstacle(0), &[Vec2::ZERO], None).unwrap();
-        let from_behind = hold_position(&v, Anchor::Obstacle(0), &[Vec2::new(-80.0, -40.0)], None).unwrap();
+        let from_behind =
+            hold_position(&v, Anchor::Obstacle(0), &[Vec2::new(-80.0, -40.0)], None).unwrap();
         assert!(
             from_centre.distance(from_behind) > 6.0,
             "opposite approaches should yield opposite sides of the pillar"
@@ -944,10 +997,15 @@ mod tests {
     /// A stale anchor index must not panic a live match.
     #[test]
     fn hold_position_tolerates_a_stale_anchor() {
-        assert_eq!(hold_position(&nagrand(), Anchor::Obstacle(99), &[Vec2::ZERO], None), None);
-        assert_eq!(hold_position(&[], Anchor::Obstacle(0), &[Vec2::ZERO], None), None);
+        assert_eq!(
+            hold_position(&nagrand(), Anchor::Obstacle(99), &[Vec2::ZERO], None),
+            None
+        );
+        assert_eq!(
+            hold_position(&[], Anchor::Obstacle(0), &[Vec2::ZERO], None),
+            None
+        );
     }
-
 
     /// The DUCK half — the one that was missing. With nobody hurt, a camped healer
     /// must NOT hold a sight-line; holding one permanently is what left the Priest
@@ -956,13 +1014,19 @@ mod tests {
     fn healthy_team_means_stay_hidden() {
         assert!(!should_break_cover(None), "no ally to heal: stay in cover");
         assert!(!should_break_cover(Some(1.0)), "full HP: stay in cover");
-        assert!(!should_break_cover(Some(0.95)), "a scratch is not worth exposure");
+        assert!(
+            !should_break_cover(Some(0.95)),
+            "a scratch is not worth exposure"
+        );
     }
 
     /// The POKE half — break cover while there is still a race to win.
     #[test]
     fn injured_ally_means_break_cover() {
-        assert!(should_break_cover(Some(CAMP_POKE_HP)), "at the threshold, poke");
+        assert!(
+            should_break_cover(Some(CAMP_POKE_HP)),
+            "at the threshold, poke"
+        );
         assert!(should_break_cover(Some(0.5)), "badly hurt: definitely poke");
         assert!(should_break_cover(Some(0.05)), "nearly dead: poke");
     }
@@ -971,6 +1035,8 @@ mod tests {
     /// only emerges at half health has to chain-cast while exposed, which is the
     /// losing shape — topping up earlier keeps each exposure short.
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn poke_threshold_is_above_the_urgency_mark() {
         assert!(
             CAMP_POKE_HP > 0.5,
@@ -994,7 +1060,11 @@ mod tests {
             "the per-unit test sees nothing, which is exactly the bug"
         );
         // ...but the teams have plainly met.
-        assert!(teams_in_contact(&[healer, partner], &[enemy], CAMP_ENGAGE_RADIUS));
+        assert!(teams_in_contact(
+            &[healer, partner],
+            &[enemy],
+            CAMP_ENGAGE_RADIUS
+        ));
     }
 
     /// Two teams still crossing the arena are not in contact — the opener must
@@ -1019,7 +1089,10 @@ mod tests {
     /// contact latch and the stance downgrade are tested as wired.
     fn run_planner_in_contact() -> TeamPlans {
         let mut app = App::new();
-        app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
+        app.insert_resource(MatchCountdown {
+            time_remaining: 0.0,
+            gates_opened: true,
+        });
         app.insert_resource(TeamPlans::default());
         app.insert_resource(AiProfiles::uniform(AiProfile::TeamPlan));
         app.insert_resource(ActiveMapGeometry {
@@ -1033,12 +1106,18 @@ mod tests {
             cover_anchors: Vec::new(),
         });
         // A camping comp (Warrior + Priest) standing right on top of a lone Mage.
-        app.world_mut()
-            .spawn((Combatant::new(1, 0, CharacterClass::Warrior), Transform::from_xyz(0.0, 0.0, 0.0)));
-        app.world_mut()
-            .spawn((Combatant::new(1, 1, CharacterClass::Priest), Transform::from_xyz(-2.0, 0.0, 0.0)));
-        app.world_mut()
-            .spawn((Combatant::new(2, 0, CharacterClass::Mage), Transform::from_xyz(3.0, 0.0, 0.0)));
+        app.world_mut().spawn((
+            Combatant::new(1, 0, CharacterClass::Warrior),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        ));
+        app.world_mut().spawn((
+            Combatant::new(1, 1, CharacterClass::Priest),
+            Transform::from_xyz(-2.0, 0.0, 0.0),
+        ));
+        app.world_mut().spawn((
+            Combatant::new(2, 0, CharacterClass::Mage),
+            Transform::from_xyz(3.0, 0.0, 0.0),
+        ));
         app.add_systems(Update, update_team_plans);
         app.update();
         app.world().resource::<TeamPlans>().clone()
@@ -1050,7 +1129,11 @@ mod tests {
     fn a_comp_already_in_contact_does_not_camp() {
         let plans = run_planner_in_contact();
         assert!(plans.has_contact(1), "touching units must register contact");
-        assert_eq!(plans.for_team(1).anchor, None, "no camp once the teams have met");
+        assert_eq!(
+            plans.for_team(1).anchor,
+            None,
+            "no camp once the teams have met"
+        );
         assert_eq!(plans.for_team(1).stance, Stance::Press);
     }
 
@@ -1061,7 +1144,10 @@ mod tests {
     #[test]
     fn a_replan_after_contact_does_not_re_arm_the_camp() {
         let mut app = App::new();
-        app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
+        app.insert_resource(MatchCountdown {
+            time_remaining: 0.0,
+            gates_opened: true,
+        });
         app.insert_resource(TeamPlans::default());
         app.insert_resource(AiProfiles::uniform(AiProfile::TeamPlan));
         app.insert_resource(ActiveMapGeometry {
@@ -1090,21 +1176,37 @@ mod tests {
         app.add_systems(Update, update_team_plans);
         app.update();
         assert!(
-            app.world().resource::<TeamPlans>().for_team(1).anchor.is_some(),
+            app.world()
+                .resource::<TeamPlans>()
+                .for_team(1)
+                .anchor
+                .is_some(),
             "pre-contact, a melee+healer comp should camp"
         );
 
         // Frame 2: the teams meet.
-        app.world_mut().entity_mut(m).insert(Transform::from_xyz(-58.0, 0.0, 0.0));
+        app.world_mut()
+            .entity_mut(m)
+            .insert(Transform::from_xyz(-58.0, 0.0, 0.0));
         app.update();
         assert!(app.world().resource::<TeamPlans>().has_contact(1));
-        assert_eq!(app.world().resource::<TeamPlans>().for_team(1).stance, Stance::Press);
+        assert_eq!(
+            app.world().resource::<TeamPlans>().for_team(1).stance,
+            Stance::Press
+        );
 
         // Frame 3: the Warrior dies — a replan, mid-fight, with the roster changed.
-        app.world_mut().entity_mut(w).get_mut::<Combatant>().unwrap().current_health = 0.0;
+        app.world_mut()
+            .entity_mut(w)
+            .get_mut::<Combatant>()
+            .unwrap()
+            .current_health = 0.0;
         app.update();
         let plans = app.world().resource::<TeamPlans>();
-        assert!(plans.revisions >= 2, "the death should have triggered a replan");
+        assert!(
+            plans.revisions >= 2,
+            "the death should have triggered a replan"
+        );
         assert_eq!(
             plans.for_team(1).anchor,
             None,
@@ -1119,8 +1221,14 @@ mod tests {
     fn camp_releases_once_the_enemy_commits() {
         assert!(should_hold(None, 15.0), "pre-contact: keep holding");
         assert!(should_hold(Some(40.0), 15.0), "still far: keep holding");
-        assert!(!should_hold(Some(14.0), 15.0), "committed: release and fight");
-        assert!(!should_hold(Some(0.0), 15.0), "in melee: definitely release");
+        assert!(
+            !should_hold(Some(14.0), 15.0),
+            "committed: release and fight"
+        );
+        assert!(
+            !should_hold(Some(0.0), 15.0),
+            "in melee: definitely release"
+        );
     }
 
     // --- the kill-target call (step 5) ---
@@ -1148,8 +1256,11 @@ mod tests {
     #[test]
     fn the_call_is_nearest_to_our_melee_not_to_the_team() {
         let units = vec![
-            CallCandidate { is_melee: true, ..cand(1, 1, 0, 0.0, 0.0) }, // melee at origin
-            cand(2, 1, 1, 0.0, 40.0),                                    // healer far north
+            CallCandidate {
+                is_melee: true,
+                ..cand(1, 1, 0, 0.0, 0.0)
+            }, // melee at origin
+            cand(2, 1, 1, 0.0, 40.0),   // healer far north
             cand(10, 2, 0, 10.0, 0.0),  // nearest to the MELEE
             cand(11, 2, 1, 12.0, 30.0), // nearest to the team centroid (0,20)
         ];
@@ -1176,11 +1287,21 @@ mod tests {
     #[test]
     fn stealthed_enemies_are_never_called() {
         let mut units = vec![
-            CallCandidate { is_melee: true, ..cand(1, 1, 0, 0.0, 0.0) },
-            CallCandidate { stealthed: true, ..cand(10, 2, 0, 5.0, 0.0) }, // closest but hidden
+            CallCandidate {
+                is_melee: true,
+                ..cand(1, 1, 0, 0.0, 0.0)
+            },
+            CallCandidate {
+                stealthed: true,
+                ..cand(10, 2, 0, 5.0, 0.0)
+            }, // closest but hidden
             cand(11, 2, 1, 20.0, 0.0),
         ];
-        assert_eq!(choose_kill_target(1, &units), Some(e(11)), "skip the stealthed one");
+        assert_eq!(
+            choose_kill_target(1, &units),
+            Some(e(11)),
+            "skip the stealthed one"
+        );
         units[2].stealthed = true;
         assert_eq!(choose_kill_target(1, &units), None, "all hidden: no call");
     }
@@ -1190,25 +1311,50 @@ mod tests {
     #[test]
     fn pets_are_never_called_and_an_empty_team_calls_nothing() {
         let units = vec![
-            CallCandidate { is_melee: true, ..cand(1, 1, 0, 0.0, 0.0) },
-            CallCandidate { is_pet: true, ..cand(10, 2, 10, 2.0, 0.0) }, // pet in our face
+            CallCandidate {
+                is_melee: true,
+                ..cand(1, 1, 0, 0.0, 0.0)
+            },
+            CallCandidate {
+                is_pet: true,
+                ..cand(10, 2, 10, 2.0, 0.0)
+            }, // pet in our face
             cand(11, 2, 0, 30.0, 0.0),
         ];
-        assert_eq!(choose_kill_target(1, &units), Some(e(11)), "call the owner, not the pet");
-        assert_eq!(choose_kill_target(2, &units[..2].to_vec()), None, "no enemies visible");
-        assert_eq!(choose_kill_target(1, &units[2..]), None, "no own units: no reference");
+        assert_eq!(
+            choose_kill_target(1, &units),
+            Some(e(11)),
+            "call the owner, not the pet"
+        );
+        assert_eq!(
+            choose_kill_target(2, &units[..2]),
+            None,
+            "no enemies visible"
+        );
+        assert_eq!(
+            choose_kill_target(1, &units[2..]),
+            None,
+            "no own units: no reference"
+        );
     }
 
     /// Equidistant enemies must resolve the same way every run.
     #[test]
     fn the_call_breaks_ties_deterministically() {
         let units = vec![
-            CallCandidate { is_melee: true, ..cand(1, 1, 0, 0.0, 0.0) },
+            CallCandidate {
+                is_melee: true,
+                ..cand(1, 1, 0, 0.0, 0.0)
+            },
             cand(11, 2, 1, 0.0, 10.0),
             cand(10, 2, 0, 10.0, 0.0), // same distance, lower slot
         ];
         for _ in 0..16 {
-            assert_eq!(choose_kill_target(1, &units), Some(e(10)), "lowest slot wins ties");
+            assert_eq!(
+                choose_kill_target(1, &units),
+                Some(e(10)),
+                "lowest slot wins ties"
+            );
         }
     }
 
@@ -1218,7 +1364,10 @@ mod tests {
     #[test]
     fn the_call_is_repicked_when_its_target_dies() {
         let mut app = App::new();
-        app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
+        app.insert_resource(MatchCountdown {
+            time_remaining: 0.0,
+            gates_opened: true,
+        });
         app.insert_resource(TeamPlans::default());
         app.insert_resource(AiProfiles {
             team1: AiProfile::TeamPlan,
@@ -1229,11 +1378,17 @@ mod tests {
         // Two enemies at distinct ranges from team 1's side.
         let near = app
             .world_mut()
-            .spawn((Combatant::new(2, 0, CharacterClass::Warlock), Transform::from_xyz(20.0, 0.0, 0.0)))
+            .spawn((
+                Combatant::new(2, 0, CharacterClass::Warlock),
+                Transform::from_xyz(20.0, 0.0, 0.0),
+            ))
             .id();
         let far = app
             .world_mut()
-            .spawn((Combatant::new(2, 1, CharacterClass::Priest), Transform::from_xyz(60.0, 0.0, 0.0)))
+            .spawn((
+                Combatant::new(2, 1, CharacterClass::Priest),
+                Transform::from_xyz(60.0, 0.0, 0.0),
+            ))
             .id();
         app.add_systems(Update, update_team_plans);
         app.update();
@@ -1244,11 +1399,19 @@ mod tests {
             Some(far),
             "healer-first: the far Priest outranks the near Warlock"
         );
-        assert_eq!(plans.for_team(2).kill_target, None, "a Legacy team never calls");
+        assert_eq!(
+            plans.for_team(2).kill_target,
+            None,
+            "a Legacy team never calls"
+        );
 
         // The called target dies: the replan must move the call to a living
         // enemy, not hold the corpse and not go quiet.
-        app.world_mut().entity_mut(far).get_mut::<Combatant>().unwrap().current_health = 0.0;
+        app.world_mut()
+            .entity_mut(far)
+            .get_mut::<Combatant>()
+            .unwrap()
+            .current_health = 0.0;
         app.update();
         assert_eq!(
             app.world().resource::<TeamPlans>().for_team(1).kill_target,
@@ -1264,19 +1427,36 @@ mod tests {
     #[test]
     fn a_visible_enemy_healer_outranks_everything_nearer() {
         let mut units = vec![
-            CallCandidate { is_melee: true, ..cand(1, 1, 0, 0.0, 0.0) },
+            CallCandidate {
+                is_melee: true,
+                ..cand(1, 1, 0, 0.0, 0.0)
+            },
             cand(10, 2, 0, 5.0, 0.0), // DPS in our face
-            CallCandidate { is_healer: true, ..cand(11, 2, 1, 50.0, 0.0) },
+            CallCandidate {
+                is_healer: true,
+                ..cand(11, 2, 1, 50.0, 0.0)
+            },
         ];
-        assert_eq!(choose_kill_target(1, &units), Some(e(11)), "the healer, however far");
+        assert_eq!(
+            choose_kill_target(1, &units),
+            Some(e(11)),
+            "the healer, however far"
+        );
         units[2].stealthed = true;
-        assert_eq!(choose_kill_target(1, &units), Some(e(10)), "hidden healer: fall back");
+        assert_eq!(
+            choose_kill_target(1, &units),
+            Some(e(10)),
+            "hidden healer: fall back"
+        );
     }
 
     #[test]
     fn melee_plus_healer_wants_to_camp() {
         let comp = classify_comp(&[CharacterClass::Warrior, CharacterClass::Priest]);
-        assert!(comp.wants_to_camp(), "melee + healer is the camping archetype");
+        assert!(
+            comp.wants_to_camp(),
+            "melee + healer is the camping archetype"
+        );
     }
 
     /// A team that already deals damage at range gains nothing from making the
@@ -1294,7 +1474,10 @@ mod tests {
     fn paladin_counts_as_melee_and_healer_but_not_ranged() {
         let comp = classify_comp(&[CharacterClass::Paladin]);
         assert!(comp.has_melee && comp.has_healer);
-        assert!(!comp.has_ranged, "a melee healer must not make the team ranged");
+        assert!(
+            !comp.has_ranged,
+            "a melee healer must not make the team ranged"
+        );
         assert!(comp.wants_to_camp());
     }
 
@@ -1305,12 +1488,22 @@ mod tests {
         let v = nagrand();
         // Team 1 spawns at -x.
         let a1 = choose_anchor(&v, -NAGRAND_SPAWN_X).expect("a -x pillar exists");
-        let Anchor::Obstacle(i1) = a1 else { panic!("expected an obstacle anchor") };
-        assert!(matches!(i1, 0 | 1), "team 1 must anchor on a -x pillar, got {i1}");
+        let Anchor::Obstacle(i1) = a1 else {
+            panic!("expected an obstacle anchor")
+        };
+        assert!(
+            matches!(i1, 0 | 1),
+            "team 1 must anchor on a -x pillar, got {i1}"
+        );
 
         let a2 = choose_anchor(&v, NAGRAND_SPAWN_X).expect("a +x pillar exists");
-        let Anchor::Obstacle(i2) = a2 else { panic!("expected an obstacle anchor") };
-        assert!(matches!(i2, 2 | 3), "team 2 must anchor on a +x pillar, got {i2}");
+        let Anchor::Obstacle(i2) = a2 else {
+            panic!("expected an obstacle anchor")
+        };
+        assert!(
+            matches!(i2, 2 | 3),
+            "team 2 must anchor on a +x pillar, got {i2}"
+        );
     }
 
     /// Symmetric pillars make ties the NORMAL case here, not an edge case, so the

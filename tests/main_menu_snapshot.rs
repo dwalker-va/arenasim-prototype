@@ -36,12 +36,10 @@ const SNAPSHOT_TIME_SECS: f32 = 0.6;
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn main_menu() {
-    let mut harness = Harness::builder()
-        .with_size([1280.0, 800.0])
-        .build(|ctx| {
-            install_game_fonts(ctx);
-            let _ = draw_main_menu(ctx, SNAPSHOT_TIME_SECS);
-        });
+    let mut harness = Harness::builder().with_size([1280.0, 800.0]).build(|ctx| {
+        install_game_fonts(ctx);
+        let _ = draw_main_menu(ctx, SNAPSHOT_TIME_SECS);
+    });
 
     harness.run();
     harness.snapshot("main_menu");

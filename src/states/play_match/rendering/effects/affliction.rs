@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Backlash Burst (UA dispel impact on dispeller)
@@ -43,7 +43,11 @@ pub fn spawn_backlash_burst_visuals(
 /// Update BacklashBurst: expand quickly (1x -> 2.5x) and fade in 0.3s.
 pub fn update_backlash_bursts(
     time: Res<Time>,
-    mut bursts: Query<(&mut BacklashBurst, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut bursts: Query<(
+        &mut BacklashBurst,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     transforms: Query<&Transform, Without<BacklashBurst>>,
 ) {
@@ -61,12 +65,8 @@ pub fn update_backlash_bursts(
 
         if let Some(material) = materials.get_mut(&material_handle.0) {
             material.base_color = Color::srgba(0.20, 0.0, 0.35, 0.85 * progress);
-            material.emissive = LinearRgba::new(
-                1.6 * progress,
-                0.20 * progress,
-                2.0 * progress,
-                1.0,
-            );
+            material.emissive =
+                LinearRgba::new(1.6 * progress, 0.20 * progress, 2.0 * progress, 1.0);
         }
     }
 }
@@ -178,7 +178,10 @@ pub fn update_drip_emitters(
         emitter.spawn_accumulator += dt;
         while emitter.spawn_accumulator >= DRIP_INTERVAL {
             emitter.spawn_accumulator -= DRIP_INTERVAL;
-            let seed = emitter.target.index().wrapping_add(emitter.drips_spawned.wrapping_mul(3));
+            let seed = emitter
+                .target
+                .index()
+                .wrapping_add(emitter.drips_spawned.wrapping_mul(3));
             emitter.drips_spawned = emitter.drips_spawned.wrapping_add(1);
 
             // Jittered spawn point around the torso (body capsule radius 0.5).
@@ -190,11 +193,7 @@ pub fn update_drip_emitters(
             commands.spawn((
                 DotDrip {
                     kind: emitter.kind,
-                    velocity: Vec3::new(
-                        angle.cos() * 0.25,
-                        -2.2,
-                        angle.sin() * 0.25,
-                    ),
+                    velocity: Vec3::new(angle.cos() * 0.25, -2.2, angle.sin() * 0.25),
                     lifetime: 0.7,
                     initial_lifetime: 0.7,
                 },
@@ -238,7 +237,9 @@ pub fn spawn_drip_visuals(
             ..default()
         });
 
-        commands.entity(drip_entity).try_insert((Mesh3d(mesh), MeshMaterial3d(material)));
+        commands
+            .entity(drip_entity)
+            .try_insert((Mesh3d(mesh), MeshMaterial3d(material)));
     }
 }
 
@@ -272,4 +273,3 @@ pub fn update_drips(
 // Silence now follows the same pattern — the existing CC log line
 // "[CC] Unstable Affliction on Team X (5.0s, DR: ...)" plus the aura icon over
 // the silenced combatant covers the visibility need without bespoke FCT.
-

@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Death Coil Burst (target-centered horror impact)
@@ -52,7 +52,11 @@ pub fn spawn_death_coil_burst(
 /// Update Death Coil bursts: a hot flash that punches outward then fades.
 pub fn update_death_coil_bursts(
     time: Res<Time>,
-    mut bursts: Query<(&mut DeathCoilBurst, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut bursts: Query<(
+        &mut DeathCoilBurst,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     transforms: Query<&Transform, Without<DeathCoilBurst>>,
 ) {
@@ -98,4 +102,3 @@ pub fn cleanup_expired_death_coil_bursts(
         }
     }
 }
-

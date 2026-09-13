@@ -12,8 +12,6 @@
 
 use std::time::Duration;
 
-use bevy::prelude::*;
-use bevy::time::TimeUpdateStrategy;
 use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraType, Combatant, FearFlash, FearMote, FearMoteEmitter, FearShard,
     FearShroud, FearedVisual, OriginalBodyMaterial, OriginalMesh, PolymorphedVisual, VisualBody,
@@ -26,6 +24,8 @@ use arenasim::states::play_match::{
     update_walk_animation,
 };
 use arenasim::CharacterClass;
+use bevy::prelude::*;
+use bevy::time::TimeUpdateStrategy;
 
 /// Fixed tick for the harness.
 const TICK: Duration = Duration::from_millis(100);
@@ -134,7 +134,11 @@ impl Harness {
             .spawn((
                 Transform::from_xyz(0.0, 1.0, 0.0),
                 Combatant::new(team, slot, CharacterClass::Warlock),
-                WalkAnim { phase: 0.0, previous_xz: Vec2::ZERO, idle_time: 0.0 },
+                WalkAnim {
+                    phase: 0.0,
+                    previous_xz: Vec2::ZERO,
+                    idle_time: 0.0,
+                },
             ))
             .id();
         self.app.world_mut().entity_mut(unit).add_child(body);
@@ -160,7 +164,11 @@ impl Harness {
     }
 
     fn total_shrouds(&mut self) -> usize {
-        self.app.world_mut().query::<&FearShroud>().iter(self.app.world()).count()
+        self.app
+            .world_mut()
+            .query::<&FearShroud>()
+            .iter(self.app.world())
+            .count()
     }
 
     fn stored_materials(&mut self) -> usize {
@@ -174,28 +182,30 @@ impl Harness {
     /// Live fear-mote count across the whole world (motes are unattached world
     /// particles, not owner-scoped).
     fn motes(&mut self) -> usize {
-        self.app.world_mut().query::<&FearMote>().iter(self.app.world()).count()
+        self.app
+            .world_mut()
+            .query::<&FearMote>()
+            .iter(self.app.world())
+            .count()
     }
 
     /// Live fear-flash count across the whole world (flashes are unattached
     /// world bursts, spawned by both transition branches of `update_fear_visuals`).
     fn flashes(&mut self) -> usize {
-        self.app.world_mut().query::<&FearFlash>().iter(self.app.world()).count()
-    }
-
-    /// The set of live fear-flash entities — lets a probe prove a NEW flash was
-    /// spawned by a transition, independent of whether older flashes have expired.
-    fn flash_entities(&mut self) -> std::collections::HashSet<Entity> {
         self.app
             .world_mut()
-            .query_filtered::<Entity, With<FearFlash>>()
+            .query::<&FearFlash>()
             .iter(self.app.world())
-            .collect()
+            .count()
     }
 
     /// Live shatter-shard count across the whole world.
     fn shards(&mut self) -> usize {
-        self.app.world_mut().query::<&FearShard>().iter(self.app.world()).count()
+        self.app
+            .world_mut()
+            .query::<&FearShard>()
+            .iter(self.app.world())
+            .count()
     }
 
     /// Lowest Y across all live shards — proves they fall (drops over time).
@@ -228,13 +238,25 @@ fn tints_on_fear() {
     let (unit, body, original_material) = h.spawn_unit(1, 0);
 
     h.app.update();
-    assert!(h.app.world().get::<FearedVisual>(unit).is_none(), "not feared yet");
+    assert!(
+        h.app.world().get::<FearedVisual>(unit).is_none(),
+        "not feared yet"
+    );
     assert_eq!(h.shrouds_of(unit), 0, "no shroud before fear");
 
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
     h.app.update();
-    assert!(h.app.world().get::<FearedVisual>(unit).is_some(), "FearedVisual inserted");
-    assert_ne!(h.body_material(body), original_material, "husk tint applied");
+    assert!(
+        h.app.world().get::<FearedVisual>(unit).is_some(),
+        "FearedVisual inserted"
+    );
+    assert_ne!(
+        h.body_material(body),
+        original_material,
+        "husk tint applied"
+    );
     assert_eq!(h.stored_materials(), 1, "original body material stored");
     assert_eq!(
         h.app.world().get::<OriginalBodyMaterial>(body).unwrap().0,
@@ -246,7 +268,11 @@ fn tints_on_fear() {
     // Idempotent while the aura holds.
     h.app.update();
     assert_eq!(h.shrouds_of(unit), 1, "shroud must not accumulate");
-    assert_eq!(h.stored_materials(), 1, "stored material must not accumulate");
+    assert_eq!(
+        h.stored_materials(),
+        1,
+        "stored material must not accumulate"
+    );
 }
 
 /// R7 / AE3 (component-removal trap): natural expiry removes the whole
@@ -255,14 +281,23 @@ fn tints_on_fear() {
 fn restores_on_component_removal() {
     let mut h = Harness::new();
     let (unit, body, original_material) = h.spawn_unit(1, 0);
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
     h.app.update();
     assert!(h.app.world().get::<FearedVisual>(unit).is_some());
 
     h.app.world_mut().entity_mut(unit).remove::<ActiveAuras>();
     h.app.update();
-    assert!(h.app.world().get::<FearedVisual>(unit).is_none(), "FearedVisual removed");
-    assert_eq!(h.body_material(body), original_material, "true material restored");
+    assert!(
+        h.app.world().get::<FearedVisual>(unit).is_none(),
+        "FearedVisual removed"
+    );
+    assert_eq!(
+        h.body_material(body),
+        original_material,
+        "true material restored"
+    );
     assert_eq!(h.stored_materials(), 0, "stored material removed");
     assert_eq!(h.shrouds_of(unit), 0, "shroud despawned");
 }
@@ -274,16 +309,32 @@ fn restores_on_component_removal() {
 fn restores_on_death_with_aura_present() {
     let mut h = Harness::new();
     let (unit, body, original_material) = h.spawn_unit(1, 0);
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
     h.app.update();
     assert!(h.app.world().get::<FearedVisual>(unit).is_some());
 
     // Killing blow: the aura survives on the corpse.
-    h.app.world_mut().get_mut::<Combatant>(unit).unwrap().current_health = 0.0;
+    h.app
+        .world_mut()
+        .get_mut::<Combatant>(unit)
+        .unwrap()
+        .current_health = 0.0;
     h.app.update();
-    assert!(h.app.world().get::<ActiveAuras>(unit).is_some(), "aura still on the corpse");
-    assert!(h.app.world().get::<FearedVisual>(unit).is_none(), "restored on death");
-    assert_eq!(h.body_material(body), original_material, "material restored on corpse");
+    assert!(
+        h.app.world().get::<ActiveAuras>(unit).is_some(),
+        "aura still on the corpse"
+    );
+    assert!(
+        h.app.world().get::<FearedVisual>(unit).is_none(),
+        "restored on death"
+    );
+    assert_eq!(
+        h.body_material(body),
+        original_material,
+        "material restored on corpse"
+    );
     assert_eq!(h.shrouds_of(unit), 0, "no shroud on the corpse");
 }
 
@@ -293,14 +344,24 @@ fn restores_on_death_with_aura_present() {
 fn restores_on_vec_emptied() {
     let mut h = Harness::new();
     let (unit, body, original_material) = h.spawn_unit(1, 0);
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
     h.app.update();
     assert!(h.app.world().get::<FearedVisual>(unit).is_some());
 
     // Damage break / dispel: aura removed but component present.
-    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+    h.app
+        .world_mut()
+        .get_mut::<ActiveAuras>(unit)
+        .unwrap()
+        .auras
+        .clear();
     h.app.update();
-    assert!(h.app.world().get::<FearedVisual>(unit).is_none(), "restored on break");
+    assert!(
+        h.app.world().get::<FearedVisual>(unit).is_none(),
+        "restored on break"
+    );
     assert_eq!(h.body_material(body), original_material);
     assert_eq!(h.shrouds_of(unit), 0);
 }
@@ -312,12 +373,24 @@ fn no_accumulation_across_repeats() {
     let mut h = Harness::new();
     let (unit, _body, _) = h.spawn_unit(1, 0);
 
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
     h.app.update();
-    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+    h.app
+        .world_mut()
+        .get_mut::<ActiveAuras>(unit)
+        .unwrap()
+        .auras
+        .clear();
     h.app.update();
     // Re-fear.
-    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.push(fear_aura());
+    h.app
+        .world_mut()
+        .get_mut::<ActiveAuras>(unit)
+        .unwrap()
+        .auras
+        .push(fear_aura());
     h.app.update();
 
     assert_eq!(h.shrouds_of(unit), 1, "one shroud after re-fear");
@@ -331,14 +404,23 @@ fn restore_is_owner_scoped() {
     let mut h = Harness::new();
     let (a, _, _) = h.spawn_unit(1, 0);
     let (b, _, _) = h.spawn_unit(2, 0);
-    h.app.world_mut().entity_mut(a).insert(ActiveAuras { auras: vec![fear_aura()] });
-    h.app.world_mut().entity_mut(b).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(a).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
+    h.app.world_mut().entity_mut(b).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
     h.app.update();
     assert_eq!(h.shrouds_of(a), 1);
     assert_eq!(h.shrouds_of(b), 1);
 
     // A's fear ends by the vec emptying.
-    h.app.world_mut().get_mut::<ActiveAuras>(a).unwrap().auras.clear();
+    h.app
+        .world_mut()
+        .get_mut::<ActiveAuras>(a)
+        .unwrap()
+        .auras
+        .clear();
     h.app.update();
     assert_eq!(h.shrouds_of(a), 0, "A's shroud stripped");
     assert_eq!(h.shrouds_of(b), 1, "B's shroud untouched");
@@ -351,10 +433,19 @@ fn restore_is_owner_scoped() {
 fn horror_gets_fear_treatment() {
     let mut h = Harness::new();
     let (unit, body, original_material) = h.spawn_unit(1, 0);
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![horror_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![horror_aura()],
+    });
     h.app.update();
-    assert!(h.app.world().get::<FearedVisual>(unit).is_some(), "horror is Fear-type → treated");
-    assert_ne!(h.body_material(body), original_material, "husk tint applied for horror");
+    assert!(
+        h.app.world().get::<FearedVisual>(unit).is_some(),
+        "horror is Fear-type → treated"
+    );
+    assert_ne!(
+        h.body_material(body),
+        original_material,
+        "husk tint applied for horror"
+    );
     assert_eq!(h.shrouds_of(unit), 1);
 }
 
@@ -367,17 +458,26 @@ fn polymorph_wins_while_co_held() {
     let (unit, _body, _) = h.spawn_unit(1, 0);
     // Stand in for an active polymorph without running its system.
     h.app.world_mut().entity_mut(unit).insert(PolymorphedVisual);
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
     h.app.update();
     assert!(
         h.app.world().get::<FearedVisual>(unit).is_none(),
         "no fear treatment while polymorphed"
     );
     assert_eq!(h.shrouds_of(unit), 0, "no shroud while polymorphed");
-    assert_eq!(h.stored_materials(), 0, "fear did not touch the body material");
+    assert_eq!(
+        h.stored_materials(),
+        0,
+        "fear did not touch the body material"
+    );
 
     // Polymorph ends; Fear is still active.
-    h.app.world_mut().entity_mut(unit).remove::<PolymorphedVisual>();
+    h.app
+        .world_mut()
+        .entity_mut(unit)
+        .remove::<PolymorphedVisual>();
     h.app.update();
     assert!(
         h.app.world().get::<FearedVisual>(unit).is_some(),
@@ -406,11 +506,19 @@ fn simultaneous_fear_and_polymorph_do_not_deadlock() {
     // and only one marker is ever set. This mirrors the fixed states/mod.rs
     // registration; without the chain the two race and deadlock into a stuck
     // double-marker state.
-    app.add_systems(Update, (update_polymorph_visuals, update_fear_visuals).chain());
+    app.add_systems(
+        Update,
+        (update_polymorph_visuals, update_fear_visuals).chain(),
+    );
 
-    let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(Capsule3d::new(0.5, 1.5));
-    let real_mat =
-        app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial::default());
+    let mesh = app
+        .world_mut()
+        .resource_mut::<Assets<Mesh>>()
+        .add(Capsule3d::new(0.5, 1.5));
+    let real_mat = app
+        .world_mut()
+        .resource_mut::<Assets<StandardMaterial>>()
+        .add(StandardMaterial::default());
     let body = app
         .world_mut()
         .spawn((
@@ -431,9 +539,9 @@ fn simultaneous_fear_and_polymorph_do_not_deadlock() {
     app.world_mut().entity_mut(unit).add_child(body);
 
     // Both CCs land the same frame.
-    app.world_mut()
-        .entity_mut(unit)
-        .insert(ActiveAuras { auras: vec![fear_aura(), polymorph_aura()] });
+    app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura(), polymorph_aura()],
+    });
     app.update();
 
     let has_fear = app.world().get::<FearedVisual>(unit).is_some();
@@ -454,7 +562,10 @@ fn simultaneous_fear_and_polymorph_do_not_deadlock() {
         "PolymorphedVisual must clear after the auras end (deadlock if it persists)"
     );
     assert_eq!(
-        app.world().get::<MeshMaterial3d<StandardMaterial>>(body).unwrap().0,
+        app.world()
+            .get::<MeshMaterial3d<StandardMaterial>>(body)
+            .unwrap()
+            .0,
         real_mat,
         "body must restore to the true material (stuck-sheep/husk if not)"
     );
@@ -474,36 +585,66 @@ fn fear_then_polymorph_does_not_clobber_material() {
     let (unit, body, real_mat) = h.spawn_unit(1, 0);
 
     // Fear lands first: husk tint, real material stored.
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
     h.app.update();
-    assert!(h.app.world().get::<FearedVisual>(unit).is_some(), "fear applied first");
+    assert!(
+        h.app.world().get::<FearedVisual>(unit).is_some(),
+        "fear applied first"
+    );
     let husk = h.body_material(body);
     assert_ne!(husk, real_mat, "husk tint applied");
     assert_eq!(h.stored_materials(), 1, "real material stored once");
 
     // Polymorph the already-feared unit — must be deferred (Without<FearedVisual>),
     // so it never overwrites the stored real material with the husk.
-    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.push(polymorph_aura());
+    h.app
+        .world_mut()
+        .get_mut::<ActiveAuras>(unit)
+        .unwrap()
+        .auras
+        .push(polymorph_aura());
     h.app.update();
     assert!(
         h.app.world().get::<PolymorphedVisual>(unit).is_none(),
         "sheep deferred while the unit is already feared"
     );
-    assert_eq!(h.body_material(body), husk, "body still the fear husk, not wool");
-    assert_eq!(h.stored_materials(), 1, "still exactly one stored material — no second capture");
+    assert_eq!(
+        h.body_material(body),
+        husk,
+        "body still the fear husk, not wool"
+    );
+    assert_eq!(
+        h.stored_materials(),
+        1,
+        "still exactly one stored material — no second capture"
+    );
 
     // Both CCs end. Fear restores; polymorph never applied, so nothing to undo.
-    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+    h.app
+        .world_mut()
+        .get_mut::<ActiveAuras>(unit)
+        .unwrap()
+        .auras
+        .clear();
     h.app.update();
     h.app.update();
-    assert!(h.app.world().get::<FearedVisual>(unit).is_none(), "fear restored");
+    assert!(
+        h.app.world().get::<FearedVisual>(unit).is_none(),
+        "fear restored"
+    );
     assert!(h.app.world().get::<PolymorphedVisual>(unit).is_none());
     assert_eq!(
         h.body_material(body),
         real_mat,
         "body restored to the TRUE material, not the husk — the OriginalBodyMaterial slot was never clobbered"
     );
-    assert_eq!(h.stored_materials(), 0, "stored material cleared on restore");
+    assert_eq!(
+        h.stored_materials(),
+        0,
+        "stored material cleared on restore"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -542,7 +683,11 @@ fn spawn_gait_unit(app: &mut App) -> (Entity, Entity) {
         .spawn((
             Transform::from_xyz(0.0, 1.0, 0.0),
             Combatant::new(1, 0, CharacterClass::Warlock),
-            WalkAnim { phase: 0.0, previous_xz: Vec2::ZERO, idle_time: 0.0 },
+            WalkAnim {
+                phase: 0.0,
+                previous_xz: Vec2::ZERO,
+                idle_time: 0.0,
+            },
         ))
         .id();
     app.world_mut().entity_mut(unit).add_child(body);
@@ -554,7 +699,11 @@ fn body_y(app: &App, body: Entity) -> f32 {
 }
 
 fn move_unit(app: &mut App, unit: Entity, dx: f32) {
-    app.world_mut().get_mut::<Transform>(unit).unwrap().translation.x += dx;
+    app.world_mut()
+        .get_mut::<Transform>(unit)
+        .unwrap()
+        .translation
+        .x += dx;
 }
 
 /// Run all three gaits registered together, moving one unit `dx` per tick for
@@ -595,13 +744,22 @@ fn fear_gait_distinct_from_walk_and_hop() {
     let fear = moving_gait_trace(Some("fear"), 30);
 
     let max_abs_diff = |a: &[f32], b: &[f32]| {
-        a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max)
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max)
     };
 
     let vs_walk = max_abs_diff(&fear, &walk);
     let vs_hop = max_abs_diff(&fear, &hop);
-    assert!(vs_walk > 0.03, "fear gait must differ from the walk bob (max diff {vs_walk})");
-    assert!(vs_hop > 0.03, "fear gait must differ from the sheep hop (max diff {vs_hop})");
+    assert!(
+        vs_walk > 0.03,
+        "fear gait must differ from the walk bob (max diff {vs_walk})"
+    );
+    assert!(
+        vs_hop > 0.03,
+        "fear gait must differ from the sheep hop (max diff {vs_hop})"
+    );
 }
 
 /// R2 (the load-bearing fixed-timestep-strobe assertion): a STATIONARY feared
@@ -625,7 +783,10 @@ fn stationary_feared_unit_still_trembles() {
     }
 
     let end_x = app.world().get::<Transform>(unit).unwrap().translation.x;
-    assert_eq!(start_x, end_x, "the unit must be stationary — zero sim displacement");
+    assert_eq!(
+        start_x, end_x,
+        "the unit must be stationary — zero sim displacement"
+    );
 
     let min = ys.iter().cloned().fold(f32::MAX, f32::min);
     let max = ys.iter().cloned().fold(f32::MIN, f32::max);
@@ -662,7 +823,10 @@ fn feared_unit_excluded_from_walk_query() {
             "feared unit is excluded from the walk query — its body stays untouched"
         );
     }
-    assert!(normal_bobbed, "the walk system bobs a non-feared moving unit");
+    assert!(
+        normal_bobbed,
+        "the walk system bobs a non-feared moving unit"
+    );
 }
 
 /// One-writer invariant (co-hold): a unit with BOTH `FearedVisual` and
@@ -759,7 +923,9 @@ fn restore_leaves_no_residual_offset() {
 fn motes_spawn_on_cadence_and_stay_bounded() {
     let mut h = Harness::new();
     let (unit, _body, _) = h.spawn_unit(1, 0);
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
 
     // 50 ticks = 5.0s of fear at the 0.1s harness tick.
     let mut peak_live = 0usize;
@@ -794,21 +960,34 @@ fn motes_spawn_on_cadence_and_stay_bounded() {
 fn motes_stop_on_restore_and_drain_to_zero() {
     let mut h = Harness::new();
     let (unit, _body, _) = h.spawn_unit(1, 0);
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
 
     // Fear for 2s → emitter armed, some motes in flight.
     for _ in 0..20 {
         h.app.update();
     }
     let spawned_before = h.motes_spawned(unit);
-    assert!(spawned_before >= 2, "emitter should have spawned motes while feared");
+    assert!(
+        spawned_before >= 2,
+        "emitter should have spawned motes while feared"
+    );
     assert!(h.motes() >= 1, "motes in flight while feared");
 
     // Fear breaks (aura vec emptied). `update_fear_visuals` removes
     // `FearedVisual`, so the emitter stops being iterated.
-    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+    h.app
+        .world_mut()
+        .get_mut::<ActiveAuras>(unit)
+        .unwrap()
+        .auras
+        .clear();
     h.app.update();
-    assert!(h.app.world().get::<FearedVisual>(unit).is_none(), "restored");
+    assert!(
+        h.app.world().get::<FearedVisual>(unit).is_none(),
+        "restored"
+    );
 
     // Run well past a mote lifetime (1.2s → 12 ticks; 20 gives margin).
     for _ in 0..20 {
@@ -844,10 +1023,18 @@ fn apply_flash_spawns_on_fear() {
     let (unit, _body, _) = h.spawn_unit(1, 0);
     assert_eq!(h.flashes(), 0, "no flash before fear");
 
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
     h.app.update();
-    assert!(h.app.world().get::<FearedVisual>(unit).is_some(), "unit is feared");
-    assert!(h.flashes() >= 1, "an apply flash is spawned when Fear lands");
+    assert!(
+        h.app.world().get::<FearedVisual>(unit).is_some(),
+        "unit is feared"
+    );
+    assert!(
+        h.flashes() >= 1,
+        "an apply flash is spawned when Fear lands"
+    );
 }
 
 /// AE2 / R6: Fear broken 0.4s after it lands still spawns a break flash — the
@@ -858,7 +1045,9 @@ fn apply_flash_spawns_on_fear() {
 fn break_shatter_spawns_in_sub_second_window() {
     let mut h = Harness::new();
     let (unit, _body, _) = h.spawn_unit(1, 0);
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
     h.app.update(); // apply
 
     // ~0.4s pass (4 ticks at the 0.1s harness tick) — a sub-second fear window.
@@ -870,9 +1059,17 @@ fn break_shatter_spawns_in_sub_second_window() {
     // Damage break: aura vec emptied. `update_fear_visuals` takes the
     // transition-out branch and SHATTERS the shroud into shards (the dynamic
     // break effect that replaced the flash).
-    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+    h.app
+        .world_mut()
+        .get_mut::<ActiveAuras>(unit)
+        .unwrap()
+        .auras
+        .clear();
     h.app.update();
-    assert!(h.app.world().get::<FearedVisual>(unit).is_none(), "restored");
+    assert!(
+        h.app.world().get::<FearedVisual>(unit).is_none(),
+        "restored"
+    );
     assert!(
         h.shards() >= 1,
         "the shroud shatters even when Fear breaks inside a sub-second window"
@@ -884,14 +1081,24 @@ fn break_shatter_spawns_in_sub_second_window() {
 fn shatter_shards_fall_and_drain() {
     let mut h = Harness::new();
     let (unit, _body, _) = h.spawn_unit(1, 0);
-    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+        auras: vec![fear_aura()],
+    });
     h.app.update(); // apply
 
     // Break → shatter burst.
-    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+    h.app
+        .world_mut()
+        .get_mut::<ActiveAuras>(unit)
+        .unwrap()
+        .auras
+        .clear();
     h.app.update();
     let count = h.shards();
-    assert!(count >= 8, "a shatter burst spawns a ring of shards (got {count})");
+    assert!(
+        count >= 8,
+        "a shatter burst spawns a ring of shards (got {count})"
+    );
     let y_at_spawn = h.min_shard_y();
 
     // Several ticks: gravity drags the shards down (the lowest shard falls).
@@ -918,16 +1125,20 @@ fn flashes_self_expire_and_stay_bounded() {
     let mut peak = 0usize;
     for _ in 0..5 {
         // Apply.
-        h.app
-            .world_mut()
-            .entity_mut(unit)
-            .insert(ActiveAuras { auras: vec![fear_aura()] });
+        h.app.world_mut().entity_mut(unit).insert(ActiveAuras {
+            auras: vec![fear_aura()],
+        });
         for _ in 0..6 {
             h.app.update();
             peak = peak.max(h.flashes());
         }
         // Break.
-        h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+        h.app
+            .world_mut()
+            .get_mut::<ActiveAuras>(unit)
+            .unwrap()
+            .auras
+            .clear();
         for _ in 0..6 {
             h.app.update();
             peak = peak.max(h.flashes());
@@ -938,7 +1149,10 @@ fn flashes_self_expire_and_stay_bounded() {
     // Each cycle spawns one apply flash (~0.3s-lived); the break now SHATTERS
     // rather than flashing, so no break flash is added. With 6 ticks between
     // transitions the apply flashes never pile up — the count stays bounded.
-    assert!(peak <= 3, "flash count must stay bounded across cycles (peaked at {peak})");
+    assert!(
+        peak <= 3,
+        "flash count must stay bounded across cycles (peaked at {peak})"
+    );
     // And after a long idle they have all drained.
     for _ in 0..10 {
         h.app.update();

@@ -153,7 +153,10 @@ fn a_deep_link_from_view_combatant_returns_to_the_same_combatant() {
             Topic::Ability(arenasim::states::play_match::AbilityType::AimedShot),
         ),
         // The equipment picker's right-click, taken mid-pick.
-        (CharacterClass::Hunter, Topic::Item(ItemId::WandOfTheInvoker)),
+        (
+            CharacterClass::Hunter,
+            Topic::Item(ItemId::WandOfTheInvoker),
+        ),
         // A kit row on a second class: the Warrior's Commanding Shout.
         (
             CharacterClass::Warrior,
@@ -202,7 +205,11 @@ fn a_deep_link_from_view_combatant_returns_to_the_same_combatant() {
         // Back at the root — the first press, because `open_at` made the page
         // the root — leaves for wherever the link came from.
         let mut state = app.world_mut().resource_mut::<EncyclopediaState>();
-        assert!(state.back_key(), "{:?}: Back did not leave at the root", topic);
+        assert!(
+            state.back_key(),
+            "{:?}: Back did not leave at the root",
+            topic
+        );
         let destination = state.leave();
         assert_eq!(destination, GameState::ViewCombatant);
         app.world_mut()
@@ -222,6 +229,10 @@ fn a_deep_link_from_view_combatant_returns_to_the_same_combatant() {
             .expect("the combatant must survive the round trip");
         assert_eq!(view.team, 2, "{:?}: came back on the wrong team", topic);
         assert_eq!(view.slot, 1, "{:?}: came back on the wrong slot", topic);
-        assert_eq!(view.class, class, "{:?}: came back on the wrong class", topic);
+        assert_eq!(
+            view.class, class,
+            "{:?}: came back on the wrong class",
+            topic
+        );
     }
 }

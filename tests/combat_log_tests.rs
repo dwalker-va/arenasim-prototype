@@ -20,7 +20,10 @@ fn create_test_log() -> CombatLog {
 fn test_damage_by_ability_empty_log() {
     let log = create_test_log();
     let damage = log.damage_by_ability("Team 1 Warrior");
-    assert!(damage.is_empty(), "Empty log should return empty damage map");
+    assert!(
+        damage.is_empty(),
+        "Empty log should return empty damage map"
+    );
 }
 
 #[test]
@@ -59,8 +62,16 @@ fn test_damage_by_ability_single_source() {
     let damage = log.damage_by_ability("Team 1 Warrior");
 
     assert_eq!(damage.len(), 2, "Should have 2 different abilities");
-    assert_eq!(damage.get("Mortal Strike"), Some(&95.0), "Mortal Strike should total 95 damage");
-    assert_eq!(damage.get("Auto Attack"), Some(&20.0), "Auto Attack should be 20 damage");
+    assert_eq!(
+        damage.get("Mortal Strike"),
+        Some(&95.0),
+        "Mortal Strike should total 95 damage"
+    );
+    assert_eq!(
+        damage.get("Auto Attack"),
+        Some(&20.0),
+        "Auto Attack should be 20 damage"
+    );
 }
 
 #[test]
@@ -400,8 +411,14 @@ fn test_combatant_survived_with_death() {
         "Team 2 Mage died".to_string(),
     );
 
-    assert!(log.combatant_survived("Team 1 Warrior"), "Killer should survive");
-    assert!(!log.combatant_survived("Team 2 Mage"), "Dead combatant should not survive");
+    assert!(
+        log.combatant_survived("Team 1 Warrior"),
+        "Killer should survive"
+    );
+    assert!(
+        !log.combatant_survived("Team 2 Mage"),
+        "Dead combatant should not survive"
+    );
 }
 
 // =============================================================================
@@ -546,7 +563,11 @@ fn test_hp_changes_only() {
     log.log(CombatLogEventType::AuraApplied, "Buff applied".to_string());
 
     let hp_changes = log.hp_changes_only();
-    assert_eq!(hp_changes.len(), 2, "Should only include damage and healing events");
+    assert_eq!(
+        hp_changes.len(),
+        2,
+        "Should only include damage and healing events"
+    );
 }
 
 #[test]

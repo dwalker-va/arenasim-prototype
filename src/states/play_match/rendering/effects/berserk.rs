@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Berserker Rage Mask (TBC-style black angry mask + red glow at the head)
@@ -46,7 +46,7 @@ pub fn spawn_berserk_mask_visuals(
         let mask_material = materials.add(StandardMaterial {
             base_color: Color::WHITE, // texture supplies the flat black + alpha
             base_color_texture: Some(glyph),
-            unlit: true,              // flat black regardless of arena lighting
+            unlit: true, // flat black regardless of arena lighting
             alpha_mode: AlphaMode::Mask(0.5),
             ..default()
         });
@@ -85,11 +85,22 @@ pub fn update_berserk_masks(
     time: Res<Time>,
     mut masks: Query<(&mut BerserkMask, &mut Transform), (Without<BerserkGlow>, Without<Camera3d>)>,
     mut glows: Query<
-        (&mut BerserkGlow, &mut Transform, &MeshMaterial3d<StandardMaterial>),
+        (
+            &mut BerserkGlow,
+            &mut Transform,
+            &MeshMaterial3d<StandardMaterial>,
+        ),
         (Without<BerserkMask>, Without<Camera3d>),
     >,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    transforms: Query<&Transform, (Without<BerserkMask>, Without<BerserkGlow>, Without<Camera3d>)>,
+    transforms: Query<
+        &Transform,
+        (
+            Without<BerserkMask>,
+            Without<BerserkGlow>,
+            Without<Camera3d>,
+        ),
+    >,
     camera: Query<&Transform, With<Camera3d>>,
 ) {
     let dt = time.delta_secs();
@@ -135,7 +146,8 @@ pub fn update_berserk_masks(
         let progress = (glow.lifetime / glow.initial_lifetime).max(0.0);
 
         if let Ok(caster_transform) = transforms.get(glow.caster) {
-            glow_transform.translation = caster_transform.translation + Vec3::Y * BERSERK_MASK_HEIGHT;
+            glow_transform.translation =
+                caster_transform.translation + Vec3::Y * BERSERK_MASK_HEIGHT;
         }
 
         // Quick flare-in, then an angry pulse while the mask holds.
@@ -174,4 +186,3 @@ pub fn cleanup_expired_berserk_masks(
         }
     }
 }
-

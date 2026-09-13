@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Drain Life Beam Visual Effects
@@ -24,7 +24,9 @@ pub fn spawn_drain_life_beams(
         }
 
         // Check if beam already exists for this caster (avoid duplicates)
-        let beam_exists = existing_beams.iter().any(|beam| beam.caster == caster_entity);
+        let beam_exists = existing_beams
+            .iter()
+            .any(|beam| beam.caster == caster_entity);
         if beam_exists {
             continue;
         }
@@ -156,7 +158,14 @@ pub fn update_drain_particles(
     time: Res<Time>,
     mut particles: Query<(Entity, &mut DrainParticle, &mut Transform)>,
     beams: Query<&DrainLifeBeam>,
-    positions: Query<&Transform, (With<Combatant>, Without<DrainLifeBeam>, Without<DrainParticle>)>,
+    positions: Query<
+        &Transform,
+        (
+            With<Combatant>,
+            Without<DrainLifeBeam>,
+            Without<DrainParticle>,
+        ),
+    >,
 ) {
     let dt = time.delta_secs();
 
@@ -223,4 +232,3 @@ pub fn cleanup_drain_life_beams(
         }
     }
 }
-

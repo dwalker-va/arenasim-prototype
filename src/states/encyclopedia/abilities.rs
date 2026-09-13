@@ -290,7 +290,11 @@ fn first_sentence(text: &str) -> String {
 /// generated mechanics text.
 pub fn tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &EncyclopediaData) {
     let Some(config) = data.abilities.get(&ability) else {
-        ui.label(egui::RichText::new(Topic::Ability(ability).name(data)).size(14.0).color(TEXT));
+        ui.label(
+            egui::RichText::new(Topic::Ability(ability).name(data))
+                .size(14.0)
+                .color(TEXT),
+        );
         return;
     };
     ui.label(
@@ -299,10 +303,18 @@ pub fn tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &EncyclopediaData)
             .color(school_color(config.spell_school))
             .strong(),
     );
-    ui.label(egui::RichText::new(subtitle(config)).size(12.0).color(MUTED));
+    ui.label(
+        egui::RichText::new(subtitle(config))
+            .size(12.0)
+            .color(MUTED),
+    );
     ui.label(egui::RichText::new(cost_line(config)).size(12.0).color(DIM));
     ui.add_space(3.0);
-    ui.label(egui::RichText::new(mechanics_text(ability, config)).size(12.0).color(TEXT));
+    ui.label(
+        egui::RichText::new(mechanics_text(ability, config))
+            .size(12.0)
+            .color(TEXT),
+    );
 }
 
 /// The SLIM ability tooltip: name in its school colour, the stat strip, and one
@@ -315,7 +327,11 @@ pub fn tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &EncyclopediaData)
 pub fn slim_tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &EncyclopediaData) {
     ui.set_max_width(320.0);
     let Some(config) = data.abilities.get(&ability) else {
-        ui.label(egui::RichText::new(Topic::Ability(ability).name(data)).size(14.0).color(TEXT));
+        ui.label(
+            egui::RichText::new(Topic::Ability(ability).name(data))
+                .size(14.0)
+                .color(TEXT),
+        );
         return;
     };
     ui.label(
@@ -326,7 +342,11 @@ pub fn slim_tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &Encyclopedia
     );
     ui.label(egui::RichText::new(cost_line(config)).size(12.0).color(DIM));
     ui.add_space(3.0);
-    ui.label(egui::RichText::new(summary_sentence(ability, config)).size(12.0).color(TEXT));
+    ui.label(
+        egui::RichText::new(summary_sentence(ability, config))
+            .size(12.0)
+            .color(TEXT),
+    );
 }
 
 /// A spell school as an egui colour — the shared `SpellSchool::color_rgb8`
@@ -379,10 +399,15 @@ pub fn render_index(
         ui.add_space(40.0);
         ui.vertical_centered(|ui| {
             ui.label(
-                egui::RichText::new("No abilities match these filters.").size(15.0).color(MUTED),
+                egui::RichText::new("No abilities match these filters.")
+                    .size(15.0)
+                    .color(MUTED),
             );
             ui.add_space(10.0);
-            if ui.button(egui::RichText::new("Clear filters").size(13.0).color(TEXT)).clicked() {
+            if ui
+                .button(egui::RichText::new("Clear filters").size(13.0).color(TEXT))
+                .clicked()
+            {
                 *filters = AbilityFilters::default();
             }
         });
@@ -409,11 +434,17 @@ pub fn render_index(
 fn render_chip_bar(ui: &mut egui::Ui, filters: &mut AbilityFilters, data: &EncyclopediaData) {
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new("CLASS").size(12.0).color(DIM));
-        if ui.selectable_label(filters.class.is_none(), "All").clicked() {
+        if ui
+            .selectable_label(filters.class.is_none(), "All")
+            .clicked()
+        {
             filters.class = None;
         }
         for class in CharacterClass::all() {
-            if ui.selectable_label(filters.class == Some(*class), class.name()).clicked() {
+            if ui
+                .selectable_label(filters.class == Some(*class), class.name())
+                .clicked()
+            {
                 filters.class = Some(*class);
             }
         }
@@ -423,7 +454,10 @@ fn render_chip_bar(ui: &mut egui::Ui, filters: &mut AbilityFilters, data: &Encyc
 
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new("SCHOOL").size(12.0).color(DIM));
-        if ui.selectable_label(filters.school.is_none(), "All").clicked() {
+        if ui
+            .selectable_label(filters.school.is_none(), "All")
+            .clicked()
+        {
             filters.school = None;
         }
         for school in schools_in_use(data.abilities) {
@@ -432,14 +466,21 @@ fn render_chip_bar(ui: &mut egui::Ui, filters: &mut AbilityFilters, data: &Encyc
                 // The chip wears its school's colour, except when selected —
                 // the selection fill is gold, so the label goes dark to stay
                 // legible on it.
-                .color(if active { super::BG } else { school_color(school) });
+                .color(if active {
+                    super::BG
+                } else {
+                    school_color(school)
+                });
             if ui.selectable_label(active, label).clicked() {
                 filters.school = Some(school);
             }
         }
 
         ui.separator();
-        if ui.button(egui::RichText::new("Clear").size(12.5).color(TEXT)).clicked() {
+        if ui
+            .button(egui::RichText::new("Clear").size(12.5).color(TEXT))
+            .clicked()
+        {
             *filters = AbilityFilters::default();
         }
     });
@@ -458,7 +499,11 @@ pub fn render_detail(
 ) -> Option<Topic> {
     let topic = Topic::Ability(ability);
     let Some(config) = data.abilities.get(&ability) else {
-        ui.label(egui::RichText::new("Unknown ability").size(16.0).color(MUTED));
+        ui.label(
+            egui::RichText::new("Unknown ability")
+                .size(16.0)
+                .color(MUTED),
+        );
         return None;
     };
 
@@ -577,7 +622,10 @@ fn stat_rows(config: &AbilityConfig) -> Vec<(String, String)> {
     if let Some(channel) = config.channel_duration {
         rows.push((
             "Channel".to_string(),
-            format!("{:.0} sec, ticks every {:.0} sec", channel, config.channel_tick_interval),
+            format!(
+                "{:.0} sec, ticks every {:.0} sec",
+                channel, config.channel_tick_interval
+            ),
         ));
     }
     if config.channel_healing_per_tick > 0.0 {
@@ -587,21 +635,36 @@ fn stat_rows(config: &AbilityConfig) -> Vec<(String, String)> {
         ));
     }
     if config.mana_burn_amount > 0.0 {
-        rows.push(("Mana burned".to_string(), format!("{:.0}", config.mana_burn_amount)));
+        rows.push((
+            "Mana burned".to_string(),
+            format!("{:.0}", config.mana_burn_amount),
+        ));
     }
     if config.is_interrupt && config.lockout_duration > 0.0 {
-        rows.push(("School lockout".to_string(), format!("{:.0} sec", config.lockout_duration)));
+        rows.push((
+            "School lockout".to_string(),
+            format!("{:.0} sec", config.lockout_duration),
+        ));
     }
     if let Some(chance) = config.application_chance {
-        rows.push(("Application chance".to_string(), format!("{:.0}%", chance * 100.0)));
+        rows.push((
+            "Application chance".to_string(),
+            format!("{:.0}%", chance * 100.0),
+        ));
     }
     if let Some(speed) = config.projectile_speed {
-        rows.push(("Projectile speed".to_string(), format!("{:.0} yd/sec", speed)));
+        rows.push((
+            "Projectile speed".to_string(),
+            format!("{:.0} yd/sec", speed),
+        ));
     }
     if config.requires_stealth {
         rows.push(("Requires".to_string(), "Stealth".to_string()));
     }
-    rows.push(("Spell school".to_string(), format!("{:?}", config.spell_school)));
+    rows.push((
+        "Spell school".to_string(),
+        format!("{:?}", config.spell_school),
+    ));
 
     rows
 }
@@ -662,7 +725,10 @@ mod tests {
         assert_eq!(first_sentence("Deals 10-20 damage."), "Deals 10-20 damage.");
         assert_eq!(first_sentence("Utility ability."), "Utility ability.");
         // No terminator at all is still a whole summary, not an empty one.
-        assert_eq!(first_sentence("Charges to the target"), "Charges to the target");
+        assert_eq!(
+            first_sentence("Charges to the target"),
+            "Charges to the target"
+        );
     }
 
     /// The slim summary View Combatant shows is a genuine PREFIX of the full
@@ -684,7 +750,11 @@ mod tests {
         for (ability, config) in abilities.iter() {
             let full = mechanics_text(*ability, config);
             let gist = summary_sentence(*ability, config);
-            assert!(!gist.trim().is_empty(), "{:?} generated no summary", ability);
+            assert!(
+                !gist.trim().is_empty(),
+                "{:?} generated no summary",
+                ability
+            );
             assert!(
                 full.starts_with(&gist),
                 "{:?} summary {:?} is not a prefix of {:?}",
@@ -845,7 +915,11 @@ mod tests {
                 .copied()
                 .filter(|a| abilities.get_unchecked(a).class == *class)
                 .collect();
-            assert_eq!(from_index, kit, "{:?} index order diverged from its kit", class);
+            assert_eq!(
+                from_index, kit,
+                "{:?} index order diverged from its kit",
+                class
+            );
         }
     }
 
@@ -855,8 +929,16 @@ mod tests {
     fn every_ability_has_a_subtitle_cost_line_and_stat_rows() {
         let abilities = load_ability_definitions().expect("abilities.ron must load");
         for (ability, config) in abilities.iter() {
-            assert!(!subtitle(config).is_empty(), "{:?} has no subtitle", ability);
-            assert!(!cost_line(config).is_empty(), "{:?} has no cost line", ability);
+            assert!(
+                !subtitle(config).is_empty(),
+                "{:?} has no subtitle",
+                ability
+            );
+            assert!(
+                !cost_line(config).is_empty(),
+                "{:?} has no cost line",
+                ability
+            );
             assert!(!mechanics_text(*ability, config).trim().is_empty());
             let rows = stat_rows(config);
             // Cast time, range, cooldown, GCD and school are unconditional.
@@ -900,7 +982,10 @@ mod tests {
 
         filters.school = Some(SpellSchool::Frost);
         let mage_frost = count(&filters);
-        assert!(mage_frost > 0 && mage_frost <= mage, "a second axis can only narrow");
+        assert!(
+            mage_frost > 0 && mage_frost <= mage,
+            "a second axis can only narrow"
+        );
     }
 
     /// Every school chip offered has at least one ability behind it.

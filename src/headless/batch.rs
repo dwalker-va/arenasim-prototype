@@ -105,7 +105,8 @@ pub fn run_batch(input: PathBuf, output: PathBuf, jobs: Option<usize>) -> Result
                     if idx >= total {
                         break;
                     }
-                    match run_headless_match_prepared(configs[idx].clone(), &preloaded, true, None) {
+                    match run_headless_match_prepared(configs[idx].clone(), &preloaded, true, None)
+                    {
                         Ok(r) => local.push((idx, r)),
                         Err(e) => eprintln!(
                             "batch match {} ({} v {}) failed: {}",
@@ -156,8 +157,8 @@ fn write_results_csv(
                 .map_err(|e| format!("create {}: {}", parent.display(), e))?;
         }
     }
-    let file = std::fs::File::create(output)
-        .map_err(|e| format!("create {}: {}", output.display(), e))?;
+    let file =
+        std::fs::File::create(output).map_err(|e| format!("create {}: {}", output.display(), e))?;
     let mut w = BufWriter::new(file);
 
     writeln!(w, "label,team1,team2,seed,winner,end_reason,duration_secs")
@@ -177,19 +178,21 @@ fn write_results_csv(
                 writeln!(
                     w,
                     "{},{},{},{},{},{},{:.2}",
-                    label, team1, team2, seed, winner, r.end_reason.as_str(), r.match_time
+                    label,
+                    team1,
+                    team2,
+                    seed,
+                    winner,
+                    r.end_reason.as_str(),
+                    r.match_time
                 )
                 .map_err(|e| e.to_string())?;
             }
             None => {
                 // Match errored out (logged to stderr above); record it so row
                 // counts stay aligned with the input.
-                writeln!(
-                    w,
-                    "{},{},{},{},error,error,0.00",
-                    label, team1, team2, seed
-                )
-                .map_err(|e| e.to_string())?;
+                writeln!(w, "{},{},{},{},error,error,0.00", label, team1, team2, seed)
+                    .map_err(|e| e.to_string())?;
             }
         }
     }

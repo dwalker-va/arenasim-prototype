@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Flame Particle Visual Effects (Immolate)
@@ -46,16 +46,14 @@ pub fn spawn_flame_visuals(
         // Fire colors - orange base with bright emissive glow
         let material = materials.add(StandardMaterial {
             base_color: Color::srgba(1.0, 0.4, 0.1, 0.9),
-            emissive: LinearRgba::rgb(2.0, 0.8, 0.1),  // Bright orange glow
+            emissive: LinearRgba::rgb(2.0, 0.8, 0.1), // Bright orange glow
             alpha_mode: AlphaMode::Blend,
             ..default()
         });
 
         // Add visual mesh to the particle entity
-        commands.entity(entity).try_insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-        ));
+        commands
+            .entity(entity)
+            .try_insert((Mesh3d(mesh), MeshMaterial3d(material)));
     }
 }
-

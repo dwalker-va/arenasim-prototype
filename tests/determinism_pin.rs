@@ -66,8 +66,13 @@ fn seeded_2v2_matches_its_recorded_identity() {
 
 #[test]
 fn seeded_1v1_matches_its_recorded_identity() {
-    let result =
-        run_headless_match_with(config(&["Mage"], &["Warrior"], 99001), true, None).expect("1v1 run");
+    let result = run_headless_match_with(config(&["Mage"], &["Warrior"], 99001), true, None)
+        .expect("1v1 run");
     // 16.049927s — same provenance as the 2v2 pin above.
-    assert_pinned(&result, Some(1), 1_098_933_824, "1v1 Mage vs Warrior @99001");
+    assert_pinned(
+        &result,
+        Some(1),
+        1_098_933_824,
+        "1v1 Mage vs Warrior @99001",
+    );
 }

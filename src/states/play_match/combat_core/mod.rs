@@ -8,23 +8,23 @@
 //! - Interrupt processing (applying lockouts)
 //! - Stealth visuals
 
-mod damage;
-mod movement;
-mod movement_scoring;
 mod auto_attack;
 mod casting;
+mod damage;
 mod death;
+mod movement;
+mod movement_scoring;
 
-pub use damage::*;
-pub use movement::*;
-pub use movement_scoring::*;
 pub use auto_attack::*;
 pub use casting::*;
+pub use damage::*;
 pub use death::*;
+pub use movement::*;
+pub use movement_scoring::*;
 
-use bevy::prelude::*;
-use super::components::*;
 use super::arena_bounds::ArenaBounds;
+use super::components::*;
+use bevy::prelude::*;
 
 // Re-export combatant_id for backward compatibility (used by other modules)
 pub use super::utils::combatant_id;
@@ -152,9 +152,9 @@ pub fn calculate_cast_time(base_cast_time: f32, auras: Option<&ActiveAuras>) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::super::match_config;
     use super::super::abilities::SpellSchool;
+    use super::super::match_config;
+    use super::*;
 
     /// Helper to create a test combatant
     fn create_test_combatant(health: f32) -> Combatant {
@@ -195,11 +195,15 @@ mod tests {
     fn test_damage_with_no_shields() {
         let mut target = create_test_combatant(100.0);
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(30.0, &mut target, None, SpellSchool::None);
+        let (actual_damage, absorbed) =
+            apply_damage_with_absorb(30.0, &mut target, None, SpellSchool::None);
 
         assert_eq!(actual_damage, 30.0, "All damage should hit health");
         assert_eq!(absorbed, 0.0, "No damage should be absorbed");
-        assert_eq!(target.current_health, 70.0, "Health should decrease by damage");
+        assert_eq!(
+            target.current_health, 70.0,
+            "Health should decrease by damage"
+        );
         assert_eq!(target.damage_taken, 30.0, "Damage taken should be tracked");
     }
 
@@ -210,12 +214,16 @@ mod tests {
             auras: vec![create_absorb_aura(50.0, "Power Word: Shield")],
         };
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(30.0, &mut target, Some(&mut auras), SpellSchool::None);
+        let (actual_damage, absorbed) =
+            apply_damage_with_absorb(30.0, &mut target, Some(&mut auras), SpellSchool::None);
 
         assert_eq!(actual_damage, 0.0, "No damage should hit health");
         assert_eq!(absorbed, 30.0, "All damage should be absorbed");
         assert_eq!(target.current_health, 100.0, "Health should remain full");
-        assert_eq!(auras.auras[0].magnitude, 20.0, "Shield should have 20 remaining");
+        assert_eq!(
+            auras.auras[0].magnitude, 20.0,
+            "Shield should have 20 remaining"
+        );
     }
 
     #[test]
@@ -225,11 +233,15 @@ mod tests {
             auras: vec![create_absorb_aura(20.0, "Power Word: Shield")],
         };
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(50.0, &mut target, Some(&mut auras), SpellSchool::None);
+        let (actual_damage, absorbed) =
+            apply_damage_with_absorb(50.0, &mut target, Some(&mut auras), SpellSchool::None);
 
         assert_eq!(absorbed, 20.0, "Shield should absorb its full amount");
         assert_eq!(actual_damage, 30.0, "Remaining damage should hit health");
-        assert_eq!(target.current_health, 70.0, "Health should decrease by remaining damage");
+        assert_eq!(
+            target.current_health, 70.0,
+            "Health should decrease by remaining damage"
+        );
         assert!(auras.auras.is_empty(), "Depleted shield should be removed");
     }
 
@@ -243,24 +255,35 @@ mod tests {
             ],
         };
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(50.0, &mut target, Some(&mut auras), SpellSchool::None);
+        let (actual_damage, absorbed) =
+            apply_damage_with_absorb(50.0, &mut target, Some(&mut auras), SpellSchool::None);
 
-        assert_eq!(absorbed, 50.0, "All damage should be absorbed by combined shields");
+        assert_eq!(
+            absorbed, 50.0,
+            "All damage should be absorbed by combined shields"
+        );
         assert_eq!(actual_damage, 0.0, "No damage should hit health");
         assert_eq!(target.current_health, 100.0, "Health should remain full");
 
         // First shield should be consumed, second should have remaining
         assert_eq!(auras.auras.len(), 1, "One shield should remain");
-        assert_eq!(auras.auras[0].magnitude, 20.0, "Ice Barrier should have 20 remaining");
+        assert_eq!(
+            auras.auras[0].magnitude, 20.0,
+            "Ice Barrier should have 20 remaining"
+        );
     }
 
     #[test]
     fn test_damage_exceeds_health() {
         let mut target = create_test_combatant(50.0);
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::None);
+        let (actual_damage, absorbed) =
+            apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::None);
 
-        assert_eq!(actual_damage, 50.0, "Actual damage should be limited by remaining health");
+        assert_eq!(
+            actual_damage, 50.0,
+            "Actual damage should be limited by remaining health"
+        );
         assert_eq!(absorbed, 0.0, "No damage absorbed");
         assert_eq!(target.current_health, 0.0, "Target should be dead");
     }
@@ -269,7 +292,8 @@ mod tests {
     fn test_zero_damage() {
         let mut target = create_test_combatant(100.0);
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(0.0, &mut target, None, SpellSchool::None);
+        let (actual_damage, absorbed) =
+            apply_damage_with_absorb(0.0, &mut target, None, SpellSchool::None);
 
         assert_eq!(actual_damage, 0.0, "No damage dealt");
         assert_eq!(absorbed, 0.0, "No damage absorbed");
@@ -283,11 +307,15 @@ mod tests {
             auras: vec![create_absorb_aura(25.0, "Power Word: Shield")],
         };
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(25.0, &mut target, Some(&mut auras), SpellSchool::None);
+        let (actual_damage, absorbed) =
+            apply_damage_with_absorb(25.0, &mut target, Some(&mut auras), SpellSchool::None);
 
         assert_eq!(absorbed, 25.0);
         assert_eq!(actual_damage, 0.0);
-        assert!(auras.auras.is_empty(), "Exactly-depleted shield should be removed");
+        assert!(
+            auras.auras.is_empty(),
+            "Exactly-depleted shield should be removed"
+        );
     }
 
     // =========================================================================
@@ -318,8 +346,14 @@ mod tests {
         let (actual, _) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::Physical);
 
         assert_eq!(actual, 50.0, "Half should hit health");
-        assert_eq!(target.damage_mitigated_by_armor, 50.0, "Half should be tracked as mitigated by armor");
-        assert_eq!(target.damage_mitigated_by_resistance, [0.0; 6], "Resistance untouched for physical");
+        assert_eq!(
+            target.damage_mitigated_by_armor, 50.0,
+            "Half should be tracked as mitigated by armor"
+        );
+        assert_eq!(
+            target.damage_mitigated_by_resistance, [0.0; 6],
+            "Resistance untouched for physical"
+        );
     }
 
     #[test]
@@ -341,13 +375,20 @@ mod tests {
 
         let (actual, _) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::Frost);
 
-        assert!((actual - 85.0).abs() < 0.001, "85 damage should hit, got {}", actual);
+        assert!(
+            (actual - 85.0).abs() < 0.001,
+            "85 damage should hit, got {}",
+            actual
+        );
         assert!(
             (target.damage_mitigated_by_resistance[FROST_IDX] - 15.0).abs() < 0.001,
             "Frost slot should record 15.0, got {}",
             target.damage_mitigated_by_resistance[FROST_IDX]
         );
-        assert_eq!(target.damage_mitigated_by_armor, 0.0, "Armor untouched for magical");
+        assert_eq!(
+            target.damage_mitigated_by_armor, 0.0,
+            "Armor untouched for magical"
+        );
     }
 
     #[test]
@@ -358,8 +399,14 @@ mod tests {
 
         let (_, _) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::Frost);
 
-        assert_eq!(target.damage_mitigated_by_resistance[FIRE_IDX], 0.0, "Fire slot must not record Frost damage");
-        assert_eq!(target.damage_mitigated_by_resistance[FROST_IDX], 0.0, "Frost slot zero — no frost resist");
+        assert_eq!(
+            target.damage_mitigated_by_resistance[FIRE_IDX], 0.0,
+            "Fire slot must not record Frost damage"
+        );
+        assert_eq!(
+            target.damage_mitigated_by_resistance[FROST_IDX], 0.0,
+            "Frost slot zero — no frost resist"
+        );
     }
 
     #[test]
@@ -394,12 +441,15 @@ mod tests {
                     assert!(
                         (target.damage_mitigated_by_resistance[idx] - 15.0).abs() < 0.001,
                         "School {:?} should write 15.0 to slot {}, got {}",
-                        school, idx, target.damage_mitigated_by_resistance[idx]
+                        school,
+                        idx,
+                        target.damage_mitigated_by_resistance[idx]
                     );
                 } else {
                     assert_eq!(
                         target.damage_mitigated_by_resistance[idx], 0.0,
-                        "School {:?} must not touch slot {}", school, idx
+                        "School {:?} must not touch slot {}",
+                        school, idx
                     );
                 }
             }
@@ -446,11 +496,15 @@ mod tests {
             }],
         };
 
-        let (actual, absorbed) = apply_damage_with_absorb(100.0, &mut target, Some(&mut auras), SpellSchool::Physical);
+        let (actual, absorbed) =
+            apply_damage_with_absorb(100.0, &mut target, Some(&mut auras), SpellSchool::Physical);
 
         assert_eq!(actual, 0.0);
         assert_eq!(absorbed, 0.0);
-        assert_eq!(target.damage_mitigated_by_armor, 0.0, "Immunity is not mitigation");
+        assert_eq!(
+            target.damage_mitigated_by_armor, 0.0,
+            "Immunity is not mitigation"
+        );
     }
 
     #[test]
@@ -463,10 +517,15 @@ mod tests {
             auras: vec![create_absorb_aura(1000.0, "Ice Barrier")], // soak everything
         };
 
-        let (actual, absorbed) = apply_damage_with_absorb(100.0, &mut target, Some(&mut auras), SpellSchool::Frost);
+        let (actual, absorbed) =
+            apply_damage_with_absorb(100.0, &mut target, Some(&mut auras), SpellSchool::Frost);
 
         assert_eq!(actual, 0.0, "All post-resist damage absorbed");
-        assert!((absorbed - 85.0).abs() < 0.001, "85 damage absorbed, got {}", absorbed);
+        assert!(
+            (absorbed - 85.0).abs() < 0.001,
+            "85 damage absorbed, got {}",
+            absorbed
+        );
         assert!(
             (target.damage_mitigated_by_resistance[FROST_IDX] - 15.0).abs() < 0.001,
             "Resistance mitigation tracked even when remainder is absorbed"
@@ -498,10 +557,15 @@ mod tests {
             }],
         };
 
-        let (actual, _) = apply_damage_with_absorb(100.0, &mut target, Some(&mut auras), SpellSchool::Shadow);
+        let (actual, _) =
+            apply_damage_with_absorb(100.0, &mut target, Some(&mut auras), SpellSchool::Shadow);
 
         // effective resistance = 0 base + 60 aura = 60 → 15% reduction
-        assert!((actual - 85.0).abs() < 0.001, "85 damage should hit, got {}", actual);
+        assert!(
+            (actual - 85.0).abs() < 0.001,
+            "85 damage should hit, got {}",
+            actual
+        );
         assert!(
             (target.damage_mitigated_by_resistance[SHADOW_IDX] - 15.0).abs() < 0.001,
             "Shadow slot should record 15.0 from buff-only resistance, got {}",
@@ -518,7 +582,10 @@ mod tests {
         let (actual, _) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::Physical);
 
         assert_eq!(actual, 10.0, "Only 10 HP was available");
-        assert_eq!(target.damage_mitigated_by_armor, 50.0, "Full 50% mitigation recorded even on lethal hit");
+        assert_eq!(
+            target.damage_mitigated_by_armor, 50.0,
+            "Full 50% mitigation recorded even on lethal hit"
+        );
         assert_eq!(target.current_health, 0.0);
     }
 
@@ -532,7 +599,10 @@ mod tests {
             apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::Physical);
         }
 
-        assert_eq!(target.damage_mitigated_by_armor, 150.0, "Mitigation accumulates");
+        assert_eq!(
+            target.damage_mitigated_by_armor, 150.0,
+            "Mitigation accumulates"
+        );
     }
 
     // =========================================================================
@@ -639,8 +709,16 @@ mod tests {
 
     #[test]
     fn test_ease_out_quad_boundaries() {
-        assert_eq!(death::ease_out_quad_for_test(0.0), 0.0, "Should return 0 at t=0");
-        assert_eq!(death::ease_out_quad_for_test(1.0), 1.0, "Should return 1 at t=1");
+        assert_eq!(
+            death::ease_out_quad_for_test(0.0),
+            0.0,
+            "Should return 0 at t=0"
+        );
+        assert_eq!(
+            death::ease_out_quad_for_test(1.0),
+            1.0,
+            "Should return 1 at t=1"
+        );
     }
 
     #[test]
@@ -709,7 +787,11 @@ mod tests {
         // (35, 20) is inside rectangle but |35|+|20|=55 > 48.88
         let clamped = clamp_to_arena(&oct(), Vec3::new(35.0, 1.0, 20.0));
         let sum = clamped.x.abs() + clamped.z.abs();
-        assert!((sum - 48.88).abs() < 0.01, "Corner sum should equal 48.88, got {}", sum);
+        assert!(
+            (sum - 48.88).abs() < 0.01,
+            "Corner sum should equal 48.88, got {}",
+            sum
+        );
         assert!(clamped.x > 0.0, "Should stay in same quadrant");
         assert!(clamped.z > 0.0, "Should stay in same quadrant");
     }

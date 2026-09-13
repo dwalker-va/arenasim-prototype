@@ -35,4 +35,3 @@ fn embed_windows_icon() {
 
 #[cfg(not(windows))]
 fn embed_windows_icon() {}
-

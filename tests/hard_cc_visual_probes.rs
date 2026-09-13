@@ -26,9 +26,8 @@ use arenasim::states::play_match::components::{
     Pet, PetType, RootStyle, RootedVisual, StunnedVisual, VisualBody, WalkAnim,
 };
 use arenasim::states::play_match::{
-    billboard_cc_beads, cc_envelope, cleanup_cc_flares, cleanup_cc_rigs, nova_outer_radius, root_style,
-    update_cc_flares, update_cc_rigs,
-    update_hard_cc_visuals,
+    billboard_cc_beads, cc_envelope, cleanup_cc_flares, cleanup_cc_rigs, nova_outer_radius,
+    root_style, update_cc_flares, update_cc_rigs, update_hard_cc_visuals,
 };
 use arenasim::CharacterClass;
 
@@ -133,7 +132,11 @@ impl Harness {
             .spawn((
                 Transform::from_xyz(0.0, 1.0, 0.0),
                 Combatant::new(team, slot, CharacterClass::Rogue),
-                WalkAnim { phase: 0.0, previous_xz: Vec2::ZERO, idle_time: 0.0 },
+                WalkAnim {
+                    phase: 0.0,
+                    previous_xz: Vec2::ZERO,
+                    idle_time: 0.0,
+                },
             ))
             .id();
         self.app.world_mut().entity_mut(unit).add_child(body);
@@ -165,7 +168,9 @@ impl Harness {
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(material),
                 OriginalMesh(mesh),
-                VisualBody { rest_y: PET_MESH_Y - PET_SIM_Y },
+                VisualBody {
+                    rest_y: PET_MESH_Y - PET_SIM_Y,
+                },
                 Transform::from_xyz(0.0, PET_MESH_Y - PET_SIM_Y, 0.0),
             ))
             .id();
@@ -175,8 +180,15 @@ impl Harness {
             .spawn((
                 Transform::from_xyz(0.0, PET_SIM_Y, 0.0),
                 Combatant::new(0, 1, CharacterClass::Hunter),
-                Pet { owner, pet_type: PetType::Spider },
-                WalkAnim { phase: 0.0, previous_xz: Vec2::ZERO, idle_time: 0.0 },
+                Pet {
+                    owner,
+                    pet_type: PetType::Spider,
+                },
+                WalkAnim {
+                    phase: 0.0,
+                    previous_xz: Vec2::ZERO,
+                    idle_time: 0.0,
+                },
             ))
             .id();
         self.app.world_mut().entity_mut(pet).add_child(body);
@@ -184,7 +196,12 @@ impl Harness {
     }
 
     fn rig_y(&mut self, rig: Entity) -> f32 {
-        self.app.world().get::<Transform>(rig).unwrap().translation.y
+        self.app
+            .world()
+            .get::<Transform>(rig)
+            .unwrap()
+            .translation
+            .y
     }
 
     fn apply(&mut self, unit: Entity, aura: Aura) {
@@ -227,7 +244,11 @@ impl Harness {
     }
 
     fn flares(&mut self) -> usize {
-        self.app.world_mut().query::<&CcFlare>().iter(self.app.world()).count()
+        self.app
+            .world_mut()
+            .query::<&CcFlare>()
+            .iter(self.app.world())
+            .count()
     }
 
     fn rig_rotation(&mut self, rig: Entity) -> Quat {
@@ -256,7 +277,10 @@ impl Harness {
     }
 
     fn remove_auras(&mut self, unit: Entity) {
-        self.app.world_mut().entity_mut(unit).remove::<ActiveAuras>();
+        self.app
+            .world_mut()
+            .entity_mut(unit)
+            .remove::<ActiveAuras>();
     }
 
     fn has_root(&self, unit: Entity) -> bool {
@@ -344,7 +368,11 @@ fn no_accumulation_while_held() {
         .into_iter()
         .chain(h.rigs_of(unit, CcKind::Stun))
         .collect();
-    assert_eq!(after.len(), 2, "held CC must not spawn a second rig per tick");
+    assert_eq!(
+        after.len(),
+        2,
+        "held CC must not spawn a second rig per tick"
+    );
 }
 
 #[test]
@@ -388,7 +416,10 @@ fn root_restores_on_component_removal() {
     h.remove_auras(unit);
     h.tick(1);
     assert!(!h.has_root(unit), "natural expiry must restore");
-    assert!(h.rigs_of(unit, CcKind::Root)[0].1.is_some(), "retract armed");
+    assert!(
+        h.rigs_of(unit, CcKind::Root)[0].1.is_some(),
+        "retract armed"
+    );
 }
 
 #[test]
@@ -492,7 +523,10 @@ fn root_and_stun_compose() {
     h.apply(unit, stun_aura());
     h.tick(2);
 
-    assert!(h.has_root(unit) && h.has_stun(unit), "both must show at once");
+    assert!(
+        h.has_root(unit) && h.has_stun(unit),
+        "both must show at once"
+    );
     assert_eq!(h.rigs_of(unit, CcKind::Root).len(), 1);
     assert_eq!(h.rigs_of(unit, CcKind::Stun).len(), 1);
 
@@ -504,7 +538,10 @@ fn root_and_stun_compose() {
 
     assert!(!h.has_root(unit));
     assert!(h.has_stun(unit), "stun survives the root ending");
-    assert!(h.rigs_of(unit, CcKind::Root)[0].1.is_some(), "root retracting");
+    assert!(
+        h.rigs_of(unit, CcKind::Root)[0].1.is_some(),
+        "root retracting"
+    );
     assert!(
         h.rigs_of(unit, CcKind::Stun)[0].1.is_none(),
         "stun rig must NOT be armed by the root's exit"
@@ -805,7 +842,10 @@ fn flares_expire_without_leaking() {
     let unit = h.spawn_unit(0, 0);
     h.apply(unit, frost_root());
     h.tick(1);
-    assert!(h.flares() > 0, "guard: the drain check must not pass vacuously");
+    assert!(
+        h.flares() > 0,
+        "guard: the drain check must not pass vacuously"
+    );
 
     // CC_FLARE_SECS is 0.40; 20 ticks is 1.0s.
     h.tick(20);
@@ -894,10 +934,10 @@ fn a_delayed_root_flare_stays_invisible_until_the_wave_arrives() {
 
     // A victim at the far edge of the nova: the wave takes most of its life to
     // get there.
-    h.app
-        .world_mut()
-        .entity_mut(unit)
-        .insert(NovaFreezeDelay { secs: 0.5, age: 0.0 });
+    h.app.world_mut().entity_mut(unit).insert(NovaFreezeDelay {
+        secs: 0.5,
+        age: 0.0,
+    });
     h.apply(unit, frost_root());
     h.tick(1);
 

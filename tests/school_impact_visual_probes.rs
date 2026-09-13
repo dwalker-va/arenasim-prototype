@@ -293,7 +293,11 @@ fn the_router_names_the_intended_landings() {
         );
     }
     // A shared landing must not ALSO be a bespoke one.
-    for ability in [AbilityType::AimedShot, AbilityType::ArcaneShot, AbilityType::MindBlast] {
+    for ability in [
+        AbilityType::AimedShot,
+        AbilityType::ArcaneShot,
+        AbilityType::MindBlast,
+    ] {
         assert!(bolt_kind_for(ability).is_none());
     }
 }
@@ -326,7 +330,10 @@ fn colour_comes_from_the_school_authority() {
                 spread < 0.1,
                 "Physical must be hueless (its tan is the floor colour), got {c:?}"
             );
-            assert!(c.red > 0.85, "Physical must be bright enough to flash: {c:?}");
+            assert!(
+                c.red > 0.85,
+                "Physical must be bright enough to flash: {c:?}"
+            );
         } else {
             let a = school.color().to_srgba();
             assert!(
@@ -367,13 +374,34 @@ fn the_ring_is_only_magic_language() {
 
     let mut h = Harness::new();
     let victim = h.spawn_victim(Vec3::ZERO);
-    h.land(SpellSchool::Physical, ImpactAnchor::Chest, victim, Vec3::X, 0.1, false);
+    h.land(
+        SpellSchool::Physical,
+        ImpactAnchor::Chest,
+        victim,
+        Vec3::X,
+        0.1,
+        false,
+    );
     h.tick(1);
-    assert!(h.sprites(ImpactRole::Ring).is_empty(), "a Physical hit spawned a ring");
+    assert!(
+        h.sprites(ImpactRole::Ring).is_empty(),
+        "a Physical hit spawned a ring"
+    );
     let other = h.spawn_victim(Vec3::Z * 6.0);
-    h.land(SpellSchool::Arcane, ImpactAnchor::Chest, other, Vec3::X, 0.1, false);
+    h.land(
+        SpellSchool::Arcane,
+        ImpactAnchor::Chest,
+        other,
+        Vec3::X,
+        0.1,
+        false,
+    );
     h.tick(1);
-    assert_eq!(h.sprites(ImpactRole::Ring).len(), 1, "an Arcane hit spawns one ring");
+    assert_eq!(
+        h.sprites(ImpactRole::Ring).len(),
+        1,
+        "an Arcane hit spawns one ring"
+    );
 }
 
 // ── size ───────────────────────────────────────────────────────────────────
@@ -384,14 +412,19 @@ fn the_ring_is_only_magic_language() {
 fn a_crit_lands_bigger_and_nothing_lands_smaller_than_the_floor() {
     assert!((impact_size(0.0, false) - IMPACT_MAGNITUDE_FLOOR).abs() < 1e-6);
     assert!((impact_size(IMPACT_MAGNITUDE_FULL, false) - 1.0).abs() < 1e-6);
-    assert!((impact_size(10.0, false) - 1.0).abs() < 1e-6, "clamped above full");
+    assert!(
+        (impact_size(10.0, false) - 1.0).abs() < 1e-6,
+        "clamped above full"
+    );
     assert!(impact_size(0.05, false) > impact_size(0.0, false));
     assert!(impact_size(0.15, false) > impact_size(0.05, false));
     let plain = impact_size(0.1, false);
     let crit = impact_size(0.1, true);
     assert!((crit / plain - IMPACT_CRIT_SCALE).abs() < 1e-5);
     // A crit throws more debris too.
-    let spray = impact_style(SpellSchool::Physical).spray.expect("Physical sprays");
+    let spray = impact_style(SpellSchool::Physical)
+        .spray
+        .expect("Physical sprays");
     assert!(spray_count(&spray, true) > spray_count(&spray, false));
 }
 
@@ -402,8 +435,22 @@ fn a_crit_flash_is_larger_on_screen() {
     let mut h = Harness::new();
     let a = h.spawn_victim(Vec3::ZERO);
     let b = h.spawn_victim(Vec3::Z * 8.0);
-    h.land(SpellSchool::Arcane, ImpactAnchor::Chest, a, Vec3::X, 0.05, false);
-    h.land(SpellSchool::Arcane, ImpactAnchor::Chest, b, Vec3::X, 0.25, true);
+    h.land(
+        SpellSchool::Arcane,
+        ImpactAnchor::Chest,
+        a,
+        Vec3::X,
+        0.05,
+        false,
+    );
+    h.land(
+        SpellSchool::Arcane,
+        ImpactAnchor::Chest,
+        b,
+        Vec3::X,
+        0.25,
+        true,
+    );
     h.tick(2);
     let flashes = h.sprites(ImpactRole::Flash);
     assert_eq!(flashes.len(), 2);
@@ -437,7 +484,10 @@ fn the_anchors_sit_on_the_capsule() {
         "head anchor {} is not in the top hemisphere (0.75..1.25)",
         head.y
     );
-    assert!(head.y - chest.y > 0.4, "the two anchors must read as different places");
+    assert!(
+        head.y - chest.y > 0.4,
+        "the two anchors must read as different places"
+    );
 
     // A pet's body hangs BELOW its transform, at about half the stature.
     let pet_chest = impact_origin(ImpactAnchor::Chest, Vec3::ZERO, true);
@@ -457,7 +507,10 @@ fn the_rig_faces_the_caster_and_keeps_world_up() {
     for from in froms() {
         let rot = impact_rotation(from);
         let up = rot * Vec3::Y;
-        assert!(up.dot(Vec3::Y) > 0.999, "rig tilted off world up for {from:?}: {up:?}");
+        assert!(
+            up.dot(Vec3::Y) > 0.999,
+            "rig tilted off world up for {from:?}: {up:?}"
+        );
         let z = rot * Vec3::Z;
         let flat = Vec3::new(from.x, 0.0, from.z).normalize();
         assert!(
@@ -495,7 +548,14 @@ fn the_landing_rides_a_moving_victim() {
 
     let mut h = Harness::new();
     let pet = h.spawn_pet_victim(Vec3::ZERO);
-    let rig = h.land(SpellSchool::Physical, ImpactAnchor::Chest, pet, Vec3::X, 0.1, false);
+    let rig = h.land(
+        SpellSchool::Physical,
+        ImpactAnchor::Chest,
+        pet,
+        Vec3::X,
+        0.1,
+        false,
+    );
     h.tick(1);
     let at = h.rig_pos(rig);
     assert!(
@@ -519,7 +579,10 @@ fn spray_directions_fold_up_and_back() {
                 assert!(d.y >= -1e-6, "lift=1 threw a piece downward: {d:?}");
             }
             if back >= 1.0 {
-                assert!(d.z >= -1e-6, "back=1 threw a piece away from the caster: {d:?}");
+                assert!(
+                    d.z >= -1e-6,
+                    "back=1 threw a piece away from the caster: {d:?}"
+                );
             }
         }
     }
@@ -527,7 +590,10 @@ fn spray_directions_fold_up_and_back() {
     assert!(plain.iter().any(|d| d.y > 0.3) && plain.iter().any(|d| d.y < -0.3));
     assert!(plain.iter().any(|d| d.z > 0.3) && plain.iter().any(|d| d.z < -0.3));
     let c = centroid(&plain);
-    assert!(c.length() < 0.2, "an unfolded fan should be balanced, centroid {c:?}");
+    assert!(
+        c.length() < 0.2,
+        "an unfolded fan should be balanced, centroid {c:?}"
+    );
 }
 
 /// Physical splinters SPLASH BACK toward the caster and FALL — in world space,
@@ -537,7 +603,14 @@ fn splinters_splash_back_toward_the_caster_and_fall() {
     let from = Vec3::new(1.0, 0.0, 1.0).normalize();
     let mut h = Harness::new();
     let victim = h.spawn_victim(Vec3::ZERO);
-    h.land(SpellSchool::Physical, ImpactAnchor::Chest, victim, from, 0.1, false);
+    h.land(
+        SpellSchool::Physical,
+        ImpactAnchor::Chest,
+        victim,
+        from,
+        0.1,
+        false,
+    );
     h.tick(4);
     let early: Vec<Vec3> = h
         .motes(SprayKind::Splinter)
@@ -552,7 +625,11 @@ fn splinters_splash_back_toward_the_caster_and_fall() {
         .iter()
         .map(|(_, g)| g.translation())
         .collect();
-    assert_eq!(late.len(), early.len(), "splinters vanished before their life ended");
+    assert_eq!(
+        late.len(),
+        early.len(),
+        "splinters vanished before their life ended"
+    );
 
     let chest = impact_origin(ImpactAnchor::Chest, Vec3::ZERO, false);
     let drift = centroid(&late) - chest;
@@ -584,7 +661,14 @@ fn splinters_splash_back_toward_the_caster_and_fall() {
 fn the_head_smoulder_keeps_emitting_and_rises() {
     let mut h = Harness::new();
     let victim = h.spawn_victim(Vec3::ZERO);
-    h.land(SpellSchool::Shadow, ImpactAnchor::Head, victim, Vec3::X, 0.15, false);
+    h.land(
+        SpellSchool::Shadow,
+        ImpactAnchor::Head,
+        victim,
+        Vec3::X,
+        0.15,
+        false,
+    );
     h.tick(6);
     let early = h.motes(SprayKind::Spark).len();
     h.tick(20);
@@ -596,7 +680,11 @@ fn the_head_smoulder_keeps_emitting_and_rises() {
     );
     let head = impact_origin(ImpactAnchor::Head, Vec3::ZERO, false);
     for (mote, g) in &sparks {
-        assert!(mote.velocity.y > 0.0, "a smoulder mote must rise: {:?}", mote.velocity);
+        assert!(
+            mote.velocity.y > 0.0,
+            "a smoulder mote must rise: {:?}",
+            mote.velocity
+        );
         assert!(
             g.translation().y >= head.y - 0.05,
             "a smoulder mote at {:?} fell below the head anchor {head:?}",
@@ -621,14 +709,25 @@ fn the_head_smoulder_keeps_emitting_and_rises() {
 fn droplets_fall() {
     let mut h = Harness::new();
     let victim = h.spawn_victim(Vec3::ZERO);
-    h.land(SpellSchool::Nature, ImpactAnchor::Chest, victim, Vec3::X, 0.0, false);
+    h.land(
+        SpellSchool::Nature,
+        ImpactAnchor::Chest,
+        victim,
+        Vec3::X,
+        0.0,
+        false,
+    );
     h.tick(3);
     let early: Vec<Vec3> = h
         .motes(SprayKind::Drop)
         .iter()
         .map(|(_, g)| g.translation())
         .collect();
-    assert!(early.len() >= 16, "a droplet burst should be dense, got {}", early.len());
+    assert!(
+        early.len() >= 16,
+        "a droplet burst should be dense, got {}",
+        early.len()
+    );
     h.tick(12);
     let late: Vec<Vec3> = h
         .motes(SprayKind::Drop)
@@ -645,12 +744,26 @@ fn droplets_fall() {
 fn mana_burn_overrides_the_shadow_row_without_leaving_its_colour() {
     let burn = landing_style(AbilityType::ManaBurn, SpellSchool::Shadow);
     let blast = landing_style(AbilityType::MindBlast, SpellSchool::Shadow);
-    assert_eq!(blast, impact_style(SpellSchool::Shadow), "Mind Blast IS the Shadow row");
+    assert_eq!(
+        blast,
+        impact_style(SpellSchool::Shadow),
+        "Mind Blast IS the Shadow row"
+    );
     assert_ne!(burn, blast, "Mana Burn must not read as Mind Blast");
-    let (b, s) = (burn.color.to_srgba(), SpellSchool::Shadow.color().to_srgba());
-    assert!((b.red - s.red).abs() < 1e-5 && (b.green - s.green).abs() < 1e-5 && (b.blue - s.blue).abs() < 1e-5);
+    let (b, s) = (
+        burn.color.to_srgba(),
+        SpellSchool::Shadow.color().to_srgba(),
+    );
+    assert!(
+        (b.red - s.red).abs() < 1e-5
+            && (b.green - s.green).abs() < 1e-5
+            && (b.blue - s.blue).abs() < 1e-5
+    );
     assert!(burn.smoulder.is_none() && burn.spray.is_some());
-    assert!(burn.life() < blast.life() * 0.5, "a mana burn is a snap, not a smoulder");
+    assert!(
+        burn.life() < blast.life() * 0.5,
+        "a mana burn is a snap, not a smoulder"
+    );
     // Every other ability plays its school's row unchanged.
     for (ability, school) in [
         (AbilityType::AimedShot, SpellSchool::Physical),
@@ -679,13 +792,28 @@ fn mana_burn_overrides_the_shadow_row_without_leaving_its_colour() {
     );
     h.tick(3);
     let sparks = h.motes(SprayKind::Spark);
-    assert!(sparks.len() >= 12, "expected a fan of sparks, got {}", sparks.len());
+    assert!(
+        sparks.len() >= 12,
+        "expected a fan of sparks, got {}",
+        sparks.len()
+    );
     let chest = impact_origin(ImpactAnchor::Chest, Vec3::ZERO, false);
-    assert!(sparks.iter().all(|(m, _)| m.velocity.y > 0.0), "mana leaves upward");
+    assert!(
+        sparks.iter().all(|(m, _)| m.velocity.y > 0.0),
+        "mana leaves upward"
+    );
     h.tick(20);
     let late = h.motes(SprayKind::Spark);
-    let c = centroid(&late.iter().map(|(_, g)| g.translation()).collect::<Vec<_>>());
-    assert!(c.y > chest.y + 0.3, "the fan should have risen clear of the chest: {c:?}");
+    let c = centroid(
+        &late
+            .iter()
+            .map(|(_, g)| g.translation())
+            .collect::<Vec<_>>(),
+    );
+    assert!(
+        c.y > chest.y + 0.3,
+        "the fan should have risen clear of the chest: {c:?}"
+    );
 }
 
 // ── hygiene ────────────────────────────────────────────────────────────────
@@ -712,9 +840,15 @@ fn no_part_of_a_landing_casts_a_shadow() {
     let mut meshes = 0;
     for (entity, flag) in q.iter(h.app.world()) {
         meshes += 1;
-        assert!(flag.is_some(), "{entity:?} carries a mesh but casts shadows");
+        assert!(
+            flag.is_some(),
+            "{entity:?} carries a mesh but casts shadows"
+        );
     }
-    assert!(meshes > 30, "expected a lot of pieces across eight schools, saw {meshes}");
+    assert!(
+        meshes > 30,
+        "expected a lot of pieces across eight schools, saw {meshes}"
+    );
 }
 
 /// Every school's landing expires and takes all of its parts with it.
@@ -725,10 +859,17 @@ fn landings_expire_with_all_their_parts() {
         let victim = h.spawn_victim(Vec3::ZERO);
         h.land(school, ImpactAnchor::Chest, victim, Vec3::X, 0.3, true);
         h.tick(2);
-        assert_eq!(h.global::<SchoolImpact>().len(), 1, "{school:?} never spawned");
+        assert_eq!(
+            h.global::<SchoolImpact>().len(),
+            1,
+            "{school:?} never spawned"
+        );
         let frames = (impact_style(school).life() / TICK.as_secs_f32()).ceil() as u32 + 3;
         h.tick(frames);
-        assert!(h.global::<SchoolImpact>().is_empty(), "{school:?}'s landing never expired");
+        assert!(
+            h.global::<SchoolImpact>().is_empty(),
+            "{school:?}'s landing never expired"
+        );
         assert!(
             h.global::<ImpactSprite>().is_empty() && h.global::<ImpactMote>().is_empty(),
             "{school:?}'s parts outlived their rig"
@@ -742,7 +883,14 @@ fn landings_expire_with_all_their_parts() {
 fn a_landing_survives_losing_its_victim() {
     let mut h = Harness::new();
     let victim = h.spawn_victim(Vec3::ZERO);
-    h.land(SpellSchool::Arcane, ImpactAnchor::Chest, victim, Vec3::X, 0.1, false);
+    h.land(
+        SpellSchool::Arcane,
+        ImpactAnchor::Chest,
+        victim,
+        Vec3::X,
+        0.1,
+        false,
+    );
     h.tick(1);
     h.world().despawn(victim);
     h.tick(40);

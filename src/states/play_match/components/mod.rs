@@ -2,21 +2,21 @@
 //!
 //! Types split into focused submodules, re-exported here for convenience.
 
-pub mod combatant;
 pub mod auras;
-pub mod resources;
+pub mod combatant;
+pub mod movement;
 pub mod pets;
+pub mod resources;
 pub mod totems;
 pub mod visual;
-pub mod movement;
 
-pub use combatant::*;
 pub use auras::*;
-pub use resources::*;
+pub use combatant::*;
+pub use movement::*;
 pub use pets::*;
+pub use resources::*;
 pub use totems::*;
 pub use visual::*;
-pub use movement::*;
 
 // =============================================================================
 // Unit Tests
@@ -24,9 +24,9 @@ pub use movement::*;
 
 #[cfg(test)]
 mod tests {
+    use super::super::abilities::AbilityType;
     use super::*;
     use bevy::prelude::Entity;
-    use super::super::abilities::AbilityType;
 
     // =========================================================================
     // GameRng Tests
@@ -83,14 +83,19 @@ mod tests {
     #[test]
     fn test_entropy_rng_records_a_replayable_seed() {
         let mut rng = GameRng::from_os_rng();
-        let seed = rng.seed.expect("an entropy RNG must record the seed it chose");
+        let seed = rng
+            .seed
+            .expect("an entropy RNG must record the seed it chose");
 
         // Replaying the recorded seed reproduces the same stream — otherwise the
         // seed in a match log would be decoration rather than a repro handle.
         let drawn: Vec<f32> = (0..8).map(|_| rng.random_f32()).collect();
         let mut replay = GameRng::from_seed(seed);
         let replayed: Vec<f32> = (0..8).map(|_| replay.random_f32()).collect();
-        assert_eq!(drawn, replayed, "recorded seed {seed} did not reproduce the stream");
+        assert_eq!(
+            drawn, replayed,
+            "recorded seed {seed} did not reproduce the stream"
+        );
     }
 
     /// Two entropy RNGs must not collide, or "random seed" would be a constant.
@@ -107,8 +112,8 @@ mod tests {
 
     #[test]
     fn test_aura_pending_from_ability_with_aura() {
-        use super::auras::AuraPending;
         use super::super::ability_config::AbilityDefinitions;
+        use super::auras::AuraPending;
 
         // Ice Barrier has an absorb aura
         let abilities = AbilityDefinitions::default();
@@ -118,7 +123,10 @@ mod tests {
 
         let pending = AuraPending::from_ability(target, caster, ability_def);
 
-        assert!(pending.is_some(), "Ice Barrier should create an AuraPending");
+        assert!(
+            pending.is_some(),
+            "Ice Barrier should create an AuraPending"
+        );
         let pending = pending.unwrap();
         assert_eq!(pending.target, target);
         assert_eq!(pending.aura.caster, Some(caster));
@@ -128,8 +136,8 @@ mod tests {
 
     #[test]
     fn test_aura_pending_from_ability_without_aura() {
-        use super::auras::AuraPending;
         use super::super::ability_config::AbilityDefinitions;
+        use super::auras::AuraPending;
 
         // Shadowbolt doesn't have an aura
         let abilities = AbilityDefinitions::default();
@@ -139,13 +147,16 @@ mod tests {
 
         let pending = AuraPending::from_ability(target, caster, ability_def);
 
-        assert!(pending.is_none(), "Shadowbolt should not create an AuraPending");
+        assert!(
+            pending.is_none(),
+            "Shadowbolt should not create an AuraPending"
+        );
     }
 
     #[test]
     fn test_aura_pending_dot_has_tick_interval() {
-        use super::auras::AuraPending;
         use super::super::ability_config::AbilityDefinitions;
+        use super::auras::AuraPending;
 
         // Corruption is a DoT
         let abilities = AbilityDefinitions::default();
@@ -164,8 +175,8 @@ mod tests {
 
     #[test]
     fn test_aura_pending_custom_name() {
-        use super::auras::AuraPending;
         use super::super::ability_config::AbilityDefinitions;
+        use super::auras::AuraPending;
 
         let abilities = AbilityDefinitions::default();
         let ability_def = abilities.get_unchecked(&AbilityType::IceBarrier);
@@ -190,20 +201,44 @@ mod tests {
 
     #[test]
     fn test_dr_category_from_aura_type_cc_types() {
-        assert_eq!(DRCategory::from_aura_type(&AuraType::Stun), Some(DRCategory::Stuns));
-        assert_eq!(DRCategory::from_aura_type(&AuraType::Fear), Some(DRCategory::Fears));
-        assert_eq!(DRCategory::from_aura_type(&AuraType::Polymorph), Some(DRCategory::Incapacitates));
-        assert_eq!(DRCategory::from_aura_type(&AuraType::Root), Some(DRCategory::Roots));
-        assert_eq!(DRCategory::from_aura_type(&AuraType::MovementSpeedSlow), Some(DRCategory::Slows));
+        assert_eq!(
+            DRCategory::from_aura_type(&AuraType::Stun),
+            Some(DRCategory::Stuns)
+        );
+        assert_eq!(
+            DRCategory::from_aura_type(&AuraType::Fear),
+            Some(DRCategory::Fears)
+        );
+        assert_eq!(
+            DRCategory::from_aura_type(&AuraType::Polymorph),
+            Some(DRCategory::Incapacitates)
+        );
+        assert_eq!(
+            DRCategory::from_aura_type(&AuraType::Root),
+            Some(DRCategory::Roots)
+        );
+        assert_eq!(
+            DRCategory::from_aura_type(&AuraType::MovementSpeedSlow),
+            Some(DRCategory::Slows)
+        );
     }
 
     #[test]
     fn test_dr_category_from_aura_type_non_cc_returns_none() {
         assert_eq!(DRCategory::from_aura_type(&AuraType::DamageOverTime), None);
-        assert_eq!(DRCategory::from_aura_type(&AuraType::MaxHealthIncrease), None);
+        assert_eq!(
+            DRCategory::from_aura_type(&AuraType::MaxHealthIncrease),
+            None
+        );
         assert_eq!(DRCategory::from_aura_type(&AuraType::Absorb), None);
-        assert_eq!(DRCategory::from_aura_type(&AuraType::SpellSchoolLockout), None);
-        assert_eq!(DRCategory::from_aura_type(&AuraType::HealingReduction), None);
+        assert_eq!(
+            DRCategory::from_aura_type(&AuraType::SpellSchoolLockout),
+            None
+        );
+        assert_eq!(
+            DRCategory::from_aura_type(&AuraType::HealingReduction),
+            None
+        );
         assert_eq!(DRCategory::from_aura_type(&AuraType::DamageImmunity), None);
     }
 
