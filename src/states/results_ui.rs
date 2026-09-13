@@ -130,12 +130,24 @@ impl<'a> Links<'a> {
     /// Resolve a combat-log ability label to its encyclopedia topic.
     ///
     /// Pet damage is folded into its owner's breakdown under `"<Pet>: <ability>"`
-    /// (see `MatchResults::pet_damage_links`), so the prefix is stripped before
-    /// the lookup. Labels that name no ability at all — auto attacks, wands —
-    /// resolve to `None` and simply stay unlinked.
+    /// (see `MatchResults::pet_damage_links`), so a prefix strip is the fallback.
+    /// The WHOLE label is tried first, because a real ability name must beat a
+    /// prefix-stripped guess: "Power Word: Shield" and "Power Word: Fortitude"
+    /// carry that separator inside their own names, and stripping first resolved
+    /// them to "Shield" — which names nothing, so the bar rendered unlinked with
+    /// no error. The strip cuts at the FIRST separator, the exact inverse of the
+    /// `"{pet_name}: {ability}"` the label is built from, so a pet casting such
+    /// an ability resolves too.
+    ///
+    /// Labels that name no ability at all — auto attacks, wands — resolve to
+    /// `None` and simply stay unlinked.
     fn ability_topic(&self, label: &str) -> Option<Topic> {
-        let bare = label.rsplit_once(": ").map_or(label, |(_, name)| name);
-        self.by_name.get(bare).copied().map(Topic::Ability)
+        let stripped = label.split_once(": ").map(|(_, name)| name);
+        self.by_name
+            .get(label)
+            .or_else(|| stripped.and_then(|bare| self.by_name.get(bare)))
+            .copied()
+            .map(Topic::Ability)
     }
 }
 
@@ -467,6 +479,12 @@ fn combatant_block(
             class_link_id(team, stats.slot, stats.class),
             egui::Sense::click(),
         );
+        // Same hover outline the ability bars wear: the two links sit on one
+        // screen, so they announce themselves the same way rather than leaving
+        // this one to the cursor shape alone.
+        if hit.hovered() {
+            paint_hover_stroke(ui.painter(), cell.rect, dim(BAR_TEXT, dimf));
+        }
         links.link(hit, Topic::Class(stats.class));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = STAT_GAP;
@@ -645,12 +663,7 @@ fn render_ability_bars(
         if let Some(topic) = topic {
             widget::paint_icon(painter, icon_rect, topic, links.data);
             if response.hovered() {
-                painter.rect_stroke(
-                    rect,
-                    2.0,
-                    egui::Stroke::new(1.0, text_color.gamma_multiply(0.4)),
-                    egui::StrokeKind::Inside,
-                );
+                paint_hover_stroke(painter, rect, text_color);
             }
         }
         painter.text(
@@ -671,6 +684,21 @@ fn render_ability_bars(
             links.link(response, topic);
         }
     }
+}
+
+/// The 1px outline a hovered LINK wears on this screen.
+///
+/// One recipe, used by both links the screen offers — the ability bars and the
+/// class cell — so the pair cannot drift into announcing themselves
+/// differently. Drawn on top of the already-painted widget, so a non-hovered
+/// frame is pixel-identical.
+fn paint_hover_stroke(painter: &egui::Painter, rect: egui::Rect, text_color: egui::Color32) {
+    painter.rect_stroke(
+        rect,
+        2.0,
+        egui::Stroke::new(1.0, text_color.gamma_multiply(0.4)),
+        egui::StrokeKind::Inside,
+    );
 }
 
 // --- Cell helpers (fixed-width for column alignment) ---
@@ -828,4 +856,81 @@ pub fn class_color32(class: CharacterClass) -> egui::Color32 {
         (c.green * 255.0) as u8,
         (c.blue * 255.0) as u8,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::states::play_match::ability_config::load_ability_definitions;
+    use crate::states::play_match::equipment::load_item_definitions;
+
+    /// Run `f` with a [`Links`] built over the REAL ability table, so the
+    /// name -> topic map under test is the one the screen actually resolves
+    /// against (two shipped abilities — both Priest — carry a `": "` inside
+    /// their own display name).
+    fn with_links(f: impl FnOnce(&Links)) {
+        let items = load_item_definitions().expect("items.ron must load");
+        let abilities = load_ability_definitions().expect("abilities.ron must load");
+        let data = EncyclopediaData {
+            items: &items,
+            abilities: &abilities,
+            item_icons: None,
+            class_icons: None,
+            ability_icons: None,
+        };
+        f(&Links::new(&data));
+    }
+
+    /// An ability whose OWN NAME contains `": "` resolves to itself.
+    ///
+    /// Stripping a pet prefix unconditionally turned "Power Word: Shield" into
+    /// "Shield", which names nothing, so the bar rendered silently unlinked.
+    #[test]
+    fn colon_bearing_ability_name_links_to_itself() {
+        with_links(|links| {
+            assert_eq!(
+                links.ability_topic("Power Word: Shield"),
+                Some(Topic::Ability(AbilityType::PowerWordShield)),
+            );
+            assert_eq!(
+                links.ability_topic("Power Word: Fortitude"),
+                Some(Topic::Ability(AbilityType::PowerWordFortitude)),
+            );
+        });
+    }
+
+    /// A genuine pet-prefixed label still resolves to the ability behind the
+    /// prefix — preferring the full label must not cost the prefix strip.
+    #[test]
+    fn pet_prefixed_label_strips_its_prefix() {
+        with_links(|links| {
+            assert_eq!(
+                links.ability_topic("Felhunter: Devour Magic"),
+                Some(Topic::Ability(AbilityType::DevourMagic)),
+            );
+        });
+    }
+
+    /// Both at once: a pet casting a colon-bearing ability. The prefix is the
+    /// FIRST segment (the label is built as `"{pet}: {ability}"`), so the strip
+    /// has to cut there rather than at the last colon.
+    #[test]
+    fn pet_prefixed_colon_bearing_ability_links() {
+        with_links(|links| {
+            assert_eq!(
+                links.ability_topic("Felhunter: Power Word: Shield"),
+                Some(Topic::Ability(AbilityType::PowerWordShield)),
+            );
+        });
+    }
+
+    /// A label that names no ability — auto attacks, wands — stays unlinked.
+    #[test]
+    fn unnamed_ability_labels_stay_unlinked() {
+        with_links(|links| {
+            assert_eq!(links.ability_topic("Auto Attack"), None);
+            assert_eq!(links.ability_topic("Wand Shot"), None);
+            assert_eq!(links.ability_topic("Felhunter: Auto Attack"), None);
+        });
+    }
 }
