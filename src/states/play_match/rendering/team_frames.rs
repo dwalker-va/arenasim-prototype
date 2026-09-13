@@ -28,9 +28,9 @@ use bevy_egui::{egui, EguiContexts};
 
 use crate::states::configure_match_ui::ClassIcons;
 use crate::states::match_config::{CharacterClass, MatchConfig};
-use crate::states::results_ui::class_color32;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
+use crate::states::results_ui::class_color32;
 
 use super::{get_aura_icon_key, is_buff_aura};
 
@@ -388,7 +388,15 @@ fn draw_column(
         if slot.is_some() && slot == affordance.called() {
             call_state = FrameCallState::Called;
         }
-        draw_frame(painter, *rect, frame, call_state, press, class_icons, spell_icons);
+        draw_frame(
+            painter,
+            *rect,
+            frame,
+            call_state,
+            press,
+            class_icons,
+            spell_icons,
+        );
     }
     clicked
 }
@@ -453,7 +461,11 @@ fn draw_frame(
     // affordance on changed nothing you could see until you happened to hover a
     // frame — the toggle looked broken, because a control mode that renders no
     // evidence of being on is indistinguishable from one that did not fire.
-    painter.rect_filled(rect, 4.0, egui::Color32::from_rgba_unmultiplied(13, 13, 20, 235));
+    painter.rect_filled(
+        rect,
+        4.0,
+        egui::Color32::from_rgba_unmultiplied(13, 13, 20, 235),
+    );
     let border = match call_state {
         FrameCallState::Called => egui::Stroke::new(2.0, CALL_MARK),
         FrameCallState::Hovered => egui::Stroke::new(1.0, CALL_HOVER),
@@ -505,7 +517,10 @@ fn draw_frame(
     }
 
     // Header: class icon + name + DEAD/STEALTH tag.
-    let icon_rect = egui::Rect::from_min_size(egui::pos2(inner_x, y), egui::vec2(HEADER_H - 2.0, HEADER_H - 2.0));
+    let icon_rect = egui::Rect::from_min_size(
+        egui::pos2(inner_x, y),
+        egui::vec2(HEADER_H - 2.0, HEADER_H - 2.0),
+    );
     if let Some(texture_id) = class_icons.textures.get(&frame.class) {
         painter.image(
             *texture_id,
@@ -540,7 +555,10 @@ fn draw_frame(
     if call_state == FrameCallState::Called {
         draw_call_reticle(
             painter,
-            egui::pos2(inner_x + inner_w - reticle_w / 2.0, y + HEADER_H / 2.0 - 1.0),
+            egui::pos2(
+                inner_x + inner_w - reticle_w / 2.0,
+                y + HEADER_H / 2.0 - 1.0,
+            ),
         );
         tag_right -= reticle_w + 4.0;
     }
@@ -573,7 +591,8 @@ fn draw_frame(
     y += HP_H + 3.0;
 
     // Resource bar.
-    let res_rect = egui::Rect::from_min_size(egui::pos2(inner_x, y), egui::vec2(inner_w, RESOURCE_H));
+    let res_rect =
+        egui::Rect::from_min_size(egui::pos2(inner_x, y), egui::vec2(inner_w, RESOURCE_H));
     let (res_color, _) = resource_colors(frame.resource_type);
     let res_pct = if frame.max_resource > 0.0 {
         (frame.current_resource / frame.max_resource).clamp(0.0, 1.0)
@@ -582,7 +601,10 @@ fn draw_frame(
     };
     painter.rect_filled(res_rect, 2.0, egui::Color32::from_rgb(20, 20, 30));
     painter.rect_filled(
-        egui::Rect::from_min_size(res_rect.min, egui::vec2(res_rect.width() * res_pct, RESOURCE_H)),
+        egui::Rect::from_min_size(
+            res_rect.min,
+            egui::vec2(res_rect.width() * res_pct, RESOURCE_H),
+        ),
         2.0,
         dimmed(res_color),
     );
@@ -665,7 +687,11 @@ fn draw_hp_bar(
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            format!("{:.0} / {:.0}", frame.current_health.max(0.0), frame.max_health),
+            format!(
+                "{:.0} / {:.0}",
+                frame.current_health.max(0.0),
+                frame.max_health
+            ),
             egui::FontId::proportional(10.0),
             egui::Color32::WHITE,
         );
@@ -711,7 +737,12 @@ fn draw_aura_row(
             };
             painter.rect_filled(icon_rect.shrink(1.5), 1.0, fallback);
         }
-        painter.rect_stroke(icon_rect, 2.0, egui::Stroke::new(1.5, border), egui::StrokeKind::Outside);
+        painter.rect_stroke(
+            icon_rect,
+            2.0,
+            egui::Stroke::new(1.5, border),
+            egui::StrokeKind::Outside,
+        );
 
         // Remaining-time text, centered on the icon (WoW cooldown-text style)
         // with a shadow for legibility over icon art.
@@ -739,7 +770,10 @@ fn draw_aura_row(
 
     if auras.len() > shown {
         painter.text(
-            egui::pos2(x + shown as f32 * (AURA_ICON + AURA_GAP) + 2.0, y + AURA_ICON / 2.0),
+            egui::pos2(
+                x + shown as f32 * (AURA_ICON + AURA_GAP) + 2.0,
+                y + AURA_ICON / 2.0,
+            ),
             egui::Align2::LEFT_CENTER,
             format!("+{}", auras.len() - shown),
             egui::FontId::proportional(10.0),
@@ -781,7 +815,9 @@ pub fn render_team_frames(
     display_settings: Res<DisplaySettings>,
     mut config: ResMut<MatchConfig>,
 ) {
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     // Sort by (team, slot) so frame order is stable across frames and matches
     // config slot order (pets have slot >= 100 and sink to the column bottom).
@@ -904,10 +940,17 @@ mod tests {
         assert_eq!(press_intensity(0.0), 1.0, "full at the moment of the press");
         assert_eq!(press_intensity(PRESS_SECS), 0.0, "gone by the end");
         assert_eq!(press_intensity(PRESS_SECS * 2.0), 0.0, "stays gone after");
-        assert_eq!(press_intensity(-1.0), 0.0, "a backwards clock reads as no press");
+        assert_eq!(
+            press_intensity(-1.0),
+            0.0,
+            "a backwards clock reads as no press"
+        );
 
         let mid = press_intensity(PRESS_SECS / 2.0);
-        assert!((0.4..=0.6).contains(&mid), "decays through the middle: {mid}");
+        assert!(
+            (0.4..=0.6).contains(&mid),
+            "decays through the middle: {mid}"
+        );
         assert!(
             press_intensity(PRESS_SECS * 0.25) > press_intensity(PRESS_SECS * 0.75),
             "intensity falls monotonically"
@@ -949,12 +992,27 @@ mod tests {
         config.team2_kill_target = None;
 
         // Clicking a Team 2 frame is Team 1 calling that target.
-        apply_call_click(&mut config, CallClick { clicked_team: 2, slot: 1 });
+        apply_call_click(
+            &mut config,
+            CallClick {
+                clicked_team: 2,
+                slot: 1,
+            },
+        );
         assert_eq!(config.team1_kill_target, Some(1));
-        assert_eq!(config.team2_kill_target, None, "the other call is untouched");
+        assert_eq!(
+            config.team2_kill_target, None,
+            "the other call is untouched"
+        );
 
         // ...and the mirror.
-        apply_call_click(&mut config, CallClick { clicked_team: 1, slot: 0 });
+        apply_call_click(
+            &mut config,
+            CallClick {
+                clicked_team: 1,
+                slot: 0,
+            },
+        );
         assert_eq!(config.team2_kill_target, Some(0));
         assert_eq!(config.team1_kill_target, Some(1));
     }
@@ -967,10 +1025,22 @@ mod tests {
         config.team1_kill_target = None;
         config.team2_kill_target = None;
 
-        apply_call_click(&mut config, CallClick { clicked_team: 2, slot: 1 });
+        apply_call_click(
+            &mut config,
+            CallClick {
+                clicked_team: 2,
+                slot: 1,
+            },
+        );
         assert_eq!(called_slots(&config), (None, Some(1)));
 
-        apply_call_click(&mut config, CallClick { clicked_team: 1, slot: 0 });
+        apply_call_click(
+            &mut config,
+            CallClick {
+                clicked_team: 1,
+                slot: 0,
+            },
+        );
         assert_eq!(called_slots(&config), (Some(0), Some(1)));
     }
 
@@ -979,11 +1049,23 @@ mod tests {
         let mut config = MatchConfig::default();
         config.team1_kill_target = Some(2);
 
-        apply_call_click(&mut config, CallClick { clicked_team: 2, slot: 2 });
+        apply_call_click(
+            &mut config,
+            CallClick {
+                clicked_team: 2,
+                slot: 2,
+            },
+        );
         assert_eq!(config.team1_kill_target, None);
 
         // Clicking it again re-selects, matching the pre-match toggle.
-        apply_call_click(&mut config, CallClick { clicked_team: 2, slot: 2 });
+        apply_call_click(
+            &mut config,
+            CallClick {
+                clicked_team: 2,
+                slot: 2,
+            },
+        );
         assert_eq!(config.team1_kill_target, Some(2));
     }
 
@@ -992,7 +1074,13 @@ mod tests {
         let mut config = MatchConfig::default();
         config.team1_kill_target = Some(0);
 
-        apply_call_click(&mut config, CallClick { clicked_team: 2, slot: 1 });
+        apply_call_click(
+            &mut config,
+            CallClick {
+                clicked_team: 2,
+                slot: 1,
+            },
+        );
         assert_eq!(config.team1_kill_target, Some(1));
     }
 

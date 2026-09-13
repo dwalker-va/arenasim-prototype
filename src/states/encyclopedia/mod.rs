@@ -108,11 +108,17 @@ pub struct View {
 
 impl View {
     pub fn index(section: Section) -> Self {
-        Self { section, topic: None }
+        Self {
+            section,
+            topic: None,
+        }
     }
 
     pub fn topic(topic: Topic) -> Self {
-        Self { section: topic.section(), topic: Some(topic) }
+        Self {
+            section: topic.section(),
+            topic: Some(topic),
+        }
     }
 }
 
@@ -237,7 +243,10 @@ impl EncyclopediaState {
 
     /// The view currently on screen.
     pub fn current(&self) -> View {
-        *self.stack.last().expect("encyclopedia nav stack is never empty")
+        *self
+            .stack
+            .last()
+            .expect("encyclopedia nav stack is never empty")
     }
 
     /// Whether Back has anywhere to go inside the encyclopedia.
@@ -330,7 +339,9 @@ pub fn encyclopedia_ui(
 
     // try_ctx_mut: the context dies with the primary window, and ctx_mut
     // panics on that final frame.
-    let Some(ctx) = contexts.try_ctx_mut() else { return };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     // The registry is derived purely from the data sources, so building it once
     // per session is enough — nothing hand-authored, nothing to invalidate.
@@ -428,7 +439,11 @@ pub fn draw_encyclopedia(
             // the top of that band while the title sat 8px lower.
             let title_height = ui
                 .painter()
-                .layout_no_wrap(TITLE.to_owned(), egui::FontId::proportional(TITLE_SIZE), GOLD)
+                .layout_no_wrap(
+                    TITLE.to_owned(),
+                    egui::FontId::proportional(TITLE_SIZE),
+                    GOLD,
+                )
                 .size()
                 .y;
             let row_height = title_height.max(ui.spacing().interact_size.y);
@@ -517,7 +532,9 @@ pub fn draw_encyclopedia(
                             // conditional appearing ABOVE this row.
                             .id(egui::Id::new(SEARCH_FIELD_ID))
                             .hint_text(
-                                egui::RichText::new("Search everything…").size(16.0).color(DIM),
+                                egui::RichText::new("Search everything…")
+                                    .size(16.0)
+                                    .color(DIM),
                             )
                             .font(egui::FontId::proportional(16.0))
                             .margin(egui::Margin::symmetric(12, 8)),
@@ -558,33 +575,35 @@ pub fn draw_encyclopedia(
             bottom: 12,
         }))
         .show(ctx, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                let needle = search.trim().to_lowercase();
-                if !needle.is_empty() {
-                    // Results TAKE OVER the content area. The blessed mockup
-                    // floated them in a dropdown; this divergence is deliberate
-                    // and user-endorsed (simpler Esc ladder, snapshot-testable
-                    // state) — see the module docs. Not an egui limitation.
-                    if let Some(topic) = search::render_results(ui, &needle, registry, data) {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let needle = search.trim().to_lowercase();
+                    if !needle.is_empty() {
+                        // Results TAKE OVER the content area. The blessed mockup
+                        // floated them in a dropdown; this divergence is deliberate
+                        // and user-endorsed (simpler Esc ladder, snapshot-testable
+                        // state) — see the module docs. Not an egui limitation.
+                        if let Some(topic) = search::render_results(ui, &needle, registry, data) {
+                            action = Some(EncyclopediaAction::Navigate(View::topic(topic)));
+                        }
+                        return;
+                    }
+
+                    let nav = match current.topic {
+                        Some(topic) => render_topic_page(ui, topic, data),
+                        None => render_section_index(
+                            ui,
+                            current.section,
+                            item_filters,
+                            ability_filters,
+                            data,
+                        ),
+                    };
+                    if let Some(topic) = nav {
                         action = Some(EncyclopediaAction::Navigate(View::topic(topic)));
                     }
-                    return;
-                }
-
-                let nav = match current.topic {
-                    Some(topic) => render_topic_page(ui, topic, data),
-                    None => render_section_index(
-                        ui,
-                        current.section,
-                        item_filters,
-                        ability_filters,
-                        data,
-                    ),
-                };
-                if let Some(topic) = nav {
-                    action = Some(EncyclopediaAction::Navigate(View::topic(topic)));
-                }
-            });
+                });
         });
 
     action
@@ -644,9 +663,13 @@ fn home_label(return_to: GameState) -> String {
 
 /// A chrome button in the screen's palette — the Back and Home affordances.
 fn chrome_button(label: &str, color: egui::Color32) -> egui::Button<'static> {
-    egui::Button::new(egui::RichText::new(label.to_string()).size(14.0).color(color))
-        .fill(PANEL)
-        .stroke(egui::Stroke::new(1.0, LINE))
+    egui::Button::new(
+        egui::RichText::new(label.to_string())
+            .size(14.0)
+            .color(color),
+    )
+    .fill(PANEL)
+    .stroke(egui::Stroke::new(1.0, LINE))
 }
 
 /// Push egui's stock widget colours onto the game's palette, so the built-in
@@ -699,7 +722,12 @@ fn tab_button(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
 
     if active {
         painter.rect_filled(rect, 5.0, PANEL);
-        painter.rect_stroke(rect, 5.0, egui::Stroke::new(1.0, LINE), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            5.0,
+            egui::Stroke::new(1.0, LINE),
+            egui::StrokeKind::Inside,
+        );
     } else if response.hovered() {
         painter.rect_filled(rect, 5.0, PANEL);
     }
@@ -710,7 +738,13 @@ fn tab_button(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
     } else {
         MUTED
     };
-    painter.text(rect.center(), egui::Align2::CENTER_CENTER, label, font, color);
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        font,
+        color,
+    );
 
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -805,21 +839,28 @@ mod tests {
         let mut state = EncyclopediaState::default();
         assert!(!state.can_go_back());
 
-        assert!(!state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Item(
-            ItemId::WandOfTheInvoker
-        )))));
+        assert!(
+            !state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Item(
+                ItemId::WandOfTheInvoker
+            ))))
+        );
         assert!(state.can_go_back());
         assert_eq!(state.current().section, Section::Items);
 
         // Cross-section link from an item page: the class page is pushed and
         // the tab follows the topic.
-        assert!(!state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Class(
-            CharacterClass::Mage
-        )))));
+        assert!(
+            !state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Class(
+                CharacterClass::Mage
+            ))))
+        );
         assert_eq!(state.current().section, Section::Classes);
 
         assert!(!state.apply(EncyclopediaAction::Back));
-        assert_eq!(state.current(), View::topic(Topic::Item(ItemId::WandOfTheInvoker)));
+        assert_eq!(
+            state.current(),
+            View::topic(Topic::Item(ItemId::WandOfTheInvoker))
+        );
         assert!(!state.apply(EncyclopediaAction::Back));
         assert!(!state.can_go_back());
 
@@ -995,7 +1036,10 @@ mod tests {
         state.search = "stale".to_string();
 
         state.open_at(Topic::Class(CharacterClass::Mage), GameState::Results);
-        assert_eq!(state.current(), View::topic(Topic::Class(CharacterClass::Mage)));
+        assert_eq!(
+            state.current(),
+            View::topic(Topic::Class(CharacterClass::Mage))
+        );
         assert!(state.search.is_empty());
         assert_eq!(home_label(state.return_to()), "\u{1f3e0} RESULTS");
 
@@ -1006,7 +1050,10 @@ mod tests {
         ))));
         assert!(state.can_go_back());
         assert!(!state.apply(EncyclopediaAction::Back));
-        assert_eq!(state.current(), View::topic(Topic::Class(CharacterClass::Mage)));
+        assert_eq!(
+            state.current(),
+            View::topic(Topic::Class(CharacterClass::Mage))
+        );
 
         // At the landing topic, Back IS the way out — to the caller.
         assert!(state.back_key());
@@ -1241,7 +1288,10 @@ mod tests {
         assert_eq!(state.current().section, Section::Classes);
 
         state.apply(EncyclopediaAction::Back);
-        assert_eq!(state.current(), View::topic(Topic::Ability(AbilityType::Corruption)));
+        assert_eq!(
+            state.current(),
+            View::topic(Topic::Ability(AbilityType::Corruption))
+        );
     }
 
     #[test]

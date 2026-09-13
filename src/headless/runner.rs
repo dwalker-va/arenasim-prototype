@@ -9,20 +9,25 @@ use std::time::Duration;
 
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
-use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin};
-use crate::states::play_match::ability_config::{AbilityDefinitions, load_ability_definitions};
-use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
-use crate::states::play_match::map_config::{load_map_geometry_config, MapGeometryConfig};
-use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_equipped_loadout, format_loadout, load_item_definitions, load_default_loadouts};
-// Use the stable systems API instead of importing internal functions directly
-use crate::states::play_match::systems::{
-    self, combatant_id, pet_combatant_id, ArenaDampening, Combatant, FloatingTextState, GameRng, MatchCountdown,
-    ShadowSightState, SimulationSpeed,
+use crate::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
+use crate::states::play_match::equipment::{
+    format_loadout, load_default_loadouts, load_item_definitions, resolve_equipped_loadout,
+    DefaultLoadouts, EquipmentPlugin, ItemDefinitions,
 };
-use crate::states::play_match::components::{ActiveAuras, AuraType, Pet, PetType, DRTracker, Totem, TotemElement};
+use crate::states::play_match::map_config::{load_map_geometry_config, MapGeometryConfig};
+use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
+use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin};
+// Use the stable systems API instead of importing internal functions directly
+use crate::states::match_config::CharacterClass;
+use crate::states::play_match::components::{
+    ActiveAuras, AuraType, DRTracker, Pet, PetType, Totem, TotemElement,
+};
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
-use crate::states::match_config::CharacterClass;
+use crate::states::play_match::systems::{
+    self, combatant_id, pet_combatant_id, ArenaDampening, Combatant, FloatingTextState, GameRng,
+    MatchCountdown, ShadowSightState, SimulationSpeed,
+};
 
 use super::config::HeadlessMatchConfig;
 
@@ -310,51 +315,97 @@ fn headless_setup_match(
     for (i, character_opt) in config.team1.iter().enumerate() {
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(1, i as u8, *character));
-            let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
-            let rogue_poison = config.team1_rogue_poisons.get(i).copied().unwrap_or_default();
-            let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
-            let warrior_shout = config.team1_warrior_shouts.get(i).copied().unwrap_or_default();
+            let rogue_opener = config
+                .team1_rogue_openers
+                .get(i)
+                .copied()
+                .unwrap_or_default();
+            let rogue_poison = config
+                .team1_rogue_poisons
+                .get(i)
+                .copied()
+                .unwrap_or_default();
+            let warlock_curse_prefs = config
+                .team1_warlock_curse_prefs
+                .get(i)
+                .cloned()
+                .unwrap_or_default();
+            let warrior_shout = config
+                .team1_warrior_shouts
+                .get(i)
+                .copied()
+                .unwrap_or_default();
             let mage_armor = config.team1_mage_armors.get(i).copied().unwrap_or_default();
-            let paladin_aura = config.team1_paladin_auras.get(i).copied().unwrap_or_default();
+            let paladin_aura = config
+                .team1_paladin_auras
+                .get(i)
+                .copied()
+                .unwrap_or_default();
             let equipment_overrides = config.team1_equipment.get(i).cloned().unwrap_or_default();
-            let loadout = resolve_equipped_loadout(*character, &default_loadouts, &equipment_overrides, &item_defs);
+            let loadout = resolve_equipped_loadout(
+                *character,
+                &default_loadouts,
+                &equipment_overrides,
+                &item_defs,
+            );
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
-            let mut combatant = Combatant::new_with_curse_prefs(1, i as u8, *character, rogue_opener, rogue_poison, warlock_curse_prefs);
+            let mut combatant = Combatant::new_with_curse_prefs(
+                1,
+                i as u8,
+                *character,
+                rogue_opener,
+                rogue_poison,
+                warlock_curse_prefs,
+            );
             combatant.warrior_shout = warrior_shout;
             combatant.mage_armor = mage_armor;
             combatant.paladin_aura = paladin_aura;
             combatant.apply_equipment(&loadout, &item_defs);
             let combatant_clone = combatant.clone();
             let weapon_poison_buff = combatant.weapon_poison_self_buff();
-            let entity = commands.spawn((
-                Transform::from_translation(position),
-                combatant,
-                DRTracker::default(),
-                FloatingTextState {
-                    next_pattern_index: 0,
-                },
-            )).id();
+            let entity = commands
+                .spawn((
+                    Transform::from_translation(position),
+                    combatant,
+                    DRTracker::default(),
+                    FloatingTextState {
+                        next_pattern_index: 0,
+                    },
+                ))
+                .id();
             if let Some(buff) = weapon_poison_buff {
-                commands.entity(entity).insert(ActiveAuras { auras: vec![buff] });
+                commands
+                    .entity(entity)
+                    .insert(ActiveAuras { auras: vec![buff] });
             }
 
             // Log equipment loadout
             combat_log.log(
                 CombatLogEventType::MatchEvent,
-                format!("[EQUIPMENT] {}: {}", combatant_id(1, i as u8, *character), format_loadout(&loadout, &item_defs)),
+                format!(
+                    "[EQUIPMENT] {}: {}",
+                    combatant_id(1, i as u8, *character),
+                    format_loadout(&loadout, &item_defs)
+                ),
             );
 
             // Spawn Felhunter pet for Warlocks
             if *character == CharacterClass::Warlock {
                 let pet_slot = PET_SLOT_BASE + i as u8;
-                let pet_combatant = Combatant::new_pet(1, pet_slot, PetType::Felhunter, &combatant_clone);
+                let pet_combatant =
+                    Combatant::new_pet(1, pet_slot, PetType::Felhunter, &combatant_clone);
                 let pet_pos = position + Vec3::new(-2.0, 0.75, 1.5);
                 commands.spawn((
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
-                    Pet { owner: entity, pet_type: PetType::Felhunter },
-                    FloatingTextState { next_pattern_index: 0 },
+                    Pet {
+                        owner: entity,
+                        pet_type: PetType::Felhunter,
+                    },
+                    FloatingTextState {
+                        next_pattern_index: 0,
+                    },
                 ));
                 combat_log.register_combatant(pet_combatant_id(1, i as u8, PetType::Felhunter));
             }
@@ -362,7 +413,11 @@ fn headless_setup_match(
             // Spawn pet for Hunters
             if *character == CharacterClass::Hunter {
                 use crate::states::match_config::HunterPetType;
-                let pet_type_pref = config.team1_hunter_pet_types.get(i).copied().unwrap_or_default();
+                let pet_type_pref = config
+                    .team1_hunter_pet_types
+                    .get(i)
+                    .copied()
+                    .unwrap_or_default();
                 let pet_type = match pet_type_pref {
                     HunterPetType::Spider => PetType::Spider,
                     HunterPetType::Boar => PetType::Boar,
@@ -375,8 +430,13 @@ fn headless_setup_match(
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
-                    Pet { owner: entity, pet_type },
-                    FloatingTextState { next_pattern_index: 0 },
+                    Pet {
+                        owner: entity,
+                        pet_type,
+                    },
+                    FloatingTextState {
+                        next_pattern_index: 0,
+                    },
                 ));
                 combat_log.register_combatant(pet_combatant_id(1, i as u8, pet_type));
             }
@@ -390,51 +450,97 @@ fn headless_setup_match(
     for (i, character_opt) in config.team2.iter().enumerate() {
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(2, i as u8, *character));
-            let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
-            let rogue_poison = config.team2_rogue_poisons.get(i).copied().unwrap_or_default();
-            let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
-            let warrior_shout = config.team2_warrior_shouts.get(i).copied().unwrap_or_default();
+            let rogue_opener = config
+                .team2_rogue_openers
+                .get(i)
+                .copied()
+                .unwrap_or_default();
+            let rogue_poison = config
+                .team2_rogue_poisons
+                .get(i)
+                .copied()
+                .unwrap_or_default();
+            let warlock_curse_prefs = config
+                .team2_warlock_curse_prefs
+                .get(i)
+                .cloned()
+                .unwrap_or_default();
+            let warrior_shout = config
+                .team2_warrior_shouts
+                .get(i)
+                .copied()
+                .unwrap_or_default();
             let mage_armor = config.team2_mage_armors.get(i).copied().unwrap_or_default();
-            let paladin_aura = config.team2_paladin_auras.get(i).copied().unwrap_or_default();
+            let paladin_aura = config
+                .team2_paladin_auras
+                .get(i)
+                .copied()
+                .unwrap_or_default();
             let equipment_overrides = config.team2_equipment.get(i).cloned().unwrap_or_default();
-            let loadout = resolve_equipped_loadout(*character, &default_loadouts, &equipment_overrides, &item_defs);
+            let loadout = resolve_equipped_loadout(
+                *character,
+                &default_loadouts,
+                &equipment_overrides,
+                &item_defs,
+            );
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
-            let mut combatant = Combatant::new_with_curse_prefs(2, i as u8, *character, rogue_opener, rogue_poison, warlock_curse_prefs);
+            let mut combatant = Combatant::new_with_curse_prefs(
+                2,
+                i as u8,
+                *character,
+                rogue_opener,
+                rogue_poison,
+                warlock_curse_prefs,
+            );
             combatant.warrior_shout = warrior_shout;
             combatant.mage_armor = mage_armor;
             combatant.paladin_aura = paladin_aura;
             combatant.apply_equipment(&loadout, &item_defs);
             let combatant_clone = combatant.clone();
             let weapon_poison_buff = combatant.weapon_poison_self_buff();
-            let entity = commands.spawn((
-                Transform::from_translation(position),
-                combatant,
-                DRTracker::default(),
-                FloatingTextState {
-                    next_pattern_index: 0,
-                },
-            )).id();
+            let entity = commands
+                .spawn((
+                    Transform::from_translation(position),
+                    combatant,
+                    DRTracker::default(),
+                    FloatingTextState {
+                        next_pattern_index: 0,
+                    },
+                ))
+                .id();
             if let Some(buff) = weapon_poison_buff {
-                commands.entity(entity).insert(ActiveAuras { auras: vec![buff] });
+                commands
+                    .entity(entity)
+                    .insert(ActiveAuras { auras: vec![buff] });
             }
 
             // Log equipment loadout
             combat_log.log(
                 CombatLogEventType::MatchEvent,
-                format!("[EQUIPMENT] {}: {}", combatant_id(2, i as u8, *character), format_loadout(&loadout, &item_defs)),
+                format!(
+                    "[EQUIPMENT] {}: {}",
+                    combatant_id(2, i as u8, *character),
+                    format_loadout(&loadout, &item_defs)
+                ),
             );
 
             // Spawn Felhunter pet for Warlocks
             if *character == CharacterClass::Warlock {
                 let pet_slot = PET_SLOT_BASE + i as u8;
-                let pet_combatant = Combatant::new_pet(2, pet_slot, PetType::Felhunter, &combatant_clone);
+                let pet_combatant =
+                    Combatant::new_pet(2, pet_slot, PetType::Felhunter, &combatant_clone);
                 let pet_pos = position + Vec3::new(2.0, 0.75, 1.5);
                 commands.spawn((
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
-                    Pet { owner: entity, pet_type: PetType::Felhunter },
-                    FloatingTextState { next_pattern_index: 0 },
+                    Pet {
+                        owner: entity,
+                        pet_type: PetType::Felhunter,
+                    },
+                    FloatingTextState {
+                        next_pattern_index: 0,
+                    },
                 ));
                 combat_log.register_combatant(pet_combatant_id(2, i as u8, PetType::Felhunter));
             }
@@ -442,7 +548,11 @@ fn headless_setup_match(
             // Spawn pet for Hunters
             if *character == CharacterClass::Hunter {
                 use crate::states::match_config::HunterPetType;
-                let pet_type_pref = config.team2_hunter_pet_types.get(i).copied().unwrap_or_default();
+                let pet_type_pref = config
+                    .team2_hunter_pet_types
+                    .get(i)
+                    .copied()
+                    .unwrap_or_default();
                 let pet_type = match pet_type_pref {
                     HunterPetType::Spider => PetType::Spider,
                     HunterPetType::Boar => PetType::Boar,
@@ -455,8 +565,13 @@ fn headless_setup_match(
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
-                    Pet { owner: entity, pet_type },
-                    FloatingTextState { next_pattern_index: 0 },
+                    Pet {
+                        owner: entity,
+                        pet_type,
+                    },
+                    FloatingTextState {
+                        next_pattern_index: 0,
+                    },
                 ));
                 combat_log.register_combatant(pet_combatant_id(2, i as u8, pet_type));
             }
@@ -508,9 +623,22 @@ fn headless_check_match_end(
             "Match timed out after {:.1}s - declaring DRAW",
             headless_state.elapsed_time
         );
-        let result = build_match_result(&combatants, &pets, None, EndReason::CapDraw, &headless_state);
+        let result = build_match_result(
+            &combatants,
+            &pets,
+            None,
+            EndReason::CapDraw,
+            &headless_state,
+        );
         if !headless_state.suppress_log {
-            save_headless_match_log(&combatants, &pets, &config, &combat_log, None, &headless_state);
+            save_headless_match_log(
+                &combatants,
+                &pets,
+                &config,
+                &combat_log,
+                None,
+                &headless_state,
+            );
         }
         headless_state.result = Some(result);
         headless_state.match_complete = true;
@@ -518,8 +646,12 @@ fn headless_check_match_end(
     }
 
     // Check team survival
-    let team1_alive = combatants.iter().any(|(_, c, _)| c.team == 1 && c.is_alive());
-    let team2_alive = combatants.iter().any(|(_, c, _)| c.team == 2 && c.is_alive());
+    let team1_alive = combatants
+        .iter()
+        .any(|(_, c, _)| c.team == 1 && c.is_alive());
+    let team2_alive = combatants
+        .iter()
+        .any(|(_, c, _)| c.team == 2 && c.is_alive());
 
     if !team1_alive || !team2_alive {
         let winner = if !team1_alive && !team2_alive {
@@ -533,9 +665,17 @@ fn headless_check_match_end(
             Some(2)
         };
 
-        let result = build_match_result(&combatants, &pets, winner, EndReason::Kill, &headless_state);
+        let result =
+            build_match_result(&combatants, &pets, winner, EndReason::Kill, &headless_state);
         if !headless_state.suppress_log {
-            save_headless_match_log(&combatants, &pets, &config, &combat_log, winner, &headless_state);
+            save_headless_match_log(
+                &combatants,
+                &pets,
+                &config,
+                &combat_log,
+                winner,
+                &headless_state,
+            );
         }
         headless_state.result = Some(result);
         headless_state.match_complete = true;
@@ -696,7 +836,13 @@ impl PreloadedConfigs {
         let loadouts = load_default_loadouts(&items)?;
         let movement = load_movement_config()?;
         let maps = load_map_geometry_config()?;
-        Ok(Self { abilities, items, loadouts, movement, maps })
+        Ok(Self {
+            abilities,
+            items,
+            loadouts,
+            movement,
+            maps,
+        })
     }
 }
 
@@ -741,7 +887,13 @@ pub fn run_headless_match_observed<F>(
 where
     F: FnMut(&FrameObservation),
 {
-    run_match_impl(config, suppress_log, trace_config, None, Some(&mut observer))
+    run_match_impl(
+        config,
+        suppress_log,
+        trace_config,
+        None,
+        Some(&mut observer),
+    )
 }
 
 /// Build a [`FrameObservation`] from read-only world access. Uses
@@ -778,10 +930,9 @@ fn observe_frame(world: &World) -> FrameObservation {
             continue;
         }
 
-        let (Some(combatant), Some(transform)) = (
-            entity_ref.get::<Combatant>(),
-            entity_ref.get::<Transform>(),
-        ) else {
+        let (Some(combatant), Some(transform)) =
+            (entity_ref.get::<Combatant>(), entity_ref.get::<Transform>())
+        else {
             continue;
         };
         let aura_types = entity_ref
@@ -850,7 +1001,9 @@ fn run_match_impl(
         // Without this, `Time::delta` reflects wall-clock between updates,
         // which is ~0µs in a tight loop — no in-game time would pass and the
         // match would never end.
-        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 60.0)))
+        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+            1.0 / 60.0,
+        )))
         .add_plugins(TransformPlugin);
 
     // Game configs: reuse pre-parsed resources when provided (batch runner),
@@ -872,7 +1025,10 @@ fn run_match_impl(
                 .add_plugins(EquipmentPlugin);
         }
     }
-    app.add_plugins(HeadlessPlugin { config: config.clone(), suppress_log });
+    app.add_plugins(HeadlessPlugin {
+        config: config.clone(),
+        suppress_log,
+    });
 
     // Run each match with the single-threaded executor: systems execute inline
     // on the calling thread instead of being dispatched to the shared global
@@ -937,7 +1093,11 @@ fn run_match_impl(
                 }
             }
             Err(e) => {
-                eprintln!("decision_trace: failed to create writer at {}: {}", tc.output_path.display(), e);
+                eprintln!(
+                    "decision_trace: failed to create writer at {}: {}",
+                    tc.output_path.display(),
+                    e
+                );
             }
         }
     }
@@ -955,7 +1115,8 @@ fn run_match_impl(
             let frame = observe_frame(app.world());
             obs(&frame);
         }
-        let done = app.world()
+        let done = app
+            .world()
             .get_resource::<HeadlessMatchState>()
             .map(|s| s.match_complete)
             .unwrap_or(false);
@@ -977,7 +1138,11 @@ fn run_match_impl(
         let world = app.world_mut();
         if let Some(mut trace) = world.get_resource_mut::<DecisionTrace>() {
             if let Err(e) = trace.close_writer() {
-                eprintln!("decision_trace: final flush failed at {}: {}", tc.output_path.display(), e);
+                eprintln!(
+                    "decision_trace: final flush failed at {}: {}",
+                    tc.output_path.display(),
+                    e
+                );
             }
         }
     }
@@ -985,7 +1150,9 @@ fn run_match_impl(
     app.world()
         .get_resource::<HeadlessMatchState>()
         .and_then(|s| s.result.clone())
-        .ok_or_else(|| "Headless match exited without producing a result (max frames reached?)".to_string())
+        .ok_or_else(|| {
+            "Headless match exited without producing a result (max frames reached?)".to_string()
+        })
 }
 
 /// Build a map from owner Entity → sum of pet damage_dealt. Used at match-end

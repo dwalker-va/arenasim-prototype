@@ -57,7 +57,10 @@ fn read(rel: &str) -> String {
 }
 
 fn all_abilities() -> Vec<AbilityType> {
-    AbilityDefinitions::default().iter().map(|(a, _)| *a).collect()
+    AbilityDefinitions::default()
+        .iter()
+        .map(|(a, _)| *a)
+        .collect()
 }
 
 fn listed() -> Vec<AbilityType> {

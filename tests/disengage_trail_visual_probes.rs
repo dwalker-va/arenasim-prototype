@@ -110,8 +110,8 @@ fn the_trail_is_laid_along_the_leap_path_not_parked_at_the_origin() {
         found.len()
     );
     let xs: Vec<f32> = found.iter().map(|t| t.translation().x).collect();
-    let span = xs.iter().cloned().fold(f32::MIN, f32::max)
-        - xs.iter().cloned().fold(f32::MAX, f32::min);
+    let span =
+        xs.iter().cloned().fold(f32::MIN, f32::max) - xs.iter().cloned().fold(f32::MAX, f32::min);
     assert!(
         span >= 4.0,
         "wind slivers span {span:.2} yd of a 7.5 yd leap — the trail is parked, not laid along the path"
@@ -244,7 +244,16 @@ fn spark_motes_scatter_along_the_path_with_varied_sizes() {
     let meshes = app.world().resource::<Assets<Mesh>>();
     let mut radii: Vec<f32> = sized
         .iter()
-        .map(|(h, s)| meshes.get(h).unwrap().compute_aabb().unwrap().half_extents.x * s)
+        .map(|(h, s)| {
+            meshes
+                .get(h)
+                .unwrap()
+                .compute_aabb()
+                .unwrap()
+                .half_extents
+                .x
+                * s
+        })
         .collect();
     for r in &radii {
         assert!(
@@ -306,7 +315,9 @@ fn elements_fade_over_life_and_despawn_without_leaking() {
 
     // Leap ends (DisengagingState removed): the emitter disarms and every
     // element fades out and despawns.
-    app.world_mut().entity_mut(leaper).remove::<DisengagingState>();
+    app.world_mut()
+        .entity_mut(leaper)
+        .remove::<DisengagingState>();
     for _ in 0..24 {
         app.update();
     }

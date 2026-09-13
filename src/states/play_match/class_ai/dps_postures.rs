@@ -29,12 +29,12 @@ use crate::states::play_match::components::{
     AuraType, Combatant, DpsPosture, KitePosture, MatchCountdown, MovementDirective, MovementGoal,
 };
 use crate::states::play_match::constants::MELEE_RANGE;
-use crate::states::play_match::map_config::ActiveMapGeometry;
-use crate::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
-use crate::states::play_match::match_config::CharacterClass;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture,
 };
+use crate::states::play_match::map_config::ActiveMapGeometry;
+use crate::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
+use crate::states::play_match::match_config::CharacterClass;
 use crate::states::play_match::movement_config::{DpsMovementConfig, MovementConfig};
 
 use super::CombatContext;
@@ -203,11 +203,7 @@ pub fn nearest_melee_threat(
     ctx.combatants
         .values()
         .filter(|i| {
-            !i.is_pet
-                && i.team != team
-                && i.is_alive
-                && !i.stealthed
-                && is_kite_threat(i.class)
+            !i.is_pet && i.team != team && i.is_alive && !i.stealthed && is_kite_threat(i.class)
         })
         .min_by(|a, b| {
             a.position
@@ -238,7 +234,13 @@ fn should_seek_los(
     let Some(info) = kill_target.and_then(|t| ctx.combatants.get(&t)) else {
         return false;
     };
-    occluded_in_range(ctx.obstacles, my_pos, my_class, info.position, info.is_alive)
+    occluded_in_range(
+        ctx.obstacles,
+        my_pos,
+        my_class,
+        info.position,
+        info.is_alive,
+    )
 }
 
 /// Occluded-in-shot-range test from raw primitives (no `CombatContext`). Shared
@@ -308,7 +310,11 @@ fn seek_chase_accumulate(
     };
     // A target swap (or first bind) resets the bucket so the new target re-earns
     // the threshold even if it is also occluded.
-    let base = if prev_target == Some(target) { prev_accum } else { 0.0 };
+    let base = if prev_target == Some(target) {
+        prev_accum
+    } else {
+        0.0
+    };
     let accum = if occluded {
         base + dt
     } else {
@@ -365,7 +371,12 @@ pub fn tick_kite_occlusion(
         // Resolve the LIVING kill target's position, if any.
         let target = combatant
             .target
-            .and_then(|t| others.get(t).ok().map(|(tf, c)| (t, tf.translation, c.is_alive())))
+            .and_then(|t| {
+                others
+                    .get(t)
+                    .ok()
+                    .map(|(tf, c)| (t, tf.translation, c.is_alive()))
+            })
             .filter(|(_, _, alive)| *alive);
         let kill_target = target.map(|(e, _, _)| e);
         let occluded = target.is_some_and(|(_, tpos, alive)| {
@@ -446,7 +457,10 @@ fn build_kiter_inputs(
         ctx.combatants
             .values()
             .find(|i| {
-                i.team == self_team && i.is_alive && !i.is_pet && i.class.is_healer()
+                i.team == self_team
+                    && i.is_alive
+                    && !i.is_pet
+                    && i.class.is_healer()
                     && i.entity != entity
             })
             .map(|i| i.position)
@@ -547,7 +561,11 @@ pub fn evaluate_dps_posture(
         state.posture = next;
         state.since = now;
         state.last_direction = None;
-        state.hold_until = if next == DpsPosture::Kite { now + config.kite_hold } else { 0.0 };
+        state.hold_until = if next == DpsPosture::Kite {
+            now + config.kite_hold
+        } else {
+            0.0
+        };
     }
 
     if next == DpsPosture::Engage {
@@ -585,8 +603,8 @@ pub fn evaluate_dps_posture(
         // down, so the kiter casts from progressively closer as sight returns.
         // The bucket itself is the hysteresis; no extra latch. This branch does
         // NOT mutate the accumulator — `tick_kite_occlusion` owns it.
-        let armed = config.seek_chase_timeout > 0.0
-            && state.occlusion_accum >= config.seek_chase_timeout;
+        let armed =
+            config.seek_chase_timeout > 0.0 && state.occlusion_accum >= config.seek_chase_timeout;
         let chase = armed && seeking;
 
         if !seeking {
@@ -619,8 +637,9 @@ pub fn evaluate_dps_posture(
         // orbit-seek in the trace. When sight returns the next decision tick
         // sees `seeking == false` and removes this directive.
         if chase {
-            if let Some(target_pos) =
-                kill_target.and_then(|t| ctx.combatants.get(&t)).map(|i| i.position)
+            if let Some(target_pos) = kill_target
+                .and_then(|t| ctx.combatants.get(&t))
+                .map(|i| i.position)
             {
                 commands.entity(entity).try_insert(MovementDirective {
                     goal: MovementGoal::Point(target_pos),
@@ -650,8 +669,15 @@ pub fn evaluate_dps_posture(
         let committed_direction = directive
             .filter(|d| now < d.committed_until)
             .and(state.last_direction);
-        let inputs =
-            build_kiter_inputs(ctx, entity, my_pos, kill_target, config, heal_range, committed_direction);
+        let inputs = build_kiter_inputs(
+            ctx,
+            entity,
+            my_pos,
+            kill_target,
+            config,
+            heal_range,
+            committed_direction,
+        );
         let chosen = score_directions(&compass_directions_16(), &inputs, &config.weights);
         if chosen != Vec2::ZERO {
             commands.entity(entity).try_insert(MovementDirective {
@@ -659,8 +685,9 @@ pub fn evaluate_dps_posture(
                 expires: now + config.directive_ttl,
                 committed_until: now + config.commit_window,
             });
-            let direction_changed =
-                state.last_direction.map_or(true, |d| d.distance(chosen) > 1e-3);
+            let direction_changed = state
+                .last_direction
+                .map_or(true, |d| d.distance(chosen) > 1e-3);
             state.last_direction = Some(chosen);
             if transitioned || direction_changed {
                 if let Some(info) = ctx.combatants.get(&entity) {
@@ -693,8 +720,8 @@ pub fn evaluate_dps_posture(
 
     // KITE: re-score only on transition or when the commit window expired, to
     // hold a direction for the anti-zigzag window.
-    let recommit = transitioned
-        || directive.map_or(true, |d| now >= d.committed_until || now >= d.expires);
+    let recommit =
+        transitioned || directive.map_or(true, |d| now >= d.committed_until || now >= d.expires);
     if !recommit {
         if needs_insert {
             commands.entity(entity).try_insert(*state);
@@ -706,7 +733,15 @@ pub fn evaluate_dps_posture(
         .filter(|d| now < d.committed_until)
         .and(state.last_direction);
 
-    let inputs = build_kiter_inputs(ctx, entity, my_pos, kill_target, config, heal_range, committed_direction);
+    let inputs = build_kiter_inputs(
+        ctx,
+        entity,
+        my_pos,
+        kill_target,
+        config,
+        heal_range,
+        committed_direction,
+    );
     let chosen = score_directions(&compass_directions_16(), &inputs, &config.weights);
     if chosen == Vec2::ZERO {
         if needs_insert {
@@ -721,7 +756,9 @@ pub fn evaluate_dps_posture(
         committed_until: now + config.commit_window,
     });
 
-    let direction_changed = state.last_direction.map_or(true, |d| d.distance(chosen) > 1e-3);
+    let direction_changed = state
+        .last_direction
+        .map_or(true, |d| d.distance(chosen) > 1e-3);
     state.last_direction = Some(chosen);
 
     if transitioned || direction_changed {
@@ -776,18 +813,39 @@ mod tests {
         const COST: f32 = 20.0;
 
         // Inactive → active only once a nuke is unaffordable.
-        assert!(!update_oom_wand_latch(false, 25.0, COST), "affordable: stays off");
-        assert!(!update_oom_wand_latch(false, 20.0, COST), "exactly one cast: still affordable, off");
-        assert!(update_oom_wand_latch(false, 19.9, COST), "below one cast: engages");
+        assert!(
+            !update_oom_wand_latch(false, 25.0, COST),
+            "affordable: stays off"
+        );
+        assert!(
+            !update_oom_wand_latch(false, 20.0, COST),
+            "exactly one cast: still affordable, off"
+        );
+        assert!(
+            update_oom_wand_latch(false, 19.9, COST),
+            "below one cast: engages"
+        );
         assert!(update_oom_wand_latch(false, 0.0, COST), "empty: engages");
 
         // Active → stays active across the whole hysteresis band, releasing only
         // at the two-cast buffer.
         assert!(update_oom_wand_latch(true, 0.0, COST), "empty: holds");
-        assert!(update_oom_wand_latch(true, 20.0, COST), "one cast recovered: still holds (in band)");
-        assert!(update_oom_wand_latch(true, 39.9, COST), "just under two casts: still holds");
-        assert!(!update_oom_wand_latch(true, 40.0, COST), "two-cast buffer restored: releases");
-        assert!(!update_oom_wand_latch(true, 50.0, COST), "comfortably above: released");
+        assert!(
+            update_oom_wand_latch(true, 20.0, COST),
+            "one cast recovered: still holds (in band)"
+        );
+        assert!(
+            update_oom_wand_latch(true, 39.9, COST),
+            "just under two casts: still holds"
+        );
+        assert!(
+            !update_oom_wand_latch(true, 40.0, COST),
+            "two-cast buffer restored: releases"
+        );
+        assert!(
+            !update_oom_wand_latch(true, 50.0, COST),
+            "comfortably above: released"
+        );
     }
 
     /// The band between one and two casts holds whatever state it was in — the
@@ -813,7 +871,10 @@ mod tests {
     /// misconfigured to zero.
     #[test]
     fn oom_wand_latch_never_engages_for_a_free_nuke() {
-        assert!(!update_oom_wand_latch(false, 0.0, 0.0), "free nuke never engages the latch");
+        assert!(
+            !update_oom_wand_latch(false, 0.0, 0.0),
+            "free nuke never engages the latch"
+        );
     }
 
     /// Fixed simulation step (headless `TimeUpdateStrategy::ManualDuration`).
@@ -831,18 +892,27 @@ mod tests {
 
         // First occluded frame: bind + fill by dt.
         let (accum, bound) = seek_chase_accumulate(0.0, None, Some(t0), true, DT, DECAY);
-        assert!((accum - DT).abs() < 1e-6, "fills by dt on the first occluded frame");
+        assert!(
+            (accum - DT).abs() < 1e-6,
+            "fills by dt on the first occluded frame"
+        );
         assert_eq!(bound, Some(t0), "binds to the occluded target");
 
         // Occluded, same target: keeps filling by dt.
         let (accum, bound) = seek_chase_accumulate(1.0, Some(t0), Some(t0), true, DT, DECAY);
-        assert!((accum - (1.0 + DT)).abs() < 1e-6, "continues filling while occluded");
+        assert!(
+            (accum - (1.0 + DT)).abs() < 1e-6,
+            "continues filling while occluded"
+        );
         assert_eq!(bound, Some(t0));
 
         // Sighted, same target: drains by decay*dt (does NOT reset — survives a
         // sight flicker, the whole point of the bucket).
         let (accum, bound) = seek_chase_accumulate(1.0, Some(t0), Some(t0), false, DT, DECAY);
-        assert!((accum - (1.0 - DECAY * DT)).abs() < 1e-6, "drains by decay*dt while sighted");
+        assert!(
+            (accum - (1.0 - DECAY * DT)).abs() < 1e-6,
+            "drains by decay*dt while sighted"
+        );
         assert_eq!(bound, Some(t0), "a sight flicker does not unbind");
 
         // Drain clamps at 0 (never negative).
@@ -852,7 +922,10 @@ mod tests {
         // Target swap: reset to 0, then this frame's fill applies to the new
         // target — the swapped-to target re-earns the threshold from scratch.
         let (accum, bound) = seek_chase_accumulate(3.0, Some(t0), Some(t1), true, DT, DECAY);
-        assert!((accum - DT).abs() < 1e-6, "a target swap resets the bucket to 0 before filling");
+        assert!(
+            (accum - DT).abs() < 1e-6,
+            "a target swap resets the bucket to 0 before filling"
+        );
         assert_eq!(bound, Some(t1));
 
         // No living target (death / none): reset to 0 and unbind.
@@ -971,8 +1044,14 @@ mod tests {
     /// the kite radius in a real match.
     #[test]
     fn kite_threat_is_warrior_and_rogue_only() {
-        assert!(is_kite_threat(CharacterClass::Warrior), "Warrior is a kite threat");
-        assert!(is_kite_threat(CharacterClass::Rogue), "Rogue is a kite threat");
+        assert!(
+            is_kite_threat(CharacterClass::Warrior),
+            "Warrior is a kite threat"
+        );
+        assert!(
+            is_kite_threat(CharacterClass::Rogue),
+            "Rogue is a kite threat"
+        );
         for ranged in [
             CharacterClass::Mage,
             CharacterClass::Warlock,

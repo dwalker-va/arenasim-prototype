@@ -228,9 +228,7 @@ const STUN_SPARKLE_SPAN: f32 = 5.0;
 /// Deterministic per-piece variation. The `fear_mote_jitter` hash, NOT
 /// `game_rng` — visual-only, so headless byte-identity holds by construction.
 pub fn cc_jitter(seed: u32) -> f32 {
-    let s = seed
-        .wrapping_mul(747_796_405)
-        .wrapping_add(2_891_336_453);
+    let s = seed.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
     ((s >> 9) & 0xFFFF) as f32 / 65536.0
 }
 
@@ -258,12 +256,7 @@ pub fn root_style(aura: &Aura) -> RootStyle {
 /// broken 50ms after it landed sinks from its partial height instead of
 /// bulging first. `age` itself keeps advancing, so the whirl goes on spinning
 /// as it fades.
-pub fn cc_envelope(
-    age: f32,
-    retract: Option<f32>,
-    grow_secs: f32,
-    retract_secs: f32,
-) -> f32 {
+pub fn cc_envelope(age: f32, retract: Option<f32>, grow_secs: f32, retract_secs: f32) -> f32 {
     let grow_age = match retract {
         None => age,
         Some(r) => (age - r).max(0.0),
@@ -350,8 +343,8 @@ fn build_ice_crystals(
             let height_scale = 1.0 - ROOT_SPIKE_JITTER * j;
 
             let radial = Vec3::new(theta.cos(), 0.0, theta.sin());
-            let tip = (Vec3::Y * ROOT_SPIKE_SPLAY.cos() + radial * ROOT_SPIKE_SPLAY.sin())
-                .normalize();
+            let tip =
+                (Vec3::Y * ROOT_SPIKE_SPLAY.cos() + radial * ROOT_SPIKE_SPLAY.sin()).normalize();
 
             (
                 Mesh3d(mesh.clone()),
@@ -523,8 +516,7 @@ fn build_stun_whirl(
         for k in 0..STUN_BEADS_PER_ARM {
             // 0.2 .. 1.0 — no bead sits at the exact centre.
             let t = (k + 1) as f32 / STUN_BEADS_PER_ARM as f32;
-            let theta =
-                (arm as f32 / STUN_ARMS as f32) * TAU + t * STUN_SPIRAL_TURNS * TAU;
+            let theta = (arm as f32 / STUN_ARMS as f32) * TAU + t * STUN_SPIRAL_TURNS * TAU;
             let r = STUN_R_INNER + (STUN_R_OUTER - STUN_R_INNER) * t;
             let y = STUN_RISE * t;
             // Outer beads are fatter, so an arm overlaps into a continuous
@@ -535,8 +527,7 @@ fn build_stun_whirl(
             parts.push((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(material.clone()),
-                Transform::from_translation(at)
-                    .with_scale(Vec3::splat(s * STUN_SPARKLE_SPAN)),
+                Transform::from_translation(at).with_scale(Vec3::splat(s * STUN_SPARKLE_SPAN)),
                 CcBead,
             ));
         }
@@ -552,7 +543,11 @@ fn spawn_cc_flare(
     end_scale: f32,
     delay: f32,
 ) {
-    let mesh = meshes.add(Annulus::new(CC_FLARE_INNER_RATIO, 1.0).mesh().resolution(56));
+    let mesh = meshes.add(
+        Annulus::new(CC_FLARE_INNER_RATIO, 1.0)
+            .mesh()
+            .resolution(56),
+    );
     // Emissive, NOT unlit — see `STUN_BEAD_COLOR` for why the two are
     // mutually exclusive in Bevy's PBR shader.
     let material = materials.add(StandardMaterial {
@@ -627,11 +622,7 @@ pub fn update_hard_cc_visuals(
     {
         let alive = combatant.is_alive();
         let root_aura = if alive {
-            auras.and_then(|a| {
-                a.auras
-                    .iter()
-                    .find(|au| au.effect_type == AuraType::Root)
-            })
+            auras.and_then(|a| a.auras.iter().find(|au| au.effect_type == AuraType::Root))
         } else {
             None
         };
@@ -696,8 +687,11 @@ pub fn update_hard_cc_visuals(
                     RootStyle::Ice => build_ice_crystals(&mut meshes, &mut materials, seed),
                     RootStyle::Web => build_web_sheet(&mut meshes, &mut materials, seed),
                 };
-                let origin =
-                    Vec3::new(transform.translation.x, CC_GROUND_Y, transform.translation.z);
+                let origin = Vec3::new(
+                    transform.translation.x,
+                    CC_GROUND_Y,
+                    transform.translation.z,
+                );
                 // A Frost Nova victim waits for the wavefront to reach it, so
                 // the freeze propagates outward instead of happening everywhere
                 // at once. Consumed here and removed; absent for a root from any
@@ -706,7 +700,15 @@ pub fn update_hard_cc_visuals(
                 if nova_delay.is_some() {
                     commands.entity(entity).remove::<NovaFreezeDelay>();
                 }
-                spawn_rig(&mut commands, parts, entity, CcKind::Root, origin, 0.0, delay);
+                spawn_rig(
+                    &mut commands,
+                    parts,
+                    entity,
+                    CcKind::Root,
+                    origin,
+                    0.0,
+                    delay,
+                );
                 commands.entity(entity).try_insert(RootedVisual { style });
                 // Only on a genuine appearance or a style swap. A silent
                 // reconcile must not pop a second flare.
@@ -734,7 +736,15 @@ pub fn update_hard_cc_visuals(
                     .clone();
                 let parts = build_stun_whirl(&mut meshes, &mut materials, tex);
                 let origin = transform.translation + Vec3::Y * stun_lift;
-                spawn_rig(&mut commands, parts, entity, CcKind::Stun, origin, stun_lift, 0.0);
+                spawn_rig(
+                    &mut commands,
+                    parts,
+                    entity,
+                    CcKind::Stun,
+                    origin,
+                    stun_lift,
+                    0.0,
+                );
                 commands.entity(entity).try_insert(StunnedVisual);
                 if stunned_marker.is_none() {
                     spawn_cc_flare(
@@ -900,9 +910,7 @@ pub fn cleanup_cc_rigs(
     owners: Query<(), With<Combatant>>,
 ) {
     for (entity, rig) in rigs.iter() {
-        let finished = rig
-            .retract
-            .is_some_and(|r| r >= retract_secs(rig.kind));
+        let finished = rig.retract.is_some_and(|r| r >= retract_secs(rig.kind));
         // Recursive despawn takes the unmarked children with it.
         if finished || owners.get(rig.owner).is_err() {
             commands.entity(entity).despawn();

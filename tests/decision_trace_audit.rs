@@ -15,7 +15,12 @@ use std::path::PathBuf;
 use arenasim::headless::runner::TraceConfig;
 use arenasim::headless::{run_headless_match_with, HeadlessMatchConfig};
 
-fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>, map: &str) -> HeadlessMatchConfig {
+fn create_config(
+    team1: Vec<&str>,
+    team2: Vec<&str>,
+    seed: Option<u64>,
+    map: &str,
+) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
         team1: team1.into_iter().map(String::from).collect(),
         team2: team2.into_iter().map(String::from).collect(),
@@ -277,13 +282,17 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
         let path = tmp.path().to_path_buf();
         drop(tmp);
 
-        let config = create_config(matchup.team1.clone(), matchup.team2.clone(), Some(matchup.seed), matchup.map);
+        let config = create_config(
+            matchup.team1.clone(),
+            matchup.team2.clone(),
+            Some(matchup.seed),
+            matchup.map,
+        );
         let _result = run_headless_match_with(
             config,
             true, // suppress .txt log
             Some(TraceConfig {
                 output_path: path.clone(),
-
             }),
         )
         .unwrap_or_else(|e| panic!("{} failed: {}", matchup.label, e));
@@ -303,9 +312,18 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
     // must be emitted) was removed deliberately — the dead-code-detection
     // value it added didn't outweigh the friction of blocking balance
     // changes on coverage-coincidence.
-    let expected_ability: HashSet<String> = EXPECTED_REJECTION_REASONS.iter().map(|s| s.to_string()).collect();
-    let expected_target: HashSet<String> = EXPECTED_TARGET_REJECTION_REASONS.iter().map(|s| s.to_string()).collect();
-    let expected_movement: HashSet<String> = EXPECTED_MOVEMENT_TRIGGERS.iter().map(|s| s.to_string()).collect();
+    let expected_ability: HashSet<String> = EXPECTED_REJECTION_REASONS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let expected_target: HashSet<String> = EXPECTED_TARGET_REJECTION_REASONS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let expected_movement: HashSet<String> = EXPECTED_MOVEMENT_TRIGGERS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
 
     let surprise_ability: Vec<&String> = all_ability.difference(&expected_ability).collect();
     let surprise_target: Vec<&String> = all_target.difference(&expected_target).collect();
@@ -372,7 +390,11 @@ fn count_movement_decisions(path: &PathBuf) -> usize {
         .filter(|line| {
             serde_json::from_str::<serde_json::Value>(line)
                 .ok()
-                .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(|s| s == "movement_decision"))
+                .and_then(|v| {
+                    v.get("kind")
+                        .and_then(|k| k.as_str())
+                        .map(|s| s == "movement_decision")
+                })
                 .unwrap_or(false)
         })
         .count()
@@ -411,7 +433,9 @@ fn movement_decision_volume_is_bounded_in_double_healer_match() {
         let result = run_headless_match_with(
             config,
             true,
-            Some(TraceConfig { output_path: path.clone() }),
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
         )
         .unwrap_or_else(|e| panic!("double-healer seed {} failed: {}", seed, e));
 
@@ -490,7 +514,9 @@ fn rogue_pools_energy_and_lands_kidney_shot() {
         run_headless_match_with(
             config,
             true,
-            Some(TraceConfig { output_path: path.clone() }),
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
         )
         .unwrap_or_else(|e| panic!("Rogue v Priest seed {} failed: {}", seed, e));
 
@@ -537,7 +563,9 @@ fn rogue_pools_energy_and_lands_kidney_shot() {
     assert!(
         ss >= 1,
         "pooling starved Sinister Strike entirely (seed {}): kidney={} ss={}",
-        seed, kidney, ss,
+        seed,
+        kidney,
+        ss,
     );
     println!(
         "rogue pooling regression: seed {} — {} Kidney Shot(s), {} Sinister Strike(s), {} pooling holds",

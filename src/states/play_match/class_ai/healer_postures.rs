@@ -14,17 +14,16 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, mask_and_los_bitmask, score_directions, AnchorConstraint,
-    ScorerInputs,
+    compass_directions_16, mask_and_los_bitmask, score_directions, AnchorConstraint, ScorerInputs,
 };
-use crate::states::play_match::components::{HealerPosture, MovementDirective, MovementGoal, Posture};
+use crate::states::play_match::components::{
+    HealerPosture, MovementDirective, MovementGoal, Posture,
+};
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementEventBuilder, MovementGoalKind, MovementTrigger,
     Posture as TracePosture, TargetView,
 };
-use crate::states::play_match::map_geometry::{
-    has_line_of_sight, EYE_HEIGHT,
-};
+use crate::states::play_match::map_geometry::{has_line_of_sight, EYE_HEIGHT};
 use crate::states::play_match::movement_config::{MovementWeights, SharedMovementConfig};
 
 use super::{pressing_when_ahead, CombatContext, CombatantInfo};
@@ -68,7 +67,10 @@ pub(super) fn apply_cover_suppression(
     suppress: bool,
 ) -> MovementWeights {
     if suppress && weights.cover_pull > 0.0 {
-        MovementWeights { cover_pull: 0.0, ..*weights }
+        MovementWeights {
+            cover_pull: 0.0,
+            ..*weights
+        }
     } else {
         *weights
     }
@@ -334,11 +336,6 @@ pub(super) fn medic_chase_target<'c>(
 // obstacle-free maps, so BasicArena stays byte-identical.
 // ---------------------------------------------------------------------------
 
-
-
-
-
-
 /// Whether the medic chase should override the normal movement tick this frame:
 /// current posture FREE or PRESSURED (never DIP — its own teammate-HP abort
 /// composes, handing control back so the medic picks up the next decision — nor
@@ -535,7 +532,10 @@ pub(super) fn escape_tick(
         builder.chosen_direction([chosen.x, chosen.y]);
         let (masked, los) = mask_and_los_bitmask(&compass_directions_16(), &inputs);
         builder.masked(masked);
-        builder.scorer_term("cover_pull", cover_pull_term(chosen, &inputs, eff_weights.cover_pull));
+        builder.scorer_term(
+            "cover_pull",
+            cover_pull_term(chosen, &inputs, eff_weights.cover_pull),
+        );
         if los != 0 {
             builder.los_masked(los);
         }
@@ -587,8 +587,7 @@ pub(super) fn healer_pressured_tick_shared(
     // committed window lapses (or the directive died — e.g. expired across a
     // heal cast). The scorer's commitment bonus applies only AT re-evaluation;
     // the two governors never stack.
-    let window_open =
-        directive.map_or(false, |d| now < d.committed_until && now < d.expires);
+    let window_open = directive.map_or(false, |d| now < d.committed_until && now < d.expires);
     if window_open && !transitioned {
         return;
     }
@@ -682,7 +681,10 @@ pub(super) fn healer_pressured_tick_shared(
         let (intent, focus) = if has_partner {
             // `OccupyCover` is defined against the healer's own ally and the
             // enemy casters, not against a focal unit.
-            (crate::states::play_match::team_plan::RoleIntent::OccupyCover, None)
+            (
+                crate::states::play_match::team_plan::RoleIntent::OccupyCover,
+                None,
+            )
         } else {
             let target_pos = ctx
                 .self_info()
@@ -690,14 +692,13 @@ pub(super) fn healer_pressured_tick_shared(
                 .and_then(|t| ctx.combatants.get(&t))
                 .filter(|t| t.is_alive)
                 .map(|t| Vec2::new(t.position.x, t.position.z));
-            (crate::states::play_match::team_plan::RoleIntent::HoldRange, target_pos)
+            (
+                crate::states::play_match::team_plan::RoleIntent::HoldRange,
+                target_pos,
+            )
         };
-        let spot = crate::states::play_match::team_solve::solve_position(
-            intent,
-            entity,
-            &world,
-            focus,
-        );
+        let spot =
+            crate::states::play_match::team_solve::solve_position(intent, entity, &world, focus);
         // A `Point` goal, not a bearing: the chosen spot can be tens of yards
         // off and behind a pillar, and `Point` is the branch that tangent-steers
         // around one. `None` means the solve is already satisfied here — hold,
@@ -786,8 +787,6 @@ pub(super) fn healer_pressured_tick_shared(
     // healer is never pulled into cover while an ally is dying (R11).
     let eff_weights = deny_weights(entity, my_pos, ctx, shared, weights);
 
-
-
     let chosen = score_directions(&compass_directions_16(), &inputs, &eff_weights);
     if chosen == Vec2::ZERO {
         return; // defensive — 16 candidates always yield a direction
@@ -833,7 +832,10 @@ pub(super) fn healer_pressured_tick_shared(
             builder.chosen_direction([chosen.x, chosen.y]);
             let (masked, los) = mask_and_los_bitmask(&compass_directions_16(), &inputs);
             builder.masked(masked);
-            builder.scorer_term("cover_pull", cover_pull_term(chosen, &inputs, eff_weights.cover_pull));
+            builder.scorer_term(
+                "cover_pull",
+                cover_pull_term(chosen, &inputs, eff_weights.cover_pull),
+            );
             if los != 0 {
                 builder.los_masked(los);
             }
@@ -875,7 +877,11 @@ mod tests {
     use crate::states::play_match::map_geometry::ObstacleVolume;
 
     fn priest_like() -> MovementWeights {
-        MovementWeights { cover_pull: 1.5, threat_repulsion: 3.0, ..MovementWeights::default() }
+        MovementWeights {
+            cover_pull: 1.5,
+            threat_repulsion: 3.0,
+            ..MovementWeights::default()
+        }
     }
 
     /// Scenario 1 (the suppression seam): while a teammate needs saving, the
@@ -885,10 +891,22 @@ mod tests {
     fn cover_suppressed_when_teammate_needs_saving() {
         let w = priest_like();
         let eff = apply_cover_suppression(&w, true);
-        assert_eq!(eff.cover_pull, 0.0, "cover_pull must be zeroed under urgency");
-        assert_eq!(eff.threat_repulsion, w.threat_repulsion, "threat_repulsion untouched");
-        assert_eq!(eff.corner_penalty, w.corner_penalty, "corner_penalty untouched");
-        assert_eq!(eff.commitment_bonus, w.commitment_bonus, "commitment_bonus untouched");
+        assert_eq!(
+            eff.cover_pull, 0.0,
+            "cover_pull must be zeroed under urgency"
+        );
+        assert_eq!(
+            eff.threat_repulsion, w.threat_repulsion,
+            "threat_repulsion untouched"
+        );
+        assert_eq!(
+            eff.corner_penalty, w.corner_penalty,
+            "corner_penalty untouched"
+        );
+        assert_eq!(
+            eff.commitment_bonus, w.commitment_bonus,
+            "commitment_bonus untouched"
+        );
     }
 
     /// No teammate in danger → weights pass through unchanged (denial stays on).
@@ -896,14 +914,20 @@ mod tests {
     fn cover_active_when_team_healthy() {
         let w = priest_like();
         let eff = apply_cover_suppression(&w, false);
-        assert_eq!(eff.cover_pull, w.cover_pull, "cover_pull stays on when no teammate is dying");
+        assert_eq!(
+            eff.cover_pull, w.cover_pull,
+            "cover_pull stays on when no teammate is dying"
+        );
     }
 
     /// A class with denial disabled (`cover_pull == 0`) is a no-op copy even
     /// while a teammate is dying — no accidental sign flips off the deny path.
     #[test]
     fn suppression_noop_when_cover_disabled() {
-        let w = MovementWeights { cover_pull: 0.0, ..MovementWeights::default() };
+        let w = MovementWeights {
+            cover_pull: 0.0,
+            ..MovementWeights::default()
+        };
         assert_eq!(apply_cover_suppression(&w, true).cover_pull, 0.0);
     }
 
@@ -912,9 +936,15 @@ mod tests {
     #[test]
     fn pressing_when_ahead_is_inclusive_at_margin() {
         let margin = 0.2;
-        assert!(pressing_when_ahead(margin, margin), ">= is inclusive at the margin");
+        assert!(
+            pressing_when_ahead(margin, margin),
+            ">= is inclusive at the margin"
+        );
         assert!(pressing_when_ahead(0.5, margin), "clearly ahead presses");
-        assert!(!pressing_when_ahead(margin - 1e-4, margin), "just under the margin does not press");
+        assert!(
+            !pressing_when_ahead(margin - 1e-4, margin),
+            "just under the margin does not press"
+        );
         assert!(!pressing_when_ahead(0.0, margin), "level does not press");
         assert!(!pressing_when_ahead(-0.5, margin), "behind never presses");
     }
@@ -935,7 +965,10 @@ mod tests {
         assert_eq!(level.cover_pull, w.cover_pull, "level team keeps denying");
         // Behind → denial stays on.
         let behind = apply_cover_suppression(&w, pressing_when_ahead(-0.5, margin));
-        assert_eq!(behind.cover_pull, w.cover_pull, "trailing team keeps denying");
+        assert_eq!(
+            behind.cover_pull, w.cover_pull,
+            "trailing team keeps denying"
+        );
     }
 
     /// The `cover_pull` trace term reports 0 on an obstacle-free map (no
@@ -952,7 +985,7 @@ mod tests {
             ..Default::default()
         };
         let chosen = Vec2::new(0.0, 1.0); // +Z: steps to (0, -1), on the axis
-        // Obstacle-free: never occluded → 0 regardless of weight.
+                                          // Obstacle-free: never occluded → 0 regardless of weight.
         assert_eq!(cover_pull_term(chosen, &base, 1.5), 0.0);
 
         // A thin pillar between the step and the threat occludes it → weight × 1.
@@ -989,7 +1022,10 @@ mod tests {
         // Occluded but healthy → not in danger.
         assert_eq!(pick_medic_target(&[(e(1), 0.8, true)], threshold), None);
         // Occluded AND low → chase.
-        assert_eq!(pick_medic_target(&[(e(1), 0.2, true)], threshold), Some(e(1)));
+        assert_eq!(
+            pick_medic_target(&[(e(1), 0.2, true)], threshold),
+            Some(e(1))
+        );
         // Exactly at the threshold does NOT qualify (strict <).
         assert_eq!(pick_medic_target(&[(e(1), 0.5, true)], threshold), None);
     }

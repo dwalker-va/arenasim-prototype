@@ -209,9 +209,7 @@ impl ArenaBounds {
                 let onset = corner_sum * EDGE_PENALTY_ONSET_FRACTION;
                 ((x.abs() + z.abs()) - onset) / (corner_sum - onset)
             }
-            ArenaBounds::Bowl {
-                semi_x, semi_z, ..
-            } => {
+            ArenaBounds::Bowl { semi_x, semi_z, .. } => {
                 // Normalized ellipse radius is already 1.0 at the wall.
                 let r = ellipse_radius(x, z, semi_x, semi_z);
                 (r - EDGE_PENALTY_ONSET_FRACTION) / (1.0 - EDGE_PENALTY_ONSET_FRACTION)
@@ -255,7 +253,9 @@ impl ArenaBounds {
         match *self {
             // Historical placement: just inboard of the spawn line, with the bar
             // fan roughly matching the arena's short axis.
-            ArenaBounds::Octagon { half_x, half_z, .. } => (half_x - WALL_OFFSET - 3.0, half_z * 0.4),
+            ArenaBounds::Octagon { half_x, half_z, .. } => {
+                (half_x - WALL_OFFSET - 3.0, half_z * 0.4)
+            }
             // The room mouth, where the corridor meets the bowl.
             ArenaBounds::Bowl {
                 semi_x,
@@ -334,7 +334,14 @@ impl ArenaBounds {
                 pts.push(Vec2::new(far, mouth));
                 pts.push(Vec2::new(ellipse_x_at(mouth, ax, az), mouth));
                 // Upper arc: from just past the +x mouth around to the -x mouth.
-                arc_points(ax, az, mouth_angle, std::f32::consts::PI - mouth_angle, segments, &mut pts);
+                arc_points(
+                    ax,
+                    az,
+                    mouth_angle,
+                    std::f32::consts::PI - mouth_angle,
+                    segments,
+                    &mut pts,
+                );
                 // -x gate mouth.
                 pts.push(Vec2::new(-ellipse_x_at(mouth, ax, az), mouth));
                 pts.push(Vec2::new(-far, mouth));
@@ -430,8 +437,14 @@ mod tests {
         assert_eq!(outline.len(), 8);
         let max_x = outline.iter().map(|p| p.x).fold(f32::MIN, f32::max);
         let max_z = outline.iter().map(|p| p.y).fold(f32::MIN, f32::max);
-        assert!((max_x - 38.0).abs() < 1e-3, "floor half-x should be 38, got {max_x}");
-        assert!((max_z - 23.0).abs() < 1e-3, "floor half-z should be 23, got {max_z}");
+        assert!(
+            (max_x - 38.0).abs() < 1e-3,
+            "floor half-x should be 38, got {max_x}"
+        );
+        assert!(
+            (max_z - 23.0).abs() < 1e-3,
+            "floor half-z should be 23, got {max_z}"
+        );
         // The chamfer: the vertex on the +x edge sits at z = 23 - 10 = 13.
         let cut_vertex = outline
             .iter()
@@ -549,7 +562,10 @@ mod tests {
         // onto the ellipse rather than being dragged into the corridor.
         let shoulder = Vec3::new(62.0, 1.0, 20.0);
         let c = b.clamp(shoulder);
-        assert!(b.contains(c), "shoulder clamp left {shoulder:?} outside at {c:?}");
+        assert!(
+            b.contains(c),
+            "shoulder clamp left {shoulder:?} outside at {c:?}"
+        );
         assert!(
             c.z.abs() > 8.0,
             "shoulder point should clamp onto the bowl, not the corridor: {c:?}"
@@ -591,12 +607,7 @@ mod tests {
         let corner_sum = 48.88_f32;
         let onset = corner_sum * 0.7;
         let b = ArenaBounds::default();
-        for (x, z) in [
-            (20.0_f32, 10.0_f32),
-            (30.0, 15.0),
-            (36.0, 12.0),
-            (5.0, 5.0),
-        ] {
+        for (x, z) in [(20.0_f32, 10.0_f32), (30.0, 15.0), (36.0, 12.0), (5.0, 5.0)] {
             let expected = ((x.abs() + z.abs()) - onset) / (corner_sum - onset);
             assert_eq!(b.edge_closeness(x, z), expected, "at ({x}, {z})");
         }

@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Fear Visual Effect System
@@ -231,14 +231,18 @@ pub fn update_fear_mote_emitters(
         // First feared tick: attach the timer and wait for the next frame. A
         // fresh emitter avoids inheriting a stale accumulator across re-fears.
         let Some(mut emitter) = emitter else {
-            commands.entity(entity).try_insert(FearMoteEmitter::default());
+            commands
+                .entity(entity)
+                .try_insert(FearMoteEmitter::default());
             continue;
         };
 
         emitter.spawn_accumulator += dt;
         while emitter.spawn_accumulator >= FEAR_MOTE_INTERVAL {
             emitter.spawn_accumulator -= FEAR_MOTE_INTERVAL;
-            let seed = entity.index().wrapping_add(emitter.motes_spawned.wrapping_mul(7));
+            let seed = entity
+                .index()
+                .wrapping_add(emitter.motes_spawned.wrapping_mul(7));
             emitter.motes_spawned = emitter.motes_spawned.wrapping_add(1);
 
             // Jittered spawn point around the torso, rising with slight drift.
@@ -282,7 +286,11 @@ pub fn update_fear_mote_emitters(
 pub fn update_fear_motes(
     time: Res<Time>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut motes: Query<(&mut FearMote, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut motes: Query<(
+        &mut FearMote,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
 ) {
     let dt = time.delta_secs();
     for (mut mote, mut transform, material_handle) in motes.iter_mut() {
@@ -319,8 +327,8 @@ pub fn update_fear_shroud(
     mut shrouds: Query<(&mut Transform, &MeshMaterial3d<StandardMaterial>), With<FearShroud>>,
 ) {
     // A 0..1 breath phase: 0 at the trough, 1 at the peak.
-    let phase = 0.5
-        + 0.5 * (time.elapsed_secs() * std::f32::consts::TAU / FEAR_SHROUD_PERIOD).sin();
+    let phase =
+        0.5 + 0.5 * (time.elapsed_secs() * std::f32::consts::TAU / FEAR_SHROUD_PERIOD).sin();
     for (mut transform, material) in shrouds.iter_mut() {
         // Subtle swell about the fitted rest size — a labored terror breath.
         transform.scale = Vec3::splat(1.0 + FEAR_SHROUD_SWELL * phase);
@@ -397,7 +405,11 @@ pub(crate) fn spawn_fear_flash(
 /// Time-driven (never gated on sim movement — the fixed-timestep-strobe trap).
 pub fn update_fear_flashes(
     time: Res<Time>,
-    mut flashes: Query<(&mut FearFlash, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut flashes: Query<(
+        &mut FearFlash,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let dt = time.delta_secs();
@@ -480,7 +492,10 @@ fn spawn_fear_shatter(
 
     for i in 0..FEAR_SHARD_COUNT {
         // Deterministic per-shard variation (visual-only hash, not GameRng).
-        let seed = unit_pos.x.to_bits().wrapping_add(i.wrapping_mul(2_654_435_761));
+        let seed = unit_pos
+            .x
+            .to_bits()
+            .wrapping_add(i.wrapping_mul(2_654_435_761));
         let j = |k: u32| fear_mote_jitter(seed.wrapping_add(k));
 
         // Ring position around the fitted shroud, spread over its height.
@@ -531,7 +546,11 @@ fn spawn_fear_shatter(
 pub fn update_fear_shards(
     time: Res<Time>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut shards: Query<(&mut FearShard, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut shards: Query<(
+        &mut FearShard,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
 ) {
     let dt = time.delta_secs();
     for (mut shard, mut transform, material_handle) in shards.iter_mut() {
@@ -544,8 +563,12 @@ pub fn update_fear_shards(
         let life_ratio = (shard.lifetime / shard.initial_lifetime).clamp(0.0, 1.0);
         if let Some(material) = materials.get_mut(&material_handle.0) {
             let base = FEAR_SHROUD_COLOR.to_srgba();
-            material.base_color =
-                Color::srgba(base.red, base.green, base.blue, FEAR_SHARD_ALPHA * life_ratio);
+            material.base_color = Color::srgba(
+                base.red,
+                base.green,
+                base.blue,
+                FEAR_SHARD_ALPHA * life_ratio,
+            );
         }
     }
 }

@@ -389,22 +389,47 @@ pub enum NoActionReason {
 /// match exercises the new variant.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum RejectionReason {
-    OutOfRange { distance: f32, max: f32 },
-    WithinDeadZone { distance: f32, min: f32 },
-    OnCooldown { remaining: f32 },
-    InsufficientMana { have: f32, need: f32 },
-    InsufficientResource { resource: ResourceKind, have: f32, need: f32 },
-    SilencedOrLocked { school: SpellSchool },
+    OutOfRange {
+        distance: f32,
+        max: f32,
+    },
+    WithinDeadZone {
+        distance: f32,
+        min: f32,
+    },
+    OnCooldown {
+        remaining: f32,
+    },
+    InsufficientMana {
+        have: f32,
+        need: f32,
+    },
+    InsufficientResource {
+        resource: ResourceKind,
+        have: f32,
+        need: f32,
+    },
+    SilencedOrLocked {
+        school: SpellSchool,
+    },
     TargetImmune,
-    TargetAlreadyCCd { cc_type: AuraType },
-    DRImmune { category: DRCategory },
+    TargetAlreadyCCd {
+        cc_type: AuraType,
+    },
+    DRImmune {
+        category: DRCategory,
+    },
     FriendlyBreakableCC,
     SelfIncapacitated,
     Rooted,
-    LowerPriorityThanChosen { chosen: AbilityType },
+    LowerPriorityThanChosen {
+        chosen: AbilityType,
+    },
     AlreadyApplied,
     NoValidTarget,
-    PreconditionUnmet { note: String },
+    PreconditionUnmet {
+        note: String,
+    },
     /// Pet is below the Heel HP threshold (25%). Emitted from pet_ai_system
     /// when the pet retreats to the owner's flank and suppresses ability
     /// execution. Hunter-dispatched PetCommands targeting this pet are

@@ -26,7 +26,9 @@
 
 use egui_kittest::Harness;
 
-use arenasim::states::configure_match_ui::{draw_configure_match, CharacterPickerState, ClassIcons};
+use arenasim::states::configure_match_ui::{
+    draw_configure_match, CharacterPickerState, ClassIcons,
+};
 use arenasim::states::match_config::{ArenaMap, CharacterClass, MatchConfig};
 use arenasim::states::play_match::map_config::MapGeometryConfig;
 use arenasim::ui::fonts::install_game_fonts;
@@ -58,7 +60,8 @@ fn configure_match_2v2() {
         .with_size([1500.0, 900.0])
         .build(move |ctx| {
             install_game_fonts(ctx);
-            let _ = draw_configure_match(ctx, &mut config, &mut picker, &icons, &map_geometry, None);
+            let _ =
+                draw_configure_match(ctx, &mut config, &mut picker, &icons, &map_geometry, None);
         });
 
     harness.run();
@@ -84,7 +87,8 @@ fn configure_match_picker_open() {
         .with_size([1500.0, 900.0])
         .build(move |ctx| {
             install_game_fonts(ctx);
-            let _ = draw_configure_match(ctx, &mut config, &mut picker, &icons, &map_geometry, None);
+            let _ =
+                draw_configure_match(ctx, &mut config, &mut picker, &icons, &map_geometry, None);
         });
 
     harness.run();

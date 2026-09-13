@@ -29,6 +29,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
+use arenasim::combat::log::CombatLog;
 use arenasim::states::play_match::abilities::{AbilityType, SpellSchool};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
@@ -37,15 +38,13 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     animate_heal_impacts, billboard_heal_impacts, butterfly_center, heal_envelope, heal_style,
-    process_hot_ticks, spawn_heal_impacts, HealAnchor, Ramp, COMBATANT_BODY_RADIUS,
-    FLASH_HEAL_FLASH_DURATION, FLASH_HEAL_RAY_COUNT, FLASH_HEAL_RAY_LENGTH,
-    FLASH_OF_LIGHT_BORROW_INTENSITY, FLASH_OF_LIGHT_DURATION, ARENA_FLOOR_WORLD_Y,
-    HEALING_WAVE_BUTTERFLIES, HEALING_WAVE_ORBIT_RADIUS, HEALING_WAVE_OUTWARD_DRIFT,
-    HEALING_WAVE_UNDERGLOW_LIFT, HEAL_BASE_Y, HEAL_STREAM_WIDTH, HOLY_LIGHT_DURATION,
-    IMPACT_HEAD_Y, TOTEM_PULSE_EMIT_SECS, TOTEM_PULSE_RING_CLEARANCE, TOTEM_PULSE_RING_RADIUS,
-    TOTEM_PULSE_WIDTH,
+    process_hot_ticks, spawn_heal_impacts, HealAnchor, Ramp, ARENA_FLOOR_WORLD_Y,
+    COMBATANT_BODY_RADIUS, FLASH_HEAL_FLASH_DURATION, FLASH_HEAL_RAY_COUNT, FLASH_HEAL_RAY_LENGTH,
+    FLASH_OF_LIGHT_BORROW_INTENSITY, FLASH_OF_LIGHT_DURATION, HEALING_WAVE_BUTTERFLIES,
+    HEALING_WAVE_ORBIT_RADIUS, HEALING_WAVE_OUTWARD_DRIFT, HEALING_WAVE_UNDERGLOW_LIFT,
+    HEAL_BASE_Y, HEAL_STREAM_WIDTH, HOLY_LIGHT_DURATION, IMPACT_HEAD_Y, TOTEM_PULSE_EMIT_SECS,
+    TOTEM_PULSE_RING_CLEARANCE, TOTEM_PULSE_RING_RADIUS, TOTEM_PULSE_WIDTH,
 };
-use arenasim::combat::log::CombatLog;
 use arenasim::CharacterClass;
 
 const TICK: Duration = Duration::from_millis(16);
@@ -70,7 +69,12 @@ impl Harness {
         // (`states/mod.rs`): `billboard` must see the poses `animate` wrote.
         app.add_systems(
             Update,
-            (spawn_heal_impacts, animate_heal_impacts, billboard_heal_impacts).chain(),
+            (
+                spawn_heal_impacts,
+                animate_heal_impacts,
+                billboard_heal_impacts,
+            )
+                .chain(),
         );
         Harness { app }
     }
@@ -122,7 +126,10 @@ impl Harness {
 
     /// Every live mote with its velocity and propagated world position.
     fn motes(&mut self) -> Vec<(Vec3, f32, Vec3)> {
-        let mut q = self.app.world_mut().query::<(&HealMote, &GlobalTransform)>();
+        let mut q = self
+            .app
+            .world_mut()
+            .query::<(&HealMote, &GlobalTransform)>();
         q.iter(self.app.world())
             .map(|(m, g)| (m.velocity, m.age, g.translation()))
             .collect()
@@ -209,7 +216,11 @@ fn the_router_names_the_blessed_mappings() {
 
 #[test]
 fn ramps_are_piecewise_linear_over_the_window() {
-    let r = Ramp { start: 10.0, mid: 20.0, end: 0.0 };
+    let r = Ramp {
+        start: 10.0,
+        mid: 20.0,
+        end: 0.0,
+    };
     assert_eq!(r.at(0.0), 10.0);
     assert_eq!(r.at(0.25), 15.0);
     assert_eq!(r.at(0.5), 20.0);
@@ -258,16 +269,28 @@ fn holy_light_is_the_only_falling_head_attached_heal() {
         HealImpactKind::TotemPulse,
     ] {
         let style = heal_style(kind);
-        assert_eq!(style.anchor, HealAnchor::Base, "{kind:?} attaches at the feet");
+        assert_eq!(
+            style.anchor,
+            HealAnchor::Base,
+            "{kind:?} attaches at the feet"
+        );
         for e in &style.emitters {
-            assert!(e.speed > 0.0, "{kind:?} motes must RISE (speed {})", e.speed);
+            assert!(
+                e.speed > 0.0,
+                "{kind:?} motes must RISE (speed {})",
+                e.speed
+            );
         }
     }
     for kind in [HealImpactKind::HolyLight, HealImpactKind::FlashOfLight] {
         let style = heal_style(kind);
         assert_eq!(style.anchor, HealAnchor::Head);
         for e in &style.emitters {
-            assert!(e.speed < 0.0, "{kind:?} motes must FALL (speed {})", e.speed);
+            assert!(
+                e.speed < 0.0,
+                "{kind:?} motes must FALL (speed {})",
+                e.speed
+            );
             assert!(
                 (-0.8301..=-0.5599).contains(&e.speed),
                 "fall speed {} outside the measured -0.56..-0.83 band",
@@ -349,7 +372,10 @@ fn flash_heal_rays_fan_and_motes_rise() {
         h.tick(12); // ~0.19s: flash fully open, motes flowing
 
         let rig_pos = h.rig_pos(rig);
-        assert!(rig_pos.distance(base) < 1e-3, "rig sits at the feet: {rig_pos}");
+        assert!(
+            rig_pos.distance(base) < 1e-3,
+            "rig sits at the feet: {rig_pos}"
+        );
 
         let rays: Vec<(f32, GlobalTransform)> = h
             .sprites()
@@ -377,8 +403,7 @@ fn flash_heal_rays_fan_and_motes_rise() {
             );
             let reach = outer.distance(rig_pos);
             assert!(
-                (FLASH_HEAL_RAY_LENGTH * 0.9..=FLASH_HEAL_RAY_LENGTH * 1.02)
-                    .contains(&reach),
+                (FLASH_HEAL_RAY_LENGTH * 0.9..=FLASH_HEAL_RAY_LENGTH * 1.02).contains(&reach),
                 "ray {angle:.2} reaches {reach}yd, not ~{FLASH_HEAL_RAY_LENGTH}yd"
             );
             // In the camera's own frame the ray must lie in the billboard
@@ -434,7 +459,10 @@ fn flash_heal_rays_fan_and_motes_rise() {
         assert_min("flash heal motes", motes.len(), 4);
         for (velocity, _, pos) in &motes {
             assert!(velocity.y > 0.0, "flash heal motes rise, got {velocity}");
-            assert!(pos.y >= base.y - 0.1, "motes start at/above the feet: {pos}");
+            assert!(
+                pos.y >= base.y - 0.1,
+                "motes start at/above the feet: {pos}"
+            );
         }
 
         // Past the flash window the rays have collapsed.
@@ -462,7 +490,11 @@ fn heal_stream_is_narrow_quiet_and_rising() {
     h.land(HealImpactKind::HealStream, recipient);
     h.tick(40); // most of the emit window
 
-    assert_eq!(h.sprites().len(), 0, "the quiet stream has no flash, no glow");
+    assert_eq!(
+        h.sprites().len(),
+        0,
+        "the quiet stream has no flash, no glow"
+    );
 
     let motes = h.motes();
     assert_min("heal stream motes", motes.len(), 8);
@@ -513,9 +545,8 @@ fn healing_wave_butterflies_orbit_the_torso() {
     for (index, _, pos) in &wings {
         let horizontal = Vec2::new(pos.x - base.x, pos.z - base.z).length();
         assert!(
-            (HEALING_WAVE_ORBIT_RADIUS - 0.35..=HEALING_WAVE_ORBIT_RADIUS
-                + HEALING_WAVE_OUTWARD_DRIFT
-                + 0.35)
+            (HEALING_WAVE_ORBIT_RADIUS - 0.35
+                ..=HEALING_WAVE_ORBIT_RADIUS + HEALING_WAVE_OUTWARD_DRIFT + 0.35)
                 .contains(&horizontal),
             "butterfly {index} at radius {horizontal}, outside the orbit band"
         );
@@ -632,7 +663,10 @@ fn healing_wave_glow_wraps_outside_the_body() {
     for g in &glows {
         let centre = g.translation();
         let spine_r = Vec2::new(centre.x - at.x, centre.z - at.z).length();
-        assert!(spine_r < 1e-3, "wrap layer centred on the spine, off by {spine_r}");
+        assert!(
+            spine_r < 1e-3,
+            "wrap layer centred on the spine, off by {spine_r}"
+        );
         seen_heights.push(centre.y - base.y);
         // The world edge of the unit quad, through scale and billboard pose.
         let edge = g.transform_point(Vec3::new(0.5, 0.0, 0.0));
@@ -648,9 +682,8 @@ fn healing_wave_glow_wraps_outside_the_body() {
         // wholly below the floor plane (world y = ARENA_FLOOR_WORLD_Y) is
         // depth-rejected by the opaque floor and reads as missing.
         let half_extent = reach; // billboarded square quad: vertical = radial
-        let visible = ((centre.y + half_extent - ARENA_FLOOR_WORLD_Y)
-            / (2.0 * half_extent))
-            .clamp(0.0, 1.0);
+        let visible =
+            ((centre.y + half_extent - ARENA_FLOOR_WORLD_Y) / (2.0 * half_extent)).clamp(0.0, 1.0);
         assert!(
             visible >= 0.6,
             "wrap layer centred at world y {} with half-extent {half_extent} \
@@ -680,7 +713,10 @@ fn healing_wave_glow_wraps_outside_the_body() {
     let pool = pools[0];
     let pos = pool.translation();
     let spine_r = Vec2::new(pos.x - at.x, pos.z - at.z).length();
-    assert!(spine_r < 1e-3, "the pool sits under the feet, off by {spine_r}");
+    assert!(
+        spine_r < 1e-3,
+        "the pool sits under the feet, off by {spine_r}"
+    );
     // The floor-representative assertion: the arena floor is an opaque
     // depth-writing plane at world y = ARENA_FLOOR_WORLD_Y, so a pool AT or
     // BELOW it never renders (the fourth build's world y = -0.21 defect
@@ -747,7 +783,11 @@ fn a_spent_landing_despawns_with_all_its_pieces() {
     let rig = h.land(HealImpactKind::HealingWave, recipient);
     h.tick(10);
     assert!(h.app.world().get_entity(rig).is_ok());
-    assert_min("healing wave pieces mid-flight", h.wings().len() + h.motes().len(), 16);
+    assert_min(
+        "healing wave pieces mid-flight",
+        h.wings().len() + h.motes().len(),
+        16,
+    );
 
     let life = heal_style(HealImpactKind::HealingWave).life();
     h.tick((life / 0.016).ceil() as u32 + 4);
@@ -780,9 +820,15 @@ fn the_aura_tick_router_names_the_blessed_mapping() {
         HealImpact::kind_for_hot_tick(AuraType::HealingOverTime),
         Some(HealImpactKind::TotemPulse)
     );
-    assert_eq!(HealImpact::kind_for_hot_tick(AuraType::DamageOverTime), None);
+    assert_eq!(
+        HealImpact::kind_for_hot_tick(AuraType::DamageOverTime),
+        None
+    );
     assert_eq!(HealImpact::kind_for_hot_tick(AuraType::Absorb), None);
-    assert_eq!(HealImpact::kind_for_hot_tick(AuraType::MaxHealthIncrease), None);
+    assert_eq!(
+        HealImpact::kind_for_hot_tick(AuraType::MaxHealthIncrease),
+        None
+    );
 }
 
 /// The Healing Stream Totem buff aura, as `totems.rs::make_totem_aura` builds

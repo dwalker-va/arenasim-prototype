@@ -90,7 +90,11 @@ pub fn process_berserker_rage(
                 0
             };
 
-            let caster_id = combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class);
+            let caster_id = combatant_id(
+                pending.caster_team,
+                pending.caster_slot,
+                pending.caster_class,
+            );
 
             // Log activation
             combat_log.log(
@@ -133,8 +137,10 @@ pub fn process_berserker_rage(
 
             // Spawn white "Berserker Rage" FCT on the Warrior (status text stays
             // white per the color budget; the label carries the information)
-            let text_position = transform.translation + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.caster) {
+            let text_position =
+                transform.translation + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.caster)
+            {
                 get_next_fct_offset(&mut fct_state)
             } else {
                 (0.0, 0.0)

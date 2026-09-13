@@ -60,7 +60,11 @@ impl ItemFilters {
     /// Returns `None` when there is no active name filter.
     pub fn name_needle(&self) -> Option<String> {
         let trimmed = self.name_search.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_lowercase()) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_lowercase())
+        }
     }
 
     /// Whether the given item passes all active filters.
@@ -98,7 +102,10 @@ const ARMOR_TYPE_CHIPS: &[(&str, ArmorType)] = &[
 /// Canonical ordering index for slot kinds. Lower values sort first.
 /// Mirrors `ItemSlotType::all()` ordering.
 fn slot_order(slot: ItemSlotType) -> usize {
-    ItemSlotType::all().iter().position(|s| *s == slot).unwrap_or(usize::MAX)
+    ItemSlotType::all()
+        .iter()
+        .position(|s| *s == slot)
+        .unwrap_or(usize::MAX)
 }
 
 // ============================================================================
@@ -166,7 +173,10 @@ pub fn render_index(
                     .color(MUTED),
             );
             ui.add_space(10.0);
-            if ui.button(egui::RichText::new("Clear filters").size(13.0).color(TEXT)).clicked() {
+            if ui
+                .button(egui::RichText::new("Clear filters").size(13.0).color(TEXT))
+                .clicked()
+            {
                 *filters = ItemFilters::default();
             }
         });
@@ -268,7 +278,10 @@ fn render_chip_bar(ui: &mut egui::Ui, filters: &mut ItemFilters, total: usize, v
                 .color(DIM),
         );
 
-        if ui.button(egui::RichText::new("Clear").size(12.5).color(TEXT)).clicked() {
+        if ui
+            .button(egui::RichText::new("Clear").size(12.5).color(TEXT))
+            .clicked()
+        {
             *filters = ItemFilters::default();
         }
     });
@@ -335,12 +348,21 @@ fn item_stat_rows(item: &ItemConfig) -> Vec<(String, String)> {
     if item.is_weapon && (item.attack_damage_min > 0.0 || item.attack_damage_max > 0.0) {
         rows.push((
             "Weapon damage".to_string(),
-            format!("{:.0} – {:.0}", item.attack_damage_min, item.attack_damage_max),
+            format!(
+                "{:.0} – {:.0}",
+                item.attack_damage_min, item.attack_damage_max
+            ),
         ));
         if item.attack_speed > 0.0 {
-            rows.push(("Attack speed".to_string(), format!("{:.1}/s", item.attack_speed)));
+            rows.push((
+                "Attack speed".to_string(),
+                format!("{:.1}/s", item.attack_speed),
+            ));
             let mid = (item.attack_damage_min + item.attack_damage_max) / 2.0;
-            rows.push(("Damage per second".to_string(), format!("{:.1}", mid * item.attack_speed)));
+            rows.push((
+                "Damage per second".to_string(),
+                format!("{:.1}", mid * item.attack_speed),
+            ));
         }
     }
 
@@ -356,14 +378,30 @@ fn item_stat_rows(item: &ItemConfig) -> Vec<(String, String)> {
     push("Mana regen", item.mana_regen, |v| format!("+{:.1} MP5", v));
     push("Attack power", item.attack_power, |v| format!("+{:.0}", v));
     push("Spell power", item.spell_power, |v| format!("+{:.0}", v));
-    push("Crit chance", item.crit_chance, |v| format!("+{:.1}%", v * 100.0));
-    push("Movement speed", item.movement_speed, |v| format!("+{:.0}%", v * 100.0));
-    push("Fire resistance", item.fire_resistance, |v| format!("+{:.0}", v));
-    push("Frost resistance", item.frost_resistance, |v| format!("+{:.0}", v));
-    push("Shadow resistance", item.shadow_resistance, |v| format!("+{:.0}", v));
-    push("Arcane resistance", item.arcane_resistance, |v| format!("+{:.0}", v));
-    push("Nature resistance", item.nature_resistance, |v| format!("+{:.0}", v));
-    push("Holy resistance", item.holy_resistance, |v| format!("+{:.0}", v));
+    push("Crit chance", item.crit_chance, |v| {
+        format!("+{:.1}%", v * 100.0)
+    });
+    push("Movement speed", item.movement_speed, |v| {
+        format!("+{:.0}%", v * 100.0)
+    });
+    push("Fire resistance", item.fire_resistance, |v| {
+        format!("+{:.0}", v)
+    });
+    push("Frost resistance", item.frost_resistance, |v| {
+        format!("+{:.0}", v)
+    });
+    push("Shadow resistance", item.shadow_resistance, |v| {
+        format!("+{:.0}", v)
+    });
+    push("Arcane resistance", item.arcane_resistance, |v| {
+        format!("+{:.0}", v)
+    });
+    push("Nature resistance", item.nature_resistance, |v| {
+        format!("+{:.0}", v)
+    });
+    push("Holy resistance", item.holy_resistance, |v| {
+        format!("+{:.0}", v)
+    });
 
     rows
 }
@@ -382,27 +420,58 @@ pub fn item_stat_parts(item: &ItemConfig) -> Vec<String> {
 
     if item.is_weapon {
         if item.attack_damage_min > 0.0 || item.attack_damage_max > 0.0 {
-            parts.push(format!("{:.0}-{:.0} Damage", item.attack_damage_min, item.attack_damage_max));
+            parts.push(format!(
+                "{:.0}-{:.0} Damage",
+                item.attack_damage_min, item.attack_damage_max
+            ));
         }
         if item.attack_speed > 0.0 {
             parts.push(format!("{:.1} Speed", item.attack_speed));
         }
     }
 
-    if item.max_health != 0.0 { parts.push(format!("+{:.0} HP", item.max_health)); }
-    if item.max_mana != 0.0 { parts.push(format!("+{:.0} Mana", item.max_mana)); }
-    if item.mana_regen != 0.0 { parts.push(format!("+{:.1} MP5", item.mana_regen)); }
-    if item.attack_power != 0.0 { parts.push(format!("+{:.0} AP", item.attack_power)); }
-    if item.spell_power != 0.0 { parts.push(format!("+{:.0} SP", item.spell_power)); }
-    if item.crit_chance != 0.0 { parts.push(format!("+{:.1}% Crit", item.crit_chance * 100.0)); }
-    if item.movement_speed != 0.0 { parts.push(format!("+{:.0}% Speed", item.movement_speed * 100.0)); }
-    if item.armor != 0.0 { parts.push(format!("{:.0} Armor", item.armor)); }
-    if item.fire_resistance != 0.0 { parts.push(format!("+{:.0} Fire Resist", item.fire_resistance)); }
-    if item.frost_resistance != 0.0 { parts.push(format!("+{:.0} Frost Resist", item.frost_resistance)); }
-    if item.shadow_resistance != 0.0 { parts.push(format!("+{:.0} Shadow Resist", item.shadow_resistance)); }
-    if item.arcane_resistance != 0.0 { parts.push(format!("+{:.0} Arcane Resist", item.arcane_resistance)); }
-    if item.nature_resistance != 0.0 { parts.push(format!("+{:.0} Nature Resist", item.nature_resistance)); }
-    if item.holy_resistance != 0.0 { parts.push(format!("+{:.0} Holy Resist", item.holy_resistance)); }
+    if item.max_health != 0.0 {
+        parts.push(format!("+{:.0} HP", item.max_health));
+    }
+    if item.max_mana != 0.0 {
+        parts.push(format!("+{:.0} Mana", item.max_mana));
+    }
+    if item.mana_regen != 0.0 {
+        parts.push(format!("+{:.1} MP5", item.mana_regen));
+    }
+    if item.attack_power != 0.0 {
+        parts.push(format!("+{:.0} AP", item.attack_power));
+    }
+    if item.spell_power != 0.0 {
+        parts.push(format!("+{:.0} SP", item.spell_power));
+    }
+    if item.crit_chance != 0.0 {
+        parts.push(format!("+{:.1}% Crit", item.crit_chance * 100.0));
+    }
+    if item.movement_speed != 0.0 {
+        parts.push(format!("+{:.0}% Speed", item.movement_speed * 100.0));
+    }
+    if item.armor != 0.0 {
+        parts.push(format!("{:.0} Armor", item.armor));
+    }
+    if item.fire_resistance != 0.0 {
+        parts.push(format!("+{:.0} Fire Resist", item.fire_resistance));
+    }
+    if item.frost_resistance != 0.0 {
+        parts.push(format!("+{:.0} Frost Resist", item.frost_resistance));
+    }
+    if item.shadow_resistance != 0.0 {
+        parts.push(format!("+{:.0} Shadow Resist", item.shadow_resistance));
+    }
+    if item.arcane_resistance != 0.0 {
+        parts.push(format!("+{:.0} Arcane Resist", item.arcane_resistance));
+    }
+    if item.nature_resistance != 0.0 {
+        parts.push(format!("+{:.0} Nature Resist", item.nature_resistance));
+    }
+    if item.holy_resistance != 0.0 {
+        parts.push(format!("+{:.0} Holy Resist", item.holy_resistance));
+    }
 
     parts
 }
@@ -487,15 +556,27 @@ mod tests {
     fn filters_and_across_axes() {
         let items = load_item_definitions().expect("items.ron must load");
         let mut filters = ItemFilters::default();
-        let all = items.iter().filter(|(_, i)| filters.matches(i, None)).count();
+        let all = items
+            .iter()
+            .filter(|(_, i)| filters.matches(i, None))
+            .count();
         assert_eq!(all, items.item_count(), "a default filter hides nothing");
 
         filters.selected_armor_types.insert(ArmorType::Plate);
-        let plate = items.iter().filter(|(_, i)| filters.matches(i, None)).count();
+        let plate = items
+            .iter()
+            .filter(|(_, i)| filters.matches(i, None))
+            .count();
         assert!(plate > 0 && plate < all);
 
         filters.selected_slots.insert(ItemSlotType::Head);
-        let plate_heads = items.iter().filter(|(_, i)| filters.matches(i, None)).count();
-        assert!(plate_heads <= plate, "adding an axis can only narrow the set");
+        let plate_heads = items
+            .iter()
+            .filter(|(_, i)| filters.matches(i, None))
+            .count();
+        assert!(
+            plate_heads <= plate,
+            "adding an axis can only narrow the set"
+        );
     }
 }

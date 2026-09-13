@@ -14,8 +14,8 @@ use arenasim::states::play_match::class_ai::cast_guard::{pre_cast_ok, PreCastOpt
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
 use arenasim::states::play_match::{
-    AbilityDefinitions, AbilityType, ActiveAuras, Aura, AuraType, Combatant, DRTracker, DispelType, ResourceType,
-    SpellSchool,
+    AbilityDefinitions, AbilityType, ActiveAuras, Aura, AuraType, Combatant, DRTracker, DispelType,
+    ResourceType, SpellSchool,
 };
 
 /// Build a minimal CombatantInfo for a target. Only fields that pre_cast_ok or
@@ -104,8 +104,8 @@ impl TestWorld {
 
     fn ctx(&self) -> CombatContext<'_> {
         CombatContext {
-        ai_profile: Default::default(),
-        bounds: Default::default(),
+            ai_profile: Default::default(),
+            bounds: Default::default(),
             combatants: &self.combatants,
             active_auras: &self.active_auras,
             dr_trackers: &self.dr_trackers,
@@ -222,7 +222,9 @@ fn friendly_cc_guard_blocks_when_target_polymorphed_by_ally() {
     let mut world = TestWorld::new(CharacterClass::Warlock);
     // An ally on team 1 polymorphed the team-2 target — shouldn't blow it up.
     let ally = Entity::from_raw(3);
-    world.combatants.insert(ally, target_info(ally, 1, CharacterClass::Mage));
+    world
+        .combatants
+        .insert(ally, target_info(ally, 1, CharacterClass::Mage));
     let mut poly = make_aura(AuraType::Polymorph, "Polymorph", Some(ally));
     poly.break_on_damage_threshold = 0.0; // breaks on any damage
     world.active_auras.insert(world.target, vec![poly]);
@@ -239,7 +241,10 @@ fn friendly_cc_guard_blocks_when_target_polymorphed_by_ally() {
         None,
         Some((world.target, world.target_pos)),
         &world.ctx(),
-        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+        PreCastOpts {
+            check_friendly_cc: true,
+            ..Default::default()
+        },
     ));
 }
 
@@ -247,7 +252,9 @@ fn friendly_cc_guard_blocks_when_target_polymorphed_by_ally() {
 fn friendly_cc_guard_passes_when_opt_disabled() {
     let mut world = TestWorld::new(CharacterClass::Warlock);
     let ally = Entity::from_raw(3);
-    world.combatants.insert(ally, target_info(ally, 1, CharacterClass::Mage));
+    world
+        .combatants
+        .insert(ally, target_info(ally, 1, CharacterClass::Mage));
     let mut poly = make_aura(AuraType::Polymorph, "Polymorph", Some(ally));
     poly.break_on_damage_threshold = 0.0;
     world.active_auras.insert(world.target, vec![poly]);
@@ -279,7 +286,9 @@ fn friendly_dots_guard_blocks_polymorph_on_dotted_target() {
     let mut world = TestWorld::new(CharacterClass::Mage);
     // Warlock teammate already has Corruption ticking on the target.
     let ally = Entity::from_raw(3);
-    world.combatants.insert(ally, target_info(ally, 1, CharacterClass::Warlock));
+    world
+        .combatants
+        .insert(ally, target_info(ally, 1, CharacterClass::Warlock));
     let dot = make_aura(AuraType::DamageOverTime, "Corruption", Some(ally));
     world.active_auras.insert(world.target, vec![dot]);
 
@@ -295,7 +304,10 @@ fn friendly_dots_guard_blocks_polymorph_on_dotted_target() {
         None,
         Some((world.target, world.target_pos)),
         &world.ctx(),
-        PreCastOpts { check_friendly_dots: true, ..Default::default() },
+        PreCastOpts {
+            check_friendly_dots: true,
+            ..Default::default()
+        },
     ));
 }
 
@@ -321,7 +333,10 @@ fn target_immunity_guard_blocks_when_target_has_damage_immunity() {
         None,
         Some((world.target, world.target_pos)),
         &world.ctx(),
-        PreCastOpts { check_target_immune: true, ..Default::default() },
+        PreCastOpts {
+            check_target_immune: true,
+            ..Default::default()
+        },
     ));
 }
 
@@ -334,7 +349,9 @@ fn silence_blocks_mana_caster() {
     let world = TestWorld::new(CharacterClass::Priest);
     let mut combatant = caster_combatant(CharacterClass::Priest);
     assert_eq!(combatant.resource_type, ResourceType::Mana);
-    let auras = ActiveAuras { auras: vec![make_aura(AuraType::Silence, "UA Backlash", None)] };
+    let auras = ActiveAuras {
+        auras: vec![make_aura(AuraType::Silence, "UA Backlash", None)],
+    };
     combatant.current_mana = combatant.max_mana;
 
     let abilities = defs();
@@ -363,7 +380,9 @@ fn silence_does_not_block_rage_user() {
     let mut combatant = caster_combatant(CharacterClass::Warrior);
     assert_eq!(combatant.resource_type, ResourceType::Rage);
     combatant.current_mana = combatant.max_mana; // rage is stored in current_mana
-    let auras = ActiveAuras { auras: vec![make_aura(AuraType::Silence, "UA Backlash", None)] };
+    let auras = ActiveAuras {
+        auras: vec![make_aura(AuraType::Silence, "UA Backlash", None)],
+    };
 
     let abilities = defs();
     let def = abilities.get_unchecked(&AbilityType::Rend);
@@ -384,7 +403,9 @@ fn silence_does_not_block_rage_user() {
 fn bypass_silence_lets_caster_through() {
     let world = TestWorld::new(CharacterClass::Priest);
     let combatant = caster_combatant(CharacterClass::Priest);
-    let auras = ActiveAuras { auras: vec![make_aura(AuraType::Silence, "UA Backlash", None)] };
+    let auras = ActiveAuras {
+        auras: vec![make_aura(AuraType::Silence, "UA Backlash", None)],
+    };
 
     let abilities = defs();
     let def = abilities.get_unchecked(&AbilityType::FlashHeal);
@@ -397,7 +418,10 @@ fn bypass_silence_lets_caster_through() {
         Some(&auras),
         Some((world.target, world.target_pos)),
         &world.ctx(),
-        PreCastOpts { bypass_silence: true, ..Default::default() },
+        PreCastOpts {
+            bypass_silence: true,
+            ..Default::default()
+        },
     ));
 }
 
@@ -417,7 +441,9 @@ fn spell_school_lockout_blocks_matching_school() {
     // The lookup table in `is_spell_school_locked` maps magnitude=1 → Frost.
     let mut lockout = make_aura(AuraType::SpellSchoolLockout, "Pummel", None);
     lockout.magnitude = 1.0;
-    let auras = ActiveAuras { auras: vec![lockout] };
+    let auras = ActiveAuras {
+        auras: vec![lockout],
+    };
 
     assert!(!pre_cast_ok(
         AbilityType::Frostbolt,
@@ -466,7 +492,10 @@ fn classify_returns_friendly_breakable_cc_when_opt_in_and_friendly_cc_present() 
         self_entity: world.caster,
     };
 
-    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     let reason = classify_pre_cast_failure(
         AbilityType::Frostbolt,
         def,
@@ -477,7 +506,11 @@ fn classify_returns_friendly_breakable_cc_when_opt_in_and_friendly_cc_present() 
         &ctx,
         opts,
     );
-    assert!(matches!(reason, RejectionReason::FriendlyBreakableCC), "got: {:?}", reason);
+    assert!(
+        matches!(reason, RejectionReason::FriendlyBreakableCC),
+        "got: {:?}",
+        reason
+    );
 }
 
 #[test]
@@ -530,7 +563,13 @@ fn classify_resource_kind_matches_class() {
         PreCastOpts::default(),
     );
     assert!(
-        matches!(reason, RejectionReason::InsufficientResource { resource: ResourceKind::Rage, .. }),
+        matches!(
+            reason,
+            RejectionReason::InsufficientResource {
+                resource: ResourceKind::Rage,
+                ..
+            }
+        ),
         "Warrior gets InsufficientResource{{Rage}}: {:?}",
         reason
     );
@@ -551,7 +590,13 @@ fn classify_resource_kind_matches_class() {
         PreCastOpts::default(),
     );
     assert!(
-        matches!(reason, RejectionReason::InsufficientResource { resource: ResourceKind::Energy, .. }),
+        matches!(
+            reason,
+            RejectionReason::InsufficientResource {
+                resource: ResourceKind::Energy,
+                ..
+            }
+        ),
         "Rogue gets InsufficientResource{{Energy}}: {:?}",
         reason
     );
@@ -634,7 +679,11 @@ fn los_blocks_hostile_cast_across_pillar() {
         &world.ctx(),
         PreCastOpts::default(),
     );
-    assert!(matches!(reason, RejectionReason::LosBlocked), "got: {:?}", reason);
+    assert!(
+        matches!(reason, RejectionReason::LosBlocked),
+        "got: {:?}",
+        reason
+    );
 }
 
 /// A friendly heal to an ally behind a pillar is rejected too — the gate is

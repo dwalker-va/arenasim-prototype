@@ -11,20 +11,23 @@
 //! 6. Frostbolt (main damage spell with kiting behavior)
 #![allow(clippy::too_many_arguments)]
 
-use bevy::prelude::*;
 use crate::combat::log::CombatLog;
 use crate::states::match_config::MageArmor;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::combat_core::{
+    calculate_cast_time, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice,
+    get_spell_power_bonus_from_slice, roll_crit,
+};
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{
     CRIT_DAMAGE_MULTIPLIER, DEFENSIVE_HP_THRESHOLD, GCD, MELEE_RANGE, SAFE_KITING_DISTANCE,
 };
-use crate::states::play_match::combat_core::{calculate_cast_time, roll_crit, get_attack_power_bonus_from_slice, get_spell_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, RejectionReason,
 };
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
+use bevy::prelude::*;
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 
@@ -52,18 +55,35 @@ pub fn decide_mage_action(
         return false;
     }
 
-    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos) else {
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos)
+    else {
         return false;
     };
 
     // Priority 1: Ice Barrier (self-shield)
-    if try_ice_barrier(commands, combat_log, abilities, entity, combatant, ctx, &mut builder) {
+    if try_ice_barrier(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        ctx,
+        &mut builder,
+    ) {
         builder.finish();
         return true;
     }
 
     // Priority 2: Mage Armor (self-buff based on preference)
-    if try_mage_armor(commands, combat_log, abilities, entity, combatant, ctx, &mut builder) {
+    if try_mage_armor(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        ctx,
+        &mut builder,
+    ) {
         builder.finish();
         return true;
     }
@@ -154,7 +174,8 @@ fn try_ice_barrier(
     let barrier_def = abilities.get_unchecked(&ice_barrier);
 
     // Check if already shielded
-    let has_absorb_shield = ctx.active_auras
+    let has_absorb_shield = ctx
+        .active_auras
         .get(&entity)
         .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::Absorb))
         .unwrap_or(false);
@@ -178,7 +199,12 @@ fn try_ice_barrier(
     }
 
     if let Some(remaining) = combatant.ability_cooldowns.get(&ice_barrier) {
-        builder.reject(ice_barrier, RejectionReason::OnCooldown { remaining: *remaining });
+        builder.reject(
+            ice_barrier,
+            RejectionReason::OnCooldown {
+                remaining: *remaining,
+            },
+        );
         return false;
     }
 
@@ -196,10 +222,20 @@ fn try_ice_barrier(
     builder.choose(ice_barrier, Some(entity), true);
 
     combatant.current_mana -= barrier_def.mana_cost;
-    combatant.ability_cooldowns.insert(ice_barrier, barrier_def.cooldown);
+    combatant
+        .ability_cooldowns
+        .insert(ice_barrier, barrier_def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Ice Barrier", None, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Ice Barrier",
+        None,
+        "casts",
+    );
 
     if let Some(aura_pending) = AuraPending::from_ability(entity, entity, barrier_def) {
         commands.spawn(aura_pending);
@@ -231,7 +267,8 @@ fn try_mage_armor(
         MageArmor::MoltenArmor => (AbilityType::MoltenArmor, AuraType::CritChanceIncrease),
     };
 
-    let already_buffed = ctx.active_auras
+    let already_buffed = ctx
+        .active_auras
         .get(&entity)
         .map(|auras| auras.iter().any(|a| a.effect_type == aura_check))
         .unwrap_or(false);
@@ -259,7 +296,15 @@ fn try_mage_armor(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, None, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        None,
+        "casts",
+    );
 
     if let Some(aura_pending) = AuraPending::from_ability(entity, entity, def) {
         commands.spawn(aura_pending);
@@ -300,9 +345,14 @@ fn try_arcane_intellect(
         if !info.class.uses_mana() {
             continue;
         }
-        let has_arcane_intellect = ctx.active_auras
+        let has_arcane_intellect = ctx
+            .active_auras
             .get(ally_entity)
-            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::MaxManaIncrease))
+            .map(|auras| {
+                auras
+                    .iter()
+                    .any(|a| a.effect_type == AuraType::MaxManaIncrease)
+            })
             .unwrap_or(false);
         if has_arcane_intellect {
             continue;
@@ -349,7 +399,15 @@ fn try_arcane_intellect(
     combatant.global_cooldown = GCD;
 
     let target_tuple = ctx.combatants.get(&buff_target).map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Arcane Intellect", target_tuple, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Arcane Intellect",
+        target_tuple,
+        "casts",
+    );
 
     if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
         commands.spawn(aura_pending);
@@ -384,16 +442,22 @@ fn try_frost_nova(
     let nova_def = abilities.get_unchecked(&frost_nova);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(frost_nova, nova_def, combatant, my_pos, auras, None, ctx, opts) {
+    if !pre_cast_ok(
+        frost_nova, nova_def, combatant, my_pos, auras, None, ctx, opts,
+    ) {
         builder.reject(
             frost_nova,
-            classify_pre_cast_failure(frost_nova, nova_def, combatant, my_pos, auras, None, ctx, opts),
+            classify_pre_cast_failure(
+                frost_nova, nova_def, combatant, my_pos, auras, None, ctx, opts,
+            ),
         );
         return false;
     }
 
     let enemies_in_melee_range = ctx.combatants.iter().any(|(_, info)| {
-        info.team != combatant.team && info.is_alive && !info.is_pet
+        info.team != combatant.team
+            && info.is_alive
+            && !info.is_pet
             && my_pos.distance(info.position) <= MELEE_RANGE
     });
 
@@ -431,10 +495,20 @@ fn try_frost_nova(
     ));
 
     combatant.current_mana -= nova_def.mana_cost;
-    combatant.ability_cooldowns.insert(frost_nova, nova_def.cooldown);
+    combatant
+        .ability_cooldowns
+        .insert(frost_nova, nova_def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Frost Nova", None, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Frost Nova",
+        None,
+        "casts",
+    );
 
     // Carry each target's pet-aware combat-log id so the root-CC log below
     // attributes correctly when Frost Nova catches an enemy pet.
@@ -448,16 +522,23 @@ fn try_frost_nova(
         }
     }
 
-    let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);
+    let self_auras = ctx
+        .active_auras
+        .get(&entity)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
     let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
     // Frost Nova scales with SpellPower, so include any spell-power auras (e.g. an
     // ally Shaman's Flametongue totem) — matching the generic hardcast path.
     let sp_bonus = get_spell_power_bonus_from_slice(self_auras);
     let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
     for (target_entity, target_pos, target_id) in &frost_nova_targets {
-        let mut damage = combatant.calculate_ability_damage_config(nova_def, game_rng, ap_bonus, sp_bonus);
+        let mut damage =
+            combatant.calculate_ability_damage_config(nova_def, game_rng, ap_bonus, sp_bonus);
         let is_crit = roll_crit(combatant.crit_chance + crit_bonus, game_rng);
-        if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
+        if is_crit {
+            damage *= CRIT_DAMAGE_MULTIPLIER;
+        }
         frost_nova_damage.push(super::QueuedAoeDamage {
             caster: entity,
             target: *target_entity,
@@ -471,7 +552,9 @@ fn try_frost_nova(
 
         if let Some(aura) = nova_def.applies_aura.as_ref() {
             if !ctx.entity_is_immune(*target_entity) {
-                if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, nova_def) {
+                if let Some(aura_pending) =
+                    AuraPending::from_ability(*target_entity, entity, nova_def)
+                {
                     same_frame_cc_queue.push((*target_entity, aura_pending.aura.clone()));
                     commands.spawn(aura_pending);
                 }
@@ -554,20 +637,18 @@ fn try_polymorph(
     }
 
     // Check if target is already CC'd
-    let already_ccd_type = ctx.active_auras
-        .get(&cc_target)
-        .and_then(|auras| {
-            auras.iter().find_map(|a| {
-                if matches!(
-                    a.effect_type,
-                    AuraType::Stun | AuraType::Fear | AuraType::Root | AuraType::Polymorph
-                ) {
-                    Some(a.effect_type)
-                } else {
-                    None
-                }
-            })
-        });
+    let already_ccd_type = ctx.active_auras.get(&cc_target).and_then(|auras| {
+        auras.iter().find_map(|a| {
+            if matches!(
+                a.effect_type,
+                AuraType::Stun | AuraType::Fear | AuraType::Root | AuraType::Polymorph
+            ) {
+                Some(a.effect_type)
+            } else {
+                None
+            }
+        })
+    });
 
     if let Some(cc_type) = already_ccd_type {
         builder.reject(ability, RejectionReason::TargetAlreadyCCd { cc_type });
@@ -621,12 +702,20 @@ fn try_polymorph(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState::new(ability, cc_target, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, cc_target, cast_time));
 
-    let target_tuple = ctx.combatants
-        .get(&cc_target)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
+    let target_tuple = ctx.combatants.get(&cc_target).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "begins casting",
+    );
 
     info!(
         "Team {} {} starts casting {} on cc_target",
@@ -729,12 +818,20 @@ fn try_frostbolt(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, target_entity, cast_time));
 
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "begins casting",
+    );
 
     info!(
         "Team {} {} starts casting {} on enemy",

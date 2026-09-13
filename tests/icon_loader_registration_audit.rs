@@ -55,17 +55,15 @@ const STATES_MOD_FILE_REL: &str = "src/states/mod.rs";
 /// provably never paints with it. Each entry must say why.
 ///
 /// `(consumer system, resource, state, justification)`
-const ALLOWLIST: &[(&str, &str, &str, &str)] = &[
-    (
-        "results_ui",
-        "ItemIcons",
-        "Results",
-        "Results resolves only Topic::Class and Topic::Ability, so it never \
+const ALLOWLIST: &[(&str, &str, &str, &str)] = &[(
+    "results_ui",
+    "ItemIcons",
+    "Results",
+    "Results resolves only Topic::Class and Topic::Ability, so it never \
          paints an item icon; the parameter is handed to EncyclopediaData and \
          goes unread. Register load_item_icons in the Results chain if that \
          ever changes.",
-    ),
-];
+)];
 
 #[test]
 fn every_state_that_reads_a_lazy_resource_registers_its_loader() {
@@ -97,7 +95,10 @@ fn every_state_that_reads_a_lazy_resource_registers_its_loader() {
     let mut consumers: Vec<(String, String)> = Vec::new();
     for sys in &systems {
         for r in &sys.writes {
-            loaders.entry(r.clone()).or_default().insert(sys.name.clone());
+            loaders
+                .entry(r.clone())
+                .or_default()
+                .insert(sys.name.clone());
         }
         for r in &sys.reads {
             consumers.push((sys.name.clone(), r.clone()));
@@ -106,10 +107,8 @@ fn every_state_that_reads_a_lazy_resource_registers_its_loader() {
 
     let registrations = state_registrations().expect("parse StatesPlugin::build");
 
-    let allowed: BTreeSet<(&str, &str, &str)> = ALLOWLIST
-        .iter()
-        .map(|(c, r, s, _)| (*c, *r, *s))
-        .collect();
+    let allowed: BTreeSet<(&str, &str, &str)> =
+        ALLOWLIST.iter().map(|(c, r, s, _)| (*c, *r, *s)).collect();
 
     let mut checked = 0usize;
     let mut checked_class_icons_in_play_match = false;
@@ -240,7 +239,11 @@ fn system_signatures(
                 }
             }
             if !writes.is_empty() || !reads.is_empty() {
-                out.push(SystemSig { name, writes, reads });
+                out.push(SystemSig {
+                    name,
+                    writes,
+                    reads,
+                });
             }
         }
     }
@@ -327,7 +330,9 @@ fn state_registrations() -> std::io::Result<StateRegistrations> {
     let mut i = 0usize;
     while let Some(m) = add_systems_re.find(&build[i..]) {
         let open = i + m.end() - 1;
-        let Some(block) = param_list(&build, open) else { break };
+        let Some(block) = param_list(&build, open) else {
+            break;
+        };
         let block_end = open + block.len() + 2;
 
         let mut states: BTreeSet<String> = BTreeSet::new();
@@ -341,7 +346,10 @@ fn state_registrations() -> std::io::Result<StateRegistrations> {
             // A named predicate function: read the states out of its body
             // rather than hardcoding what `in_combat_scene` covers today.
             if let Some(body) = find_fn_body(&text, &cap[1]) {
-                for c in Regex::new(r"GameState::(\w+)").unwrap().captures_iter(&body) {
+                for c in Regex::new(r"GameState::(\w+)")
+                    .unwrap()
+                    .captures_iter(&body)
+                {
                     states.insert(c[1].to_string());
                 }
             }

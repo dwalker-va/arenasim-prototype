@@ -15,7 +15,7 @@ pub mod fonts;
 use bevy::prelude::*;
 
 /// Plugin for UI management.
-/// 
+///
 /// Currently, all UI logic is handled per-state in `states/mod.rs` and related modules.
 /// This plugin exists as a placeholder for future shared UI utilities.
 pub struct UiPlugin;

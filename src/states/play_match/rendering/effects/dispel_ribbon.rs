@@ -1,13 +1,13 @@
-use bevy::prelude::*;
+use super::dispel_burst::dispel_burst_colors;
+use super::spell_bolts::soft_dot_texture;
+use crate::states::match_config::CharacterClass;
+use crate::states::play_match::components::*;
 use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
+use bevy::prelude::*;
 use bevy::render::mesh::Indices;
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::PrimitiveTopology;
-use crate::states::play_match::components::*;
-use crate::states::match_config::CharacterClass;
-use super::dispel_burst::dispel_burst_colors;
-use super::spell_bolts::soft_dot_texture;
 
 // ==============================================================================
 // Dispel Ribbon Visual Effects
@@ -136,7 +136,12 @@ fn dispel_ribbon_colors(class: CharacterClass) -> (Color, LinearRgba) {
         // Opaque on screen; the alpha here is inert (see `FADE_TAPER`).
         base.with_alpha(1.0),
         // Trim the emissive so it's a colored sheen + light bloom, not a pure glow.
-        LinearRgba::new(emissive.red * 0.6, emissive.green * 0.6, emissive.blue * 0.6, 1.0),
+        LinearRgba::new(
+            emissive.red * 0.6,
+            emissive.green * 0.6,
+            emissive.blue * 0.6,
+            1.0,
+        ),
     )
 }
 
@@ -173,7 +178,11 @@ pub fn ribbon_origin(class: CharacterClass, target: Vec3, progress: f32) -> Vec3
 /// The top ring's centre in the rig's frame — where the sparks come from.
 pub fn ribbon_top_local() -> Vec3 {
     let angle = RIBBON_TURNS * std::f32::consts::TAU;
-    Vec3::new(angle.cos() * RIBBON_RADIUS, RIBBON_HEIGHT, angle.sin() * RIBBON_RADIUS)
+    Vec3::new(
+        angle.cos() * RIBBON_RADIUS,
+        RIBBON_HEIGHT,
+        angle.sin() * RIBBON_RADIUS,
+    )
 }
 
 /// The helix's vertical extent, for probes.
@@ -230,7 +239,6 @@ pub fn ribbon_fold_centre(age: f32) -> f32 {
 pub fn ribbon_fold_amp() -> f32 {
     FOLD_AMP
 }
-
 
 /// Vertex positions of the helix with the fold rolled along it and the bottom
 /// `consumed` of it gone.
@@ -317,11 +325,14 @@ fn build_dispel_ribbon_mesh(
         indices.extend_from_slice(&[bl, br, tr, bl, tr, tl]);
     }
 
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-        .with_inserted_indices(Indices::U32(indices))
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(Indices::U32(indices))
 }
 
 /// Spawn visual mesh for new dispel ribbons.
@@ -372,7 +383,9 @@ pub fn spawn_dispel_ribbon_visuals(
         let position = ribbon_origin(ribbon.caster_class, target_transform.translation, 1.0);
 
         // The sparks' shared sprite and this ribbon's own spark material.
-        let dot = dot.get_or_insert_with(|| images.add(soft_dot_texture())).clone();
+        let dot = dot
+            .get_or_insert_with(|| images.add(soft_dot_texture()))
+            .clone();
         let quad = quad
             .get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0)))
             .clone();
@@ -409,9 +422,7 @@ pub fn spawn_dispel_ribbon_visuals(
 
 /// Cheap deterministic jitter in [0, 1). Visual only.
 fn spark_jitter(seed: u32) -> f32 {
-    let s = seed
-        .wrapping_mul(747_796_405)
-        .wrapping_add(2_891_336_453);
+    let s = seed.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
     let s = ((s >> ((s >> 28) + 4)) ^ s).wrapping_mul(277_803_737);
     ((s >> 22) ^ s) as f32 / u32::MAX as f32
 }
@@ -585,7 +596,10 @@ mod dispel_ribbon_mesh_tests {
         let min_y = ys.iter().cloned().fold(f32::INFINITY, f32::min);
         let max_y = ys.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         assert!(min_y.abs() < 1e-4, "min Y should be ~0, got {min_y}");
-        assert!((max_y - height).abs() < 1e-4, "max Y should be ~height, got {max_y}");
+        assert!(
+            (max_y - height).abs() < 1e-4,
+            "max Y should be ~height, got {max_y}"
+        );
     }
 
     #[test]
@@ -600,7 +614,10 @@ mod dispel_ribbon_mesh_tests {
         let last = pos[pos.len() - 1];
         let first_angle = first[2].atan2(first[0]);
         // Sanity: the first centerline angle is near 0 (cos≈1).
-        assert!(first_angle.abs() < 0.3, "first angle near 0, got {first_angle}");
+        assert!(
+            first_angle.abs() < 0.3,
+            "first angle near 0, got {first_angle}"
+        );
         // The helix advances monotonically: the y of the last vertex >> first.
         assert!(last[1] > first[1]);
         // Number of full turns is encoded in height/turns geometry; assert the
@@ -676,6 +693,9 @@ mod dispel_ribbon_mesh_tests {
         }
         assert!((plain[0][1] - folded[0][1]).abs() < 1e-3);
         assert!((plain[plain.len() - 1][1] - folded[folded.len() - 1][1]).abs() < 1e-3);
-        assert!(plain.iter().zip(folded.iter()).any(|(a, b)| (a[1] - b[1]).abs() > 0.02));
+        assert!(plain
+            .iter()
+            .zip(folded.iter())
+            .any(|(a, b)| (a[1] - b[1]).abs() > 0.02));
     }
 }

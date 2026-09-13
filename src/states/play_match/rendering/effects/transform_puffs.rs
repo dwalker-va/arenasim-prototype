@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Transform Puff (polymorph apply / restore)
@@ -36,12 +36,12 @@ const PUFF_EMISSIVE: LinearRgba = LinearRgba::new(2.6, 2.5, 2.3, 1.0);
 /// Spawn a puff at a transforming unit's torso. `torso_world_y` comes from the
 /// unit's [`VisualBody`] (pets render their body off the sim entity's `y`); a
 /// unit without one falls back to its logical position.
-pub(crate) fn spawn_transform_puff(commands: &mut Commands, unit_pos: Vec3, torso_world_y: Option<f32>) {
-    let position = Vec3::new(
-        unit_pos.x,
-        torso_world_y.unwrap_or(unit_pos.y),
-        unit_pos.z,
-    );
+pub(crate) fn spawn_transform_puff(
+    commands: &mut Commands,
+    unit_pos: Vec3,
+    torso_world_y: Option<f32>,
+) {
+    let position = Vec3::new(unit_pos.x, torso_world_y.unwrap_or(unit_pos.y), unit_pos.z);
     commands.spawn((
         TransformPuff {
             position,
@@ -100,7 +100,11 @@ pub fn spawn_transform_puff_visuals(
 /// Expand, rise and fade the puff cluster.
 pub fn update_transform_puffs(
     time: Res<Time>,
-    mut puffs: Query<(&mut TransformPuff, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut puffs: Query<(
+        &mut TransformPuff,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let dt = time.delta_secs();
@@ -115,7 +119,8 @@ pub fn update_transform_puffs(
         // sqrt easing: most of the expansion lands in the first few frames.
         let scale = PUFF_SCALE_START + (PUFF_SCALE_END - PUFF_SCALE_START) * elapsed.sqrt();
         transform.scale = Vec3::splat(scale * PUFF_CENTER_RADIUS);
-        transform.translation.y = puff.position.y + PUFF_RISE_SPEED * elapsed * puff.initial_lifetime;
+        transform.translation.y =
+            puff.position.y + PUFF_RISE_SPEED * elapsed * puff.initial_lifetime;
 
         // Fade on the square so the cloud thins out early and leaves no
         // lingering haze over the restored unit.
@@ -143,4 +148,3 @@ pub fn cleanup_expired_transform_puffs(
         }
     }
 }
-

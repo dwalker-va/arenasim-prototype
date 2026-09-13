@@ -70,9 +70,11 @@ fn encyclopedia_class_detail() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_abilities_grid() {
     let mut state = state_at_root();
-    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
-        View::index(Section::Abilities),
-    ));
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::index(
+            Section::Abilities,
+        )),
+    );
     snapshot("encyclopedia_abilities_grid", state);
 }
 
@@ -82,9 +84,11 @@ fn encyclopedia_abilities_grid() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_abilities_filtered() {
     let mut state = state_at_root();
-    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
-        View::index(Section::Abilities),
-    ));
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::index(
+            Section::Abilities,
+        )),
+    );
     state.ability_filters = AbilityFilters {
         class: Some(CharacterClass::Mage),
         school: None,
@@ -119,9 +123,9 @@ fn encyclopedia_pet_ability_detail() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_items_grid() {
     let mut state = state_at_root();
-    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
-        View::index(Section::Items),
-    ));
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::index(Section::Items)),
+    );
     snapshot("encyclopedia_items_grid", state);
 }
 
@@ -131,9 +135,9 @@ fn encyclopedia_items_grid() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_items_filtered() {
     let mut state = state_at_root();
-    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
-        View::index(Section::Items),
-    ));
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::index(Section::Items)),
+    );
     let mut filters = ItemFilters::default();
     filters.selected_armor_types.insert(ArmorType::Plate);
     filters.item_level_min = 50;
@@ -149,9 +153,9 @@ fn encyclopedia_items_filtered() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_items_paired_slots() {
     let mut state = state_at_root();
-    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
-        View::index(Section::Items),
-    ));
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::index(Section::Items)),
+    );
     let mut filters = ItemFilters::default();
     filters.selected_slots.insert(ItemSlotType::Ring);
     filters.selected_slots.insert(ItemSlotType::Trinket);
@@ -186,9 +190,9 @@ fn encyclopedia_search() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_auras_index() {
     let mut state = state_at_root();
-    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
-        View::index(Section::Auras),
-    ));
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::index(Section::Auras)),
+    );
     snapshot("encyclopedia_auras_index", state);
 }
 
@@ -201,9 +205,11 @@ fn encyclopedia_auras_index() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_aura_detail() {
     let mut state = state_at_root();
-    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
-        View::topic(Topic::Aura(AuraId::Ability(AbilityType::Corruption))),
-    ));
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Ability(AbilityType::Corruption),
+        ))),
+    );
     snapshot("encyclopedia_aura_detail", state);
 }
 
@@ -217,9 +223,11 @@ fn encyclopedia_aura_detail() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_aura_detail_curse() {
     let mut state = state_at_root();
-    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
-        View::topic(Topic::Aura(AuraId::Ability(AbilityType::CurseOfAgony))),
-    ));
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Ability(AbilityType::CurseOfAgony),
+        ))),
+    );
     snapshot("encyclopedia_aura_detail_curse", state);
 }
 
@@ -230,11 +238,11 @@ fn encyclopedia_aura_detail_curse() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_aura_detail_engine() {
     let mut state = state_at_root();
-    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
-        View::topic(Topic::Aura(AuraId::Engine(
-            arenasim::states::encyclopedia::EngineAura::FrostTrapSlow,
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::FrostTrapSlow),
         ))),
-    ));
+    );
     snapshot("encyclopedia_aura_detail_engine", state);
 }
 
@@ -249,13 +257,15 @@ fn encyclopedia_aura_detail_engine() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_aura_detail_name_collision() {
     let mut state = state_at_root();
-    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
-        View::topic(Topic::Aura(AuraId::Engine(
-            arenasim::states::encyclopedia::EngineAura::WeaponPoisonCoating(
-                arenasim::states::match_config::RoguePoison::Crippling,
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Engine(
+                arenasim::states::encyclopedia::EngineAura::WeaponPoisonCoating(
+                    arenasim::states::match_config::RoguePoison::Crippling,
+                ),
             ),
         ))),
-    ));
+    );
     snapshot("encyclopedia_aura_detail_name_collision", state);
 }
 
@@ -286,9 +296,11 @@ fn encyclopedia_nav_cluster_from_view_combatant() {
         Topic::Ability(AbilityType::Frostbolt),
         arenasim::states::GameState::ViewCombatant,
     );
-    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
-        View::topic(Topic::Class(CharacterClass::Mage)),
-    ));
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Class(
+            CharacterClass::Mage,
+        ))),
+    );
     snapshot("encyclopedia_nav_cluster_from_view_combatant", state);
 }
 

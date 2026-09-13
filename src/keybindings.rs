@@ -59,22 +59,29 @@ impl GameAction {
             GameAction::ToggleCallDisplay => "Toggle Kill Call Display",
         }
     }
-    
+
     pub fn category(&self) -> &'static str {
         match self {
             GameAction::Back | GameAction::Confirm => "Navigation",
-            GameAction::CycleCameraMode | GameAction::ResetCamera
-            | GameAction::CameraMoveForward | GameAction::CameraMoveBackward
-            | GameAction::CameraMoveLeft | GameAction::CameraMoveRight
-            | GameAction::CameraZoomIn | GameAction::CameraZoomOut => "Camera",
-            GameAction::PausePlay | GameAction::SpeedSlow
-            | GameAction::SpeedNormal | GameAction::SpeedFast
+            GameAction::CycleCameraMode
+            | GameAction::ResetCamera
+            | GameAction::CameraMoveForward
+            | GameAction::CameraMoveBackward
+            | GameAction::CameraMoveLeft
+            | GameAction::CameraMoveRight
+            | GameAction::CameraZoomIn
+            | GameAction::CameraZoomOut => "Camera",
+            GameAction::PausePlay
+            | GameAction::SpeedSlow
+            | GameAction::SpeedNormal
+            | GameAction::SpeedFast
             | GameAction::SpeedVeryFast => "Simulation",
-            GameAction::ToggleAuraIcons | GameAction::ToggleCombatPanel
+            GameAction::ToggleAuraIcons
+            | GameAction::ToggleCombatPanel
             | GameAction::ToggleCallDisplay => "Display",
         }
     }
-    
+
     pub fn all() -> Vec<GameAction> {
         vec![
             GameAction::Back,
@@ -195,7 +202,7 @@ pub struct KeyBinding {
 mod keycode_serde {
     use super::*;
     use serde::{Deserializer, Serializer};
-    
+
     pub fn serialize<S>(key: &KeyCode, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -203,7 +210,7 @@ mod keycode_serde {
         let sk: SerializableKeyCode = (*key).into();
         sk.serialize(serializer)
     }
-    
+
     pub fn deserialize<'de, D>(deserializer: D) -> Result<KeyCode, D::Error>
     where
         D: Deserializer<'de>,
@@ -216,7 +223,7 @@ mod keycode_serde {
 mod option_keycode_serde {
     use super::*;
     use serde::{Deserializer, Serializer};
-    
+
     pub fn serialize<S>(key: &Option<KeyCode>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -229,7 +236,7 @@ mod option_keycode_serde {
             None => serializer.serialize_none(),
         }
     }
-    
+
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<KeyCode>, D::Error>
     where
         D: Deserializer<'de>,
@@ -246,14 +253,14 @@ impl KeyBinding {
             secondary: None,
         }
     }
-    
+
     pub fn with_secondary(primary: KeyCode, secondary: KeyCode) -> Self {
         Self {
             primary,
             secondary: Some(secondary),
         }
     }
-    
+
     pub fn matches(&self, key: KeyCode) -> bool {
         self.primary == key || self.secondary == Some(key)
     }
@@ -283,18 +290,24 @@ impl Keybindings {
         // Camera
         bindings.insert(GameAction::CycleCameraMode, KeyBinding::new(KeyCode::Tab));
         bindings.insert(GameAction::ResetCamera, KeyBinding::new(KeyCode::KeyC));
-        bindings.insert(GameAction::CameraMoveForward, KeyBinding::new(KeyCode::KeyW));
-        bindings.insert(GameAction::CameraMoveBackward, KeyBinding::new(KeyCode::KeyS));
+        bindings.insert(
+            GameAction::CameraMoveForward,
+            KeyBinding::new(KeyCode::KeyW),
+        );
+        bindings.insert(
+            GameAction::CameraMoveBackward,
+            KeyBinding::new(KeyCode::KeyS),
+        );
         bindings.insert(GameAction::CameraMoveLeft, KeyBinding::new(KeyCode::KeyA));
         bindings.insert(GameAction::CameraMoveRight, KeyBinding::new(KeyCode::KeyD));
-        bindings.insert(GameAction::CameraZoomIn, KeyBinding::with_secondary(
-            KeyCode::Equal,
-            KeyCode::NumpadAdd
-        ));
-        bindings.insert(GameAction::CameraZoomOut, KeyBinding::with_secondary(
-            KeyCode::Minus,
-            KeyCode::NumpadSubtract
-        ));
+        bindings.insert(
+            GameAction::CameraZoomIn,
+            KeyBinding::with_secondary(KeyCode::Equal, KeyCode::NumpadAdd),
+        );
+        bindings.insert(
+            GameAction::CameraZoomOut,
+            KeyBinding::with_secondary(KeyCode::Minus, KeyCode::NumpadSubtract),
+        );
 
         // Simulation
         bindings.insert(GameAction::PausePlay, KeyBinding::new(KeyCode::Space));
@@ -305,8 +318,14 @@ impl Keybindings {
 
         // Display
         bindings.insert(GameAction::ToggleAuraIcons, KeyBinding::new(KeyCode::KeyV));
-        bindings.insert(GameAction::ToggleCombatPanel, KeyBinding::new(KeyCode::KeyL));
-        bindings.insert(GameAction::ToggleCallDisplay, KeyBinding::new(KeyCode::KeyK));
+        bindings.insert(
+            GameAction::ToggleCombatPanel,
+            KeyBinding::new(KeyCode::KeyL),
+        );
+        bindings.insert(
+            GameAction::ToggleCallDisplay,
+            KeyBinding::new(KeyCode::KeyK),
+        );
 
         Self { bindings }
     }
@@ -324,45 +343,52 @@ impl Keybindings {
             }
         }
     }
-    
+
     /// Get the binding for an action
     pub fn get(&self, action: GameAction) -> Option<&KeyBinding> {
         self.bindings.get(&action)
     }
-    
+
     /// Set a new binding for an action
     pub fn set(&mut self, action: GameAction, binding: KeyBinding) {
         self.bindings.insert(action, binding);
     }
-    
+
     /// Reset all bindings to defaults
     pub fn reset_to_defaults(&mut self) {
         *self = Self::create_defaults();
     }
-    
+
     /// Check if an action is currently pressed
     pub fn action_pressed(&self, action: GameAction, keyboard: &ButtonInput<KeyCode>) -> bool {
         if let Some(binding) = self.get(action) {
-            keyboard.pressed(binding.primary) || 
-                binding.secondary.map_or(false, |key| keyboard.pressed(key))
+            keyboard.pressed(binding.primary)
+                || binding.secondary.map_or(false, |key| keyboard.pressed(key))
         } else {
             false
         }
     }
-    
+
     /// Check if an action was just pressed this frame
     pub fn action_just_pressed(&self, action: GameAction, keyboard: &ButtonInput<KeyCode>) -> bool {
         if let Some(binding) = self.get(action) {
-            keyboard.just_pressed(binding.primary) || 
-                binding.secondary.map_or(false, |key| keyboard.just_pressed(key))
+            keyboard.just_pressed(binding.primary)
+                || binding
+                    .secondary
+                    .map_or(false, |key| keyboard.just_pressed(key))
         } else {
             false
         }
     }
-    
+
     /// Check if a key is already bound to any action (for conflict detection)
-    pub fn is_key_bound(&self, key: KeyCode, exclude_action: Option<GameAction>) -> Option<GameAction> {
-        self.bindings.iter()
+    pub fn is_key_bound(
+        &self,
+        key: KeyCode,
+        exclude_action: Option<GameAction>,
+    ) -> Option<GameAction> {
+        self.bindings
+            .iter()
             .find(|(action, binding)| {
                 if let Some(excluded) = exclude_action {
                     if **action == excluded {
@@ -373,7 +399,7 @@ impl Keybindings {
             })
             .map(|(action, _)| *action)
     }
-    
+
     /// Get a human-readable string for a key
     pub fn key_name(key: KeyCode) -> &'static str {
         match key {
@@ -443,7 +469,7 @@ impl Keybindings {
             _ => "???",
         }
     }
-    
+
     /// Get display string for a binding
     pub fn binding_display(&self, action: GameAction) -> String {
         if let Some(binding) = self.get(action) {
@@ -513,4 +539,3 @@ mod tests {
         }
     }
 }
-

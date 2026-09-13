@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Charge Trail Visual (Warrior Charge + Boar Charge)
@@ -61,7 +61,12 @@ const PET_SCALE: f32 = 0.55;
 /// travel and advancing `last_emit`. The loop matters: one fast frame can
 /// cover several spacings, and each element must land ON the path, not at
 /// the endpoint. Shared by every path-laid trail (Charge, Disengage).
-fn emit_along_path(last_emit: &mut Vec3, pos: Vec3, spacing: f32, mut emit: impl FnMut(Vec3, Vec3)) {
+fn emit_along_path(
+    last_emit: &mut Vec3,
+    pos: Vec3,
+    spacing: f32,
+    mut emit: impl FnMut(Vec3, Vec3),
+) {
     loop {
         let delta = pos - *last_emit;
         let dist = delta.length();
@@ -127,16 +132,12 @@ fn spawn_streak_segment(
     // the body centre for both unit kinds (a pet sims ~1.45yd above its
     // capsule; a combatant's rest_y is 0) — the `hard_cc.rs` stun-whirl
     // derivation.
-    let pos = Vec3::new(
-        mid.x,
-        mid.y + rest_y + STREAK_CHEST_OFFSET * scale,
-        mid.z,
-    );
+    let pos = Vec3::new(mid.x, mid.y + rest_y + STREAK_CHEST_OFFSET * scale, mid.z);
 
     // Jittered life so adjacent segments never fade in lockstep — even two
     // segments emitted in the same fast frame dissolve on their own clocks.
-    let life = STREAK_LIFETIME
-        * (1.0 + STREAK_LIFE_JITTER * (2.0 * hash01(seed_from(mid, 0)) - 1.0));
+    let life =
+        STREAK_LIFETIME * (1.0 + STREAK_LIFE_JITTER * (2.0 * hash01(seed_from(mid, 0)) - 1.0));
 
     commands.spawn((
         Mesh3d(mesh),
@@ -245,9 +246,11 @@ pub fn spawn_charge_trail(
                 let rest_y = children
                     .and_then(|cs| cs.iter().find_map(|c| bodies.get(c).ok()))
                     .map_or(0.0, |b| b.rest_y);
-                commands
-                    .entity(entity)
-                    .try_insert(ChargeTrailEmitter { last_emit: pos, scale, rest_y });
+                commands.entity(entity).try_insert(ChargeTrailEmitter {
+                    last_emit: pos,
+                    scale,
+                    rest_y,
+                });
                 spawn_dust_cluster(&mut commands, &mut meshes, &mut materials, pos, scale * 1.4);
             }
             Some(mut em) => {
@@ -403,7 +406,11 @@ fn spawn_spark_motes(
         let radius = MOTE_RADIUS_MIN + (MOTE_RADIUS_MAX - MOTE_RADIUS_MIN) * h(0);
         let angle = std::f32::consts::TAU * h(1);
         let out = Vec3::new(angle.cos(), 0.0, angle.sin());
-        let scatter_max = if burst { MOTE_SCATTER_MAX * 1.5 } else { MOTE_SCATTER_MAX };
+        let scatter_max = if burst {
+            MOTE_SCATTER_MAX * 1.5
+        } else {
+            MOTE_SCATTER_MAX
+        };
         let scatter = MOTE_SCATTER_MIN + (scatter_max - MOTE_SCATTER_MIN) * h(2);
         // Trail motes hang in the air with a gentle rise; the launch burst
         // throws them outward (the client flash's radial sparkle shell).
@@ -494,7 +501,11 @@ pub fn spawn_disengage_trail(
 pub fn update_and_cleanup_disengage_trails(
     mut commands: Commands,
     time: Res<Time>,
-    mut slivers: Query<(Entity, &mut DisengageWindStreak, &MeshMaterial3d<StandardMaterial>)>,
+    mut slivers: Query<(
+        Entity,
+        &mut DisengageWindStreak,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut motes: Query<
         (
             Entity,
@@ -543,7 +554,11 @@ pub fn update_and_cleanup_disengage_trails(
 pub fn update_and_cleanup_charge_trails(
     mut commands: Commands,
     time: Res<Time>,
-    mut streaks: Query<(Entity, &mut ChargeStreakSegment, &MeshMaterial3d<StandardMaterial>)>,
+    mut streaks: Query<(
+        Entity,
+        &mut ChargeStreakSegment,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut puffs: Query<
         (
             Entity,

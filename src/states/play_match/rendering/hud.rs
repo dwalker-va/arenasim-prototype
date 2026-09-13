@@ -2,11 +2,11 @@
 //!
 //! Health bars, resource bars, cast bars, and time controls.
 
+use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::components::*;
 use bevy::prelude::*;
 use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
-use crate::states::play_match::ability_config::AbilityDefinitions;
-use crate::states::play_match::components::*;
 
 // ==============================================================================
 // Zoom Scaling Constants
@@ -52,23 +52,34 @@ pub fn render_time_controls(
     // Handle V key toggle for aura icons
     if keybindings.action_just_pressed(GameAction::ToggleAuraIcons, &keyboard) {
         display_settings.show_aura_icons = !display_settings.show_aura_icons;
-        info!("Aura icons toggled to: {}", display_settings.show_aura_icons);
+        info!(
+            "Aura icons toggled to: {}",
+            display_settings.show_aura_icons
+        );
     }
 
     // Handle L key toggle for the combat log / timeline panel
     if keybindings.action_just_pressed(GameAction::ToggleCombatPanel, &keyboard) {
         display_settings.show_combat_panel = !display_settings.show_combat_panel;
-        info!("Combat panel toggled to: {}", display_settings.show_combat_panel);
+        info!(
+            "Combat panel toggled to: {}",
+            display_settings.show_combat_panel
+        );
     }
 
     // Handle K key toggle for the kill-call markers on the team frames
     if keybindings.action_just_pressed(GameAction::ToggleCallDisplay, &keyboard) {
         display_settings.show_call_display = !display_settings.show_call_display;
-        info!("Call display toggled to: {}", display_settings.show_call_display);
+        info!(
+            "Call display toggled to: {}",
+            display_settings.show_call_display
+        );
     }
 
     // Use try_ctx_mut to gracefully handle window close
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     // Position in top-right corner
     let screen_width = ctx.screen_rect().width();
@@ -79,9 +90,11 @@ pub fn render_time_controls(
         .resizable(false)
         .collapsible(false)
         .title_bar(false)
-        .frame(egui::Frame::window(&ctx.style())
-            .fill(egui::Color32::from_black_alpha(200)) // Semi-transparent
-            .stroke(egui::Stroke::NONE)) // Remove border
+        .frame(
+            egui::Frame::window(&ctx.style())
+                .fill(egui::Color32::from_black_alpha(200)) // Semi-transparent
+                .stroke(egui::Stroke::NONE),
+        ) // Remove border
         .show(ctx, |ui| {
             ui.set_width(panel_width);
 
@@ -89,7 +102,7 @@ pub fn render_time_controls(
                 ui.label(
                     egui::RichText::new("Speed:")
                         .size(14.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200))
+                        .color(egui::Color32::from_rgb(200, 200, 200)),
                 );
 
                 let speed_text = if sim_speed.is_paused() {
@@ -112,7 +125,7 @@ pub fn render_time_controls(
                         } else {
                             egui::Color32::from_rgb(100, 255, 100)
                         })
-                        .strong()
+                        .strong(),
                 );
             });
 
@@ -121,9 +134,9 @@ pub fn render_time_controls(
             ui.horizontal(|ui| {
                 // Pause button
                 let pause_btn = egui::Button::new(
-                    egui::RichText::new(if sim_speed.is_paused() { "▶" } else { "⏸" })
-                        .size(16.0)
-                ).min_size(egui::vec2(35.0, 30.0));
+                    egui::RichText::new(if sim_speed.is_paused() { "▶" } else { "⏸" }).size(16.0),
+                )
+                .min_size(egui::vec2(35.0, 30.0));
 
                 if ui.add(pause_btn).clicked() {
                     if sim_speed.is_paused() {
@@ -136,18 +149,21 @@ pub fn render_time_controls(
 
                 // Speed buttons
                 for &speed in &[0.5, 1.0, 2.0, 3.0] {
-                    let is_active = !sim_speed.is_paused() && (sim_speed.multiplier - speed).abs() < 0.01;
-                    let label = if speed == 0.5 { "½x" } else { &format!("{}x", speed as u8) };
-
-                    let btn = egui::Button::new(
-                        egui::RichText::new(label).size(12.0)
-                    )
-                    .min_size(egui::vec2(32.0, 30.0))
-                    .fill(if is_active {
-                        egui::Color32::from_rgb(60, 80, 120)
+                    let is_active =
+                        !sim_speed.is_paused() && (sim_speed.multiplier - speed).abs() < 0.01;
+                    let label = if speed == 0.5 {
+                        "½x"
                     } else {
-                        egui::Color32::from_rgb(40, 40, 50)
-                    });
+                        &format!("{}x", speed as u8)
+                    };
+
+                    let btn = egui::Button::new(egui::RichText::new(label).size(12.0))
+                        .min_size(egui::vec2(32.0, 30.0))
+                        .fill(if is_active {
+                            egui::Color32::from_rgb(60, 80, 120)
+                        } else {
+                            egui::Color32::from_rgb(40, 40, 50)
+                        });
 
                     if ui.add(btn).clicked() {
                         sim_speed.multiplier = speed;
@@ -162,7 +178,7 @@ pub fn render_time_controls(
             ui.label(
                 egui::RichText::new("Space=Pause 1-4=Speed")
                     .size(10.0)
-                    .color(egui::Color32::from_rgb(120, 120, 120))
+                    .color(egui::Color32::from_rgb(120, 120, 120)),
             );
 
             ui.add_space(5.0);
@@ -174,12 +190,15 @@ pub fn render_time_controls(
                 let mut show_auras = display_settings.show_aura_icons;
                 if ui.checkbox(&mut show_auras, "").changed() {
                     display_settings.show_aura_icons = show_auras;
-                    info!("Aura icons toggled to: {}", display_settings.show_aura_icons);
+                    info!(
+                        "Aura icons toggled to: {}",
+                        display_settings.show_aura_icons
+                    );
                 }
                 ui.label(
                     egui::RichText::new("Auras [V]")
                         .size(12.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200))
+                        .color(egui::Color32::from_rgb(200, 200, 200)),
                 );
             });
 
@@ -188,12 +207,15 @@ pub fn render_time_controls(
                 let mut show_panel = display_settings.show_combat_panel;
                 if ui.checkbox(&mut show_panel, "").changed() {
                     display_settings.show_combat_panel = show_panel;
-                    info!("Combat panel toggled to: {}", display_settings.show_combat_panel);
+                    info!(
+                        "Combat panel toggled to: {}",
+                        display_settings.show_combat_panel
+                    );
                 }
                 ui.label(
                     egui::RichText::new("Log [L]")
                         .size(12.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200))
+                        .color(egui::Color32::from_rgb(200, 200, 200)),
                 );
             });
 
@@ -202,12 +224,15 @@ pub fn render_time_controls(
                 let mut show_calls = display_settings.show_call_display;
                 if ui.checkbox(&mut show_calls, "").changed() {
                     display_settings.show_call_display = show_calls;
-                    info!("Call display toggled to: {}", display_settings.show_call_display);
+                    info!(
+                        "Call display toggled to: {}",
+                        display_settings.show_call_display
+                    );
                 }
                 ui.label(
                     egui::RichText::new("Calls [K]")
                         .size(12.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200))
+                        .color(egui::Color32::from_rgb(200, 200, 200)),
                 );
             });
         });
@@ -231,13 +256,21 @@ pub fn render_time_controls(
 pub fn render_health_bars(
     mut contexts: EguiContexts,
     abilities: Res<AbilityDefinitions>,
-    combatants: Query<(&Combatant, &Transform, Option<&CastingState>, Option<&ChannelingState>, Option<&ActiveAuras>)>,
+    combatants: Query<(
+        &Combatant,
+        &Transform,
+        Option<&CastingState>,
+        Option<&ChannelingState>,
+        Option<&ActiveAuras>,
+    )>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     time: Res<Time<Real>>,
     camera_controller: Res<CameraController>,
 ) {
     // Use try_ctx_mut to gracefully handle window close
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     let Ok((camera, camera_transform)) = camera_query.single() else {
         return;
@@ -245,7 +278,8 @@ pub fn render_health_bars(
 
     // Calculate UI scale based on camera zoom distance
     // When zoomed out (larger distance), UI elements get smaller
-    let ui_scale = (BASE_ZOOM_DISTANCE / camera_controller.zoom_distance).clamp(MIN_UI_SCALE, MAX_UI_SCALE);
+    let ui_scale =
+        (BASE_ZOOM_DISTANCE / camera_controller.zoom_distance).clamp(MIN_UI_SCALE, MAX_UI_SCALE);
 
     // Calculate pulse intensity for low HP highlighting (uses real time so it works when paused)
     let pulse_phase = time.elapsed_secs() * LOW_HP_PULSE_SPEED * std::f32::consts::TAU;
@@ -254,7 +288,9 @@ pub fn render_health_bars(
     egui::Area::new(egui::Id::new("health_bars"))
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
-            for (combatant, transform, casting_state, channeling_state, active_auras) in combatants.iter() {
+            for (combatant, transform, casting_state, channeling_state, active_auras) in
+                combatants.iter()
+            {
                 if !combatant.is_alive() {
                     continue;
                 }
@@ -289,53 +325,127 @@ pub fn render_health_bars(
 
                     // STEALTH indicator (if stealthed)
                     if combatant.stealthed {
-                        render_status_label(ui, &bar_pos, bar_width, &mut status_offset, "STEALTH", status_color, ui_scale);
+                        render_status_label(
+                            ui,
+                            &bar_pos,
+                            bar_width,
+                            &mut status_offset,
+                            "STEALTH",
+                            status_color,
+                            ui_scale,
+                        );
                     }
 
                     // Status effect indicators (if has auras)
                     if let Some(auras) = active_auras {
                         // STUN indicator with duration countdown
-                        if let Some(stun_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Stun) {
+                        if let Some(stun_aura) =
+                            auras.auras.iter().find(|a| a.effect_type == AuraType::Stun)
+                        {
                             let stun_text = format!("STUN {:.1}s", stun_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &stun_text, status_color, ui_scale);
+                            render_status_label(
+                                ui,
+                                &bar_pos,
+                                bar_width,
+                                &mut status_offset,
+                                &stun_text,
+                                status_color,
+                                ui_scale,
+                            );
                         }
 
                         // ROOT indicator with duration countdown
-                        if let Some(root_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Root) {
+                        if let Some(root_aura) =
+                            auras.auras.iter().find(|a| a.effect_type == AuraType::Root)
+                        {
                             let root_text = format!("ROOT {:.1}s", root_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &root_text, status_color, ui_scale);
+                            render_status_label(
+                                ui,
+                                &bar_pos,
+                                bar_width,
+                                &mut status_offset,
+                                &root_text,
+                                status_color,
+                                ui_scale,
+                            );
                         }
 
                         // FEAR / HORROR indicator with duration countdown. Death Coil
                         // applies a Fear-type aura (for the flee locomotion) but is
                         // mechanically a separate horror with its own DR, so it gets
                         // its own "HORROR" label to parallel "FEAR".
-                        if let Some(fear_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Fear) {
+                        if let Some(fear_aura) =
+                            auras.auras.iter().find(|a| a.effect_type == AuraType::Fear)
+                        {
                             let label = if fear_aura.ability_name == "Death Coil" {
                                 "HORROR"
                             } else {
                                 "FEAR"
                             };
                             let fear_text = format!("{} {:.1}s", label, fear_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &fear_text, status_color, ui_scale);
+                            render_status_label(
+                                ui,
+                                &bar_pos,
+                                bar_width,
+                                &mut status_offset,
+                                &fear_text,
+                                status_color,
+                                ui_scale,
+                            );
                         }
 
                         // SHEEPED indicator with duration countdown (Polymorph)
-                        if let Some(poly_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Polymorph) {
+                        if let Some(poly_aura) = auras
+                            .auras
+                            .iter()
+                            .find(|a| a.effect_type == AuraType::Polymorph)
+                        {
                             let poly_text = format!("SHEEPED {:.1}s", poly_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &poly_text, status_color, ui_scale);
+                            render_status_label(
+                                ui,
+                                &bar_pos,
+                                bar_width,
+                                &mut status_offset,
+                                &poly_text,
+                                status_color,
+                                ui_scale,
+                            );
                         }
 
                         // SILENCE indicator with duration countdown
-                        if let Some(silence_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Silence) {
+                        if let Some(silence_aura) = auras
+                            .auras
+                            .iter()
+                            .find(|a| a.effect_type == AuraType::Silence)
+                        {
                             let silence_text = format!("SILENCE {:.1}s", silence_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &silence_text, status_color, ui_scale);
+                            render_status_label(
+                                ui,
+                                &bar_pos,
+                                bar_width,
+                                &mut status_offset,
+                                &silence_text,
+                                status_color,
+                                ui_scale,
+                            );
                         }
 
                         // BERSERK indicator with duration countdown (Berserker Rage fear immunity)
-                        if let Some(br_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::FearImmunity) {
+                        if let Some(br_aura) = auras
+                            .auras
+                            .iter()
+                            .find(|a| a.effect_type == AuraType::FearImmunity)
+                        {
                             let br_text = format!("BERSERK {:.1}s", br_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &br_text, status_color, ui_scale);
+                            render_status_label(
+                                ui,
+                                &bar_pos,
+                                bar_width,
+                                &mut status_offset,
+                                &br_text,
+                                status_color,
+                                ui_scale,
+                            );
                         }
                     }
 
@@ -369,7 +479,9 @@ pub fn render_health_bars(
 
                     // Absorb shield visualization (translucent white overlay from right)
                     if let Some(auras) = active_auras {
-                        let absorb_amount: f32 = auras.auras.iter()
+                        let absorb_amount: f32 = auras
+                            .auras
+                            .iter()
                             .filter(|a| a.effect_type == AuraType::Absorb)
                             .map(|a| a.magnitude)
                             .sum();
@@ -383,7 +495,8 @@ pub fn render_health_bars(
                             let absorb_start_x = bar_pos.x + bar_width - absorb_bar_width;
 
                             // Translucent white overlay
-                            let shield_color = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100);
+                            let shield_color =
+                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100);
 
                             ui.painter().rect_filled(
                                 egui::Rect::from_min_size(
@@ -405,7 +518,11 @@ pub fn render_health_bars(
                     } else {
                         egui::Color32::from_rgb(200, 200, 200)
                     };
-                    let border_width = if is_low_hp { 2.0 * ui_scale } else { 1.0 * ui_scale };
+                    let border_width = if is_low_hp {
+                        2.0 * ui_scale
+                    } else {
+                        1.0 * ui_scale
+                    };
 
                     ui.painter().rect_stroke(
                         egui::Rect::from_min_size(bar_pos, egui::vec2(bar_width, bar_height)),
@@ -421,10 +538,16 @@ pub fn render_health_bars(
                         ui.painter().rect_stroke(
                             egui::Rect::from_min_size(
                                 bar_pos - egui::vec2(glow_expand, glow_expand),
-                                egui::vec2(bar_width + glow_expand * 2.0, bar_height + glow_expand * 2.0),
+                                egui::vec2(
+                                    bar_width + glow_expand * 2.0,
+                                    bar_height + glow_expand * 2.0,
+                                ),
                             ),
                             4.0 * ui_scale,
-                            egui::Stroke::new(2.0 * ui_scale, egui::Color32::from_rgba_unmultiplied(255, 50, 50, glow_alpha)),
+                            egui::Stroke::new(
+                                2.0 * ui_scale,
+                                egui::Color32::from_rgba_unmultiplied(255, 50, 50, glow_alpha),
+                            ),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -440,18 +563,13 @@ pub fn render_health_bars(
                     if let Some(casting) = casting_state {
                         let ability_def = abilities.get_unchecked(&casting.ability);
 
-                        let cast_bar_pos = egui::pos2(
-                            bar_pos.x,
-                            bar_pos.y + next_bar_y_offset,
-                        );
+                        let cast_bar_pos = egui::pos2(bar_pos.x, bar_pos.y + next_bar_y_offset);
                         let cast_bar_height = 8.0 * ui_scale; // Slightly larger than other bars
                         let cast_bar_width = bar_width + 10.0 * ui_scale; // Wider for better visibility
 
                         // Adjust x position to keep it centered
-                        let cast_bar_pos = egui::pos2(
-                            cast_bar_pos.x - 5.0 * ui_scale,
-                            cast_bar_pos.y,
-                        );
+                        let cast_bar_pos =
+                            egui::pos2(cast_bar_pos.x - 5.0 * ui_scale, cast_bar_pos.y);
 
                         let cast_font_size = 10.0 * ui_scale;
 
@@ -459,16 +577,25 @@ pub fn render_health_bars(
                         if casting.interrupted {
                             // Red background for interrupted
                             ui.painter().rect_filled(
-                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
+                                egui::Rect::from_min_size(
+                                    cast_bar_pos,
+                                    egui::vec2(cast_bar_width, cast_bar_height),
+                                ),
                                 corner_radius,
                                 egui::Color32::from_rgb(150, 20, 20), // Dark red
                             );
 
                             // Red border
                             ui.painter().rect_stroke(
-                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
+                                egui::Rect::from_min_size(
+                                    cast_bar_pos,
+                                    egui::vec2(cast_bar_width, cast_bar_height),
+                                ),
                                 corner_radius,
-                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(220, 50, 50)),
+                                egui::Stroke::new(
+                                    1.5 * ui_scale,
+                                    egui::Color32::from_rgb(220, 50, 50),
+                                ),
                                 egui::StrokeKind::Outside,
                             );
 
@@ -486,11 +613,15 @@ pub fn render_health_bars(
                             );
                         } else {
                             // Normal cast bar
-                            let cast_progress = 1.0 - (casting.time_remaining / ability_def.cast_time);
+                            let cast_progress =
+                                1.0 - (casting.time_remaining / ability_def.cast_time);
 
                             // Cast bar background (darker)
                             ui.painter().rect_filled(
-                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
+                                egui::Rect::from_min_size(
+                                    cast_bar_pos,
+                                    egui::vec2(cast_bar_width, cast_bar_height),
+                                ),
                                 corner_radius,
                                 egui::Color32::from_rgb(15, 15, 20),
                             );
@@ -507,9 +638,15 @@ pub fn render_health_bars(
 
                             // Cast bar border
                             ui.painter().rect_stroke(
-                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
+                                egui::Rect::from_min_size(
+                                    cast_bar_pos,
+                                    egui::vec2(cast_bar_width, cast_bar_height),
+                                ),
                                 corner_radius,
-                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(255, 200, 100)),
+                                egui::Stroke::new(
+                                    1.5 * ui_scale,
+                                    egui::Color32::from_rgb(255, 200, 100),
+                                ),
                                 egui::StrokeKind::Outside,
                             );
 
@@ -536,18 +673,13 @@ pub fn render_health_bars(
                         let ability_def = abilities.get_unchecked(&channeling.ability);
                         let channel_duration = ability_def.channel_duration.unwrap_or(5.0);
 
-                        let channel_bar_pos = egui::pos2(
-                            bar_pos.x,
-                            bar_pos.y + next_bar_y_offset,
-                        );
+                        let channel_bar_pos = egui::pos2(bar_pos.x, bar_pos.y + next_bar_y_offset);
                         let channel_bar_height = 8.0 * ui_scale;
                         let channel_bar_width = bar_width + 10.0 * ui_scale;
 
                         // Adjust x position to keep it centered
-                        let channel_bar_pos = egui::pos2(
-                            channel_bar_pos.x - 5.0 * ui_scale,
-                            channel_bar_pos.y,
-                        );
+                        let channel_bar_pos =
+                            egui::pos2(channel_bar_pos.x - 5.0 * ui_scale, channel_bar_pos.y);
 
                         let channel_font_size = 10.0 * ui_scale;
 
@@ -555,16 +687,25 @@ pub fn render_health_bars(
                         if channeling.interrupted {
                             // Red background for interrupted
                             ui.painter().rect_filled(
-                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
+                                egui::Rect::from_min_size(
+                                    channel_bar_pos,
+                                    egui::vec2(channel_bar_width, channel_bar_height),
+                                ),
                                 corner_radius,
                                 egui::Color32::from_rgb(150, 20, 20),
                             );
 
                             // Red border
                             ui.painter().rect_stroke(
-                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
+                                egui::Rect::from_min_size(
+                                    channel_bar_pos,
+                                    egui::vec2(channel_bar_width, channel_bar_height),
+                                ),
                                 corner_radius,
-                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(220, 50, 50)),
+                                egui::Stroke::new(
+                                    1.5 * ui_scale,
+                                    egui::Color32::from_rgb(220, 50, 50),
+                                ),
                                 egui::StrokeKind::Outside,
                             );
 
@@ -586,7 +727,10 @@ pub fn render_health_bars(
 
                             // Channel bar background (darker)
                             ui.painter().rect_filled(
-                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
+                                egui::Rect::from_min_size(
+                                    channel_bar_pos,
+                                    egui::vec2(channel_bar_width, channel_bar_height),
+                                ),
                                 corner_radius,
                                 egui::Color32::from_rgb(15, 15, 20),
                             );
@@ -595,7 +739,10 @@ pub fn render_health_bars(
                             ui.painter().rect_filled(
                                 egui::Rect::from_min_size(
                                     channel_bar_pos,
-                                    egui::vec2(channel_bar_width * channel_progress, channel_bar_height),
+                                    egui::vec2(
+                                        channel_bar_width * channel_progress,
+                                        channel_bar_height,
+                                    ),
                                 ),
                                 corner_radius,
                                 egui::Color32::from_rgb(50, 200, 150), // Teal/green
@@ -603,9 +750,15 @@ pub fn render_health_bars(
 
                             // Channel bar border
                             ui.painter().rect_stroke(
-                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
+                                egui::Rect::from_min_size(
+                                    channel_bar_pos,
+                                    egui::vec2(channel_bar_width, channel_bar_height),
+                                ),
                                 corner_radius,
-                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(100, 220, 180)),
+                                egui::Stroke::new(
+                                    1.5 * ui_scale,
+                                    egui::Color32::from_rgb(100, 220, 180),
+                                ),
                                 egui::StrokeKind::Outside,
                             );
 
@@ -627,7 +780,6 @@ pub fn render_health_bars(
                         // no further y-offset consumers (aura icons live in the
                         // team frames now).
                     }
-
                 }
             }
         });
@@ -646,11 +798,7 @@ fn render_status_label(
     let font = egui::FontId::monospace(9.0 * ui_scale);
 
     // Create galley for measuring size
-    let galley = ui.fonts(|f| f.layout_no_wrap(
-        text.to_string(),
-        font.clone(),
-        color,
-    ));
+    let galley = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font.clone(), color));
     let center_pos = egui::pos2(
         bar_pos.x + (bar_width - galley.size().x) / 2.0,
         bar_pos.y + *status_offset,
@@ -661,16 +809,12 @@ fn render_status_label(
     for dx in [-outline_offset, 0.0, outline_offset] {
         for dy in [-outline_offset, 0.0, outline_offset] {
             if dx != 0.0 || dy != 0.0 {
-                let outline_galley = ui.fonts(|f| f.layout_no_wrap(
-                    text.to_string(),
-                    font.clone(),
-                    egui::Color32::BLACK,
-                ));
-                let outline_pos = egui::pos2(
-                    center_pos.x + dx,
-                    center_pos.y + dy,
-                );
-                ui.painter().galley(outline_pos, outline_galley, egui::Color32::BLACK);
+                let outline_galley = ui.fonts(|f| {
+                    f.layout_no_wrap(text.to_string(), font.clone(), egui::Color32::BLACK)
+                });
+                let outline_pos = egui::pos2(center_pos.x + dx, center_pos.y + dy);
+                ui.painter()
+                    .galley(outline_pos, outline_galley, egui::Color32::BLACK);
             }
         }
     }
@@ -687,11 +831,8 @@ fn render_status_label(
 /// Check if an aura type is a hard CC that should be highlighted.
 /// Public: also used by the team frames for the bright-border treatment.
 pub fn is_hard_cc_aura(aura_type: &AuraType) -> bool {
-    matches!(aura_type,
-        AuraType::Stun |
-        AuraType::Fear |
-        AuraType::Polymorph |
-        AuraType::Root
+    matches!(
+        aura_type,
+        AuraType::Stun | AuraType::Fear | AuraType::Polymorph | AuraType::Root
     )
 }
-

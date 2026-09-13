@@ -206,7 +206,11 @@ pub fn focus_position(focus: Focus, world: &SolveWorld) -> Option<Vec2> {
 /// `Press` splits DPS by reach, because the two want opposite things from the
 /// same focal unit: melee must close (`PressTarget`), ranged must not
 /// (`HoldRange`).
-pub fn assign_intents(stance: Stance, team: u8, world: &SolveWorld) -> BTreeMap<Entity, RoleIntent> {
+pub fn assign_intents(
+    stance: Stance,
+    team: u8,
+    world: &SolveWorld,
+) -> BTreeMap<Entity, RoleIntent> {
     let mut intents = BTreeMap::new();
     // Does this team still have anyone worth healing? A healer with no living
     // non-pet partner is not a healer any more, and `OccupyCover` degenerates
@@ -520,7 +524,9 @@ fn team_bearing(ctx: &SolveContext) -> Option<Vec2> {
             n += 1;
         }
     }
-    (n > 0).then(|| sum.normalize_or_zero()).filter(|b| *b != Vec2::ZERO)
+    (n > 0)
+        .then(|| sum.normalize_or_zero())
+        .filter(|b| *b != Vec2::ZERO)
 }
 
 /// Clearance beyond an obstacle's own footprint when standing in its shadow, so
@@ -738,7 +744,10 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
     // volume, and that pillar-hugging equilibrium beats every "reachable"
     // alternative candidate. Do not re-add the screen without re-measuring.
     let usable = |c: &Vec2| {
-        ctx.world.bounds.as_ref().is_none_or(|b| b.contains(Vec3::new(c.x, 0.0, c.y)))
+        ctx.world
+            .bounds
+            .as_ref()
+            .is_none_or(|b| b.contains(Vec3::new(c.x, 0.0, c.y)))
     };
 
     // Proximity-danger deficit at a candidate: how far INSIDE `threat_radius`
@@ -800,7 +809,11 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
         // `HoldRange` and measured worse: -8pt for the Mage.)
         let key = (
             cost,
-            if field_is_flat { danger(&candidate) } else { 0.0 },
+            if field_is_flat {
+                danger(&candidate)
+            } else {
+                0.0
+            },
             candidate.distance(ctx.unit.pos),
         );
         if best.is_none_or(|(bk, _)| key < bk) {
@@ -833,7 +846,12 @@ pub fn solve_team(
             continue;
         };
         let spot = {
-            let ctx = SolveContext { world, unit, focus: focus_pos, placed: &placed };
+            let ctx = SolveContext {
+                world,
+                unit,
+                focus: focus_pos,
+                placed: &placed,
+            };
             solve_unit(intent, &ctx)
         };
         placed.insert(entity, spot);
@@ -862,9 +880,11 @@ fn pet_is_melee(pet_type: super::components::PetType) -> bool {
 
 /// The spell school a class heals in. `None` for classes that do not heal — the
 /// answer is unused for them, since only `OccupyCover` reads castability.
-fn heal_school(class: crate::states::match_config::CharacterClass) -> Option<super::abilities::SpellSchool> {
-    use crate::states::match_config::CharacterClass as C;
+fn heal_school(
+    class: crate::states::match_config::CharacterClass,
+) -> Option<super::abilities::SpellSchool> {
     use super::abilities::SpellSchool;
+    use crate::states::match_config::CharacterClass as C;
     match class {
         C::Priest | C::Paladin => Some(SpellSchool::Holy),
         C::Shaman => Some(SpellSchool::Nature),
@@ -878,13 +898,17 @@ fn heal_school(class: crate::states::match_config::CharacterClass) -> Option<sup
 /// Deliberately about the HEAL specifically rather than "can act at all" — a
 /// Priest with Holy locked but Shadow free can still cast Mind Blast, and should
 /// still be positioning for safety rather than for a heal it cannot deliver.
-fn can_cast_heal(ctx: &super::class_ai::CombatContext, info: &super::class_ai::CombatantInfo) -> bool {
+fn can_cast_heal(
+    ctx: &super::class_ai::CombatContext,
+    info: &super::class_ai::CombatantInfo,
+) -> bool {
     let Some(school) = heal_school(info.class) else {
         return false;
     };
     let auras = ctx.active_auras.get(&info.entity);
     let silenced = auras.is_some_and(|a| {
-        a.iter().any(|aura| aura.effect_type == super::components::AuraType::Silence)
+        a.iter()
+            .any(|aura| aura.effect_type == super::components::AuraType::Silence)
     });
     if silenced {
         return false;
@@ -959,7 +983,12 @@ pub fn solve_position(
     focus: Option<Vec2>,
 ) -> Option<Vec2> {
     let unit = *world.unit(entity)?;
-    let ctx = SolveContext { world, unit, focus, placed: &BTreeMap::new() };
+    let ctx = SolveContext {
+        world,
+        unit,
+        focus,
+        placed: &BTreeMap::new(),
+    };
     let spot = solve_unit(intent, &ctx);
     (spot.distance(unit.pos) > 1e-3).then_some(spot)
 }
@@ -989,11 +1018,17 @@ mod tests {
     }
 
     fn healer(id: u32, team: u8, slot: u8, x: f32, z: f32) -> SolveUnit {
-        SolveUnit { is_healer: true, ..unit(id, team, slot, x, z) }
+        SolveUnit {
+            is_healer: true,
+            ..unit(id, team, slot, x, z)
+        }
     }
 
     fn melee(id: u32, team: u8, slot: u8, x: f32, z: f32) -> SolveUnit {
-        SolveUnit { is_melee: true, ..unit(id, team, slot, x, z) }
+        SolveUnit {
+            is_melee: true,
+            ..unit(id, team, slot, x, z)
+        }
     }
 
     fn world(units: Vec<SolveUnit>) -> SolveWorld {
@@ -1025,7 +1060,10 @@ mod tests {
     fn press_roots_on_the_called_kill_target() {
         let mut w = world(vec![melee(1, 1, 0, -10.0, 0.0), unit(2, 2, 0, 10.0, 0.0)]);
         w.kill_target = Some(e(2));
-        assert_eq!(focal_point(Stance::Press, None, 1, &w), Some(Focus::Unit(e(2))));
+        assert_eq!(
+            focal_point(Stance::Press, None, 1, &w),
+            Some(Focus::Unit(e(2)))
+        );
     }
 
     #[test]
@@ -1036,7 +1074,11 @@ mod tests {
             healer(3, 2, 0, 10.0, 0.0),
         ]);
         let focus = focal_point(Stance::Withdraw(WithdrawReason::Recover), None, 1, &w);
-        assert_eq!(focus, Some(Focus::Unit(e(2))), "must be OUR healer, not theirs");
+        assert_eq!(
+            focus,
+            Some(Focus::Unit(e(2))),
+            "must be OUR healer, not theirs"
+        );
     }
 
     #[test]
@@ -1054,7 +1096,11 @@ mod tests {
     #[test]
     fn a_missing_focus_yields_none_rather_than_a_substitute() {
         let w = world(vec![melee(1, 1, 0, -10.0, 0.0)]);
-        assert_eq!(focal_point(Stance::Press, None, 1, &w), None, "no kill target called");
+        assert_eq!(
+            focal_point(Stance::Press, None, 1, &w),
+            None,
+            "no kill target called"
+        );
         assert_eq!(focal_point(Stance::Hold, None, 1, &w), None, "no anchor");
         assert_eq!(
             focal_point(Stance::Withdraw(WithdrawReason::Draw), None, 1, &w),
@@ -1080,7 +1126,10 @@ mod tests {
 
     #[test]
     fn hold_stacks_everyone_but_the_healer() {
-        let w = world(vec![melee(1, 1, 0, -10.0, 0.0), healer(2, 1, 1, -12.0, 0.0)]);
+        let w = world(vec![
+            melee(1, 1, 0, -10.0, 0.0),
+            healer(2, 1, 1, -12.0, 0.0),
+        ]);
         let i = assign_intents(Stance::Hold, 1, &w);
         assert_eq!(i[&e(1)], RoleIntent::StackAnchor);
         assert_eq!(i[&e(2)], RoleIntent::OccupyCover);
@@ -1088,7 +1137,10 @@ mod tests {
 
     #[test]
     fn withdraw_screens_the_healer() {
-        let w = world(vec![melee(1, 1, 0, -10.0, 0.0), healer(2, 1, 1, -12.0, 0.0)]);
+        let w = world(vec![
+            melee(1, 1, 0, -10.0, 0.0),
+            healer(2, 1, 1, -12.0, 0.0),
+        ]);
         let i = assign_intents(Stance::Withdraw(WithdrawReason::Recover), 1, &w);
         assert_eq!(i[&e(1)], RoleIntent::ScreenPartner);
         assert_eq!(i[&e(2)], RoleIntent::OccupyCover);
@@ -1098,18 +1150,27 @@ mod tests {
     /// review caught exactly this leak in the camp consumer.
     #[test]
     fn pets_never_receive_an_intent() {
-        let pet = SolveUnit { is_pet: true, ..unit(9, 1, 10, -11.0, 0.0) };
+        let pet = SolveUnit {
+            is_pet: true,
+            ..unit(9, 1, 10, -11.0, 0.0)
+        };
         let w = world(vec![melee(1, 1, 0, -10.0, 0.0), pet]);
         let i = assign_intents(Stance::Hold, 1, &w);
         assert!(i.contains_key(&e(1)));
-        assert!(!i.contains_key(&e(9)), "a pet must not get a positional job");
+        assert!(
+            !i.contains_key(&e(9)),
+            "a pet must not get a positional job"
+        );
     }
 
     /// A healer's partner may itself be a healer. Both still have someone to
     /// cover and heal, so neither degenerates into the lone-unit `HoldRange`.
     #[test]
     fn two_healers_still_cover_for_each_other() {
-        let w = world(vec![healer(1, 1, 0, -10.0, 0.0), healer(2, 1, 1, -12.0, 0.0)]);
+        let w = world(vec![
+            healer(1, 1, 0, -10.0, 0.0),
+            healer(2, 1, 1, -12.0, 0.0),
+        ]);
         let i = assign_intents(Stance::Hold, 1, &w);
         assert_eq!(i[&e(1)], RoleIntent::OccupyCover);
         assert_eq!(i[&e(2)], RoleIntent::OccupyCover);
@@ -1118,8 +1179,15 @@ mod tests {
     /// ...but a healer genuinely alone fights instead of camping for a corpse.
     #[test]
     fn a_lone_healer_holds_range_instead_of_camping() {
-        let pet = SolveUnit { is_pet: true, ..unit(9, 1, 10, -11.0, 0.0) };
-        let w = world(vec![healer(1, 1, 0, -10.0, 0.0), pet, unit(2, 2, 0, 10.0, 0.0)]);
+        let pet = SolveUnit {
+            is_pet: true,
+            ..unit(9, 1, 10, -11.0, 0.0)
+        };
+        let w = world(vec![
+            healer(1, 1, 0, -10.0, 0.0),
+            pet,
+            unit(2, 2, 0, 10.0, 0.0),
+        ]);
         let i = assign_intents(Stance::Hold, 1, &w);
         assert_eq!(i[&e(1)], RoleIntent::HoldRange, "a pet is not a partner");
     }
@@ -1141,7 +1209,11 @@ mod tests {
             unit(3, 1, 2, -14.0, 0.0),
         ]);
         let order = solve_order(Some(Focus::Unit(e(3))), 1, &w);
-        assert_eq!(order[0], e(3), "everything is defined relative to the focus");
+        assert_eq!(
+            order[0],
+            e(3),
+            "everything is defined relative to the focus"
+        );
     }
 
     /// With no focal unit of ours, the healer must still precede the units whose
@@ -1160,8 +1232,15 @@ mod tests {
 
     #[test]
     fn solve_order_excludes_pets_and_the_enemy() {
-        let pet = SolveUnit { is_pet: true, ..unit(9, 1, 10, -11.0, 0.0) };
-        let w = world(vec![melee(1, 1, 0, -10.0, 0.0), pet, melee(2, 2, 0, 10.0, 0.0)]);
+        let pet = SolveUnit {
+            is_pet: true,
+            ..unit(9, 1, 10, -11.0, 0.0)
+        };
+        let w = world(vec![
+            melee(1, 1, 0, -10.0, 0.0),
+            pet,
+            melee(2, 2, 0, 10.0, 0.0),
+        ]);
         assert_eq!(solve_order(None, 1, &w), vec![e(1)]);
     }
 
@@ -1178,7 +1257,10 @@ mod tests {
             placed: &BTreeMap::new(),
         };
         // Directly behind the pillar from the enemy: occluded.
-        assert_eq!(violations(RoleIntent::OccupyCover, Vec2::new(-10.0, 0.0), &ctx) & C_OCCLUDED, 0);
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, Vec2::new(-10.0, 0.0), &ctx) & C_OCCLUDED,
+            0
+        );
         // Off to the side with a clear line: not occluded.
         assert_ne!(
             violations(RoleIntent::OccupyCover, Vec2::new(-10.0, 30.0), &ctx) & C_OCCLUDED,
@@ -1214,7 +1296,10 @@ mod tests {
     /// numbers that say this is currently load-bearing.
     #[test]
     fn enemy_pets_still_count_as_casters_to_hide_from() {
-        let enemy_pet = SolveUnit { is_pet: true, ..unit(2, 2, 10, 10.0, 0.0) };
+        let enemy_pet = SolveUnit {
+            is_pet: true,
+            ..unit(2, 2, 10, 10.0, 0.0)
+        };
         let mut w = world(vec![healer(1, 1, 0, -10.0, 0.0), enemy_pet]);
         w.obstacles = vec![pillar_at(0.0, 0.0)];
         let ctx = SolveContext {
@@ -1272,7 +1357,10 @@ mod tests {
         // Behind the pillar: hidden from the caster, blind to the ally.
         let hidden_but_blind = Vec2::new(-10.0, 0.0);
 
-        let locked = SolveUnit { can_cast_heal: false, ..w.units[0] };
+        let locked = SolveUnit {
+            can_cast_heal: false,
+            ..w.units[0]
+        };
         let ctx = SolveContext {
             world: &w,
             unit: locked,
@@ -1325,7 +1413,10 @@ mod tests {
             "a healer mid-rotation is not charged for standing close"
         );
 
-        let locked = SolveUnit { can_cast_heal: false, ..w.units[0] };
+        let locked = SolveUnit {
+            can_cast_heal: false,
+            ..w.units[0]
+        };
         let ctx = SolveContext {
             world: &w,
             unit: locked,
@@ -1374,8 +1465,14 @@ mod tests {
             focus: None,
             placed: &BTreeMap::new(),
         };
-        assert_eq!(violations(RoleIntent::OccupyCover, Vec2::new(5.0, 0.0), &ctx) & C_LEASH, 0);
-        assert_ne!(violations(RoleIntent::OccupyCover, Vec2::new(50.0, 0.0), &ctx) & C_LEASH, 0);
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, Vec2::new(5.0, 0.0), &ctx) & C_LEASH,
+            0
+        );
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, Vec2::new(50.0, 0.0), &ctx) & C_LEASH,
+            0
+        );
     }
 
     /// The constraint the additive scorer could not express: see my ally AND deny
@@ -1397,7 +1494,11 @@ mod tests {
         };
         // Behind the pillar: sees the ally at -20, hidden from the enemy at +20.
         let v = violations(RoleIntent::ScreenPartner, Vec2::new(-10.0, 0.0), &ctx);
-        assert_eq!(v & (C_SIGHT | C_OCCLUDED), 0, "this is the position that should exist");
+        assert_eq!(
+            v & (C_SIGHT | C_OCCLUDED),
+            0,
+            "this is the position that should exist"
+        );
         // Way off to the side: sees both, so it fails the denial half.
         let v = violations(RoleIntent::ScreenPartner, Vec2::new(0.0, 40.0), &ctx);
         assert_ne!(v & C_OCCLUDED, 0);
@@ -1414,7 +1515,10 @@ mod tests {
             focus: Some(Vec2::new(0.0, 0.0)),
             placed: &BTreeMap::new(),
         };
-        assert_eq!(violations(RoleIntent::HoldRange, Vec2::new(-30.0, 0.0), &ctx), 0);
+        assert_eq!(
+            violations(RoleIntent::HoldRange, Vec2::new(-30.0, 0.0), &ctx),
+            0
+        );
         assert_ne!(
             violations(RoleIntent::HoldRange, Vec2::new(-5.0, 0.0), &ctx) & C_STANDOFF,
             0,
@@ -1437,7 +1541,10 @@ mod tests {
         assert_ne!(v & C_LEASH, 0);
         assert_ne!(v & C_SIGHT, 0);
         // Close and clear: satisfies.
-        assert_eq!(violations(RoleIntent::PressTarget, Vec2::new(-5.0, 5.0), &ctx), 0);
+        assert_eq!(
+            violations(RoleIntent::PressTarget, Vec2::new(-5.0, 5.0), &ctx),
+            0
+        );
     }
 
     // --- cohesion: the convergent/divergent hinge ---
@@ -1479,7 +1586,10 @@ mod tests {
             focus: Some(Vec2::ZERO),
             placed: &BTreeMap::new(),
         };
-        assert_eq!(violations(RoleIntent::StackAnchor, Vec2::new(-10.0, 0.0), &ctx) & C_COHESION, 0);
+        assert_eq!(
+            violations(RoleIntent::StackAnchor, Vec2::new(-10.0, 0.0), &ctx) & C_COHESION,
+            0
+        );
     }
 
     // --- the solve itself ---
@@ -1497,7 +1607,10 @@ mod tests {
             focus: Some(Vec2::ZERO),
             placed: &BTreeMap::new(),
         };
-        assert_eq!(solve_unit(RoleIntent::HoldRange, &ctx), Vec2::new(-30.0, 0.0));
+        assert_eq!(
+            solve_unit(RoleIntent::HoldRange, &ctx),
+            Vec2::new(-30.0, 0.0)
+        );
     }
 
     /// THE GRADIENT PROBE. This unit is 5yd inside a 12yd threat radius and the
@@ -1535,8 +1648,8 @@ mod tests {
     fn a_flat_constraint_set_still_backs_away_from_a_melee_in_range() {
         let mut w = world(vec![
             healer(1, 1, 0, 0.0, 0.0),
-            melee(2, 1, 1, 30.0, 0.0),           // partner, sighted, in range
-            melee(3, 2, 0, 3.0, 0.0),            // enemy melee ON the healer
+            melee(2, 1, 1, 30.0, 0.0), // partner, sighted, in range
+            melee(3, 2, 0, 3.0, 0.0),  // enemy melee ON the healer
         ]);
         w.threat_radius = 12.0;
         w.obstacles = vec![]; // BasicArena: no cover anywhere
@@ -1572,7 +1685,10 @@ mod tests {
 
     #[test]
     fn solve_team_places_every_non_pet_member_once() {
-        let pet = SolveUnit { is_pet: true, ..unit(9, 1, 10, -11.0, 0.0) };
+        let pet = SolveUnit {
+            is_pet: true,
+            ..unit(9, 1, 10, -11.0, 0.0)
+        };
         let mut w = world(vec![
             melee(1, 1, 0, -10.0, 0.0),
             healer(2, 1, 1, -12.0, 0.0),
@@ -1607,7 +1723,10 @@ mod tests {
     /// consumer would read as "nobody should move".
     #[test]
     fn a_missing_focus_still_places_the_team() {
-        let w = world(vec![melee(1, 1, 0, -10.0, 0.0), healer(2, 1, 1, -12.0, 0.0)]);
+        let w = world(vec![
+            melee(1, 1, 0, -10.0, 0.0),
+            healer(2, 1, 1, -12.0, 0.0),
+        ]);
         let placed = solve_team(Stance::Press, None, 1, &w);
         assert_eq!(placed.len(), 2);
     }

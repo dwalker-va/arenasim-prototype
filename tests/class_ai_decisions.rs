@@ -55,7 +55,11 @@ fn pet_info(entity: Entity, team: u8, owner_class: CharacterClass) -> CombatantI
     }
 }
 
-fn aura_with(effect_type: AuraType, caster: Option<Entity>, break_on_damage_threshold: f32) -> Aura {
+fn aura_with(
+    effect_type: AuraType,
+    caster: Option<Entity>,
+    break_on_damage_threshold: f32,
+) -> Aura {
     Aura {
         effect_type,
         duration: 5.0,
@@ -104,7 +108,9 @@ fn dispel_priority_orders_cc_above_dots_above_slows() {
     assert!(dispel_priority(AuraType::Polymorph) > dispel_priority(AuraType::Fear));
     assert!(dispel_priority(AuraType::Fear) > dispel_priority(AuraType::Root));
     assert!(dispel_priority(AuraType::Root) > dispel_priority(AuraType::DamageOverTime));
-    assert!(dispel_priority(AuraType::DamageOverTime) > dispel_priority(AuraType::MovementSpeedSlow));
+    assert!(
+        dispel_priority(AuraType::DamageOverTime) > dispel_priority(AuraType::MovementSpeedSlow)
+    );
     assert!(dispel_priority(AuraType::MovementSpeedSlow) > 0);
 }
 
@@ -192,9 +198,12 @@ fn purge_priority_orders_defensives_above_offensive_buffs() {
     // outranks an AttackPower buff.
     assert!(purge_priority(AuraType::Absorb) > purge_priority(AuraType::AttackPowerIncrease));
     assert!(
-        purge_priority(AuraType::DamageTakenReduction) > purge_priority(AuraType::AttackPowerIncrease)
+        purge_priority(AuraType::DamageTakenReduction)
+            > purge_priority(AuraType::AttackPowerIncrease)
     );
-    assert!(purge_priority(AuraType::HealingOverTime) > purge_priority(AuraType::CritChanceIncrease));
+    assert!(
+        purge_priority(AuraType::HealingOverTime) > purge_priority(AuraType::CritChanceIncrease)
+    );
     assert!(
         purge_priority(AuraType::AttackPowerIncrease)
             > purge_priority(AuraType::LockoutDurationReduction)
@@ -368,13 +377,19 @@ fn has_friendly_breakable_cc_detects_team_polymorph() {
     let enemy = Entity::from_raw(3);
 
     let mut snapshot = snapshot_for(me, 1, CharacterClass::Warlock);
-    snapshot.combatants.insert(ally, info(ally, 1, CharacterClass::Mage));
-    snapshot.combatants.insert(enemy, info(enemy, 2, CharacterClass::Warrior));
+    snapshot
+        .combatants
+        .insert(ally, info(ally, 1, CharacterClass::Mage));
+    snapshot
+        .combatants
+        .insert(enemy, info(enemy, 2, CharacterClass::Warrior));
 
     // Ally Polymorphed the enemy — break_on_damage_threshold == 0.0 means it
     // breaks on any damage, which is the signal `has_friendly_breakable_cc`
     // looks for.
-    snapshot.active_auras.insert(enemy, vec![aura_with(AuraType::Polymorph, Some(ally), 0.0)]);
+    snapshot
+        .active_auras
+        .insert(enemy, vec![aura_with(AuraType::Polymorph, Some(ally), 0.0)]);
 
     let ctx = snapshot.context_for(me);
     assert!(ctx.has_friendly_breakable_cc(enemy));
@@ -387,12 +402,19 @@ fn has_friendly_breakable_cc_ignores_enemy_caster() {
     let target = Entity::from_raw(3);
 
     let mut snapshot = snapshot_for(me, 1, CharacterClass::Warrior);
-    snapshot.combatants.insert(enemy_caster, info(enemy_caster, 2, CharacterClass::Mage));
-    snapshot.combatants.insert(target, info(target, 2, CharacterClass::Priest));
+    snapshot
+        .combatants
+        .insert(enemy_caster, info(enemy_caster, 2, CharacterClass::Mage));
+    snapshot
+        .combatants
+        .insert(target, info(target, 2, CharacterClass::Priest));
 
     // Enemy mage Polymorphed their own teammate. Not our problem — we can
     // damage that target without breaking *our* CC.
-    snapshot.active_auras.insert(target, vec![aura_with(AuraType::Polymorph, Some(enemy_caster), 0.0)]);
+    snapshot.active_auras.insert(
+        target,
+        vec![aura_with(AuraType::Polymorph, Some(enemy_caster), 0.0)],
+    );
 
     let ctx = snapshot.context_for(me);
     assert!(!ctx.has_friendly_breakable_cc(target));
@@ -405,12 +427,18 @@ fn has_friendly_breakable_cc_ignores_high_threshold_auras() {
     let enemy = Entity::from_raw(3);
 
     let mut snapshot = snapshot_for(me, 1, CharacterClass::Warrior);
-    snapshot.combatants.insert(ally, info(ally, 1, CharacterClass::Mage));
-    snapshot.combatants.insert(enemy, info(enemy, 2, CharacterClass::Rogue));
+    snapshot
+        .combatants
+        .insert(ally, info(ally, 1, CharacterClass::Mage));
+    snapshot
+        .combatants
+        .insert(enemy, info(enemy, 2, CharacterClass::Rogue));
 
     // Frost Nova root: break_on_damage_threshold == 80.0, not 0.0. It absorbs
     // moderate damage before breaking, so attacking the target is fine.
-    snapshot.active_auras.insert(enemy, vec![aura_with(AuraType::Root, Some(ally), 80.0)]);
+    snapshot
+        .active_auras
+        .insert(enemy, vec![aura_with(AuraType::Root, Some(ally), 80.0)]);
 
     let ctx = snapshot.context_for(me);
     assert!(!ctx.has_friendly_breakable_cc(enemy));
@@ -427,11 +455,18 @@ fn has_friendly_dots_on_target_detects_team_dot() {
     let enemy = Entity::from_raw(3);
 
     let mut snapshot = snapshot_for(me, 1, CharacterClass::Mage);
-    snapshot.combatants.insert(ally, info(ally, 1, CharacterClass::Warlock));
-    snapshot.combatants.insert(enemy, info(enemy, 2, CharacterClass::Priest));
+    snapshot
+        .combatants
+        .insert(ally, info(ally, 1, CharacterClass::Warlock));
+    snapshot
+        .combatants
+        .insert(enemy, info(enemy, 2, CharacterClass::Priest));
 
     // Warlock teammate has Corruption ticking. Polymorph would break next tick.
-    snapshot.active_auras.insert(enemy, vec![aura_with(AuraType::DamageOverTime, Some(ally), -1.0)]);
+    snapshot.active_auras.insert(
+        enemy,
+        vec![aura_with(AuraType::DamageOverTime, Some(ally), -1.0)],
+    );
 
     let ctx = snapshot.context_for(me);
     assert!(ctx.has_friendly_dots_on_target(enemy));
@@ -444,12 +479,24 @@ fn has_friendly_dots_on_target_ignores_enemy_dot() {
     let teammate = Entity::from_raw(3);
 
     let mut snapshot = snapshot_for(me, 1, CharacterClass::Mage);
-    snapshot.combatants.insert(enemy_warlock, info(enemy_warlock, 2, CharacterClass::Warlock));
-    snapshot.combatants.insert(teammate, info(teammate, 1, CharacterClass::Priest));
+    snapshot.combatants.insert(
+        enemy_warlock,
+        info(enemy_warlock, 2, CharacterClass::Warlock),
+    );
+    snapshot
+        .combatants
+        .insert(teammate, info(teammate, 1, CharacterClass::Priest));
 
     // The DoT here is on a teammate, applied by an enemy — irrelevant to
     // whether *we* would break our own CC by Polymorphing the *target*.
-    snapshot.active_auras.insert(teammate, vec![aura_with(AuraType::DamageOverTime, Some(enemy_warlock), -1.0)]);
+    snapshot.active_auras.insert(
+        teammate,
+        vec![aura_with(
+            AuraType::DamageOverTime,
+            Some(enemy_warlock),
+            -1.0,
+        )],
+    );
 
     let ctx = snapshot.context_for(me);
     assert!(!ctx.has_friendly_dots_on_target(teammate));
@@ -474,7 +521,9 @@ fn lowest_health_ally_below_returns_lowest_under_threshold() {
     snapshot.combatants.insert(ally_low, low);
 
     let ctx = snapshot.context_for(me);
-    let target = ctx.lowest_health_ally_below(0.9, f32::MAX, Vec3::ZERO).expect("ally below 90%");
+    let target = ctx
+        .lowest_health_ally_below(0.9, f32::MAX, Vec3::ZERO)
+        .expect("ally below 90%");
     assert_eq!(target.entity, ally_low);
 }
 
@@ -493,8 +542,13 @@ fn lowest_health_ally_below_excludes_pets() {
     snapshot.combatants.insert(pet, pet_inf);
 
     let ctx = snapshot.context_for(me);
-    let target = ctx.lowest_health_ally_below(0.9, f32::MAX, Vec3::ZERO).expect("non-pet ally");
-    assert_eq!(target.entity, ally, "pet must not be returned even though its HP is lowest");
+    let target = ctx
+        .lowest_health_ally_below(0.9, f32::MAX, Vec3::ZERO)
+        .expect("non-pet ally");
+    assert_eq!(
+        target.entity, ally,
+        "pet must not be returned even though its HP is lowest"
+    );
 }
 
 #[test]
@@ -515,7 +569,9 @@ fn lowest_health_ally_below_respects_range() {
 
     let ctx = snapshot.context_for(me);
     // Healing range = 30 units. The far ally is closer to dead but we cannot reach them.
-    let target = ctx.lowest_health_ally_below(0.9, 30.0, Vec3::ZERO).expect("near ally");
+    let target = ctx
+        .lowest_health_ally_below(0.9, 30.0, Vec3::ZERO)
+        .expect("near ally");
     assert_eq!(target.entity, near);
 }
 
@@ -525,11 +581,15 @@ fn lowest_health_ally_below_returns_none_when_team_is_full_hp() {
     let ally = Entity::from_raw(2);
 
     let mut snapshot = snapshot_for(me, 1, CharacterClass::Priest);
-    snapshot.combatants.insert(ally, info(ally, 1, CharacterClass::Warrior));
+    snapshot
+        .combatants
+        .insert(ally, info(ally, 1, CharacterClass::Warrior));
 
     let ctx = snapshot.context_for(me);
     // Threshold 0.9 — nobody is below it (self + ally are both at 100%).
-    assert!(ctx.lowest_health_ally_below(0.9, f32::MAX, Vec3::ZERO).is_none());
+    assert!(ctx
+        .lowest_health_ally_below(0.9, f32::MAX, Vec3::ZERO)
+        .is_none());
     assert!(ctx.is_team_healthy(0.9, Vec3::ZERO));
 }
 
@@ -543,7 +603,9 @@ fn is_ccd_detects_each_hard_cc_type() {
     let target = Entity::from_raw(2);
 
     let mut snapshot = snapshot_for(me, 1, CharacterClass::Mage);
-    snapshot.combatants.insert(target, info(target, 2, CharacterClass::Warrior));
+    snapshot
+        .combatants
+        .insert(target, info(target, 2, CharacterClass::Warrior));
 
     // Each of these aura types should make the target read as CC'd.
     for cc in [
@@ -553,7 +615,9 @@ fn is_ccd_detects_each_hard_cc_type() {
         AuraType::Polymorph,
         AuraType::Incapacitate,
     ] {
-        snapshot.active_auras.insert(target, vec![aura_with(cc, None, -1.0)]);
+        snapshot
+            .active_auras
+            .insert(target, vec![aura_with(cc, None, -1.0)]);
         let ctx = snapshot.context_for(me);
         assert!(ctx.is_ccd(target), "is_ccd should return true for {:?}", cc);
     }
@@ -566,10 +630,15 @@ fn is_ccd_returns_false_for_non_cc_auras_and_missing_target() {
     let unknown = Entity::from_raw(99);
 
     let mut snapshot = snapshot_for(me, 1, CharacterClass::Mage);
-    snapshot.combatants.insert(target, info(target, 2, CharacterClass::Warrior));
+    snapshot
+        .combatants
+        .insert(target, info(target, 2, CharacterClass::Warrior));
 
     // DoT is a debuff but not CC.
-    snapshot.active_auras.insert(target, vec![aura_with(AuraType::DamageOverTime, None, -1.0)]);
+    snapshot.active_auras.insert(
+        target,
+        vec![aura_with(AuraType::DamageOverTime, None, -1.0)],
+    );
     let ctx = snapshot.context_for(me);
     assert!(!ctx.is_ccd(target), "DoT is not CC");
 
@@ -587,7 +656,9 @@ fn is_dr_immune_returns_false_when_no_tracker() {
     let target = Entity::from_raw(2);
 
     let mut snapshot = snapshot_for(me, 1, CharacterClass::Rogue);
-    snapshot.combatants.insert(target, info(target, 2, CharacterClass::Priest));
+    snapshot
+        .combatants
+        .insert(target, info(target, 2, CharacterClass::Priest));
     // No DRTracker entry — target has never been CC'd.
 
     let ctx = snapshot.context_for(me);
@@ -600,7 +671,9 @@ fn is_dr_immune_returns_true_after_three_stuns() {
     let target = Entity::from_raw(2);
 
     let mut snapshot = snapshot_for(me, 1, CharacterClass::Rogue);
-    snapshot.combatants.insert(target, info(target, 2, CharacterClass::Priest));
+    snapshot
+        .combatants
+        .insert(target, info(target, 2, CharacterClass::Priest));
 
     // Drive the Stuns category to immunity (DR ladder: 100% → 50% → 25% → immune).
     let mut tracker = DRTracker::default();
@@ -630,12 +703,15 @@ fn priest_snapshot() -> (CombatSnapshot, Entity) {
 fn enemies_targeting_excludes_stealthed_rogue() {
     let (mut snapshot, me) = priest_snapshot();
     let rogue = Entity::from_raw(2);
-    snapshot.combatants.insert(rogue, CombatantInfo {
-        stealthed: true,
-        target: Some(me),
-        position: Vec3::new(3.0, 0.0, 0.0),
-        ..info(rogue, 2, CharacterClass::Rogue)
-    });
+    snapshot.combatants.insert(
+        rogue,
+        CombatantInfo {
+            stealthed: true,
+            target: Some(me),
+            position: Vec3::new(3.0, 0.0, 0.0),
+            ..info(rogue, 2, CharacterClass::Rogue)
+        },
+    );
 
     let ctx = snapshot.context_for(me);
     assert!(
@@ -648,12 +724,15 @@ fn enemies_targeting_excludes_stealthed_rogue() {
 fn enemies_targeting_includes_stealthed_rogue_under_shadow_sight() {
     let (mut snapshot, me) = priest_snapshot();
     let rogue = Entity::from_raw(2);
-    snapshot.combatants.insert(rogue, CombatantInfo {
-        stealthed: true,
-        target: Some(me),
-        position: Vec3::new(3.0, 0.0, 0.0),
-        ..info(rogue, 2, CharacterClass::Rogue)
-    });
+    snapshot.combatants.insert(
+        rogue,
+        CombatantInfo {
+            stealthed: true,
+            target: Some(me),
+            position: Vec3::new(3.0, 0.0, 0.0),
+            ..info(rogue, 2, CharacterClass::Rogue)
+        },
+    );
     // I hold Shadow Sight — the stealthed Rogue is revealed.
     snapshot
         .active_auras
@@ -661,7 +740,11 @@ fn enemies_targeting_includes_stealthed_rogue_under_shadow_sight() {
 
     let ctx = snapshot.context_for(me);
     let threats = ctx.enemies_targeting(me);
-    assert_eq!(threats.len(), 1, "shadow sight reveals the stealthed threat");
+    assert_eq!(
+        threats.len(),
+        1,
+        "shadow sight reveals the stealthed threat"
+    );
     assert_eq!(threats[0].entity, rogue);
 }
 
@@ -671,11 +754,14 @@ fn enemies_targeting_includes_rogue_holding_shadow_sight() {
     // Sight is revealed even while stealthed.
     let (mut snapshot, me) = priest_snapshot();
     let rogue = Entity::from_raw(2);
-    snapshot.combatants.insert(rogue, CombatantInfo {
-        stealthed: true,
-        target: Some(me),
-        ..info(rogue, 2, CharacterClass::Rogue)
-    });
+    snapshot.combatants.insert(
+        rogue,
+        CombatantInfo {
+            stealthed: true,
+            target: Some(me),
+            ..info(rogue, 2, CharacterClass::Rogue)
+        },
+    );
     snapshot
         .active_auras
         .insert(rogue, vec![aura_with(AuraType::ShadowSight, None, -1.0)]);
@@ -688,11 +774,14 @@ fn enemies_targeting_includes_rogue_holding_shadow_sight() {
 fn enemies_targeting_includes_enemy_pet() {
     let (mut snapshot, me) = priest_snapshot();
     let pet = Entity::from_raw(2);
-    snapshot.combatants.insert(pet, CombatantInfo {
-        target: Some(me),
-        position: Vec3::new(4.0, 0.0, 0.0),
-        ..pet_info(pet, 2, CharacterClass::Warlock)
-    });
+    snapshot.combatants.insert(
+        pet,
+        CombatantInfo {
+            target: Some(me),
+            position: Vec3::new(4.0, 0.0, 0.0),
+            ..pet_info(pet, 2, CharacterClass::Warlock)
+        },
+    );
 
     let ctx = snapshot.context_for(me);
     let threats = ctx.enemies_targeting(me);
@@ -704,21 +793,29 @@ fn enemies_targeting_includes_enemy_pet() {
 fn enemies_targeting_excludes_enemy_targeting_someone_else_and_dead() {
     let (mut snapshot, me) = priest_snapshot();
     let ally = Entity::from_raw(2);
-    snapshot.combatants.insert(ally, info(ally, 1, CharacterClass::Warrior));
+    snapshot
+        .combatants
+        .insert(ally, info(ally, 1, CharacterClass::Warrior));
     // Enemy on my team's Warrior, not me.
     let warrior = Entity::from_raw(3);
-    snapshot.combatants.insert(warrior, CombatantInfo {
-        target: Some(ally),
-        ..info(warrior, 2, CharacterClass::Warrior)
-    });
+    snapshot.combatants.insert(
+        warrior,
+        CombatantInfo {
+            target: Some(ally),
+            ..info(warrior, 2, CharacterClass::Warrior)
+        },
+    );
     // Dead enemy "targeting" me.
     let corpse = Entity::from_raw(4);
-    snapshot.combatants.insert(corpse, CombatantInfo {
-        target: Some(me),
-        is_alive: false,
-        current_health: 0.0,
-        ..info(corpse, 2, CharacterClass::Rogue)
-    });
+    snapshot.combatants.insert(
+        corpse,
+        CombatantInfo {
+            target: Some(me),
+            is_alive: false,
+            current_health: 0.0,
+            ..info(corpse, 2, CharacterClass::Rogue)
+        },
+    );
 
     let ctx = snapshot.context_for(me);
     assert!(ctx.enemies_targeting(me).is_empty());
@@ -728,17 +825,23 @@ fn enemies_targeting_excludes_enemy_targeting_someone_else_and_dead() {
 fn primary_attacker_picks_nearest_of_two() {
     let (mut snapshot, me) = priest_snapshot();
     let far = Entity::from_raw(2);
-    snapshot.combatants.insert(far, CombatantInfo {
-        target: Some(me),
-        position: Vec3::new(20.0, 0.0, 0.0),
-        ..info(far, 2, CharacterClass::Warrior)
-    });
+    snapshot.combatants.insert(
+        far,
+        CombatantInfo {
+            target: Some(me),
+            position: Vec3::new(20.0, 0.0, 0.0),
+            ..info(far, 2, CharacterClass::Warrior)
+        },
+    );
     let near = Entity::from_raw(3);
-    snapshot.combatants.insert(near, CombatantInfo {
-        target: Some(me),
-        position: Vec3::new(5.0, 0.0, 0.0),
-        ..info(near, 2, CharacterClass::Rogue)
-    });
+    snapshot.combatants.insert(
+        near,
+        CombatantInfo {
+            target: Some(me),
+            position: Vec3::new(5.0, 0.0, 0.0),
+            ..info(near, 2, CharacterClass::Rogue)
+        },
+    );
 
     let ctx = snapshot.context_for(me);
     let attacker = ctx.primary_attacker(me).expect("two attackers exist");
@@ -750,28 +853,37 @@ fn primary_attacker_skips_dead_and_invisible() {
     let (mut snapshot, me) = priest_snapshot();
     // Nearest is dead.
     let dead = Entity::from_raw(2);
-    snapshot.combatants.insert(dead, CombatantInfo {
-        target: Some(me),
-        position: Vec3::new(2.0, 0.0, 0.0),
-        is_alive: false,
-        current_health: 0.0,
-        ..info(dead, 2, CharacterClass::Warrior)
-    });
+    snapshot.combatants.insert(
+        dead,
+        CombatantInfo {
+            target: Some(me),
+            position: Vec3::new(2.0, 0.0, 0.0),
+            is_alive: false,
+            current_health: 0.0,
+            ..info(dead, 2, CharacterClass::Warrior)
+        },
+    );
     // Second-nearest is stealthed (invisible).
     let hidden = Entity::from_raw(3);
-    snapshot.combatants.insert(hidden, CombatantInfo {
-        target: Some(me),
-        position: Vec3::new(4.0, 0.0, 0.0),
-        stealthed: true,
-        ..info(hidden, 2, CharacterClass::Rogue)
-    });
+    snapshot.combatants.insert(
+        hidden,
+        CombatantInfo {
+            target: Some(me),
+            position: Vec3::new(4.0, 0.0, 0.0),
+            stealthed: true,
+            ..info(hidden, 2, CharacterClass::Rogue)
+        },
+    );
     // Farthest is the only live, visible attacker.
     let live = Entity::from_raw(4);
-    snapshot.combatants.insert(live, CombatantInfo {
-        target: Some(me),
-        position: Vec3::new(15.0, 0.0, 0.0),
-        ..info(live, 2, CharacterClass::Warrior)
-    });
+    snapshot.combatants.insert(
+        live,
+        CombatantInfo {
+            target: Some(me),
+            position: Vec3::new(15.0, 0.0, 0.0),
+            ..info(live, 2, CharacterClass::Warrior)
+        },
+    );
 
     let ctx = snapshot.context_for(me);
     let attacker = ctx.primary_attacker(me).expect("one valid attacker");
@@ -782,7 +894,9 @@ fn primary_attacker_skips_dead_and_invisible() {
 fn primary_attacker_none_when_unthreatened() {
     let (mut snapshot, me) = priest_snapshot();
     let enemy = Entity::from_raw(2);
-    snapshot.combatants.insert(enemy, info(enemy, 2, CharacterClass::Mage)); // target: None
+    snapshot
+        .combatants
+        .insert(enemy, info(enemy, 2, CharacterClass::Mage)); // target: None
 
     let ctx = snapshot.context_for(me);
     assert!(ctx.primary_attacker(me).is_none());
@@ -792,10 +906,13 @@ fn primary_attacker_none_when_unthreatened() {
 fn attacker_escape_window_returns_remaining_impair_duration() {
     let (mut snapshot, me) = priest_snapshot();
     let attacker = Entity::from_raw(2);
-    snapshot.combatants.insert(attacker, CombatantInfo {
-        target: Some(me),
-        ..info(attacker, 2, CharacterClass::Warrior)
-    });
+    snapshot.combatants.insert(
+        attacker,
+        CombatantInfo {
+            target: Some(me),
+            ..info(attacker, 2, CharacterClass::Warrior)
+        },
+    );
 
     for (effect, expected) in [
         (AuraType::Root, 5.0_f32),
@@ -820,13 +937,17 @@ fn attacker_escape_window_returns_remaining_impair_duration() {
 fn attacker_escape_window_takes_longest_of_multiple() {
     let (mut snapshot, me) = priest_snapshot();
     let attacker = Entity::from_raw(2);
-    snapshot.combatants.insert(attacker, info(attacker, 2, CharacterClass::Warrior));
+    snapshot
+        .combatants
+        .insert(attacker, info(attacker, 2, CharacterClass::Warrior));
 
     let mut short_stun = aura_with(AuraType::Stun, None, -1.0);
     short_stun.duration = 1.5;
     let mut long_root = aura_with(AuraType::Root, None, 80.0);
     long_root.duration = 6.0;
-    snapshot.active_auras.insert(attacker, vec![short_stun, long_root]);
+    snapshot
+        .active_auras
+        .insert(attacker, vec![short_stun, long_root]);
 
     let ctx = snapshot.context_for(me);
     assert_eq!(ctx.attacker_escape_window(attacker), Some(6.0));
@@ -836,7 +957,9 @@ fn attacker_escape_window_takes_longest_of_multiple() {
 fn attacker_escape_window_none_for_fear_or_free_attacker() {
     let (mut snapshot, me) = priest_snapshot();
     let attacker = Entity::from_raw(2);
-    snapshot.combatants.insert(attacker, info(attacker, 2, CharacterClass::Warrior));
+    snapshot
+        .combatants
+        .insert(attacker, info(attacker, 2, CharacterClass::Warrior));
 
     // No CC at all → no window.
     {
@@ -858,11 +981,14 @@ fn is_closing_true_for_melee_pursuing_me() {
     // Warrior (preferred_range 2.0) at 10 units, kill target = me: its
     // pursuit moves toward me this frame.
     let warrior = Entity::from_raw(2);
-    snapshot.combatants.insert(warrior, CombatantInfo {
-        target: Some(me),
-        position: Vec3::new(10.0, 0.0, 0.0),
-        ..info(warrior, 2, CharacterClass::Warrior)
-    });
+    snapshot.combatants.insert(
+        warrior,
+        CombatantInfo {
+            target: Some(me),
+            position: Vec3::new(10.0, 0.0, 0.0),
+            ..info(warrior, 2, CharacterClass::Warrior)
+        },
+    );
 
     let ctx = snapshot.context_for(me);
     assert!(ctx.is_closing(warrior, me));
@@ -874,11 +1000,14 @@ fn is_closing_false_for_stationary_caster_in_range() {
     // Mage (preferred_range 38.0) at 20 units targeting me: already inside
     // its preferred range, so pursuit holds position — not closing.
     let mage = Entity::from_raw(2);
-    snapshot.combatants.insert(mage, CombatantInfo {
-        target: Some(me),
-        position: Vec3::new(20.0, 0.0, 0.0),
-        ..info(mage, 2, CharacterClass::Mage)
-    });
+    snapshot.combatants.insert(
+        mage,
+        CombatantInfo {
+            target: Some(me),
+            position: Vec3::new(20.0, 0.0, 0.0),
+            ..info(mage, 2, CharacterClass::Mage)
+        },
+    );
 
     let ctx = snapshot.context_for(me);
     assert!(!ctx.is_closing(mage, me));
@@ -888,23 +1017,31 @@ fn is_closing_false_for_stationary_caster_in_range() {
 fn is_closing_false_when_threat_targets_someone_else_or_is_in_melee() {
     let (mut snapshot, me) = priest_snapshot();
     let ally = Entity::from_raw(2);
-    snapshot.combatants.insert(ally, info(ally, 1, CharacterClass::Warrior));
+    snapshot
+        .combatants
+        .insert(ally, info(ally, 1, CharacterClass::Warrior));
 
     // Distant melee whose kill target is my ally, not me.
     let off_target = Entity::from_raw(3);
-    snapshot.combatants.insert(off_target, CombatantInfo {
-        target: Some(ally),
-        position: Vec3::new(10.0, 0.0, 0.0),
-        ..info(off_target, 2, CharacterClass::Warrior)
-    });
+    snapshot.combatants.insert(
+        off_target,
+        CombatantInfo {
+            target: Some(ally),
+            position: Vec3::new(10.0, 0.0, 0.0),
+            ..info(off_target, 2, CharacterClass::Warrior)
+        },
+    );
     // Melee already on top of me (inside preferred_range 2.0): targeting me
     // but not "closing" — it is already there.
     let in_melee = Entity::from_raw(4);
-    snapshot.combatants.insert(in_melee, CombatantInfo {
-        target: Some(me),
-        position: Vec3::new(1.5, 0.0, 0.0),
-        ..info(in_melee, 2, CharacterClass::Rogue)
-    });
+    snapshot.combatants.insert(
+        in_melee,
+        CombatantInfo {
+            target: Some(me),
+            position: Vec3::new(1.5, 0.0, 0.0),
+            ..info(in_melee, 2, CharacterClass::Rogue)
+        },
+    );
 
     let ctx = snapshot.context_for(me);
     assert!(!ctx.is_closing(off_target, me));
@@ -917,11 +1054,14 @@ fn is_closing_uses_pet_preferred_range_for_pets() {
     // Felhunter (pet preferred_range 2.0, melee) at 12 units with kill
     // target me: closing.
     let felhunter = Entity::from_raw(2);
-    snapshot.combatants.insert(felhunter, CombatantInfo {
-        target: Some(me),
-        position: Vec3::new(12.0, 0.0, 0.0),
-        ..pet_info(felhunter, 2, CharacterClass::Warlock)
-    });
+    snapshot.combatants.insert(
+        felhunter,
+        CombatantInfo {
+            target: Some(me),
+            position: Vec3::new(12.0, 0.0, 0.0),
+            ..pet_info(felhunter, 2, CharacterClass::Warlock)
+        },
+    );
 
     let ctx = snapshot.context_for(me);
     assert!(ctx.is_closing(felhunter, me));
@@ -936,16 +1076,22 @@ fn visible_enemies_within_includes_only_enemies_inside_radius() {
     let (mut snapshot, me) = priest_snapshot();
     // Enemy at distance 5 (inside radius 10).
     let near = Entity::from_raw(2);
-    snapshot.combatants.insert(near, CombatantInfo {
-        position: Vec3::new(5.0, 0.0, 0.0),
-        ..info(near, 2, CharacterClass::Warrior)
-    });
+    snapshot.combatants.insert(
+        near,
+        CombatantInfo {
+            position: Vec3::new(5.0, 0.0, 0.0),
+            ..info(near, 2, CharacterClass::Warrior)
+        },
+    );
     // Enemy at distance 15 (outside radius 10).
     let far = Entity::from_raw(3);
-    snapshot.combatants.insert(far, CombatantInfo {
-        position: Vec3::new(15.0, 0.0, 0.0),
-        ..info(far, 2, CharacterClass::Mage)
-    });
+    snapshot.combatants.insert(
+        far,
+        CombatantInfo {
+            position: Vec3::new(15.0, 0.0, 0.0),
+            ..info(far, 2, CharacterClass::Mage)
+        },
+    );
 
     let ctx = snapshot.context_for(me);
     let within: Vec<Entity> = ctx
@@ -953,7 +1099,11 @@ fn visible_enemies_within_includes_only_enemies_inside_radius() {
         .iter()
         .map(|c| c.entity)
         .collect();
-    assert_eq!(within, vec![near], "only the enemy inside the radius is returned");
+    assert_eq!(
+        within,
+        vec![near],
+        "only the enemy inside the radius is returned"
+    );
 }
 
 #[test]
@@ -961,16 +1111,22 @@ fn visible_enemies_within_respects_radius_boundary_and_team() {
     let (mut snapshot, me) = priest_snapshot();
     // Enemy exactly at the radius (10.0) — `<=` so it is included.
     let on_edge = Entity::from_raw(2);
-    snapshot.combatants.insert(on_edge, CombatantInfo {
-        position: Vec3::new(10.0, 0.0, 0.0),
-        ..info(on_edge, 2, CharacterClass::Warrior)
-    });
+    snapshot.combatants.insert(
+        on_edge,
+        CombatantInfo {
+            position: Vec3::new(10.0, 0.0, 0.0),
+            ..info(on_edge, 2, CharacterClass::Warrior)
+        },
+    );
     // Ally inside the radius — never a "threat", regardless of distance.
     let ally = Entity::from_raw(3);
-    snapshot.combatants.insert(ally, CombatantInfo {
-        position: Vec3::new(2.0, 0.0, 0.0),
-        ..info(ally, 1, CharacterClass::Warrior)
-    });
+    snapshot.combatants.insert(
+        ally,
+        CombatantInfo {
+            position: Vec3::new(2.0, 0.0, 0.0),
+            ..info(ally, 1, CharacterClass::Warrior)
+        },
+    );
 
     let ctx = snapshot.context_for(me);
     let within: Vec<Entity> = ctx
@@ -1000,7 +1156,11 @@ fn movement_slow_multiplier_single_slow() {
     snapshot.active_auras.insert(me, vec![slow]);
 
     let ctx = snapshot.context_for(me);
-    assert_eq!(ctx.movement_slow_multiplier(me), 0.5, "one 50% slow halves speed");
+    assert_eq!(
+        ctx.movement_slow_multiplier(me),
+        0.5,
+        "one 50% slow halves speed"
+    );
 }
 
 #[test]
@@ -1012,7 +1172,9 @@ fn movement_slow_multiplier_stacks_multiplicatively() {
     slow_b.magnitude = 0.7;
     // A non-slow aura must be ignored by the product.
     let unrelated = aura_with(AuraType::DamageOverTime, None, 0.0);
-    snapshot.active_auras.insert(me, vec![slow_a, slow_b, unrelated]);
+    snapshot
+        .active_auras
+        .insert(me, vec![slow_a, slow_b, unrelated]);
 
     let ctx = snapshot.context_for(me);
     // 0.5 * 0.7 = 0.35 (the DoT does not participate).
@@ -1029,7 +1191,10 @@ fn movement_slow_multiplier_stacks_multiplicatively() {
 
 /// A full-HP `info` scaled to `hp_frac` of its max (0.0..=1.0).
 fn injured(entity: Entity, team: u8, class: CharacterClass, hp_frac: f32) -> CombatantInfo {
-    CombatantInfo { current_health: 100.0 * hp_frac, ..info(entity, team, class) }
+    CombatantInfo {
+        current_health: 100.0 * hp_frac,
+        ..info(entity, team, class)
+    }
 }
 
 /// Snapshot holding exactly the given members (self-entity is chosen per test

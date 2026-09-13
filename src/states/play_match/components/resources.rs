@@ -1,9 +1,9 @@
+use super::super::match_config;
 use bevy::prelude::*;
 use bevy_egui::egui;
 use rand::prelude::*;
 use rand::rngs::StdRng;
 use std::collections::HashMap;
-use super::super::match_config;
 
 // ============================================================================
 // Resources & Camera
@@ -148,11 +148,11 @@ pub enum CameraMode {
 #[derive(Resource)]
 pub struct CameraController {
     pub mode: CameraMode,
-    pub zoom_distance: f32,      // Distance from target
-    pub pitch: f32,              // Rotation around X-axis (up/down)
-    pub yaw: f32,                // Rotation around Y-axis (left/right)
-    pub manual_target: Vec3,     // Look-at point for manual mode
-    pub is_dragging: bool,       // Mouse drag state
+    pub zoom_distance: f32,  // Distance from target
+    pub pitch: f32,          // Rotation around X-axis (up/down)
+    pub yaw: f32,            // Rotation around Y-axis (left/right)
+    pub manual_target: Vec3, // Look-at point for manual mode
+    pub is_dragging: bool,   // Mouse drag state
     pub last_mouse_pos: Option<Vec2>,
     pub keyboard_movement: Vec3, // WASD movement delta this frame
     /// Cursor position at the start of the current left-button press, or

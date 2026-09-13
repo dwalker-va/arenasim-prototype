@@ -207,11 +207,17 @@ pub fn draw_arena_layout(
 
     // ---- Center crosshair --------------------------------------------------
     painter.line_segment(
-        [to_screen(Vec2::new(-half.x, 0.0)), to_screen(Vec2::new(half.x, 0.0))],
+        [
+            to_screen(Vec2::new(-half.x, 0.0)),
+            to_screen(Vec2::new(half.x, 0.0)),
+        ],
         egui::Stroke::new(0.5, egui::Color32::from_rgb(70, 76, 94)),
     );
     painter.line_segment(
-        [to_screen(Vec2::new(0.0, -half.y)), to_screen(Vec2::new(0.0, half.y))],
+        [
+            to_screen(Vec2::new(0.0, -half.y)),
+            to_screen(Vec2::new(0.0, half.y)),
+        ],
         egui::Stroke::new(0.5, egui::Color32::from_rgb(70, 76, 94)),
     );
 

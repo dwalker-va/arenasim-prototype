@@ -39,12 +39,8 @@ fn fitted(
     width: f32,
     max_rows: usize,
 ) -> std::sync::Arc<egui::Galley> {
-    let mut job = egui::text::LayoutJob::simple(
-        text,
-        egui::FontId::proportional(size),
-        color,
-        width,
-    );
+    let mut job =
+        egui::text::LayoutJob::simple(text, egui::FontId::proportional(size), color, width);
     job.wrap.max_rows = max_rows;
     job.wrap.overflow_character = Some('…');
     ui.fonts(|f| f.layout_job(job))
@@ -69,7 +65,12 @@ pub fn paint_icon(
         }
         None => {
             painter.rect_filled(rect, 3.0, PANEL_HI);
-            painter.rect_stroke(rect, 3.0, egui::Stroke::new(1.0, LINE), egui::StrokeKind::Inside);
+            painter.rect_stroke(
+                rect,
+                3.0,
+                egui::Stroke::new(1.0, LINE),
+                egui::StrokeKind::Inside,
+            );
         }
     }
 }
@@ -84,7 +85,12 @@ pub fn tooltip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) {
             // The same builder the equipment picker and in-match UI use.
             Some(item) => super::items::render_item_tooltip(ui, item),
             None => {
-                ui.label(egui::RichText::new(topic.name(data)).size(14.0).color(GOLD).strong());
+                ui.label(
+                    egui::RichText::new(topic.name(data))
+                        .size(14.0)
+                        .color(GOLD)
+                        .strong(),
+                );
             }
         },
         Topic::Class(class) => super::classes::tooltip(ui, class, data),
@@ -181,7 +187,10 @@ pub fn icon_link(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Op
     );
     paint_icon(&painter, icon_rect, topic, data);
     painter.galley(
-        egui::pos2(rect.center().x - galley.size().x / 2.0, icon_rect.bottom() + 6.0),
+        egui::pos2(
+            rect.center().x - galley.size().x / 2.0,
+            icon_rect.bottom() + 6.0,
+        ),
         galley,
         TEXT,
     );
@@ -208,7 +217,12 @@ pub fn tile(
     let fill = if response.hovered() { PANEL_HI } else { PANEL };
     let frame = if response.hovered() { LINE_HI } else { LINE };
     painter.rect_filled(rect, 5.0, fill);
-    painter.rect_stroke(rect, 5.0, egui::Stroke::new(1.0, frame), egui::StrokeKind::Inside);
+    painter.rect_stroke(
+        rect,
+        5.0,
+        egui::Stroke::new(1.0, frame),
+        egui::StrokeKind::Inside,
+    );
 
     let icon_rect = egui::Rect::from_min_size(
         egui::pos2(rect.left() + PAD, rect.center().y - ICON_TILE / 2.0),
@@ -267,8 +281,10 @@ pub fn row(
     paint_icon(&painter, icon_rect, topic, data);
 
     // The trailing note keeps its natural width; the name takes what is left.
-    let trail = (!trailing.is_empty())
-        .then(|| ui.painter().layout_no_wrap(trailing.to_string(), egui::FontId::proportional(11.5), DIM));
+    let trail = (!trailing.is_empty()).then(|| {
+        ui.painter()
+            .layout_no_wrap(trailing.to_string(), egui::FontId::proportional(11.5), DIM)
+    });
     let trail_w = trail.as_ref().map(|g| g.size().x + PAD).unwrap_or(0.0);
 
     let name_left = icon_rect.right() + PAD;
@@ -287,7 +303,10 @@ pub fn row(
     );
     if let Some(trail) = trail {
         painter.galley(
-            egui::pos2(rect.right() - PAD - trail.size().x, rect.center().y - trail.size().y / 2.0),
+            egui::pos2(
+                rect.right() - PAD - trail.size().x,
+                rect.center().y - trail.size().y / 2.0,
+            ),
             trail,
             DIM,
         );
@@ -329,7 +348,10 @@ pub fn chip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Option<
     );
     paint_icon(&painter, icon_rect, topic, data);
     painter.galley(
-        egui::pos2(icon_rect.right() + 6.0, rect.center().y - galley.size().y / 2.0),
+        egui::pos2(
+            icon_rect.right() + 6.0,
+            rect.center().y - galley.size().y / 2.0,
+        ),
         galley,
         topic.accent(data),
     );
@@ -342,12 +364,7 @@ pub fn chip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Option<
 // ============================================================================
 
 /// Icon + name + subtitle block at the top of a detail page.
-pub fn detail_header(
-    ui: &mut egui::Ui,
-    topic: Topic,
-    subtitle: &str,
-    data: &EncyclopediaData,
-) {
+pub fn detail_header(ui: &mut egui::Ui, topic: Topic, subtitle: &str, data: &EncyclopediaData) {
     ui.horizontal(|ui| {
         let (rect, _) =
             ui.allocate_exact_size(egui::vec2(ICON_HEADER, ICON_HEADER), egui::Sense::hover());
@@ -473,7 +490,10 @@ mod tests {
         harness.step();
         let pos = probe.rect.get().center();
         let modifiers = egui::Modifiers::NONE;
-        harness.input_mut().events.push(egui::Event::PointerMoved(pos));
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::PointerMoved(pos));
         harness.step();
         harness.input_mut().events.push(egui::Event::PointerButton {
             pos,

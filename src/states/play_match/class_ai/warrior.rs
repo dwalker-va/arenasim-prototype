@@ -16,9 +16,13 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::match_config::WarriorShout;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::combat_core::{
+    get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice, roll_crit,
+};
 use crate::states::play_match::components::*;
-use crate::states::play_match::combat_core::{roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
-use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
+use crate::states::play_match::constants::{
+    CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE,
+};
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
     NoActionReason, Posture as TracePosture, RejectionReason, ResourceKind,
@@ -28,8 +32,8 @@ use crate::states::play_match::movement_config::MeleeMovementConfig;
 
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
-use super::{pressing_when_ahead, CombatContext};
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::{pressing_when_ahead, CombatContext};
 
 /// Shout range constant (applies to all shout variants)
 const SHOUT_RANGE: f32 = 30.0;
@@ -59,7 +63,8 @@ pub fn decide_warrior_action(
         return false;
     }
 
-    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos) else {
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos)
+    else {
         return false;
     };
 
@@ -125,8 +130,19 @@ pub fn decide_warrior_action(
 
     if burst_window
         && try_mortal_strike(
-            commands, combat_log, game_rng, abilities, entity, combatant, my_pos, auras,
-            target_entity, target_pos, ctx, instant_attacks, &mut builder,
+            commands,
+            combat_log,
+            game_rng,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+            instant_attacks,
+            &mut builder,
         )
     {
         builder.finish();
@@ -200,13 +216,37 @@ fn try_shout(
 ) -> bool {
     match combatant.warrior_shout {
         WarriorShout::BattleShout => try_battle_shout(
-            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame, builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            ctx,
+            shouted_this_frame,
+            builder,
         ),
         WarriorShout::DemoralizingShout => try_demoralizing_shout(
-            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame, builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            ctx,
+            shouted_this_frame,
+            builder,
         ),
         WarriorShout::CommandingShout => try_commanding_shout(
-            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame, builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            ctx,
+            shouted_this_frame,
+            builder,
         ),
     }
 }
@@ -237,9 +277,14 @@ fn try_battle_shout(
             continue;
         }
 
-        let already_has = ctx.active_auras
+        let already_has = ctx
+            .active_auras
             .get(ally_entity)
-            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::AttackPowerIncrease))
+            .map(|auras| {
+                auras
+                    .iter()
+                    .any(|a| a.effect_type == AuraType::AttackPowerIncrease)
+            })
             .unwrap_or(false);
 
         if !already_has && !shouted_this_frame.contains(ally_entity) {
@@ -269,7 +314,15 @@ fn try_battle_shout(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Battle Shout", None, "uses");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Battle Shout",
+        None,
+        "uses",
+    );
 
     for target in targets {
         shouted_this_frame.insert(target);
@@ -313,9 +366,14 @@ fn try_demoralizing_shout(
             continue;
         }
 
-        let already_has = ctx.active_auras
+        let already_has = ctx
+            .active_auras
             .get(enemy_entity)
-            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::AttackPowerReduction))
+            .map(|auras| {
+                auras
+                    .iter()
+                    .any(|a| a.effect_type == AuraType::AttackPowerReduction)
+            })
             .unwrap_or(false);
 
         if !already_has && !shouted_this_frame.contains(enemy_entity) {
@@ -345,7 +403,15 @@ fn try_demoralizing_shout(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Demoralizing Shout", None, "uses");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Demoralizing Shout",
+        None,
+        "uses",
+    );
 
     for target in targets {
         shouted_this_frame.insert(target);
@@ -389,9 +455,14 @@ fn try_commanding_shout(
             continue;
         }
 
-        let already_has = ctx.active_auras
+        let already_has = ctx
+            .active_auras
             .get(ally_entity)
-            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::MaxHealthIncrease))
+            .map(|auras| {
+                auras
+                    .iter()
+                    .any(|a| a.effect_type == AuraType::MaxHealthIncrease)
+            })
             .unwrap_or(false);
 
         if !already_has && !shouted_this_frame.contains(ally_entity) {
@@ -421,7 +492,15 @@ fn try_commanding_shout(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Commanding Shout", None, "uses");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Commanding Shout",
+        None,
+        "uses",
+    );
 
     for target in targets {
         shouted_this_frame.insert(target);
@@ -463,13 +542,22 @@ fn try_charge(
     }
 
     if let Some(remaining) = combatant.ability_cooldowns.get(&charge) {
-        builder.reject(charge, RejectionReason::OnCooldown { remaining: *remaining });
+        builder.reject(
+            charge,
+            RejectionReason::OnCooldown {
+                remaining: *remaining,
+            },
+        );
         return false;
     }
 
     // Check if rooted
     let is_rooted = auras
-        .map(|a| a.auras.iter().any(|aura| matches!(aura.effect_type, AuraType::Root)))
+        .map(|a| {
+            a.auras
+                .iter()
+                .any(|aura| matches!(aura.effect_type, AuraType::Root))
+        })
         .unwrap_or(false);
 
     if is_rooted {
@@ -513,7 +601,9 @@ fn try_charge(
     builder.choose(charge, Some(target_entity), true);
 
     // Execute Charge
-    combatant.ability_cooldowns.insert(charge, charge_def.cooldown);
+    combatant
+        .ability_cooldowns
+        .insert(charge, charge_def.cooldown);
     combatant.global_cooldown = GCD;
 
     commands.entity(entity).insert(ChargingState {
@@ -521,10 +611,16 @@ fn try_charge(
     });
 
     // Log
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Charge", target_tuple, "uses");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Charge",
+        target_tuple,
+        "uses",
+    );
 
     info!(
         "Team {} {} uses Charge on enemy (distance: {:.1} units)",
@@ -555,9 +651,14 @@ fn try_rend(
     let rend_def = abilities.get_unchecked(&rend);
 
     // Check if target already has Rend (any DoT for now)
-    let target_has_rend = ctx.active_auras
+    let target_has_rend = ctx
+        .active_auras
         .get(&target_entity)
-        .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageOverTime))
+        .map(|auras| {
+            auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::DamageOverTime)
+        })
         .unwrap_or(false);
 
     if target_has_rend {
@@ -565,7 +666,10 @@ fn try_rend(
         return false;
     }
 
-    let rend_opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let rend_opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
         rend,
         rend_def,
@@ -599,10 +703,16 @@ fn try_rend(
     combatant.global_cooldown = GCD;
 
     // Log
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Rend", target_tuple, "uses");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Rend",
+        target_tuple,
+        "uses",
+    );
 
     // Apply DoT aura
     if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, rend_def) {
@@ -645,7 +755,10 @@ fn try_mortal_strike(
     let mortal_strike = AbilityType::MortalStrike;
     let ms_def = abilities.get_unchecked(&mortal_strike);
 
-    let ms_opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let ms_opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
         mortal_strike,
         ms_def,
@@ -685,19 +798,35 @@ fn try_mortal_strike(
 
     // Execute Mortal Strike
     combatant.current_mana -= ms_def.mana_cost;
-    combatant.ability_cooldowns.insert(mortal_strike, ms_def.cooldown);
+    combatant
+        .ability_cooldowns
+        .insert(mortal_strike, ms_def.cooldown);
     combatant.global_cooldown = GCD;
 
     // Log
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Mortal Strike", Some(target_info.log_id()), "uses");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Mortal Strike",
+        Some(target_info.log_id()),
+        "uses",
+    );
 
     // Calculate and queue damage (with dynamic aura bonuses)
-    let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);
+    let self_auras = ctx
+        .active_auras
+        .get(&entity)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
     let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
     let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
     let mut damage = combatant.calculate_ability_damage_config(ms_def, game_rng, ap_bonus, 0.0);
     let is_crit = roll_crit(combatant.crit_chance + crit_bonus, game_rng);
-    if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
+    if is_crit {
+        damage *= CRIT_DAMAGE_MULTIPLIER;
+    }
     instant_attacks.push(super::QueuedInstantAttack {
         attacker: entity,
         target: target_entity,
@@ -817,15 +946,15 @@ pub fn try_berserker_rage_while_cc(
             matches!(
                 a.effect_type,
                 AuraType::Stun | AuraType::Polymorph | AuraType::Incapacitate
-            ) || (a.effect_type == AuraType::Fear
-                && a.dr_category() == Some(DRCategory::Horror))
+            ) || (a.effect_type == AuraType::Fear && a.dr_category() == Some(DRCategory::Horror))
         })
     });
     if hard_locked {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
-                note: "hard-CC'd (stun/poly/incap/horror) — Berserker Rage only answers Fear".into(),
+                note: "hard-CC'd (stun/poly/incap/horror) — Berserker Rage only answers Fear"
+                    .into(),
             },
         );
         return false;
@@ -833,9 +962,9 @@ pub fn try_berserker_rage_while_cc(
 
     // Only worth pressing if there's a breakable Fear on us.
     let has_breakable_fear = ctx.self_auras().map_or(false, |auras| {
-        auras.iter().any(|a| {
-            a.effect_type == AuraType::Fear && a.dr_category() != Some(DRCategory::Horror)
-        })
+        auras
+            .iter()
+            .any(|a| a.effect_type == AuraType::Fear && a.dr_category() != Some(DRCategory::Horror))
     });
     if !has_breakable_fear {
         builder.reject(
@@ -847,8 +976,18 @@ pub fn try_berserker_rage_while_cc(
         return false;
     }
 
-    if combatant.ability_cooldowns.get(&ability).copied().unwrap_or(0.0) > 0.0 {
-        let remaining = combatant.ability_cooldowns.get(&ability).copied().unwrap_or(0.0);
+    if combatant
+        .ability_cooldowns
+        .get(&ability)
+        .copied()
+        .unwrap_or(0.0)
+        > 0.0
+    {
+        let remaining = combatant
+            .ability_cooldowns
+            .get(&ability)
+            .copied()
+            .unwrap_or(0.0);
         builder.reject(ability, RejectionReason::OnCooldown { remaining });
         return false;
     }
@@ -873,7 +1012,15 @@ pub fn try_berserker_rage_while_cc(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Berserker Rage", None, "uses");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Berserker Rage",
+        None,
+        "uses",
+    );
 
     true
 }
@@ -1025,4 +1172,3 @@ pub fn evaluate_warrior_reset(
         commands.entity(entity).try_insert(*state);
     }
 }
-

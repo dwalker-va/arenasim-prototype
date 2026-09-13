@@ -428,18 +428,18 @@ impl Default for DpsMovementConfig {
                 commitment_bonus: 1.5,
                 los_seek: 0.0,
                 cover_pull: 0.0,
-            healer_leash: 0.0,
+                healer_leash: 0.0,
             },
-            range_band_min: 8.0,   // SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE
-            range_band_max: 30.0,  // within AUTO_SHOT_RANGE
+            range_band_min: 8.0,  // SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE
+            range_band_max: 30.0, // within AUTO_SHOT_RANGE
             kite_hold: 1.0,
-            directive_ttl: 3.0,    // covers a Frostbolt / Aimed Shot cast
+            directive_ttl: 3.0, // covers a Frostbolt / Aimed Shot cast
             commit_window: 0.6,
             kite_entry_radius: 20.0,   // Hunter closing-range band
             kite_sustain_radius: 24.0, // hold a touch past entry
             dip_budget: 0.0,           // Mage default off; Hunter ron turns it on
             seek_chase_timeout: 3.5,   // accumulated occlusion units before the chase arms
-            seek_chase_decay: 0.5,     // drains this per sighted second (< fill, so jukes still accrue)
+            seek_chase_decay: 0.5, // drains this per sighted second (< fill, so jukes still accrue)
         }
     }
 }
@@ -481,7 +481,10 @@ impl MovementConfig {
         ];
         for (name, value) in positives {
             if !(value > 0.0) || !value.is_finite() {
-                issues.push(format!("{} must be a positive finite number, got {}", name, value));
+                issues.push(format!(
+                    "{} must be a positive finite number, got {}",
+                    name, value
+                ));
             }
         }
 
@@ -489,16 +492,31 @@ impl MovementConfig {
             ("shared.formation_offset", s.formation_offset),
             ("shared.escape_min_window", s.escape_min_window),
             ("shared.anchor_switch_margin", s.anchor_switch_margin),
-            ("priest.formation_shift_threshold", self.priest.formation_shift_threshold),
+            (
+                "priest.formation_shift_threshold",
+                self.priest.formation_shift_threshold,
+            ),
             ("priest.formation_deadzone", self.priest.formation_deadzone),
-            ("priest.directive_refresh_margin", self.priest.directive_refresh_margin),
-            ("shaman.formation_shift_threshold", self.shaman.formation_shift_threshold),
+            (
+                "priest.directive_refresh_margin",
+                self.priest.directive_refresh_margin,
+            ),
+            (
+                "shaman.formation_shift_threshold",
+                self.shaman.formation_shift_threshold,
+            ),
             ("shaman.formation_deadzone", self.shaman.formation_deadzone),
-            ("shaman.directive_refresh_margin", self.shaman.directive_refresh_margin),
+            (
+                "shaman.directive_refresh_margin",
+                self.shaman.directive_refresh_margin,
+            ),
         ];
         for (name, value) in non_negatives {
             if value < 0.0 || !value.is_finite() {
-                issues.push(format!("{} must be non-negative and finite, got {}", name, value));
+                issues.push(format!(
+                    "{} must be non-negative and finite, got {}",
+                    name, value
+                ));
             }
         }
 
@@ -635,7 +653,10 @@ impl MovementConfig {
                 ));
             }
             if m.kite_hold <= 0.0 || !m.kite_hold.is_finite() {
-                issues.push(format!("{class}.kite_hold must be a positive finite number, got {}", m.kite_hold));
+                issues.push(format!(
+                    "{class}.kite_hold must be a positive finite number, got {}",
+                    m.kite_hold
+                ));
             }
             if m.directive_ttl < m.commit_window {
                 issues.push(format!(
@@ -645,7 +666,10 @@ impl MovementConfig {
                 ));
             }
             if m.commit_window <= 0.0 || !m.commit_window.is_finite() {
-                issues.push(format!("{class}.commit_window must be a positive finite number, got {}", m.commit_window));
+                issues.push(format!(
+                    "{class}.commit_window must be a positive finite number, got {}",
+                    m.commit_window
+                ));
             }
             // Proximity-gate sanity (Hunter): sustain radius must not be smaller
             // than entry, or KITE would exit the instant it enters.
@@ -684,20 +708,24 @@ impl MovementConfig {
 /// Parse a movement config from RON text. `source` names the origin for
 /// error messages (a path, or "inline" in tests).
 pub fn parse_movement_config(contents: &str, source: &str) -> Result<MovementConfig, String> {
-    let config: MovementConfig = ron::from_str(contents)
-        .map_err(|e| format!("Failed to parse {}: {}", source, e))?;
+    let config: MovementConfig =
+        ron::from_str(contents).map_err(|e| format!("Failed to parse {}: {}", source, e))?;
 
-    config
-        .validate()
-        .map_err(|issues| format!("Invalid movement config in {}:\n  {}", source, issues.join("\n  ")))?;
+    config.validate().map_err(|issues| {
+        format!(
+            "Invalid movement config in {}:\n  {}",
+            source,
+            issues.join("\n  ")
+        )
+    })?;
 
     Ok(config)
 }
 
 /// Load and validate a movement config from a RON file path.
 pub fn load_movement_config_from(path: &str) -> Result<MovementConfig, String> {
-    let contents = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read {}: {}", path, e))?;
+    let contents =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
     parse_movement_config(&contents, path)
 }
 
@@ -785,7 +813,9 @@ mod tests {
     fn validate_rejects_nonpositive_heal_range() {
         let mut config = MovementConfig::default();
         config.shared.heal_range = 0.0;
-        let issues = config.validate().expect_err("heal_range 0 must fail validation");
+        let issues = config
+            .validate()
+            .expect_err("heal_range 0 must fail validation");
         assert!(
             issues.iter().any(|i| i.contains("shared.heal_range")),
             "issues should name heal_range: {:?}",
@@ -877,28 +907,61 @@ mod tests {
             ("paladin", &config.paladin.weights),
             ("shaman", &config.shaman.weights),
         ] {
-            assert_eq!(w.los_seek, 0.0, "{name}.los_seek must ship at 0.0 (healers deny, don't seek)");
+            assert_eq!(
+                w.los_seek, 0.0,
+                "{name}.los_seek must ship at 0.0 (healers deny, don't seek)"
+            );
         }
-        assert_eq!(config.mage.weights.los_seek, 2.0, "mage.los_seek (U9 seek knob)");
-        assert_eq!(config.hunter.weights.los_seek, 1.0, "hunter.los_seek (U9 seek knob)");
+        assert_eq!(
+            config.mage.weights.los_seek, 2.0,
+            "mage.los_seek (U9 seek knob)"
+        );
+        assert_eq!(
+            config.hunter.weights.los_seek, 1.0,
+            "hunter.los_seek (U9 seek knob)"
+        );
         // Occlusion-timeout direct chase: both kiters ship at 3.5s (0.0 would
         // disable). Pinned so an accidental RON edit that turns the chase off
         // (re-opening the pillar-hug stall) is caught.
-        assert_eq!(config.mage.seek_chase_timeout, 3.5, "mage.seek_chase_timeout");
-        assert_eq!(config.hunter.seek_chase_timeout, 3.5, "hunter.seek_chase_timeout");
+        assert_eq!(
+            config.mage.seek_chase_timeout, 3.5,
+            "mage.seek_chase_timeout"
+        );
+        assert_eq!(
+            config.hunter.seek_chase_timeout, 3.5,
+            "hunter.seek_chase_timeout"
+        );
         // Leaky-bucket drain rate: both kiters ship at 0.5/sec (below the 1.0/sec
         // fill, so a juking target still accrues occlusion toward the arm
         // threshold). Pinned so an accidental RON edit is caught.
         assert_eq!(config.mage.seek_chase_decay, 0.5, "mage.seek_chase_decay");
-        assert_eq!(config.hunter.seek_chase_decay, 0.5, "hunter.seek_chase_decay");
+        assert_eq!(
+            config.hunter.seek_chase_decay, 0.5,
+            "hunter.seek_chase_decay"
+        );
         // Deny-posture weights: healers cover, DPS kiters do not. Each stays
         // below its block's threat_repulsion so denial shapes the retreat
         // without overriding escape.
-        assert_eq!(config.priest.weights.cover_pull, 1.5, "priest.cover_pull (U8)");
-        assert_eq!(config.paladin.weights.cover_pull, 1.0, "paladin.cover_pull (U8, melee identity → lower)");
-        assert_eq!(config.shaman.weights.cover_pull, 1.5, "shaman.cover_pull (U8)");
-        assert_eq!(config.mage.weights.cover_pull, 0.0, "mage.cover_pull off (U9)");
-        assert_eq!(config.hunter.weights.cover_pull, 0.0, "hunter.cover_pull off (U9)");
+        assert_eq!(
+            config.priest.weights.cover_pull, 1.5,
+            "priest.cover_pull (U8)"
+        );
+        assert_eq!(
+            config.paladin.weights.cover_pull, 1.0,
+            "paladin.cover_pull (U8, melee identity → lower)"
+        );
+        assert_eq!(
+            config.shaman.weights.cover_pull, 1.5,
+            "shaman.cover_pull (U8)"
+        );
+        assert_eq!(
+            config.mage.weights.cover_pull, 0.0,
+            "mage.cover_pull off (U9)"
+        );
+        assert_eq!(
+            config.hunter.weights.cover_pull, 0.0,
+            "hunter.cover_pull off (U9)"
+        );
         for (name, w) in [
             ("priest", &config.priest.weights),
             ("paladin", &config.paladin.weights),
@@ -931,7 +994,9 @@ mod tests {
     fn validate_rejects_mage_range_band_max_beyond_shot_range() {
         let mut config = MovementConfig::default();
         config.mage.range_band_max = AUTO_SHOT_RANGE + 5.0;
-        let issues = config.validate().expect_err("max > AUTO_SHOT_RANGE must fail");
+        let issues = config
+            .validate()
+            .expect_err("max > AUTO_SHOT_RANGE must fail");
         assert!(
             issues.iter().any(|i| i.contains("mage.range_band_max")),
             "issues should name range_band_max: {:?}",
@@ -943,7 +1008,9 @@ mod tests {
     fn validate_rejects_mage_range_band_min_below_safe_distance() {
         let mut config = MovementConfig::default();
         config.mage.range_band_min = SAFE_KITING_DISTANCE - 1.0;
-        let issues = config.validate().expect_err("min < SAFE_KITING_DISTANCE must fail");
+        let issues = config
+            .validate()
+            .expect_err("min < SAFE_KITING_DISTANCE must fail");
         assert!(
             issues.iter().any(|i| i.contains("mage.range_band_min")),
             "issues should name range_band_min: {:?}",
@@ -968,7 +1035,9 @@ mod tests {
         let mut config = MovementConfig::default();
         config.mage.commit_window = 0.6;
         config.mage.directive_ttl = 0.3;
-        let issues = config.validate().expect_err("ttl < commit_window must fail");
+        let issues = config
+            .validate()
+            .expect_err("ttl < commit_window must fail");
         assert!(
             issues.iter().any(|i| i.contains("mage.directive_ttl")),
             "issues should name mage.directive_ttl: {:?}",
@@ -984,6 +1053,9 @@ mod tests {
         let config = parse_movement_config("(shared: (danger_radius: 15.0))", "inline")
             .expect("partial config must parse");
         assert_eq!(config.shared.danger_radius, 15.0);
-        assert_eq!(config.shared.heal_range, 40.0, "unspecified fields use defaults");
+        assert_eq!(
+            config.shared.heal_range, 40.0,
+            "unspecified fields use defaults"
+        );
     }
 }

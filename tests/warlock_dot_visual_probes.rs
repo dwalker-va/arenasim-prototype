@@ -37,11 +37,10 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::{
     age_warlock_dot_particles, animate_corruption_shrouds, animate_curse_apparitions,
     animate_dot_apply_bursts, animate_ua_states, billboard_warlock_dot_visuals,
-    cleanup_warlock_dot_visuals, curse_envelope, curse_spec, dot_anchor,
-    orient_curse_apparitions, shroud_alpha, spawn_warlock_dot_visuals, ua_crackle_k,
-    APPLY_BURST_LIFE, CORRUPTION_AURA, COA_AURA, CURSE_SUSTAIN_WHISPER, PULSE_PERIOD,
-    SHROUD_DARKNESS, SHROUD_RADIUS, UA_AURA, UA_CRACKLE_PERIOD, UA_CRACKLE_SECS,
-    UA_PULSE_PERIOD,
+    cleanup_warlock_dot_visuals, curse_envelope, curse_spec, dot_anchor, orient_curse_apparitions,
+    shroud_alpha, spawn_warlock_dot_visuals, ua_crackle_k, APPLY_BURST_LIFE, COA_AURA,
+    CORRUPTION_AURA, CURSE_SUSTAIN_WHISPER, PULSE_PERIOD, SHROUD_DARKNESS, SHROUD_RADIUS, UA_AURA,
+    UA_CRACKLE_PERIOD, UA_CRACKLE_SECS, UA_PULSE_PERIOD,
 };
 use arenasim::states::play_match::{
     COMBATANT_BODY_RADIUS, IMPACT_HEAD_Y, IMPACT_PET_BODY_Y, IMPACT_PET_STATURE, UA_CAMERA_LIFT,
@@ -212,7 +211,9 @@ impl Harness {
             .app
             .world_mut()
             .query::<(&DotSprite, &GlobalTransform)>();
-        q.iter(self.app.world()).map(|(s, g)| (s.role, *g)).collect()
+        q.iter(self.app.world())
+            .map(|(s, g)| (s.role, *g))
+            .collect()
     }
 
     fn sprite_entities(&mut self) -> Vec<(Entity, DotSpriteRole, GlobalTransform)> {
@@ -281,7 +282,11 @@ fn assert_min(label: &str, actual: usize, min: usize) {
 fn every_curse_envelope_fades_in_holds_and_is_gone_by_its_blessed_time() {
     for curse in CurseKind::ALL {
         let spec = curse_spec(curse);
-        assert_eq!(curse_envelope(curse, 0.0), 0.0, "{curse:?} starts invisible");
+        assert_eq!(
+            curse_envelope(curse, 0.0),
+            0.0,
+            "{curse:?} starts invisible"
+        );
         assert!(
             curse_envelope(curse, spec.fade_in * 0.5) > 0.0,
             "{curse:?} is fading in half way through its fade-in"
@@ -293,8 +298,10 @@ fn every_curse_envelope_fades_in_holds_and_is_gone_by_its_blessed_time() {
             spec.peak_alpha
         );
         assert!(
-            curse_envelope(curse, spec.fade_out_start + (spec.life - spec.fade_out_start) * 0.5)
-                < spec.peak_alpha,
+            curse_envelope(
+                curse,
+                spec.fade_out_start + (spec.life - spec.fade_out_start) * 0.5
+            ) < spec.peak_alpha,
             "{curse:?} is fading out past {}s",
             spec.fade_out_start
         );
@@ -319,7 +326,11 @@ fn the_shroud_reblooms_on_its_period() {
 
 #[test]
 fn the_crackle_fires_at_cycle_end_not_on_apply() {
-    assert_eq!(ua_crackle_k(0.0), None, "no discharge on top of the apply burst");
+    assert_eq!(
+        ua_crackle_k(0.0),
+        None,
+        "no discharge on top of the apply burst"
+    );
     assert_eq!(ua_crackle_k(1.0), None);
     let start = UA_CRACKLE_PERIOD - UA_CRACKLE_SECS;
     assert!(ua_crackle_k(start + 0.01).is_some());
@@ -371,17 +382,26 @@ fn coa_skull_hangs_above_the_head_and_dissolves_while_the_curse_runs_on() {
         head_world_y
     );
     let horizontal = Vec2::new(cranium.x - at.x, cranium.z - at.z).length();
-    assert!(horizontal < 0.2, "the skull sits over the head, off by {horizontal}");
+    assert!(
+        horizontal < 0.2,
+        "the skull sits over the head, off by {horizontal}"
+    );
 
     // Eye sockets and core exist (the face), sparks crackle, motes sink.
     let roles: Vec<DotSpriteRole> = h.sprites().into_iter().map(|(r, _)| r).collect();
     assert_eq!(
-        roles.iter().filter(|r| matches!(r, DotSpriteRole::SkullEye)).count(),
+        roles
+            .iter()
+            .filter(|r| matches!(r, DotSpriteRole::SkullEye))
+            .count(),
         2,
         "two eye sockets"
     );
     assert_eq!(
-        roles.iter().filter(|r| matches!(r, DotSpriteRole::SkullCore)).count(),
+        roles
+            .iter()
+            .filter(|r| matches!(r, DotSpriteRole::SkullCore))
+            .count(),
         1,
         "one yellow core glow"
     );
@@ -400,7 +420,11 @@ fn coa_skull_hangs_above_the_head_and_dissolves_while_the_curse_runs_on() {
     // Past the apparition window: everything skull is gone — and the curse
     // aura is STILL on the victim (24s duration), which is the point.
     h.tick((curse_spec(CurseKind::Agony).life / TICK_SECS).ceil() as u32 + 8);
-    assert_eq!(h.count::<CurseApparitionRig>(), 0, "the apparition self-expires");
+    assert_eq!(
+        h.count::<CurseApparitionRig>(),
+        0,
+        "the apparition self-expires"
+    );
     assert_eq!(
         h.sprites().len(),
         0,
@@ -415,7 +439,11 @@ fn coa_skull_hangs_above_the_head_and_dissolves_while_the_curse_runs_on() {
 
     // And the latch holds: no re-fire while the same application persists.
     h.tick(30);
-    assert_eq!(h.count::<CurseApparitionRig>(), 0, "no skull re-fire mid-curse");
+    assert_eq!(
+        h.count::<CurseApparitionRig>(),
+        0,
+        "no skull re-fire mid-curse"
+    );
 }
 
 // ── Corruption ─────────────────────────────────────────────────────────────
@@ -503,7 +531,11 @@ fn corruption_shroud_wraps_outside_the_body_and_reblooms() {
     // The state ends with the aura — no flourish, nothing left behind.
     h.dispel(victim, CORRUPTION_AURA);
     h.tick(2);
-    assert_eq!(h.count::<CorruptionShroudRig>(), 0, "shroud despawns on dispel");
+    assert_eq!(
+        h.count::<CorruptionShroudRig>(),
+        0,
+        "shroud despawns on dispel"
+    );
 }
 
 /// Wisps GROW over their life (the client's 0.22→0.69 swelling track) —
@@ -515,10 +547,7 @@ fn corruption_wisps_swell_as_they_age() {
     h.spawn_victim(at, &[CORRUPTION_AURA]);
     h.tick(10); // ~0.16s at 20 wisps/s: a few young wisps to track
 
-    let mut q = h
-        .app
-        .world_mut()
-        .query::<(Entity, &DotWisp, &Transform)>();
+    let mut q = h.app.world_mut().query::<(Entity, &DotWisp, &Transform)>();
     let tracked: Vec<(Entity, f32)> = q
         .iter(h.app.world())
         .map(|(e, _, t)| (e, t.scale.x))
@@ -719,7 +748,11 @@ fn dispel_ends_the_states_and_rearms_the_skull() {
         .auras
         .push(Harness::dot_aura(COA_AURA));
     h.tick(2);
-    assert_eq!(h.count::<CurseApparitionRig>(), 1, "a fresh curse fires a fresh skull");
+    assert_eq!(
+        h.count::<CurseApparitionRig>(),
+        1,
+        "a fresh curse fires a fresh skull"
+    );
 }
 
 /// Death ends the states too: auras linger on corpses (`update_auras` skips
@@ -727,7 +760,10 @@ fn dispel_ends_the_states_and_rearms_the_skull() {
 #[test]
 fn death_ends_the_state_visuals() {
     let mut h = Harness::new();
-    let victim = h.spawn_victim(Vec3::new(0.0, COMBATANT_Y, 0.0), &[CORRUPTION_AURA, UA_AURA]);
+    let victim = h.spawn_victim(
+        Vec3::new(0.0, COMBATANT_Y, 0.0),
+        &[CORRUPTION_AURA, UA_AURA],
+    );
     h.tick(4);
     assert_eq!(h.count::<CorruptionShroudRig>(), 1);
 
@@ -737,7 +773,11 @@ fn death_ends_the_state_visuals() {
         .expect("victim")
         .current_health = 0.0;
     h.tick(2);
-    assert_eq!(h.count::<CorruptionShroudRig>(), 0, "shroud dies with the victim");
+    assert_eq!(
+        h.count::<CorruptionShroudRig>(),
+        0,
+        "shroud dies with the victim"
+    );
     assert_eq!(h.count::<UaStateRig>(), 0, "UA state dies with the victim");
 }
 
@@ -825,9 +865,7 @@ fn pet_dots_use_the_pet_stature_correction() {
     let shells: Vec<Vec3> = h
         .sprites()
         .into_iter()
-        .filter_map(|(role, g)| {
-            matches!(role, DotSpriteRole::ShroudShell).then(|| g.translation())
-        })
+        .filter_map(|(role, g)| matches!(role, DotSpriteRole::ShroudShell).then(|| g.translation()))
         .collect();
     assert_eq!(shells.len(), 1);
     assert!(
@@ -901,13 +939,17 @@ fn cow_apparition_hangs_above_the_head_with_its_bone() {
 
     // Apply-only: gone by the spec's life while the curse itself runs on.
     h.tick((curse_spec(CurseKind::Weakness).life / TICK_SECS).ceil() as u32 + 8);
-    assert_eq!(h.count::<CurseApparitionRig>(), 0, "the apparition self-expires");
+    assert_eq!(
+        h.count::<CurseApparitionRig>(),
+        0,
+        "the apparition self-expires"
+    );
     assert_eq!(h.sprites().len(), 0, "no sustained CoW pieces");
-    let still_cursed = h
-        .app
-        .world()
-        .get::<ActiveAuras>(victim)
-        .is_some_and(|a| a.auras.iter().any(|au| au.effect_type == AuraType::DamageReduction));
+    let still_cursed = h.app.world().get::<ActiveAuras>(victim).is_some_and(|a| {
+        a.auras
+            .iter()
+            .any(|au| au.effect_type == AuraType::DamageReduction)
+    });
     assert!(still_cursed, "the curse itself must still be running");
     h.tick(30);
     assert_eq!(h.count::<CurseApparitionRig>(), 0, "no re-fire mid-curse");
@@ -1011,7 +1053,11 @@ fn cot_rune_circle_rings_the_chest_facing_outward_and_turns() {
 
     // Apply-only, and short: gone by 1.67s.
     h.tick((curse_spec(CurseKind::Tongues).life / TICK_SECS).ceil() as u32 + 4);
-    assert_eq!(h.count::<CurseApparitionRig>(), 0, "the rune circle self-expires");
+    assert_eq!(
+        h.count::<CurseApparitionRig>(),
+        0,
+        "the rune circle self-expires"
+    );
     assert_eq!(h.sprites().len(), 0, "no sustained CoT pieces");
 }
 
@@ -1053,8 +1099,7 @@ fn distinct_curse_apparitions_read_apart() {
                 .iter()
                 .map(|(_, g)| g.translation().y)
                 .fold(f32::MIN, f32::max);
-            let mut roles: Vec<String> =
-                sprites.iter().map(|(r, _)| format!("{r:?}")).collect();
+            let mut roles: Vec<String> = sprites.iter().map(|(r, _)| format!("{r:?}")).collect();
             roles.sort();
             roles.dedup();
 
@@ -1074,7 +1119,13 @@ fn distinct_curse_apparitions_read_apart() {
             };
             let shell = chroma(h.material_of(&pick(shell_role)).base_color);
             let core = chroma(h.material_of(&pick(core_role)).base_color);
-            Read { curse, top_y, roles, shell, core }
+            Read {
+                curse,
+                top_y,
+                roles,
+                shell,
+                core,
+            }
         })
         .collect();
 

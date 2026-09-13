@@ -33,7 +33,12 @@ impl Section {
     /// Tabs in display order. This is the single source of truth for the tab
     /// row, the search-result grouping order, and the registry's sort order.
     pub fn all() -> &'static [Section] {
-        &[Section::Classes, Section::Abilities, Section::Auras, Section::Items]
+        &[
+            Section::Classes,
+            Section::Abilities,
+            Section::Auras,
+            Section::Items,
+        ]
     }
 
     pub fn label(self) -> &'static str {
@@ -57,7 +62,10 @@ impl Section {
 
     /// Display order index, used to sort the registry and group results.
     pub fn order(self) -> usize {
-        Section::all().iter().position(|s| *s == self).unwrap_or(usize::MAX)
+        Section::all()
+            .iter()
+            .position(|s| *s == self)
+            .unwrap_or(usize::MAX)
     }
 }
 
@@ -146,10 +154,12 @@ impl Topic {
             // with no applying ability render the placeholder tile.
             Topic::Ability(ability) => {
                 let name = &data.abilities.get(&ability)?.name;
-                data.ability_icons.and_then(|icons| icons.textures.get(name).copied())
+                data.ability_icons
+                    .and_then(|icons| icons.textures.get(name).copied())
             }
             Topic::Aura(id) => super::auras::icon_key(id, data.abilities).and_then(|key| {
-                data.ability_icons.and_then(|icons| icons.textures.get(&key).copied())
+                data.ability_icons
+                    .and_then(|icons| icons.textures.get(&key).copied())
             }),
         }
     }
@@ -205,8 +215,14 @@ mod tests {
 
     #[test]
     fn topics_route_to_their_section() {
-        assert_eq!(Topic::Item(ItemId::WandOfTheInvoker).section(), Section::Items);
-        assert_eq!(Topic::Class(CharacterClass::Mage).section(), Section::Classes);
+        assert_eq!(
+            Topic::Item(ItemId::WandOfTheInvoker).section(),
+            Section::Items
+        );
+        assert_eq!(
+            Topic::Class(CharacterClass::Mage).section(),
+            Section::Classes
+        );
         assert_eq!(
             Topic::Aura(AuraId::Ability(AbilityType::CheapShot)).section(),
             Section::Auras
@@ -215,7 +231,10 @@ mod tests {
 
     #[test]
     fn camel_case_variants_are_spaced_out() {
-        assert_eq!(spaced_debug(&AuraType::MovementSpeedSlow), "Movement Speed Slow");
+        assert_eq!(
+            spaced_debug(&AuraType::MovementSpeedSlow),
+            "Movement Speed Slow"
+        );
         assert_eq!(spaced_debug(&AuraType::Stun), "Stun");
     }
 }

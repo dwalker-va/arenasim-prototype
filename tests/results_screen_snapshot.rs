@@ -128,10 +128,26 @@ fn results_screen_value_combos() {
     let rogue = "Team 1 Rogue #1".to_string();
     let warlock = "Team 2 Warlock #1".to_string();
     for _ in 0..2 {
-        log.log_damage(rogue.clone(), "Team 2 Priest #2".to_string(), "Eviscerate".to_string(), 100.0, true, false, String::new());
+        log.log_damage(
+            rogue.clone(),
+            "Team 2 Priest #2".to_string(),
+            "Eviscerate".to_string(),
+            100.0,
+            true,
+            false,
+            String::new(),
+        );
     }
     for _ in 0..11 {
-        log.log_damage(warlock.clone(), "Team 1 Rogue #2".to_string(), "Shadow Bolt".to_string(), 100.0, true, false, String::new());
+        log.log_damage(
+            warlock.clone(),
+            "Team 1 Rogue #2".to_string(),
+            "Shadow Bolt".to_string(),
+            100.0,
+            true,
+            false,
+            String::new(),
+        );
     }
 
     let mut harness = harness(results, log);
@@ -156,22 +172,27 @@ fn sized_harness(results: MatchResults, log: CombatLog, size: [f32; 2]) -> Harne
     let abilities: AbilityDefinitions =
         load_ability_definitions().expect("abilities.ron must load");
 
-    Harness::builder()
-        .with_size(size)
-        .build(move |ctx| {
-            install_game_fonts(ctx);
-            let data = EncyclopediaData {
-                items: &items,
-                abilities: &abilities,
-                item_icons: None,
-                class_icons: None,
-                ability_icons: None,
-            };
-            let _ = draw_results_screen(ctx, Some(&results), &log, &data);
-        })
+    Harness::builder().with_size(size).build(move |ctx| {
+        install_game_fonts(ctx);
+        let data = EncyclopediaData {
+            items: &items,
+            abilities: &abilities,
+            item_icons: None,
+            class_icons: None,
+            ability_icons: None,
+        };
+        let _ = draw_results_screen(ctx, Some(&results), &log, &data);
+    })
 }
 
-fn cs(class: CharacterClass, slot: u8, dmg: f32, heal: f32, tkn: f32, survived: bool) -> CombatantStats {
+fn cs(
+    class: CharacterClass,
+    slot: u8,
+    dmg: f32,
+    heal: f32,
+    tkn: f32,
+    survived: bool,
+) -> CombatantStats {
     CombatantStats {
         class,
         slot,
@@ -259,14 +280,30 @@ fn mock_combat_log() -> CombatLog {
         ("Eviscerate", 188.0, false),
         ("Sinister Strike", 64.0, true),
     ] {
-        log.log_damage(rogue.clone(), warlock.clone(), ability.to_string(), amount, kb, false, String::new());
+        log.log_damage(
+            rogue.clone(),
+            warlock.clone(),
+            ability.to_string(),
+            amount,
+            kb,
+            false,
+            String::new(),
+        );
     }
     for (ability, amount, kb) in [
         ("Sinister Strike", 51.0, false),
         ("Sinister Strike", 49.0, false),
         ("Eviscerate", 156.0, true),
     ] {
-        log.log_damage(rogue.clone(), t2_priest.clone(), ability.to_string(), amount, kb, false, String::new());
+        log.log_damage(
+            rogue.clone(),
+            t2_priest.clone(),
+            ability.to_string(),
+            amount,
+            kb,
+            false,
+            String::new(),
+        );
     }
     // The Warlock's own output, summing (with its pet's below) to the 612 its
     // `CombatantStats` reports. "Wand Shot" is the row shape that names no
@@ -279,12 +316,28 @@ fn mock_combat_log() -> CombatLog {
         ("Wand Shot", 30.0),
         ("Wand Shot", 30.0),
     ] {
-        log.log_damage(warlock.clone(), rogue.clone(), ability.to_string(), amount, false, false, String::new());
+        log.log_damage(
+            warlock.clone(),
+            rogue.clone(),
+            ability.to_string(),
+            amount,
+            false,
+            false,
+            String::new(),
+        );
     }
     // Pet damage is logged under the PET's id and folded into the owner's
     // breakdown as "Felhunter: Auto Attack" via `pet_damage_links`.
     for amount in [54.0, 54.0] {
-        log.log_damage(FELHUNTER.to_string(), rogue.clone(), "Auto Attack".to_string(), amount, false, false, String::new());
+        log.log_damage(
+            FELHUNTER.to_string(),
+            rogue.clone(),
+            "Auto Attack".to_string(),
+            amount,
+            false,
+            false,
+            String::new(),
+        );
     }
     for (ability, amount) in [
         ("Flash Heal", 420.0),
@@ -292,10 +345,29 @@ fn mock_combat_log() -> CombatLog {
         ("Renew", 220.0),
         ("Greater Heal", 800.0),
     ] {
-        log.log_healing(t1_priest.clone(), rogue.clone(), ability.to_string(), amount, false, String::new());
+        log.log_healing(
+            t1_priest.clone(),
+            rogue.clone(),
+            ability.to_string(),
+            amount,
+            false,
+            String::new(),
+        );
     }
-    log.log_crowd_control(rogue.clone(), warlock.clone(), "Kidney Shot".to_string(), 6.0, String::new());
-    log.log_crowd_control(t2_priest.clone(), rogue.clone(), "Psychic Scream".to_string(), 2.0, String::new());
+    log.log_crowd_control(
+        rogue.clone(),
+        warlock.clone(),
+        "Kidney Shot".to_string(),
+        6.0,
+        String::new(),
+    );
+    log.log_crowd_control(
+        t2_priest.clone(),
+        rogue.clone(),
+        "Psychic Scream".to_string(),
+        2.0,
+        String::new(),
+    );
     log.log_death(warlock, Some(rogue.clone()), String::new());
     log.log_death(t2_priest, Some(rogue), String::new());
 

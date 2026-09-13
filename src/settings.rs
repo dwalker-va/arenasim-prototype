@@ -2,12 +2,12 @@
 //!
 //! Manages user preferences for graphics, audio, and other options.
 
+use crate::keybindings::Keybindings;
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::keybindings::Keybindings;
 
 /// User-configurable game settings
 #[derive(Resource, Clone, Debug, Serialize, Deserialize)]
@@ -69,13 +69,12 @@ impl PendingSettingsRestart {
     /// Update with new settings and determine if restart is needed
     pub fn check_restart_needed(&mut self, new_settings: &GameSettings) -> bool {
         // Only window mode and resolution changes require restart
-        let needs_restart = 
-            self.previous_settings.window_mode != new_settings.window_mode ||
-            self.previous_settings.resolution != new_settings.resolution;
-        
+        let needs_restart = self.previous_settings.window_mode != new_settings.window_mode
+            || self.previous_settings.resolution != new_settings.resolution;
+
         self.previous_settings = new_settings.clone();
         self.restart_required = needs_restart;
-        
+
         needs_restart
     }
 }
@@ -161,7 +160,9 @@ impl WindowModeOption {
     pub fn to_bevy(&self) -> WindowMode {
         match self {
             WindowModeOption::Windowed => WindowMode::Windowed,
-            WindowModeOption::BorderlessFullscreen => WindowMode::BorderlessFullscreen(MonitorSelection::Current),
+            WindowModeOption::BorderlessFullscreen => {
+                WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+            }
         }
     }
 
@@ -173,7 +174,10 @@ impl WindowModeOption {
     }
 
     pub fn all() -> [WindowModeOption; 2] {
-        [WindowModeOption::Windowed, WindowModeOption::BorderlessFullscreen]
+        [
+            WindowModeOption::Windowed,
+            WindowModeOption::BorderlessFullscreen,
+        ]
     }
 }
 
@@ -218,17 +222,24 @@ impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
         // Load settings from file
         let settings = GameSettings::load();
-        
+
         // Also insert keybindings as a separate resource for easy access
         let keybindings = settings.keybindings.clone();
-        
+
         app.insert_resource(settings.clone())
             .insert_resource(keybindings)
             .insert_resource(PendingSettingsRestart {
                 restart_required: false,
                 previous_settings: settings,
             })
-            .add_systems(Update, (save_settings_on_change, apply_runtime_settings, sync_keybindings));
+            .add_systems(
+                Update,
+                (
+                    save_settings_on_change,
+                    apply_runtime_settings,
+                    sync_keybindings,
+                ),
+            );
     }
 }
 
@@ -241,7 +252,7 @@ fn save_settings_on_change(
     if settings.is_changed() && !settings.is_added() {
         // Check if this change requires restart (window mode or resolution)
         let needs_restart = pending_restart.check_restart_needed(&settings);
-        
+
         // Save settings to file
         if let Err(e) = settings.save() {
             error!("Failed to save settings: {}", e);
@@ -249,8 +260,7 @@ fn save_settings_on_change(
             if needs_restart {
                 info!(
                     "Settings changed: {:?} @ {:?} (restart required)",
-                    settings.window_mode,
-                    settings.resolution
+                    settings.window_mode, settings.resolution
                 );
             } else {
                 info!("Settings changed and applied immediately");
@@ -275,7 +285,7 @@ fn apply_runtime_settings(
             } else {
                 PresentMode::AutoNoVsync
             };
-            
+
             info!("Applied VSync: {}", settings.vsync);
         }
     }
@@ -305,7 +315,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("ArenaSim/settings.ron");
 
-        GameSettings::default().save_to(&path).expect("save settings");
+        GameSettings::default()
+            .save_to(&path)
+            .expect("save settings");
 
         let contents = fs::read_to_string(&path).expect("read settings back");
         ron::from_str::<GameSettings>(&contents).expect("settings deserialize");
@@ -322,7 +334,9 @@ mod tests {
         fs::write(&blocker, "").expect("write blocker");
 
         assert!(
-            GameSettings::default().save_to(&blocker.join("settings.ron")).is_err(),
+            GameSettings::default()
+                .save_to(&blocker.join("settings.ron"))
+                .is_err(),
             "an unwritable destination should report an error"
         );
     }
@@ -347,18 +361,17 @@ mod tests {
         );
 
         let loaded: GameSettings = ron::from_str(&legacy).expect("legacy settings deserialize");
-        assert!(loaded.show_call_display, "missing field falls back to the default");
+        assert!(
+            loaded.show_call_display,
+            "missing field falls back to the default"
+        );
     }
 }
 
 /// System to keep Keybindings resource in sync with GameSettings
-fn sync_keybindings(
-    settings: Res<GameSettings>,
-    mut keybindings: ResMut<Keybindings>,
-) {
+fn sync_keybindings(settings: Res<GameSettings>, mut keybindings: ResMut<Keybindings>) {
     if settings.is_changed() && !settings.is_added() {
         *keybindings = settings.keybindings.clone();
         info!("Synced keybindings from settings");
     }
 }
-

@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // ==============================================================================
 // Auto-Attack Weapon Swings (graphical-only)
@@ -568,7 +568,6 @@ const SINISTER_LEAN: f32 = 0.18;
 /// pin it in a test before "fixing" the signs to match.
 const KICK_DRIVE: f32 = -0.50;
 
-
 /// Normalized swing parameter in `[-1, 1]`.
 ///
 /// * `s < 0` — windup: eases 0 -> -1 over the anticipation window as
@@ -663,12 +662,8 @@ fn swing_pose(kind: WeaponKind, s: f32) -> Transform {
             // lunge hard forward on release, with only a whisper of pitch.
             let pull = if s < 0.0 { -s } else { 0.0 };
             let thrust = if s > 0.0 { s } else { 0.0 };
-            return Transform::from_translation(Vec3::new(
-                0.0,
-                0.0,
-                -0.4 * pull + 0.85 * thrust,
-            ))
-            .with_rotation(Quat::from_rotation_x(0.2 * pull - 0.1 * thrust));
+            return Transform::from_translation(Vec3::new(0.0, 0.0, -0.4 * pull + 0.85 * thrust))
+                .with_rotation(Quat::from_rotation_x(0.2 * pull - 0.1 * thrust));
         }
         WeaponKind::Shield => 0.0, // static (plan R9)
         // TwoHandAxe / Mace: big readable arc, raised back past vertical on
@@ -708,7 +703,11 @@ fn swing_pose(kind: WeaponKind, s: f32) -> Transform {
 fn arc_rotation(s: f32, arc: SwingArc) -> (Vec3, f32) {
     match arc {
         SwingArc::Sagittal => (Vec3::X, if s < 0.0 { 0.9 * s } else { 1.4 * s }),
-        SwingArc::TiltedPlane { tilt, windup, release } => {
+        SwingArc::TiltedPlane {
+            tilt,
+            windup,
+            release,
+        } => {
             let angle = if s < 0.0 { windup * -s } else { -release * s };
             (Quat::from_rotation_z(tilt) * Vec3::X, angle)
         }
@@ -743,7 +742,12 @@ fn arc_rotation(s: f32, arc: SwingArc) -> (Vec3, f32) {
 fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
     match arc {
         SwingArc::Sagittal => swing_pose(kind, s),
-        SwingArc::Lunge { pull, thrust, pitch, .. } => {
+        SwingArc::Lunge {
+            pull,
+            thrust,
+            pitch,
+            ..
+        } => {
             // Socket-local -Z is back toward the wielder and +Z out along the
             // aim, matching the dagger's own stab in `swing_pose`.
             let draw = if s < 0.0 { -s } else { 0.0 };
@@ -765,7 +769,9 @@ fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
         // VisualBody means it rides the torso's motion for free. The stillness
         // is the point — do not give this arm a pose.
         SwingArc::Unarmed { .. } => Transform::IDENTITY,
-        SwingArc::PommelStrike { pull, thrust, flip, .. } => {
+        SwingArc::PommelStrike {
+            pull, thrust, flip, ..
+        } => {
             let draw = if s < 0.0 { -s } else { 0.0 };
             let drive = if s > 0.0 { s } else { 0.0 };
             // The flip is swept monotonically THROUGH the release (`-flip *
@@ -1048,7 +1054,11 @@ pub fn animate_weapon_swings(
             let mut err = target_local - socket.yaw_local;
             err = (err + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
                 - std::f32::consts::PI;
-            let rate = if socket.release_t.is_some() { 20.0 } else { 6.0 };
+            let rate = if socket.release_t.is_some() {
+                20.0
+            } else {
+                6.0
+            };
             let max_step = rate * dt;
             socket.yaw_local += err.clamp(-max_step, max_step);
             // Keep the stored angle wrapped so it never accumulates turns.
@@ -1206,13 +1216,22 @@ mod swing_tests {
         // The stroke starts AT the frozen windup pose and powers through to
         // full extension — the pull-back is spent, not discarded.
         let start = swing_param(0.0, 2.0, 0.5, Some(0.0), -1.0);
-        assert!((start + 1.0).abs() < 1e-5, "stroke begins at the windup pose");
+        assert!(
+            (start + 1.0).abs() < 1e-5,
+            "stroke begins at the windup pose"
+        );
         let peak = swing_param(0.0, 2.0, 0.5, Some(SWING_RELEASE_SECS), -1.0);
         assert!((peak - 1.0).abs() < 1e-5, "stroke reaches full extension");
         // Monotonically rising through the sweep.
         let mut last = -1.0;
         for i in 0..=10 {
-            let s = swing_param(0.0, 2.0, 0.5, Some(SWING_RELEASE_SECS * i as f32 / 10.0), -1.0);
+            let s = swing_param(
+                0.0,
+                2.0,
+                0.5,
+                Some(SWING_RELEASE_SECS * i as f32 / 10.0),
+                -1.0,
+            );
             assert!(s >= last - 1e-6, "sweep must rise monotonically");
             last = s;
         }
@@ -1279,7 +1298,10 @@ mod swing_tests {
         let windup = swing_pose(WeaponKind::Dagger, -1.0);
         assert!(windup.translation.z < -0.2, "windup pulls the dagger back");
         let release = swing_pose(WeaponKind::Dagger, 1.0);
-        assert!(release.translation.z > 0.6, "release lunges the dagger forward");
+        assert!(
+            release.translation.z > 0.6,
+            "release lunges the dagger forward"
+        );
         let (_, angle) = release.rotation.to_axis_angle();
         assert!(angle.abs() < 0.3, "a stab barely rotates");
     }
@@ -1315,8 +1337,7 @@ mod swing_tests {
         let mut max_turn: f32 = 0.0;
         for i in -20..=20 {
             let s = i as f32 / 20.0;
-            let pose =
-                swing_pose_arc(WeaponKind::Dagger, s, SwingStyle::KidneyShot.profile().arc);
+            let pose = swing_pose_arc(WeaponKind::Dagger, s, SwingStyle::KidneyShot.profile().arc);
             let angle = pose.rotation.to_euler(EulerRot::XYZ).0;
             max_turn = max_turn.max(angle.abs());
         }
@@ -1392,8 +1413,14 @@ mod swing_tests {
     fn mortal_strike_is_slower_and_holds_longer_than_an_auto() {
         let auto = SwingStyle::Auto.profile();
         let ms = SwingStyle::MortalStrike.profile();
-        assert!(ms.release_secs > auto.release_secs, "the stroke is slower into the hit");
-        assert!(ms.impact_hold_secs > auto.impact_hold_secs, "the beat registers longer");
+        assert!(
+            ms.release_secs > auto.release_secs,
+            "the stroke is slower into the hit"
+        );
+        assert!(
+            ms.impact_hold_secs > auto.impact_hold_secs,
+            "the beat registers longer"
+        );
         assert!(ms.total() > auto.total());
         assert_eq!(SwingStyle::MortalStrike.stroke_secs(), ms.total());
     }
@@ -1410,8 +1437,14 @@ mod swing_tests {
         let auto_windup = pitch_of(swing_pose(WeaponKind::TwoHandAxe, -1.0));
         let auto_release = pitch_of(swing_pose(WeaponKind::TwoHandAxe, 1.0));
 
-        assert!(auto_windup < 0.0 && auto_release > 0.0, "auto: raise then chop down");
-        assert!(ms_windup > 0.0 && ms_release < 0.0, "mortal strike: drop then rip up");
+        assert!(
+            auto_windup < 0.0 && auto_release > 0.0,
+            "auto: raise then chop down"
+        );
+        assert!(
+            ms_windup > 0.0 && ms_release < 0.0,
+            "mortal strike: drop then rip up"
+        );
     }
 
     #[test]
@@ -1431,7 +1464,10 @@ mod swing_tests {
             (lean - MORTAL_STRIKE_TILT).abs() < 0.05,
             "the swing plane must be leaned by the configured tilt, got {lean}"
         );
-        assert!(axis.z.abs() < 1e-3, "the tilt stays within the frontal plane");
+        assert!(
+            axis.z.abs() < 1e-3,
+            "the tilt stays within the frontal plane"
+        );
     }
 
     #[test]
@@ -1469,12 +1505,19 @@ mod swing_tests {
         let axis = swing_pose_arc(
             WeaponKind::TwoHandAxe,
             1.0,
-            SwingArc::TiltedPlane { tilt: 0.0, windup: 1.0, release: 1.0 },
+            SwingArc::TiltedPlane {
+                tilt: 0.0,
+                windup: 1.0,
+                release: 1.0,
+            },
         )
         .rotation
         .to_axis_angle()
         .0;
-        assert!(axis.y.abs() < 1e-3 && axis.z.abs() < 1e-3, "untilted swings about X alone");
+        assert!(
+            axis.y.abs() < 1e-3 && axis.z.abs() < 1e-3,
+            "untilted swings about X alone"
+        );
     }
 
     #[test]
@@ -1575,7 +1618,10 @@ mod swing_tests {
         // the butt end leading into the target. A positive pitch here is the
         // strike turned back into an ordinary forward chop.
         let arc = SwingStyle::Pummel.profile().arc;
-        let SwingArc::PommelStrike { flip, thrust, pull, .. } = arc else {
+        let SwingArc::PommelStrike {
+            flip, thrust, pull, ..
+        } = arc
+        else {
             panic!("Pummel must be a PommelStrike");
         };
         let ext = swing_pose_arc(WeaponKind::TwoHandAxe, 1.0, arc);
@@ -1595,7 +1641,10 @@ mod swing_tests {
         // direction, telegraphing the release rather than counter-rotating.
         let wound = swing_pose_arc(WeaponKind::TwoHandAxe, -1.0, arc);
         assert!((wound.translation.z + pull).abs() < 1e-4, "draw pulls back");
-        assert!(pitch_of(wound) < 0.0, "the cock tips the same way as the flip");
+        assert!(
+            pitch_of(wound) < 0.0,
+            "the cock tips the same way as the flip"
+        );
         assert!(
             pitch_of(wound).abs() < flip * 0.5,
             "the draw only telegraphs; the flip itself belongs to the release"
@@ -1724,8 +1773,7 @@ pub fn update_weapon_stealth_fade(
                     };
                     let mut faded = mat.clone();
                     let c = faded.base_color.to_srgba();
-                    faded.base_color =
-                        Color::srgba(c.red * 0.6, c.green * 0.6, c.blue * 0.6, 0.4);
+                    faded.base_color = Color::srgba(c.red * 0.6, c.green * 0.6, c.blue * 0.6, 0.4);
                     faded.alpha_mode = bevy::prelude::AlphaMode::Blend;
                     let original = mat_handle.0.clone();
                     let faded_handle = materials.add(faded);
@@ -1743,4 +1791,3 @@ pub fn update_weapon_stealth_fade(
         }
     }
 }
-

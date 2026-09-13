@@ -198,7 +198,11 @@ fn run_comp(t1: &str, t2: &str, seed: u64, team1: &[&str], team2: &[&str]) -> Ce
                 {
                     let mut enemy_priest: Option<Vec2> = None;
                     for obs in f.combatants.values() {
-                        if obs.team == 2 && !obs.is_pet && obs.class == CharacterClass::Priest && obs.alive {
+                        if obs.team == 2
+                            && !obs.is_pet
+                            && obs.class == CharacterClass::Priest
+                            && obs.alive
+                        {
                             enemy_priest = Some(Vec2::new(obs.position.x, obs.position.z));
                         }
                     }
@@ -212,9 +216,11 @@ fn run_comp(t1: &str, t2: &str, seed: u64, team1: &[&str], team2: &[&str]) -> Ce
                         continue;
                     }
                     use arenasim::states::play_match::components::AuraType::*;
-                    if obs.aura_types.iter().any(|a| {
-                        matches!(a, Fear | Stun | Incapacitate | Polymorph | Root)
-                    }) {
+                    if obs
+                        .aura_types
+                        .iter()
+                        .any(|a| matches!(a, Fear | Stun | Incapacitate | Polymorph | Root))
+                    {
                         cc_frames += 1;
                     }
                 }
@@ -271,7 +277,6 @@ fn run_comp(t1: &str, t2: &str, seed: u64, team1: &[&str], team2: &[&str]) -> Ce
         mean_healer_sep: sep_sum / sep_n.max(1) as f32,
     }
 }
-
 
 #[test]
 #[ignore]
@@ -379,22 +384,54 @@ fn paired_legacy_vs_team_plan() {
          {:<28} {:>11.1}y {:>11.1}y\n\
          {:<28} {:>12} {:>12}\n\
          {:<28} {:>12} {:>12}",
-        "", "Legacy", "TeamPlan",
-        "team-1 wins", format!("{lw}/{}", seeds.len()), format!("{tw}/{}", seeds.len()),
-        "mean duration", lt / n, tt / n,
-        "mean heal to Warrior", lh / n, th / n,
-        "mean heal line occluded", 100.0 * lb / n, 100.0 * tb / n,
-        "  ...before contact", 100.0 * lpre / n, 100.0 * tpre / n,
-        "  ...after contact", 100.0 * lpost / n, 100.0 * tpost / n,
-        "separation at contact", lsep / n, tsep / n,
-        "Warlock denied Priest, pre", lpo / n, tpo / n,
-        "Warlock denied Priest, post", lqo / n, tqo / n,
-        "Priest dist from camp pillar", lrd / n, trd / n,
-        "Priest dist to nearest caster", lcd / n, tcd / n,
-        "Priest time hard-CC'd", lcc / n, tcc / n,
-        "distance BETWEEN the healers", lhs / n, ths / n,
-        "Warrior died", format!("{ld}/{}", seeds.len()), format!("{td}/{}", seeds.len()),
-        "losses with ZERO heal", zero_heal_losses.0, zero_heal_losses.1,
+        "",
+        "Legacy",
+        "TeamPlan",
+        "team-1 wins",
+        format!("{lw}/{}", seeds.len()),
+        format!("{tw}/{}", seeds.len()),
+        "mean duration",
+        lt / n,
+        tt / n,
+        "mean heal to Warrior",
+        lh / n,
+        th / n,
+        "mean heal line occluded",
+        100.0 * lb / n,
+        100.0 * tb / n,
+        "  ...before contact",
+        100.0 * lpre / n,
+        100.0 * tpre / n,
+        "  ...after contact",
+        100.0 * lpost / n,
+        100.0 * tpost / n,
+        "separation at contact",
+        lsep / n,
+        tsep / n,
+        "Warlock denied Priest, pre",
+        lpo / n,
+        tpo / n,
+        "Warlock denied Priest, post",
+        lqo / n,
+        tqo / n,
+        "Priest dist from camp pillar",
+        lrd / n,
+        trd / n,
+        "Priest dist to nearest caster",
+        lcd / n,
+        tcd / n,
+        "Priest time hard-CC'd",
+        lcc / n,
+        tcc / n,
+        "distance BETWEEN the healers",
+        lhs / n,
+        ths / n,
+        "Warrior died",
+        format!("{ld}/{}", seeds.len()),
+        format!("{td}/{}", seeds.len()),
+        "losses with ZERO heal",
+        zero_heal_losses.0,
+        zero_heal_losses.1,
     );
     println!(
         "discordant pairs: Legacy-only {only_legacy}, TeamPlan-only {only_team_plan} \
@@ -402,4 +439,3 @@ fn paired_legacy_vs_team_plan() {
         only_legacy + only_team_plan
     );
 }
-

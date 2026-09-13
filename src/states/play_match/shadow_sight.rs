@@ -4,11 +4,11 @@
 //! After 90 seconds of combat, two orbs spawn that grant a buff allowing
 //! the holder to see stealthed enemies (and be seen by enemies).
 
-use bevy::prelude::*;
-use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::components::*;
-use super::PlayMatchEntity;
 use super::utils::combat_log_id_for;
+use super::PlayMatchEntity;
+use crate::combat::log::{CombatLog, CombatLogEventType};
+use bevy::prelude::*;
 
 /// Time after gates open before Shadow Sight orbs spawn (seconds)
 pub const SHADOW_SIGHT_SPAWN_TIME: f32 = 90.0;
@@ -38,8 +38,8 @@ const ORB_CONSUMPTION_DURATION: f32 = 0.4;
 /// Spawn positions for Shadow Sight orbs (symmetric on Z-axis)
 /// Positioned near the center but offset north/south for accessibility
 const ORB_SPAWN_POSITIONS: [Vec3; 2] = [
-    Vec3::new(0.0, 1.0, 15.0),   // North side
-    Vec3::new(0.0, 1.0, -15.0),  // South side
+    Vec3::new(0.0, 1.0, 15.0),  // North side
+    Vec3::new(0.0, 1.0, -15.0), // South side
 ];
 
 /// System to track combat time and spawn Shadow Sight orbs after the threshold.
@@ -78,7 +78,13 @@ pub fn track_shadow_sight_timer(
             (Some(mut meshes), Some(mut materials)) => {
                 // Graphical mode: spawn orbs with visuals
                 for (i, position) in ORB_SPAWN_POSITIONS.iter().enumerate() {
-                    spawn_shadow_sight_orb(&mut commands, &mut meshes, &mut materials, *position, i as u8);
+                    spawn_shadow_sight_orb(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        *position,
+                        i as u8,
+                    );
                 }
             }
             _ => {
@@ -86,7 +92,9 @@ pub fn track_shadow_sight_timer(
                 for (i, position) in ORB_SPAWN_POSITIONS.iter().enumerate() {
                     commands.spawn((
                         Transform::from_translation(*position),
-                        ShadowSightOrb { spawn_index: i as u8 },
+                        ShadowSightOrb {
+                            spawn_index: i as u8,
+                        },
                     ));
                 }
             }
@@ -128,17 +136,19 @@ fn spawn_shadow_sight_orb(
     });
 
     // Spawn core orb with aura as child
-    commands.spawn((
-        Mesh3d(core_mesh),
-        MeshMaterial3d(core_material),
-        Transform::from_translation(position),
-        ShadowSightOrb { spawn_index },
-        PlayMatchEntity,
-    )).with_child((
-        Mesh3d(aura_mesh),
-        MeshMaterial3d(aura_material),
-        Transform::default(), // Centered on parent
-    ));
+    commands
+        .spawn((
+            Mesh3d(core_mesh),
+            MeshMaterial3d(core_material),
+            Transform::from_translation(position),
+            ShadowSightOrb { spawn_index },
+            PlayMatchEntity,
+        ))
+        .with_child((
+            Mesh3d(aura_mesh),
+            MeshMaterial3d(aura_material),
+            Transform::default(), // Centered on parent
+        ));
 }
 
 /// System to detect combatants picking up Shadow Sight orbs.

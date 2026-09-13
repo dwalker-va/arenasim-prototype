@@ -156,13 +156,19 @@ pub fn classify_pre_cast_failure(
         }
     }
     if is_spell_school_locked(def.spell_school, auras) {
-        return RejectionReason::SilencedOrLocked { school: def.spell_school };
+        return RejectionReason::SilencedOrLocked {
+            school: def.spell_school,
+        };
     }
     if !opts.bypass_silence && def.mana_cost > 0.0 && is_silenced(caster, auras) {
-        return RejectionReason::SilencedOrLocked { school: def.spell_school };
+        return RejectionReason::SilencedOrLocked {
+            school: def.spell_school,
+        };
     }
     if let Some(remaining) = caster.ability_cooldowns.get(&ability) {
-        return RejectionReason::OnCooldown { remaining: *remaining };
+        return RejectionReason::OnCooldown {
+            remaining: *remaining,
+        };
     }
     let resource_shortage = || -> RejectionReason {
         use crate::states::match_config::CharacterClass;
@@ -196,14 +202,21 @@ pub fn classify_pre_cast_failure(
             }
             let distance = caster_pos.distance(target_pos);
             if distance > def.range {
-                return RejectionReason::OutOfRange { distance, max: def.range };
+                return RejectionReason::OutOfRange {
+                    distance,
+                    max: def.range,
+                };
             }
             if let Some(min_range) = def.min_range {
                 if distance < min_range {
-                    return RejectionReason::WithinDeadZone { distance, min: min_range };
+                    return RejectionReason::WithinDeadZone {
+                        distance,
+                        min: min_range,
+                    };
                 }
             }
-            if matches!(ability, AbilityType::Ambush | AbilityType::CheapShot) && !caster.stealthed {
+            if matches!(ability, AbilityType::Ambush | AbilityType::CheapShot) && !caster.stealthed
+            {
                 return RejectionReason::PreconditionUnmet {
                     note: "stealth required (Ambush/CheapShot)".into(),
                 };
@@ -222,5 +235,7 @@ pub fn classify_pre_cast_failure(
             }
         }
     }
-    RejectionReason::PreconditionUnmet { note: "can_cast_config failed".into() }
+    RejectionReason::PreconditionUnmet {
+        note: "can_cast_config failed".into(),
+    }
 }

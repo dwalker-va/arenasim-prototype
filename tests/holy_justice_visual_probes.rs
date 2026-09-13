@@ -13,15 +13,15 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
-use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::abilities::AbilityType;
+use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
-    Combatant, JusticeWave, InstantAbilityFired, JusticeRune, SwingStyle, VisualBody, WeaponHand,
+    Combatant, InstantAbilityFired, JusticeRune, JusticeWave, SwingStyle, VisualBody, WeaponHand,
     WeaponKind, WeaponSocket,
 };
 use arenasim::states::play_match::{
     cleanup_holy_justice, consume_instant_ability_signals, swing_style_for_ability,
-    update_justice_waves, update_justice_runes,
+    update_justice_runes, update_justice_waves,
 };
 use arenasim::CharacterClass;
 
@@ -196,7 +196,10 @@ fn the_uppercut_is_not_mortal_strikes_diagonal() {
     use arenasim::states::play_match::swing_plane_tilt;
     let hoj = swing_plane_tilt(SwingStyle::HammerOfJustice).expect("HoJ is a plane");
     let ms = swing_plane_tilt(SwingStyle::MortalStrike).expect("MS is a plane");
-    assert!(hoj < 0.35, "the uppercut leans {hoj} rad -- that is a slash");
+    assert!(
+        hoj < 0.35,
+        "the uppercut leans {hoj} rad -- that is a slash"
+    );
     assert!(
         ms - hoj > 0.5,
         "the uppercut {hoj} and Mortal Strike {ms} are too close to tell apart"
@@ -274,7 +277,10 @@ fn both_halves_expire_without_leaking() {
     let victim = h.spawn_victim(6.0);
     h.fire(paladin, victim);
     h.tick(1);
-    assert!(h.waves() > 0 && h.runes() > 0, "guard against a vacuous drain");
+    assert!(
+        h.waves() > 0 && h.runes() > 0,
+        "guard against a vacuous drain"
+    );
 
     // Past the rune's life, which is the longer of the two.
     h.tick(40);

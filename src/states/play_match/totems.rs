@@ -16,9 +16,9 @@
 use bevy::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::components::*;
 use super::utils::combat_log_id_for;
+use crate::combat::log::{CombatLog, CombatLogEventType};
 
 /// Short window (seconds) the buff aura is refreshed to each pulse. Allies that
 /// leave the radius keep the buff for at most this long before it expires.
@@ -34,7 +34,11 @@ fn make_totem_aura(
     spell_school: super::abilities::SpellSchool,
     buff_name: &str,
 ) -> Aura {
-    let tick_interval = if aura_type == AuraType::HealingOverTime { 1.0 } else { 0.0 };
+    let tick_interval = if aura_type == AuraType::HealingOverTime {
+        1.0
+    } else {
+        0.0
+    };
     Aura {
         effect_type: aura_type,
         duration: TOTEM_BUFF_REFRESH_WINDOW,
@@ -61,7 +65,10 @@ pub fn totem_pulse_system(
     time: Res<Time>,
     mut combat_log: ResMut<CombatLog>,
     mut totems: Query<(Entity, &mut Totem, &Transform)>,
-    mut combatants: Query<(Entity, &Combatant, &Transform, Option<&mut ActiveAuras>), Without<Totem>>,
+    mut combatants: Query<
+        (Entity, &Combatant, &Transform, Option<&mut ActiveAuras>),
+        Without<Totem>,
+    >,
     pet_query: Query<&Pet>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -135,19 +142,26 @@ pub fn totem_pulse_system(
             if let Some(mut auras) = active_auras {
                 // Refresh the existing totem buff (match on type + stable name)
                 // or push a fresh one — mirrors slow_zone_system's refresh.
-                if let Some(existing) = auras.auras.iter_mut().find(|a| {
-                    a.effect_type == aura_type && a.ability_name == buff_name
-                }) {
+                if let Some(existing) = auras
+                    .auras
+                    .iter_mut()
+                    .find(|a| a.effect_type == aura_type && a.ability_name == buff_name)
+                {
                     existing.duration = TOTEM_BUFF_REFRESH_WINDOW;
                 } else {
                     auras.auras.push(make_totem_aura(
-                        aura_type, magnitude, owner, spell_school, buff_name,
+                        aura_type,
+                        magnitude,
+                        owner,
+                        spell_school,
+                        buff_name,
                     ));
                     combat_log.log(
                         CombatLogEventType::Buff,
                         format!(
                             "[TOTEM] {} buffs {}",
-                            buff_name, combat_log_id_for(ally, pet_query.get(ally_entity).ok())
+                            buff_name,
+                            combat_log_id_for(ally, pet_query.get(ally_entity).ok())
                         ),
                     );
                 }
@@ -155,14 +169,19 @@ pub fn totem_pulse_system(
                 // Ally has no ActiveAuras yet — add the component with the buff.
                 commands.entity(ally_entity).try_insert(ActiveAuras {
                     auras: vec![make_totem_aura(
-                        aura_type, magnitude, owner, spell_school, buff_name,
+                        aura_type,
+                        magnitude,
+                        owner,
+                        spell_school,
+                        buff_name,
                     )],
                 });
                 combat_log.log(
                     CombatLogEventType::Buff,
                     format!(
                         "[TOTEM] {} buffs {}",
-                        buff_name, combat_log_id_for(ally, pet_query.get(ally_entity).ok())
+                        buff_name,
+                        combat_log_id_for(ally, pet_query.get(ally_entity).ok())
                     ),
                 );
             }
@@ -172,10 +191,10 @@ pub fn totem_pulse_system(
 
 #[cfg(test)]
 mod totem_lifecycle_tests {
-    use super::*;
-    use bevy::ecs::system::RunSystemOnce;
     use super::super::abilities::SpellSchool;
     use super::super::constants::TOTEM_DURATION;
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
 
     fn fire(owner: Entity, duration: f32) -> Totem {
         Totem {
@@ -224,11 +243,17 @@ mod totem_lifecycle_tests {
         // Old Fire (being replaced — partially elapsed) and the freshly recast
         // Fire (full duration). Same (owner, element) → dedup keeps the newer.
         let fire_old = world.spawn((fire(owner, 12.0), Transform::default())).id();
-        let fire_new = world.spawn((fire(owner, TOTEM_DURATION), Transform::default())).id();
+        let fire_new = world
+            .spawn((fire(owner, TOTEM_DURATION), Transform::default()))
+            .id();
         // A different element slot — must NOT be affected by the Fire recast.
-        let water_totem = world.spawn((water(owner, TOTEM_DURATION), Transform::default())).id();
+        let water_totem = world
+            .spawn((water(owner, TOTEM_DURATION), Transform::default()))
+            .id();
 
-        world.run_system_once(totem_pulse_system).expect("totem_pulse_system ran");
+        world
+            .run_system_once(totem_pulse_system)
+            .expect("totem_pulse_system ran");
 
         let live: Vec<Entity> = {
             let mut q = world.query_filtered::<Entity, With<Totem>>();
@@ -248,7 +273,11 @@ mod totem_lifecycle_tests {
             "the Water totem (different element slot) must be untouched by a Fire recast"
         );
         // Exactly one Fire + one Water remain (no stacking).
-        assert_eq!(live.len(), 2, "expected exactly one Fire + one Water totem live");
+        assert_eq!(
+            live.len(),
+            2,
+            "expected exactly one Fire + one Water totem live"
+        );
     }
 
     /// AE5 (covers R13): a Totem is NOT a Combatant — it carries only a `Totem`
@@ -260,7 +289,9 @@ mod totem_lifecycle_tests {
     fn totem_is_not_a_combatant_and_thus_untargetable() {
         let mut world = World::new();
         let owner = world.spawn_empty().id();
-        let totem = world.spawn((fire(owner, TOTEM_DURATION), Transform::default())).id();
+        let totem = world
+            .spawn((fire(owner, TOTEM_DURATION), Transform::default()))
+            .id();
 
         let combatants: Vec<Entity> = {
             let mut q = world.query_filtered::<Entity, With<Combatant>>();

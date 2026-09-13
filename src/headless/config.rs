@@ -7,7 +7,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
 
-use crate::states::match_config::{ArenaMap, CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener, RoguePoison, WarlockCurse, WarriorShout};
+use crate::states::match_config::{
+    ArenaMap, CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener,
+    RoguePoison, WarlockCurse, WarriorShout,
+};
 use crate::states::play_match::equipment::{
     load_item_definitions, validate_class_restrictions, ItemId, ItemSlot, Loadout,
 };
@@ -178,8 +181,8 @@ impl HeadlessMatchConfig {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read config file: {}", e))?;
 
-        let config: HeadlessMatchConfig = serde_json::from_str(&contents)
-            .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+        let config: HeadlessMatchConfig =
+            serde_json::from_str(&contents).map_err(|e| format!("Failed to parse JSON: {}", e))?;
 
         config.validate()?;
         Ok(config)
@@ -194,9 +197,7 @@ impl HeadlessMatchConfig {
     /// headless runner and the replay launcher, and `validate()` checked a
     /// different field list than the runner consumed — the exact class of
     /// drift a second implementation invites.
-    pub fn ai_profiles(
-        &self,
-    ) -> Result<crate::states::play_match::ai_profile::AiProfiles, String> {
+    pub fn ai_profiles(&self) -> Result<crate::states::play_match::ai_profile::AiProfiles, String> {
         use crate::states::play_match::ai_profile::{AiProfile, AiProfiles};
         let parse = |s: Option<&str>| s.map(AiProfile::parse).transpose();
         let base = parse(self.ai_profile.as_deref())?.unwrap_or_default();
@@ -315,7 +316,10 @@ impl HeadlessMatchConfig {
                 let Some(class_name) = classes.get(slot_index) else {
                     return Err(format!(
                         "team{}_equipment has an entry for slot {} but team{} has only {} members",
-                        team, slot_index, team, classes.len()
+                        team,
+                        slot_index,
+                        team,
+                        classes.len()
                     ));
                 };
                 let class = Self::parse_class(class_name)?;
@@ -394,8 +398,12 @@ impl HeadlessMatchConfig {
     fn parse_warrior_shout(name: &str) -> WarriorShout {
         match name.to_lowercase().as_str() {
             "battle" | "battleshout" | "battle_shout" | "battle shout" => WarriorShout::BattleShout,
-            "demoralizing" | "demoralizingshout" | "demoralizing_shout" | "demoralizing shout" => WarriorShout::DemoralizingShout,
-            "commanding" | "commandingshout" | "commanding_shout" | "commanding shout" => WarriorShout::CommandingShout,
+            "demoralizing" | "demoralizingshout" | "demoralizing_shout" | "demoralizing shout" => {
+                WarriorShout::DemoralizingShout
+            }
+            "commanding" | "commandingshout" | "commanding_shout" | "commanding shout" => {
+                WarriorShout::CommandingShout
+            }
             _ => WarriorShout::default(),
         }
     }
@@ -413,9 +421,18 @@ impl HeadlessMatchConfig {
     /// Parse a paladin aura name string into PaladinAura
     fn parse_paladin_aura(name: &str) -> PaladinAura {
         match name.to_lowercase().as_str() {
-            "devotion" | "devotionaura" | "devotion_aura" | "devotion aura" => PaladinAura::DevotionAura,
-            "shadow" | "shadowresistance" | "shadow_resistance" | "shadow resistance" | "shadow resistance aura" | "shadowresistanceaura" => PaladinAura::ShadowResistanceAura,
-            "concentration" | "concentrationaura" | "concentration_aura" | "concentration aura" => PaladinAura::ConcentrationAura,
+            "devotion" | "devotionaura" | "devotion_aura" | "devotion aura" => {
+                PaladinAura::DevotionAura
+            }
+            "shadow"
+            | "shadowresistance"
+            | "shadow_resistance"
+            | "shadow resistance"
+            | "shadow resistance aura"
+            | "shadowresistanceaura" => PaladinAura::ShadowResistanceAura,
+            "concentration" | "concentrationaura" | "concentration_aura" | "concentration aura" => {
+                PaladinAura::ConcentrationAura
+            }
             _ => PaladinAura::default(),
         }
     }
@@ -684,7 +701,11 @@ mod tests {
     #[test]
     fn parse_map_rejects_unknown_and_lists_test_verticality() {
         let err = HeadlessMatchConfig::parse_map("Nonsense").unwrap_err();
-        assert!(err.contains("TestVerticality"), "error should list the new map: {}", err);
+        assert!(
+            err.contains("TestVerticality"),
+            "error should list the new map: {}",
+            err
+        );
     }
 
     /// The actual incident: `"seed"` instead of `"random_seed"` used to parse
@@ -744,9 +765,7 @@ mod tests {
         // The card's case: a Mage with a two-handed axe.
         let json = r#"{"team1":["Mage"],"team2":["Warrior"],"team1_equipment":[{"MainHand":"ArcaniteReaper"}]}"#;
         let config: HeadlessMatchConfig = serde_json::from_str(json).expect("parses");
-        let err = config
-            .validate()
-            .expect_err("a Mage may not wield an axe");
+        let err = config.validate().expect_err("a Mage may not wield an axe");
         assert!(
             err.contains("proficiency") && err.contains("Axe"),
             "error must name the failing gate: {}",

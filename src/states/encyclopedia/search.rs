@@ -33,7 +33,12 @@ pub struct SearchEntry {
 
 impl SearchEntry {
     pub fn new(topic: Topic, name: String, sub: String) -> Self {
-        Self { needle: name.to_lowercase(), topic, name, sub }
+        Self {
+            needle: name.to_lowercase(),
+            topic,
+            name,
+            sub,
+        }
     }
 }
 
@@ -42,10 +47,7 @@ impl SearchEntry {
 /// Sections contribute in tab order, and each section's entries are sorted by
 /// name, so results are stable across runs no matter how the underlying maps
 /// iterate.
-pub fn build_registry(
-    items: &ItemDefinitions,
-    abilities: &AbilityDefinitions,
-) -> Vec<SearchEntry> {
+pub fn build_registry(items: &ItemDefinitions, abilities: &AbilityDefinitions) -> Vec<SearchEntry> {
     let mut entries = Vec::new();
     // Every section contributes here; each is one call that reads its own
     // data source.
@@ -124,7 +126,11 @@ pub fn render_results(
         if group.is_empty() {
             continue;
         }
-        ui.label(egui::RichText::new(section.group_label()).size(12.0).color(GOLD));
+        ui.label(
+            egui::RichText::new(section.group_label())
+                .size(12.0)
+                .color(GOLD),
+        );
         ui.add_space(2.0);
         for (_, entry) in group {
             if let Some(topic) = super::widget::row(ui, entry.topic, &entry.sub, width, data) {
@@ -190,8 +196,14 @@ mod tests {
     fn matching_is_case_insensitive_substring() {
         let (items, abilities) = fixtures();
         let registry = build_registry(&items, &abilities);
-        let hits = registry.iter().filter(|e| rank(e, "wand").is_some()).count();
-        assert!(hits > 0, "expected at least one item whose name contains 'wand'");
+        let hits = registry
+            .iter()
+            .filter(|e| rank(e, "wand").is_some())
+            .count();
+        assert!(
+            hits > 0,
+            "expected at least one item whose name contains 'wand'"
+        );
     }
 
     /// A named aura and the ability that applies it share a name, so a search

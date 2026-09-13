@@ -28,42 +28,42 @@ use bevy::prelude::*;
 // This provides a stable API - internal renames only require updating these re-exports
 
 // === Phase 1: Resources and Auras ===
-pub use super::match_flow::update_countdown;
-pub use super::team_plan::update_team_plans;
-pub use super::match_flow::update_dampening;
-pub use super::combat_core::regenerate_resources;
-pub use super::shadow_sight::track_shadow_sight_timer;
+pub use super::auras::apply_pending_auras;
 pub use super::auras::process_dot_ticks;
 pub use super::auras::process_hot_ticks;
 pub use super::auras::update_auras;
-pub use super::auras::apply_pending_auras;
+pub use super::combat_core::regenerate_resources;
+pub use super::match_flow::update_countdown;
+pub use super::match_flow::update_dampening;
+pub use super::shadow_sight::track_shadow_sight_timer;
+pub use super::team_plan::update_team_plans;
 // Effect processing (instant ability effects)
-pub use super::effects::process_dispels;
-pub use super::effects::process_holy_shock_heals;
-pub use super::effects::process_holy_shock_damage;
-pub use super::effects::process_divine_shield;
-pub use super::effects::process_berserker_rage;
 pub use super::effects::process_backlash;
+pub use super::effects::process_berserker_rage;
+pub use super::effects::process_dispels;
+pub use super::effects::process_divine_shield;
+pub use super::effects::process_holy_shock_damage;
+pub use super::effects::process_holy_shock_heals;
 pub use super::effects::process_mana_burn;
 
 // === Phase 2: Combat and Movement ===
 pub use super::auras::process_aura_breaks;
-pub use super::combat_ai::acquire_targets;
-pub use super::shadow_sight::check_orb_pickups;
-pub use super::shadow_sight::cleanup_consumed_orbs;
 pub use super::class_ai::dps_postures::tick_kite_occlusion;
-pub use super::combat_ai::decide_abilities;
 pub use super::class_ai::pet_ai::pet_ai_system;
+pub use super::combat_ai::acquire_targets;
 pub use super::combat_ai::check_interrupts;
-pub use super::combat_core::process_interrupts;
+pub use super::combat_ai::decide_abilities;
+pub use super::combat_core::despawn_pets_of_dead_owners;
+pub use super::combat_core::move_to_target;
 pub use super::combat_core::process_casting;
 pub use super::combat_core::process_channeling;
+pub use super::combat_core::process_interrupts;
 pub use super::projectiles::move_projectiles;
 pub use super::projectiles::process_projectile_hits;
-pub use super::combat_core::move_to_target;
-pub use super::traps::trap_system;
+pub use super::shadow_sight::check_orb_pickups;
+pub use super::shadow_sight::cleanup_consumed_orbs;
 pub use super::traps::move_trap_launch_projectiles;
-pub use super::combat_core::despawn_pets_of_dead_owners;
+pub use super::traps::trap_system;
 
 // === Phase 1 (additional): Slow Zone ===
 pub use super::traps::slow_zone_system;
@@ -82,8 +82,8 @@ pub use super::utils::{combatant_id, pet_combatant_id};
 
 // === Components and Resources ===
 pub use super::components::{
-    Combatant, CastingState, ChannelingState, ActiveAuras, Aura, AuraPending, AuraType,
-    ArenaDampening, FloatingTextState, GameRng, MatchCountdown, SimulationSpeed, ShadowSightState,
+    ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, CastingState, ChannelingState,
+    Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState, SimulationSpeed,
 };
 
 /// System set labels for combat system ordering.
@@ -196,11 +196,11 @@ pub fn add_core_combat_systems<M, N>(
             regenerate_resources,
             track_shadow_sight_timer.run_if(decide.clone()),
             process_dot_ticks,
-            process_hot_ticks,     // HoT healing — like process_dot_ticks, must run BEFORE update_auras
+            process_hot_ticks, // HoT healing — like process_dot_ticks, must run BEFORE update_auras
             update_auras,
             slow_zone_system,       // Zone slow refresh before aura processing
             totem_pulse_system,     // Totem dedup + buff pulse on allies (after slow_zone_system)
-            process_divine_shield,  // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
+            process_divine_shield, // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
             process_berserker_rage, // Must run BEFORE apply_pending_auras so FearImmunity blocks queued Fears
             apply_pending_auras,
             process_dispels,
@@ -250,10 +250,10 @@ pub fn add_core_combat_systems<M, N>(
             tick_kite_occlusion.run_if(decide.clone()),
             decide_abilities.run_if(decide.clone()),
             ApplyDeferred, // Flush PetCommand components spawned by Hunter
-                            // AI in decide_abilities so pet_ai_system sees
-                            // them on the same tick (per U3 of the pet
-                            // engagement plan). Without this, PetCommand has
-                            // one-tick lag.
+            // AI in decide_abilities so pet_ai_system sees
+            // them on the same tick (per U3 of the pet
+            // engagement plan). Without this, PetCommand has
+            // one-tick lag.
             pet_ai_system.run_if(decide.clone()),
             ApplyDeferred, // Flush CastingState for interrupt checks
             check_interrupts.run_if(decide.clone()),
@@ -261,10 +261,10 @@ pub fn add_core_combat_systems<M, N>(
             process_casting,
             process_channeling,
             move_projectiles,
-            move_trap_launch_projectiles,  // Arc travel for launched traps — before trap_system
+            move_trap_launch_projectiles, // Arc travel for launched traps — before trap_system
             process_projectile_hits,
             move_to_target.run_if(decide.clone()),
-            trap_system,  // After movement — needs current positions for proximity check
+            trap_system, // After movement — needs current positions for proximity check
             // Kill pets whose owner has died
             despawn_pets_of_dead_owners.run_if(decide.clone()),
         )

@@ -11,9 +11,9 @@
 //! Geometry knobs (jag, branch count, thickness, color, lifetime) are the
 //! consts below and are meant to be tuned in-engine.
 
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // --- Tuning knobs -----------------------------------------------------------
 
@@ -96,7 +96,13 @@ impl BoltRng {
 }
 
 /// Midpoint-displacement jagged polyline from `start` to `end`.
-fn jagged(start: Vec3, end: Vec3, rng: &mut BoltRng, subdivisions: u32, displace: f32) -> Vec<Vec3> {
+fn jagged(
+    start: Vec3,
+    end: Vec3,
+    rng: &mut BoltRng,
+    subdivisions: u32,
+    displace: f32,
+) -> Vec<Vec3> {
     let mut pts = vec![start, end];
     let mut d = displace;
     for _ in 0..subdivisions {
@@ -110,7 +116,11 @@ fn jagged(start: Vec3, end: Vec3, rng: &mut BoltRng, subdivisions: u32, displace
             let dir = seg / len;
             // Two perpendicular axes so the jag leaves the caster->target line
             // in 3D rather than staying planar.
-            let helper = if dir.dot(Vec3::Y).abs() > 0.9 { Vec3::X } else { Vec3::Y };
+            let helper = if dir.dot(Vec3::Y).abs() > 0.9 {
+                Vec3::X
+            } else {
+                Vec3::Y
+            };
             let perp1 = dir.cross(helper).normalize();
             let perp2 = dir.cross(perp1).normalize();
             let mid = (a + b) * 0.5;
@@ -143,19 +153,24 @@ pub fn spawn_lightning_bolt(
     // Cached unit meshes — identical for every strike, so build once and clone
     // the handles instead of re-uploading GPU buffers per cast.
     mut unit_meshes: Local<Option<(Handle<Mesh>, Handle<Mesh>)>>,
-    strikes: Query<(Entity, &LightningBoltStrike), (Added<LightningBoltStrike>, Without<LightningBoltVisual>)>,
+    strikes: Query<
+        (Entity, &LightningBoltStrike),
+        (Added<LightningBoltStrike>, Without<LightningBoltVisual>),
+    >,
 ) {
     let (seg_mesh, burst_mesh) = unit_meshes
         .get_or_insert_with(|| {
-            (meshes.add(Cuboid::new(1.0, 1.0, 1.0)), meshes.add(Sphere::new(1.0)))
+            (
+                meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+                meshes.add(Sphere::new(1.0)),
+            )
         })
         .clone();
 
     for (entity, strike) in strikes.iter() {
         // Seed the visual-only RNG from the entity id + endpoints so each strike
         // varies without touching the sim RNG stream.
-        let seed = (entity.index() as u64)
-            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        let seed = (entity.index() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
             ^ ((strike.start.x.to_bits() as u64) << 1)
             ^ ((strike.start.z.to_bits() as u64) << 17)
             ^ ((strike.end.x.to_bits() as u64) << 31)
@@ -190,7 +205,11 @@ pub fn spawn_lightning_bolt(
             let idx = 1 + (rng.next_f32() * (main.len() as f32 - 2.0)) as usize;
             let p = main[idx.min(main.len() - 1)];
             let toward = (end - p).normalize_or_zero();
-            let base_dir = if toward == Vec3::ZERO { Vec3::Y } else { toward };
+            let base_dir = if toward == Vec3::ZERO {
+                Vec3::Y
+            } else {
+                toward
+            };
             let axis = Vec3::new(
                 rng.range(-1.0, 1.0),
                 rng.range(-1.0, 1.0),
@@ -222,7 +241,11 @@ pub fn spawn_lightning_bolt(
             ))
             .with_children(|parent| {
                 for t in &seg_transforms {
-                    parent.spawn((Mesh3d(seg_mesh.clone()), MeshMaterial3d(material.clone()), *t));
+                    parent.spawn((
+                        Mesh3d(seg_mesh.clone()),
+                        MeshMaterial3d(material.clone()),
+                        *t,
+                    ));
                 }
             });
 
@@ -230,7 +253,12 @@ pub fn spawn_lightning_bolt(
         // fades. Not the shared `SchoolImpact`: Nature's row is a poison read
         // (Serpent Sting's droplets), and lightning is a signature.
         let burst_material = materials.add(StandardMaterial {
-            base_color: Color::srgba(BURST_BASE_COLOR.0, BURST_BASE_COLOR.1, BURST_BASE_COLOR.2, 1.0),
+            base_color: Color::srgba(
+                BURST_BASE_COLOR.0,
+                BURST_BASE_COLOR.1,
+                BURST_BASE_COLOR.2,
+                1.0,
+            ),
             emissive: LinearRgba::rgb(BURST_EMISSIVE.0, BURST_EMISSIVE.1, BURST_EMISSIVE.2),
             alpha_mode: AlphaMode::Add,
             unlit: true,

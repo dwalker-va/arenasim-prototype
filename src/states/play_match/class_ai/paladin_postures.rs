@@ -148,9 +148,8 @@ pub fn evaluate_paladin_posture(
     };
 
     // --- DIP abort check (only while mid-dip and not being preempted) ---
-    let dip_aborts = prev == Posture::Dip
-        && !focused
-        && dip_should_abort(state, combatant, ctx, shared, now);
+    let dip_aborts =
+        prev == Posture::Dip && !focused && dip_should_abort(state, combatant, ctx, shared, now);
 
     // --- DIP entry (FREE only, no pressure) ---
     let dip_entry = if prev == Posture::Free && !trigger {
@@ -218,7 +217,16 @@ pub fn evaluate_paladin_posture(
     // a dying teammate is occluded — walk around cover to regain sight and heal.
     if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
         medic_chase_tick(
-            commands, entity, my_pos, ally, state, directive, shared, now, decision_trace, ctx,
+            commands,
+            entity,
+            my_pos,
+            ally,
+            state,
+            directive,
+            shared,
+            now,
+            decision_trace,
+            ctx,
         );
     } else {
         if state.medic_target.is_some() {
@@ -230,20 +238,47 @@ pub fn evaluate_paladin_posture(
         match next {
             Posture::Escape => {
                 escape_tick(
-                    commands, entity, my_pos, ctx, state, directive, shared,
-                    &pal.weights, decision_trace, transitioned, prev,
+                    commands,
+                    entity,
+                    my_pos,
+                    ctx,
+                    state,
+                    directive,
+                    shared,
+                    &pal.weights,
+                    decision_trace,
+                    transitioned,
+                    prev,
                 );
                 plan.cast_defer = Some(shared.urgency_hp_threshold);
             }
             Posture::Pressured => paladin_pressured_tick(
-                commands, entity, my_pos, ctx, state, directive, movement, now,
-                decision_trace, transitioned, prev,
+                commands,
+                entity,
+                my_pos,
+                ctx,
+                state,
+                directive,
+                movement,
+                now,
+                decision_trace,
+                transitioned,
+                prev,
             ),
             Posture::Dip => {
                 plan.cast_defer = Some(shared.urgency_hp_threshold);
                 plan.hoj = paladin_dip_tick(
-                    commands, abilities, entity, my_pos, ctx, state, directive, now,
-                    decision_trace, transitioned, prev,
+                    commands,
+                    abilities,
+                    entity,
+                    my_pos,
+                    ctx,
+                    state,
+                    directive,
+                    now,
+                    decision_trace,
+                    transitioned,
+                    prev,
                 );
             }
             _ => paladin_free_tick(commands, entity, ctx, decision_trace, transitioned, prev),
@@ -252,10 +287,7 @@ pub fn evaluate_paladin_posture(
 
     // HoJ reservation (R8) — unless the dip tick already claimed the cast.
     if !matches!(plan.hoj, HojPlan::DipCast { .. }) {
-        let enemy_healer_alive = ctx
-            .alive_enemies()
-            .iter()
-            .any(|e| e.class.is_healer());
+        let enemy_healer_alive = ctx.alive_enemies().iter().any(|e| e.class.is_healer());
         plan.hoj = if rotation_hoj_allowed(state.posture, enemy_healer_alive) {
             HojPlan::Rotation
         } else {
@@ -289,7 +321,13 @@ fn evaluate_dip_entry(
 
     // HoJ ready — identical readiness gate to the rotation cast.
     if !pre_cast_ok(
-        AbilityType::HammerOfJustice, def, combatant, my_pos, auras, None, ctx,
+        AbilityType::HammerOfJustice,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
         PreCastOpts::default(),
     ) {
         return None;
@@ -419,7 +457,12 @@ fn paladin_free_tick(
     if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
         // goal_kind Entity records "legacy target pursuit governs" (same
         // convention as the Priest's degenerate FREE).
-        builder.transition(prev.into(), TracePosture::Free, trigger, MovementGoalKind::Entity);
+        builder.transition(
+            prev.into(),
+            TracePosture::Free,
+            trigger,
+            MovementGoalKind::Entity,
+        );
         builder.finish();
     }
 }

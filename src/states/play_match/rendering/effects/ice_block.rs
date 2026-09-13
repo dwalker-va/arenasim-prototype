@@ -1,6 +1,6 @@
-use bevy::prelude::*;
+use super::traps::{trap_type_emissive, trap_type_rgb};
 use crate::states::play_match::components::*;
-use super::traps::{trap_type_rgb, trap_type_emissive};
+use bevy::prelude::*;
 
 // ==============================================================================
 // Slow Zone Visual (spawned on SlowZone entity via Added<SlowZone>)
@@ -23,10 +23,9 @@ pub fn spawn_slow_zone_visuals(
             ..default()
         });
 
-        commands.entity(zone_entity).try_insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-        ));
+        commands
+            .entity(zone_entity)
+            .try_insert((Mesh3d(mesh), MeshMaterial3d(material)));
     }
 }
 
@@ -57,4 +56,3 @@ pub fn update_slow_zone_visuals(
         material.base_color = Color::srgba(r, g, b, alpha);
     }
 }
-

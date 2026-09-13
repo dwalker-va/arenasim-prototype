@@ -2,10 +2,10 @@
 //!
 //! Full-screen overlays for countdown and victory celebration.
 
+use super::draw_text_with_outline;
+use crate::states::play_match::components::{MatchCountdown, VictoryCelebration};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use crate::states::play_match::components::{MatchCountdown, VictoryCelebration};
-use super::draw_text_with_outline;
 
 // ==============================================================================
 // Countdown Overlay
@@ -27,7 +27,9 @@ pub fn render_countdown(
     }
 
     // Use try_ctx_mut to gracefully handle window close
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     let screen_rect = ctx.screen_rect();
     let screen_center = screen_rect.center();
@@ -100,7 +102,9 @@ pub fn render_countdown(
     );
 
     // Team 1 class icons with names
-    let team1_classes: Vec<_> = match_config.team1.iter()
+    let team1_classes: Vec<_> = match_config
+        .team1
+        .iter()
         .filter_map(|c| c.as_ref())
         .collect();
     for (i, class) in team1_classes.iter().enumerate() {
@@ -163,7 +167,9 @@ pub fn render_countdown(
     );
 
     // Team 2 class icons with names
-    let team2_classes: Vec<_> = match_config.team2.iter()
+    let team2_classes: Vec<_> = match_config
+        .team2
+        .iter()
         .filter_map(|c| c.as_ref())
         .collect();
     for (i, class) in team2_classes.iter().enumerate() {
@@ -233,7 +239,9 @@ pub fn render_victory_celebration(
     };
 
     // Use try_ctx_mut to gracefully handle window close
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
     let screen_rect = ctx.screen_rect();
     let center = screen_rect.center();
 
@@ -247,7 +255,7 @@ pub fn render_victory_celebration(
         Some(1) => ("TEAM 1 WINS!", egui::Color32::from_rgb(100, 150, 255)), // Blue
         Some(2) => ("TEAM 2 WINS!", egui::Color32::from_rgb(255, 100, 100)), // Red
         None => ("DRAW!", egui::Color32::from_rgb(200, 200, 100)),           // Yellow
-        _ => ("MATCH OVER", egui::Color32::from_rgb(200, 200, 200)),        // Gray
+        _ => ("MATCH OVER", egui::Color32::from_rgb(200, 200, 200)),         // Gray
     };
 
     // Large victory text

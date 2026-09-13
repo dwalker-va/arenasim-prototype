@@ -1,8 +1,8 @@
-use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityConfig;
-use super::super::constants::{DR_RESET_TIMER, DR_IMMUNE_LEVEL, DR_MULTIPLIERS};
+use super::super::constants::{DR_IMMUNE_LEVEL, DR_MULTIPLIERS, DR_RESET_TIMER};
+use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // Aura Types
@@ -646,10 +646,9 @@ impl Aura {
             // `is_cleansable_poison`); curses come off to curse-removal, which
             // no ability in the arena performs YET — when one lands, this arm
             // is where `Curse` moves out of.
-            DispelType::Poison
-            | DispelType::Disease
-            | DispelType::Curse
-            | DispelType::Physical => return false,
+            DispelType::Poison | DispelType::Disease | DispelType::Curse | DispelType::Physical => {
+                return false
+            }
             DispelType::Auto => {}
         }
 
@@ -875,8 +874,7 @@ impl AuraPending {
             aura: Aura {
                 effect_type: aura_effect.aura_type,
                 duration: aura_effect.duration,
-                magnitude: aura_effect.magnitude
-                    + spell_power * aura_effect.magnitude_coefficient,
+                magnitude: aura_effect.magnitude + spell_power * aura_effect.magnitude_coefficient,
                 break_on_damage_threshold: aura_effect.break_on_damage,
                 accumulated_damage: 0.0,
                 tick_interval: aura_effect.tick_interval,
@@ -1250,11 +1248,7 @@ mod tests {
             AuraType::Silence,
             AuraType::WeakenedSoul,
         ] {
-            assert!(
-                !aura(ty).can_be_purged(),
-                "{:?} must NOT be purgeable",
-                ty
-            );
+            assert!(!aura(ty).can_be_purged(), "{:?} must NOT be purgeable", ty);
         }
     }
 
@@ -1352,8 +1346,14 @@ mod tests {
                 ..Default::default()
             };
             assert!(!curse.can_be_dispelled(), "{ty:?} as a curse is not magic");
-            assert!(!curse.is_cleansable_poison(), "{ty:?} as a curse is not a poison");
-            assert!(!curse.can_be_purged(), "{ty:?} as a curse is a debuff, not a buff");
+            assert!(
+                !curse.is_cleansable_poison(),
+                "{ty:?} as a curse is not a poison"
+            );
+            assert!(
+                !curse.can_be_purged(),
+                "{ty:?} as a curse is a debuff, not a buff"
+            );
             assert!(curse.is_curse());
             assert!(!curse.is_physical(), "a curse is not physical");
             assert_eq!(curse.removal_class_name(), Some("Curse"));
@@ -1367,7 +1367,10 @@ mod tests {
             dispel_type: DispelType::Auto,
             ..Default::default()
         };
-        assert!(corruption.can_be_dispelled(), "an ordinary Shadow DoT is dispellable magic");
+        assert!(
+            corruption.can_be_dispelled(),
+            "an ordinary Shadow DoT is dispellable magic"
+        );
         assert_eq!(corruption.removal_class_name(), Some("Magic"));
     }
 
@@ -1385,7 +1388,10 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(shout.removal_class_name(), None);
-        assert!(!shout.can_be_dispelled(), "inert either way — no dispel takes an AP cut");
+        assert!(
+            !shout.can_be_dispelled(),
+            "inert either way — no dispel takes an AP cut"
+        );
     }
 
     /// The rule, stated on the mechanic-by-mechanic grid it used to be wrong

@@ -9,12 +9,12 @@ use bevy_egui::egui;
 use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
-use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{
     apply_damage_with_absorb, roll_crit, spawn_healing_refused_tell,
 };
+use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
-use crate::states::play_match::utils::{combatant_id, combat_log_id_for, get_next_fct_offset};
+use crate::states::play_match::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 
 /// Process pending Holy Shock heals.
 ///
@@ -35,7 +35,8 @@ pub fn process_holy_shock_heals(
 
     for (pending_entity, pending) in pending_heals.iter() {
         // Get target combatant
-        if let Ok((mut target, target_transform, target_auras)) = combatants.get_mut(pending.target) {
+        if let Ok((mut target, target_transform, target_auras)) = combatants.get_mut(pending.target)
+        {
             if !target.is_alive() {
                 commands.entity(pending_entity).despawn();
                 continue;
@@ -43,7 +44,8 @@ pub fn process_holy_shock_heals(
 
             // Calculate healing amount using ability config
             let base_heal = ability_def.healing_base_min
-                + game_rng.random_f32() * (ability_def.healing_base_max - ability_def.healing_base_min);
+                + game_rng.random_f32()
+                    * (ability_def.healing_base_max - ability_def.healing_base_min);
             let spell_power_bonus = pending.caster_spell_power * ability_def.healing_coefficient;
             let mut heal_amount = base_heal + spell_power_bonus;
 
@@ -81,8 +83,10 @@ pub fn process_holy_shock_heals(
             let target_id = combat_log_id_for(&target, pet_query.get(pending.target).ok());
 
             // Spawn floating combat text (green for healing)
-            let text_position = target_transform.translation + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
+            let text_position =
+                target_transform.translation + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target)
+            {
                 get_next_fct_offset(&mut fct_state)
             } else {
                 (0.0, 0.0)
@@ -116,7 +120,11 @@ pub fn process_holy_shock_heals(
             }
 
             // Log the heal with caster attribution
-            let caster_id = combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class);
+            let caster_id = combatant_id(
+                pending.caster_team,
+                pending.caster_slot,
+                pending.caster_class,
+            );
             let verb = if is_crit { "CRITICALLY heals" } else { "heals" };
             let message = format!(
                 "{}'s Holy Shock {} {} for {:.0}",
@@ -155,7 +163,9 @@ pub fn process_holy_shock_damage(
 
     for (pending_entity, pending) in pending_damage.iter() {
         // Get target combatant
-        if let Ok((mut target, target_transform, mut target_auras)) = combatants.get_mut(pending.target) {
+        if let Ok((mut target, target_transform, mut target_auras)) =
+            combatants.get_mut(pending.target)
+        {
             if !target.is_alive() {
                 commands.entity(pending_entity).despawn();
                 continue;
@@ -163,7 +173,8 @@ pub fn process_holy_shock_damage(
 
             // Calculate damage amount using ability config
             let base_damage = ability_def.damage_base_min
-                + game_rng.random_f32() * (ability_def.damage_base_max - ability_def.damage_base_min);
+                + game_rng.random_f32()
+                    * (ability_def.damage_base_max - ability_def.damage_base_min);
             let spell_power_bonus = pending.caster_spell_power * ability_def.damage_coefficient;
             let mut raw_damage = base_damage + spell_power_bonus;
 
@@ -186,9 +197,11 @@ pub fn process_holy_shock_damage(
             let target_id = combat_log_id_for(&target, pet_query.get(pending.target).ok());
 
             // Track damage for aura breaking
-            commands.entity(pending.target).insert(DamageTakenThisFrame {
-                amount: actual_damage,
-            });
+            commands
+                .entity(pending.target)
+                .insert(DamageTakenThisFrame {
+                    amount: actual_damage,
+                });
 
             // Warriors generate Rage from taking damage
             if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
@@ -197,8 +210,10 @@ pub fn process_holy_shock_damage(
             }
 
             // Spawn floating combat text (yellow for ability damage)
-            let text_position = target_transform.translation + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
+            let text_position =
+                target_transform.translation + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target)
+            {
                 get_next_fct_offset(&mut fct_state)
             } else {
                 (0.0, 0.0)
@@ -217,14 +232,16 @@ pub fn process_holy_shock_damage(
 
             // Spawn absorbed text if applicable
             if absorbed > 0.0 {
-                let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
-                    get_next_fct_offset(&mut fct_state)
-                } else {
-                    (0.0, 0.0)
-                };
+                let (absorb_offset_x, absorb_offset_y) =
+                    if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
                 commands.spawn((
                     FloatingCombatText {
-                        world_position: text_position + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
+                        world_position: text_position
+                            + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
                         text: format!("{:.0} absorbed", absorbed),
                         color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                         lifetime: 1.5,
@@ -256,7 +273,11 @@ pub fn process_holy_shock_damage(
             }
 
             // Log damage with caster attribution
-            let caster_id = combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class);
+            let caster_id = combatant_id(
+                pending.caster_team,
+                pending.caster_slot,
+                pending.caster_class,
+            );
             let is_killing_blow = !target.is_alive();
             let is_first_death = is_killing_blow && !target.is_dead;
             if is_first_death {
@@ -294,11 +315,7 @@ pub fn process_holy_shock_damage(
                     "{} has been eliminated by {}'s Holy Shock",
                     target_id, caster_id
                 );
-                combat_log.log_death(
-                    target_id,
-                    Some(caster_id),
-                    death_message,
-                );
+                combat_log.log_death(target_id, Some(caster_id), death_message);
             }
         }
 

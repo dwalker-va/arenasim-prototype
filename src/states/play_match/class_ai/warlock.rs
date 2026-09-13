@@ -21,11 +21,11 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::match_config::{CharacterClass, WarlockCurse};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
-use crate::states::play_match::components::{
-    ActiveAuras, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
-    DRCategory, PlayMatchEntity, Projectile,
-};
 use crate::states::play_match::combat_core::calculate_cast_time;
+use crate::states::play_match::components::{
+    ActiveAuras, AuraPending, AuraType, CastingState, ChannelingState, Combatant, DRCategory,
+    PlayMatchEntity, Projectile,
+};
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, RejectionReason,
@@ -45,7 +45,11 @@ fn is_being_kited(
     auras: Option<&ActiveAuras>,
 ) -> bool {
     let is_slowed = auras
-        .map(|a| a.auras.iter().any(|aura| aura.effect_type == AuraType::MovementSpeedSlow))
+        .map(|a| {
+            a.auras
+                .iter()
+                .any(|aura| aura.effect_type == AuraType::MovementSpeedSlow)
+        })
         .unwrap_or(false);
 
     let distance_to_target = my_pos.distance(target_pos);
@@ -62,10 +66,7 @@ fn is_being_kited(
 /// not already CC'd), and is not yet Fear-DR-immune. DR on the Fears category is
 /// the natural rate limiter — once the healer is DR-immune this returns `None` and
 /// the Warlock resumes its damage rotation until the window reopens.
-fn pick_healer_to_fear(
-    kill_target: Entity,
-    ctx: &CombatContext,
-) -> Option<Entity> {
+fn pick_healer_to_fear(kill_target: Entity, ctx: &CombatContext) -> Option<Entity> {
     ctx.alive_enemies()
         .into_iter()
         .filter(|info| info.class.is_healer())
@@ -77,12 +78,17 @@ fn pick_healer_to_fear(
                 return false;
             }
             // Already stunned/feared/rooted? No value in re-CCing.
-            let already_ccd = ctx.active_auras
+            let already_ccd = ctx
+                .active_auras
                 .get(&healer)
-                .map(|auras| auras.iter().any(|a| matches!(
-                    a.effect_type,
-                    AuraType::Stun | AuraType::Fear | AuraType::Root
-                )))
+                .map(|auras| {
+                    auras.iter().any(|a| {
+                        matches!(
+                            a.effect_type,
+                            AuraType::Stun | AuraType::Fear | AuraType::Root
+                        )
+                    })
+                })
                 .unwrap_or(false);
             !already_ccd
         })
@@ -100,12 +106,9 @@ const DEATH_COIL_PEEL_RADIUS: f32 = 8.0;
 /// Fear-DR-immune, or already hard-CC'd (no value in re-CCing). Returns the
 /// nearest such enemy. The caller still range/cooldown/mana-gates via
 /// `try_death_coil`, so this only answers "is there someone to peel?".
-fn pick_death_coil_peel(
-    me: Entity,
-    my_pos: Vec3,
-    ctx: &CombatContext,
-) -> Option<Entity> {
-    let mut threats: Vec<(Entity, f32)> = ctx.alive_enemies()
+fn pick_death_coil_peel(me: Entity, my_pos: Vec3, ctx: &CombatContext) -> Option<Entity> {
+    let mut threats: Vec<(Entity, f32)> = ctx
+        .alive_enemies()
         .into_iter()
         .filter(|info| {
             let dist = info.position.distance(my_pos);
@@ -119,15 +122,22 @@ fn pick_death_coil_peel(
             }
             // Death Coil diminishes on the Horror bucket (not Fears), so gate on
             // Horror DR — a target that is Fear-DR-immune can still be horrified.
-            if ctx.entity_is_immune(info.entity) || ctx.is_dr_immune(info.entity, DRCategory::Horror) {
+            if ctx.entity_is_immune(info.entity)
+                || ctx.is_dr_immune(info.entity, DRCategory::Horror)
+            {
                 return false;
             }
-            let already_ccd = ctx.active_auras
+            let already_ccd = ctx
+                .active_auras
                 .get(&info.entity)
-                .map(|auras| auras.iter().any(|a| matches!(
-                    a.effect_type,
-                    AuraType::Stun | AuraType::Fear | AuraType::Root
-                )))
+                .map(|auras| {
+                    auras.iter().any(|a| {
+                        matches!(
+                            a.effect_type,
+                            AuraType::Stun | AuraType::Fear | AuraType::Root
+                        )
+                    })
+                })
                 .unwrap_or(false);
             !already_ccd
         })
@@ -167,7 +177,8 @@ pub fn decide_warlock_action(
     let target_immune = ctx.entity_is_immune(target_entity);
     let being_kited = is_being_kited(combatant, my_pos, target_pos, auras);
 
-    let Some(mut builder) = ctx.start_ability_decision(decision_trace, Some(target_entity), my_pos) else {
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, Some(target_entity), my_pos)
+    else {
         return false;
     };
 
@@ -180,8 +191,17 @@ pub fn decide_warlock_action(
         if let Some(peel_info) = ctx.combatants.get(&peel_target) {
             let peel_pos = peel_info.position;
             if try_death_coil(
-                commands, combat_log, abilities, entity, combatant, my_pos, auras,
-                peel_target, peel_pos, ctx, &mut builder,
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                peel_target,
+                peel_pos,
+                ctx,
+                &mut builder,
             ) {
                 builder.finish();
                 return true;
@@ -189,18 +209,27 @@ pub fn decide_warlock_action(
         }
     }
 
-    let enemy_has_dispeller = ctx.alive_enemies().iter().any(|e| matches!(
-        e.class,
-        CharacterClass::Priest | CharacterClass::Paladin
-    ));
+    let enemy_has_dispeller = ctx
+        .alive_enemies()
+        .iter()
+        .any(|e| matches!(e.class, CharacterClass::Priest | CharacterClass::Paladin));
 
     let mut ua_attempted = false;
 
     // Dispeller-priority: try UA before Corruption when enemy can dispel.
     if enemy_has_dispeller && !target_immune {
         if try_unstable_affliction(
-            commands, combat_log, abilities, entity, combatant, my_pos, auras,
-            target_entity, target_pos, ctx, &mut builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+            &mut builder,
         ) {
             builder.finish();
             return true;
@@ -212,8 +241,17 @@ pub fn decide_warlock_action(
     if target_immune {
         builder.reject(AbilityType::Corruption, RejectionReason::TargetImmune);
     } else if try_corruption(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras,
-        target_entity, target_pos, ctx, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        ctx,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -223,12 +261,24 @@ pub fn decide_warlock_action(
     // dispeller-priority gate above).
     if target_immune {
         if !ua_attempted {
-            builder.reject(AbilityType::UnstableAffliction, RejectionReason::TargetImmune);
+            builder.reject(
+                AbilityType::UnstableAffliction,
+                RejectionReason::TargetImmune,
+            );
         }
     } else if !ua_attempted {
         if try_unstable_affliction(
-            commands, combat_log, abilities, entity, combatant, my_pos, auras,
-            target_entity, target_pos, ctx, &mut builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+            &mut builder,
         ) {
             builder.finish();
             return true;
@@ -248,8 +298,17 @@ pub fn decide_warlock_action(
         if let Some(healer_info) = ctx.combatants.get(&healer_entity) {
             let healer_pos = healer_info.position;
             if try_fear(
-                commands, combat_log, abilities, entity, combatant, my_pos, auras,
-                healer_entity, healer_pos, ctx, &mut builder,
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                healer_entity,
+                healer_pos,
+                ctx,
+                &mut builder,
             ) {
                 builder.finish();
                 return true;
@@ -259,7 +318,14 @@ pub fn decide_warlock_action(
 
     // Priority 2: Spread curses to all enemies.
     if try_spread_curses(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
         &mut builder,
     ) {
         builder.finish();
@@ -277,8 +343,17 @@ pub fn decide_warlock_action(
             },
         );
     } else if try_immolate(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras,
-        target_entity, target_pos, ctx, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        ctx,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -292,13 +367,24 @@ pub fn decide_warlock_action(
         } else if ctx.is_dr_immune(fear_target_entity, DRCategory::Fears) {
             builder.reject(
                 AbilityType::Fear,
-                RejectionReason::DRImmune { category: DRCategory::Fears },
+                RejectionReason::DRImmune {
+                    category: DRCategory::Fears,
+                },
             );
         } else if let Some(fear_target_info) = ctx.combatants.get(&fear_target_entity) {
             let fear_target_pos = fear_target_info.position;
             if try_fear(
-                commands, combat_log, abilities, entity, combatant, my_pos, auras,
-                fear_target_entity, fear_target_pos, ctx, &mut builder,
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                fear_target_entity,
+                fear_target_pos,
+                ctx,
+                &mut builder,
             ) {
                 builder.finish();
                 return true;
@@ -319,8 +405,17 @@ pub fn decide_warlock_action(
             },
         );
     } else if try_drain_life(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras,
-        target_entity, target_pos, ctx, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        ctx,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -344,8 +439,17 @@ pub fn decide_warlock_action(
     }
 
     let acted = try_shadowbolt(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras,
-        target_entity, target_pos, ctx, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        ctx,
+        &mut builder,
     );
     builder.finish();
     acted
@@ -368,11 +472,14 @@ fn try_corruption(
     let corruption = AbilityType::Corruption;
     let corruption_def = abilities.get_unchecked(&corruption);
 
-    let target_has_corruption = ctx.active_auras
+    let target_has_corruption = ctx
+        .active_auras
         .get(&target_entity)
-        .map(|auras| auras.iter().any(|a|
-            a.effect_type == AuraType::DamageOverTime && a.ability_name == "Corruption"
-        ))
+        .map(|auras| {
+            auras.iter().any(|a| {
+                a.effect_type == AuraType::DamageOverTime && a.ability_name == "Corruption"
+            })
+        })
         .unwrap_or(false);
 
     if target_has_corruption {
@@ -380,16 +487,31 @@ fn try_corruption(
         return false;
     }
 
-    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
-        corruption, corruption_def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        corruption,
+        corruption_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             corruption,
             classify_pre_cast_failure(
-                corruption, corruption_def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                corruption,
+                corruption_def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -400,10 +522,16 @@ fn try_corruption(
     combatant.current_mana -= corruption_def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Corruption", target_tuple, "casts");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Corruption",
+        target_tuple,
+        "casts",
+    );
 
     if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, corruption_def) {
         commands.spawn(aura_pending);
@@ -442,11 +570,14 @@ fn try_unstable_affliction(
     let ua = AbilityType::UnstableAffliction;
     let ua_def = abilities.get_unchecked(&ua);
 
-    let target_has_ua = ctx.active_auras
+    let target_has_ua = ctx
+        .active_auras
         .get(&target_entity)
-        .map(|auras| auras.iter().any(|a|
-            a.effect_type == AuraType::DamageOverTime && a.ability_name == "Unstable Affliction"
-        ))
+        .map(|auras| {
+            auras.iter().any(|a| {
+                a.effect_type == AuraType::DamageOverTime && a.ability_name == "Unstable Affliction"
+            })
+        })
         .unwrap_or(false);
 
     if target_has_ua {
@@ -454,16 +585,31 @@ fn try_unstable_affliction(
         return false;
     }
 
-    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
-        ua, ua_def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        ua,
+        ua_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ua,
             classify_pre_cast_failure(
-                ua, ua_def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                ua,
+                ua_def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -474,12 +620,20 @@ fn try_unstable_affliction(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(ua_def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState::new(ua, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ua, target_entity, cast_time));
 
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Unstable Affliction", target_tuple, "begins casting");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Unstable Affliction",
+        target_tuple,
+        "begins casting",
+    );
 
     info!(
         "Team {} {} begins casting Unstable Affliction on enemy",
@@ -507,11 +661,14 @@ fn try_immolate(
     let immolate = AbilityType::Immolate;
     let immolate_def = abilities.get_unchecked(&immolate);
 
-    let target_has_immolate = ctx.active_auras
+    let target_has_immolate = ctx
+        .active_auras
         .get(&target_entity)
-        .map(|auras| auras.iter().any(|a|
-            a.effect_type == AuraType::DamageOverTime && a.ability_name == "Immolate"
-        ))
+        .map(|auras| {
+            auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::DamageOverTime && a.ability_name == "Immolate")
+        })
         .unwrap_or(false);
 
     if target_has_immolate {
@@ -519,16 +676,31 @@ fn try_immolate(
         return false;
     }
 
-    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
-        immolate, immolate_def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        immolate,
+        immolate_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             immolate,
             classify_pre_cast_failure(
-                immolate, immolate_def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                immolate,
+                immolate_def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -539,12 +711,20 @@ fn try_immolate(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(immolate_def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState::new(immolate, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(immolate, target_entity, cast_time));
 
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Immolate", target_tuple, "begins casting");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Immolate",
+        target_tuple,
+        "begins casting",
+    );
 
     info!(
         "Team {} {} starts casting Immolate on enemy",
@@ -572,17 +752,18 @@ fn try_fear(
     let fear = AbilityType::Fear;
     let fear_def = abilities.get_unchecked(&fear);
 
-    let already_ccd_type = ctx.active_auras
-        .get(&target_entity)
-        .and_then(|auras| {
-            auras.iter().find_map(|a| {
-                if matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Root) {
-                    Some(a.effect_type)
-                } else {
-                    None
-                }
-            })
-        });
+    let already_ccd_type = ctx.active_auras.get(&target_entity).and_then(|auras| {
+        auras.iter().find_map(|a| {
+            if matches!(
+                a.effect_type,
+                AuraType::Stun | AuraType::Fear | AuraType::Root
+            ) {
+                Some(a.effect_type)
+            } else {
+                None
+            }
+        })
+    });
 
     if let Some(cc_type) = already_ccd_type {
         builder.reject(fear, RejectionReason::TargetAlreadyCCd { cc_type });
@@ -591,14 +772,26 @@ fn try_fear(
 
     let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        fear, fear_def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        fear,
+        fear_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             fear,
             classify_pre_cast_failure(
-                fear, fear_def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                fear,
+                fear_def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -609,12 +802,20 @@ fn try_fear(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(fear_def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState::new(fear, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(fear, target_entity, cast_time));
 
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Fear", target_tuple, "begins casting");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Fear",
+        target_tuple,
+        "begins casting",
+    );
 
     info!(
         "Team {} {} starts casting Fear on enemy",
@@ -647,14 +848,26 @@ fn try_death_coil(
 
     let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        death_coil, def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        death_coil,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             death_coil,
             classify_pre_cast_failure(
-                death_coil, def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                death_coil,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -682,10 +895,16 @@ fn try_death_coil(
     combatant.ability_cooldowns.insert(death_coil, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Death Coil", target_tuple, "fires");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Death Coil",
+        target_tuple,
+        "fires",
+    );
 
     info!(
         "Team {} {} fires Death Coil (peel + lifesteal)",
@@ -713,16 +932,31 @@ fn try_shadowbolt(
     let shadowbolt = AbilityType::Shadowbolt;
     let shadowbolt_def = abilities.get_unchecked(&shadowbolt);
 
-    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
-        shadowbolt, shadowbolt_def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        shadowbolt,
+        shadowbolt_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             shadowbolt,
             classify_pre_cast_failure(
-                shadowbolt, shadowbolt_def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                shadowbolt,
+                shadowbolt_def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -733,12 +967,20 @@ fn try_shadowbolt(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(shadowbolt_def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState::new(shadowbolt, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(shadowbolt, target_entity, cast_time));
 
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Shadow Bolt", target_tuple, "begins casting");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Shadow Bolt",
+        target_tuple,
+        "begins casting",
+    );
 
     info!(
         "Team {} {} starts casting {} on enemy",
@@ -778,9 +1020,14 @@ fn try_drain_life(
         return false;
     }
 
-    let target_has_dot = ctx.active_auras
+    let target_has_dot = ctx
+        .active_auras
         .get(&target_entity)
-        .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageOverTime))
+        .map(|auras| {
+            auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::DamageOverTime)
+        })
         .unwrap_or(false);
 
     if !target_has_dot {
@@ -793,16 +1040,31 @@ fn try_drain_life(
         return false;
     }
 
-    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
-        drain_life, drain_life_def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        drain_life,
+        drain_life_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             drain_life,
             classify_pre_cast_failure(
-                drain_life, drain_life_def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                drain_life,
+                drain_life_def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -827,10 +1089,16 @@ fn try_drain_life(
         ticks_applied: 0,
     });
 
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Drain Life", target_tuple, "begins channeling");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Drain Life",
+        target_tuple,
+        "begins channeling",
+    );
 
     info!(
         "Team {} {} starts channeling Drain Life on enemy (HP: {:.0}%)",
@@ -860,7 +1128,8 @@ fn try_spread_curses(
         return false;
     }
 
-    let mut enemies: Vec<(Entity, Vec3, u8)> = ctx.combatants
+    let mut enemies: Vec<(Entity, Vec3, u8)> = ctx
+        .combatants
         .iter()
         .filter_map(|(&enemy_entity, info)| {
             if info.team != combatant.team && info.current_health > 0.0 && !info.is_pet {
@@ -884,7 +1153,8 @@ fn try_spread_curses(
             .copied()
             .unwrap_or(WarlockCurse::Agony);
 
-        let has_our_curse = ctx.active_auras
+        let has_our_curse = ctx
+            .active_auras
             .get(&enemy_entity)
             .map(|auras| {
                 auras.iter().any(|a| {
@@ -907,8 +1177,19 @@ fn try_spread_curses(
         };
 
         if try_cast_curse(
-            commands, combat_log, abilities, entity, combatant, my_pos, auras,
-            enemy_entity, enemy_pos, ctx, ability, ability_name, builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            enemy_entity,
+            enemy_pos,
+            ctx,
+            ability,
+            ability_name,
+            builder,
         ) {
             return true;
         }
@@ -935,16 +1216,31 @@ fn try_cast_curse(
 ) -> bool {
     let ability_def = abilities.get_unchecked(&ability);
 
-    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
-        ability, ability_def, combatant, my_pos, auras,
-        Some((target_entity, target_pos)), ctx, opts,
+        ability,
+        ability_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, ability_def, combatant, my_pos, auras,
-                Some((target_entity, target_pos)), ctx, opts,
+                ability,
+                ability_def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -955,10 +1251,16 @@ fn try_cast_curse(
     combatant.current_mana -= ability_def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    let target_tuple = ctx.combatants
-        .get(&target_entity)
-        .map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, ability_name, target_tuple, "casts");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        ability_name,
+        target_tuple,
+        "casts",
+    );
 
     if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, ability_def) {
         commands.spawn(aura_pending);

@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use crate::states::play_match::components::*;
+use bevy::prelude::*;
 
 /// Peak height of the walking bob above `ground_y`, in arena units.
 /// Capsule height is ~2.5, so 0.10 reads as a subtle walk rather than a hop.
@@ -291,7 +291,11 @@ pub fn update_fear_run(
             time.delta_secs(),
         );
         // Distance-gated bob: zero while the unit holds still.
-        let bob = if idle { 0.0 } else { walk.phase.sin() * FEAR_BOB_AMPLITUDE };
+        let bob = if idle {
+            0.0
+        } else {
+            walk.phase.sin() * FEAR_BOB_AMPLITUDE
+        };
         // Time-driven tremble: always present, even at a dead stop.
         let tremble = (time.elapsed_secs() * FEAR_TREMBLE_FREQ).sin() * FEAR_TREMBLE_AMPLITUDE;
         // Write the composed offset unconditionally (idle = false): the tremble
@@ -306,4 +310,3 @@ pub fn update_fear_run(
         );
     }
 }
-

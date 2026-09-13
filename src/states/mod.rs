@@ -5,15 +5,15 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-pub mod match_config;
-pub mod main_menu;
+pub mod ability_text;
 pub mod animation_sandbox;
 pub mod arena_layout_debug;
 pub mod configure_match_ui;
 pub mod encyclopedia;
+pub mod main_menu;
+pub mod match_config;
 pub mod play_match;
 pub mod results_ui;
-pub mod ability_text;
 pub mod view_combatant_ui;
 
 pub use match_config::MatchConfig;
@@ -66,7 +66,7 @@ impl GameState {
 }
 
 use play_match::systems::{
-    CombatSystemPhase, configure_combat_system_ordering, add_core_combat_systems,
+    add_core_combat_systems, configure_combat_system_ordering, CombatSystemPhase,
 };
 
 /// Run condition for the shared combat VISUAL layer.
@@ -135,10 +135,7 @@ impl Plugin for StatesPlugin {
                     .run_if(in_state(GameState::MainMenu)),
             )
             // Options menu systems (now using egui)
-            .add_systems(
-                Update,
-                options_ui.run_if(in_state(GameState::Options)),
-            )
+            .add_systems(Update, options_ui.run_if(in_state(GameState::Options)))
             .add_systems(
                 Update,
                 keybindings_ui.run_if(in_state(GameState::Keybindings)),
@@ -147,8 +144,14 @@ impl Plugin for StatesPlugin {
             // The live arena preview is a render-to-texture scene set up/torn
             // down with the state; `update_map_preview` rebuilds it on map
             // change. Graphical-only (no headless registration).
-            .add_systems(OnEnter(GameState::ConfigureMatch), configure_match_ui::setup_map_preview)
-            .add_systems(OnExit(GameState::ConfigureMatch), configure_match_ui::cleanup_map_preview)
+            .add_systems(
+                OnEnter(GameState::ConfigureMatch),
+                configure_match_ui::setup_map_preview,
+            )
+            .add_systems(
+                OnExit(GameState::ConfigureMatch),
+                configure_match_ui::cleanup_map_preview,
+            )
             .add_systems(
                 Update,
                 (
@@ -291,709 +294,709 @@ impl Plugin for StatesPlugin {
         // fixed angles. One registration, widened, so no `SystemTypeSet` becomes
         // ambiguous (see `add_core_combat_systems`).
         app.add_systems(
-                Update,
+            Update,
+            (
+                play_match::handle_camera_input,
+                play_match::update_camera_position,
+            )
+                .chain()
+                .run_if(in_combat_scene),
+        )
+        .add_systems(
+            Update,
+            (
+                play_match::handle_time_controls,
+                // pick_selected_combatant consumes the pending_pick flag set
+                // by handle_camera_input on click-release; must run after it.
+                play_match::pick_selected_combatant,
+                // sync_selection_ring spawns/despawns the ring when the
+                // Selection resource changes — runs after picking.
+                play_match::sync_selection_ring,
+                play_match::animate_gate_bars,
+                play_match::update_play_match,
+            )
+                .chain()
+                .after(play_match::handle_camera_input)
+                .run_if(in_state(GameState::PlayMatch)),
+        )
+        // Graphical-only, but it must run IN the sim schedule: it attaches
+        // meshes to projectiles the same tick `process_casting` spawns them,
+        // before `move_projectiles` moves them and `process_projectile_hits`
+        // can despawn them. Registered in `Update` it was ordered against a
+        // set with no members there, so a projectile that spawned and hit
+        // inside one rendered frame was never drawn at all. Draws no RNG, so
+        // moving it into `FixedUpdate` cannot shift the sim's draw order.
+        .add_systems(
+            FixedUpdate,
+            play_match::spawn_projectile_visuals
+                .in_set(CombatSystemPhase::CombatAndMovement)
+                .after(play_match::process_channeling)
+                .before(play_match::move_projectiles)
+                .run_if(in_combat_scene),
+        )
+        // Match end is a SIM decision, so it belongs on the sim clock. In
+        // `Update` it was evaluated once per rendered frame — coarser than a
+        // tick, and at a cadence that varied with frame rate — while headless
+        // has always run its equivalent (`headless_check_match_end`) in
+        // `FixedUpdate`. Same class of bug as the match-clock fix in 3a16a46.
+        // Headless never registers this system, so no baseline moves.
+        .add_systems(
+            FixedUpdate,
+            play_match::check_match_end
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_state(GameState::PlayMatch)),
+        )
+        // Weapon-swing signal consumption is graphical-only but must run IN
+        // the sim schedule (same rationale as `spawn_projectile_visuals`
+        // above): `FixedUpdate` can tick several times per rendered frame,
+        // and a landed-attack marker consumed one tick late would desync
+        // the release stroke from its hit. Runs after CombatResolution so
+        // it sees the markers `combat_auto_attack` spawned this tick.
+        .add_systems(
+            FixedUpdate,
+            play_match::consume_swing_signals
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Landed instant-melee signals (Mortal Strike's signature stroke +
+        // flourish). Same FixedUpdate rationale as `consume_swing_signals`
+        // above. `.after` it so that when an ordinary auto and a Mortal
+        // Strike land on the same tick, the SIGNATURE wins the socket —
+        // otherwise the auto's `swing_style = Auto` reset could land last
+        // and silently downgrade the special to a normal swing.
+        .add_systems(
+            FixedUpdate,
+            play_match::consume_instant_ability_signals
+                .after(CombatSystemPhase::CombatResolution)
+                .after(play_match::consume_swing_signals)
+                .run_if(in_combat_scene),
+        )
+        // Mortal Wounds heal fracture: also a core-spawned marker consumer,
+        // so it takes the same FixedUpdate slot as its siblings above
+        // rather than Update. Several heals can resolve in one rendered
+        // frame, and the ash burst reads the target's LIVE transform — a
+        // consumer running at render rate would site every burst in that
+        // frame at one position instead of each at its own.
+        .add_systems(
+            FixedUpdate,
+            play_match::spawn_heal_fracture
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Weapon swing animation + cosmetic arrows: per-rendered-frame
+        // cosmetic transforms, ordinary Update visual group.
+        .add_systems(
+            Update,
+            (
+                play_match::animate_weapon_swings,
+                play_match::update_cosmetic_arrows,
+                play_match::update_weapon_stealth_fade,
+            )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Body lean into the swing. Its own registration rather than a
+        // nested tuple: the ordering constraint is a real dependency (it
+        // consumes the `last_s` the swing publishes, and would trail the
+        // weapon by a frame otherwise), so it reads better stated than
+        // implied by position — and `registration_audit`'s scanner cannot
+        // see through a nested `.chain()` sub-tuple.
+        .add_systems(
+            Update,
+            play_match::animate_body_lean
+                .after(play_match::animate_weapon_swings)
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Cast-ending signal consumption: same rationale as
+        // `consume_swing_signals` above — FixedUpdate can tick several
+        // times per rendered frame, and a CastEnding marker consumed one
+        // tick late would let cleanup_casting_orbs mistake a landed/
+        // fizzled cast for a silent-vanish removal. Runs after
+        // CombatResolution so it sees markers spawned this tick.
+        .add_systems(
+            FixedUpdate,
+            play_match::consume_cast_ending_signals
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Casting orb (gathering-orb cast animation): spawn/animate/motes/
+        // cleanup — separate group to avoid tuple size limits. `.chain()`
+        // enforces spawn->update->motes->cleanup ordering within the
+        // frame, so a just-spawned orb is positioned before motes stream
+        // toward it (otherwise motes could target the default-ZERO
+        // translation for a frame).
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_casting_orbs,
+                play_match::update_casting_orbs,
+                play_match::spawn_casting_orb_motes,
+                play_match::update_casting_orb_motes,
+                play_match::cleanup_casting_orbs,
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Cast-side heal visuals (`rendering/effects/heal_cast.rs`): the
+        // per-hand glow-and-wisp rigs that replace the casting orb FOR
+        // HARD-CAST HEALS ONLY. Same chained spawn -> update -> cleanup ->
+        // billboard contract as the orb group above; its own group so the
+        // tuple stays small and the hunk disjoint.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_heal_cast_glows,
+                play_match::update_heal_cast_glows,
+                play_match::cleanup_heal_cast_glows,
+                play_match::billboard_heal_cast_glows,
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // The heal-cast body posture (ReadySpellOmni/SpellCastOmni on the
+        // capsule). Registered alone for the same reason animate_body_lean
+        // is: the ordering is a real dependency — it must overwrite the
+        // lean's absolute rotation while a heal cast owns the torso, and
+        // it derives its target from the rigs the group above manages.
+        .add_systems(
+            Update,
+            play_match::update_heal_cast_posture
+                .after(play_match::animate_body_lean)
+                .after(play_match::cleanup_heal_cast_glows)
+                .run_if(in_combat_scene),
+        )
+        // Heal-cast CastEnding consumption: FixedUpdate for the same
+        // multi-tick-per-frame reason as `consume_cast_ending_signals`,
+        // and BEFORE it — that consumer owns despawning the marker; this
+        // one only reads it (launch flare vs stop-dead teardown).
+        .add_systems(
+            FixedUpdate,
+            play_match::consume_heal_cast_endings
+                .after(CombatSystemPhase::CombatResolution)
+                .before(play_match::consume_cast_ending_signals)
+                .run_if(in_combat_scene),
+        )
+        // Combat resolution, death, and visual effects (after core combat)
+        .add_systems(
+            Update,
+            (
+                play_match::update_stealth_visuals,
+                play_match::trigger_death_animation,
+                play_match::animate_death,
+                play_match::update_victory_celebration,
+                play_match::update_floating_combat_text,
+                play_match::update_speech_bubbles,
+                play_match::cleanup_expired_floating_text,
+                play_match::animate_shadow_sight_orbs, // Pulsing orb animation
+                play_match::animate_orb_consumption,   // Orb pickup shrink/move animation
+                play_match::update_shield_bubbles,     // Spawn/despawn shield bubbles
+                play_match::follow_shield_bubbles,     // Update bubble positions
+                // Polymorph BEFORE Fear, chained so a sync point flushes
+                // PolymorphedVisual before Fear evaluates its
+                // `Without<PolymorphedVisual>` filter. A unit hit by both on the
+                // same frame would otherwise get BOTH markers (each insert is a
+                // deferred Command the other can't see that frame) and then
+                // deadlock — both treatments exclude a double-marked unit, so
+                // neither could ever restore. Chaining keeps at most one marker
+                // set (sheep wins the tie). See
+                // tests/fear_visual_probes.rs::simultaneous_fear_and_polymorph_do_not_deadlock.
                 (
-                    play_match::handle_camera_input,
-                    play_match::update_camera_position,
+                    play_match::update_polymorph_visuals, // Sheep body swap when polymorphed
+                    play_match::update_fear_visuals,      // Shadow-husk tint when feared
                 )
-                    .chain()
-                    .run_if(in_combat_scene),
-            )
-            .add_systems(
-                Update,
+                    .chain(),
+                // Fear sub-effects nested to keep the outer tuple within Bevy's 20-limit.
                 (
-                    play_match::handle_time_controls,
-                    // pick_selected_combatant consumes the pending_pick flag set
-                    // by handle_camera_input on click-release; must run after it.
-                    play_match::pick_selected_combatant,
-                    // sync_selection_ring spawns/despawns the ring when the
-                    // Selection resource changes — runs after picking.
-                    play_match::sync_selection_ring,
-                    play_match::animate_gate_bars,
-                    play_match::update_play_match,
-                )
-                    .chain()
-                    .after(play_match::handle_camera_input)
-                    .run_if(in_state(GameState::PlayMatch)),
-            )
-            // Graphical-only, but it must run IN the sim schedule: it attaches
-            // meshes to projectiles the same tick `process_casting` spawns them,
-            // before `move_projectiles` moves them and `process_projectile_hits`
-            // can despawn them. Registered in `Update` it was ordered against a
-            // set with no members there, so a projectile that spawned and hit
-            // inside one rendered frame was never drawn at all. Draws no RNG, so
-            // moving it into `FixedUpdate` cannot shift the sim's draw order.
-            .add_systems(
-                FixedUpdate,
-                play_match::spawn_projectile_visuals
-                    .in_set(CombatSystemPhase::CombatAndMovement)
-                    .after(play_match::process_channeling)
-                    .before(play_match::move_projectiles)
-                    .run_if(in_combat_scene),
-            )
-            // Match end is a SIM decision, so it belongs on the sim clock. In
-            // `Update` it was evaluated once per rendered frame — coarser than a
-            // tick, and at a cadence that varied with frame rate — while headless
-            // has always run its equivalent (`headless_check_match_end`) in
-            // `FixedUpdate`. Same class of bug as the match-clock fix in 3a16a46.
-            // Headless never registers this system, so no baseline moves.
-            .add_systems(
-                FixedUpdate,
-                play_match::check_match_end
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
-            )
-            // Weapon-swing signal consumption is graphical-only but must run IN
-            // the sim schedule (same rationale as `spawn_projectile_visuals`
-            // above): `FixedUpdate` can tick several times per rendered frame,
-            // and a landed-attack marker consumed one tick late would desync
-            // the release stroke from its hit. Runs after CombatResolution so
-            // it sees the markers `combat_auto_attack` spawned this tick.
-            .add_systems(
-                FixedUpdate,
-                play_match::consume_swing_signals
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
-            )
-            // Landed instant-melee signals (Mortal Strike's signature stroke +
-            // flourish). Same FixedUpdate rationale as `consume_swing_signals`
-            // above. `.after` it so that when an ordinary auto and a Mortal
-            // Strike land on the same tick, the SIGNATURE wins the socket —
-            // otherwise the auto's `swing_style = Auto` reset could land last
-            // and silently downgrade the special to a normal swing.
-            .add_systems(
-                FixedUpdate,
-                play_match::consume_instant_ability_signals
-                    .after(CombatSystemPhase::CombatResolution)
-                    .after(play_match::consume_swing_signals)
-                    .run_if(in_combat_scene),
-            )
-            // Mortal Wounds heal fracture: also a core-spawned marker consumer,
-            // so it takes the same FixedUpdate slot as its siblings above
-            // rather than Update. Several heals can resolve in one rendered
-            // frame, and the ash burst reads the target's LIVE transform — a
-            // consumer running at render rate would site every burst in that
-            // frame at one position instead of each at its own.
-            .add_systems(
-                FixedUpdate,
-                play_match::spawn_heal_fracture
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
-            )
-            // Weapon swing animation + cosmetic arrows: per-rendered-frame
-            // cosmetic transforms, ordinary Update visual group.
-            .add_systems(
-                Update,
+                    play_match::update_fear_shroud,        // Breathing fear shroud pulse
+                    play_match::update_fear_mote_emitters, // Spawn rising fear motes per feared unit
+                    play_match::update_fear_motes,         // Float/fade fear motes
+                    play_match::cleanup_fear_motes,        // Despawn expired fear motes
+                    play_match::update_fear_flashes,       // Grow/fade apply flash
+                    play_match::cleanup_fear_flashes,      // Despawn expired fear flashes
+                    play_match::update_fear_shards,        // Fall/tumble/fade shroud shatter shards
+                    play_match::cleanup_fear_shards,       // Despawn expired shatter shards
+                ),
+                play_match::spawn_flame_visuals, // Visual meshes for flame particles
+                play_match::update_flame_particles, // Move/fade flame particles
+                // Lightning Bolt signature flash-crack, nested to keep the
+                // outer tuple within Bevy's 20-item .add_systems limit.
+                // Graphical-only (never registered in systems.rs) — headless
+                // stays byte-identical.
                 (
-                    play_match::animate_weapon_swings,
-                    play_match::update_cosmetic_arrows,
-                    play_match::update_weapon_stealth_fade,
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
-            )
-            // Body lean into the swing. Its own registration rather than a
-            // nested tuple: the ordering constraint is a real dependency (it
-            // consumes the `last_s` the swing publishes, and would trail the
-            // weapon by a frame otherwise), so it reads better stated than
-            // implied by position — and `registration_audit`'s scanner cannot
-            // see through a nested `.chain()` sub-tuple.
-            .add_systems(
-                Update,
-                play_match::animate_body_lean
-                    .after(play_match::animate_weapon_swings)
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
-            )
-            // Cast-ending signal consumption: same rationale as
-            // `consume_swing_signals` above — FixedUpdate can tick several
-            // times per rendered frame, and a CastEnding marker consumed one
-            // tick late would let cleanup_casting_orbs mistake a landed/
-            // fizzled cast for a silent-vanish removal. Runs after
-            // CombatResolution so it sees markers spawned this tick.
-            .add_systems(
-                FixedUpdate,
-                play_match::consume_cast_ending_signals
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
-            )
-            // Casting orb (gathering-orb cast animation): spawn/animate/motes/
-            // cleanup — separate group to avoid tuple size limits. `.chain()`
-            // enforces spawn->update->motes->cleanup ordering within the
-            // frame, so a just-spawned orb is positioned before motes stream
-            // toward it (otherwise motes could target the default-ZERO
-            // translation for a frame).
-            .add_systems(
-                Update,
+                    play_match::spawn_lightning_bolt,
+                    play_match::update_lightning_bolt,
+                    play_match::cleanup_lightning_bolt,
+                ),
+                // Mortal Strike signature: weapon trail, impact flash and
+                // sparks, plus the Mortal Wounds heal fracture. Both live
+                // in ONE nested tuple — the outer tuple is at Bevy's
+                // 20-item .add_systems limit, so a second sibling here does
+                // not compile. Graphical-only.
                 (
-                    play_match::spawn_casting_orbs,
-                    play_match::update_casting_orbs,
-                    play_match::spawn_casting_orb_motes,
-                    play_match::update_casting_orb_motes,
-                    play_match::cleanup_casting_orbs,
-                )
-                    .chain()
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
-            )
-            // Cast-side heal visuals (`rendering/effects/heal_cast.rs`): the
-            // per-hand glow-and-wisp rigs that replace the casting orb FOR
-            // HARD-CAST HEALS ONLY. Same chained spawn -> update -> cleanup ->
-            // billboard contract as the orb group above; its own group so the
-            // tuple stays small and the hunk disjoint.
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_heal_cast_glows,
-                    play_match::update_heal_cast_glows,
-                    play_match::cleanup_heal_cast_glows,
-                    play_match::billboard_heal_cast_glows,
-                )
-                    .chain()
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
-            )
-            // The heal-cast body posture (ReadySpellOmni/SpellCastOmni on the
-            // capsule). Registered alone for the same reason animate_body_lean
-            // is: the ordering is a real dependency — it must overwrite the
-            // lean's absolute rotation while a heal cast owns the torso, and
-            // it derives its target from the rigs the group above manages.
-            .add_systems(
-                Update,
-                play_match::update_heal_cast_posture
-                    .after(play_match::animate_body_lean)
-                    .after(play_match::cleanup_heal_cast_glows)
-                    .run_if(in_combat_scene),
-            )
-            // Heal-cast CastEnding consumption: FixedUpdate for the same
-            // multi-tick-per-frame reason as `consume_cast_ending_signals`,
-            // and BEFORE it — that consumer owns despawning the marker; this
-            // one only reads it (launch flare vs stop-dead teardown).
-            .add_systems(
-                FixedUpdate,
-                play_match::consume_heal_cast_endings
-                    .after(CombatSystemPhase::CombatResolution)
-                    .before(play_match::consume_cast_ending_signals)
-                    .run_if(in_combat_scene),
-            )
-            // Combat resolution, death, and visual effects (after core combat)
-            .add_systems(
-                Update,
-                (
-                    play_match::update_stealth_visuals,
-                    play_match::trigger_death_animation,
-                    play_match::animate_death,
-                    play_match::update_victory_celebration,
-                    play_match::update_floating_combat_text,
-                    play_match::update_speech_bubbles,
-                    play_match::cleanup_expired_floating_text,
-                    play_match::animate_shadow_sight_orbs,  // Pulsing orb animation
-                    play_match::animate_orb_consumption,    // Orb pickup shrink/move animation
-                    play_match::update_shield_bubbles,      // Spawn/despawn shield bubbles
-                    play_match::follow_shield_bubbles,      // Update bubble positions
-                    // Polymorph BEFORE Fear, chained so a sync point flushes
-                    // PolymorphedVisual before Fear evaluates its
-                    // `Without<PolymorphedVisual>` filter. A unit hit by both on the
-                    // same frame would otherwise get BOTH markers (each insert is a
-                    // deferred Command the other can't see that frame) and then
-                    // deadlock — both treatments exclude a double-marked unit, so
-                    // neither could ever restore. Chaining keeps at most one marker
-                    // set (sheep wins the tie). See
-                    // tests/fear_visual_probes.rs::simultaneous_fear_and_polymorph_do_not_deadlock.
                     (
-                        play_match::update_polymorph_visuals, // Sheep body swap when polymorphed
-                        play_match::update_fear_visuals,      // Shadow-husk tint when feared
+                        play_match::update_mortal_strike_trail,
+                        // Fires the held flash/sparks when the blade
+                        // arrives. Chained ahead of the updaters so a burst
+                        // spawned this frame is not aged before it renders.
+                        play_match::update_mortal_strike_impacts,
+                        play_match::update_mortal_strike_flash,
+                        play_match::update_mortal_strike_sparks,
+                        play_match::cleanup_mortal_strike,
                     )
                         .chain(),
-                    // Fear sub-effects nested to keep the outer tuple within Bevy's 20-limit.
+                    // `spawn_heal_fracture` is NOT here — it consumes a
+                    // core-spawned marker and belongs in FixedUpdate with
+                    // the other marker consumers (see below). These two are
+                    // ordinary per-frame particle motion.
                     (
-                        play_match::update_fear_shroud,        // Breathing fear shroud pulse
-                        play_match::update_fear_mote_emitters, // Spawn rising fear motes per feared unit
-                        play_match::update_fear_motes,         // Float/fade fear motes
-                        play_match::cleanup_fear_motes,        // Despawn expired fear motes
-                        play_match::update_fear_flashes,       // Grow/fade apply flash
-                        play_match::cleanup_fear_flashes,      // Despawn expired fear flashes
-                        play_match::update_fear_shards,        // Fall/tumble/fade shroud shatter shards
-                        play_match::cleanup_fear_shards,       // Despawn expired shatter shards
+                        play_match::update_heal_fracture,
+                        play_match::cleanup_heal_fracture,
                     ),
-                    play_match::spawn_flame_visuals,        // Visual meshes for flame particles
-                    play_match::update_flame_particles,     // Move/fade flame particles
-                    // Lightning Bolt signature flash-crack, nested to keep the
-                    // outer tuple within Bevy's 20-item .add_systems limit.
-                    // Graphical-only (never registered in systems.rs) — headless
-                    // stays byte-identical.
-                    (
-                        play_match::spawn_lightning_bolt,
-                        play_match::update_lightning_bolt,
-                        play_match::cleanup_lightning_bolt,
-                    ),
-                    // Mortal Strike signature: weapon trail, impact flash and
-                    // sparks, plus the Mortal Wounds heal fracture. Both live
-                    // in ONE nested tuple — the outer tuple is at Bevy's
-                    // 20-item .add_systems limit, so a second sibling here does
-                    // not compile. Graphical-only.
-                    (
-                        (
-                            play_match::update_mortal_strike_trail,
-                            // Fires the held flash/sparks when the blade
-                            // arrives. Chained ahead of the updaters so a burst
-                            // spawned this frame is not aged before it renders.
-                            play_match::update_mortal_strike_impacts,
-                            play_match::update_mortal_strike_flash,
-                            play_match::update_mortal_strike_sparks,
-                            play_match::cleanup_mortal_strike,
-                        )
-                            .chain(),
-                        // `spawn_heal_fracture` is NOT here — it consumes a
-                        // core-spawned marker and belongs in FixedUpdate with
-                        // the other marker consumers (see below). These two are
-                        // ordinary per-frame particle motion.
-                        (
-                            play_match::update_heal_fracture,
-                            play_match::cleanup_heal_fracture,
-                        ),
-                    ),
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                ),
             )
-            // Hard-CC receiver treatment: ice crystals / web sheet at a rooted
-            // unit's feet, and the whirl over a stunned unit's head. Its own
-            // group because the block above is AT Bevy's 20-item .add_systems
-            // tuple limit, so a 21st sibling there does not compile.
-            //
-            // Graphical-only — never registered in `add_core_combat_systems`.
-            // Keyed purely on the VICTIM's aura, which is what makes it faithful
-            // in the animation sandbox too: Frost Nova, Cheap Shot, Kidney Shot
-            // and Hammer of Justice are all applied inline in class AI and never
-            // enter `process_casting`, but every path converges on `AuraPending`
-            // -> `apply_pending_auras`, which does run under `in_combat_scene`.
-            .add_systems(
-                Update,
-                (
-                    // Rogue stun crescents, consumed from the same
-                    // `InstantAbilityFired` marker the hard-CC treatment's
-                    // victims key on.
-                    play_match::update_crescent_flares,
-                    play_match::cleanup_crescent_flares,
-                    // Hammer of Justice's caster-centred ground wave and victim
-                    // rune. The uppercut stroke is dispatched separately, in
-                    // `consume_instant_ability_signals`.
-                    play_match::update_justice_waves,
-                    play_match::update_justice_runes,
-                    play_match::cleanup_holy_justice,
-                    // Frost Nova's wavefront.
-                    //
-                    // These four are order-INDEPENDENT of the hard-CC treatment
-                    // below; none of them writes `NovaFreezeDelay`. The real
-                    // invariant is a schedule apart: the delay is inserted by
-                    // `spawn_frost_nova`, called from
-                    // `consume_instant_ability_signals` in FIXED_UPDATE, which
-                    // therefore runs before any Update-schedule system can build
-                    // the victim's Root rig. Move that consumer out of
-                    // FixedUpdate and the rig grows immediately with the
-                    // propagation lost — reordering anything here will not save
-                    // it.
-                    play_match::update_nova_rings,
-                    play_match::update_nova_shards,
-                    play_match::cleanup_frost_nova,
-                    play_match::expire_nova_freeze_delays,
-                    play_match::update_hard_cc_visuals,
-                    play_match::update_cc_rigs,
-                    // After `update_cc_rigs`, which writes the hub rotation the
-                    // billboard has to cancel.
-                    play_match::billboard_cc_beads,
-                    play_match::update_cc_flares,
-                    play_match::cleanup_cc_rigs,
-                    play_match::cleanup_cc_flares,
-                )
-                    .chain()
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Hard-CC receiver treatment: ice crystals / web sheet at a rooted
+        // unit's feet, and the whirl over a stunned unit's head. Its own
+        // group because the block above is AT Bevy's 20-item .add_systems
+        // tuple limit, so a 21st sibling there does not compile.
+        //
+        // Graphical-only — never registered in `add_core_combat_systems`.
+        // Keyed purely on the VICTIM's aura, which is what makes it faithful
+        // in the animation sandbox too: Frost Nova, Cheap Shot, Kidney Shot
+        // and Hammer of Justice are all applied inline in class AI and never
+        // enter `process_casting`, but every path converges on `AuraPending`
+        // -> `apply_pending_auras`, which does run under `in_combat_scene`.
+        .add_systems(
+            Update,
+            (
+                // Rogue stun crescents, consumed from the same
+                // `InstantAbilityFired` marker the hard-CC treatment's
+                // victims key on.
+                play_match::update_crescent_flares,
+                play_match::cleanup_crescent_flares,
+                // Hammer of Justice's caster-centred ground wave and victim
+                // rune. The uppercut stroke is dispatched separately, in
+                // `consume_instant_ability_signals`.
+                play_match::update_justice_waves,
+                play_match::update_justice_runes,
+                play_match::cleanup_holy_justice,
+                // Frost Nova's wavefront.
+                //
+                // These four are order-INDEPENDENT of the hard-CC treatment
+                // below; none of them writes `NovaFreezeDelay`. The real
+                // invariant is a schedule apart: the delay is inserted by
+                // `spawn_frost_nova`, called from
+                // `consume_instant_ability_signals` in FIXED_UPDATE, which
+                // therefore runs before any Update-schedule system can build
+                // the victim's Root rig. Move that consumer out of
+                // FixedUpdate and the rig grows immediately with the
+                // propagation lost — reordering anything here will not save
+                // it.
+                play_match::update_nova_rings,
+                play_match::update_nova_shards,
+                play_match::cleanup_frost_nova,
+                play_match::expire_nova_freeze_delays,
+                play_match::update_hard_cc_visuals,
+                play_match::update_cc_rigs,
+                // After `update_cc_rigs`, which writes the hub rotation the
+                // billboard has to cancel.
+                play_match::billboard_cc_beads,
+                play_match::update_cc_flares,
+                play_match::cleanup_cc_rigs,
+                play_match::cleanup_cc_flares,
             )
-            // Frostbolt and Shadow Bolt: the bespoke missiles and the bursts
-            // they leave on their victims.
-            //
-            // Its OWN `.add_systems` group rather than more entries on the one
-            // above, which had reached Bevy's 20-tuple limit — the same reason
-            // the effect groups upstream are split.
-            //
-            // Order within the group is load-bearing twice over: `animate_*`
-            // must follow `spawn_*` or a bolt's first frame drives a rig that
-            // does not exist yet, and each `billboard_*` must follow BOTH,
-            // because it cancels the rig's own aim out of every flat child and
-            // therefore has to see the poses those two just wrote. `.chain()`
-            // guarantees all of it.
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_bolt_visuals,
-                    play_match::animate_bolts,
-                    play_match::billboard_bolt_sprites,
-                    play_match::update_bolt_trails,
-                    play_match::update_bolt_motes,
-                    play_match::spawn_bolt_impacts,
-                    play_match::animate_bolt_impacts,
-                    play_match::billboard_bolt_impacts,
-                    // The shared school impact, same spawn -> animate ->
-                    // billboard contract as the bespoke bolt bursts above.
-                    play_match::spawn_school_impacts,
-                    play_match::animate_school_impacts,
-                    play_match::billboard_school_impacts,
-                )
-                    .chain()
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Frostbolt and Shadow Bolt: the bespoke missiles and the bursts
+        // they leave on their victims.
+        //
+        // Its OWN `.add_systems` group rather than more entries on the one
+        // above, which had reached Bevy's 20-tuple limit — the same reason
+        // the effect groups upstream are split.
+        //
+        // Order within the group is load-bearing twice over: `animate_*`
+        // must follow `spawn_*` or a bolt's first frame drives a rig that
+        // does not exist yet, and each `billboard_*` must follow BOTH,
+        // because it cancels the rig's own aim out of every flat child and
+        // therefore has to see the poses those two just wrote. `.chain()`
+        // guarantees all of it.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_bolt_visuals,
+                play_match::animate_bolts,
+                play_match::billboard_bolt_sprites,
+                play_match::update_bolt_trails,
+                play_match::update_bolt_motes,
+                play_match::spawn_bolt_impacts,
+                play_match::animate_bolt_impacts,
+                play_match::billboard_bolt_impacts,
+                // The shared school impact, same spawn -> animate ->
+                // billboard contract as the bespoke bolt bursts above.
+                play_match::spawn_school_impacts,
+                play_match::animate_school_impacts,
+                play_match::billboard_school_impacts,
             )
-            // Pet mesh tilt must run after movement sets Y-facing rotation
-            .add_systems(
-                Update,
-                play_match::apply_pet_mesh_tilt
-                    .after(CombatSystemPhase::CombatAndMovement)
-                    .run_if(in_combat_scene),
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Pet mesh tilt must run after movement sets Y-facing rotation
+        .add_systems(
+            Update,
+            play_match::apply_pet_mesh_tilt
+                .after(CombatSystemPhase::CombatAndMovement)
+                .run_if(in_combat_scene),
+        )
+        // Per-spell heal landings (separate group to avoid tuple size
+        // limits) — spawn -> animate -> billboard, the same chained
+        // contract as the shared school impact above: `animate` must see
+        // the rig `spawn` just built, and `billboard` must see the poses
+        // both just wrote.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_heal_impacts,
+                play_match::animate_heal_impacts,
+                play_match::billboard_heal_impacts,
             )
-            // Per-spell heal landings (separate group to avoid tuple size
-            // limits) — spawn -> animate -> billboard, the same chained
-            // contract as the shared school impact above: `animate` must see
-            // the rig `spawn` just built, and `billboard` must see the poses
-            // both just wrote.
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_heal_impacts,
-                    play_match::animate_heal_impacts,
-                    play_match::billboard_heal_impacts,
-                )
-                    .chain()
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Dispel burst visual effects (separate group to avoid tuple size limits)
+        // Still used by Concussive Shot impact and Master's Call — NOT the dispel.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_dispel_visuals, // Spawn burst when dispel succeeds
+                play_match::update_dispel_bursts, // Expand sphere and fade
+                play_match::cleanup_expired_dispel_bursts, // Remove expired bursts
             )
-            // Dispel burst visual effects (separate group to avoid tuple size limits)
-            // Still used by Concussive Shot impact and Master's Call — NOT the dispel.
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_dispel_visuals,          // Spawn burst when dispel succeeds
-                    play_match::update_dispel_bursts,          // Expand sphere and fade
-                    play_match::cleanup_expired_dispel_bursts, // Remove expired bursts
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Transform puff visual effects (separate group to avoid tuple size limits)
+        // The cloud pop at both ends of a polymorph — graphical only.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_transform_puff_visuals, // Attach cloud lobes to new puffs
+                play_match::update_transform_puffs,       // Expand, rise and fade
+                play_match::cleanup_expired_transform_puffs, // Remove expired puffs
             )
-            // Transform puff visual effects (separate group to avoid tuple size limits)
-            // The cloud pop at both ends of a polymorph — graphical only.
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_transform_puff_visuals, // Attach cloud lobes to new puffs
-                    play_match::update_transform_puffs,       // Expand, rise and fade
-                    play_match::cleanup_expired_transform_puffs, // Remove expired puffs
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Dispel ribbon visual effects (separate group to avoid tuple size limits)
+        // The spiraling "you got cleansed" indicator — graphical only.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_dispel_ribbon_visuals, // Attach ribbon mesh when a dispel succeeds
+                play_match::update_dispel_ribbons, // Climb the body, roll the fold, ignite, then play out
+                play_match::update_dispel_sparks, // Sparks off the fixed top end while it plays out
+                play_match::cleanup_expired_dispel_ribbons, // Remove expired ribbons
             )
-            // Dispel ribbon visual effects (separate group to avoid tuple size limits)
-            // The spiraling "you got cleansed" indicator — graphical only.
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_dispel_ribbon_visuals,    // Attach ribbon mesh when a dispel succeeds
-                    play_match::update_dispel_ribbons,          // Climb the body, roll the fold, ignite, then play out
-                    play_match::update_dispel_sparks,           // Sparks off the fixed top end while it plays out
-                    play_match::cleanup_expired_dispel_ribbons, // Remove expired ribbons
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Psychic Scream burst visuals (separate group to avoid tuple size limits)
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_scream_burst, // Attach mesh when a scream marker appears
+                play_match::update_scream_bursts, // Expand the AoE ring and fade
+                play_match::cleanup_expired_scream_bursts, // Remove expired bursts
             )
-            // Psychic Scream burst visuals (separate group to avoid tuple size limits)
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_scream_burst,            // Attach mesh when a scream marker appears
-                    play_match::update_scream_bursts,          // Expand the AoE ring and fade
-                    play_match::cleanup_expired_scream_bursts, // Remove expired bursts
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Death Coil impact burst (separate group to avoid tuple size limits)
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_death_coil_burst, // Attach mesh when a coil-impact marker appears
+                play_match::update_death_coil_bursts, // Flash, punch outward, fade
+                play_match::cleanup_expired_death_coil_bursts, // Remove expired bursts
             )
-            // Death Coil impact burst (separate group to avoid tuple size limits)
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_death_coil_burst,            // Attach mesh when a coil-impact marker appears
-                    play_match::update_death_coil_bursts,          // Flash, punch outward, fade
-                    play_match::cleanup_expired_death_coil_bursts, // Remove expired bursts
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Berserker Rage activation visuals (separate group to avoid tuple size limits)
+        // The TBC-style black angry mask + red glow at the Warrior's head.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_berserk_mask_visuals, // Attach glyph quad + glow when a mask marker appears
+                play_match::update_berserk_masks,       // Follow head, billboard, pop/hold/collapse
+                play_match::cleanup_expired_berserk_masks, // Remove expired masks and glows
             )
-            // Berserker Rage activation visuals (separate group to avoid tuple size limits)
-            // The TBC-style black angry mask + red glow at the Warrior's head.
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_berserk_mask_visuals,     // Attach glyph quad + glow when a mask marker appears
-                    play_match::update_berserk_masks,           // Follow head, billboard, pop/hold/collapse
-                    play_match::cleanup_expired_berserk_masks,  // Remove expired masks and glows
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // UA dispel-backlash burst on the dispeller (graphical only —
+        // never registered in headless systems.rs).
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_backlash_burst_visuals, // Build mesh for new bursts
+                play_match::update_backlash_bursts,       // Expand and fade
+                play_match::cleanup_expired_backlash_bursts, // Remove expired bursts
+                                                          // Silence visibility uses the standard CC pattern: [CC] log entry
+                                                          // plus the HUD aura icon — no bespoke floating text.
             )
-            // UA dispel-backlash burst on the dispeller (graphical only —
-            // never registered in headless systems.rs).
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_backlash_burst_visuals,  // Build mesh for new bursts
-                    play_match::update_backlash_bursts,        // Expand and fade
-                    play_match::cleanup_expired_backlash_bursts, // Remove expired bursts
-                    // Silence visibility uses the standard CC pattern: [CC] log entry
-                    // plus the HUD aura icon — no bespoke floating text.
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Warlock DoT + curse aura visuals: Corruption's darkening
+        // shroud (the one deliberate AlphaMode::Blend exception — see
+        // rendering/effects/warlock_dots.rs), the shared apply ring, the
+        // three curse apply apparitions (Agony/Weakness skulls, Tongues'
+        // rune circle), and UA's authored violet glow + crackle.
+        // Aura-keyed and graphical only — never registered in headless
+        // systems.rs. Chained: animates must see the rigs `spawn` just
+        // built, the particle pass must see the pieces the animates
+        // emitted, and the billboard pass (fed by the apparition
+        // orientation pass) runs on the final poses.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_warlock_dot_visuals, // Detect DoT auras, build rigs
+                play_match::animate_dot_apply_bursts,  // Ring ramp + spark burst
+                play_match::animate_corruption_shrouds, // Shroud throb + wisps + fizz
+                play_match::animate_curse_apparitions, // Curse envelopes + emitters
+                play_match::animate_ua_states,         // Glow pulse + crackle
+                play_match::age_warlock_dot_particles, // Motes/wisps/bolts age out
+                play_match::orient_curse_apparitions,  // Yaw skulls / spin the rune ring
+                play_match::billboard_warlock_dot_visuals, // Face the flat pieces
+                play_match::cleanup_warlock_dot_visuals, // End states at aura end
             )
-            // Warlock DoT + curse aura visuals: Corruption's darkening
-            // shroud (the one deliberate AlphaMode::Blend exception — see
-            // rendering/effects/warlock_dots.rs), the shared apply ring, the
-            // three curse apply apparitions (Agony/Weakness skulls, Tongues'
-            // rune circle), and UA's authored violet glow + crackle.
-            // Aura-keyed and graphical only — never registered in headless
-            // systems.rs. Chained: animates must see the rigs `spawn` just
-            // built, the particle pass must see the pieces the animates
-            // emitted, and the billboard pass (fed by the apparition
-            // orientation pass) runs on the final poses.
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_warlock_dot_visuals,     // Detect DoT auras, build rigs
-                    play_match::animate_dot_apply_bursts,      // Ring ramp + spark burst
-                    play_match::animate_corruption_shrouds,    // Shroud throb + wisps + fizz
-                    play_match::animate_curse_apparitions,     // Curse envelopes + emitters
-                    play_match::animate_ua_states,             // Glow pulse + crackle
-                    play_match::age_warlock_dot_particles,     // Motes/wisps/bolts age out
-                    play_match::orient_curse_apparitions,      // Yaw skulls / spin the rune ring
-                    play_match::billboard_warlock_dot_visuals, // Face the flat pieces
-                    play_match::cleanup_warlock_dot_visuals,   // End states at aura end
-                )
-                    .chain()
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // DoT drip indicators: green poison / red bleed drops on afflicted
+        // targets (graphical only — never registered in headless systems.rs).
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_drip_emitters_for_afflicted, // Detect mapped DoTs, spawn emitters
+                play_match::update_drip_emitters, // Tick emitters, spawn drips, cleanup
+                play_match::spawn_drip_visuals,   // Build mesh for new drips
+                play_match::update_drips,         // Fall, shrink, despawn
             )
-            // DoT drip indicators: green poison / red bleed drops on afflicted
-            // targets (graphical only — never registered in headless systems.rs).
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_drip_emitters_for_afflicted, // Detect mapped DoTs, spawn emitters
-                    play_match::update_drip_emitters,              // Tick emitters, spawn drips, cleanup
-                    play_match::spawn_drip_visuals,                // Build mesh for new drips
-                    play_match::update_drips,                      // Fall, shrink, despawn
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Windfury Totem proc effect: a spinning wind funnel around the melee
+        // ally that just landed a bonus swing (graphical only — the marker is
+        // spawned in core like FCT; the mesh is built only here).
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_windfury_tornado_visuals, // Build funnel mesh for new procs
+                play_match::update_windfury_tornados,       // Spin fast, follow ally, fade
+                play_match::cleanup_expired_windfury_tornados, // Despawn when expired
             )
-            // Windfury Totem proc effect: a spinning wind funnel around the melee
-            // ally that just landed a bonus swing (graphical only — the marker is
-            // spawned in core like FCT; the mesh is built only here).
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_windfury_tornado_visuals,  // Build funnel mesh for new procs
-                    play_match::update_windfury_tornados,        // Spin fast, follow ally, fade
-                    play_match::cleanup_expired_windfury_tornados, // Despawn when expired
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Drain Life beam visual effects (separate group to avoid tuple size limits)
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_drain_life_beams, // Spawn beam when Drain Life starts
+                play_match::update_drain_life_beams, // Update beam position/rotation
+                play_match::spawn_drain_particles,  // Spawn particles along beam
+                play_match::update_drain_particles, // Move particles toward caster
+                play_match::cleanup_drain_life_beams, // Remove beam when channel ends
             )
-            // Drain Life beam visual effects (separate group to avoid tuple size limits)
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_drain_life_beams,     // Spawn beam when Drain Life starts
-                    play_match::update_drain_life_beams,    // Update beam position/rotation
-                    play_match::spawn_drain_particles,      // Spawn particles along beam
-                    play_match::update_drain_particles,     // Move particles toward caster
-                    play_match::cleanup_drain_life_beams,   // Remove beam when channel ends
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Trap visual effects (ground circles + trigger bursts)
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_trap_visuals,       // Ground circle on new traps
+                play_match::update_trap_visuals,      // Arming pulse → armed shimmer
+                play_match::spawn_trap_burst_visuals, // Burst sphere on trigger
+                play_match::update_and_cleanup_trap_bursts, // Expand + fade + despawn
+                play_match::spawn_trap_launch_visuals, // Glowing sphere on launched traps
             )
-            // Trap visual effects (ground circles + trigger bursts)
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_trap_visuals,              // Ground circle on new traps
-                    play_match::update_trap_visuals,             // Arming pulse → armed shimmer
-                    play_match::spawn_trap_burst_visuals,        // Burst sphere on trigger
-                    play_match::update_and_cleanup_trap_bursts,  // Expand + fade + despawn
-                    play_match::spawn_trap_launch_visuals,       // Glowing sphere on launched traps
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Ice block + slow zone visual effects
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_ice_block_visuals, // Cuboid around frozen targets
+                play_match::update_ice_blocks,       // Follow target position
+                play_match::cleanup_ice_blocks,      // Despawn when aura breaks
+                play_match::spawn_slow_zone_visuals, // Cyan disc on slow zones
+                play_match::update_slow_zone_visuals, // Pulse + fade out
+                play_match::spawn_totem_visuals,     // Element-colored pillar on new totems
+                play_match::update_totem_visuals,    // Pulse + fade out
             )
-            // Ice block + slow zone visual effects
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_ice_block_visuals,     // Cuboid around frozen targets
-                    play_match::update_ice_blocks,           // Follow target position
-                    play_match::cleanup_ice_blocks,          // Despawn when aura breaks
-                    play_match::spawn_slow_zone_visuals,     // Cyan disc on slow zones
-                    play_match::update_slow_zone_visuals,    // Pulse + fade out
-                    play_match::spawn_totem_visuals,         // Element-colored pillar on new totems
-                    play_match::update_totem_visuals,        // Pulse + fade out
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Disengage trail + charge trail visual effects
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_disengage_trail, // Path-laid wind slivers + spark motes (Hunter)
+                play_match::update_and_cleanup_disengage_trails, // Fade + despawn
+                play_match::spawn_charge_trail,    // Path-laid streak + dust (Warrior + Boar)
+                play_match::update_and_cleanup_charge_trails, // Fade + despawn
             )
-            // Disengage trail + charge trail visual effects
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_disengage_trail,                 // Path-laid wind slivers + spark motes (Hunter)
-                    play_match::update_and_cleanup_disengage_trails,   // Fade + despawn
-                    play_match::spawn_charge_trail,                    // Path-laid streak + dust (Warrior + Boar)
-                    play_match::update_and_cleanup_charge_trails,      // Fade + despawn
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Walking animation: vertical bob on moving combatants/pets, and
+        // the hop that replaces it while a unit is polymorphed. Must run
+        // after movement has settled so the post-movement XZ is read.
+        .add_systems(
+            Update,
+            (
+                play_match::update_walk_animation,
+                play_match::update_sheep_hop,
+                play_match::update_fear_run,
             )
-            // Walking animation: vertical bob on moving combatants/pets, and
-            // the hop that replaces it while a unit is polymorphed. Must run
-            // after movement has settled so the post-movement XZ is read.
-            .add_systems(
-                Update,
-                (
-                    play_match::update_walk_animation,
-                    play_match::update_sheep_hop,
-                    play_match::update_fear_run,
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Kill-target call watcher (banter, graphical-only). An explicit
+        // per-team diff of `MatchConfig`, NOT Bevy change detection —
+        // `ResMut` deref marks the whole resource changed whether or not a
+        // field moved, and `is_changed()` fires on the first run after
+        // insert (KTD4). Ordinary `Update`: it reads the config and the
+        // countdown's gate flag, touches no sim state, and only needs to
+        // run before the beat scheduler that consumes its queue.
+        .add_systems(
+            Update,
+            play_match::watch_kill_target_calls.run_if(in_state(GameState::PlayMatch)),
+        )
+        // Banter beat scheduler (graphical-only). Drains the watcher's
+        // queue, resolves an exchange per change, and spawns each beat's
+        // speech bubble as it falls due. Ordered `.after` the watcher so a
+        // call change is picked up on the frame it is detected — both
+        // systems take `ResMut<CallWatcher>`, so Bevy would otherwise
+        // serialise them in an arbitrary order and the opening exchange
+        // would sometimes start a frame late. It writes nothing but
+        // `SpeechBubble` entities, which no sim system reads.
+        .add_systems(
+            Update,
+            play_match::play_banter_beats
+                .after(play_match::watch_kill_target_calls)
+                .run_if(in_state(GameState::PlayMatch)),
+        )
+        // UI rendering systems
+        .add_systems(
+            Update,
+            // Chained: egui systems are serialized on EguiContexts anyway,
+            // and render_team_frames must run AFTER render_combat_panel —
+            // it anchors to available_rect(), which only reflects panels
+            // already shown this frame.
+            (
+                play_match::load_spell_icons,
+                play_match::load_emoji_icons,
+                // Class icons are painted by the team frames, the
+                // countdown roster and the speech bubbles, and until now
+                // NOTHING filled them on the way into a match:
+                // `load_class_icons` ran only under ConfigureMatch, which
+                // `--replay` skips entirely (it boots straight into
+                // PlayMatch). A replay therefore ran the whole match with
+                // class-less frames. Self-guards on an internal `loaded`
+                // flag — and `ClassIcons` is owned for the app lifetime, so
+                // that flag never goes back to false — making this free on
+                // the normal path.
+                configure_match_ui::load_class_icons,
+                play_match::render_time_controls,
+                play_match::render_camera_controls,
+                play_match::render_combat_panel,
+                play_match::render_countdown,
+                play_match::render_victory_celebration,
+                play_match::render_health_bars,
+                play_match::render_team_frames,
+                play_match::render_speech_bubbles,
             )
-            // Kill-target call watcher (banter, graphical-only). An explicit
-            // per-team diff of `MatchConfig`, NOT Bevy change detection —
-            // `ResMut` deref marks the whole resource changed whether or not a
-            // field moved, and `is_changed()` fires on the first run after
-            // insert (KTD4). Ordinary `Update`: it reads the config and the
-            // countdown's gate flag, touches no sim state, and only needs to
-            // run before the beat scheduler that consumes its queue.
-            .add_systems(
-                Update,
-                play_match::watch_kill_target_calls.run_if(in_state(GameState::PlayMatch)),
+                .chain()
+                .run_if(in_state(GameState::PlayMatch)),
+        )
+        // Floating combat text renders in the sandbox too (not just matches):
+        // it is world-space damage/heal feedback, not HUD chrome, and for
+        // FCT-only abilities (Holy Shock, the melee strikes) it is the only
+        // visible confirmation that the hit landed. R13 excludes the HUD /
+        // team frames / combat log / speech bubbles from the sandbox — not
+        // this. `update_floating_combat_text` already runs under
+        // `in_combat_scene`; this widens the egui draw to match.
+        .add_systems(
+            Update,
+            play_match::render_floating_combat_text.run_if(in_combat_scene),
+        )
+        // Selection ring follow & cleanup — runs after combat resolution
+        // so the ring tracks post-movement positions on the same frame
+        // (matches the `follow_shield_bubbles` pattern).
+        .add_systems(
+            Update,
+            play_match::follow_selection_ring
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_state(GameState::PlayMatch)),
+        )
+        .add_systems(
+            OnExit(GameState::PlayMatch),
+            play_match::reset_selection_on_exit,
+        )
+        // Back to the "never observed" sentinel so the next match reports
+        // its own opening call change, and so an unconsumed change cannot
+        // leak into the next match's queue.
+        .add_systems(
+            OnExit(GameState::PlayMatch),
+            play_match::reset_call_watcher_on_exit,
+        )
+        // Drop every queued beat, the scheduler clock, and the occurrence
+        // counters, so nothing carries into the next match.
+        .add_systems(
+            OnExit(GameState::PlayMatch),
+            play_match::reset_banter_scheduler_on_exit,
+        )
+        .add_systems(OnExit(GameState::PlayMatch), play_match::cleanup_play_match)
+        // Results systems (defined in results_ui module).
+        //
+        // The icon loaders run here too. The Results screen reads its class
+        // and ability icons through `EncyclopediaData`, and nothing else
+        // fills those resources on the way in: the ability loader otherwise
+        // runs only under ViewCombatant and Encyclopedia, so a reader who
+        // went straight from a match to the results got an empty
+        // placeholder tile on every ability bar until they happened to open
+        // one of those screens. Both loaders self-guard on an internal
+        // `loaded` flag, so registering them here as well as in their own
+        // states is idempotent — the same trick the Encyclopedia and the
+        // Animation Sandbox use.
+        //
+        // The ITEM loader is deliberately NOT here: the Results screen
+        // resolves only `Topic::Class` and `Topic::Ability`, so it never
+        // paints an item icon. Add it if that ever changes.
+        .add_systems(
+            Update,
+            (
+                view_combatant_ui::load_ability_icons,
+                configure_match_ui::load_class_icons,
+                results_ui::results_ui,
             )
-            // Banter beat scheduler (graphical-only). Drains the watcher's
-            // queue, resolves an exchange per change, and spawns each beat's
-            // speech bubble as it falls due. Ordered `.after` the watcher so a
-            // call change is picked up on the frame it is detected — both
-            // systems take `ResMut<CallWatcher>`, so Bevy would otherwise
-            // serialise them in an arbitrary order and the opening exchange
-            // would sometimes start a frame late. It writes nothing but
-            // `SpeechBubble` entities, which no sim system reads.
-            .add_systems(
-                Update,
-                play_match::play_banter_beats
-                    .after(play_match::watch_kill_target_calls)
-                    .run_if(in_state(GameState::PlayMatch)),
-            )
-            // UI rendering systems
-            .add_systems(
-                Update,
-                // Chained: egui systems are serialized on EguiContexts anyway,
-                // and render_team_frames must run AFTER render_combat_panel —
-                // it anchors to available_rect(), which only reflects panels
-                // already shown this frame.
-                (
-                    play_match::load_spell_icons,
-                    play_match::load_emoji_icons,
-                    // Class icons are painted by the team frames, the
-                    // countdown roster and the speech bubbles, and until now
-                    // NOTHING filled them on the way into a match:
-                    // `load_class_icons` ran only under ConfigureMatch, which
-                    // `--replay` skips entirely (it boots straight into
-                    // PlayMatch). A replay therefore ran the whole match with
-                    // class-less frames. Self-guards on an internal `loaded`
-                    // flag — and `ClassIcons` is owned for the app lifetime, so
-                    // that flag never goes back to false — making this free on
-                    // the normal path.
-                    configure_match_ui::load_class_icons,
-                    play_match::render_time_controls,
-                    play_match::render_camera_controls,
-                    play_match::render_combat_panel,
-                    play_match::render_countdown,
-                    play_match::render_victory_celebration,
-                    play_match::render_health_bars,
-                    play_match::render_team_frames,
-                    play_match::render_speech_bubbles,
-                )
-                    .chain()
-                    .run_if(in_state(GameState::PlayMatch)),
-            )
-            // Floating combat text renders in the sandbox too (not just matches):
-            // it is world-space damage/heal feedback, not HUD chrome, and for
-            // FCT-only abilities (Holy Shock, the melee strikes) it is the only
-            // visible confirmation that the hit landed. R13 excludes the HUD /
-            // team frames / combat log / speech bubbles from the sandbox — not
-            // this. `update_floating_combat_text` already runs under
-            // `in_combat_scene`; this widens the egui draw to match.
-            .add_systems(
-                Update,
-                play_match::render_floating_combat_text.run_if(in_combat_scene),
-            )
-            // Selection ring follow & cleanup — runs after combat resolution
-            // so the ring tracks post-movement positions on the same frame
-            // (matches the `follow_shield_bubbles` pattern).
-            .add_systems(
-                Update,
-                play_match::follow_selection_ring
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
-            )
-            .add_systems(
-                OnExit(GameState::PlayMatch),
-                play_match::reset_selection_on_exit,
-            )
-            // Back to the "never observed" sentinel so the next match reports
-            // its own opening call change, and so an unconsumed change cannot
-            // leak into the next match's queue.
-            .add_systems(
-                OnExit(GameState::PlayMatch),
-                play_match::reset_call_watcher_on_exit,
-            )
-            // Drop every queued beat, the scheduler clock, and the occurrence
-            // counters, so nothing carries into the next match.
-            .add_systems(
-                OnExit(GameState::PlayMatch),
-                play_match::reset_banter_scheduler_on_exit,
-            )
-            .add_systems(OnExit(GameState::PlayMatch), play_match::cleanup_play_match)
-            // Results systems (defined in results_ui module).
-            //
-            // The icon loaders run here too. The Results screen reads its class
-            // and ability icons through `EncyclopediaData`, and nothing else
-            // fills those resources on the way in: the ability loader otherwise
-            // runs only under ViewCombatant and Encyclopedia, so a reader who
-            // went straight from a match to the results got an empty
-            // placeholder tile on every ability bar until they happened to open
-            // one of those screens. Both loaders self-guard on an internal
-            // `loaded` flag, so registering them here as well as in their own
-            // states is idempotent — the same trick the Encyclopedia and the
-            // Animation Sandbox use.
-            //
-            // The ITEM loader is deliberately NOT here: the Results screen
-            // resolves only `Topic::Class` and `Topic::Ability`, so it never
-            // paints an item icon. Add it if that ever changes.
-            .add_systems(
-                Update,
-                (
-                    view_combatant_ui::load_ability_icons,
-                    configure_match_ui::load_class_icons,
-                    results_ui::results_ui,
-                )
-                    .chain()
-                    .run_if(in_state(GameState::Results)),
-            );
+                .chain()
+                .run_if(in_state(GameState::Results)),
+        );
     }
 }
 
@@ -1009,7 +1012,9 @@ fn options_ui(
 ) {
     // Use try_ctx_mut to gracefully handle window close (the context
     // dies with the primary window; ctx_mut panics on the final frame)
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     // Configure style for a dark theme
     let mut style = (*ctx.style()).clone();
@@ -1349,7 +1354,9 @@ fn keybindings_ui(
 
     // Use try_ctx_mut to gracefully handle window close (the context
     // dies with the primary window; ctx_mut panics on the final frame)
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     // Configure style for a dark theme
     let mut style = (*ctx.style()).clone();
@@ -1366,16 +1373,14 @@ fn keybindings_ui(
                     right: 20,
                     top: 20,
                     bottom: 20,
-                })
+                }),
         )
         .show(ctx, |ui| {
             ui.add_space(10.0);
 
             // Back button - positioned in top-left
-            let back_rect = egui::Rect::from_min_size(
-                egui::pos2(20.0, 20.0),
-                egui::vec2(80.0, 36.0)
-            );
+            let back_rect =
+                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(80.0, 36.0));
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
                 if ui.button(egui::RichText::new("BACK").size(20.0)).clicked() {
                     next_state.set(GameState::Options);
@@ -1395,13 +1400,13 @@ fn keybindings_ui(
 
             // Reset to defaults button
             ui.vertical_centered(|ui| {
-                if ui.add(
-                    egui::Button::new(
-                        egui::RichText::new("Reset to Defaults")
-                            .size(16.0)
+                if ui
+                    .add(
+                        egui::Button::new(egui::RichText::new("Reset to Defaults").size(16.0))
+                            .min_size(egui::vec2(180.0, 32.0)),
                     )
-                    .min_size(egui::vec2(180.0, 32.0))
-                ).clicked() {
+                    .clicked()
+                {
                     settings.keybindings.reset_to_defaults();
                 }
             });
@@ -1416,8 +1421,10 @@ fn keybindings_ui(
                     egui::Layout::top_down(egui::Align::LEFT),
                     |ui| {
                         // Group actions by category
-                        let mut actions_by_category: std::collections::HashMap<&str, Vec<GameAction>> =
-                            std::collections::HashMap::new();
+                        let mut actions_by_category: std::collections::HashMap<
+                            &str,
+                            Vec<GameAction>,
+                        > = std::collections::HashMap::new();
 
                         for action in GameAction::all() {
                             actions_by_category
@@ -1444,7 +1451,8 @@ fn keybindings_ui(
 
                                     // Render each action in this category
                                     for action in actions {
-                                        let rebinding = rebinding_state.as_ref()
+                                        let rebinding = rebinding_state
+                                            .as_ref()
                                             .and_then(|rs| rs.action)
                                             .map_or(false, |a| a == *action);
 
@@ -1453,87 +1461,103 @@ fn keybindings_ui(
                                             ui.label(
                                                 egui::RichText::new(action.description())
                                                     .size(18.0)
-                                                    .color(egui::Color32::from_rgb(200, 200, 200))
+                                                    .color(egui::Color32::from_rgb(200, 200, 200)),
                                             );
 
                                             ui.add_space(20.0);
 
                                             // Spacer to push buttons to the right
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                // Secondary key button
-                                                let binding = settings.keybindings.get(*action);
-                                                let secondary_text = binding
-                                                    .and_then(|b| b.secondary)
-                                                    .map(|k| Keybindings::key_name(k).to_string())
-                                                    .unwrap_or_else(|| "-".to_string());
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    // Secondary key button
+                                                    let binding = settings.keybindings.get(*action);
+                                                    let secondary_text = binding
+                                                        .and_then(|b| b.secondary)
+                                                        .map(|k| {
+                                                            Keybindings::key_name(k).to_string()
+                                                        })
+                                                        .unwrap_or_else(|| "-".to_string());
 
-                                                let secondary_rebinding = rebinding &&
-                                                    !rebinding_state.as_ref().unwrap().is_primary;
+                                                    let secondary_rebinding = rebinding
+                                                        && !rebinding_state
+                                                            .as_ref()
+                                                            .unwrap()
+                                                            .is_primary;
 
-                                                let secondary_button = egui::Button::new(
-                                                    egui::RichText::new(if secondary_rebinding {
-                                                        "Press key..."
+                                                    let secondary_button = egui::Button::new(
+                                                        egui::RichText::new(
+                                                            if secondary_rebinding {
+                                                                "Press key..."
+                                                            } else {
+                                                                &secondary_text
+                                                            },
+                                                        )
+                                                        .size(16.0)
+                                                        .color(if secondary_rebinding {
+                                                            egui::Color32::from_rgb(255, 200, 100)
+                                                        } else {
+                                                            egui::Color32::from_rgb(180, 180, 180)
+                                                        }),
+                                                    )
+                                                    .min_size(egui::vec2(120.0, 32.0))
+                                                    .fill(if secondary_rebinding {
+                                                        egui::Color32::from_rgb(80, 60, 40)
                                                     } else {
-                                                        &secondary_text
-                                                    })
-                                                    .size(16.0)
-                                                    .color(if secondary_rebinding {
-                                                        egui::Color32::from_rgb(255, 200, 100)
-                                                    } else {
-                                                        egui::Color32::from_rgb(180, 180, 180)
-                                                    })
-                                                )
-                                                .min_size(egui::vec2(120.0, 32.0))
-                                                .fill(if secondary_rebinding {
-                                                    egui::Color32::from_rgb(80, 60, 40)
-                                                } else {
-                                                    egui::Color32::from_rgb(40, 40, 50)
-                                                });
+                                                        egui::Color32::from_rgb(40, 40, 50)
+                                                    });
 
-                                                if ui.add(secondary_button).clicked() {
-                                                    if let Some(rs) = rebinding_state.as_mut() {
-                                                        rs.action = Some(*action);
-                                                        rs.is_primary = false;
+                                                    if ui.add(secondary_button).clicked() {
+                                                        if let Some(rs) = rebinding_state.as_mut() {
+                                                            rs.action = Some(*action);
+                                                            rs.is_primary = false;
+                                                        }
                                                     }
-                                                }
 
-                                                ui.add_space(10.0);
+                                                    ui.add_space(10.0);
 
-                                                // Primary key button
-                                                let primary_text = binding
-                                                    .map(|b| Keybindings::key_name(b.primary).to_string())
-                                                    .unwrap_or_else(|| "Unbound".to_string());
+                                                    // Primary key button
+                                                    let primary_text = binding
+                                                        .map(|b| {
+                                                            Keybindings::key_name(b.primary)
+                                                                .to_string()
+                                                        })
+                                                        .unwrap_or_else(|| "Unbound".to_string());
 
-                                                let primary_rebinding = rebinding &&
-                                                    rebinding_state.as_ref().unwrap().is_primary;
+                                                    let primary_rebinding = rebinding
+                                                        && rebinding_state
+                                                            .as_ref()
+                                                            .unwrap()
+                                                            .is_primary;
 
-                                                let primary_button = egui::Button::new(
-                                                    egui::RichText::new(if primary_rebinding {
-                                                        "Press key..."
+                                                    let primary_button = egui::Button::new(
+                                                        egui::RichText::new(if primary_rebinding {
+                                                            "Press key..."
+                                                        } else {
+                                                            &primary_text
+                                                        })
+                                                        .size(16.0)
+                                                        .color(if primary_rebinding {
+                                                            egui::Color32::from_rgb(255, 200, 100)
+                                                        } else {
+                                                            egui::Color32::from_rgb(255, 255, 255)
+                                                        }),
+                                                    )
+                                                    .min_size(egui::vec2(120.0, 32.0))
+                                                    .fill(if primary_rebinding {
+                                                        egui::Color32::from_rgb(80, 60, 40)
                                                     } else {
-                                                        &primary_text
-                                                    })
-                                                    .size(16.0)
-                                                    .color(if primary_rebinding {
-                                                        egui::Color32::from_rgb(255, 200, 100)
-                                                    } else {
-                                                        egui::Color32::from_rgb(255, 255, 255)
-                                                    })
-                                                )
-                                                .min_size(egui::vec2(120.0, 32.0))
-                                                .fill(if primary_rebinding {
-                                                    egui::Color32::from_rgb(80, 60, 40)
-                                                } else {
-                                                    egui::Color32::from_rgb(60, 60, 80)
-                                                });
+                                                        egui::Color32::from_rgb(60, 60, 80)
+                                                    });
 
-                                                if ui.add(primary_button).clicked() {
-                                                    if let Some(rs) = rebinding_state.as_mut() {
-                                                        rs.action = Some(*action);
-                                                        rs.is_primary = true;
+                                                    if ui.add(primary_button).clicked() {
+                                                        if let Some(rs) = rebinding_state.as_mut() {
+                                                            rs.action = Some(*action);
+                                                            rs.is_primary = true;
+                                                        }
                                                     }
-                                                }
-                                            });
+                                                },
+                                            );
                                         });
 
                                         ui.add_space(8.0);
@@ -1545,7 +1569,7 @@ fn keybindings_ui(
                                 ui.add_space(20.0);
                             }
                         }
-                    }
+                    },
                 );
             });
         });
@@ -1557,8 +1581,13 @@ fn keybindings_ui(
                 let new_key = keys_just_pressed[0];
 
                 // Check for conflicts
-                if let Some(conflicting_action) = settings.keybindings.is_key_bound(new_key, Some(action)) {
-                    info!("Key {:?} is already bound to {:?}", new_key, conflicting_action);
+                if let Some(conflicting_action) =
+                    settings.keybindings.is_key_bound(new_key, Some(action))
+                {
+                    info!(
+                        "Key {:?} is already bound to {:?}",
+                        new_key, conflicting_action
+                    );
                     // For now, just warn. In a full implementation, you'd show a conflict dialog
                 }
 

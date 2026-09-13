@@ -90,7 +90,11 @@ fn mage_mana_survives_juked_frostbolts_seed1() {
 
     // The match resolves decisively for Team 1 (the Mage+Priest).
     assert_eq!(result.winner, Some(1), "Team 1 should win seed 1");
-    assert_eq!(result.end_reason, EndReason::Kill, "seed 1 should end by kill, not cap");
+    assert_eq!(
+        result.end_reason,
+        EndReason::Kill,
+        "seed 1 should end by kill, not cap"
+    );
 
     // The 2v1 window exists: the Warrior dies while the Shaman is still up. Find
     // the last frame the Warrior was alive — the window is everything after it.

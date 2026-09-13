@@ -1,19 +1,22 @@
 //! Casting and channeling systems, resource regeneration, stealth visuals.
 
-use bevy::prelude::*;
-use bevy_egui::egui;
-use crate::combat::log::{CombatLog, CombatLogEventType};
-use super::super::match_config;
-use super::super::components::*;
 use super::super::abilities::AbilityType;
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityDefinitions;
+use super::super::components::*;
+use super::super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::has_line_of_sight;
-use super::super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
-use super::super::utils::{get_next_fct_offset, combatant_id, combat_log_id_for};
+use super::super::match_config;
+use super::super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 use super::super::FCT_HEIGHT;
-use super::damage::{roll_crit, apply_damage_with_absorb, get_physical_damage_reduction, get_divine_shield_damage_penalty};
+use super::damage::{
+    apply_damage_with_absorb, get_divine_shield_damage_penalty, get_physical_damage_reduction,
+    roll_crit,
+};
+use crate::combat::log::{CombatLog, CombatLogEventType};
+use bevy::prelude::*;
+use bevy_egui::egui;
 
 /// Resource regeneration system: Regenerate mana for all combatants.
 ///
@@ -34,11 +37,13 @@ pub fn regenerate_resources(
         let mana_regen_bonus = super::get_mana_regen_bonus(active_auras);
         let effective_mana_regen = combatant.mana_regen + mana_regen_bonus;
         if effective_mana_regen > 0.0 {
-            combatant.current_mana = (combatant.current_mana + effective_mana_regen * dt).min(combatant.max_mana);
+            combatant.current_mana =
+                (combatant.current_mana + effective_mana_regen * dt).min(combatant.max_mana);
         }
 
         // Tick down ability cooldowns
-        let abilities_on_cooldown: Vec<AbilityType> = combatant.ability_cooldowns.keys().copied().collect();
+        let abilities_on_cooldown: Vec<AbilityType> =
+            combatant.ability_cooldowns.keys().copied().collect();
         for ability in abilities_on_cooldown {
             if let Some(cooldown) = combatant.ability_cooldowns.get_mut(&ability) {
                 *cooldown -= dt;
@@ -146,7 +151,10 @@ pub fn spawn_healing_refused_tell(
 ) {
     if let Some(refused) = refused_fraction(before, after) {
         commands.spawn((
-            HealingRefused { target, refused_fraction: refused },
+            HealingRefused {
+                target,
+                refused_fraction: refused,
+            },
             PlayMatchEntity,
         ));
     }
@@ -188,7 +196,13 @@ pub fn process_casting(
     mut game_rng: ResMut<GameRng>,
     dampening: Res<ArenaDampening>,
     map_geometry: Res<ActiveMapGeometry>,
-    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>, Option<&mut ActiveAuras>)>,
+    mut combatants: Query<(
+        Entity,
+        &Transform,
+        &mut Combatant,
+        Option<&mut CastingState>,
+        Option<&mut ActiveAuras>,
+    )>,
     pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -204,7 +218,9 @@ pub fn process_casting(
     let mut completed_casts = Vec::new();
 
     // First pass: update cast timers and collect completed casts
-    for (caster_entity, caster_transform, caster, casting_state, caster_auras) in combatants.iter_mut() {
+    for (caster_entity, caster_transform, caster, casting_state, caster_auras) in
+        combatants.iter_mut()
+    {
         let Some(mut casting) = casting_state else {
             continue;
         };
@@ -224,9 +240,18 @@ pub fn process_casting(
             combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
             combat_log.log(
                 CombatLogEventType::CrowdControl,
-                format!("{}'s {} interrupted by crowd control", caster_id, ability_def.name),
+                format!(
+                    "{}'s {} interrupted by crowd control",
+                    caster_id, ability_def.name
+                ),
             );
-            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
+            commands.spawn((
+                CastEnding {
+                    caster: caster_entity,
+                    kind: CastEndingKind::Interrupted,
+                },
+                PlayMatchEntity,
+            ));
             commands.entity(caster_entity).remove::<CastingState>();
             continue;
         }
@@ -242,9 +267,18 @@ pub fn process_casting(
             combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
             combat_log.log(
                 CombatLogEventType::CrowdControl,
-                format!("{}'s {} interrupted by Silence", caster_id, ability_def.name),
+                format!(
+                    "{}'s {} interrupted by Silence",
+                    caster_id, ability_def.name
+                ),
             );
-            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
+            commands.spawn((
+                CastEnding {
+                    caster: caster_entity,
+                    kind: CastEndingKind::Interrupted,
+                },
+                PlayMatchEntity,
+            ));
             commands.entity(caster_entity).remove::<CastingState>();
             continue;
         }
@@ -287,12 +321,15 @@ pub fn process_casting(
             let ap_bonus = super::get_attack_power_bonus(caster_auras.as_deref());
             let sp_bonus = super::get_spell_power_bonus(caster_auras.as_deref());
             let crit_bonus = super::get_crit_chance_bonus(caster_auras.as_deref());
-            let mut ability_damage = caster.calculate_ability_damage_config(def, &mut game_rng, ap_bonus, sp_bonus);
+            let mut ability_damage =
+                caster.calculate_ability_damage_config(def, &mut game_rng, ap_bonus, sp_bonus);
 
             // Roll crit for damage (before physical damage reduction)
             let is_crit_damage = if def.is_damage() {
                 let crit = roll_crit(caster.crit_chance + crit_bonus, &mut game_rng);
-                if crit { ability_damage *= CRIT_DAMAGE_MULTIPLIER; }
+                if crit {
+                    ability_damage *= CRIT_DAMAGE_MULTIPLIER;
+                }
                 crit
             } else {
                 false
@@ -308,12 +345,15 @@ pub fn process_casting(
             let ds_penalty = get_divine_shield_damage_penalty(caster_auras.as_deref());
             ability_damage = (ability_damage * ds_penalty).max(0.0);
 
-            let mut ability_healing = caster.calculate_ability_healing_config(def, &mut game_rng, sp_bonus);
+            let mut ability_healing =
+                caster.calculate_ability_healing_config(def, &mut game_rng, sp_bonus);
 
             // Roll crit for healing (before healing reduction)
             let is_crit_heal = if def.is_heal() {
                 let crit = roll_crit(caster.crit_chance + crit_bonus, &mut game_rng);
-                if crit { ability_healing *= CRIT_HEALING_MULTIPLIER; }
+                if crit {
+                    ability_healing *= CRIT_HEALING_MULTIPLIER;
+                }
                 crit
             } else {
                 false
@@ -358,7 +398,22 @@ pub fn process_casting(
     let mut mana_charges: Vec<(Entity, f32)> = Vec::new();
 
     // Process completed casts
-    for (caster_entity, caster_team, caster_slot, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal, caster_spell_power, mana_cost) in completed_casts {
+    for (
+        caster_entity,
+        caster_team,
+        caster_slot,
+        caster_class,
+        caster_pos,
+        ability_damage,
+        ability_healing,
+        ability,
+        target_entity,
+        is_crit_damage,
+        is_crit_heal,
+        caster_spell_power,
+        mana_cost,
+    ) in completed_casts
+    {
         let def = abilities.get_unchecked(&ability);
 
         // Get target
@@ -378,9 +433,25 @@ pub fn process_casting(
             // existing spawn behavior. Empty obstacle lists → always clear, so
             // this is byte-identical on BasicArena / obstacle-free maps.
             if let Ok((_, target_transform, ..)) = combatants.get(target_entity) {
-                if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
-                    log_los_fizzle(&mut combat_log, caster_team, caster_slot, caster_class, &def.name);
-                    commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Fizzled }, PlayMatchEntity));
+                if !has_line_of_sight(
+                    &map_geometry.volumes,
+                    caster_pos,
+                    target_transform.translation,
+                ) {
+                    log_los_fizzle(
+                        &mut combat_log,
+                        caster_team,
+                        caster_slot,
+                        caster_class,
+                        &def.name,
+                    );
+                    commands.spawn((
+                        CastEnding {
+                            caster: caster_entity,
+                            kind: CastEndingKind::Fizzled,
+                        },
+                        PlayMatchEntity,
+                    ));
                     continue;
                 }
             }
@@ -389,7 +460,13 @@ pub fn process_casting(
             // projectile lands regardless of later LoS (R7), so mana is charged
             // at spawn, after the LoS-at-completion gate above.
             mana_charges.push((caster_entity, mana_cost));
-            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Landed }, PlayMatchEntity));
+            commands.spawn((
+                CastEnding {
+                    caster: caster_entity,
+                    kind: CastEndingKind::Landed,
+                },
+                PlayMatchEntity,
+            ));
 
             // Spawn projectile with Transform (required for move_projectiles to work in headless mode)
             // Visual mesh/material is added by spawn_projectile_visuals in graphical mode
@@ -414,16 +491,30 @@ pub fn process_casting(
         let is_self_target = target_entity == caster_entity;
 
         // Get target combatant
-        let Ok((_, target_transform, mut target, _, mut target_auras)) = combatants.get_mut(target_entity) else {
+        let Ok((_, target_transform, mut target, _, mut target_auras)) =
+            combatants.get_mut(target_entity)
+        else {
             // Target no longer resolves → the cast fizzles (no mana charged).
-            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Fizzled }, PlayMatchEntity));
+            commands.spawn((
+                CastEnding {
+                    caster: caster_entity,
+                    kind: CastEndingKind::Fizzled,
+                },
+                PlayMatchEntity,
+            ));
             continue;
         };
 
         if !target.is_alive() {
             // Dead-target fizzle — the most common no-mana-charged exit in
             // arena play. Signals the orb's sputter, like the LoS gates below.
-            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Fizzled }, PlayMatchEntity));
+            commands.spawn((
+                CastEnding {
+                    caster: caster_entity,
+                    kind: CastEndingKind::Fizzled,
+                },
+                PlayMatchEntity,
+            ));
             continue;
         }
 
@@ -439,9 +530,25 @@ pub fn process_casting(
         // target that is both dead AND out of LoS fizzles as a dead target (the
         // is_alive check wins by placement). Same caster→target segment and
         // no-op-on-empty semantics as the cast-start gate.
-        if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
-            log_los_fizzle(&mut combat_log, caster_team, caster_slot, caster_class, &def.name);
-            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Fizzled }, PlayMatchEntity));
+        if !has_line_of_sight(
+            &map_geometry.volumes,
+            caster_pos,
+            target_transform.translation,
+        ) {
+            log_los_fizzle(
+                &mut combat_log,
+                caster_team,
+                caster_slot,
+                caster_class,
+                &def.name,
+            );
+            commands.spawn((
+                CastEnding {
+                    caster: caster_entity,
+                    kind: CastEndingKind::Fizzled,
+                },
+                PlayMatchEntity,
+            ));
             continue;
         }
 
@@ -451,7 +558,13 @@ pub fn process_casting(
         // cost mana exactly as before. Anything that fizzled above `continue`d
         // without reaching this line and costs nothing.
         mana_charges.push((caster_entity, mana_cost));
-        commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Landed }, PlayMatchEntity));
+        commands.spawn((
+            CastEnding {
+                caster: caster_entity,
+                kind: CastEndingKind::Landed,
+            },
+            PlayMatchEntity,
+        ));
 
         let target_pos = target_transform.translation;
         let text_position = target_transform.translation + Vec3::new(0.0, FCT_HEIGHT, 0.0);
@@ -509,7 +622,8 @@ pub fn process_casting(
 
             // Spawn floating combat text (yellow for damage abilities)
             // Get deterministic offset based on pattern state
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity)
+            {
                 get_next_fct_offset(&mut fct_state)
             } else {
                 (0.0, 0.0)
@@ -528,14 +642,16 @@ pub fn process_casting(
 
             // Spawn light blue floating combat text for absorbed damage
             if absorbed > 0.0 {
-                let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
-                    get_next_fct_offset(&mut fct_state)
-                } else {
-                    (0.0, 0.0)
-                };
+                let (absorb_offset_x, absorb_offset_y) =
+                    if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
                 commands.spawn((
                     FloatingCombatText {
-                        world_position: text_position + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
+                        world_position: text_position
+                            + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
                         text: format!("{:.0} absorbed", absorbed),
                         color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                         lifetime: 1.5,
@@ -575,16 +691,16 @@ pub fn process_casting(
                 for _ in 0..particle_count {
                     // Randomize position slightly around target
                     let offset = Vec3::new(
-                        (game_rng.random_f32() - 0.5) * 1.0,  // -0.5 to 0.5
-                        game_rng.random_f32() * 0.5,          // 0 to 0.5 (start near ground)
+                        (game_rng.random_f32() - 0.5) * 1.0, // -0.5 to 0.5
+                        game_rng.random_f32() * 0.5,         // 0 to 0.5 (start near ground)
                         (game_rng.random_f32() - 0.5) * 1.0,
                     );
                     let velocity = Vec3::new(
-                        (game_rng.random_f32() - 0.5) * 0.5,  // Slight horizontal drift
-                        2.0 + game_rng.random_f32() * 1.5,    // Upward: 2.0-3.5 units/sec
+                        (game_rng.random_f32() - 0.5) * 0.5, // Slight horizontal drift
+                        2.0 + game_rng.random_f32() * 1.5,   // Upward: 2.0-3.5 units/sec
                         (game_rng.random_f32() - 0.5) * 0.5,
                     );
-                    let lifetime = 0.6 + game_rng.random_f32() * 0.4;  // 0.6-1.0 sec
+                    let lifetime = 0.6 + game_rng.random_f32() * 0.4; // 0.6-1.0 sec
                     commands.spawn((
                         FlameParticle {
                             velocity,
@@ -646,11 +762,7 @@ pub fn process_casting(
                 commands.entity(target_entity).remove::<ChannelingState>();
 
                 let death_message = format!("{} has been eliminated", target_id);
-                combat_log.log_death(
-                    target_id.clone(),
-                    Some(caster_id.clone()),
-                    death_message,
-                );
+                combat_log.log_death(target_id.clone(), Some(caster_id.clone()), death_message);
             }
         }
         // Handle healing spells
@@ -671,7 +783,12 @@ pub fn process_casting(
             // Mortal Wounds tell: the debuff has no body treatment, it states
             // itself by visibly breaking the heal. Before dampening, so the
             // tell reflects the debuff's cut only.
-            spawn_healing_refused_tell(&mut commands, target_entity, pre_reduction_healing, healing);
+            spawn_healing_refused_tell(
+                &mut commands,
+                target_entity,
+                pre_reduction_healing,
+                healing,
+            );
 
             // Arena dampening: time-ramped reduction of all healing
             healing = dampening.apply(healing);
@@ -691,7 +808,8 @@ pub fn process_casting(
 
             // Spawn floating combat text (green for healing)
             // Get deterministic offset based on pattern state
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity)
+            {
                 get_next_fct_offset(&mut fct_state)
             } else {
                 (0.0, 0.0)
@@ -709,7 +827,11 @@ pub fn process_casting(
             ));
 
             // Log the healing with structured data
-            let verb = if is_crit_heal { "CRITICALLY heals" } else { "heals" };
+            let verb = if is_crit_heal {
+                "CRITICALLY heals"
+            } else {
+                "heals"
+            };
             let message = format!(
                 "{}'s {} {} {} for {:.0}",
                 caster_id, def.name, verb, target_id, actual_healing
@@ -740,14 +862,17 @@ pub fn process_casting(
 
         // Apply aura if applicable (store for later application)
         if let Some(aura) = def.applies_aura.as_ref() {
-            if let Some(mut aura_pending) = AuraPending::from_ability(target_entity, caster_entity, def) {
+            if let Some(mut aura_pending) =
+                AuraPending::from_ability(target_entity, caster_entity, def)
+            {
                 // For abilities with a dispel-backlash config (e.g., Unstable Affliction),
                 // snapshot the backlash damage from the caster's spell power at cast
                 // completion. SP doesn't change mid-cast in this codebase, so this is
                 // equivalent to "snapshot at cast start" for all current cases.
                 if let Some(backlash_cfg) = def.dispel_backlash.as_ref() {
                     aura_pending.aura.backlash_damage = Some(
-                        backlash_cfg.damage_base + backlash_cfg.damage_sp_coefficient * caster_spell_power,
+                        backlash_cfg.damage_base
+                            + backlash_cfg.damage_sp_coefficient * caster_spell_power,
                     );
                 }
                 commands.spawn((aura_pending, PlayMatchEntity));
@@ -765,7 +890,10 @@ pub fn process_casting(
             // Log CC application for all crowd control types
             match aura.aura_type {
                 AuraType::Fear => {
-                    let message = format!("{}'s {} lands on {} ({:.1}s)", caster_id, def.name, target_id, aura.duration);
+                    let message = format!(
+                        "{}'s {} lands on {} ({:.1}s)",
+                        caster_id, def.name, target_id, aura.duration
+                    );
                     combat_log.log_crowd_control(
                         caster_id.clone(),
                         target_id.clone(),
@@ -775,7 +903,10 @@ pub fn process_casting(
                     );
                 }
                 AuraType::Root => {
-                    let message = format!("{}'s {} roots {} ({:.1}s)", caster_id, def.name, target_id, aura.duration);
+                    let message = format!(
+                        "{}'s {} roots {} ({:.1}s)",
+                        caster_id, def.name, target_id, aura.duration
+                    );
                     combat_log.log_crowd_control(
                         caster_id.clone(),
                         target_id.clone(),
@@ -785,7 +916,10 @@ pub fn process_casting(
                     );
                 }
                 AuraType::Stun => {
-                    let message = format!("{}'s {} stuns {} ({:.1}s)", caster_id, def.name, target_id, aura.duration);
+                    let message = format!(
+                        "{}'s {} stuns {} ({:.1}s)",
+                        caster_id, def.name, target_id, aura.duration
+                    );
                     combat_log.log_crowd_control(
                         caster_id.clone(),
                         target_id.clone(),
@@ -795,7 +929,10 @@ pub fn process_casting(
                     );
                 }
                 AuraType::Polymorph => {
-                    let message = format!("{}'s {} polymorphs {} ({:.1}s)", caster_id, def.name, target_id, aura.duration);
+                    let message = format!(
+                        "{}'s {} polymorphs {} ({:.1}s)",
+                        caster_id, def.name, target_id, aura.duration
+                    );
                     combat_log.log_crowd_control(
                         caster_id.clone(),
                         target_id.clone(),
@@ -823,11 +960,7 @@ pub fn process_casting(
             commands.entity(target_entity).remove::<ChannelingState>();
 
             let message = format!("{} has been eliminated", target_id);
-            combat_log.log_death(
-                target_id.clone(),
-                Some(caster_id.clone()),
-                message,
-            );
+            combat_log.log_death(target_id.clone(), Some(caster_id.clone()), message);
         }
     }
 
@@ -889,7 +1022,13 @@ pub fn process_channeling(
     mut combat_log: ResMut<CombatLog>,
     abilities: Res<AbilityDefinitions>,
     dampening: Res<ArenaDampening>,
-    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut ChannelingState>, Option<&mut ActiveAuras>)>,
+    mut combatants: Query<(
+        Entity,
+        &Transform,
+        &mut Combatant,
+        Option<&mut ChannelingState>,
+        Option<&mut ActiveAuras>,
+    )>,
     pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -905,7 +1044,15 @@ pub fn process_channeling(
     let mut remove_channel: Vec<Entity> = Vec::new();
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
     // (caster_entity, target_entity, damage, caster_team, caster_slot, caster_class, spell_school)
-    let mut damage_to_apply: Vec<(Entity, Entity, f32, u8, u8, match_config::CharacterClass, SpellSchool)> = Vec::new();
+    let mut damage_to_apply: Vec<(
+        Entity,
+        Entity,
+        f32,
+        u8,
+        u8,
+        match_config::CharacterClass,
+        SpellSchool,
+    )> = Vec::new();
 
     // Build a snapshot of positions and health for lookups
     let positions: std::collections::HashMap<Entity, Vec3> = combatants
@@ -916,23 +1063,41 @@ pub fn process_channeling(
     // snapshot allocates nothing; the pet-aware id `String` is resolved lazily
     // below only for the one target that actually ticks (Drain Life is the sole
     // channel, so most frames tick nothing).
-    let health_info: std::collections::HashMap<Entity, (bool, u8, u8, match_config::CharacterClass, Option<PetType>)> = combatants
+    let health_info: std::collections::HashMap<
+        Entity,
+        (bool, u8, u8, match_config::CharacterClass, Option<PetType>),
+    > = combatants
         .iter()
         .map(|(entity, _, combatant, _, _)| {
             let pet_type = pet_query.get(entity).ok().map(|p| p.pet_type);
-            (entity, (combatant.is_alive(), combatant.team, combatant.slot, combatant.class, pet_type))
+            (
+                entity,
+                (
+                    combatant.is_alive(),
+                    combatant.team,
+                    combatant.slot,
+                    combatant.class,
+                    pet_type,
+                ),
+            )
         })
         .collect();
     // Snapshot target immunity status for Drain Life healing suppression
     let immunity_info: std::collections::HashSet<Entity> = combatants
         .iter()
         .filter(|(_, _, _, _, auras)| {
-            auras.as_ref().map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::DamageImmunity))
+            auras.as_ref().map_or(false, |a| {
+                a.auras
+                    .iter()
+                    .any(|aura| aura.effect_type == AuraType::DamageImmunity)
+            })
         })
         .map(|(entity, _, _, _, _)| entity)
         .collect();
 
-    for (caster_entity, _caster_transform, caster, channeling_state, caster_auras) in combatants.iter_mut() {
+    for (caster_entity, _caster_transform, caster, channeling_state, caster_auras) in
+        combatants.iter_mut()
+    {
         let Some(mut channeling) = channeling_state else {
             continue;
         };
@@ -961,9 +1126,18 @@ pub fn process_channeling(
             combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
             combat_log.log(
                 CombatLogEventType::CrowdControl,
-                format!("{}'s {} interrupted by crowd control", caster_id, ability_def.name),
+                format!(
+                    "{}'s {} interrupted by crowd control",
+                    caster_id, ability_def.name
+                ),
             );
-            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
+            commands.spawn((
+                CastEnding {
+                    caster: caster_entity,
+                    kind: CastEndingKind::Interrupted,
+                },
+                PlayMatchEntity,
+            ));
             remove_channel.push(caster_entity);
             continue;
         }
@@ -978,9 +1152,18 @@ pub fn process_channeling(
             combat_log.mark_cast_interrupted(&caster_id, &channel_def.name);
             combat_log.log(
                 CombatLogEventType::CrowdControl,
-                format!("{}'s {} interrupted by Silence", caster_id, channel_def.name),
+                format!(
+                    "{}'s {} interrupted by Silence",
+                    caster_id, channel_def.name
+                ),
             );
-            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
+            commands.spawn((
+                CastEnding {
+                    caster: caster_entity,
+                    kind: CastEndingKind::Interrupted,
+                },
+                PlayMatchEntity,
+            ));
             remove_channel.push(caster_entity);
             continue;
         }
@@ -1007,7 +1190,15 @@ pub fn process_channeling(
             let damage = ability_def.damage_base_min;
 
             // Track damage to apply later (includes target entity and caster info for death logging)
-            damage_to_apply.push((caster_entity, channeling.target, damage, caster.team, caster.slot, caster.class, ability_def.spell_school));
+            damage_to_apply.push((
+                caster_entity,
+                channeling.target,
+                damage,
+                caster.team,
+                caster.slot,
+                caster.class,
+                ability_def.spell_school,
+            ));
 
             // Track healing for caster (Drain Life heals 0 if target has DamageImmunity)
             let healing = ability_def.channel_healing_per_tick;
@@ -1017,13 +1208,15 @@ pub fn process_channeling(
             }
 
             // Log the tick
-            if let Some(&(_, t_team, t_slot, t_class, t_pet)) = health_info.get(&channeling.target) {
+            if let Some(&(_, t_team, t_slot, t_class, t_pet)) = health_info.get(&channeling.target)
+            {
                 // Pet-aware for consistency with the rest of the sweep (a channel
                 // caster is always a Warlock today, but reachability isn't a
                 // load-bearing assumption). Must match the death-block back-patch
                 // id built the same way below.
                 let caster_id = combat_log_id_for(&caster, pet_query.get(caster_entity).ok());
-                let target_id = super::super::utils::log_id_from_parts(t_team, t_slot, t_class, t_pet);
+                let target_id =
+                    super::super::utils::log_id_from_parts(t_team, t_slot, t_class, t_pet);
                 let damage_message = format!(
                     "{}'s {} ticks on {} for {:.0} damage",
                     caster_id, ability_def.name, target_id, damage
@@ -1057,11 +1250,12 @@ pub fn process_channeling(
             // Spawn floating combat text for damage on target
             if let Some(&target_pos) = positions.get(&channeling.target) {
                 let text_position = target_pos + Vec3::new(0.0, FCT_HEIGHT, 0.0);
-                let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(channeling.target) {
-                    get_next_fct_offset(&mut fct_state)
-                } else {
-                    (0.0, 0.0)
-                };
+                let (offset_x, offset_y) =
+                    if let Ok(mut fct_state) = fct_states.get_mut(channeling.target) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
                 commands.spawn((
                     FloatingCombatText {
                         world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
@@ -1095,9 +1289,20 @@ pub fn process_channeling(
     }
 
     // Apply damage to targets and update caster stats
-    for (caster_entity, target_entity, damage, caster_team, caster_slot, caster_class, spell_school) in damage_to_apply {
+    for (
+        caster_entity,
+        target_entity,
+        damage,
+        caster_team,
+        caster_slot,
+        caster_class,
+        spell_school,
+    ) in damage_to_apply
+    {
         // Apply damage to target
-        if let Ok((_, target_transform, mut target, _, mut target_auras)) = combatants.get_mut(target_entity) {
+        if let Ok((_, target_transform, mut target, _, mut target_auras)) =
+            combatants.get_mut(target_entity)
+        {
             if target.is_alive() {
                 let (actual_damage, absorbed) = apply_damage_with_absorb(
                     damage,
@@ -1115,12 +1320,14 @@ pub fn process_channeling(
 
                 // Spawn absorbed text if any
                 if absorbed > 0.0 {
-                    let text_position = target_transform.translation + Vec3::new(0.0, FCT_HEIGHT, 0.0);
-                    let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
-                        get_next_fct_offset(&mut fct_state)
-                    } else {
-                        (0.0, 0.0)
-                    };
+                    let text_position =
+                        target_transform.translation + Vec3::new(0.0, FCT_HEIGHT, 0.0);
+                    let (offset_x, offset_y) =
+                        if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                            get_next_fct_offset(&mut fct_state)
+                        } else {
+                            (0.0, 0.0)
+                        };
                     commands.spawn((
                         FloatingCombatText {
                             world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
@@ -1163,11 +1370,7 @@ pub fn process_channeling(
                     // undercounts Drain Life finishes.
                     combat_log.mark_last_damage_killing_blow(&caster_id, &target_id);
                     let death_message = format!("{} has been eliminated", target_id);
-                    combat_log.log_death(
-                        target_id,
-                        Some(caster_id),
-                        death_message,
-                    );
+                    combat_log.log_death(target_id, Some(caster_id), death_message);
                 }
             }
         }
@@ -1180,7 +1383,9 @@ pub fn process_channeling(
 
     // Apply healing to casters and spawn healing FCT
     for (caster_entity, healing) in caster_healing_updates {
-        if let Ok((_, caster_transform, mut caster, _, caster_auras)) = combatants.get_mut(caster_entity) {
+        if let Ok((_, caster_transform, mut caster, _, caster_auras)) =
+            combatants.get_mut(caster_entity)
+        {
             let mut actual_healing = healing;
 
             // Check for healing reduction auras
@@ -1210,7 +1415,8 @@ pub fn process_channeling(
 
             // Spawn floating combat text for healing
             let text_position = caster_transform.translation + Vec3::new(0.0, FCT_HEIGHT, 0.0);
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(caster_entity) {
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(caster_entity)
+            {
                 get_next_fct_offset(&mut fct_state)
             } else {
                 (0.0, 0.0)

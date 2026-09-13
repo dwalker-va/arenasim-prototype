@@ -259,10 +259,7 @@ pub struct BanterConfig {
 
 impl BanterConfig {
     /// Every exchange authored for `context`, in file order.
-    pub fn exchanges_for(
-        &self,
-        context: BanterContext,
-    ) -> impl Iterator<Item = &BanterExchange> {
+    pub fn exchanges_for(&self, context: BanterContext) -> impl Iterator<Item = &BanterExchange> {
         self.exchanges.iter().filter(move |e| e.context == context)
     }
 
@@ -410,7 +407,10 @@ impl BanterConfig {
             // Roles are exchange-local labels; duplicates make role binding
             // ambiguous (which combatant is "caller"?).
             for (i, speaker) in exchange.speakers.iter().enumerate() {
-                if exchange.speakers[..i].iter().any(|s| s.role == speaker.role) {
+                if exchange.speakers[..i]
+                    .iter()
+                    .any(|s| s.role == speaker.role)
+                {
                     issues.push(format!(
                         "{}: duplicate speaker role '{}' — roles must be unique within an exchange",
                         label, speaker.role
@@ -517,9 +517,13 @@ pub fn parse_banter_config(contents: &str, source: &str) -> Result<BanterConfig,
     let config: BanterConfig =
         ron::from_str(contents).map_err(|e| format!("Failed to parse {}: {}", source, e))?;
 
-    config
-        .validate()
-        .map_err(|issues| format!("Invalid banter config in {}:\n  {}", source, issues.join("\n  ")))?;
+    config.validate().map_err(|issues| {
+        format!(
+            "Invalid banter config in {}:\n  {}",
+            source,
+            issues.join("\n  ")
+        )
+    })?;
 
     Ok(config)
 }
@@ -575,8 +579,14 @@ mod tests {
         BanterExchange {
             context,
             speakers: vec![
-                BanterSpeaker { role: "caller".to_string(), class: ClassConstraint::Any },
-                BanterSpeaker { role: "responder".to_string(), class: ClassConstraint::Any },
+                BanterSpeaker {
+                    role: "caller".to_string(),
+                    class: ClassConstraint::Any,
+                },
+                BanterSpeaker {
+                    role: "responder".to_string(),
+                    class: ClassConstraint::Any,
+                },
             ],
             target: ClassConstraint::Any,
             beats: vec![
@@ -584,7 +594,10 @@ mod tests {
                     role: "caller".to_string(),
                     text: "{ability:Mortal Strike} {emoji:arrow} {target}".to_string(),
                 },
-                BanterBeat { role: "responder".to_string(), text: "{emoji:yes}".to_string() },
+                BanterBeat {
+                    role: "responder".to_string(),
+                    text: "{emoji:yes}".to_string(),
+                },
             ],
         }
     }
@@ -594,7 +607,11 @@ mod tests {
     fn covered_config() -> BanterConfig {
         BanterConfig {
             timing: BanterTiming::default(),
-            exchanges: BanterContext::all().iter().copied().map(generic_exchange).collect(),
+            exchanges: BanterContext::all()
+                .iter()
+                .copied()
+                .map(generic_exchange)
+                .collect(),
         }
     }
 
@@ -791,9 +808,7 @@ mod tests {
         let mut config = covered_config();
         config.exchanges[0].speakers[1].role = "caller".to_string();
         config.exchanges[0].beats[1].role = "caller".to_string();
-        let issues = config
-            .validate()
-            .expect_err("duplicate roles must fail");
+        let issues = config.validate().expect_err("duplicate roles must fail");
         assert!(
             issues.iter().any(|i| i.contains("duplicate speaker role")),
             "issues should report the duplicate: {:?}",
@@ -837,7 +852,9 @@ mod tests {
             .validate()
             .expect_err("specificity_weight below 1.0 must fail");
         assert!(
-            issues.iter().any(|i| i.contains("timing.specificity_weight")),
+            issues
+                .iter()
+                .any(|i| i.contains("timing.specificity_weight")),
             "issues should name specificity_weight: {:?}",
             issues
         );
@@ -863,8 +880,8 @@ mod tests {
     /// an exchange-less pool cannot meet the coverage floor.
     #[test]
     fn partial_ron_uses_defaults() {
-        let config: BanterConfig = ron::from_str("(timing: (beat_gap: 9.5))")
-            .expect("partial config must parse");
+        let config: BanterConfig =
+            ron::from_str("(timing: (beat_gap: 9.5))").expect("partial config must parse");
         assert_eq!(config.timing.beat_gap, 9.5, "the stated field wins");
         // Compared against the default rather than a literal: this test is
         // about serde filling the gaps, not about the current pacing, and
@@ -875,7 +892,10 @@ mod tests {
             "unspecified fields use defaults"
         );
         assert_eq!(config.timing.specificity_weight, 3.0);
-        assert!(config.exchanges.is_empty(), "an omitted pool defaults to empty");
+        assert!(
+            config.exchanges.is_empty(),
+            "an omitted pool defaults to empty"
+        );
     }
 
     /// A partially-specified exchange also fills from defaults — an entry

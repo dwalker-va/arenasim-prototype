@@ -58,8 +58,8 @@ use bevy_egui::egui;
 
 use crate::states::ability_text::build_aura_description;
 use crate::states::match_config::RoguePoison;
-use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
+use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::combat_core::{
     frost_armor_attack_speed_aura, frost_armor_movement_slow_aura,
 };
@@ -299,7 +299,10 @@ impl NamedAura {
         if self.sample.can_be_dispelled() {
             ("Dispellable", "Magic. Removed by dispels.")
         } else if self.sample.is_cleansable_poison() {
-            ("Cleansable", "Poison. Not affected by dispels; removed by cleanses.")
+            (
+                "Cleansable",
+                "Poison. Not affected by dispels; removed by cleanses.",
+            )
         } else if self.sample.is_curse() {
             (
                 "Curse",
@@ -314,7 +317,10 @@ impl NamedAura {
                  debuffs.",
             )
         } else if self.sample.can_be_purged() {
-            ("Purgeable", "Beneficial magic. An enemy can strip this with a purge.")
+            (
+                "Purgeable",
+                "Beneficial magic. An enemy can strip this with a purge.",
+            )
         } else if self.sample.is_hostile_effect() {
             // Stuns, interrupt lockouts, the attack-speed half of Frost Armor's
             // proc: not a physical debuff, but not a dispellable KIND of effect
@@ -395,7 +401,11 @@ fn ron_entry(ability: AbilityType, abilities: &AbilityDefinitions) -> Option<Nam
 pub fn subtitle_for(mechanic: AuraType) -> String {
     format!(
         "{} · {}",
-        if is_buff_aura(&mechanic) { "Buff" } else { "Debuff" },
+        if is_buff_aura(&mechanic) {
+            "Buff"
+        } else {
+            "Debuff"
+        },
         mechanic.display_name()
     )
 }
@@ -505,7 +515,9 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
         EngineAura::InterruptLockout(ability) => {
             let def = abilities.get(&ability);
             EngineSpec {
-                name: def.map(|d| d.name.clone()).unwrap_or_else(|| format!("{:?}", ability)),
+                name: def
+                    .map(|d| d.name.clone())
+                    .unwrap_or_else(|| format!("{:?}", ability)),
                 frame_name: None,
                 mechanic: AuraType::SpellSchoolLockout,
                 source: Some(ability),
@@ -542,8 +554,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
             }
         }
         EngineAura::DispelBacklashSilence => {
-            let sample =
-                dispel_backlash_silence_aura(None, DISPEL_BACKLASH_SILENCE_DURATION);
+            let sample = dispel_backlash_silence_aura(None, DISPEL_BACKLASH_SILENCE_DURATION);
             EngineSpec {
                 name: "Unstable Affliction (dispel backlash)".to_string(),
                 frame_name: Some(sample.ability_name.clone()),
@@ -606,7 +617,11 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
         provenance,
     } = spec;
 
-    let tick_interval = if mechanic == AuraType::HealingOverTime { 1.0 } else { 0.0 };
+    let tick_interval = if mechanic == AuraType::HealingOverTime {
+        1.0
+    } else {
+        0.0
+    };
     let duration = match persistence {
         Persistence::Seconds(secs) => secs,
         // The refresh window itself; the page prints the persistence note
@@ -637,7 +652,10 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
     let provenance = if frame_name == name {
         provenance
     } else {
-        format!("{} Shown on the actor frames as “{}”.", provenance, frame_name)
+        format!(
+            "{} Shown on the actor frames as “{}”.",
+            provenance, frame_name
+        )
     };
 
     NamedAura {
@@ -741,8 +759,10 @@ pub fn render_index(ui: &mut egui::Ui, data: &EncyclopediaData) -> Option<Topic>
             .zip([("BUFFS", true, BUFF), ("DEBUFFS", false, DEBUFF)])
         {
             let width = column.available_width().min(COLUMN_MAX_WIDTH);
-            let group: Vec<&NamedAura> =
-                catalog.iter().filter(|e| e.is_buff() == want_buff).collect();
+            let group: Vec<&NamedAura> = catalog
+                .iter()
+                .filter(|e| e.is_buff() == want_buff)
+                .collect();
             column.label(
                 egui::RichText::new(format!("{}  ({})", label, group.len()))
                     .size(12.5)
@@ -784,8 +804,11 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
     // --- Badges: polarity, mechanic, how it comes off ---
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-        let (polarity, color) =
-            if entry.is_buff() { ("Buff", BUFF) } else { ("Debuff", DEBUFF) };
+        let (polarity, color) = if entry.is_buff() {
+            ("Buff", BUFF)
+        } else {
+            ("Debuff", DEBUFF)
+        };
         badge(ui, polarity, color).on_hover_text(if entry.is_buff() {
             "A beneficial effect. Buffs show a gold border on the actor frames."
         } else {
@@ -802,10 +825,19 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
     });
 
     ui.add_space(12.0);
-    ui.label(egui::RichText::new(&entry.description).size(14.0).color(TEXT));
+    ui.label(
+        egui::RichText::new(&entry.description)
+            .size(14.0)
+            .color(TEXT),
+    );
     if let Some(provenance) = &entry.provenance {
         ui.add_space(4.0);
-        ui.label(egui::RichText::new(provenance).size(12.0).color(DIM).italics());
+        ui.label(
+            egui::RichText::new(provenance)
+                .size(12.0)
+                .color(DIM)
+                .italics(),
+        );
     }
 
     ui.add_space(12.0);
@@ -851,7 +883,10 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
     if !siblings.is_empty() {
         widget::section_heading(
             ui,
-            &format!("OTHER {} EFFECTS", entry.mechanic.display_name().to_uppercase()),
+            &format!(
+                "OTHER {} EFFECTS",
+                entry.mechanic.display_name().to_uppercase()
+            ),
         );
         ui.label(
             egui::RichText::new(entry.mechanic.description())
@@ -885,11 +920,23 @@ pub fn render_tooltip(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) {
             .color(if entry.is_buff() { BUFF } else { DEBUFF })
             .strong(),
     );
-    ui.label(egui::RichText::new(entry.subtitle()).size(12.0).color(MUTED));
+    ui.label(
+        egui::RichText::new(entry.subtitle())
+            .size(12.0)
+            .color(MUTED),
+    );
     ui.add_space(4.0);
-    ui.label(egui::RichText::new(&entry.description).size(12.5).color(TEXT));
+    ui.label(
+        egui::RichText::new(&entry.description)
+            .size(12.5)
+            .color(TEXT),
+    );
     for (key, value) in stat_rows(entry) {
-        ui.label(egui::RichText::new(format!("{}: {}", key, value)).size(11.5).color(DIM));
+        ui.label(
+            egui::RichText::new(format!("{}: {}", key, value))
+                .size(11.5)
+                .color(DIM),
+        );
     }
 }
 
@@ -923,7 +970,10 @@ fn stat_rows(entry: &NamedAura) -> Vec<(String, String)> {
     }
 
     if aura.tick_interval > 0.0 {
-        rows.push(("Ticks every".to_string(), format!("{:.0} sec", aura.tick_interval)));
+        rows.push((
+            "Ticks every".to_string(),
+            format!("{:.0} sec", aura.tick_interval),
+        ));
     }
 
     rows.push((
@@ -1040,7 +1090,12 @@ fn badge(ui: &mut egui::Ui, label: &str, color: egui::Color32) -> egui::Response
         egui::Sense::hover(),
     );
     let painter = ui.painter_at(rect);
-    painter.rect_stroke(rect, 3.0, egui::Stroke::new(1.0, color), egui::StrokeKind::Inside);
+    painter.rect_stroke(
+        rect,
+        3.0,
+        egui::Stroke::new(1.0, color),
+        egui::StrokeKind::Inside,
+    );
     painter.galley(
         egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0),
         galley,
@@ -1061,7 +1116,10 @@ mod tests {
     #[test]
     fn every_ability_with_an_applies_aura_becomes_an_entry() {
         let abilities = abilities();
-        let expected = abilities.iter().filter(|(_, def)| def.applies_aura.is_some()).count();
+        let expected = abilities
+            .iter()
+            .filter(|(_, def)| def.applies_aura.is_some())
+            .count();
         let entries = catalog(&abilities);
         let from_ron = entries
             .iter()
@@ -1099,7 +1157,10 @@ mod tests {
         let abilities = abilities();
         let a: Vec<String> = catalog(&abilities).into_iter().map(|e| e.name).collect();
         let b: Vec<String> = catalog(&abilities).into_iter().map(|e| e.name).collect();
-        assert_eq!(a, b, "a HashMap-backed source must be sorted into a stable order");
+        assert_eq!(
+            a, b,
+            "a HashMap-backed source must be sorted into a stable order"
+        );
         assert!(a.windows(2).all(|w| w[0] <= w[1]), "entries sort by name");
 
         // Two entries sharing a name would be indistinguishable in the index.
@@ -1119,7 +1180,11 @@ mod tests {
             );
             assert!(!entry.subtitle().is_empty());
             for (key, value) in stat_rows(&entry) {
-                assert!(!key.is_empty() && !value.is_empty(), "{} has a blank stat row", entry.name);
+                assert!(
+                    !key.is_empty() && !value.is_empty(),
+                    "{} has a blank stat row",
+                    entry.name
+                );
             }
         }
     }
@@ -1131,10 +1196,19 @@ mod tests {
     fn dispel_classification_is_per_aura_not_per_mechanic() {
         let entries = catalog(&abilities());
         let by_name = |name: &str| {
-            entries.iter().find(|e| e.name == name).unwrap_or_else(|| panic!("{} missing", name))
+            entries
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap_or_else(|| panic!("{} missing", name))
         };
-        assert!(!by_name("Rend").sample.can_be_dispelled(), "Rend is physical");
-        assert!(by_name("Corruption").sample.can_be_dispelled(), "Corruption is Shadow");
+        assert!(
+            !by_name("Rend").sample.can_be_dispelled(),
+            "Rend is physical"
+        );
+        assert!(
+            by_name("Corruption").sample.can_be_dispelled(),
+            "Corruption is Shadow"
+        );
         assert!(
             by_name("Crippling Poison").sample.is_cleansable_poison(),
             "a poison is cleansed, not dispelled"
@@ -1150,13 +1224,19 @@ mod tests {
     fn a_physical_slow_is_not_dispellable_but_a_frost_one_is() {
         let entries = catalog(&abilities());
         let by_name = |name: &str| {
-            entries.iter().find(|e| e.name == name).unwrap_or_else(|| panic!("{} missing", name))
+            entries
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap_or_else(|| panic!("{} missing", name))
         };
         let concussive = by_name("Concussive Shot");
         let frostbolt = by_name("Frostbolt");
         assert_eq!(concussive.mechanic, frostbolt.mechanic, "same mechanic");
         assert!(frostbolt.sample.can_be_dispelled(), "a frost slow is magic");
-        assert!(!concussive.sample.can_be_dispelled(), "an arrow is not magic");
+        assert!(
+            !concussive.sample.can_be_dispelled(),
+            "an arrow is not magic"
+        );
         assert!(concussive.sample.is_physical());
     }
 
@@ -1167,13 +1247,19 @@ mod tests {
     fn a_physical_debuff_reads_as_physical_on_both_the_badge_and_the_stat_block() {
         let entries = catalog(&abilities());
         let by_name = |name: &str| {
-            entries.iter().find(|e| e.name == name).unwrap_or_else(|| panic!("{} missing", name))
+            entries
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap_or_else(|| panic!("{} missing", name))
         };
         for name in ["Concussive Shot", "Rend"] {
             let entry = by_name(name);
             let (badge, tooltip) = entry.removal();
             assert_eq!(badge, "Immune to dispel", "{name} badge");
-            assert!(tooltip.starts_with("Physical"), "{name} names its class first: {tooltip}");
+            assert!(
+                tooltip.starts_with("Physical"),
+                "{name} names its class first: {tooltip}"
+            );
             assert!(
                 stat_rows(entry)
                     .iter()
@@ -1191,16 +1277,24 @@ mod tests {
     fn a_curse_reads_as_a_curse_not_as_unremovable() {
         let entries = catalog(&abilities());
         let by_name = |name: &str| {
-            entries.iter().find(|e| e.name == name).unwrap_or_else(|| panic!("{} missing", name))
+            entries
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap_or_else(|| panic!("{} missing", name))
         };
         for name in ["Curse of Agony", "Curse of Weakness", "Curse of Tongues"] {
             let entry = by_name(name);
             let (badge, tooltip) = entry.removal();
             assert_eq!(badge, "Curse", "{name} badge");
-            assert!(tooltip.contains("none in the arena yet"), "{name}: {tooltip}");
+            assert!(
+                tooltip.contains("none in the arena yet"),
+                "{name}: {tooltip}"
+            );
             assert!(!entry.sample.can_be_dispelled(), "{name} is not magic");
             assert!(
-                stat_rows(entry).iter().any(|(k, v)| k == "Removal class" && v == "Curse"),
+                stat_rows(entry)
+                    .iter()
+                    .any(|(k, v)| k == "Removal class" && v == "Curse"),
                 "{name} stat block"
             );
         }
@@ -1209,8 +1303,14 @@ mod tests {
         // block carries both lines.
         let agony = by_name("Curse of Agony");
         let corruption = by_name("Corruption");
-        assert_eq!(agony.sample.spell_school, corruption.sample.spell_school, "both Shadow");
-        assert!(corruption.sample.can_be_dispelled(), "Corruption is ordinary Shadow magic");
+        assert_eq!(
+            agony.sample.spell_school, corruption.sample.spell_school,
+            "both Shadow"
+        );
+        assert!(
+            corruption.sample.can_be_dispelled(),
+            "Corruption is ordinary Shadow magic"
+        );
         assert_eq!(corruption.removal().0, "Dispellable");
     }
 
@@ -1244,7 +1344,11 @@ mod tests {
         ];
         for entry in catalog(&abilities()) {
             let (badge, tooltip) = entry.removal();
-            assert!(BADGES.contains(&badge), "{} has an unknown badge {badge}", entry.name);
+            assert!(
+                BADGES.contains(&badge),
+                "{} has an unknown badge {badge}",
+                entry.name
+            );
             for name in NAMES {
                 assert!(
                     !tooltip.contains(name),
@@ -1267,7 +1371,13 @@ mod tests {
         let mut rows: Vec<String> = catalog(&abilities())
             .iter()
             .filter(|e| e.removal().0 == "Immune to dispel")
-            .map(|e| format!("{} [{}]", e.name, e.sample.removal_class_name().unwrap_or("—")))
+            .map(|e| {
+                format!(
+                    "{} [{}]",
+                    e.name,
+                    e.sample.removal_class_name().unwrap_or("—")
+                )
+            })
             .collect();
         rows.sort();
         assert_eq!(
@@ -1319,16 +1429,34 @@ mod tests {
     #[test]
     fn engine_auras_carry_the_simulations_own_numbers() {
         let entries = catalog(&abilities());
-        let weakened = entries.iter().find(|e| e.name == "Weakened Soul").expect("registered");
-        assert_eq!(weakened.persistence, Persistence::Seconds(WEAKENED_SOUL_DURATION));
-        assert!(weakened.source.is_none(), "Weakened Soul has no applying ability");
+        let weakened = entries
+            .iter()
+            .find(|e| e.name == "Weakened Soul")
+            .expect("registered");
+        assert_eq!(
+            weakened.persistence,
+            Persistence::Seconds(WEAKENED_SOUL_DURATION)
+        );
+        assert!(
+            weakened.source.is_none(),
+            "Weakened Soul has no applying ability"
+        );
 
         // The totem buffs and the Frost Trap slow DO have an ability to link
         // back to — one with no `applies_aura` of its own.
-        let windfury = entries.iter().find(|e| e.name == "Windfury Totem").expect("registered");
+        let windfury = entries
+            .iter()
+            .find(|e| e.name == "Windfury Totem")
+            .expect("registered");
         assert_eq!(windfury.source, Some(AbilityType::AirTotem));
-        assert!(matches!(windfury.persistence, Persistence::WhileSourceActive(_)));
-        let frost_trap = entries.iter().find(|e| e.name == "Frost Trap").expect("registered");
+        assert!(matches!(
+            windfury.persistence,
+            Persistence::WhileSourceActive(_)
+        ));
+        let frost_trap = entries
+            .iter()
+            .find(|e| e.name == "Frost Trap")
+            .expect("registered");
         assert_eq!(frost_trap.sample.magnitude, FROST_TRAP_SLOW_MAGNITUDE);
     }
 
@@ -1348,11 +1476,18 @@ mod tests {
                 .iter()
                 .find(|e| e.name == def.name && e.mechanic == AuraType::SpellSchoolLockout)
                 .unwrap_or_else(|| panic!("{} locks a school but has no catalog entry", def.name));
-            assert_eq!(entry.persistence, Persistence::Seconds(def.lockout_duration));
+            assert_eq!(
+                entry.persistence,
+                Persistence::Seconds(def.lockout_duration)
+            );
             assert!(!entry.is_buff(), "a lockout is a debuff");
             checked += 1;
         }
-        assert!(checked >= 4, "expected the four interrupts, checked {}", checked);
+        assert!(
+            checked >= 4,
+            "expected the four interrupts, checked {}",
+            checked
+        );
     }
 
     /// The three reused engine names each address SEVERAL distinct auras, and
@@ -1362,14 +1497,20 @@ mod tests {
     fn reused_engine_names_get_an_entry_each() {
         let entries = catalog(&abilities());
         let by_name = |name: &str| {
-            entries.iter().find(|e| e.name == name).unwrap_or_else(|| panic!("{} missing", name))
+            entries
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap_or_else(|| panic!("{} missing", name))
         };
 
         // The Rogue's coating marker: a BUFF, a different mechanic, and a
         // different removal rule from the debuff sharing its frame name.
         let coating = by_name("Crippling Poison (weapon coating)");
         let debuff = by_name("Crippling Poison");
-        assert_eq!(coating.frame_name, debuff.frame_name, "both read the same on the frames");
+        assert_eq!(
+            coating.frame_name, debuff.frame_name,
+            "both read the same on the frames"
+        );
         assert!(coating.is_buff() && !debuff.is_buff());
         assert_eq!(coating.mechanic, AuraType::WeaponPoison);
         assert_eq!(debuff.mechanic, AuraType::MovementSpeedSlow);
@@ -1383,15 +1524,24 @@ mod tests {
             silence.persistence,
             Persistence::Seconds(DISPEL_BACKLASH_SILENCE_DURATION)
         );
-        assert_eq!(by_name("Unstable Affliction").mechanic, AuraType::DamageOverTime);
+        assert_eq!(
+            by_name("Unstable Affliction").mechanic,
+            AuraType::DamageOverTime
+        );
 
         // Frost Armor: the Mage's buff plus the two procs it hangs on melee.
         let buff = by_name("Frost Armor");
         let slow = by_name("Frost Armor (movement slow)");
         let swings = by_name("Frost Armor (attack speed)");
         assert!(buff.is_buff() && !slow.is_buff() && !swings.is_buff());
-        assert_eq!(slow.sample.magnitude, frost_armor_movement_slow_aura().magnitude);
-        assert_eq!(swings.sample.magnitude, frost_armor_attack_speed_aura().magnitude);
+        assert_eq!(
+            slow.sample.magnitude,
+            frost_armor_movement_slow_aura().magnitude
+        );
+        assert_eq!(
+            swings.sample.magnitude,
+            frost_armor_attack_speed_aura().magnitude
+        );
         for entry in [slow, swings] {
             assert_eq!(entry.frame_name, "Frost Armor");
         }
@@ -1417,8 +1567,10 @@ mod tests {
     #[test]
     fn engine_entries_take_break_on_damage_from_their_apply_site() {
         let entries = catalog(&abilities());
-        let shadow_sight =
-            entries.iter().find(|e| e.name == "Shadow Sight").expect("registered");
+        let shadow_sight = entries
+            .iter()
+            .find(|e| e.name == "Shadow Sight")
+            .expect("registered");
         assert_eq!(
             shadow_sight.sample.break_on_damage_threshold, SHADOW_SIGHT_BREAK_ON_DAMAGE,
             "the page must read the threshold the orb pickup applies"
@@ -1440,11 +1592,16 @@ mod tests {
     #[test]
     fn a_spell_power_scaled_aura_says_it_scales() {
         let entries = catalog(&abilities());
-        let shield =
-            entries.iter().find(|e| e.name == "Power Word: Shield").expect("registered");
+        let shield = entries
+            .iter()
+            .find(|e| e.name == "Power Word: Shield")
+            .expect("registered");
         assert!(shield.magnitude_coefficient > 0.0);
         let rows = stat_rows(shield);
-        let absorb = rows.iter().find(|(key, _)| key == "Absorbs").expect("absorb row");
+        let absorb = rows
+            .iter()
+            .find(|(key, _)| key == "Absorbs")
+            .expect("absorb row");
         assert!(
             absorb.1.contains("per point of spell power"),
             "a scaled absorb must not present its base as the whole story: {:?}",
@@ -1452,10 +1609,16 @@ mod tests {
         );
 
         // And an UNSCALED aura says nothing of the sort.
-        let barrier = entries.iter().find(|e| e.name == "Ice Barrier").expect("registered");
+        let barrier = entries
+            .iter()
+            .find(|e| e.name == "Ice Barrier")
+            .expect("registered");
         assert_eq!(barrier.magnitude_coefficient, 0.0);
         let rows = stat_rows(barrier);
-        let absorb = rows.iter().find(|(key, _)| key == "Absorbs").expect("absorb row");
+        let absorb = rows
+            .iter()
+            .find(|(key, _)| key == "Absorbs")
+            .expect("absorb row");
         assert!(!absorb.1.contains("spell power"));
     }
 
@@ -1465,7 +1628,11 @@ mod tests {
     #[test]
     fn every_mechanic_with_a_named_aura_reaches_a_page() {
         let entries = catalog(&abilities());
-        for mechanic in [AuraType::Silence, AuraType::AttackSpeedSlow, AuraType::WeaponPoison] {
+        for mechanic in [
+            AuraType::Silence,
+            AuraType::AttackSpeedSlow,
+            AuraType::WeaponPoison,
+        ] {
             assert!(
                 entries.iter().any(|e| e.mechanic == mechanic),
                 "{:?} is applied in the engine but has no catalog entry",
@@ -1479,7 +1646,10 @@ mod tests {
         let entries = catalog(&abilities());
         let rend = entries.iter().find(|e| e.name == "Rend").expect("Rend");
         let sibs = siblings(&entries, rend.mechanic, rend.id);
-        assert!(sibs.iter().all(|s| s.id != rend.id), "an entry is not its own sibling");
+        assert!(
+            sibs.iter().all(|s| s.id != rend.id),
+            "an entry is not its own sibling"
+        );
         assert!(
             sibs.iter().any(|s| s.name == "Corruption"),
             "Rend must cross-link to the other damage-over-time effects"

@@ -1,9 +1,9 @@
-use bevy::prelude::*;
+use crate::states::play_match::components::*;
 use bevy::color::LinearRgba;
+use bevy::prelude::*;
 use bevy::render::mesh::Indices;
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::PrimitiveTopology;
-use crate::states::play_match::components::*;
 
 // ==============================================================================
 // Windfury Tornado Visual (spawned on a WindfuryTornado entity via Added<>)
@@ -78,11 +78,14 @@ fn build_tornado_mesh(
         indices.extend_from_slice(&[bl, br, tr, bl, tr, tl]);
     }
 
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-        .with_inserted_indices(Indices::U32(indices))
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(Indices::U32(indices))
 }
 
 /// Attach the funnel mesh when a `WindfuryTornado` marker is spawned (at the
@@ -111,8 +114,18 @@ pub fn spawn_windfury_tornado_visuals(
         ));
         // Dark storm-grey dust funnel — blended (not additive) so it stays dark.
         let material = materials.add(StandardMaterial {
-            base_color: Color::srgba(WINDFURY_RGB.0, WINDFURY_RGB.1, WINDFURY_RGB.2, WINDFURY_ALPHA),
-            emissive: LinearRgba::new(WINDFURY_EMISSIVE.0, WINDFURY_EMISSIVE.1, WINDFURY_EMISSIVE.2, 1.0),
+            base_color: Color::srgba(
+                WINDFURY_RGB.0,
+                WINDFURY_RGB.1,
+                WINDFURY_RGB.2,
+                WINDFURY_ALPHA,
+            ),
+            emissive: LinearRgba::new(
+                WINDFURY_EMISSIVE.0,
+                WINDFURY_EMISSIVE.1,
+                WINDFURY_EMISSIVE.2,
+                1.0,
+            ),
             alpha_mode: AlphaMode::Blend,
             cull_mode: None,
             ..default()
@@ -130,7 +143,11 @@ pub fn spawn_windfury_tornado_visuals(
 /// Spin the funnel fast, follow the ally's feet, and fade out over its lifetime.
 pub fn update_windfury_tornados(
     time: Res<Time>,
-    mut tornados: Query<(&mut WindfuryTornado, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut tornados: Query<(
+        &mut WindfuryTornado,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     transforms: Query<&Transform, Without<WindfuryTornado>>,
 ) {
@@ -149,8 +166,12 @@ pub fn update_windfury_tornados(
         tornado_transform.rotation = Quat::from_rotation_y(tornado.spin);
 
         if let Some(material) = materials.get_mut(&material_handle.0) {
-            material.base_color =
-                Color::srgba(WINDFURY_RGB.0, WINDFURY_RGB.1, WINDFURY_RGB.2, WINDFURY_ALPHA * progress);
+            material.base_color = Color::srgba(
+                WINDFURY_RGB.0,
+                WINDFURY_RGB.1,
+                WINDFURY_RGB.2,
+                WINDFURY_ALPHA * progress,
+            );
             material.emissive = LinearRgba::new(
                 WINDFURY_EMISSIVE.0 * progress,
                 WINDFURY_EMISSIVE.1 * progress,
@@ -172,4 +193,3 @@ pub fn cleanup_expired_windfury_tornados(
         }
     }
 }
-

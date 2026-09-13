@@ -23,8 +23,8 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
-use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::abilities::AbilityType;
+use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
     Combatant, InstantAbilityFired, SwingStyle, VisualBody, WeaponHand, WeaponKind, WeaponSocket,
 };
@@ -203,7 +203,10 @@ fn ambush_drives_the_dagger_through_the_target_in_world_space() {
     // 15 ticks x 50ms covers the ~0.64s stroke with follow-through.
     let samples = h.sample_stroke(15);
 
-    let min_z = samples.iter().map(|(d, _)| d.z).fold(f32::INFINITY, f32::min);
+    let min_z = samples
+        .iter()
+        .map(|(d, _)| d.z)
+        .fold(f32::INFINITY, f32::min);
     let max_z = samples
         .iter()
         .map(|(d, _)| d.z)
@@ -338,7 +341,10 @@ fn the_builder_stays_quick_but_never_undercuts_the_interrupts() {
     let cheap = SwingStyle::CheapShot.stroke_secs();
     let pummel = SwingStyle::Pummel.stroke_secs();
     let kick = SwingStyle::Kick.stroke_secs();
-    assert!(ss <= cheap, "SS {ss:.2}s reads as ceremony past {cheap:.2}s");
+    assert!(
+        ss <= cheap,
+        "SS {ss:.2}s reads as ceremony past {cheap:.2}s"
+    );
     assert!(
         ss > pummel && ss > kick,
         "SS {ss:.2}s undercuts an interrupt ({pummel:.2}s / {kick:.2}s)"

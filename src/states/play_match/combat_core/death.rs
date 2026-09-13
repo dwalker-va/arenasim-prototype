@@ -1,9 +1,9 @@
 //! Death animation and pet despawn systems.
 
-use bevy::prelude::*;
-use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::super::components::*;
 use super::super::utils::pet_combatant_id;
+use crate::combat::log::{CombatLog, CombatLogEventType};
+use bevy::prelude::*;
 
 /// Trigger death animation when a combatant dies.
 /// Detects dead combatants without a DeathAnimation component and adds one.
@@ -35,11 +35,7 @@ pub fn trigger_death_animation(
 
         // Fall direction: away from nearest enemy, or forward if no enemy found
         let fall_direction = if let Some(enemy_pos) = nearest_enemy_pos {
-            Vec3::new(
-                my_pos.x - enemy_pos.x,
-                0.0,
-                my_pos.z - enemy_pos.z,
-            ).normalize_or_zero()
+            Vec3::new(my_pos.x - enemy_pos.x, 0.0, my_pos.z - enemy_pos.z).normalize_or_zero()
         } else {
             // No enemy found, fall in the direction they're facing
             let forward = transform.rotation * Vec3::Z;
@@ -53,14 +49,14 @@ pub fn trigger_death_animation(
             fall_direction
         };
 
-        commands.entity(entity).insert(DeathAnimation::new(fall_direction));
+        commands
+            .entity(entity)
+            .insert(DeathAnimation::new(fall_direction));
 
         let display_name = pet.map_or_else(|| combatant.class.name(), |p| p.pet_type.name());
         info!(
             "Team {} {} death animation started (falling toward {:?})",
-            combatant.team,
-            display_name,
-            fall_direction
+            combatant.team, display_name, fall_direction
         );
     }
 }
@@ -129,7 +125,9 @@ pub fn despawn_pets_of_dead_owners(
     owners: Query<&Combatant, Without<Pet>>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
-    if celebration.is_some() { return; }
+    if celebration.is_some() {
+        return;
+    }
     for (_pet_entity, pet, mut pet_combatant) in pets.iter_mut() {
         if !pet_combatant.is_alive() {
             continue;
@@ -139,7 +137,14 @@ pub fn despawn_pets_of_dead_owners(
                 pet_combatant.current_health = 0.0;
                 combat_log.log(
                     CombatLogEventType::Death,
-                    format!("{} despawns (owner died)", pet_combatant_id(pet_combatant.team, pet_combatant.owner_relative_slot(), pet.pet_type)),
+                    format!(
+                        "{} despawns (owner died)",
+                        pet_combatant_id(
+                            pet_combatant.team,
+                            pet_combatant.owner_relative_slot(),
+                            pet.pet_type
+                        )
+                    ),
                 );
             }
         }

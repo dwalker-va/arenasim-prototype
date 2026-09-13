@@ -9,12 +9,12 @@
 //!
 //! Note: Instant effect processing (Holy Shock, Dispels) moved to effects/ module.
 
+use super::components::*;
+use super::match_config;
+use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
+use crate::combat::log::{CombatLog, CombatLogEventType};
 use bevy::prelude::*;
 use bevy_egui::egui;
-use crate::combat::log::{CombatLog, CombatLogEventType};
-use super::match_config;
-use super::components::*;
-use super::utils::{combatant_id, combat_log_id_for, get_next_fct_offset};
 
 /// Update all active auras - tick down durations and remove expired ones.
 ///
@@ -27,7 +27,12 @@ pub fn update_auras(
     time: Res<Time>,
     mut commands: Commands,
     mut game_rng: ResMut<GameRng>,
-    mut combatants: Query<(Entity, &mut ActiveAuras, &mut Combatant, Option<&mut DRTracker>)>,
+    mut combatants: Query<(
+        Entity,
+        &mut ActiveAuras,
+        &mut Combatant,
+        Option<&mut DRTracker>,
+    )>,
 ) {
     let dt = time.delta_secs();
 
@@ -55,7 +60,11 @@ pub fn update_auras(
 
                     // Reset timer: change direction every 1-2 seconds (WoW-style)
                     // Polymorph changes direction slightly less frequently (sheep wander lazily)
-                    let base_timer = if aura.effect_type == AuraType::Polymorph { 1.5 } else { 1.0 };
+                    let base_timer = if aura.effect_type == AuraType::Polymorph {
+                        1.5
+                    } else {
+                        1.0
+                    };
                     aura.fear_direction_timer = base_timer + game_rng.random_f32();
                 }
             }
@@ -67,7 +76,8 @@ pub fn update_auras(
                 match aura.effect_type {
                     AuraType::MaxHealthIncrease => {
                         combatant.max_health -= aura.magnitude;
-                        combatant.current_health = combatant.current_health.min(combatant.max_health);
+                        combatant.current_health =
+                            combatant.current_health.min(combatant.max_health);
                     }
                     AuraType::MaxManaIncrease => {
                         combatant.max_mana -= aura.magnitude;
@@ -121,7 +131,11 @@ pub fn reflect_instant_cc_in_snapshot(
     debug_assert!(
         matches!(
             aura.effect_type,
-            AuraType::Stun | AuraType::Fear | AuraType::Root | AuraType::Polymorph | AuraType::Incapacitate
+            AuraType::Stun
+                | AuraType::Fear
+                | AuraType::Root
+                | AuraType::Polymorph
+                | AuraType::Incapacitate
         ),
         "reflect_instant_cc_in_snapshot called with non-CC aura type {:?}",
         aura.effect_type
@@ -130,7 +144,11 @@ pub fn reflect_instant_cc_in_snapshot(
     // Divine Shield blocks all hostile auras in the real path — mirror that here.
     let has_damage_immunity = active_auras_map
         .get(&target)
-        .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity))
+        .map(|auras| {
+            auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::DamageImmunity)
+        })
         .unwrap_or(false);
     if has_damage_immunity {
         return;
@@ -141,7 +159,11 @@ pub fn reflect_instant_cc_in_snapshot(
     if aura.effect_type == AuraType::Fear && aura.dr_category() != Some(DRCategory::Horror) {
         let has_fear_immunity = active_auras_map
             .get(&target)
-            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::FearImmunity))
+            .map(|auras| {
+                auras
+                    .iter()
+                    .any(|a| a.effect_type == AuraType::FearImmunity)
+            })
             .unwrap_or(false);
         if has_fear_immunity {
             return;
@@ -171,10 +193,7 @@ pub fn reflect_instant_cc_in_snapshot(
     // CC replacement + push into snapshot auras.
     let entry = active_auras_map.entry(target).or_default();
     if let Some(category) = dr_category {
-        if let Some(pos) = entry
-            .iter()
-            .position(|a| a.dr_category() == Some(category))
-        {
+        if let Some(pos) = entry.iter().position(|a| a.dr_category() == Some(category)) {
             entry.swap_remove(pos);
         }
     }
@@ -193,7 +212,12 @@ pub fn apply_pending_auras(
     mut combat_log: ResMut<CombatLog>,
     dampening: Res<ArenaDampening>,
     pending_auras: Query<(Entity, &AuraPending)>,
-    mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>, &Transform, Option<&mut DRTracker>)>,
+    mut combatants: Query<(
+        &mut Combatant,
+        Option<&mut ActiveAuras>,
+        &Transform,
+        Option<&mut DRTracker>,
+    )>,
     charging_query: Query<&ChargingState>,
     disengaging_query: Query<&DisengagingState>,
     mut fct_states: Query<&mut FloatingTextState>,
@@ -232,7 +256,9 @@ pub fn apply_pending_auras(
         );
 
         // Get target combatant
-        let Ok((mut target_combatant, mut active_auras, target_transform, mut dr_tracker)) = combatants.get_mut(pending.target) else {
+        let Ok((mut target_combatant, mut active_auras, target_transform, mut dr_tracker)) =
+            combatants.get_mut(pending.target)
+        else {
             commands.entity(pending_entity).despawn();
             continue;
         };
@@ -252,7 +278,11 @@ pub fn apply_pending_auras(
         // Check for CC immunity: Charging combatants are immune to crowd control
         let is_cc_aura = matches!(
             pending.aura.effect_type,
-            AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph | AuraType::Incapacitate
+            AuraType::Fear
+                | AuraType::Stun
+                | AuraType::Root
+                | AuraType::Polymorph
+                | AuraType::Incapacitate
         );
         let is_unstoppable = charging_query.get(pending.target).is_ok()
             || disengaging_query.get(pending.target).is_ok();
@@ -260,7 +290,8 @@ pub fn apply_pending_auras(
         if is_cc_aura && is_unstoppable {
             // Target is immune - show floating text and log
             let text_position = target_transform.translation + Vec3::new(0.0, 2.5, 0.0);
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target)
+            {
                 get_next_fct_offset(&mut fct_state)
             } else {
                 (0.0, 0.0)
@@ -289,17 +320,9 @@ pub fn apply_pending_auras(
             };
             combat_log.log(
                 CombatLogEventType::MatchEvent,
-                format!(
-                    "{}'s {} is immune (charging)",
-                    target_id,
-                    cc_name
-                )
+                format!("{}'s {} is immune (charging)", target_id, cc_name),
             );
-            info!(
-                "{} is immune to {} (charging)",
-                target_id,
-                cc_name
-            );
+            info!("{} is immune to {} (charging)", target_id, cc_name);
 
             commands.entity(pending_entity).despawn();
             continue;
@@ -313,14 +336,18 @@ pub fn apply_pending_auras(
         // could still receive them.
         let is_hostile_aura = pending.aura.is_hostile_effect();
         let has_immunity = if let Some(ref auras) = active_auras {
-            auras.auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity)
+            auras
+                .auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::DamageImmunity)
         } else {
             false
         };
 
         if is_hostile_aura && has_immunity {
             let text_position = target_transform.translation + Vec3::new(0.0, 2.5, 0.0);
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target)
+            {
                 get_next_fct_offset(&mut fct_state)
             } else {
                 (0.0, 0.0)
@@ -348,14 +375,18 @@ pub fn apply_pending_auras(
         let is_blockable_fear = pending.aura.effect_type == AuraType::Fear
             && pending.aura.dr_category() != Some(DRCategory::Horror);
         let has_fear_immunity = if let Some(ref auras) = active_auras {
-            auras.auras.iter().any(|a| a.effect_type == AuraType::FearImmunity)
+            auras
+                .auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::FearImmunity)
         } else {
             false
         };
 
         if is_blockable_fear && has_fear_immunity {
             let text_position = target_transform.translation + Vec3::new(0.0, 2.5, 0.0);
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target)
+            {
                 get_next_fct_offset(&mut fct_state)
             } else {
                 (0.0, 0.0)
@@ -377,8 +408,7 @@ pub fn apply_pending_auras(
                 CombatLogEventType::CrowdControl,
                 format!(
                     "{} IMMUNE on {} (Berserker Rage)",
-                    pending.aura.ability_name,
-                    target_id,
+                    pending.aura.ability_name, target_id,
                 ),
             );
 
@@ -394,11 +424,12 @@ pub fn apply_pending_auras(
                 if tracker.is_immune(category) {
                     // DR immune — block the CC, spawn "IMMUNE" FCT, log it
                     let text_position = target_transform.translation + Vec3::new(0.0, 2.5, 0.0);
-                    let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
-                        get_next_fct_offset(&mut fct_state)
-                    } else {
-                        (0.0, 0.0)
-                    };
+                    let (offset_x, offset_y) =
+                        if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
+                            get_next_fct_offset(&mut fct_state)
+                        } else {
+                            (0.0, 0.0)
+                        };
 
                     commands.spawn((
                         FloatingCombatText {
@@ -414,8 +445,7 @@ pub fn apply_pending_auras(
 
                     let message = format!(
                         "{} IMMUNE on {} (DR immune)",
-                        pending.aura.ability_name,
-                        target_id,
+                        pending.aura.ability_name, target_id,
                     );
                     combat_log.log(CombatLogEventType::CrowdControl, message);
 
@@ -433,14 +463,23 @@ pub fn apply_pending_auras(
         // Note: Different Absorb abilities (Ice Barrier vs PW:S) CAN coexist - only same ability is blocked
         let is_buff_aura = matches!(
             pending.aura.effect_type,
-            AuraType::MaxHealthIncrease | AuraType::MaxManaIncrease | AuraType::AttackPowerIncrease
-            | AuraType::Absorb | AuraType::WeakenedSoul | AuraType::DamageTakenReduction
-            | AuraType::DamageImmunity | AuraType::AttackPowerReduction
-            | AuraType::CritChanceIncrease | AuraType::ManaRegenIncrease
-            | AuraType::FrostArmorBuff | AuraType::LockoutDurationReduction
-            | AuraType::SpellResistanceBuff | AuraType::AttackSpeedSlow
-            | AuraType::SpellPowerIncrease | AuraType::HealingOverTime
-            | AuraType::WindfuryBuff
+            AuraType::MaxHealthIncrease
+                | AuraType::MaxManaIncrease
+                | AuraType::AttackPowerIncrease
+                | AuraType::Absorb
+                | AuraType::WeakenedSoul
+                | AuraType::DamageTakenReduction
+                | AuraType::DamageImmunity
+                | AuraType::AttackPowerReduction
+                | AuraType::CritChanceIncrease
+                | AuraType::ManaRegenIncrease
+                | AuraType::FrostArmorBuff
+                | AuraType::LockoutDurationReduction
+                | AuraType::SpellResistanceBuff
+                | AuraType::AttackSpeedSlow
+                | AuraType::SpellPowerIncrease
+                | AuraType::HealingOverTime
+                | AuraType::WindfuryBuff
         );
         if is_buff_aura {
             // For Absorb shields, use ability_name as the key to allow different absorbs to coexist
@@ -461,12 +500,16 @@ pub fn apply_pending_auras(
             let already_has_buff_existing = if let Some(ref auras) = active_auras {
                 if pending.aura.effect_type == AuraType::Absorb {
                     // For absorbs, check same ability name
-                    auras.auras.iter().any(|a|
-                        a.effect_type == AuraType::Absorb && a.ability_name == pending.aura.ability_name
-                    )
+                    auras.auras.iter().any(|a| {
+                        a.effect_type == AuraType::Absorb
+                            && a.ability_name == pending.aura.ability_name
+                    })
                 } else {
                     // For other buffs, check same effect type
-                    auras.auras.iter().any(|a| a.effect_type == pending.aura.effect_type)
+                    auras
+                        .auras
+                        .iter()
+                        .any(|a| a.effect_type == pending.aura.effect_type)
                 }
             } else {
                 false
@@ -475,11 +518,14 @@ pub fn apply_pending_auras(
             // Also check auras we're accumulating this frame for entities without ActiveAuras
             let already_has_buff_new = if let Some(new_auras) = new_auras_map.get(&pending.target) {
                 if pending.aura.effect_type == AuraType::Absorb {
-                    new_auras.iter().any(|a|
-                        a.effect_type == AuraType::Absorb && a.ability_name == pending.aura.ability_name
-                    )
+                    new_auras.iter().any(|a| {
+                        a.effect_type == AuraType::Absorb
+                            && a.ability_name == pending.aura.ability_name
+                    })
                 } else {
-                    new_auras.iter().any(|a| a.effect_type == pending.aura.effect_type)
+                    new_auras
+                        .iter()
+                        .any(|a| a.effect_type == pending.aura.effect_type)
                 }
             } else {
                 false
@@ -503,10 +549,7 @@ pub fn apply_pending_auras(
 
             info!(
                 "{} receives Power Word: Fortitude (+{:.0} max HP, now {:.0}/{:.0})",
-                target_id,
-                hp_bonus,
-                target_combatant.current_health,
-                target_combatant.max_health
+                target_id, hp_bonus, target_combatant.current_health, target_combatant.max_health
             );
 
             // Log to combat log
@@ -514,9 +557,8 @@ pub fn apply_pending_auras(
                 CombatLogEventType::Buff,
                 format!(
                     "{} gains Power Word: Fortitude (+{:.0} max HP)",
-                    target_id,
-                    hp_bonus
-                )
+                    target_id, hp_bonus
+                ),
             );
         }
 
@@ -528,10 +570,7 @@ pub fn apply_pending_auras(
 
             info!(
                 "{} receives Arcane Intellect (+{:.0} max mana, now {:.0}/{:.0})",
-                target_id,
-                mana_bonus,
-                target_combatant.current_mana,
-                target_combatant.max_mana
+                target_id, mana_bonus, target_combatant.current_mana, target_combatant.max_mana
             );
 
             // Log to combat log
@@ -539,9 +578,8 @@ pub fn apply_pending_auras(
                 CombatLogEventType::Buff,
                 format!(
                     "{} gains Arcane Intellect (+{:.0} max mana)",
-                    target_id,
-                    mana_bonus
-                )
+                    target_id, mana_bonus
+                ),
             );
         }
 
@@ -551,17 +589,15 @@ pub fn apply_pending_auras(
 
             info!(
                 "{} receives Battle Shout (+{:.0} attack power)",
-                target_id,
-                ap_bonus,
+                target_id, ap_bonus,
             );
 
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
                     "{} gains Battle Shout (+{:.0} attack power)",
-                    target_id,
-                    ap_bonus
-                )
+                    target_id, ap_bonus
+                ),
             );
         }
 
@@ -573,10 +609,8 @@ pub fn apply_pending_auras(
                 CombatLogEventType::Buff,
                 format!(
                     "{} suffers {} (-{:.0} attack power)",
-                    target_id,
-                    pending.aura.ability_name,
-                    ap_reduction
-                )
+                    target_id, pending.aura.ability_name, ap_reduction
+                ),
             );
         }
 
@@ -589,7 +623,7 @@ pub fn apply_pending_auras(
                     target_id,
                     pending.aura.ability_name,
                     pending.aura.magnitude * 100.0
-                )
+                ),
             );
         }
 
@@ -599,10 +633,8 @@ pub fn apply_pending_auras(
                 CombatLogEventType::Buff,
                 format!(
                     "{} gains {} (+{:.0} mana/s)",
-                    target_id,
-                    pending.aura.ability_name,
-                    pending.aura.magnitude
-                )
+                    target_id, pending.aura.ability_name, pending.aura.magnitude
+                ),
             );
         }
 
@@ -610,11 +642,7 @@ pub fn apply_pending_auras(
         if pending.aura.effect_type == AuraType::FrostArmorBuff {
             combat_log.log(
                 CombatLogEventType::Buff,
-                format!(
-                    "{} gains {}",
-                    target_id,
-                    pending.aura.ability_name,
-                )
+                format!("{} gains {}", target_id, pending.aura.ability_name,),
             );
         }
 
@@ -625,11 +653,7 @@ pub fn apply_pending_auras(
         ) {
             combat_log.log(
                 CombatLogEventType::Buff,
-                format!(
-                    "{} gains {}",
-                    target_id,
-                    pending.aura.ability_name,
-                )
+                format!("{} gains {}", target_id, pending.aura.ability_name,),
             );
         }
 
@@ -640,10 +664,8 @@ pub fn apply_pending_auras(
                 CombatLogEventType::Buff,
                 format!(
                     "{} gains {} ({}% shorter interrupt lockouts)",
-                    target_id,
-                    pending.aura.ability_name,
-                    reduction_pct
-                )
+                    target_id, pending.aura.ability_name, reduction_pct
+                ),
             );
         }
 
@@ -654,10 +676,8 @@ pub fn apply_pending_auras(
                 CombatLogEventType::Buff,
                 format!(
                     "{} gains {} ({}% damage reduction)",
-                    target_id,
-                    pending.aura.ability_name,
-                    reduction_percent
-                )
+                    target_id, pending.aura.ability_name, reduction_percent
+                ),
             );
         }
 
@@ -679,18 +699,17 @@ pub fn apply_pending_auras(
             let dr_pct = (dr_multiplier * 100.0) as i32;
             let message = format!(
                 "{} on {} ({:.1}s, DR: {}%)",
-                aura_to_add.ability_name,
-                target_id,
-                aura_to_add.duration,
-                dr_pct,
+                aura_to_add.ability_name, target_id, aura_to_add.duration, dr_pct,
             );
             combat_log.log(CombatLogEventType::CrowdControl, message);
 
             // CC replacement: remove existing CC of same DR category before adding new one
             if let Some(ref mut active_auras) = active_auras {
-                if let Some(pos) = active_auras.auras.iter().position(|a| {
-                    a.dr_category() == Some(category)
-                }) {
+                if let Some(pos) = active_auras
+                    .auras
+                    .iter()
+                    .position(|a| a.dr_category() == Some(category))
+                {
                     active_auras.auras.swap_remove(pos);
                 }
             }
@@ -720,13 +739,18 @@ pub fn apply_pending_auras(
 }
 
 /// Process damage-based aura breaking.
-/// 
+///
 /// When a combatant takes damage, accumulate it on their breakable auras.
 /// If accumulated damage exceeds the break threshold, remove the aura.
 pub fn process_aura_breaks(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    mut combatants: Query<(Entity, &Combatant, &mut ActiveAuras, Option<&DamageTakenThisFrame>)>,
+    mut combatants: Query<(
+        Entity,
+        &Combatant,
+        &mut ActiveAuras,
+        Option<&DamageTakenThisFrame>,
+    )>,
     pet_query: Query<&Pet>,
 ) {
     for (entity, combatant, mut active_auras, damage_taken) in combatants.iter_mut() {
@@ -743,10 +767,10 @@ pub fn process_aura_breaks(
         if damage_taken.amount <= 0.0 {
             continue;
         }
-        
+
         // Track which auras to remove
         let mut auras_to_remove = Vec::new();
-        
+
         // Accumulate damage on breakable auras
         // Note: threshold of 0.0 means "break on ANY damage" (e.g., Polymorph)
         // threshold of -1.0 or negative means "never break on damage"
@@ -763,7 +787,7 @@ pub fn process_aura_breaks(
                 // Check if aura should break (threshold 0 = break on any damage)
                 if aura.accumulated_damage > aura.break_on_damage_threshold {
                     auras_to_remove.push(index);
-                    
+
                     // Log the break - use the ability name stored on the aura
                     let aura_name = if aura.ability_name.is_empty() {
                         // Fallback for auras without ability names
@@ -791,12 +815,12 @@ pub fn process_aura_breaks(
                 }
             }
         }
-        
+
         // Remove broken auras (in reverse order to preserve indices)
         for &index in auras_to_remove.iter().rev() {
             active_auras.auras.remove(index);
         }
-        
+
         // Clear damage taken component
         commands.entity(entity).remove::<DamageTakenThisFrame>();
     }
@@ -829,43 +853,57 @@ pub fn process_dot_ticks(
         return;
     }
     let dt = time.delta_secs();
-    
+
     // Build a map of entity -> (team, class) for quick lookups
     // Include BOTH combatants with auras AND combatants without auras (like the Warrior caster)
-    let mut combatant_info: std::collections::HashMap<Entity, (u8, u8, match_config::CharacterClass)> = 
-        combatants_with_auras
-            .iter()
-            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.slot, combatant.class)))
-            .collect();
-    
+    let mut combatant_info: std::collections::HashMap<
+        Entity,
+        (u8, u8, match_config::CharacterClass),
+    > = combatants_with_auras
+        .iter()
+        .map(|(entity, combatant, _, _)| {
+            (entity, (combatant.team, combatant.slot, combatant.class))
+        })
+        .collect();
+
     // Add combatants without auras to the map
     for (entity, combatant) in combatants_without_auras.iter() {
         combatant_info.insert(entity, (combatant.team, combatant.slot, combatant.class));
     }
-    
+
     // Build a map of entity -> position
     let positions: std::collections::HashMap<Entity, Vec3> = combatants_with_auras
         .iter()
         .map(|(entity, _, transform, _)| (entity, transform.translation))
         .collect();
-    
+
     // Track DoT damage to apply (to avoid borrow issues)
     // Format: (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name, spell_school)
-    let mut dot_damage_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, u8, match_config::CharacterClass, String, super::abilities::SpellSchool)> = Vec::new();
-    
+    let mut dot_damage_to_apply: Vec<(
+        Entity,
+        Entity,
+        f32,
+        Vec3,
+        u8,
+        u8,
+        match_config::CharacterClass,
+        String,
+        super::abilities::SpellSchool,
+    )> = Vec::new();
+
     // First pass: tick down DoT timers and queue damage
     for (entity, combatant, _transform, mut active_auras) in combatants_with_auras.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
-        
+
         let target_pos = positions.get(&entity).copied().unwrap_or(Vec3::ZERO);
-        
+
         for aura in active_auras.auras.iter_mut() {
             if aura.effect_type != AuraType::DamageOverTime {
                 continue;
             }
-            
+
             // Tick down time until next damage application
             aura.time_until_next_tick -= dt;
 
@@ -882,7 +920,9 @@ pub fn process_dot_ticks(
 
                 // Get caster info (if still exists)
                 if let Some(caster_entity) = aura.caster {
-                    if let Some(&(caster_team, caster_slot, caster_class)) = combatant_info.get(&caster_entity) {
+                    if let Some(&(caster_team, caster_slot, caster_class)) =
+                        combatant_info.get(&caster_entity)
+                    {
                         dot_damage_to_apply.push((
                             entity,
                             caster_entity,
@@ -892,7 +932,8 @@ pub fn process_dot_ticks(
                             caster_slot,
                             caster_class,
                             aura.ability_name.clone(),
-                            aura.spell_school.unwrap_or(super::abilities::SpellSchool::None),
+                            aura.spell_school
+                                .unwrap_or(super::abilities::SpellSchool::None),
                         ));
                     }
                 }
@@ -904,14 +945,26 @@ pub fn process_dot_ticks(
             }
         }
     }
-    
+
     // Track caster damage dealt updates
     let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
-    
+
     // Second pass: apply queued DoT damage to targets
-    for (target_entity, caster_entity, damage, target_pos, caster_team, caster_slot, caster_class, ability_name, spell_school) in dot_damage_to_apply {
+    for (
+        target_entity,
+        caster_entity,
+        damage,
+        target_pos,
+        caster_team,
+        caster_slot,
+        caster_class,
+        ability_name,
+        spell_school,
+    ) in dot_damage_to_apply
+    {
         // Get target combatant
-        let Ok((_, mut target, _, mut target_auras)) = combatants_with_auras.get_mut(target_entity) else {
+        let Ok((_, mut target, _, mut target_auras)) = combatants_with_auras.get_mut(target_entity)
+        else {
             continue;
         };
 
@@ -968,14 +1021,16 @@ pub fn process_dot_ticks(
 
         // Spawn light blue floating combat text for absorbed damage
         if absorbed > 0.0 {
-            let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
-                get_next_fct_offset(&mut fct_state)
-            } else {
-                (0.0, 0.0)
-            };
+            let (absorb_offset_x, absorb_offset_y) =
+                if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                    get_next_fct_offset(&mut fct_state)
+                } else {
+                    (0.0, 0.0)
+                };
             commands.spawn((
                 FloatingCombatText {
-                    world_position: target_pos + Vec3::new(absorb_offset_x, super::FCT_HEIGHT + absorb_offset_y, 0.0),
+                    world_position: target_pos
+                        + Vec3::new(absorb_offset_x, super::FCT_HEIGHT + absorb_offset_y, 0.0),
                     text: format!("{:.0} absorbed", absorbed),
                     color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                     lifetime: 1.5,
@@ -1020,11 +1075,7 @@ pub fn process_dot_ticks(
             commands.entity(target_entity).remove::<ChannelingState>();
 
             let death_message = format!("{} has been eliminated", target_id);
-            combat_log.log_death(
-                target_id.clone(),
-                Some(caster_id.clone()),
-                death_message,
-            );
+            combat_log.log_death(target_id.clone(), Some(caster_id.clone()), death_message);
         }
     }
 
@@ -1070,11 +1121,15 @@ pub fn process_hot_ticks(
     // Build a map of entity -> (team, class) for caster attribution lookups.
     // Include BOTH combatants with auras AND combatants without auras (a caster
     // may have shed all of its own auras while its totem buff lives on an ally).
-    let mut combatant_info: std::collections::HashMap<Entity, (u8, u8, match_config::CharacterClass)> =
-        combatants_with_auras
-            .iter()
-            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.slot, combatant.class)))
-            .collect();
+    let mut combatant_info: std::collections::HashMap<
+        Entity,
+        (u8, u8, match_config::CharacterClass),
+    > = combatants_with_auras
+        .iter()
+        .map(|(entity, combatant, _, _)| {
+            (entity, (combatant.team, combatant.slot, combatant.class))
+        })
+        .collect();
     for (entity, combatant) in combatants_without_auras.iter() {
         combatant_info.insert(entity, (combatant.team, combatant.slot, combatant.class));
     }
@@ -1087,7 +1142,16 @@ pub fn process_hot_ticks(
 
     // Track HoT healing to apply (to avoid borrow issues)
     // Format: (target_entity, caster_entity, healing, target_pos, caster_team, caster_class, ability_name)
-    let mut hot_healing_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, u8, match_config::CharacterClass, String)> = Vec::new();
+    let mut hot_healing_to_apply: Vec<(
+        Entity,
+        Entity,
+        f32,
+        Vec3,
+        u8,
+        u8,
+        match_config::CharacterClass,
+        String,
+    )> = Vec::new();
 
     // First pass: tick down HoT timers and queue healing
     for (entity, combatant, _transform, mut active_auras) in combatants_with_auras.iter_mut() {
@@ -1116,7 +1180,9 @@ pub fn process_hot_ticks(
 
                 // Get caster info (if still exists) for attribution
                 if let Some(caster_entity) = aura.caster {
-                    if let Some(&(caster_team, caster_slot, caster_class)) = combatant_info.get(&caster_entity) {
+                    if let Some(&(caster_team, caster_slot, caster_class)) =
+                        combatant_info.get(&caster_entity)
+                    {
                         hot_healing_to_apply.push((
                             entity,
                             caster_entity,
@@ -1142,7 +1208,17 @@ pub fn process_hot_ticks(
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
 
     // Second pass: apply queued HoT healing to bearers
-    for (target_entity, caster_entity, healing, target_pos, caster_team, caster_slot, caster_class, ability_name) in hot_healing_to_apply {
+    for (
+        target_entity,
+        caster_entity,
+        healing,
+        target_pos,
+        caster_team,
+        caster_slot,
+        caster_class,
+        ability_name,
+    ) in hot_healing_to_apply
+    {
         // Get target combatant (the bearer of the HoT)
         let Ok((_, mut target, _, _)) = combatants_with_auras.get_mut(target_entity) else {
             continue;
@@ -1228,9 +1304,9 @@ pub fn process_hot_ticks(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::super::components::auras::{Aura, AuraType, DRCategory, DRTracker, DispelType};
     use super::super::abilities::SpellSchool;
+    use super::super::components::auras::{Aura, AuraType, DRCategory, DRTracker, DispelType};
+    use super::*;
     use bevy::prelude::Entity;
     use std::collections::BTreeMap;
 
@@ -1317,29 +1393,47 @@ mod tests {
         // Both stuns coexist (different DR buckets → no CC replacement), and
         // Kidney is undiminished at its full 6.0s despite following a stun.
         let auras = auras_map.get(&target).unwrap();
-        assert_eq!(auras.len(), 2, "Cheap Shot and Kidney Shot are different DR categories and coexist");
+        assert_eq!(
+            auras.len(),
+            2,
+            "Cheap Shot and Kidney Shot are different DR categories and coexist"
+        );
         let kidney_aura = auras
             .iter()
             .find(|a| a.dr_category_override == Some(DRCategory::KidneyShotStun))
             .expect("kidney present");
-        assert_eq!(kidney_aura.duration, 6.0, "Kidney Shot must not be diminished by a prior Cheap Shot");
+        assert_eq!(
+            kidney_aura.duration, 6.0,
+            "Kidney Shot must not be diminished by a prior Cheap Shot"
+        );
 
         // The Stuns bucket is unaffected by the Kidney application, and a SECOND
         // Kidney Shot still diminishes against its own category.
         let tracker = dr_map.get_mut(&target).unwrap();
         assert!(!tracker.is_immune(DRCategory::Stuns));
         let second_kidney = tracker.apply(DRCategory::KidneyShotStun);
-        assert!(second_kidney < 1.0, "a second Kidney Shot diminishes against its own category");
+        assert!(
+            second_kidney < 1.0,
+            "a second Kidney Shot diminishes against its own category"
+        );
     }
 
     #[test]
     fn test_lockout_magnitude_roundtrip() {
         for school in [
-            SpellSchool::Physical, SpellSchool::Frost, SpellSchool::Holy,
-            SpellSchool::Shadow, SpellSchool::Arcane, SpellSchool::Fire,
-            SpellSchool::Nature, SpellSchool::None,
+            SpellSchool::Physical,
+            SpellSchool::Frost,
+            SpellSchool::Holy,
+            SpellSchool::Shadow,
+            SpellSchool::Arcane,
+            SpellSchool::Fire,
+            SpellSchool::Nature,
+            SpellSchool::None,
         ] {
-            assert_eq!(SpellSchool::from_lockout_magnitude(school.to_lockout_magnitude()), school);
+            assert_eq!(
+                SpellSchool::from_lockout_magnitude(school.to_lockout_magnitude()),
+                school
+            );
         }
     }
 
@@ -1438,4 +1532,3 @@ mod tests {
         assert_eq!(target_auras[0].duration, 8.0);
     }
 }
-

@@ -242,12 +242,7 @@ impl CombatLog {
     }
 
     /// Add a structured death event
-    pub fn log_death(
-        &mut self,
-        victim: CombatantId,
-        killer: Option<CombatantId>,
-        message: String,
-    ) {
+    pub fn log_death(&mut self, victim: CombatantId, killer: Option<CombatantId>, message: String) {
         self.entries.push(CombatLogEntry {
             timestamp: self.match_time,
             event_type: CombatLogEventType::Death,
@@ -289,8 +284,12 @@ impl CombatLog {
     /// [`Self::mark_cast_interrupted`]. Idempotent; a no-op if no match exists.
     pub fn mark_last_damage_killing_blow(&mut self, source_id: &str, target_id: &str) {
         for entry in self.entries.iter_mut().rev() {
-            if let Some(StructuredEventData::Damage { source, target, is_killing_blow, .. }) =
-                &mut entry.structured_data
+            if let Some(StructuredEventData::Damage {
+                source,
+                target,
+                is_killing_blow,
+                ..
+            }) = &mut entry.structured_data
             {
                 if source == source_id && target == target_id {
                     *is_killing_blow = true;
@@ -304,7 +303,13 @@ impl CombatLog {
     pub fn mark_cast_interrupted(&mut self, caster_id: &str, ability_name: &str) {
         // Find the most recent matching ability cast and mark it interrupted
         for entry in self.entries.iter_mut().rev() {
-            if let Some(StructuredEventData::AbilityCast { caster, ability, interrupted, .. }) = &mut entry.structured_data {
+            if let Some(StructuredEventData::AbilityCast {
+                caster,
+                ability,
+                interrupted,
+                ..
+            }) = &mut entry.structured_data
+            {
                 if caster == caster_id && ability == ability_name {
                     *interrupted = true;
                     return;
@@ -349,7 +354,13 @@ impl CombatLog {
         self.entries
             .iter()
             .filter_map(|e| {
-                if let Some(StructuredEventData::AbilityCast { caster, ability, interrupted, .. }) = &e.structured_data {
+                if let Some(StructuredEventData::AbilityCast {
+                    caster,
+                    ability,
+                    interrupted,
+                    ..
+                }) = &e.structured_data
+                {
                     if caster == combatant_id {
                         Some((e.timestamp, ability.as_str(), *interrupted))
                     } else {
@@ -392,12 +403,20 @@ impl CombatLog {
         let mut result: HashMap<String, f32> = HashMap::new();
 
         for entry in &self.entries {
-            if let Some(StructuredEventData::Damage { source, ability, amount, .. }) = &entry.structured_data {
+            if let Some(StructuredEventData::Damage {
+                source,
+                ability,
+                amount,
+                ..
+            }) = &entry.structured_data
+            {
                 if source == owner_id {
                     *result.entry(ability.clone()).or_insert(0.0) += amount;
                 } else if let Some((mapped_owner, pet_name)) = pet_links.get(source) {
                     if mapped_owner == owner_id {
-                        *result.entry(format!("{pet_name}: {ability}")).or_insert(0.0) += amount;
+                        *result
+                            .entry(format!("{pet_name}: {ability}"))
+                            .or_insert(0.0) += amount;
                     }
                 }
             }
@@ -412,7 +431,13 @@ impl CombatLog {
         let mut result: HashMap<String, f32> = HashMap::new();
 
         for entry in &self.entries {
-            if let Some(StructuredEventData::Healing { source, ability, amount, .. }) = &entry.structured_data {
+            if let Some(StructuredEventData::Healing {
+                source,
+                ability,
+                amount,
+                ..
+            }) = &entry.structured_data
+            {
                 if source == combatant_id {
                     *result.entry(ability.clone()).or_insert(0.0) += amount;
                 }
@@ -437,7 +462,8 @@ impl CombatLog {
         let mut total = 0.0;
 
         for entry in &self.entries {
-            if let Some(StructuredEventData::Damage { target, amount, .. }) = &entry.structured_data {
+            if let Some(StructuredEventData::Damage { target, amount, .. }) = &entry.structured_data
+            {
                 if target == combatant_id {
                     total += amount;
                 }
@@ -471,7 +497,12 @@ impl CombatLog {
         let mut count = 0;
 
         for entry in &self.entries {
-            if let Some(StructuredEventData::Damage { source, is_killing_blow: true, .. }) = &entry.structured_data {
+            if let Some(StructuredEventData::Damage {
+                source,
+                is_killing_blow: true,
+                ..
+            }) = &entry.structured_data
+            {
                 let credited = source == owner_id
                     || pet_links
                         .get(source)
@@ -490,7 +521,12 @@ impl CombatLog {
         let mut total = 0.0;
 
         for entry in &self.entries {
-            if let Some(StructuredEventData::CrowdControl { source, duration_secs, .. }) = &entry.structured_data {
+            if let Some(StructuredEventData::CrowdControl {
+                source,
+                duration_secs,
+                ..
+            }) = &entry.structured_data
+            {
                 if source == combatant_id {
                     total += duration_secs;
                 }
@@ -505,7 +541,12 @@ impl CombatLog {
         let mut total = 0.0;
 
         for entry in &self.entries {
-            if let Some(StructuredEventData::CrowdControl { target, duration_secs, .. }) = &entry.structured_data {
+            if let Some(StructuredEventData::CrowdControl {
+                target,
+                duration_secs,
+                ..
+            }) = &entry.structured_data
+            {
                 if target == combatant_id {
                     total += duration_secs;
                 }
@@ -569,12 +610,16 @@ impl CombatLog {
         }
         true
     }
-    
+
     /// Save the combat log to a file with match metadata
     /// If `output_path` is provided, saves to that exact path.
     /// Otherwise, generates a timestamped filename in the log directory the
     /// path seam picks — `match_logs/` in a checkout.
-    pub fn save_to_file(&self, match_metadata: &MatchMetadata, output_path: Option<&str>) -> std::io::Result<String> {
+    pub fn save_to_file(
+        &self,
+        match_metadata: &MatchMetadata,
+        output_path: Option<&str>,
+    ) -> std::io::Result<String> {
         use std::fs::{self, File};
         use std::io::Write;
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -601,32 +646,40 @@ impl CombatLog {
                 .to_string_lossy()
                 .into_owned()
         };
-        
+
         let mut file = File::create(&filename)?;
-        
+
         // Write header
         writeln!(file, "{}", "=".repeat(80))?;
         writeln!(file, "ARENA MATCH REPORT")?;
         writeln!(file, "{}", "=".repeat(80))?;
         writeln!(file)?;
-        
+
         // Write match metadata
         writeln!(file, "MATCH METADATA")?;
         writeln!(file, "{}", "-".repeat(80))?;
         writeln!(file, "Arena: {}", match_metadata.arena_name)?;
         writeln!(file, "Duration: {:.2}s", self.match_time)?;
-        writeln!(file, "Winner: {}", match match_metadata.winner {
-            None => "DRAW".to_string(),
-            Some(1) => "Team 1".to_string(),
-            Some(2) => "Team 2".to_string(),
-            Some(n) => format!("Team {} (invalid)", n),
-        })?;
-        writeln!(file, "Seed: {}", match match_metadata.random_seed {
-            Some(seed) => seed.to_string(),
-            None => "<unseeded>".to_string(),
-        })?;
+        writeln!(
+            file,
+            "Winner: {}",
+            match match_metadata.winner {
+                None => "DRAW".to_string(),
+                Some(1) => "Team 1".to_string(),
+                Some(2) => "Team 2".to_string(),
+                Some(n) => format!("Team {} (invalid)", n),
+            }
+        )?;
+        writeln!(
+            file,
+            "Seed: {}",
+            match match_metadata.random_seed {
+                Some(seed) => seed.to_string(),
+                None => "<unseeded>".to_string(),
+            }
+        )?;
         writeln!(file)?;
-        
+
         // Write team compositions
         writeln!(file, "TEAM 1 COMPOSITION")?;
         writeln!(file, "{}", "-".repeat(80))?;
@@ -641,16 +694,16 @@ impl CombatLog {
             write_combatant_block(&mut file, i + 1, combatant)?;
         }
         writeln!(file)?;
-        
+
         // Write combat log
         writeln!(file, "COMBAT LOG")?;
         writeln!(file, "{}", "=".repeat(80))?;
         writeln!(file)?;
-        
+
         for entry in &self.entries {
             // Format timestamp
             let timestamp_str = format!("[{:>6.2}s]", entry.timestamp);
-            
+
             // Event type indicator
             let type_str = match entry.event_type {
                 CombatLogEventType::Damage => "[DMG]",
@@ -663,17 +716,25 @@ impl CombatLog {
                 CombatLogEventType::Death => "[DEATH]",
                 CombatLogEventType::MatchEvent => "[EVENT]",
             };
-            
+
             // Write main log line
             writeln!(file, "{} {} {}", timestamp_str, type_str, entry.message)?;
-            
+
             // Write position data if available
             if let Some(ref pos_data) = entry.position_data {
                 writeln!(file, "    Entities: {}", pos_data.entities.join(", "))?;
                 for (i, pos) in pos_data.positions.iter().enumerate() {
-                    writeln!(file, "      {}: ({:.2}, {:.2}, {:.2})",
-                        if i < pos_data.entities.len() { &pos_data.entities[i] } else { "?" },
-                        pos.0, pos.1, pos.2
+                    writeln!(
+                        file,
+                        "      {}: ({:.2}, {:.2}, {:.2})",
+                        if i < pos_data.entities.len() {
+                            &pos_data.entities[i]
+                        } else {
+                            "?"
+                        },
+                        pos.0,
+                        pos.1,
+                        pos.2
                     )?;
                 }
                 if let Some(distance) = pos_data.distance {
@@ -681,12 +742,12 @@ impl CombatLog {
                 }
             }
         }
-        
+
         writeln!(file)?;
         writeln!(file, "{}", "=".repeat(80))?;
         writeln!(file, "END OF REPORT")?;
         writeln!(file, "{}", "=".repeat(80))?;
-        
+
         Ok(filename)
     }
 }
@@ -724,9 +785,7 @@ fn write_combatant_block(
     writeln!(
         file,
         "    Position: ({:.2}, {:.2}, {:.2})",
-        combatant.final_position.0,
-        combatant.final_position.1,
-        combatant.final_position.2,
+        combatant.final_position.0, combatant.final_position.1, combatant.final_position.2,
     )?;
     writeln!(
         file,
@@ -736,7 +795,10 @@ fn write_combatant_block(
 
     // Mitigated line: omit zero schools, skip line entirely if everything is zero.
     let school_labels = ["frost", "holy", "shadow", "arcane", "fire", "nature"];
-    let any_resistance = combatant.damage_mitigated_by_resistance.iter().any(|v| *v > 0.0);
+    let any_resistance = combatant
+        .damage_mitigated_by_resistance
+        .iter()
+        .any(|v| *v > 0.0);
     if combatant.damage_mitigated_by_armor > 0.0 || any_resistance {
         let mut parts: Vec<String> = Vec::new();
         if combatant.damage_mitigated_by_armor > 0.0 {
@@ -771,7 +833,6 @@ pub struct CombatantMetadata {
     pub damage_mitigated_by_resistance: [f32; 6],
     pub final_position: (f32, f32, f32),
 }
-
 
 #[cfg(test)]
 mod pet_attribution_tests {
@@ -890,10 +951,19 @@ mod pet_attribution_tests {
         log.mark_last_damage_killing_blow("Team 1 Warlock #1", "Team 2 Warrior #1");
         assert_eq!(log.killing_blows("Team 1 Warlock #1"), 1);
         // Only the most-recent matching entry is flagged.
-        let flagged = log.entries.iter().filter(|e| matches!(
-            &e.structured_data,
-            Some(StructuredEventData::Damage { is_killing_blow: true, .. })
-        )).count();
+        let flagged = log
+            .entries
+            .iter()
+            .filter(|e| {
+                matches!(
+                    &e.structured_data,
+                    Some(StructuredEventData::Damage {
+                        is_killing_blow: true,
+                        ..
+                    })
+                )
+            })
+            .count();
         assert_eq!(flagged, 1);
     }
 

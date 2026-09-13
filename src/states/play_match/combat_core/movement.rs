@@ -1,18 +1,17 @@
 //! Movement systems: target following, kiting, fear/polymorph wandering, charging, disengaging.
 
-use bevy::prelude::*;
-use super::super::components::*;
-use super::clamp_to_arena;
 use super::super::arena_bounds::ArenaBounds;
-use super::super::match_config::CharacterClass;
-use super::super::{MELEE_RANGE, WAND_RANGE, DISENGAGE_SPEED};
+use super::super::components::*;
 use super::super::map_config::ActiveMapGeometry;
+use super::super::map_geometry::{resolve_movement, steer_toward_goal, ObstacleVolume};
+use super::super::match_config::CharacterClass;
 use super::super::team_plan::{
     hold_position, should_break_cover, should_hold, Stance, TeamPlans, CAMP_ARRIVAL_EPSILON,
     CAMP_ENGAGE_RADIUS,
 };
-use super::super::map_geometry::{resolve_movement, steer_toward_goal, ObstacleVolume};
-
+use super::super::{DISENGAGE_SPEED, MELEE_RANGE, WAND_RANGE};
+use super::clamp_to_arena;
+use bevy::prelude::*;
 
 /// How close a `MovementGoal::Point` directive walks before stopping (units).
 /// Prevents oscillation around the exact formation point.
@@ -37,7 +36,17 @@ pub fn move_to_target(
     countdown: Res<MatchCountdown>,
     time: Res<Time>,
     mut commands: Commands,
-    mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>, Option<&ChannelingState>, Option<&DisengagingState>, Option<&MovementDirective>)>,
+    mut combatants: Query<(
+        Entity,
+        &mut Transform,
+        &Combatant,
+        Option<&ActiveAuras>,
+        Option<&CastingState>,
+        Option<&ChargingState>,
+        Option<&ChannelingState>,
+        Option<&DisengagingState>,
+        Option<&MovementDirective>,
+    )>,
     orbs: Query<&Transform, (With<ShadowSightOrb>, Without<Combatant>)>,
     pet_query: Query<&Pet>,
     // OOM wand-fallback latch (Mage): when set, the Mage's ENGAGE pursuit stops
@@ -68,7 +77,9 @@ pub fn move_to_target(
     // section) and the matching comments in auto_attack.rs.
     let positions: std::collections::BTreeMap<Entity, (Vec3, u8)> = combatants
         .iter()
-        .map(|(entity, transform, combatant, _, _, _, _, _, _)| (entity, (transform.translation, combatant.team)))
+        .map(|(entity, transform, combatant, _, _, _, _, _, _)| {
+            (entity, (transform.translation, combatant.team))
+        })
         .collect();
 
     // Position + team + HP fraction + pet flag, for the camp's line-of-sight
@@ -84,14 +95,29 @@ pub fn move_to_target(
         .iter()
         .filter(|(_, _, c, _, _, _, _, _, _)| c.is_alive())
         .map(|(entity, transform, c, _, _, _, _, _, _)| {
-            let frac = if c.max_health > 0.0 { c.current_health / c.max_health } else { 0.0 };
+            let frac = if c.max_health > 0.0 {
+                c.current_health / c.max_health
+            } else {
+                0.0
+            };
             let is_pet = pet_query.get(entity).is_ok();
             (entity, (transform.translation, c.team, frac, is_pet))
         })
         .collect();
 
     // Move each combatant towards their target if needed
-    for (entity, mut transform, combatant, auras, casting_state, charging_state, channeling_state, disengaging_state, movement_directive) in combatants.iter_mut() {
+    for (
+        entity,
+        mut transform,
+        combatant,
+        auras,
+        casting_state,
+        charging_state,
+        channeling_state,
+        disengaging_state,
+        movement_directive,
+    ) in combatants.iter_mut()
+    {
         // MOVEMENT DIRECTIVE EXPIRY — checked before EVERY early-continue
         // below (death, casting, channeling, root/stun). `expires` is an
         // absolute sim-time deadline: a directive issued pre-stun must be
@@ -121,12 +147,22 @@ pub fn move_to_target(
         }
 
         // Check for movement-preventing CC and wandering CC
-        let (is_rooted_or_stunned, fear_direction, polymorph_direction) = if let Some(auras) = auras {
-            let rooted_or_stunned = auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Root | AuraType::Stun | AuraType::Incapacitate));
-            let fear_dir = auras.auras.iter()
+        let (is_rooted_or_stunned, fear_direction, polymorph_direction) = if let Some(auras) = auras
+        {
+            let rooted_or_stunned = auras.auras.iter().any(|a| {
+                matches!(
+                    a.effect_type,
+                    AuraType::Root | AuraType::Stun | AuraType::Incapacitate
+                )
+            });
+            let fear_dir = auras
+                .auras
+                .iter()
                 .find(|a| a.effect_type == AuraType::Fear)
                 .map(|a| a.fear_direction);
-            let poly_dir = auras.auras.iter()
+            let poly_dir = auras
+                .auras
+                .iter()
                 .find(|a| a.effect_type == AuraType::Polymorph)
                 .map(|a| a.fear_direction); // Polymorph reuses fear_direction for wandering
             (rooted_or_stunned, fear_dir, poly_dir)
@@ -152,7 +188,8 @@ pub fn move_to_target(
                 // Move in fear direction (slide off obstacles, then clamp to arena)
                 let from = transform.translation;
                 let proposed = from + direction * move_distance;
-                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
+                transform.translation =
+                    resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -173,7 +210,8 @@ pub fn move_to_target(
                 // Move in polymorph direction (slide off obstacles, then clamp to arena)
                 let from = transform.translation;
                 let proposed = from + direction * move_distance;
-                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
+                transform.translation =
+                    resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -207,11 +245,8 @@ pub fn move_to_target(
             }
 
             // Calculate direction to target
-            let direction = Vec3::new(
-                target_pos.x - my_pos.x,
-                0.0,
-                target_pos.z - my_pos.z,
-            ).normalize_or_zero();
+            let direction = Vec3::new(target_pos.x - my_pos.x, 0.0, target_pos.z - my_pos.z)
+                .normalize_or_zero();
 
             if direction != Vec3::ZERO {
                 // Charge speed: 4x normal movement speed, ignores slows
@@ -224,7 +259,8 @@ pub fn move_to_target(
                 // check in warrior AI rejects Charge across an obstacle up front.
                 let from = transform.translation;
                 let proposed = from + direction * move_distance;
-                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
+                transform.translation =
+                    resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
 
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -242,7 +278,8 @@ pub fn move_to_target(
                 let new_pos = from + disengage.direction * move_amount;
 
                 // Slide off obstacles, then clamp to arena bounds
-                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, new_pos);
+                transform.translation =
+                    resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, new_pos);
 
                 // Decrement distance remaining
                 let remaining = disengage.distance_remaining - move_amount;
@@ -310,25 +347,29 @@ pub fn move_to_target(
             // `continue` above this branch, so all that is required per tick is
             // "does anyone need healing?" — if yes, break cover for the cast; if
             // no, hide.
-            let keep_sighted = combatant.class.is_healer().then(|| {
-                // Most-injured living HEALABLE ally, and how hurt it is. Pets are
-                // excluded because no healer in this codebase ever targets one
-                // (every heal/shield/medic-chase predicate filters `is_pet`), so
-                // including them made the healer break cover to hold sight of a
-                // Felhunter or Hunter pet it could not heal — and, because pets
-                // are squishy and engage first, that pet was usually the
-                // lowest-HP unit on the team, hiding the teammate that did need
-                // the line.
-                let worst = living
-                    .iter()
-                    .filter(|(e, (_, team, _, is_pet))| {
-                        *team == combatant.team && **e != entity && !*is_pet
-                    })
-                    .map(|(_, (pos, _, hp, _))| (*hp, *pos))
-                    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-                let (hp, pos) = worst?;
-                should_break_cover(Some(hp)).then_some(Vec2::new(pos.x, pos.z))
-            }).flatten();
+            let keep_sighted = combatant
+                .class
+                .is_healer()
+                .then(|| {
+                    // Most-injured living HEALABLE ally, and how hurt it is. Pets are
+                    // excluded because no healer in this codebase ever targets one
+                    // (every heal/shield/medic-chase predicate filters `is_pet`), so
+                    // including them made the healer break cover to hold sight of a
+                    // Felhunter or Hunter pet it could not heal — and, because pets
+                    // are squishy and engage first, that pet was usually the
+                    // lowest-HP unit on the team, hiding the teammate that did need
+                    // the line.
+                    let worst = living
+                        .iter()
+                        .filter(|(e, (_, team, _, is_pet))| {
+                            *team == combatant.team && **e != entity && !*is_pet
+                        })
+                        .map(|(_, (pos, _, hp, _))| (*hp, *pos))
+                        .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                    let (hp, pos) = worst?;
+                    should_break_cover(Some(hp)).then_some(Vec2::new(pos.x, pos.z))
+                })
+                .flatten();
 
             // Every living enemy, so the spot maximises how many of them lose
             // sight — hiding from only the nearest left the other caster free.
@@ -338,7 +379,7 @@ pub fn move_to_target(
                 .map(|(_, (pos, _, _, _))| Vec2::new(pos.x, pos.z))
                 .collect();
             hold_position(&map_geometry.volumes, anchor, &threats, keep_sighted)
-            .map(|spot| (spot, nearest_pos))
+                .map(|spot| (spot, nearest_pos))
         });
 
         if let Some((spot, face_pos)) = camp_spot {
@@ -401,9 +442,7 @@ pub fn move_to_target(
             let mut move_distance = movement_speed * dt;
 
             let direction = match directive.goal {
-                MovementGoal::Direction(dir) => {
-                    Vec3::new(dir.x, 0.0, dir.y).normalize_or_zero()
-                }
+                MovementGoal::Direction(dir) => Vec3::new(dir.x, 0.0, dir.y).normalize_or_zero(),
                 MovementGoal::Point(point) => {
                     let to_point = Vec3::new(point.x - my_pos.x, 0.0, point.z - my_pos.z);
                     let distance = to_point.length();
@@ -453,7 +492,8 @@ pub fn move_to_target(
                 // Slide off obstacles, then clamp to arena bounds
                 let from = transform.translation;
                 let proposed = from + direction * move_distance;
-                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
+                transform.translation =
+                    resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -479,9 +519,10 @@ pub fn move_to_target(
                             my_pos.y,
                         )
                         .map(|s| Vec3::new(s.x, 0.0, s.y))
-                        .unwrap_or_else(|| Vec3::new(
-                            owner_pos.x - my_pos.x, 0.0, owner_pos.z - my_pos.z,
-                        ).normalize_or_zero());
+                        .unwrap_or_else(|| {
+                            Vec3::new(owner_pos.x - my_pos.x, 0.0, owner_pos.z - my_pos.z)
+                                .normalize_or_zero()
+                        });
                         if direction != Vec3::ZERO {
                             let mut movement_speed = combatant.base_movement_speed;
                             if let Some(auras) = auras {
@@ -495,8 +536,14 @@ pub fn move_to_target(
                             // Slide off obstacles, then clamp to arena bounds
                             let from = transform.translation;
                             let proposed = from + direction * move_distance;
-                            transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
-                            let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
+                            transform.translation = resolve_and_clamp(
+                                &map_geometry.bounds,
+                                &map_geometry.volumes,
+                                from,
+                                proposed,
+                            );
+                            let target_rotation =
+                                Quat::from_rotation_y(direction.x.atan2(direction.z));
                             transform.rotation = target_rotation;
                         }
                     }
@@ -509,7 +556,8 @@ pub fn move_to_target(
             // to break the stalemate. This represents accepting the reveal to gain vision.
 
             // Find nearest Shadow Sight orb (if any exist)
-            let nearest_orb_pos = orbs.iter()
+            let nearest_orb_pos = orbs
+                .iter()
                 .map(|orb_transform| orb_transform.translation)
                 .min_by(|a, b| {
                     let dist_a = my_pos.distance(*a);
@@ -524,11 +572,8 @@ pub fn move_to_target(
             // Only move if we're far from destination (> 2.5 units for orbs, > 5 units for center)
             let stop_distance = if nearest_orb_pos.is_some() { 2.5 } else { 5.0 };
             if distance_to_destination > stop_distance {
-                let direction = Vec3::new(
-                    destination.x - my_pos.x,
-                    0.0,
-                    destination.z - my_pos.z,
-                ).normalize_or_zero();
+                let direction = Vec3::new(destination.x - my_pos.x, 0.0, destination.z - my_pos.z)
+                    .normalize_or_zero();
 
                 if direction != Vec3::ZERO {
                     // Calculate effective movement speed
@@ -545,7 +590,12 @@ pub fn move_to_target(
                     let move_distance = movement_speed * dt;
                     let from = transform.translation;
                     let proposed = from + direction * move_distance;
-                    transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
+                    transform.translation = resolve_and_clamp(
+                        &map_geometry.bounds,
+                        &map_geometry.volumes,
+                        from,
+                        proposed,
+                    );
 
                     // Rotate to face destination
                     let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -593,11 +643,14 @@ pub fn move_to_target(
                 my_pos.y,
             )
             .map(|s| Vec3::new(s.x, 0.0, s.y))
-            .unwrap_or_else(|| Vec3::new(
-                target_pos.x - my_pos.x,
-                0.0, // Don't move vertically
-                target_pos.z - my_pos.z,
-            ).normalize_or_zero());
+            .unwrap_or_else(|| {
+                Vec3::new(
+                    target_pos.x - my_pos.x,
+                    0.0, // Don't move vertically
+                    target_pos.z - my_pos.z,
+                )
+                .normalize_or_zero()
+            });
 
             if direction != Vec3::ZERO {
                 // Calculate effective movement speed (base * aura modifiers)
@@ -614,7 +667,8 @@ pub fn move_to_target(
                 let move_distance = movement_speed * dt;
                 let from = transform.translation;
                 let proposed = from + direction * move_distance;
-                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
+                transform.translation =
+                    resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
 
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));

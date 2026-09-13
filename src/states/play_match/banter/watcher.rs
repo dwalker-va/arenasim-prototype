@@ -307,7 +307,11 @@ mod tests {
         // The shipped defaults: both teams call enemy slot 0.
         let changes = detect_call_changes(FRESH, [Some(0), Some(0)], false);
 
-        assert_eq!(changes.len(), 2, "both teams should report their first call");
+        assert_eq!(
+            changes.len(),
+            2,
+            "both teams should report their first call"
+        );
         assert_eq!(changes[0].team, 1);
         assert_eq!(changes[1].team, 2);
         for change in &changes {
@@ -319,10 +323,7 @@ mod tests {
 
     #[test]
     fn unchanged_calls_report_nothing() {
-        let seen = [
-            LastSeenCall::Seen(Some(0)),
-            LastSeenCall::Seen(Some(1)),
-        ];
+        let seen = [LastSeenCall::Seen(Some(0)), LastSeenCall::Seen(Some(1))];
         assert!(detect_call_changes(seen, [Some(0), Some(1)], false).is_empty());
         // Gate state alone must not manufacture a change — the gates opening
         // mid-match is not itself a call change.
@@ -453,7 +454,10 @@ mod tests {
 
     /// Spawn a two-combatant team 2 so a call has something to name.
     fn spawn_enemies(world: &mut World) {
-        for (slot, class) in [(0u8, CharacterClass::Warrior), (1u8, CharacterClass::Priest)] {
+        for (slot, class) in [
+            (0u8, CharacterClass::Warrior),
+            (1u8, CharacterClass::Priest),
+        ] {
             let mut combatant = Combatant::new(2, slot, class);
             combatant.current_health = combatant.max_health;
             world.spawn(combatant);
@@ -491,9 +495,15 @@ mod tests {
             .iter()
             .find(|l| l.contains("was"))
             .expect("the swap should be logged with its previous target");
-        assert!(swap.contains("Team 1 calls"), "names the calling team: {swap}");
+        assert!(
+            swap.contains("Team 1 calls"),
+            "names the calling team: {swap}"
+        );
         assert!(swap.contains("Priest"), "names the new target: {swap}");
-        assert!(swap.contains("Warrior"), "names the previous target: {swap}");
+        assert!(
+            swap.contains("Warrior"),
+            "names the previous target: {swap}"
+        );
     }
 
     /// Pre-gate calls are setup, not events, and stay out of the log.
@@ -564,7 +574,10 @@ mod tests {
 
         let watcher = world.resource::<CallWatcher>();
         assert!(watcher.pending.is_empty());
-        assert_eq!(watcher.last_seen, FRESH, "nothing observed, nothing recorded");
+        assert_eq!(
+            watcher.last_seen, FRESH,
+            "nothing observed, nothing recorded"
+        );
     }
 
     #[test]

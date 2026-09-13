@@ -173,7 +173,12 @@ pub(super) fn resolve_exchange(
         // only ever bites a hand-built `BanterConfig`. Dropping the exchange
         // here rather than trusting the loader is what lets the binding lookup
         // below index without a bounds check.
-        .filter(|exchange| exchange.beats.iter().all(|beat| declares(exchange, &beat.role)))
+        .filter(|exchange| {
+            exchange
+                .beats
+                .iter()
+                .all(|beat| declares(exchange, &beat.role))
+        })
         .filter(|exchange| target_satisfies(exchange, call))
         .filter_map(|exchange| Some((exchange, bind_roles(exchange, lineup)?)))
         .collect();
@@ -361,12 +366,7 @@ fn context_salt(context: BanterContext) -> u64 {
 /// identical (KTD7) — hashing the lineup alone would have the same comp tell
 /// the same joke forever. Reading `GameRng::seed` is a public-field read, so it
 /// cannot advance draw order and no headless baseline can move (R15, R18).
-fn banter_roll(
-    seed: Option<u64>,
-    team: u8,
-    context: BanterContext,
-    occurrence: u32,
-) -> f32 {
+fn banter_roll(seed: Option<u64>, team: u8, context: BanterContext, occurrence: u32) -> f32 {
     let mut hash = mix(BANTER_HASH_INIT, seed.unwrap_or(BANTER_FALLBACK_SEED));
     hash = mix(hash, u64::from(team));
     hash = mix(hash, context_salt(context));
@@ -436,15 +436,16 @@ mod tests {
     // are shared with the scheduler's suite, so they live in the parent's
     // `test_fixtures`.
     use super::super::test_fixtures::{beat, speaker, two_speaker};
-    use crate::states::play_match::banter_config::{
-        BanterExchange, BanterTiming, ClassConstraint,
-    };
+    use crate::states::play_match::banter_config::{BanterExchange, BanterTiming, ClassConstraint};
 
     /// Seed used wherever a test needs *a* seed and does not care which.
     const A_SEED: Option<u64> = Some(0xC0FF_EE12);
 
     fn config_with(exchanges: Vec<BanterExchange>) -> BanterConfig {
-        BanterConfig { timing: BanterTiming::default(), exchanges }
+        BanterConfig {
+            timing: BanterTiming::default(),
+            exchanges,
+        }
     }
 
     /// Living combatants of the given classes, in slot order, on team 1.
@@ -464,7 +465,11 @@ mod tests {
     }
 
     fn called(target: CharacterClass) -> BanterCall {
-        BanterCall { target: Some(target), prev_target: None, enemy_team: 2 }
+        BanterCall {
+            target: Some(target),
+            prev_target: None,
+            enemy_team: 2,
+        }
     }
 
     /// The label prefix a resolved exchange's first beat carries, for
@@ -806,9 +811,8 @@ mod tests {
             prev_target: Some(CharacterClass::Paladin),
             enemy_team: 2,
         };
-        let resolve = |context| {
-            resolve_exchange(&config, &team, call, context, A_SEED, 0).expect("resolves")
-        };
+        let resolve =
+            |context| resolve_exchange(&config, &team, call, context, A_SEED, 0).expect("resolves");
 
         // Both portraits resolve, each carrying the enemy team so the renderer
         // can tint them.
@@ -979,7 +983,14 @@ mod tests {
         )]);
         let team = lineup(&[CharacterClass::Mage, CharacterClass::Priest]);
         let resolve = |context| {
-            resolve_exchange(&config, &team, called(CharacterClass::Warrior), context, A_SEED, 0)
+            resolve_exchange(
+                &config,
+                &team,
+                called(CharacterClass::Warrior),
+                context,
+                A_SEED,
+                0,
+            )
         };
 
         assert!(resolve(BanterContext::Opening).is_some());

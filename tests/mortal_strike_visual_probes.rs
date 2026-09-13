@@ -16,23 +16,24 @@
 
 use std::time::Duration;
 
-use bevy::prelude::*;
-use bevy::time::TimeUpdateStrategy;
-use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::abilities::AbilityType;
+use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::combat_core::refused_fraction;
+use arenasim::states::play_match::components::AutoAttackSwing;
 use arenasim::states::play_match::components::{
     Combatant, DeathAnimation, HealingRefused, InstantAbilityFired, SwingStyle, VisualBody,
     WeaponHand, WeaponKind, WeaponSocket,
 };
 use arenasim::states::play_match::{
-    animate_body_lean, cleanup_heal_fracture, cleanup_mortal_strike, consume_instant_ability_signals,
-    consume_swing_signals, spawn_heal_fracture, update_heal_fracture,
-    update_mortal_strike_flash, update_mortal_strike_impacts, update_mortal_strike_sparks,
-    update_mortal_strike_trail, MortalStrikePendingImpact, MortalStrikeSpark, RefusedHealMote,
+    animate_body_lean, cleanup_heal_fracture, cleanup_mortal_strike,
+    consume_instant_ability_signals, consume_swing_signals, spawn_heal_fracture,
+    update_heal_fracture, update_mortal_strike_flash, update_mortal_strike_impacts,
+    update_mortal_strike_sparks, update_mortal_strike_trail, MortalStrikePendingImpact,
+    MortalStrikeSpark, RefusedHealMote,
 };
-use arenasim::states::play_match::components::AutoAttackSwing;
 use arenasim::CharacterClass;
+use bevy::prelude::*;
+use bevy::time::TimeUpdateStrategy;
 
 const TICK: Duration = Duration::from_millis(50);
 
@@ -64,7 +65,10 @@ fn spawn_warrior(app: &mut App) -> (Entity, Entity) {
         .id();
     let body = app
         .world_mut()
-        .spawn((VisualBody { rest_y: 1.0 }, Transform::from_xyz(0.0, 1.0, 0.0)))
+        .spawn((
+            VisualBody { rest_y: 1.0 },
+            Transform::from_xyz(0.0, 1.0, 0.0),
+        ))
         .id();
     app.world_mut().entity_mut(attacker).add_child(body);
     let socket = app
@@ -185,7 +189,10 @@ fn an_ordinary_auto_clears_a_signature_style() {
     // without it, an auto landing while a Mortal Strike stroke is still
     // playing inherits the signature's slower timing and deeper arc.
     let mut app = harness();
-    app.add_systems(Update, (consume_swing_signals, consume_instant_ability_signals).chain());
+    app.add_systems(
+        Update,
+        (consume_swing_signals, consume_instant_ability_signals).chain(),
+    );
     let (attacker, socket) = spawn_warrior(&mut app);
     let target = spawn_target(&mut app, 2.0);
 
@@ -197,15 +204,27 @@ fn an_ordinary_auto_clears_a_signature_style() {
     });
     app.update();
     assert_eq!(
-        app.world().entity(socket).get::<WeaponSocket>().unwrap().swing_style,
+        app.world()
+            .entity(socket)
+            .get::<WeaponSocket>()
+            .unwrap()
+            .swing_style,
         SwingStyle::MortalStrike
     );
 
-    app.world_mut().spawn(AutoAttackSwing { attacker, target, ranged: false });
+    app.world_mut().spawn(AutoAttackSwing {
+        attacker,
+        target,
+        ranged: false,
+    });
     app.update();
 
     assert_eq!(
-        app.world().entity(socket).get::<WeaponSocket>().unwrap().swing_style,
+        app.world()
+            .entity(socket)
+            .get::<WeaponSocket>()
+            .unwrap()
+            .swing_style,
         SwingStyle::Auto,
         "an auto-attack must not inherit the signature stroke"
     );
@@ -216,11 +235,18 @@ fn a_same_tick_auto_does_not_downgrade_the_signature() {
     // Both land on one tick. The registration orders the instant consumer AFTER
     // the auto consumer precisely so the special wins the socket.
     let mut app = harness();
-    app.add_systems(Update, (consume_swing_signals, consume_instant_ability_signals).chain());
+    app.add_systems(
+        Update,
+        (consume_swing_signals, consume_instant_ability_signals).chain(),
+    );
     let (attacker, socket) = spawn_warrior(&mut app);
     let target = spawn_target(&mut app, 2.0);
 
-    app.world_mut().spawn(AutoAttackSwing { attacker, target, ranged: false });
+    app.world_mut().spawn(AutoAttackSwing {
+        attacker,
+        target,
+        ranged: false,
+    });
     app.world_mut().spawn(InstantAbilityFired {
         caster: attacker,
         target: Some(target),
@@ -230,7 +256,11 @@ fn a_same_tick_auto_does_not_downgrade_the_signature() {
     app.update();
 
     assert_eq!(
-        app.world().entity(socket).get::<WeaponSocket>().unwrap().swing_style,
+        app.world()
+            .entity(socket)
+            .get::<WeaponSocket>()
+            .unwrap()
+            .swing_style,
         SwingStyle::MortalStrike,
         "the signature must win a same-tick race with an ordinary auto"
     );
@@ -244,7 +274,11 @@ fn the_impact_waits_for_the_blade_to_arrive() {
     let mut app = harness();
     app.add_systems(
         Update,
-        (consume_instant_ability_signals, update_mortal_strike_impacts).chain(),
+        (
+            consume_instant_ability_signals,
+            update_mortal_strike_impacts,
+        )
+            .chain(),
     );
     let (attacker, _socket) = spawn_warrior(&mut app);
     let target = spawn_target(&mut app, 2.0);
@@ -257,11 +291,18 @@ fn the_impact_waits_for_the_blade_to_arrive() {
     });
 
     let sparks = |app: &mut App| {
-        app.world_mut().query::<&MortalStrikeSpark>().iter(app.world()).count()
+        app.world_mut()
+            .query::<&MortalStrikeSpark>()
+            .iter(app.world())
+            .count()
     };
 
     app.update();
-    assert_eq!(sparks(&mut app), 0, "no burst while the blade is still wound up");
+    assert_eq!(
+        sparks(&mut app),
+        0,
+        "no burst while the blade is still wound up"
+    );
 
     // The stroke's contact frame is `SwingStyle::MortalStrike.impact_at()`;
     // step past it and the burst must appear exactly once.
@@ -314,7 +355,11 @@ fn the_flourish_expires_without_leaking_entities() {
     for _ in 0..12 {
         app.update();
     }
-    let mid = app.world_mut().query::<&MortalStrikeSpark>().iter(app.world()).count();
+    let mid = app
+        .world_mut()
+        .query::<&MortalStrikeSpark>()
+        .iter(app.world())
+        .count();
     assert!(mid > 0, "the burst fired before the sweep to cleanup");
 
     for _ in 0..60 {
@@ -336,7 +381,11 @@ fn the_flourish_expires_without_leaking_entities() {
         .query::<&arenasim::states::play_match::MortalStrikeSpark>()
         .iter(app.world())
         .count();
-    assert_eq!((trails, flashes, sparks), (0, 0, 0), "the flourish must fully clean up");
+    assert_eq!(
+        (trails, flashes, sparks),
+        (0, 0, 0),
+        "the flourish must fully clean up"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +405,10 @@ fn the_body_stands_upright_between_swings() {
     app.update();
 
     let t = app.world().entity(body).get::<Transform>().unwrap();
-    assert!(t.rotation.angle_between(Quat::IDENTITY) < 1e-5, "upright at rest");
+    assert!(
+        t.rotation.angle_between(Quat::IDENTITY) < 1e-5,
+        "upright at rest"
+    );
     assert!(t.translation.z.abs() < 1e-5, "no step at rest");
 }
 
@@ -401,12 +453,26 @@ fn a_dying_unit_cedes_rotation_and_loses_its_step() {
         socket_state.last_s = 1.0;
     }
     app.update();
-    assert!(app.world().entity(body).get::<Transform>().unwrap().translation.z > 0.05);
+    assert!(
+        app.world()
+            .entity(body)
+            .get::<Transform>()
+            .unwrap()
+            .translation
+            .z
+            > 0.05
+    );
 
     // The unit dies mid-swing; the death fall sets its own rotation.
     let death_rotation = Quat::from_rotation_x(1.0);
-    app.world_mut().entity_mut(attacker).insert(DeathAnimation::new(Vec3::X));
-    app.world_mut().entity_mut(body).get_mut::<Transform>().unwrap().rotation = death_rotation;
+    app.world_mut()
+        .entity_mut(attacker)
+        .insert(DeathAnimation::new(Vec3::X));
+    app.world_mut()
+        .entity_mut(body)
+        .get_mut::<Transform>()
+        .unwrap()
+        .rotation = death_rotation;
     app.update();
 
     let t = app.world().entity(body).get::<Transform>().unwrap();
@@ -455,7 +521,10 @@ fn the_lean_plays_in_the_aim_plane_not_the_facing_plane() {
         "no side tilt relative to the aim; up-vector tipped to {tipped_up}"
     );
     // The weight-shift step drives TOWARD the victim, along the aim bearing.
-    assert!(t.translation.x > 0.05, "the step must be toward the +X victim");
+    assert!(
+        t.translation.x > 0.05,
+        "the step must be toward the +X victim"
+    );
     assert!(t.translation.z.abs() < 0.02, "not along the stale facing");
 }
 
@@ -480,8 +549,14 @@ fn a_squared_up_unit_leans_exactly_as_before() {
 
     let t = *app.world().entity(body).get::<Transform>().unwrap();
     assert!(t.rotation.angle_between(Quat::IDENTITY) > 0.1);
-    assert!(t.translation.x.abs() < 1e-5, "no lateral step when squared up");
-    assert!((t.translation.z - 0.18).abs() < 1e-4, "the legacy forward step");
+    assert!(
+        t.translation.x.abs() < 1e-5,
+        "no lateral step when squared up"
+    );
+    assert!(
+        (t.translation.z - 0.18).abs() < 1e-4,
+        "the legacy forward step"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -496,14 +571,24 @@ fn a_refused_heal_sheds_ash_and_consumes_its_marker() {
 
     let marker = app
         .world_mut()
-        .spawn(HealingRefused { target, refused_fraction: 0.35 })
+        .spawn(HealingRefused {
+            target,
+            refused_fraction: 0.35,
+        })
         .id();
 
     app.update();
 
-    let motes = app.world_mut().query::<&RefusedHealMote>().iter(app.world()).count();
+    let motes = app
+        .world_mut()
+        .query::<&RefusedHealMote>()
+        .iter(app.world())
+        .count();
     assert!(motes > 0, "a refused heal must shed visible ash");
-    assert!(app.world().get_entity(marker).is_err(), "the marker must be consumed");
+    assert!(
+        app.world().get_entity(marker).is_err(),
+        "the marker must be consumed"
+    );
 }
 
 #[test]
@@ -517,14 +602,23 @@ fn a_marker_for_a_despawned_target_is_still_consumed() {
 
     let marker = app
         .world_mut()
-        .spawn(HealingRefused { target, refused_fraction: 0.35 })
+        .spawn(HealingRefused {
+            target,
+            refused_fraction: 0.35,
+        })
         .id();
 
     app.update();
 
-    assert!(app.world().get_entity(marker).is_err(), "orphaned markers must be consumed");
+    assert!(
+        app.world().get_entity(marker).is_err(),
+        "orphaned markers must be consumed"
+    );
     assert_eq!(
-        app.world_mut().query::<&RefusedHealMote>().iter(app.world()).count(),
+        app.world_mut()
+            .query::<&RefusedHealMote>()
+            .iter(app.world())
+            .count(),
         0,
         "no ash without a target to shed it from"
     );
@@ -535,19 +629,36 @@ fn ash_expires() {
     let mut app = harness();
     app.add_systems(
         Update,
-        (spawn_heal_fracture, update_heal_fracture, cleanup_heal_fracture).chain(),
+        (
+            spawn_heal_fracture,
+            update_heal_fracture,
+            cleanup_heal_fracture,
+        )
+            .chain(),
     );
     let target = spawn_target(&mut app, 0.0);
-    app.world_mut().spawn(HealingRefused { target, refused_fraction: 0.8 });
+    app.world_mut().spawn(HealingRefused {
+        target,
+        refused_fraction: 0.8,
+    });
 
     app.update();
-    assert!(app.world_mut().query::<&RefusedHealMote>().iter(app.world()).count() > 0);
+    assert!(
+        app.world_mut()
+            .query::<&RefusedHealMote>()
+            .iter(app.world())
+            .count()
+            > 0
+    );
 
     for _ in 0..60 {
         app.update();
     }
     assert_eq!(
-        app.world_mut().query::<&RefusedHealMote>().iter(app.world()).count(),
+        app.world_mut()
+            .query::<&RefusedHealMote>()
+            .iter(app.world())
+            .count(),
         0,
         "ash must self-expire"
     );
@@ -568,7 +679,10 @@ fn mortal_strikes_magnitude_reports_its_refused_share() {
     // Aimed Shot carry, which is why the tell is keyed on the reduction rather
     // than on either ability.
     let refused = refused_fraction(100.0, 65.0).expect("a cut heal reports a refusal");
-    assert!((refused - 0.35).abs() < 1e-5, "expected 0.35, got {refused}");
+    assert!(
+        (refused - 0.35).abs() < 1e-5,
+        "expected 0.35, got {refused}"
+    );
 }
 
 #[test]

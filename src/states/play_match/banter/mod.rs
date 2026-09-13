@@ -46,11 +46,17 @@ mod test_fixtures {
     };
 
     pub(super) fn speaker(role: &str, class: ClassConstraint) -> BanterSpeaker {
-        BanterSpeaker { role: role.to_string(), class }
+        BanterSpeaker {
+            role: role.to_string(),
+            class,
+        }
     }
 
     pub(super) fn beat(role: &str, text: &str) -> BanterBeat {
-        BanterBeat { role: role.to_string(), text: text.to_string() }
+        BanterBeat {
+            role: role.to_string(),
+            text: text.to_string(),
+        }
     }
 
     /// A two-speaker exchange whose beats are tagged with `label`, so a test can

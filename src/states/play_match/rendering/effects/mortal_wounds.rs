@@ -18,9 +18,9 @@
 //! Registered only in `states/mod.rs`; headless spawns the `HealingRefused`
 //! markers and never reads them.
 
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
 
 // --- Tuning knobs -----------------------------------------------------------
 
@@ -121,8 +121,7 @@ pub fn spawn_heal_fracture(
                 let angle = j1 * std::f32::consts::TAU;
                 let radius = ASH_SPAWN_RADIUS_MIN + ASH_SPAWN_RADIUS_SPAN * j2;
                 let height = ASH_SPAWN_HEIGHT_MIN + ASH_SPAWN_HEIGHT_SPAN * j3;
-                let offset =
-                    Vec3::new(angle.cos() * radius, height, angle.sin() * radius);
+                let offset = Vec3::new(angle.cos() * radius, height, angle.sin() * radius);
                 let speed = ASH_SHED_SPEED * (0.5 + 0.8 * j2);
                 let life = ASH_LIFETIME * (0.75 + 0.5 * j3);
 
@@ -166,10 +165,7 @@ pub fn update_heal_fracture(
 }
 
 /// Cleanup (graphical-only): despawn spent motes.
-pub fn cleanup_heal_fracture(
-    mut commands: Commands,
-    motes: Query<(Entity, &RefusedHealMote)>,
-) {
+pub fn cleanup_heal_fracture(mut commands: Commands, motes: Query<(Entity, &RefusedHealMote)>) {
     for (entity, mote) in motes.iter() {
         if mote.lifetime <= 0.0 {
             commands.entity(entity).despawn();

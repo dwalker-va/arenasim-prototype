@@ -176,7 +176,8 @@ pub fn heal_cast_wisp_width(kind: HealCastKind) -> f32 {
 /// Rendered trail length of the `index`th wisp: the arc its head sweeps in
 /// one edge lifetime at the orbit's linear speed.
 pub fn heal_cast_wisp_length(index: u32) -> f32 {
-    TAU * HOLY_CAST_ORBIT_HZ * HEAL_CAST_WISP_ORBIT_RADIUS
+    TAU * HOLY_CAST_ORBIT_HZ
+        * HEAL_CAST_WISP_ORBIT_RADIUS
         * HEAL_CAST_WISP_LIFETIMES[index as usize % 3]
 }
 
@@ -357,10 +358,18 @@ pub fn spawn_heal_cast_glows(
         for side in [1.0_f32, -1.0] {
             // Per-rig materials: alphas are animated absolutely each frame,
             // so nothing outside this rig may share the handles.
-            let outer_material =
-                additive_material(&mut materials, glow_color(kind), 2.0, Some(assets.dot.clone()));
-            let core_material =
-                additive_material(&mut materials, glow_color(kind), 2.8, Some(assets.dot.clone()));
+            let outer_material = additive_material(
+                &mut materials,
+                glow_color(kind),
+                2.0,
+                Some(assets.dot.clone()),
+            );
+            let core_material = additive_material(
+                &mut materials,
+                glow_color(kind),
+                2.8,
+                Some(assets.dot.clone()),
+            );
 
             let rig = commands
                 .spawn((
@@ -410,7 +419,10 @@ pub fn spawn_heal_cast_glows(
                 parts.push(
                     commands
                         .spawn((
-                            HealCastPiece { role, base_alpha: alpha },
+                            HealCastPiece {
+                                role,
+                                base_alpha: alpha,
+                            },
                             Mesh3d(assets.quad.clone()),
                             MeshMaterial3d(material),
                             Transform::from_scale(Vec3::splat(1e-3)),
@@ -565,8 +577,7 @@ pub fn update_heal_cast_glows(
                             rig.burst_carry[ei] -= 1.0;
                             let i = rig.emitted;
                             rig.emitted = rig.emitted.wrapping_add(1);
-                            let seed =
-                                rig_entity.index().wrapping_add(i.wrapping_mul(0x85EB_CA6B));
+                            let seed = rig_entity.index().wrapping_add(i.wrapping_mul(0x85EB_CA6B));
                             // A tight directional jet: tilt the axis by a
                             // hashed angle within the ~2° spread cone.
                             let tilt = heal_jitter(seed) * NATURE_LAUNCH_SPREAD;
@@ -622,12 +633,10 @@ pub fn update_heal_cast_glows(
                 let alpha = piece.base_alpha * bloom * flare_alpha;
                 match piece.role {
                     HealCastPieceRole::GlowOuter => {
-                        part.scale =
-                            Vec3::splat((glow_sizes[0] * pulse * flare_scale).max(1e-3));
+                        part.scale = Vec3::splat((glow_sizes[0] * pulse * flare_scale).max(1e-3));
                     }
                     HealCastPieceRole::GlowCore => {
-                        part.scale =
-                            Vec3::splat((glow_sizes[1] * pulse * flare_scale).max(1e-3));
+                        part.scale = Vec3::splat((glow_sizes[1] * pulse * flare_scale).max(1e-3));
                     }
                     HealCastPieceRole::Wisp { index } => {
                         // The head orbits; the trail streams back along the
@@ -636,11 +645,7 @@ pub fn update_heal_cast_glows(
                         let tangent = heal_cast_wisp_tangent(index, age);
                         let length = heal_cast_wisp_length(index) * bloom;
                         part.translation = head - tangent * (length * 0.5);
-                        part.scale = Vec3::new(
-                            wisp_width * flare_scale,
-                            length.max(1e-3),
-                            1.0,
-                        );
+                        part.scale = Vec3::new(wisp_width * flare_scale, length.max(1e-3), 1.0);
                     }
                 }
                 if let Some(material) = materials.get_mut(&material.0) {
@@ -672,16 +677,17 @@ pub fn update_heal_cast_glows(
                         // The shockwave read: the ring EXPANDS as it fades.
                         let swell = 1.0 + NATURE_LAUNCH_RING_SWELL * (1.0 - k);
                         part.scale = Vec3::splat(
-                            (NATURE_LAUNCH_RING_SIZE * NATURE_LAUNCH_BURST_SCALE * swell
+                            (NATURE_LAUNCH_RING_SIZE
+                                * NATURE_LAUNCH_BURST_SCALE
+                                * swell
                                 * k.powf(0.35))
                             .max(1e-4),
                         );
                     }
                     HealCastBurstKind::GoldSpark => {
                         part.scale = Vec3::splat(
-                            (NATURE_LAUNCH_SPARK_SIZE * NATURE_LAUNCH_BURST_SCALE
-                                * k.powf(0.6))
-                            .max(1e-4),
+                            (NATURE_LAUNCH_SPARK_SIZE * NATURE_LAUNCH_BURST_SCALE * k.powf(0.6))
+                                .max(1e-4),
                         );
                     }
                 }
@@ -749,7 +755,12 @@ pub fn update_heal_cast_posture(
     time: Res<Time>,
     rigs: Query<&HealCastHand>,
     mut casters: Query<
-        (Entity, &mut HealCastPosture, &Children, Option<&DeathAnimation>),
+        (
+            Entity,
+            &mut HealCastPosture,
+            &Children,
+            Option<&DeathAnimation>,
+        ),
         With<Combatant>,
     >,
     mut bodies: Query<&mut Transform, With<VisualBody>>,
@@ -847,11 +858,19 @@ pub fn billboard_heal_cast_glows(
     >,
     mut leaves: Query<
         &mut Transform,
-        (With<HealCastLeaf>, Without<HealCastPiece>, Without<HealCastBurstMote>),
+        (
+            With<HealCastLeaf>,
+            Without<HealCastPiece>,
+            Without<HealCastBurstMote>,
+        ),
     >,
     mut bursts: Query<
         &mut Transform,
-        (With<HealCastBurstMote>, Without<HealCastPiece>, Without<HealCastLeaf>),
+        (
+            With<HealCastBurstMote>,
+            Without<HealCastPiece>,
+            Without<HealCastLeaf>,
+        ),
     >,
 ) {
     let Some(cam) = camera.iter().next() else {
@@ -873,8 +892,7 @@ pub fn billboard_heal_cast_glows(
             if let Ok((piece, mut part)) = pieces.get_mut(child) {
                 match piece.role {
                     HealCastPieceRole::Wisp { index } => {
-                        let tangent_world =
-                            parent_world * heal_cast_wisp_tangent(index, rig.age);
+                        let tangent_world = parent_world * heal_cast_wisp_tangent(index, rig.age);
                         let t_cam = cam.rotation.inverse() * tangent_world;
                         // Roll the quad's long (+Y) axis onto the tangent's
                         // projection in the billboard plane.

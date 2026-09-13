@@ -4,9 +4,9 @@
 //! Actual ability definitions are loaded from `assets/config/abilities.ron`
 //! via the `ability_config` module.
 
+use super::components::{ActiveAuras, AuraType, Combatant};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use super::components::{ActiveAuras, AuraType, Combatant};
 
 /// Spell schools - determines which spells share lockouts when interrupted.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
@@ -132,22 +132,22 @@ pub enum AbilityType {
     KidneyShot,
     PowerWordFortitude,
     Rend,
-    MortalStrike, // Warrior damage + healing reduction
-    Pummel,    // Warrior interrupt
-    BerserkerRage, // Warrior fear break + 10s fear immunity (horror bypasses it)
-    Kick,      // Rogue interrupt
+    MortalStrike,    // Warrior damage + healing reduction
+    Pummel,          // Warrior interrupt
+    BerserkerRage,   // Warrior fear break + 10s fear immunity (horror bypasses it)
+    Kick,            // Rogue interrupt
     CripplingPoison, // Rogue weapon poison: on-hit chance to slow (passive, not cast)
     // Warlock abilities
-    Corruption,     // Shadow DoT
-    Shadowbolt,     // Shadow projectile
-    Fear,           // Shadow CC - target flees, breaks on damage
-    Immolate,       // Fire direct damage + DoT
-    DrainLife,      // Shadow channel - damages target, heals caster
-    CurseOfAgony,   // Shadow DoT - 84 damage over 24s
-    CurseOfWeakness, // Shadow debuff - reduces target damage dealt
-    CurseOfTongues, // Shadow debuff - increases target cast time
+    Corruption,         // Shadow DoT
+    Shadowbolt,         // Shadow projectile
+    Fear,               // Shadow CC - target flees, breaks on damage
+    Immolate,           // Fire direct damage + DoT
+    DrainLife,          // Shadow channel - damages target, heals caster
+    CurseOfAgony,       // Shadow DoT - 84 damage over 24s
+    CurseOfWeakness,    // Shadow debuff - reduces target damage dealt
+    CurseOfTongues,     // Shadow debuff - increases target cast time
     UnstableAffliction, // Shadow DoT - dispel backlash applies Silence + Shadow damage
-    DeathCoil,      // Shadow instant - 3s horror (never breaks) + damage + self-heal, peel cooldown
+    DeathCoil, // Shadow instant - 3s horror (never breaks) + damage + self-heal, peel cooldown
     // Buff abilities
     ArcaneIntellect, // Mage buff - increases max mana
     BattleShout,     // Warrior buff - increases attack power
@@ -157,50 +157,50 @@ pub enum AbilityType {
     // Crowd Control abilities
     Polymorph, // Mage CC - transforms target into sheep, breaks on any damage
     // Dispel abilities
-    DispelMagic, // Priest - removes one magic debuff from ally
+    DispelMagic,   // Priest - removes one magic debuff from ally
     PsychicScream, // Priest - instant self-centered AoE fear, breaks on damage
-    ManaBurn, // Priest - cast-time Shadow spell that destroys mana on an enemy mana user
+    ManaBurn,      // Priest - cast-time Shadow spell that destroys mana on an enemy mana user
     // Paladin abilities
-    FlashOfLight,     // Paladin fast heal
-    HolyLight,        // Paladin big heal (2.5s cast)
-    HolyShock,        // Paladin dual-purpose: damage enemy OR heal ally
-    HammerOfJustice,  // Paladin 6s stun
-    PaladinCleanse,   // Paladin dispel magic
-    DevotionAura,     // Paladin team buff - reduces damage taken by 10%
-    DivineShield,     // Paladin bubble - damage immunity, purges debuffs, 50% damage penalty
+    FlashOfLight,    // Paladin fast heal
+    HolyLight,       // Paladin big heal (2.5s cast)
+    HolyShock,       // Paladin dual-purpose: damage enemy OR heal ally
+    HammerOfJustice, // Paladin 6s stun
+    PaladinCleanse,  // Paladin dispel magic
+    DevotionAura,    // Paladin team buff - reduces damage taken by 10%
+    DivineShield,    // Paladin bubble - damage immunity, purges debuffs, 50% damage penalty
     // Pet abilities (Felhunter)
-    SpellLock,        // Felhunter interrupt (instant, 30yd, 30s CD, 3s silence)
-    DevourMagic,      // Felhunter dispel (instant, 30yd, 8s CD, heals pet on success)
+    SpellLock,   // Felhunter interrupt (instant, 30yd, 30s CD, 3s silence)
+    DevourMagic, // Felhunter dispel (instant, 30yd, 8s CD, heals pet on success)
     // Hunter abilities
-    AimedShot,        // Hunter cast-time physical damage + healing reduction (35yd, 10s CD)
-    ArcaneShot,       // Hunter instant Arcane damage (35yd, 6s CD)
-    ConcussiveShot,   // Hunter instant slow (35yd, 12s CD)
-    SerpentSting,     // Hunter instant Nature DoT (35yd, no CD, pure DoT)
-    Disengage,        // Hunter backward leap (~15 yards, 25s CD, no range req)
-    FreezingTrap,     // Hunter trap — incapacitates first enemy (25s CD)
-    FrostTrap,        // Hunter trap — creates persistent slow zone (20s CD)
+    AimedShot,      // Hunter cast-time physical damage + healing reduction (35yd, 10s CD)
+    ArcaneShot,     // Hunter instant Arcane damage (35yd, 6s CD)
+    ConcussiveShot, // Hunter instant slow (35yd, 12s CD)
+    SerpentSting,   // Hunter instant Nature DoT (35yd, no CD, pure DoT)
+    Disengage,      // Hunter backward leap (~15 yards, 25s CD, no range req)
+    FreezingTrap,   // Hunter trap — incapacitates first enemy (25s CD)
+    FrostTrap,      // Hunter trap — creates persistent slow zone (20s CD)
     // Hunter pet abilities
-    SpiderWeb,        // Spider ranged root on target (45s CD)
-    BoarCharge,       // Boar gap closer + short stun (45s CD)
-    MastersCall,      // Bird removes movement impairments from friendly (45s CD)
+    SpiderWeb,   // Spider ranged root on target (45s CD)
+    BoarCharge,  // Boar gap closer + short stun (45s CD)
+    MastersCall, // Bird removes movement impairments from friendly (45s CD)
     // Strategic option abilities
-    DemoralizingShout,  // Warrior debuff - reduces enemy attack power
-    CommandingShout,    // Warrior buff - increases team max health
-    FrostArmor,         // Mage self-buff - procs slow on melee attackers
-    MageArmorSpell,     // Mage self-buff - increases mana regen
-    MoltenArmor,        // Mage self-buff - increases crit chance
+    DemoralizingShout,    // Warrior debuff - reduces enemy attack power
+    CommandingShout,      // Warrior buff - increases team max health
+    FrostArmor,           // Mage self-buff - procs slow on melee attackers
+    MageArmorSpell,       // Mage self-buff - increases mana regen
+    MoltenArmor,          // Mage self-buff - increases crit chance
     ShadowResistanceAura, // Paladin team aura - shadow resistance
-    ConcentrationAura,  // Paladin team aura - reduces interrupt lockout duration
+    ConcentrationAura,    // Paladin team aura - reduces interrupt lockout duration
     // Shaman abilities
-    LightningBolt,      // Shaman ranged Nature nuke (cast time)
-    FrostShock,         // Shaman instant Frost nuke + single-target slow
-    LesserHealingWave,  // Shaman fast direct heal
-    Purge,              // Shaman offensive dispel - removes one enemy buff
-    WindShear,          // Shaman ranged instant interrupt
-    AirTotem,           // Shaman Windfury Totem - empowers melee allies
-    WaterTotem,         // Shaman Healing Stream Totem - periodic ally heal
-    EarthTotem,         // Shaman Strength of Earth Totem - ally attack power
-    FireTotem,          // Shaman Flametongue Totem - ally spell power
+    LightningBolt,     // Shaman ranged Nature nuke (cast time)
+    FrostShock,        // Shaman instant Frost nuke + single-target slow
+    LesserHealingWave, // Shaman fast direct heal
+    Purge,             // Shaman offensive dispel - removes one enemy buff
+    WindShear,         // Shaman ranged instant interrupt
+    AirTotem,          // Shaman Windfury Totem - empowers melee allies
+    WaterTotem,        // Shaman Healing Stream Totem - periodic ally heal
+    EarthTotem,        // Shaman Strength of Earth Totem - ally attack power
+    FireTotem,         // Shaman Flametongue Totem - ally spell power
 }
 
 impl AbilityType {
@@ -254,7 +254,10 @@ pub fn is_silenced(caster: &super::components::Combatant, auras: Option<&ActiveA
         return false;
     }
     if let Some(auras) = auras {
-        auras.auras.iter().any(|aura| aura.effect_type == AuraType::Silence)
+        auras
+            .auras
+            .iter()
+            .any(|aura| aura.effect_type == AuraType::Silence)
     } else {
         false
     }

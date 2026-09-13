@@ -40,7 +40,11 @@ use std::process::Command;
 fn run_suite(relative: &str) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let suite = root.join(relative);
-    assert!(suite.is_file(), "missing fixture suite at {}", suite.display());
+    assert!(
+        suite.is_file(),
+        "missing fixture suite at {}",
+        suite.display()
+    );
 
     // A missing interpreter FAILS rather than skips. A suite that silently
     // does not run is the same species of false reassurance these scripts

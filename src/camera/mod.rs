@@ -1,7 +1,7 @@
 //! Camera system
 //!
 //! Handles camera setup and basic keyboard controls for viewing the 3D arena during matches.
-//! 
+//!
 //! **Current Features:**
 //! - Fixed isometric camera position
 //! - Keyboard-based zoom (+/- or numpad +/-)
@@ -23,22 +23,21 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, handle_escape_key)
-            .add_systems(
-                Update,
-                camera_controls.run_if(in_state(GameState::PlayMatch)),
-            );
+        app.add_systems(Update, handle_escape_key).add_systems(
+            Update,
+            camera_controls.run_if(in_state(GameState::PlayMatch)),
+        );
     }
 }
 
 /// Marker component for the main 3D game camera (used during PlayMatch).
-/// 
+///
 /// The camera is spawned in `setup_play_match` and despawned in `cleanup_play_match`.
 #[derive(Component)]
 pub struct MainCamera;
 
 /// Handle Back key to return to previous state/menu.
-/// 
+///
 /// Note: ConfigureMatch has its own Back handler to close modals first.
 fn handle_escape_key(
     keybindings: Res<crate::keybindings::Keybindings>,
@@ -47,7 +46,7 @@ fn handle_escape_key(
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     use crate::keybindings::GameAction;
-    
+
     if keybindings.action_just_pressed(GameAction::Back, &keyboard) {
         match current_state.get() {
             GameState::MainMenu => {
@@ -88,7 +87,7 @@ fn handle_escape_key(
 }
 
 /// Camera controls for the 3D arena view during PlayMatch.
-/// 
+///
 /// **Controls:**
 /// - Zoom in/out: Via keybindings (default: +/- or numpad +/-)
 /// - Pan camera: Via keybindings (default: WASD)
@@ -99,7 +98,7 @@ fn camera_controls(
     time: Res<Time>,
 ) {
     use crate::keybindings::GameAction;
-    
+
     let Ok(mut camera_transform) = camera_query.single_mut() else {
         return;
     };

@@ -2,10 +2,10 @@
 //!
 //! Handles camera modes, input, and positioning for the match view.
 
+use super::components::{ArenaCamera, CameraController, CameraMode, Combatant, Pet};
 use bevy::prelude::*;
 use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
-use super::components::{CameraController, CameraMode, ArenaCamera, Combatant, Pet};
 
 /// Exponential smoothing rate for the camera's look-at point (higher =
 /// snappier). ~6 gives a ~170ms time constant: deaths and follow-target
@@ -32,18 +32,21 @@ pub fn handle_camera_input(
 
     // Check if egui wants pointer input (hovering over UI)
     // Use try_ctx_mut to gracefully handle window close
-    let egui_wants_pointer = contexts.try_ctx_mut()
+    let egui_wants_pointer = contexts
+        .try_ctx_mut()
         .map(|ctx| ctx.wants_pointer_input())
         .unwrap_or(false);
 
     // Keyboard zoom controls
     if keybindings.action_pressed(GameAction::CameraZoomIn, &keyboard) {
         let zoom_speed = 30.0 * dt;
-        camera_controller.zoom_distance = (camera_controller.zoom_distance - zoom_speed).clamp(20.0, 220.0);
+        camera_controller.zoom_distance =
+            (camera_controller.zoom_distance - zoom_speed).clamp(20.0, 220.0);
     }
     if keybindings.action_pressed(GameAction::CameraZoomOut, &keyboard) {
         let zoom_speed = 30.0 * dt;
-        camera_controller.zoom_distance = (camera_controller.zoom_distance + zoom_speed).clamp(20.0, 220.0);
+        camera_controller.zoom_distance =
+            (camera_controller.zoom_distance + zoom_speed).clamp(20.0, 220.0);
     }
 
     // WASD camera panning - moves the target point
@@ -112,7 +115,8 @@ pub fn handle_camera_input(
     if !egui_wants_pointer {
         for event in mouse_wheel.read() {
             let zoom_delta = event.y * 3.0; // Zoom speed
-            camera_controller.zoom_distance = (camera_controller.zoom_distance - zoom_delta).clamp(20.0, 220.0);
+            camera_controller.zoom_distance =
+                (camera_controller.zoom_distance - zoom_delta).clamp(20.0, 220.0);
         }
     } else {
         // Drain events if egui wants pointer
@@ -142,10 +146,7 @@ pub fn handle_camera_input(
         // Only fire when the press was accepted (press_position set, i.e.,
         // not started over an egui panel) and the cursor is currently in
         // the window.
-        if let (Some(press), Some(release)) = (
-            camera_controller.press_position,
-            cursor_now,
-        ) {
+        if let (Some(press), Some(release)) = (camera_controller.press_position, cursor_now) {
             if super::selection::is_click_gesture(
                 press,
                 release,
@@ -166,7 +167,9 @@ pub fn handle_camera_input(
 
                 // Update yaw and pitch based on drag
                 camera_controller.yaw -= delta.x * 0.005; // Horizontal rotation
-                camera_controller.pitch = (camera_controller.pitch - delta.y * 0.005).clamp(0.1, 1.5); // Vertical rotation, clamped
+                camera_controller.pitch =
+                    (camera_controller.pitch - delta.y * 0.005).clamp(0.1, 1.5);
+                // Vertical rotation, clamped
             }
             camera_controller.last_mouse_pos = Some(event.position);
         }
@@ -224,7 +227,7 @@ pub fn update_camera_position(
             .unwrap_or_else(|| follow_center_target(&combatants));
         camera_controller.mode = CameraMode::Manual;
     }
-    
+
     // Apply keyboard movement to manual target, rotated by camera yaw
     // so that WASD moves relative to camera orientation
     let keyboard_movement = camera_controller.keyboard_movement;
@@ -242,7 +245,7 @@ pub fn update_camera_position(
 
         camera_controller.manual_target += rotated_movement;
     }
-    
+
     // Determine the desired look-at point based on camera mode
     let desired_target = match camera_controller.mode {
         CameraMode::FollowCenter => follow_center_target(&combatants),
@@ -273,12 +276,17 @@ pub fn update_camera_position(
     };
     camera_controller.smoothed_target = Some(target_point);
 
-
     // Calculate camera position based on spherical coordinates
-    let x = target_point.x + camera_controller.zoom_distance * camera_controller.pitch.sin() * camera_controller.yaw.sin();
+    let x = target_point.x
+        + camera_controller.zoom_distance
+            * camera_controller.pitch.sin()
+            * camera_controller.yaw.sin();
     let y = target_point.y + camera_controller.zoom_distance * camera_controller.pitch.cos();
-    let z = target_point.z + camera_controller.zoom_distance * camera_controller.pitch.sin() * camera_controller.yaw.cos();
-    
+    let z = target_point.z
+        + camera_controller.zoom_distance
+            * camera_controller.pitch.sin()
+            * camera_controller.yaw.cos();
+
     camera_transform.translation = Vec3::new(x, y, z);
     camera_transform.look_at(target_point, Vec3::Y);
 }
@@ -293,48 +301,51 @@ pub fn render_camera_controls(
     use crate::keybindings::GameAction;
 
     // Use try_ctx_mut to gracefully handle window close
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     // Position in bottom-right corner (to avoid overlapping with timeline panel on left)
     let panel_width = 260.0;
     egui::Window::new("Camera Controls")
-        .fixed_pos(egui::pos2(ctx.screen_rect().width() - panel_width - 10.0, ctx.screen_rect().height() - 160.0))
+        .fixed_pos(egui::pos2(
+            ctx.screen_rect().width() - panel_width - 10.0,
+            ctx.screen_rect().height() - 160.0,
+        ))
         .resizable(false)
         .collapsible(false)
         .title_bar(false)
-        .frame(egui::Frame::window(&ctx.style())
-            .fill(egui::Color32::from_black_alpha(150)) // Semi-transparent
-            .stroke(egui::Stroke::NONE)) // Remove border
+        .frame(
+            egui::Frame::window(&ctx.style())
+                .fill(egui::Color32::from_black_alpha(150)) // Semi-transparent
+                .stroke(egui::Stroke::NONE),
+        ) // Remove border
         .show(ctx, |ui| {
             ui.set_width(250.0);
-            
+
             // Current mode
             let mode_text = match camera_controller.mode {
                 CameraMode::FollowCenter => "Center".to_string(),
-                CameraMode::FollowCombatant(entity) => {
-                    match combatants.get(entity) {
-                        Ok((combatant, pet)) => {
-                            let name = pet.map_or_else(
-                                || combatant.class.name(),
-                                |p| p.pet_type.name(),
-                            );
-                            format!("Following Team {} {}", combatant.team, name)
-                        }
-                        Err(_) => "Follow Combatant".to_string(),
+                CameraMode::FollowCombatant(entity) => match combatants.get(entity) {
+                    Ok((combatant, pet)) => {
+                        let name =
+                            pet.map_or_else(|| combatant.class.name(), |p| p.pet_type.name());
+                        format!("Following Team {} {}", combatant.team, name)
                     }
-                }
+                    Err(_) => "Follow Combatant".to_string(),
+                },
                 CameraMode::Manual => "Manual".to_string(),
             };
-            
+
             ui.label(
                 egui::RichText::new(format!("Mode: {}", mode_text))
                     .size(12.0)
                     .color(egui::Color32::from_rgb(100, 200, 255))
-                    .strong()
+                    .strong(),
             );
-            
+
             ui.add_space(5.0);
-            
+
             // Controls - dynamically show actual keybindings
             ui.label(
                 egui::RichText::new(format!(
@@ -342,7 +353,7 @@ pub fn render_camera_controls(
                     keybindings.binding_display(GameAction::CycleCameraMode)
                 ))
                 .size(11.0)
-                .color(egui::Color32::from_rgb(200, 200, 200))
+                .color(egui::Color32::from_rgb(200, 200, 200)),
             );
             ui.label(
                 egui::RichText::new(format!(
@@ -350,18 +361,17 @@ pub fn render_camera_controls(
                     keybindings.binding_display(GameAction::ResetCamera)
                 ))
                 .size(11.0)
-                .color(egui::Color32::from_rgb(200, 200, 200))
+                .color(egui::Color32::from_rgb(200, 200, 200)),
             );
             ui.label(
                 egui::RichText::new("Mouse Wheel - Zoom")
                     .size(11.0)
-                    .color(egui::Color32::from_rgb(200, 200, 200))
+                    .color(egui::Color32::from_rgb(200, 200, 200)),
             );
             ui.label(
                 egui::RichText::new("Left Click Drag - Rotate/Pitch")
                     .size(11.0)
-                    .color(egui::Color32::from_rgb(200, 200, 200))
+                    .color(egui::Color32::from_rgb(200, 200, 200)),
             );
         });
 }
-

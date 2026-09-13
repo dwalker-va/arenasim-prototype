@@ -14,7 +14,9 @@ use super::super::banter_config::BanterConfig;
 use super::super::components::{Combatant, GameRng, Pet, SpeechBubble};
 use super::super::match_config::CharacterClass;
 use super::super::utils::spawn_speech_line;
-use super::resolver::{resolve_exchange, BanterCall, BanterCombatant, BanterLineup, ResolvedExchange};
+use super::resolver::{
+    resolve_exchange, BanterCall, BanterCombatant, BanterLineup, ResolvedExchange,
+};
 use super::watcher::CallWatcher;
 
 // =============================================================================
@@ -234,7 +236,9 @@ impl BanterScheduler {
 ///
 /// Private, and it stays private: a `pub fn` taking a `Query` is exactly what
 /// `tests/registration_audit.rs` flags as an unregistered system.
-fn team_rosters(combatants: &Query<(Entity, &Combatant), Without<Pet>>) -> [Vec<BanterCombatant>; 2] {
+fn team_rosters(
+    combatants: &Query<(Entity, &Combatant), Without<Pet>>,
+) -> [Vec<BanterCombatant>; 2] {
     let mut by_slot: [Vec<(u8, BanterCombatant)>; 2] = Default::default();
     for (entity, combatant) in combatants.iter() {
         // The DEAD are excluded, not merely flagged, because this list is
@@ -471,11 +475,11 @@ mod tests {
             vec![(ALEX, "Kill the Mage.".to_string())],
             "beat 0 speaks once the clock passes its start"
         );
-        assert!(step(&mut scheduler, 1.0).is_empty(), "beat 1 is not due yet");
-        assert_eq!(
-            step(&mut scheduler, 1.5),
-            vec![(BEA, "On it.".to_string())]
+        assert!(
+            step(&mut scheduler, 1.0).is_empty(),
+            "beat 1 is not due yet"
         );
+        assert_eq!(step(&mut scheduler, 1.5), vec![(BEA, "On it.".to_string())]);
         // ...and the queue is now empty rather than replaying.
         assert!(step(&mut scheduler, 10.0).is_empty());
     }
@@ -528,7 +532,10 @@ mod tests {
             &resolved(BanterContext::Opening, 1.0, &[(ALEX, "opening", 1.0)]),
         );
         assert_eq!(step(&mut scheduler, 1.0).len(), 1);
-        assert!(scheduler.queues[0].is_empty(), "the opening is fully played");
+        assert!(
+            scheduler.queues[0].is_empty(),
+            "the opening is fully played"
+        );
 
         scheduler.cancel_team(1);
         scheduler.queue_exchange(
@@ -753,7 +760,12 @@ mod tests {
         world.resource_mut::<CallWatcher>().pending.push(change);
     }
 
-    fn change(team: u8, new_call: Option<usize>, previous: LastSeenCall, gates: bool) -> CallChange {
+    fn change(
+        team: u8,
+        new_call: Option<usize>,
+        previous: LastSeenCall,
+        gates: bool,
+    ) -> CallChange {
         CallChange {
             team,
             new_call,

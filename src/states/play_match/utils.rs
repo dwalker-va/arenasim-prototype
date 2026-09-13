@@ -3,10 +3,12 @@
 //! This module contains utility functions used by multiple combat modules.
 //! Having them here breaks circular dependencies between combat_ai and combat_core.
 
-use bevy::prelude::*;
-use crate::combat::log::{CombatLog, CombatantId};
+use super::components::{
+    Combatant, FloatingTextState, Pet, PetType, PlayMatchEntity, SpeechBubble,
+};
 use super::match_config::{self, CharacterClass};
-use super::components::{FloatingTextState, SpeechBubble, PlayMatchEntity, PetType, Combatant, Pet};
+use crate::combat::log::{CombatLog, CombatantId};
+use bevy::prelude::*;
 
 /// Floating combat text horizontal spread (multiplied by -0.5 to +0.5 range)
 /// Adjust this to control how far left/right numbers can appear from their spawn point
@@ -88,7 +90,12 @@ pub fn log_id_from_parts(
 /// [`pet_combatant_id`] so its damage/CC attributes to its own registered id
 /// instead of an impossible `"<OwnerClass> #<raw slot>"`.
 pub fn combat_log_id_for(combatant: &Combatant, pet: Option<&Pet>) -> CombatantId {
-    log_id_from_parts(combatant.team, combatant.slot, combatant.class, pet.map(|p| p.pet_type))
+    log_id_from_parts(
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        pet.map(|p| p.pet_type),
+    )
 }
 
 /// Helper to log an ability cast with consistent formatting.
@@ -143,10 +150,10 @@ pub fn spawn_speech_line(commands: &mut Commands, owner: Entity, text: String, l
 /// This ensures multiple simultaneous FCT numbers don't overlap.
 pub fn get_next_fct_offset(state: &mut FloatingTextState) -> (f32, f32) {
     let (x_offset, y_offset) = match state.next_pattern_index {
-        0 => (0.0, 0.0),                                                    // Center
-        1 => (FCT_HORIZONTAL_SPREAD * 0.4, FCT_VERTICAL_SPREAD * 0.3),      // Right side, slight up
-        2 => (FCT_HORIZONTAL_SPREAD * -0.4, FCT_VERTICAL_SPREAD * 0.6),     // Left side, more up
-        _ => (0.0, 0.0),                                                    // Fallback to center
+        0 => (0.0, 0.0),                                                // Center
+        1 => (FCT_HORIZONTAL_SPREAD * 0.4, FCT_VERTICAL_SPREAD * 0.3),  // Right side, slight up
+        2 => (FCT_HORIZONTAL_SPREAD * -0.4, FCT_VERTICAL_SPREAD * 0.6), // Left side, more up
+        _ => (0.0, 0.0),                                                // Fallback to center
     };
 
     // Cycle to next pattern: 0 -> 1 -> 2 -> 0
@@ -171,7 +178,9 @@ pub fn is_incapacitating(aura_type: &super::components::AuraType) -> bool {
 /// Root does NOT count as incapacitation — it only prevents movement.
 pub fn is_incapacitated(auras: Option<&super::components::ActiveAuras>) -> bool {
     auras.map_or(false, |a| {
-        a.auras.iter().any(|aura| is_incapacitating(&aura.effect_type))
+        a.auras
+            .iter()
+            .any(|aura| is_incapacitating(&aura.effect_type))
     })
 }
 
@@ -217,9 +226,8 @@ mod tests {
         // lifetime, since a conversational beat has no fixed clock.
         let owner = Entity::from_raw(3);
         let line = "Kill the Priest first, then the pet.".to_string();
-        let mut world = world_after(|commands| {
-            spawn_speech_line(commands, owner, line.clone(), 4.5)
-        });
+        let mut world =
+            world_after(|commands| spawn_speech_line(commands, owner, line.clone(), 4.5));
 
         let mut q = world.query::<(&SpeechBubble, &PlayMatchEntity)>();
         let (bubble, _) = q.single(&world).expect("one bubble spawned");
@@ -230,7 +238,9 @@ mod tests {
 
     #[test]
     fn test_fct_offset_pattern_cycles() {
-        let mut state = FloatingTextState { next_pattern_index: 0 };
+        let mut state = FloatingTextState {
+            next_pattern_index: 0,
+        };
 
         // First call: center
         let (x, y) = get_next_fct_offset(&mut state);

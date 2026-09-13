@@ -1,13 +1,13 @@
 //! Damage application, absorb shields, and interrupt processing.
 
-use bevy::prelude::*;
-use crate::combat::log::{CombatLog, CombatLogEventType};
-use super::super::components::*;
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityDefinitions;
+use super::super::components::*;
 use super::super::constants::DIVINE_SHIELD_DAMAGE_PENALTY;
 use super::super::utils::combat_log_id_for;
 use super::get_lockout_duration_reduction;
+use crate::combat::log::{CombatLog, CombatLogEventType};
+use bevy::prelude::*;
 
 /// Roll a critical strike check. Returns true if the roll is a crit.
 pub fn roll_crit(crit_chance: f32, rng: &mut GameRng) -> bool {
@@ -58,7 +58,11 @@ pub fn apply_damage_with_absorb(
 
     // Check for damage immunity (Divine Shield) — blocks all incoming damage
     if let Some(ref auras) = active_auras {
-        if auras.auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity) {
+        if auras
+            .auras
+            .iter()
+            .any(|a| a.effect_type == AuraType::DamageImmunity)
+        {
             return (0.0, 0.0);
         }
     }
@@ -127,7 +131,9 @@ pub fn apply_damage_with_absorb(
             }
         }
         // Remove depleted absorb shields
-        auras.auras.retain(|a| !(a.effect_type == AuraType::Absorb && a.magnitude <= 0.0));
+        auras
+            .auras
+            .retain(|a| !(a.effect_type == AuraType::Absorb && a.magnitude <= 0.0));
     }
 
     // Apply remaining damage to health
@@ -146,12 +152,20 @@ pub fn apply_damage_with_absorb(
 
 /// Check if a combatant has an absorb shield active
 pub fn has_absorb_shield(auras: Option<&ActiveAuras>) -> bool {
-    auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::Absorb))
+    auras.map_or(false, |a| {
+        a.auras
+            .iter()
+            .any(|aura| aura.effect_type == AuraType::Absorb)
+    })
 }
 
 /// Check if a combatant has Weakened Soul (cannot receive Power Word: Shield)
 pub fn has_weakened_soul(auras: Option<&ActiveAuras>) -> bool {
-    auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::WeakenedSoul))
+    auras.map_or(false, |a| {
+        a.auras
+            .iter()
+            .any(|aura| aura.effect_type == AuraType::WeakenedSoul)
+    })
 }
 
 /// Get the physical damage reduction multiplier from DamageReduction auras on the attacker.
@@ -170,7 +184,11 @@ pub fn get_physical_damage_reduction(auras: Option<&ActiveAuras>) -> f32 {
 
 /// Check if a combatant has damage immunity (Divine Shield active)
 pub fn has_damage_immunity(auras: Option<&ActiveAuras>) -> bool {
-    auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::DamageImmunity))
+    auras.map_or(false, |a| {
+        a.auras
+            .iter()
+            .any(|aura| aura.effect_type == AuraType::DamageImmunity)
+    })
 }
 
 /// Returns the outgoing damage multiplier for the caster.
@@ -217,14 +235,22 @@ pub fn process_interrupts(
                 // Mark cast as interrupted
                 cast_state.interrupted = true;
                 cast_state.interrupted_display_time = 0.5; // Show "INTERRUPTED" for 0.5 seconds
-                commands.spawn((CastEnding { caster: interrupt.target, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
+                commands.spawn((
+                    CastEnding {
+                        caster: interrupt.target,
+                        kind: CastEndingKind::Interrupted,
+                    },
+                    PlayMatchEntity,
+                ));
 
                 // Mark the ability cast as interrupted in the combat log (for timeline visualization)
-                let interrupted_caster_id = combat_log_id_for(target_combatant, pet_query.get(interrupt.target).ok());
+                let interrupted_caster_id =
+                    combat_log_id_for(target_combatant, pet_query.get(interrupt.target).ok());
                 combat_log.mark_cast_interrupted(&interrupted_caster_id, interrupted_spell_name);
 
                 // Check for lockout duration reduction (Concentration Aura)
-                let lockout_reduction = get_lockout_duration_reduction(auras_query.get(interrupt.target).ok());
+                let lockout_reduction =
+                    get_lockout_duration_reduction(auras_query.get(interrupt.target).ok());
 
                 // Apply lockout and log
                 apply_interrupt_lockout(
@@ -246,7 +272,9 @@ pub fn process_interrupts(
 
         // Check if target is channeling (if not already interrupted a cast)
         if !interrupted {
-            if let Ok((mut channel_state, target_combatant)) = channeling_targets.get_mut(interrupt.target) {
+            if let Ok((mut channel_state, target_combatant)) =
+                channeling_targets.get_mut(interrupt.target)
+            {
                 // Don't interrupt if already interrupted
                 if !channel_state.interrupted {
                     // Get the spell school of the interrupted channel
@@ -257,14 +285,23 @@ pub fn process_interrupts(
                     // Mark channel as interrupted
                     channel_state.interrupted = true;
                     channel_state.interrupted_display_time = 0.5; // Show "INTERRUPTED" for 0.5 seconds
-                    commands.spawn((CastEnding { caster: interrupt.target, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
+                    commands.spawn((
+                        CastEnding {
+                            caster: interrupt.target,
+                            kind: CastEndingKind::Interrupted,
+                        },
+                        PlayMatchEntity,
+                    ));
 
                     // Mark the ability as interrupted in the combat log (for timeline visualization)
-                    let interrupted_caster_id = combat_log_id_for(target_combatant, pet_query.get(interrupt.target).ok());
-                    combat_log.mark_cast_interrupted(&interrupted_caster_id, interrupted_spell_name);
+                    let interrupted_caster_id =
+                        combat_log_id_for(target_combatant, pet_query.get(interrupt.target).ok());
+                    combat_log
+                        .mark_cast_interrupted(&interrupted_caster_id, interrupted_spell_name);
 
                     // Check for lockout duration reduction (Concentration Aura)
-                    let lockout_reduction = get_lockout_duration_reduction(auras_query.get(interrupt.target).ok());
+                    let lockout_reduction =
+                        get_lockout_duration_reduction(auras_query.get(interrupt.target).ok());
 
                     // Apply lockout and log
                     apply_interrupt_lockout(

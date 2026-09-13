@@ -12,8 +12,8 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
-use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::abilities::AbilityType;
+use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
     Combatant, CrescentFlare, InstantAbilityFired, SwingStyle, VisualBody, WeaponHand, WeaponKind,
     WeaponSocket,
@@ -313,7 +313,9 @@ fn the_fan_sweeps_across_the_casters_breadth() {
 
         let xs: Vec<f32> = {
             let mut q = h.app.world_mut().query::<(&CrescentFlare, &Transform)>();
-            q.iter(h.app.world()).map(|(_, t)| t.translation.x).collect()
+            q.iter(h.app.world())
+                .map(|(_, t)| t.translation.x)
+                .collect()
         };
         let lo = xs.iter().cloned().fold(f32::INFINITY, f32::min);
         let hi = xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -325,7 +327,10 @@ fn the_fan_sweeps_across_the_casters_breadth() {
         );
         // And it must stay a slash rather than becoming two separate effects
         // either side of the unit.
-        assert!(span < 3.0, "{ability:?}'s fan spans {span}yd — too scattered");
+        assert!(
+            span < 3.0,
+            "{ability:?}'s fan spans {span}yd — too scattered"
+        );
     }
 }
 
@@ -350,7 +355,9 @@ fn the_fan_follows_the_aim_not_the_world_axes() {
 
     let zs: Vec<f32> = {
         let mut q = h.app.world_mut().query::<(&CrescentFlare, &Transform)>();
-        q.iter(h.app.world()).map(|(_, t)| t.translation.z).collect()
+        q.iter(h.app.world())
+            .map(|(_, t)| t.translation.z)
+            .collect()
     };
     let span = zs.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
         - zs.iter().cloned().fold(f32::INFINITY, f32::min);
@@ -482,7 +489,10 @@ fn cheap_shots_halo_is_a_ring_not_a_line() {
             - ps.iter().map(f).fold(f32::INFINITY, f32::min)
     };
     assert!(span(|p| p.x) > 1.0, "no width: {ps:?}");
-    assert!(span(|p| p.z) > 1.0, "no depth — the halo is a flat line: {ps:?}");
+    assert!(
+        span(|p| p.z) > 1.0,
+        "no depth — the halo is a flat line: {ps:?}"
+    );
     // Tilted, so it reads as a ring rather than a flat disc from the camera.
     assert!(span(|p| p.y) > 0.3, "the halo is not tilted: {ps:?}");
 }
@@ -494,7 +504,10 @@ fn crescents_expire_without_leaking() {
     let victim = h.spawn_victim();
     h.fire(rogue, victim, AbilityType::CheapShot);
     h.tick(1);
-    assert!(h.crescents() > 0, "guard: the drain must not pass vacuously");
+    assert!(
+        h.crescents() > 0,
+        "guard: the drain must not pass vacuously"
+    );
 
     // Past the last crescent's delay plus its lifetime.
     h.tick(30);

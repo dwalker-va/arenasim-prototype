@@ -5,16 +5,16 @@
 //! - Ability decisions (class-specific AI for using abilities)
 //! - Interrupt decisions (when to interrupt enemy casts)
 
-use bevy::prelude::*;
-use bevy::ecs::system::SystemParam;
-use bevy_egui::egui;
-use crate::combat::log::CombatLog;
-use super::match_config;
-use super::components::*;
 use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
-use super::utils::{combatant_id, combat_log_id_for, get_next_fct_offset, log_ability_use};
 use super::class_ai;
+use super::components::*;
+use super::match_config;
+use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset, log_ability_use};
+use crate::combat::log::CombatLog;
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
+use bevy_egui::egui;
 
 /// Bundled extra params for `decide_abilities`, keeping it within Bevy's
 /// 16-argument system-function limit. Holds the victory-celebration guard and
@@ -52,7 +52,11 @@ pub fn acquire_targets(
         .iter()
         .filter_map(|(entity, _, _, auras)| {
             if let Some(active) = auras {
-                if active.auras.iter().any(|a| a.effect_type == AuraType::ShadowSight) {
+                if active
+                    .auras
+                    .iter()
+                    .any(|a| a.effect_type == AuraType::ShadowSight)
+                {
                     return Some(entity);
                 }
             }
@@ -62,8 +66,26 @@ pub fn acquire_targets(
 
     // Build list of all alive combatants with their info
     // Tuple: (entity, position, stealthed, has_shadow_sight, class, current_health, is_immune, is_pet)
-    let mut team1_combatants: Vec<(Entity, Vec3, bool, bool, match_config::CharacterClass, f32, bool, bool)> = Vec::new();
-    let mut team2_combatants: Vec<(Entity, Vec3, bool, bool, match_config::CharacterClass, f32, bool, bool)> = Vec::new();
+    let mut team1_combatants: Vec<(
+        Entity,
+        Vec3,
+        bool,
+        bool,
+        match_config::CharacterClass,
+        f32,
+        bool,
+        bool,
+    )> = Vec::new();
+    let mut team2_combatants: Vec<(
+        Entity,
+        Vec3,
+        bool,
+        bool,
+        match_config::CharacterClass,
+        f32,
+        bool,
+        bool,
+    )> = Vec::new();
 
     // Collect active auras for CC checking
     let active_auras_map: std::collections::HashMap<Entity, Vec<Aura>> = combatants
@@ -81,14 +103,36 @@ pub fn acquire_targets(
         let has_shadow_sight = shadow_sight_holders.contains(&entity);
         let is_immune = active_auras_map
             .get(&entity)
-            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity))
+            .map(|auras| {
+                auras
+                    .iter()
+                    .any(|a| a.effect_type == AuraType::DamageImmunity)
+            })
             .unwrap_or(false);
         let is_pet = pet_query.get(entity).is_ok();
 
         if c.team == 1 {
-            team1_combatants.push((entity, transform.translation, c.stealthed, has_shadow_sight, c.class, c.current_health, is_immune, is_pet));
+            team1_combatants.push((
+                entity,
+                transform.translation,
+                c.stealthed,
+                has_shadow_sight,
+                c.class,
+                c.current_health,
+                is_immune,
+                is_pet,
+            ));
         } else {
-            team2_combatants.push((entity, transform.translation, c.stealthed, has_shadow_sight, c.class, c.current_health, is_immune, is_pet));
+            team2_combatants.push((
+                entity,
+                transform.translation,
+                c.stealthed,
+                has_shadow_sight,
+                c.class,
+                c.current_health,
+                is_immune,
+                is_pet,
+            ));
         }
     }
 
@@ -98,10 +142,8 @@ pub fn acquire_targets(
     // would then put slot 1 first, so kill_target=Some(0) would resolve to the
     // wrong combatant. Pets have slot >= PET_SLOT_BASE (10+), so they sort after
     // primaries naturally. Look up slot per entity from the live combatants query.
-    let slot_lookup: std::collections::HashMap<Entity, u8> = combatants
-        .iter()
-        .map(|(e, c, _, _)| (e, c.slot))
-        .collect();
+    let slot_lookup: std::collections::HashMap<Entity, u8> =
+        combatants.iter().map(|(e, c, _, _)| (e, c.slot)).collect();
     team1_combatants.sort_by_key(|(entity, _, _, _, _, _, _, _)| {
         slot_lookup.get(entity).copied().unwrap_or(u8::MAX)
     });
@@ -112,10 +154,14 @@ pub fn acquire_targets(
     // Build pet-filtered lists for config index lookups (kill_target, cc_target).
     // Config indices are 0-based slot indices into primary combatants only.
     // The full lists (including pets) are kept for nearest-enemy fallback targeting.
-    let team1_primary: Vec<_> = team1_combatants.iter()
-        .filter(|(_, _, _, _, _, _, _, is_pet)| !is_pet).collect();
-    let team2_primary: Vec<_> = team2_combatants.iter()
-        .filter(|(_, _, _, _, _, _, _, is_pet)| !is_pet).collect();
+    let team1_primary: Vec<_> = team1_combatants
+        .iter()
+        .filter(|(_, _, _, _, _, _, _, is_pet)| !is_pet)
+        .collect();
+    let team2_primary: Vec<_> = team2_combatants
+        .iter()
+        .filter(|(_, _, _, _, _, _, _, is_pet)| !is_pet)
+        .collect();
 
     // For each combatant, ensure they have a valid target
     for (entity, mut combatant, transform, _) in combatants.iter_mut() {
@@ -143,11 +189,22 @@ pub fn acquire_targets(
         let i_have_shadow_sight = shadow_sight_holders.contains(&entity);
 
         // Get enemy team combatants and target priorities
-        let (enemy_combatants, enemy_primary, kill_target_index, cc_target_index) = if combatant.team == 1 {
-            (&team2_combatants, &team2_primary, config.team1_kill_target, config.team1_cc_target)
-        } else {
-            (&team1_combatants, &team1_primary, config.team2_kill_target, config.team2_cc_target)
-        };
+        let (enemy_combatants, enemy_primary, kill_target_index, cc_target_index) =
+            if combatant.team == 1 {
+                (
+                    &team2_combatants,
+                    &team2_primary,
+                    config.team1_kill_target,
+                    config.team1_cc_target,
+                )
+            } else {
+                (
+                    &team1_combatants,
+                    &team1_primary,
+                    config.team2_kill_target,
+                    config.team2_cc_target,
+                )
+            };
 
         // Visibility check: can see enemy if:
         // 1. Enemy is not stealthed, OR
@@ -158,12 +215,17 @@ pub fn acquire_targets(
         };
 
         // Check if current target is still valid (alive, on enemy team, visible, and not immune)
-        let target_valid = combatant.target.and_then(|target_entity| {
-            enemy_combatants
-                .iter()
-                .find(|(e, _, _, _, _, _, _, _)| *e == target_entity)
-                .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| can_see(*stealthed, *enemy_ss) && !immune)
-        }).is_some();
+        let target_valid = combatant
+            .target
+            .and_then(|target_entity| {
+                enemy_combatants
+                    .iter()
+                    .find(|(e, _, _, _, _, _, _, _)| *e == target_entity)
+                    .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| {
+                        can_see(*stealthed, *enemy_ss) && !immune
+                    })
+            })
+            .is_some();
 
         // If no valid target, acquire a new one
         if !target_valid {
@@ -172,7 +234,9 @@ pub fn acquire_targets(
             let kill_target = if let Some(index) = kill_target_index {
                 enemy_primary
                     .get(index)
-                    .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| can_see(*stealthed, *enemy_ss) && !immune)
+                    .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| {
+                        can_see(*stealthed, *enemy_ss) && !immune
+                    })
                     .map(|(entity, _, _, _, _, _, _, _)| *entity)
             } else {
                 None
@@ -189,7 +253,6 @@ pub fn acquire_targets(
             // exists, `plan.kill_target` stays producer-only (the step-2
             // provable-no-op shape).
 
-
             if let Some(priority_target) = kill_target {
                 // Use the kill target
                 combatant.target = Some(priority_target);
@@ -199,21 +262,33 @@ pub fn acquire_targets(
                 let my_pos = transform.translation;
                 let visible_enemies: Vec<_> = enemy_combatants
                     .iter()
-                    .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| can_see(*stealthed, *enemy_ss) && !immune)
+                    .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| {
+                        can_see(*stealthed, *enemy_ss) && !immune
+                    })
                     .collect();
 
                 // Try non-pet enemies first, fall back to all visible if none
-                let nearest_primary = visible_enemies.iter()
+                let nearest_primary = visible_enemies
+                    .iter()
                     .filter(|(_, _, _, _, _, _, _, is_pet)| !is_pet)
-                    .min_by(|(_, pos_a, _, _, _, _, _, _), (_, pos_b, _, _, _, _, _, _)| {
-                        my_pos.distance(*pos_a).partial_cmp(&my_pos.distance(*pos_b)).unwrap()
-                    });
+                    .min_by(
+                        |(_, pos_a, _, _, _, _, _, _), (_, pos_b, _, _, _, _, _, _)| {
+                            my_pos
+                                .distance(*pos_a)
+                                .partial_cmp(&my_pos.distance(*pos_b))
+                                .unwrap()
+                        },
+                    );
 
                 let nearest_enemy = nearest_primary.or_else(|| {
-                    visible_enemies.iter()
-                        .min_by(|(_, pos_a, _, _, _, _, _, _), (_, pos_b, _, _, _, _, _, _)| {
-                            my_pos.distance(*pos_a).partial_cmp(&my_pos.distance(*pos_b)).unwrap()
-                        })
+                    visible_enemies.iter().min_by(
+                        |(_, pos_a, _, _, _, _, _, _), (_, pos_b, _, _, _, _, _, _)| {
+                            my_pos
+                                .distance(*pos_a)
+                                .partial_cmp(&my_pos.distance(*pos_b))
+                                .unwrap()
+                        },
+                    )
                 });
 
                 combatant.target = nearest_enemy.map(|(entity, _, _, _, _, _, _, _)| *entity);
@@ -229,8 +304,13 @@ pub fn acquire_targets(
                 && decision_trace.current_sim_time - combatant.last_target_swap_time
                     < movement_config.melee.swap_hysteresis;
             if !swap_sticky {
-                if let Some((kt_entity, _, stealthed, enemy_ss, _, _, immune, _)) = enemy_primary.get(index) {
-                    if can_see(*stealthed, *enemy_ss) && !immune && combatant.target != Some(*kt_entity) {
+                if let Some((kt_entity, _, stealthed, enemy_ss, _, _, immune, _)) =
+                    enemy_primary.get(index)
+                {
+                    if can_see(*stealthed, *enemy_ss)
+                        && !immune
+                        && combatant.target != Some(*kt_entity)
+                    {
                         combatant.target = Some(*kt_entity);
                     }
                 }
@@ -297,12 +377,17 @@ pub fn acquire_targets(
         // Separate from kill target - use for CC abilities to create outnumbering situations
 
         // Check if current CC target is still valid (not immune)
-        let cc_target_valid = combatant.cc_target.and_then(|cc_target_entity| {
-            enemy_combatants
-                .iter()
-                .find(|(e, _, _, _, _, _, _, _)| *e == cc_target_entity)
-                .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| can_see(*stealthed, *enemy_ss) && !immune)
-        }).is_some();
+        let cc_target_valid = combatant
+            .cc_target
+            .and_then(|cc_target_entity| {
+                enemy_combatants
+                    .iter()
+                    .find(|(e, _, _, _, _, _, _, _)| *e == cc_target_entity)
+                    .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| {
+                        can_see(*stealthed, *enemy_ss) && !immune
+                    })
+            })
+            .is_some();
 
         if !cc_target_valid {
             // Priority 1: Use explicitly configured CC target (if visible and not immune)
@@ -310,7 +395,9 @@ pub fn acquire_targets(
             let explicit_cc_target = if let Some(index) = cc_target_index {
                 enemy_primary
                     .get(index)
-                    .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| can_see(*stealthed, *enemy_ss) && !immune)
+                    .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| {
+                        can_see(*stealthed, *enemy_ss) && !immune
+                    })
                     .map(|(entity, _, _, _, _, _, _, _)| *entity)
             } else {
                 None
@@ -332,8 +419,13 @@ pub fn acquire_targets(
         } else if let Some(index) = cc_target_index {
             // Current CC target is valid, but check if configured CC target has become
             // available (e.g., broke stealth) and should take priority
-            if let Some((cc_entity, _, stealthed, enemy_ss, _, _, immune, _)) = enemy_primary.get(index) {
-                if can_see(*stealthed, *enemy_ss) && !immune && combatant.cc_target != Some(*cc_entity) {
+            if let Some((cc_entity, _, stealthed, enemy_ss, _, _, immune, _)) =
+                enemy_primary.get(index)
+            {
+                if can_see(*stealthed, *enemy_ss)
+                    && !immune
+                    && combatant.cc_target != Some(*cc_entity)
+                {
                     combatant.cc_target = Some(*cc_entity);
                 }
             }
@@ -368,7 +460,8 @@ pub fn acquire_targets(
                 mana_pct,
                 my_pos,
             );
-            let mut tbuilder = decision_trace.start_target_acquisition(actor_view, prev_target, prev_cc_target);
+            let mut tbuilder =
+                decision_trace.start_target_acquisition(actor_view, prev_target, prev_cc_target);
 
             // Populate candidates from the visible enemy set. Chosen = new_target;
             // all other alive non-pet enemies are Rejected{LowerScoreThanChosen}
@@ -376,13 +469,25 @@ pub fn acquire_targets(
             // priority for primary targeting).
             let chosen = combatant.target;
             let chosen_pos = chosen
-                .and_then(|t| enemy_combatants.iter().find(|(e, _, _, _, _, _, _, _)| *e == t))
+                .and_then(|t| {
+                    enemy_combatants
+                        .iter()
+                        .find(|(e, _, _, _, _, _, _, _)| *e == t)
+                })
                 .map(|(_, p, _, _, _, _, _, _)| *p);
             let chosen_distance = chosen_pos.map(|p| my_pos.distance(p));
             let chosen_score = chosen_distance.map(|d| -(d as i32)).unwrap_or(0);
 
-            for (enemy_entity, enemy_pos, stealthed, enemy_ss, enemy_class, enemy_hp, enemy_immune, is_pet) in
-                enemy_combatants.iter()
+            for (
+                enemy_entity,
+                enemy_pos,
+                stealthed,
+                enemy_ss,
+                enemy_class,
+                enemy_hp,
+                enemy_immune,
+                is_pet,
+            ) in enemy_combatants.iter()
             {
                 if *is_pet || *enemy_hp <= 0.0 {
                     continue;
@@ -390,7 +495,13 @@ pub fn acquire_targets(
                 let distance = my_pos.distance(*enemy_pos);
                 let score = -(distance as i32);
                 if Some(*enemy_entity) == chosen {
-                    tbuilder.score(*enemy_entity, *enemy_class, score, CandidateStatus::Chosen, None);
+                    tbuilder.score(
+                        *enemy_entity,
+                        *enemy_class,
+                        score,
+                        CandidateStatus::Chosen,
+                        None,
+                    );
                 } else if *enemy_immune {
                     tbuilder.score(
                         *enemy_entity,
@@ -435,7 +546,16 @@ pub fn acquire_targets(
 /// Special case: If kill_target is a healer, we INVERT healer priority.
 /// When killing the healer, we want to CC the DPS to prevent them from peeling.
 fn select_cc_target_heuristic(
-    enemy_combatants: &[(Entity, Vec3, bool, bool, match_config::CharacterClass, f32, bool, bool)],
+    enemy_combatants: &[(
+        Entity,
+        Vec3,
+        bool,
+        bool,
+        match_config::CharacterClass,
+        f32,
+        bool,
+        bool,
+    )],
     kill_target: Option<Entity>,
     active_auras_map: &std::collections::HashMap<Entity, Vec<Aura>>,
     can_see: &impl Fn(bool, bool) -> bool,
@@ -454,7 +574,9 @@ fn select_cc_target_heuristic(
     // Pets are excluded — CC on a pet is wasted
     let mut scored_targets: Vec<(Entity, i32)> = enemy_combatants
         .iter()
-        .filter(|(_, _, stealthed, enemy_ss, _, _, immune, is_pet)| can_see(*stealthed, *enemy_ss) && !immune && !is_pet)
+        .filter(|(_, _, stealthed, enemy_ss, _, _, immune, is_pet)| {
+            can_see(*stealthed, *enemy_ss) && !immune && !is_pet
+        })
         .filter(|(entity, _, _, _, _, _, _, _)| !is_entity_ccd(*entity, active_auras_map))
         .map(|(entity, _, _, _, class, current_health, _, _)| {
             let mut score = 0i32;
@@ -488,15 +610,17 @@ fn select_cc_target_heuristic(
         .collect();
 
     // Sort by score descending, then by entity index for determinism
-    scored_targets.sort_by(|(e1, s1), (e2, s2)| {
-        s2.cmp(s1).then_with(|| e1.index().cmp(&e2.index()))
-    });
+    scored_targets
+        .sort_by(|(e1, s1), (e2, s2)| s2.cmp(s1).then_with(|| e1.index().cmp(&e2.index())));
 
     scored_targets.first().map(|(entity, _)| *entity)
 }
 
 /// Check if an entity is currently CC'd (Stun, Fear, Root, or Polymorph).
-fn is_entity_ccd(entity: Entity, active_auras_map: &std::collections::HashMap<Entity, Vec<Aura>>) -> bool {
+fn is_entity_ccd(
+    entity: Entity,
+    active_auras_map: &std::collections::HashMap<Entity, Vec<Aura>>,
+) -> bool {
     active_auras_map
         .get(&entity)
         .map(|auras| {
@@ -517,9 +641,37 @@ pub fn decide_abilities(
     countdown: Res<MatchCountdown>,
     time: Res<Time>,
     movement_config: Res<crate::states::play_match::movement_config::MovementConfig>,
-    mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>, Option<&ChargingState>, Option<&DisengagingState>), (Without<CastingState>, Without<ChannelingState>)>,
-    casting_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>, &CastingState), With<CastingState>>,
-    channeling_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>, &ChannelingState), (With<ChannelingState>, Without<CastingState>)>,
+    mut combatants: Query<
+        (
+            Entity,
+            &mut Combatant,
+            &Transform,
+            Option<&mut ActiveAuras>,
+            Option<&ChargingState>,
+            Option<&DisengagingState>,
+        ),
+        (Without<CastingState>, Without<ChannelingState>),
+    >,
+    casting_auras: Query<
+        (
+            Entity,
+            &Combatant,
+            &Transform,
+            Option<&ActiveAuras>,
+            &CastingState,
+        ),
+        With<CastingState>,
+    >,
+    channeling_auras: Query<
+        (
+            Entity,
+            &Combatant,
+            &Transform,
+            Option<&ActiveAuras>,
+            &ChannelingState,
+        ),
+        (With<ChannelingState>, Without<CastingState>),
+    >,
     dr_tracker_query: Query<(Entity, &DRTracker)>,
     // Posture state + standing directive read-back (movement AI). One query
     // for the healer (HealerPosture), DPS-kiter (KitePosture), and Warrior
@@ -550,8 +702,8 @@ pub fn decide_abilities(
     let mut totem_durations: std::collections::BTreeMap<Entity, [f32; 4]> =
         std::collections::BTreeMap::new();
     for totem in extras.totems.iter() {
-        let slot = &mut totem_durations.entry(totem.owner).or_insert([0.0; 4])
-            [totem.element.index()];
+        let slot =
+            &mut totem_durations.entry(totem.owner).or_insert([0.0; 4])[totem.element.index()];
         if totem.duration_remaining > *slot {
             *slot = totem.duration_remaining;
         }
@@ -583,19 +735,23 @@ pub fn decide_abilities(
 
     // Track targets that have been shielded THIS FRAME to prevent same-frame double-shielding
     // This handles the case where multiple Priests try to shield the same target before AuraPending is processed
-    let mut shielded_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+    let mut shielded_this_frame: std::collections::HashSet<Entity> =
+        std::collections::HashSet::new();
 
     // Track targets that have been fortified THIS FRAME to prevent same-frame double-buffing
     // This handles the case where multiple Priests try to buff the same target before AuraPending is processed
-    let mut fortified_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+    let mut fortified_this_frame: std::collections::HashSet<Entity> =
+        std::collections::HashSet::new();
 
     // Track targets that have received Battle Shout THIS FRAME to prevent duplicate buffs
     // when multiple Warriors cast Battle Shout before AuraPending is processed
-    let mut battle_shouted_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+    let mut battle_shouted_this_frame: std::collections::HashSet<Entity> =
+        std::collections::HashSet::new();
 
     // Track targets that have received a Paladin aura THIS FRAME to prevent duplicate buffs
     // when multiple Paladins cast their aura before AuraPending is processed
-    let mut paladin_aura_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+    let mut paladin_aura_this_frame: std::collections::HashSet<Entity> =
+        std::collections::HashSet::new();
 
     // Queue for Frost Nova damage
     let mut frost_nova_damage: Vec<class_ai::QueuedAoeDamage> = Vec::new();
@@ -627,7 +783,11 @@ pub fn decide_abilities(
         for (cc_target, cc_aura) in same_frame_cc_queue.drain(..) {
             let is_cc = matches!(
                 cc_aura.effect_type,
-                AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph | AuraType::Incapacitate
+                AuraType::Fear
+                    | AuraType::Stun
+                    | AuraType::Root
+                    | AuraType::Polymorph
+                    | AuraType::Incapacitate
             );
             if is_cc && unstoppable.contains(&cc_target) {
                 continue; // real path will reject it as "Immune (charging)"
@@ -647,10 +807,13 @@ pub fn decide_abilities(
         // WoW Mechanic: Cannot use abilities while stunned, feared, or polymorphed.
         // Read from the per-frame snapshot (not live `auras`) so that instant CCs
         // landed earlier this frame by other class AIs are observed here.
-        let is_incapacitated = snapshot.active_auras
+        let is_incapacitated = snapshot
+            .active_auras
             .get(&entity)
             .map(|auras_slice| {
-                auras_slice.iter().any(|a| super::utils::is_incapacitating(&a.effect_type))
+                auras_slice
+                    .iter()
+                    .any(|a| super::utils::is_incapacitating(&a.effect_type))
             })
             .unwrap_or(false);
 
@@ -719,7 +882,7 @@ pub fn decide_abilities(
         if is_incapacitated {
             continue;
         }
-        
+
         let my_pos = transform.translation;
 
         let ctx = snapshot.context_for(entity);
@@ -741,21 +904,25 @@ pub fn decide_abilities(
                 // `combatants` query filter, so KITE exit can lag one GCD — an
                 // accepted pilot simplification.
                 if countdown.gates_opened {
-                    if let Ok((_healer, mage_posture, directive, _reset)) = posture_movement.get_mut(entity) {
+                    if let Ok((_healer, mage_posture, directive, _reset)) =
+                        posture_movement.get_mut(entity)
+                    {
                         // Mage: aura-gated KITE (a melee enemy it rooted/slowed).
                         let cfg = &movement_config.mage;
                         let entry = class_ai::dps_postures::mage_kite_entry(&ctx, entity, my_pos);
-                        let sustain =
-                            class_ai::dps_postures::mage_kite_sustain(&ctx, entity, my_pos, cfg.range_band_max);
+                        let sustain = class_ai::dps_postures::mage_kite_sustain(
+                            &ctx,
+                            entity,
+                            my_pos,
+                            cfg.range_band_max,
+                        );
                         // OOM wand-pull gate: pull to wand range once the Mage
                         // can't afford a Frostbolt, so its wand auto-attack fires
                         // instead of idling the mana refractory. Cost read from
                         // config, never hardcoded.
                         let wand_gate = Some(class_ai::dps_postures::WandPullGate {
                             current_mana: combatant.current_mana,
-                            nuke_cost: abilities
-                                .get_unchecked(&AbilityType::Frostbolt)
-                                .mana_cost,
+                            nuke_cost: abilities.get_unchecked(&AbilityType::Frostbolt).mana_cost,
                         });
                         class_ai::dps_postures::evaluate_dps_posture(
                             &mut commands,
@@ -805,7 +972,9 @@ pub fn decide_abilities(
                 // window.
                 let mut plan = class_ai::priest::PriestMovementPlan::default();
                 if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive, _reset)) = posture_movement.get_mut(entity) {
+                    if let Ok((healer_posture, _mage, directive, _reset)) =
+                        posture_movement.get_mut(entity)
+                    {
                         plan = class_ai::priest::evaluate_priest_posture(
                             &mut commands,
                             entity,
@@ -838,7 +1007,7 @@ pub fn decide_abilities(
                     &mut same_frame_cc_queue,
                     &mut decision_trace,
                 )
-            },
+            }
             match_config::CharacterClass::Warrior => {
                 // Tempo-reset movement pre-pass — mirrors the Mage arm:
                 // runs BEFORE the ability pass and OUTSIDE decide_warrior_action's
@@ -846,7 +1015,8 @@ pub fn decide_abilities(
                 // gates_opened, never for casting/CC'd warriors (query excludes
                 // CastingState; move_to_target ignores the directive under CC).
                 if countdown.gates_opened {
-                    if let Ok((_healer, _mage, directive, reset)) = posture_movement.get_mut(entity) {
+                    if let Ok((_healer, _mage, directive, reset)) = posture_movement.get_mut(entity)
+                    {
                         class_ai::warrior::evaluate_warrior_reset(
                             &mut commands,
                             entity,
@@ -915,7 +1085,9 @@ pub fn decide_abilities(
                 let durations = totem_durations.get(&entity).copied().unwrap_or([0.0; 4]);
                 let mut plan = class_ai::shaman::ShamanMovementPlan::default();
                 if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive, _reset)) = posture_movement.get_mut(entity) {
+                    if let Ok((healer_posture, _mage, directive, _reset)) =
+                        posture_movement.get_mut(entity)
+                    {
                         plan = class_ai::shaman::evaluate_shaman_posture(
                             &mut commands,
                             entity,
@@ -958,7 +1130,9 @@ pub fn decide_abilities(
                 // enemy-healer dip; `DipCast` on dip arrival).
                 let mut plan = class_ai::paladin::PaladinMovementPlan::default();
                 if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive, _reset)) = posture_movement.get_mut(entity) {
+                    if let Ok((healer_posture, _mage, directive, _reset)) =
+                        posture_movement.get_mut(entity)
+                    {
                         plan = class_ai::paladin::evaluate_paladin_posture(
                             &mut commands,
                             &abilities,
@@ -989,7 +1163,7 @@ pub fn decide_abilities(
                     &plan,
                     &mut decision_trace,
                 )
-            },
+            }
             match_config::CharacterClass::Hunter => {
                 // Hunter movement is the proximity-gated ENGAGE/KITE machine
                 // (the Mage's aura-gating doesn't fit — the Hunter has no
@@ -1007,7 +1181,9 @@ pub fn decide_abilities(
                 // and KITE runs unchanged.
                 let mut dip_plan = class_ai::hunter_dip::HunterDipPlan::Rotation;
                 if countdown.gates_opened {
-                    if let Ok((_healer, mut kite_posture, directive, _reset)) = posture_movement.get_mut(entity) {
+                    if let Ok((_healer, mut kite_posture, directive, _reset)) =
+                        posture_movement.get_mut(entity)
+                    {
                         let cfg = &movement_config.hunter;
                         dip_plan = class_ai::hunter_dip::evaluate_hunter_dip(
                             &mut commands,
@@ -1025,10 +1201,16 @@ pub fn decide_abilities(
                         );
                         if !dip_plan.owns_movement() {
                             let entry = class_ai::dps_postures::melee_within(
-                                &ctx, entity, my_pos, cfg.kite_entry_radius,
+                                &ctx,
+                                entity,
+                                my_pos,
+                                cfg.kite_entry_radius,
                             );
                             let sustain = class_ai::dps_postures::melee_within(
-                                &ctx, entity, my_pos, cfg.kite_sustain_radius,
+                                &ctx,
+                                entity,
+                                my_pos,
+                                cfg.kite_sustain_radius,
                             );
                             class_ai::dps_postures::evaluate_dps_posture(
                                 &mut commands,
@@ -1091,7 +1273,10 @@ pub fn decide_abilities(
 
         // Apply Divine Shield outgoing damage penalty (50%) if attacker has DamageImmunity
         let ds_penalty = if let Some(attacker_auras) = snapshot.active_auras.get(&attacker_entity) {
-            if attacker_auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity) {
+            if attacker_auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::DamageImmunity)
+            {
                 super::constants::DIVINE_SHIELD_DAMAGE_PENALTY
             } else {
                 1.0
@@ -1101,7 +1286,9 @@ pub fn decide_abilities(
         };
         let damage = (damage * ds_penalty).max(0.0);
 
-        if let Ok((_, mut target, target_transform, mut target_auras, _, _)) = combatants.get_mut(target_entity) {
+        if let Ok((_, mut target, target_transform, mut target_auras, _, _)) =
+            combatants.get_mut(target_entity)
+        {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration
                 let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
@@ -1149,13 +1336,15 @@ pub fn decide_abilities(
                 ));
 
                 // Spawn floating combat text (yellow for abilities)
-                let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
+                let text_position =
+                    target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
                 // Get deterministic offset based on pattern state
-                let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
-                    get_next_fct_offset(&mut fct_state)
-                } else {
-                    (0.0, 0.0)
-                };
+                let (offset_x, offset_y) =
+                    if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
                 commands.spawn((
                     FloatingCombatText {
                         world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
@@ -1170,14 +1359,16 @@ pub fn decide_abilities(
 
                 // Spawn light blue floating combat text for absorbed damage
                 if absorbed > 0.0 {
-                    let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
-                        get_next_fct_offset(&mut fct_state)
-                    } else {
-                        (0.0, 0.0)
-                    };
+                    let (absorb_offset_x, absorb_offset_y) =
+                        if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                            get_next_fct_offset(&mut fct_state)
+                        } else {
+                            (0.0, 0.0)
+                        };
                     commands.spawn((
                         FloatingCombatText {
-                            world_position: text_position + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
+                            world_position: text_position
+                                + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
                             text: format!("{:.0} absorbed", absorbed),
                             color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                             lifetime: 1.5,
@@ -1258,7 +1449,9 @@ pub fn decide_abilities(
             _ => continue,
         }
 
-        if let Ok((_, mut target, target_transform, mut target_auras, _, _)) = combatants.get_mut(target_entity) {
+        if let Ok((_, mut target, target_transform, mut target_auras, _, _)) =
+            combatants.get_mut(target_entity)
+        {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration (Frost Nova is always Frost school)
                 let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
@@ -1283,13 +1476,15 @@ pub fn decide_abilities(
                 });
 
                 // Spawn floating combat text (yellow for abilities)
-                let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
+                let text_position =
+                    target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
                 // Get deterministic offset based on pattern state
-                let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
-                    get_next_fct_offset(&mut fct_state)
-                } else {
-                    (0.0, 0.0)
-                };
+                let (offset_x, offset_y) =
+                    if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
                 commands.spawn((
                     FloatingCombatText {
                         world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
@@ -1304,14 +1499,16 @@ pub fn decide_abilities(
 
                 // Spawn light blue floating combat text for absorbed damage
                 if absorbed > 0.0 {
-                    let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
-                        get_next_fct_offset(&mut fct_state)
-                    } else {
-                        (0.0, 0.0)
-                    };
+                    let (absorb_offset_x, absorb_offset_y) =
+                        if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                            get_next_fct_offset(&mut fct_state)
+                        } else {
+                            (0.0, 0.0)
+                        };
                     commands.spawn((
                         FloatingCombatText {
-                            world_position: text_position + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
+                            world_position: text_position
+                                + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
                             text: format!("{:.0} absorbed", absorbed),
                             color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                             lifetime: 1.5,
@@ -1358,11 +1555,7 @@ pub fn decide_abilities(
                     commands.entity(target_entity).remove::<ChannelingState>();
 
                     let death_message = format!("{} has been eliminated", target_id);
-                    combat_log.log_death(
-                        target_id.clone(),
-                        Some(caster_id.clone()),
-                        death_message,
-                    );
+                    combat_log.log_death(target_id.clone(), Some(caster_id.clone()), death_message);
                 }
             }
         }
@@ -1407,7 +1600,8 @@ pub fn check_interrupts(
         // Only Warriors, Rogues, and Shamans have interrupts
         if combatant.class != match_config::CharacterClass::Warrior
             && combatant.class != match_config::CharacterClass::Rogue
-            && combatant.class != match_config::CharacterClass::Shaman {
+            && combatant.class != match_config::CharacterClass::Shaman
+        {
             continue;
         }
 
@@ -1431,7 +1625,10 @@ pub fn check_interrupts(
                 }
                 // Skip immune targets (Divine Shield).
                 if let Ok(a) = all_auras.get(e) {
-                    if a.auras.iter().any(|au| au.effect_type == AuraType::DamageImmunity) {
+                    if a.auras
+                        .iter()
+                        .any(|au| au.effect_type == AuraType::DamageImmunity)
+                    {
                         continue;
                     }
                 }
@@ -1469,7 +1666,11 @@ pub fn check_interrupts(
 
         // Don't waste interrupts on immune targets (Divine Shield)
         if let Ok(target_auras) = all_auras.get(target_entity) {
-            if target_auras.auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity) {
+            if target_auras
+                .auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::DamageImmunity)
+            {
                 continue;
             }
         }
@@ -1515,7 +1716,7 @@ pub fn check_interrupts(
                     continue;
                 }
                 AbilityType::Kick
-            },
+            }
             match_config::CharacterClass::Shaman => AbilityType::WindShear,
             _ => continue,
         };
@@ -1547,12 +1748,22 @@ pub fn check_interrupts(
         combatant.current_mana -= ability_def.mana_cost;
 
         // Put on cooldown
-        combatant.ability_cooldowns.insert(interrupt_ability, ability_def.cooldown);
+        combatant
+            .ability_cooldowns
+            .insert(interrupt_ability, ability_def.cooldown);
 
         // Interrupts do NOT trigger GCD in WoW!
 
         // Log ability cast for timeline
-        log_ability_use(&mut combat_log, combatant.team, combatant.slot, combatant.class, &ability_def.name, None, "uses");
+        log_ability_use(
+            &mut combat_log,
+            combatant.team,
+            combatant.slot,
+            combatant.class,
+            &ability_def.name,
+            None,
+            "uses",
+        );
 
         // Queue the interrupt for processing
         // Note: The actual interrupt result (with school lockout info) is logged in process_interrupts

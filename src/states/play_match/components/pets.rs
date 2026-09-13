@@ -72,7 +72,6 @@ impl PetType {
             PetType::Bird => true,
         }
     }
-
 }
 
 /// Marker component for pet entities. Links pet to its owner.

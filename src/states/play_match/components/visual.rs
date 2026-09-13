@@ -1,8 +1,8 @@
-use bevy::prelude::*;
-use bevy_egui::egui;
 use super::super::abilities::{AbilityType, SpellSchool};
 use super::super::match_config::CharacterClass;
 use super::auras::AuraType;
+use bevy::prelude::*;
+use bevy_egui::egui;
 
 // ============================================================================
 // Visual Effect Components

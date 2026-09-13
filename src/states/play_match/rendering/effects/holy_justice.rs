@@ -144,7 +144,7 @@ fn wave_mesh() -> Mesh {
 
     for i in 0..=seg {
         let t = i as f32 / seg as f32; // 0..1 across the sweep
-        // Centred on +Z, which the spawn site yaws toward the victim.
+                                       // Centred on +Z, which the spawn site yaws toward the victim.
         let a = (t - 0.5) * 2.0 * HOJ_WAVE_SPAN;
         let (sa, ca) = (a.sin(), a.cos());
         // Feather both ends so the wave tapers off instead of being cut.
@@ -342,8 +342,7 @@ pub fn spawn_holy_justice(
     commands.spawn((
         Mesh3d(meshes.add(Rectangle::new(1.0, 1.0))),
         MeshMaterial3d(rune_material),
-        Transform::from_translation(target_pos + Vec3::Y * HOJ_RUNE_HEIGHT)
-            .with_scale(Vec3::ZERO),
+        Transform::from_translation(target_pos + Vec3::Y * HOJ_RUNE_HEIGHT).with_scale(Vec3::ZERO),
         JusticeRune { age: 0.0 },
         PlayMatchEntity,
     ));
@@ -367,8 +366,8 @@ pub fn update_justice_waves(
 
         // Sweep outward over the middle of the life, easing out so the ring
         // decelerates rather than snapping to full size.
-        let travel = ((k - HOJ_WAVE_GROW_FROM) / (HOJ_WAVE_GROW_TO - HOJ_WAVE_GROW_FROM))
-            .clamp(0.0, 1.0);
+        let travel =
+            ((k - HOJ_WAVE_GROW_FROM) / (HOJ_WAVE_GROW_TO - HOJ_WAVE_GROW_FROM)).clamp(0.0, 1.0);
         let radius = (wave.length * travel.sqrt()).max(0.01);
         // Uniform: the ring is a unit annulus, so one scale grows it in place.
         // It stays centred on the caster, which is why nothing has to walk its
@@ -381,7 +380,11 @@ pub fn update_justice_waves(
             let (from, to, t) = if k < HOJ_FLASH_AT {
                 (HOJ_ORANGE, HOJ_FLASH, k / HOJ_FLASH_AT)
             } else {
-                (HOJ_FLASH, HOJ_ORANGE, (k - HOJ_FLASH_AT) / (1.0 - HOJ_FLASH_AT))
+                (
+                    HOJ_FLASH,
+                    HOJ_ORANGE,
+                    (k - HOJ_FLASH_AT) / (1.0 - HOJ_FLASH_AT),
+                )
             };
             let a = from.to_srgba();
             let b = to.to_srgba();
@@ -490,8 +493,7 @@ mod tests {
         // open space behind the caster.
         use bevy::render::mesh::VertexAttributeValues;
         let mesh = wave_mesh();
-        let Some(VertexAttributeValues::Float32x3(ps)) =
-            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        let Some(VertexAttributeValues::Float32x3(ps)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
             panic!("the wave needs positions");
         };
@@ -516,8 +518,7 @@ mod tests {
         // would read as a cut-off band.
         use bevy::render::mesh::VertexAttributeValues;
         let mesh = wave_mesh();
-        let Some(VertexAttributeValues::Float32x4(cs)) =
-            mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+        let Some(VertexAttributeValues::Float32x4(cs)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR)
         else {
             panic!("the wave needs vertex colours");
         };
@@ -528,7 +529,10 @@ mod tests {
             "the trailing end should finish transparent"
         );
         let mid = cs[cs.len() / 2][3];
-        assert!(mid > 0.9, "the middle of the wave should be solid, got {mid}");
+        assert!(
+            mid > 0.9,
+            "the middle of the wave should be solid, got {mid}"
+        );
     }
 
     #[test]

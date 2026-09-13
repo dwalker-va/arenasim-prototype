@@ -2,10 +2,10 @@
 //!
 //! The tabbed combat panel showing combat log events and ability timeline.
 
-use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::components::{CombatPanelView, DisplaySettings, SpellIcons};
+use bevy::prelude::*;
+use bevy_egui::{egui, EguiContexts};
 
 // ==============================================================================
 // Timeline Constants
@@ -44,7 +44,9 @@ pub fn render_combat_panel(
     }
 
     // Use try_ctx_mut to gracefully handle window close
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     // Combat panel on the left side - semi-transparent to reduce obstruction
     egui::SidePanel::left("combat_panel")
@@ -53,24 +55,29 @@ pub fn render_combat_panel(
         .min_width(280.0)
         .resizable(true)
         .show_separator_line(false)
-        .frame(egui::Frame::side_top_panel(&ctx.style())
-            .fill(egui::Color32::from_black_alpha(180))
-            .stroke(egui::Stroke::NONE))
+        .frame(
+            egui::Frame::side_top_panel(&ctx.style())
+                .fill(egui::Color32::from_black_alpha(180))
+                .stroke(egui::Stroke::NONE),
+        )
         .show(ctx, |ui| {
             // Tab bar
             ui.horizontal(|ui| {
                 // Combat Log tab
                 let log_selected = *panel_view == CombatPanelView::CombatLog;
-                if ui.selectable_label(
-                    log_selected,
-                    egui::RichText::new("Combat Log")
-                        .size(14.0)
-                        .color(if log_selected {
-                            egui::Color32::from_rgb(230, 204, 153)
-                        } else {
-                            egui::Color32::from_rgb(150, 150, 150)
-                        })
-                ).clicked() {
+                if ui
+                    .selectable_label(
+                        log_selected,
+                        egui::RichText::new("Combat Log")
+                            .size(14.0)
+                            .color(if log_selected {
+                                egui::Color32::from_rgb(230, 204, 153)
+                            } else {
+                                egui::Color32::from_rgb(150, 150, 150)
+                            }),
+                    )
+                    .clicked()
+                {
                     *panel_view = CombatPanelView::CombatLog;
                 }
 
@@ -78,16 +85,19 @@ pub fn render_combat_panel(
 
                 // Timeline tab
                 let timeline_selected = *panel_view == CombatPanelView::Timeline;
-                if ui.selectable_label(
-                    timeline_selected,
-                    egui::RichText::new("Timeline")
-                        .size(14.0)
-                        .color(if timeline_selected {
-                            egui::Color32::from_rgb(230, 204, 153)
-                        } else {
-                            egui::Color32::from_rgb(150, 150, 150)
-                        })
-                ).clicked() {
+                if ui
+                    .selectable_label(
+                        timeline_selected,
+                        egui::RichText::new("Timeline")
+                            .size(14.0)
+                            .color(if timeline_selected {
+                                egui::Color32::from_rgb(230, 204, 153)
+                            } else {
+                                egui::Color32::from_rgb(150, 150, 150)
+                            }),
+                    )
+                    .clicked()
+                {
                     *panel_view = CombatPanelView::Timeline;
                 }
             });
@@ -127,13 +137,9 @@ fn render_combat_log_content(ui: &mut egui::Ui, combat_log: &CombatLog) {
                     ui.label(
                         egui::RichText::new(&timestamp_str)
                             .size(11.0)
-                            .color(egui::Color32::from_rgb(150, 150, 150))
+                            .color(egui::Color32::from_rgb(150, 150, 150)),
                     );
-                    ui.label(
-                        egui::RichText::new(&entry.message)
-                            .size(12.0)
-                            .color(color)
-                    );
+                    ui.label(egui::RichText::new(&entry.message).size(12.0).color(color));
                 });
             }
         });
@@ -158,7 +164,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                 egui::RichText::new("Waiting for match to start...")
                     .size(14.0)
                     .color(egui::Color32::from_rgb(120, 120, 120))
-                    .italics()
+                    .italics(),
             );
         });
         return;
@@ -167,7 +173,8 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
     let num_combatants = combatants.len();
     let current_time = combat_log.match_time;
     // Add top padding so icons at t=0 are visible
-    let timeline_height = TIMELINE_TOP_PADDING + (current_time * TIMELINE_PIXELS_PER_SECOND).max(200.0);
+    let timeline_height =
+        TIMELINE_TOP_PADDING + (current_time * TIMELINE_PIXELS_PER_SECOND).max(200.0);
 
     // Calculate dynamic column width to fill available space
     let available_width = ui.available_width() - 15.0; // Reserve space for scrollbar
@@ -203,9 +210,9 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                         egui::RichText::new(short_name)
                             .size(12.0)
                             .color(team_color)
-                            .strong()
+                            .strong(),
                     );
-                }
+                },
             );
         }
     });
@@ -224,17 +231,18 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
             // Allocate the full timeline space
             let (rect, response) = ui.allocate_exact_size(
                 egui::vec2(total_width, timeline_height),
-                egui::Sense::hover()
+                egui::Sense::hover(),
             );
 
             let painter = ui.painter_at(rect);
 
             // Draw vertical column separator lines
             for i in 0..=num_combatants {
-                let x = rect.min.x + TIMELINE_TIME_COLUMN_WIDTH + (i as f32 * combatant_column_width);
+                let x =
+                    rect.min.x + TIMELINE_TIME_COLUMN_WIDTH + (i as f32 * combatant_column_width);
                 painter.line_segment(
                     [egui::pos2(x, rect.min.y), egui::pos2(x, rect.max.y)],
-                    egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30))
+                    egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30)),
                 );
             }
 
@@ -245,8 +253,11 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
 
                 // Horizontal line across all columns
                 painter.line_segment(
-                    [egui::pos2(rect.min.x + TIMELINE_TIME_COLUMN_WIDTH, y), egui::pos2(rect.max.x, y)],
-                    egui::Stroke::new(1.0, egui::Color32::from_white_alpha(20))
+                    [
+                        egui::pos2(rect.min.x + TIMELINE_TIME_COLUMN_WIDTH, y),
+                        egui::pos2(rect.max.x, y),
+                    ],
+                    egui::Stroke::new(1.0, egui::Color32::from_white_alpha(20)),
                 );
 
                 // Time label on left
@@ -255,7 +266,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                     egui::Align2::LEFT_TOP,
                     format!("{}s", t as u32),
                     egui::FontId::proportional(10.0),
-                    egui::Color32::from_rgb(120, 120, 120)
+                    egui::Color32::from_rgb(120, 120, 120),
                 );
 
                 t += TIMELINE_TIME_TICK_INTERVAL;
@@ -266,7 +277,8 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
 
             for (col_idx, combatant_id) in combatants.iter().enumerate() {
                 let casts = combat_log.ability_casts_for(combatant_id);
-                let col_center_x = rect.min.x + TIMELINE_TIME_COLUMN_WIDTH
+                let col_center_x = rect.min.x
+                    + TIMELINE_TIME_COLUMN_WIDTH
                     + (col_idx as f32 * combatant_column_width)
                     + (combatant_column_width / 2.0);
 
@@ -275,7 +287,8 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                 let mut icon_positions: Vec<(f32, f32, &str, bool)> = Vec::new(); // (timestamp, adjusted_y, ability_name, interrupted)
 
                 for (timestamp, ability_name, interrupted) in &casts {
-                    let base_y = rect.min.y + TIMELINE_TOP_PADDING + timestamp * TIMELINE_PIXELS_PER_SECOND;
+                    let base_y =
+                        rect.min.y + TIMELINE_TOP_PADDING + timestamp * TIMELINE_PIXELS_PER_SECOND;
 
                     // Check if this icon would overlap with any previous icon in this column
                     let mut adjusted_y = base_y;
@@ -293,7 +306,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                 for (timestamp, y, ability_name, interrupted) in icon_positions {
                     let icon_rect = egui::Rect::from_center_size(
                         egui::pos2(col_center_x, y),
-                        egui::vec2(TIMELINE_ICON_SIZE, TIMELINE_ICON_SIZE)
+                        egui::vec2(TIMELINE_ICON_SIZE, TIMELINE_ICON_SIZE),
                     );
 
                     // Try to use spell icon if available
@@ -321,7 +334,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                             *texture_id,
                             icon_rect,
                             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            icon_tint
+                            icon_tint,
                         );
                     } else {
                         // Fallback: colored rectangle with abbreviation
@@ -338,14 +351,15 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                             egui::Align2::CENTER_CENTER,
                             abbrev,
                             egui::FontId::proportional(9.0),
-                            egui::Color32::WHITE
+                            egui::Color32::WHITE,
                         );
                     }
 
                     // Check hover for tooltip
                     if let Some(hover_pos) = response.hover_pos() {
                         if icon_rect.contains(hover_pos) {
-                            hovered_ability = Some((ability_name.to_string(), timestamp, interrupted));
+                            hovered_ability =
+                                Some((ability_name.to_string(), timestamp, interrupted));
                         }
                     }
                 }
@@ -365,9 +379,10 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                     let tooltip_pos = egui::pos2(hover_pos.x + 15.0, hover_pos.y - 10.0);
 
                     // Use foreground layer painter so tooltip can overflow panel bounds
-                    let foreground_painter = ui.ctx().layer_painter(
-                        egui::LayerId::new(egui::Order::Foreground, egui::Id::new("timeline_tooltip"))
-                    );
+                    let foreground_painter = ui.ctx().layer_painter(egui::LayerId::new(
+                        egui::Order::Foreground,
+                        egui::Id::new("timeline_tooltip"),
+                    ));
 
                     let font = egui::FontId::proportional(12.0);
                     let time_color = egui::Color32::from_rgb(255, 215, 0); // Gold
@@ -377,22 +392,27 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                     let full_galley = foreground_painter.layout_no_wrap(
                         full_text,
                         font.clone(),
-                        egui::Color32::WHITE
+                        egui::Color32::WHITE,
                     );
                     let bg_rect = egui::Rect::from_min_size(
                         tooltip_pos,
-                        full_galley.size() + egui::vec2(8.0, 4.0)
+                        full_galley.size() + egui::vec2(8.0, 4.0),
                     );
-                    foreground_painter.rect_filled(bg_rect, 3.0, egui::Color32::from_black_alpha(220));
+                    foreground_painter.rect_filled(
+                        bg_rect,
+                        3.0,
+                        egui::Color32::from_black_alpha(220),
+                    );
 
                     // Draw time in yellow
-                    let time_galley = foreground_painter.layout_no_wrap(
-                        time_text,
-                        font.clone(),
-                        time_color
-                    );
+                    let time_galley =
+                        foreground_painter.layout_no_wrap(time_text, font.clone(), time_color);
                     let time_width = time_galley.size().x;
-                    foreground_painter.galley(tooltip_pos + egui::vec2(4.0, 2.0), time_galley, time_color);
+                    foreground_painter.galley(
+                        tooltip_pos + egui::vec2(4.0, 2.0),
+                        time_galley,
+                        time_color,
+                    );
 
                     // Draw ability name in white (after time)
                     foreground_painter.text(
@@ -400,7 +420,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                         egui::Align2::LEFT_TOP,
                         ability_text,
                         font,
-                        ability_color
+                        ability_color,
                     );
                 }
             }
@@ -413,9 +433,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
 
 /// Shorten combatant name for compact display (e.g., "Team 1 Mage" -> "T1 Mag")
 fn shorten_combatant_name(name: &str) -> String {
-    let shortened = name
-        .replace("Team 1 ", "T1 ")
-        .replace("Team 2 ", "T2 ");
+    let shortened = name.replace("Team 1 ", "T1 ").replace("Team 2 ", "T2 ");
 
     // Further shorten class names
     shortened
@@ -464,11 +482,17 @@ fn get_ability_icon_color(ability: &str) -> egui::Color32 {
         // Holy (yellow/gold)
         "Flash Heal" | "Power Word: Fortitude" => egui::Color32::from_rgb(200, 180, 80),
         // Shadow (purple)
-        "Mind Blast" | "Shadow Bolt" | "Corruption" | "Fear" => egui::Color32::from_rgb(120, 80, 160),
+        "Mind Blast" | "Shadow Bolt" | "Corruption" | "Fear" => {
+            egui::Color32::from_rgb(120, 80, 160)
+        }
         // Physical (brown/orange)
-        "Charge" | "Rend" | "Mortal Strike" | "Heroic Strike" | "Pummel" => egui::Color32::from_rgb(160, 100, 60),
+        "Charge" | "Rend" | "Mortal Strike" | "Heroic Strike" | "Pummel" => {
+            egui::Color32::from_rgb(160, 100, 60)
+        }
         // Rogue (yellow)
-        "Ambush" | "Sinister Strike" | "Kidney Shot" | "Kick" => egui::Color32::from_rgb(180, 160, 60),
+        "Ambush" | "Sinister Strike" | "Kidney Shot" | "Kick" => {
+            egui::Color32::from_rgb(180, 160, 60)
+        }
         // Nature (green)
         "Serpent Sting" => egui::Color32::from_rgb(100, 170, 60),
         // Default

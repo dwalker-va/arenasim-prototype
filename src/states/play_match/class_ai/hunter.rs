@@ -12,20 +12,20 @@
 
 use bevy::prelude::*;
 
-use crate::combat::log::CombatLog;
 use super::super::arena_bounds::ArenaBounds;
+use super::super::utils::log_ability_use;
+use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::hunter_dip::{emit_dip_complete, HunterDipPlan};
+use super::{CombatContext, CombatantInfo};
+use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
-use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
+use crate::states::play_match::components::*;
 use crate::states::play_match::constants::*;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, TargetView,
 };
-use super::{CombatContext, CombatantInfo};
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
-use super::hunter_dip::{emit_dip_complete, HunterDipPlan};
-use super::super::utils::log_ability_use;
 
 /// Hold Concussive Shot while the target's existing slow has more than this many
 /// seconds left; refresh only inside this window before expiry so the new slow
@@ -57,8 +57,13 @@ pub fn decide_hunter_action(
     // events (with `dispatched_by: Some(hunter_entity)`); the autonomous
     // headline-ability path in pet_ai.rs has been removed for Spider/Boar/Bird.
     dispatch_pet_ability(
-        commands, abilities, decision_trace,
-        entity, combatant.target, auras, ctx,
+        commands,
+        abilities,
+        decision_trace,
+        entity,
+        combatant.target,
+        auras,
+        ctx,
     );
 
     if combatant.global_cooldown > 0.0 {
@@ -75,7 +80,8 @@ pub fn decide_hunter_action(
         return false;
     }
 
-    let Some(mut builder) = ctx.start_ability_decision(decision_trace, Some(target_entity), my_pos) else {
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, Some(target_entity), my_pos)
+    else {
         return false;
     };
 
@@ -90,14 +96,26 @@ pub fn decide_hunter_action(
     // success install the dip-cleared posture and emit DipComplete; if the trap
     // can't land (arena clamp / lost the window) fall through and the dip
     // retries next tick.
-    if let HunterDipPlan::DipCast { target, completed_state } = dip_plan {
+    if let HunterDipPlan::DipCast {
+        target,
+        completed_state,
+    } = dip_plan
+    {
         if ctx.combatants.get(&target).is_some_and(|i| i.is_alive) {
             // Lead a moving target into its path; drop directly on a planted one.
-            let landing = super::hunter_dip::trap_lead_landing(ctx, target, my_pos)
-                .unwrap_or(my_pos);
+            let landing =
+                super::hunter_dip::trap_lead_landing(ctx, target, my_pos).unwrap_or(my_pos);
             if try_place_trap_at(
-                commands, combat_log, abilities, entity, combatant, my_pos,
-                landing, TrapType::Freezing, &ctx.bounds, &mut builder,
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                landing,
+                TrapType::Freezing,
+                &ctx.bounds,
+                &mut builder,
             ) {
                 builder.finish();
                 commands.entity(entity).try_insert(completed_state);
@@ -112,7 +130,9 @@ pub fn decide_hunter_action(
     // === DEAD ZONE (<8 yards) — Escape priority ===
     if nearest_dist < HUNTER_DEAD_ZONE {
         let is_rooted = auras.map_or(false, |a| {
-            a.auras.iter().any(|aura| aura.effect_type == AuraType::Root)
+            a.auras
+                .iter()
+                .any(|aura| aura.effect_type == AuraType::Root)
         });
 
         // Priority 1: Disengage (inline because it doesn't use a try_* helper)
@@ -121,7 +141,12 @@ pub fn decide_hunter_action(
             if is_rooted {
                 builder.reject(disengage, RejectionReason::Rooted);
             } else if let Some(remaining) = combatant.ability_cooldowns.get(&disengage) {
-                builder.reject(disengage, RejectionReason::OnCooldown { remaining: *remaining });
+                builder.reject(
+                    disengage,
+                    RejectionReason::OnCooldown {
+                        remaining: *remaining,
+                    },
+                );
             } else if combatant.current_mana < def.mana_cost {
                 builder.reject(
                     disengage,
@@ -144,7 +169,11 @@ pub fn decide_hunter_action(
                 };
 
                 let direction = if away_dir == Vec3::ZERO {
-                    if combatant.team == 1 { Vec3::new(-1.0, 0.0, 0.0) } else { Vec3::new(1.0, 0.0, 0.0) }
+                    if combatant.team == 1 {
+                        Vec3::new(-1.0, 0.0, 0.0)
+                    } else {
+                        Vec3::new(1.0, 0.0, 0.0)
+                    }
                 } else {
                     Vec3::new(away_dir.x, 0.0, away_dir.z).normalize_or_zero()
                 };
@@ -158,7 +187,15 @@ pub fn decide_hunter_action(
                 combatant.ability_cooldowns.insert(disengage, def.cooldown);
                 combatant.global_cooldown = GCD;
 
-                log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Disengage", None, "uses");
+                log_ability_use(
+                    combat_log,
+                    combatant.team,
+                    combatant.slot,
+                    combatant.class,
+                    "Disengage",
+                    None,
+                    "uses",
+                );
                 builder.finish();
                 return true;
             }
@@ -166,8 +203,16 @@ pub fn decide_hunter_action(
 
         // Priority 2: Frost Trap at feet
         if try_place_trap_at(
-            commands, combat_log, abilities, entity, combatant, my_pos, my_pos,
-            TrapType::Frost, &ctx.bounds, &mut builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            my_pos,
+            TrapType::Frost,
+            &ctx.bounds,
+            &mut builder,
         ) {
             builder.finish();
             return true;
@@ -181,11 +226,27 @@ pub fn decide_hunter_action(
 
     // === CLOSING RANGE (8-20 yards) — Kite + instants ===
     if nearest_dist < 20.0 {
-        let conc_max = abilities.get(&AbilityType::ConcussiveShot).map_or(35.0, |d| d.range);
-        if let Some(ct) = concussive_target(ctx, entity, my_pos, target_entity, HUNTER_DEAD_ZONE, conc_max) {
+        let conc_max = abilities
+            .get(&AbilityType::ConcussiveShot)
+            .map_or(35.0, |d| d.range);
+        if let Some(ct) = concussive_target(
+            ctx,
+            entity,
+            my_pos,
+            target_entity,
+            HUNTER_DEAD_ZONE,
+            conc_max,
+        ) {
             if try_concussive_shot(
-                commands, combat_log, abilities, entity, combatant, my_pos,
-                ct, ctx, &mut builder,
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                ct,
+                ctx,
+                &mut builder,
             ) {
                 builder.finish();
                 return true;
@@ -199,12 +260,22 @@ pub fn decide_hunter_action(
         // melee threat exists.
         let frost_anchor = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)
             .map(|(_, pos)| pos)
-            .or_else(|| nearest_enemy.and_then(|(e, _)| ctx.combatants.get(&e).map(|i| i.position)));
+            .or_else(|| {
+                nearest_enemy.and_then(|(e, _)| ctx.combatants.get(&e).map(|i| i.position))
+            });
         if let Some(anchor_pos) = frost_anchor {
             let midpoint = (my_pos + anchor_pos) / 2.0;
             if try_place_trap_at(
-                commands, combat_log, abilities, entity, combatant, my_pos, midpoint,
-                TrapType::Frost, &ctx.bounds, &mut builder,
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                midpoint,
+                TrapType::Frost,
+                &ctx.bounds,
+                &mut builder,
             ) {
                 builder.finish();
                 return true;
@@ -217,8 +288,19 @@ pub fn decide_hunter_action(
         // band — that's the point of a DoT. (Sweep data: a sting GCD spent
         // during the approach window cost more than 50 DoT damage bought.)
         if try_arcane_shot(
-            commands, combat_log, game_rng, abilities, entity, combatant, my_pos,
-            target_entity, target_info, ctx, instant_attacks, auras, &mut builder,
+            commands,
+            combat_log,
+            game_rng,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            target_entity,
+            target_info,
+            ctx,
+            instant_attacks,
+            auras,
+            &mut builder,
         ) {
             builder.finish();
             return true;
@@ -239,23 +321,47 @@ pub fn decide_hunter_action(
     // breakable trap). Outside the window the rotation below is the unchanged
     // order, so non-CC frames are untouched. This is the complement to the trap
     // rework: the trap creates the healer-down window, this converts it.
-    let burst_window =
-        ctx.enemy_healer_is_cced() && ctx.enemy_healer() != Some(target_entity);
+    let burst_window = ctx.enemy_healer_is_cced() && ctx.enemy_healer() != Some(target_entity);
     if burst_window && distance_to_target >= 20.0 {
         if try_aimed_shot(
-            commands, combat_log, abilities, entity, combatant, my_pos,
-            target_entity, target_info, auras, ctx, &mut builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            target_entity,
+            target_info,
+            auras,
+            ctx,
+            &mut builder,
         ) {
             builder.finish();
             return true;
         }
     }
 
-    let conc_max = abilities.get(&AbilityType::ConcussiveShot).map_or(35.0, |d| d.range);
-    if let Some(ct) = concussive_target(ctx, entity, my_pos, target_entity, HUNTER_DEAD_ZONE, conc_max) {
+    let conc_max = abilities
+        .get(&AbilityType::ConcussiveShot)
+        .map_or(35.0, |d| d.range);
+    if let Some(ct) = concussive_target(
+        ctx,
+        entity,
+        my_pos,
+        target_entity,
+        HUNTER_DEAD_ZONE,
+        conc_max,
+    ) {
         if try_concussive_shot(
-            commands, combat_log, abilities, entity, combatant, my_pos,
-            ct, ctx, &mut builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            ct,
+            ctx,
+            &mut builder,
         ) {
             builder.finish();
             return true;
@@ -266,8 +372,17 @@ pub fn decide_hunter_action(
     // already-applied sting at placement time (closes the trap-placed-first,
     // stung-second ordering hole for the single-target case — plan KTD 3).
     if try_serpent_sting(
-        commands, combat_log, abilities, entity, combatant, my_pos,
-        target_entity, target_info, ctx, auras, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        target_entity,
+        target_info,
+        ctx,
+        auras,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -283,14 +398,19 @@ pub fn decide_hunter_action(
     // target) we fall back to the legacy peel: trap the candidate at the
     // midpoint so the Hunter keeps its melee-peel in healer-less matchups.
     let off_target = super::hunter_dip::opportunistic_off_target(
-        ctx, entity, combatant.team, combatant.target, my_pos,
+        ctx,
+        entity,
+        combatant.team,
+        combatant.target,
+        my_pos,
     );
     if let Some((healer, healer_pos)) = off_target {
         // Only drop opportunistically when already point-blank — the dip walks us
         // in when we're farther out. Lead the landing into the target's path
         // (planted target → directly on it) so the 1.5s arm doesn't whiff a kite.
         let plant_close = my_pos.distance(healer_pos) <= super::hunter_dip::HUNTER_TRAP_PLANT_RANGE;
-        let landing = super::hunter_dip::trap_lead_landing(ctx, healer, my_pos).unwrap_or(healer_pos);
+        let landing =
+            super::hunter_dip::trap_lead_landing(ctx, healer, my_pos).unwrap_or(healer_pos);
         // No other living enemy close enough to the landing to beat the target
         // to the trigger.
         let healer_triggers = !ctx.combatants.values().any(|other| {
@@ -303,12 +423,25 @@ pub fn decide_hunter_action(
             // Two-way CC guard (R8/R9): a friendly DoT on the healer pops the
             // incap on the first tick — skip (only when the trap is castable).
             if ctx.has_friendly_dots_on_target(healer)
-                && !combatant.ability_cooldowns.contains_key(&AbilityType::FreezingTrap)
+                && !combatant
+                    .ability_cooldowns
+                    .contains_key(&AbilityType::FreezingTrap)
             {
-                builder.reject(AbilityType::FreezingTrap, RejectionReason::FriendlyBreakableCC);
+                builder.reject(
+                    AbilityType::FreezingTrap,
+                    RejectionReason::FriendlyBreakableCC,
+                );
             } else if try_place_trap_at(
-                commands, combat_log, abilities, entity, combatant, my_pos,
-                landing, TrapType::Freezing, &ctx.bounds, &mut builder,
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                landing,
+                TrapType::Freezing,
+                &ctx.bounds,
+                &mut builder,
             ) {
                 builder.finish();
                 return true;
@@ -317,7 +450,11 @@ pub fn decide_hunter_action(
         // else: HOLD — the dip will walk us into range to land it on the healer.
     } else {
         let trap_target = freezing_trap_candidate(ctx, target_entity);
-        if let Some(trap_target_info) = ctx.combatants.get(&trap_target).filter(|info| info.is_alive) {
+        if let Some(trap_target_info) = ctx
+            .combatants
+            .get(&trap_target)
+            .filter(|info| info.is_alive)
+        {
             // Two-way CC guard (R8/R9): never aim Freezing Trap at a target the
             // team has DoT'd — the first tick breaks the incapacitate
             // (break_on_damage: 0.0). Reactive and binary: skip this tick, no
@@ -325,13 +462,25 @@ pub fn decide_hunter_action(
             // otherwise castable — while it's on cooldown, fall through so the
             // trace records OnCooldown instead of masking it as the DoT guard.
             if ctx.has_friendly_dots_on_target(trap_target)
-                && !combatant.ability_cooldowns.contains_key(&AbilityType::FreezingTrap)
+                && !combatant
+                    .ability_cooldowns
+                    .contains_key(&AbilityType::FreezingTrap)
             {
-                builder.reject(AbilityType::FreezingTrap, RejectionReason::FriendlyBreakableCC);
+                builder.reject(
+                    AbilityType::FreezingTrap,
+                    RejectionReason::FriendlyBreakableCC,
+                );
             } else if try_place_trap_at(
-                commands, combat_log, abilities, entity, combatant, my_pos,
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
                 (my_pos + trap_target_info.position) / 2.0,
-                TrapType::Freezing, &ctx.bounds, &mut builder,
+                TrapType::Freezing,
+                &ctx.bounds,
+                &mut builder,
             ) {
                 builder.finish();
                 return true;
@@ -341,8 +490,17 @@ pub fn decide_hunter_action(
 
     if distance_to_target >= 20.0 {
         if try_aimed_shot(
-            commands, combat_log, abilities, entity, combatant, my_pos,
-            target_entity, target_info, auras, ctx, &mut builder,
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            target_entity,
+            target_info,
+            auras,
+            ctx,
+            &mut builder,
         ) {
             builder.finish();
             return true;
@@ -358,8 +516,19 @@ pub fn decide_hunter_action(
     }
 
     if try_arcane_shot(
-        commands, combat_log, game_rng, abilities, entity, combatant, my_pos,
-        target_entity, target_info, ctx, instant_attacks, auras, &mut builder,
+        commands,
+        combat_log,
+        game_rng,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        target_entity,
+        target_info,
+        ctx,
+        instant_attacks,
+        auras,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -381,10 +550,20 @@ fn freezing_trap_candidate(ctx: &CombatContext, fallback: Entity) -> Entity {
     ctx.enemy_healer().unwrap_or(fallback)
 }
 
-fn find_nearest_enemy(self_entity: Entity, my_team: u8, my_pos: Vec3, ctx: &CombatContext) -> (Option<(Entity, f32)>, Option<f32>) {
+fn find_nearest_enemy(
+    self_entity: Entity,
+    my_team: u8,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+) -> (Option<(Entity, f32)>, Option<f32>) {
     let mut nearest: Option<(Entity, f32)> = None;
     for (entity, info) in ctx.combatants.iter() {
-        if *entity == self_entity || info.team == my_team || !info.is_alive || info.is_pet || info.stealthed {
+        if *entity == self_entity
+            || info.team == my_team
+            || !info.is_alive
+            || info.is_pet
+            || info.stealthed
+        {
             continue;
         }
         let dist = my_pos.distance(info.position);
@@ -405,7 +584,9 @@ fn slow_remaining(target: Entity, ctx: &CombatContext) -> Option<f32> {
             .iter()
             .filter(|a| a.effect_type == AuraType::MovementSpeedSlow)
             .map(|a| a.duration)
-            .fold(None, |acc: Option<f32>, d| Some(acc.map_or(d, |m| m.max(d))))
+            .fold(None, |acc: Option<f32>, d| {
+                Some(acc.map_or(d, |m| m.max(d)))
+            })
     })
 }
 
@@ -526,9 +707,16 @@ fn try_place_trap_at(
         TrapType::Frost => AbilityType::FrostTrap,
     };
 
-    let Some(def) = abilities.get(&ability) else { return false };
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
     if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
+        builder.reject(
+            ability,
+            RejectionReason::OnCooldown {
+                remaining: *remaining,
+            },
+        );
         return false;
     }
     if combatant.current_mana < def.mana_cost {
@@ -546,8 +734,23 @@ fn try_place_trap_at(
 
     // Clamp to octagonal arena bounds (midpoint can land outside corners)
     let position = crate::states::play_match::combat_core::clamp_to_arena(bounds, position);
-    spawn_trap(commands, entity, combatant.team, my_pos, position, trap_type);
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, trap_type.name(), None, "uses");
+    spawn_trap(
+        commands,
+        entity,
+        combatant.team,
+        my_pos,
+        position,
+        trap_type,
+    );
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        trap_type.name(),
+        None,
+        "uses",
+    );
 
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(ability, def.cooldown);
@@ -569,21 +772,40 @@ fn try_concussive_shot(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::ConcussiveShot;
-    let Some(def) = abilities.get(&ability) else { return false };
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
 
-    let Some(target_info) = ctx.combatants.get(&target_entity) else { return false };
+    let Some(target_info) = ctx.combatants.get(&target_entity) else {
+        return false;
+    };
     let target_pos = target_info.position;
 
-    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
-        ability, def, combatant, my_pos, None,
-        Some((target_entity, target_pos)), ctx, opts,
+        ability,
+        def,
+        combatant,
+        my_pos,
+        None,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, def, combatant, my_pos, None,
-                Some((target_entity, target_pos)), ctx, opts,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                None,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -618,7 +840,15 @@ fn try_concussive_shot(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_info.log_id()), "fires");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        Some(target_info.log_id()),
+        "fires",
+    );
 
     true
 }
@@ -638,18 +868,35 @@ fn try_aimed_shot(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::AimedShot;
-    let Some(def) = abilities.get(&ability) else { return false };
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
 
-    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
-        ability, def, combatant, my_pos, auras,
-        Some((target_entity, target_info.position)), ctx, opts,
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_info.position)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, def, combatant, my_pos, auras,
-                Some((target_entity, target_info.position)), ctx, opts,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_info.position)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -658,13 +905,23 @@ fn try_aimed_shot(
     builder.choose(ability, Some(target_entity), false);
 
     let cast_time = calculate_cast_time(def.cast_time, auras);
-    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, target_entity, cast_time));
 
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_info.log_id()), "begins casting");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        Some(target_info.log_id()),
+        "begins casting",
+    );
 
     true
 }
@@ -686,18 +943,35 @@ fn try_arcane_shot(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::ArcaneShot;
-    let Some(def) = abilities.get(&ability) else { return false };
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
 
-    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
-        ability, def, combatant, my_pos, auras,
-        Some((target_entity, target_info.position)), ctx, opts,
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_info.position)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, def, combatant, my_pos, auras,
-                Some((target_entity, target_info.position)), ctx, opts,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_info.position)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -725,7 +999,15 @@ fn try_arcane_shot(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_info.log_id()), "fires");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        Some(target_info.log_id()),
+        "fires",
+    );
 
     true
 }
@@ -752,13 +1034,18 @@ fn try_serpent_sting(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::SerpentSting;
-    let Some(def) = abilities.get(&ability) else { return false };
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
 
-    let target_has_sting = ctx.active_auras
+    let target_has_sting = ctx
+        .active_auras
         .get(&target_entity)
-        .map(|target_auras| target_auras.iter().any(|a|
-            a.effect_type == AuraType::DamageOverTime && a.ability_name == "Serpent Sting"
-        ))
+        .map(|target_auras| {
+            target_auras.iter().any(|a| {
+                a.effect_type == AuraType::DamageOverTime && a.ability_name == "Serpent Sting"
+            })
+        })
         .unwrap_or(false);
 
     if target_has_sting {
@@ -773,9 +1060,12 @@ fn try_serpent_sting(
     // floor so the reserve holds AFTER the cast, not just before it.
     const STING_MANA_FLOOR: f32 = 100.0;
     if combatant.current_mana - def.mana_cost < STING_MANA_FLOOR {
-        builder.reject(ability, RejectionReason::PreconditionUnmet {
-            note: "mana reserved for kiting toolkit".to_string(),
-        });
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "mana reserved for kiting toolkit".to_string(),
+            },
+        );
         return false;
     }
 
@@ -784,9 +1074,12 @@ fn try_serpent_sting(
     // funding extra Mortal Strikes against our team. Sweep data: stinging
     // Warriors was uniquely immune to every other mitigation.
     if target_info.class.gains_rage_from_damage() {
-        builder.reject(ability, RejectionReason::PreconditionUnmet {
-            note: "sting feeds Warrior rage".to_string(),
-        });
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "sting feeds Warrior rage".to_string(),
+            },
+        );
         return false;
     }
 
@@ -799,25 +1092,45 @@ fn try_serpent_sting(
     // blocks the trap, reserving the sting as well would deadlock both
     // abilities for the rest of the match. (Mana isn't checked — the sting
     // floor above already guarantees the trap's cost.)
-    let trap_poised = !combatant.ability_cooldowns.contains_key(&AbilityType::FreezingTrap)
+    let trap_poised = !combatant
+        .ability_cooldowns
+        .contains_key(&AbilityType::FreezingTrap)
         && !ctx.has_friendly_dots_on_target(target_entity);
     if trap_poised && freezing_trap_candidate(ctx, target_entity) == target_entity {
-        builder.reject(ability, RejectionReason::PreconditionUnmet {
-            note: "trap candidate reserved for Freezing Trap".to_string(),
-        });
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "trap candidate reserved for Freezing Trap".to_string(),
+            },
+        );
         return false;
     }
 
-    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
-        ability, def, combatant, my_pos, auras,
-        Some((target_entity, target_info.position)), ctx, opts,
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_info.position)),
+        ctx,
+        opts,
     ) {
         builder.reject(
             ability,
             classify_pre_cast_failure(
-                ability, def, combatant, my_pos, auras,
-                Some((target_entity, target_info.position)), ctx, opts,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_info.position)),
+                ctx,
+                opts,
             ),
         );
         return false;
@@ -846,7 +1159,15 @@ fn try_serpent_sting(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_info.log_id()), "fires");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        Some(target_info.log_id()),
+        "fires",
+    );
 
     true
 }
@@ -874,32 +1195,59 @@ fn dispatch_pet_ability(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
 ) {
-    let Some(hunter_info) = ctx.combatants.get(&hunter_entity) else { return };
-    let Some(pet_entity) = hunter_info.pet else { return };
-    let Some(pet_info) = ctx.combatants.get(&pet_entity) else { return };
-    let Some(pet_type) = pet_info.pet_type else { return };
+    let Some(hunter_info) = ctx.combatants.get(&hunter_entity) else {
+        return;
+    };
+    let Some(pet_entity) = hunter_info.pet else {
+        return;
+    };
+    let Some(pet_info) = ctx.combatants.get(&pet_entity) else {
+        return;
+    };
+    let Some(pet_type) = pet_info.pet_type else {
+        return;
+    };
 
     match pet_type {
         PetType::Spider => {
             if let Some(target) = target_entity {
                 try_dispatch_spider_web(
-                    commands, abilities, decision_trace,
-                    hunter_entity, pet_entity, pet_info, target, ctx,
+                    commands,
+                    abilities,
+                    decision_trace,
+                    hunter_entity,
+                    pet_entity,
+                    pet_info,
+                    target,
+                    ctx,
                 );
             }
         }
         PetType::Boar => {
             if let Some(target) = target_entity {
                 try_dispatch_boar_charge(
-                    commands, abilities, decision_trace,
-                    hunter_entity, pet_entity, pet_info, target, ctx,
+                    commands,
+                    abilities,
+                    decision_trace,
+                    hunter_entity,
+                    pet_entity,
+                    pet_info,
+                    target,
+                    ctx,
                 );
             }
         }
         PetType::Bird => {
             try_dispatch_masters_call(
-                commands, abilities, decision_trace,
-                hunter_entity, pet_entity, pet_info, hunter_info, auras, ctx,
+                commands,
+                abilities,
+                decision_trace,
+                hunter_entity,
+                pet_entity,
+                pet_info,
+                hunter_info,
+                auras,
+                ctx,
             );
         }
         PetType::Felhunter => {
@@ -922,8 +1270,12 @@ fn try_dispatch_spider_web(
     ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::SpiderWeb;
-    let Some(def) = abilities.get(&ability) else { return false };
-    let Some(target_info) = ctx.combatants.get(&target_entity) else { return false };
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
+    let Some(target_info) = ctx.combatants.get(&target_entity) else {
+        return false;
+    };
 
     let pet_pos = pet_info.position;
     let actor_view = ActorView::from_info(pet_info);
@@ -936,7 +1288,15 @@ fn try_dispatch_spider_web(
         hunter_entity,
     );
 
-    if let Some(reason) = dispatch_predicates_for_damaging(ability, def, pet_info, pet_entity, target_entity, target_info, ctx) {
+    if let Some(reason) = dispatch_predicates_for_damaging(
+        ability,
+        def,
+        pet_info,
+        pet_entity,
+        target_entity,
+        target_info,
+        ctx,
+    ) {
         builder.reject(ability, reason);
         builder.finish();
         return false;
@@ -976,8 +1336,12 @@ fn try_dispatch_boar_charge(
     ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::BoarCharge;
-    let Some(def) = abilities.get(&ability) else { return false };
-    let Some(target_info) = ctx.combatants.get(&target_entity) else { return false };
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
+    let Some(target_info) = ctx.combatants.get(&target_entity) else {
+        return false;
+    };
 
     let pet_pos = pet_info.position;
     let actor_view = ActorView::from_info(pet_info);
@@ -990,7 +1354,15 @@ fn try_dispatch_boar_charge(
         hunter_entity,
     );
 
-    if let Some(reason) = dispatch_predicates_for_damaging(ability, def, pet_info, pet_entity, target_entity, target_info, ctx) {
+    if let Some(reason) = dispatch_predicates_for_damaging(
+        ability,
+        def,
+        pet_info,
+        pet_entity,
+        target_entity,
+        target_info,
+        ctx,
+    ) {
         builder.reject(ability, reason);
         builder.finish();
         return false;
@@ -1021,15 +1393,19 @@ fn try_dispatch_masters_call(
     ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::MastersCall;
-    let Some(def) = abilities.get(&ability) else { return false };
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
 
     // Find a cleanse target: Hunter first (uses live auras since that's the
     // freshest view); then scan allies in the snapshot.
     let owner_needs_cleanse = hunter_auras.map_or(false, |a| {
-        a.auras.iter().any(|aura| matches!(
-            aura.effect_type,
-            AuraType::Root | AuraType::MovementSpeedSlow,
-        ))
+        a.auras.iter().any(|aura| {
+            matches!(
+                aura.effect_type,
+                AuraType::Root | AuraType::MovementSpeedSlow,
+            )
+        })
     });
     let cleanse_target = if owner_needs_cleanse {
         Some(hunter_entity)
@@ -1040,10 +1416,10 @@ fn try_dispatch_masters_call(
                 continue;
             }
             if let Some(auras) = ctx.active_auras.get(ally_entity) {
-                if auras.iter().any(|a| matches!(
-                    a.effect_type,
-                    AuraType::Root | AuraType::MovementSpeedSlow,
-                )) {
+                if auras
+                    .iter()
+                    .any(|a| matches!(a.effect_type, AuraType::Root | AuraType::MovementSpeedSlow,))
+                {
                     fallback = Some(*ally_entity);
                     break;
                 }
@@ -1071,13 +1447,19 @@ fn try_dispatch_masters_call(
         return false;
     }
 
-    let cd_remaining = ctx.ability_cooldowns
+    let cd_remaining = ctx
+        .ability_cooldowns
         .get(&pet_entity)
         .and_then(|cds| cds.get(&ability))
         .copied()
         .unwrap_or(0.0);
     if cd_remaining > 0.0 {
-        builder.reject(ability, RejectionReason::OnCooldown { remaining: cd_remaining });
+        builder.reject(
+            ability,
+            RejectionReason::OnCooldown {
+                remaining: cd_remaining,
+            },
+        );
         builder.finish();
         return false;
     }
@@ -1091,7 +1473,13 @@ fn try_dispatch_masters_call(
     if let Some(target_info) = ctx.combatants.get(&target) {
         let dist = pet_pos.distance(target_info.position);
         if dist > def.range {
-            builder.reject(ability, RejectionReason::OutOfRange { distance: dist, max: def.range });
+            builder.reject(
+                ability,
+                RejectionReason::OutOfRange {
+                    distance: dist,
+                    max: def.range,
+                },
+            );
             builder.finish();
             return false;
         }
@@ -1124,13 +1512,16 @@ fn dispatch_predicates_for_damaging(
         return Some(RejectionReason::LowHealthHeel);
     }
 
-    let cd_remaining = ctx.ability_cooldowns
+    let cd_remaining = ctx
+        .ability_cooldowns
         .get(&pet_entity)
         .and_then(|cds| cds.get(&ability))
         .copied()
         .unwrap_or(0.0);
     if cd_remaining > 0.0 {
-        return Some(RejectionReason::OnCooldown { remaining: cd_remaining });
+        return Some(RejectionReason::OnCooldown {
+            remaining: cd_remaining,
+        });
     }
 
     if !target_info.is_alive {
@@ -1145,10 +1536,16 @@ fn dispatch_predicates_for_damaging(
 
     let dist = pet_info.position.distance(target_info.position);
     if dist > def.range {
-        return Some(RejectionReason::OutOfRange { distance: dist, max: def.range });
+        return Some(RejectionReason::OutOfRange {
+            distance: dist,
+            max: def.range,
+        });
     }
     if ability == AbilityType::BoarCharge && dist < CHARGE_MIN_RANGE {
-        return Some(RejectionReason::WithinDeadZone { distance: dist, min: CHARGE_MIN_RANGE });
+        return Some(RejectionReason::WithinDeadZone {
+            distance: dist,
+            min: CHARGE_MIN_RANGE,
+        });
     }
 
     // Friendly-CC guard only applies to abilities that deal damage on landing

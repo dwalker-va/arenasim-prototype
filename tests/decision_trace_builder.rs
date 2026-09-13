@@ -42,10 +42,7 @@ fn builder_happy_path_records_three_rejects_and_one_choose() {
         AbilityType::Charge,
         RejectionReason::OnCooldown { remaining: 4.2 },
     );
-    builder.reject(
-        AbilityType::Rend,
-        RejectionReason::AlreadyApplied,
-    );
+    builder.reject(AbilityType::Rend, RejectionReason::AlreadyApplied);
     builder.reject(
         AbilityType::MortalStrike,
         RejectionReason::OutOfRange {
@@ -58,10 +55,26 @@ fn builder_happy_path_records_three_rejects_and_one_choose() {
 
     assert_event_count(&trace, 1);
     let json = serde_json::to_string(&trace.pending_events[0]).unwrap();
-    assert!(json.contains("\"ability\":\"Charge\""), "Charge listed: {}", json);
-    assert!(json.contains("\"OnCooldown\""), "OnCooldown reason emitted: {}", json);
-    assert!(json.contains("\"HeroicStrike\""), "HeroicStrike chosen: {}", json);
-    assert!(json.contains("\"action_taken\""), "outcome action_taken: {}", json);
+    assert!(
+        json.contains("\"ability\":\"Charge\""),
+        "Charge listed: {}",
+        json
+    );
+    assert!(
+        json.contains("\"OnCooldown\""),
+        "OnCooldown reason emitted: {}",
+        json
+    );
+    assert!(
+        json.contains("\"HeroicStrike\""),
+        "HeroicStrike chosen: {}",
+        json
+    );
+    assert!(
+        json.contains("\"action_taken\""),
+        "outcome action_taken: {}",
+        json
+    );
 }
 
 #[test]
@@ -97,7 +110,11 @@ fn builder_rejection_with_structured_payload_serializes_with_numbers() {
         "structured payload preserved: {}",
         json
     );
-    assert!(json.contains("\"no_action\""), "no_action outcome: {}", json);
+    assert!(
+        json.contains("\"no_action\""),
+        "no_action outcome: {}",
+        json
+    );
 }
 
 #[test]
@@ -166,7 +183,11 @@ fn writer_sorts_events_by_frame_then_entity_then_kind() {
 
     trace.current_frame = 10;
     let mut b = trace.start_ability_decision(warrior_actor(), None);
-    b.choose(AbilityType::Rend, Some(bevy::prelude::Entity::from_raw(4)), true);
+    b.choose(
+        AbilityType::Rend,
+        Some(bevy::prelude::Entity::from_raw(4)),
+        true,
+    );
     b.finish();
 
     // Drain and write.
@@ -234,9 +255,17 @@ fn start_pet_decision_event_carries_owner_and_pet_type() {
     builder.finish();
     assert_event_count(&trace, 1);
     let json = serde_json::to_string(&trace.pending_events[0]).unwrap();
-    assert!(json.contains("\"kind\":\"pet_decision\""), "kind=pet_decision: {}", json);
+    assert!(
+        json.contains("\"kind\":\"pet_decision\""),
+        "kind=pet_decision: {}",
+        json
+    );
     assert!(json.contains("\"owner\":42"), "owner=42: {}", json);
-    assert!(json.contains("\"pet_type\":\"Spider\""), "pet_type=Spider: {}", json);
+    assert!(
+        json.contains("\"pet_type\":\"Spider\""),
+        "pet_type=Spider: {}",
+        json
+    );
 }
 
 #[test]
@@ -284,7 +313,10 @@ fn writer_sorts_target_acquisition_before_ability_decision_at_same_frame_and_ent
         .collect();
     assert_eq!(
         kinds,
-        vec!["target_acquisition".to_string(), "ability_decision".to_string()],
+        vec![
+            "target_acquisition".to_string(),
+            "ability_decision".to_string()
+        ],
         "TargetAcquisition (kind_order=0) sorted before AbilityDecision (kind_order=1): {:?}",
         kinds
     );
@@ -293,7 +325,11 @@ fn writer_sorts_target_acquisition_before_ability_decision_at_same_frame_and_ent
 #[test]
 fn writer_creates_parent_directory_on_create() {
     let temp = tempfile::tempdir().unwrap();
-    let nested = temp.path().join("traces").join("subdir").join("trace.jsonl");
+    let nested = temp
+        .path()
+        .join("traces")
+        .join("subdir")
+        .join("trace.jsonl");
     assert!(!nested.parent().unwrap().exists());
 
     let writer = TraceWriter::create(nested.clone()).unwrap();
@@ -331,8 +367,16 @@ fn movement_builder_transition_carries_old_new_posture_and_trigger() {
 
     assert_event_count(&trace, 1);
     let json = serde_json::to_string(&trace.pending_events[0]).unwrap();
-    assert!(json.contains("\"kind\":\"movement_decision\""), "kind: {}", json);
-    assert!(json.contains("\"posture\":\"pressured\""), "new posture: {}", json);
+    assert!(
+        json.contains("\"kind\":\"movement_decision\""),
+        "kind: {}",
+        json
+    );
+    assert!(
+        json.contains("\"posture\":\"pressured\""),
+        "new posture: {}",
+        json
+    );
     assert!(
         json.contains("\"previous_posture\":\"free\""),
         "old posture: {}",
@@ -343,7 +387,11 @@ fn movement_builder_transition_carries_old_new_posture_and_trigger() {
         "trigger as bare string: {}",
         json
     );
-    assert!(json.contains("\"goal_kind\":\"direction\""), "goal_kind: {}", json);
+    assert!(
+        json.contains("\"goal_kind\":\"direction\""),
+        "goal_kind: {}",
+        json
+    );
     assert!(
         json.contains("\"chosen_direction\":[0.6,-0.8]"),
         "chosen_direction: {}",
@@ -356,8 +404,12 @@ fn movement_builder_transition_carries_old_new_posture_and_trigger() {
         json
     );
     // BTreeMap order: boundary_penalty < threat_repulsion lexicographically.
-    let bp = json.find("boundary_penalty").expect("boundary_penalty term");
-    let tr = json.find("threat_repulsion").expect("threat_repulsion term");
+    let bp = json
+        .find("boundary_penalty")
+        .expect("boundary_penalty term");
+    let tr = json
+        .find("threat_repulsion")
+        .expect("threat_repulsion term");
     assert!(bp < tr, "scorer_terms in BTreeMap (sorted) order: {}", json);
 }
 
@@ -375,7 +427,11 @@ fn movement_builder_direction_change_omits_previous_posture() {
 
     assert_event_count(&trace, 1);
     let json = serde_json::to_string(&trace.pending_events[0]).unwrap();
-    assert!(json.contains("\"posture\":\"pressured\""), "posture: {}", json);
+    assert!(
+        json.contains("\"posture\":\"pressured\""),
+        "posture: {}",
+        json
+    );
     assert!(
         !json.contains("previous_posture"),
         "previous_posture omitted on re-commit (skip_serializing_if): {}",
@@ -408,7 +464,11 @@ fn movement_builder_masked_field_present_when_set_absent_otherwise() {
     builder.masked(0xFFFF);
     builder.finish();
     let json = serde_json::to_string(&trace.pending_events[0]).unwrap();
-    assert!(json.contains("\"masked\":65535"), "all-masked bitmask present: {}", json);
+    assert!(
+        json.contains("\"masked\":65535"),
+        "all-masked bitmask present: {}",
+        json
+    );
 
     // When the emitter does not attach a mask (non-scorer transition), the
     // field is skipped entirely.
@@ -422,7 +482,11 @@ fn movement_builder_masked_field_present_when_set_absent_otherwise() {
     );
     b2.finish();
     let json2 = serde_json::to_string(&trace2.pending_events[0]).unwrap();
-    assert!(!json2.contains("masked"), "masked omitted when unset (skip_serializing_if): {}", json2);
+    assert!(
+        !json2.contains("masked"),
+        "masked omitted when unset (skip_serializing_if): {}",
+        json2
+    );
 }
 
 #[test]

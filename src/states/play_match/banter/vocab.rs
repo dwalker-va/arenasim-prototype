@@ -234,10 +234,7 @@ mod tests {
     #[test]
     fn class_token_round_trips_through_the_parser() {
         let token = class_token(CharacterClass::Warlock, 1);
-        assert_eq!(
-            parse(&token),
-            vec![Span::Class(CharacterClass::Warlock, 1)]
-        );
+        assert_eq!(parse(&token), vec![Span::Class(CharacterClass::Warlock, 1)]);
     }
 
     #[test]

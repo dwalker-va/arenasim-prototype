@@ -29,12 +29,12 @@ use crate::states::play_match::decision_trace::{
 };
 use crate::states::play_match::movement_config::MovementConfig;
 
+use super::super::utils::{combatant_id, log_ability_use};
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
     compound_pressure_trigger, escape_tick, escape_window_from, healer_pressured_tick_shared,
     medic_chase_override, medic_chase_tick, start_movement_event,
 };
-use super::super::utils::{combatant_id, log_ability_use};
 use super::CombatContext;
 
 /// Emergency heal trigger — a teammate below this HP fraction is healed before
@@ -62,7 +62,10 @@ pub struct ShamanMovementPlan {
 
 impl Default for ShamanMovementPlan {
     fn default() -> Self {
-        Self { escape_defer: None, pressured: false }
+        Self {
+            escape_defer: None,
+            pressured: false,
+        }
     }
 }
 
@@ -96,7 +99,8 @@ pub fn decide_shaman_action(
         return false;
     }
 
-    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos) else {
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos)
+    else {
         return false;
     };
 
@@ -104,8 +108,18 @@ pub fn decide_shaman_action(
     // (including totem maintenance: never let an ally die to refresh a buff
     // totem). Critical: never deferred for an escape window.
     if try_lesser_healing_wave(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        SHAMAN_EMERGENCY_HP, None, movement, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        SHAMAN_EMERGENCY_HP,
+        None,
+        movement,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -114,7 +128,15 @@ pub fn decide_shaman_action(
     // P2: Frost Shock — instant Frost nuke + slow, used as a peel against a
     // melee/pet attacking the Shaman or a low-HP ally.
     if try_frost_shock(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -124,7 +146,14 @@ pub fn decide_shaman_action(
     // Refreshes are deferred below a mana floor so totems don't starve offense;
     // initial drops are always allowed.
     if maintain_totems(
-        commands, combat_log, abilities, entity, combatant, my_pos, totem_durations, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        totem_durations,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -133,8 +162,16 @@ pub fn decide_shaman_action(
     // P4: Lightning Bolt — cast-time filler nuke on the kill target. Deferred
     // while fleeing (don't hardcast mid-escape).
     if try_lightning_bolt(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        escape_defer, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        escape_defer,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -144,8 +181,18 @@ pub fn decide_shaman_action(
     // than the Priest: the Shaman is offense-slanted, so it only heals when
     // needed. Deferred for healthy-ish targets while an escape window is live.
     if try_lesser_healing_wave(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        SHAMAN_SUSTAIN_HP, escape_defer, movement, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        SHAMAN_SUSTAIN_HP,
+        escape_defer,
+        movement,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -153,7 +200,15 @@ pub fn decide_shaman_action(
 
     // P6: Purge — strip a beneficial aura off an enemy (prefers the healer).
     if super::try_purge_enemy(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, &mut builder,
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
     ) {
         builder.finish();
         return true;
@@ -208,10 +263,28 @@ fn try_lesser_healing_wave(
     }
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(ability, def, combatant, my_pos, auras, Some((heal_target, target_pos)), ctx, opts) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((heal_target, target_pos)),
+        ctx,
+        opts,
+    ) {
         builder.reject(
             ability,
-            classify_pre_cast_failure(ability, def, combatant, my_pos, auras, Some((heal_target, target_pos)), ctx, opts),
+            classify_pre_cast_failure(
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((heal_target, target_pos)),
+                ctx,
+                opts,
+            ),
         );
         return false;
     }
@@ -220,10 +293,20 @@ fn try_lesser_healing_wave(
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
-    commands.entity(entity).insert(CastingState::new(ability, heal_target, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, heal_target, cast_time));
 
     let target_tuple = ctx.combatants.get(&heal_target).map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "begins casting",
+    );
 
     true
 }
@@ -314,10 +397,28 @@ fn try_frost_shock(
         check_target_immune: true,
         ..Default::default()
     };
-    if !pre_cast_ok(ability, def, combatant, my_pos, auras, Some((target_entity, target_pos)), ctx, opts) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
+    ) {
         builder.reject(
             ability,
-            classify_pre_cast_failure(ability, def, combatant, my_pos, auras, Some((target_entity, target_pos)), ctx, opts),
+            classify_pre_cast_failure(
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
+            ),
         );
         return false;
     }
@@ -327,10 +428,20 @@ fn try_frost_shock(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras); // 0.0 — completes immediately
-    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, target_entity, cast_time));
 
     let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "casts");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "casts",
+    );
 
     true
 }
@@ -379,10 +490,28 @@ fn try_lightning_bolt(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(ability, def, combatant, my_pos, auras, Some((target_entity, target_pos)), ctx, opts) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
+    ) {
         builder.reject(
             ability,
-            classify_pre_cast_failure(ability, def, combatant, my_pos, auras, Some((target_entity, target_pos)), ctx, opts),
+            classify_pre_cast_failure(
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                opts,
+            ),
         );
         return false;
     }
@@ -391,10 +520,20 @@ fn try_lightning_bolt(
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
-    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, target_entity, cast_time));
 
     let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "begins casting",
+    );
 
     true
 }
@@ -436,10 +575,18 @@ pub(super) fn maintain_totems(
         }
 
         let cast = match element {
-            TotemElement::Air => try_air_totem(commands, combat_log, abilities, entity, combatant, my_pos, builder),
-            TotemElement::Water => try_water_totem(commands, combat_log, abilities, entity, combatant, my_pos, builder),
-            TotemElement::Earth => try_earth_totem(commands, combat_log, abilities, entity, combatant, my_pos, builder),
-            TotemElement::Fire => try_fire_totem(commands, combat_log, abilities, entity, combatant, my_pos, builder),
+            TotemElement::Air => try_air_totem(
+                commands, combat_log, abilities, entity, combatant, my_pos, builder,
+            ),
+            TotemElement::Water => try_water_totem(
+                commands, combat_log, abilities, entity, combatant, my_pos, builder,
+            ),
+            TotemElement::Earth => try_earth_totem(
+                commands, combat_log, abilities, entity, combatant, my_pos, builder,
+            ),
+            TotemElement::Fire => try_fire_totem(
+                commands, combat_log, abilities, entity, combatant, my_pos, builder,
+            ),
         };
         if cast {
             return true;
@@ -473,15 +620,35 @@ pub fn totem_buff_spec(ability: AbilityType) -> Option<(AuraType, f32)> {
 pub fn totem_spec(element: TotemElement) -> (AbilityType, AuraType, f32, SpellSchool) {
     match element {
         // Windfury Totem — empowers melee allies' auto-attacks (proc chance 0..1).
-        TotemElement::Air => (AbilityType::AirTotem, AuraType::WindfuryBuff, 0.12, SpellSchool::Nature),
+        TotemElement::Air => (
+            AbilityType::AirTotem,
+            AuraType::WindfuryBuff,
+            0.12,
+            SpellSchool::Nature,
+        ),
         // Healing Stream Totem — periodic ally heal (per-tick amount).
-        TotemElement::Water => (AbilityType::WaterTotem, AuraType::HealingOverTime, 8.0, SpellSchool::Nature),
+        TotemElement::Water => (
+            AbilityType::WaterTotem,
+            AuraType::HealingOverTime,
+            8.0,
+            SpellSchool::Nature,
+        ),
         // Strength of Earth Totem — flat attack power. Tempered alongside
         // Flametongue (SP) so physical partners (Warrior/Rogue/Hunter) don't
         // win the damage race against a Priest-healed mirror by totem buffs alone.
-        TotemElement::Earth => (AbilityType::EarthTotem, AuraType::AttackPowerIncrease, 15.0, SpellSchool::Nature),
+        TotemElement::Earth => (
+            AbilityType::EarthTotem,
+            AuraType::AttackPowerIncrease,
+            15.0,
+            SpellSchool::Nature,
+        ),
         // Flametongue Totem — flat spell power.
-        TotemElement::Fire => (AbilityType::FireTotem, AuraType::SpellPowerIncrease, 18.0, SpellSchool::Fire),
+        TotemElement::Fire => (
+            AbilityType::FireTotem,
+            AuraType::SpellPowerIncrease,
+            18.0,
+            SpellSchool::Fire,
+        ),
     }
 }
 
@@ -509,10 +676,17 @@ fn try_totem(
 ) -> bool {
     let (ability, aura_type, magnitude, spell_school) = totem_spec(element);
 
-    let Some(def) = abilities.get(&ability) else { return false };
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
 
     if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
+        builder.reject(
+            ability,
+            RejectionReason::OnCooldown {
+                remaining: *remaining,
+            },
+        );
         return false;
     }
     if combatant.current_mana < def.mana_cost {
@@ -553,9 +727,21 @@ fn try_totem(
 
     combat_log.log(
         CombatLogEventType::Buff,
-        format!("[TOTEM] {} drops {}", combatant_id(team, combatant.slot, combatant.class), element.buff_name()),
+        format!(
+            "[TOTEM] {} drops {}",
+            combatant_id(team, combatant.slot, combatant.class),
+            element.buff_name()
+        ),
     );
-    log_ability_use(combat_log, team, combatant.slot, combatant.class, &def.name, None, "drops");
+    log_ability_use(
+        combat_log,
+        team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        None,
+        "drops",
+    );
 
     true
 }
@@ -570,7 +756,16 @@ fn try_air_totem(
     my_pos: Vec3,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
-    try_totem(commands, combat_log, abilities, entity, combatant, my_pos, TotemElement::Air, builder)
+    try_totem(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        TotemElement::Air,
+        builder,
+    )
 }
 
 /// Healing Stream Totem (Water).
@@ -583,7 +778,16 @@ fn try_water_totem(
     my_pos: Vec3,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
-    try_totem(commands, combat_log, abilities, entity, combatant, my_pos, TotemElement::Water, builder)
+    try_totem(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        TotemElement::Water,
+        builder,
+    )
 }
 
 /// Strength of Earth Totem (Earth).
@@ -596,7 +800,16 @@ fn try_earth_totem(
     my_pos: Vec3,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
-    try_totem(commands, combat_log, abilities, entity, combatant, my_pos, TotemElement::Earth, builder)
+    try_totem(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        TotemElement::Earth,
+        builder,
+    )
 }
 
 /// Flametongue Totem (Fire).
@@ -609,7 +822,16 @@ fn try_fire_totem(
     my_pos: Vec3,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
-    try_totem(commands, combat_log, abilities, entity, combatant, my_pos, TotemElement::Fire, builder)
+    try_totem(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        TotemElement::Fire,
+        builder,
+    )
 }
 
 // ============================================================================
@@ -707,7 +929,16 @@ pub fn evaluate_shaman_posture(
     // dying teammate is occluded — walk around cover to regain sight and heal.
     if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
         medic_chase_tick(
-            commands, entity, my_pos, ally, state, directive, shared, now, decision_trace, ctx,
+            commands,
+            entity,
+            my_pos,
+            ally,
+            state,
+            directive,
+            shared,
+            now,
+            decision_trace,
+            ctx,
         );
     } else {
         if state.medic_target.is_some() {
@@ -716,16 +947,45 @@ pub fn evaluate_shaman_posture(
         }
         match next {
             Posture::Escape => escape_tick(
-                commands, entity, my_pos, ctx, state, directive, shared,
-                &movement.shaman.weights, decision_trace, transitioned, prev,
+                commands,
+                entity,
+                my_pos,
+                ctx,
+                state,
+                directive,
+                shared,
+                &movement.shaman.weights,
+                decision_trace,
+                transitioned,
+                prev,
             ),
             Posture::Pressured => shaman_pressured_tick(
-                commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
-                decision_trace, transitioned, prev,
+                commands,
+                entity,
+                combatant,
+                my_pos,
+                ctx,
+                state,
+                directive,
+                movement,
+                now,
+                decision_trace,
+                transitioned,
+                prev,
             ),
             _ => shaman_free_tick(
-                commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
-                decision_trace, transitioned, prev,
+                commands,
+                entity,
+                combatant,
+                my_pos,
+                ctx,
+                state,
+                directive,
+                movement,
+                now,
+                decision_trace,
+                transitioned,
+                prev,
             ),
         }
     }
@@ -828,9 +1088,9 @@ fn shaman_free_tick(
 
     let point_xz = Vec2::new(point.x, point.z);
     let my_xz = Vec2::new(my_pos.x, my_pos.z);
-    let moved = state
-        .last_point
-        .map_or(true, |lp| lp.distance(point_xz) > movement.shaman.formation_shift_threshold);
+    let moved = state.last_point.map_or(true, |lp| {
+        lp.distance(point_xz) > movement.shaman.formation_shift_threshold
+    });
     let near = my_xz.distance(point_xz) <= movement.shaman.formation_deadzone;
 
     let issue = |commands: &mut Commands| {
@@ -865,7 +1125,9 @@ fn shaman_free_tick(
             builder.finish();
         }
     } else if !near
-        && directive.map_or(true, |d| d.expires - now < movement.shaman.directive_refresh_margin)
+        && directive.map_or(true, |d| {
+            d.expires - now < movement.shaman.directive_refresh_margin
+        })
     {
         issue(commands);
     }
@@ -917,13 +1179,14 @@ fn compute_formation_point(
                 .unwrap()
         });
     let away = match nearest_enemy {
-        Some(e) => Vec2::new(centroid.x - e.position.x, centroid.z - e.position.z)
-            .normalize_or_zero(),
+        Some(e) => {
+            Vec2::new(centroid.x - e.position.x, centroid.z - e.position.z).normalize_or_zero()
+        }
         None => Vec2::new(centroid.x, centroid.z).normalize_or_zero(),
     };
     let to_center = Vec2::new(-centroid.x, -centroid.z).normalize_or_zero();
-    let mut dir = (away * (1.0 - shared.center_bias) + to_center * shared.center_bias)
-        .normalize_or_zero();
+    let mut dir =
+        (away * (1.0 - shared.center_bias) + to_center * shared.center_bias).normalize_or_zero();
     if dir == Vec2::ZERO {
         dir = away;
     }

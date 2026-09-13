@@ -174,8 +174,7 @@ pub fn process_backlash(
             continue;
         }
 
-        let silence_aura =
-            dispel_backlash_silence_aura(Some(event.caster), event.silence_duration);
+        let silence_aura = dispel_backlash_silence_aura(Some(event.caster), event.silence_duration);
 
         commands.spawn(AuraPending {
             target: event.dispeller,

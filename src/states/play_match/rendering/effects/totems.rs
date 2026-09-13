@@ -1,11 +1,11 @@
-use bevy::prelude::*;
-use bevy::color::LinearRgba;
-use bevy::render::mesh::Indices;
-use bevy::render::render_asset::RenderAssetUsages;
-use bevy::render::render_resource::PrimitiveTopology;
 use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::components::*;
 use crate::states::play_match::map_config::ActiveMapGeometry;
+use bevy::color::LinearRgba;
+use bevy::prelude::*;
+use bevy::render::mesh::Indices;
+use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::render_resource::PrimitiveTopology;
 
 // ==============================================================================
 // Totem Visuals (Shaman, graphical-only)
@@ -54,11 +54,14 @@ fn arena_clipped_disc_mesh(bounds: &ArenaBounds, center: Vec2, radius: f32) -> M
     }
     let normals = vec![[0.0, 1.0, 0.0]; positions.len()];
     let uvs = vec![[0.0, 0.0]; positions.len()];
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-        .with_inserted_indices(Indices::U32(indices))
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(Indices::U32(indices))
 }
 
 /// Attach meshes to newly spawned totems. Headless mode spawns the bare `Totem`
@@ -78,10 +81,7 @@ pub fn spawn_totem_visuals(
     map_geometry: Option<Res<ActiveMapGeometry>>,
     new_totems: Query<(Entity, &Totem, &Transform), (Added<Totem>, Without<Children>)>,
 ) {
-    let bounds = map_geometry
-        .as_ref()
-        .map(|g| g.bounds)
-        .unwrap_or_default();
+    let bounds = map_geometry.as_ref().map(|g| g.bounds).unwrap_or_default();
     for (totem_entity, totem, transform) in new_totems.iter() {
         let color = totem.element.color();
         let s = color.to_srgba();
@@ -131,25 +131,25 @@ pub fn spawn_totem_visuals(
             .entity(totem_entity)
             .insert(Visibility::default())
             .with_children(|parent| {
-            // post: base rests on the ground (Cuboid is centered, half-height 0.65)
-            parent.spawn((
-                Mesh3d(post_mesh),
-                MeshMaterial3d(post_mat),
-                Transform::from_xyz(0.0, 0.65, 0.0),
-            ));
-            // orb: floats just above the post top (post spans y 0.0..1.3)
-            parent.spawn((
-                Mesh3d(orb_mesh),
-                MeshMaterial3d(orb_mat),
-                Transform::from_xyz(0.0, 1.65, 0.0),
-            ));
-            // radius disc: a hair above the floor so it doesn't z-fight it
-            parent.spawn((
-                Mesh3d(disc_mesh),
-                MeshMaterial3d(disc_mat),
-                Transform::from_xyz(0.0, 0.03, 0.0),
-            ));
-        });
+                // post: base rests on the ground (Cuboid is centered, half-height 0.65)
+                parent.spawn((
+                    Mesh3d(post_mesh),
+                    MeshMaterial3d(post_mat),
+                    Transform::from_xyz(0.0, 0.65, 0.0),
+                ));
+                // orb: floats just above the post top (post spans y 0.0..1.3)
+                parent.spawn((
+                    Mesh3d(orb_mesh),
+                    MeshMaterial3d(orb_mat),
+                    Transform::from_xyz(0.0, 1.65, 0.0),
+                ));
+                // radius disc: a hair above the floor so it doesn't z-fight it
+                parent.spawn((
+                    Mesh3d(disc_mesh),
+                    MeshMaterial3d(disc_mat),
+                    Transform::from_xyz(0.0, 0.03, 0.0),
+                ));
+            });
     }
 }
 
@@ -170,4 +170,3 @@ pub fn update_totem_visuals(mut totems: Query<(&Totem, &mut Transform)>) {
         }
     }
 }
-

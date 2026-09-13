@@ -19,9 +19,9 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use crate::states::match_config::{ArenaMap, CharacterClass};
 
 use super::config::HeadlessMatchConfig;
-use crate::states::play_match::ai_profile::AiProfile;
 use super::runner::{run_headless_match_with, TraceConfig};
 use crate::cli::TraceMode;
+use crate::states::play_match::ai_profile::AiProfile;
 
 /// Per-cell stats accumulator. One cell = one (team1_class, team2_class) pair.
 #[derive(Debug, Default, Clone)]
@@ -45,15 +45,27 @@ impl CellStats {
     }
 
     fn team1_winrate(&self) -> f32 {
-        if self.runs == 0 { 0.0 } else { self.team1_wins as f32 / self.runs as f32 }
+        if self.runs == 0 {
+            0.0
+        } else {
+            self.team1_wins as f32 / self.runs as f32
+        }
     }
 
     fn draw_rate(&self) -> f32 {
-        if self.runs == 0 { 0.0 } else { self.draws as f32 / self.runs as f32 }
+        if self.runs == 0 {
+            0.0
+        } else {
+            self.draws as f32 / self.runs as f32
+        }
     }
 
     fn avg_duration(&self) -> f32 {
-        if self.runs == 0 { 0.0 } else { self.sum_duration / self.runs as f32 }
+        if self.runs == 0 {
+            0.0
+        } else {
+            self.sum_duration / self.runs as f32
+        }
     }
 }
 
@@ -139,7 +151,10 @@ pub fn run_matrix(
                 let trace_config = traces_dir.as_ref().map(|dir| TraceConfig {
                     output_path: format!(
                         "{}/match_{}_{}_v_{}_trace.jsonl",
-                        dir, seed, c1.name(), c2.name()
+                        dir,
+                        seed,
+                        c1.name(),
+                        c2.name()
                     )
                     .into(),
                 });
@@ -147,20 +162,36 @@ pub fn run_matrix(
                 match run_headless_match_with(config, !save_logs, trace_config) {
                     Ok(result) => cell.record(result.winner, result.match_time),
                     Err(e) => {
-                        eprintln!("  Match {} vs {} run {} failed: {}", c1.name(), c2.name(), run, e);
+                        eprintln!(
+                            "  Match {} vs {} run {} failed: {}",
+                            c1.name(),
+                            c2.name(),
+                            run,
+                            e
+                        );
                     }
                 }
             }
-            print!("  {} vs {}: T1={} T2={} D={} (avg {:.1}s)\r",
-                c1.name(), c2.name(), cell.team1_wins, cell.team2_wins, cell.draws, cell.avg_duration());
+            print!(
+                "  {} vs {}: T1={} T2={} D={} (avg {:.1}s)\r",
+                c1.name(),
+                c2.name(),
+                cell.team1_wins,
+                cell.team2_wins,
+                cell.draws,
+                cell.avg_duration()
+            );
             std::io::stdout().flush().ok();
             stats.insert((c1, c2), cell);
         }
     }
 
     let elapsed = started.elapsed().as_secs_f32();
-    println!("\nMatrix complete in {:.1}s ({:.0} matches/sec)",
-        elapsed, total_matches as f32 / elapsed.max(0.001));
+    println!(
+        "\nMatrix complete in {:.1}s ({:.0} matches/sec)",
+        elapsed,
+        total_matches as f32 / elapsed.max(0.001)
+    );
 
     // Surface any per-match TraceWriter::create failures that the runner
     // eprintln'd inline. We aggregate by re-scanning the per-run dir for the
@@ -168,10 +199,14 @@ pub fn run_matrix(
     if let Some(dir) = traces_dir.as_ref() {
         let expected = total_matches as usize;
         let actual = fs::read_dir(dir)
-            .map(|rd| rd.filter_map(|e| e.ok()).filter(|e| {
-                e.file_name().to_string_lossy().starts_with("match_")
-                    && e.file_name().to_string_lossy().ends_with("_trace.jsonl")
-            }).count())
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.file_name().to_string_lossy().starts_with("match_")
+                            && e.file_name().to_string_lossy().ends_with("_trace.jsonl")
+                    })
+                    .count()
+            })
             .unwrap_or(0);
         if actual != expected {
             let missing = expected.saturating_sub(actual);
@@ -184,8 +219,10 @@ pub fn run_matrix(
                     expected, actual, dir, missing,
                 ),
             );
-            println!("Trace coverage: {}/{} matches ({} missing — see {})",
-                actual, expected, missing, failures_log);
+            println!(
+                "Trace coverage: {}/{} matches ({} missing — see {})",
+                actual, expected, missing, failures_log
+            );
         } else {
             println!("Trace coverage: {}/{} matches", actual, expected);
         }
@@ -273,16 +310,33 @@ fn write_csv(
     profile: AiProfile,
 ) -> std::io::Result<()> {
     let mut f = fs::File::create(path)?;
-    writeln!(f, "# Matrix run: n={} seed_base={} ai_profile={}", n, seed_base, profile.name())?;
-    writeln!(f, "team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs")?;
+    writeln!(
+        f,
+        "# Matrix run: n={} seed_base={} ai_profile={}",
+        n,
+        seed_base,
+        profile.name()
+    )?;
+    writeln!(
+        f,
+        "team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs"
+    )?;
     for &c1 in classes {
         for &c2 in classes {
             let cell = stats.get(&(c1, c2)).cloned().unwrap_or_default();
-            writeln!(f,
+            writeln!(
+                f,
                 "{},{},{},{},{},{},{:.4},{:.4},{:.2}",
-                c1.name(), c2.name(),
-                cell.runs, cell.team1_wins, cell.team2_wins, cell.draws,
-                cell.team1_winrate(), cell.draw_rate(), cell.avg_duration())?;
+                c1.name(),
+                c2.name(),
+                cell.runs,
+                cell.team1_wins,
+                cell.team2_wins,
+                cell.draws,
+                cell.team1_winrate(),
+                cell.draw_rate(),
+                cell.avg_duration()
+            )?;
         }
     }
     Ok(())
@@ -303,18 +357,30 @@ fn write_markdown(
     writeln!(f)?;
     writeln!(f, "- **Runs per cell:** {}", n)?;
     writeln!(f, "- **AI profile:** {}", profile.name())?;
-    writeln!(f, "- **Seed base:** {} (cell `(c1, c2)` run `i` uses seed `seed_base + (cell_idx × N + i)`)", seed_base)?;
-    writeln!(f, "- **Total matches:** {}", classes.len().pow(2) as u32 * n)?;
+    writeln!(
+        f,
+        "- **Seed base:** {} (cell `(c1, c2)` run `i` uses seed `seed_base + (cell_idx × N + i)`)",
+        seed_base
+    )?;
+    writeln!(
+        f,
+        "- **Total matches:** {}",
+        classes.len().pow(2) as u32 * n
+    )?;
     writeln!(f, "- **Wall time:** {:.1}s", elapsed_secs)?;
     writeln!(f)?;
 
     writeln!(f, "## Team 1 Winrate (rows = team 1, columns = team 2)")?;
     writeln!(f)?;
     write!(f, "| T1 \\ T2 |")?;
-    for &c in classes { write!(f, " {} |", short(c))?; }
+    for &c in classes {
+        write!(f, " {} |", short(c))?;
+    }
     writeln!(f)?;
     write!(f, "|---|")?;
-    for _ in classes { write!(f, "---|")?; }
+    for _ in classes {
+        write!(f, "---|")?;
+    }
     writeln!(f)?;
     for &c1 in classes {
         write!(f, "| **{}** |", short(c1))?;
@@ -329,10 +395,14 @@ fn write_markdown(
     writeln!(f, "## Draw Rate")?;
     writeln!(f)?;
     write!(f, "| T1 \\ T2 |")?;
-    for &c in classes { write!(f, " {} |", short(c))?; }
+    for &c in classes {
+        write!(f, " {} |", short(c))?;
+    }
     writeln!(f)?;
     write!(f, "|---|")?;
-    for _ in classes { write!(f, "---|")?; }
+    for _ in classes {
+        write!(f, "---|")?;
+    }
     writeln!(f)?;
     for &c1 in classes {
         write!(f, "| **{}** |", short(c1))?;
@@ -347,10 +417,14 @@ fn write_markdown(
     writeln!(f, "## Average Match Duration (seconds)")?;
     writeln!(f)?;
     write!(f, "| T1 \\ T2 |")?;
-    for &c in classes { write!(f, " {} |", short(c))?; }
+    for &c in classes {
+        write!(f, " {} |", short(c))?;
+    }
     writeln!(f)?;
     write!(f, "|---|")?;
-    for _ in classes { write!(f, "---|")?; }
+    for _ in classes {
+        write!(f, "---|")?;
+    }
     writeln!(f)?;
     for &c1 in classes {
         write!(f, "| **{}** |", short(c1))?;
@@ -372,9 +446,24 @@ fn write_markdown(
     writeln!(f, "## Totals")?;
     writeln!(f)?;
     writeln!(f, "- Matches: {}", totals_runs)?;
-    writeln!(f, "- Team 1 wins: {} ({:.1}%)", totals_t1, pct(totals_t1, totals_runs))?;
-    writeln!(f, "- Team 2 wins: {} ({:.1}%)", totals_t2, pct(totals_t2, totals_runs))?;
-    writeln!(f, "- Draws: {} ({:.1}%)", totals_draw, pct(totals_draw, totals_runs))?;
+    writeln!(
+        f,
+        "- Team 1 wins: {} ({:.1}%)",
+        totals_t1,
+        pct(totals_t1, totals_runs)
+    )?;
+    writeln!(
+        f,
+        "- Team 2 wins: {} ({:.1}%)",
+        totals_t2,
+        pct(totals_t2, totals_runs)
+    )?;
+    writeln!(
+        f,
+        "- Draws: {} ({:.1}%)",
+        totals_draw,
+        pct(totals_draw, totals_runs)
+    )?;
     writeln!(f)?;
 
     // Mirror-matchup sanity: same class on both sides should converge to ~50%
@@ -384,19 +473,27 @@ fn write_markdown(
     writeln!(f)?;
     for &c in classes {
         let cell = stats.get(&(c, c)).cloned().unwrap_or_default();
-        writeln!(f, "- {} vs {}: **{:.0}%** T1 win, {:.0}% draw ({} matches, avg {:.1}s)",
-            c.name(), c.name(),
+        writeln!(
+            f,
+            "- {} vs {}: **{:.0}%** T1 win, {:.0}% draw ({} matches, avg {:.1}s)",
+            c.name(),
+            c.name(),
             cell.team1_winrate() * 100.0,
             cell.draw_rate() * 100.0,
             cell.runs,
-            cell.avg_duration())?;
+            cell.avg_duration()
+        )?;
     }
 
     Ok(())
 }
 
 fn pct(numerator: u32, denominator: u32) -> f32 {
-    if denominator == 0 { 0.0 } else { numerator as f32 / denominator as f32 * 100.0 }
+    if denominator == 0 {
+        0.0
+    } else {
+        numerator as f32 / denominator as f32 * 100.0
+    }
 }
 
 /// 3-letter class abbreviation for compact heatmap headers.

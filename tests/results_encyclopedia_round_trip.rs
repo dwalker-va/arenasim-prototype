@@ -29,6 +29,7 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin as BevyStatesPlugin;
 
 use arenasim::combat::CombatPlugin;
+use arenasim::states::configure_match_ui::ClassIconHandles;
 use arenasim::states::encyclopedia::{EncyclopediaState, Topic};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::equipment::EquipmentPlugin;
@@ -36,7 +37,6 @@ use arenasim::states::play_match::{
     AbilityConfigPlugin, CombatantStats, MapConfigPlugin, MatchResults, MovementConfigPlugin,
 };
 use arenasim::states::results_ui::{apply_results_action, ResultsAction};
-use arenasim::states::configure_match_ui::ClassIconHandles;
 use arenasim::states::view_combatant_ui::AbilityIconHandles;
 use arenasim::states::{GameState, StatesPlugin};
 
