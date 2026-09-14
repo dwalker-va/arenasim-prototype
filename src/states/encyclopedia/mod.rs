@@ -71,7 +71,7 @@ use super::view_combatant_ui::{AbilityIcons, ItemIcons};
 use super::GameState;
 
 pub use abilities::AbilityFilters;
-pub use auras::{AuraId, EngineAura};
+pub use auras::{AuraArt, AuraId, AuraSource, EngineAura};
 pub use items::ItemFilters;
 pub use search::{build_registry, SearchEntry};
 pub use topic::{Section, Topic};

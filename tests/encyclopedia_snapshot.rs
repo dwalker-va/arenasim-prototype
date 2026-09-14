@@ -303,6 +303,39 @@ fn encyclopedia_aura_detail_name_collision() {
     snapshot("encyclopedia_aura_detail_name_collision", state);
 }
 
+/// An engine aura whose applying ability has no `applies_aura` block of its own.
+/// Power Word: Shield spawns Weakened Soul on the ally it shields at the cast
+/// site, so APPLIED BY is a live link to the shield's page — the section used to
+/// say "applied by an engine mechanic", which read as though nothing in the game
+/// produced the debuff that gates re-shielding. The icon is the aura's OWN art,
+/// not the shield's (invisible here — kittest has no textures).
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_weakened_soul() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::WeakenedSoul),
+        ))),
+    );
+    snapshot("encyclopedia_aura_detail_weakened_soul", state);
+}
+
+/// The one aura NO ability applies: an arena orb pickup. Its APPLIED BY section
+/// has no page to link to, so it names the mechanic instead of reporting the
+/// absence of one.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_orb() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::ShadowSight),
+        ))),
+    );
+    snapshot("encyclopedia_aura_detail_orb", state);
+}
+
 /// The navigation cluster at a DEEP LINK: entered from the Results screen, so
 /// Back is disabled (a deep link is a fresh stack with no history above it) and
 /// Home names Results rather than the main menu. The two other cluster states —
