@@ -214,17 +214,30 @@ matters: this is *not* a melee unit spending a match attacking the wrong target.
 It is a melee unit that gets two swings off and dies. Same conclusion, but the
 evidence is now what it says it is. All 14 cells are accounted for.
 
-**Which of these figures you can re-run from this PR.** The load-bearing ones
-are all reproducible from committed data: the 13-of-14 cell comparison
-(`…-as54-blast.py` against the two committed CSVs), and this cell's 100-of-100
-team-2 wins and 14.8–35.6s durations (the committed baseline CSV). The one
-exception is the hit-target breakdown — two attacks per match, all on the
-Shaman — which came from a scratchpad helper that is deliberately **not**
-committed: it carries the same hardcoded-path defect already filed against the
-other two scripts, and adding a fourth instance to satisfy one figure would
-trade a real cleanup for a cosmetic one. That figure instead rests on
-independent replication: the Tester measured it separately at ten seeds
-(20 of 20 hits on the Shaman, zero on the Mage) against the six here.
+**Which of these figures you can re-run, and how.** Every load-bearing number is
+reachable from repository data, but not all by the same route — and one of them
+needs a step this paragraph originally got wrong.
+
+- **This cell's 100-of-100 team-2 wins and 14.8–35.6s durations** — read straight
+  off the committed baseline CSV in the working tree. No extra step.
+- **The 13-of-14 cell comparison** — needs BOTH baselines, and only one is in the
+  working tree. The tree holds the post-AS-54 baseline; the **pre**-AS-54 one was
+  overwritten when §5 re-measured, and survives as a blob on an earlier commit of
+  this branch:
+  ```bash
+  git show 4a902d1:docs/design/balance/2026-09-13-shaman-weapon-damage-before.csv > /tmp/pre.csv
+  ```
+  `…-as54-blast.py` records the method, but is **not** a runnable route as
+  committed: both its input paths point at a scratchpad directory that existed
+  only in the authoring session, so it raises `FileNotFoundError` anywhere else.
+  Point it at `/tmp/pre.csv` and the tree's baseline to re-derive the 13 of 14.
+- **The hit-target breakdown** (two attacks per match, all on the Shaman) — not
+  reproducible from this PR at all. Its helper is deliberately uncommitted: it
+  carries the same hardcoded-path defect already filed against the other scripts,
+  and adding a fourth instance to satisfy one figure would trade a real cleanup
+  for a cosmetic one. This figure rests on independent replication instead — the
+  Tester measured it separately at ten seeds (20 of 20 hits on the Shaman, zero
+  on the Mage) against the six here.
 
 ### What this does NOT claim
 

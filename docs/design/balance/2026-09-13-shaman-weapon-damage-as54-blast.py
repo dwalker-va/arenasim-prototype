@@ -13,6 +13,18 @@ Mage and a melee attacker. If that is right:
 
 Compares the OLD-base baseline CSV against the NEW-base baseline CSV. Both are
 the unmodified-Shaman arm, so the only variable between them is AS-54.
+
+NOT RUNNABLE AS COMMITTED -- the two paths below point at the authoring
+session's scratchpad and will raise FileNotFoundError anywhere else. This file
+is a record of the method; edit the paths to re-run it. Only the NEW baseline is
+in the working tree. The OLD (pre-AS-54) one was overwritten when the sweep was
+re-measured on the new base, and survives as a blob on an earlier commit of this
+branch:
+
+    git show 4a902d1:docs/design/balance/2026-09-13-shaman-weapon-damage-before.csv > /tmp/pre.csv
+
+Then set OLD to /tmp/pre.csv and NEW to the tree's
+docs/design/balance/2026-09-13-shaman-weapon-damage-before.csv.
 """
 import csv
 import os
@@ -64,5 +76,17 @@ bad = [
         != ("Mage" in set(cell.replace("_vs_", "+").split("+"))
             and bool(set(cell.replace("_vs_", "+").split("+")) & MELEE)))
 ]
-print("VERDICT: %s" % (
-    "prediction holds for every cell" if not bad else "prediction fails on %s" % bad))
+KNOWN = [("mirrored", "Warrior+Shaman_vs_Mage+Shaman")]
+
+if not bad:
+    print("VERDICT: the rule above holds for every cell")
+elif sorted(bad) == sorted(KNOWN):
+    print("VERDICT: 13 of 14 -- the rule above holds except for the one KNOWN and")
+    print("         EXPLAINED cell, %s." % bad[0][1])
+    print("         The rule as coded is 'contains a Mage and a melee unit'. The")
+    print("         real trigger also needs the melee unit to LAND a hit on the")
+    print("         Mage, and here the Warrior connects twice -- both on the")
+    print("         enemy Shaman -- and dies. So the chill never fires and the")
+    print("         cell is correctly unmoved. See the findings doc, section 5.")
+else:
+    print("VERDICT: unexpected cells break the rule: %s" % bad)
