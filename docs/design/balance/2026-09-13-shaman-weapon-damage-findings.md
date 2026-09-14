@@ -196,10 +196,23 @@ cell pairs a Mage with a melee unit (`Mage+Shaman vs Mage+Priest` has no melee;
 whole slice and the delta it measures is untouched.
 
 The fourteenth cell, `Warrior+Shaman vs Mage+Shaman`, has both and still did not
-move. Checked directly rather than left as an exception: over six seeds the
-Warrior lands **every** one of its attacks on the enemy Shaman and never once on
-the Mage — it trains the healer — so the chill never fires there either. All 14
-cells are accounted for.
+move. Checked directly rather than left as an exception.
+
+**The Warrior connects twice and dies.** Across six seeds it lands 12 attacks
+total — two per match, every one on the enemy Shaman, none on the Mage. (The
+Tester replicated this independently at ten seeds: 20 of 20 landed hits on the
+Shaman, zero on the Mage.) Team 2 wins **all 100 seeds** of this cell, in 14.8s
+to 35.6s, per the committed baseline CSV.
+
+The chill is gated on a LANDED melee hit against an entity carrying
+`FrostArmorBuff` — the `frost_armor_procs` insert in
+`combat_core/auto_attack.rs` sits inside the damage-application path and reads
+the TARGET's auras — so zero landed hits on the Mage means it cannot fire.
+
+Worth stating precisely, because the loose version is misleading in a way that
+matters: this is *not* a melee unit spending a match attacking the wrong target.
+It is a melee unit that gets two swings off and dies. Same conclusion, but the
+evidence is now what it says it is. All 14 cells are accounted for.
 
 ### What this does NOT claim
 
