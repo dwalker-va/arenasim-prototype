@@ -82,6 +82,9 @@ fn schools_in_use(abilities: &AbilityDefinitions) -> Vec<SpellSchool> {
 /// there is one definition of that order (AS-30's `abilities_for_class`).
 /// Every ability carries a required `class`, so this walk is exhaustive and
 /// visits each ability once — pinned by a test below.
+///
+/// [`render_index`] renders FROM this, grouping the runs it already contains,
+/// so the pinned walk and the drawn walk are one piece of code.
 pub fn all_in_kit_order(abilities: &AbilityDefinitions) -> Vec<AbilityType> {
     CharacterClass::all()
         .iter()
@@ -373,19 +376,13 @@ pub fn render_index(
     // has — the index is the eight class kits laid end to end, with their
     // seams drawn in rather than hidden. A wall of 70 unlabelled icons is not
     // navigable; eight labelled kits are.
-    let groups: Vec<(CharacterClass, Vec<AbilityType>)> = CharacterClass::all()
-        .iter()
-        .map(|class| {
-            let kit = data
-                .abilities
-                .abilities_for_class(*class)
-                .into_iter()
-                .filter(|a| data.abilities.get(a).is_some_and(|c| filters.matches(c)))
-                .collect();
-            (*class, kit)
-        })
-        .filter(|(_, kit): &(CharacterClass, Vec<AbilityType>)| !kit.is_empty())
-        .collect();
+    //
+    // The walk is [`all_in_kit_order`] itself, cut back into runs at the class
+    // seams it already contains — not a second traversal that happens to agree
+    // with it. That is what makes the exactly-once test below a statement about
+    // THIS screen: change the order and the test moves with it.
+    let groups: Vec<(CharacterClass, Vec<AbilityType>)> =
+        group_by_class(all_in_kit_order(data.abilities), data, filters);
 
     let total = data.abilities.ability_types().count();
     let shown: usize = groups.iter().map(|(_, kit)| kit.len()).sum();
@@ -427,6 +424,34 @@ pub fn render_index(
         });
     }
     clicked
+}
+
+/// Cut a kit-order walk into the class runs it already contains, dropping
+/// abilities the filters reject and classes left with nothing.
+///
+/// Grouping is by ADJACENCY, not by a lookup per class: [`all_in_kit_order`]
+/// concatenates the kits, so each class's abilities are already contiguous and
+/// a run ends exactly where the source order says the seam is. An ability with
+/// no config is skipped, as it is everywhere else on this screen.
+fn group_by_class(
+    order: Vec<AbilityType>,
+    data: &EncyclopediaData,
+    filters: &AbilityFilters,
+) -> Vec<(CharacterClass, Vec<AbilityType>)> {
+    let mut groups: Vec<(CharacterClass, Vec<AbilityType>)> = Vec::new();
+    for ability in order {
+        let Some(config) = data.abilities.get(&ability) else {
+            continue;
+        };
+        if !filters.matches(config) {
+            continue;
+        }
+        match groups.last_mut() {
+            Some((class, kit)) if *class == config.class => kit.push(ability),
+            _ => groups.push((config.class, vec![ability])),
+        }
+    }
+    groups
 }
 
 /// Two chip rows: owning class, then spell school. Single-select per row, with
@@ -702,6 +727,10 @@ mod tests {
     /// per-class kits must visit every ability in `abilities.ron` exactly once.
     /// If this ever fails, an ability is either missing from the index or shown
     /// twice — both invisible without it.
+    ///
+    /// This is the walk the screen runs: `render_index` groups
+    /// [`all_in_kit_order`]'s output rather than re-deriving it, so there is no
+    /// second traversal for this to be silently true of.
     #[test]
     fn the_index_lists_every_ability_exactly_once() {
         let abilities = load_ability_definitions().expect("abilities.ron must load");
@@ -709,6 +738,23 @@ mod tests {
         let unique: HashSet<AbilityType> = order.iter().copied().collect();
         assert_eq!(order.len(), unique.len(), "an ability is listed twice");
         assert_eq!(unique.len(), abilities.ability_types().count());
+    }
+
+    /// Each class's abilities are CONTIGUOUS in the kit order, which is what
+    /// lets the index group by adjacency instead of looking each kit up again.
+    /// A class appearing in two runs would silently split its section heading.
+    #[test]
+    fn the_kit_order_keeps_each_class_in_one_run() {
+        let abilities = load_ability_definitions().expect("abilities.ron must load");
+        let mut runs: Vec<CharacterClass> = Vec::new();
+        for ability in all_in_kit_order(&abilities) {
+            let class = abilities.get(&ability).expect("ability has a config").class;
+            if runs.last() != Some(&class) {
+                runs.push(class);
+            }
+        }
+        let unique: HashSet<CharacterClass> = runs.iter().copied().collect();
+        assert_eq!(runs.len(), unique.len(), "a class appears in two runs");
     }
 
     /// The sentence split must not fire on a DECIMAL. The generator prints
