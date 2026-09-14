@@ -710,7 +710,9 @@ pub fn apply_pending_auras(
                     .iter()
                     .position(|a| a.dr_category() == Some(category))
                 {
-                    active_auras.auras.swap_remove(pos);
+                    // Whole debuff, riders included — a replaced Frost Armor
+                    // chill must not leave its attack-speed half behind.
+                    active_auras.swap_remove_debuff_at(pos);
                 }
             }
         }
@@ -1328,6 +1330,7 @@ mod tests {
             backlash_damage: None,
             dr_category_override: None,
             dispel_type: DispelType::Auto,
+            compound: None,
         }
     }
 

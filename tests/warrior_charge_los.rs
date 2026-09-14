@@ -79,6 +79,7 @@ fn attack_power_aura() -> Aura {
         backlash_damage: None,
         dr_category_override: None,
         dispel_type: DispelType::Auto,
+        compound: None,
     }
 }
 

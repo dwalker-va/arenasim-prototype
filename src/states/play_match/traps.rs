@@ -128,6 +128,7 @@ pub fn trap_system(
                                 backlash_damage: None,
                                 dr_category_override: None,
                                 dispel_type: DispelType::Auto,
+                                compound: None,
                             },
                         },
                         PlayMatchEntity,
@@ -266,6 +267,7 @@ pub fn slow_zone_system(
                             backlash_damage: None,
                             dr_category_override: None,
                             dispel_type: DispelType::Auto,
+                            compound: None,
                         });
                     }
                 } else {
@@ -288,6 +290,7 @@ pub fn slow_zone_system(
                             backlash_damage: None,
                             dr_category_override: None,
                             dispel_type: DispelType::Auto,
+                            compound: None,
                         }],
                     });
                 }

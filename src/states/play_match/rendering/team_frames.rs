@@ -852,6 +852,12 @@ pub fn render_team_frames(
                 if !display_settings.show_aura_icons {
                     continue;
                 }
+                // One debuff, one icon: a compound debuff's riders are drawn by
+                // its face (see `CompoundDebuff`). Without this the Frost Armor
+                // chill stacks two identically-named icons on the frame.
+                if aura.is_compound_rider() {
+                    continue;
+                }
                 let frame_aura = FrameAura {
                     icon_key: get_aura_icon_key(aura, &abilities),
                     remaining: aura.duration,

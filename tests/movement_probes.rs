@@ -2940,6 +2940,7 @@ mod bucket_a_unit {
             backlash_damage: None,
             dr_category_override: None,
             dispel_type: DispelType::Auto,
+            compound: None,
         }
     }
 
@@ -4559,6 +4560,7 @@ mod u9_seek_reset {
             backlash_damage: None,
             dr_category_override: None,
             dispel_type: DispelType::Auto,
+            compound: None,
         }
     }
 

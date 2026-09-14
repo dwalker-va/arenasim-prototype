@@ -423,6 +423,7 @@ pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
         backlash_damage: None,
         dr_category_override: None,
         dispel_type: super::DispelType::Auto,
+        compound: None,
     }
 }
 

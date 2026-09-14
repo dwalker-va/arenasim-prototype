@@ -639,31 +639,28 @@ pub fn combat_auto_attack(
         }
     }
 
-    // Apply Frost Armor procs: slow melee attackers who hit a target with FrostArmorBuff
-    // Only apply if the attacker doesn't already have a Frost Armor slow (prevents DR escalation)
+    // Apply Frost Armor procs: chill melee attackers who hit a target with FrostArmorBuff
+    // Only apply if the attacker doesn't already have the chill (prevents DR escalation)
     for attacker_entity in frost_armor_procs {
-        // Check if attacker already has the Frost Armor slow active
+        // Check if attacker already has the Frost Armor chill active
         let already_has_frost_slow =
             if let Ok((_, _, _, _, _, Some(attacker_auras))) = combatants.get(attacker_entity) {
-                attacker_auras.auras.iter().any(|a| {
-                    a.effect_type == AuraType::MovementSpeedSlow && a.ability_name == "Frost Armor"
-                })
+                attacker_auras
+                    .auras
+                    .iter()
+                    .any(|a| a.compound == Some(CompoundDebuff::FrostArmorChill))
             } else {
                 false
             };
         if already_has_frost_slow {
             continue;
         }
-        // Apply MovementSpeedSlow (30% slow = magnitude 0.7) for 5 seconds
-        commands.spawn(AuraPending {
-            target: attacker_entity,
-            aura: frost_armor_movement_slow_aura(),
-        });
-        // Apply AttackSpeedSlow (25% slower attacks) for 5 seconds
-        commands.spawn(AuraPending {
-            target: attacker_entity,
-            aura: frost_armor_attack_speed_aura(),
-        });
+        for aura in frost_armor_chill_auras() {
+            commands.spawn(AuraPending {
+                target: attacker_entity,
+                aura,
+            });
+        }
     }
 
     // Spawn floating combat text for each target that took damage (batched)
@@ -741,12 +738,29 @@ pub fn combat_auto_attack(
 /// How long a Frost Armor proc chills its victim.
 pub const FROST_ARMOR_PROC_DURATION: f32 = 5.0;
 
-/// The movement slow a Frost Armor proc hangs on a melee attacker.
+/// The Frost Armor chill: ONE debuff, two effects.
+///
+/// A melee attacker who strikes a Mage wearing Frost Armor is slowed AND swings
+/// slower. The two effects are separate [`Aura`]s because that is the only way
+/// the movement solver and the swing timer can each see the half they act on —
+/// and they carry [`CompoundDebuff::FrostArmorChill`] so everything that treats
+/// a debuff as a unit (the frames, the catalog, a dispel) sees one thing.
 ///
 /// Shared constructor so the apply site and the encyclopedia's catalog entry
-/// cannot disagree. Note the name: BOTH procs and the Mage's own self-buff are
-/// called "Frost Armor" on the frames, which is why the catalog addresses them
-/// separately and the audit keys on name PLUS mechanic.
+/// cannot disagree, and a single function so the two halves cannot be applied
+/// apart. Note the name: the chill and the Mage's own self-buff are both
+/// "Frost Armor" on the frames, which is why the audit keys on name PLUS
+/// mechanic.
+pub fn frost_armor_chill_auras() -> [Aura; 2] {
+    [
+        frost_armor_movement_slow_aura(),
+        frost_armor_attack_speed_aura(),
+    ]
+}
+
+/// The movement-slow half of [`frost_armor_chill_auras`] — the chill's FACE,
+/// and so the effect a dispel is classified against. Public for the catalog,
+/// which needs each effect's own numbers; the sim applies the pair.
 pub fn frost_armor_movement_slow_aura() -> Aura {
     Aura {
         effect_type: AuraType::MovementSpeedSlow,
@@ -765,11 +779,13 @@ pub fn frost_armor_movement_slow_aura() -> Aura {
         backlash_damage: None,
         dr_category_override: None,
         dispel_type: DispelType::Auto,
+        compound: Some(CompoundDebuff::FrostArmorChill),
     }
 }
 
-/// The attack-speed slow a Frost Armor proc hangs on a melee attacker,
-/// alongside [`frost_armor_movement_slow_aura`].
+/// The attack-speed half of [`frost_armor_chill_auras`] — a RIDER: it does not
+/// need to be dispellable in its own right, because the chill comes off by its
+/// face.
 pub fn frost_armor_attack_speed_aura() -> Aura {
     Aura {
         effect_type: AuraType::AttackSpeedSlow,
@@ -788,6 +804,7 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
         backlash_damage: None,
         dr_category_override: None,
         dispel_type: DispelType::Auto,
+        compound: Some(CompoundDebuff::FrostArmorChill),
     }
 }
 

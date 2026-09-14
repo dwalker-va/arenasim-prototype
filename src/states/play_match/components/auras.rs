@@ -596,6 +596,65 @@ impl AuraType {
 }
 
 // ============================================================================
+// Compound Debuffs
+// ============================================================================
+
+/// A DEBUFF made of several effects, applied and removed as one thing.
+///
+/// An [`Aura`] carries exactly one `effect_type`, and that is not an oversight
+/// to be patched: every reader in the sim scans `ActiveAuras` for the mechanic
+/// it cares about — the movement solver for `MovementSpeedSlow`, the swing
+/// timer for `AttackSpeedSlow`, the Hunter's peel logic, the kiter's posture —
+/// so an effect only exists, behaviourally, when it is its own aura in the
+/// vector. A single aura holding a compound `effect_type`, or a "secondary
+/// effect" field, would be invisible to every one of those readers, and the
+/// failure mode is silence.
+///
+/// What the model actually lacked is a debuff ABOVE the effect. This is it.
+/// Auras sharing a `CompoundDebuff` are one debuff to the player and to
+/// everything that acts on debuffs as a unit: they show ONE icon on the frames,
+/// they get ONE catalog entry, and — the point of the whole thing — a removal
+/// that takes one takes all of them.
+///
+/// Membership is STORED on the aura, never derived from its `ability_name`.
+/// Same reason [`DispelType::Curse`] is declared rather than inferred: a
+/// classification rule living inside a display string breaks the moment the
+/// string is edited for display reasons.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum CompoundDebuff {
+    /// The chill a Frost Armor proc puts on a melee attacker: a movement slow
+    /// AND an attack-speed slow, one debuff named "Frost Armor". Before these
+    /// were bound together a dispel lifted whichever half it happened to roll
+    /// and left the other standing under the same name.
+    FrostArmorChill,
+}
+
+impl CompoundDebuff {
+    /// The effect that REPRESENTS this debuff: the icon the frames draw, the
+    /// mechanic badge its catalog entry wears, and the aura a removal
+    /// predicate is asked about. Its siblings are RIDERS — real auras with
+    /// real effects, but not the debuff's public face.
+    ///
+    /// Naming a face is what keeps the compound from needing a second field on
+    /// every aura. It also decides removability deliberately rather than by
+    /// accident: Frost Armor's chill comes off to a dispel because its FACE is
+    /// a dispellable magic slow, and the attack-speed rider never has to become
+    /// independently dispellable for the debuff to behave as one. That matters
+    /// beyond Frost Armor — widening [`AuraType::is_magic_dispellable`] to
+    /// admit `AttackSpeedSlow` was the other way to get this behaviour, and it
+    /// would have dragged `AttackPowerReduction` along with it and quietly made
+    /// Demoralizing Shout dispellable as magic.
+    ///
+    /// **Exhaustive on purpose — do not add a `_ =>` arm.** Compound N+1 must
+    /// say which of its effects the player is looking at.
+    pub fn face(self) -> AuraType {
+        match self {
+            CompoundDebuff::FrostArmorChill => AuraType::MovementSpeedSlow,
+        }
+    }
+}
+
+// ============================================================================
 // Aura Struct
 // ============================================================================
 
@@ -653,6 +712,13 @@ pub struct Aura {
     /// coating, or Concussive Shot's physical snare that no dispel touches.
     /// Set by [`DispelType::for_ability`] for every RON-defined aura.
     pub dispel_type: DispelType,
+    /// The COMPOUND DEBUFF this effect belongs to, when it is one effect of a
+    /// debuff that has several — see [`CompoundDebuff`]. `None` for the
+    /// overwhelming majority of auras, which are a whole debuff on their own.
+    ///
+    /// Every member of a compound carries the SAME value here, and the members
+    /// are applied together, expire together and are removed together.
+    pub compound: Option<CompoundDebuff>,
 }
 
 impl Aura {
@@ -783,6 +849,17 @@ impl Aura {
         }
     }
 
+    /// True when this aura is a RIDER on a compound debuff — a real effect,
+    /// but not the effect the player is looking at. See [`CompoundDebuff`].
+    ///
+    /// Display surfaces skip riders so one debuff draws one icon; nothing that
+    /// computes an EFFECT may skip them, because the rider is where that
+    /// effect lives.
+    pub fn is_compound_rider(&self) -> bool {
+        self.compound
+            .is_some_and(|compound| compound.face() != self.effect_type)
+    }
+
     /// Returns true if this aura is a HOSTILE effect — see
     /// [`AuraType::is_hostile_effect`], which owns the (exhaustive)
     /// classification. Hostility is a property of the aura TYPE alone.
@@ -868,6 +945,49 @@ pub struct ActiveAuras {
     pub auras: Vec<Aura>,
 }
 
+impl ActiveAuras {
+    /// Remove the DEBUFF the aura at `index` belongs to: that aura, plus every
+    /// other effect sharing its [`CompoundDebuff`]. Returns the indexed aura.
+    ///
+    /// Every site that removes ONE aura on purpose — a dispel, a cleanse, a
+    /// purge, a Master's Call — must go through this or
+    /// [`Self::swap_remove_debuff_at`] rather than `Vec::remove` directly.
+    /// Taking half a debuff off is the bug this pair exists to make
+    /// unreachable, and it is invisible from the outside: the frames show one
+    /// icon either way, and the surviving half keeps working under the name of
+    /// a debuff the player just watched come off.
+    ///
+    /// The whole-vector removals need nothing here — Divine Shield's
+    /// `retain(!is_hostile_effect)` and the expiry sweep already take every
+    /// member, because membership of a compound is an all-or-nothing property
+    /// of the effects (`compound_members_share_their_lifetime` pins that).
+    pub fn remove_debuff_at(&mut self, index: usize) -> Aura {
+        let removed = self.auras.remove(index);
+        self.drop_compound_siblings_of(&removed);
+        removed
+    }
+
+    /// [`Self::remove_debuff_at`] with `Vec::swap_remove` semantics, for the
+    /// one caller that has always used them (the CC-replacement swap in
+    /// `apply_pending_auras`). Kept distinct rather than folded into the
+    /// ordered version because the two leave the aura vector in different
+    /// orders, and several downstream scans are order-sensitive.
+    pub fn swap_remove_debuff_at(&mut self, index: usize) -> Aura {
+        let removed = self.auras.swap_remove(index);
+        self.drop_compound_siblings_of(&removed);
+        removed
+    }
+
+    /// Drop whatever else belonged to `removed`'s compound. A no-op for the
+    /// ordinary single-effect aura, so both removal paths above are unchanged
+    /// for every debuff but a compound one.
+    fn drop_compound_siblings_of(&mut self, removed: &Aura) {
+        if let Some(compound) = removed.compound {
+            self.auras.retain(|aura| aura.compound != Some(compound));
+        }
+    }
+}
+
 // ============================================================================
 // AuraPending Component
 // ============================================================================
@@ -939,6 +1059,9 @@ impl AuraPending {
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
                 dispel_type,
+                // An ability applies at most one aura, so a RON-defined aura is never
+                // part of a compound debuff. See `CompoundDebuff`.
+                compound: None,
             },
         })
     }
@@ -984,6 +1107,9 @@ impl AuraPending {
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
                 dispel_type,
+                // An ability applies at most one aura, so a RON-defined aura is never
+                // part of a compound debuff. See `CompoundDebuff`.
+                compound: None,
             },
         })
     }
@@ -1029,6 +1155,9 @@ impl AuraPending {
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
                 dispel_type,
+                // An ability applies at most one aura, so a RON-defined aura is never
+                // part of a compound debuff. See `CompoundDebuff`.
+                compound: None,
             },
         })
     }
@@ -1261,6 +1390,139 @@ mod aura_type_tests {
             listed.len(),
             declared.len()
         );
+    }
+}
+
+#[cfg(test)]
+mod compound_tests {
+    use super::*;
+
+    fn member(effect_type: AuraType) -> Aura {
+        Aura {
+            effect_type,
+            duration: 5.0,
+            compound: Some(CompoundDebuff::FrostArmorChill),
+            ..Default::default()
+        }
+    }
+
+    fn lone(effect_type: AuraType) -> Aura {
+        Aura {
+            effect_type,
+            duration: 5.0,
+            ..Default::default()
+        }
+    }
+
+    /// Exactly one member of a compound is its FACE; the rest are riders. A
+    /// compound whose `face()` names a mechanic no member has would leave the
+    /// debuff with no icon, no catalog badge and nothing for a dispel to be
+    /// classified against.
+    #[test]
+    fn every_compound_has_exactly_one_face() {
+        for compound in [CompoundDebuff::FrostArmorChill] {
+            let members: Vec<Aura> = match compound {
+                CompoundDebuff::FrostArmorChill => vec![
+                    member(AuraType::MovementSpeedSlow),
+                    member(AuraType::AttackSpeedSlow),
+                ],
+            };
+            let faces = members.iter().filter(|a| !a.is_compound_rider()).count();
+            assert_eq!(
+                faces,
+                1,
+                "{compound:?} has {faces} members matching its face {:?}",
+                compound.face()
+            );
+        }
+    }
+
+    /// Removing ANY member of a compound removes the whole debuff — the bug
+    /// this concept exists to make unreachable. Both members, because a dispel
+    /// rolls an index and the rider can sit either side of the face.
+    #[test]
+    fn removing_one_member_removes_the_whole_compound() {
+        for index in 0..2 {
+            let mut auras = ActiveAuras {
+                auras: vec![
+                    lone(AuraType::DamageOverTime),
+                    member(AuraType::MovementSpeedSlow),
+                    member(AuraType::AttackSpeedSlow),
+                    lone(AuraType::Stun),
+                ],
+            };
+            let removed = auras.remove_debuff_at(1 + index);
+            assert_eq!(removed.compound, Some(CompoundDebuff::FrostArmorChill));
+            let left: Vec<AuraType> = auras.auras.iter().map(|a| a.effect_type).collect();
+            assert_eq!(
+                left,
+                vec![AuraType::DamageOverTime, AuraType::Stun],
+                "removing member {index} left part of the compound behind"
+            );
+        }
+    }
+
+    /// The swap-remove variant does the same, and leaves the survivors in the
+    /// order `Vec::swap_remove` would — the CC-replacement caller has always
+    /// had those semantics and several downstream scans are order-sensitive.
+    #[test]
+    fn swap_remove_takes_the_compound_and_keeps_its_ordering() {
+        let mut auras = ActiveAuras {
+            auras: vec![
+                member(AuraType::MovementSpeedSlow),
+                member(AuraType::AttackSpeedSlow),
+                lone(AuraType::Stun),
+                lone(AuraType::DamageOverTime),
+            ],
+        };
+        auras.swap_remove_debuff_at(0);
+        let left: Vec<AuraType> = auras.auras.iter().map(|a| a.effect_type).collect();
+        // swap_remove(0) pulls the DoT into slot 0; the retain then drops the
+        // attack-speed rider without disturbing what is left.
+        assert_eq!(left, vec![AuraType::DamageOverTime, AuraType::Stun]);
+    }
+
+    /// A single-effect aura is untouched by either path — the compound
+    /// machinery must be inert for every ordinary aura in the game.
+    #[test]
+    fn a_lone_aura_removal_is_unchanged() {
+        let mut auras = ActiveAuras {
+            auras: vec![
+                lone(AuraType::DamageOverTime),
+                lone(AuraType::Stun),
+                lone(AuraType::Root),
+            ],
+        };
+        auras.remove_debuff_at(1);
+        let left: Vec<AuraType> = auras.auras.iter().map(|a| a.effect_type).collect();
+        assert_eq!(left, vec![AuraType::DamageOverTime, AuraType::Root]);
+    }
+
+    /// The whole-vector removals (Divine Shield's `retain`, the expiry sweep,
+    /// the break-on-damage sweep) take a compound's members together WITHOUT
+    /// knowing about compounds — but only because every member shares the
+    /// debuff's lifetime and hostility. Pin that, so a compound whose members
+    /// disagreed could not ship: it would strand half a debuff at exactly the
+    /// sites the removal helpers above do not cover.
+    #[test]
+    fn compound_members_share_their_lifetime() {
+        use crate::states::play_match::combat_core::frost_armor_chill_auras;
+
+        let members = frost_armor_chill_auras();
+        let first = &members[0];
+        for other in &members[1..] {
+            assert_eq!(other.compound, first.compound);
+            assert_eq!(other.duration, first.duration, "durations must match");
+            assert_eq!(
+                other.break_on_damage_threshold, first.break_on_damage_threshold,
+                "break-on-damage thresholds must match"
+            );
+            assert_eq!(
+                other.is_hostile_effect(),
+                first.is_hostile_effect(),
+                "hostility must match, or Divine Shield takes half the debuff"
+            );
+        }
     }
 }
 
