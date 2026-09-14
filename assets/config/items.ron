@@ -882,6 +882,87 @@
         ),
 
         // ====================================================================
+        // RELICS — the Ranged socket for classes that train no ranged weapon
+        //
+        // A Libram (Paladin) or a Totem (Shaman) is a stat stick, not a weapon:
+        // no damage, no swing, no range. `weapon_type: Relic` is what carries
+        // that through the proficiency gate, and `allowed_classes` keeps a
+        // Libram off a Shaman and a Totem off a Paladin.
+        //
+        // Budget: ilvl 58 accessory = 58 * 0.75 * 0.5625 = 24.5 points. These
+        // deliberately spend under half of it, so a relic contributes roughly
+        // what the wands and bows in this socket contribute in BUDGETED stats
+        // (6-8 points) — closing the gap without handing two healers a
+        // full-budget accessory no other class's ranged item provides.
+        // ====================================================================
+
+        LibramOfHope: (
+            name: "Libram of Hope",
+            item_level: 58,
+            icon: "icons/items/inv_relics_libramofhope.jpg",
+            slot: Ranged,
+            weapon_type: Relic,
+            allowed_classes: Some([Paladin]),
+            spell_power: 5.0,
+            max_mana: 3.0,
+        ),
+
+        LibramOfGrace: (
+            name: "Libram of Grace",
+            item_level: 58,
+            icon: "icons/items/inv_relics_libramofgrace.jpg",
+            slot: Ranged,
+            weapon_type: Relic,
+            allowed_classes: Some([Paladin]),
+            max_mana: 6.0,
+            mana_regen: 0.5,
+        ),
+
+        LibramOfTruth: (
+            name: "Libram of Truth",
+            item_level: 58,
+            icon: "icons/items/inv_relics_libramoftruth.jpg",
+            slot: Ranged,
+            weapon_type: Relic,
+            allowed_classes: Some([Paladin]),
+            attack_power: 6.0,
+            max_health: 4.0,
+        ),
+
+        TotemOfLife: (
+            name: "Totem of Life",
+            item_level: 58,
+            icon: "icons/items/inv_relics_totemoflife.jpg",
+            slot: Ranged,
+            weapon_type: Relic,
+            allowed_classes: Some([Shaman]),
+            spell_power: 5.0,
+            max_mana: 3.0,
+        ),
+
+        TotemOfRebirth: (
+            name: "Totem of Rebirth",
+            item_level: 58,
+            icon: "icons/items/inv_relics_totemofrebirth.jpg",
+            slot: Ranged,
+            weapon_type: Relic,
+            allowed_classes: Some([Shaman]),
+            max_mana: 6.0,
+            mana_regen: 0.5,
+        ),
+
+        TotemOfRage: (
+            name: "Totem of Rage",
+            item_level: 58,
+            icon: "icons/items/inv_relics_totemofrage.jpg",
+            slot: Ranged,
+            weapon_type: Relic,
+            allowed_classes: Some([Shaman]),
+            spell_power: 4.0,
+            crit_chance: 0.01,
+        ),
+
+        // ====================================================================
         // OFF HAND
         // ====================================================================
 
