@@ -476,12 +476,22 @@ impl AuraType {
             // Stat debuffs, not crowd control — this classifier's true arm is
             // scoped to CC. Stuns are never dispellable in WoW at all; the
             // healing reduction (Mortal Strike, Aimed Shot) and the AP cut
-            // (Demoralizing Shout) are physical. `AttackSpeedSlow` is the
-            // frost-school half of Frost Armor's proc and is the one judgement
-            // call here: its paired `MovementSpeedSlow` half IS dispellable, so
-            // a dispel lifts half a proc. Widening this arm would change what
-            // the dispel pool contains, so it stays a stat debuff until someone
-            // measures the alternative.
+            // (Demoralizing Shout) are physical.
+            //
+            // `AttackSpeedSlow` used to be the awkward one: it is the
+            // frost-school half of Frost Armor's proc, its paired
+            // `MovementSpeedSlow` half WAS dispellable, and so a dispel lifted
+            // half a proc and left the rest standing. That is fixed, and NOT
+            // here — the two halves are one [`CompoundDebuff`] now, removed
+            // together, and the debuff is classified by its FACE (the
+            // dispellable slow). See `ActiveAuras::remove_debuff_at`.
+            //
+            // So this arm is no longer a judgement call awaiting measurement;
+            // it is load-bearing in a new way. The rider must NOT be
+            // independently dispellable, because nothing needs it to be, and
+            // the natural widening — admitting `AttackSpeedSlow` — would drag
+            // `AttackPowerReduction` along with it and make Demoralizing Shout
+            // dispellable as magic without anyone deciding that.
             AuraType::Stun
             | AuraType::HealingReduction
             | AuraType::AttackPowerReduction
@@ -630,6 +640,16 @@ pub enum CompoundDebuff {
 }
 
 impl CompoundDebuff {
+    /// Every compound, in declaration order — the single source of truth for
+    /// any surface that sweeps them. Follows `AuraType::ALL` /
+    /// `TotemElement::ALL` / `RoguePoison::ALL`.
+    ///
+    /// **This list is not what keeps the enum safe — [`Self::face`]'s
+    /// exhaustive match is.** What it buys is COVERAGE: the guards below sweep
+    /// it, so compound N+1 is checked the moment it is declared here, instead
+    /// of a test quietly continuing to check only the one it was written for.
+    pub const ALL: [CompoundDebuff; 1] = [CompoundDebuff::FrostArmorChill];
+
     /// The effect that REPRESENTS this debuff: the icon the frames draw, the
     /// mechanic badge its catalog entry wears, and the aura a removal
     /// predicate is asked about. Its siblings are RIDERS — real auras with
@@ -1420,7 +1440,7 @@ mod compound_tests {
     /// classified against.
     #[test]
     fn every_compound_has_exactly_one_face() {
-        for compound in [CompoundDebuff::FrostArmorChill] {
+        for compound in CompoundDebuff::ALL {
             let members: Vec<Aura> = match compound {
                 CompoundDebuff::FrostArmorChill => vec![
                     member(AuraType::MovementSpeedSlow),
