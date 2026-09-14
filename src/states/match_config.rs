@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::states::play_match::equipment::Loadout;
+use crate::states::play_match::equipment::{ItemSlot, Loadout};
 
 /// Rogue stealth opener choice
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -359,6 +359,37 @@ impl CharacterClass {
             self,
             CharacterClass::Warrior | CharacterClass::Rogue | CharacterClass::Paladin
         )
+    }
+
+    /// Which equipment socket holds this class's primary weapon — the one whose
+    /// `attack_damage` / `attack_speed` REPLACE the class base stats in
+    /// `Combatant::apply_equipment`.
+    ///
+    /// Deliberately NOT [`Self::is_melee`], which answers a different question:
+    /// how far away this class swings (`MELEE_RANGE` vs `WAND_RANGE` /
+    /// `AUTO_SHOT_RANGE` at the auto-attack range gate in
+    /// `combat_core::auto_attack`). The two answers coincided for seven classes
+    /// and so were conflated into one predicate. That is how the Shaman — which
+    /// wields a MainHand mace but attacks at wand range — silently kept its
+    /// class base weapon stats: the conflated predicate sent it to its Ranged
+    /// socket, which holds a relic rather than a weapon, so nothing replaced
+    /// them.
+    ///
+    /// Exhaustive by design — no `_` arm — so a new class is a compile error
+    /// here rather than a silent default to the wrong socket.
+    /// `tests/weapon_slot_audit.rs` additionally pins this against the socket
+    /// each shipped loadout actually fills, so the two cannot drift apart again.
+    pub fn weapon_slot(&self) -> ItemSlot {
+        match self {
+            CharacterClass::Warrior
+            | CharacterClass::Rogue
+            | CharacterClass::Paladin
+            | CharacterClass::Shaman => ItemSlot::MainHand,
+            CharacterClass::Mage
+            | CharacterClass::Priest
+            | CharacterClass::Warlock
+            | CharacterClass::Hunter => ItemSlot::Ranged,
+        }
     }
 
     /// Whether this class is primarily a healer (for CC target prioritization).

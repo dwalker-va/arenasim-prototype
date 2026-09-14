@@ -144,12 +144,9 @@ struct EquipmentBonuses {
 impl EquipmentBonuses {
     fn from_loadout(loadout: &Loadout, items: &ItemDefinitions, class: CharacterClass) -> Self {
         let mut bonuses = Self::default();
-        // Determine which weapon slot is primary (melee classes use MainHand, ranged use Ranged)
-        let primary_weapon_slot = if class.is_melee() {
-            ItemSlot::MainHand
-        } else {
-            ItemSlot::Ranged
-        };
+        // Same socket the sim replaces stats from, so this screen cannot
+        // report a weapon speed the combatant does not actually swing at.
+        let primary_weapon_slot = class.weapon_slot();
         for (slot, item_id) in loadout {
             if let Some(item) = items.get(item_id) {
                 bonuses.health += item.max_health;

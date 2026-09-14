@@ -5796,7 +5796,45 @@ mod juke_chase {
         // to be (4 fizzle-length windows / ~10.5s occlusion / team-1
         // elimination win at ~44s, from `scan_seeds`), and the bound keeps the
         // same roughly-2x headroom the pin has always carried.
-        assert_juke_bounded(JUKE_SEED_B, 8);
+        //
+        // Re-pinned again 2026-09-14 (seed 11 -> 38, bound 8 -> 16) once AS-97
+        // equipped the Shaman's main-hand mace, which moves this comp's OTHER
+        // side. Two cards re-picked this same pin independently from the drifted
+        // seed 2 — AS-54 chose 11, AS-97 chose 34 — and neither pick was measured
+        // on a tree carrying both changes, so the surviving seed was re-derived
+        // from `scan_seeds` there rather than either being taken on faith.
+        //
+        // Seed 11 still PASSES on this tree and both vacuity floors still clear
+        // (3.1s occlusion > 1.0s, 436 lone samples > 200). It was dropped anyway,
+        // because clearing a floor is not the same as testing anything: it fell
+        // from 4 fizzle-length windows to 2 on a single sim change, and 2 against
+        // a bound can only catch a THREEFOLD regression. The proxy this probe is
+        // NAMED for had almost no signal left, and the trend says one more change
+        // takes it to zero.
+        //
+        // Seed 34 — the pick from AS-97's own first pass — was dropped for the
+        // same reason and not because it fails: it PASSES, at 15.0s occlusion and
+        // 1 fizzle window. A pin there would assert nothing about a long dance,
+        // which is the thing this probe exists to bound. A guard that passes
+        // while proving nothing is the failure mode here, not a red test.
+        //
+        // Seed 38 restores the character seed 2 had before it drifted — 40.9s
+        // total occlusion, 11 fizzle-length windows, 4097 lone samples, team-1
+        // elimination win at 98.0s — so the bound has real signal under it again.
+        //
+        // Bound derived from that observed 11, NOT carried over from the 6 it
+        // replaces: the other pin runs at 1.50x (seed 6: observed 10, bound 15),
+        // and 1.5 x 11 = 16.5 rounds down to 16 — 1.45x, a shade tighter than the
+        // convention rather than looser. The assertion is `fizzle_windows <= max`,
+        // so a larger number here is not a looser test: what tightens a bound is
+        // shrinking the gap to what is observed.
+        //
+        // 16 is the tightest value THE CONVENTION GIVES, not the tightest this
+        // seed would tolerate. 13 or 14 would also pass today and nothing here
+        // establishes where the real floor is — the headroom exists to absorb
+        // trajectory wobble from unrelated changes, not because 15 was tested and
+        // failed.
+        assert_juke_bounded(JUKE_SEED_B, 16);
     }
 
     // Pinned by `scan_seeds` (run with `--ignored`): seeds where the enemy
@@ -5815,8 +5853,18 @@ mod juke_chase {
     // 2026-09-13, the Frost Armor compound-debuff change: this comp puts a Mage
     // wearing Frost Armor against a Warrior, so its trajectories moved and seed 2
     // stopped producing a dance at all.)
+    //
+    // Numbers again as of AS-97 equipping the Shaman's main-hand mace, which
+    // moves the OTHER side of the same comp. Re-measured on that tree with
+    // `scan_seeds`:
+    //   seed 6:  38.5s total occlusion, 10 fizzle-length windows, team-1 win at ~92.5s.
+    //   seed 38: 40.9s total occlusion, 11 fizzle-length windows, team-1 win at ~98.0s.
+    // Seed 6 held. Seed 11 (AS-54's pick) and seed 34 (AS-97's) both still PASS
+    // there, but had decayed to 2 and 1 fizzle windows respectively — clearing
+    // the vacuity floor while leaving the bound nothing to catch — so B moved to
+    // 38, which has the long-dance character seed 2 had before it drifted.
     const JUKE_SEED_A: u64 = 6;
-    const JUKE_SEED_B: u64 = 11;
+    const JUKE_SEED_B: u64 = 38;
 }
 
 // ---------------------------------------------------------------------------
