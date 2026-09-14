@@ -504,6 +504,9 @@ item_ids! {
     HammerOfTheRighteous,
     CrescentStaff,
 
+    // === Caster One-Handers (MainHand, spell power) ===
+    Witchblade,
+
     // === Ranged Weapons ===
     WandOfShadows,
     StaffOfDominance,
@@ -604,6 +607,10 @@ item_ids! {
     FangOfTheViper,
     MaceOfTheRedeemer,
     RunestaffOfElements,
+
+    // === Tier 1: Caster One-Handers (MainHand, spell power) ===
+    ClawOfChromaggus,
+    AzuresongMageblade,
 
     // === Tier 1: Ranged Weapons ===
     WandOfTheInvoker,
@@ -2426,6 +2433,195 @@ mod tests {
         assert!(can_equip(CharacterClass::Shaman, totem));
         assert!(!can_equip(CharacterClass::Paladin, totem));
         assert!(!can_equip(CharacterClass::Hunter, totem));
+    }
+
+    // ---- socket USEFULNESS ----
+
+    use crate::states::play_match::abilities::ScalingStat;
+    use crate::states::play_match::ability_config::{
+        load_ability_definitions, AbilityDefinitions,
+    };
+
+    /// The (class, socket) pairs the shipped pool can fill but cannot fill
+    /// USEFULLY, each with the rule of the game that makes that legitimate.
+    ///
+    /// A pair belongs here only when no item could correctly be authored for
+    /// it today. "Nobody has drawn the item yet" is not a justification; it is
+    /// the bug this list exists to expose.
+    ///
+    /// Checked in BOTH directions by `every_socket_offers_a_useful_item`, the
+    /// way `JUSTIFIED_EMPTY_SOCKETS` is: an unlisted useless pair fails, and so
+    /// does a listed pair that has since become useful.
+    const JUSTIFIED_USELESS_SOCKETS: &[(CharacterClass, ItemSlot, &str)] = &[
+        (
+            CharacterClass::Rogue,
+            ItemSlot::OffHand,
+            "a Rogue's off-hand is a second WEAPON (dual wield, AS-60), which this \
+             equipment model does not have; it trains no shield, and a held-in-off-hand \
+             frill is a caster stat stick by definition",
+        ),
+        (
+            CharacterClass::Hunter,
+            ItemSlot::OffHand,
+            "the Rogue's reason exactly — dual wield (AS-60), no shield proficiency, and \
+             frills carry caster stats",
+        ),
+    ];
+
+    /// What an item has to carry for `class` to get anything out of it: the
+    /// stat its own abilities scale with.
+    ///
+    /// Derived from the kit in `abilities.ron` rather than hardcoded, so a
+    /// class whose kit changes character changes what counts here without
+    /// anyone remembering to update a table. Healing is spell power in WoW and
+    /// in this sim, so a heal counts as spell-power scaling whatever its
+    /// `damage_scales_with` says.
+    fn scaling_stats_of(class: CharacterClass, abilities: &AbilityDefinitions) -> Vec<ScalingStat> {
+        let mut stats = Vec::new();
+        for ability in abilities.own_abilities_for_class(class) {
+            let Some(def) = abilities.get(&ability) else {
+                continue;
+            };
+            let scales_with_heal = def.healing_base_max > 0.0 || def.healing_coefficient > 0.0;
+            let scales = if scales_with_heal {
+                ScalingStat::SpellPower
+            } else if def.damage_coefficient > 0.0 {
+                def.damage_scales_with
+            } else {
+                ScalingStat::None
+            };
+            if scales != ScalingStat::None && !stats.contains(&scales) {
+                stats.push(scales);
+            }
+        }
+        stats
+    }
+
+    /// Whether `item` carries a stat `class` can actually use.
+    fn carries_a_useful_stat(item: &ItemConfig, scaling: &[ScalingStat]) -> bool {
+        scaling.iter().any(|stat| match stat {
+            ScalingStat::SpellPower => item.spell_power > 0.0,
+            ScalingStat::AttackPower => item.attack_power > 0.0,
+            ScalingStat::None => false,
+        })
+    }
+
+    /// Every class can put something USEFUL in every socket, without giving up
+    /// another socket to do it.
+    ///
+    /// The companion to `every_class_can_fill_every_socket`, and a strictly
+    /// stronger claim: "a legal item exists" and "a legal item worth equipping
+    /// exists" are different properties, and only the second one is what a
+    /// player experiences. AS-86 closed the first for the Paladin and Shaman
+    /// ranged socket; this is the second.
+    ///
+    /// The defect it closes (AS-87): a Mage or a Warlock had four one-handers
+    /// it could legally hold — two daggers and two swords — and every one of
+    /// them carried attack power and nothing else. The only main hand with a
+    /// caster stat on it was a two-handed staff, which costs them the off-hand.
+    /// Nothing failed. `every_class_can_fill_every_socket` passed, because the
+    /// staff fills the socket; the loadout validated, because an empty main
+    /// hand is legal; and two of the three caster classes wore a dead stat slot
+    /// under every balance number in the repo.
+    ///
+    /// A TWO-HANDER cannot be the item that proves a main hand usefully
+    /// fillable, which is the part that makes this catch the bug:
+    /// `enforce_two_hand_conflicts` strips the off-hand when one is equipped,
+    /// so "fillable only by a two-hander" means the socket is really a trade,
+    /// not a slot.
+    #[test]
+    fn every_socket_offers_a_useful_item() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let abilities = load_ability_definitions().expect("abilities.ron must load");
+
+        let justification = |class: CharacterClass, socket: ItemSlot| {
+            JUSTIFIED_USELESS_SOCKETS
+                .iter()
+                .find(|(c, s, _)| *c == class && *s == socket)
+                .map(|(_, _, why)| *why)
+        };
+
+        for class in CharacterClass::all() {
+            let scaling = scaling_stats_of(*class, &abilities);
+            assert!(
+                !scaling.is_empty(),
+                "{}'s kit scales with nothing — this test cannot say what it needs",
+                class.name()
+            );
+
+            for socket in ItemSlot::all() {
+                let useful: Vec<_> = items
+                    .items_for_slot(*socket, *class)
+                    .into_iter()
+                    // A two-hander fills the main hand only by shutting the
+                    // off-hand, so it cannot prove the main hand fillable.
+                    .filter(|(_, item)| !(*socket == ItemSlot::MainHand && item.two_handed))
+                    .filter(|(_, item)| carries_a_useful_stat(item, &scaling))
+                    .collect();
+
+                match justification(*class, *socket) {
+                    None => assert!(
+                        !useful.is_empty(),
+                        "{} has nothing worth equipping in its {:?} socket: every item it \
+                         can put there carries none of {:?}. Either author one that does, \
+                         or add ({}, {:?}) to JUSTIFIED_USELESS_SOCKETS with the rule of \
+                         the game that keeps it that way.",
+                        class.name(),
+                        socket,
+                        scaling,
+                        class.name(),
+                        socket
+                    ),
+                    Some(why) => assert!(
+                        useful.is_empty(),
+                        "({}, {:?}) is listed in JUSTIFIED_USELESS_SOCKETS as {:?}, but \
+                         {} item(s) there now carry a stat it uses — delete the stale \
+                         exemption.",
+                        class.name(),
+                        socket,
+                        why,
+                        useful.len()
+                    ),
+                }
+            }
+        }
+    }
+
+    /// The caster one-handers AS-87 added are one-handed, carry spell power,
+    /// and land in the hands the card is about.
+    #[test]
+    fn caster_one_handers_are_wieldable_by_the_caster_classes() {
+        let items = load_item_definitions().expect("items.ron must load");
+
+        for id in [
+            ItemId::Witchblade,
+            ItemId::ClawOfChromaggus,
+            ItemId::AzuresongMageblade,
+        ] {
+            let item = items.get(&id).unwrap_or_else(|| panic!("{:?} must exist", id));
+            assert_eq!(item.slot, ItemSlotType::MainHand, "{:?} slot", id);
+            assert!(!item.two_handed, "{:?} must be one-handed", id);
+            assert!(item.spell_power > 0.0, "{:?} must carry spell power", id);
+            assert!(
+                can_equip(CharacterClass::Mage, item),
+                "a Mage must be able to hold {:?}",
+                id
+            );
+            assert!(
+                can_equip(CharacterClass::Warlock, item),
+                "a Warlock must be able to hold {:?}",
+                id
+            );
+        }
+
+        // The daggers reach the Priest too; the sword does not (no proficiency),
+        // which is why the default the three classes share is the dagger.
+        let witchblade = items.get(&ItemId::Witchblade).expect("Witchblade");
+        assert!(can_equip(CharacterClass::Priest, witchblade));
+        let sword = items
+            .get(&ItemId::AzuresongMageblade)
+            .expect("Azuresong Mageblade");
+        assert!(!can_equip(CharacterClass::Priest, sword));
     }
 
     // ---- enforce_two_hand_conflicts tests ----

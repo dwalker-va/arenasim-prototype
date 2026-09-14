@@ -822,6 +822,44 @@
             max_mana: 9.0,
         ),
 
+        // --------------------------------------------------------------------
+        // CASTER ONE-HANDERS — the main hand as a stat slot for a caster
+        //
+        // Mage and Warlock train dagger, one-handed sword, staff and wand, and
+        // no mace. Before these, every one-hander either class could hold
+        // carried attack power and nothing else, so the only main hand with a
+        // caster stat on it was a two-handed staff — which costs them the
+        // off-hand. The dagger-plus-tome loadout was unrepresentable, and the
+        // staff-versus-one-hander choice was no choice at all.
+        //
+        // Deliberately spent UNDER budget: Witchblade takes 13.5 of an ilvl-58
+        // main hand's 24.5 points. `slot_budget_multiplier` gives a two-hander
+        // the same budget as a one-hander, so a full-budget one-hander plus a
+        // 19-point off-hand would leave the staves permanently dominated. These
+        // narrow that gap rather than closing it — the staves already sit at
+        // 97-98% of their own budget and cannot be raised to meet it.
+        //
+        // The weapon damage here is INERT for the classes these are meant for:
+        // `apply_equipment` replaces attack damage from the MainHand only when
+        // `class.is_melee()`, and every class that wants one of these swings
+        // from the Ranged socket instead. It is carried for the melee classes
+        // that also train daggers, and so the picker reads them as weapons.
+        // --------------------------------------------------------------------
+
+        Witchblade: (
+            name: "Witchblade",
+            item_level: 58,
+            icon: "icons/items/inv_weapon_shortblade_25.jpg",
+            slot: MainHand,
+            weapon_type: Dagger,
+            is_weapon: true,
+            attack_damage_min: 7.0,
+            attack_damage_max: 11.0,
+            attack_speed: 1.5,
+            spell_power: 5.0,
+            max_mana: 6.0,
+        ),
+
         // ====================================================================
         // RANGED WEAPONS
         // ====================================================================
@@ -1790,6 +1828,46 @@
             attack_speed: 0.7,
             spell_power: 12.0,
             max_mana: 12.0,
+        ),
+
+        // --------------------------------------------------------------------
+        // TIER 1: CASTER ONE-HANDERS — see the base-tier block above for why
+        // these exist and why they are spent under budget. At this tier the
+        // main-hand choice is a real one: the dagger leans on mana and regen,
+        // the sword on raw spell power and crit, and Mace of the Redeemer is
+        // the same slot again for the classes that train maces instead.
+        // --------------------------------------------------------------------
+
+        ClawOfChromaggus: (
+            name: "Claw of Chromaggus",
+            item_level: 73,
+            item_tier: 1,
+            icon: "icons/items/inv_weapon_shortblade_28.jpg",
+            slot: MainHand,
+            weapon_type: Dagger,
+            is_weapon: true,
+            attack_damage_min: 9.0,
+            attack_damage_max: 14.0,
+            attack_speed: 1.5,
+            spell_power: 7.0,
+            max_mana: 8.0,
+            mana_regen: 0.5,
+        ),
+
+        AzuresongMageblade: (
+            name: "Azuresong Mageblade",
+            item_level: 73,
+            item_tier: 1,
+            icon: "icons/items/inv_sword_39.jpg",
+            slot: MainHand,
+            weapon_type: Sword,
+            is_weapon: true,
+            attack_damage_min: 11.0,
+            attack_damage_max: 17.0,
+            attack_speed: 1.1,
+            spell_power: 8.0,
+            max_health: 4.0,
+            crit_chance: 0.01,
         ),
 
         // ====================================================================
