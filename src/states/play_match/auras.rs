@@ -732,6 +732,10 @@ pub fn apply_pending_auras(
         //
         // Reached only once the face has cleared every gate above, so there is
         // no ordering to get wrong and no window in which a rider exists alone.
+        // The riders skip those gates by construction — including the
+        // same-type non-stacking check, which the FACE already answers for the
+        // whole debuff (the Frost Armor proc refuses to fire at all while any
+        // member of the chill is still up).
         let riders = aura_to_add.compound.map(|compound| {
             let face_duration = aura_to_add.duration;
             super::combat_core::compound_riders(compound)

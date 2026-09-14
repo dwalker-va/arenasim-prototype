@@ -20,9 +20,16 @@ scripts/gen_sweep.py --t1 'Mage+Priest+Warrior' --t2-size 3 --n 30 \
   --seed-base 0 --extra '{"map":"BasicArena"}'                    # 1,650
 ```
 
-Run each arm's binary over the whole file:
+Run each arm's binary over the whole file, then compare them:
 
 ```bash
 <binary> --batch docs/design/balance/sweeps/2026-09-13-as54-frost-armor-chill.jsonl \
-  --out <before|after>.csv --jobs 8 --trace-mode off
+  --out <before|after>.csv --jobs 6 --trace-mode off
+
+sweeps/2026-09-13-as54-paired.py before.csv after.csv
 ```
+
+`2026-09-13-as54-paired.py` is the analysis that produced the published tables:
+McNemar on the flip counts, Wilson intervals for the level, and the slices the
+change can physically reach. It lives beside its input rather than in
+`scripts/` because its slicing knows what a Frost Armor chill is.
