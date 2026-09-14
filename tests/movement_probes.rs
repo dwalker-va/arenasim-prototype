@@ -5797,23 +5797,36 @@ mod juke_chase {
         // elimination win at ~44s, from `scan_seeds`), and the bound keeps the
         // same roughly-2x headroom the pin has always carried.
         //
-        // Re-validated 2026-09-13 on the merged tree (AS-97 equips the Shaman's
-        // main-hand mace, so this comp's OTHER side moved too). Seed 11 survives
-        // — it is still a `scan_seeds` CANDIDATE — but its dance is thinner than
-        // the numbers above, which were measured without the mace: now 2
-        // fizzle-length windows / 3.1s occlusion / 436 lone samples / team-1
-        // elimination win at ~34.7s. Both vacuity floors still clear (3.1s > 1.0s,
-        // 436 > 200), so the pin proves something; bound re-derived from the
-        // observed 2 rather than carried over, giving the same absolute slack the
-        // earlier pins ran with (14 -> 20, 18 -> 24) instead of the 4x that
-        // holding 8 against 2 would now mean.
+        // Re-pinned again 2026-09-14 (seed 11 -> 38, bound 8 -> 16) once AS-97
+        // equipped the Shaman's main-hand mace, which moves this comp's OTHER
+        // side. Two cards re-picked this same pin independently from the drifted
+        // seed 2 — AS-54 chose 11, AS-97 chose 34 — and neither pick was measured
+        // on a tree carrying both changes, so the surviving seed was re-derived
+        // from `scan_seeds` there rather than either being taken on faith.
         //
-        // NOTE for the next re-pin: 3.1s is close to the 1.0s floor, so this seed
-        // is one sim change away from going vacuous. When it does, `scan_seeds`
-        // on that tree had much more robust long-dance candidates — 38 (40.9s /
-        // 11 windows / 98.0s), 23 (32.7s / 10 / 90.0s) — which is the character
-        // seed 2 originally had.
-        assert_juke_bounded(JUKE_SEED_B, 6);
+        // Seed 11 still PASSES on this tree and both vacuity floors still clear
+        // (3.1s occlusion > 1.0s, 436 lone samples > 200). It was dropped anyway,
+        // because clearing a floor is not the same as testing anything: it fell
+        // from 4 fizzle-length windows to 2 on a single sim change, and 2 against
+        // a bound can only catch a THREEFOLD regression. The proxy this probe is
+        // NAMED for had almost no signal left, and the trend says one more change
+        // takes it to zero.
+        //
+        // Seed 34 — the pick from AS-97's own first pass — was dropped for the
+        // same reason and not because it fails: it PASSES, at 15.0s occlusion and
+        // 1 fizzle window. A pin there would assert nothing about a long dance,
+        // which is the thing this probe exists to bound. A guard that passes
+        // while proving nothing is the failure mode here, not a red test.
+        //
+        // Seed 38 restores the character seed 2 had before it drifted — 40.9s
+        // total occlusion, 11 fizzle-length windows, 4097 lone samples, team-1
+        // elimination win at 98.0s — so the bound has real signal under it again.
+        // Bound derived from that observed 11, at the same ~1.45x the other pin
+        // runs (seed 6: observed 10, bound 15), NOT carried over from the 6 it
+        // replaces. The assertion is `fizzle_windows <= max`, so a larger number
+        // here is not a looser test: what tightens a bound is shrinking the gap
+        // to what is observed, and 11 -> 16 is the tightest this seed supports.
+        assert_juke_bounded(JUKE_SEED_B, 16);
     }
 
     // Pinned by `scan_seeds` (run with `--ignored`): seeds where the enemy
@@ -5834,16 +5847,16 @@ mod juke_chase {
     // stopped producing a dance at all.)
     //
     // Numbers again as of AS-97 equipping the Shaman's main-hand mace, which
-    // moves the OTHER side of the same comp. Both pins survive; re-measured on
-    // the merged tree with `scan_seeds`:
+    // moves the OTHER side of the same comp. Re-measured on that tree with
+    // `scan_seeds`:
     //   seed 6:  38.5s total occlusion, 10 fizzle-length windows, team-1 win at ~92.5s.
-    //   seed 11:  3.1s total occlusion,  2 fizzle-length windows, team-1 win at ~34.7s.
-    // Two cards re-picked this same pin independently (AS-54 chose 11, AS-97
-    // chose 34) because each moved one side of the comp. Neither pick was valid
-    // on the tree that has both, so the surviving seed was re-validated here
-    // rather than either side being taken on faith.
+    //   seed 38: 40.9s total occlusion, 11 fizzle-length windows, team-1 win at ~98.0s.
+    // Seed 6 held. Seed 11 (AS-54's pick) and seed 34 (AS-97's) both still PASS
+    // there, but had decayed to 2 and 1 fizzle windows respectively — clearing
+    // the vacuity floor while leaving the bound nothing to catch — so B moved to
+    // 38, which has the long-dance character seed 2 had before it drifted.
     const JUKE_SEED_A: u64 = 6;
-    const JUKE_SEED_B: u64 = 11;
+    const JUKE_SEED_B: u64 = 38;
 }
 
 // ---------------------------------------------------------------------------

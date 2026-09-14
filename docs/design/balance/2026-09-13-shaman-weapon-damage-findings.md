@@ -268,9 +268,15 @@ socket, found []"*.
   move it — and both cards independently re-picked it from the drifted seed 2
   (AS-54 chose 11, this card chose 34), neither measured on a tree carrying both
   changes. Resolved by re-running the probe's own `scan_seeds` on the merged
-  tree: seed 11 survives as a candidate and is kept, with the bound re-derived
-  from the observed 2 fizzle windows to 6 — tighter than the 8 it replaces. Seed
-  11's dance is now thin (3.1s occlusion against a 1.0s vacuity floor), so the
-  comment names robust alternatives for whoever re-pins next.
+  tree and re-pinning to **seed 38** (40.9s occlusion, 11 fizzle windows,
+  4097 lone samples, team-1 elimination win at 98.0s), bound derived from that
+  observation at 16.
+
+  Both earlier picks still *pass* on the merged tree — they were dropped for
+  having decayed to 2 (seed 11) and 1 (seed 34) fizzle windows, which clears the
+  vacuity floor while leaving the bound nothing to catch. That is the failure
+  mode this probe is exposed to: not a red test, but a guard that stays green
+  while asserting nothing. Seed 38 restores the long-dance character seed 2 had
+  before it drifted.
 - The 30-yard thrown mace (its own card).
 - Re-baseline the Shaman against a fresh canonical sweep.
