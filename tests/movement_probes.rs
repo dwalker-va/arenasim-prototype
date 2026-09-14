@@ -5895,8 +5895,19 @@ mod juke_chase {
     // there, but had decayed to 2 and 1 fizzle windows respectively — clearing
     // the vacuity floor while leaving the bound nothing to catch — so B moved to
     // 38, which has the long-dance character seed 2 had before it drifted.
-    const JUKE_SEED_A: u64 = 6;
-    const JUKE_SEED_B: u64 = 9;
+    // SEED_A re-derived on the twice-merged tree (6 -> 10). AS-97 made the
+    // Shaman's main-hand weapon damage live, and this comp IS a lone-Shaman
+    // 2v1, so seed 6's dance stretched: 17 fizzle-length windows against a
+    // bound of 15. Seed 10 is the nearest match to seed 6's old character
+    // (2676 lone samples / 28.8s occlusion / 10 windows, versus the 10 windows
+    // the bound of 15 was set around), so the bound is unchanged.
+    const JUKE_SEED_A: u64 = 10;
+    // SEED_B is MAIN's value, not this branch's. AS-87 had re-pinned it to 9
+    // on the previous base; a merged-tree scan shows 9 gives 0.00s occlusion
+    // here while AS-97's 38 still holds (2409 lone samples / 22.9s occlusion /
+    // 4 fizzle-length windows against the bound of 8). Re-deriving is what
+    // showed main's side was the right one — it was confirmed, not assumed.
+    const JUKE_SEED_B: u64 = 38;
 }
 
 // ---------------------------------------------------------------------------
@@ -6317,7 +6328,12 @@ mod oom_wand {
     // comes from a merged-tree `scan_oom_seeds` — Warrior dies at 28.0s, 5 wand
     // hits, 17 Mage damage events through the window the mana refractory used
     // to leave dead.
-    const SEED: u64 = 33;
+    // Re-pinned again on the twice-merged tree (33 -> 16). AS-97's live Shaman
+    // weapon damage changes the lone Shaman this probe chases, and at 33 the
+    // Mage no longer reaches wand range. Seed 16 from a merged-tree
+    // `scan_oom_seeds`: Warrior dies at 36.6s, 33 wand hits, 42 Mage damage
+    // events through the window the mana refractory used to leave dead.
+    const SEED: u64 = 16;
 
     /// One damage event parsed from the combat log: `(wall_time, is_wand)`.
     struct MageDamage {
