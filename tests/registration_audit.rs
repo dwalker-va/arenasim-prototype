@@ -10,14 +10,26 @@
 //! Dispels were each registered in only one of the two paths and silently
 //! failed in the other mode).
 //!
+//! The reading — file discovery, comment blanking, signature scanning,
+//! `.add_systems` block extraction, and the type-alias and
+//! `SystemParam`-bundle expansion that keeps a parameter visible however it is
+//! spelled — is shared with the repo's other lexical audits in
+//! `tests/common/source_audit.rs`. What counts as a system, and what counts as
+//! a registration, stay here.
+//!
 //! See `docs/plans/2026-04-26-001-refactor-system-registration-architecture-plan.md`
 //! for context. Convention is documented in `CLAUDE.md` under "Adding a New
 //! Combat System".
 
+mod common;
+
+use common::source_audit::{
+    add_systems_blocks, expanded_param_types, find_fn_body, load_sources, pub_fn_signatures,
+    rel_display, repo_path, states_plugin_build, SourceFile, SystemParamBundles, TypeAliases,
+};
 use regex::Regex;
 use std::collections::BTreeSet;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const PLAY_MATCH_REL: &str = "src/states/play_match";
 const SYSTEMS_FILE_REL: &str = "src/states/play_match/systems.rs";
@@ -67,11 +79,7 @@ fn audit_combat_system_registration() {
         let mut msg = String::new();
         msg.push_str("\n\nFound Bevy system function(s) not registered in any known location:\n\n");
         for (name, path, line) in &violations {
-            let display_path = path
-                .strip_prefix(env!("CARGO_MANIFEST_DIR"))
-                .unwrap_or(path)
-                .display();
-            msg.push_str(&format!("  {} at {}:{}\n", name, display_path, line));
+            msg.push_str(&format!("  {} at {}:{}\n", name, rel_display(path), line));
         }
         msg.push_str("\nFor each function listed above, do ONE of:\n");
         msg.push_str(
@@ -97,107 +105,19 @@ fn extract_registered_in_function(
     rel_path: &str,
     fn_name: &str,
 ) -> std::io::Result<BTreeSet<String>> {
-    let text = fs::read_to_string(repo_path(rel_path))?;
-    let body = find_fn_body(&text, fn_name).unwrap_or_default();
-    Ok(collect_registered_identifiers(&body))
+    let file = read_one(rel_path)?;
+    let body = find_fn_body(&file.code, fn_name).unwrap_or_default();
+    Ok(collect_registered_identifiers(&body, &file.code))
 }
 
 fn extract_registered_in_states_plugin_build() -> std::io::Result<BTreeSet<String>> {
-    let text = fs::read_to_string(repo_path(STATES_MOD_FILE_REL))?;
-    let impl_body = find_impl_body(&text, "Plugin", "StatesPlugin").unwrap_or_default();
-    let build_body = find_fn_body(&impl_body, "build").unwrap_or_default();
-    Ok(collect_registered_identifiers(&build_body))
+    let file = read_one(STATES_MOD_FILE_REL)?;
+    let build = states_plugin_build(&file.code).unwrap_or_default();
+    Ok(collect_registered_identifiers(&build, &file.code))
 }
 
-fn repo_path(rel: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel)
-}
-
-/// Find body of `fn FN_NAME(...) [-> ...] { ... }` (without surrounding braces).
-/// Handles generics, multi-line parameter lists, and return types.
-fn find_fn_body(text: &str, fn_name: &str) -> Option<String> {
-    let pattern = format!(r"\bfn\s+{}\b", regex::escape(fn_name));
-    let re = Regex::new(&pattern).ok()?;
-    let m = re.find(text)?;
-    let bytes = text.as_bytes();
-    let mut i = m.end();
-
-    if i < bytes.len() && bytes[i] == b'<' {
-        let mut depth = 1;
-        i += 1;
-        while i < bytes.len() && depth > 0 {
-            match bytes[i] {
-                b'<' => depth += 1,
-                b'>' => depth -= 1,
-                _ => {}
-            }
-            i += 1;
-        }
-    }
-    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n') {
-        i += 1;
-    }
-    if i < bytes.len() && bytes[i] == b'(' {
-        let mut depth = 1;
-        i += 1;
-        while i < bytes.len() && depth > 0 {
-            match bytes[i] {
-                b'(' => depth += 1,
-                b')' => depth -= 1,
-                _ => {}
-            }
-            i += 1;
-        }
-    }
-    while i < bytes.len() && bytes[i] != b'{' {
-        i += 1;
-    }
-    if i >= bytes.len() {
-        return None;
-    }
-    let body_start = i + 1;
-    let mut depth = 1;
-    let mut j = body_start;
-    while j < bytes.len() && depth > 0 {
-        match bytes[j] {
-            b'{' => depth += 1,
-            b'}' => depth -= 1,
-            _ => {}
-        }
-        j += 1;
-    }
-    Some(text[body_start..j.saturating_sub(1)].to_string())
-}
-
-/// Find body of `impl TRAIT for TYPE { ... }`.
-fn find_impl_body(text: &str, trait_name: &str, type_name: &str) -> Option<String> {
-    let pattern = format!(
-        r"\bimpl\s+{}\s+for\s+{}\b",
-        regex::escape(trait_name),
-        regex::escape(type_name)
-    );
-    let re = Regex::new(&pattern).ok()?;
-    let m = re.find(text)?;
-    let bytes = text.as_bytes();
-    let mut i = m.end();
-    while i < bytes.len() && bytes[i] != b'{' {
-        i += 1;
-    }
-    if i >= bytes.len() {
-        return None;
-    }
-    let body_start = i + 1;
-    let mut depth = 1;
-    let mut j = body_start;
-    while j < bytes.len() && depth > 0 {
-        match bytes[j] {
-            b'{' => depth += 1,
-            b'}' => depth -= 1,
-            _ => {}
-        }
-        j += 1;
-    }
-    Some(text[body_start..j.saturating_sub(1)].to_string())
+fn read_one(rel_path: &str) -> std::io::Result<SourceFile> {
+    SourceFile::read(&repo_path(rel_path))
 }
 
 const SCHEDULE_AND_KEYWORDS: &[&str] = &[
@@ -249,36 +169,17 @@ const SCHEDULE_AND_KEYWORDS: &[&str] = &[
 ///
 /// The line-based extraction is permissive (catches identifiers from anywhere
 /// inside the call), filtered by an exclude list of Rust idioms.
-fn collect_registered_identifiers(body: &str) -> BTreeSet<String> {
+fn collect_registered_identifiers(body: &str, file: &str) -> BTreeSet<String> {
     let mut registered: BTreeSet<String> = BTreeSet::new();
-    let bytes = body.as_bytes();
 
-    let add_systems_re = Regex::new(r"\.add_systems\s*\(").unwrap();
     let line_re = Regex::new(r"(?m)^\s*(?:[\w:]+::)?([a-z_][a-z0-9_]*)\s*[,.\(]").unwrap();
     // Single-system shortcut: SCHEDULE, IDENT (e.g. OnEnter(...), play_match::setup_play_match)
     // Operates on the captured block (without the leading .add_systems prefix).
     let single_re =
         Regex::new(r"(?m)^\s*[\w:]+(?:\([^)]*\))?\s*,\s*(?:[\w:]+::)?([a-z_][a-z0-9_]*)").unwrap();
 
-    let mut i = 0usize;
-    while let Some(m) = add_systems_re.find(&body[i..]) {
-        let start = i + m.end() - 1; // at `(`
-        let mut depth = 1;
-        let mut j = start + 1;
-        while j < bytes.len() && depth > 0 {
-            match bytes[j] {
-                b'(' => depth += 1,
-                b')' => depth -= 1,
-                _ => {}
-            }
-            j += 1;
-        }
-        if j > bytes.len() {
-            break;
-        }
-        let block = &body[start + 1..j.saturating_sub(1)];
-
-        for cap in single_re.captures_iter(block) {
+    for block in add_systems_blocks(body, file) {
+        for cap in single_re.captures_iter(&block.text) {
             let token = cap[1].split("::").last().unwrap_or("").to_string();
             if !SCHEDULE_AND_KEYWORDS.contains(&token.as_str())
                 && !token.is_empty()
@@ -291,139 +192,120 @@ fn collect_registered_identifiers(body: &str) -> BTreeSet<String> {
                 registered.insert(token);
             }
         }
-        for cap in line_re.captures_iter(block) {
+        for cap in line_re.captures_iter(&block.text) {
             let token = cap[1].to_string();
             if SCHEDULE_AND_KEYWORDS.contains(&token.as_str()) {
                 continue;
             }
             registered.insert(token);
         }
-
-        i = j;
     }
     registered
 }
 
 // ---- candidate scan ----
 
-/// SystemParam tokens (Bevy 0.15) that mark a function as a Bevy system.
+/// SystemParam tokens (Bevy 0.16) that mark a function as a Bevy system.
 /// Extend this list when a new SystemParam shape is adopted (e.g. a Bevy
 /// upgrade introduces a new param type).
+///
+/// Written whitespace-tolerantly (`\s*` before every `<`) for the same reason
+/// the shared reader is: a spelling rustfmt would never produce must still be
+/// read, or the audit's coverage depends on the formatter.
 const SYSTEM_PARAM_TOKENS: &[&str] = &[
-    r"\bQuery<",
-    r"\bRes<",
-    r"\bResMut<",
+    r"\bQuery\s*<",
+    r"\bRes\s*<",
+    r"\bResMut\s*<",
     r"\bCommands\b",
-    r"\bLocal<",
-    r"\bEventReader<",
-    r"\bEventWriter<",
+    r"\bLocal\s*<",
+    r"\bEventReader\s*<",
+    r"\bEventWriter\s*<",
     r"\bTime\b",
-    r"\bTime<",
-    r"\bAssets<",
+    r"\bTime\s*<",
+    r"\bAssets\s*<",
     r"\bAssetServer\b",
     r"\bEguiContexts\b",
     r"\bGizmos\b",
-    r"\bTrigger<",
-    r"\bIn<",
-    r"\bSingle<",
-    r"\bPopulated<",
-    r"\bNonSend<",
-    r"\bNonSendMut<",
-    r"\bRemovedComponents<",
-    r"\bParamSet<",
+    r"\bTrigger\s*<",
+    r"\bIn\s*<",
+    r"\bSingle\s*<",
+    r"\bPopulated\s*<",
+    r"\bNonSend\s*<",
+    r"\bNonSendMut\s*<",
+    r"\bRemovedComponents\s*<",
+    r"\bParamSet\s*<",
 ];
 
 /// Walk play_match for `pub fn` items with system signatures.
 /// Returns Vec of (name, file_path, line_number).
 fn walk_play_match_fns() -> std::io::Result<Vec<(String, PathBuf, usize)>> {
-    let mut out = Vec::new();
-    let pub_fn_re = Regex::new(r"(?m)^[ \t]*pub\s+fn\s+(\w+)\s*(?:<[^>]*>)?\s*\(").unwrap();
-    let helper_ref_re = Regex::new(r"&mut\s+(?:Commands|Assets<)").unwrap();
     let sys_param_re = Regex::new(&SYSTEM_PARAM_TOKENS.join("|")).unwrap();
 
-    let dir = repo_path(PLAY_MATCH_REL);
-    walk_dir(&dir, &mut |path| {
-        let text = fs::read_to_string(path)?;
-        let stripped = strip_test_blocks(&text);
-        for m in pub_fn_re.captures_iter(&stripped) {
-            let name = m[1].to_string();
-            let m0 = m.get(0).unwrap();
-            let bytes = stripped.as_bytes();
-            let start_paren = m0.end() - 1;
-            let mut depth = 0;
-            let mut i = start_paren;
-            while i < bytes.len() {
-                match bytes[i] {
-                    b'(' => depth += 1,
-                    b')' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
-            if i >= bytes.len() {
+    let files = load_sources(&[PLAY_MATCH_REL])?;
+    let bundles = SystemParamBundles::scan(&files);
+
+    let mut out = Vec::new();
+    for file in &files {
+        // Test modules take SystemParam types in harness signatures; excluding
+        // them prevents false positives.
+        let code = file.code_without_test_modules();
+        let aliases = TypeAliases::from_source(&code);
+        for sig in pub_fn_signatures(&code) {
+            // Parameters taken by reference are helper arguments, not system
+            // parameters; aliases and SystemParam bundles are expanded so a
+            // system is recognised however its parameters are spelled.
+            let params = expanded_param_types(&sig.params, &aliases, &bundles).join(", ");
+            if !sys_param_re.is_match(&params) {
                 continue;
             }
-            let params = &stripped[start_paren + 1..i];
-            let params_clean = helper_ref_re.replace_all(params, "");
-            if !sys_param_re.is_match(&params_clean) {
-                continue;
-            }
-            let line_no = stripped[..m0.start()].matches('\n').count() + 1;
-            out.push((name, path.to_path_buf(), line_no));
+            out.push((sig.name, file.path.clone(), sig.line));
         }
-        Ok(())
-    })?;
+    }
     Ok(out)
 }
 
-fn walk_dir<F: FnMut(&Path) -> std::io::Result<()>>(
-    dir: &Path,
-    visitor: &mut F,
-) -> std::io::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            walk_dir(&path, visitor)?;
-        } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
-            visitor(&path)?;
-        }
-    }
-    Ok(())
-}
-
-/// Remove `#[cfg(test)] mod tests { ... }` blocks from text. Test functions
-/// frequently take SystemParam types in test harness signatures; excluding
-/// them prevents false positives.
-fn strip_test_blocks(text: &str) -> String {
-    let mod_tests_re = Regex::new(r"#\[cfg\(test\)\][\s\S]*?\bmod\s+tests\s*\{").unwrap();
-    let mut out = String::new();
-    let mut i = 0;
-    let bytes = text.as_bytes();
-    while i < bytes.len() {
-        let slice = &text[i..];
-        if let Some(m) = mod_tests_re.find(slice) {
-            out.push_str(&text[i..i + m.start()]);
-            let mut depth = 1;
-            let mut j = i + m.end();
-            while j < bytes.len() && depth > 0 {
-                match bytes[j] {
-                    b'{' => depth += 1,
-                    b'}' => depth -= 1,
-                    _ => {}
-                }
-                j += 1;
+/// The detector itself, pinned: a signature spelled the way rustfmt would never
+/// write it — extra whitespace, a type alias, a `SystemParam` bundle — is still
+/// a system. Each of these was a real miss in one of the repo's three lexical
+/// audits before the reading moved into `tests/common/source_audit.rs`.
+#[test]
+fn the_param_detector_reads_hostile_spellings() {
+    let sys_param_re = Regex::new(&SYSTEM_PARAM_TOKENS.join("|")).unwrap();
+    let bundles = SystemParamBundles::scan(&[SourceFile {
+        path: PathBuf::from("synthetic.rs"),
+        raw: String::new(),
+        code: r#"
+            #[derive(SystemParam)]
+            pub struct Extras<'w> {
+                clock: Res<'w, Time>,
             }
-            i = j;
-        } else {
-            out.push_str(&text[i..]);
-            break;
-        }
+        "#
+        .to_string(),
+    }]);
+    let aliases = TypeAliases::from_source("type Clock<'w> = Res<'w, Time>;\nuse x::Query as Q;");
+
+    for (label, params) in [
+        ("plain", "time: Res<Time>"),
+        ("spaced", "time: Res < Time >"),
+        ("lifetime", "time: Res<'w, Time>"),
+        ("type alias", "clock: Clock"),
+        ("use rename", "q: Q<'w, 's, &'static Transform>"),
+        ("SystemParam bundle", "extras: Extras"),
+        ("borrowing query", "q: Query<&mut Transform>"),
+    ] {
+        let expanded = expanded_param_types(params, &aliases, &bundles).join(", ");
+        assert!(
+            sys_param_re.is_match(&expanded),
+            "`{params}` ({label}) must read as a system parameter, got `{expanded}`"
+        );
     }
-    out
+
+    // A helper argument is still not a system parameter.
+    for params in ["commands: &mut Commands", "icons: &Res<ClassIcons>"] {
+        let expanded = expanded_param_types(params, &aliases, &bundles).join(", ");
+        assert!(
+            !sys_param_re.is_match(&expanded),
+            "`{params}` is a helper argument, not a system parameter"
+        );
+    }
 }

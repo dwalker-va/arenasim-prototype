@@ -39,13 +39,23 @@
 //! by reading `StatesPlugin::build`. A screen nobody has written yet is covered
 //! the day it takes a `Res<…Icons>` parameter.
 //!
+//! The reading — file discovery, comment blanking, signature and
+//! `.add_systems` parsing, and the type-alias and `SystemParam`-bundle
+//! expansion that keeps a `Res<'w, ClassIcons>` visible wherever it is spelled
+//! — is shared with the repo's other lexical audits in
+//! `tests/common/source_audit.rs`. The judging below is this audit's own.
+//!
 //! Same shape, and the same ALLOWLIST escape hatch, as
 //! `tests/registration_audit.rs`.
 
+mod common;
+
+use common::source_audit::{
+    add_systems_blocks, load_sources, pub_fn_signatures, repo_path, resource_uses,
+    states_plugin_build, SourceFile, SystemParamBundles, TypeAliases,
+};
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::path::{Path, PathBuf};
 
 const SRC_REL: &str = "src";
 const STATES_MOD_FILE_REL: &str = "src/states/mod.rs";
@@ -67,8 +77,8 @@ const ALLOWLIST: &[(&str, &str, &str, &str)] = &[(
 
 #[test]
 fn every_state_that_reads_a_lazy_resource_registers_its_loader() {
-    let files = rust_files(&repo_path(SRC_REL)).expect("walk src/");
-    let lazy = lazy_resources(&files).expect("scan for lazily-loaded resources");
+    let files = load_sources(&[SRC_REL]).expect("walk src/");
+    let lazy = lazy_resources(&files);
 
     // Non-vacuity: a parser that silently stops finding anything would make
     // this test pass forever. Pin the resources the class is known to contain.
@@ -88,7 +98,25 @@ fn every_state_that_reads_a_lazy_resource_registers_its_loader() {
         );
     }
 
-    let systems = system_signatures(&files, &lazy).expect("scan for system signatures");
+    let bundles = SystemParamBundles::scan(&files);
+    // Non-vacuity for the bundle expansion specifically: a system takes its
+    // resources through a `#[derive(SystemParam)]` struct to stay under Bevy's
+    // 16-parameter limit, and the fields of that struct are the blind spot this
+    // expansion exists to close. If the scan finds no bundle at all, a future
+    // `Res<'w, ClassIcons>` field would go unread and this audit would not say
+    // so. `AbilityDispatchExtras` is the tree's bundle today; when it goes, put
+    // its replacement here rather than deleting the check.
+    let expanded = bundles.expand("extras: AbilityDispatchExtras");
+    assert!(
+        expanded.iter().any(|ty| ty.contains("Res<")),
+        "the SystemParam-bundle scan no longer reads any `Res` field out of \
+         AbilityDispatchExtras (found {expanded:?}) — a resource held inside a \
+         bundle is invisible to a signature scan, so this audit would stop \
+         seeing it. Bundles discovered: {:?}",
+        bundles.names().collect::<Vec<_>>()
+    );
+
+    let systems = system_signatures(&files, &lazy, &bundles);
     // resource -> loader system names
     let mut loaders: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     // (consumer, resource) pairs
@@ -105,7 +133,7 @@ fn every_state_that_reads_a_lazy_resource_registers_its_loader() {
         }
     }
 
-    let registrations = state_registrations().expect("parse StatesPlugin::build");
+    let registrations = state_registrations(&files);
 
     let allowed: BTreeSet<(&str, &str, &str)> =
         ALLOWLIST.iter().map(|(c, r, s, _)| (*c, *r, *s)).collect();
@@ -171,22 +199,21 @@ fn every_state_that_reads_a_lazy_resource_registers_its_loader() {
 
 /// A `#[derive(… Resource …)] struct X { … loaded: bool … }` — the self-guard
 /// idiom every lazy loader in this codebase uses.
-fn lazy_resources(files: &[PathBuf]) -> std::io::Result<BTreeSet<String>> {
+fn lazy_resources(files: &[SourceFile]) -> BTreeSet<String> {
     let re = Regex::new(
         r"(?m)#\[derive\([^)]*\bResource\b[^)]*\)\]\s*(?:pub\s+)?struct\s+(\w+)\s*\{([^}]*)\}",
     )
     .unwrap();
     let loaded_re = Regex::new(r"\bloaded\s*:\s*bool\b").unwrap();
     let mut out = BTreeSet::new();
-    for path in files {
-        let text = strip_comments(&fs::read_to_string(path)?);
-        for cap in re.captures_iter(&text) {
+    for file in files {
+        for cap in re.captures_iter(&file.code) {
             if loaded_re.is_match(&cap[2]) {
                 out.insert(cap[1].to_string());
             }
         }
     }
-    Ok(out)
+    out
 }
 
 // ---- discovery: system signatures ----
@@ -200,94 +227,25 @@ struct SystemSig {
 }
 
 fn system_signatures(
-    files: &[PathBuf],
+    files: &[SourceFile],
     lazy: &BTreeSet<String>,
-) -> std::io::Result<Vec<SystemSig>> {
-    let pub_fn_re = Regex::new(r"(?m)^[ \t]*pub\s+fn\s+(\w+)\s*(?:<[^>]*>)?\s*\(").unwrap();
-    let res_re = Regex::new(r"\bRes<\s*(?:[\w]+\s*::\s*)*(\w+)\s*>").unwrap();
-    let res_mut_re = Regex::new(r"\bResMut<\s*(?:[\w]+\s*::\s*)*(\w+)\s*>").unwrap();
-
+    bundles: &SystemParamBundles,
+) -> Vec<SystemSig> {
     let mut out = Vec::new();
-    for path in files {
-        let text = strip_comments(&fs::read_to_string(path)?);
-        for m in pub_fn_re.captures_iter(&text) {
-            let name = m[1].to_string();
-            let Some(params) = param_list(&text, m.get(0).unwrap().end() - 1) else {
-                continue;
-            };
-            let mut writes = BTreeSet::new();
-            let mut reads = BTreeSet::new();
-            for param in split_params(&params) {
-                // A parameter behind a reference is a HELPER argument, not a
-                // Bevy system parameter — the helper's caller is the system.
-                if param.contains('&') {
-                    continue;
-                }
-                for cap in res_mut_re.captures_iter(&param) {
-                    if lazy.contains(&cap[1]) {
-                        writes.insert(cap[1].to_string());
-                    }
-                }
-                for cap in res_re.captures_iter(&param) {
-                    // `ResMut<…>` also contains `Res` — but not as a word
-                    // boundary match of `Res<`, so the two regexes are disjoint.
-                    if lazy.contains(&cap[1]) {
-                        reads.insert(cap[1].to_string());
-                    }
-                }
-            }
+    for file in files {
+        let aliases = TypeAliases::from_source(&file.code);
+        for sig in pub_fn_signatures(&file.code) {
+            let uses = resource_uses(&sig.params, &aliases, bundles);
+            let writes: BTreeSet<String> = uses.writes.intersection(lazy).cloned().collect();
+            let reads: BTreeSet<String> = uses.reads.intersection(lazy).cloned().collect();
             if !writes.is_empty() || !reads.is_empty() {
                 out.push(SystemSig {
-                    name,
+                    name: sig.name,
                     writes,
                     reads,
                 });
             }
         }
-    }
-    Ok(out)
-}
-
-/// Text between the parens of a parameter list starting at `open` (the `(`).
-fn param_list(text: &str, open: usize) -> Option<String> {
-    let bytes = text.as_bytes();
-    let mut depth = 0usize;
-    let mut i = open;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(text[open + 1..i].to_string());
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Split a parameter list on TOP-LEVEL commas (generics and tuples nest).
-fn split_params(params: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut depth = 0i32;
-    let mut current = String::new();
-    for ch in params.chars() {
-        match ch {
-            '<' | '(' | '[' => depth += 1,
-            '>' | ')' | ']' => depth -= 1,
-            ',' if depth == 0 => {
-                out.push(std::mem::take(&mut current));
-                continue;
-            }
-            _ => {}
-        }
-        current.push(ch);
-    }
-    if !current.trim().is_empty() {
-        out.push(current);
     }
     out
 }
@@ -305,136 +263,24 @@ impl StateRegistrations {
     }
 }
 
-/// Parse every `.add_systems(...)` call in `StatesPlugin::build`, pairing the
-/// systems it registers with the state(s) it gates them on.
-///
-/// Three gate shapes appear in that function:
-///   - `run_if(in_state(GameState::X))`      -> {X}
-///   - `OnEnter(GameState::X)` / `OnExit(..)` -> {X}
-///   - `run_if(<fn>)` where `<fn>` is a plain `-> bool` state predicate
-///     (`in_combat_scene`) -> the states named in that function's body.
-fn state_registrations() -> std::io::Result<StateRegistrations> {
-    let text = strip_comments(&fs::read_to_string(repo_path(STATES_MOD_FILE_REL))?);
-    let build = find_states_plugin_build(&text).expect("StatesPlugin::build body");
-
-    let in_state_re = Regex::new(r"in_state\s*\(\s*GameState::(\w+)\s*\)").unwrap();
-    let on_enter_exit_re = Regex::new(r"On(?:Enter|Exit)\s*\(\s*GameState::(\w+)\s*\)").unwrap();
-    let run_if_fn_re = Regex::new(r"run_if\s*\(\s*([a-z_][a-z0-9_]*)\s*\)").unwrap();
+/// Pair every system registered in `StatesPlugin::build` with the state(s) the
+/// `.add_systems` call that registers it is gated on.
+fn state_registrations(files: &[SourceFile]) -> StateRegistrations {
+    let states_mod = repo_path(STATES_MOD_FILE_REL);
+    let file = files
+        .iter()
+        .find(|f| f.path == states_mod)
+        .expect("src/states/mod.rs must be among the scanned sources");
+    let build = states_plugin_build(&file.code).expect("StatesPlugin::build body");
     let ident_re = Regex::new(r"(?:([a-z_][a-z0-9_]*)\s*::\s*)?([a-z_][a-z0-9_]*)").unwrap();
-    let game_state_re = Regex::new(r"GameState::(\w+)").unwrap();
-    let add_systems_re = Regex::new(r"\.add_systems\s*\(").unwrap();
 
     let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let bytes = build.as_bytes();
-    let mut i = 0usize;
-    while let Some(m) = add_systems_re.find(&build[i..]) {
-        let open = i + m.end() - 1;
-        let Some(block) = param_list(&build, open) else {
-            break;
-        };
-        let block_end = open + block.len() + 2;
-
-        let mut states: BTreeSet<String> = BTreeSet::new();
-        for cap in in_state_re.captures_iter(&block) {
-            states.insert(cap[1].to_string());
-        }
-        for cap in on_enter_exit_re.captures_iter(&block) {
-            states.insert(cap[1].to_string());
-        }
-        for cap in run_if_fn_re.captures_iter(&block) {
-            // A named predicate function: read the states out of its body
-            // rather than hardcoding what `in_combat_scene` covers today.
-            if let Some(body) = find_fn_body(&text, &cap[1]) {
-                for c in game_state_re.captures_iter(&body) {
-                    states.insert(c[1].to_string());
-                }
-            }
-        }
-
-        for cap in ident_re.captures_iter(&block) {
-            let name = cap[2].to_string();
-            map.entry(name).or_default().extend(states.iter().cloned());
-        }
-
-        i = block_end.min(bytes.len());
-    }
-    Ok(StateRegistrations { map })
-}
-
-fn find_states_plugin_build(text: &str) -> Option<String> {
-    let re = Regex::new(r"\bimpl\s+Plugin\s+for\s+StatesPlugin\b").unwrap();
-    let m = re.find(text)?;
-    let impl_body = brace_body(text, m.end())?;
-    find_fn_body(&impl_body, "build")
-}
-
-/// Body of `fn NAME(...) [-> T] { ... }`, braces excluded.
-fn find_fn_body(text: &str, fn_name: &str) -> Option<String> {
-    let re = Regex::new(&format!(r"\bfn\s+{}\s*\(", regex::escape(fn_name))).ok()?;
-    let m = re.find(text)?;
-    let after_params = {
-        let open = m.end() - 1;
-        let params = param_list(text, open)?;
-        open + params.len() + 2
-    };
-    brace_body(text, after_params)
-}
-
-/// Body of the next `{ ... }` at or after `from`, braces excluded.
-fn brace_body(text: &str, from: usize) -> Option<String> {
-    let bytes = text.as_bytes();
-    let mut i = from;
-    while i < bytes.len() && bytes[i] != b'{' {
-        i += 1;
-    }
-    if i >= bytes.len() {
-        return None;
-    }
-    let start = i + 1;
-    let mut depth = 1;
-    let mut j = start;
-    while j < bytes.len() && depth > 0 {
-        match bytes[j] {
-            b'{' => depth += 1,
-            b'}' => depth -= 1,
-            _ => {}
-        }
-        j += 1;
-    }
-    Some(text[start..j.saturating_sub(1)].to_string())
-}
-
-// ---- plumbing ----
-
-fn repo_path(rel: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel)
-}
-
-/// Blank out `//` comments (keeping newlines) so prose mentioning
-/// `GameState::X` or a system name cannot be parsed as a registration.
-fn strip_comments(text: &str) -> String {
-    text.lines()
-        .map(|line| match line.find("//") {
-            Some(idx) => line[..idx].to_string(),
-            None => line.to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn rust_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let mut out = Vec::new();
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        for entry in fs::read_dir(&d)? {
-            let path = entry?.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
-                out.push(path);
-            }
+    for block in add_systems_blocks(&build, &file.code) {
+        for cap in ident_re.captures_iter(&block.text) {
+            map.entry(cap[2].to_string())
+                .or_default()
+                .extend(block.states.iter().cloned());
         }
     }
-    out.sort();
-    Ok(out)
+    StateRegistrations { map }
 }
