@@ -554,6 +554,34 @@ pub fn applied_by(catalog: &[NamedAura], ability: AbilityType) -> Vec<&NamedAura
         .collect()
 }
 
+/// The OTHER named auras the same ability applies — [`applied_by`] minus the
+/// entry you are standing on.
+///
+/// An ability is not limited to one aura: Frost Armor is a Mage self-buff and
+/// the procs it hangs on melee attackers, Unstable Affliction is a
+/// damage-over-time and the silence its dispel backlash inflicts, a Rogue
+/// poison is a coating marker and the debuff that coating applies. Each of
+/// those already pointed at its ability, and `applied_by` gives an ability page
+/// the full set — but between the AURA pages the link ran one way only, so the
+/// page a Mage would open to ask what Frost Armor does was the page that never
+/// mentioned the procs.
+///
+/// Reads the same `source` field as both of those, so an ability that grows a
+/// second aura is cross-linked in every direction with no code per entry.
+pub fn source_siblings(
+    catalog: &[NamedAura],
+    source: AuraSource,
+    self_id: AuraId,
+) -> Vec<&NamedAura> {
+    let Some(ability) = source.ability() else {
+        return Vec::new();
+    };
+    applied_by(catalog, ability)
+        .into_iter()
+        .filter(|entry| entry.id != self_id)
+        .collect()
+}
+
 pub fn find(catalog: &[NamedAura], id: AuraId) -> Option<&NamedAura> {
     catalog.iter().find(|entry| entry.id == id)
 }
@@ -1063,13 +1091,40 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
 
     let mut clicked = None;
 
-    // --- Applied by ---
+    // --- Applied by, and anything else the same ability applies ---
     widget::section_heading(ui, "APPLIED BY");
     match entry.source {
         AuraSource::Ability(ability) => {
-            let width = ui.available_width().min(430.0);
+            let width = ui.available_width().min(COLUMN_MAX_WIDTH);
             if let Some(topic) = widget::row(ui, Topic::Ability(ability), "", width, data) {
                 clicked = Some(topic);
+            }
+            // The link from an aura to its ability always existed; the link
+            // BETWEEN the auras one ability hangs did not, so a Mage on the
+            // Frost Armor buff's own page was never told the procs exist.
+            let kin = source_siblings(&catalog, entry.source, id);
+            if !kin.is_empty() {
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} also applies:",
+                        Topic::Ability(ability).name(data)
+                    ))
+                    .size(12.5)
+                    .color(MUTED),
+                );
+                ui.add_space(2.0);
+                for sibling in kin {
+                    if let Some(topic) = widget::row(
+                        ui,
+                        Topic::Aura(sibling.id),
+                        &sibling.subtitle(),
+                        width,
+                        data,
+                    ) {
+                        clicked = Some(topic);
+                    }
+                }
             }
         }
         // No page to link to — so the section NAMES the mechanic instead of
@@ -1976,6 +2031,67 @@ mod tests {
         assert!(
             sibs.iter().any(|s| s.name == "Corruption"),
             "Rend must cross-link to the other damage-over-time effects"
+        );
+    }
+
+    /// The page a player would actually open to ask what Frost Armor does —
+    /// the Mage's own buff — reaches the procs it hangs on melee attackers.
+    ///
+    /// That link was one-directional: each proc named Frost Armor as its
+    /// source, and the buff named nothing. Pinned on the buff SPECIFICALLY,
+    /// because the proc pages were never the broken direction.
+    #[test]
+    fn a_buff_reaches_the_other_auras_its_ability_applies() {
+        let entries = catalog(&abilities());
+        let buff = entries
+            .iter()
+            .find(|e| e.id == AuraId::Ability(AbilityType::FrostArmor))
+            .expect("Frost Armor's self-buff is a RON entry");
+        let kin = source_siblings(&entries, buff.source, buff.id);
+
+        assert!(
+            !kin.is_empty(),
+            "the Frost Armor buff page must reach the proc(s) the same ability applies"
+        );
+        for other in &kin {
+            assert_eq!(
+                other.source, buff.source,
+                "a source sibling shares the applying ability"
+            );
+            assert!(!other.is_buff(), "Frost Armor's procs are debuffs");
+        }
+    }
+
+    /// The relation is symmetric for EVERY entry, not just the one above: if A
+    /// lists B, B lists A. A one-directional cross-link is the defect this
+    /// helper exists to close, so it must not be able to reintroduce one.
+    #[test]
+    fn source_siblings_are_symmetric_and_exclude_self() {
+        let entries = catalog(&abilities());
+        let mut paired = 0usize;
+        for entry in &entries {
+            for other in source_siblings(&entries, entry.source, entry.id) {
+                assert_ne!(entry.id, other.id, "an entry is not its own sibling");
+                assert!(
+                    source_siblings(&entries, other.source, other.id)
+                        .iter()
+                        .any(|back| back.id == entry.id),
+                    "{} lists {} but {} does not list it back",
+                    entry.name,
+                    other.name,
+                    other.name
+                );
+                paired += 1;
+            }
+        }
+        // Non-vacuity: a catalog where no ability hangs two auras would pass
+        // the loop above without testing anything. Frost Armor, Unstable
+        // Affliction and the Rogue's poisons are all this shape today.
+        assert!(
+            paired >= 6,
+            "only {} source-sibling pairing(s) in the catalog — too few for this to be \
+             testing anything",
+            paired
         );
     }
 

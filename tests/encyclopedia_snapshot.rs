@@ -358,6 +358,23 @@ fn encyclopedia_aura_detail_orb() {
     snapshot("encyclopedia_aura_detail_orb", state);
 }
 
+/// The page that reaches the OTHER auras its ability applies. Frost Armor is
+/// a Mage self-buff and the procs it hangs on melee attackers, and each proc
+/// already named Frost Armor as its source — but the buff, the page a Mage
+/// would actually open, named nothing back. This shows the reverse link under
+/// APPLIED BY.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_source_siblings() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Ability(AbilityType::FrostArmor),
+        ))),
+    );
+    snapshot("encyclopedia_aura_detail_source_siblings", state);
+}
+
 /// The navigation cluster at a DEEP LINK: entered from the Results screen, so
 /// Back is disabled (a deep link is a fresh stack with no history above it) and
 /// Home names Results rather than the main menu. The two other cluster states —
