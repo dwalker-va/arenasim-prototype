@@ -4429,10 +4429,14 @@ mod u9_seek_reset {
     ///   power. This took 13/6 to ZERO cast-start blocks independently, and
     ///   re-pinned to 37/42.
     ///
-    /// On the merged tree NEITHER pair could be assumed, so the scanner was
-    /// re-run over both changes together and the seeds below chosen from its
-    /// candidates rather than taken from either branch. The seek +
-    /// cast-recovery machinery still fires; only the seed moved.
+    /// On the merged tree NEITHER pair could be assumed, and re-running the
+    /// scanner over both changes together proved it: AS-87's own seed 37 fell
+    /// to ZERO cast-start blocks once AS-54 was under it. The seeds below are
+    /// chosen from that merged-tree scan rather than taken from either branch —
+    /// 9 has 469 cast-start blocks / 74 seeks / 55 casts landed after occlusion
+    /// began / 4.37s longest stall, and 42 survived the merge at 336 / 11 / 2 /
+    /// 3.08s. The seek + cast-recovery machinery still fires; only the seed
+    /// moved.
     fn assert_mage_repositions_and_casts(seed: u64) {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
@@ -4470,8 +4474,8 @@ mod u9_seek_reset {
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_37() {
-        assert_mage_repositions_and_casts(37);
+    fn mage_repositions_and_casts_despite_occlusion_seed_9() {
+        assert_mage_repositions_and_casts(9);
     }
 
     #[test]
@@ -5244,11 +5248,13 @@ mod los_probes {
 
     #[test]
     fn completion_fizzle_and_projectiles_still_land() {
-        // Seeds re-pinned for AS-87: the Mage and both Priests gained a caster
-        // main hand, and at 6/7 the completion fizzle stopped occurring at all
-        // (0 fizzles). 37 and 38 carry it comfortably — 40 and 29 fizzles
-        // against 16 and 13 Frostbolt impacts. See `scan_fizzle_seeds`.
-        for seed in [37u64, 38u64] {
+        // Seeds re-pinned twice. AS-87 (caster main-hands) took the original
+        // 6/7 to zero fizzles; then AS-54's compound Frost Armor chill, merged
+        // underneath, took AS-87's replacement 37/38 to zero as well — this
+        // comp puts a Mage against a Warrior, so it sits in both blast radii.
+        // 9 and 26 are chosen from a scan of the MERGED tree: 47 and 30 fizzles
+        // against 12 and 15 Frostbolt impacts. See `scan_fizzle_seeds`.
+        for seed in [9u64, 26u64] {
             let log = pillared_log(seed);
 
             let fizzles = log
@@ -5804,6 +5810,14 @@ mod juke_chase {
 
     #[test]
     fn juke_bounded_seed_b() {
+        // Re-pinned again for AS-87 (seed 11 -> 9, bound 8 held): the caster
+        // main-hands took seed 11's lone-Shaman dance to 0.00s occlusion, below
+        // the vacuity floor, exactly as AS-54 had taken seed 2 there before it.
+        // Seed 9 is the nearest replacement in character from a merged-tree
+        // `scan_seeds` (1469 lone samples / 12.4s occlusion / 3 fizzle-length
+        // windows / team-1 elimination win at ~51.8s), and the bound keeps the
+        // same roughly-2x headroom the pin has always carried.
+        //
         // Re-pinned 2026-09-13 (seed 2 -> 11, bound 24 -> 8) when the Frost
         // Armor chill became ONE debuff: at seed 2 the lone-Shaman dance no
         // longer starts at all (0.0s occlusion, below the vacuity floor), so
@@ -5865,7 +5879,7 @@ mod juke_chase {
     // by elimination (numbers as of the 2026-07-23 mana-on-completion fix, which
     // keeps the Mage casting from range instead of bankrupting to wand):
     //   seed 6: 25.8s total occlusion, 7 fizzle-length windows, team-1 win at ~84s.
-    //   seed 11: 10.5s total occlusion, 4 fizzle-length windows, team-1 win at ~44s.
+    //   seed 9: 12.4s total occlusion, 3 fizzle-length windows, team-1 win at ~52s.
     // (The geometric fizzle-window PROXY the probe asserts on counts any occluded
     // run >= a cast length, whether or not a cast completed in it. Numbers as of
     // 2026-09-13, the Frost Armor compound-debuff change: this comp puts a Mage
@@ -5882,7 +5896,7 @@ mod juke_chase {
     // the vacuity floor while leaving the bound nothing to catch — so B moved to
     // 38, which has the long-dance character seed 2 had before it drifted.
     const JUKE_SEED_A: u64 = 6;
-    const JUKE_SEED_B: u64 = 38;
+    const JUKE_SEED_B: u64 = 9;
 }
 
 // ---------------------------------------------------------------------------
@@ -6298,7 +6312,12 @@ mod oom_wand {
     /// dampening-gated rather than mana-gated, so the probe validates the OOM
     /// wand fallback via the close + wand chip, not via a faster resolution — see
     /// the outcome assertion for why the old "< 68s" speedup proxy was retired.
-    const SEED: u64 = 22;
+    // Re-pinned for AS-87 + AS-54 (22 -> 33): on the merged tree seed 22 no
+    // longer opens a lone-Shaman 2v1 the Mage reaches wand range in. Seed 33
+    // comes from a merged-tree `scan_oom_seeds` — Warrior dies at 28.0s, 5 wand
+    // hits, 17 Mage damage events through the window the mana refractory used
+    // to leave dead.
+    const SEED: u64 = 33;
 
     /// One damage event parsed from the combat log: `(wall_time, is_wand)`.
     struct MageDamage {

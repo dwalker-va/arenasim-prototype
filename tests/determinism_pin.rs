@@ -66,15 +66,17 @@ fn seeded_2v2_matches_its_recorded_identity() {
     //   teams here field one of those classes, so a pin still passing would
     //   mean the change never reached the sim.
     //
-    // The value below is measured on the two TOGETHER; neither branch's own
-    // figure survives the merge, which is why it was re-run rather than taken
-    // from either side. A single seed's winner is not a balance claim — see
+    // Measured on the two TOGETHER: 49.38275s. Neither branch's own figure
+    // survives the merge — AS-54 alone recorded 47.982773s and AS-87 alone
+    // 58.44928s — which is why this was re-run rather than taken from either
+    // side. The winner (Some(2)) is AS-54's; AS-87 moves the duration within
+    // that outcome. A single seed's winner is not a balance claim — see
     // `docs/design/balance/2026-09-13-frost-armor-one-debuff-findings.md` and
     // `docs/design/balance/2026-09-14-caster-onehander-findings.md`.
     assert_pinned(
         &result,
         Some(2),
-        1_111_486_044,
+        1_111_853_040,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }
