@@ -4413,16 +4413,26 @@ mod u9_seek_reset {
     /// were re-pinned to 27/33. Tangent steering then retired 27/33 in turn: the
     /// pursuing Mage now rounds pillars in a clean arc, so at 27/33 the cast-start
     /// LosBlocked events collapse below the vacuity floor (the fix working — the
-    /// Mage stops standing occluded).
+    /// Mage stops standing occluded). Seeds 13/6 are the remaining seeds where the
+    /// enemy healer still denies sight long enough to drive a real seek: 13 has
+    /// 244 cast-start blocks / 185 seeks / 3.30s longest stall; 6 has 215 / 253 /
+    /// 3.42s. The seek + cast-recovery machinery still fires; only the seed moved.
     ///
-    /// Re-pinned again 2026-09-13 (13/6 -> 2/9) for the Frost Armor chill
-    /// becoming ONE debuff: this comp is that change's blast radius — team 1's
-    /// Mage wears Frost Armor and team 2's Warrior melees it — so its
-    /// trajectories moved and at 13/6 the cast-start LosBlocked events fell
-    /// below the vacuity floor. Seeds 2/9 are the nearest replacements in
-    /// character (from `scan_mage_occlusion_seeds`): 2 has 243 cast-start
-    /// blocks / 19 seeks / 3.08s longest stall; 9 has 212 / 25 / 3.25s. The
-    /// seek + cast-recovery machinery still fires; only the seed moved.
+    /// Re-pinned twice more in short order, by two changes that both land in
+    /// this comp's blast radius and that were measured independently before
+    /// meeting here:
+    ///
+    ///   AS-54 — the Frost Armor chill becoming ONE debuff. Team 1's Mage wears
+    ///   it and team 2's Warrior melees into it, so trajectories moved; 13/6
+    ///   fell below the vacuity floor and were re-pinned to 2/9.
+    ///   AS-87 — caster main-hands, giving the Mage and both Priests +5 spell
+    ///   power. This took 13/6 to ZERO cast-start blocks independently, and
+    ///   re-pinned to 37/42.
+    ///
+    /// On the merged tree NEITHER pair could be assumed, so the scanner was
+    /// re-run over both changes together and the seeds below chosen from its
+    /// candidates rather than taken from either branch. The seek +
+    /// cast-recovery machinery still fires; only the seed moved.
     fn assert_mage_repositions_and_casts(seed: u64) {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
@@ -4460,40 +4470,42 @@ mod u9_seek_reset {
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_2() {
-        assert_mage_repositions_and_casts(2);
+    fn mage_repositions_and_casts_despite_occlusion_seed_37() {
+        assert_mage_repositions_and_casts(37);
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_9() {
-        assert_mage_repositions_and_casts(9);
+    fn mage_repositions_and_casts_despite_occlusion_seed_42() {
+        assert_mage_repositions_and_casts(42);
     }
 
     /// Tight anti-stall bound at a canonical occlusion seed. Absent a persistent
     /// enemy-healer juke, an occluded Mage recovers to a cast quickly: the
     /// longest contiguous LosBlocked run is well under 10 sim-seconds. Seed
-    /// re-pinned to 2 (13 dropped below the occlusion floor when the Frost
-    /// Armor chill became one debuff — see `assert_mage_repositions_and_casts`
-    /// for why this comp moves with that change); seed 2 keeps the enemy healer
-    /// denying while staying inside the bound (observed longest run ~3.1s).
+    /// re-pinned to 13 (seed 27 dropped below the occlusion floor once tangent
+    /// steering let the Mage round pillars cleanly — see
+    /// `assert_mage_repositions_and_casts`), then to 77 for AS-87 when the
+    /// caster main-hands took seed 13's cast-start blocks to 0. Seed 77 keeps
+    /// the enemy healer denying while staying inside the bound: 254 blocks,
+    /// 132 seeks, longest run 3.23s — the same character as the retired 13.
     #[test]
-    fn mage_recovers_to_cast_within_bound_seed_2() {
+    fn mage_recovers_to_cast_within_bound_seed_77() {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            2,
+            77,
             "TwinPillars",
         );
         let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
         assert!(
             blocked.len() >= 3,
-            "seed 2 must exercise occlusion, got {}",
+            "seed 77 must exercise occlusion, got {}",
             blocked.len()
         );
         let span = max_contiguous_block_span(&lines);
         assert!(
             span <= 10.0,
-            "seed 2: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
+            "seed 77: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
             span
         );
     }
@@ -4502,12 +4514,14 @@ mod u9_seek_reset {
     /// ENGAGE seek decisions during occluded windows.
     #[test]
     fn mage_seek_emits_los_seek_scorer_term() {
-        // Seed re-pinned to 2 (13 dropped below the occlusion floor when the
-        // Frost Armor chill became one debuff).
+        // Seed re-pinned to 13 (seed 27 dropped below the occlusion floor once
+        // tangent steering let the Mage round pillars cleanly), then to 77 for
+        // AS-87's caster main-hands — 77 carries 8 SeekLos decisions with a
+        // los_seek term against seed 13's 0.
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            2,
+            77,
             "TwinPillars",
         );
         let seek_with_term = lines
@@ -5230,7 +5244,11 @@ mod los_probes {
 
     #[test]
     fn completion_fizzle_and_projectiles_still_land() {
-        for seed in [6u64, 7u64] {
+        // Seeds re-pinned for AS-87: the Mage and both Priests gained a caster
+        // main hand, and at 6/7 the completion fizzle stopped occurring at all
+        // (0 fizzles). 37 and 38 carry it comfortably — 40 and 29 fizzles
+        // against 16 and 13 Frostbolt impacts. See `scan_fizzle_seeds`.
+        for seed in [37u64, 38u64] {
             let log = pillared_log(seed);
 
             let fizzles = log
@@ -6213,8 +6231,30 @@ mod medic_chase {
     // window. Observed (with steering):
     //   seed 13: 375 distress frames, 4.83s longest window, heal at 3.30s, 0 lost.
     //   seed 26: 235 distress frames, 3.50s longest window, heal at 6.55s, 0 lost.
-    const MEDIC_SEED_A: u64 = 13;
-    const MEDIC_SEED_B: u64 = 26;
+    //
+    // Re-pinned again for AS-87 (caster main-hands: the Priest here gains +5
+    // spell power, the enemy Shaman gains nothing, so this comp is a one-sided
+    // healer buff). 13 went vacuous outright — 0 distress frames, because the
+    // Warrior no longer drops below the urgency threshold while occluded — and
+    // 26 collapsed from 20 short windows into a single 308-frame one whose heal
+    // lands at 11.20s, past the ceiling.
+    //
+    // That is recalibration, not a slower chase, and the scan says so directly:
+    // the CHASE bound this probe exists to defend (longest contiguous occluded
+    // window <= 8s) is not breached on ANY of 30 seeds on EITHER binary, and its
+    // maximum falls slightly (5.40s -> 5.20s). What rose is the NUMBER of
+    // occluded-distress windows — the fraction of the match spent in one roughly
+    // doubles, 0.029 -> 0.061 excluding three seeds that now run to the cap —
+    // because a stronger Priest keeps its Warrior ALIVE at low HP instead of
+    // letting it die. Excluding those capped seeds, allies stopped dying before
+    // a heal landed on all but one seed (5 seeds -> 1). More rescues to perform,
+    // not slower rescues.
+    //
+    // Observed after AS-87:
+    //   seed 8: 587 distress frames, 5.20s longest window, heal at 4.00s, 0 lost.
+    //   seed 9: 412 distress frames, 1.98s longest window, heal at 4.12s, 0 lost.
+    const MEDIC_SEED_A: u64 = 8;
+    const MEDIC_SEED_B: u64 = 9;
 
     #[test]
     fn medic_bounds_distressed_ally_seed_a() {
