@@ -5821,11 +5821,19 @@ mod juke_chase {
         // Seed 38 restores the character seed 2 had before it drifted — 40.9s
         // total occlusion, 11 fizzle-length windows, 4097 lone samples, team-1
         // elimination win at 98.0s — so the bound has real signal under it again.
-        // Bound derived from that observed 11, at the same ~1.45x the other pin
-        // runs (seed 6: observed 10, bound 15), NOT carried over from the 6 it
-        // replaces. The assertion is `fizzle_windows <= max`, so a larger number
-        // here is not a looser test: what tightens a bound is shrinking the gap
-        // to what is observed, and 11 -> 16 is the tightest this seed supports.
+        //
+        // Bound derived from that observed 11, NOT carried over from the 6 it
+        // replaces: the other pin runs at 1.50x (seed 6: observed 10, bound 15),
+        // and 1.5 x 11 = 16.5 rounds down to 16 — 1.45x, a shade tighter than the
+        // convention rather than looser. The assertion is `fizzle_windows <= max`,
+        // so a larger number here is not a looser test: what tightens a bound is
+        // shrinking the gap to what is observed.
+        //
+        // 16 is the tightest value THE CONVENTION GIVES, not the tightest this
+        // seed would tolerate. 13 or 14 would also pass today and nothing here
+        // establishes where the real floor is — the headroom exists to absorb
+        // trajectory wobble from unrelated changes, not because 15 was tested and
+        // failed.
         assert_juke_bounded(JUKE_SEED_B, 16);
     }
 
