@@ -88,7 +88,7 @@ Inputs and both CSVs are committed beside this doc.
 |---|---|---|---|
 | **control** (no Shaman either side) | 500 | **500** | **0** |
 | **clean** (team1 Shaman, team2 Priest) | 500 | 52 | 448 (89.6%) |
-| **mirrored** (both sides Shaman) | 400 | 61 | 339 (84.8%) |
+| **mirrored** (both sides Shaman) | 400 | 62 | 338 (84.5%) |
 
 Both directions pass. The 500 control rows agree on winner, end reason and
 duration to the printed precision.
@@ -96,8 +96,8 @@ duration to the printed precision.
 ### Non-vacuity
 
 Every one of the 1400 matches in each arm ended by `kill` — none timed out at
-the cap — and durations are near-continuous (391 / 408 / 225 distinct values per
-slice before; 391 / 387 / 244 after). Draws: 4 of 500 in the clean slice, 0
+the cap — and durations are near-continuous (382 / 408 / 234 distinct values per
+slice before; 382 / 387 / 239 after). Draws: 4 of 500 in the clean slice, 0
 elsewhere, identical in both arms.
 
 Over a separate 12-seed log-level run of `Warrior+Shaman` vs `Warrior+Priest`:
@@ -144,7 +144,9 @@ Re-verified rather than assumed, two ways:
 2. **Re-run and diff.** Seeds 0-9 of all 14 cells (140 matches per arm) re-run
    from the committed input with the same hard pinning, then compared to the
    committed CSVs: **280/280 rows reproduce exactly** on winner, end reason and
-   duration.
+   duration. (Run on the `3c61185` arms. The later full re-run on `323bd93` —
+   §5 — is a stronger version of the same check: all 2800 rows regenerated from
+   source on a rebuilt baseline, under the same hard pinning.)
 
 A sample suffices because CWD is fixed for a process's lifetime, so this failure
 mode is all-or-nothing per run, never a scattering of bad rows.
@@ -159,19 +161,45 @@ Paired by seed; McNemar over per-seed flips, Wilson 95% intervals on the level.
 
 | slice | before | after | delta | gained / lost | McNemar |
 |---|---|---|---|---|---|
-| control | 64.6% [60.3, 68.7] | 64.6% [60.3, 68.7] | **+0.0 pt** | 0 / 0 | p = 1 |
+| control | 63.4% [59.1, 67.5] | 63.4% [59.1, 67.5] | **+0.0 pt** | 0 / 0 | p = 1 |
 | **clean** | 57.0% [52.6, 61.3] | 72.4% [68.3, 76.1] | **+15.4 pt** | 109 / 32 | **p = 5.0e-11** |
-| mirrored | 56.5% [51.6, 61.3] | 55.2% [50.4, 60.0] | -1.2 pt | 24 / 29 | p = 0.58 |
+| mirrored | 51.7% [46.9, 56.6] | 50.2% [45.4, 55.1] | -1.5 pt | 19 / 25 | p = 0.45 |
 
 **Clean slice** — the enemy has no Shaman, so the move is attributable to the
 Shaman's own weapon: **+15.4 points**, 109 seeds flipped to a win against 32 the
 other way, p = 5.0e-11. Not noise.
 
 **Mirrored slice** — both sides field a Shaman, so the buff applies to both:
--1.2 points, 24 versus 29 flips, p = 0.58. Net-neutral, as it should be. The
+-1.5 points, 19 versus 25 flips, p = 0.45. Net-neutral, as it should be. The
 individual outcomes still move on 85% of seeds; what does not move is who wins.
 
 **Control slice** — zero flips, as §4 requires.
+
+### Re-measured on the post-AS-54 base, and why the headline did not move
+
+These figures are from a **complete re-run of both arms on `323bd93`** (main
+after AS-54 made Frost Armor's chill one debuff). The baseline arm was rebuilt
+from that commit — a rebase argument is evidence about the patch, not about
+behaviour, and AS-54 is a real sim change.
+
+The clean slice came back **bit-for-bit what it was on the old base** — same
+57.0% -> 72.4%, same 109/32 flips — while control moved 64.6% -> 63.4% and
+mirrored moved 56.5% -> 51.7%. That is a suspicious-looking coincidence, so it
+was checked rather than accepted.
+
+AS-54's chill fires when a **melee unit hits a Mage**, so it can only move a cell
+that contains both — and where the melee unit actually attacks the Mage.
+Comparing the old-base baseline against the new-base baseline cell by cell
+(`…-as54-blast.py`), 13 of 14 cells match that prediction exactly. No clean-slice
+cell pairs a Mage with a melee unit (`Mage+Shaman vs Mage+Priest` has no melee;
+`Warrior+Shaman vs Warrior+Priest` has no Mage), so AS-54 is inert across the
+whole slice and the delta it measures is untouched.
+
+The fourteenth cell, `Warrior+Shaman vs Mage+Shaman`, has both and still did not
+move. Checked directly rather than left as an exception: over six seeds the
+Warrior lands **every** one of its attacks on the enemy Shaman and never once on
+the Mage — it trains the healer — so the chill never fires there either. All 14
+cells are accounted for.
 
 ### What this does NOT claim
 
@@ -203,7 +231,9 @@ docs/design/balance/2026-09-13-shaman-weapon-damage-analyze.py /tmp/before.csv /
 ```
 
 The committed `sweep.jsonl` is the exact input both arms ran. "Before" was built
-from `3c61185` (origin/main at the time); "after" from this card's branch.
+from `323bd93` (main after AS-54 merged); "after" from this card's branch
+rebased onto that same commit. Both arms were rebuilt from source on that base —
+see §5 for why the headline figure is unchanged from the earlier `3c61185` run.
 
 ## 7. The regression guard
 
@@ -220,10 +250,14 @@ socket, found []"*.
 
 ## 8. Follow-ups
 
-- `tests/movement_probes.rs::juke_chase::juke_bounded_seed_b` was re-pinned from
-  seed 2 to seed 34. Its 2v1 contains the Shaman, so every seeded trajectory in
-  it moved; at seed 2 the match now resolves in 40.7s with 0.0s occlusion and the
-  probe went vacuous. The replacement bound is 20 against an observed 14 —
-  tighter than the 24 it replaced.
+- `tests/movement_probes.rs::juke_chase::juke_bounded_seed_b` needed re-pinning
+  twice. Its 2v1 is `Mage+Priest vs Warrior+Shaman`, so BOTH this card and AS-54
+  move it — and both cards independently re-picked it from the drifted seed 2
+  (AS-54 chose 11, this card chose 34), neither measured on a tree carrying both
+  changes. Resolved by re-running the probe's own `scan_seeds` on the merged
+  tree: seed 11 survives as a candidate and is kept, with the bound re-derived
+  from the observed 2 fizzle windows to 6 — tighter than the 8 it replaces. Seed
+  11's dance is now thin (3.1s occlusion against a 1.0s vacuity floor), so the
+  comment names robust alternatives for whoever re-pins next.
 - The 30-yard thrown mace (its own card).
 - Re-baseline the Shaman against a fresh canonical sweep.
