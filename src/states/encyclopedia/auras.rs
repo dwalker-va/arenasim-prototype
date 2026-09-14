@@ -26,7 +26,7 @@
 //!    Weakened Soul, Shadow Sight, the Frost Trap zone's slow, the totem
 //!    pulses, the school lockout every interrupt leaves behind, the Rogue's
 //!    weapon-coating marker, Unstable Affliction's dispel-backlash silence and
-//!    the two Frost Armor procs. The nested variants EXPAND from their own
+//!    the Frost Armor chill. The nested variants EXPAND from their own
 //!    sources (`TotemElement::ALL`, `RoguePoison::ALL`, the interrupt flags),
 //!    so they stay zero-marginal-cost too.
 //!
@@ -60,9 +60,7 @@ use crate::states::ability_text::build_aura_description;
 use crate::states::match_config::RoguePoison;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::ability_config::AbilityDefinitions;
-use crate::states::play_match::combat_core::{
-    frost_armor_attack_speed_aura, frost_armor_movement_slow_aura,
-};
+use crate::states::play_match::combat_core::frost_armor_chill_auras;
 use crate::states::play_match::components::{
     weapon_poison_marker_aura, Aura, AuraPending, AuraType, DRCategory, DispelType, TotemElement,
     WEAPON_POISON_MARKER_DURATION,
@@ -131,20 +129,27 @@ pub enum AuraId {
 ///
 /// ## Name collisions
 ///
-/// Four of these carry a `frame_name` that is NOT their catalog name, because
-/// the engine hangs two or three distinct auras under one name and a player
-/// reading their frames cannot tell which is which:
+/// Three of these carry a `frame_name` that is NOT their catalog name, because
+/// the engine hangs two distinct DEBUFFS under one name and a player reading
+/// their frames cannot tell which is which:
 ///
 /// - "Crippling Poison" is both the Rogue's own coating marker and the slow it
 ///   puts on the target.
 /// - "Unstable Affliction" is both an 18-second Shadow damage-over-time and the
 ///   silence its dispel backlash inflicts.
-/// - "Frost Armor" is the Mage's self-buff AND both procs it hangs on melee
+/// - "Frost Armor" is the Mage's self-buff AND the chill it hangs on melee
 ///   attackers.
 ///
 /// Each gets its own entry with a parenthetical qualifier, and its page says
 /// what the frames call it. The alternative — one entry per NAME — sends a
 /// player from their own gold-bordered buff to the enemy debuff's page.
+///
+/// **A collision is two debuffs sharing a name, never two EFFECTS of one
+/// debuff.** Frost Armor's chill used to be listed twice, once per effect, and
+/// the two rows wore different removal badges over what a player experiences as
+/// one thing. That is fixed upstream in the engine rather than papered over
+/// here: the chill's effects are bound into a [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff), so it is one
+/// entry that states both (see [`NamedAura::riders`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EngineAura {
     /// The Power Word: Shield cooldown marker, applied alongside the shield.
@@ -168,10 +173,12 @@ pub enum EngineAura {
     /// The silence Unstable Affliction's dispel backlash puts on the dispeller,
     /// which shares the DoT's name.
     DispelBacklashSilence,
-    /// The movement slow a Frost Armor proc hangs on a melee attacker.
-    FrostArmorMovementSlow,
-    /// The attack-speed slow the same proc hangs alongside it.
-    FrostArmorAttackSpeedSlow,
+    /// The chill a Frost Armor proc hangs on a melee attacker — ONE debuff
+    /// doing two things (a movement slow and an attack-speed slow), so ONE
+    /// entry. It was two entries wearing different removal badges until the
+    /// engine learned to bind the two effects into one debuff; see
+    /// [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff).
+    FrostArmorChill,
 }
 
 impl EngineAura {
@@ -185,8 +192,7 @@ impl EngineAura {
             EngineAura::ShadowSight,
             EngineAura::FrostTrapSlow,
             EngineAura::DispelBacklashSilence,
-            EngineAura::FrostArmorMovementSlow,
-            EngineAura::FrostArmorAttackSpeedSlow,
+            EngineAura::FrostArmorChill,
         ];
         all.extend(TotemElement::ALL.iter().copied().map(EngineAura::TotemBuff));
         all.extend(
@@ -331,7 +337,19 @@ pub struct NamedAura {
     pub art: AuraArt,
     /// A representative aura, built the way the simulation builds it. Every
     /// classification on the page is a question asked of THIS.
+    ///
+    /// For a COMPOUND debuff (see [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff)) this is the debuff's
+    /// FACE, and [`Self::riders`] holds the rest. Classification asks the face
+    /// because that is what the engine asks: a dispel rolls against the face
+    /// and takes the riders with it.
     pub sample: Aura,
+    /// The other effects of a compound debuff, beyond [`Self::sample`]. Empty
+    /// for every ordinary aura — one aura, one effect, one entry.
+    ///
+    /// This is why the catalog no longer needs two "Frost Armor (…)" rows: the
+    /// engine binds the chill's two effects into one debuff, so the catalog
+    /// lists one entry that states both.
+    pub riders: Vec<Aura>,
     pub persistence: Persistence,
     /// Spell power added to [`Self::sample`]'s magnitude per point, from the
     /// ability's `applies_aura.magnitude_coefficient`. Non-zero only for
@@ -348,6 +366,19 @@ pub struct NamedAura {
 impl NamedAura {
     pub fn is_buff(&self) -> bool {
         is_buff_aura(&self.mechanic)
+    }
+
+    /// Every mechanic this ONE entry covers: its face, then each rider's. A
+    /// single-effect aura yields exactly its `mechanic`.
+    ///
+    /// The cross-links and `tests/aura_catalog_audit.rs` both walk this rather
+    /// than `mechanic` alone, so a compound debuff is reachable from every
+    /// mechanic it actually applies — the Frost Armor chill shows up under
+    /// "other Attack Speed Slow effects" even though its badge says Slow.
+    pub fn mechanics(&self) -> Vec<AuraType> {
+        let mut all = vec![self.mechanic];
+        all.extend(self.riders.iter().map(|rider| rider.effect_type));
+        all
     }
 
     /// `Debuff · Damage over Time` — the one-line identity shared by index
@@ -404,11 +435,14 @@ impl NamedAura {
                 "Beneficial magic. An enemy can strip this with a purge.",
             )
         } else if self.sample.is_hostile_effect() {
-            // Stuns, interrupt lockouts, the attack-speed half of Frost Armor's
-            // proc: not a physical debuff, but not a dispellable KIND of effect
-            // either. Deliberately says nothing about the class — some of these
-            // are magic (Hammer of Justice is Holy) and some are schoolless with
-            // no determined class at all.
+            // Stuns and interrupt lockouts: not a physical debuff, but not a
+            // dispellable KIND of effect either. Deliberately says nothing
+            // about the class — some of these are magic (Hammer of Justice is
+            // Holy) and some are schoolless with no determined class at all.
+            //
+            // A compound debuff is classified by its FACE, which is why Frost
+            // Armor's chill no longer lands here: its attack-speed effect is a
+            // rider on a dispellable slow rather than an entry of its own.
             (
                 "Immune to dispel",
                 "No dispel, cleanse or purge removes an effect of this kind; only effects that \
@@ -472,6 +506,9 @@ fn ron_entry(ability: AbilityType, abilities: &AbilityDefinitions) -> Option<Nam
         source: AuraSource::Ability(ability),
         art: AuraArt::FromSource,
         sample: pending.aura,
+        // `AbilityConfig::applies_aura` is a single `Option`, so a RON-defined
+        // ability applies exactly one effect and can never be a compound.
+        riders: Vec::new(),
         persistence: Persistence::Seconds(effect.duration),
         magnitude_coefficient: effect.magnitude_coefficient,
         description: build_aura_description(effect),
@@ -497,7 +534,7 @@ pub fn subtitle_for(mechanic: AuraType) -> String {
 pub fn siblings(catalog: &[NamedAura], mechanic: AuraType, self_id: AuraId) -> Vec<&NamedAura> {
     catalog
         .iter()
-        .filter(|entry| entry.mechanic == mechanic && entry.id != self_id)
+        .filter(|entry| entry.mechanics().contains(&mechanic) && entry.id != self_id)
         .collect()
 }
 
@@ -545,7 +582,21 @@ struct EngineSpec {
     /// can only ever say what the engine does.
     break_on_damage: f32,
     persistence: Persistence,
+    /// The RIDER effects of a compound debuff — the effects this entry covers
+    /// beyond its face. Empty for every ordinary aura. See
+    /// [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff); the arm builds these from the same constructor the
+    /// apply site uses, so the page lists exactly what lands.
+    riders: Vec<Aura>,
     provenance: String,
+}
+
+impl EngineSpec {
+    /// The default for every arm that is not a compound debuff. Spelled out as
+    /// a helper rather than a `Default` impl so the other eight fields stay
+    /// mandatory — `break_on_damage` in particular must never default.
+    fn no_riders() -> Vec<Aura> {
+        Vec::new()
+    }
 }
 
 /// Which engine auras carry art of their own, and which borrow their ability's.
@@ -566,8 +617,7 @@ fn engine_art(engine: EngineAura) -> AuraArt {
         | EngineAura::InterruptLockout(_)
         | EngineAura::WeaponPoisonCoating(_)
         | EngineAura::DispelBacklashSilence
-        | EngineAura::FrostArmorMovementSlow
-        | EngineAura::FrostArmorAttackSpeedSlow => AuraArt::FromSource,
+        | EngineAura::FrostArmorChill => AuraArt::FromSource,
     }
 }
 
@@ -587,6 +637,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
             school: None,
             break_on_damage: -1.0,
             persistence: Persistence::Seconds(WEAKENED_SOUL_DURATION),
+            riders: EngineSpec::no_riders(),
             provenance: "Placed on the ally the moment the shield lands: one cast applies both."
                 .to_string(),
         },
@@ -599,6 +650,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
             school: None,
             break_on_damage: SHADOW_SIGHT_BREAK_ON_DAMAGE,
             persistence: Persistence::Seconds(SHADOW_SIGHT_DURATION),
+            riders: EngineSpec::no_riders(),
             provenance: format!(
                 "Granted by picking up one of the two orbs that spawn in mid-arena {:.0} sec \
                  after the gates open.",
@@ -614,6 +666,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
             school: Some(SpellSchool::Frost),
             break_on_damage: -1.0,
             persistence: Persistence::WhileSourceActive("while you stand in the zone"),
+            riders: EngineSpec::no_riders(),
             provenance: format!(
                 "Re-applied every tick by a triggered Frost Trap's slow zone, which itself \
                  lasts {:.0} sec.",
@@ -632,6 +685,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 school: Some(school),
                 break_on_damage: -1.0,
                 persistence: Persistence::WhileSourceActive("while you stand near the totem"),
+                riders: EngineSpec::no_riders(),
                 provenance: format!(
                     "Pulsed onto nearby allies by a dropped totem, which itself lasts {:.0} sec.",
                     TOTEM_DURATION
@@ -656,6 +710,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 persistence: Persistence::Seconds(
                     def.map(|d| d.lockout_duration).unwrap_or_default(),
                 ),
+                riders: EngineSpec::no_riders(),
                 provenance: "Left behind when this interrupt lands. Only the school of the \
                              interrupted spell is locked — the target's other schools keep \
                              working."
@@ -673,6 +728,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 school: sample.spell_school,
                 break_on_damage: sample.break_on_damage_threshold,
                 persistence: Persistence::WholeMatch,
+                riders: EngineSpec::no_riders(),
                 provenance: "A Rogue carries this from the opening bell — it marks the coated \
                              weapon. The slow itself comes from the coating's on-hit proc, not \
                              from this mark."
@@ -690,42 +746,36 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 school: sample.spell_school,
                 break_on_damage: sample.break_on_damage_threshold,
                 persistence: Persistence::Seconds(sample.duration),
+                riders: EngineSpec::no_riders(),
                 provenance: "Punishes whoever lifts an Unstable Affliction off an ally, \
                              alongside the backlash damage. Dispelling it on your own team \
                              costs nothing."
                     .to_string(),
             }
         }
-        EngineAura::FrostArmorMovementSlow => {
-            let sample = frost_armor_movement_slow_aura();
+        EngineAura::FrostArmorChill => {
+            // Built from the simulation's own constructor for the whole
+            // debuff, so the page cannot list an effect the proc does not
+            // apply — or miss one it does.
+            let [face, rider] = frost_armor_chill_auras();
             EngineSpec {
-                name: "Frost Armor (movement slow)".to_string(),
-                frame_name: Some(sample.ability_name.clone()),
-                mechanic: sample.effect_type,
+                // No disambiguating qualifier on the mechanic: there is one
+                // chill now, and the only other "Frost Armor" is the Mage's
+                // self-buff, which is a BUFF and files on the other side of
+                // the catalog.
+                name: "Frost Armor (chill)".to_string(),
+                frame_name: Some(face.ability_name.clone()),
+                mechanic: face.effect_type,
                 source: AuraSource::Ability(AbilityType::FrostArmor),
-                magnitude: sample.magnitude,
-                school: sample.spell_school,
-                break_on_damage: sample.break_on_damage_threshold,
-                persistence: Persistence::Seconds(sample.duration),
-                provenance: "Hung on any melee attacker who strikes a Mage wearing Frost Armor, \
-                             alongside the attack-speed slow. It does not stack with itself — a \
-                             second hit while it is up refreshes nothing."
-                    .to_string(),
-            }
-        }
-        EngineAura::FrostArmorAttackSpeedSlow => {
-            let sample = frost_armor_attack_speed_aura();
-            EngineSpec {
-                name: "Frost Armor (attack speed)".to_string(),
-                frame_name: Some(sample.ability_name.clone()),
-                mechanic: sample.effect_type,
-                source: AuraSource::Ability(AbilityType::FrostArmor),
-                magnitude: sample.magnitude,
-                school: sample.spell_school,
-                break_on_damage: sample.break_on_damage_threshold,
-                persistence: Persistence::Seconds(sample.duration),
-                provenance: "Hung on any melee attacker who strikes a Mage wearing Frost Armor, \
-                             alongside the movement slow."
+                magnitude: face.magnitude,
+                school: face.spell_school,
+                break_on_damage: face.break_on_damage_threshold,
+                persistence: Persistence::Seconds(face.duration),
+                riders: vec![rider],
+                provenance: "Hung on any melee attacker who strikes a Mage wearing Frost Armor. \
+                             One debuff doing two things — a dispel that lifts it takes both. It \
+                             does not stack with itself: a second hit while it is up refreshes \
+                             nothing."
                     .to_string(),
             }
         }
@@ -740,6 +790,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
         school,
         break_on_damage,
         persistence,
+        riders,
         provenance,
     } = spec;
 
@@ -767,8 +818,14 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
     };
 
     // Engine auras have no `applies_aura` block to generate prose from, so the
-    // MECHANIC's own player-facing sentence carries the page.
-    let description = mechanic.description().to_string();
+    // MECHANIC's own player-facing sentence carries the page — one sentence
+    // per effect for a compound debuff, in face-then-riders order, so the
+    // prose covers everything the debuff actually does.
+    let description = std::iter::once(mechanic)
+        .chain(riders.iter().map(|rider| rider.effect_type))
+        .map(|effect| effect.description())
+        .collect::<Vec<_>>()
+        .join(" ");
 
     // A disambiguated entry has to say what the frames actually call it, or a
     // player matching the buff bar against the catalog finds no such name.
@@ -792,6 +849,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
         source,
         art: engine_art(engine),
         sample,
+        riders,
         persistence,
         magnitude_coefficient: 0.0,
         description,
@@ -1117,6 +1175,15 @@ fn stat_rows(entry: &NamedAura) -> Vec<(String, String)> {
         rows.push((label, value));
     }
 
+    // A compound debuff's riders are effects of the SAME debuff, so their
+    // numbers belong in the same stat block, right under the face's. The page
+    // is the only place a player can learn that one dispel takes both.
+    for rider in &entry.riders {
+        if let Some(rider_row) = magnitude_row_for(rider.effect_type, rider.magnitude) {
+            rows.push(rider_row);
+        }
+    }
+
     if aura.tick_interval > 0.0 {
         rows.push((
             "Ticks every".to_string(),
@@ -1171,10 +1238,16 @@ fn stat_rows(entry: &NamedAura) -> Vec<(String, String)> {
 /// match `build_aura_description`'s sentence for the same aura — a row that
 /// said "70%" beside prose that said "30%" would read as a bug.
 fn magnitude_row(entry: &NamedAura) -> Option<(String, String)> {
-    let m = entry.sample.magnitude;
+    magnitude_row_for(entry.mechanic, entry.sample.magnitude)
+}
+
+/// [`magnitude_row`] for one (mechanic, magnitude) pair, so a compound
+/// debuff's RIDERS get the same worded row as its face rather than a second
+/// copy of the wording rules.
+fn magnitude_row_for(mechanic: AuraType, m: f32) -> Option<(String, String)> {
     let pct = |v: f32| format!("{:.0}%", v * 100.0);
     let row = |label: &str, value: String| Some((label.to_string(), value));
-    match entry.mechanic {
+    match mechanic {
         // Remaining-fraction multipliers.
         AuraType::MovementSpeedSlow => row("Movement slowed by", pct(1.0 - m)),
         AuraType::HealingReduction => row("Healing reduced by", pct(1.0 - m)),
@@ -1583,10 +1656,17 @@ mod tests {
     /// Every entry the page tells a player no dispel reaches. Two kinds live
     /// here and the split is the card's whole subject: the PHYSICAL debuffs
     /// (arrow, wound, boot) and the mechanics no dispel takes whatever their
-    /// school (stuns, interrupt lockouts, the attack-speed half of Frost
-    /// Armor's proc). Pinned because this rung is where a widening of
-    /// `is_magic_dispellable` would silently show up — moving a name out of
-    /// this list is a balance change, not a wording change.
+    /// school (stuns, interrupt lockouts). Pinned because this rung is where a
+    /// widening of `is_magic_dispellable` would silently show up — moving a
+    /// name out of this list is a balance change, not a wording change.
+    ///
+    /// "Frost Armor (attack speed)" used to sit here, beside a dispellable
+    /// "Frost Armor (movement slow)" — one debuff on two rungs. AS-54 took it
+    /// off this list by taking it out of the CATALOG: the attack-speed effect
+    /// is now a rider on the chill, which is dispellable by its face. Note
+    /// what did NOT change to achieve that — `is_magic_dispellable` still
+    /// refuses `AttackSpeedSlow`, so the five schoolless `[—]` rows below are
+    /// exactly as they were.
     #[test]
     fn the_immune_to_dispel_rung_is_pinned() {
         let mut rows: Vec<String> = catalog(&abilities())
@@ -1609,7 +1689,6 @@ mod tests {
                 "Cheap Shot [Physical]",
                 "Concussive Shot [Physical]",
                 "Demoralizing Shout [—]",
-                "Frost Armor (attack speed) [Magic]",
                 "Hammer of Justice [Magic]",
                 "Kick [—]",
                 "Kidney Shot [Physical]",
@@ -1753,22 +1832,34 @@ mod tests {
             AuraType::DamageOverTime
         );
 
-        // Frost Armor: the Mage's buff plus the two procs it hangs on melee.
+        // Frost Armor: the Mage's buff, plus the ONE chill it hangs on melee.
+        // The chill is a compound debuff — one entry carrying both effects —
+        // so the catalog holds no "(movement slow)" / "(attack speed)" pair.
         let buff = by_name("Frost Armor");
-        let slow = by_name("Frost Armor (movement slow)");
-        let swings = by_name("Frost Armor (attack speed)");
-        assert!(buff.is_buff() && !slow.is_buff() && !swings.is_buff());
+        let chill = by_name("Frost Armor (chill)");
+        assert!(buff.is_buff() && !chill.is_buff());
+        assert_eq!(chill.frame_name, "Frost Armor");
+        let [face, rider] = frost_armor_chill_auras();
+        assert_eq!(chill.sample.magnitude, face.magnitude);
+        assert_eq!(chill.mechanic, face.effect_type);
         assert_eq!(
-            slow.sample.magnitude,
-            frost_armor_movement_slow_aura().magnitude
+            chill
+                .riders
+                .iter()
+                .map(|r| r.effect_type)
+                .collect::<Vec<_>>(),
+            vec![rider.effect_type],
+            "the chill's page must list its attack-speed effect, or the one \
+             entry hides half the debuff"
         );
-        assert_eq!(
-            swings.sample.magnitude,
-            frost_armor_attack_speed_aura().magnitude
+        assert_eq!(chill.riders[0].magnitude, rider.magnitude);
+        assert!(
+            entries
+                .iter()
+                .all(|e| !e.name.starts_with("Frost Armor (movement")
+                    && !e.name.starts_with("Frost Armor (attack")),
+            "the split Frost Armor entries must be gone, not merely hidden"
         );
-        for entry in [slow, swings] {
-            assert_eq!(entry.frame_name, "Frost Armor");
-        }
 
         // Every disambiguated entry says what the frames call it, or a player
         // matching the buff bar against the catalog finds no such name.
@@ -1851,6 +1942,12 @@ mod tests {
     /// The three mechanics that had `display_name()` and `description()` but no
     /// entry to show them on. A mechanic with no entries is a page a player can
     /// never reach.
+    ///
+    /// Asked of `mechanics()`, not `mechanic`: `AttackSpeedSlow` reaches a page
+    /// as a RIDER on the Frost Armor chill rather than as an entry of its own
+    /// (it is half of one debuff, not a debuff). Its stat row is on the chill's
+    /// page and its cross-links resolve there, which is the reachability this
+    /// test is about — the badge saying "Slow" is a separate question.
     #[test]
     fn every_mechanic_with_a_named_aura_reaches_a_page() {
         let entries = catalog(&abilities());
@@ -1860,7 +1957,7 @@ mod tests {
             AuraType::WeaponPoison,
         ] {
             assert!(
-                entries.iter().any(|e| e.mechanic == mechanic),
+                entries.iter().any(|e| e.mechanics().contains(&mechanic)),
                 "{:?} is applied in the engine but has no catalog entry",
                 mechanic
             );

@@ -27,13 +27,20 @@
 //! - "Unstable Affliction" — an 18-second `DamageOverTime` and the `Silence`
 //!   its dispel backlash inflicts.
 //! - "Frost Armor" — the Mage's `FrostArmorBuff` and the `MovementSpeedSlow`
-//!   plus `AttackSpeedSlow` it hangs on melee attackers.
+//!   plus `AttackSpeedSlow` of the chill it hangs on melee attackers.
 //!
 //! Keyed on name alone, all six resolved to three entries and the guard passed
 //! while the catalog was sending a player from their own gold-bordered buff to
 //! the enemy debuff's page — wrong polarity, wrong mechanic, wrong duration,
-//! wrong removal rule. The pair key makes each of the six an entry of its own
-//! (see `EngineAura`'s collision note), and blocks a seventh.
+//! wrong removal rule. The pair key makes each of the six resolvable
+//! separately (see `EngineAura`'s collision note), and blocks a seventh.
+//!
+//! Six auras, but only FIVE entries: the chill's two effects are one COMPOUND
+//! debuff, so they share an entry (and a dispel takes both). An entry
+//! therefore contributes one pair per effect it covers rather than one pair
+//! flat — see `known_pairs`. Six auras resolving to five entries is not the
+//! collision bug returning; a collision is two DEBUFFS under one name, and the
+//! pair key still separates the chill from the Mage's self-buff.
 //!
 //! ## What this does NOT catch
 //!
@@ -85,6 +92,32 @@ struct ScannedAura {
     line: usize,
 }
 
+/// Every `(frame name, mechanic)` pair the catalog accounts for.
+///
+/// An entry contributes ONE pair per effect it covers, not one per entry. Most
+/// entries are one aura doing one thing; a COMPOUND debuff is several auras
+/// bound into one debuff (`CompoundDebuff`), gets one catalog entry, and still
+/// has to resolve each of its apply sites — the Frost Armor chill writes both
+/// a `MovementSpeedSlow` and an `AttackSpeedSlow` under the name "Frost Armor".
+/// Keying only on `mechanic` here would leave the rider's apply site
+/// unresolvable and this guard would fail an aura the catalog really does
+/// cover; keying on the NAME alone is the collision bug in the module doc
+/// above. So: name plus each mechanic.
+fn known_pairs(
+    abilities: &arenasim::states::play_match::ability_config::AbilityDefinitions,
+) -> BTreeSet<(String, String)> {
+    catalog(abilities)
+        .into_iter()
+        .flat_map(|entry| {
+            entry
+                .mechanics()
+                .into_iter()
+                .map(|mechanic| (entry.frame_name.clone(), format!("{:?}", mechanic)))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 #[test]
 fn every_named_aura_in_the_engine_has_a_catalog_entry() {
     let abilities = load_ability_definitions().expect("abilities.ron must load");
@@ -99,10 +132,7 @@ fn every_named_aura_in_the_engine_has_a_catalog_entry() {
     //
     // Keyed on FRAME name: the name the engine writes, not the catalog's
     // disambiguated one. That is what an apply site can be compared against.
-    let known: BTreeSet<(String, String)> = catalog(&abilities)
-        .into_iter()
-        .map(|entry| (entry.frame_name, format!("{:?}", entry.mechanic)))
-        .collect();
+    let known = known_pairs(&abilities);
     let allowed: BTreeSet<&str> = ALLOWLIST.iter().map(|(name, _)| *name).collect();
 
     let scanned = scan_aura_literals().expect("failed to walk the sources");
@@ -184,10 +214,7 @@ fn every_named_aura_in_the_engine_has_a_catalog_entry() {
 #[test]
 fn named_auras_built_from_helpers_also_resolve() {
     let abilities = load_ability_definitions().expect("abilities.ron must load");
-    let known: BTreeSet<(String, String)> = catalog(&abilities)
-        .into_iter()
-        .map(|entry| (entry.frame_name, format!("{:?}", entry.mechanic)))
-        .collect();
+    let known = known_pairs(&abilities);
 
     // `totems.rs` names each pulsed buff via `TotemElement::buff_name()`, and
     // takes its mechanic from `totem_spec`.

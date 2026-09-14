@@ -76,7 +76,12 @@ pub fn process_dispels(
                 let idx_to_remove =
                     dispellable_indices[random_idx.min(dispellable_indices.len() - 1)];
 
-                let removed_aura = active_auras.auras.remove(idx_to_remove);
+                // Takes the whole DEBUFF, not one effect: a compound debuff's
+                // riders come off with its face (see `CompoundDebuff`). Only
+                // the face was ever a dispel candidate above, so this changes
+                // nothing about WHICH debuff is rolled — only how much of it
+                // actually leaves.
+                let removed_aura = active_auras.remove_debuff_at(idx_to_remove);
 
                 // Log the dispel using the provided log prefix
                 let target_id = combat_log_id_for(&combatant, pet_query.get(pending.target).ok());
