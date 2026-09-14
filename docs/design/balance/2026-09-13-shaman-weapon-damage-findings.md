@@ -57,7 +57,7 @@ both binaries:
 
 | | before | after |
 |---|---|---|
-| Wand Shot damage per hit (post-armor) | 5 | 9 (**1.80x**) |
+| Wand Shot normal hit **vs the Warrior** (post-armor) | 5 | 9 (**1.80x**) |
 | Modal swing interval | **1.27s** | **1.02s** |
 | Shaman Wand Shots in the match | 20 | 59 |
 | Match result | Team 2 at 42.4s | Team 1 at 72.4s |
@@ -65,6 +65,14 @@ both binaries:
 Both predictions land. The interval sits a tick above nominal in both arms
 because the fixed timestep quantises it, and the ratio is what the change
 predicts. This is the difference attributed *positively* — not by elimination.
+
+**Compare per target, not in aggregate.** Damage per hit is post-armor, so it
+depends on who is being shot. In the before arm the Shaman only ever shoots the
+Warrior (17 normal hits, all for 5). In the after arm it shoots both: the Warrior
+for 9 and the cloth-wearing Priest for 12. The like-for-like comparison is
+therefore the Warrior column above — 5 -> 9. Taking the mode across *both*
+targets instead gives 5 -> 12, which overstates the change by mixing in a softer
+target the before arm never reached.
 
 ## 4. Split control
 
@@ -96,13 +104,51 @@ Over a separate 12-seed log-level run of `Warrior+Shaman` vs `Warrior+Priest`:
 
 | | before | after |
 |---|---|---|
-| Shaman Wand Shots | 497 | 366 |
-| of which crits | 16 | 17 |
+| Shaman Wand Shots | 261 | 195 |
+| of which crits | 7 | 8 |
 | total crits (all units) | 100 | 102 |
 | total damage events | 1493 | 1233 |
 
 The after-arm has *fewer* wand shots and damage events because the matches are
 shorter, which is the expected direction.
+
+(Count the Shaman as the *actor*: `Team \d Shaman #\d's Wand Shot`. A looser
+"Shaman and Wand Shot on the same line" also matches the enemy Priest wanding
+*at* the Shaman, which inflates these counts by roughly half.)
+
+## 4a. The sweep read the right assets (CWD contamination re-check)
+
+**A development build resolves its asset root to the RELATIVE path `assets`.**
+`paths::install_root` returns `None` when `is_development_build` finds a
+`Cargo.toml` above the executable — which is always true for
+`<worktree>/target/release/arenasim` — and `assets_dir_from(None)` is then
+literally `PathBuf::from("assets")`. Every RON config a run loads is therefore
+resolved against the **process working directory**, not against the binary.
+
+That makes a sweep silently readable from another worktree's asset tree if the
+CWD is not what you think it is. It is not hypothetical here: another card was
+concurrently mid-edit on `items.ron` and `loadouts.ron` — including
+`HammerOfTheRighteous`, this card's exact item — and a run that picked those up
+would look like a real result.
+
+Re-verified rather than assumed, two ways:
+
+1. **Positive asset check.** One seeded match per arm, absolute binary path and
+   CWD forced to that arm's worktree, reading the Shaman's behaviour back out of
+   the log: before 20 wand shots at 5 damage on a 1.27s cadence, after 59 at 9 on
+   1.02s. Those are the class-base and mace-equipped numbers respectively, so
+   each binary demonstrably read its own `loadouts.ron` / `items.ron`.
+2. **Re-run and diff.** Seeds 0-9 of all 14 cells (140 matches per arm) re-run
+   from the committed input with the same hard pinning, then compared to the
+   committed CSVs: **280/280 rows reproduce exactly** on winner, end reason and
+   duration.
+
+A sample suffices because CWD is fixed for a process's lifetime, so this failure
+mode is all-or-nothing per run, never a scattering of bad rows.
+
+**For the next sweep:** pass an absolute binary path and an explicit CWD. A
+relative `./target/release/arenasim` is doubly unsafe — under a drifted CWD it
+resolves to *another tree's binary* as well as another tree's assets.
 
 ## 5. The measured delta
 
