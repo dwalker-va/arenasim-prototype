@@ -5796,7 +5796,24 @@ mod juke_chase {
         // to be (4 fizzle-length windows / ~10.5s occlusion / team-1
         // elimination win at ~44s, from `scan_seeds`), and the bound keeps the
         // same roughly-2x headroom the pin has always carried.
-        assert_juke_bounded(JUKE_SEED_B, 8);
+        //
+        // Re-validated 2026-09-13 on the merged tree (AS-97 equips the Shaman's
+        // main-hand mace, so this comp's OTHER side moved too). Seed 11 survives
+        // — it is still a `scan_seeds` CANDIDATE — but its dance is thinner than
+        // the numbers above, which were measured without the mace: now 2
+        // fizzle-length windows / 3.1s occlusion / 436 lone samples / team-1
+        // elimination win at ~34.7s. Both vacuity floors still clear (3.1s > 1.0s,
+        // 436 > 200), so the pin proves something; bound re-derived from the
+        // observed 2 rather than carried over, giving the same absolute slack the
+        // earlier pins ran with (14 -> 20, 18 -> 24) instead of the 4x that
+        // holding 8 against 2 would now mean.
+        //
+        // NOTE for the next re-pin: 3.1s is close to the 1.0s floor, so this seed
+        // is one sim change away from going vacuous. When it does, `scan_seeds`
+        // on that tree had much more robust long-dance candidates — 38 (40.9s /
+        // 11 windows / 98.0s), 23 (32.7s / 10 / 90.0s) — which is the character
+        // seed 2 originally had.
+        assert_juke_bounded(JUKE_SEED_B, 6);
     }
 
     // Pinned by `scan_seeds` (run with `--ignored`): seeds where the enemy
@@ -5815,6 +5832,16 @@ mod juke_chase {
     // 2026-09-13, the Frost Armor compound-debuff change: this comp puts a Mage
     // wearing Frost Armor against a Warrior, so its trajectories moved and seed 2
     // stopped producing a dance at all.)
+    //
+    // Numbers again as of AS-97 equipping the Shaman's main-hand mace, which
+    // moves the OTHER side of the same comp. Both pins survive; re-measured on
+    // the merged tree with `scan_seeds`:
+    //   seed 6:  38.5s total occlusion, 10 fizzle-length windows, team-1 win at ~92.5s.
+    //   seed 11:  3.1s total occlusion,  2 fizzle-length windows, team-1 win at ~34.7s.
+    // Two cards re-picked this same pin independently (AS-54 chose 11, AS-97
+    // chose 34) because each moved one side of the comp. Neither pick was valid
+    // on the tree that has both, so the surviving seed was re-validated here
+    // rather than either side being taken on faith.
     const JUKE_SEED_A: u64 = 6;
     const JUKE_SEED_B: u64 = 11;
 }
