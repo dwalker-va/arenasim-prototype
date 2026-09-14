@@ -54,12 +54,24 @@ fn seeded_2v2_matches_its_recorded_identity() {
         None,
     )
     .expect("2v2 run");
-    // 66.86647s — recorded on feat/in-match-kill-call-banter after the branch
-    // was confirmed byte-identical to main, so this is main's value too.
+    // 47.982773s. Re-recorded 2026-09-13 for the Frost Armor chill becoming
+    // ONE debuff (card AS-54), an INTENDED simulation change. Was Some(1) @
+    // 66.86647s.
+    //
+    // Both pinned cells put a Mage against a Warrior, which is exactly this
+    // change's blast radius: Frost Armor's proc chills the Warrior, and the
+    // chill's two effects now land, diminish and come off together instead of
+    // separately. `tests/baselines/legacy_behaviour_2026-09-13_frost_armor_chill.txt`
+    // records the same change across the 27-cell baseline, measured against a
+    // fresh run of main.
+    //
+    // A single seed's winner flipping is not a balance claim — the paired
+    // n=5,150 sweep behind the change is in
+    // `docs/design/balance/2026-09-13-frost-armor-one-debuff-findings.md`.
     assert_pinned(
         &result,
-        Some(1),
-        1_116_060_578,
+        Some(2),
+        1_111_486_044,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }
@@ -68,11 +80,12 @@ fn seeded_2v2_matches_its_recorded_identity() {
 fn seeded_1v1_matches_its_recorded_identity() {
     let result = run_headless_match_with(config(&["Mage"], &["Warrior"], 99001), true, None)
         .expect("1v1 run");
-    // 16.049927s — same provenance as the 2v2 pin above.
+    // 17.549904s — re-recorded with the 2v2 pin above, same reason (was
+    // 16.049927s; the winner did not move).
     assert_pinned(
         &result,
         Some(1),
-        1_098_933_824,
+        1_099_720_244,
         "1v1 Mage vs Warrior @99001",
     );
 }

@@ -16,7 +16,7 @@ use bevy::prelude::*;
 
 use arenasim::combat::log::CombatLog;
 use arenasim::states::play_match::combat_core::{
-    effective_attack_interval, frost_armor_chill_auras,
+    compound_riders, effective_attack_interval, frost_armor_chill_auras,
 };
 use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraType, Combatant, CompoundDebuff, DispelPending, GameRng,
@@ -161,6 +161,26 @@ fn only_the_rolled_debuff_leaves() {
     app.update();
 
     assert_eq!(remaining(&app, victim), vec![AuraType::DamageOverTime]);
+}
+
+/// The debuff the catalog describes and the debuff the simulation applies are
+/// the same debuff.
+///
+/// Two paths produce it: `frost_armor_chill_auras` (the whole thing, which the
+/// encyclopedia page and these tests read) and `compound_riders` (what
+/// `apply_pending_auras` pulls in behind the face). A rider present in one and
+/// not the other is a page that promises an effect the proc never lands, or a
+/// proc that lands one the page never mentions.
+#[test]
+fn the_catalog_and_the_apply_path_agree_on_the_riders() {
+    let [_, rider] = frost_armor_chill_auras();
+    let applied = compound_riders(CompoundDebuff::FrostArmorChill);
+
+    assert_eq!(applied.len(), 1);
+    assert_eq!(applied[0].effect_type, rider.effect_type);
+    assert_eq!(applied[0].magnitude, rider.magnitude);
+    assert_eq!(applied[0].ability_name, rider.ability_name);
+    assert_eq!(applied[0].compound, rider.compound);
 }
 
 /// The apply site hands out both halves bound to the same debuff. Pinned here

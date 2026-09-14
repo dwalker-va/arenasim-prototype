@@ -1504,6 +1504,12 @@ mod compound_tests {
     /// debuff's lifetime and hostility. Pin that, so a compound whose members
     /// disagreed could not ship: it would strand half a debuff at exactly the
     /// sites the removal helpers above do not cover.
+    ///
+    /// The equal DURATION is pinned at the constructors, which is where the
+    /// encyclopedia reads them. In play the riders are stamped with the face's
+    /// post-diminishing-returns duration by `apply_pending_auras`, so they
+    /// agree there too — and a compound declared with mismatched constants
+    /// would still be wrong on the page.
     #[test]
     fn compound_members_share_their_lifetime() {
         use crate::states::play_match::combat_core::frost_armor_chill_auras;

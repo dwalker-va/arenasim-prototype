@@ -717,17 +717,43 @@ pub fn apply_pending_auras(
             }
         }
 
+        // A COMPOUND debuff's riders are born here, with its face, and never
+        // as pendings of their own (see `CompoundDebuff`). That is what makes
+        // "one debuff" true of its LIFETIME as well as its removal:
+        //
+        //  - the face carries the DR category, so diminishing returns scale
+        //    and DR immunity rejects the whole debuff. A rider queued
+        //    separately carries no DR category, so it survived a rejection its
+        //    face did not — hanging a 5-second attack-speed slow on a target
+        //    with no Frost Armor icon and nothing for a dispel to take hold of;
+        //  - the rider inherits the face's FINAL duration, after DR. A
+        //    diminished chill is 1.2s, not 1.2s of slow plus 5s of slower
+        //    swings.
+        //
+        // Reached only once the face has cleared every gate above, so there is
+        // no ordering to get wrong and no window in which a rider exists alone.
+        let riders = aura_to_add.compound.map(|compound| {
+            let face_duration = aura_to_add.duration;
+            super::combat_core::compound_riders(compound)
+                .into_iter()
+                .map(move |mut rider| {
+                    rider.duration = face_duration;
+                    rider
+                })
+        });
+        let to_add = std::iter::once(aura_to_add).chain(riders.into_iter().flatten());
+
         // Add aura to target
         if let Some(mut active_auras) = active_auras {
             // Add to existing ActiveAuras component
-            active_auras.auras.push(aura_to_add);
+            active_auras.auras.extend(to_add);
         } else {
             // Entity doesn't have ActiveAuras yet - accumulate in our map
             // This prevents multiple insert() calls from overwriting each other
             new_auras_map
                 .entry(pending.target)
                 .or_default()
-                .push(aura_to_add);
+                .extend(to_add);
         }
 
         // Remove the pending aura entity

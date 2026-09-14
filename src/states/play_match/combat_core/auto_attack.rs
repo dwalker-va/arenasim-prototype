@@ -655,12 +655,13 @@ pub fn combat_auto_attack(
         if already_has_frost_slow {
             continue;
         }
-        for aura in frost_armor_chill_auras() {
-            commands.spawn(AuraPending {
-                target: attacker_entity,
-                aura,
-            });
-        }
+        // ONE pending, for the chill's FACE. `apply_pending_auras` brings the
+        // attack-speed rider in with it, at whatever duration the face ends up
+        // with — see the compound note there.
+        commands.spawn(AuraPending {
+            target: attacker_entity,
+            aura: frost_armor_movement_slow_aura(),
+        });
     }
 
     // Spawn floating combat text for each target that took damage (batched)
@@ -738,6 +739,23 @@ pub fn combat_auto_attack(
 /// How long a Frost Armor proc chills its victim.
 pub const FROST_ARMOR_PROC_DURATION: f32 = 5.0;
 
+/// The RIDER effects a compound debuff brings along with its face.
+///
+/// Called by `apply_pending_auras` at the moment the face actually lands, so a
+/// rider cannot outlive, out-stack or survive the rejection of the debuff it
+/// belongs to. The riders' durations are overwritten there with the face's
+/// post-diminishing-returns duration; what this returns is everything else
+/// about them.
+///
+/// **Exhaustive on purpose — do not add a `_ =>` arm.** A compound whose
+/// riders were forgotten here is a debuff that silently does half of what it
+/// says, and the catalog would still print both effects.
+pub fn compound_riders(compound: CompoundDebuff) -> Vec<Aura> {
+    match compound {
+        CompoundDebuff::FrostArmorChill => vec![frost_armor_attack_speed_aura()],
+    }
+}
+
 /// The Frost Armor chill: ONE debuff, two effects.
 ///
 /// A melee attacker who strikes a Mage wearing Frost Armor is slowed AND swings
@@ -746,11 +764,15 @@ pub const FROST_ARMOR_PROC_DURATION: f32 = 5.0;
 /// and they carry [`CompoundDebuff::FrostArmorChill`] so everything that treats
 /// a debuff as a unit (the frames, the catalog, a dispel) sees one thing.
 ///
-/// Shared constructor so the apply site and the encyclopedia's catalog entry
-/// cannot disagree, and a single function so the two halves cannot be applied
-/// apart. Note the name: the chill and the Mage's own self-buff are both
-/// "Frost Armor" on the frames, which is why the audit keys on name PLUS
-/// mechanic.
+/// The whole debuff, face first, at its UNDIMINISHED durations — what the
+/// encyclopedia's page describes and what the tests assert against. The sim
+/// never calls this: it queues the face alone and lets `apply_pending_auras`
+/// pull the riders in through [`compound_riders`], which is what keeps the two
+/// halves from being applied apart or with different lifetimes.
+///
+/// Note the name: the chill and the Mage's own self-buff are both "Frost
+/// Armor" on the frames, which is why the catalog disambiguates and the audit
+/// keys on name PLUS mechanic.
 pub fn frost_armor_chill_auras() -> [Aura; 2] {
     [
         frost_armor_movement_slow_aura(),

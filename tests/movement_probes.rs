@@ -4413,10 +4413,16 @@ mod u9_seek_reset {
     /// were re-pinned to 27/33. Tangent steering then retired 27/33 in turn: the
     /// pursuing Mage now rounds pillars in a clean arc, so at 27/33 the cast-start
     /// LosBlocked events collapse below the vacuity floor (the fix working — the
-    /// Mage stops standing occluded). Seeds 13/6 are the remaining seeds where the
-    /// enemy healer still denies sight long enough to drive a real seek: 13 has
-    /// 244 cast-start blocks / 185 seeks / 3.30s longest stall; 6 has 215 / 253 /
-    /// 3.42s. The seek + cast-recovery machinery still fires; only the seed moved.
+    /// Mage stops standing occluded).
+    ///
+    /// Re-pinned again 2026-09-13 (13/6 -> 2/9) for the Frost Armor chill
+    /// becoming ONE debuff: this comp is that change's blast radius — team 1's
+    /// Mage wears Frost Armor and team 2's Warrior melees it — so its
+    /// trajectories moved and at 13/6 the cast-start LosBlocked events fell
+    /// below the vacuity floor. Seeds 2/9 are the nearest replacements in
+    /// character (from `scan_mage_occlusion_seeds`): 2 has 243 cast-start
+    /// blocks / 19 seeks / 3.08s longest stall; 9 has 212 / 25 / 3.25s. The
+    /// seek + cast-recovery machinery still fires; only the seed moved.
     fn assert_mage_repositions_and_casts(seed: u64) {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
@@ -4454,40 +4460,40 @@ mod u9_seek_reset {
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_13() {
-        assert_mage_repositions_and_casts(13);
+    fn mage_repositions_and_casts_despite_occlusion_seed_2() {
+        assert_mage_repositions_and_casts(2);
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_6() {
-        assert_mage_repositions_and_casts(6);
+    fn mage_repositions_and_casts_despite_occlusion_seed_9() {
+        assert_mage_repositions_and_casts(9);
     }
 
     /// Tight anti-stall bound at a canonical occlusion seed. Absent a persistent
     /// enemy-healer juke, an occluded Mage recovers to a cast quickly: the
     /// longest contiguous LosBlocked run is well under 10 sim-seconds. Seed
-    /// re-pinned to 13 (seed 27 dropped below the occlusion floor once tangent
-    /// steering let the Mage round pillars cleanly — see
-    /// `assert_mage_repositions_and_casts`); seed 13 keeps the enemy healer
-    /// denying while staying inside the bound (observed longest run ~3.3s).
+    /// re-pinned to 2 (13 dropped below the occlusion floor when the Frost
+    /// Armor chill became one debuff — see `assert_mage_repositions_and_casts`
+    /// for why this comp moves with that change); seed 2 keeps the enemy healer
+    /// denying while staying inside the bound (observed longest run ~3.1s).
     #[test]
-    fn mage_recovers_to_cast_within_bound_seed_13() {
+    fn mage_recovers_to_cast_within_bound_seed_2() {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            13,
+            2,
             "TwinPillars",
         );
         let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
         assert!(
             blocked.len() >= 3,
-            "seed 13 must exercise occlusion, got {}",
+            "seed 2 must exercise occlusion, got {}",
             blocked.len()
         );
         let span = max_contiguous_block_span(&lines);
         assert!(
             span <= 10.0,
-            "seed 13: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
+            "seed 2: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
             span
         );
     }
@@ -4496,12 +4502,12 @@ mod u9_seek_reset {
     /// ENGAGE seek decisions during occluded windows.
     #[test]
     fn mage_seek_emits_los_seek_scorer_term() {
-        // Seed re-pinned to 13 (seed 27 dropped below the occlusion floor once
-        // tangent steering let the Mage round pillars cleanly).
+        // Seed re-pinned to 2 (13 dropped below the occlusion floor when the
+        // Frost Armor chill became one debuff).
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            13,
+            2,
             "TwinPillars",
         );
         let seek_with_term = lines
@@ -5780,18 +5786,17 @@ mod juke_chase {
 
     #[test]
     fn juke_bounded_seed_b() {
-        // Re-baselined 2026-08-17 (was proxy 3, bound 6): making Lightning Bolt an
-        // instant strike (team2's Shaman) lengthens the lone-Shaman kite endgame at
-        // seed 2 — the Shaman lands reliable ranged damage and survives longer, so
-        // the geometric occlusion proxy rose to 18 windows / ~52s occlusion. The
-        // load-bearing assertions still hold: team 1 wins by ELIMINATION at ~102s,
-        // well under the 200s cap, so the leaky-bucket chase is still closing — the
-        // dance is just longer. Bound raised to 24 (headroom above 18); the
-        // elimination-win and duration guards remain the primary signal. This
-        // systematic lengthening of lone-Shaman endgames is the expected balance
-        // consequence of the instant-strike buff (flagged for the U5 sweep), not a
-        // chase-logic regression.
-        assert_juke_bounded(JUKE_SEED_B, 24);
+        // Re-pinned 2026-09-13 (seed 2 -> 11, bound 24 -> 8) when the Frost
+        // Armor chill became ONE debuff: at seed 2 the lone-Shaman dance no
+        // longer starts at all (0.0s occlusion, below the vacuity floor), so
+        // the old pin proved nothing. This comp is the change's blast radius —
+        // team 1's Mage wears Frost Armor and team 2's Warrior melees it — so
+        // a trajectory shift here is expected, not a chase-logic regression.
+        // Seed 11 is the nearest replacement in character to what seed 2 used
+        // to be (4 fizzle-length windows / ~10.5s occlusion / team-1
+        // elimination win at ~44s, from `scan_seeds`), and the bound keeps the
+        // same roughly-2x headroom the pin has always carried.
+        assert_juke_bounded(JUKE_SEED_B, 8);
     }
 
     // Pinned by `scan_seeds` (run with `--ignored`): seeds where the enemy
@@ -5803,12 +5808,15 @@ mod juke_chase {
     // window, now held to a bounded number of fizzle-length windows and resolved
     // by elimination (numbers as of the 2026-07-23 mana-on-completion fix, which
     // keeps the Mage casting from range instead of bankrupting to wand):
-    //   seed 6: 38.7s total occlusion, 10 fizzle-length windows, team-1 win at ~88s.
-    //   seed 2: 11.7s total occlusion, 3 fizzle-length windows, team-1 win at ~54s.
+    //   seed 6: 25.8s total occlusion, 7 fizzle-length windows, team-1 win at ~84s.
+    //   seed 11: 10.5s total occlusion, 4 fizzle-length windows, team-1 win at ~44s.
     // (The geometric fizzle-window PROXY the probe asserts on counts any occluded
-    // run >= a cast length, whether or not a cast completed in it.)
+    // run >= a cast length, whether or not a cast completed in it. Numbers as of
+    // 2026-09-13, the Frost Armor compound-debuff change: this comp puts a Mage
+    // wearing Frost Armor against a Warrior, so its trajectories moved and seed 2
+    // stopped producing a dance at all.)
     const JUKE_SEED_A: u64 = 6;
-    const JUKE_SEED_B: u64 = 2;
+    const JUKE_SEED_B: u64 = 11;
 }
 
 // ---------------------------------------------------------------------------
