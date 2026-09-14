@@ -214,6 +214,18 @@ matters: this is *not* a melee unit spending a match attacking the wrong target.
 It is a melee unit that gets two swings off and dies. Same conclusion, but the
 evidence is now what it says it is. All 14 cells are accounted for.
 
+**Which of these figures you can re-run from this PR.** The load-bearing ones
+are all reproducible from committed data: the 13-of-14 cell comparison
+(`…-as54-blast.py` against the two committed CSVs), and this cell's 100-of-100
+team-2 wins and 14.8–35.6s durations (the committed baseline CSV). The one
+exception is the hit-target breakdown — two attacks per match, all on the
+Shaman — which came from a scratchpad helper that is deliberately **not**
+committed: it carries the same hardcoded-path defect already filed against the
+other two scripts, and adding a fourth instance to satisfy one figure would
+trade a real cleanup for a cosmetic one. That figure instead rests on
+independent replication: the Tester measured it separately at ten seeds
+(20 of 20 hits on the Shaman, zero on the Mage) against the six here.
+
 ### What this does NOT claim
 
 This is a **delta between two binaries on one input file**, and nothing more. The
