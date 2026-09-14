@@ -301,9 +301,16 @@ pub enum ArmorType {
     None,
 }
 
-/// What kind of weapon an item is. Gates equipping through
-/// [`weapon_proficiency`]; `OffhandFrill` (a held-in-off-hand tome or orb) and
-/// `None` are the two values that are not weapons and need no proficiency.
+/// What kind of item sits in a weapon socket. Gates equipping through
+/// [`weapon_proficiency`].
+///
+/// Three variants are not weapons: `OffhandFrill` (a held-in-off-hand tome or
+/// orb) and `None` need no proficiency and are open to everyone, while `Relic`
+/// — a Paladin's Libram or a Shaman's Totem — is a stat stick that occupies the
+/// ranged socket in place of a bow or a wand. A relic has no damage, no swing
+/// and no range, but it is still a weapon-socket item, so the proficiency table
+/// is where its access lives: only the classes whose ranged socket is a relic
+/// socket may equip one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WeaponType {
     Sword,
@@ -320,6 +327,8 @@ pub enum WeaponType {
     Thrown,
     Shield,
     OffhandFrill,
+    /// A Libram or a Totem — occupies the ranged socket, is not a weapon.
+    Relic,
     None,
 }
 
@@ -342,6 +351,7 @@ impl WeaponType {
             WeaponType::Thrown,
             WeaponType::Shield,
             WeaponType::OffhandFrill,
+            WeaponType::Relic,
             WeaponType::None,
         ]
     }
@@ -499,6 +509,14 @@ item_ids! {
     StaffOfDominance,
     AshwoodBow,
     SniperScope,
+
+    // === Relics (Ranged socket, Paladin/Shaman) ===
+    LibramOfHope,
+    LibramOfGrace,
+    LibramOfTruth,
+    TotemOfLife,
+    TotemOfRebirth,
+    TotemOfRage,
 
     // === Off Hand ===
     TomeOfKnowledge,
@@ -751,6 +769,13 @@ pub enum Proficiency {
 /// (`OffhandFrill`) require no proficiency in Classic and are open to every
 /// class, as is an item carrying no weapon type at all.
 ///
+/// `Relic` is the row that is about a SOCKET rather than a skill: a Libram or a
+/// Totem needs no training, but only a Paladin and a Shaman have a ranged
+/// socket that accepts one. Encoding that here rather than leaning on each
+/// relic's `allowed_classes` means a relic authored without a class list still
+/// cannot land on a Warrior, and a new [`CharacterClass`] must answer for
+/// relics at compile time.
+///
 /// Both matches are wildcard-free on purpose: a new [`CharacterClass`] or
 /// [`WeaponType`] variant fails to compile until every class has an answer for
 /// it. That is the point of the table — see `weapon_proficiency_is_exhaustive`.
@@ -774,6 +799,8 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             | W::Thrown
             | W::Shield => Trained,
             W::Wand => Untrained,
+            // No relic socket — this class's ranged socket takes a real weapon.
+            W::Relic => Untrained,
             W::OffhandFrill | W::None => Trained,
         },
         // Axes, maces, swords (both forms), polearms, shields. No dagger, no
@@ -788,6 +815,8 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             | W::Crossbow
             | W::Thrown
             | W::Wand => Untrained,
+            // A Paladin's ranged socket is a Libram socket, not a bow socket.
+            W::Relic => Trained,
             W::OffhandFrill | W::None => Trained,
         },
         // Bows, guns, crossbows, thrown; axes, swords, daggers, staves,
@@ -804,6 +833,8 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             | W::Crossbow
             | W::Thrown => Trained,
             W::Mace | W::Wand | W::Shield => Untrained,
+            // No relic socket — this class's ranged socket takes a real weapon.
+            W::Relic => Untrained,
             W::OffhandFrill | W::None => Trained,
         },
         // Daggers, fist weapons, one-handed maces and swords, all three
@@ -813,6 +844,8 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             W::Dagger | W::Fist | W::Bow | W::Gun | W::Crossbow | W::Thrown => Trained,
             W::Mace | W::Sword => OneHandedOnly,
             W::Axe | W::Staff | W::Polearm | W::Wand | W::Shield => Untrained,
+            // No relic socket — this class's ranged socket takes a real weapon.
+            W::Relic => Untrained,
             W::OffhandFrill | W::None => Trained,
         },
         // Axes and maces in both forms, daggers, staves, fist weapons,
@@ -822,6 +855,8 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             W::Sword | W::Polearm | W::Bow | W::Gun | W::Crossbow | W::Thrown | W::Wand => {
                 Untrained
             }
+            // A Shaman's ranged socket is a Totem socket, not a bow socket.
+            W::Relic => Trained,
             W::OffhandFrill | W::None => Trained,
         },
         // Daggers, one-handed maces, staves, wands.
@@ -837,6 +872,8 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             | W::Crossbow
             | W::Thrown
             | W::Shield => Untrained,
+            // No relic socket — this class's ranged socket takes a real weapon.
+            W::Relic => Untrained,
             W::OffhandFrill | W::None => Trained,
         },
         // Daggers, one-handed swords, staves, wands.
@@ -852,6 +889,8 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             | W::Crossbow
             | W::Thrown
             | W::Shield => Untrained,
+            // No relic socket — this class's ranged socket takes a real weapon.
+            W::Relic => Untrained,
             W::OffhandFrill | W::None => Trained,
         },
         // Daggers, one-handed swords, staves, wands — the Mage's list.
@@ -867,6 +906,8 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             | W::Crossbow
             | W::Thrown
             | W::Shield => Untrained,
+            // No relic socket — this class's ranged socket takes a real weapon.
+            W::Relic => Untrained,
             W::OffhandFrill | W::None => Trained,
         },
     }
@@ -1670,14 +1711,15 @@ mod tests {
                 WeaponType::Thrown => 11,
                 WeaponType::Shield => 12,
                 WeaponType::OffhandFrill => 13,
-                WeaponType::None => 14,
+                WeaponType::Relic => 14,
+                WeaponType::None => 15,
             }
         }
 
         let all = WeaponType::all();
         assert_eq!(
             all.len(),
-            15,
+            16,
             "a WeaponType variant is missing from (or duplicated in) all()"
         );
         for (index, weapon) in all.iter().enumerate() {
@@ -2262,6 +2304,128 @@ mod tests {
         let ring_items = items.items_for_slot(ItemSlot::Ring1, CharacterClass::Warrior);
         assert_eq!(ring_items[0].1.name, "Alpha Ring");
         assert_eq!(ring_items[1].1.name, "Zebra Ring");
+    }
+
+    // ---- socket coverage ----
+
+    /// The (class, socket) pairs the shipped item pool legitimately cannot
+    /// fill, each with the reason it is legitimate.
+    ///
+    /// A pair belongs here only when NO item could correctly be authored for
+    /// it — a rule of the game says the socket stays shut. "Nobody has drawn
+    /// the item yet" is not a justification; it is the bug this list exists to
+    /// expose.
+    ///
+    /// The list is checked in BOTH directions by
+    /// `every_class_can_fill_every_socket`: an unlisted empty pair fails, and
+    /// so does a listed pair that has since become fillable. So the day
+    /// dual-wield ships, this list tells you to delete its rows rather than
+    /// quietly blessing a stale exemption.
+    const JUSTIFIED_EMPTY_SOCKETS: &[(CharacterClass, ItemSlot, &str)] = &[];
+
+    /// Every class can put SOMETHING in every socket.
+    ///
+    /// The defect this closes (AS-86): `items_for_slot(Ranged, Paladin)` and
+    /// `(Ranged, Shaman)` were empty sets. Neither class trains a bow, a gun, a
+    /// crossbow or a wand — correct Classic — and the Ranged slot held nothing
+    /// else, so both wore a permanently empty socket while every other class
+    /// drew stats from theirs. Nothing failed: the loadout validated, the
+    /// picker rendered an empty list, and the asymmetry sat under every balance
+    /// number in the repo.
+    ///
+    /// It generalises. Any future item KIND that a socket needs and does not
+    /// have fails here on the day the socket is added, not the day somebody
+    /// eyeballs a loadout.
+    #[test]
+    fn every_class_can_fill_every_socket() {
+        let items = load_item_definitions().expect("items.ron must load");
+
+        let justification = |class: CharacterClass, socket: ItemSlot| {
+            JUSTIFIED_EMPTY_SOCKETS
+                .iter()
+                .find(|(c, s, _)| *c == class && *s == socket)
+                .map(|(_, _, why)| *why)
+        };
+
+        for class in CharacterClass::all() {
+            for socket in ItemSlot::all() {
+                let fillable = items.items_for_slot(*socket, *class);
+                match justification(*class, *socket) {
+                    None => assert!(
+                        !fillable.is_empty(),
+                        "{} has nothing to put in its {:?} socket. Either author an \
+                         item it can equip, or add ({}, {:?}) to \
+                         JUSTIFIED_EMPTY_SOCKETS with the rule of the game that \
+                         keeps it shut.",
+                        class.name(),
+                        socket,
+                        class.name(),
+                        socket
+                    ),
+                    Some(why) => assert!(
+                        fillable.is_empty(),
+                        "({}, {:?}) is listed in JUSTIFIED_EMPTY_SOCKETS as {:?}, but \
+                         {} item(s) now fit it — delete the stale exemption.",
+                        class.name(),
+                        socket,
+                        why,
+                        fillable.len()
+                    ),
+                }
+            }
+        }
+    }
+
+    /// A relic is a stat stick in the ranged socket, and only the two classes
+    /// whose ranged socket is a relic socket may wear one.
+    #[test]
+    fn relics_are_class_gated_and_carry_no_weapon() {
+        let items = load_item_definitions().expect("items.ron must load");
+
+        let relics: Vec<_> = items
+            .iter()
+            .filter(|(_, item)| item.weapon_type == WeaponType::Relic)
+            .collect();
+        assert!(!relics.is_empty(), "items.ron must define relics");
+
+        for (id, relic) in &relics {
+            assert_eq!(
+                relic.slot,
+                ItemSlotType::Ranged,
+                "{:?} is a relic outside the ranged socket",
+                id
+            );
+            assert!(!relic.is_weapon, "{:?} is a relic flagged as a weapon", id);
+            assert_eq!(relic.attack_damage_min, 0.0, "{:?} relic swings", id);
+            assert_eq!(relic.attack_damage_max, 0.0, "{:?} relic swings", id);
+            assert_eq!(relic.attack_speed, 0.0, "{:?} relic swings", id);
+        }
+
+        // The proficiency table, not the class list, is what shuts the door.
+        for class in CharacterClass::all() {
+            let relic_class = matches!(class, CharacterClass::Paladin | CharacterClass::Shaman);
+            assert_eq!(
+                can_wield(*class, WeaponType::Relic, false),
+                relic_class,
+                "{} relic proficiency",
+                class.name()
+            );
+        }
+
+        // And the class list is what keeps a Libram off a Shaman.
+        let libram = items
+            .get(&ItemId::LibramOfHope)
+            .expect("Libram of Hope must exist");
+        assert!(can_equip(CharacterClass::Paladin, libram));
+        assert!(!can_equip(CharacterClass::Shaman, libram));
+        assert!(!can_equip(CharacterClass::Warrior, libram));
+
+        let totem = items
+            .get(&ItemId::TotemOfLife)
+            .expect("Totem of Life must exist");
+        assert!(can_equip(CharacterClass::Shaman, totem));
+        assert!(!can_equip(CharacterClass::Paladin, totem));
+        assert!(!can_equip(CharacterClass::Hunter, totem));
     }
 
     // ---- enforce_two_hand_conflicts tests ----

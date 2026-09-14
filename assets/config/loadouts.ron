@@ -111,7 +111,7 @@
         },
 
         // ====================================================================
-        // PALADIN — Holy plate, mace + shield
+        // PALADIN — Holy plate, mace + shield, Libram in the ranged socket
         // ====================================================================
         Paladin: {
             Head: LawbringerHelm,
@@ -129,6 +129,7 @@
             Trinket1: EssenceOfEternalLife,
             MainHand: HammerOfTheRighteous,
             OffHand: AegisOfTheBloodGod,
+            Ranged: LibramOfHope,
         },
 
         // ====================================================================
@@ -152,7 +153,8 @@
         },
 
         // ====================================================================
-        // SHAMAN — Caster mail (Earthfury), spell-power accessories, mace + frill
+        // SHAMAN — Caster mail (Earthfury), spell-power accessories, mace + frill,
+        // Totem in the ranged socket
         // Mirrors the Priest's caster accessory coverage but on mail armor.
         // Gear prioritizes mana + spell power to relieve the 160-base starvation.
         // ====================================================================
@@ -172,6 +174,7 @@
             Trinket1: EssenceOfEternalLife,
             MainHand: HammerOfTheRighteous,
             OffHand: TomeOfKnowledge,
+            Ranged: TotemOfLife,
         },
     }
 )

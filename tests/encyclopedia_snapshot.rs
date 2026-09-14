@@ -123,7 +123,7 @@ fn encyclopedia_pet_ability_detail() {
     );
 }
 
-/// The Items index: chip-bar filters over the full 136-item grid.
+/// The Items index: chip-bar filters over the full 142-item grid.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_items_grid() {
@@ -166,6 +166,35 @@ fn encyclopedia_items_paired_slots() {
     filters.selected_slots.insert(ItemSlotType::Trinket);
     state.item_filters = filters;
     snapshot("encyclopedia_items_paired_slots", state);
+}
+
+/// The Ranged socket, which holds two unlike things: weapons (wands, bows,
+/// crossbows) and relics (Librams, Totems). The relics are the half with no
+/// damage, no speed and no DPS row, so this is the view that shows a relic
+/// reading as a stat stick rather than as a weapon that forgot its numbers.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_items_ranged_socket() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::index(Section::Items)),
+    );
+    let mut filters = ItemFilters::default();
+    filters.selected_slots.insert(ItemSlotType::Ranged);
+    state.item_filters = filters;
+    snapshot("encyclopedia_items_ranged_socket", state);
+}
+
+/// A relic's detail page. The weapon block is what a relic must NOT have — it
+/// occupies a weapon socket but has no damage, speed or DPS — so this pins the
+/// page rendering it as the accessory it is.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_relic_detail() {
+    snapshot(
+        "encyclopedia_relic_detail",
+        state_at(Topic::Item(ItemId::LibramOfHope)),
+    );
 }
 
 /// An item detail page: header, stat block, and the class chips that link on.
