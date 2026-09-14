@@ -1,4 +1,4 @@
-# Caster one-handers — what filling the main-hand socket was worth (AS-87)
+# Caster one-handers — filling the main-hand socket (AS-87)
 
 Every one-handed weapon a Mage or a Warlock could hold carried attack power and
 nothing else. Both train dagger, one-handed sword, staff and wand — no mace —
@@ -14,6 +14,11 @@ for no reason at all.
 
 AS-87 adds three one-handers that carry spell power, and gives all three caster
 classes one by default.
+
+**This card fills a CONTENT HOLE. The deliverable is a fillable slot with a real
+choice in it, not a movement in win rate.** That matters for how the numbers
+below should be read, and the section on the sweep says so plainly rather than
+leaving it implied.
 
 ## What shipped
 
@@ -32,6 +37,10 @@ dagger's 7-11 swing is INERT for all three, because `apply_equipment` takes
 attack damage from the MainHand only when `class.is_melee()`, and none of them
 is melee — they swing from the Ranged socket. The tier-1 pair is pool-only; no
 default loadout equips it.
+
+One honest limitation: the card asked for daggers AND one-handed swords, and
+both kinds are present, but the sword arrives only at tier 1. At the base tier
+the caster choice is dagger-or-staff.
 
 ## Why they are spent under budget
 
@@ -76,6 +85,67 @@ exemptions are recorded with their reasons: the Rogue and Hunter off-hands,
 where the off-hand is a second weapon (dual wield, AS-60) and a held-in-off-hand
 frill is a caster stat stick by definition.
 
+## The paired sweep
+
+Four 2v2 arms on BasicArena / Legacy at a 300s cap, 3,870 matches per binary,
+run on both binaries at identical seeds. Three arms put a buffed class on team 1;
+the fourth is a CONTROL filtered to cells where NEITHER side fields a Mage,
+Warlock or Priest.
+
+### The control — the card's actual obligation
+
+| | result |
+|---|---|
+| no buffed class on either side | **720 identical, 0 differ** |
+| a buffed class present | 1,861 of 3,150 differ |
+| non-vacuity | 3,870/3,870 ended in a kill; 2,170 distinct durations |
+
+That split is the byte-identity requirement discharged. Cells the change cannot
+touch are bit-identical; cells it can touch move. A uniformly identical result
+would have meant the change never reached the sim, and a control cell moving
+would have meant it reached further than intended. Neither happened.
+
+### The balance arms
+
+Team 1 win rate, n=1,050 per arm.
+
+| arm | all opponents | CLEAN (enemy unbuffed) | MIRRORED | SOLO |
+|---|---|---|---|---|
+| Mage | +1.4pt (z=1.66) | +0.0pt (z=0.21) | +2.2pt (z=2.00) | +1.5pt (z=0.80) |
+| Warlock | +0.3pt (z=0.24) | +2.1pt (z=1.28) | -0.7pt (z=0.62) | +2.6pt (z=1.81) |
+| Priest | -0.2pt (z=0.12) | +1.3pt (z=0.74) | -1.0pt (z=0.89) | -0.7pt (z=0.21) |
+
+**The effect is about +1 point and not resolvable from zero at this n. That is
+the ideal outcome, not a failed measurement.** The hole is filled without
+distorting balance. A clean +3pt would have been the worrying result, because it
+would mean the item was doing something the card did not intend.
+
+**On the one cell that reads as significant.** Mage MIRRORED sits at z=2.00.
+It is named here rather than quietly dropped, because a reader deserves to know
+it exists and why it is not a finding: twelve slices were tested, and one at
+z=2.00 is what multiple comparisons produce. It is also the MIRRORED slice — the
+one where both sides hold a buffed class and the effect is expected to WASH. A
+genuine effect would show in CLEAN, where the Mage arm measures exactly +0.0pt.
+
+**A prediction that missed, recorded because it is useful.** Before measuring,
+reasoning from AS-86's relics (+5 spell power and +3 mana worth +2.4pt to a
+Paladin comp at z=4.86), this card predicted +2 to +3pt in the clean slice.
+Measured: +0.0, +2.1 and +1.3, none resolvable. The prediction was HIGH. Whoever
+sizes the next sweep should weight that: an equivalent stat step on a different
+class and socket did not reproduce the relics' magnitude.
+
+### Two bases, same conclusion
+
+AS-54 (the Frost Armor chill as one compound debuff) merged mid-card and moved
+Mage comps, so the whole sweep was re-run on the new base. Both runs are
+committed:
+
+  `2026-09-14-as87_superseded_base_{before,after}.csv`  — base 3c61185
+  `2026-09-14-as87_{before,after}.csv`                   — base 323bd93
+
+Two measurements on two different bases agreeing the effect is small is stronger
+than either alone.
+
 ## The medic-chase scan — the clearest evidence the buff works
 
 Seven movement probes broke on this change. The identical suite passes 107/107
@@ -100,8 +170,10 @@ reason is the opposite of a defect:
 | team-1 (buffed Priest) wins across the scan | 16/30 | 19/30 |
 
 A stronger Priest keeps its Warrior ALIVE at low HP instead of letting it die,
-so there are more rescues to perform. More rescues, not slower ones. This is the
-clearest evidence in the card that the buff does what it is meant to.
+so there are more rescues to perform. More rescues, not slower ones. This is a
+per-frame mechanism measurement rather than a win-rate one, which is why it
+carries more weight than the sweep's headline for the question "does the buff
+work".
 
 **On match length.** Three of thirty seeds (0, 2, 17) stop resolving and run to
 the probe's 200s cap where they previously ended in 37-46s. That is worth
@@ -115,9 +187,31 @@ time-to-heal ceiling is already breachable on main. Seed 12 breaches it at
 13.27s on BOTH binaries — the identical value, that seed being untouched here.
 That ceiling holds at the seeds it is pinned to, not universally.
 
-## The paired sweep
+## Combination-only probe failures — a general result
 
-<!-- SWEEP RESULTS -->
+Rebasing onto AS-54 broke FOUR probes, and two of them are the interesting kind:
+
+  u9_seek_reset  37 -> 9     AS-87's own re-pin fell to zero cast-start blocks
+                             with AS-54 underneath
+  los_probes     37/38 -> 9/26   both AS-87 fizzle seeds fell to zero fizzles
+  juke_chase     11 -> 9     PASSED ON EACH BRANCH ALONE
+  oom_wand       22 -> 33    PASSED ON EACH BRANCH ALONE
+
+`juke_chase` and `oom_wand` were touched by neither branch. They broke because
+both changes move Mage trajectories, and only the merged tree shows it. **No
+amount of care on either branch in isolation would have caught them**, and
+taking either side's file wholesale during the rebase would have shipped main
+red.
+
+The determinism pin makes the same point numerically: AS-54 alone recorded
+47.982773s and AS-87 alone 58.44928s, and the merged value is 49.38275s.
+Neither branch's figure survived, because the pin is a property of the two
+together.
+
+The lesson for a push-and-rebase workflow: on a conflict in a seed-pinned or
+value-pinned test, **re-derive on the merged tree rather than picking a side**,
+and confirm the base is green first — plain main at `323bd93` passes 107/107,
+which is the step that turns "tests are failing" into "these four are mine".
 
 ## Reproducing this
 
