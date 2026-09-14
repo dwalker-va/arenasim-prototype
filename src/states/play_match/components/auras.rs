@@ -1526,10 +1526,18 @@ mod compound_tests {
     /// sites the removal helpers above do not cover.
     ///
     /// The equal DURATION is pinned at the constructors, which is where the
-    /// encyclopedia reads them. In play the riders are stamped with the face's
-    /// post-diminishing-returns duration by `apply_pending_auras`, so they
-    /// agree there too — and a compound declared with mismatched constants
-    /// would still be wrong on the page.
+    /// encyclopedia reads them; a compound declared with mismatched constants
+    /// would be wrong on the page regardless of what the sim did.
+    ///
+    /// The IN-PLAY rule is a separate claim and is pinned separately, because
+    /// this test cannot see it: riders are stamped with the face's
+    /// post-diminishing-returns duration by `apply_pending_auras`, and are
+    /// never created at all when the face is rejected. Both halves are driven
+    /// through the real system by `a_diminished_chill_shortens_its_rider_too`
+    /// and `a_dr_immune_chill_leaves_no_rider_behind` in
+    /// `tests/frost_armor_chill.rs`. Do not let this doc comment describe that
+    /// rule again without a guard behind it — that is what it did before, and
+    /// deleting the line it described left the suite green.
     #[test]
     fn compound_members_share_their_lifetime() {
         use crate::states::play_match::combat_core::frost_armor_chill_auras;

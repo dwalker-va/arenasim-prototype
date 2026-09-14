@@ -15,11 +15,14 @@
 use bevy::prelude::*;
 
 use arenasim::combat::log::CombatLog;
+use arenasim::states::play_match::auras::apply_pending_auras;
 use arenasim::states::play_match::combat_core::{
     compound_riders, effective_attack_interval, frost_armor_chill_auras,
+    frost_armor_movement_slow_aura, FROST_ARMOR_PROC_DURATION,
 };
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, Combatant, CompoundDebuff, DispelPending, GameRng,
+    ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, Combatant, CompoundDebuff,
+    DRCategory, DRTracker, DispelPending, GameRng,
 };
 use arenasim::states::play_match::effects::process_dispels;
 use arenasim::CharacterClass;
@@ -161,6 +164,150 @@ fn only_the_rolled_debuff_leaves() {
     app.update();
 
     assert_eq!(remaining(&app, victim), vec![AuraType::DamageOverTime]);
+}
+
+// ---------------------------------------------------------------------------
+// The riders' lifetime, driven through the real `apply_pending_auras`
+// ---------------------------------------------------------------------------
+//
+// A rider is not queued as a pending of its own: `apply_pending_auras` pulls it
+// in when the FACE lands, stamped with the face's post-diminishing-returns
+// duration. Both halves of that need a guard that names them, because both were
+// live defects on main:
+//
+//   - the rider carried no DR category, so it kept its full 5 seconds while a
+//     diminished chill expired after 1.2 — half a debuff outliving the icon
+//     that represents it;
+//   - and it survived a DR-IMMUNE rejection its face did not, landing alone on
+//     a target with no Frost Armor on its frames and nothing for a dispel to
+//     take hold of.
+//
+// The suite used to prove neither. `compound_members_share_their_lifetime`
+// deliberately pins equality at the CONSTRUCTORS — which is the right thing for
+// the encyclopedia to read — and its doc comment then described the in-play
+// rule without pinning it. Deleting `rider.duration = face_duration` left the
+// whole default suite green except for behavioural pins that the next person
+// would simply re-record.
+
+/// Drive the real aura-application system, with everything it reads.
+fn apply_harness() -> App {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(CombatLog::default());
+    app.insert_resource(ArenaDampening::default());
+    app.add_systems(Update, apply_pending_auras);
+    app
+}
+
+/// A target that can be diminished: `DRTracker` is what makes the chill's
+/// `Slows` category scale, and `Transform` is required by the system's query.
+fn dr_victim(app: &mut App) -> Entity {
+    app.world_mut()
+        .spawn((
+            Combatant::new(2, 0, CharacterClass::Warrior),
+            Transform::default(),
+            DRTracker::default(),
+        ))
+        .id()
+}
+
+/// Queue the chill the way the proc site does: ONE pending, for the face.
+fn proc_chill(app: &mut App, target: Entity) {
+    let aura = frost_armor_movement_slow_aura();
+    app.world_mut().spawn(AuraPending { target, aura });
+    app.update();
+}
+
+fn durations(app: &App, entity: Entity) -> Vec<(AuraType, f32)> {
+    app.world()
+        .entity(entity)
+        .get::<ActiveAuras>()
+        .map(|a| {
+            a.auras
+                .iter()
+                .map(|x| (x.effect_type, x.duration))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A DIMINISHED chill is short in BOTH of its effects. The rider inherits the
+/// face's scaled duration, not the constant it was built from.
+#[test]
+fn a_diminished_chill_shortens_its_rider_too() {
+    let mut app = apply_harness();
+    let victim = dr_victim(&mut app);
+
+    // First application is undiminished: both effects run the full duration.
+    proc_chill(&mut app, victim);
+    for (effect, duration) in durations(&app, victim) {
+        assert_eq!(
+            duration, FROST_ARMOR_PROC_DURATION,
+            "{effect:?} should land at full duration while DR is fresh"
+        );
+    }
+
+    // Second lands at 50%. The face carries the `Slows` DR category; the rider
+    // carries none, which is exactly why it needs the face to hand it a
+    // duration rather than keeping its own.
+    proc_chill(&mut app, victim);
+    let after = durations(&app, victim);
+    assert_eq!(after.len(), 2, "the chill is two effects: {after:?}");
+
+    let face = after
+        .iter()
+        .find(|(e, _)| *e == AuraType::MovementSpeedSlow)
+        .expect("face");
+    let rider = after
+        .iter()
+        .find(|(e, _)| *e == AuraType::AttackSpeedSlow)
+        .expect("rider");
+
+    assert!(
+        face.1 < FROST_ARMOR_PROC_DURATION,
+        "the second chill must be diminished, or this proves nothing: {face:?}"
+    );
+    assert_eq!(
+        rider.1, face.1,
+        "the rider must inherit the face's POST-DR duration ({}s), not its own \
+         undiminished {FROST_ARMOR_PROC_DURATION}s — a rider that outlives its \
+         face is a debuff with no icon and nothing to dispel",
+        face.1
+    );
+}
+
+/// A chill the target is IMMUNE to lands nothing at all — not even the half
+/// that carries no diminishing-returns category of its own.
+#[test]
+fn a_dr_immune_chill_leaves_no_rider_behind() {
+    let mut app = apply_harness();
+    let victim = dr_victim(&mut app);
+
+    // 100% -> 50% -> 25%, and the fourth is resisted outright.
+    for _ in 0..3 {
+        proc_chill(&mut app, victim);
+    }
+    assert!(
+        app.world()
+            .entity(victim)
+            .get::<DRTracker>()
+            .expect("tracker")
+            .is_immune(DRCategory::Slows),
+        "the target must be DR-immune by now, or the rejection is never exercised"
+    );
+
+    // Let the third chill expire so the vector is empty, then proc into immunity.
+    if let Some(mut auras) = app.world_mut().entity_mut(victim).get_mut::<ActiveAuras>() {
+        auras.auras.clear();
+    }
+    proc_chill(&mut app, victim);
+
+    assert_eq!(
+        durations(&app, victim),
+        vec![],
+        "the face was resisted, so NOTHING should have landed — a rider alone \
+         is the exact defect this compound exists to make unreachable"
+    );
 }
 
 /// The debuff the catalog describes and the debuff the simulation applies are
