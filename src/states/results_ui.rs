@@ -369,7 +369,7 @@ fn render_banner(ui: &mut egui::Ui, winner: Option<u8>, duration_secs: f32) {
         .fill(egui::Color32::from_rgb(26, 26, 38))
         .corner_radius(8.0)
         .inner_margin(egui::Margin::symmetric(20, 14))
-        .stroke(egui::Stroke::new(2.0, color))
+        .stroke(egui::Stroke::new(2.0_f32, color))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -408,9 +408,9 @@ fn render_team_panel(
     let dimf = if is_loser { DIM_LOSER } else { 1.0 };
 
     let stroke = if is_winner {
-        egui::Stroke::new(2.0, team_color)
+        egui::Stroke::new(2.0_f32, team_color)
     } else {
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 55, 70))
+        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(55, 55, 70))
     };
 
     egui::Frame::new()
@@ -754,7 +754,7 @@ fn paint_hover_stroke(painter: &egui::Painter, rect: egui::Rect, text_color: egu
     painter.rect_stroke(
         rect,
         2.0,
-        egui::Stroke::new(1.0, text_color.gamma_multiply(0.4)),
+        egui::Stroke::new(1.0_f32, text_color.gamma_multiply(0.4)),
         egui::StrokeKind::Inside,
     );
 }

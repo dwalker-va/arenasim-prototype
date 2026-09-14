@@ -79,17 +79,28 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: dtolnay/rust-toolchain@stable
+      # The toolchain comes from `rust-toolchain.toml`, which is why this step
+      # names no version — see the long note in lint.yaml. It matters more here
+      # than there: `tests/determinism_pin.rs` compares an f32 by `to_bits` and
+      # `tests/baselines/` hashes whole match logs, so the compiler is an input
+      # to the expected values. Floating `stable` against baselines blessed on
+      # a developer's machine put a silent rustc upgrade one merge away from
+      # moving a bit-exact pin, with the version that moved it recorded
+      # nowhere.
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
 
       # Bevy's dependency graph dominates the wall clock: a cold compile is many
       # minutes, a cached one is the time to rebuild this crate alone. The cache
       # covers both profiles, because the two steps below deliberately use both.
+      # After the install, so the key reflects the pinned rustc.
       - uses: Swatinem/rust-cache@v2
 
       - name: Toolchain versions
         run: |
           rustc --version
           cargo --version
+          rustup show active-toolchain
           python3 --version
 
       # `--locked` so a Cargo.lock that no longer matches Cargo.toml fails here

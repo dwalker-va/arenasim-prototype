@@ -467,10 +467,10 @@ fn draw_frame(
         egui::Color32::from_rgba_unmultiplied(13, 13, 20, 235),
     );
     let border = match call_state {
-        FrameCallState::Called => egui::Stroke::new(2.0, CALL_MARK),
-        FrameCallState::Hovered => egui::Stroke::new(1.0, CALL_HOVER),
-        FrameCallState::Callable => egui::Stroke::new(1.0, CALL_CALLABLE),
-        FrameCallState::Inert => egui::Stroke::new(1.0, egui::Color32::from_rgb(45, 45, 60)),
+        FrameCallState::Called => egui::Stroke::new(2.0_f32, CALL_MARK),
+        FrameCallState::Hovered => egui::Stroke::new(1.0_f32, CALL_HOVER),
+        FrameCallState::Callable => egui::Stroke::new(1.0_f32, CALL_CALLABLE),
+        FrameCallState::Inert => egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(45, 45, 60)),
     };
     // Click flash: a brief lift on the frame you just pressed. Drawn UNDER the
     // border so the call marker stays the brightest thing even mid-press, and
@@ -625,7 +625,7 @@ fn draw_frame(
 /// A crosshair reticle: ring plus four outward ticks, drawn geometrically so
 /// it needs no glyph the bundled fonts might not carry.
 fn draw_call_reticle(painter: &egui::Painter, center: egui::Pos2) {
-    let stroke = egui::Stroke::new(1.5, CALL_MARK);
+    let stroke = egui::Stroke::new(1.5_f32, CALL_MARK);
     painter.circle_stroke(center, RETICLE_R, stroke);
     for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
         painter.line_segment(
@@ -740,7 +740,7 @@ fn draw_aura_row(
         painter.rect_stroke(
             icon_rect,
             2.0,
-            egui::Stroke::new(1.5, border),
+            egui::Stroke::new(1.5_f32, border),
             egui::StrokeKind::Outside,
         );
 

@@ -92,7 +92,7 @@ pub fn render_speech_bubbles(
         painter.rect_stroke(
             rect,
             egui::CornerRadius::same(6),
-            egui::Stroke::new(2.0, egui::Color32::BLACK),
+            egui::Stroke::new(2.0_f32, egui::Color32::BLACK),
             egui::StrokeKind::Outside,
         );
 
@@ -141,7 +141,7 @@ pub fn render_speech_bubbles(
                     painter.rect_stroke(
                         icon_rect,
                         3.0,
-                        egui::Stroke::new(2.0, team_tint(*team)),
+                        egui::Stroke::new(2.0_f32, team_tint(*team)),
                         egui::StrokeKind::Inside,
                     );
                 }
@@ -158,7 +158,7 @@ pub fn render_speech_bubbles(
                             painter.rect_stroke(
                                 icon_rect,
                                 3.0,
-                                egui::Stroke::new(1.0, egui::Color32::DARK_GRAY),
+                                egui::Stroke::new(1.0_f32, egui::Color32::DARK_GRAY),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -177,7 +177,7 @@ pub fn render_speech_bubbles(
                             painter.rect_stroke(
                                 icon_rect,
                                 3.0,
-                                egui::Stroke::new(1.0, egui::Color32::from_gray(120)),
+                                egui::Stroke::new(1.0_f32, egui::Color32::from_gray(120)),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -187,7 +187,7 @@ pub fn render_speech_bubbles(
                     painter.rect_stroke(
                         icon_rect_at(x, mid_y),
                         3.0,
-                        egui::Stroke::new(1.0, egui::Color32::RED),
+                        egui::Stroke::new(1.0_f32, egui::Color32::RED),
                         egui::StrokeKind::Inside,
                     );
                 }

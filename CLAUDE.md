@@ -972,6 +972,19 @@ goes in the audit's `ALLOWLIST` with a justification.
 
 ### Continuous integration
 
+**The Rust version is pinned in `rust-toolchain.toml`, and that file is the only
+place it is chosen.** rustup reads it for every cargo invocation — yours and
+CI's — and installs the toolchain on demand, so a fresh checkout needs no
+`rustup update` to agree with the workflows, and all three of them
+(`ci.yaml`, `lint.yaml`, `release.yaml`) provision from it with a bare
+`rustup toolchain install`. Do not name a version in a workflow as well; two
+copies can drift, and drift is exactly what the pin exists to stop. Before this
+existed CI floated `stable` to 1.98.1 while everyone ran 1.96.0, and the Lint
+job failed on all 90 of the sites those two releases disagreed about — on every
+run from the day it was added. **When you raise the pin, expect newly-widened
+lints, and read the first red Lint run as a question about the toolchain before
+reading it as a question about the diff.**
+
 `.github/workflows/ci.yaml` runs `cargo build --release --locked` and
 `cargo test --locked` on `macos-latest`, on every push to `main` except
 docs-only pushes (`**.md`, `docs/**`, `.claude/**`, `LICENSE` are

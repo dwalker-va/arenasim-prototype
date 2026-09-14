@@ -160,24 +160,24 @@ fn apply_theme(ctx: &egui::Context) {
     v.panel_fill = BG_COLOR;
     v.window_fill = BG_COLOR;
     v.selection.bg_fill = SELECTED_BG;
-    v.selection.stroke = egui::Stroke::new(1.0, TITLE_GOLD);
+    v.selection.stroke = egui::Stroke::new(1.0_f32, TITLE_GOLD);
 
     v.widgets.inactive.weak_bg_fill = TILE_BG;
     v.widgets.inactive.bg_fill = TILE_BG;
-    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, TILE_FRAME);
-    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, BUTTON_TEXT);
+    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, TILE_FRAME);
+    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0_f32, BUTTON_TEXT);
 
     v.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(42, 42, 58);
     v.widgets.hovered.bg_fill = egui::Color32::from_rgb(42, 42, 58);
-    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, TITLE_GOLD);
-    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, BUTTON_TEXT);
+    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, TITLE_GOLD);
+    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0_f32, BUTTON_TEXT);
 
     v.widgets.active.weak_bg_fill = SELECTED_BG;
     v.widgets.active.bg_fill = SELECTED_BG;
-    v.widgets.active.bg_stroke = egui::Stroke::new(1.0, TITLE_GOLD);
-    v.widgets.active.fg_stroke = egui::Stroke::new(1.0, egui::Color32::WHITE);
+    v.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, TITLE_GOLD);
+    v.widgets.active.fg_stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
 
-    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, BUTTON_TEXT);
+    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0_f32, BUTTON_TEXT);
     ctx.set_style(style);
 }
 
@@ -246,7 +246,7 @@ fn icon_row(
         painter.rect_stroke(
             rect,
             3.0,
-            egui::Stroke::new(1.0, TITLE_GOLD),
+            egui::Stroke::new(1.0_f32, TITLE_GOLD),
             egui::StrokeKind::Inside,
         );
     } else if enabled && response.hovered() {
@@ -314,7 +314,7 @@ fn class_grid(
                 painter.rect_stroke(
                     rect,
                     3.0,
-                    egui::Stroke::new(1.0, TITLE_GOLD),
+                    egui::Stroke::new(1.0_f32, TITLE_GOLD),
                     egui::StrokeKind::Inside,
                 );
             } else {
@@ -334,7 +334,7 @@ fn class_grid(
                 painter.rect_stroke(
                     rect,
                     3.0,
-                    egui::Stroke::new(1.0, TILE_FRAME),
+                    egui::Stroke::new(1.0_f32, TILE_FRAME),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -361,7 +361,7 @@ fn progress_track(ui: &mut egui::Ui, view: &SandboxView) {
     painter.rect_stroke(
         rect,
         4.0,
-        egui::Stroke::new(1.0, TILE_FRAME),
+        egui::Stroke::new(1.0_f32, TILE_FRAME),
         egui::StrokeKind::Inside,
     );
 
@@ -390,7 +390,7 @@ fn progress_track(ui: &mut egui::Ui, view: &SandboxView) {
             egui::pos2(filled.right(), rect.top() - 2.0),
             egui::pos2(filled.right(), rect.bottom() + 2.0),
         ],
-        egui::Stroke::new(2.0, TITLE_GOLD),
+        egui::Stroke::new(2.0_f32, TITLE_GOLD),
     );
 }
 
@@ -574,7 +574,7 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
                     .add_enabled(
                         has_selection,
                         egui::Button::new(egui::RichText::new("\u{25b6}  Play").color(TITLE_GOLD))
-                            .stroke(egui::Stroke::new(1.0, TITLE_GOLD))
+                            .stroke(egui::Stroke::new(1.0_f32, TITLE_GOLD))
                             .min_size(egui::vec2(72.0, 22.0)),
                     )
                     .clicked()
