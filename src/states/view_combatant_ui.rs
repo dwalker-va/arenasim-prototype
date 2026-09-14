@@ -28,6 +28,7 @@ use super::play_match::equipment::{
     enforce_two_hand_conflicts, find_one_handed_mainhand, resolve_equipped_loadout,
     resolve_loadout, DefaultLoadouts, ItemDefinitions, ItemId, ItemSlot, Loadout,
 };
+use super::play_match::rendering::GENERIC_AURA_ICONS;
 use super::play_match::AbilityType;
 use super::{
     match_config::{
@@ -71,9 +72,16 @@ pub struct ViewCombatantState {
 }
 
 /// Resource storing loaded ability icon textures for the view combatant screen.
+///
+/// Also carries the GENERIC AURA icons, under their `GENERIC_AURA_ICONS` keys.
+/// They share one map because they share one keyspace: the encyclopedia asks
+/// `auras::icon_key` for an aura's icon and gets back either an ability's
+/// display name or a generic key, exactly as the in-match `SpellIcons` map
+/// already works. Without them, an aura no ability applies — Shadow Sight — had
+/// no key to look up and rendered the placeholder tile.
 #[derive(Resource, Default)]
 pub struct AbilityIcons {
-    /// Map of ability name to egui texture ID
+    /// Map of ability name (or generic aura key) to egui texture ID
     pub textures: HashMap<String, egui::TextureId>,
     /// Whether icons have been loaded
     pub loaded: bool,
@@ -190,6 +198,13 @@ pub fn load_ability_icons(
                 let handle: Handle<Image> = asset_server.load(&config.icon);
                 icon_handles.handles.push((config.name.clone(), handle));
             }
+        }
+        // The aura art that belongs to no ability, keyed the same way the
+        // actor frames key it, so the encyclopedia and the buff bar can never
+        // draw different icons for one aura.
+        for (key, path) in GENERIC_AURA_ICONS {
+            let handle: Handle<Image> = asset_server.load(*path);
+            icon_handles.handles.push((key.to_string(), handle));
         }
         return; // Wait for next frame to check if loaded
     }

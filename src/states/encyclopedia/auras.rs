@@ -76,7 +76,7 @@ use crate::states::play_match::effects::backlash::{
 };
 use crate::states::play_match::rendering::is_buff_aura;
 use crate::states::play_match::shadow_sight::{
-    SHADOW_SIGHT_BREAK_ON_DAMAGE, SHADOW_SIGHT_DURATION,
+    SHADOW_SIGHT_BREAK_ON_DAMAGE, SHADOW_SIGHT_DURATION, SHADOW_SIGHT_SPAWN_TIME,
 };
 
 use super::search::SearchEntry;
@@ -125,7 +125,9 @@ pub enum AuraId {
 /// Some of these share a NAME with a real `abilities.ron` entry that carries no
 /// `applies_aura` of its own (Frost Trap places a zone; the totems pulse their
 /// buff). Those borrow the ability's icon and link back to it as the applying
-/// ability; only Weakened Soul and Shadow Sight have no ability at all.
+/// ability. Weakened Soul links back to Power Word: Shield but keeps art of its
+/// own — see [`AuraArt`] — and only Shadow Sight has no applying ability at
+/// all, which [`AuraSource::Mechanic`] makes it say out loud.
 ///
 /// ## Name collisions
 ///
@@ -224,6 +226,83 @@ pub enum Persistence {
     WholeMatch,
 }
 
+/// Where a named aura comes from — the one answer to "what puts this on me?",
+/// and the one field an ability page reads when it wants the reverse.
+///
+/// ## Why this is a type and not an `Option<AbilityType>`
+///
+/// It was one, and "no applying ability" was spelled `None`. That made two
+/// different facts identical on the page: an aura whose applying ability the
+/// registry had never filled in, and an aura that genuinely has none. Weakened
+/// Soul sat in the first group wearing the second group's clothes — Power Word:
+/// Shield spawns it on the shielded ally at the Priest's cast site
+/// (`class_ai/priest.rs`), but its page said only "applied by an engine
+/// mechanic", so the debuff that GATES the shield read as though nothing in the
+/// game produced it.
+///
+/// With a variant per fact the blank is unrepresentable: [`Self::Mechanic`] has
+/// to NAME what applies the aura, so an entry cannot go quiet about its origin
+/// the way `None` let it.
+///
+/// ## One model, both directions
+///
+/// The aura page asks this what to link to; an ability page asks the catalog
+/// which entries name it, through [`applied_by`]. Both readings come off this
+/// one field, so a link cannot exist in one direction only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuraSource {
+    /// Applied by an ability with a page of its own. That page is where the
+    /// APPLIED BY section links — and, unless the entry carries [`AuraArt::Own`],
+    /// where its icon comes from.
+    Ability(AbilityType),
+    /// Applied by a match mechanic with no ability behind it — the arena's
+    /// Shadow Sight orbs are the only one today. The string names the mechanic
+    /// inside [`Self::mechanic_line`]'s sentence; it is not optional, because an
+    /// unnamed origin is the hole this type exists to close.
+    Mechanic(&'static str),
+}
+
+impl AuraSource {
+    /// The applying ability, if there is one. The icon lookup and the reverse
+    /// lookup both go through this rather than matching on the variant.
+    pub fn ability(self) -> Option<AbilityType> {
+        match self {
+            AuraSource::Ability(ability) => Some(ability),
+            AuraSource::Mechanic(_) => None,
+        }
+    }
+
+    /// What the APPLIED BY section says when there is no ability page to link
+    /// to. `None` for an ability source, whose section is a link instead.
+    pub fn mechanic_line(self) -> Option<String> {
+        match self {
+            AuraSource::Ability(_) => None,
+            AuraSource::Mechanic(mechanic) => Some(format!(
+                "No ability applies this — it comes from {}.",
+                mechanic
+            )),
+        }
+    }
+}
+
+/// Where an entry's ICON comes from — a separate question from where the AURA
+/// comes from, which is why they are separate fields.
+///
+/// Borrowing the applying ability's icon is the default and the in-match
+/// convention (`get_aura_icon_key`), and it is right whenever the aura simply
+/// IS that ability's effect. It is wrong for a marker an ability leaves
+/// BEHIND: Weakened Soul wearing the Power Word: Shield icon would put the
+/// shield's art on the debuff that blocks the next shield.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuraArt {
+    /// Borrow the applying ability's icon.
+    FromSource,
+    /// The aura has art of its own, under a `GENERIC_AURA_ICONS` key. That is
+    /// the same table the actor frames load from, so a page and a buff bar
+    /// cannot show different art for one aura.
+    Own(&'static str),
+}
+
 /// One catalog entry: a named aura, fully resolved.
 ///
 /// Built by [`catalog`]; never stored, so a RON edit is picked up on the next
@@ -245,8 +324,11 @@ pub struct NamedAura {
     pub frame_name: String,
     /// The mechanic badge.
     pub mechanic: AuraType,
-    /// The ability that applies it, when there is one to link to.
-    pub source: Option<AbilityType>,
+    /// What applies it: an ability to link to, or the mechanic to name.
+    pub source: AuraSource,
+    /// Where its icon comes from. Separate from [`Self::source`] because an
+    /// aura can have an applying ability AND art of its own.
+    pub art: AuraArt,
     /// A representative aura, built the way the simulation builds it. Every
     /// classification on the page is a question asked of THIS.
     pub sample: Aura,
@@ -387,7 +469,8 @@ fn ron_entry(ability: AbilityType, abilities: &AbilityDefinitions) -> Option<Nam
         name: def.name.clone(),
         frame_name: def.name.clone(),
         mechanic: effect.aura_type,
-        source: Some(ability),
+        source: AuraSource::Ability(ability),
+        art: AuraArt::FromSource,
         sample: pending.aura,
         persistence: Persistence::Seconds(effect.duration),
         magnitude_coefficient: effect.magnitude_coefficient,
@@ -418,6 +501,22 @@ pub fn siblings(catalog: &[NamedAura], mechanic: AuraType, self_id: AuraId) -> V
         .collect()
 }
 
+/// Every named aura `ability` applies — the reverse of [`AuraSource::Ability`].
+///
+/// An ability page needs this to show what its casts leave behind; an aura page
+/// needs [`AuraSource`] to point back. Reading one field both ways is what keeps
+/// the two directions from disagreeing.
+///
+/// Power Word: Shield is the case that earns it: it applies its own absorb and
+/// the Weakened Soul marker, so an ability page derived from `applies_aura`
+/// alone would show half of what the cast does.
+pub fn applied_by(catalog: &[NamedAura], ability: AbilityType) -> Vec<&NamedAura> {
+    catalog
+        .iter()
+        .filter(|entry| entry.source.ability() == Some(ability))
+        .collect()
+}
+
 pub fn find(catalog: &[NamedAura], id: AuraId) -> Option<&NamedAura> {
     catalog.iter().find(|entry| entry.id == id)
 }
@@ -436,7 +535,7 @@ struct EngineSpec {
     /// What the actor frames call it. `None` means "same as `name`".
     frame_name: Option<String>,
     mechanic: AuraType,
-    source: Option<AbilityType>,
+    source: AuraSource,
     magnitude: f32,
     school: Option<SpellSchool>,
     /// Read from the constant the apply site reads. NOT defaulted: Shadow Sight
@@ -447,6 +546,29 @@ struct EngineSpec {
     break_on_damage: f32,
     persistence: Persistence,
     provenance: String,
+}
+
+/// Which engine auras carry art of their own, and which borrow their ability's.
+///
+/// Exhaustive on purpose — no `_` arm. Engine aura N+1 has to state which it is,
+/// because the failure mode is silent: a wrong borrow renders a plausible icon
+/// that means something else, and a missing one renders the placeholder tile
+/// that sent this card here in the first place.
+fn engine_art(engine: EngineAura) -> AuraArt {
+    match engine {
+        // Applied by Power Word: Shield, but it is the debuff that BLOCKS the
+        // next shield — borrowing the shield's icon would say the opposite.
+        EngineAura::WeakenedSoul => AuraArt::Own("aura_weakened_soul"),
+        // An arena orb pickup: no ability icon exists to borrow.
+        EngineAura::ShadowSight => AuraArt::Own("aura_shadow_sight"),
+        EngineAura::FrostTrapSlow
+        | EngineAura::TotemBuff(_)
+        | EngineAura::InterruptLockout(_)
+        | EngineAura::WeaponPoisonCoating(_)
+        | EngineAura::DispelBacklashSilence
+        | EngineAura::FrostArmorMovementSlow
+        | EngineAura::FrostArmorAttackSpeedSlow => AuraArt::FromSource,
+    }
 }
 
 /// Resolve one engine-originated aura into a catalog entry.
@@ -460,30 +582,34 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
             name: "Weakened Soul".to_string(),
             frame_name: None,
             mechanic: AuraType::WeakenedSoul,
-            source: None,
+            source: AuraSource::Ability(AbilityType::PowerWordShield),
             magnitude: 0.0,
             school: None,
             break_on_damage: -1.0,
             persistence: Persistence::Seconds(WEAKENED_SOUL_DURATION),
-            provenance: "Placed on the ally a Priest shields, alongside Power Word: Shield."
+            provenance: "Placed on the ally the moment the shield lands: one cast applies both."
                 .to_string(),
         },
         EngineAura::ShadowSight => EngineSpec {
             name: "Shadow Sight".to_string(),
             frame_name: None,
             mechanic: AuraType::ShadowSight,
-            source: None,
+            source: AuraSource::Mechanic("a Shadow Sight orb"),
             magnitude: 1.0,
             school: None,
             break_on_damage: SHADOW_SIGHT_BREAK_ON_DAMAGE,
             persistence: Persistence::Seconds(SHADOW_SIGHT_DURATION),
-            provenance: "Granted by picking up a Shadow Sight orb in the arena.".to_string(),
+            provenance: format!(
+                "Granted by picking up one of the two orbs that spawn in mid-arena {:.0} sec \
+                 after the gates open.",
+                SHADOW_SIGHT_SPAWN_TIME
+            ),
         },
         EngineAura::FrostTrapSlow => EngineSpec {
             name: "Frost Trap".to_string(),
             frame_name: None,
             mechanic: AuraType::MovementSpeedSlow,
-            source: Some(AbilityType::FrostTrap),
+            source: AuraSource::Ability(AbilityType::FrostTrap),
             magnitude: FROST_TRAP_SLOW_MAGNITUDE,
             school: Some(SpellSchool::Frost),
             break_on_damage: -1.0,
@@ -501,7 +627,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 name: element.buff_name().to_string(),
                 frame_name: None,
                 mechanic: aura_type,
-                source: Some(ability),
+                source: AuraSource::Ability(ability),
                 magnitude,
                 school: Some(school),
                 break_on_damage: -1.0,
@@ -520,7 +646,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                     .unwrap_or_else(|| format!("{:?}", ability)),
                 frame_name: None,
                 mechanic: AuraType::SpellSchoolLockout,
-                source: Some(ability),
+                source: AuraSource::Ability(ability),
                 // The magnitude encodes WHICH school was locked and depends on
                 // what the interrupt caught, so it is not a fact about this
                 // aura; `magnitude_row` prints nothing for this mechanic.
@@ -542,7 +668,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 name: format!("{} (weapon coating)", poison.name()),
                 frame_name: Some(sample.ability_name.clone()),
                 mechanic: sample.effect_type,
-                source: Some(poison.ability()),
+                source: AuraSource::Ability(poison.ability()),
                 magnitude: sample.magnitude,
                 school: sample.spell_school,
                 break_on_damage: sample.break_on_damage_threshold,
@@ -559,7 +685,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 name: "Unstable Affliction (dispel backlash)".to_string(),
                 frame_name: Some(sample.ability_name.clone()),
                 mechanic: sample.effect_type,
-                source: Some(AbilityType::UnstableAffliction),
+                source: AuraSource::Ability(AbilityType::UnstableAffliction),
                 magnitude: sample.magnitude,
                 school: sample.spell_school,
                 break_on_damage: sample.break_on_damage_threshold,
@@ -576,7 +702,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 name: "Frost Armor (movement slow)".to_string(),
                 frame_name: Some(sample.ability_name.clone()),
                 mechanic: sample.effect_type,
-                source: Some(AbilityType::FrostArmor),
+                source: AuraSource::Ability(AbilityType::FrostArmor),
                 magnitude: sample.magnitude,
                 school: sample.spell_school,
                 break_on_damage: sample.break_on_damage_threshold,
@@ -593,7 +719,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 name: "Frost Armor (attack speed)".to_string(),
                 frame_name: Some(sample.ability_name.clone()),
                 mechanic: sample.effect_type,
-                source: Some(AbilityType::FrostArmor),
+                source: AuraSource::Ability(AbilityType::FrostArmor),
                 magnitude: sample.magnitude,
                 school: sample.spell_school,
                 break_on_damage: sample.break_on_damage_threshold,
@@ -664,6 +790,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
         frame_name,
         mechanic,
         source,
+        art: engine_art(engine),
         sample,
         persistence,
         magnitude_coefficient: 0.0,
@@ -687,46 +814,67 @@ pub fn search_entries(abilities: &AbilityDefinitions, out: &mut Vec<SearchEntry>
     }
 }
 
-/// Name, mechanic and applying ability of ONE address, resolved without
-/// building the whole catalog.
+/// Name, mechanic, source and art of ONE address, resolved without building the
+/// whole catalog.
 ///
 /// The linked-icon widget asks a `Topic` for its name and icon once per widget
 /// it draws, and the index draws fifty of them, so this path has to stay cheap.
 /// Resolving one engine aura through [`engine_entry`] is fine — that builds a
 /// single entry, not the catalog.
-fn identity(
-    id: AuraId,
-    abilities: &AbilityDefinitions,
-) -> Option<(String, AuraType, Option<AbilityType>)> {
+struct Identity {
+    name: String,
+    mechanic: AuraType,
+    source: AuraSource,
+    art: AuraArt,
+}
+
+fn identity(id: AuraId, abilities: &AbilityDefinitions) -> Option<Identity> {
     match id {
         AuraId::Ability(ability) => {
             let def = abilities.get(&ability)?;
             let effect = def.applies_aura.as_ref()?;
-            Some((def.name.clone(), effect.aura_type, Some(ability)))
+            Some(Identity {
+                name: def.name.clone(),
+                mechanic: effect.aura_type,
+                source: AuraSource::Ability(ability),
+                art: AuraArt::FromSource,
+            })
         }
         AuraId::Engine(engine) => {
             let entry = engine_entry(engine, abilities);
-            Some((entry.name, entry.mechanic, entry.source))
+            Some(Identity {
+                name: entry.name,
+                mechanic: entry.mechanic,
+                source: entry.source,
+                art: entry.art,
+            })
         }
     }
 }
 
 /// The display name of one aura address, for [`Topic::name`].
 pub fn name_of(id: AuraId, abilities: &AbilityDefinitions) -> Option<String> {
-    identity(id, abilities).map(|(name, _, _)| name)
+    identity(id, abilities).map(|identity| identity.name)
 }
 
 /// The `Buff · Mechanic` subtitle of one aura address, for [`Topic::subtitle`].
 pub fn subtitle_of(id: AuraId, abilities: &AbilityDefinitions) -> Option<String> {
-    identity(id, abilities).map(|(_, mechanic, _)| subtitle_for(mechanic))
+    identity(id, abilities).map(|identity| subtitle_for(identity.mechanic))
 }
 
-/// The icon key of one aura address: the applying ability's name, which is how
-/// `AbilityIcons` is keyed. `None` for the two entries with no applying ability
-/// at all, which render the widget's placeholder tile.
+/// The icon key of one aura address, in the keyspace `AbilityIcons` uses: an
+/// ability's display NAME for a borrowed icon, or a `GENERIC_AURA_ICONS` key
+/// for an aura with art of its own. `None` only if the address resolves to
+/// nothing — every catalog entry has an icon.
 pub fn icon_key(id: AuraId, abilities: &AbilityDefinitions) -> Option<String> {
-    let source = identity(id, abilities)?.2?;
-    abilities.get(&source).map(|def| def.name.clone())
+    let identity = identity(id, abilities)?;
+    match identity.art {
+        AuraArt::Own(key) => Some(key.to_string()),
+        AuraArt::FromSource => {
+            let ability = identity.source.ability()?;
+            abilities.get(&ability).map(|def| def.name.clone())
+        }
+    }
 }
 
 // ============================================================================
@@ -860,20 +1008,20 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
     // --- Applied by ---
     widget::section_heading(ui, "APPLIED BY");
     match entry.source {
-        Some(ability) => {
+        AuraSource::Ability(ability) => {
             let width = ui.available_width().min(430.0);
             if let Some(topic) = widget::row(ui, Topic::Ability(ability), "", width, data) {
                 clicked = Some(topic);
             }
         }
-        None => {
+        // No page to link to — so the section NAMES the mechanic instead of
+        // saying there is nothing to name.
+        AuraSource::Mechanic(_) => {
             ui.label(
-                egui::RichText::new(
-                    "Applied by an engine mechanic — it has no entry in the ability list.",
-                )
-                .size(13.0)
-                .color(MUTED)
-                .italics(),
+                egui::RichText::new(entry.source.mechanic_line().unwrap_or_default())
+                    .size(13.0)
+                    .color(MUTED)
+                    .italics(),
             );
         }
     }
@@ -1108,6 +1256,7 @@ fn badge(ui: &mut egui::Ui, label: &str, color: egui::Color32) -> egui::Response
 mod tests {
     use super::*;
     use crate::states::play_match::ability_config::load_ability_definitions;
+    use crate::states::play_match::rendering::GENERIC_AURA_ICONS;
 
     fn abilities() -> AbilityDefinitions {
         load_ability_definitions().expect("abilities.ron must load")
@@ -1177,7 +1326,7 @@ mod tests {
             );
             assert_eq!(
                 entry.source,
-                Some(*ability),
+                AuraSource::Ability(*ability),
                 "{:?}'s aura entry links back to the wrong ability",
                 ability
             );
@@ -1509,9 +1658,12 @@ mod tests {
             weakened.persistence,
             Persistence::Seconds(WEAKENED_SOUL_DURATION)
         );
-        assert!(
-            weakened.source.is_none(),
-            "Weakened Soul has no applying ability"
+        assert_eq!(
+            weakened.source,
+            AuraSource::Ability(AbilityType::PowerWordShield),
+            "Power Word: Shield spawns Weakened Soul on the ally it shields, so the page \
+             must link to it — `source: None` is what made this page read as though \
+             nothing applied it"
         );
 
         // The totem buffs and the Frost Trap slow DO have an ability to link
@@ -1520,7 +1672,7 @@ mod tests {
             .iter()
             .find(|e| e.name == "Windfury Totem")
             .expect("registered");
-        assert_eq!(windfury.source, Some(AbilityType::AirTotem));
+        assert_eq!(windfury.source, AuraSource::Ability(AbilityType::AirTotem));
         assert!(matches!(
             windfury.persistence,
             Persistence::WhileSourceActive(_)
@@ -1735,5 +1887,175 @@ mod tests {
         let entries = catalog(&abilities());
         assert!(entries.iter().any(|e| e.is_buff()));
         assert!(entries.iter().any(|e| !e.is_buff()));
+    }
+
+    /// The PROVENANCE AUDIT: every page says what applies it, and the entries
+    /// that say "nothing does" are a closed, deliberate set.
+    ///
+    /// The failure this replaces was silent — Weakened Soul's `source: None`
+    /// looked exactly like Shadow Sight's, so the one entry with a real
+    /// applying ability and the one with none printed the same sentence. The
+    /// type now forces a mechanic to be NAMED; this pins that nobody names a
+    /// blank one, and that the list of ability-less auras is short enough to
+    /// read.
+    #[test]
+    fn every_entry_names_what_applies_it() {
+        let abilities = abilities();
+        let mut ability_less: Vec<String> = Vec::new();
+        for entry in catalog(&abilities) {
+            match entry.source {
+                AuraSource::Ability(ability) => {
+                    assert!(
+                        abilities.get(&ability).is_some(),
+                        "{} points APPLIED BY at {:?}, which has no ability definition — \
+                         a dead link",
+                        entry.name,
+                        ability
+                    );
+                    assert!(
+                        entry.source.mechanic_line().is_none(),
+                        "{} has an ability page to link to and must not also narrate one",
+                        entry.name
+                    );
+                }
+                AuraSource::Mechanic(mechanic) => {
+                    assert!(
+                        !mechanic.trim().is_empty(),
+                        "{} says no ability applies it without saying what does",
+                        entry.name
+                    );
+                    let line = entry
+                        .source
+                        .mechanic_line()
+                        .expect("a mechanic source always has a line");
+                    assert!(
+                        line.contains(mechanic),
+                        "{}'s APPLIED BY line never names the mechanic: {:?}",
+                        entry.name,
+                        line
+                    );
+                    ability_less.push(entry.name.clone());
+                }
+            }
+        }
+        ability_less.sort();
+        assert_eq!(
+            ability_less,
+            vec!["Shadow Sight".to_string()],
+            "an arena orb pickup is the only aura no ability applies — a new one here is \
+             either a genuine mechanic or a `source` nobody filled in"
+        );
+    }
+
+    /// The other direction of the same field: an ability can ask which auras it
+    /// applies. Power Word: Shield is the case that needs it — it applies its
+    /// own absorb AND the Weakened Soul marker, so an ability page built from
+    /// `applies_aura` alone would show half the cast.
+    #[test]
+    fn an_ability_can_find_every_aura_it_applies() {
+        let abilities = abilities();
+        let catalog = catalog(&abilities);
+
+        let mut shield: Vec<&str> = applied_by(&catalog, AbilityType::PowerWordShield)
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        shield.sort_unstable();
+        assert_eq!(
+            shield,
+            vec!["Power Word: Shield", "Weakened Soul"],
+            "one cast, two auras — both must be reachable from the ability"
+        );
+
+        // The ordinary case still works: an ability with one `applies_aura`
+        // block finds exactly its own entry.
+        let frostbolt: Vec<&str> = applied_by(&catalog, AbilityType::Frostbolt)
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(frostbolt, vec!["Frostbolt"]);
+
+        // And every ability-sourced entry is reachable from its own ability, so
+        // the two directions cannot disagree.
+        for entry in &catalog {
+            if let Some(ability) = entry.source.ability() {
+                assert!(
+                    applied_by(&catalog, ability)
+                        .iter()
+                        .any(|found| found.id == entry.id),
+                    "{} names {:?} as its source but the reverse lookup misses it",
+                    entry.name,
+                    ability
+                );
+            }
+        }
+    }
+
+    /// Every entry resolves to an icon key some loader actually registers, and
+    /// an entry with art of its own points at a file that exists.
+    ///
+    /// This is the card's other half. Shadow Sight rendered the placeholder
+    /// tile because it had no applying ability and therefore no key at all;
+    /// Weakened Soul now HAS an applying ability and must still not wear its
+    /// icon, because the shield's art on the debuff that blocks the shield says
+    /// the opposite of what is true.
+    #[test]
+    fn every_entry_resolves_to_an_icon_that_exists() {
+        let abilities = abilities();
+        let mut own_art: Vec<String> = Vec::new();
+        for entry in catalog(&abilities) {
+            let key = icon_key(entry.id, &abilities)
+                .unwrap_or_else(|| panic!("{} has no icon key — a placeholder tile", entry.name));
+            match entry.art {
+                AuraArt::Own(expected) => {
+                    assert_eq!(key, expected);
+                    let path = GENERIC_AURA_ICONS
+                        .iter()
+                        .find(|(registered, _)| *registered == expected)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "{}'s icon key {:?} is in no loader's table, so nothing ever \
+                                 registers a texture for it",
+                                entry.name, expected
+                            )
+                        })
+                        .1;
+                    let on_disk = std::path::Path::new("assets").join(path);
+                    assert!(
+                        on_disk.exists(),
+                        "{} points at {}, which is not in the asset tree",
+                        entry.name,
+                        on_disk.display()
+                    );
+                    own_art.push(entry.name.clone());
+                }
+                AuraArt::FromSource => {
+                    let ability = entry
+                        .source
+                        .ability()
+                        .unwrap_or_else(|| panic!("{} borrows art from nothing", entry.name));
+                    assert_eq!(key, abilities.get(&ability).expect("defined").name);
+                }
+            }
+        }
+        own_art.sort();
+        assert_eq!(
+            own_art,
+            vec!["Shadow Sight".to_string(), "Weakened Soul".to_string()],
+            "the two auras whose own art beats a borrowed icon"
+        );
+
+        // The encyclopedia's loader waits for EVERY handle it opened before it
+        // registers any texture, and it now opens this whole table — so one
+        // missing file here blanks every icon on the screen, not just an aura's.
+        for (key, path) in GENERIC_AURA_ICONS {
+            let on_disk = std::path::Path::new("assets").join(path);
+            assert!(
+                on_disk.exists(),
+                "generic aura icon {:?} points at {}, which is not in the asset tree",
+                key,
+                on_disk.display()
+            );
+        }
     }
 }
