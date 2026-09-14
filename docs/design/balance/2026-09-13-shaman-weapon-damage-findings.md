@@ -135,9 +135,12 @@ Re-verified rather than assumed, two ways:
 
 1. **Positive asset check.** One seeded match per arm, absolute binary path and
    CWD forced to that arm's worktree, reading the Shaman's behaviour back out of
-   the log: before 20 wand shots at 5 damage on a 1.27s cadence, after 59 at 9 on
-   1.02s. Those are the class-base and mace-equipped numbers respectively, so
-   each binary demonstrably read its own `loadouts.ron` / `items.ron`.
+   the log: before 20 wand shots on a 1.27s cadence hitting the Warrior for 5,
+   after 59 on 1.02s hitting the Warrior for 9. Those are the class-base and
+   mace-equipped numbers respectively, so each binary demonstrably read its own
+   `loadouts.ron` / `items.ron`. (`…-assetcheck.py` reports damage per target,
+   because post-armor damage is only comparable against the same one — the after
+   arm also shoots the cloth Priest for 12.)
 2. **Re-run and diff.** Seeds 0-9 of all 14 cells (140 matches per arm) re-run
    from the committed input with the same hard pinning, then compared to the
    committed CSVs: **280/280 rows reproduce exactly** on winner, end reason and
@@ -186,13 +189,17 @@ re-measuring against a fresh baseline before anything else is tuned around it.
 ```bash
 # Generate the input (map is encoded in the label: --batch's CSV has no map
 # column, so recording it any other way loses it)
-docs/design/balance/2026-09-13-shaman-weapon-damage-gen.py 100 sweep.jsonl
+docs/design/balance/2026-09-13-shaman-weapon-damage-gen.py 100 /tmp/sweep.jsonl
 
-# Run it through each binary
-cargo run --release -- --batch sweep.jsonl --out arm.csv
+# Run it through each arm. ABSOLUTE binary path, and CWD forced to that arm's
+# checkout -- a dev build reads `assets/` relative to the working directory
+# (§4a), so a relative `cargo run` here would resolve BOTH the binary and the
+# assets against wherever the reader happens to be standing.
+ARM=/abs/path/to/the/checkout
+(cd "$ARM" && "$ARM/target/release/arenasim" --batch /tmp/sweep.jsonl --out /tmp/arm.csv)
 
 # Analyse the pair
-docs/design/balance/2026-09-13-shaman-weapon-damage-analyze.py before.csv after.csv
+docs/design/balance/2026-09-13-shaman-weapon-damage-analyze.py /tmp/before.csv /tmp/after.csv
 ```
 
 The committed `sweep.jsonl` is the exact input both arms ran. "Before" was built

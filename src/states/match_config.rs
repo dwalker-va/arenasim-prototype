@@ -377,7 +377,7 @@ impl CharacterClass {
     ///
     /// Exhaustive by design — no `_` arm — so a new class is a compile error
     /// here rather than a silent default to the wrong socket.
-    /// `tests/loadout_order_audit.rs` additionally pins this against the socket
+    /// `tests/weapon_slot_audit.rs` additionally pins this against the socket
     /// each shipped loadout actually fills, so the two cannot drift apart again.
     pub fn weapon_slot(&self) -> ItemSlot {
         match self {
