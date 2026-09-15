@@ -139,6 +139,15 @@
         // At 2.5 an Opening exchange fits FIVE beats (1.5 / 4.0 / 6.5 / 9.0 /
         // 11.5 against latest_beat 12.0) — four inside the countdown, and the
         // fifth spilling into the opening approach (see latest_beat).
+        //
+        // THIS KNOB IS FENCED ON BOTH SIDES, and the ceiling is the tight one:
+        // the longest Opening exchange has five beats, so its last starts at
+        // `opening_start + 4 * beat_gap` and must not pass `latest_beat`.
+        // That caps beat_gap at 2.625 — only 0.125 above the shipped value.
+        // The floor is 1.7, from the spacing check at `line_lifetime`. Safe
+        // range (1.7, 2.625]; measured, not derived — 2.625 validates and
+        // 2.63 fails with "beat 4 starts at 12.02s, past timing.latest_beat".
+        // Raising this wants `latest_beat` raised with it.
         beat_gap: 2.5,
         // How long each bubble stays up — the read-time knob. A speaker who
         // starts a new line while their last is still up REPLACES it, so
@@ -146,21 +155,35 @@
         // talking over themselves. The first line's screen time is cut to the
         // beat gap; that shortening is the overcommunication, not a defect.
         //
-        // Upper bound: switch_start + beat_gap (3.3). Validation enforces
-        // `line_lifetime` minus a context's start delay staying below that
-        // context's beat gap, for every context holding a multi-beat
-        // exchange; Switch's near-immediate start delay makes it the binding
-        // one. The formula is inherited from a mechanism the scheduler no
-        // longer has — `banter_config.rs` gives the honest account of what it
-        // does and does not measure, at the check itself.
+        // Bounded above at 3.9. Validation requires `line_lifetime` minus a
+        // context's start delay to stay BELOW that context's beat gap, and it
+        // checks only contexts that actually hold a multi-beat exchange. Two
+        // qualify: Opening (3.2 - 1.5 = 1.7 against beat_gap 2.5) and
+        // Correction (1.7 against correction_beat_gap 2.4). Correction has
+        // the smaller gap, so it binds first — 3.8 validates, 3.9 fails
+        // naming Correction. Switch is NOT checked: all its entries are
+        // single-beat shouts, so it has no interval to constrain. Authoring a
+        // two-beat Switch would turn its row on and tighten the ceiling to
+        // `switch_start + beat_gap`.
+        //
+        // The formula is inherited from a mechanism the scheduler no longer
+        // has — `banter_config.rs` gives the honest account of what it does
+        // and does not measure, at the check itself.
         line_lifetime: 3.2,
-        // Tighter pacing for corrections — they race the gates.
+        // Tighter pacing for corrections — they race the gates. Floor 1.7,
+        // the same spacing check: 1.8 validates, 1.7 fails. No ceiling worth
+        // naming — the longest Correction runs three beats.
         correction_beat_gap: 2.4,
         // The countdown is 10s, but a conversation MAY spill past the gates
         // (ruling 2026-09-14): the walk across the arena's dead space —
         // Nagrand especially — leaves ample time to finish talking before
         // contact, and the scheduler already plays late beats. This bounds
         // the tail so an exchange still ends well before combat closes.
+        //
+        // It cannot drop below 11.5 at the shipped beat_gap: the five-beat
+        // Opening exchange puts its last beat at 11.5s, and a beat starting
+        // past this value fails validation. Measured — 11.5 validates, 11.4
+        // fails. Lowering this means lowering `beat_gap` first.
         latest_beat: 12.0,
         // Selection-weight multiplier per non-Any constraint. 1.0 would make
         // specificity irrelevant; this favours a bespoke exchange without
