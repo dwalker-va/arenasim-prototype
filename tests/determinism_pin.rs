@@ -54,12 +54,29 @@ fn seeded_2v2_matches_its_recorded_identity() {
         None,
     )
     .expect("2v2 run");
-    // 66.86647s — recorded on feat/in-match-kill-call-banter after the branch
-    // was confirmed byte-identical to main, so this is main's value too.
+    // Re-recorded twice in short order, for two INTENDED simulation changes
+    // that landed together. Both pinned cells put a Mage against a Warrior,
+    // which is inside both blast radii.
+    //
+    //   AS-54 — Frost Armor's chill became ONE debuff, so its two effects
+    //   land, diminish and come off together. Took this cell to Some(2) @
+    //   47.982773s from Some(1) @ 66.86647s.
+    //   AS-87 — the Mage, the Warlock and the Priest gained a caster main hand
+    //   (+5 spell power, +6 mana) where all three wore an empty socket. Both
+    //   teams here field one of those classes, so a pin still passing would
+    //   mean the change never reached the sim.
+    //
+    // Measured on the two TOGETHER: 49.38275s. Neither branch's own figure
+    // survives the merge — AS-54 alone recorded 47.982773s and AS-87 alone
+    // 58.44928s — which is why this was re-run rather than taken from either
+    // side. The winner (Some(2)) is AS-54's; AS-87 moves the duration within
+    // that outcome. A single seed's winner is not a balance claim — see
+    // `docs/design/balance/2026-09-13-frost-armor-one-debuff-findings.md` and
+    // `docs/design/balance/2026-09-14-caster-onehander-findings.md`.
     assert_pinned(
         &result,
-        Some(1),
-        1_116_060_578,
+        Some(2),
+        1_111_853_040,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }
@@ -68,11 +85,21 @@ fn seeded_2v2_matches_its_recorded_identity() {
 fn seeded_1v1_matches_its_recorded_identity() {
     let result = run_headless_match_with(config(&["Mage"], &["Warrior"], 99001), true, None)
         .expect("1v1 run");
-    // 16.049927s — same provenance as the 2v2 pin above.
+    // Re-recorded with the 2v2 pin above, for the same two changes (was
+    // 16.049927s on the base both branched from).
+    //
+    // Worth knowing what this pin can and cannot see: it asserts winner and
+    // match_time only. Measured against a pre-AS-87 binary, AS-87 alone moved
+    // every Frostbolt in this cell (83->86, 84->87, 87->90) and Frost Nova by
+    // 1, yet left match_time untouched, because the killing blow was already
+    // an overkill — its logged damage fell 106->96, exactly the 10 points the
+    // earlier hits had already removed. So a passing pin here is not evidence
+    // that a change did nothing; AS-87 carries its non-vacuity in a paired
+    // control sweep instead.
     assert_pinned(
         &result,
         Some(1),
-        1_098_933_824,
+        1_099_720_244,
         "1v1 Mage vs Warrior @99001",
     );
 }

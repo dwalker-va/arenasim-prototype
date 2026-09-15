@@ -47,11 +47,38 @@ by someone who was not there.
 
 | File | Captured | Notes |
 |---|---|---|
-| `legacy_behaviour_2026-08-02_backlash_ids.txt` | 2026-08-02 | **Current.** After the `[BACKLASH]` log-id fix. Verified reproducible: two independent runs agreed on all 27 cells. |
+| `legacy_behaviour_2026-09-13_frost_armor_chill.txt` | 2026-09-13 | **Current.** After the Frost Armor chill became one compound debuff (card AS-54). Captured against a FRESH run of `main` @ `3c61185` rather than against the file below — see the note under the table. |
+| `legacy_behaviour_2026-08-02_backlash_ids.txt` | 2026-08-02 | After the `[BACKLASH]` log-id fix. Verified reproducible: two independent runs agreed on all 27 cells. |
 | `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | After moving the simulation to `FixedUpdate`. Verified reproducible when captured. |
 | `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | Pre-fixed-timestep. Also verified reproducible when captured. |
 
-### What changed between them, and what did not
+### 2026-09-13 — the Frost Armor chill (AS-54)
+
+Frost Armor's proc used to hang two independent auras on a melee attacker. They
+are now one compound debuff that lands, diminishes, and comes off as a unit.
+
+**Nine of 27 cells moved, and they are exactly the nine `ranged_v_melee` cells**
+— `Mage,Priest` vs `Warrior,Paladin`, the only comp in this matrix with a Mage
+in it. Three of the nine flipped winner (`TwinPillars` 4 and 7, `PillaredArena`
+4). The other 18 cells — `healer_v_healer` and `pet_comp`, across all three maps
+— are byte-identical, log SHA included.
+
+That is the attribution, and it is a POSITIVE one rather than an argument from
+elimination: no Mage means no Frost Armor, no chill, and nothing for the change
+to touch. The change predicts which cells move, and those are the cells that
+moved.
+
+**Measured against a fresh run of `main` @ `3c61185`, not against the
+2026-08-02 file.** That file is known to be stale on the nine `pet_comp` cells
+(`main` has drifted under it), so diffing against it would have mixed someone
+else's drift into this change's evidence. Both arms of the comparison above
+were captured on this machine, minutes apart, from the two commits.
+
+The balance consequence is measured separately, over 5,150 paired matches:
+`docs/design/balance/2026-09-13-frost-armor-one-debuff-findings.md`. Nine cells
+of a determinism reference are not a balance result.
+
+### What changed between the 07-31 and 08-01 files, and what did not
 
 Moving combat systems from `Update` to `FixedUpdate` shifted every logged
 timestamp by one tick (1/60 ≈ 0.02s), so all 27 log hashes changed.

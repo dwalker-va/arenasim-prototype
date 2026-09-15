@@ -230,7 +230,7 @@ pub fn draw_main_menu(ctx: &egui::Context, time_secs: f32) -> Option<MenuAction>
                         egui::pos2(title_rect.center().x + rule_half_width, rule_y),
                     ],
                     egui::Stroke::new(
-                        2.0,
+                        2.0_f32,
                         egui::Color32::from_rgba_unmultiplied(230, 204, 153, rule_alpha),
                     ),
                 );
@@ -290,13 +290,16 @@ fn menu_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
                 .color(egui::Color32::from_rgb(230, 217, 191)),
         )
         .fill(egui::Color32::from_rgba_unmultiplied(24, 24, 36, 200))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 70, 88))),
+        .stroke(egui::Stroke::new(
+            1.0_f32,
+            egui::Color32::from_rgb(70, 70, 88),
+        )),
     );
     if response.hovered() {
         ui.painter().rect_stroke(
             response.rect.expand(2.0),
             6.0,
-            egui::Stroke::new(2.0, egui::Color32::from_rgb(230, 204, 153)),
+            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(230, 204, 153)),
             egui::StrokeKind::Outside,
         );
         // Repaint the label brighter — cheaper than a second widget style.

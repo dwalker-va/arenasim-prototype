@@ -42,14 +42,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # rustfmt and clippy ship with the stable toolchain; named explicitly so
-      # a component that stops being default fails here instead of skipping the
-      # step that needed it.
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      # THE TOOLCHAIN COMES FROM `rust-toolchain.toml`, NOT FROM THIS FILE.
+      #
+      # This step deliberately names no version. `rust-toolchain.toml` at the
+      # repo root is the single source of truth, and a bare
+      # `rustup toolchain install` provisions exactly what that file specifies
+      # — channel, `profile`, and the `rustfmt` / `clippy` components. Naming a
+      # version here as well would let the two drift, which is the same class
+      # of defect this pin exists to close.
+      #
+      # It replaced `dtolnay/rust-toolchain@stable`. That action floats: it
+      # resolves `stable` on the day the job runs and installs it with
+      # `rustup default`. Because rustup ranks a toolchain file ABOVE the
+      # default, adding `rust-toolchain.toml` would have silently reduced that
+      # action to an unused download — the workflow would say "stable" while
+      # the build ran the pinned version. Better to have one mechanism than a
+      # decorative second one.
+      #
+      # `--no-self-update` keeps the step from upgrading the runner's rustup
+      # mid-job; the job needs a pinned rustc, not the newest rustup.
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
 
+      # After the install, so the cache key is computed from the PINNED rustc
+      # rather than whatever the runner image shipped with.
       - uses: Swatinem/rust-cache@v2
+
+      # Printed so a future failure can be attributed without re-deriving it.
+      # The gap this closes was worth about 10 red runs: CI floated to 1.98.1
+      # while every developer was on 1.96.0, so the same tree was clean locally
+      # and failed here, and the log was the only place the difference showed.
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo clippy --version
+          rustup show active-toolchain
 
       # No --locked: this step reads no lockfile-sensitive output, and ci.yaml
       # already fails on a stale Cargo.lock.
@@ -62,3 +89,24 @@ jobs:
       # job it exists to avoid.
       - name: Clippy
         run: cargo clippy -- -D warnings
+
+# ---------------------------------------------------------------------------
+# IF THIS JOB GOES RED RIGHT AFTER A TOOLCHAIN BUMP, SUSPECT THE BUMP.
+#
+# Worth stating because this job spent its entire first life red for exactly
+# that reason, and the redness was not the merges it landed on. Every run from
+# the job's introduction onward failed identically — 89 `float_literal_f32_fallback`
+# plus one `clippy::question_mark`, in files the merged cards had never
+# touched — because CI installed whatever `stable` meant that day (1.98.1)
+# while the whole team ran 1.96.0. Both lints widened in between. Every
+# engineer who reported clippy clean was telling the truth about their own
+# machine.
+#
+# The cost of that is not the lint sites; it is that an always-red gate reports
+# nothing. A real regression would have arrived as the eleventh identical
+# failure and been indistinguishable from the ten before it. So: when the
+# version in `rust-toolchain.toml` changes, read the first red run as a
+# question about the toolchain before reading it as a question about the diff,
+# and get the gate back to green quickly rather than letting a standing failure
+# become the background.
+# ---------------------------------------------------------------------------

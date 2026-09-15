@@ -820,6 +820,7 @@ fn try_power_word_shield(
             backlash_damage: None,
             dr_category_override: None,
             dispel_type: DispelType::Auto,
+            compound: None,
         },
     });
 

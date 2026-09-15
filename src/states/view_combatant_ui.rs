@@ -28,6 +28,7 @@ use super::play_match::equipment::{
     enforce_two_hand_conflicts, find_one_handed_mainhand, resolve_equipped_loadout,
     resolve_loadout, DefaultLoadouts, ItemDefinitions, ItemId, ItemSlot, Loadout,
 };
+use super::play_match::rendering::GENERIC_AURA_ICONS;
 use super::play_match::AbilityType;
 use super::{
     match_config::{
@@ -71,9 +72,16 @@ pub struct ViewCombatantState {
 }
 
 /// Resource storing loaded ability icon textures for the view combatant screen.
+///
+/// Also carries the GENERIC AURA icons, under their `GENERIC_AURA_ICONS` keys.
+/// They share one map because they share one keyspace: the encyclopedia asks
+/// `auras::icon_key` for an aura's icon and gets back either an ability's
+/// display name or a generic key, exactly as the in-match `SpellIcons` map
+/// already works. Without them, an aura no ability applies — Shadow Sight — had
+/// no key to look up and rendered the placeholder tile.
 #[derive(Resource, Default)]
 pub struct AbilityIcons {
-    /// Map of ability name to egui texture ID
+    /// Map of ability name (or generic aura key) to egui texture ID
     pub textures: HashMap<String, egui::TextureId>,
     /// Whether icons have been loaded
     pub loaded: bool,
@@ -136,12 +144,9 @@ struct EquipmentBonuses {
 impl EquipmentBonuses {
     fn from_loadout(loadout: &Loadout, items: &ItemDefinitions, class: CharacterClass) -> Self {
         let mut bonuses = Self::default();
-        // Determine which weapon slot is primary (melee classes use MainHand, ranged use Ranged)
-        let primary_weapon_slot = if class.is_melee() {
-            ItemSlot::MainHand
-        } else {
-            ItemSlot::Ranged
-        };
+        // Same socket the sim replaces stats from, so this screen cannot
+        // report a weapon speed the combatant does not actually swing at.
+        let primary_weapon_slot = class.weapon_slot();
         for (slot, item_id) in loadout {
             if let Some(item) = items.get(item_id) {
                 bonuses.health += item.max_health;
@@ -190,6 +195,13 @@ pub fn load_ability_icons(
                 let handle: Handle<Image> = asset_server.load(&config.icon);
                 icon_handles.handles.push((config.name.clone(), handle));
             }
+        }
+        // The aura art that belongs to no ability, keyed the same way the
+        // actor frames key it, so the encyclopedia and the buff bar can never
+        // draw different icons for one aura.
+        for (key, path) in GENERIC_AURA_ICONS {
+            let handle: Handle<Image> = asset_server.load(*path);
+            icon_handles.handles.push((key.to_string(), handle));
         }
         return; // Wait for next frame to check if loaded
     }
@@ -502,7 +514,7 @@ pub fn view_combatant_ui(
                                     .corner_radius(8.0)
                                     .inner_margin(egui::Margin::same(15))
                                     .stroke(egui::Stroke::new(
-                                        2.0,
+                                        2.0_f32,
                                         class_color32.gamma_multiply(0.6),
                                     ))
                                     .show(ui, |ui| {
@@ -526,13 +538,12 @@ pub fn view_combatant_ui(
                                                 ),
                                                 egui::Color32::WHITE,
                                             );
+                                            let border_width: f32 =
+                                                if response.hovered() { 3.0 } else { 2.0 };
                                             ui.painter().rect_stroke(
                                                 rect,
                                                 6.0,
-                                                egui::Stroke::new(
-                                                    if response.hovered() { 3.0 } else { 2.0 },
-                                                    class_color32,
-                                                ),
+                                                egui::Stroke::new(border_width, class_color32),
                                                 egui::StrokeKind::Outside,
                                             );
                                             open_topic = open_topic.or(widget::link(
@@ -1338,7 +1349,7 @@ fn render_ability_row(
         painter.rect_stroke(
             icon_rect,
             3.0,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 100)),
+            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(80, 80, 100)),
             egui::StrokeKind::Outside,
         );
     } else {
@@ -1346,7 +1357,7 @@ fn render_ability_row(
         painter.rect_stroke(
             icon_rect,
             3.0,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 100)),
+            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(80, 80, 100)),
             egui::StrokeKind::Outside,
         );
     }
@@ -1842,7 +1853,7 @@ fn render_rogue_opener_panel(
 
                 let is_selected = current_opener == *opener;
                 let border_color = if is_selected { gold } else { gray };
-                let border_width = if is_selected { 3.0 } else { 2.0 };
+                let border_width: f32 = if is_selected { 3.0 } else { 2.0 };
 
                 ui.vertical(|ui| {
                     // Get icon texture
@@ -1980,7 +1991,7 @@ fn render_strategic_option_panel<T>(
 
                 let is_selected = current == *option;
                 let border_color = if is_selected { gold } else { gray };
-                let border_width = if is_selected { 3.0 } else { 2.0 };
+                let border_width: f32 = if is_selected { 3.0 } else { 2.0 };
 
                 ui.vertical(|ui| {
                     let icon_texture = ability_icons
@@ -2164,7 +2175,7 @@ fn render_hunter_pet_panel(
 
                 let is_selected = current_pet == *pet;
                 let border_color = if is_selected { gold } else { gray };
-                let border_width = if is_selected { 3.0 } else { 2.0 };
+                let border_width: f32 = if is_selected { 3.0 } else { 2.0 };
 
                 ui.vertical(|ui| {
                     let (rect, response) = ui.allocate_exact_size(
@@ -2363,7 +2374,7 @@ fn render_warlock_curse_panel(
 
                     let is_selected = current_curse == *curse;
                     let border_color = if is_selected { gold } else { gray };
-                    let border_width = if is_selected { 3.0 } else { 1.0 };
+                    let border_width: f32 = if is_selected { 3.0 } else { 1.0 };
 
                     ui.vertical(|ui| {
                         // Get icon texture

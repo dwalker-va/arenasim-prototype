@@ -51,6 +51,7 @@ pub const GENERIC_AURA_ICONS: &[(&str, &str)] = &[
     ("aura_max_health", "icons/auras/max_health_buff.jpg"),
     ("aura_lockout", "icons/auras/lockout.jpg"),
     ("aura_weakened_soul", "icons/auras/weakened_soul.jpg"),
+    ("aura_shadow_sight", "icons/auras/shadow_sight.jpg"),
 ];
 
 /// Get the icon key for an aura.
@@ -79,7 +80,7 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         AuraType::SpellSchoolLockout => "aura_lockout".to_string(),
         AuraType::WeakenedSoul => "aura_weakened_soul".to_string(),
         AuraType::Polymorph => "aura_stun".to_string(), // Reuse stun icon as fallback
-        AuraType::ShadowSight => "aura_dot".to_string(), // Reuse DoT icon as fallback
+        AuraType::ShadowSight => "aura_shadow_sight".to_string(),
         AuraType::DamageReduction => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
         AuraType::CastTimeIncrease => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
         AuraType::DamageTakenReduction => "aura_max_health".to_string(), // Devotion Aura buff, reuse buff icon

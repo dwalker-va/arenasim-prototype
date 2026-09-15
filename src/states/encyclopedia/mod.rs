@@ -71,7 +71,7 @@ use super::view_combatant_ui::{AbilityIcons, ItemIcons};
 use super::GameState;
 
 pub use abilities::AbilityFilters;
-pub use auras::{AuraId, EngineAura};
+pub use auras::{AuraArt, AuraId, AuraSource, EngineAura};
 pub use items::ItemFilters;
 pub use search::{build_registry, SearchEntry};
 pub use topic::{Section, Topic};
@@ -500,7 +500,7 @@ pub fn draw_encyclopedia(
                             has_query,
                             egui::Button::new(egui::RichText::new("×").size(19.0).color(MUTED))
                                 .fill(PANEL)
-                                .stroke(egui::Stroke::new(1.0, LINE))
+                                .stroke(egui::Stroke::new(1.0_f32, LINE))
                                 .min_size(egui::vec2(SEARCH_HEIGHT, SEARCH_HEIGHT)),
                         )
                         .on_hover_text("Clear search");
@@ -669,7 +669,7 @@ fn chrome_button(label: &str, color: egui::Color32) -> egui::Button<'static> {
             .color(color),
     )
     .fill(PANEL)
-    .stroke(egui::Stroke::new(1.0, LINE))
+    .stroke(egui::Stroke::new(1.0_f32, LINE))
 }
 
 /// Push egui's stock widget colours onto the game's palette, so the built-in
@@ -682,9 +682,9 @@ fn apply_palette(v: &mut egui::Visuals) {
     v.extreme_bg_color = PANEL;
     // Selected filter chips: dark text on gold, like the mockup's active chip.
     v.selection.bg_fill = GOLD;
-    v.selection.stroke = egui::Stroke::new(1.0, BG);
+    v.selection.stroke = egui::Stroke::new(1.0_f32, BG);
 
-    let stroke = |c| egui::Stroke::new(1.0, c);
+    let stroke = |c| egui::Stroke::new(1.0_f32, c);
     v.widgets.noninteractive.bg_fill = PANEL;
     v.widgets.noninteractive.weak_bg_fill = PANEL;
     v.widgets.noninteractive.bg_stroke = stroke(LINE);
@@ -725,7 +725,7 @@ fn tab_button(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
         painter.rect_stroke(
             rect,
             5.0,
-            egui::Stroke::new(1.0, LINE),
+            egui::Stroke::new(1.0_f32, LINE),
             egui::StrokeKind::Inside,
         );
     } else if response.hovered() {

@@ -55,6 +55,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Provisioned before `rustup target add`, because that command adds the
+      # target TO the active toolchain and the active toolchain is now the one
+      # `rust-toolchain.toml` names — which a fresh runner has not installed
+      # yet. Pinning the compiler that builds a published artifact is the point:
+      # a release should be rebuildable later from its tag alone.
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+
       # Explicit target rather than relying on the runner's host triple: if the
       # image's architecture ever changes, this fails loudly instead of quietly
       # publishing a binary for the wrong one.
@@ -98,6 +106,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      # As in the windows job: the pinned toolchain has to exist before a
+      # target can be added to it.
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
 
       - name: Install the target
         run: rustup target add aarch64-apple-darwin

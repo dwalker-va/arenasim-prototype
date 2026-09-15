@@ -150,8 +150,10 @@ impl Topic {
             // `AbilityIcons` is keyed by the ability's display NAME, so the
             // lookup goes through `abilities.ron` rather than the enum. An aura
             // borrows the icon of the ability that applies it (the convention
-            // `get_aura_icon_key` already uses in-match); the two engine auras
-            // with no applying ability render the placeholder tile.
+            // `get_aura_icon_key` already uses in-match), unless it carries art
+            // of its own — `auras::icon_key` answers with whichever, in the same
+            // keyspace, because `load_ability_icons` registers the generic aura
+            // icons alongside the ability ones.
             Topic::Ability(ability) => {
                 let name = &data.abilities.get(&ability)?.name;
                 data.ability_icons

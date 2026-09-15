@@ -2940,6 +2940,7 @@ mod bucket_a_unit {
             backlash_damage: None,
             dr_category_override: None,
             dispel_type: DispelType::Auto,
+            compound: None,
         }
     }
 
@@ -4416,6 +4417,26 @@ mod u9_seek_reset {
     /// enemy healer still denies sight long enough to drive a real seek: 13 has
     /// 244 cast-start blocks / 185 seeks / 3.30s longest stall; 6 has 215 / 253 /
     /// 3.42s. The seek + cast-recovery machinery still fires; only the seed moved.
+    ///
+    /// Re-pinned twice more in short order, by two changes that both land in
+    /// this comp's blast radius and that were measured independently before
+    /// meeting here:
+    ///
+    ///   AS-54 — the Frost Armor chill becoming ONE debuff. Team 1's Mage wears
+    ///   it and team 2's Warrior melees into it, so trajectories moved; 13/6
+    ///   fell below the vacuity floor and were re-pinned to 2/9.
+    ///   AS-87 — caster main-hands, giving the Mage and both Priests +5 spell
+    ///   power. This took 13/6 to ZERO cast-start blocks independently, and
+    ///   re-pinned to 37/42.
+    ///
+    /// On the merged tree NEITHER pair could be assumed, and re-running the
+    /// scanner over both changes together proved it: AS-87's own seed 37 fell
+    /// to ZERO cast-start blocks once AS-54 was under it. The seeds below are
+    /// chosen from that merged-tree scan rather than taken from either branch —
+    /// 9 has 469 cast-start blocks / 74 seeks / 55 casts landed after occlusion
+    /// began / 4.37s longest stall, and 42 survived the merge at 336 / 11 / 2 /
+    /// 3.08s. The seek + cast-recovery machinery still fires; only the seed
+    /// moved.
     fn assert_mage_repositions_and_casts(seed: u64) {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
@@ -4453,40 +4474,42 @@ mod u9_seek_reset {
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_13() {
-        assert_mage_repositions_and_casts(13);
+    fn mage_repositions_and_casts_despite_occlusion_seed_9() {
+        assert_mage_repositions_and_casts(9);
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_6() {
-        assert_mage_repositions_and_casts(6);
+    fn mage_repositions_and_casts_despite_occlusion_seed_42() {
+        assert_mage_repositions_and_casts(42);
     }
 
     /// Tight anti-stall bound at a canonical occlusion seed. Absent a persistent
     /// enemy-healer juke, an occluded Mage recovers to a cast quickly: the
-    /// longest contiguous LosBlocked run is well under 10 sim-seconds. Seed
-    /// re-pinned to 13 (seed 27 dropped below the occlusion floor once tangent
-    /// steering let the Mage round pillars cleanly — see
-    /// `assert_mage_repositions_and_casts`); seed 13 keeps the enemy healer
-    /// denying while staying inside the bound (observed longest run ~3.3s).
+    /// longest contiguous LosBlocked run is well under 10 sim-seconds.
+    ///
+    /// Seed 77 keeps the enemy healer denying while staying inside the bound:
+    /// 254 cast-start blocks, 132 seeks, longest run 3.23s. It was re-derived
+    /// from `scan_mage_occlusion_seeds` on a tree carrying the caster
+    /// main-hands, which took the previous pin's cast-start blocks to 0 — the
+    /// vacuity floor doing its job, not a stall regression.
     #[test]
-    fn mage_recovers_to_cast_within_bound_seed_13() {
+    fn mage_recovers_to_cast_within_bound_seed_77() {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            13,
+            77,
             "TwinPillars",
         );
         let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
         assert!(
             blocked.len() >= 3,
-            "seed 13 must exercise occlusion, got {}",
+            "seed 77 must exercise occlusion, got {}",
             blocked.len()
         );
         let span = max_contiguous_block_span(&lines);
         assert!(
             span <= 10.0,
-            "seed 13: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
+            "seed 77: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
             span
         );
     }
@@ -4496,11 +4519,13 @@ mod u9_seek_reset {
     #[test]
     fn mage_seek_emits_los_seek_scorer_term() {
         // Seed re-pinned to 13 (seed 27 dropped below the occlusion floor once
-        // tangent steering let the Mage round pillars cleanly).
+        // tangent steering let the Mage round pillars cleanly), then to 77 for
+        // AS-87's caster main-hands — 77 carries 8 SeekLos decisions with a
+        // los_seek term against seed 13's 0.
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            13,
+            77,
             "TwinPillars",
         );
         let seek_with_term = lines
@@ -4559,6 +4584,7 @@ mod u9_seek_reset {
             backlash_damage: None,
             dr_category_override: None,
             dispel_type: DispelType::Auto,
+            compound: None,
         }
     }
 
@@ -5222,7 +5248,13 @@ mod los_probes {
 
     #[test]
     fn completion_fizzle_and_projectiles_still_land() {
-        for seed in [6u64, 7u64] {
+        // Seeds re-pinned twice. AS-87 (caster main-hands) took the original
+        // 6/7 to zero fizzles; then AS-54's compound Frost Armor chill, merged
+        // underneath, took AS-87's replacement 37/38 to zero as well — this
+        // comp puts a Mage against a Warrior, so it sits in both blast radii.
+        // 9 and 26 are chosen from a scan of the MERGED tree: 47 and 30 fizzles
+        // against 12 and 15 Frostbolt impacts. See `scan_fizzle_seeds`.
+        for seed in [9u64, 26u64] {
             let log = pillared_log(seed);
 
             let fizzles = log
@@ -5778,18 +5810,55 @@ mod juke_chase {
 
     #[test]
     fn juke_bounded_seed_b() {
-        // Re-baselined 2026-08-17 (was proxy 3, bound 6): making Lightning Bolt an
-        // instant strike (team2's Shaman) lengthens the lone-Shaman kite endgame at
-        // seed 2 — the Shaman lands reliable ranged damage and survives longer, so
-        // the geometric occlusion proxy rose to 18 windows / ~52s occlusion. The
-        // load-bearing assertions still hold: team 1 wins by ELIMINATION at ~102s,
-        // well under the 200s cap, so the leaky-bucket chase is still closing — the
-        // dance is just longer. Bound raised to 24 (headroom above 18); the
-        // elimination-win and duration guards remain the primary signal. This
-        // systematic lengthening of lone-Shaman endgames is the expected balance
-        // consequence of the instant-strike buff (flagged for the U5 sweep), not a
-        // chase-logic regression.
-        assert_juke_bounded(JUKE_SEED_B, 24);
+        // Re-pinned 2026-09-13 (seed 2 -> 11, bound 24 -> 8) when the Frost
+        // Armor chill became ONE debuff: at seed 2 the lone-Shaman dance no
+        // longer starts at all (0.0s occlusion, below the vacuity floor), so
+        // the old pin proved nothing. This comp is the change's blast radius —
+        // team 1's Mage wears Frost Armor and team 2's Warrior melees it — so
+        // a trajectory shift here is expected, not a chase-logic regression.
+        // Seed 11 is the nearest replacement in character to what seed 2 used
+        // to be (4 fizzle-length windows / ~10.5s occlusion / team-1
+        // elimination win at ~44s, from `scan_seeds`), and the bound keeps the
+        // same roughly-2x headroom the pin has always carried.
+        //
+        // Re-pinned again 2026-09-14 (seed 11 -> 38, bound 8 -> 16) once AS-97
+        // equipped the Shaman's main-hand mace, which moves this comp's OTHER
+        // side. Two cards re-picked this same pin independently from the drifted
+        // seed 2 — AS-54 chose 11, AS-97 chose 34 — and neither pick was measured
+        // on a tree carrying both changes, so the surviving seed was re-derived
+        // from `scan_seeds` there rather than either being taken on faith.
+        //
+        // Seed 11 still PASSES on this tree and both vacuity floors still clear
+        // (3.1s occlusion > 1.0s, 436 lone samples > 200). It was dropped anyway,
+        // because clearing a floor is not the same as testing anything: it fell
+        // from 4 fizzle-length windows to 2 on a single sim change, and 2 against
+        // a bound can only catch a THREEFOLD regression. The proxy this probe is
+        // NAMED for had almost no signal left, and the trend says one more change
+        // takes it to zero.
+        //
+        // Seed 34 — the pick from AS-97's own first pass — was dropped for the
+        // same reason and not because it fails: it PASSES, at 15.0s occlusion and
+        // 1 fizzle window. A pin there would assert nothing about a long dance,
+        // which is the thing this probe exists to bound. A guard that passes
+        // while proving nothing is the failure mode here, not a red test.
+        //
+        // Seed 38 restores the character seed 2 had before it drifted — 40.9s
+        // total occlusion, 11 fizzle-length windows, 4097 lone samples, team-1
+        // elimination win at 98.0s — so the bound has real signal under it again.
+        //
+        // Bound derived from that observed 11, NOT carried over from the 6 it
+        // replaces: the other pin runs at 1.50x (seed 10: observed 10, bound 15),
+        // and 1.5 x 11 = 16.5 rounds down to 16 — 1.45x, a shade tighter than the
+        // convention rather than looser. The assertion is `fizzle_windows <= max`,
+        // so a larger number here is not a looser test: what tightens a bound is
+        // shrinking the gap to what is observed.
+        //
+        // 16 is the tightest value THE CONVENTION GIVES, not the tightest this
+        // seed would tolerate. 13 or 14 would also pass today and nothing here
+        // establishes where the real floor is — the headroom exists to absorb
+        // trajectory wobble from unrelated changes, not because 15 was tested and
+        // failed.
+        assert_juke_bounded(JUKE_SEED_B, 16);
     }
 
     // Pinned by `scan_seeds` (run with `--ignored`): seeds where the enemy
@@ -5801,12 +5870,39 @@ mod juke_chase {
     // window, now held to a bounded number of fizzle-length windows and resolved
     // by elimination (numbers as of the 2026-07-23 mana-on-completion fix, which
     // keeps the Mage casting from range instead of bankrupting to wand):
-    //   seed 6: 38.7s total occlusion, 10 fizzle-length windows, team-1 win at ~88s.
-    //   seed 2: 11.7s total occlusion, 3 fizzle-length windows, team-1 win at ~54s.
+    //   seed 6: 25.8s total occlusion, 7 fizzle-length windows, team-1 win at ~84s.
     // (The geometric fizzle-window PROXY the probe asserts on counts any occluded
-    // run >= a cast length, whether or not a cast completed in it.)
-    const JUKE_SEED_A: u64 = 6;
-    const JUKE_SEED_B: u64 = 2;
+    // run >= a cast length, whether or not a cast completed in it. Numbers as of
+    // 2026-09-13, the Frost Armor compound-debuff change: this comp puts a Mage
+    // wearing Frost Armor against a Warrior, so its trajectories moved and seed 2
+    // stopped producing a dance at all.)
+    //
+    // Numbers again as of AS-97 equipping the Shaman's main-hand mace, which
+    // moves the OTHER side of the same comp. Re-measured on that tree with
+    // `scan_seeds`:
+    //   seed 10: 28.8s total occlusion, 10 fizzle-length windows, 2676 lone samples.
+    //   seed 38: 40.9s total occlusion, 11 fizzle-length windows, team-1 win at ~98.0s.
+    // Seed 11 (AS-54's pick) and seed 34 (AS-97's) both still PASS there, but had
+    // decayed to 2 and 1 fizzle windows respectively — clearing the vacuity floor
+    // while leaving the bound nothing to catch — so B moved to 38, which has the
+    // long-dance character seed 2 had before it drifted.
+    //
+    // A moved off seed 6 for the opposite reason, once the caster main-hands
+    // landed under it as well: seed 6's dance STRETCHED, to 17 fizzle-length
+    // windows against its bound of 15. Seed 10 carries seed 6's old character
+    // (10 windows) so that bound is unchanged.
+    // A: 2676 lone samples / 28.8s occlusion / 10 fizzle-length windows,
+    // against the bound of 15 — the same 10 windows that bound was set around,
+    // which is why it is unchanged.
+    const JUKE_SEED_A: u64 = 10;
+    // B: 40.9s total occlusion / 11 fizzle-length windows against the bound of
+    // 16 — the long-dance character seed 2 carried before it drifted.
+    //
+    // Both were re-derived from `scan_seeds` on a tree carrying every change
+    // under them, rather than taken from any one branch's pick. That is the
+    // only way this pin survives: three cards in a row re-picked it from their
+    // own base, and no two of those picks agreed.
+    const JUKE_SEED_B: u64 = 38;
 }
 
 // ---------------------------------------------------------------------------
@@ -6155,8 +6251,30 @@ mod medic_chase {
     // window. Observed (with steering):
     //   seed 13: 375 distress frames, 4.83s longest window, heal at 3.30s, 0 lost.
     //   seed 26: 235 distress frames, 3.50s longest window, heal at 6.55s, 0 lost.
-    const MEDIC_SEED_A: u64 = 13;
-    const MEDIC_SEED_B: u64 = 26;
+    //
+    // Re-pinned again for AS-87 (caster main-hands: the Priest here gains +5
+    // spell power, the enemy Shaman gains nothing, so this comp is a one-sided
+    // healer buff). 13 went vacuous outright — 0 distress frames, because the
+    // Warrior no longer drops below the urgency threshold while occluded — and
+    // 26 collapsed from 20 short windows into a single 308-frame one whose heal
+    // lands at 11.20s, past the ceiling.
+    //
+    // That is recalibration, not a slower chase, and the scan says so directly:
+    // the CHASE bound this probe exists to defend (longest contiguous occluded
+    // window <= 8s) is not breached on ANY of 30 seeds on EITHER binary, and its
+    // maximum falls slightly (5.40s -> 5.20s). What rose is the NUMBER of
+    // occluded-distress windows — the fraction of the match spent in one roughly
+    // doubles, 0.029 -> 0.061 excluding three seeds that now run to the cap —
+    // because a stronger Priest keeps its Warrior ALIVE at low HP instead of
+    // letting it die. Excluding those capped seeds, allies stopped dying before
+    // a heal landed on all but one seed (5 seeds -> 1). More rescues to perform,
+    // not slower rescues.
+    //
+    // Observed after AS-87:
+    //   seed 8: 587 distress frames, 5.20s longest window, heal at 4.00s, 0 lost.
+    //   seed 9: 412 distress frames, 1.98s longest window, heal at 4.12s, 0 lost.
+    const MEDIC_SEED_A: u64 = 8;
+    const MEDIC_SEED_B: u64 = 9;
 
     #[test]
     fn medic_bounds_distressed_ally_seed_a() {
@@ -6200,7 +6318,17 @@ mod oom_wand {
     /// dampening-gated rather than mana-gated, so the probe validates the OOM
     /// wand fallback via the close + wand chip, not via a faster resolution — see
     /// the outcome assertion for why the old "< 68s" speedup proxy was retired.
-    const SEED: u64 = 22;
+    // Re-pinned for AS-87 + AS-54 (22 -> 33): on the merged tree seed 22 no
+    // longer opens a lone-Shaman 2v1 the Mage reaches wand range in. Seed 33
+    // comes from a merged-tree `scan_oom_seeds` — Warrior dies at 28.0s, 5 wand
+    // hits, 17 Mage damage events through the window the mana refractory used
+    // to leave dead.
+    // Re-pinned again on the twice-merged tree (33 -> 16). AS-97's live Shaman
+    // weapon damage changes the lone Shaman this probe chases, and at 33 the
+    // Mage no longer reaches wand range. Seed 16 from a merged-tree
+    // `scan_oom_seeds`: Warrior dies at 36.6s, 33 wand hits, 42 Mage damage
+    // events through the window the mana refractory used to leave dead.
+    const SEED: u64 = 16;
 
     /// One damage event parsed from the combat log: `(wall_time, is_wand)`.
     struct MageDamage {

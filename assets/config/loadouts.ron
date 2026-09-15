@@ -28,7 +28,7 @@
         },
 
         // ====================================================================
-        // MAGE — Cloth armor, wand + off-hand
+        // MAGE — Cloth armor, caster dagger + wand + off-hand
         // ====================================================================
         Mage: {
             Head: MagistersCrown,
@@ -44,8 +44,9 @@
             Ring1: SignetOfFocus,
             Ring2: RingOfProtection,
             Trinket1: EssenceOfEternalLife,
-            Ranged: WandOfShadows,
+            MainHand: Witchblade,
             OffHand: TomeOfKnowledge,
+            Ranged: WandOfShadows,
         },
 
         // ====================================================================
@@ -69,7 +70,7 @@
         },
 
         // ====================================================================
-        // PRIEST — Cloth armor, wand + off-hand
+        // PRIEST — Cloth armor, caster dagger + wand + off-hand
         // ====================================================================
         Priest: {
             Head: MagistersCrown,
@@ -85,12 +86,13 @@
             Ring1: SignetOfFocus,
             Ring2: RingOfProtection,
             Trinket1: EssenceOfEternalLife,
-            Ranged: StaffOfDominance,
+            MainHand: Witchblade,
             OffHand: TomeOfKnowledge,
+            Ranged: StaffOfDominance,
         },
 
         // ====================================================================
-        // WARLOCK — Cloth armor, wand + off-hand
+        // WARLOCK — Cloth armor, caster dagger + wand + off-hand
         // ====================================================================
         Warlock: {
             Head: MagistersCrown,
@@ -106,8 +108,9 @@
             Ring1: SignetOfFocus,
             Ring2: RingOfProtection,
             Trinket1: EssenceOfEternalLife,
-            Ranged: WandOfShadows,
+            MainHand: Witchblade,
             OffHand: TomeOfKnowledge,
+            Ranged: WandOfShadows,
         },
 
         // ====================================================================

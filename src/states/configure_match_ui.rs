@@ -289,7 +289,10 @@ pub fn draw_configure_match(
                         .color(egui::Color32::from_rgb(200, 205, 220)),
                 )
                 .fill(egui::Color32::from_rgb(38, 40, 54))
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 74, 92)))
+                .stroke(egui::Stroke::new(
+                    1.0_f32,
+                    egui::Color32::from_rgb(70, 74, 92),
+                ))
                 .corner_radius(6.0)
                 .min_size(egui::vec2(96.0, 38.0));
                 if ui.add(back).clicked() {
@@ -378,13 +381,13 @@ pub fn draw_configure_match(
                     (
                         egui::Color32::from_rgb(46, 110, 66),
                         egui::Color32::from_rgb(235, 248, 235),
-                        egui::Stroke::new(1.5, egui::Color32::from_rgb(96, 176, 116)),
+                        egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(96, 176, 116)),
                     )
                 } else {
                     (
                         egui::Color32::from_rgb(38, 40, 52),
                         egui::Color32::from_rgb(120, 120, 132),
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(56, 58, 72)),
+                        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(56, 58, 72)),
                     )
                 };
 
@@ -437,7 +440,7 @@ fn team_column_frame(
 
     egui::Frame::new()
         .fill(fill)
-        .stroke(egui::Stroke::new(2.0, stroke.gamma_multiply(0.85)))
+        .stroke(egui::Stroke::new(2.0_f32, stroke.gamma_multiply(0.85)))
         .corner_radius(10.0)
         .inner_margin(egui::Margin::same(14))
         .show(ui, |ui| {
@@ -457,7 +460,10 @@ fn center_column_frame(
 ) {
     egui::Frame::new()
         .fill(egui::Color32::from_rgb(24, 24, 34))
-        .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(58, 58, 74)))
+        .stroke(egui::Stroke::new(
+            1.5_f32,
+            egui::Color32::from_rgb(58, 58, 74),
+        ))
         .corner_radius(10.0)
         .inner_margin(egui::Margin::same(14))
         .show(ui, |ui| {
@@ -535,7 +541,7 @@ fn render_character_picker_modal(
                         rect,
                         8.0,
                         egui::Stroke::new(
-                            if is_current { 2.5 } else { 2.0 },
+                            if is_current { 2.5_f32 } else { 2.0_f32 },
                             if is_current {
                                 color32
                             } else {
@@ -570,7 +576,7 @@ fn render_character_picker_modal(
                         ui.painter().rect_stroke(
                             icon_rect,
                             6.0,
-                            egui::Stroke::new(2.0, color32),
+                            egui::Stroke::new(2.0_f32, color32),
                             egui::StrokeKind::Outside,
                         );
                     } else {
@@ -580,7 +586,7 @@ fn render_character_picker_modal(
                         ui.painter().rect_stroke(
                             icon_rect,
                             6.0,
-                            egui::Stroke::new(2.0, color32),
+                            egui::Stroke::new(2.0_f32, color32),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -772,13 +778,13 @@ fn render_team_panel(
                     (
                         team_color.gamma_multiply(0.9),
                         egui::Color32::from_rgb(240, 244, 250),
-                        egui::Stroke::new(1.5, team_color),
+                        egui::Stroke::new(1.5_f32, team_color),
                     )
                 } else {
                     (
                         egui::Color32::from_rgb(40, 42, 54),
                         egui::Color32::from_rgb(180, 184, 196),
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(66, 70, 88)),
+                        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(66, 70, 88)),
                     )
                 };
 
@@ -883,7 +889,7 @@ fn render_character_slot(
     ui.painter().rect_stroke(
         rect,
         8.0,
-        egui::Stroke::new(2.0, team_color.gamma_multiply(border_alpha)),
+        egui::Stroke::new(2.0_f32, team_color.gamma_multiply(border_alpha)),
         egui::StrokeKind::Outside,
     );
 
@@ -921,7 +927,7 @@ fn render_character_slot(
             ui.painter().rect_stroke(
                 icon_rect,
                 6.0,
-                egui::Stroke::new(2.0, color32),
+                egui::Stroke::new(2.0_f32, color32),
                 egui::StrokeKind::Outside,
             );
         } else {
@@ -931,7 +937,7 @@ fn render_character_slot(
             ui.painter().rect_stroke(
                 icon_rect,
                 6.0,
-                egui::Stroke::new(2.0, color32),
+                egui::Stroke::new(2.0_f32, color32),
                 egui::StrokeKind::Outside,
             );
         }
@@ -1121,7 +1127,7 @@ fn render_map_panel(
         ui.painter().rect_stroke(
             rect,
             8.0,
-            egui::Stroke::new(1.5, egui::Color32::from_rgb(70, 74, 92)),
+            egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(70, 74, 92)),
             egui::StrokeKind::Outside,
         );
         if let Some(tex) = preview_texture {
@@ -1237,14 +1243,14 @@ fn draw_map_preview(
     let floor: Vec<egui::Pos2> = outline.iter().map(|p| to_screen(p.x, p.y)).collect();
     let mut floor_path = egui::epaint::PathShape::closed_line(
         floor,
-        egui::Stroke::new(1.5, egui::Color32::from_rgb(90, 96, 120)),
+        egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(90, 96, 120)),
     );
     floor_path.fill = egui::Color32::from_rgb(34, 36, 48);
     painter.add(floor_path);
 
     // Obstacles for the selected map.
     let obstacle_fill = egui::Color32::from_rgb(96, 102, 128);
-    let obstacle_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 156, 180));
+    let obstacle_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(150, 156, 180));
     for volume in &active.volumes {
         match volume {
             ObstacleVolume::Cylinder {

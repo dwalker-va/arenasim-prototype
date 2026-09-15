@@ -61,6 +61,7 @@ fn make_aura(effect_type: AuraType, ability_name: &str, caster: Option<Entity>) 
         backlash_damage: None,
         dr_category_override: None,
         dispel_type: DispelType::Auto,
+        compound: None,
     }
 }
 

@@ -1,6 +1,6 @@
 use super::super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::super::ability_config::AbilityConfig;
-use super::super::equipment::{ItemDefinitions, ItemSlot, Loadout};
+use super::super::equipment::{ItemDefinitions, Loadout};
 use super::super::match_config::{
     self, MageArmor, PaladinAura, RogueOpener, RoguePoison, WarlockCurse, WarriorShout,
 };
@@ -423,6 +423,7 @@ pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
         backlash_damage: None,
         dr_category_override: None,
         dispel_type: super::DispelType::Auto,
+        compound: None,
     }
 }
 
@@ -685,17 +686,15 @@ impl Combatant {
     /// Apply equipment stats from a resolved loadout to this combatant.
     ///
     /// - Armor/accessory items: ADD their stats to combatant fields.
-    /// - Weapon in the primary slot (MainHand for melee, Ranged for ranged): REPLACE
-    ///   attack_damage and attack_speed, ADD other stats.
+    /// - Weapon in the class's primary weapon socket
+    ///   ([`CharacterClass::weapon_slot`]): REPLACE attack_damage and
+    ///   attack_speed, ADD other stats.
     /// - Off Hand weapons: only ADD non-weapon stats (no attack_damage/attack_speed replacement).
     /// - After all items: reset current_health and current_mana to their new maximums.
     pub fn apply_equipment(&mut self, loadout: &Loadout, items: &ItemDefinitions) {
-        // Determine the primary weapon slot based on class
-        let primary_weapon_slot = if self.class.is_melee() {
-            ItemSlot::MainHand
-        } else {
-            ItemSlot::Ranged
-        };
+        // The socket holding this class's primary weapon. NOT `is_melee()`:
+        // that answers attack RANGE, not which socket is live.
+        let primary_weapon_slot = self.class.weapon_slot();
 
         for (slot, item_id) in loadout {
             let Some(item) = items.get(item_id) else {

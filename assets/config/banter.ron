@@ -117,10 +117,14 @@
         // so tuning is edit-and-relaunch with no rebuild. If lines feel
         // rushed, raise `line_lifetime` first and `beat_gap` second.
         //
-        // Two bounds constrain it. `latest_beat` keeps every beat inside the
-        // 10s countdown, and validation rejects a pool where `line_lifetime`
-        // minus a context's start delay reaches its beat gap (a deferred beat
-        // could then collide with the one behind it).
+        // Two bounds constrain it. `latest_beat` bounds how late an exchange's
+        // last beat may speak; spilling past the 10s countdown is allowed and
+        // deliberate (see `latest_beat` below). And validation rejects a pool
+        // where `line_lifetime` minus a context's start delay reaches its beat
+        // gap — a floor on how tightly beats may be spaced. That formula is
+        // inherited from a mechanism the scheduler no longer has;
+        // `banter_config.rs` says so at the check itself rather than
+        // inventing a tidier reason for it.
 
         // Seconds after the call change before the first beat speaks. Applies
         // to Opening and Correction, both of which play during the countdown
@@ -136,17 +140,19 @@
         // 11.5 against latest_beat 12.0) — four inside the countdown, and the
         // fifth spilling into the opening approach (see latest_beat).
         beat_gap: 2.5,
-        // How long each bubble stays up — the read-time knob. Upper bound:
-        // switch_start + beat_gap (3.3) — at or past that, a deferred Switch
-        // beat collides with the one behind it.
+        // How long each bubble stays up — the read-time knob. A speaker who
+        // starts a new line while their last is still up REPLACES it, so
+        // consecutive beats on ONE role are allowed and read as that speaker
+        // talking over themselves. The first line's screen time is cut to the
+        // beat gap; that shortening is the overcommunication, not a defect.
         //
-        // KNOWN GAP (engineer spec filed): validation still rejects two beats
-        // on ONE role closer than this lifetime, but same-role consecutive
-        // lines are legitimate by design — one party overcommunicating (or
-        // the other undercommunicating) is an expressive device. The fix is
-        // renderer-side (a speaker's new line replaces their live bubble),
-        // after which the validator check goes; several exchanges below
-        // author same-role runs on purpose and fail validation until then.
+        // Upper bound: switch_start + beat_gap (3.3). Validation enforces
+        // `line_lifetime` minus a context's start delay staying below that
+        // context's beat gap, for every context holding a multi-beat
+        // exchange; Switch's near-immediate start delay makes it the binding
+        // one. The formula is inherited from a mechanism the scheduler no
+        // longer has — `banter_config.rs` gives the honest account of what it
+        // does and does not measure, at the check itself.
         line_lifetime: 3.2,
         // Tighter pacing for corrections — they race the gates.
         correction_beat_gap: 2.4,

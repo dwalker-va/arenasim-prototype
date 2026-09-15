@@ -1,0 +1,27 @@
+# The one place the Rust version is chosen. rustup reads this file for every
+# cargo/rustc invocation in the repo — locally and in CI — and installs the
+# toolchain on demand if it is missing, so a checkout needs no `rustup update`
+# to agree with the workflows.
+#
+# It exists because the absence of it cost the Lint job its entire first life:
+# CI installed `dtolnay/rust-toolchain@stable`, which resolved to 1.98.1, while
+# every developer was on 1.96.0. `float_literal_f32_fallback` and
+# `clippy::question_mark` both widened in between, so `cargo clippy` was
+# genuinely clean on every local machine and failed on all 90 sites in CI, on
+# every run from the job's introduction onward. Nobody was wrong; the two
+# environments were never the same environment.
+#
+# 1.98.1 rather than the 1.96.0 the tree was written against, and the deciding
+# reason is that 89 of those 90 sites were `float_literal_f32_fallback` — a
+# rustc FUTURE-COMPATIBILITY lint, whose own note says it "will become a hard
+# error in a future release". Pinning back to 1.96.0 would have gone green
+# today by hiding 89 sites that are scheduled to stop compiling, and would have
+# had to be paid off anyway, later, by whoever bumped the pin.
+#
+# When raising this version, expect newly-widened lints and treat the first red
+# Lint run as a question about the toolchain — see the note at the foot of
+# .github/workflows/lint.yaml.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

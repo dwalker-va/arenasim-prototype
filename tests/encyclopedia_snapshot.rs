@@ -123,7 +123,7 @@ fn encyclopedia_pet_ability_detail() {
     );
 }
 
-/// The Items index: chip-bar filters over the full 142-item grid.
+/// The Items index: chip-bar filters over the full 145-item grid.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_items_grid() {
@@ -183,6 +183,23 @@ fn encyclopedia_items_ranged_socket() {
     filters.selected_slots.insert(ItemSlotType::Ranged);
     state.item_filters = filters;
     snapshot("encyclopedia_items_ranged_socket", state);
+}
+
+/// The Main Hand socket, which is where a class's weapon proficiency shows up
+/// as a real constraint: the pool a Mage sees here is a different set from the
+/// one a Warrior sees. It is also the view that shows the caster one-handers
+/// sitting beside the attack-power ones, which is the choice AS-87 added.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_items_mainhand_socket() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::index(Section::Items)),
+    );
+    let mut filters = ItemFilters::default();
+    filters.selected_slots.insert(ItemSlotType::MainHand);
+    state.item_filters = filters;
+    snapshot("encyclopedia_items_mainhand_socket", state);
 }
 
 /// A relic's detail page. The weapon block is what a relic must NOT have — it
@@ -280,6 +297,28 @@ fn encyclopedia_aura_detail_engine() {
     snapshot("encyclopedia_aura_detail_engine", state);
 }
 
+/// A COMPOUND debuff's page: one entry stating BOTH of the effects a Frost
+/// Armor proc lands, on one removal rung.
+///
+/// This page is the reason the engine grew `CompoundDebuff`. It used to be two
+/// adjacent index rows — "Frost Armor (movement slow)", Dispellable, and "Frost
+/// Armor (attack speed)", Immune to dispel — over what a player experiences as
+/// one debuff with one icon, because a dispel really did lift one and leave the
+/// other. What to look for here: a single Slow mechanic badge, a Dispellable
+/// removal badge, and a stat block carrying a movement-slow row AND an
+/// attack-speed row.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_compound() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::FrostArmorChill),
+        ))),
+    );
+    snapshot("encyclopedia_aura_detail_compound", state);
+}
+
 /// A DISAMBIGUATED aura page. The Rogue's weapon coating and the slow that
 /// coating applies are both called "Crippling Poison" on the actor frames, and
 /// a catalog keyed on name alone gave the player only the debuff's page — wrong
@@ -301,6 +340,56 @@ fn encyclopedia_aura_detail_name_collision() {
         ))),
     );
     snapshot("encyclopedia_aura_detail_name_collision", state);
+}
+
+/// An engine aura whose applying ability has no `applies_aura` block of its own.
+/// Power Word: Shield spawns Weakened Soul on the ally it shields at the cast
+/// site, so APPLIED BY is a live link to the shield's page — the section used to
+/// say "applied by an engine mechanic", which read as though nothing in the game
+/// produced the debuff that gates re-shielding. The icon is the aura's OWN art,
+/// not the shield's (invisible here — kittest has no textures).
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_weakened_soul() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::WeakenedSoul),
+        ))),
+    );
+    snapshot("encyclopedia_aura_detail_weakened_soul", state);
+}
+
+/// The one aura NO ability applies: an arena orb pickup. Its APPLIED BY section
+/// has no page to link to, so it names the mechanic instead of reporting the
+/// absence of one.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_orb() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::ShadowSight),
+        ))),
+    );
+    snapshot("encyclopedia_aura_detail_orb", state);
+}
+
+/// The page that reaches the OTHER auras its ability applies. Frost Armor is
+/// a Mage self-buff and the procs it hangs on melee attackers, and each proc
+/// already named Frost Armor as its source — but the buff, the page a Mage
+/// would actually open, named nothing back. This shows the reverse link under
+/// APPLIED BY.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_source_siblings() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Ability(AbilityType::FrostArmor),
+        ))),
+    );
+    snapshot("encyclopedia_aura_detail_source_siblings", state);
 }
 
 /// The navigation cluster at a DEEP LINK: entered from the Results screen, so

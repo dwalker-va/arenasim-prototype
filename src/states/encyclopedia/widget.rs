@@ -68,7 +68,7 @@ pub fn paint_icon(
             painter.rect_stroke(
                 rect,
                 3.0,
-                egui::Stroke::new(1.0, LINE),
+                egui::Stroke::new(1.0_f32, LINE),
                 egui::StrokeKind::Inside,
             );
         }
@@ -220,7 +220,7 @@ pub fn tile(
     painter.rect_stroke(
         rect,
         5.0,
-        egui::Stroke::new(1.0, frame),
+        egui::Stroke::new(1.0_f32, frame),
         egui::StrokeKind::Inside,
     );
 
@@ -338,7 +338,7 @@ pub fn chip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Option<
     painter.rect_stroke(
         rect,
         H / 2.0,
-        egui::Stroke::new(1.0, frame),
+        egui::Stroke::new(1.0_f32, frame),
         egui::StrokeKind::Inside,
     );
 
@@ -411,7 +411,7 @@ pub fn prose_block(ui: &mut egui::Ui, text: &str) {
     let width = ui.available_width().min(560.0);
     egui::Frame::new()
         .fill(PANEL)
-        .stroke(egui::Stroke::new(1.0, LINE))
+        .stroke(egui::Stroke::new(1.0_f32, LINE))
         .corner_radius(6.0)
         .inner_margin(egui::Margin::symmetric(16, 12))
         .show(ui, |ui| {
@@ -428,7 +428,7 @@ pub fn stat_rows(ui: &mut egui::Ui, id: &str, rows: &[(String, String)]) {
     }
     egui::Frame::new()
         .fill(PANEL)
-        .stroke(egui::Stroke::new(1.0, LINE))
+        .stroke(egui::Stroke::new(1.0_f32, LINE))
         .corner_radius(6.0)
         .inner_margin(egui::Margin::symmetric(16, 12))
         .show(ui, |ui| {

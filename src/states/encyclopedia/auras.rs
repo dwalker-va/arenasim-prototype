@@ -26,7 +26,7 @@
 //!    Weakened Soul, Shadow Sight, the Frost Trap zone's slow, the totem
 //!    pulses, the school lockout every interrupt leaves behind, the Rogue's
 //!    weapon-coating marker, Unstable Affliction's dispel-backlash silence and
-//!    the two Frost Armor procs. The nested variants EXPAND from their own
+//!    the Frost Armor chill. The nested variants EXPAND from their own
 //!    sources (`TotemElement::ALL`, `RoguePoison::ALL`, the interrupt flags),
 //!    so they stay zero-marginal-cost too.
 //!
@@ -60,9 +60,7 @@ use crate::states::ability_text::build_aura_description;
 use crate::states::match_config::RoguePoison;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::ability_config::AbilityDefinitions;
-use crate::states::play_match::combat_core::{
-    frost_armor_attack_speed_aura, frost_armor_movement_slow_aura,
-};
+use crate::states::play_match::combat_core::frost_armor_chill_auras;
 use crate::states::play_match::components::{
     weapon_poison_marker_aura, Aura, AuraPending, AuraType, DRCategory, DispelType, TotemElement,
     WEAPON_POISON_MARKER_DURATION,
@@ -76,7 +74,7 @@ use crate::states::play_match::effects::backlash::{
 };
 use crate::states::play_match::rendering::is_buff_aura;
 use crate::states::play_match::shadow_sight::{
-    SHADOW_SIGHT_BREAK_ON_DAMAGE, SHADOW_SIGHT_DURATION,
+    SHADOW_SIGHT_BREAK_ON_DAMAGE, SHADOW_SIGHT_DURATION, SHADOW_SIGHT_SPAWN_TIME,
 };
 
 use super::search::SearchEntry;
@@ -125,24 +123,33 @@ pub enum AuraId {
 /// Some of these share a NAME with a real `abilities.ron` entry that carries no
 /// `applies_aura` of its own (Frost Trap places a zone; the totems pulse their
 /// buff). Those borrow the ability's icon and link back to it as the applying
-/// ability; only Weakened Soul and Shadow Sight have no ability at all.
+/// ability. Weakened Soul links back to Power Word: Shield but keeps art of its
+/// own — see [`AuraArt`] — and only Shadow Sight has no applying ability at
+/// all, which [`AuraSource::Mechanic`] makes it say out loud.
 ///
 /// ## Name collisions
 ///
-/// Four of these carry a `frame_name` that is NOT their catalog name, because
-/// the engine hangs two or three distinct auras under one name and a player
-/// reading their frames cannot tell which is which:
+/// Three of these carry a `frame_name` that is NOT their catalog name, because
+/// the engine hangs two distinct DEBUFFS under one name and a player reading
+/// their frames cannot tell which is which:
 ///
 /// - "Crippling Poison" is both the Rogue's own coating marker and the slow it
 ///   puts on the target.
 /// - "Unstable Affliction" is both an 18-second Shadow damage-over-time and the
 ///   silence its dispel backlash inflicts.
-/// - "Frost Armor" is the Mage's self-buff AND both procs it hangs on melee
+/// - "Frost Armor" is the Mage's self-buff AND the chill it hangs on melee
 ///   attackers.
 ///
 /// Each gets its own entry with a parenthetical qualifier, and its page says
 /// what the frames call it. The alternative — one entry per NAME — sends a
 /// player from their own gold-bordered buff to the enemy debuff's page.
+///
+/// **A collision is two debuffs sharing a name, never two EFFECTS of one
+/// debuff.** Frost Armor's chill used to be listed twice, once per effect, and
+/// the two rows wore different removal badges over what a player experiences as
+/// one thing. That is fixed upstream in the engine rather than papered over
+/// here: the chill's effects are bound into a [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff), so it is one
+/// entry that states both (see [`NamedAura::riders`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EngineAura {
     /// The Power Word: Shield cooldown marker, applied alongside the shield.
@@ -166,10 +173,12 @@ pub enum EngineAura {
     /// The silence Unstable Affliction's dispel backlash puts on the dispeller,
     /// which shares the DoT's name.
     DispelBacklashSilence,
-    /// The movement slow a Frost Armor proc hangs on a melee attacker.
-    FrostArmorMovementSlow,
-    /// The attack-speed slow the same proc hangs alongside it.
-    FrostArmorAttackSpeedSlow,
+    /// The chill a Frost Armor proc hangs on a melee attacker — ONE debuff
+    /// doing two things (a movement slow and an attack-speed slow), so ONE
+    /// entry. It was two entries wearing different removal badges until the
+    /// engine learned to bind the two effects into one debuff; see
+    /// [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff).
+    FrostArmorChill,
 }
 
 impl EngineAura {
@@ -183,8 +192,7 @@ impl EngineAura {
             EngineAura::ShadowSight,
             EngineAura::FrostTrapSlow,
             EngineAura::DispelBacklashSilence,
-            EngineAura::FrostArmorMovementSlow,
-            EngineAura::FrostArmorAttackSpeedSlow,
+            EngineAura::FrostArmorChill,
         ];
         all.extend(TotemElement::ALL.iter().copied().map(EngineAura::TotemBuff));
         all.extend(
@@ -224,6 +232,83 @@ pub enum Persistence {
     WholeMatch,
 }
 
+/// Where a named aura comes from — the one answer to "what puts this on me?",
+/// and the one field an ability page reads when it wants the reverse.
+///
+/// ## Why this is a type and not an `Option<AbilityType>`
+///
+/// It was one, and "no applying ability" was spelled `None`. That made two
+/// different facts identical on the page: an aura whose applying ability the
+/// registry had never filled in, and an aura that genuinely has none. Weakened
+/// Soul sat in the first group wearing the second group's clothes — Power Word:
+/// Shield spawns it on the shielded ally at the Priest's cast site
+/// (`class_ai/priest.rs`), but its page said only "applied by an engine
+/// mechanic", so the debuff that GATES the shield read as though nothing in the
+/// game produced it.
+///
+/// With a variant per fact the blank is unrepresentable: [`Self::Mechanic`] has
+/// to NAME what applies the aura, so an entry cannot go quiet about its origin
+/// the way `None` let it.
+///
+/// ## One model, both directions
+///
+/// The aura page asks this what to link to; an ability page asks the catalog
+/// which entries name it, through [`applied_by`]. Both readings come off this
+/// one field, so a link cannot exist in one direction only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuraSource {
+    /// Applied by an ability with a page of its own. That page is where the
+    /// APPLIED BY section links — and, unless the entry carries [`AuraArt::Own`],
+    /// where its icon comes from.
+    Ability(AbilityType),
+    /// Applied by a match mechanic with no ability behind it — the arena's
+    /// Shadow Sight orbs are the only one today. The string names the mechanic
+    /// inside [`Self::mechanic_line`]'s sentence; it is not optional, because an
+    /// unnamed origin is the hole this type exists to close.
+    Mechanic(&'static str),
+}
+
+impl AuraSource {
+    /// The applying ability, if there is one. The icon lookup and the reverse
+    /// lookup both go through this rather than matching on the variant.
+    pub fn ability(self) -> Option<AbilityType> {
+        match self {
+            AuraSource::Ability(ability) => Some(ability),
+            AuraSource::Mechanic(_) => None,
+        }
+    }
+
+    /// What the APPLIED BY section says when there is no ability page to link
+    /// to. `None` for an ability source, whose section is a link instead.
+    pub fn mechanic_line(self) -> Option<String> {
+        match self {
+            AuraSource::Ability(_) => None,
+            AuraSource::Mechanic(mechanic) => Some(format!(
+                "No ability applies this — it comes from {}.",
+                mechanic
+            )),
+        }
+    }
+}
+
+/// Where an entry's ICON comes from — a separate question from where the AURA
+/// comes from, which is why they are separate fields.
+///
+/// Borrowing the applying ability's icon is the default and the in-match
+/// convention (`get_aura_icon_key`), and it is right whenever the aura simply
+/// IS that ability's effect. It is wrong for a marker an ability leaves
+/// BEHIND: Weakened Soul wearing the Power Word: Shield icon would put the
+/// shield's art on the debuff that blocks the next shield.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuraArt {
+    /// Borrow the applying ability's icon.
+    FromSource,
+    /// The aura has art of its own, under a `GENERIC_AURA_ICONS` key. That is
+    /// the same table the actor frames load from, so a page and a buff bar
+    /// cannot show different art for one aura.
+    Own(&'static str),
+}
+
 /// One catalog entry: a named aura, fully resolved.
 ///
 /// Built by [`catalog`]; never stored, so a RON edit is picked up on the next
@@ -245,11 +330,26 @@ pub struct NamedAura {
     pub frame_name: String,
     /// The mechanic badge.
     pub mechanic: AuraType,
-    /// The ability that applies it, when there is one to link to.
-    pub source: Option<AbilityType>,
+    /// What applies it: an ability to link to, or the mechanic to name.
+    pub source: AuraSource,
+    /// Where its icon comes from. Separate from [`Self::source`] because an
+    /// aura can have an applying ability AND art of its own.
+    pub art: AuraArt,
     /// A representative aura, built the way the simulation builds it. Every
     /// classification on the page is a question asked of THIS.
+    ///
+    /// For a COMPOUND debuff (see [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff)) this is the debuff's
+    /// FACE, and [`Self::riders`] holds the rest. Classification asks the face
+    /// because that is what the engine asks: a dispel rolls against the face
+    /// and takes the riders with it.
     pub sample: Aura,
+    /// The other effects of a compound debuff, beyond [`Self::sample`]. Empty
+    /// for every ordinary aura — one aura, one effect, one entry.
+    ///
+    /// This is why the catalog no longer needs two "Frost Armor (…)" rows: the
+    /// engine binds the chill's two effects into one debuff, so the catalog
+    /// lists one entry that states both.
+    pub riders: Vec<Aura>,
     pub persistence: Persistence,
     /// Spell power added to [`Self::sample`]'s magnitude per point, from the
     /// ability's `applies_aura.magnitude_coefficient`. Non-zero only for
@@ -266,6 +366,19 @@ pub struct NamedAura {
 impl NamedAura {
     pub fn is_buff(&self) -> bool {
         is_buff_aura(&self.mechanic)
+    }
+
+    /// Every mechanic this ONE entry covers: its face, then each rider's. A
+    /// single-effect aura yields exactly its `mechanic`.
+    ///
+    /// The cross-links and `tests/aura_catalog_audit.rs` both walk this rather
+    /// than `mechanic` alone, so a compound debuff is reachable from every
+    /// mechanic it actually applies — the Frost Armor chill shows up under
+    /// "other Attack Speed Slow effects" even though its badge says Slow.
+    pub fn mechanics(&self) -> Vec<AuraType> {
+        let mut all = vec![self.mechanic];
+        all.extend(self.riders.iter().map(|rider| rider.effect_type));
+        all
     }
 
     /// `Debuff · Damage over Time` — the one-line identity shared by index
@@ -322,11 +435,14 @@ impl NamedAura {
                 "Beneficial magic. An enemy can strip this with a purge.",
             )
         } else if self.sample.is_hostile_effect() {
-            // Stuns, interrupt lockouts, the attack-speed half of Frost Armor's
-            // proc: not a physical debuff, but not a dispellable KIND of effect
-            // either. Deliberately says nothing about the class — some of these
-            // are magic (Hammer of Justice is Holy) and some are schoolless with
-            // no determined class at all.
+            // Stuns and interrupt lockouts: not a physical debuff, but not a
+            // dispellable KIND of effect either. Deliberately says nothing
+            // about the class — some of these are magic (Hammer of Justice is
+            // Holy) and some are schoolless with no determined class at all.
+            //
+            // A compound debuff is classified by its FACE, which is why Frost
+            // Armor's chill no longer lands here: its attack-speed effect is a
+            // rider on a dispellable slow rather than an entry of its own.
             (
                 "Immune to dispel",
                 "No dispel, cleanse or purge removes an effect of this kind; only effects that \
@@ -387,8 +503,12 @@ fn ron_entry(ability: AbilityType, abilities: &AbilityDefinitions) -> Option<Nam
         name: def.name.clone(),
         frame_name: def.name.clone(),
         mechanic: effect.aura_type,
-        source: Some(ability),
+        source: AuraSource::Ability(ability),
+        art: AuraArt::FromSource,
         sample: pending.aura,
+        // `AbilityConfig::applies_aura` is a single `Option`, so a RON-defined
+        // ability applies exactly one effect and can never be a compound.
+        riders: Vec::new(),
         persistence: Persistence::Seconds(effect.duration),
         magnitude_coefficient: effect.magnitude_coefficient,
         description: build_aura_description(effect),
@@ -414,7 +534,51 @@ pub fn subtitle_for(mechanic: AuraType) -> String {
 pub fn siblings(catalog: &[NamedAura], mechanic: AuraType, self_id: AuraId) -> Vec<&NamedAura> {
     catalog
         .iter()
-        .filter(|entry| entry.mechanic == mechanic && entry.id != self_id)
+        .filter(|entry| entry.mechanics().contains(&mechanic) && entry.id != self_id)
+        .collect()
+}
+
+/// Every named aura `ability` applies — the reverse of [`AuraSource::Ability`].
+///
+/// An ability page needs this to show what its casts leave behind; an aura page
+/// needs [`AuraSource`] to point back. Reading one field both ways is what keeps
+/// the two directions from disagreeing.
+///
+/// Power Word: Shield is the case that earns it: it applies its own absorb and
+/// the Weakened Soul marker, so an ability page derived from `applies_aura`
+/// alone would show half of what the cast does.
+pub fn applied_by(catalog: &[NamedAura], ability: AbilityType) -> Vec<&NamedAura> {
+    catalog
+        .iter()
+        .filter(|entry| entry.source.ability() == Some(ability))
+        .collect()
+}
+
+/// The OTHER named auras the same ability applies — [`applied_by`] minus the
+/// entry you are standing on.
+///
+/// An ability is not limited to one aura: Frost Armor is a Mage self-buff and
+/// the procs it hangs on melee attackers, Unstable Affliction is a
+/// damage-over-time and the silence its dispel backlash inflicts, a Rogue
+/// poison is a coating marker and the debuff that coating applies. Each of
+/// those already pointed at its ability, and `applied_by` gives an ability page
+/// the full set — but between the AURA pages the link ran one way only, so the
+/// page a Mage would open to ask what Frost Armor does was the page that never
+/// mentioned the procs.
+///
+/// Reads the same `source` field as both of those, so an ability that grows a
+/// second aura is cross-linked in every direction with no code per entry.
+pub fn source_siblings(
+    catalog: &[NamedAura],
+    source: AuraSource,
+    self_id: AuraId,
+) -> Vec<&NamedAura> {
+    let Some(ability) = source.ability() else {
+        return Vec::new();
+    };
+    applied_by(catalog, ability)
+        .into_iter()
+        .filter(|entry| entry.id != self_id)
         .collect()
 }
 
@@ -436,7 +600,7 @@ struct EngineSpec {
     /// What the actor frames call it. `None` means "same as `name`".
     frame_name: Option<String>,
     mechanic: AuraType,
-    source: Option<AbilityType>,
+    source: AuraSource,
     magnitude: f32,
     school: Option<SpellSchool>,
     /// Read from the constant the apply site reads. NOT defaulted: Shadow Sight
@@ -446,7 +610,43 @@ struct EngineSpec {
     /// can only ever say what the engine does.
     break_on_damage: f32,
     persistence: Persistence,
+    /// The RIDER effects of a compound debuff — the effects this entry covers
+    /// beyond its face. Empty for every ordinary aura. See
+    /// [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff); the arm builds these from the same constructor the
+    /// apply site uses, so the page lists exactly what lands.
+    riders: Vec<Aura>,
     provenance: String,
+}
+
+impl EngineSpec {
+    /// The default for every arm that is not a compound debuff. Spelled out as
+    /// a helper rather than a `Default` impl so the other eight fields stay
+    /// mandatory — `break_on_damage` in particular must never default.
+    fn no_riders() -> Vec<Aura> {
+        Vec::new()
+    }
+}
+
+/// Which engine auras carry art of their own, and which borrow their ability's.
+///
+/// Exhaustive on purpose — no `_` arm. Engine aura N+1 has to state which it is,
+/// because the failure mode is silent: a wrong borrow renders a plausible icon
+/// that means something else, and a missing one renders the placeholder tile
+/// that sent this card here in the first place.
+fn engine_art(engine: EngineAura) -> AuraArt {
+    match engine {
+        // Applied by Power Word: Shield, but it is the debuff that BLOCKS the
+        // next shield — borrowing the shield's icon would say the opposite.
+        EngineAura::WeakenedSoul => AuraArt::Own("aura_weakened_soul"),
+        // An arena orb pickup: no ability icon exists to borrow.
+        EngineAura::ShadowSight => AuraArt::Own("aura_shadow_sight"),
+        EngineAura::FrostTrapSlow
+        | EngineAura::TotemBuff(_)
+        | EngineAura::InterruptLockout(_)
+        | EngineAura::WeaponPoisonCoating(_)
+        | EngineAura::DispelBacklashSilence
+        | EngineAura::FrostArmorChill => AuraArt::FromSource,
+    }
 }
 
 /// Resolve one engine-originated aura into a catalog entry.
@@ -460,34 +660,41 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
             name: "Weakened Soul".to_string(),
             frame_name: None,
             mechanic: AuraType::WeakenedSoul,
-            source: None,
+            source: AuraSource::Ability(AbilityType::PowerWordShield),
             magnitude: 0.0,
             school: None,
             break_on_damage: -1.0,
             persistence: Persistence::Seconds(WEAKENED_SOUL_DURATION),
-            provenance: "Placed on the ally a Priest shields, alongside Power Word: Shield."
+            riders: EngineSpec::no_riders(),
+            provenance: "Placed on the ally the moment the shield lands: one cast applies both."
                 .to_string(),
         },
         EngineAura::ShadowSight => EngineSpec {
             name: "Shadow Sight".to_string(),
             frame_name: None,
             mechanic: AuraType::ShadowSight,
-            source: None,
+            source: AuraSource::Mechanic("a Shadow Sight orb"),
             magnitude: 1.0,
             school: None,
             break_on_damage: SHADOW_SIGHT_BREAK_ON_DAMAGE,
             persistence: Persistence::Seconds(SHADOW_SIGHT_DURATION),
-            provenance: "Granted by picking up a Shadow Sight orb in the arena.".to_string(),
+            riders: EngineSpec::no_riders(),
+            provenance: format!(
+                "Granted by picking up one of the two orbs that spawn in mid-arena {:.0} sec \
+                 after the gates open.",
+                SHADOW_SIGHT_SPAWN_TIME
+            ),
         },
         EngineAura::FrostTrapSlow => EngineSpec {
             name: "Frost Trap".to_string(),
             frame_name: None,
             mechanic: AuraType::MovementSpeedSlow,
-            source: Some(AbilityType::FrostTrap),
+            source: AuraSource::Ability(AbilityType::FrostTrap),
             magnitude: FROST_TRAP_SLOW_MAGNITUDE,
             school: Some(SpellSchool::Frost),
             break_on_damage: -1.0,
             persistence: Persistence::WhileSourceActive("while you stand in the zone"),
+            riders: EngineSpec::no_riders(),
             provenance: format!(
                 "Re-applied every tick by a triggered Frost Trap's slow zone, which itself \
                  lasts {:.0} sec.",
@@ -501,11 +708,12 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 name: element.buff_name().to_string(),
                 frame_name: None,
                 mechanic: aura_type,
-                source: Some(ability),
+                source: AuraSource::Ability(ability),
                 magnitude,
                 school: Some(school),
                 break_on_damage: -1.0,
                 persistence: Persistence::WhileSourceActive("while you stand near the totem"),
+                riders: EngineSpec::no_riders(),
                 provenance: format!(
                     "Pulsed onto nearby allies by a dropped totem, which itself lasts {:.0} sec.",
                     TOTEM_DURATION
@@ -520,7 +728,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                     .unwrap_or_else(|| format!("{:?}", ability)),
                 frame_name: None,
                 mechanic: AuraType::SpellSchoolLockout,
-                source: Some(ability),
+                source: AuraSource::Ability(ability),
                 // The magnitude encodes WHICH school was locked and depends on
                 // what the interrupt caught, so it is not a fact about this
                 // aura; `magnitude_row` prints nothing for this mechanic.
@@ -530,6 +738,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 persistence: Persistence::Seconds(
                     def.map(|d| d.lockout_duration).unwrap_or_default(),
                 ),
+                riders: EngineSpec::no_riders(),
                 provenance: "Left behind when this interrupt lands. Only the school of the \
                              interrupted spell is locked — the target's other schools keep \
                              working."
@@ -542,11 +751,12 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 name: format!("{} (weapon coating)", poison.name()),
                 frame_name: Some(sample.ability_name.clone()),
                 mechanic: sample.effect_type,
-                source: Some(poison.ability()),
+                source: AuraSource::Ability(poison.ability()),
                 magnitude: sample.magnitude,
                 school: sample.spell_school,
                 break_on_damage: sample.break_on_damage_threshold,
                 persistence: Persistence::WholeMatch,
+                riders: EngineSpec::no_riders(),
                 provenance: "A Rogue carries this from the opening bell — it marks the coated \
                              weapon. The slow itself comes from the coating's on-hit proc, not \
                              from this mark."
@@ -559,47 +769,41 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                 name: "Unstable Affliction (dispel backlash)".to_string(),
                 frame_name: Some(sample.ability_name.clone()),
                 mechanic: sample.effect_type,
-                source: Some(AbilityType::UnstableAffliction),
+                source: AuraSource::Ability(AbilityType::UnstableAffliction),
                 magnitude: sample.magnitude,
                 school: sample.spell_school,
                 break_on_damage: sample.break_on_damage_threshold,
                 persistence: Persistence::Seconds(sample.duration),
+                riders: EngineSpec::no_riders(),
                 provenance: "Punishes whoever lifts an Unstable Affliction off an ally, \
                              alongside the backlash damage. Dispelling it on your own team \
                              costs nothing."
                     .to_string(),
             }
         }
-        EngineAura::FrostArmorMovementSlow => {
-            let sample = frost_armor_movement_slow_aura();
+        EngineAura::FrostArmorChill => {
+            // Built from the simulation's own constructor for the whole
+            // debuff, so the page cannot list an effect the proc does not
+            // apply — or miss one it does.
+            let [face, rider] = frost_armor_chill_auras();
             EngineSpec {
-                name: "Frost Armor (movement slow)".to_string(),
-                frame_name: Some(sample.ability_name.clone()),
-                mechanic: sample.effect_type,
-                source: Some(AbilityType::FrostArmor),
-                magnitude: sample.magnitude,
-                school: sample.spell_school,
-                break_on_damage: sample.break_on_damage_threshold,
-                persistence: Persistence::Seconds(sample.duration),
-                provenance: "Hung on any melee attacker who strikes a Mage wearing Frost Armor, \
-                             alongside the attack-speed slow. It does not stack with itself — a \
-                             second hit while it is up refreshes nothing."
-                    .to_string(),
-            }
-        }
-        EngineAura::FrostArmorAttackSpeedSlow => {
-            let sample = frost_armor_attack_speed_aura();
-            EngineSpec {
-                name: "Frost Armor (attack speed)".to_string(),
-                frame_name: Some(sample.ability_name.clone()),
-                mechanic: sample.effect_type,
-                source: Some(AbilityType::FrostArmor),
-                magnitude: sample.magnitude,
-                school: sample.spell_school,
-                break_on_damage: sample.break_on_damage_threshold,
-                persistence: Persistence::Seconds(sample.duration),
-                provenance: "Hung on any melee attacker who strikes a Mage wearing Frost Armor, \
-                             alongside the movement slow."
+                // No disambiguating qualifier on the mechanic: there is one
+                // chill now, and the only other "Frost Armor" is the Mage's
+                // self-buff, which is a BUFF and files on the other side of
+                // the catalog.
+                name: "Frost Armor (chill)".to_string(),
+                frame_name: Some(face.ability_name.clone()),
+                mechanic: face.effect_type,
+                source: AuraSource::Ability(AbilityType::FrostArmor),
+                magnitude: face.magnitude,
+                school: face.spell_school,
+                break_on_damage: face.break_on_damage_threshold,
+                persistence: Persistence::Seconds(face.duration),
+                riders: vec![rider],
+                provenance: "Hung on any melee attacker who strikes a Mage wearing Frost Armor. \
+                             One debuff doing two things — a dispel that lifts it takes both. It \
+                             does not stack with itself: a second hit while it is up refreshes \
+                             nothing."
                     .to_string(),
             }
         }
@@ -614,6 +818,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
         school,
         break_on_damage,
         persistence,
+        riders,
         provenance,
     } = spec;
 
@@ -641,8 +846,14 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
     };
 
     // Engine auras have no `applies_aura` block to generate prose from, so the
-    // MECHANIC's own player-facing sentence carries the page.
-    let description = mechanic.description().to_string();
+    // MECHANIC's own player-facing sentence carries the page — one sentence
+    // per effect for a compound debuff, in face-then-riders order, so the
+    // prose covers everything the debuff actually does.
+    let description = std::iter::once(mechanic)
+        .chain(riders.iter().map(|rider| rider.effect_type))
+        .map(|effect| effect.description())
+        .collect::<Vec<_>>()
+        .join(" ");
 
     // A disambiguated entry has to say what the frames actually call it, or a
     // player matching the buff bar against the catalog finds no such name.
@@ -664,7 +875,9 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
         frame_name,
         mechanic,
         source,
+        art: engine_art(engine),
         sample,
+        riders,
         persistence,
         magnitude_coefficient: 0.0,
         description,
@@ -687,46 +900,67 @@ pub fn search_entries(abilities: &AbilityDefinitions, out: &mut Vec<SearchEntry>
     }
 }
 
-/// Name, mechanic and applying ability of ONE address, resolved without
-/// building the whole catalog.
+/// Name, mechanic, source and art of ONE address, resolved without building the
+/// whole catalog.
 ///
 /// The linked-icon widget asks a `Topic` for its name and icon once per widget
 /// it draws, and the index draws fifty of them, so this path has to stay cheap.
 /// Resolving one engine aura through [`engine_entry`] is fine — that builds a
 /// single entry, not the catalog.
-fn identity(
-    id: AuraId,
-    abilities: &AbilityDefinitions,
-) -> Option<(String, AuraType, Option<AbilityType>)> {
+struct Identity {
+    name: String,
+    mechanic: AuraType,
+    source: AuraSource,
+    art: AuraArt,
+}
+
+fn identity(id: AuraId, abilities: &AbilityDefinitions) -> Option<Identity> {
     match id {
         AuraId::Ability(ability) => {
             let def = abilities.get(&ability)?;
             let effect = def.applies_aura.as_ref()?;
-            Some((def.name.clone(), effect.aura_type, Some(ability)))
+            Some(Identity {
+                name: def.name.clone(),
+                mechanic: effect.aura_type,
+                source: AuraSource::Ability(ability),
+                art: AuraArt::FromSource,
+            })
         }
         AuraId::Engine(engine) => {
             let entry = engine_entry(engine, abilities);
-            Some((entry.name, entry.mechanic, entry.source))
+            Some(Identity {
+                name: entry.name,
+                mechanic: entry.mechanic,
+                source: entry.source,
+                art: entry.art,
+            })
         }
     }
 }
 
 /// The display name of one aura address, for [`Topic::name`].
 pub fn name_of(id: AuraId, abilities: &AbilityDefinitions) -> Option<String> {
-    identity(id, abilities).map(|(name, _, _)| name)
+    identity(id, abilities).map(|identity| identity.name)
 }
 
 /// The `Buff · Mechanic` subtitle of one aura address, for [`Topic::subtitle`].
 pub fn subtitle_of(id: AuraId, abilities: &AbilityDefinitions) -> Option<String> {
-    identity(id, abilities).map(|(_, mechanic, _)| subtitle_for(mechanic))
+    identity(id, abilities).map(|identity| subtitle_for(identity.mechanic))
 }
 
-/// The icon key of one aura address: the applying ability's name, which is how
-/// `AbilityIcons` is keyed. `None` for the two entries with no applying ability
-/// at all, which render the widget's placeholder tile.
+/// The icon key of one aura address, in the keyspace `AbilityIcons` uses: an
+/// ability's display NAME for a borrowed icon, or a `GENERIC_AURA_ICONS` key
+/// for an aura with art of its own. `None` only if the address resolves to
+/// nothing — every catalog entry has an icon.
 pub fn icon_key(id: AuraId, abilities: &AbilityDefinitions) -> Option<String> {
-    let source = identity(id, abilities)?.2?;
-    abilities.get(&source).map(|def| def.name.clone())
+    let identity = identity(id, abilities)?;
+    match identity.art {
+        AuraArt::Own(key) => Some(key.to_string()),
+        AuraArt::FromSource => {
+            let ability = identity.source.ability()?;
+            abilities.get(&ability).map(|def| def.name.clone())
+        }
+    }
 }
 
 // ============================================================================
@@ -857,23 +1091,50 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
 
     let mut clicked = None;
 
-    // --- Applied by ---
+    // --- Applied by, and anything else the same ability applies ---
     widget::section_heading(ui, "APPLIED BY");
     match entry.source {
-        Some(ability) => {
-            let width = ui.available_width().min(430.0);
+        AuraSource::Ability(ability) => {
+            let width = ui.available_width().min(COLUMN_MAX_WIDTH);
             if let Some(topic) = widget::row(ui, Topic::Ability(ability), "", width, data) {
                 clicked = Some(topic);
             }
+            // The link from an aura to its ability always existed; the link
+            // BETWEEN the auras one ability hangs did not, so a Mage on the
+            // Frost Armor buff's own page was never told the procs exist.
+            let kin = source_siblings(&catalog, entry.source, id);
+            if !kin.is_empty() {
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} also applies:",
+                        Topic::Ability(ability).name(data)
+                    ))
+                    .size(12.5)
+                    .color(MUTED),
+                );
+                ui.add_space(2.0);
+                for sibling in kin {
+                    if let Some(topic) = widget::row(
+                        ui,
+                        Topic::Aura(sibling.id),
+                        &sibling.subtitle(),
+                        width,
+                        data,
+                    ) {
+                        clicked = Some(topic);
+                    }
+                }
+            }
         }
-        None => {
+        // No page to link to — so the section NAMES the mechanic instead of
+        // saying there is nothing to name.
+        AuraSource::Mechanic(_) => {
             ui.label(
-                egui::RichText::new(
-                    "Applied by an engine mechanic — it has no entry in the ability list.",
-                )
-                .size(13.0)
-                .color(MUTED)
-                .italics(),
+                egui::RichText::new(entry.source.mechanic_line().unwrap_or_default())
+                    .size(13.0)
+                    .color(MUTED)
+                    .italics(),
             );
         }
     }
@@ -969,6 +1230,15 @@ fn stat_rows(entry: &NamedAura) -> Vec<(String, String)> {
         rows.push((label, value));
     }
 
+    // A compound debuff's riders are effects of the SAME debuff, so their
+    // numbers belong in the same stat block, right under the face's. The page
+    // is the only place a player can learn that one dispel takes both.
+    for rider in &entry.riders {
+        if let Some(rider_row) = magnitude_row_for(rider.effect_type, rider.magnitude) {
+            rows.push(rider_row);
+        }
+    }
+
     if aura.tick_interval > 0.0 {
         rows.push((
             "Ticks every".to_string(),
@@ -1023,10 +1293,16 @@ fn stat_rows(entry: &NamedAura) -> Vec<(String, String)> {
 /// match `build_aura_description`'s sentence for the same aura — a row that
 /// said "70%" beside prose that said "30%" would read as a bug.
 fn magnitude_row(entry: &NamedAura) -> Option<(String, String)> {
-    let m = entry.sample.magnitude;
+    magnitude_row_for(entry.mechanic, entry.sample.magnitude)
+}
+
+/// [`magnitude_row`] for one (mechanic, magnitude) pair, so a compound
+/// debuff's RIDERS get the same worded row as its face rather than a second
+/// copy of the wording rules.
+fn magnitude_row_for(mechanic: AuraType, m: f32) -> Option<(String, String)> {
     let pct = |v: f32| format!("{:.0}%", v * 100.0);
     let row = |label: &str, value: String| Some((label.to_string(), value));
-    match entry.mechanic {
+    match mechanic {
         // Remaining-fraction multipliers.
         AuraType::MovementSpeedSlow => row("Movement slowed by", pct(1.0 - m)),
         AuraType::HealingReduction => row("Healing reduced by", pct(1.0 - m)),
@@ -1093,7 +1369,7 @@ fn badge(ui: &mut egui::Ui, label: &str, color: egui::Color32) -> egui::Response
     painter.rect_stroke(
         rect,
         3.0,
-        egui::Stroke::new(1.0, color),
+        egui::Stroke::new(1.0_f32, color),
         egui::StrokeKind::Inside,
     );
     painter.galley(
@@ -1108,6 +1384,7 @@ fn badge(ui: &mut egui::Ui, label: &str, color: egui::Color32) -> egui::Response
 mod tests {
     use super::*;
     use crate::states::play_match::ability_config::load_ability_definitions;
+    use crate::states::play_match::rendering::GENERIC_AURA_ICONS;
 
     fn abilities() -> AbilityDefinitions {
         load_ability_definitions().expect("abilities.ron must load")
@@ -1177,7 +1454,7 @@ mod tests {
             );
             assert_eq!(
                 entry.source,
-                Some(*ability),
+                AuraSource::Ability(*ability),
                 "{:?}'s aura entry links back to the wrong ability",
                 ability
             );
@@ -1434,10 +1711,17 @@ mod tests {
     /// Every entry the page tells a player no dispel reaches. Two kinds live
     /// here and the split is the card's whole subject: the PHYSICAL debuffs
     /// (arrow, wound, boot) and the mechanics no dispel takes whatever their
-    /// school (stuns, interrupt lockouts, the attack-speed half of Frost
-    /// Armor's proc). Pinned because this rung is where a widening of
-    /// `is_magic_dispellable` would silently show up — moving a name out of
-    /// this list is a balance change, not a wording change.
+    /// school (stuns, interrupt lockouts). Pinned because this rung is where a
+    /// widening of `is_magic_dispellable` would silently show up — moving a
+    /// name out of this list is a balance change, not a wording change.
+    ///
+    /// "Frost Armor (attack speed)" used to sit here, beside a dispellable
+    /// "Frost Armor (movement slow)" — one debuff on two rungs. AS-54 took it
+    /// off this list by taking it out of the CATALOG: the attack-speed effect
+    /// is now a rider on the chill, which is dispellable by its face. Note
+    /// what did NOT change to achieve that — `is_magic_dispellable` still
+    /// refuses `AttackSpeedSlow`, so the five schoolless `[—]` rows below are
+    /// exactly as they were.
     #[test]
     fn the_immune_to_dispel_rung_is_pinned() {
         let mut rows: Vec<String> = catalog(&abilities())
@@ -1460,7 +1744,6 @@ mod tests {
                 "Cheap Shot [Physical]",
                 "Concussive Shot [Physical]",
                 "Demoralizing Shout [—]",
-                "Frost Armor (attack speed) [Magic]",
                 "Hammer of Justice [Magic]",
                 "Kick [—]",
                 "Kidney Shot [Physical]",
@@ -1509,9 +1792,12 @@ mod tests {
             weakened.persistence,
             Persistence::Seconds(WEAKENED_SOUL_DURATION)
         );
-        assert!(
-            weakened.source.is_none(),
-            "Weakened Soul has no applying ability"
+        assert_eq!(
+            weakened.source,
+            AuraSource::Ability(AbilityType::PowerWordShield),
+            "Power Word: Shield spawns Weakened Soul on the ally it shields, so the page \
+             must link to it — `source: None` is what made this page read as though \
+             nothing applied it"
         );
 
         // The totem buffs and the Frost Trap slow DO have an ability to link
@@ -1520,7 +1806,7 @@ mod tests {
             .iter()
             .find(|e| e.name == "Windfury Totem")
             .expect("registered");
-        assert_eq!(windfury.source, Some(AbilityType::AirTotem));
+        assert_eq!(windfury.source, AuraSource::Ability(AbilityType::AirTotem));
         assert!(matches!(
             windfury.persistence,
             Persistence::WhileSourceActive(_)
@@ -1601,22 +1887,34 @@ mod tests {
             AuraType::DamageOverTime
         );
 
-        // Frost Armor: the Mage's buff plus the two procs it hangs on melee.
+        // Frost Armor: the Mage's buff, plus the ONE chill it hangs on melee.
+        // The chill is a compound debuff — one entry carrying both effects —
+        // so the catalog holds no "(movement slow)" / "(attack speed)" pair.
         let buff = by_name("Frost Armor");
-        let slow = by_name("Frost Armor (movement slow)");
-        let swings = by_name("Frost Armor (attack speed)");
-        assert!(buff.is_buff() && !slow.is_buff() && !swings.is_buff());
+        let chill = by_name("Frost Armor (chill)");
+        assert!(buff.is_buff() && !chill.is_buff());
+        assert_eq!(chill.frame_name, "Frost Armor");
+        let [face, rider] = frost_armor_chill_auras();
+        assert_eq!(chill.sample.magnitude, face.magnitude);
+        assert_eq!(chill.mechanic, face.effect_type);
         assert_eq!(
-            slow.sample.magnitude,
-            frost_armor_movement_slow_aura().magnitude
+            chill
+                .riders
+                .iter()
+                .map(|r| r.effect_type)
+                .collect::<Vec<_>>(),
+            vec![rider.effect_type],
+            "the chill's page must list its attack-speed effect, or the one \
+             entry hides half the debuff"
         );
-        assert_eq!(
-            swings.sample.magnitude,
-            frost_armor_attack_speed_aura().magnitude
+        assert_eq!(chill.riders[0].magnitude, rider.magnitude);
+        assert!(
+            entries
+                .iter()
+                .all(|e| !e.name.starts_with("Frost Armor (movement")
+                    && !e.name.starts_with("Frost Armor (attack")),
+            "the split Frost Armor entries must be gone, not merely hidden"
         );
-        for entry in [slow, swings] {
-            assert_eq!(entry.frame_name, "Frost Armor");
-        }
 
         // Every disambiguated entry says what the frames call it, or a player
         // matching the buff bar against the catalog finds no such name.
@@ -1699,6 +1997,12 @@ mod tests {
     /// The three mechanics that had `display_name()` and `description()` but no
     /// entry to show them on. A mechanic with no entries is a page a player can
     /// never reach.
+    ///
+    /// Asked of `mechanics()`, not `mechanic`: `AttackSpeedSlow` reaches a page
+    /// as a RIDER on the Frost Armor chill rather than as an entry of its own
+    /// (it is half of one debuff, not a debuff). Its stat row is on the chill's
+    /// page and its cross-links resolve there, which is the reachability this
+    /// test is about — the badge saying "Slow" is a separate question.
     #[test]
     fn every_mechanic_with_a_named_aura_reaches_a_page() {
         let entries = catalog(&abilities());
@@ -1708,7 +2012,7 @@ mod tests {
             AuraType::WeaponPoison,
         ] {
             assert!(
-                entries.iter().any(|e| e.mechanic == mechanic),
+                entries.iter().any(|e| e.mechanics().contains(&mechanic)),
                 "{:?} is applied in the engine but has no catalog entry",
                 mechanic
             );
@@ -1730,10 +2034,241 @@ mod tests {
         );
     }
 
+    /// The page a player would actually open to ask what Frost Armor does —
+    /// the Mage's own buff — reaches the procs it hangs on melee attackers.
+    ///
+    /// That link was one-directional: each proc named Frost Armor as its
+    /// source, and the buff named nothing. Pinned on the buff SPECIFICALLY,
+    /// because the proc pages were never the broken direction.
+    #[test]
+    fn a_buff_reaches_the_other_auras_its_ability_applies() {
+        let entries = catalog(&abilities());
+        let buff = entries
+            .iter()
+            .find(|e| e.id == AuraId::Ability(AbilityType::FrostArmor))
+            .expect("Frost Armor's self-buff is a RON entry");
+        let kin = source_siblings(&entries, buff.source, buff.id);
+
+        assert!(
+            !kin.is_empty(),
+            "the Frost Armor buff page must reach the proc(s) the same ability applies"
+        );
+        for other in &kin {
+            assert_eq!(
+                other.source, buff.source,
+                "a source sibling shares the applying ability"
+            );
+            assert!(!other.is_buff(), "Frost Armor's procs are debuffs");
+        }
+    }
+
+    /// The relation is symmetric for EVERY entry, not just the one above: if A
+    /// lists B, B lists A. A one-directional cross-link is the defect this
+    /// helper exists to close, so it must not be able to reintroduce one.
+    #[test]
+    fn source_siblings_are_symmetric_and_exclude_self() {
+        let entries = catalog(&abilities());
+        let mut paired = 0usize;
+        for entry in &entries {
+            for other in source_siblings(&entries, entry.source, entry.id) {
+                assert_ne!(entry.id, other.id, "an entry is not its own sibling");
+                assert!(
+                    source_siblings(&entries, other.source, other.id)
+                        .iter()
+                        .any(|back| back.id == entry.id),
+                    "{} lists {} but {} does not list it back",
+                    entry.name,
+                    other.name,
+                    other.name
+                );
+                paired += 1;
+            }
+        }
+        // Non-vacuity: a catalog where no ability hangs two auras would pass
+        // the loop above without testing anything. Frost Armor, Unstable
+        // Affliction and the Rogue's poisons are all this shape today.
+        assert!(
+            paired >= 6,
+            "only {} source-sibling pairing(s) in the catalog — too few for this to be \
+             testing anything",
+            paired
+        );
+    }
+
     #[test]
     fn buffs_and_debuffs_both_have_entries() {
         let entries = catalog(&abilities());
         assert!(entries.iter().any(|e| e.is_buff()));
         assert!(entries.iter().any(|e| !e.is_buff()));
+    }
+
+    /// The PROVENANCE AUDIT: every page says what applies it, and the entries
+    /// that say "nothing does" are a closed, deliberate set.
+    ///
+    /// The failure this replaces was silent — Weakened Soul's `source: None`
+    /// looked exactly like Shadow Sight's, so the one entry with a real
+    /// applying ability and the one with none printed the same sentence. The
+    /// type now forces a mechanic to be NAMED; this pins that nobody names a
+    /// blank one, and that the list of ability-less auras is short enough to
+    /// read.
+    #[test]
+    fn every_entry_names_what_applies_it() {
+        let abilities = abilities();
+        let mut ability_less: Vec<String> = Vec::new();
+        for entry in catalog(&abilities) {
+            match entry.source {
+                AuraSource::Ability(ability) => {
+                    assert!(
+                        abilities.get(&ability).is_some(),
+                        "{} points APPLIED BY at {:?}, which has no ability definition — \
+                         a dead link",
+                        entry.name,
+                        ability
+                    );
+                    assert!(
+                        entry.source.mechanic_line().is_none(),
+                        "{} has an ability page to link to and must not also narrate one",
+                        entry.name
+                    );
+                }
+                AuraSource::Mechanic(mechanic) => {
+                    assert!(
+                        !mechanic.trim().is_empty(),
+                        "{} says no ability applies it without saying what does",
+                        entry.name
+                    );
+                    let line = entry
+                        .source
+                        .mechanic_line()
+                        .expect("a mechanic source always has a line");
+                    assert!(
+                        line.contains(mechanic),
+                        "{}'s APPLIED BY line never names the mechanic: {:?}",
+                        entry.name,
+                        line
+                    );
+                    ability_less.push(entry.name.clone());
+                }
+            }
+        }
+        ability_less.sort();
+        assert_eq!(
+            ability_less,
+            vec!["Shadow Sight".to_string()],
+            "an arena orb pickup is the only aura no ability applies — a new one here is \
+             either a genuine mechanic or a `source` nobody filled in"
+        );
+    }
+
+    /// The other direction of the same field: an ability can ask which auras it
+    /// applies. Power Word: Shield is the case that needs it — it applies its
+    /// own absorb AND the Weakened Soul marker, so an ability page built from
+    /// `applies_aura` alone would show half the cast.
+    #[test]
+    fn an_ability_can_find_every_aura_it_applies() {
+        let abilities = abilities();
+        let catalog = catalog(&abilities);
+
+        let mut shield: Vec<&str> = applied_by(&catalog, AbilityType::PowerWordShield)
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        shield.sort_unstable();
+        assert_eq!(
+            shield,
+            vec!["Power Word: Shield", "Weakened Soul"],
+            "one cast, two auras — both must be reachable from the ability"
+        );
+
+        // The ordinary case still works: an ability with one `applies_aura`
+        // block finds exactly its own entry.
+        let frostbolt: Vec<&str> = applied_by(&catalog, AbilityType::Frostbolt)
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(frostbolt, vec!["Frostbolt"]);
+
+        // And every ability-sourced entry is reachable from its own ability, so
+        // the two directions cannot disagree.
+        for entry in &catalog {
+            if let Some(ability) = entry.source.ability() {
+                assert!(
+                    applied_by(&catalog, ability)
+                        .iter()
+                        .any(|found| found.id == entry.id),
+                    "{} names {:?} as its source but the reverse lookup misses it",
+                    entry.name,
+                    ability
+                );
+            }
+        }
+    }
+
+    /// Every entry resolves to an icon key some loader actually registers, and
+    /// an entry with art of its own points at a file that exists.
+    ///
+    /// This is the card's other half. Shadow Sight rendered the placeholder
+    /// tile because it had no applying ability and therefore no key at all;
+    /// Weakened Soul now HAS an applying ability and must still not wear its
+    /// icon, because the shield's art on the debuff that blocks the shield says
+    /// the opposite of what is true.
+    #[test]
+    fn every_entry_resolves_to_an_icon_that_exists() {
+        let abilities = abilities();
+        let mut own_art: Vec<String> = Vec::new();
+        for entry in catalog(&abilities) {
+            let key = icon_key(entry.id, &abilities)
+                .unwrap_or_else(|| panic!("{} has no icon key — a placeholder tile", entry.name));
+            match entry.art {
+                AuraArt::Own(expected) => {
+                    assert_eq!(key, expected);
+                    let path = GENERIC_AURA_ICONS
+                        .iter()
+                        .find(|(registered, _)| *registered == expected)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "{}'s icon key {:?} is in no loader's table, so nothing ever \
+                                 registers a texture for it",
+                                entry.name, expected
+                            )
+                        })
+                        .1;
+                    let on_disk = std::path::Path::new("assets").join(path);
+                    assert!(
+                        on_disk.exists(),
+                        "{} points at {}, which is not in the asset tree",
+                        entry.name,
+                        on_disk.display()
+                    );
+                    own_art.push(entry.name.clone());
+                }
+                AuraArt::FromSource => {
+                    let ability = entry
+                        .source
+                        .ability()
+                        .unwrap_or_else(|| panic!("{} borrows art from nothing", entry.name));
+                    assert_eq!(key, abilities.get(&ability).expect("defined").name);
+                }
+            }
+        }
+        own_art.sort();
+        assert_eq!(
+            own_art,
+            vec!["Shadow Sight".to_string(), "Weakened Soul".to_string()],
+            "the two auras whose own art beats a borrowed icon"
+        );
+
+        // The encyclopedia's loader waits for EVERY handle it opened before it
+        // registers any texture, and it now opens this whole table — so one
+        // missing file here blanks every icon on the screen, not just an aura's.
+        for (key, path) in GENERIC_AURA_ICONS {
+            let on_disk = std::path::Path::new("assets").join(path);
+            assert!(
+                on_disk.exists(),
+                "generic aura icon {:?} points at {}, which is not in the asset tree",
+                key,
+                on_disk.display()
+            );
+        }
     }
 }

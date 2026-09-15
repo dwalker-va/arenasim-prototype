@@ -1,5 +1,28 @@
 fn main() {
-    // Enable wasm_js for getrandom when building for wasm32
+    // Declare this script's inputs.
+    //
+    // A build script that prints no `rerun-if-*` directive at all opts into
+    // Cargo's documented fallback of treating EVERY file in the package as an
+    // input to it. On a non-Windows host this script printed none, so editing
+    // a test, a doc or an asset reran it, which invalidated the crate, which
+    // rebuilt all 52 test binaries — a documented zero-rebuild `.ron` retune
+    // loop cost a full rebuild.
+    //
+    // The line matters for being PRESENT more than for the path it names:
+    // Cargo already reruns the script whenever build.rs itself changes,
+    // because the recompiled script binary is a dependency of the run. What
+    // the directive buys is switching the fallback off.
+    println!("cargo:rerun-if-changed=build.rs");
+
+    // Enable wasm_js for getrandom when building for wasm32.
+    //
+    // This needs no `rerun-if-env-changed=CARGO_CFG_TARGET_ARCH` to stay
+    // correct across a target switch, and adding one would imply a hazard that
+    // does not exist. Cargo runs and fingerprints a build script once PER
+    // TARGET, into a per-target output directory, so a
+    // `--target wasm32-unknown-unknown` build runs this script again and reads
+    // its own output — it cannot inherit the host build's cfg, or fail to see
+    // the wasm one.
     if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
         println!("cargo:rustc-cfg=wasm_js");
     }
