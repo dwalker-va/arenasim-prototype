@@ -355,26 +355,31 @@ impl BanterConfig {
             }
         }
 
-        // A pacing floor on the gap between an exchange's beats, held against
-        // the read-time a line is given: `line_lifetime - start_delay` must
-        // stay below the gap, so each line has had most of its screen time
-        // before the next one arrives.
+        // A floor on how tightly an exchange's beats may be spaced:
+        // `line_lifetime - start_delay` must stay below the gap between beats.
         //
-        // NOTE: this began as a bound on the scheduler's DEFERRAL push, and the
-        // scheduler no longer defers — it replaces. The check is kept because
-        // it still constrains pacing and the shipped defaults are tuned to
-        // satisfy it, not because anything now depends on that deferral.
+        // WHAT THIS IS, HONESTLY. The formula was derived to bound the
+        // scheduler's DEFERRAL push, and deferral is gone — a new line now
+        // replaces its speaker's live bubble instead of queueing behind it.
+        // The quantity it tests is inherited from that derivation and is NOT a
+        // read-time measure: a context's START DELAY is when its first beat
+        // speaks, which says nothing about how long a line stays readable. So
+        // it bounds beat spacing only approximately, by arithmetic built for
+        // another purpose, and it should not be dressed up as anything tidier.
+        //
+        // It is RETAINED because the shipped defaults satisfy it and it still
+        // catches a retune that would crowd beats together — not because
+        // anything now depends on the mechanism it was written for. Re-deriving
+        // it on its own terms, or dropping it, is open.
         //
         // Checked only for contexts whose pool actually holds a multi-beat
         // exchange, because the gap constrains the interval BETWEEN two beats
         // and a single-beat context has no second beat for it to apply to —
         // that is what lets `Switch` run its near-immediate `switch_start`
         // against the shared `line_lifetime`. Authoring a two-beat `Switch`
-        // later turns the check on for it automatically.
-        //
-        // The shipped values satisfy this, which is exactly why it needs
-        // checking: the safety is arithmetic, not structural, so a plausible
-        // retune would reintroduce a pacing violation silently.
+        // later turns the check on for it automatically. The safety here is
+        // arithmetic, not structural, so a plausible retune would cross the
+        // floor silently.
         for (context, start, gap) in [
             (BanterContext::Opening, t.opening_start, t.beat_gap),
             (
@@ -395,8 +400,8 @@ impl BanterConfig {
             if max_push >= gap {
                 issues.push(format!(
                     "{:?}: timing.line_lifetime ({}) minus its start delay ({}) is {}, which is \
-                     not below its beat gap ({}) — a line would still be on screen when the \
-                     next beat of its exchange arrives",
+                     not below its beat gap ({}) — the beats of an exchange would be spaced \
+                     more tightly than this floor allows",
                     context, t.line_lifetime, start, max_push, gap
                 ));
             }

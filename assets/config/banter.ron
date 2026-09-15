@@ -94,8 +94,10 @@
         //
         // Two bounds constrain it. `latest_beat` keeps every beat inside the
         // 10s countdown, and validation rejects a pool where `line_lifetime`
-        // minus a context's start delay reaches its beat gap — a pacing floor,
-        // so each line has had most of its screen time before the next lands.
+        // minus a context's start delay reaches its beat gap — a floor on how
+        // tightly beats may be spaced. That formula is inherited from a
+        // mechanism the scheduler no longer has; `banter_config.rs` says so at
+        // the check itself rather than inventing a tidier reason for it.
 
         // Seconds after the call change before the first beat speaks. Applies
         // to Opening and Correction, both of which play during the countdown
