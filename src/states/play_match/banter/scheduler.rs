@@ -282,11 +282,13 @@ fn class_at(roster: &[BanterCombatant], slot: Option<usize>) -> Option<Character
 /// `in_state(GameState::PlayMatch)` and never in `add_core_combat_systems`. It
 /// writes nothing but `SpeechBubble` entities, which no sim system reads.
 ///
-/// LATE CORRECTIONS MAY LAND AFTER THE GATES, and that is accepted. `latest_beat`
-/// (9.0s) bounds a beat's offset within an exchange, but a correction made at
-/// t=9.5 in the 10s countdown schedules its first beat at ~11.5s — a second or
-/// so into the fight. Suppressing it would silently swallow a call the operator
-/// just made, and a beat landing just after the gates open reads fine.
+/// LATE BEATS MAY LAND AFTER THE GATES, and that is accepted — by ruling
+/// (2026-09-14), a whole exchange may spill into the opening approach:
+/// `latest_beat` bounds a beat's offset within an exchange but sits past the
+/// 10s countdown, because the walk across the arena's dead space leaves ample
+/// time to finish a conversation before contact. Likewise a correction made
+/// at t=9.5 schedules beats into the fight; suppressing either would silently
+/// swallow a call the operator just made.
 pub fn play_banter_beats(
     mut commands: Commands,
     time: Res<Time>,

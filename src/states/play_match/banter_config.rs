@@ -647,8 +647,10 @@ mod tests {
     fn shipped_banter_ron_loads_and_validates() {
         let config = load_banter_config().expect("assets/config/banter.ron must load");
         assert!(
-            config.timing.latest_beat < 10.0,
-            "latest_beat must sit inside the 10s countdown, got {}",
+            config.timing.latest_beat < 13.0,
+            "latest_beat may spill past the 10s countdown into the opening \
+             approach (the walk across the arena's dead space), but must end \
+             well before combat contact, got {}",
             config.timing.latest_beat
         );
         assert!(
