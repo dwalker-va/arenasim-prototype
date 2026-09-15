@@ -68,21 +68,6 @@ use arenasim::states::play_match::equipment::{
     load_default_loadouts, load_item_definitions, ItemSlot,
 };
 
-/// For every shipped loadout: the socket the predicate names holds a weapon,
-/// and every other weapon the class carries is a declared stat stick.
-///
-/// Off-hand is excluded on purpose rather than by accident. `apply_equipment`
-/// documents and implements that an off-hand weapon never replaces
-/// attack_damage / attack_speed, so an off-hand weapon is not a candidate for
-/// "the socket that is live" and must not make this audit ambiguous.
-///
-/// A class may hold a weapon in a replacement-INELIGIBLE socket: a Mage,
-/// Warlock or Priest carries a caster one-hander in MainHand for its spell
-/// power while swinging from Ranged. Its damage fields are inert BY
-/// CONSTRUCTION rather than by ambiguity — `apply_equipment` replaces from
-/// exactly one socket, so there is never a question of which weapon "wins".
-/// Such a weapon belongs in `DECLARED_STAT_STICK_WEAPONS` with its reason, so
-/// that carrying two is a decision somebody wrote down rather than drift.
 /// The classes that deliberately carry a weapon in a socket they do NOT swing
 /// from, with the reason. A stat stick: its `attack_damage_*` and
 /// `attack_speed` never reach the combatant.
@@ -111,6 +96,21 @@ const DECLARED_STAT_STICK_WEAPONS: &[(CharacterClass, ItemSlot, &str)] = &[
     ),
 ];
 
+/// For every shipped loadout: the socket the predicate names holds a weapon,
+/// and every other weapon the class carries is a declared stat stick.
+///
+/// Off-hand is excluded on purpose rather than by accident. `apply_equipment`
+/// documents and implements that an off-hand weapon never replaces
+/// attack_damage / attack_speed, so an off-hand weapon is not a candidate for
+/// "the socket that is live" and must not make this audit ambiguous.
+///
+/// A class may hold a weapon in a replacement-INELIGIBLE socket: a Mage,
+/// Warlock or Priest carries a caster one-hander in MainHand for its spell
+/// power while swinging from Ranged. Its damage fields are inert BY
+/// CONSTRUCTION rather than by ambiguity — `apply_equipment` replaces from
+/// exactly one socket, so there is never a question of which weapon "wins".
+/// Such a weapon belongs in `DECLARED_STAT_STICK_WEAPONS` with its reason, so
+/// that carrying two is a decision somebody wrote down rather than drift.
 #[test]
 fn weapon_slot_matches_the_socket_each_loadout_fills() {
     let items = load_item_definitions().expect("items.ron must load");
