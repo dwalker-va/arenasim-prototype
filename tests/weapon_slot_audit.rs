@@ -20,6 +20,47 @@
 //! shipped loadouts. This audit pins exactly that relation, so the two cannot
 //! drift apart again — whether the next change moves a weapon between sockets
 //! in `loadouts.ron` or adds a class to the match arm.
+//!
+//! # The defect class this guard exists for
+//!
+//! **`weapon_slot()` disagreeing with `loadouts.ron` about which weapon is
+//! live.** Both are self-consistent when that happens; what is wrong is one
+//! relative to the other, and the symptom is silence — a class swings numbers
+//! nobody chose for it.
+//!
+//! Nothing else in this file can catch that, and the reason is worth stating
+//! exactly, because it is not obvious and it is easy to believe otherwise:
+//!
+//! > `every_class_swings_the_weapon_in_its_named_socket` derives its
+//! > expectation FROM `weapon_slot()`, so it is definitionally satisfied
+//! > whenever `apply_equipment` reads that same socket. It can only catch those
+//! > two disagreeing with each other, never the predicate disagreeing with
+//! > INTENT.
+//!
+//! A test whose expected value is computed from the thing under test cannot
+//! fail on that thing being wrong. So the burden sits here, on the two
+//! assertions below, and it sits on BOTH of them:
+//!
+//! - the named socket must HOLD a weapon — the form the Shaman hit, where the
+//!   predicate points at a socket carrying a relic, or nothing;
+//! - every OTHER weapon must be DECLARED — the form available only once a class
+//!   carries two, where the predicate points at a real weapon that is the WRONG
+//!   real weapon. Name MainHand for a Mage and it swings its caster dagger
+//!   instead of its wand; both sockets hold weapons, so "the named socket holds
+//!   a weapon" is satisfied and says nothing.
+//!
+//! Neither assertion is redundant and neither covers the other. Relaxing either
+//! one reopens a defect that ships silently.
+//!
+//! # A stated limit
+//!
+//! `DECLARED_STAT_STICK_WEAPONS` can be silenced by writing a FALSE
+//! justification into it: declare `(Mage, Ranged)` and the Mage may then point
+//! at MainHand unchallenged. That is the accepted cost of a named-exception
+//! list, the same cost `JUSTIFIED_EMPTY_SOCKETS` and `JUSTIFIED_USELESS_SOCKETS`
+//! carry, and it is deliberate rather than an oversight. Silencing this guard
+//! requires writing a sentence that is not true, in source, where a reviewer
+//! reads it — which is the point of asking for the sentence.
 
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::components::Combatant;
@@ -27,35 +68,21 @@ use arenasim::states::play_match::equipment::{
     load_default_loadouts, load_item_definitions, ItemSlot,
 };
 
-/// For every shipped loadout: the socket the predicate names DOES hold a
-/// weapon.
+/// For every shipped loadout: the socket the predicate names holds a weapon,
+/// and every other weapon the class carries is a declared stat stick.
 ///
 /// Off-hand is excluded on purpose rather than by accident. `apply_equipment`
 /// documents and implements that an off-hand weapon never replaces
 /// attack_damage / attack_speed, so an off-hand weapon is not a candidate for
 /// "the socket that is live" and must not make this audit ambiguous.
 ///
-/// A class may legitimately hold a weapon in a replacement-INELIGIBLE socket as
-/// well (AS-87): a Mage, Warlock or Priest carries a caster one-hander in
-/// MainHand for its spell power while swinging from Ranged. That item's damage
-/// fields are inert, and inert BY CONSTRUCTION rather than by ambiguity —
-/// `apply_equipment` replaces from exactly one socket, so there is never a
-/// question of which weapon "wins".
-///
-/// So this asserts two things rather than one. The named socket must HOLD a
-/// weapon — that is the failure the Shaman hit. And any OTHER weapon must be
-/// DECLARED in `DECLARED_STAT_STICK_WEAPONS`, because a second weapon should be
-/// a decision somebody made, not drift.
-///
-/// The declaration is what keeps this as strong as the "exactly one weapon"
-/// rule it replaced. That rule had to go — AS-87 makes two weapons correct for
-/// three classes — but dropping it without a replacement would wave through the
-/// mutation it used to catch: name the WRONG socket for a class that holds two,
-/// say `weapon_slot(Mage) = MainHand`, and the Mage silently swings its dagger
-/// instead of its wand. A bare "the named socket holds a weapon" check passes
-/// that, because MainHand does hold one. Requiring the OTHER socket to be the
-/// declared one fails it, because under that mutation the undeclared socket is
-/// Ranged.
+/// A class may hold a weapon in a replacement-INELIGIBLE socket: a Mage,
+/// Warlock or Priest carries a caster one-hander in MainHand for its spell
+/// power while swinging from Ranged. Its damage fields are inert BY
+/// CONSTRUCTION rather than by ambiguity — `apply_equipment` replaces from
+/// exactly one socket, so there is never a question of which weapon "wins".
+/// Such a weapon belongs in `DECLARED_STAT_STICK_WEAPONS` with its reason, so
+/// that carrying two is a decision somebody wrote down rather than drift.
 /// The classes that deliberately carry a weapon in a socket they do NOT swing
 /// from, with the reason. A stat stick: its `attack_damage_*` and
 /// `attack_speed` never reach the combatant.
