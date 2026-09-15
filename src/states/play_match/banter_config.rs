@@ -187,8 +187,10 @@ pub struct BanterTiming {
     /// Beat gap for the `Correction` context — tighter, because a correction
     /// races the gates.
     pub correction_beat_gap: f32,
-    /// No beat may start after this. The countdown is 10s, so a beat past it
-    /// would be cut off by the gates opening.
+    /// No beat may start after this. Beats MAY start after the 10s countdown
+    /// (ruling 2026-09-14): the walk across the arena's dead space leaves time
+    /// to finish talking before contact, so this bounds the tail of an
+    /// exchange rather than confining it to the countdown.
     pub latest_beat: f32,
     /// Selection-weight multiplier applied once per non-`Any` constraint
     /// (KTD8). `1.0` makes specificity irrelevant; higher favours bespoke
@@ -460,7 +462,9 @@ impl BanterConfig {
                 }
             }
 
-            // Derived beat times must fit inside the countdown window.
+            // Derived beat times must land at or before `latest_beat` — which
+            // sits past the countdown on purpose, so this is a bound on the
+            // tail of an exchange, not on the countdown window.
             for (i, _beat) in exchange.beats.iter().enumerate() {
                 let start = t.beat_start(exchange.context, i);
                 if start > t.latest_beat {
