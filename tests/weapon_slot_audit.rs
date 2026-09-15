@@ -27,13 +27,22 @@ use arenasim::states::play_match::equipment::{
     load_default_loadouts, load_item_definitions, ItemSlot,
 };
 
-/// For every shipped loadout: the socket holding its weapon IS the socket the
-/// predicate names.
+/// For every shipped loadout: the socket the predicate names DOES hold a
+/// weapon.
 ///
 /// Off-hand is excluded on purpose rather than by accident. `apply_equipment`
 /// documents and implements that an off-hand weapon never replaces
 /// attack_damage / attack_speed, so an off-hand weapon is not a candidate for
 /// "the socket that is live" and must not make this audit ambiguous.
+///
+/// A class may legitimately hold a weapon in a replacement-ineligible socket
+/// as well (AS-87): a Mage, Warlock or Priest carries a caster one-hander in
+/// MainHand for its spell power while swinging from Ranged. That item's damage
+/// fields are inert, and inert BY CONSTRUCTION rather than by ambiguity —
+/// `apply_equipment` replaces from exactly one socket, the one `weapon_slot()`
+/// names, so there is never a question of which weapon "wins". What the audit
+/// has to prove is the thing that actually broke: that the named socket is not
+/// EMPTY of a weapon, because then the class silently keeps its class base.
 #[test]
 fn weapon_slot_matches_the_socket_each_loadout_fills() {
     let items = load_item_definitions().expect("items.ron must load");
@@ -57,32 +66,19 @@ fn weapon_slot_matches_the_socket_each_loadout_fills() {
             .map(|(slot, _)| *slot)
             .collect();
 
-        assert_eq!(
-            live.len(),
-            1,
-            "{} should fill exactly one replacement-eligible weapon socket, \
-             found {:?}. Either its loadout carries no weapon at all (its \
-             attack_damage / attack_speed would stay at the class base), or it \
-             carries two and which one goes live is ambiguous.",
-            class.name(),
-            live
-        );
-
         let expected = class.weapon_slot();
-        assert_eq!(
-            live[0],
-            expected,
-            "{} carries its weapon in {:?}, but CharacterClass::weapon_slot() \
-             names {:?}. apply_equipment replaces attack_damage / attack_speed \
-             ONLY from the socket the predicate names, so as written this class \
-             fights with its class base weapon stats and the item in {:?} is \
-             inert. Fix whichever of the two is wrong: the match arm in \
-             src/states/match_config.rs, or the socket in \
+        assert!(
+            live.contains(&expected),
+            "{} carries no weapon in {:?}, the socket \
+             CharacterClass::weapon_slot() names — it fills {:?} instead. \
+             apply_equipment replaces attack_damage / attack_speed ONLY from \
+             the named socket, so as written this class fights with its class \
+             base weapon stats. Fix whichever of the two is wrong: the match \
+             arm in src/states/match_config.rs, or the socket in \
              assets/config/loadouts.ron.",
             class.name(),
-            live[0],
             expected,
-            live[0]
+            live
         );
 
         audited += 1;

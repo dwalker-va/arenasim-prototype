@@ -87,64 +87,102 @@ frill is a caster stat stick by definition.
 
 ## The paired sweep
 
-Four 2v2 arms on BasicArena / Legacy at a 300s cap, 3,870 matches per binary,
-run on both binaries at identical seeds. Three arms put a buffed class on team 1;
-the fourth is a CONTROL filtered to cells where NEITHER side fields a Mage,
-Warlock or Priest.
+Three paired runs, on the three successive bases this card was rebased across
+while other cards merged under it. Every run is BasicArena / Legacy, 300s cap,
+both binaries at identical seeds, with a CONTROL arm filtered to cells where
+NEITHER side fields a Mage, Warlock or Priest.
 
-### The control — the card's actual obligation
+| run | base | size | why |
+|---|---|---|---|
+| 1 | `3c61185` | 3,870/binary | before AS-54 merged |
+| 2 | `323bd93` | 3,870/binary | after AS-54 (Frost Armor as one debuff) |
+| 3 | `17bf5b1` | 1,770/binary | after AS-97 (Shaman weapon damage) + AS-53 |
 
-| | result |
-|---|---|
-| no buffed class on either side | **720 identical, 0 differ** |
-| a buffed class present | 1,861 of 3,150 differ |
-| non-vacuity | 3,870/3,870 ended in a kill; 2,170 distinct durations |
+Run 3 is deliberately asymmetric: the CONTROL is at FULL strength because it is
+the card's actual obligation, and the delta arms are small because two prior
+runs had already answered that question and a third full-size pass would only
+have raced the merge queue again.
 
-That split is the byte-identity requirement discharged. Cells the change cannot
-touch are bit-identical; cells it can touch move. A uniformly identical result
-would have meant the change never reached the sim, and a control cell moving
-would have meant it reached further than intended. Neither happened.
+### The control — the load-bearing result
 
-### The balance arms
+| base | no buffed class either side | a buffed class present |
+|---|---|---|
+| `3c61185` | **720 identical, 0 differ** | 1,861 of 3,150 differ |
+| `323bd93` | **720 identical, 0 differ** | 1,838 of 3,150 differ |
+| `17bf5b1` | **720 identical, 0 differ** | 620 of 1,050 differ |
 
-Team 1 win rate, n=1,050 per arm.
+Non-vacuity: every run ended 100% of its matches in a kill (none by timeout),
+with 2,170 / 2,158 / 1,189 distinct durations.
 
-| arm | all opponents | CLEAN (enemy unbuffed) | MIRRORED | SOLO |
+**This is what the card owes and it replicates on all three bases.** Cells the
+change cannot touch are bit-identical in winner, end reason and duration; cells
+it can touch move. A uniformly identical result would have meant the change
+never reached the sim; a control cell moving would have meant it reached further
+than intended. Neither happened, three times.
+
+### The delta — directional, and small
+
+Team 1 win rate. **Runs 1 and 2 are n=1,050 per arm; run 3 is n=350 and is
+DIRECTIONAL ONLY — it may not be cited as any class's standing.**
+
+| arm | slice | base 3c61185 | base 323bd93 | base 17bf5b1 |
 |---|---|---|---|---|
-| Mage | +1.4pt (z=1.66) | +0.0pt (z=0.21) | +2.2pt (z=2.00) | +1.5pt (z=0.80) |
-| Warlock | +0.3pt (z=0.24) | +2.1pt (z=1.28) | -0.7pt (z=0.62) | +2.6pt (z=1.81) |
-| Priest | -0.2pt (z=0.12) | +1.3pt (z=0.74) | -1.0pt (z=0.89) | -0.7pt (z=0.21) |
+| Mage | all | +1.4 ns | +1.8 (z=2.30) | +1.4 ns |
+| | CLEAN | +0.0 ns | +0.0 ns | -0.8 ns |
+| | MIRRORED | +2.2 (z=2.00) | +2.8 (z=2.81) | +2.7 ns |
+| Warlock | all | +0.3 ns | +1.2 ns | +3.1 ns |
+| | CLEAN | +2.1 ns | +2.1 ns | +3.2 ns |
+| Priest | all | -0.2 ns | -0.2 ns | +0.6 ns |
+| | CLEAN | +1.3 ns | +2.1 ns | +5.6 (z=2.00) |
 
-**The effect is about +1 point and not resolvable from zero at this n. That is
-the ideal outcome, not a failed measurement.** The hole is filled without
-distorting balance. A clean +3pt would have been the worrying result, because it
-would mean the item was doing something the card did not intend.
-
-**On the one cell that reads as significant.** Mage MIRRORED sits at z=2.00.
-It is named here rather than quietly dropped, because a reader deserves to know
-it exists and why it is not a finding: twelve slices were tested, and one at
-z=2.00 is what multiple comparisons produce. It is also the MIRRORED slice — the
-one where both sides hold a buffed class and the effect is expected to WASH. A
-genuine effect would show in CLEAN, where the Mage arm measures exactly +0.0pt.
+**The effect is about +1 to +2 points and does not resolve from zero on any of
+three bases. That is the ideal outcome, not a failed measurement.** This card
+fills a CONTENT HOLE — two classes had no one-handed weapon carrying a caster
+stat, so the slot was unusable and the staff-versus-one-hander choice was fake.
+The deliverable is a fillable slot with a real choice in it. An unresolvable
++1pt means the hole is closed WITHOUT distorting balance. A clean +3pt would
+have been the worrying result, because it would mean the item was doing
+something the card did not intend.
 
 **A prediction that missed, recorded because it is useful.** Before measuring,
 reasoning from AS-86's relics (+5 spell power and +3 mana worth +2.4pt to a
 Paladin comp at z=4.86), this card predicted +2 to +3pt in the clean slice.
-Measured: +0.0, +2.1 and +1.3, none resolvable. The prediction was HIGH. Whoever
-sizes the next sweep should weight that: an equivalent stat step on a different
-class and socket did not reproduce the relics' magnitude.
+Measured clean slices across three bases: +0.0, +0.0, -0.8 (Mage); +2.1, +2.1,
++3.2 (Warlock); +1.3, +2.1, +5.6 (Priest). The prediction was HIGH for the Mage
+and roughly right for the other two. Whoever sizes the next sweep should weight
+that an equivalent stat step on a different class and socket did not reproduce
+the relics' magnitude.
 
-### Two bases, same conclusion
+**On the cells that read as significant.** Three appear across the three runs,
+and they are NOT the same cell: Mage MIRRORED (z=2.00, then z=2.81), and Priest
+CLEAN on run 3 (z=2.00, n=350). They are named here rather than quietly dropped.
 
-AS-54 (the Frost Armor chill as one compound debuff) merged mid-card and moved
-Mage comps, so the whole sweep was re-run on the new base. Both runs are
-committed:
+The Mage MIRRORED pair is the interesting one, and the reasoning went both ways.
+One cell at z=2.00 out of twelve slices is what multiple comparisons produce,
+which was the first read. The SAME cell returning larger on a second base is
+harder to dismiss on those grounds. What keeps it from being a finding is
+different: runs 1 and 2 share seeds and comps and differ only in the base, so
+they are CORRELATED, not independent replications — agreement between them is
+much weaker evidence than two independent samples. And on run 3 that cell is
++2.7pt but NOT significant, while a different cell entirely (Priest CLEAN) is.
+A significant cell that wanders between runs is the signature of multiple
+comparisons, not of an effect.
 
-  `2026-09-14-as87_superseded_base_{before,after}.csv`  — base 3c61185
-  `2026-09-14-as87_{before,after}.csv`                   — base 323bd93
+The honest statement: the mirrored slice moved the same direction on all three
+runs at a size the design cannot resolve, while the CLEAN slice that isolates
+the buff from the mirror is +0.0pt on both full-size runs. Noted, unresolved,
+and not a claim about where any class stands.
 
-Two measurements on two different bases agreeing the effect is small is stronger
-than either alone.
+**An open question for whoever reads several of these.** A significant team-1
+gain in the MIRRORED slice — the slice where the effect is supposed to wash —
+has now appeared on more than one card this cycle: AS-86's relics measured
+mirrored +1.9pt at z=2.01, and this card's Mage arm measured z=2.00 then z=2.81.
+Two other cards in the same cycle (AS-54's Frost Armor, AS-97's Shaman weapon
+damage) showed nothing in that slice. Two of four is not a pattern worth betting
+on, and nothing here chases it. It is recorded because if it IS systematic, it
+would be a fact about the MEASUREMENT rather than about any class, and it would
+quietly bias every mirrored slice this project reports. If it shows up on a
+third card, it deserves to become one.
 
 ## The medic-chase scan — the clearest evidence the buff works
 
@@ -215,12 +253,20 @@ which is the step that turns "tests are failing" into "these four are mine".
 
 ## Reproducing this
 
-Unlike AS-86, the sweep's input is committed:
-`2026-09-14-as87_caster_onehanders_sweep.jsonl`. Every line names its `map` and
-`ai_profile`, so the file fully determines the run — the batch CSV has no column
-for either.
+Unlike AS-86, the sweep inputs are committed, and every line names its `map`
+and `ai_profile` so a file fully determines its run — the batch CSV has no
+column for either.
 
-    arenasim --batch docs/design/balance/2026-09-14-as87_caster_onehanders_sweep.jsonl \
+  `2026-09-14-as87_caster_onehanders_sweep.jsonl`  runs 1 and 2 (3,870 matches)
+  `2026-09-14-as87_base3_sweep.jsonl`              run 3 (1,770 matches)
+
+Results, one pair per base:
+
+  `2026-09-14-as87_base1_3c61185_{before,after}.csv`
+  `2026-09-14-as87_base2_323bd93_{before,after}.csv`
+  `2026-09-14-as87_base3_17bf5b1_{before,after}.csv`
+
+    arenasim --batch docs/design/balance/2026-09-14-as87_base3_sweep.jsonl \
       --out results.csv --jobs 8
 
 Run it from the root of a tree holding the assets you mean to measure. **The sim
