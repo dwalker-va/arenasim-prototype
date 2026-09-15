@@ -133,15 +133,26 @@ pub fn log_ability_use(
 /// here too; that was removed once combatants got real animations, which the
 /// bubbles sat on top of. `text` is displayed verbatim and `lifetime` is the
 /// caller's, since a conversational beat has no fixed clock.
-pub fn spawn_speech_line(commands: &mut Commands, owner: Entity, text: String, lifetime: f32) {
-    commands.spawn((
-        SpeechBubble {
-            owner,
-            text,
-            lifetime,
-        },
-        PlayMatchEntity,
-    ));
+///
+/// Returns the spawned bubble so the caller can enforce one bubble per
+/// speaker: bubbles carry no per-owner offset, so a speaker who starts a new
+/// line while their last is still up must have the old entity despawned.
+pub fn spawn_speech_line(
+    commands: &mut Commands,
+    owner: Entity,
+    text: String,
+    lifetime: f32,
+) -> Entity {
+    commands
+        .spawn((
+            SpeechBubble {
+                owner,
+                text,
+                lifetime,
+            },
+            PlayMatchEntity,
+        ))
+        .id()
 }
 
 /// Helper function to get next floating combat text offset and update pattern state.
@@ -226,8 +237,9 @@ mod tests {
         // lifetime, since a conversational beat has no fixed clock.
         let owner = Entity::from_raw(3);
         let line = "Kill the Priest first, then the pet.".to_string();
-        let mut world =
-            world_after(|commands| spawn_speech_line(commands, owner, line.clone(), 4.5));
+        let mut world = world_after(|commands| {
+            spawn_speech_line(commands, owner, line.clone(), 4.5);
+        });
 
         let mut q = world.query::<(&SpeechBubble, &PlayMatchEntity)>();
         let (bubble, _) = q.single(&world).expect("one bubble spawned");

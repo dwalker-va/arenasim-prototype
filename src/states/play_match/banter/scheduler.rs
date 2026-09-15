@@ -79,11 +79,6 @@ pub struct BanterScheduler {
     /// `at`. The two teams schedule independently: a correction on one side
     /// never touches the other's queue.
     queues: [Vec<PendingBeat>; 2],
-    /// When each speaker's live bubble expires, on the same clock. The
-    /// cross-exchange half of the one-bubble-per-speaker rule. Entries are
-    /// never pruned: at most one per combatant, and the whole resource is
-    /// dropped on match exit.
-    speaking_until: HashMap<Entity, f32>,
     /// Per-team count of resolutions so far this match, fed to
     /// `resolve_exchange` so a team corrected three times does not tell the
     /// same joke three times.
@@ -144,29 +139,6 @@ impl BanterScheduler {
         }));
     }
 
-    /// Record every live bubble as speaker occupancy.
-    ///
-    /// Occupancy exists because two bubbles on one speaker DRAW on top of each
-    /// other. Every bubble is a banter line and every banter line renders, so
-    /// every one of them can collide.
-    ///
-    /// Takes the max against whatever is already recorded so a booking is never
-    /// shortened by this, and so a speaker holding two bubbles is busy until
-    /// the later one clears.
-    ///
-    /// Split from [`take_due`](Self::take_due) rather than folded into it
-    /// because the queue mechanics stay pure and testable over plain values;
-    /// this is the one step that needs the World.
-    fn observe_live_bubbles(&mut self, bubbles: &Query<&SpeechBubble>) {
-        for bubble in bubbles.iter() {
-            let free_at = self.clock + bubble.lifetime;
-            self.speaking_until
-                .entry(bubble.owner)
-                .and_modify(|until| *until = until.max(free_at))
-                .or_insert(free_at);
-        }
-    }
-
     /// Remove and return every beat due at the current clock, in play order.
     ///
     /// `is_alive` is asked per beat at EMISSION time — a speaker bound five
@@ -175,19 +147,17 @@ impl BanterScheduler {
     /// (dropping the rest of the exchange too) would silence a survivor's reply
     /// because their partner fell.
     ///
-    /// Each team's queue is walked in order and STOPS at the first beat that
-    /// cannot speak yet. That is what keeps an exchange in sequence: if beat 0
-    /// is deferred behind a live bubble, beat 1 waits behind it rather than
-    /// jumping the queue and delivering the punchline first.
+    /// Each team's queue is walked in ascending `at` and STOPS at the first
+    /// beat that is not due yet, so an exchange always plays in sequence and
+    /// can never deliver its punchline before its setup.
     ///
-    /// DEFERRAL, not dropping, is how a cross-exchange collision is resolved: a
-    /// beat whose speaker still has a bubble up has its `at` pushed to the
-    /// moment that bubble expires. The alternative — dropping it — would eat
-    /// the first line of a correction precisely when the operator most wants to
-    /// be told what changed. The push is bounded by one `line_lifetime` (the
-    /// blocking bubble was spawned at most that long ago), and it cannot
-    /// cascade past one step, because `BanterConfig::validate()` already keeps same-role
-    /// beats within an exchange at least `line_lifetime` apart.
+    /// A beat is NEVER held back because its speaker is already talking. A
+    /// speaker who starts a new line while their last is still up REPLACES it
+    /// (see `play_banter_beats`) — self-interruption, like chat. That is the
+    /// point: consecutive beats on one role are an authored device, and the
+    /// rapid-fire replacement is what reads as one party overcommunicating.
+    /// Holding the beat instead would stretch such a run to one `line_lifetime`
+    /// per beat and spill it past the gates.
     fn take_due(&mut self, is_alive: impl Fn(Entity) -> bool) -> Vec<PendingBeat> {
         let mut due: Vec<PendingBeat> = Vec::new();
 
@@ -202,18 +172,7 @@ impl BanterScheduler {
                     self.queues[index].remove(0);
                     continue;
                 }
-                let free_at = self
-                    .speaking_until
-                    .get(&beat.speaker)
-                    .copied()
-                    .unwrap_or(f32::NEG_INFINITY);
-                if self.clock < free_at {
-                    self.queues[index][0].at = free_at;
-                    break;
-                }
                 let beat = self.queues[index].remove(0);
-                self.speaking_until
-                    .insert(beat.speaker, self.clock + beat.lifetime);
                 due.push(beat);
             }
         }
@@ -295,7 +254,7 @@ pub fn play_banter_beats(
     mut watcher: ResMut<CallWatcher>,
     mut scheduler: ResMut<BanterScheduler>,
     combatants: Query<(Entity, &Combatant), Without<Pet>>,
-    bubbles: Query<&SpeechBubble>,
+    bubbles: Query<(Entity, &SpeechBubble)>,
 ) {
     let Some(banter_config) = banter_config else {
         // `BanterConfigPlugin` registers in `src/main.rs` only (KTD5), so this
@@ -358,15 +317,6 @@ pub fn play_banter_beats(
         }
     }
 
-    // Fold every live bubble into the occupancy map before deciding what is
-    // due, not just the ones this scheduler emitted itself.
-    //
-    // Bubbles carry no per-owner offset, so two live on one speaker draw on top
-    // of each other. Reading the World rather than trusting the scheduler's own
-    // bookkeeping keeps the one-bubble-per-speaker rule true against anything
-    // else that ever spawns a bubble, not only against banter.
-    scheduler.observe_live_bubbles(&bubbles);
-
     // A despawned entity fails the `get` and reads as dead, which is the right
     // answer for a beat whose speaker is gone.
     let due = scheduler.take_due(|entity| {
@@ -374,8 +324,29 @@ pub fn play_banter_beats(
             .get(entity)
             .is_ok_and(|(_, combatant)| combatant.is_alive())
     });
+
+    // One bubble per speaker: a new line REPLACES that speaker's live one.
+    //
+    // Bubbles carry no per-owner offset, so two live on one speaker would draw
+    // on top of each other. Replacement — not a layout offset, and not holding
+    // the new line back — is what keeps that impossible, and self-interruption
+    // is the intended read for consecutive beats on one role.
+    //
+    // Seeded from the World rather than from the scheduler's own bookkeeping,
+    // so the rule holds against any bubble, not only the ones banter emitted.
+    // The map is kept current as beats spawn, which also covers two beats for
+    // one speaker falling due on the SAME frame: `Commands` are deferred, so a
+    // bubble spawned here is not yet visible to `bubbles`.
+    let mut live: HashMap<Entity, Entity> = bubbles
+        .iter()
+        .map(|(entity, bubble)| (bubble.owner, entity))
+        .collect();
     for beat in due {
-        spawn_speech_line(&mut commands, beat.speaker, beat.text, beat.lifetime);
+        let speaker = beat.speaker;
+        let bubble = spawn_speech_line(&mut commands, speaker, beat.text, beat.lifetime);
+        if let Some(previous) = live.insert(speaker, bubble) {
+            commands.entity(previous).try_despawn();
+        }
     }
 }
 
@@ -571,11 +542,12 @@ mod tests {
         assert_eq!(due[0].speaker, BEA);
     }
 
-    /// One live bubble per speaker, ACROSS exchanges. `BanterConfig::validate()` covers
-    /// the within-exchange case; only the scheduler can see a correction beat
-    /// landing while an opening beat from the same speaker is still up.
+    /// One bubble per speaker, ACROSS exchanges — by REPLACEMENT, not by
+    /// waiting. A correction landing while an opening beat from the same
+    /// speaker is still up speaks at once and takes the bubble over; holding it
+    /// back would delay the operator's own correction to tell them nothing new.
     #[test]
-    fn a_second_bubble_on_one_speaker_is_deferred_until_the_first_expires() {
+    fn a_second_line_on_one_speaker_speaks_at_once() {
         let mut scheduler = BanterScheduler::default();
         scheduler.queue_exchange(
             1,
@@ -592,26 +564,23 @@ mod tests {
             &resolved(BanterContext::Correction, 2.6, &[(ALEX, "correction", 0.0)]),
         );
 
+        assert_eq!(
+            scheduler.take_due(all_alive).len(),
+            1,
+            "the correction speaks now — the live bubble is replaced, not waited out"
+        );
         assert!(
-            scheduler.take_due(all_alive).is_empty(),
-            "the correction must wait rather than draw over the live bubble"
-        );
-        assert_eq!(
-            scheduler.queues[0][0].at, 2.6,
-            "deferred to exactly when the first bubble expires"
-        );
-
-        // The push is bounded by one lifetime, so the line is delayed, never lost.
-        assert_eq!(
-            step(&mut scheduler, 0.7),
-            vec![(ALEX, "correction".to_string())]
+            scheduler.queues[0].is_empty(),
+            "and nothing is left holding behind it"
         );
     }
 
-    /// A deferred beat holds the ones behind it, so an exchange cannot deliver
-    /// its punchline before its setup.
+    /// Beats keep their authored times and their order. A speaker already
+    /// mid-bubble no longer holds anything back, so the setup speaks on time
+    /// (replacing the line before it) and the punchline still waits for its own
+    /// beat rather than arriving alongside it.
     #[test]
-    fn later_beats_wait_behind_a_deferred_beat() {
+    fn beats_keep_their_order_and_their_pacing() {
         let mut scheduler = BanterScheduler::default();
         // ALEX is already mid-bubble when the exchange is queued...
         scheduler.queue_exchange(
@@ -630,13 +599,17 @@ mod tests {
             ),
         );
 
-        // ...so at t=0.5 BEA's beat is due, but it must not jump ALEX's.
-        assert!(step(&mut scheduler, 0.5).is_empty());
-        let spoken: Vec<String> = (0..10)
-            .flat_map(|_| step(&mut scheduler, 0.5))
-            .map(|(_, text)| text)
-            .collect();
-        assert_eq!(spoken, vec!["setup".to_string(), "punchline".to_string()]);
+        // ...and the setup speaks straight over it, on its authored beat.
+        assert_eq!(step(&mut scheduler, 0.0), vec![(ALEX, "setup".to_string())]);
+        assert!(
+            step(&mut scheduler, 0.2).is_empty(),
+            "the punchline must not jump forward to fill the gap"
+        );
+        assert_eq!(
+            step(&mut scheduler, 0.3),
+            vec![(BEA, "punchline".to_string())],
+            "it lands on its own beat time"
+        );
     }
 
     /// The occurrence counter is per team and advances on every change — it is
@@ -853,14 +826,14 @@ mod tests {
         assert_eq!(world.resource::<BanterScheduler>().occurrence[0], 1);
     }
 
-    /// `observe_live_bubbles` reads the WORLD, not just the scheduler's own
-    /// emissions, so a bubble it never queued still books its owner's mouth.
+    /// The one-bubble-per-speaker rule is seeded from the WORLD, not from the
+    /// scheduler's own emissions, so a bubble it never queued is replaced too.
     ///
-    /// The pure-value tests above cover deferral within the scheduler's
-    /// bookkeeping; this is the half that needs a World, and the only thing
-    /// that would notice if the fold were dropped.
+    /// The pure-value tests above cover the queue mechanics; this is the half
+    /// that needs a World, and the only thing that would notice if the
+    /// replacement map stopped reading live bubbles.
     #[test]
-    fn a_live_bubble_the_scheduler_did_not_emit_still_defers_a_beat() {
+    fn a_live_bubble_the_scheduler_did_not_emit_is_replaced() {
         let mut world = banter_world(
             &[CharacterClass::Warrior, CharacterClass::Priest],
             &[CharacterClass::Mage, CharacterClass::Warlock],
@@ -884,30 +857,109 @@ mod tests {
             change(1, Some(0), LastSeenCall::NeverObserved, false),
         );
 
-        // opening_start is 1.0, so beat 0 is due here — and must wait, because
-        // drawing it now would stack two bubbles on one head.
+        // opening_start is 1.0, so beat 0 is due here — and it TAKES OVER the
+        // bubble already on the caller's head rather than stacking on it.
         run_scheduler(&mut world, 0.1);
         run_scheduler(&mut world, 1.0);
+
+        let on_caller: Vec<String> = bubbles(&mut world)
+            .into_iter()
+            .filter(|(owner, _)| *owner == caller)
+            .map(|(_, text)| text)
+            .collect();
+        assert_eq!(
+            on_caller.len(),
+            1,
+            "exactly one bubble may be live on a speaker, got {:?}",
+            on_caller
+        );
         assert!(
-            !bubbles(&mut world)
-                .iter()
-                .any(|(owner, text)| *owner == caller && text.contains("{class:")),
-            "beat 0 must not draw over a live bubble, got {:?}",
-            bubbles(&mut world)
+            on_caller[0].contains("{class:"),
+            "and it is the new beat, not the line it replaced: {:?}",
+            on_caller
+        );
+        assert!(
+            world.get_entity(blocker).is_err(),
+            "the replaced bubble is despawned, not merely hidden"
+        );
+    }
+
+    /// A same-role RUN plays as clean sequential replacement: never two
+    /// bubbles on one head, and the lines arrive in authored order.
+    ///
+    /// This is the property that had to hold before the validator's same-role
+    /// rule could go. Three beats on ONE role, each landing while the previous
+    /// bubble is still live, is the shape that rule used to reject — and the
+    /// shape an authored "this speaker is overcommunicating" run needs.
+    #[test]
+    fn a_same_role_run_replaces_rather_than_stacking() {
+        let timing = BanterTiming {
+            opening_start: 1.0,
+            switch_start: 0.1,
+            beat_gap: 1.0,
+            // ABOVE the beat gap on purpose: every beat lands while the
+            // previous bubble is still up, so every one of them replaces.
+            line_lifetime: 3.0,
+            correction_beat_gap: 1.0,
+            latest_beat: 9.0,
+            specificity_weight: 3.0,
+        };
+        let run = BanterExchange {
+            context: BanterContext::Opening,
+            speakers: vec![
+                speaker("caller", ClassConstraint::Any),
+                speaker("responder", ClassConstraint::Any),
+            ],
+            target: ClassConstraint::Any,
+            beats: vec![
+                beat("caller", "one"),
+                beat("caller", "two"),
+                beat("caller", "three"),
+            ],
+        };
+        let mut world = banter_world(
+            &[CharacterClass::Warrior, CharacterClass::Priest],
+            &[CharacterClass::Mage, CharacterClass::Warlock],
+        );
+        world.insert_resource(BanterConfig {
+            timing,
+            exchanges: vec![run],
+        });
+        push_change(
+            &mut world,
+            change(1, Some(0), LastSeenCall::NeverObserved, false),
         );
 
-        // Deferred, not dropped: the line speaks once the mouth is free. The
-        // step clears the booking the blocker made on its last observed frame
-        // (`clock + 2.0`), which outlives the entity by design — occupancy is
-        // recorded when a bubble is seen, not tracked as it expires.
-        world.despawn(blocker);
-        run_scheduler(&mut world, 2.5);
-        assert!(
-            bubbles(&mut world)
-                .iter()
-                .any(|(owner, text)| *owner == caller && text.contains("{class:")),
-            "beat 0 should speak once the blocking bubble is gone, got {:?}",
-            bubbles(&mut world)
+        // Bubbles never expire here — `update_speech_bubbles` is not in this
+        // harness — so anything still live is something replacement failed to
+        // clear, which is exactly what the per-frame check wants to catch.
+        let mut spoken: Vec<String> = Vec::new();
+        for _ in 0..40 {
+            run_scheduler(&mut world, 0.1);
+            let live = bubbles(&mut world);
+
+            let mut owners: Vec<Entity> = live.iter().map(|(owner, _)| *owner).collect();
+            let before = owners.len();
+            owners.sort();
+            owners.dedup();
+            assert_eq!(
+                owners.len(),
+                before,
+                "two bubbles live on one speaker — replacement failed: {:?}",
+                live
+            );
+
+            if let Some((_, text)) = live.first() {
+                if spoken.last() != Some(text) {
+                    spoken.push(text.clone());
+                }
+            }
+        }
+
+        assert_eq!(
+            spoken,
+            vec!["one".to_string(), "two".to_string(), "three".to_string()],
+            "the run must play in authored order, each line taking over from the last"
         );
     }
 
@@ -950,7 +1002,6 @@ mod tests {
 
         let scheduler = world.resource::<BanterScheduler>();
         assert!(scheduler.queues.iter().all(|queue| queue.is_empty()));
-        assert!(scheduler.speaking_until.is_empty());
         assert_eq!(scheduler.occurrence, [0, 0]);
         assert_eq!(
             scheduler.clock, 0.0,
