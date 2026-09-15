@@ -840,10 +840,11 @@
         // 97-98% of their own budget and cannot be raised to meet it.
         //
         // The weapon damage here is INERT for the classes these are meant for:
-        // `apply_equipment` replaces attack damage from the MainHand only when
-        // `class.is_melee()`, and every class that wants one of these swings
-        // from the Ranged socket instead. It is carried for the melee classes
-        // that also train daggers, and so the picker reads them as weapons.
+        // `apply_equipment` replaces attack damage from ONE socket, the one
+        // `class.weapon_slot()` names, and for a Mage, Warlock or Priest that
+        // socket is Ranged. It is carried for the classes whose live socket IS
+        // the main hand and that also train daggers, and so the picker reads
+        // them as weapons.
         // --------------------------------------------------------------------
 
         Witchblade: (

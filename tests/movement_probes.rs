@@ -4485,13 +4485,13 @@ mod u9_seek_reset {
 
     /// Tight anti-stall bound at a canonical occlusion seed. Absent a persistent
     /// enemy-healer juke, an occluded Mage recovers to a cast quickly: the
-    /// longest contiguous LosBlocked run is well under 10 sim-seconds. Seed
-    /// re-pinned to 13 (seed 27 dropped below the occlusion floor once tangent
-    /// steering let the Mage round pillars cleanly — see
-    /// `assert_mage_repositions_and_casts`), then to 77 for AS-87 when the
-    /// caster main-hands took seed 13's cast-start blocks to 0. Seed 77 keeps
-    /// the enemy healer denying while staying inside the bound: 254 blocks,
-    /// 132 seeks, longest run 3.23s — the same character as the retired 13.
+    /// longest contiguous LosBlocked run is well under 10 sim-seconds.
+    ///
+    /// Seed 77 keeps the enemy healer denying while staying inside the bound:
+    /// 254 cast-start blocks, 132 seeks, longest run 3.23s. It was re-derived
+    /// from `scan_mage_occlusion_seeds` on a tree carrying the caster
+    /// main-hands, which took the previous pin's cast-start blocks to 0 — the
+    /// vacuity floor doing its job, not a stall regression.
     #[test]
     fn mage_recovers_to_cast_within_bound_seed_77() {
         let lines = run_traced_lines(
@@ -5810,14 +5810,6 @@ mod juke_chase {
 
     #[test]
     fn juke_bounded_seed_b() {
-        // Re-pinned again for AS-87 (seed 11 -> 9, bound 8 held): the caster
-        // main-hands took seed 11's lone-Shaman dance to 0.00s occlusion, below
-        // the vacuity floor, exactly as AS-54 had taken seed 2 there before it.
-        // Seed 9 is the nearest replacement in character from a merged-tree
-        // `scan_seeds` (1469 lone samples / 12.4s occlusion / 3 fizzle-length
-        // windows / team-1 elimination win at ~51.8s), and the bound keeps the
-        // same roughly-2x headroom the pin has always carried.
-        //
         // Re-pinned 2026-09-13 (seed 2 -> 11, bound 24 -> 8) when the Frost
         // Armor chill became ONE debuff: at seed 2 the lone-Shaman dance no
         // longer starts at all (0.0s occlusion, below the vacuity floor), so
@@ -5855,7 +5847,7 @@ mod juke_chase {
         // elimination win at 98.0s — so the bound has real signal under it again.
         //
         // Bound derived from that observed 11, NOT carried over from the 6 it
-        // replaces: the other pin runs at 1.50x (seed 6: observed 10, bound 15),
+        // replaces: the other pin runs at 1.50x (seed 10: observed 10, bound 15),
         // and 1.5 x 11 = 16.5 rounds down to 16 — 1.45x, a shade tighter than the
         // convention rather than looser. The assertion is `fizzle_windows <= max`,
         // so a larger number here is not a looser test: what tightens a bound is
@@ -5879,7 +5871,6 @@ mod juke_chase {
     // by elimination (numbers as of the 2026-07-23 mana-on-completion fix, which
     // keeps the Mage casting from range instead of bankrupting to wand):
     //   seed 6: 25.8s total occlusion, 7 fizzle-length windows, team-1 win at ~84s.
-    //   seed 9: 12.4s total occlusion, 3 fizzle-length windows, team-1 win at ~52s.
     // (The geometric fizzle-window PROXY the probe asserts on counts any occluded
     // run >= a cast length, whether or not a cast completed in it. Numbers as of
     // 2026-09-13, the Frost Armor compound-debuff change: this comp puts a Mage
@@ -5889,24 +5880,28 @@ mod juke_chase {
     // Numbers again as of AS-97 equipping the Shaman's main-hand mace, which
     // moves the OTHER side of the same comp. Re-measured on that tree with
     // `scan_seeds`:
-    //   seed 6:  38.5s total occlusion, 10 fizzle-length windows, team-1 win at ~92.5s.
+    //   seed 10: 28.8s total occlusion, 10 fizzle-length windows, 2676 lone samples.
     //   seed 38: 40.9s total occlusion, 11 fizzle-length windows, team-1 win at ~98.0s.
-    // Seed 6 held. Seed 11 (AS-54's pick) and seed 34 (AS-97's) both still PASS
-    // there, but had decayed to 2 and 1 fizzle windows respectively — clearing
-    // the vacuity floor while leaving the bound nothing to catch — so B moved to
-    // 38, which has the long-dance character seed 2 had before it drifted.
-    // SEED_A re-derived on the twice-merged tree (6 -> 10). AS-97 made the
-    // Shaman's main-hand weapon damage live, and this comp IS a lone-Shaman
-    // 2v1, so seed 6's dance stretched: 17 fizzle-length windows against a
-    // bound of 15. Seed 10 is the nearest match to seed 6's old character
-    // (2676 lone samples / 28.8s occlusion / 10 windows, versus the 10 windows
-    // the bound of 15 was set around), so the bound is unchanged.
+    // Seed 11 (AS-54's pick) and seed 34 (AS-97's) both still PASS there, but had
+    // decayed to 2 and 1 fizzle windows respectively — clearing the vacuity floor
+    // while leaving the bound nothing to catch — so B moved to 38, which has the
+    // long-dance character seed 2 had before it drifted.
+    //
+    // A moved off seed 6 for the opposite reason, once the caster main-hands
+    // landed under it as well: seed 6's dance STRETCHED, to 17 fizzle-length
+    // windows against its bound of 15. Seed 10 carries seed 6's old character
+    // (10 windows) so that bound is unchanged.
+    // A: 2676 lone samples / 28.8s occlusion / 10 fizzle-length windows,
+    // against the bound of 15 — the same 10 windows that bound was set around,
+    // which is why it is unchanged.
     const JUKE_SEED_A: u64 = 10;
-    // SEED_B is MAIN's value, not this branch's. AS-87 had re-pinned it to 9
-    // on the previous base; a merged-tree scan shows 9 gives 0.00s occlusion
-    // here while AS-97's 38 still holds (2409 lone samples / 22.9s occlusion /
-    // 4 fizzle-length windows against the bound of 8). Re-deriving is what
-    // showed main's side was the right one — it was confirmed, not assumed.
+    // B: 40.9s total occlusion / 11 fizzle-length windows against the bound of
+    // 16 — the long-dance character seed 2 carried before it drifted.
+    //
+    // Both were re-derived from `scan_seeds` on a tree carrying every change
+    // under them, rather than taken from any one branch's pick. That is the
+    // only way this pin survives: three cards in a row re-picked it from their
+    // own base, and no two of those picks agreed.
     const JUKE_SEED_B: u64 = 38;
 }
 

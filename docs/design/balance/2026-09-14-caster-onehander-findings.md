@@ -34,8 +34,8 @@ by id (13964, 19347, 17103), each with its own era-faithful icon.
 **Mage, Warlock and Priest default to Witchblade**, so the measured change is
 exactly **+5 spell power and +6 max mana** on each. Nothing else moves: the
 dagger's 7-11 swing is INERT for all three, because `apply_equipment` takes
-attack damage from the MainHand only when `class.is_melee()`, and none of them
-is melee — they swing from the Ranged socket. The tier-1 pair is pool-only; no
+attack damage from ONE socket, the one `class.weapon_slot()` names, and for all
+three of them that socket is Ranged. The tier-1 pair is pool-only; no
 default loadout equips it.
 
 One honest limitation: the card asked for daggers AND one-handed swords, and
