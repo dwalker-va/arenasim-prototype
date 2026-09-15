@@ -2438,9 +2438,7 @@ mod tests {
     // ---- socket USEFULNESS ----
 
     use crate::states::play_match::abilities::ScalingStat;
-    use crate::states::play_match::ability_config::{
-        load_ability_definitions, AbilityDefinitions,
-    };
+    use crate::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
 
     /// The (class, socket) pairs the shipped pool can fill but cannot fill
     /// USEFULLY, each with the rule of the game that makes that legitimate.
@@ -2598,7 +2596,9 @@ mod tests {
             ItemId::ClawOfChromaggus,
             ItemId::AzuresongMageblade,
         ] {
-            let item = items.get(&id).unwrap_or_else(|| panic!("{:?} must exist", id));
+            let item = items
+                .get(&id)
+                .unwrap_or_else(|| panic!("{:?} must exist", id));
             assert_eq!(item.slot, ItemSlotType::MainHand, "{:?} slot", id);
             assert!(!item.two_handed, "{:?} must be one-handed", id);
             assert!(item.spell_power > 0.0, "{:?} must carry spell power", id);
