@@ -200,7 +200,7 @@ impl Default for BanterTiming {
     fn default() -> Self {
         Self {
             opening_start: 1.5,
-            // Near-immediate, but not near-zero: the deferral check below
+            // Near-immediate, but not near-zero: the pacing check below
             // requires `line_lifetime - switch_start < beat_gap` for any
             // context that could hold a multi-beat exchange, and 0.8 keeps the
             // defaults internally consistent for ANY pool rather than only the
@@ -366,14 +366,15 @@ impl BanterConfig {
         // satisfy it, not because anything now depends on that deferral.
         //
         // Checked only for contexts whose pool actually holds a multi-beat
-        // exchange, because a single-beat context has nothing queued behind to
-        // collide with — that is what lets `Switch` run its near-immediate
-        // `switch_start` against the shared `line_lifetime`. Authoring a
-        // two-beat `Switch` later turns the check on for it automatically.
+        // exchange, because the gap constrains the interval BETWEEN two beats
+        // and a single-beat context has no second beat for it to apply to —
+        // that is what lets `Switch` run its near-immediate `switch_start`
+        // against the shared `line_lifetime`. Authoring a two-beat `Switch`
+        // later turns the check on for it automatically.
         //
         // The shipped values satisfy this, which is exactly why it needs
         // checking: the safety is arithmetic, not structural, so a plausible
-        // retune would reintroduce the collision silently.
+        // retune would reintroduce a pacing violation silently.
         for (context, start, gap) in [
             (BanterContext::Opening, t.opening_start, t.beat_gap),
             (
@@ -394,8 +395,8 @@ impl BanterConfig {
             if max_push >= gap {
                 issues.push(format!(
                     "{:?}: timing.line_lifetime ({}) minus its start delay ({}) is {}, which is \
-                     not below its beat gap ({}) — a deferred beat could collide with the one \
-                     queued behind it",
+                     not below its beat gap ({}) — a line would still be on screen when the \
+                     next beat of its exchange arrives",
                     context, t.line_lifetime, start, max_push, gap
                 ));
             }

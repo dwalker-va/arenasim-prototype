@@ -32,9 +32,12 @@ use super::watcher::CallWatcher;
 //  1. ONE LIVE BUBBLE PER SPEAKER. `render_speech_bubbles` projects every
 //     bubble to a fixed offset above its owner with no per-owner stacking or
 //     dedup, so two concurrent bubbles on one combatant draw on top of each
-//     other and neither is readable. `BanterConfig::validate()` enforces the gap WITHIN
-//     an exchange; the scheduler enforces it ACROSS exchanges, where the
-//     config cannot see the collision coming (see [`BanterScheduler::take_due`]).
+//     other and neither is readable. Enforced at EMISSION, in
+//     [`play_banter_beats`]: a speaker who starts a new line while their last
+//     is still up has that bubble despawned, so the new line REPLACES it.
+//     Neither the config nor the queue prevents the overlap — a pool may put
+//     consecutive beats on ONE role, and that self-interruption is an authored
+//     device (one party overcommunicating), not an error to be scheduled away.
 //  2. A CORRECTION CANCELS THE UNPLAYED BEATS (KTD9). Letting the opening
 //     exchange finish would talk over the correction with lines about a target
 //     that is no longer called — the exact confusion the correction exists to
@@ -56,8 +59,11 @@ struct PendingBeat {
     /// Final text — placeholders already substituted by the resolver.
     pub text: String,
     /// Absolute time on [`BanterScheduler::clock`] at which this beat speaks.
-    /// Deferral (see [`BanterScheduler::take_due`]) is the only thing that
-    /// moves it after queueing, and only ever forward.
+    /// Written once, by [`BanterScheduler::queue_exchange`], and only read
+    /// afterwards — nothing moves a beat once it is queued. That is precisely
+    /// what holds an exchange to its AUTHORED pacing: a speaker who is already
+    /// talking does not push their next beat back, they replace their own
+    /// bubble.
     pub at: f32,
     /// Bubble lifetime, copied off the resolved exchange so emission needs
     /// nothing but the beat.
@@ -571,7 +577,7 @@ mod tests {
         );
         assert!(
             scheduler.queues[0].is_empty(),
-            "and nothing is left holding behind it"
+            "and nothing is left queued behind it"
         );
     }
 
