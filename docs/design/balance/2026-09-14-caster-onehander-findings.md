@@ -120,6 +120,44 @@ it can touch move. A uniformly identical result would have meant the change
 never reached the sim; a control cell moving would have meant it reached further
 than intended. Neither happened, three times.
 
+### Is the control wired up? (instrument non-vacuity)
+
+A control that reads "720 identical, 0 differ" three times running is, from the
+outside, indistinguishable from a control that is not connected to anything. The
+split in the table above is the first answer — the same comparator, over the
+same file, reports 1,861 / 1,838 / 620 DIFFERING rows among the buffed cells, so
+it cannot be a comparator that always says "identical".
+
+But those are different ROWS. The sharper question is whether the instrument
+detects a change in the CONTROL rows specifically. It does, and the three
+`before` runs prove it at no extra cost: they are unmodified main at three
+successive commits, and two of those commits differ in ways with OPPOSITE
+predictions for an arm that contains no Mage, Warlock or Priest by construction.
+
+| between | the intervening change | prediction | measured |
+|---|---|---|---|
+| base1 -> base2 | AS-54, Frost Armor chill as one debuff — a MAGE ability | identical | **720 / 0** |
+| base2 -> base3 | AS-97, the Shaman's main-hand weapon damage going live | differs | **482 / 238** |
+
+And it does better than detect — it LOCALISES:
+
+    rows WITH a Shaman    : 238 differ, 122 identical
+    rows WITHOUT a Shaman :   0 differ, 360 identical
+
+Every control row that moved contains a Shaman, and no row without one moved.
+That is the same property AS-87's own control claims, demonstrated on the same
+720 rows by a change this card did not make. The three clean controls are three
+measurements, not three no-ops.
+
+**One limit, stated rather than left implied.** The comparison is on
+`(winner, end_reason, duration_secs)` at the CSV's 0.01s resolution, not on a
+whole-log hash. A match whose internals moved without moving any of those three
+reads as identical here — which is why 122 Shaman rows are identical above
+despite AS-97 reaching them. The claim the control supports is "no observable
+outcome difference at this resolution", which is the claim the card needs;
+`scripts/behaviour_baseline.sh` is the whole-log instrument if a stronger one is
+ever wanted.
+
 ### The delta — directional, and small
 
 Team 1 win rate. **Runs 1 and 2 are n=1,050 per arm; run 3 is n=350 and is
