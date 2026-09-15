@@ -35,14 +35,55 @@ use arenasim::states::play_match::equipment::{
 /// attack_damage / attack_speed, so an off-hand weapon is not a candidate for
 /// "the socket that is live" and must not make this audit ambiguous.
 ///
-/// A class may legitimately hold a weapon in a replacement-ineligible socket
-/// as well (AS-87): a Mage, Warlock or Priest carries a caster one-hander in
+/// A class may legitimately hold a weapon in a replacement-INELIGIBLE socket as
+/// well (AS-87): a Mage, Warlock or Priest carries a caster one-hander in
 /// MainHand for its spell power while swinging from Ranged. That item's damage
 /// fields are inert, and inert BY CONSTRUCTION rather than by ambiguity —
-/// `apply_equipment` replaces from exactly one socket, the one `weapon_slot()`
-/// names, so there is never a question of which weapon "wins". What the audit
-/// has to prove is the thing that actually broke: that the named socket is not
-/// EMPTY of a weapon, because then the class silently keeps its class base.
+/// `apply_equipment` replaces from exactly one socket, so there is never a
+/// question of which weapon "wins".
+///
+/// So this asserts two things rather than one. The named socket must HOLD a
+/// weapon — that is the failure the Shaman hit. And any OTHER weapon must be
+/// DECLARED in `DECLARED_STAT_STICK_WEAPONS`, because a second weapon should be
+/// a decision somebody made, not drift.
+///
+/// The declaration is what keeps this as strong as the "exactly one weapon"
+/// rule it replaced. That rule had to go — AS-87 makes two weapons correct for
+/// three classes — but dropping it without a replacement would wave through the
+/// mutation it used to catch: name the WRONG socket for a class that holds two,
+/// say `weapon_slot(Mage) = MainHand`, and the Mage silently swings its dagger
+/// instead of its wand. A bare "the named socket holds a weapon" check passes
+/// that, because MainHand does hold one. Requiring the OTHER socket to be the
+/// declared one fails it, because under that mutation the undeclared socket is
+/// Ranged.
+/// The classes that deliberately carry a weapon in a socket they do NOT swing
+/// from, with the reason. A stat stick: its `attack_damage_*` and
+/// `attack_speed` never reach the combatant.
+///
+/// Checked in BOTH directions, like the other justification lists in this
+/// repo — an undeclared second weapon fails, and so does a declared pair that
+/// no longer holds one, so a stale entry cannot sit here unnoticed.
+const DECLARED_STAT_STICK_WEAPONS: &[(CharacterClass, ItemSlot, &str)] = &[
+    (
+        CharacterClass::Mage,
+        ItemSlot::MainHand,
+        "AS-87 caster one-hander, held for its spell power; the Mage swings \
+         from Ranged",
+    ),
+    (
+        CharacterClass::Warlock,
+        ItemSlot::MainHand,
+        "AS-87 caster one-hander, held for its spell power; the Warlock swings \
+         from Ranged",
+    ),
+    (
+        CharacterClass::Priest,
+        ItemSlot::MainHand,
+        "AS-87 caster one-hander, held for its spell power; the Priest swings \
+         from Ranged",
+    ),
+];
+
 #[test]
 fn weapon_slot_matches_the_socket_each_loadout_fills() {
     let items = load_item_definitions().expect("items.ron must load");
@@ -81,6 +122,27 @@ fn weapon_slot_matches_the_socket_each_loadout_fills() {
             live
         );
 
+        // Every OTHER weapon must be a declared stat stick.
+        for slot in live.iter().filter(|s| **s != expected) {
+            let declared = DECLARED_STAT_STICK_WEAPONS
+                .iter()
+                .find(|(c, s2, _)| c == class && s2 == slot);
+            assert!(
+                declared.is_some(),
+                "{} carries a weapon in {:?} as well as in its live socket \
+                 {:?}, and that second weapon is not declared. Its damage and \
+                 speed are inert — apply_equipment reads only {:?} — so either \
+                 this is a deliberate stat stick and belongs in \
+                 DECLARED_STAT_STICK_WEAPONS with its reason, or \
+                 CharacterClass::weapon_slot() names the wrong socket and this \
+                 class is swinging the wrong weapon.",
+                class.name(),
+                slot,
+                expected,
+                expected,
+            );
+        }
+
         audited += 1;
         match expected {
             ItemSlot::MainHand => main_hand_classes += 1,
@@ -91,6 +153,23 @@ fn weapon_slot_matches_the_socket_each_loadout_fills() {
                 other
             ),
         }
+    }
+
+    // A declared pair that no longer holds a weapon is a stale exemption.
+    for (class, slot, why) in DECLARED_STAT_STICK_WEAPONS {
+        let loadout = defaults.get(*class).expect("default loadout");
+        let holds_weapon = loadout
+            .get(slot)
+            .and_then(|id| items.get(id))
+            .is_some_and(|item| item.is_weapon);
+        assert!(
+            holds_weapon,
+            "({}, {:?}) is declared in DECLARED_STAT_STICK_WEAPONS as {:?}, but \
+             that socket no longer holds a weapon — delete the stale entry.",
+            class.name(),
+            slot,
+            why,
+        );
     }
 
     assert_eq!(
