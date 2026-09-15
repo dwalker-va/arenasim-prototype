@@ -179,9 +179,10 @@ pub struct BanterTiming {
     pub switch_start: f32,
     /// Seconds between consecutive beats (`Opening` and `Switch`).
     pub beat_gap: f32,
-    /// How long a bubble stays up. Bubbles carry no per-owner offset, so two
-    /// beats on the SAME role closer together than this would draw on top of
-    /// each other — validation rejects that.
+    /// How long a bubble stays up. Bubbles carry no per-owner offset, so a
+    /// speaker who starts a new line while their last is still up REPLACES it
+    /// rather than drawing over it; consecutive beats on one role are an
+    /// authored device, and that self-interruption is how they read.
     pub line_lifetime: f32,
     /// Beat gap for the `Correction` context — tighter, because a correction
     /// races the gates.
@@ -199,7 +200,7 @@ impl Default for BanterTiming {
     fn default() -> Self {
         Self {
             opening_start: 1.5,
-            // Near-immediate, but not near-zero: the deferral check below
+            // Near-immediate, but not near-zero: the pacing check below
             // requires `line_lifetime - switch_start < beat_gap` for any
             // context that could hold a multi-beat exchange, and 0.8 keeps the
             // defaults internally consistent for ANY pool rather than only the
@@ -354,21 +355,31 @@ impl BanterConfig {
             }
         }
 
-        // The scheduler defers a beat whose speaker still has a live bubble to
-        // that bubble's expiry, but it does NOT push the beats queued behind
-        // it. The largest such push is `line_lifetime - start_delay`; if that
-        // exceeds the gap between beats, a deferred setup and its untouched
-        // punchline can land on the same frame and draw over each other.
+        // A floor on how tightly an exchange's beats may be spaced:
+        // `line_lifetime - start_delay` must stay below the gap between beats.
+        //
+        // WHAT THIS IS, HONESTLY. The formula was derived to bound the
+        // scheduler's DEFERRAL push, and deferral is gone — a new line now
+        // replaces its speaker's live bubble instead of queueing behind it.
+        // The quantity it tests is inherited from that derivation and is NOT a
+        // read-time measure: a context's START DELAY is when its first beat
+        // speaks, which says nothing about how long a line stays readable. So
+        // it bounds beat spacing only approximately, by arithmetic built for
+        // another purpose, and it should not be dressed up as anything tidier.
+        //
+        // It is RETAINED because the shipped defaults satisfy it and it still
+        // catches a retune that would crowd beats together — not because
+        // anything now depends on the mechanism it was written for. Re-deriving
+        // it on its own terms, or dropping it, is open.
         //
         // Checked only for contexts whose pool actually holds a multi-beat
-        // exchange, because a single-beat context has nothing queued behind to
-        // collide with — that is what lets `Switch` run its near-immediate
-        // `switch_start` against the shared `line_lifetime`. Authoring a
-        // two-beat `Switch` later turns the check on for it automatically.
-        //
-        // The shipped values satisfy this, which is exactly why it needs
-        // checking: the safety is arithmetic, not structural, so a plausible
-        // retune would reintroduce the collision silently.
+        // exchange, because the gap constrains the interval BETWEEN two beats
+        // and a single-beat context has no second beat for it to apply to —
+        // that is what lets `Switch` run its near-immediate `switch_start`
+        // against the shared `line_lifetime`. Authoring a two-beat `Switch`
+        // later turns the check on for it automatically. The safety here is
+        // arithmetic, not structural, so a plausible retune would cross the
+        // floor silently.
         for (context, start, gap) in [
             (BanterContext::Opening, t.opening_start, t.beat_gap),
             (
@@ -389,8 +400,8 @@ impl BanterConfig {
             if max_push >= gap {
                 issues.push(format!(
                     "{:?}: timing.line_lifetime ({}) minus its start delay ({}) is {}, which is \
-                     not below its beat gap ({}) — a deferred beat could collide with the one \
-                     queued behind it",
+                     not below its beat gap ({}) — the beats of an exchange would be spaced \
+                     more tightly than this floor allows",
                     context, t.line_lifetime, start, max_push, gap
                 ));
             }
@@ -457,27 +468,6 @@ impl BanterConfig {
                         "{}: beat {} starts at {}s, past timing.latest_beat ({}s)",
                         label, i, start, t.latest_beat
                     ));
-                }
-            }
-
-            // Two beats on ONE role closer than the bubble lifetime would
-            // draw the second bubble on top of the first — bubble rendering
-            // applies no per-owner offset (AE4).
-            for (i, beat) in exchange.beats.iter().enumerate() {
-                for (j, other) in exchange.beats.iter().enumerate().skip(i + 1) {
-                    if beat.role != other.role {
-                        continue;
-                    }
-                    let start_i = t.beat_start(exchange.context, i);
-                    let start_j = t.beat_start(exchange.context, j);
-                    if (start_j - start_i).abs() < t.line_lifetime {
-                        issues.push(format!(
-                            "{}: role '{}' speaks at {}s and {}s, closer than \
-                             timing.line_lifetime ({}s) — the second bubble would draw on top \
-                             of the first",
-                            label, beat.role, start_i, start_j, t.line_lifetime
-                        ));
-                    }
                 }
             }
         }
@@ -783,10 +773,12 @@ mod tests {
         );
     }
 
-    /// AE4: consecutive beats on one role sit `beat_gap` apart, which is
-    /// below `line_lifetime` — the second bubble would draw over the first.
+    /// Consecutive beats on ONE role are an authored device — one party
+    /// overcommunicating — not an authoring error. They sit `beat_gap` apart,
+    /// inside `line_lifetime`, so the second line replaces the first mid-read;
+    /// that self-interruption is the point, and validation must allow it.
     #[test]
-    fn validate_rejects_same_role_beats_within_line_lifetime() {
+    fn validate_accepts_same_role_consecutive_beats() {
         let mut config = covered_config();
         let exchange = config
             .exchanges
@@ -796,18 +788,12 @@ mod tests {
         exchange.beats[1].role = "caller".to_string();
         assert!(
             config.timing.beat_gap < config.timing.line_lifetime,
-            "fixture assumes adjacent beats collide"
+            "fixture must put the two beats inside one bubble lifetime, or it \
+             is not exercising the replacement case"
         );
-        let issues = config
+        config
             .validate()
-            .expect_err("same-role beats inside the bubble lifetime must fail");
-        assert!(
-            issues
-                .iter()
-                .any(|i| i.contains("'caller'") && i.contains("line_lifetime")),
-            "issues should name the colliding role: {:?}",
-            issues
-        );
+            .expect("same-role consecutive beats must validate");
     }
 
     #[test]

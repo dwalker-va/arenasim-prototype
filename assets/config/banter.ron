@@ -94,8 +94,10 @@
         //
         // Two bounds constrain it. `latest_beat` keeps every beat inside the
         // 10s countdown, and validation rejects a pool where `line_lifetime`
-        // minus a context's start delay reaches its beat gap (a deferred beat
-        // could then collide with the one behind it).
+        // minus a context's start delay reaches its beat gap — a floor on how
+        // tightly beats may be spaced. That formula is inherited from a
+        // mechanism the scheduler no longer has; `banter_config.rs` says so at
+        // the check itself rather than inventing a tidier reason for it.
 
         // Seconds after the call change before the first beat speaks. Applies
         // to Opening and Correction, both of which play during the countdown
@@ -108,8 +110,11 @@
         // `line_lifetime` on purpose: consecutive lines overlap a little so an
         // exchange reads as conversation rather than as a slideshow.
         beat_gap: 3.0,
-        // How long each bubble stays up — the read-time knob. Two beats on the
-        // same role must be at least this far apart.
+        // How long each bubble stays up — the read-time knob. A speaker who
+        // starts a new line while their last is still up REPLACES it, so
+        // consecutive beats on ONE role are allowed and read as that speaker
+        // talking over themselves. The first line's screen time is cut to the
+        // beat gap; that shortening is the overcommunication, not a defect.
         line_lifetime: 3.6,
         // Tighter pacing for corrections — they race the gates.
         correction_beat_gap: 2.4,
