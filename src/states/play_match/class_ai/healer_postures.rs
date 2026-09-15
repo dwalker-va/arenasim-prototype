@@ -166,11 +166,10 @@ pub(super) fn escape_window_from<I: IntoIterator<Item = Option<f32>>>(
     let mut any = false;
     for cc in proximate_cc_remaining {
         any = true;
-        match cc {
-            Some(remaining) => window = window.min(remaining),
-            // Multi-attacker rule: one free proximate threat voids the window.
-            None => return None,
-        }
+        // Multi-attacker rule: one free proximate threat voids the window
+        // (`?` returns None from this function, exactly as the old match arm did).
+        let remaining = cc?;
+        window = window.min(remaining);
     }
     // Empty set: no proximate threat → nothing to escape from → no window.
     if !any {

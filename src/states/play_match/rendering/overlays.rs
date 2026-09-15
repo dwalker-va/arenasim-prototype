@@ -120,7 +120,7 @@ pub fn render_countdown(
             painter.rect_stroke(
                 icon_rect.expand(2.0),
                 4.0,
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 150, 255)),
+                egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(100, 150, 255)),
                 egui::StrokeKind::Outside,
             );
             painter.image(
@@ -196,7 +196,7 @@ pub fn render_countdown(
             painter.rect_stroke(
                 icon_rect.expand(2.0),
                 4.0,
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 100, 100)),
+                egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(255, 100, 100)),
                 egui::StrokeKind::Outside,
             );
             painter.image(

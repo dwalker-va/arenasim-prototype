@@ -1369,7 +1369,7 @@ fn badge(ui: &mut egui::Ui, label: &str, color: egui::Color32) -> egui::Response
     painter.rect_stroke(
         rect,
         3.0,
-        egui::Stroke::new(1.0, color),
+        egui::Stroke::new(1.0_f32, color),
         egui::StrokeKind::Inside,
     );
     painter.galley(

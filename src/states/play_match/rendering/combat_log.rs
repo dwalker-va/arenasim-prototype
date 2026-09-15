@@ -242,7 +242,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                     rect.min.x + TIMELINE_TIME_COLUMN_WIDTH + (i as f32 * combatant_column_width);
                 painter.line_segment(
                     [egui::pos2(x, rect.min.y), egui::pos2(x, rect.max.y)],
-                    egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30)),
+                    egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(30)),
                 );
             }
 
@@ -257,7 +257,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                         egui::pos2(rect.min.x + TIMELINE_TIME_COLUMN_WIDTH, y),
                         egui::pos2(rect.max.x, y),
                     ],
-                    egui::Stroke::new(1.0, egui::Color32::from_white_alpha(20)),
+                    egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(20)),
                 );
 
                 // Time label on left
@@ -318,10 +318,11 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                         } else {
                             egui::Color32::from_white_alpha(100)
                         };
+                        let border_width: f32 = if interrupted { 2.0 } else { 1.0 };
                         painter.rect_stroke(
                             icon_rect.expand(1.0),
                             3.0,
-                            egui::Stroke::new(if interrupted { 2.0 } else { 1.0 }, border_color),
+                            egui::Stroke::new(border_width, border_color),
                             egui::StrokeKind::Outside,
                         );
                         // Draw the spell icon (tinted red if interrupted)

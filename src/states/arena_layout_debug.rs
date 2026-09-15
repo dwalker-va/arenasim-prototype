@@ -175,7 +175,7 @@ pub fn draw_arena_layout(
     }
     painter.add(egui::Shape::closed_line(
         outline.iter().map(|p| to_screen(*p)).collect(),
-        egui::Stroke::new(2.0, ink),
+        egui::Stroke::new(2.0_f32, ink),
     ));
 
     // The gameplay bounds, sampled by testing containment on a grid ray per
@@ -201,7 +201,7 @@ pub fn draw_arena_layout(
     if walkable.len() > 2 {
         painter.add(egui::Shape::closed_line(
             walkable,
-            egui::Stroke::new(1.0, dim),
+            egui::Stroke::new(1.0_f32, dim),
         ));
     }
 
@@ -211,14 +211,14 @@ pub fn draw_arena_layout(
             to_screen(Vec2::new(-half.x, 0.0)),
             to_screen(Vec2::new(half.x, 0.0)),
         ],
-        egui::Stroke::new(0.5, egui::Color32::from_rgb(70, 76, 94)),
+        egui::Stroke::new(0.5_f32, egui::Color32::from_rgb(70, 76, 94)),
     );
     painter.line_segment(
         [
             to_screen(Vec2::new(0.0, -half.y)),
             to_screen(Vec2::new(0.0, half.y)),
         ],
-        egui::Stroke::new(0.5, egui::Color32::from_rgb(70, 76, 94)),
+        egui::Stroke::new(0.5_f32, egui::Color32::from_rgb(70, 76, 94)),
     );
 
     // ---- Obstacles ---------------------------------------------------------
@@ -236,7 +236,7 @@ pub fn draw_arena_layout(
                 painter.add(egui::Shape::convex_polygon(
                     verts.iter().map(|v| to_screen(*v)).collect(),
                     egui::Color32::from_rgb(96, 102, 128),
-                    egui::Stroke::new(1.2, egui::Color32::from_rgb(168, 176, 204)),
+                    egui::Stroke::new(1.2_f32, egui::Color32::from_rgb(168, 176, 204)),
                 ));
                 pillars.push(Pillar {
                     center: center_xz,
@@ -251,7 +251,7 @@ pub fn draw_arena_layout(
                     to_screen(center_xz),
                     radius * scale,
                     egui::Color32::from_rgb(96, 102, 128),
-                    egui::Stroke::new(1.2, egui::Color32::from_rgb(168, 176, 204)),
+                    egui::Stroke::new(1.2_f32, egui::Color32::from_rgb(168, 176, 204)),
                 );
                 pillars.push(Pillar {
                     center: center_xz,
@@ -266,7 +266,7 @@ pub fn draw_arena_layout(
                     ),
                     0.0,
                     egui::Color32::from_rgb(96, 102, 128),
-                    egui::Stroke::new(1.2, egui::Color32::from_rgb(168, 176, 204)),
+                    egui::Stroke::new(1.2_f32, egui::Color32::from_rgb(168, 176, 204)),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -293,7 +293,7 @@ pub fn draw_arena_layout(
         let (z0, z1) = (zs[0], zs[zs.len() - 1]);
         painter.line_segment(
             [to_screen(Vec2::new(x, z0)), to_screen(Vec2::new(x, z1))],
-            egui::Stroke::new(1.5, measure),
+            egui::Stroke::new(1.5_f32, measure),
         );
         label(
             Vec2::new(x, (z0 + z1) * 0.5),
@@ -309,7 +309,7 @@ pub fn draw_arena_layout(
         let (x0, x1) = (xs[0], xs[xs.len() - 1]);
         painter.line_segment(
             [to_screen(Vec2::new(x0, z)), to_screen(Vec2::new(x1, z))],
-            egui::Stroke::new(1.5, measure),
+            egui::Stroke::new(1.5_f32, measure),
         );
         label(
             Vec2::new((x0 + x1) * 0.5, z),
@@ -374,7 +374,7 @@ pub fn draw_arena_layout(
                 to_screen(Vec2::new(semi_x, alcove_half_width)),
                 to_screen(Vec2::new(semi_x + alcove_depth, alcove_half_width)),
             ],
-            egui::Stroke::new(1.5, accent),
+            egui::Stroke::new(1.5_f32, accent),
         );
         label(
             Vec2::new(semi_x + alcove_depth * 0.5, alcove_half_width),
