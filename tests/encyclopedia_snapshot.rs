@@ -123,7 +123,7 @@ fn encyclopedia_pet_ability_detail() {
     );
 }
 
-/// The Items index: chip-bar filters over the full 142-item grid.
+/// The Items index: chip-bar filters over the full 145-item grid.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_items_grid() {
@@ -183,6 +183,23 @@ fn encyclopedia_items_ranged_socket() {
     filters.selected_slots.insert(ItemSlotType::Ranged);
     state.item_filters = filters;
     snapshot("encyclopedia_items_ranged_socket", state);
+}
+
+/// The Main Hand socket, which is where a class's weapon proficiency shows up
+/// as a real constraint: the pool a Mage sees here is a different set from the
+/// one a Warrior sees. It is also the view that shows the caster one-handers
+/// sitting beside the attack-power ones, which is the choice AS-87 added.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_items_mainhand_socket() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::index(Section::Items)),
+    );
+    let mut filters = ItemFilters::default();
+    filters.selected_slots.insert(ItemSlotType::MainHand);
+    state.item_filters = filters;
+    snapshot("encyclopedia_items_mainhand_socket", state);
 }
 
 /// A relic's detail page. The weapon block is what a relic must NOT have — it
