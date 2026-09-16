@@ -48,14 +48,31 @@
 // mark can be. Validation rejects anything else, naming the character, so an
 // unrenderable or off-conceit line cannot reach a match.
 //
-// Vocabulary in play, and what each says in context:
-//   {ability:Mortal Strike}      attack        {emoji:arrow}     directs at a target
-//   {ability:Death Coil}         kill / death  {emoji:no}        no / stop / not that
-//   {ability:Flash Heal}         healing       {emoji:yes}       yes / on it
-//   {ability:Power Word: Shield} defence       {emoji:seenoevil} cannot see it (stealth)
-//   {ability:Lightning Bolt}     burst         !                 urgency, beware
-//   {ability:Frost Nova}         freeze        ?                 uncertainty
-//   {ability:Aimed Shot}         spotted       …                 hesitation, waiting
+// ABILITY ICONS NAME A CLASS THAT IS IN THE MATCH (rule settled 2026-09-13).
+// An {ability:X} icon is a REFERENCE to a class party to the exchange — the
+// speaker's own kit, a bound teammate's kit (asking a teammate to press one
+// of THEIR buttons is a legitimate interaction; pushy types exist), or the
+// called target's kit (naming the threat: "{ability:Flash Heal} {emoji:no}"
+// = stop their healing). An icon whose class may be ABSENT from the match is
+// confusing and forbidden — which rules out any specific class's ability as
+// a generic verb in an Any-speaker line; intent is spoken in emoji verbs
+// instead (sword/swords = attack, skull = kill intent, headstone = the
+// resulting death, equals = "amounts to", no + ability = deny it).
+// Operationally: presence is only GUARANTEED by the entry's own bindings, so
+// an icon's class must appear among the entry's bound speaker classes or its
+// target class. (A "class present anywhere in the match" resolver condition
+// would be an engine extension — not built.)
+//
+// Vocabulary in play, and what each says in context. The VERBS are emoji —
+// an ability icon is a class reference under the ownership rule above,
+// never a verb:
+//   {emoji:sword} {emoji:swords} attack / engage     {emoji:arrow}    directs at a target
+//   {emoji:skull}                kill intent         {emoji:no}       no / stop / deny that
+//   {emoji:headstone}            the resulting death {emoji:yes}      yes / on it
+//   {emoji:equals}               "amounts to"        {emoji:thumbsup} casual ack
+//   {emoji:bandage}              healing, a healer   {emoji:eyes}     watch for it
+//   {emoji:seenoevil}            cannot see it       {emoji:speaknoevil} shut up
+//   {emoji:thinking}             hesitation          !  ?  …          urgency / doubt / waiting
 //
 // PICK EMOJI THAT ARE ACTUALLY COLOURFUL. Several Unicode dingbats render in
 // Twemoji as near-greyscale — ✔️ is dark slate, 🔍 is grey — and at 20px in a
@@ -79,6 +96,14 @@
 // constraint) rather than filtering, so a bespoke line lands often without
 // ever crowding the generics out. Adding one is one appended entry.
 //
+// FALLBACK RULE (2026-09-14): when a slot resists tuning — a joke that has
+// failed review twice, or interactive banter (Corrections and Switches,
+// where a target swap must read INSTANTLY) — stop iterating and take the
+// simple template instead: the plain call-and-ack shape the tier-1 generics
+// and the signature-ability tier-3 entries use. A slot may also simply stay
+// empty; the generics always cover it. Simplistic and legible beats clever
+// and tuned-forever.
+//
 // SILENCE IN 1v1 IS DELIBERATE, AND THE ROLE COUNT ENFORCES IT.
 // Every exchange — including the single-beat Switch shouts — declares two
 // distinct speaker roles. A solo combatant cannot bind both, so nothing is
@@ -92,12 +117,14 @@
         // so tuning is edit-and-relaunch with no rebuild. If lines feel
         // rushed, raise `line_lifetime` first and `beat_gap` second.
         //
-        // Two bounds constrain it. `latest_beat` keeps every beat inside the
-        // 10s countdown, and validation rejects a pool where `line_lifetime`
-        // minus a context's start delay reaches its beat gap — a floor on how
-        // tightly beats may be spaced. That formula is inherited from a
-        // mechanism the scheduler no longer has; `banter_config.rs` says so at
-        // the check itself rather than inventing a tidier reason for it.
+        // Two bounds constrain it. `latest_beat` bounds how late an exchange's
+        // last beat may speak; spilling past the 10s countdown is allowed and
+        // deliberate (see `latest_beat` below). And validation rejects a pool
+        // where `line_lifetime` minus a context's start delay reaches its beat
+        // gap — a floor on how tightly beats may be spaced. That formula is
+        // inherited from a mechanism the scheduler no longer has;
+        // `banter_config.rs` says so at the check itself rather than
+        // inventing a tidier reason for it.
 
         // Seconds after the call change before the first beat speaks. Applies
         // to Opening and Correction, both of which play during the countdown
@@ -109,17 +136,55 @@
         // Seconds between consecutive beats (Opening and Switch). Below
         // `line_lifetime` on purpose: consecutive lines overlap a little so an
         // exchange reads as conversation rather than as a slideshow.
-        beat_gap: 3.0,
+        // At 2.5 an Opening exchange fits FIVE beats (1.5 / 4.0 / 6.5 / 9.0 /
+        // 11.5 against latest_beat 12.0) — four inside the countdown, and the
+        // fifth spilling into the opening approach (see latest_beat).
+        //
+        // THIS KNOB IS FENCED ON BOTH SIDES, and the ceiling is the tight one:
+        // the longest Opening exchange has five beats, so its last starts at
+        // `opening_start + 4 * beat_gap` and must not pass `latest_beat`.
+        // That caps beat_gap at 2.625 — only 0.125 above the shipped value.
+        // The floor is 1.7, from the spacing check at `line_lifetime`. Safe
+        // range (1.7, 2.625]; measured, not derived — 2.625 validates and
+        // 2.63 fails with "beat 4 starts at 12.02s, past timing.latest_beat".
+        // Raising this wants `latest_beat` raised with it.
+        beat_gap: 2.5,
         // How long each bubble stays up — the read-time knob. A speaker who
         // starts a new line while their last is still up REPLACES it, so
         // consecutive beats on ONE role are allowed and read as that speaker
         // talking over themselves. The first line's screen time is cut to the
         // beat gap; that shortening is the overcommunication, not a defect.
-        line_lifetime: 3.6,
-        // Tighter pacing for corrections — they race the gates.
+        //
+        // Bounded above at 3.9. Validation requires `line_lifetime` minus a
+        // context's start delay to stay BELOW that context's beat gap, and it
+        // checks only contexts that actually hold a multi-beat exchange. Two
+        // qualify: Opening (3.2 - 1.5 = 1.7 against beat_gap 2.5) and
+        // Correction (1.7 against correction_beat_gap 2.4). Correction has
+        // the smaller gap, so it binds first — 3.8 validates, 3.9 fails
+        // naming Correction. Switch is NOT checked: all its entries are
+        // single-beat shouts, so it has no interval to constrain. Authoring a
+        // two-beat Switch would turn its row on and tighten the ceiling to
+        // `switch_start + beat_gap`.
+        //
+        // The formula is inherited from a mechanism the scheduler no longer
+        // has — `banter_config.rs` gives the honest account of what it does
+        // and does not measure, at the check itself.
+        line_lifetime: 3.2,
+        // Tighter pacing for corrections — they race the gates. Floor 1.7,
+        // the same spacing check: 1.8 validates, 1.7 fails. No ceiling worth
+        // naming — the longest Correction runs three beats.
         correction_beat_gap: 2.4,
-        // The countdown is 10s; no beat may start after this.
-        latest_beat: 9.0,
+        // The countdown is 10s, but a conversation MAY spill past the gates
+        // (ruling 2026-09-14): the walk across the arena's dead space —
+        // Nagrand especially — leaves ample time to finish talking before
+        // contact, and the scheduler already plays late beats. This bounds
+        // the tail so an exchange still ends well before combat closes.
+        //
+        // It cannot drop below 11.5 at the shipped beat_gap: the five-beat
+        // Opening exchange puts its last beat at 11.5s, and a beat starting
+        // past this value fails validation. Measured — 11.5 validates, 11.4
+        // fails. Lowering this means lowering `beat_gap` first.
+        latest_beat: 12.0,
         // Selection-weight multiplier per non-Any constraint. 1.0 would make
         // specificity irrelevant; this favours a bespoke exchange without
         // ever crowding the generics out.
@@ -136,7 +201,7 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Any,
             beats: [
-                (role: "caller",    text: "{ability:Mortal Strike} {emoji:arrow} {target}"),
+                (role: "caller",    text: "{emoji:sword} {target} {emoji:arrow} {emoji:skull}"),
                 (role: "responder", text: "{emoji:yes}"),
             ],
         ),
@@ -145,18 +210,11 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Any,
             beats: [
-                (role: "caller",    text: "{target} {emoji:arrow} {ability:Death Coil}"),
-                (role: "responder", text: "{emoji:yes}"),
-            ],
-        ),
-        (
-            context: Opening,
-            speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
-            target: Any,
-            beats: [
+                (role: "caller",    text: "..."),
+                (role: "responder", text: "..."),
+                (role: "caller",    text: "{emoji:thinking}"),
                 (role: "caller",    text: "{target} ?"),
                 (role: "responder", text: "{target} !"),
-                (role: "caller",    text: "{ability:Mortal Strike}"),
             ],
         ),
         (
@@ -164,18 +222,10 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Any,
             beats: [
-                (role: "caller",    text: "{ability:Mortal Strike} {emoji:arrow} {target} …"),
-                (role: "responder", text: "… …"),
-                (role: "caller",    text: "!"),
-            ],
-        ),
-        (
-            context: Opening,
-            speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
-            target: Any,
-            beats: [
-                (role: "caller",    text: "{speaker} {ability:Mortal Strike} {emoji:arrow} {target}"),
-                (role: "responder", text: "! {emoji:yes}"),
+                (role: "caller",    text: "{emoji:skull} {emoji:arrow} {target}"),
+                (role: "responder", text: "{emoji:no} {target}"),
+                (role: "responder", text: "{emoji:math} {emoji:arrow} {emoji:test_tube} {emoji:arrow} {emoji:lightbulb} {emoji:arrow} {emoji:book}"),
+                (role: "caller",    text: "{emoji:speaknoevil} ! {emoji:skull} {emoji:arrow} {target} !"),
             ],
         ),
 
@@ -187,7 +237,7 @@
             target: Class(Priest),
             beats: [
                 (role: "caller",    text: "{target} {ability:Flash Heal} {emoji:no}"),
-                (role: "responder", text: "{ability:Mortal Strike} {emoji:arrow} {target} !"),
+                (role: "responder", text: "{emoji:skull} {emoji:arrow} {target} {emoji:equals} {emoji:headstone} !"),
             ],
         ),
         (
@@ -195,8 +245,8 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Class(Paladin),
             beats: [
-                (role: "caller",    text: "{ability:Mortal Strike} {emoji:arrow} {target}"),
-                (role: "responder", text: "{ability:Divine Shield} ! …"),
+                (role: "caller",    text: "{target} {ability:Flash of Light} {emoji:no}"),
+                (role: "responder", text: "{emoji:skull} {emoji:arrow} {target} {emoji:equals} {emoji:headstone} !"),
             ],
         ),
         (
@@ -204,8 +254,8 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Class(Shaman),
             beats: [
-                (role: "caller",    text: "{target} {emoji:arrow} {ability:Death Coil}"),
-                (role: "responder", text: "{ability:Windfury Totem} {emoji:no} {ability:Mortal Strike}"),
+                (role: "caller",    text: "{target} {ability:Lesser Healing Wave} {emoji:no}"),
+                (role: "responder", text: "{emoji:skull} {emoji:arrow} {target} {emoji:equals} {emoji:headstone} !"),
             ],
         ),
         (
@@ -213,8 +263,9 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Class(Rogue),
             beats: [
-                (role: "caller",    text: "{ability:Mortal Strike} {emoji:arrow} {target}"),
-                (role: "responder", text: "{emoji:seenoevil} …"),
+                (role: "caller",    text: "{emoji:ninja} {emoji:equals} {emoji:angry}"),
+                (role: "responder", text: "{emoji:swords} {target} ?"),
+                (role: "caller",    text: "{emoji:thumbsup} {emoji:thumbsup} {emoji:thumbsup}"),
             ],
         ),
         (
@@ -222,8 +273,10 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Class(Mage),
             beats: [
-                (role: "caller",    text: "{target} {emoji:arrow} {ability:Death Coil} …"),
-                (role: "responder", text: "{ability:Polymorph} !"),
+                (role: "caller",    text: "{emoji:no} {ability:Polymorph}"),
+                (role: "responder", text: "{emoji:thumbsup}"),
+                (role: "responder", text: "{emoji:swords} {target}?"),
+                (role: "caller",    text: "{emoji:thumbsup}"),
             ],
         ),
         (
@@ -231,8 +284,10 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Class(Warlock),
             beats: [
-                (role: "caller",    text: "{target} … !"),
-                (role: "responder", text: "{ability:Corruption} !"),
+                (role: "caller",    text: "{emoji:no} {ability:Fear}"),
+                (role: "responder", text: "{emoji:thumbsup}"),
+                (role: "responder", text: "{emoji:swords} {target}?"),
+                (role: "caller",    text: "{emoji:thumbsup}"),
             ],
         ),
         (
@@ -240,17 +295,20 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Class(Warrior),
             beats: [
-                (role: "caller",    text: "{ability:Mortal Strike} {emoji:arrow} {target}"),
-                (role: "responder", text: "{ability:Charge} ! {ability:Power Word: Shield}"),
+                (role: "caller",    text: "{emoji:sword} {emoji:monkey} {target}"),
+                (role: "responder", text: "{emoji:monkey} {emoji:banana} {emoji:monkey} {emoji:banana} {emoji:yes}!"),
             ],
         ),
+        // The footrace dread — a Hunter kill means Disengage, then running,
+        // and running. Flat periods; the resignation is the joke.
         (
             context: Opening,
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Class(Hunter),
             beats: [
-                (role: "caller",    text: "{target} {emoji:arrow} {ability:Death Coil}"),
-                (role: "responder", text: "{ability:Freezing Trap} ! {ability:Aimed Shot}"),
+                (role: "caller",    text: "{emoji:skull} {emoji:arrow} {target} ."),
+                (role: "responder", text: "{target} {emoji:equals} {ability:Disengage} {emoji:run} {emoji:run} …"),
+                (role: "caller",    text: "{emoji:run} {emoji:yes} . {emoji:skull} {emoji:yes} ."),
             ],
         ),
 
@@ -278,7 +336,7 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Class(Priest)) ],
             target: Any,
             beats: [
-                (role: "caller",    text: "{ability:Mortal Strike} {emoji:arrow} {target} {ability:Flash Heal} ?"),
+                (role: "caller",    text: "{emoji:sword} {emoji:arrow} {target} {ability:Flash Heal} ?"),
                 (role: "responder", text: "{ability:Flash Heal} {emoji:yes}"),
             ],
         ),
@@ -287,17 +345,22 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Class(Paladin)) ],
             target: Any,
             beats: [
-                (role: "caller",    text: "{ability:Mortal Strike} {emoji:arrow} {target} !"),
-                (role: "responder", text: "{ability:Power Word: Shield} {emoji:yes}"),
+                (role: "caller",    text: "{emoji:sword} {emoji:arrow} {target} !"),
+                (role: "responder", text: "{ability:Flash of Light} {emoji:yes}"),
             ],
         ),
+        // The escape drill: "and when melee closes?" — "Disengage. Trap.
+        // Run." (verbatim the AI's dead-zone priority ladder; the flat
+        // periods are the fire-drill cadence).
         (
             context: Opening,
             speakers: [ (role: "caller", class: Class(Hunter)), (role: "responder", class: Any) ],
             target: Any,
             beats: [
                 (role: "caller",    text: "{ability:Aimed Shot} {emoji:arrow} {target}"),
-                (role: "responder", text: "{ability:Aimed Shot} {emoji:yes}"),
+                (role: "responder", text: "{emoji:swords} {emoji:dash} ?"),
+                (role: "caller",    text: "{ability:Disengage} . {ability:Frost Trap} . {emoji:run} ."),
+                (role: "responder", text: "{emoji:thumbsup} …"),
             ],
         ),
         (
@@ -328,6 +391,118 @@
             ],
         ),
 
+        // Paladin caller — the SIMPLE sibling template, deliberately: two
+        // joke rounds failed review here, and the fallback rule (see the
+        // tiering header) says stop tuning and take the plain form.
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Paladin)), (role: "responder", class: Any) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{ability:Hammer of Justice} {emoji:arrow} {target}"),
+                (role: "responder", text: "{emoji:yes}"),
+            ],
+        ),
+        // The Light told me who dies (responder sarcasm per review tweak).
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Priest)), (role: "responder", class: Any) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:pray} …"),
+                (role: "caller",    text: "{emoji:sparkles} ! {emoji:skull} {emoji:arrow} {target}"),
+                (role: "responder", text: "… {emoji:pray} ? {emoji:shrug} {emoji:yes}"),
+            ],
+        ),
+        // The aggressive Priest: "and who heals ME?" — "the Light will
+        // provide." (Mechanically true: the AI only Mind Blasts while its
+        // allies are healthy.)
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Priest)), (role: "responder", class: Any) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{ability:Mind Blast} {emoji:arrow} {target} !"),
+                (role: "responder", text: "{ability:Flash Heal} {emoji:arrow} {speaker} … ?"),
+                (role: "caller",    text: "{emoji:pray} {emoji:sparkles}"),
+            ],
+        ),
+        // Every answer is Charge.
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Class(Warrior)) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:thinking} {target} ?"),
+                (role: "responder", text: "{ability:Charge}"),
+                (role: "caller",    text: "{emoji:thinking} … {emoji:shield} ?"),
+                (role: "responder", text: "{ability:Charge} !"),
+            ],
+        ),
+        // The detailed plan nobody asked for — and it is CORRECT (the AI
+        // really Polymorphs the non-kill target to make the 2v1).
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Class(Mage)) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:sword} {emoji:arrow} {target} ?"),
+                (role: "responder", text: "{ability:Polymorph} {emoji:arrow} {emoji:no} {target} , {ability:Frostbolt} {emoji:arrow} {target} , {ability:Frostbolt} ."),
+                (role: "responder", text: "{emoji:stopwatch} {emoji:equals} {emoji:math} !"),
+                (role: "caller",    text: "… {emoji:thumbsup}"),
+            ],
+        ),
+        // The overplanning Rogue, dithering between its AI's two REAL chains.
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Class(Rogue)) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:skull} {emoji:arrow} {target}"),
+                (role: "responder", text: "{emoji:math} {ability:Cheap Shot} {emoji:arrow} {ability:Kidney Shot} {emoji:equals} {emoji:hourglass} {emoji:hourglass}"),
+                (role: "responder", text: "{emoji:no} … {emoji:math} {ability:Kick} {emoji:arrow} … {emoji:arrow} {ability:Kidney Shot} ?"),
+                (role: "caller",    text: "{emoji:interrobang}"),
+            ],
+        ),
+        // The chill Rogue. It's all good. They'll figure it out out there.
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Class(Rogue)) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:skull} {emoji:arrow} {target} ! {emoji:alert} !"),
+                (role: "responder", text: "{emoji:surf}"),
+                (role: "caller",    text: "? ? {emoji:target} ?"),
+                (role: "responder", text: "{emoji:smirk} {emoji:thumbsup}"),
+            ],
+        ),
+        // Surgical strike vs. arson ("fire? where did that come from!?" per
+        // review tweak).
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Class(Warlock)) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:skull} {emoji:arrow} {target} ?"),
+                (role: "responder", text: "{emoji:imp} {emoji:yes} … {emoji:fire} {emoji:fire} {emoji:fire}"),
+                (role: "caller",    text: "{emoji:fire} {emoji:fire} {emoji:fire} ! ?"),
+                (role: "responder", text: "… {emoji:imp} {emoji:fire}"),
+            ],
+        ),
+        // Furniture first, then the doctrine (the AI's literal priority 1 is
+        // totem maintenance).
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Class(Shaman)) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:skull} {emoji:arrow} {target} ?"),
+                (role: "responder", text: "{ability:Windfury Totem} {ability:Healing Stream Totem} {ability:Strength of Earth Totem} {ability:Flametongue Totem} ."),
+                (role: "responder", text: "{ability:Wind Shear} {emoji:equals} {emoji:speaknoevil} , {ability:Lightning Bolt} {emoji:arrow} {emoji:boom} !"),
+                (role: "caller",    text: "… {emoji:thumbsup}"),
+            ],
+        ),
+
         // ---- tier 4: full pairs ---------------------------------------------
         // A Rogue promising to open on a healer, and the healer's own class
         // knowing exactly how that goes.
@@ -354,7 +529,7 @@
             speakers: [ (role: "caller", class: Class(Warrior)), (role: "responder", class: Any) ],
             target: Class(Mage),
             beats: [
-                (role: "caller",    text: "{ability:Charge} {emoji:arrow} {target} {ability:Death Coil}"),
+                (role: "caller",    text: "{ability:Charge} {emoji:arrow} {target} {emoji:skull}"),
                 (role: "responder", text: "{ability:Ice Barrier} ! ?"),
             ],
         ),
@@ -363,8 +538,81 @@
             speakers: [ (role: "caller", class: Class(Priest)), (role: "responder", class: Any) ],
             target: Class(Paladin),
             beats: [
-                (role: "caller",    text: "{speaker} {ability:Flash Heal} {ability:Mortal Strike} {target} {ability:Flash Heal}"),
+                (role: "caller",    text: "{speaker} {ability:Flash Heal} {emoji:sword} {target} {ability:Flash Heal}"),
                 (role: "responder", text: "… … …"),
+            ],
+        ),
+
+        // The plan meets the ranged interrupt.
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Mage)), (role: "responder", class: Any) ],
+            target: Class(Shaman),
+            beats: [
+                (role: "caller",    text: "{ability:Frostbolt} , {ability:Polymorph} , {ability:Frostbolt} ."),
+                (role: "responder", text: "{target} {ability:Wind Shear} ?"),
+                (role: "caller",    text: "… {emoji:angry} {emoji:angry} {emoji:angry}"),
+                (role: "responder", text: "{emoji:skull} {emoji:arrow} {target} {emoji:equals} {emoji:headstone} !"),
+            ],
+        ),
+        // Ban the bubble ("sure thing, monkey").
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Warrior)), (role: "responder", class: Any) ],
+            target: Class(Paladin),
+            beats: [
+                (role: "caller",    text: "{ability:Charge} {emoji:arrow} {target} !"),
+                (role: "responder", text: "{target} {ability:Divine Shield} …"),
+                (role: "caller",    text: "{emoji:angry} ! {ability:Divine Shield} {emoji:equals} {emoji:banned} !"),
+                (role: "responder", text: "{emoji:monkey} {emoji:yes} {emoji:yes}"),
+            ],
+        ),
+        // The snail. "you are a snail." (period.)
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Warrior)), (role: "responder", class: Any) ],
+            target: Class(Hunter),
+            beats: [
+                (role: "caller",    text: "{ability:Charge} {emoji:arrow} {target} !"),
+                (role: "responder", text: "{target} {ability:Concussive Shot} … {emoji:snail}"),
+                (role: "caller",    text: "{emoji:snail} {emoji:no} ! {emoji:muscle} !"),
+                (role: "responder", text: "{emoji:snail} {emoji:yes} ."),
+            ],
+        ),
+        // Evil is patient: the AI never Fears its own dotted kill target —
+        // the rot IS the clock. ("no Fear" clause trimmed per review.)
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Warlock)), (role: "responder", class: Any) ],
+            target: Class(Priest),
+            beats: [
+                (role: "caller",    text: "{ability:Corruption} {emoji:arrow} {target} , {emoji:imp} {emoji:smirk}"),
+                (role: "responder", text: "{target} {ability:Flash Heal} {emoji:no} ! {ability:Fear} ?"),
+                (role: "caller",    text: "{ability:Corruption} {emoji:equals} {emoji:hourglass} {emoji:headstone} ."),
+                (role: "responder", text: "{emoji:hourglass} {emoji:angry} …"),
+            ],
+        ),
+        // "Dispel Psychic Scream and we win!" — a Priest speaker makes
+        // Dispel Magic first-person-legal.
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Priest)), (role: "responder", class: Any) ],
+            target: Class(Priest),
+            beats: [
+                (role: "caller",    text: "{target} {ability:Psychic Scream} ? {ability:Dispel Magic} {emoji:equals} {emoji:trophy} !"),
+                (role: "responder", text: "{emoji:scream} … {emoji:thumbsup}"),
+            ],
+        ),
+        // Do not say the word.
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Warrior)), (role: "responder", class: Any) ],
+            target: Class(Mage),
+            beats: [
+                (role: "caller",    text: "{ability:Charge} {emoji:arrow} {target} !"),
+                (role: "responder", text: "{ability:Frost Nova} ?"),
+                (role: "caller",    text: "{emoji:speaknoevil} ! {emoji:angry} !"),
+                (role: "responder", text: "{emoji:snowflake} …"),
             ],
         ),
 
@@ -397,7 +645,7 @@
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Any,
             beats: [
-                (role: "caller",    text: "{target} {ability:Mortal Strike}"),
+                (role: "caller",    text: "{target} {emoji:swords}"),
                 (role: "responder", text: "… {prev_target} ? ?!"),
             ],
         ),
@@ -408,6 +656,16 @@
             beats: [
                 (role: "caller",    text: "{emoji:no} {emoji:no} {target} !"),
                 (role: "responder", text: "… {emoji:no} {emoji:yes}"),
+            ],
+        ),
+        // Simple retarget ack, from review: "them = dead", any target.
+        (
+            context: Correction,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:no} {prev_target} {emoji:arrow} {target}"),
+                (role: "responder", text: "{target} {emoji:equals} {emoji:skull}"),
             ],
         ),
 
@@ -432,6 +690,61 @@
             ],
         ),
 
+        // Plan around the abomination: the bubble runs out, then they die.
+        (
+            context: Correction,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
+            target: Class(Paladin),
+            beats: [
+                (role: "caller",    text: "{emoji:no} {prev_target} {emoji:arrow} {target} !"),
+                (role: "responder", text: "{target} {ability:Divine Shield} … {emoji:angry}"),
+                (role: "caller",    text: "{ability:Divine Shield} {emoji:arrow} {emoji:hourglass} , {emoji:skull} !"),
+            ],
+        ),
+        // The lightning is already free.
+        (
+            context: Correction,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
+            target: Class(Shaman),
+            beats: [
+                (role: "caller",    text: "{emoji:no} {prev_target} ! {target} {ability:Lightning Bolt} !"),
+                (role: "responder", text: "{emoji:zap} {emoji:zap} {emoji:zap} {emoji:scream}"),
+                (role: "caller",    text: "{emoji:skull} {emoji:arrow} {target} !"),
+            ],
+        ),
+
+        // One groan, then compliance.
+        (
+            context: Correction,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
+            target: Class(Mage),
+            beats: [
+                (role: "caller",    text: "{emoji:no} {prev_target} {emoji:arrow} {target} !"),
+                (role: "responder", text: "{emoji:angry} {ability:Polymorph} … {emoji:yes}"),
+            ],
+        ),
+        // The only delighted responder in the correction family.
+        (
+            context: Correction,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
+            target: Class(Warlock),
+            beats: [
+                (role: "caller",    text: "{emoji:no} {prev_target} {emoji:arrow} {target} !"),
+                (role: "responder", text: "{ability:Fear} {emoji:angry} ! {emoji:yes} !"),
+            ],
+        ),
+        // Weary acceptance of the footrace.
+        (
+            context: Correction,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
+            target: Class(Hunter),
+            beats: [
+                (role: "caller",    text: "{emoji:no} {prev_target} {emoji:arrow} {target}"),
+                (role: "responder", text: "… {emoji:run} {emoji:yes}"),
+            ],
+        ),
+        // (No Warrior-target Correction by decision — the generics cover it.)
+
         // =====================================================================
         // SWITCH — the call changed after the gates
         //
@@ -451,13 +764,13 @@
             context: Switch,
             speakers: [ (role: "caller", class: Any), (role: "witness", class: Any) ],
             target: Any,
-            beats: [ (role: "caller", text: "{ability:Mortal Strike} {target} !") ],
+            beats: [ (role: "caller", text: "{emoji:swords} {target} !") ],
         ),
         (
             context: Switch,
             speakers: [ (role: "caller", class: Any), (role: "witness", class: Any) ],
             target: Any,
-            beats: [ (role: "caller", text: "{target} {emoji:arrow} {ability:Death Coil} !") ],
+            beats: [ (role: "caller", text: "{target} {emoji:arrow} {emoji:skull} !") ],
         ),
         (
             context: Switch,
@@ -477,13 +790,45 @@
             context: Switch,
             speakers: [ (role: "caller", class: Any), (role: "witness", class: Any) ],
             target: Class(Mage),
-            beats: [ (role: "caller", text: "{target} {ability:Aimed Shot} ! {ability:Mortal Strike}") ],
+            beats: [ (role: "caller", text: "{target} {emoji:eyes} ! {emoji:swords}") ],
         ),
         (
             context: Switch,
             speakers: [ (role: "caller", class: Any), (role: "witness", class: Any) ],
             target: Class(Rogue),
             beats: [ (role: "caller", text: "? ! {target}") ],
+        ),
+        // The stop-their-signature-ability shout family (parallels Priest).
+        (
+            context: Switch,
+            speakers: [ (role: "caller", class: Any), (role: "witness", class: Any) ],
+            target: Class(Shaman),
+            beats: [ (role: "caller", text: "{target} {ability:Lightning Bolt} {emoji:no} !") ],
+        ),
+        (
+            context: Switch,
+            speakers: [ (role: "caller", class: Any), (role: "witness", class: Any) ],
+            target: Class(Warlock),
+            beats: [ (role: "caller", text: "{target} ! {ability:Fear} {emoji:eyes} !") ],
+        ),
+        (
+            context: Switch,
+            speakers: [ (role: "caller", class: Any), (role: "witness", class: Any) ],
+            target: Class(Warrior),
+            beats: [ (role: "caller", text: "{emoji:monkey} ! {emoji:skull} {emoji:arrow} {target} !") ],
+        ),
+        (
+            context: Switch,
+            speakers: [ (role: "caller", class: Any), (role: "witness", class: Any) ],
+            target: Class(Hunter),
+            beats: [ (role: "caller", text: "{target} {emoji:run} {emoji:no} !") ],
+        ),
+        // "The bubble is just an hourglass!" — mechanically true rally cry.
+        (
+            context: Switch,
+            speakers: [ (role: "caller", class: Any), (role: "witness", class: Any) ],
+            target: Class(Paladin),
+            beats: [ (role: "caller", text: "{target} {ability:Divine Shield} {emoji:equals} {emoji:hourglass} !") ],
         ),
     ],
 )
