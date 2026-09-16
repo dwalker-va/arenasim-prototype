@@ -31,13 +31,36 @@
 //
 //   {target}                 portrait of the called enemy, framed by ITS team
 //   {prev_target}            the replaced target's portrait (Correction only)
+//   {cctarget}               the enemy this team means to CONTROL, not kill
 //   {speaker}                the speaking combatant's own portrait
+//   {mate:caller}            portrait of whoever is bound to that role
 //   {ability:Mortal Strike}  that ability's real icon art
 //   {emoji:arrow}            art from assets/icons/emoji/arrow.png
 //
 // Portraits are FRAMED blue for team 1 and red for team 2 — the same colours
 // the combat-log timeline uses. A frame rather than a tint: tinting multiplied
-// the portrait's own colours and muddied the class silhouette.
+// the portrait's own colours and muddied the class silhouette. Framing follows
+// WHO IS POINTED AT, not who is talking: {target}, {prev_target} and
+// {cctarget} are enemies and come out red; {speaker} and {mate:<role>} are the
+// speaker's own side and come out blue.
+//
+// {mate:<role>} POINTS AT A TEAMMATE — the combatant bound to a role this
+// entry declares in `speakers`, which is how a line addresses "you" rather
+// than "me". Naming a role the entry does not declare fails validation and
+// names the role. The prefix is deliberate and a bare {caller} was rejected:
+// an alias would put authored role labels in the same namespace as the
+// grammar, so a role named `target` or `speaker` would silently shadow a
+// portrait token with nothing able to tell the two apart.
+//
+// {cctarget} IS THE ONE TOKEN THAT CAN MAKE AN ENTRY UNSATISFIABLE. It names
+// an enemy who is NOT the called kill target, preferring a healer (Priest /
+// Paladin / Shaman) and otherwise taking the lowest surviving slot. Exclusion
+// is by SLOT, so calling one of two Priests still leaves the other nameable.
+// When the enemy side holds nobody but the kill target the resolver DROPS the
+// entry — the same silence that keeps a two-role exchange out of a 1v1, not a
+// fallback glyph stuffed into a line written around a second enemy. So an
+// entry naming {cctarget} does NOT count toward the generic-coverage floor
+// below, however Any its classes are; validation enforces that.
 //
 // KNOWN LIMITATION: a portrait names a CLASS, not a combatant. A team fielding
 // two of the same class renders the same portrait for both, so a line cannot
@@ -349,6 +372,17 @@
                 (role: "responder", text: "{ability:Flash of Light} {emoji:yes}"),
             ],
         ),
+        // ...and the same answer aimed AT the caller: "Flash of Light on
+        // YOU." The ack is the direction, which is what {mate:caller} buys.
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Class(Paladin)) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:sword} {emoji:arrow} {target} !"),
+                (role: "responder", text: "{ability:Flash of Light} {emoji:arrow} {mate:caller}"),
+            ],
+        ),
         // The escape drill: "and when melee closes?" — "Disengage. Trap.
         // Run." (verbatim the AI's dead-zone priority ladder; the flat
         // periods are the fire-drill cadence).
@@ -401,6 +435,19 @@
             beats: [
                 (role: "caller",    text: "{ability:Hammer of Justice} {emoji:arrow} {target}"),
                 (role: "responder", text: "{emoji:yes}"),
+            ],
+        ),
+        // The wheelchair: Paladins hold that their class is underpowered —
+        // playing in a wheelchair while everyone else is on their feet. "And
+        // you're moving in fast?" — "I will get there. Righteously."
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Paladin)), (role: "responder", class: Any) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:skull} {emoji:arrow} {target} !"),
+                (role: "responder", text: "{mate:caller} {emoji:racecar} ?"),
+                (role: "caller",    text: "{emoji:wheelchair} … {emoji:yes}"),
             ],
         ),
         // The Light told me who dies (responder sarcasm per review tweak).
@@ -500,6 +547,20 @@
                 (role: "responder", text: "{ability:Windfury Totem} {ability:Healing Stream Totem} {ability:Strength of Earth Totem} {ability:Flametongue Totem} ."),
                 (role: "responder", text: "{ability:Wind Shear} {emoji:equals} {emoji:speaknoevil} , {ability:Lightning Bolt} {emoji:arrow} {emoji:boom} !"),
                 (role: "caller",    text: "… {emoji:thumbsup}"),
+            ],
+        ),
+        // The professional. The full stop where every other class puts a `!`
+        // IS the characterisation — marksmen do not shout. Grounded: this is
+        // the real AI's signature play, Freezing Trap on the off-target healer
+        // and Aimed Shot inside the window it buys. Needs that second enemy to
+        // exist, so this entry goes quiet in a 2v1.
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Class(Hunter)) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:skull} {emoji:arrow} {target} ?"),
+                (role: "responder", text: "{ability:Freezing Trap} {emoji:arrow} {cctarget} , {ability:Aimed Shot} {emoji:arrow} {target} ."),
             ],
         ),
 

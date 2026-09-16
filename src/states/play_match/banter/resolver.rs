@@ -20,16 +20,18 @@ use super::vocab;
 // The pipeline is filter -> weight -> pick -> bind -> substitute:
 //
 //  1. FILTER   drop exchanges whose context differs, whose target constraint
-//              the call does not satisfy, or whose roles cannot all bind to
-//              distinct living combatants. Unsatisfiable never reaches the
-//              weighting step — which is why a 1v1 team is silent for any
-//              two-speaker exchange with no special case (AE1).
+//              the call does not satisfy, whose roles cannot all bind to
+//              distinct living combatants, or which name `{cctarget}` when the
+//              enemy side holds nobody but the kill target. Unsatisfiable never
+//              reaches the weighting step — which is why a 1v1 team is silent
+//              for any two-speaker exchange with no special case (AE1).
 //  2. WEIGHT   `specificity_weight ^ (non-`Any` constraint count)`. A WEIGHT,
 //              not a filter (KTD8) — see [`exchange_weight`].
 //  3. PICK     a weighted draw off a hash of (seed, team, context, occurrence),
 //              never `GameRng` (KTD7, R15).
 //  4. BIND     constrained roles first, then unconstrained in slot order.
-//  5. SUBSTITUTE `{target}` everywhere, `{prev_target}` in `Correction` only.
+//  5. SUBSTITUTE `{target}` / `{cctarget}` / `{speaker}` / `{mate:<role>}`
+//              everywhere, `{prev_target}` in `Correction` only.
 
 /// Selection seed used when `GameRng::seed` is `None`.
 ///
@@ -107,6 +109,15 @@ pub(super) struct BanterCall {
     /// Class of the combatant the call replaced. Only ever substituted in
     /// `Correction`.
     pub prev_target: Option<CharacterClass>,
+    /// Class of the enemy the team means to CONTROL rather than kill — see
+    /// [`cc_target_class`], which the caller uses to fill this in.
+    ///
+    /// `None` means there is nobody to name: the enemy side holds the kill
+    /// target and nobody else. Unlike the other two, that is a SATISFIABILITY
+    /// fact, not just a substitution gap — an exchange naming `{cctarget}` is
+    /// dropped from the pool rather than rendered with a fallback glyph, since
+    /// its line was written around a second enemy existing.
+    pub cc_target: Option<CharacterClass>,
     /// Team that owns both of the above — the speaker's opposition.
     ///
     /// Carried so a portrait can be tinted by the team it belongs to. A line
@@ -180,6 +191,11 @@ pub(super) fn resolve_exchange(
                 .all(|beat| declares(exchange, &beat.role))
         })
         .filter(|exchange| target_satisfies(exchange, call))
+        // `{cctarget}` needs a second enemy to point at. Dropping the exchange
+        // here — rather than substituting the fallback glyph — is the same
+        // mechanism that silences a two-role exchange in 1v1: a line written
+        // around an off-target enemy says nothing coherent without one.
+        .filter(|exchange| call.cc_target.is_some() || !names_cc_target(exchange))
         .filter_map(|exchange| Some((exchange, bind_roles(exchange, lineup)?)))
         .collect();
 
@@ -196,6 +212,16 @@ pub(super) fn resolve_exchange(
     let (exchange, bound) = &candidates[weighted_pick(&weights, roll)];
 
     // --- 4. Bind (already done) + 5. substitute ----------------------------
+    // The cast is the role -> bound class map `{mate:<role>}` reads. Built once
+    // per exchange rather than per beat: every beat of an exchange addresses
+    // the same bound combatants.
+    let cast: Vec<(&str, Option<CharacterClass>)> = exchange
+        .speakers
+        .iter()
+        .enumerate()
+        .map(|(index, speaker)| (speaker.role.as_str(), speaker_class(lineup, bound[index])))
+        .collect();
+
     let beats = exchange
         .beats
         .iter()
@@ -209,6 +235,7 @@ pub(super) fn resolve_exchange(
                 call,
                 context,
                 speaker_class(lineup, bound[role_index(exchange, &beat.role)]),
+                &cast,
                 lineup.team,
             ),
             start: config.timing.beat_start(context, index),
@@ -279,6 +306,48 @@ fn bind_roles(exchange: &BanterExchange, lineup: &BanterLineup) -> Option<Vec<En
 
     // Every slot is filled or we returned early via `?` above.
     bound.into_iter().collect()
+}
+
+/// Whether any beat of this exchange names `{cctarget}`.
+fn names_cc_target(exchange: &BanterExchange) -> bool {
+    exchange
+        .beats
+        .iter()
+        .any(|beat| vocab::references_cc_target(&beat.text))
+}
+
+/// The class `{cctarget}` names: an enemy who is NOT the called kill target,
+/// preferring a healer.
+///
+/// `called` is the call index into `enemies` — the same slot-ordered, living-
+/// only roster `{target}` is read from, so "not the kill target" is an index
+/// comparison and not a class comparison. That distinction matters against a
+/// double-healer enemy team: calling one Priest must still leave the other
+/// nameable.
+///
+/// A healer is preferred because that is what a team actually spends its
+/// control on, and it is the case the content was written for. Failing that,
+/// any other enemy will do. Both passes take the LOWEST index, which is the
+/// lowest surviving slot — a deterministic tie-break, so the same lineup and
+/// call always name the same combatant.
+///
+/// `None` when nobody qualifies (the enemy side is just the kill target).
+/// [`resolve_exchange`] reads that as unsatisfiable.
+pub(super) fn cc_target_class(
+    enemies: &[BanterCombatant],
+    called: Option<usize>,
+) -> Option<CharacterClass> {
+    let eligible = || {
+        enemies
+            .iter()
+            .enumerate()
+            .filter(|(index, enemy)| enemy.alive && Some(*index) != called)
+            .map(|(_, enemy)| enemy)
+    };
+    eligible()
+        .find(|enemy| enemy.class.is_healer())
+        .or_else(|| eligible().next())
+        .map(|enemy| enemy.class)
 }
 
 /// Whether `role` is declared in the exchange's `speakers` list.
@@ -389,26 +458,76 @@ fn speaker_class(lineup: &BanterLineup, speaker: Entity) -> Option<CharacterClas
         .map(|ally| ally.class)
 }
 
-/// Substitute `{target}`, `{prev_target}` and `{speaker}` into one beat's text.
+/// Substitute every portrait token into one beat's text.
 ///
 /// `{prev_target}` resolves in `Correction` ONLY — it is the one context where
 /// a previous call exists as a thing worth naming. Elsewhere it falls back with
 /// everything else rather than leaking a literal brace into a bubble; see
 /// [`UNRESOLVED_TARGET`].
+///
+/// TEAM FRAMING follows who is being pointed at, not who is talking:
+/// `{target}`, `{prev_target}` and `{cctarget}` name enemies and carry
+/// `call.enemy_team`; `{speaker}` and `{mate:<role>}` name the speaking side
+/// and carry `speaking_team`.
+///
+/// `{cctarget}` is substituted by plain `replace` alongside the others because
+/// `{target}` is not a substring of `{cctarget}` (pinned by a vocab test), so
+/// no ordering between the two can corrupt either.
 fn render_line(
     text: &str,
     call: BanterCall,
     context: BanterContext,
     speaker: Option<CharacterClass>,
+    cast: &[(&str, Option<CharacterClass>)],
     speaking_team: u8,
 ) -> String {
     let prev = match context {
         BanterContext::Correction => call.prev_target,
         BanterContext::Opening | BanterContext::Switch => None,
     };
-    text.replace("{prev_target}", &portrait(prev, call.enemy_team))
+    let substituted = text
+        .replace("{prev_target}", &portrait(prev, call.enemy_team))
+        .replace(vocab::CC_TARGET, &portrait(call.cc_target, call.enemy_team))
         .replace("{target}", &portrait(call.target, call.enemy_team))
-        .replace("{speaker}", &portrait(speaker, speaking_team))
+        .replace("{speaker}", &portrait(speaker, speaking_team));
+    substitute_mates(&substituted, cast, speaking_team)
+}
+
+/// Replace every `{mate:<role>}` with the portrait of whoever that role bound.
+///
+/// A scan rather than a `replace` chain, because the role name is part of the
+/// token: there is no fixed needle to search for.
+///
+/// An undeclared role renders [`UNRESOLVED_TARGET`] and an unclosed `{mate:`
+/// stays literal. Validation rejects both at load, so neither is reachable from
+/// the shipped pool — the same posture as `role_index`'s `unwrap_or`, where a
+/// content mistake costs one bubble rather than the client.
+fn substitute_mates(
+    text: &str,
+    cast: &[(&str, Option<CharacterClass>)],
+    speaking_team: u8,
+) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(start) = rest.find(vocab::MATE_PREFIX) {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + vocab::MATE_PREFIX.len()..];
+        let Some(end) = after.find('}') else {
+            // No closing brace: the rest is literal, prefix included.
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let bound = cast
+            .iter()
+            .find(|(role, _)| *role == &after[..end])
+            .and_then(|(_, class)| *class);
+        out.push_str(&portrait(bound, speaking_team));
+        rest = &after[end + 1..];
+    }
+
+    out.push_str(rest);
+    out
 }
 
 /// A class portrait token, or the fallback when there is nobody to point at.
@@ -464,12 +583,29 @@ mod tests {
         }
     }
 
+    /// A call on `target` with no off-target enemy — the shape every test that
+    /// is not about `{cctarget}` wants, since it leaves that token
+    /// unsatisfiable and so absent from those pools.
     fn called(target: CharacterClass) -> BanterCall {
         BanterCall {
             target: Some(target),
             prev_target: None,
+            cc_target: None,
             enemy_team: 2,
         }
+    }
+
+    /// An enemy side, in call-slot order, on team 2.
+    fn enemies(classes: &[CharacterClass]) -> Vec<BanterCombatant> {
+        classes
+            .iter()
+            .enumerate()
+            .map(|(index, class)| BanterCombatant {
+                entity: Entity::from_raw(index as u32 + 100),
+                class: *class,
+                alive: true,
+            })
+            .collect()
     }
 
     /// The label prefix a resolved exchange's first beat carries, for
@@ -809,6 +945,7 @@ mod tests {
         let call = BanterCall {
             target: Some(CharacterClass::Rogue),
             prev_target: Some(CharacterClass::Paladin),
+            cc_target: None,
             enemy_team: 2,
         };
         let resolve =
@@ -1044,6 +1181,307 @@ mod tests {
             0,
         )
         .is_none());
+    }
+
+    // -------------------------------------------------------------------
+    // {mate:<role>} — pointing at a bound teammate
+    // -------------------------------------------------------------------
+
+    /// An exchange whose beat 1 is `text`, on a two-role generic Opening.
+    fn opening_saying(text: &str) -> BanterExchange {
+        BanterExchange {
+            context: BanterContext::Opening,
+            speakers: vec![
+                speaker("caller", ClassConstraint::Any),
+                speaker("responder", ClassConstraint::Any),
+            ],
+            target: ClassConstraint::Any,
+            beats: vec![beat("caller", "setup"), beat("responder", text)],
+        }
+    }
+
+    /// `{mate:<role>}` renders the combatant BOUND to that role, framed by the
+    /// SPEAKING team — the same framing `{speaker}` uses, because it points at
+    /// the speaker's own side.
+    #[test]
+    fn a_mate_token_renders_the_bound_teammate_in_the_speaking_teams_frame() {
+        let config = config_with(vec![opening_saying(
+            "{ability:Flash of Light} {mate:caller}",
+        )]);
+        let resolved = resolve_exchange(
+            &config,
+            &lineup(&[CharacterClass::Warrior, CharacterClass::Paladin]),
+            called(CharacterClass::Mage),
+            BanterContext::Opening,
+            A_SEED,
+            0,
+        )
+        .expect("resolves");
+
+        // `caller` bound the Warrior (slot order), and team 1 is speaking, so
+        // the portrait carries team 1 — NOT the Paladin who is saying it, and
+        // not the enemy team `{target}` would carry.
+        assert_eq!(
+            resolved.beats[1].text,
+            "{ability:Flash of Light} {class:Warrior:1}"
+        );
+    }
+
+    /// The token tracks the BINDING, not the authored slot order: a
+    /// class-constrained role that binds out of order is still pointed at
+    /// correctly.
+    #[test]
+    fn a_mate_token_follows_the_binding_not_the_roster_order() {
+        let priest_responder = BanterExchange {
+            context: BanterContext::Opening,
+            speakers: vec![
+                speaker("caller", ClassConstraint::Any),
+                speaker("responder", ClassConstraint::Class(CharacterClass::Priest)),
+            ],
+            target: ClassConstraint::Any,
+            beats: vec![beat("caller", "{mate:responder} ?"), beat("responder", "!")],
+        };
+        let config = config_with(vec![priest_responder]);
+        // Priest is in the LAST slot, so the constrained role reaches past the
+        // Rogue to take it.
+        let resolved = resolve_exchange(
+            &config,
+            &lineup(&[
+                CharacterClass::Warrior,
+                CharacterClass::Rogue,
+                CharacterClass::Priest,
+            ]),
+            called(CharacterClass::Mage),
+            BanterContext::Opening,
+            A_SEED,
+            0,
+        )
+        .expect("the lineup has a Priest");
+
+        assert_eq!(resolved.beats[0].text, "{class:Priest:1} ?");
+    }
+
+    /// An undeclared role falls back to the neutral glyph rather than leaking
+    /// the authoring token. `validate()` rejects this at load, so only a
+    /// hand-built config reaches it.
+    #[test]
+    fn a_mate_token_on_an_undeclared_role_falls_back_instead_of_leaking() {
+        let config = config_with(vec![opening_saying("{mate:ghost} ?")]);
+        let resolved = resolve_exchange(
+            &config,
+            &lineup(&[CharacterClass::Mage, CharacterClass::Priest]),
+            called(CharacterClass::Warrior),
+            BanterContext::Opening,
+            A_SEED,
+            0,
+        )
+        .expect("resolves");
+
+        assert_eq!(resolved.beats[1].text, "❓ ?");
+        assert!(!resolved.beats[1].text.contains("{mate:"));
+    }
+
+    /// An unclosed `{mate:` stays literal rather than swallowing the rest of
+    /// the line — the same posture `vocab::parse` takes on a dangling brace.
+    #[test]
+    fn an_unclosed_mate_token_stays_literal() {
+        let config = config_with(vec![opening_saying("{mate:caller ?")]);
+        let resolved = resolve_exchange(
+            &config,
+            &lineup(&[CharacterClass::Mage, CharacterClass::Priest]),
+            called(CharacterClass::Warrior),
+            BanterContext::Opening,
+            A_SEED,
+            0,
+        )
+        .expect("resolves");
+
+        assert_eq!(resolved.beats[1].text, "{mate:caller ?");
+    }
+
+    /// The two new substitutions are the IDENTITY on a line that names
+    /// neither, which is every line the pool held before they existed. This is
+    /// the property that keeps the 62 shipped exchanges resolving exactly as
+    /// they did — asserted here rather than left to inspection of the diff.
+    #[test]
+    fn the_new_tokens_leave_a_line_that_names_neither_untouched() {
+        let cast = [
+            ("caller", Some(CharacterClass::Warrior)),
+            ("responder", Some(CharacterClass::Priest)),
+        ];
+        for line in [
+            "{emoji:sword} {target} {emoji:arrow} {emoji:skull}",
+            "{ability:Flash Heal} {emoji:arrow} {speaker} … ?",
+            "✖ {prev_target} ➡ {target}",
+            "{class:Priest:2} !",
+            "",
+            "{mystery} {unclosed",
+        ] {
+            assert_eq!(substitute_mates(line, &cast, 1), line);
+            assert_eq!(line.replace(vocab::CC_TARGET, "REPLACED"), line);
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // {cctarget} — the enemy the team means to control
+    // -------------------------------------------------------------------
+
+    /// The selection rule, directly: a healer wins, otherwise the lowest
+    /// surviving slot, and the called target is never it.
+    #[test]
+    fn the_cc_target_is_an_off_target_enemy_preferring_a_healer() {
+        use CharacterClass::{Mage, Paladin, Priest, Rogue, Warrior};
+
+        // A healer is preferred even from the last slot.
+        assert_eq!(
+            cc_target_class(&enemies(&[Warrior, Rogue, Priest]), Some(0)),
+            Some(Priest)
+        );
+        // With no healer, the lowest eligible index wins — a deterministic
+        // tie-break, not whichever the iterator reached first.
+        assert_eq!(
+            cc_target_class(&enemies(&[Warrior, Rogue, Mage]), Some(2)),
+            Some(Warrior)
+        );
+        // Two healers: still the lowest slot.
+        assert_eq!(
+            cc_target_class(&enemies(&[Mage, Priest, Paladin]), Some(0)),
+            Some(Priest)
+        );
+        // The CALLED one is excluded by slot, not by class — calling one
+        // Priest must leave the other nameable.
+        assert_eq!(
+            cc_target_class(&enemies(&[Priest, Priest]), Some(0)),
+            Some(Priest)
+        );
+        // ...and excluding by class would be wrong here in a way the case
+        // above cannot show: with the healer called, a non-healer is named.
+        assert_eq!(
+            cc_target_class(&enemies(&[Priest, Mage]), Some(0)),
+            Some(Mage)
+        );
+    }
+
+    /// Nobody to name: a lone enemy who is the kill target, and a corpse who
+    /// is not.
+    #[test]
+    fn the_cc_target_is_none_when_only_the_kill_target_remains() {
+        use CharacterClass::{Mage, Priest};
+
+        assert_eq!(cc_target_class(&enemies(&[Mage]), Some(0)), None);
+        assert_eq!(cc_target_class(&[], Some(0)), None);
+
+        let mut with_corpse = enemies(&[Mage, Priest]);
+        with_corpse[1].alive = false;
+        assert_eq!(
+            cc_target_class(&with_corpse, Some(0)),
+            None,
+            "a dead enemy is nobody to plan a trap for"
+        );
+
+        // A cleared call leaves everyone eligible — nothing is the kill target.
+        assert_eq!(cc_target_class(&enemies(&[Mage]), None), Some(Mage));
+    }
+
+    /// `{cctarget}` renders an ENEMY portrait, distinct from `{target}`, both
+    /// framed by the enemy team.
+    #[test]
+    fn a_cc_target_token_renders_the_off_target_enemy() {
+        let config = config_with(vec![opening_saying(
+            "{ability:Freezing Trap} {cctarget} , {target}",
+        )]);
+        let call = BanterCall {
+            target: Some(CharacterClass::Mage),
+            prev_target: None,
+            cc_target: cc_target_class(
+                &enemies(&[CharacterClass::Mage, CharacterClass::Priest]),
+                Some(0),
+            ),
+            enemy_team: 2,
+        };
+        let resolved = resolve_exchange(
+            &config,
+            &lineup(&[CharacterClass::Hunter, CharacterClass::Warrior]),
+            call,
+            BanterContext::Opening,
+            A_SEED,
+            0,
+        )
+        .expect("resolves");
+
+        assert_eq!(
+            resolved.beats[1].text, "{ability:Freezing Trap} {class:Priest:2} , {class:Mage:2}",
+            "the two enemy portraits must be distinct and both framed red"
+        );
+    }
+
+    /// AE1's mechanism, extended: an exchange that names an off-target enemy
+    /// is UNSATISFIABLE when there is none, so it is dropped from the pool
+    /// rather than rendering the fallback glyph into a line written around a
+    /// second enemy.
+    #[test]
+    fn an_exchange_naming_the_cc_target_is_dropped_when_it_cannot_bind() {
+        let config = config_with(vec![opening_saying("{cctarget} !")]);
+        let team = lineup(&[CharacterClass::Hunter, CharacterClass::Warrior]);
+        let resolve = |cc_target| {
+            resolve_exchange(
+                &config,
+                &team,
+                BanterCall {
+                    target: Some(CharacterClass::Mage),
+                    prev_target: None,
+                    cc_target,
+                    enemy_team: 2,
+                },
+                BanterContext::Opening,
+                A_SEED,
+                0,
+            )
+        };
+
+        assert!(
+            resolve(None).is_none(),
+            "with no off-target enemy the pool has nothing to play"
+        );
+        // ...and the same pool DOES resolve once there is one, so the case
+        // above is about the token and not about a broken fixture.
+        let resolved =
+            resolve(Some(CharacterClass::Priest)).expect("one off-target enemy is enough");
+        assert_eq!(resolved.beats[1].text, "{class:Priest:2} !");
+    }
+
+    /// The drop is per-exchange, not per-pool: a generic entry alongside an
+    /// unsatisfiable one still plays, which is what the coverage floor in
+    /// `banter_config` relies on.
+    #[test]
+    fn an_unsatisfiable_cc_target_entry_does_not_silence_the_generics() {
+        let config = config_with(vec![
+            opening_saying("{cctarget} !"),
+            two_speaker(
+                BanterContext::Opening,
+                "generic",
+                ClassConstraint::Any,
+                ClassConstraint::Any,
+            ),
+        ]);
+        let team = lineup(&[CharacterClass::Hunter, CharacterClass::Warrior]);
+
+        for seed in 0..40u64 {
+            let resolved = resolve_exchange(
+                &config,
+                &team,
+                called(CharacterClass::Mage),
+                BanterContext::Opening,
+                Some(seed),
+                0,
+            )
+            .expect("the generic entry always resolves");
+            assert_eq!(
+                label_of(&resolved),
+                "generic",
+                "only the satisfiable entry may be picked"
+            );
+        }
     }
 
     /// The two teams hash differently, so a mirror comp does not have both
