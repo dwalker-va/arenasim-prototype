@@ -28,8 +28,9 @@ Rogue+Priest, off hand empty (shipped) vs a second Serpent Fang Dagger:
 | empty off hand | 59.9% [57.9–61.8] | `...-rogue-control-n100.csv` |
 | second dagger | **70.7% [68.9–72.5]** | `...-rogue-offhand-n100.csv` |
 
-**+10.8pt**, non-overlapping intervals, 11 of 25 cells moved beyond noise —
-the contested ones hardest: Rogue mirror 52→82, vs Rogue+Shaman 15→50, vs
+**+10.8pt**, non-overlapping intervals, 10 of 25 cells moved beyond noise —
+as counted by `agg_sweep.py --compare`, the tool the reproduction section
+below tells you to run. The contested cells moved hardest: Rogue mirror 52→82, vs Rogue+Shaman 15→50, vs
 Mage+Priest 14→44, vs Warrior+Rogue 12→42.
 
 The off-hand item is a second copy of the Rogue's own default main hand, so
