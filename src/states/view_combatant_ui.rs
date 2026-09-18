@@ -26,7 +26,7 @@ use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::components::{class_base_stats, ClassBaseStats, PetType, ResourceType};
 use super::play_match::equipment::{
     enforce_two_hand_conflicts, find_one_handed_mainhand, resolve_equipped_loadout,
-    resolve_loadout, DefaultLoadouts, ItemDefinitions, ItemId, ItemSlot, Loadout,
+    resolve_loadout, DefaultLoadouts, HeldSlot, ItemDefinitions, ItemId, ItemSlot, Loadout,
 };
 use super::play_match::rendering::GENERIC_AURA_ICONS;
 use super::play_match::AbilityType;
@@ -1765,7 +1765,7 @@ fn set_equipment_override(
             let mh_is_2h = pre_resolved
                 .get(&ItemSlot::MainHand)
                 .and_then(|id| items.get(id))
-                .is_some_and(|item| item.two_handed);
+                .is_some_and(|item| item.held() == Some(HeldSlot::TwoHand));
             if mh_is_2h {
                 if let Some(replacement) = find_one_handed_mainhand(items, class) {
                     equip_map.insert(ItemSlot::MainHand, replacement);
@@ -1781,7 +1781,7 @@ fn set_equipment_override(
         // (enforce_two_hand_conflicts handles the default off-hand at resolve time)
         if slot == ItemSlot::MainHand {
             if let Some(new_item) = items.get(&id) {
-                if new_item.two_handed {
+                if new_item.held() == Some(HeldSlot::TwoHand) {
                     equip_map.remove(&ItemSlot::OffHand);
                 }
             }

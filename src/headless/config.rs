@@ -293,7 +293,9 @@ impl HeadlessMatchConfig {
     /// A config file is the one place a human writes a loadout by hand, so an
     /// illegal entry is REJECTED here with the offending socket named, rather
     /// than silently dropped at spawn the way a stale in-app override is. The
-    /// rule is the same one the equipment picker enforces — `can_equip` — so
+    /// rule is the same one the equipment picker enforces — `socket_rejection`,
+    /// which also answers the question only a named socket can ask: whether the
+    /// class may hold a one-hander in its OFF hand — so
     /// headless and graphical agree on what is legal; they differ only in what
     /// they do about it, and only because only one of them has a file to point
     /// at.

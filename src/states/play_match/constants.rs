@@ -124,6 +124,26 @@ pub const ARENA_CORNER_SUM: f32 = 48.88;
 pub const FCT_HEIGHT: f32 = 4.0;
 
 // ============================================================================
+// Dual Wield
+// ============================================================================
+
+/// Fraction of its listed weapon damage an OFF-HAND swing deals. Classic's
+/// untalented off-hand penalty is 50%.
+pub const OFFHAND_DAMAGE_MULTIPLIER: f32 = 0.5;
+
+/// Chance that a swing MISSES while the attacker is dual wielding — the price
+/// Classic charges for the second weapon, and the reason dual wield is a trade
+/// rather than a free damage increase.
+///
+/// Classic puts a level-60 attacker's white-hit miss chance against an
+/// equal-level target at 5% single-wielding and 24% dual-wielding; the 19%
+/// difference is this number. It applies to BOTH hands, as in Classic, and
+/// only while a second weapon is actually equipped — the sim has no general
+/// miss mechanic, so a single-wielding attacker rolls nothing and existing
+/// matches draw no extra RNG.
+pub const DUAL_WIELD_MISS_CHANCE: f32 = 0.19;
+
+// ============================================================================
 // Critical Strike
 // ============================================================================
 
