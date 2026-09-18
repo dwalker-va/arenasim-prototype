@@ -20,7 +20,7 @@ use bevy::MinimalPlugins;
 use arenasim::combat::log::CombatLog;
 use arenasim::states::play_match::combat_core::combat_auto_attack;
 use arenasim::states::play_match::components::{Combatant, GameRng, MatchCountdown};
-use arenasim::states::play_match::constants::DUAL_WIELD_MISS_CHANCE;
+use arenasim::states::play_match::constants::{DUAL_WIELD_MISS_CHANCE, OFFHAND_DAMAGE_MULTIPLIER};
 use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::AbilityDefinitions;
 use arenasim::CharacterClass;
@@ -157,31 +157,49 @@ fn an_off_hand_weapon_adds_damage() {
 
 /// The off hand swings at HALF damage, not full.
 ///
-/// Both hands at the same speed and the same listed damage, so what separates
-/// this ratio from a doubled main hand is the off-hand penalty — and what
-/// separates it from `1 + OFFHAND_DAMAGE_MULTIPLIER` is the miss penalty,
-/// which the single-wield control does not pay. Both are folded into the
-/// expectation; getting either wrong lands outside the band.
+/// **Every number here is a literal.** Deriving the expectation from the two
+/// constants it claims to pin — which an earlier version did, setting
+/// `off_damage = 20.0 * OFFHAND_DAMAGE_MULTIPLIER` and expecting
+/// `(1.0 + OFFHAND_DAMAGE_MULTIPLIER) * (1.0 - DUAL_WIELD_MISS_CHANCE)` — puts
+/// each constant on both sides, so retuning either moved the input and the
+/// expectation together and the test could not fail on it. Measured: setting
+/// the multiplier to 1.0 left this whole file green.
 ///
-/// The band is wide because ~120 miss rolls sit inside it, and narrow enough
-/// to exclude the two mistakes it is here to catch: an off hand at FULL damage
-/// reads 1.62, and one at a quarter reads 1.01.
+/// So the band is built from 1.5 and 0.81 written out, and the two constants
+/// are asserted against their literal values separately. What this probe
+/// catches, stated exactly:
 ///
-/// The off-hand damage is the LITERAL half of the main hand's, not
-/// `20.0 * OFFHAND_DAMAGE_MULTIPLIER`. Reading that constant here would put it
-/// on both sides of the comparison — it would set the input and the
-/// expectation together, and retuning it would move both and prove nothing.
-/// That the constant is what `apply_equipment` actually applies is pinned
-/// separately, by `apply_equipment_offhand_weapon_arms_the_second_swing`.
+/// - the off-hand SWING not honouring `offhand_damage` — at full main-hand
+///   damage the ratio reads 1.62 and at a quarter it reads 1.01, both outside
+///   the band (mutations M1 and M11 both fail here);
+/// - the main hand not paying the miss penalty, which pulls the ratio up (M2, M9);
+/// - either constant being retuned, via the two `assert_eq!`s below.
+///
+/// The band is ±0.15 because ~120 miss rolls sit inside it — wide enough not to
+/// flake, narrow enough to exclude both of the ratios named above.
 #[test]
 fn the_off_hand_swings_at_half_damage() {
+    // The constants this probe's expectation is built from. Asserted rather
+    // than read, so a retune fails HERE with a message naming the literal to
+    // update, instead of silently sliding the band along with itself.
+    assert_eq!(
+        OFFHAND_DAMAGE_MULTIPLIER, 0.5,
+        "the off-hand penalty moved; update the 10.0 off-hand damage and the \
+         1.5 below — and note that moving it is a balance change"
+    );
+    assert_eq!(
+        DUAL_WIELD_MISS_CHANCE, 0.19,
+        "the dual-wield miss rate moved; update the 0.81 below — and note that \
+         moving it is a balance change"
+    );
+
     let single = single_wield_damage(7, 20.0, 1.0);
+    // Off hand at half the main hand's 20.0.
     let dual = dual_wield_damage(7, 20.0, 1.0, 10.0, 1.0);
 
-    // 1.5x the main hand's contribution, less the miss rate the control does
-    // not pay. The miss rate IS read from its constant: it is a different
-    // mechanism this probe has to compensate for, not the one under test.
-    let expected_ratio = 1.5 * (1.0 - DUAL_WIELD_MISS_CHANCE);
+    // 1.5x the main hand's contribution (1 + the 0.5 off-hand share), less the
+    // 19% miss rate the single-wield control does not pay.
+    let expected_ratio = 1.5 * 0.81;
     let ratio = dual / single;
     assert!(
         (ratio - expected_ratio).abs() < 0.15,
