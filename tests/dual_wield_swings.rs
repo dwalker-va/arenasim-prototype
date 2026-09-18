@@ -20,7 +20,7 @@ use bevy::MinimalPlugins;
 use arenasim::combat::log::CombatLog;
 use arenasim::states::play_match::combat_core::combat_auto_attack;
 use arenasim::states::play_match::components::{Combatant, GameRng, MatchCountdown};
-use arenasim::states::play_match::constants::{DUAL_WIELD_MISS_CHANCE, OFFHAND_DAMAGE_MULTIPLIER};
+use arenasim::states::play_match::constants::DUAL_WIELD_MISS_CHANCE;
 use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::AbilityDefinitions;
 use arenasim::CharacterClass;
@@ -143,7 +143,7 @@ fn dual_wield_damage(
 #[test]
 fn an_off_hand_weapon_adds_damage() {
     let single = single_wield_damage(1, 20.0, 1.0);
-    let dual = dual_wield_damage(1, 20.0, 1.0, 20.0 * OFFHAND_DAMAGE_MULTIPLIER, 1.0);
+    let dual = dual_wield_damage(1, 20.0, 1.0, 10.0, 1.0);
 
     assert!(
         single > 0.0,
@@ -166,12 +166,22 @@ fn an_off_hand_weapon_adds_damage() {
 /// The band is wide because ~120 miss rolls sit inside it, and narrow enough
 /// to exclude the two mistakes it is here to catch: an off hand at FULL damage
 /// reads 1.62, and one at a quarter reads 1.01.
+///
+/// The off-hand damage is the LITERAL half of the main hand's, not
+/// `20.0 * OFFHAND_DAMAGE_MULTIPLIER`. Reading that constant here would put it
+/// on both sides of the comparison — it would set the input and the
+/// expectation together, and retuning it would move both and prove nothing.
+/// That the constant is what `apply_equipment` actually applies is pinned
+/// separately, by `apply_equipment_offhand_weapon_arms_the_second_swing`.
 #[test]
 fn the_off_hand_swings_at_half_damage() {
     let single = single_wield_damage(7, 20.0, 1.0);
-    let dual = dual_wield_damage(7, 20.0, 1.0, 20.0 * OFFHAND_DAMAGE_MULTIPLIER, 1.0);
+    let dual = dual_wield_damage(7, 20.0, 1.0, 10.0, 1.0);
 
-    let expected_ratio = (1.0 + OFFHAND_DAMAGE_MULTIPLIER) * (1.0 - DUAL_WIELD_MISS_CHANCE);
+    // 1.5x the main hand's contribution, less the miss rate the control does
+    // not pay. The miss rate IS read from its constant: it is a different
+    // mechanism this probe has to compensate for, not the one under test.
+    let expected_ratio = 1.5 * (1.0 - DUAL_WIELD_MISS_CHANCE);
     let ratio = dual / single;
     assert!(
         (ratio - expected_ratio).abs() < 0.15,
@@ -216,7 +226,10 @@ fn the_off_hand_runs_on_its_own_timer() {
 fn dual_wield_misses_cost_damage() {
     let main_damage = 20.0;
     let main_speed = 1.0;
-    let off_damage = 20.0 * OFFHAND_DAMAGE_MULTIPLIER;
+    // Literal, not `main_damage * OFFHAND_DAMAGE_MULTIPLIER`: the ceiling
+    // below is built from this number, so reading the constant would set the
+    // input and the bound together.
+    let off_damage = 10.0;
     let off_speed = main_speed;
 
     let single = single_wield_damage(11, main_damage, main_speed);
@@ -263,13 +276,49 @@ fn the_miss_penalty_reaches_the_main_hand() {
     );
 }
 
+/// How many values the app's `GameRng` has drawn, recovered by replaying a
+/// fresh RNG at the same seed until its stream lines up with the app's.
+///
+/// This is the independent observation the probe below needs: it interrogates
+/// the RNG, not the system under test, so no arithmetic inside
+/// `combat_auto_attack` can make it agree by construction. Matches on TWO
+/// consecutive values, so a chance `f32` collision cannot report a wrong
+/// position. `None` means the stream did not line up anywhere in range — a
+/// failure to measure, which the caller must treat as a failure.
+fn rng_draws_taken(next_two: (f32, f32), seed: u64, search_limit: u32) -> Option<u32> {
+    for n in 0..=search_limit {
+        let mut reference = GameRng::from_seed(seed);
+        for _ in 0..n {
+            reference.random_f32();
+        }
+        if (reference.random_f32(), reference.random_f32()) == next_two {
+            return Some(n);
+        }
+    }
+    None
+}
+
 /// A combatant with no second weapon runs the old path exactly: no off-hand
-/// timer, no miss roll, no extra RNG draw. This is the property that lets
-/// every existing balance baseline stand unchanged, so pin it directly rather
-/// than inferring it from a green suite.
+/// timer, and — the property every existing balance baseline rests on — NO
+/// EXTRA RNG DRAW.
+///
+/// **Counting damage cannot show this, and an earlier version of this probe
+/// wrongly claimed it could.** It argued that a single wielder's total stays an
+/// exact multiple of its weapon damage because nothing missed. But a missed
+/// swing contributes zero, so the total stays an exact multiple either way, and
+/// the assertion could not fail for the reason it gave: removing the
+/// `dual_wielding &&` gate so every attacker rolls to miss failed fifteen other
+/// tests and left this one green.
+///
+/// So count the DRAWS instead. `roll_crit` draws unconditionally — crit chance
+/// zero still consumes a value — and nothing else in this harness touches the
+/// RNG, so a correct single wielder advances the stream exactly once per landed
+/// swing. Ungate the miss roll and it advances twice per swing while landing
+/// fewer, and the two numbers separate immediately.
 #[test]
 fn a_single_wielder_draws_no_dual_wield_rng() {
-    let mut app = harness_app(42);
+    const SEED: u64 = 42;
+    let mut app = harness_app(SEED);
     let attacker = spawn_attacker(&mut app, 20.0, 1.0);
     let victim = spawn_victim(&mut app);
     set_target(&mut app, attacker, victim);
@@ -285,16 +334,34 @@ fn a_single_wielder_draws_no_dual_wield_rng() {
         "a single wielder must not tick an off-hand timer"
     );
 
-    // Every landed swing dealt exactly `attack_damage` (crit is off and
-    // nothing missed), so the total is an exact multiple of it — which it
-    // could not be if a miss roll had eaten a swing.
     let dealt = damage_dealt(&app, attacker);
-    let swings = dealt / 20.0;
-    assert!(dealt > 0.0, "the control dealt no damage");
+    let landed_swings = (dealt / 20.0).round() as u32;
+    // Non-vacuity only: enough swings that one draw each is plainly distinct
+    // from two. Deliberately well BELOW the ~59 a correct build lands and below
+    // the ~48 an ungated miss roll would leave, so this guard can never
+    // preempt the draw comparison below and report a short window when the
+    // real finding is an extra roll.
+    assert!(
+        landed_swings >= 30,
+        "the control only landed {landed_swings} swings — too few to separate \
+         one draw per swing from two"
+    );
+
+    // Drawing these two advances the app's RNG, so take them last.
+    let next_two = {
+        let mut rng = app.world_mut().resource_mut::<GameRng>();
+        (rng.random_f32(), rng.random_f32())
+    };
+    // Generous ceiling: twice a swing-per-tick upper bound, so a build that
+    // draws far MORE than expected is still located and reported rather than
+    // failing as "could not measure".
+    let draws = rng_draws_taken(next_two, SEED, WINDOW_TICKS * 2)
+        .expect("could not locate the app's RNG position — the probe cannot measure");
+
     assert_eq!(
-        swings,
-        swings.round(),
-        "a single wielder's damage {dealt} is not a whole number of full-damage \
-         swings — something rolled against it"
+        draws, landed_swings,
+        "a single wielder must draw exactly once per landed swing (the crit \
+         roll): it landed {landed_swings} swings and drew {draws} values, so \
+         something else is rolling — the dual-wield miss gate is the suspect"
     );
 }
