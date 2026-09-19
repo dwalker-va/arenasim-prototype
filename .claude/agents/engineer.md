@@ -38,7 +38,7 @@ an open, review-ready PR — nothing more.
      right, whether a joke lands.
 
    Name the thing, say what wrong looks like, say why no test covers it. Two models,
-   adapted from real cards:
+   adapted from a real card and a real PR:
 
    > Watch a same-role run render as clean sequential replacement — no overdraw, no two
    > live bubbles on one speaker. The framing is the one thing only the renderer decides.

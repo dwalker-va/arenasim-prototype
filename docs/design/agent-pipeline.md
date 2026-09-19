@@ -79,15 +79,15 @@ rounds — three Tester REJECTs and **two user bounces**. `human_review` is the 
 for that state, so approved-but-open work stops parking in `done` beside genuinely
 shipped work, indistinguishable from it.
 
-**The PR says what to look at.** Every PR carries a short statement of what a human has
-to check and why a machine could not — `screencapture` and `osascript` are
-permission-blocked on this machine, so an agent cannot see pixels, and plenty of cards
-turn on a judgment only the user can make (whether a replacement reads cleanly, whether
-an impact feels right, whether a joke lands). It is the *inverse* of the banned
+**The PR says what to look at.** Every PR ends with a `**Human testing:**` line saying
+what a human has to check and why a machine could not — `screencapture` and `osascript`
+are permission-blocked on this machine, so an agent cannot see pixels, and plenty of
+cards turn on a judgment only the user can make (whether a replacement reads cleanly,
+whether an impact feels right, whether a joke lands). It is the *inverse* of the banned
 Proof/Testing section: that one lists what passed, this one lists what was never
-verified. "Nothing needs human testing" is written out rather than omitted, so a genuinely
-empty eyeball pass is distinguishable from an author who never considered one. The
-Engineer writes it; the Tester verifies the claim before APPROVE.
+verified. "Nothing needs human testing" is written out rather than omitted, so a
+genuinely empty eyeball pass is distinguishable from an author who never considered one.
+The Engineer writes it; the Tester verifies the claim before APPROVE.
 
 From `human_review` there are exactly **two exits, and both are the user's
 gesture**. No automation runs on the column:
