@@ -116,6 +116,52 @@ pub struct Args {
     /// `on` for `--matrix`.
     #[arg(long, value_name = "MODE", value_enum)]
     pub trace_mode: Option<TraceMode>,
+
+    /// Drive the graphical client from a UI script instead of a human.
+    ///
+    /// The script names widgets the UI has opted into a per-frame registry and
+    /// says what to hover, click, press and assert; input is injected at Bevy's
+    /// own input events, so bevy_egui's conversion and every handler above it
+    /// run exactly as they do for a physical mouse. The process exits non-zero
+    /// on the first failed assertion, so a script doubles as a smoke test.
+    /// Scripts live in `tests/ui-scripts/`; see
+    /// `docs/solutions/workflows/client-input-injection-driver.md`.
+    ///
+    /// Graphical mode only, and inert without this flag — see
+    /// `arenasim::ui::driver`.
+    #[arg(long, value_name = "SCRIPT")]
+    pub ui_script: Option<PathBuf>,
+
+    /// Where `--ui-script` writes its log. Defaults to
+    /// `match_logs/ui_script_<timestamp>.log`. Ignored without `--ui-script`.
+    #[arg(long, value_name = "LOG_FILE")]
+    pub ui_script_log: Option<PathBuf>,
+}
+
+impl Args {
+    /// The non-graphical mode `--ui-script` was wrongly combined with, if any.
+    ///
+    /// A UI script drives the CLIENT; `--headless`, `--matrix` and `--batch`
+    /// open no window, and each is dispatched BEFORE the graphical arm in
+    /// `main`, so the script would simply never run. Silently doing nothing is
+    /// the exact failure this driver exists to remove, so `main` turns this
+    /// into an error rather than letting the flag evaporate.
+    ///
+    /// The arms are checked in `main`'s own dispatch order, so the mode named
+    /// is the one that would actually have won.
+    pub fn ui_script_conflict(&self) -> Option<&'static str> {
+        self.ui_script.as_ref()?;
+        if self.batch.is_some() {
+            return Some("--batch");
+        }
+        if self.matrix.is_some() {
+            return Some("--matrix");
+        }
+        if self.headless.is_some() {
+            return Some("--headless");
+        }
+        None
+    }
 }
 
 pub fn parse_args() -> Args {

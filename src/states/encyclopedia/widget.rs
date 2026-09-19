@@ -139,6 +139,11 @@ pub fn link_with(
     let response = response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_ui(|ui| {
+            // Every linked icon in the client funnels through here, so ONE
+            // probe reports "this entity's tooltip body actually ran" for all
+            // of them — the encyclopedia's own icons and View Combatant's kit
+            // rows alike. Inert unless `--ui-script` armed the registry.
+            crate::ui::driver::note(ui, format_args!("tooltip:{topic:?}"));
             body(ui);
             click_hint(ui);
         });

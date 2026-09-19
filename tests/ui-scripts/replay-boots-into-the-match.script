@@ -1,0 +1,16 @@
+# The --replay path still boots straight into a match, and --ui-script
+# composes with it.
+#
+# Run:  cargo run --release -- \
+#           --replay tests/ui-scripts/replay-boots-into-the-match.json \
+#           --ui-script tests/ui-scripts/replay-boots-into-the-match.script
+#
+# Deliberately tiny. The in-match HUD is NOT instrumented (out of scope for
+# AS-82), so there is nothing here to click. It exists to pin the one thing the
+# restructured graphical dispatch in main.rs could have broken silently: a
+# replay reaching PlayMatch rather than the menu.
+
+assert-state PlayMatch
+wait 60
+assert-state PlayMatch
+dump

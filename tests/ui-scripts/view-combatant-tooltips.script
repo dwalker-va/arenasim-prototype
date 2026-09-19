@@ -1,0 +1,138 @@
+# View Combatant: tooltips, click-through and the Back round-trip, five classes.
+#
+# This is the walk AS-65 round 3 did by hand with a throwaway injector. Its
+# acceptance criterion was the user's: tooltips work on BOTH the kit rows and
+# the strategic-option panels, clicking a kit row opens that ability's page,
+# and Esc comes back to the SAME combatant.
+#
+# Run:  cargo run --release -- --ui-script tests/ui-scripts/view-combatant-tooltips.script
+#
+# Each class does the same six things:
+#   1. hover a kit row          -> its slim tooltip body ran
+#   2. hover a strategic icon   -> its slim tooltip body ran (hover-only by
+#                                  decision; right-click was removed in r3)
+#   3. click the kit row        -> the encyclopedia, at that ability
+#   4. Esc                      -> back on View Combatant
+#   5. the same kit row is still on screen -> the SAME combatant, not a reset
+#   6. Esc                      -> Configure Match, ready for the next class
+
+assert-state MainMenu
+click menu:MATCH
+assert-state ConfigureMatch
+
+# --------------------------------------------------------------- ROGUE
+click slot:t1s0
+click class:Rogue
+click slot:t1s0
+assert-state ViewCombatant
+
+hover kit:Ambush
+assert-note tooltip:Ability(Ambush)
+
+hover strategic:CheapShot
+assert-note tooltip:Ability(CheapShot)
+
+click kit:Ambush
+assert-state Encyclopedia
+assert-view Ability(Ambush)
+key Escape
+assert-state ViewCombatant
+assert-visible kit:Ambush
+
+key Escape
+assert-state ConfigureMatch
+
+# ------------------------------------------------------------- WARRIOR
+click slot:t1s0:change
+click class:Warrior
+click slot:t1s0
+assert-state ViewCombatant
+
+hover kit:MortalStrike
+assert-note tooltip:Ability(MortalStrike)
+
+hover strategic:DemoralizingShout
+assert-note tooltip:Ability(DemoralizingShout)
+
+click kit:MortalStrike
+assert-state Encyclopedia
+assert-view Ability(MortalStrike)
+key Escape
+assert-state ViewCombatant
+assert-visible kit:MortalStrike
+
+key Escape
+assert-state ConfigureMatch
+
+# ---------------------------------------------------------------- MAGE
+click slot:t1s0:change
+click class:Mage
+click slot:t1s0
+assert-state ViewCombatant
+
+hover kit:Frostbolt
+assert-note tooltip:Ability(Frostbolt)
+
+hover strategic:MoltenArmor
+assert-note tooltip:Ability(MoltenArmor)
+
+click kit:Frostbolt
+assert-state Encyclopedia
+assert-view Ability(Frostbolt)
+key Escape
+assert-state ViewCombatant
+assert-visible kit:Frostbolt
+
+key Escape
+assert-state ConfigureMatch
+
+# ------------------------------------------------------------- PALADIN
+click slot:t1s0:change
+click class:Paladin
+click slot:t1s0
+assert-state ViewCombatant
+
+hover kit:HolyShock
+assert-note tooltip:Ability(HolyShock)
+
+hover strategic:ConcentrationAura
+assert-note tooltip:Ability(ConcentrationAura)
+
+click kit:HolyShock
+assert-state Encyclopedia
+assert-view Ability(HolyShock)
+key Escape
+assert-state ViewCombatant
+assert-visible kit:HolyShock
+
+key Escape
+assert-state ConfigureMatch
+
+# ------------------------------------------------------------- WARLOCK
+click slot:t1s0:change
+click class:Warlock
+click slot:t1s0
+assert-state ViewCombatant
+
+hover kit:Corruption
+assert-note tooltip:Ability(Corruption)
+
+hover strategic:CurseOfTongues:e0
+assert-note tooltip:Ability(CurseOfTongues)
+
+click kit:Corruption
+assert-state Encyclopedia
+assert-view Ability(Corruption)
+
+# The encyclopedia's own navigation cluster, while we are here: Back is dead at
+# the root of a deep link (the whole point of open_at), and Home names the
+# screen that opened it.
+assert-enabled enc:back false
+assert-visible enc:home
+click enc:home
+assert-state ViewCombatant
+assert-visible kit:Corruption
+
+key Escape
+assert-state ConfigureMatch
+dump

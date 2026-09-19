@@ -1,0 +1,71 @@
+# Equipment: the AS-64 ring repro, and the whole-set restore that replaced the
+# per-slot reset.
+#
+# Run:  cargo run --release -- --ui-script tests/ui-scripts/equipment-restore-defaults.script
+#
+# The bug AS-64 fixed, in three clicks on a Warrior:
+#   a. override Ring 1 = Signet of Focus
+#   b. set Ring 2 = Band of Accuria (offered now that Ring 1 no longer wears it)
+#   c. reset Ring 1 to its default - which IS Band of Accuria
+# The old per-slot reset then let enforce_unique_equipped silently drop the
+# Ring 2 pick, while the Ring 2 row went on rendering GREEN-AS-OVERRIDDEN over
+# nothing. Step (c) no longer exists: there is one "Restore defaults" for the
+# whole set, and the row colouring keys off what is actually WORN.
+#
+# Every claim below is read back off what the frame actually rendered:
+# `equip-row <slot> item=<id> override=<bool>` is emitted by the row itself,
+# and `overrides {...}` is the live override map.
+
+assert-state MainMenu
+click menu:MATCH
+assert-state ConfigureMatch
+
+click slot:t1s0
+click class:Warrior
+click slot:t1s0
+assert-state ViewCombatant
+
+# --- the RON default, with nothing overridden --------------------------------
+assert-note overrides {}
+assert-enabled equip:restore false
+assert-note equip-row Ring1 item=BandOfAccuria override=false
+assert-note equip-row Ring2 item=RingOfProtection override=false
+
+# --- (a) Ring 1 -> Signet of Focus -------------------------------------------
+click equip:Ring1
+assert-visible pick:SignetOfFocus
+click pick:SignetOfFocus
+assert-note Ring1=SignetOfFocus
+assert-note equip-row Ring1 item=SignetOfFocus override=true
+
+# --- (b) Ring 2 -> Band of Accuria, now that Ring 1 has let go of it ---------
+click equip:Ring2
+assert-visible pick:BandOfAccuria
+click pick:BandOfAccuria
+assert-note Ring1=SignetOfFocus
+assert-note Ring2=BandOfAccuria
+assert-note equip-row Ring2 item=BandOfAccuria override=true
+assert-enabled equip:restore true
+
+# --- (c) restore the whole set -----------------------------------------------
+click equip:restore
+assert-note overrides {}
+assert-enabled equip:restore false
+assert-note equip-row Ring1 item=BandOfAccuria override=false
+assert-note equip-row Ring2 item=RingOfProtection override=false
+# The regression itself: after a restore NO row may still render as
+# overridden. This is the assertion the old per-slot reset would have failed.
+assert-no-note override=true
+
+# --- right-click is the reference affordance, left-click stays the editor ----
+# AS-65 kept this on equipment only, and the user confirmed a real secondary
+# click (two-finger tap) reaches it. Injected right-clicks arrive as a genuine
+# MouseButton::Right, so this asserts the HANDLER; see the Ctrl+click limit in
+# docs/solutions/workflows/client-input-injection-driver.md.
+click equip:Ring1 right
+assert-state Encyclopedia
+assert-view Item(BandOfAccuria)
+key Escape
+assert-state ViewCombatant
+assert-note equip-row Ring1 item=BandOfAccuria override=false
+dump
