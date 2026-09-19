@@ -17,6 +17,7 @@ use arenasim::states::play_match::{
     AbilityConfigPlugin, BanterConfigPlugin, MapConfigPlugin, MovementConfigPlugin,
 };
 use arenasim::states::{GameState, StatesPlugin};
+use arenasim::ui::driver::{Outcome, UiDriverConfig, UiDriverPlugin};
 use arenasim::ui::fonts::install_game_fonts;
 use arenasim::ui::UiPlugin;
 
@@ -67,13 +68,60 @@ fn main() {
         // `--trace-mode on` (or `verbose`).
         let trace_mode = args.trace_mode.unwrap_or(cli::TraceMode::Off);
         run_headless_mode(config_path, args.output, args.max_duration, trace_mode);
-    } else if let Some(replay_path) = args.replay {
-        // Graphical replay of a headless config — same file, watchable.
-        run_replay_mode(replay_path);
     } else {
-        // Normal graphical mode
-        run_graphical_mode();
+        // Graphical modes. `--ui-script` composes with both of them: it drives
+        // whatever screen the client boots on, menu or replayed match.
+        let driver = match args.ui_script {
+            Some(ref path) => {
+                let log = args
+                    .ui_script_log
+                    .clone()
+                    .unwrap_or_else(default_ui_script_log);
+                Some(UiDriverConfig::load(path, log).unwrap_or_else(|e| {
+                    eprintln!("{e}");
+                    std::process::exit(2)
+                }))
+            }
+            None => None,
+        };
+        let outcome = driver.as_ref().map(|c| c.outcome.clone());
+
+        let replay = args.replay.map(|path| {
+            headless::HeadlessMatchConfig::load_from_file(&path).unwrap_or_else(|e| {
+                eprintln!("Error loading replay config: {e}");
+                std::process::exit(1)
+            })
+        });
+        build_graphical_app(replay, driver).run();
+
+        // The verdict cannot ride out on `AppExit` — writing that from a system
+        // deadlocks the macOS winit loop, so the driver closes the window and
+        // leaves its answer here. See
+        // docs/solutions/implementation-patterns/bevy-macos-exit-deadlock-egui-teardown.md
+        if let Some(outcome) = outcome {
+            let outcome = outcome.lock().expect("ui script outcome mutex").clone();
+            match outcome {
+                Outcome::Passed => println!("UI script PASSED"),
+                Outcome::Failed(reason) => {
+                    eprintln!("UI script FAILED — {reason}");
+                    std::process::exit(1);
+                }
+                Outcome::Incomplete => {
+                    eprintln!("UI script did not finish — the window closed before the last step");
+                    std::process::exit(1);
+                }
+            }
+        }
     }
+}
+
+/// Default `--ui-script-log` path: alongside the match logs, timestamped.
+fn default_ui_script_log() -> std::path::PathBuf {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    arenasim::paths::match_log_dir().join(format!("ui_script_{ts}.log"))
 }
 
 fn run_headless_mode(
@@ -130,12 +178,15 @@ fn run_headless_mode(
     }
 }
 
-fn run_graphical_mode() {
-    build_graphical_app(None).run();
-}
-
-/// Build the client app. `replay` pre-seeds the match and boots straight into it.
-fn build_graphical_app(replay: Option<headless::HeadlessMatchConfig>) -> App {
+/// Build the client app.
+///
+/// `replay` pre-seeds the match and boots straight into it. `driver` is the
+/// `--ui-script` run, if any; [`UiDriverPlugin::disabled`] is what every normal
+/// launch gets, and it registers nothing at all.
+fn build_graphical_app(
+    replay: Option<headless::HeadlessMatchConfig>,
+    driver: Option<UiDriverConfig>,
+) -> App {
     // Load settings first to apply them to window configuration
     let settings = GameSettings::load();
     let (width, height) = settings.resolution.dimensions();
@@ -178,6 +229,10 @@ fn build_graphical_app(replay: Option<headless::HeadlessMatchConfig>) -> App {
             CameraPlugin,
             CombatPlugin,
             UiPlugin,
+            match driver {
+                Some(config) => UiDriverPlugin::enabled(config),
+                None => UiDriverPlugin::disabled(),
+            },
         ))
         // Setup custom font
         .add_systems(Startup, setup_custom_font);
@@ -216,14 +271,6 @@ fn build_graphical_app(replay: Option<headless::HeadlessMatchConfig>) -> App {
         }
     }
     app
-}
-
-fn run_replay_mode(path: std::path::PathBuf) {
-    let cfg = headless::HeadlessMatchConfig::load_from_file(&path).unwrap_or_else(|e| {
-        eprintln!("Error loading replay config: {e}");
-        std::process::exit(1)
-    });
-    build_graphical_app(Some(cfg)).run();
 }
 
 fn setup_custom_font(mut contexts: EguiContexts) {

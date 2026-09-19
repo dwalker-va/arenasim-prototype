@@ -13,6 +13,7 @@ use bevy_egui::{egui, EguiContexts};
 use super::match_config::CharacterClass;
 use super::play_match::{class_mesh_color, spawn_arena_environment, spawn_arena_sun};
 use super::GameState;
+use crate::ui::driver as ui_driver;
 
 // ============================================================================
 // Ambient 3D backdrop scene
@@ -311,6 +312,10 @@ fn menu_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
             egui::Color32::from_rgb(255, 244, 214),
         );
     }
+    // A UI script has to get INTO a screen before it can check anything on it,
+    // so the five menu buttons are opted in alongside the widgets under test.
+    // Inert unless `--ui-script` armed the registry.
+    ui_driver::mark(ui, response.rect, true, format_args!("menu:{label}"));
     response
 }
 

@@ -893,6 +893,44 @@ that function from a kittest harness with mock data.
 the encyclopedia's harness loads the real `items.ron` and `abilities.ron`
 rather than mock data, so a content change shows up in the snapshot.
 
+### Verify the RUNNING client with a UI script (input injection)
+
+The egui snapshot loop above iterates a screen's LOOK offscreen. It cannot tell
+you whether the real client responds to a real click — and `egui_kittest`
+proving a widget's contract is not the same claim (AS-65 round 2 approved a
+`secondary_clicked()` assertion that the running client did not honour).
+`screencapture` / `osascript` are permission-blocked here, so the answer is to
+drive the client itself:
+
+```bash
+cargo run --release -- --ui-script tests/ui-scripts/view-combatant-tooltips.script
+# one line per step on stdout and in match_logs/ui_script_<ts>.log;
+# exit 1 on the first failed assertion, so a script doubles as a smoke test
+```
+
+Input is injected at BEVY's input events (`CursorMoved` / `MouseButtonInput` /
+`KeyboardInput` / `MouseWheel`) in `PreUpdate` before `InputSystem`, so
+`ButtonInput<KeyCode>` and bevy_egui's own conversion both run exactly as they
+do for a physical device. Steps: `hover`, `click <id> [left|right]`, `key`,
+`wait`, `assert-state`, `assert-view`, `assert-note`, `assert-no-note`,
+`assert-visible`, `assert-absent`, `assert-enabled`, `dump`.
+
+A screen opts a widget in with ONE call —
+`ui_driver::mark(ui, rect, enabled, format_args!("kit:{ability:?}"))` — plus
+`ui_driver::note(...)` where only the draw can see what happened (which tooltip
+body ran, what colour a row rendered). Keep the opt-in explicit; do not
+instrument every widget. **Inert without the flag**: `UiDriverPlugin::build`
+registers nothing, so `mark`/`note` are one failed hash lookup each, proved by
+mutation in `tests/ui_driver.rs`.
+
+**The limit to state out loud: this proves a HANDLER runs, never that the
+user's input reaches it.** macOS Ctrl+click arrives at winit as Left+ctrl, so a
+right-click affordance can pass here and still look broken to someone using
+it. Ask what device a reporter used.
+
+Full loop, both timing traps, and the shipped scripts:
+`docs/solutions/workflows/client-input-injection-driver.md`.
+
 ### Browsing game content in-game (the Encyclopedia)
 
 `GameState::Encyclopedia` (`src/states/encyclopedia/`) is the player-facing

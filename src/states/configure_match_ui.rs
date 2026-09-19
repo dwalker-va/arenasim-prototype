@@ -27,6 +27,7 @@ use super::{
     match_config::{self, ArenaMap, MatchConfig},
     GameState,
 };
+use crate::ui::driver as ui_driver;
 use bevy::core_pipeline::bloom::Bloom;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
@@ -536,6 +537,10 @@ fn render_character_picker_modal(
                         egui::Color32::from_rgb(51, 51, 64)
                     };
 
+                    // Same reason as the slot cards: a script has to fill a
+                    // slot before it can open View Combatant on it.
+                    ui_driver::mark(ui, rect, true, format_args!("class:{class:?}"));
+
                     ui.painter().rect_filled(rect, 8.0, bg_color);
                     ui.painter().rect_stroke(
                         rect,
@@ -877,6 +882,10 @@ fn render_character_slot(
         },
     );
 
+    // The route into View Combatant, so a UI script can reach the screens the
+    // driver actually exists to check. Inert unless `--ui-script` armed it.
+    ui_driver::mark(ui, rect, is_active, format_args!("slot:t{team}s{slot}"));
+
     // Hover effect for active slots
     let visual_bg_color = if is_active && response.hovered() {
         bg_color.linear_multiply(1.2)
@@ -974,6 +983,14 @@ fn render_character_slot(
 
         // Check if mouse is over the X button
         let btn_hovered = ui.rect_contains_pointer(btn_rect);
+        // The change-class affordance, so a script can walk several classes
+        // through one slot rather than needing three.
+        ui_driver::mark(
+            ui,
+            btn_rect,
+            true,
+            format_args!("slot:t{team}s{slot}:change"),
+        );
         let btn_color = if btn_hovered {
             egui::Color32::from_rgb(200, 80, 80)
         } else {
