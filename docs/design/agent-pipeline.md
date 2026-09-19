@@ -79,6 +79,16 @@ rounds — three Tester REJECTs and **two user bounces**. `human_review` is the 
 for that state, so approved-but-open work stops parking in `done` beside genuinely
 shipped work, indistinguishable from it.
 
+**The PR says what to look at.** Every PR carries a short statement of what a human has
+to check and why a machine could not — `screencapture` and `osascript` are
+permission-blocked on this machine, so an agent cannot see pixels, and plenty of cards
+turn on a judgment only the user can make (whether a replacement reads cleanly, whether
+an impact feels right, whether a joke lands). It is the *inverse* of the banned
+Proof/Testing section: that one lists what passed, this one lists what was never
+verified. "Nothing needs human testing" is written out rather than omitted, so a genuinely
+empty eyeball pass is distinguishable from an author who never considered one. The
+Engineer writes it; the Tester verifies the claim before APPROVE.
+
 From `human_review` there are exactly **two exits, and both are the user's
 gesture**. No automation runs on the column:
 
@@ -356,7 +366,8 @@ handed off from a PM session get filed.
   (Cross-session discovery is not reliable — sessions under different
   accounts or clients may simply not reach each other — so the file-plus-user
   path is the protocol, and the message is the nice-to-have.)
-- **Engineer** — `.claude/agents/engineer.md`. Isolated worktree → PR. Reports
+- **Engineer** — `.claude/agents/engineer.md`. Isolated worktree → PR, whose description
+  states what a human must check (see The eyeball loop). Reports
   `READY_FOR_REVIEW / NEEDS_INPUT / FAILED` in a fixed format.
 - **Tester** — `.claude/agents/tester.md`. Verification only: no Edit/Write
   tools by definition. Checks out the card's PR branch in its own isolated
@@ -364,7 +375,8 @@ handed off from a PM session get filed.
   `cargo build --release` + `cargo test` plus the probe/snapshot suites the diff
   touches (movement probes, registration audit, layout/egui snapshots), and does
   an independent review of the diff (correctness, repo conventions,
-  byte-identity constraints, missing registrations). Reports a machine-parsed
+  byte-identity constraints, missing registrations) plus a check that the PR's
+  human-testing statement is present and true. Reports a machine-parsed
   `VERDICT: APPROVE | REJECT` with a PR URL and FINDINGS; the orchestrator moves
   the card to Human Review on APPROVE — where the user merges it or bounces it
   back with eyeball feedback — or straight back to In Progress (findings appended

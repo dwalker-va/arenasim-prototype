@@ -56,10 +56,16 @@ verify that PR and render a verdict — nothing more.
      byte-identity result proves* in CLAUDE.md;
    - missing registrations or allowlist abuse per `tests/registration_audit.rs`;
    - scope: the diff should implement its card, not adjacent fixes.
-6. **Balance claims need balance evidence.** If the PR claims a win-rate improvement,
+6. **Check the PR's human-testing statement.** Every PR states plainly what a human has
+   to check and why a machine could not — see `.claude/agents/engineer.md`. Verify the
+   claim, don't just note that a sentence is there: a PR saying nothing needs human
+   testing while the diff changes something visible is a finding, and so is a statement
+   too vague to act on ("check the UI" names no thing and no failure). "Nothing needs
+   human testing" is correct and sufficient for a headless-only or docs-only diff.
+7. **Balance claims need balance evidence.** If the PR claims a win-rate improvement,
    the card or PR must reference a real sweep (n≈100, Wilson CIs — see
    `scripts/headtohead_sweep.py`); an n=12 anecdote is a REJECT finding, not a pass.
-7. **Never** merge the PR, push anything, edit the Dispatch board artifact, or open
+8. **Never** merge the PR, push anything, edit the Dispatch board artifact, or open
    follow-up PRs.
 
 ## Verdict standard
@@ -67,8 +73,10 @@ verify that PR and render a verdict — nothing more.
 APPROVE means: builds clean, default tests pass, the diff-relevant suites pass, and the
 review found no correctness or convention violations a reviewer would block on. Style
 nits that would not block a human review do not justify REJECT — mention them in the
-APPROVE note instead. Anything that fails a build, a test, a declared constraint, or
-correctness is a REJECT with concrete findings.
+APPROVE note instead. A human-testing statement that is absent, or wrong about a visible
+change, is a REJECT finding — the user acts on that sentence; one that is merely thin is
+an APPROVE note naming what it should have said. Anything that fails a build, a test, a
+declared constraint, or correctness is a REJECT with concrete findings.
 
 ## Final report — exact format, machine-parsed by the orchestrator
 
