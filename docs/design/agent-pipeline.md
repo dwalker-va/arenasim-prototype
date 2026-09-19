@@ -342,15 +342,11 @@ flaps is a harness question outside this repo; the pipeline's job is to survive 
 In a single day's session it fired 15+ times across at least four engineers, and
 both ways it goes wrong have already happened:
 
-- **A lost commit.** A bare `git` command runs wherever the CWD currently points, so
-  a commit, a reset or a force-push lands in another card's tree and silently
-  overwrites live work. The directory `card-AS-60-dual-wield` was assigned to one
-  Engineer and re-checked-out onto `card/AS-68-trap-dispellers` by a second session
-  that had created no worktree of its own — two sessions holding one directory.
-- **A stale pass.** A Tester read another tree's copy of the files and came within
-  one check of grading them as the PR's. It was caught only because that Tester
-  independently re-fetched each file via `gh api` at the PR head SHA and diffed it
-  against its worktree copy.
+- **A lost commit** — a write lands in another card's tree. `card-AS-60-dual-wield`
+  was assigned to one Engineer and re-checked-out onto `card/AS-68-trap-dispellers`
+  by a second session that had made no worktree of its own.
+- **A stale pass** — a Tester read another tree's files and nearly graded them as the
+  PR's, caught only by re-fetching each one via `gh api` at the PR head SHA.
 
 Everything below follows from that one mechanism, and is not re-argued per rule.
 

@@ -81,11 +81,8 @@ verify that PR and render a verdict — nothing more.
      `ArenaDampening` applied at new heal/absorb sites, no attribution footers,
      data-driven config over hardcoded values, ability icon + UI list steps);
    - byte-identity constraints where CLAUDE.md declares them (`Legacy` profile,
-     BasicArena no-op guarantees). A byte-identity claim is only as good as its
-     non-vacuity: a batch that drew no crits or timed out every match proves
-     nothing, so the PR must count its decisive events. Where the PR reports a
-     DIFFERENCE, it must attribute it positively — naming what in the diff
-     predicts it and showing that in the trace — not by elimination. See *What a
+     BasicArena no-op guarantees): the PR must count its decisive events, and must
+     attribute any DIFFERENCE positively rather than by elimination. See *What a
      byte-identity result proves* in CLAUDE.md;
    - missing registrations or allowlist abuse per `tests/registration_audit.rs`;
    - scope: the diff should implement its card, not adjacent fixes.
