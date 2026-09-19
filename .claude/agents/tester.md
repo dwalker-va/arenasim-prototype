@@ -59,9 +59,12 @@ verify that PR and render a verdict — nothing more.
 6. **Check the PR's human-testing statement.** Every PR states plainly what a human has
    to check and why a machine could not — see `.claude/agents/engineer.md`. Verify the
    claim, don't just note that a sentence is there: a PR saying nothing needs human
-   testing while the diff changes something visible is a finding, and so is a statement
+   testing while the diff turns on something only a human can judge — pixels, feel,
+   whether a line reads right — is a finding, and so is a statement
    too vague to act on ("check the UI" names no thing and no failure). "Nothing needs
-   human testing" is correct and sufficient for a headless-only or docs-only diff.
+   human testing" is correct and sufficient for a headless-only or docs-only diff, and
+   the statement belongs on a final line beginning `**Human testing:**`. *Verdict
+   standard* below grades which of these block.
 7. **Balance claims need balance evidence.** If the PR claims a win-rate improvement,
    the card or PR must reference a real sweep (n≈100, Wilson CIs — see
    `scripts/headtohead_sweep.py`); an n=12 anecdote is a REJECT finding, not a pass.
@@ -73,10 +76,12 @@ verify that PR and render a verdict — nothing more.
 APPROVE means: builds clean, default tests pass, the diff-relevant suites pass, and the
 review found no correctness or convention violations a reviewer would block on. Style
 nits that would not block a human review do not justify REJECT — mention them in the
-APPROVE note instead. A human-testing statement that is absent, or wrong about a visible
-change, is a REJECT finding — the user acts on that sentence; one that is merely thin is
-an APPROVE note naming what it should have said. Anything that fails a build, a test, a
-declared constraint, or correctness is a REJECT with concrete findings.
+APPROVE note instead. A human-testing statement that is absent, or that claims nothing
+while the diff turns on a judgment only a human can make — visible or not; whether the
+joke lands counts — is a REJECT finding, because the user acts on that sentence. One
+that is honest but thin or too vague to act on is an APPROVE note naming what it should
+have said. Anything that fails a build, a test, a declared constraint, or correctness is
+a REJECT with concrete findings.
 
 ## Final report — exact format, machine-parsed by the orchestrator
 

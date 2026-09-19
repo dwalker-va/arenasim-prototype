@@ -27,7 +27,7 @@ an open, review-ready PR — nothing more.
    reference the card id in the PR body (e.g. `Card: AS-7`).
 
    **Then say what a human has to check.** That is the *inverse* of the no-Proof/Testing
-   rule, not a reversal of it, and the two get collapsed unless they are written as a pair:
+   rule, not a reversal of it:
 
    - *Still banned* — a section listing what PASSED. Tests, lint, byte-identity, local
      verification are table stakes; a PR that ran them needs no evidence section.
@@ -37,22 +37,24 @@ an open, review-ready PR — nothing more.
      user can make: whether a bubble replacement reads cleanly, whether an impact feels
      right, whether a joke lands.
 
-   Name the thing, say what wrong looks like, say why no test covers it. Genuine statements
-   from this board:
+   Name the thing, say what wrong looks like, say why no test covers it. Two models,
+   adapted from real cards:
 
    > Watch a same-role run render as clean sequential replacement — no overdraw, no two
    > live bubbles on one speaker. The framing is the one thing only the renderer decides.
 
-   > Confirm the `{mate:caller}` portrait carries the blue team-1 frame while `{target}`
-   > beside it carries red.
-
    > The one 5-beat Opening exchange puts its last beat at 11.5s, 1.5s after the gates —
    > that is the ruling working as designed, but it is the thing to watch for.
 
+   **Give it a fixed home:** the last line of the description, beginning
+   `**Human testing:**`. Same place every PR, so the user never hunts for it and the
+   Tester has a fixed thing to check.
+
    **"Nothing needs human testing" is a valid answer and must be stated.** A docs-only or
    headless-only change says so in one line and the reader stops looking; an absent
-   statement is indistinguishable from an author who never thought about it. Not a heading
-   with "N/A" under it — a sentence of substance, or an explicit "nothing".
+   statement is indistinguishable from an author who never thought about it. The fixed
+   home is not a licence for an empty one — a sentence of substance, or an explicit
+   "nothing", never "N/A".
 
 6. **Never** merge the PR, edit the Dispatch board artifact, or push to `main`.
 
