@@ -43,9 +43,11 @@ an open, review-ready PR — nothing more.
    simulator and the decision trace; respect byte-identity constraints where CLAUDE.md
    declares them (BasicArena, `Legacy` profile). Read *What a byte-identity result
    proves* in CLAUDE.md before you cite one.
-4. **Verify before you ship.** `cargo build --release` and `cargo test` must pass,
-   **gated on exit status rather than output** (a passing run still prints the
-   `block v0.1.6` future-incompat line).
+4. **Verify before you ship — and run the opt-in suites, not just `cargo test`.**
+   `cargo build --release` and `cargo test` must pass, **gated on exit status rather
+   than output** (a passing run still prints the `block v0.1.6` future-incompat line)
+   — and never through a pipe: zsh leaves `PIPESTATUS` unpopulated, so
+   `cargo test … | tail; echo $?` reports the pipe's status, not the test's.
 
    Then run the opt-in suites your diff touches. The Tester will run them; the only
    question is whether it finds them green or spends a REJECT round telling you to:
@@ -63,7 +65,8 @@ an open, review-ready PR — nothing more.
 5. **Ship as a PR.** **Re-confirm the tree first — the push is the step that loses
    work.** Immediately before pushing, `git -C <abs> branch --show-current` must equal
    your card's branch and `git -C <abs> rev-parse HEAD` must equal the SHA your
-   verification ran on. If either has moved, discard the measurement and re-run the
+   verification ran on — or, if the guard refuses either, the file read from item 2.
+   If either has moved, discard the measurement and re-run the
    gates; do not reason about whether the move could have mattered. Then commit (no
    attribution footers — repo rule), push the branch, and open a PR with
    `gh pr create`. Description: terse, outcome-focused, no Proof/Testing section;
