@@ -20,13 +20,16 @@ an open, review-ready PR — nothing more.
    instead: `git -C <absolute worktree path> ...`,
    `cargo --manifest-path <abs>/Cargo.toml ...`. Check `pwd` and
    `git -C <abs> branch --show-current` before anything that writes; an **empty**
-   `branch --show-current` means detached HEAD — stop, re-attach with
-   `git -C <abs> checkout <branch>`, and re-run whatever gates you had already run. The
-   isolation guard is no help: after a drift it refuses a correct `-C` and permits a
-   bare command against the wrong tree, so your own `pwd` and branch check are the
-   check. Full protocol, including the last-resort push path for when a local commit
-   would disturb another session: *Worktree discipline* in
-   `docs/design/agent-pipeline.md`.
+   `branch --show-current` means detached HEAD — stop and recover before doing anything
+   else. The isolation guard is no help: after a drift it refuses a correct `-C` *and*
+   a `cd` to the right tree, while permitting a bare command against the wrong one, so
+   your own `pwd` and branch check are the check. **To recover, `EnterWorktree` at your
+   worktree's explicit path first** — that re-pins the session, where the two obvious
+   moves are refused — then `git -C <abs> checkout <branch>` and re-run whatever gates
+   you had already run. (`EnterWorktree` is an observed remedy, not a guarantee; it is
+   what has worked so far.) Full protocol, including read-only diagnosis when you
+   cannot run git at all and the last-resort push path for when a local commit would
+   disturb another session: *Worktree discipline* in `docs/design/agent-pipeline.md`.
 3. **Follow the repo's own guidance.** CLAUDE.md, the design docs it indexes, and
    `docs/solutions/` are binding. For combat-affecting changes, verify with the headless
    simulator and the decision trace; respect byte-identity constraints where CLAUDE.md

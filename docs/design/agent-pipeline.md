@@ -342,15 +342,11 @@ flaps is a harness question outside this repo; the pipeline's job is to survive 
 In a single day's session it fired 15+ times across at least four engineers, and
 both ways it goes wrong have already happened:
 
-- **A lost commit.** A bare `git` command runs wherever the CWD currently points, so
-  a commit, a reset or a force-push lands in another card's tree and silently
-  overwrites live work. The directory `card-AS-60-dual-wield` was assigned to one
-  Engineer and re-checked-out onto `card/AS-68-trap-dispellers` by a second session
-  that had created no worktree of its own — two sessions holding one directory.
-- **A stale pass.** A Tester read another tree's copy of the files and came within
-  one check of grading them as the PR's. It was caught only because that Tester
-  independently re-fetched each file via `gh api` at the PR head SHA and diffed it
-  against its worktree copy.
+- **A lost commit** — a write lands in another card's tree. `card-AS-60-dual-wield`
+  was assigned to one Engineer and re-checked-out onto `card/AS-68-trap-dispellers`
+  by a second session that had made no worktree of its own.
+- **A stale pass** — a Tester read another tree's files and nearly graded them as the
+  PR's, caught only by re-fetching each one via `gh api` at the PR head SHA.
 
 Everything below follows from that one mechanism, and is not re-argued per rule.
 
@@ -392,9 +388,20 @@ exactly once, against that card's own branch.
    a correct `git -C <right path>` and permits a bare `git` against the wrong tree. An
    agent's own `pwd` and `branch --show-current` are the check.
 
-**When it happens anyway.** The branch ref usually survives — a rebase moves the ref
-before HEAD can be disturbed — so re-attach with `git -C <abs> checkout <branch>` and
-re-run the gates.
+**When it happens anyway — re-pin the session first.** Once the CWD has drifted, the
+guard refuses *both* obvious ways back: a correct `git -C <the right tree>` and a `cd`
+to it. So the first move is **`EnterWorktree` at your worktree's explicit path**, which
+re-pins the session; only then re-attach with `git -C <abs> checkout <branch>` (the
+branch ref usually survives — a rebase moves the ref before HEAD can be disturbed) and
+re-run the gates. Treat `EnterWorktree` as an **observed** remedy, not a guarantee: it
+is what worked for AS-68's run and repeatedly during AS-117's own, and no one has
+tested where it fails.
+
+*Diagnosis when even that is unavailable:* the tree's own files are guard-immune. Read
+`<worktree>/.git` for its gitdir, then `<gitdir>/HEAD` for the branch or SHA, and use
+`gh api` for the remote side. These tell you **where you are and nothing more** — they
+are read-only and cannot re-attach you. `EnterWorktree` is the write-side half; this is
+the half that survives when you cannot run git at all.
 
 *Last resort, only when committing locally would switch a branch out from under
 another session's live work:* push through the GitHub Git Data API (blobs → tree →

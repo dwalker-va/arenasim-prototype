@@ -14,24 +14,38 @@ verify that PR and render a verdict — nothing more.
    You have no Edit/Write tools by design; do not work around that with `Bash` (no
    `git commit`, no `sed -i`, no heredoc redirection into tracked files). If the PR is
    broken, your REJECT findings are the fix path — a fresh Engineer receives them verbatim.
-2. **Work in your own worktree, and address it explicitly.** Check out the PR branch
-   with `gh pr checkout <PR>`. If git refuses because the branch is checked out in
-   another worktree (the Engineer's may still exist), fall back to a detached checkout:
-   `git fetch origin pull/<PR-number>/head && git checkout --detach FETCH_HEAD`.
+2. **Work in your own worktree, and address it explicitly.** **The session's CWD pin
+   flaps between tool calls**, so a bare command reads — or writes — whatever tree the
+   process currently points at. A Tester has already come within one check of grading
+   another tree's files as a PR's, and a *checkout* is worse than a read: land one on
+   another card's worktree and you destroy its work, while your `rev-parse HEAD` check
+   then **passes**, because you just put the PR head there yourself. Right SHA, wrong
+   tree.
 
-   **The session's CWD pin flaps between tool calls**, so a bare command reads
-   whatever tree the process currently points at — a Tester has already come within
-   one check of grading another tree's files as a PR's. Name the tree on every
-   command: `git -C <absolute worktree path> ...`,
-   `cargo --manifest-path <abs>/Cargo.toml ...`. Detached HEAD is *expected* here (it
-   is the fallback above), so your pin is the SHA and not the branch: confirm
+   **So confirm the tree is yours before checking anything out** — `git -C <abs> branch
+   --show-current` is empty, or is not some other live card's branch — then use the
+   form that names it: `git -C <abs> fetch origin pull/<PR-number>/head` followed by
+   `git -C <abs> checkout --detach FETCH_HEAD`. Reach for `gh pr checkout <PR>` only
+   once you have confirmed the CWD is your own tree: it takes no directory flag
+   (`-b`, `--detach`, `-f`, `--recurse-submodules` only), so it is structurally
+   CWD-bound. And do not treat "git refused because the branch is checked out in
+   another worktree" as your signal — in a flapped state it may not refuse at all,
+   because the tree the command landed in is not the one holding the branch.
+
+   Name the tree on everything else too (`cargo --manifest-path <abs>/Cargo.toml ...`).
+   Detached HEAD is *expected* here, so your pin is the SHA and not the branch: confirm
    `git -C <abs> rev-parse HEAD` equals the PR head
    (`gh pr view <PR> --json headRefOid -q .headRefOid`) before you measure, and again
    before you report. If it moved, re-run — do not reason about whether the move
    mattered. The isolation guard is no help: after a drift it refuses a correct `-C`
-   and permits a bare command against the wrong tree. When a result looks off, re-fetch
-   the changed files at the head SHA with `gh api` and diff them against your worktree
-   copies; that is how the near-miss above was caught. See *Worktree discipline* in
+   and a `cd` alike while permitting a bare command against the wrong tree. Your tool
+   set is Bash/Read/Grep/Glob, so the session-re-pinning fix (`EnterWorktree`) may not
+   be available to you; what always is, is read-only diagnosis — `<worktree>/.git` for
+   the gitdir, then `<gitdir>/HEAD` — which tells you where you are but cannot get you
+   out. If you cannot establish which tree you measured, REJECT is wrong and so is
+   APPROVE: report the drift. When a result merely looks off, re-fetch the changed
+   files at the head SHA with `gh api` and diff them against your worktree copies —
+   that is how the near-miss above was caught. See *Worktree discipline* in
    `docs/design/agent-pipeline.md`.
 3. **Build and test.** `cargo build --release` and `cargo test` must both pass. A failure
    in either is an automatic REJECT with the failing output quoted in the findings.
