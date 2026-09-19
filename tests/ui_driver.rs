@@ -787,6 +787,27 @@ fn only_assertions_expand_to_a_check() {
 //
 // One bug is a fix; the class needs a guard. This walks the real call sites
 // the way `registration_audit` walks systems.
+//
+// WHAT THIS AUDIT CANNOT SEE — read before trusting a green run:
+//
+//   * It is a SUBSTRING SCAN over source text, not a parse. It recognises
+//     work by spelling (`EAGER_MARKERS`), so a helper function that allocates
+//     internally — `ui_driver::note(ui, format_args!("{}", summarise(xs)))` —
+//     is invisible to it. Only shapes written inline are caught.
+//   * It finds calls by walking back from `mark(` / `note(` over a path of
+//     `[A-Za-z0-9_:]`, so any spelling rustfmt produces is seen, but a call
+//     split across a line break mid-path, or written with spaces around `::`,
+//     is not. rustfmt produces neither.
+//   * It says nothing about cost that is not allocation.
+//
+// The first version of this audit had a far worse blind spot and shipped
+// green: it matched four hardcoded opener strings and skipped any match whose
+// preceding character was `:`, so EVERY fully-qualified call was invisible —
+// including `encyclopedia::widget`'s, the one note that every linked icon in
+// the client funnels through. Its own non-vacuity plant used the spelling
+// that worked, so the self-check could not reveal it either, and a
+// `sites.len() >= 10` floor could not notice 20 sites found where 21 exist.
+// Hence `EXPECTED_CALL_SITES` below: an exact per-file census, not a bound.
 // ===========================================================================
 
 /// Work that must not appear inside a `mark` / `note` argument expression,
@@ -800,8 +821,22 @@ const EAGER_MARKERS: &[&str] = &[
     "String::from",
 ];
 
-/// Every `ui_driver::mark` / `ui_driver::note` call in `src/`, as
-/// `(file, line, full call text)`.
+/// Every instrumented file and how many driver calls it contains.
+///
+/// An exact census, not a floor. Instrumenting a new widget means adding it
+/// here, which is the point: the audit's whole value is that it sees EVERY
+/// call site, and the only way to keep that checkable is to state the number
+/// and let it fail when it moves. (A `>=` bound here previously hid a scanner
+/// that found 20 of 21.)
+const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
+    ("src/states/configure_match_ui.rs", 3),
+    ("src/states/encyclopedia/mod.rs", 2),
+    ("src/states/encyclopedia/widget.rs", 1),
+    ("src/states/main_menu.rs", 1),
+    ("src/states/view_combatant_ui.rs", 14),
+];
+
+/// Every `mark` / `note` call under `src/`, as `(file, line, full call text)`.
 fn driver_call_sites() -> Vec<(String, usize, String)> {
     fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         for entry in std::fs::read_dir(dir).expect("readable src dir") {
@@ -814,20 +849,20 @@ fn driver_call_sites() -> Vec<(String, usize, String)> {
         }
     }
 
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
-    walk(&root, &mut files);
+    walk(&manifest.join("src"), &mut files);
     files.sort();
 
     let mut sites = Vec::new();
     for file in files {
-        // The driver's own module defines these; it is not a call site.
+        // The driver's own module DEFINES these; it is not a call site.
         if file.components().any(|c| c.as_os_str() == "driver") {
             continue;
         }
         let text = std::fs::read_to_string(&file).expect("readable source");
         let rel = file
-            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .strip_prefix(manifest)
             .unwrap_or(&file)
             .display()
             .to_string();
@@ -840,29 +875,42 @@ fn driver_call_sites() -> Vec<(String, usize, String)> {
     sites
 }
 
-/// Pull out each `…driver::mark(` / `…driver::note(` call, balanced to its
-/// closing paren.
+/// Pull out each driver `mark` / `note` call, balanced to its closing paren.
+///
+/// Works backwards from the function name rather than forwards from a list of
+/// spellings: find `mark(` / `note(`, walk back over the path characters, and
+/// accept when the path ends in `driver::`. That covers `ui_driver::note(`,
+/// `driver::note(` and `crate::ui::driver::note(` alike — the last of which
+/// the opener-list version could not see at all.
 fn extract_calls(text: &str) -> Vec<(usize, String)> {
-    let bytes = text.as_bytes();
+    fn is_path_char(c: char) -> bool {
+        c.is_alphanumeric() || c == '_' || c == ':'
+    }
+
     let mut calls = Vec::new();
-    for opener in [
-        "driver::mark(",
-        "driver::note(",
-        "ui_driver::mark(",
-        "ui_driver::note(",
-    ] {
+    for name in ["mark(", "note("] {
         let mut from = 0;
-        while let Some(rel) = text[from..].find(opener) {
+        while let Some(rel) = text[from..].find(name) {
             let start = from + rel;
-            from = start + opener.len();
-            // `ui_driver::mark(` also matches inside `driver::mark(`; dedupe by
-            // requiring the char before the match to not be alphanumeric or ':'.
-            if start > 0 {
-                let prev = bytes[start - 1] as char;
-                if prev.is_alphanumeric() || prev == '_' || prev == ':' {
-                    continue;
-                }
+            from = start + name.len();
+
+            // The qualified path immediately before the function name.
+            let prefix_end = start;
+            let prefix_start = text[..prefix_end]
+                .char_indices()
+                .rev()
+                .take_while(|(_, c)| is_path_char(*c))
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(prefix_end);
+            let prefix = &text[prefix_start..prefix_end];
+
+            // `ui_driver::`, `driver::`, `crate::ui::driver::`, … — but not
+            // `registry::mark(`, not a bare `fn mark(`, and not `remark(`.
+            if !prefix.ends_with("driver::") {
+                continue;
             }
+
             let mut depth = 0usize;
             let mut end = from;
             for (i, c) in text[start..].char_indices() {
@@ -878,12 +926,75 @@ fn extract_calls(text: &str) -> Vec<(usize, String)> {
                     _ => {}
                 }
             }
-            let line = text[..start].matches('\n').count() + 1;
-            calls.push((line, text[start..end].to_string()));
+            let line = text[..prefix_start].matches('\n').count() + 1;
+            calls.push((line, text[prefix_start..end].to_string()));
         }
     }
     calls.sort();
     calls
+}
+
+/// The scanner sees every spelling of a driver call that the tree contains.
+///
+/// Separated from the allocation check because it is a different claim, and
+/// because the allocation check is worthless without it: the first version of
+/// this audit was green precisely because it could not see the call site that
+/// mattered. Both spellings are planted, including the fully-qualified one
+/// that was invisible.
+#[test]
+fn the_call_site_scanner_sees_every_spelling() {
+    let planted = r#"
+        ui_driver::note(ui, format_args!("a {}", names.join("/")));
+        crate::ui::driver::note(ui, format_args!("b {}", names.join("/")));
+        driver::mark(ui, rect, true, format_args!("c"));
+        super::super::ui::driver::mark(ui, rect, true, format_args!("d"));
+        // Not driver calls, and must not be collected:
+        registry::mark(ctx, rect, true, false, format_args!("e"));
+        thing.remark(format_args!("f"));
+        fn note(ui: &Ui) {}
+    "#;
+
+    let found = extract_calls(planted);
+    let texts: Vec<&str> = found.iter().map(|(_, c)| c.as_str()).collect();
+    assert_eq!(
+        found.len(),
+        4,
+        "expected the four driver calls and nothing else, got {texts:#?}"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|c| c.starts_with("crate::ui::driver::note(")),
+        "the FULLY-QUALIFIED spelling is the one the first version missed: {texts:#?}"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|c| c.starts_with("super::super::ui::driver::mark(")),
+        "a longer qualified path must work too: {texts:#?}"
+    );
+    for (_, call) in &found {
+        assert!(
+            EAGER_MARKERS.iter().any(|m| call.contains(m))
+                || call.contains("format_args!(\"c\")")
+                || call.contains("format_args!(\"d\")"),
+            "each planted call should be captured whole: {call}"
+        );
+    }
+
+    // And the markers flag the known-bad shape in BOTH spellings — the plant
+    // that the first version's self-check was missing.
+    for spelling in ["ui_driver::note(", "crate::ui::driver::note("] {
+        let call = found
+            .iter()
+            .find(|(_, c)| c.starts_with(spelling))
+            .unwrap_or_else(|| panic!("{spelling} not captured"));
+        assert!(
+            EAGER_MARKERS.iter().any(|m| call.1.contains(m)),
+            "{spelling}: markers must flag `.join(` in {}",
+            call.1
+        );
+    }
 }
 
 /// No `mark` / `note` call site builds a `String` in its argument position.
@@ -892,34 +1003,24 @@ fn extract_calls(text: &str) -> Vec<(usize, String)> {
 /// instead (`view_combatant_ui::OverrideMap` is the worked example).
 #[test]
 fn no_driver_call_site_allocates_before_the_armed_check() {
-    // Non-vacuity, first: the scanner must be able to SEE the defect it
-    // guards against. This is the exact shape review found in the equipment
-    // panel, and if the extractor ever stops matching call sites the real
-    // sweep below would pass on an empty set.
-    let planted = r#"
-        ui_driver::note(
-            ui,
-            format_args!("overrides {{{}}}", xs.iter().map(f).collect::<Vec<_>>().join(",")),
-        );
-    "#;
-    let found = extract_calls(planted);
-    assert_eq!(
-        found.len(),
-        1,
-        "the extractor must find a call site: {found:?}"
-    );
-    assert!(
-        EAGER_MARKERS.iter().any(|m| found[0].1.contains(m)),
-        "the markers must flag the known-bad shape: {}",
-        found[0].1
-    );
-
     let sites = driver_call_sites();
-    assert!(
-        sites.len() >= 10,
-        "expected the instrumented widgets' call sites, found {} — the \
-         extractor has probably stopped matching",
-        sites.len()
+
+    // The census, first. A scan that silently under-collects would make the
+    // allocation check below vacuous, which is exactly how the first version
+    // of this audit shipped green while missing a call site.
+    let mut per_file: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (file, _, _) in &sites {
+        *per_file.entry(file.as_str()).or_default() += 1;
+    }
+    let expected: std::collections::BTreeMap<&str, usize> =
+        EXPECTED_CALL_SITES.iter().copied().collect();
+    assert_eq!(
+        per_file, expected,
+        "the driver call sites found do not match the expected census. If you \
+         instrumented a new widget, add it to EXPECTED_CALL_SITES; if this \
+         dropped without you removing a call, the scanner has stopped seeing \
+         a spelling and the allocation check below is not looking at \
+         everything."
     );
 
     let mut offenders = Vec::new();
@@ -943,7 +1044,6 @@ fn no_driver_call_site_allocates_before_the_armed_check() {
         offenders.join("\n  ")
     );
 }
-
 // ===========================================================================
 // THE FLAG ITSELF
 // ===========================================================================

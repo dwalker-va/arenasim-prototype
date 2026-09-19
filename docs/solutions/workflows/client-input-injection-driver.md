@@ -182,7 +182,20 @@ that `Vec` and `String` on every frame with the driver off. The equipment
 panel did exactly that until review caught it. Wrap the source in a `Display`
 and let the formatter do the work (`view_combatant_ui::OverrideMap`), and
 `no_driver_call_site_allocates_before_the_armed_check` keeps the next one
-honest by scanning the real call sites.
+honest by scanning the real call sites against an exact per-file census.
+
+**That audit is a substring scan, not a parse, and its blind spots are
+written into its own doc comment** — read them before trusting a green run.
+The short version: it recognises eager work by spelling, so a helper function
+that allocates internally is invisible to it. Its first version had a far
+worse one and shipped green — it matched hardcoded opener strings and skipped
+anything preceded by `:`, making every fully-qualified call invisible,
+including `encyclopedia::widget`'s, the single note every linked icon in the
+client funnels through. A `>=` floor on the site count could not notice 20
+found where 21 exist, and the audit's own self-check planted only the
+spelling that worked. **A guard that generalises one bug into a class check
+proves nothing by firing on the bug that motivated it; plant a case it has
+never seen.**
 
 That is a claim about **absence**, which a passing test cannot demonstrate: a
 test that goes green with the driver off would go green just as happily if the
@@ -201,6 +214,8 @@ interesting one:
 | `assert-absent` goes back to `!is_visible` | `presence_assertions_separate_not_drawn_from_scrolled_off` **fails** on the clipped case |
 | `hover` settles for `settle` | `a_hover_settles_for_the_long_window_and_a_click_does_not` **fails** |
 | a shipped script is deleted | `every_shipped_script_parses` **fails**, naming the file |
+| eager work in the FULLY-QUALIFIED call in `widget.rs` | the audit **fails** at `widget.rs:146` — the case its first version could not see |
+| two offending calls planted in an untouched file, both spellings | the census **fails**, and with the census updated the audit names both lines |
 
 The second test asserted on `registry::snapshot`, which re-checks the armed
 flag itself, so a leaking `mark` still read back as `None`. **The assertion was
