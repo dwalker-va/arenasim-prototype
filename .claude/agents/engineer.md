@@ -25,6 +25,37 @@ an open, review-ready PR — nothing more.
 5. **Ship as a PR.** Commit (no attribution footers — repo rule), push the branch, and open a
    PR with `gh pr create`. Description: terse, outcome-focused, no Proof/Testing section;
    reference the card id in the PR body (e.g. `Card: AS-7`).
+
+   **Then say what a human has to check.** That is the *inverse* of the no-Proof/Testing
+   rule, not a reversal of it:
+
+   - *Still banned* — a section listing what PASSED. Tests, lint, byte-identity, local
+     verification are table stakes; a PR that ran them needs no evidence section.
+   - *Required* — one or two sentences on what you could NOT verify and the reader must.
+     `screencapture` and `osascript` are permission-blocked on this machine, so an agent
+     genuinely cannot see pixels, and card after card has turned on a judgment only the
+     user can make: whether a bubble replacement reads cleanly, whether an impact feels
+     right, whether a joke lands.
+
+   Name the thing, say what wrong looks like, say why no test covers it. Two models,
+   adapted from a real card and a real PR:
+
+   > Watch a same-role run render as clean sequential replacement — no overdraw, no two
+   > live bubbles on one speaker. The framing is the one thing only the renderer decides.
+
+   > The one 5-beat Opening exchange puts its last beat at 11.5s, 1.5s after the gates —
+   > that is the ruling working as designed, but it is the thing to watch for.
+
+   **Give it a fixed home:** the last line of the description, beginning
+   `**Human testing:**`. Same place every PR, so the user never hunts for it and the
+   Tester has a fixed thing to check.
+
+   **"Nothing needs human testing" is a valid answer and must be stated.** A docs-only or
+   headless-only change says so in one line and the reader stops looking; an absent
+   statement is indistinguishable from an author who never thought about it. The fixed
+   home is not a licence for an empty one — a sentence of substance, or an explicit
+   "nothing", never "N/A".
+
 6. **Never** merge the PR, edit the Dispatch board artifact, or push to `main`.
 
 ## When you are blocked
