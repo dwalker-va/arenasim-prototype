@@ -943,3 +943,79 @@ fn no_driver_call_site_allocates_before_the_armed_check() {
         offenders.join("\n  ")
     );
 }
+
+// ===========================================================================
+// THE FLAG ITSELF
+// ===========================================================================
+
+/// `--ui-script` names the mode it clashes with, and only when it clashes.
+///
+/// The headless arms are dispatched before the graphical one, so a script
+/// passed alongside them would be accepted and never run — silence, which is
+/// the failure this whole driver exists to stop shipping. The named mode is
+/// the one `main`'s dispatch would actually have taken, so the message cannot
+/// point at the wrong arm.
+#[test]
+fn ui_script_conflicts_with_every_windowless_mode() {
+    use arenasim::cli::Args;
+    use clap::Parser;
+
+    let args = |argv: &[&str]| Args::try_parse_from(argv).expect("valid argv");
+
+    // Each windowless mode, named.
+    assert_eq!(
+        args(&[
+            "arenasim",
+            "--headless",
+            "m.json",
+            "--ui-script",
+            "s.script"
+        ])
+        .ui_script_conflict(),
+        Some("--headless")
+    );
+    assert_eq!(
+        args(&["arenasim", "--matrix", "10", "--ui-script", "s.script"]).ui_script_conflict(),
+        Some("--matrix")
+    );
+    assert_eq!(
+        args(&["arenasim", "--batch", "b.jsonl", "--ui-script", "s.script"]).ui_script_conflict(),
+        Some("--batch")
+    );
+
+    // Dispatch order decides which is reported when several are given, so the
+    // message always names the arm that would have won.
+    assert_eq!(
+        args(&[
+            "arenasim",
+            "--headless",
+            "m.json",
+            "--matrix",
+            "10",
+            "--batch",
+            "b.jsonl",
+            "--ui-script",
+            "s.script",
+        ])
+        .ui_script_conflict(),
+        Some("--batch"),
+        "main dispatches --batch first, so that is the mode that eats the run"
+    );
+
+    // The legitimate combinations stay legitimate.
+    assert_eq!(
+        args(&["arenasim", "--ui-script", "s.script"]).ui_script_conflict(),
+        None
+    );
+    assert_eq!(
+        args(&["arenasim", "--replay", "r.json", "--ui-script", "s.script"]).ui_script_conflict(),
+        None,
+        "--replay IS graphical; the shipped replay script depends on this"
+    );
+
+    // And a windowless run without a script is not a conflict.
+    assert_eq!(
+        args(&["arenasim", "--headless", "m.json"]).ui_script_conflict(),
+        None
+    );
+}

@@ -21,6 +21,9 @@
 //! # Enabling it
 //!
 //! `cargo run --release -- --ui-script tests/ui-scripts/<name>.script`.
+//! It composes with `--replay`, and is an ERROR alongside `--headless`,
+//! `--matrix` or `--batch` — those have no window, dispatch first, and would
+//! swallow the script silently (see [`crate::cli::Args::ui_script_conflict`]).
 //! Without that flag [`UiDriverPlugin::build`] returns immediately: no
 //! resource, no systems, and — because nothing ever calls [`registry::arm`] —
 //! every [`mark`] and [`note`] in `src/states/` is a single failed hash lookup

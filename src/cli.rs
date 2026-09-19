@@ -138,6 +138,32 @@ pub struct Args {
     pub ui_script_log: Option<PathBuf>,
 }
 
+impl Args {
+    /// The non-graphical mode `--ui-script` was wrongly combined with, if any.
+    ///
+    /// A UI script drives the CLIENT; `--headless`, `--matrix` and `--batch`
+    /// open no window, and each is dispatched BEFORE the graphical arm in
+    /// `main`, so the script would simply never run. Silently doing nothing is
+    /// the exact failure this driver exists to remove, so `main` turns this
+    /// into an error rather than letting the flag evaporate.
+    ///
+    /// The arms are checked in `main`'s own dispatch order, so the mode named
+    /// is the one that would actually have won.
+    pub fn ui_script_conflict(&self) -> Option<&'static str> {
+        self.ui_script.as_ref()?;
+        if self.batch.is_some() {
+            return Some("--batch");
+        }
+        if self.matrix.is_some() {
+            return Some("--matrix");
+        }
+        if self.headless.is_some() {
+            return Some("--headless");
+        }
+        None
+    }
+}
+
 pub fn parse_args() -> Args {
     Args::parse()
 }

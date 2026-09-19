@@ -234,6 +234,19 @@ about half a second) rather than the ordinary three.
 Both traps share a shape: the driver observed a state that was still changing.
 When a new assertion is flaky, suspect that before suspecting the UI.
 
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | every step ran and every assertion held |
+| 1 | an assertion failed, or the window closed before the last step |
+| 2 | the script could not be read or parsed, or `--ui-script` was combined with a windowless mode |
+
+`--ui-script` drives the CLIENT, so combining it with `--headless`, `--matrix`
+or `--batch` is an error rather than a flag that quietly evaporates — those
+arms dispatch first and the script would never run. (`--replay` IS graphical
+and composes fine.) `--ui-script-log` without `--ui-script` warns.
+
 ## Exit, and why not `AppExit`
 
 Writing `AppExit` from a system deadlocks the macOS winit event loop (see
@@ -243,8 +256,8 @@ leaves its verdict in an `Arc<Mutex<Outcome>>` that `main` reads after
 `App::run` returns, then `std::process::exit(1)`.
 
 A run that ends without finishing (the window closed early, a panic) leaves
-`Outcome::Incomplete`, which is also a non-zero exit: an unfinished script
-checked nothing, and must not read as a pass.
+`Outcome::Incomplete` — the `Default`, deliberately — which is also a non-zero
+exit: an unfinished script checked nothing, and must not read as a pass.
 
 ## The shipped scripts
 

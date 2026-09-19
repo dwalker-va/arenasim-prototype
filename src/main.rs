@@ -35,6 +35,24 @@ fn main() {
         );
     }
 
+    // `--ui-script` only means anything to the client. Without this it would
+    // be accepted and then quietly never run, because the headless arms are
+    // dispatched first — the silent no-op this whole driver exists to stop
+    // shipping.
+    if let Some(mode) = args.ui_script_conflict() {
+        eprintln!(
+            "error: --ui-script drives the graphical client and cannot be combined with {mode}."
+        );
+        std::process::exit(2);
+    }
+
+    // Same shape, lower stakes, and the same precedent as the --ai-profile
+    // warning above: say the flag did nothing rather than letting the user
+    // wonder where their log went.
+    if args.ui_script.is_none() && args.ui_script_log.is_some() {
+        eprintln!("warning: --ui-script-log ignored — it applies to --ui-script only.");
+    }
+
     if let Some(batch_path) = args.batch {
         // Parallel in-process batch runner for sweeps (2v2/3v3/strategy vars).
         let out = args.out.unwrap_or_else(|| {
