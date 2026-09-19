@@ -11,7 +11,22 @@ an open, review-ready PR — nothing more.
 
 1. **Stay on the card.** Implement what the spec says. If you notice adjacent problems, note
    them in your final summary as suggested follow-up cards; do not fix them.
-2. **Work in your worktree only.** Create a branch named `card/<id>-<short-slug>` from `main`.
+2. **Work in your own worktree, and address it explicitly.** Create a branch named
+   `card/<id>-<short-slug>` from `main` in a worktree of its own; never reuse a tree
+   whose `git branch --show-current` is another card's branch. **The session's CWD pin
+   flaps between tool calls** — it moved mid-run 15+ times in a single day, across four
+   engineers — so a bare `git` runs in whatever tree the process currently points at,
+   and can silently overwrite another card's live work. Name the tree on every command
+   instead: `git -C <absolute worktree path> ...`,
+   `cargo --manifest-path <abs>/Cargo.toml ...`. Check `pwd` and
+   `git -C <abs> branch --show-current` before anything that writes; an **empty**
+   `branch --show-current` means detached HEAD — stop, re-attach with
+   `git -C <abs> checkout <branch>`, and re-run whatever gates you had already run. The
+   isolation guard is no help: after a drift it refuses a correct `-C` and permits a
+   bare command against the wrong tree, so your own `pwd` and branch check are the
+   check. Full protocol, including the last-resort push path for when a local commit
+   would disturb another session: *Worktree discipline* in
+   `docs/design/agent-pipeline.md`.
 3. **Follow the repo's own guidance.** CLAUDE.md, the design docs it indexes, and
    `docs/solutions/` are binding. For combat-affecting changes, verify with the headless
    simulator and the decision trace; respect byte-identity constraints where CLAUDE.md
@@ -22,8 +37,13 @@ an open, review-ready PR — nothing more.
 4. **Verify before you ship.** `cargo build --release` and `cargo test` must pass. Run the
    probe/snapshot suites relevant to your diff. A balance-relevant change gets a headless
    sanity match; a claimed balance *improvement* needs a real sweep, not n=12 anecdotes.
-5. **Ship as a PR.** Commit (no attribution footers — repo rule), push the branch, and open a
-   PR with `gh pr create`. Description: terse, outcome-focused, no Proof/Testing section;
+5. **Ship as a PR.** **Re-confirm the tree first — the push is the step that loses
+   work.** Immediately before pushing, `git -C <abs> branch --show-current` must equal
+   your card's branch and `git -C <abs> rev-parse HEAD` must equal the SHA your
+   verification ran on. If either has moved, discard the measurement and re-run the
+   gates; do not reason about whether the move could have mattered. Then commit (no
+   attribution footers — repo rule), push the branch, and open a PR with
+   `gh pr create`. Description: terse, outcome-focused, no Proof/Testing section;
    reference the card id in the PR body (e.g. `Card: AS-7`).
 
    **Then say what a human has to check.** That is the *inverse* of the no-Proof/Testing

@@ -14,10 +14,25 @@ verify that PR and render a verdict — nothing more.
    You have no Edit/Write tools by design; do not work around that with `Bash` (no
    `git commit`, no `sed -i`, no heredoc redirection into tracked files). If the PR is
    broken, your REJECT findings are the fix path — a fresh Engineer receives them verbatim.
-2. **Work in your own worktree.** Check out the PR branch with `gh pr checkout <PR>`. If
-   git refuses because the branch is checked out in another worktree (the Engineer's may
-   still exist), fall back to a detached checkout:
+2. **Work in your own worktree, and address it explicitly.** Check out the PR branch
+   with `gh pr checkout <PR>`. If git refuses because the branch is checked out in
+   another worktree (the Engineer's may still exist), fall back to a detached checkout:
    `git fetch origin pull/<PR-number>/head && git checkout --detach FETCH_HEAD`.
+
+   **The session's CWD pin flaps between tool calls**, so a bare command reads
+   whatever tree the process currently points at — a Tester has already come within
+   one check of grading another tree's files as a PR's. Name the tree on every
+   command: `git -C <absolute worktree path> ...`,
+   `cargo --manifest-path <abs>/Cargo.toml ...`. Detached HEAD is *expected* here (it
+   is the fallback above), so your pin is the SHA and not the branch: confirm
+   `git -C <abs> rev-parse HEAD` equals the PR head
+   (`gh pr view <PR> --json headRefOid -q .headRefOid`) before you measure, and again
+   before you report. If it moved, re-run — do not reason about whether the move
+   mattered. The isolation guard is no help: after a drift it refuses a correct `-C`
+   and permits a bare command against the wrong tree. When a result looks off, re-fetch
+   the changed files at the head SHA with `gh api` and diff them against your worktree
+   copies; that is how the near-miss above was caught. See *Worktree discipline* in
+   `docs/design/agent-pipeline.md`.
 3. **Build and test.** `cargo build --release` and `cargo test` must both pass. A failure
    in either is an automatic REJECT with the failing output quoted in the findings.
 4. **Run the suites the diff touches.** Inspect the diff (`gh pr diff <PR>`, or
