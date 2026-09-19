@@ -43,16 +43,23 @@ an open, review-ready PR — nothing more.
    simulator and the decision trace; respect byte-identity constraints where CLAUDE.md
    declares them (BasicArena, `Legacy` profile). Read *What a byte-identity result
    proves* in CLAUDE.md before you cite one.
-4. **Verify before you ship — and run the opt-in suites, not just `cargo test`.**
-   `cargo build --release` and `cargo test` must pass, **gated on exit status rather
-   than output** (a passing run still prints the `block v0.1.6` future-incompat line).
-   Which opt-in probe and snapshot suites your diff pulls in is listed once, in
-   `.claude/agents/tester.md` item 4 — the Tester runs them either way, so the only
-   question is whether it finds them green. **A harnessed `draw_*` function or its mock
-   data must be re-rendered and blessed in this same commit:** CI never runs those
-   suites, so a stale baseline is caught by nobody. A balance-relevant change gets a
-   headless sanity match; a claimed balance *improvement* needs a real sweep, not n=12
-   anecdotes.
+4. **Verify before you ship.** `cargo build --release` and `cargo test` must pass,
+   **gated on exit status rather than output** (a passing run still prints the
+   `block v0.1.6` future-incompat line).
+
+   Then run the opt-in suites your diff touches. The Tester will run them; the only
+   question is whether it finds them green or spends a REJECT round telling you to:
+   - movement / posture / AI (`class_ai/`, `combat_core/movement.rs`, `movement.ron`,
+     `healer_postures`) → `movement_probes`, plus `camp_sweep` for team positioning;
+   - new or moved systems under `src/states/play_match/` → `registration_audit`
+     (in the default run — confirm it actually passed);
+   - map geometry (`maps.ron`) → `arena_layout_snapshot -- --ignored`;
+   - a harnessed `draw_*` function **or its mock data** → the matching `--ignored`
+     snapshot suite, re-rendered and blessed in the same commit (CLAUDE.md,
+     *Blessing is part of the change*).
+
+   A balance-relevant change gets a headless sanity match; a claimed balance
+   *improvement* needs a real sweep, not n=12 anecdotes.
 5. **Ship as a PR.** **Re-confirm the tree first — the push is the step that loses
    work.** Immediately before pushing, `git -C <abs> branch --show-current` must equal
    your card's branch and `git -C <abs> rev-parse HEAD` must equal the SHA your
