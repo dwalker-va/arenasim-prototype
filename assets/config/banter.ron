@@ -486,6 +486,24 @@
                 (role: "responder", text: "{ability:Charge} !"),
             ],
         ),
+        // The fuller attention check (AS-121): the caller's test iterates
+        // from the kill target to the off-target to a banana, and the game
+        // plan does not change based on input. Five beats — the six-beat form
+        // does not fit latest_beat, so the escalation replaces a Q/A pair
+        // with a same-role caller run. As a {cctarget} entry it never counts
+        // toward generic coverage; the four-beat form above holds this slot.
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Class(Warrior)) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{emoji:thinking} {target} ?"),
+                (role: "responder", text: "{ability:Charge}"),
+                (role: "caller",    text: "{emoji:thinking} … {cctarget} ?"),
+                (role: "caller",    text: "{emoji:banana} ? ?"),
+                (role: "responder", text: "{ability:Charge} !"),
+            ],
+        ),
         // The detailed plan nobody asked for — and it is CORRECT (the AI
         // really Polymorphs the non-kill target to make the 2v1).
         (
