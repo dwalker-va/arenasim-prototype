@@ -113,6 +113,7 @@ pub fn decide_hunter_action(
                 combatant,
                 my_pos,
                 landing,
+                Some(target),
                 TrapType::Freezing,
                 &ctx.bounds,
                 &mut builder,
@@ -210,6 +211,7 @@ pub fn decide_hunter_action(
             combatant,
             my_pos,
             my_pos,
+            None,
             TrapType::Frost,
             &ctx.bounds,
             &mut builder,
@@ -258,12 +260,11 @@ pub fn decide_hunter_action(
         // slowing — rather than the nearest enemy generally (which can be a pet
         // or a stray-closest caster). Falls back to the nearest enemy when no
         // melee threat exists.
-        let frost_anchor = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)
-            .map(|(_, pos)| pos)
-            .or_else(|| {
-                nearest_enemy.and_then(|(e, _)| ctx.combatants.get(&e).map(|i| i.position))
+        let frost_anchor =
+            super::dps_postures::nearest_melee_threat(ctx, entity, my_pos).or_else(|| {
+                nearest_enemy.and_then(|(e, _)| ctx.combatants.get(&e).map(|i| (e, i.position)))
             });
-        if let Some(anchor_pos) = frost_anchor {
+        if let Some((frost_anchor_entity, anchor_pos)) = frost_anchor {
             let midpoint = (my_pos + anchor_pos) / 2.0;
             if try_place_trap_at(
                 commands,
@@ -273,6 +274,7 @@ pub fn decide_hunter_action(
                 combatant,
                 my_pos,
                 midpoint,
+                Some(frost_anchor_entity),
                 TrapType::Frost,
                 &ctx.bounds,
                 &mut builder,
@@ -440,6 +442,7 @@ pub fn decide_hunter_action(
                 combatant,
                 my_pos,
                 landing,
+                Some(healer),
                 TrapType::Freezing,
                 &ctx.bounds,
                 &mut builder,
@@ -479,6 +482,7 @@ pub fn decide_hunter_action(
                 combatant,
                 my_pos,
                 (my_pos + trap_target_info.position) / 2.0,
+                Some(trap_target),
                 TrapType::Freezing,
                 &ctx.bounds,
                 &mut builder,
@@ -700,6 +704,7 @@ fn try_place_trap_at(
     combatant: &mut Combatant,
     my_pos: Vec3,
     position: Vec3,
+    intended: Option<Entity>,
     trap_type: TrapType,
     bounds: &ArenaBounds,
     builder: &mut DecisionEventBuilder<'_>,
@@ -732,7 +737,13 @@ fn try_place_trap_at(
         return false;
     }
 
-    builder.choose(ability, None, true);
+    // Trace the INTENDED victim, not just the ability. A trap is placed at a
+    // POSITION and springs on whoever reaches it first, so the entity the
+    // Hunter aimed at is not recoverable from the outcome — without this the
+    // trace cannot answer "did the trap catch who it was aimed at?", which is
+    // the question every trap-targeting diagnosis starts from. `None` for the
+    // Frost Trap dropped at the Hunter's own feet, which aims at nobody.
+    builder.choose(ability, intended, true);
 
     // Clamp to octagonal arena bounds (midpoint can land outside corners)
     let position = crate::states::play_match::combat_core::clamp_to_arena(bounds, position);
