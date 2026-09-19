@@ -118,14 +118,16 @@ pub struct BanterSpeaker {
 
 /// One spoken line: which role says it, and what they say.
 ///
-/// `text` supports `{target}` in every context and `{prev_target}` in
-/// `Correction` only. Substitution happens at resolve time (U5); this layer
-/// only stores the strings.
+/// `text` supports `{target}`, `{cctarget}`, `{speaker}` and
+/// `{mate:<role>}` in every context, and `{prev_target}` in `Correction`
+/// only. Substitution happens at resolve time (U5); this layer only stores
+/// the strings — and checks, below, that every role a line names is one the
+/// exchange declares.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BanterBeat {
     /// Role saying this line — must be declared in the exchange's `speakers`.
     pub role: String,
-    /// The line, with `{target}` / `{prev_target}` placeholders unresolved.
+    /// The line, with its portrait placeholders unresolved.
     pub text: String,
 }
 
@@ -162,6 +164,19 @@ impl BanterExchange {
     /// enough combatants can play it. Every context needs at least one.
     pub fn is_fully_generic(&self) -> bool {
         self.specificity() == 0
+    }
+
+    /// Whether any beat names `{cctarget}`.
+    ///
+    /// Not folded into [`specificity`](Self::specificity): that count is the
+    /// resolver's selection WEIGHT, and `{cctarget}` narrows satisfiability
+    /// without making a line any more bespoke. It matters here because the
+    /// coverage floor below promises a fallback that can never fail to
+    /// resolve, and a line needing a second enemy is not that.
+    pub fn references_cc_target(&self) -> bool {
+        self.beats
+            .iter()
+            .any(|beat| crate::states::play_match::banter::vocab::references_cc_target(&beat.text))
     }
 }
 
@@ -462,6 +477,23 @@ impl BanterConfig {
                 }
             }
 
+            // ...and so must every `{mate:<role>}` a beat POINTS AT. A role
+            // the exchange never declared binds to nobody, so the token would
+            // resolve to the neutral fallback glyph mid-match — a typo that is
+            // invisible in the RON and reads in the client as one combatant
+            // being unnameable. Rejecting at load names the role instead.
+            for (i, beat) in exchange.beats.iter().enumerate() {
+                for role in crate::states::play_match::banter::vocab::mate_roles(&beat.text) {
+                    if !exchange.speakers.iter().any(|s| s.role == role) {
+                        issues.push(format!(
+                            "{}: beat {} addresses teammate role '{}', which is not declared in \
+                             `speakers`",
+                            label, i, role
+                        ));
+                    }
+                }
+            }
+
             // Derived beat times must land at or before `latest_beat` — which
             // sits past the countdown on purpose, so this is a bound on the
             // tail of an exchange, not on the countdown window.
@@ -479,14 +511,21 @@ impl BanterConfig {
         // --- Generic-coverage floor (AE6) ----------------------------------
         // Every context needs at least one exchange with NO constraints, so
         // the resolver can never come up empty for a satisfiable lineup.
+        //
+        // `{cctarget}` disqualifies an entry from being that floor even when
+        // its class constraints are all `Any`: the resolver DROPS such an
+        // exchange when the enemy side is just the kill target, so a context
+        // whose only generic entry named it would go silent in exactly the
+        // lineups the floor exists to cover.
         for context in BanterContext::all() {
             if !self
                 .exchanges_for(*context)
-                .any(BanterExchange::is_fully_generic)
+                .any(|e| e.is_fully_generic() && !e.references_cc_target())
             {
                 issues.push(format!(
-                    "context {:?} has no fully-generic exchange (all speaker classes Any AND \
-                     target Any) — every context needs one so resolution can never fail",
+                    "context {:?} has no fully-generic exchange (all speaker classes Any, target \
+                     Any, and no {{cctarget}}) — every context needs one so resolution can never \
+                     fail",
                     context
                 ));
             }
@@ -816,6 +855,84 @@ mod tests {
             "issues should name the undeclared role: {:?}",
             issues
         );
+    }
+
+    /// A `{mate:<role>}` pointing at a role the exchange never declared binds
+    /// to nobody, so the load fails naming the role rather than shipping a
+    /// bubble with a fallback glyph where a teammate should be.
+    #[test]
+    fn validate_rejects_mate_token_on_an_undeclared_role() {
+        let mut config = covered_config();
+        config.exchanges[0].beats[1].text = "{ability:Flash of Light} {mate:ghost}".to_string();
+        let issues = config
+            .validate()
+            .expect_err("a mate token on an undeclared role must fail");
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("'ghost'") && i.contains("teammate role")),
+            "issues should name the undeclared role: {:?}",
+            issues
+        );
+    }
+
+    /// ...and a declared one passes, so the check above is about the role and
+    /// not about the token being rejected outright.
+    #[test]
+    fn validate_accepts_a_mate_token_on_a_declared_role() {
+        let mut config = covered_config();
+        config.exchanges[0].beats[1].text = "{mate:caller} {emoji:yes}".to_string();
+        config
+            .validate()
+            .expect("a mate token naming a declared role must validate");
+    }
+
+    /// The coverage floor promises a fallback that can never fail to resolve.
+    /// `{cctarget}` can fail to bind, so an entry naming it does not count as
+    /// that fallback however generic its class constraints are.
+    #[test]
+    fn validate_rejects_cc_target_as_the_only_generic_coverage() {
+        let mut config = covered_config();
+        let exchange = config
+            .exchanges
+            .iter_mut()
+            .find(|e| e.context == BanterContext::Opening)
+            .expect("fixture has an Opening exchange");
+        exchange.beats[0].text = "{emoji:skull} {cctarget}".to_string();
+        assert!(
+            exchange.is_fully_generic(),
+            "the entry's class constraints are untouched — this test is about \
+             the token, not about specificity"
+        );
+
+        let issues = config
+            .validate()
+            .expect_err("a context covered only by a cctarget entry must fail");
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("Opening") && i.contains("fully-generic")),
+            "issues should name the uncovered context: {:?}",
+            issues
+        );
+        assert!(
+            !issues.iter().any(|i| i.contains("Switch")),
+            "still-covered contexts must not be reported: {:?}",
+            issues
+        );
+    }
+
+    /// A `{cctarget}` entry is fine as long as something else covers the
+    /// context — it is extra content, not a banned token.
+    #[test]
+    fn validate_accepts_a_cc_target_entry_alongside_a_generic_one() {
+        let mut config = covered_config();
+        let mut extra = generic_exchange(BanterContext::Opening);
+        extra.beats[0].text = "{emoji:skull} {cctarget}".to_string();
+        config.exchanges.push(extra);
+        config
+            .validate()
+            .expect("a cctarget entry must be legal where the floor is covered elsewhere");
     }
 
     #[test]

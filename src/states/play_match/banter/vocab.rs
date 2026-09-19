@@ -11,13 +11,23 @@
 //! |---|---|
 //! | `{target}` | class portrait of the called enemy, framed by ITS team |
 //! | `{prev_target}` | the replaced target's portrait (`Correction` only) |
+//! | `{cctarget}` | the enemy the team means to CC — not the kill target |
 //! | `{speaker}` | the speaking combatant's own portrait |
+//! | `{mate:caller}` | the portrait of whoever is bound to that role |
 //! | `{ability:Mortal Strike}` | that ability's real icon art |
 //! | `{emoji:skull}` | `assets/icons/emoji/skull.png` |
 //!
-//! The three portrait tokens are AUTHORING tokens: the resolver rewrites them
+//! The five portrait tokens are AUTHORING tokens: the resolver rewrites them
 //! into the resolved `{class:<Class>:<team>}` form once it knows who is
 //! speaking about whom, and the renderer only ever sees the resolved form.
+//!
+//! `{mate:<role>}` names a role the exchange declares, so it is spelled with
+//! the `mate:` prefix rather than as a bare `{caller}`. A bare alias would put
+//! authored role labels into the same namespace as the grammar: adding a role
+//! called `target` or `speaker` would then silently shadow a portrait token,
+//! and no validation could tell the two apart. The prefix keeps the grammar's
+//! own words reserved and makes "this points at a teammate" readable in the
+//! line.
 //!
 //! ## Why emoji are IMAGES and not text
 //!
@@ -154,6 +164,44 @@ pub fn class_token(class: CharacterClass, team: u8) -> String {
     format!("{{class:{}:{}}}", class.name(), team)
 }
 
+/// Opening of the teammate-portrait token, `{mate:<role>}`.
+pub const MATE_PREFIX: &str = "{mate:";
+
+/// The CC-target portrait token: the enemy the team means to control rather
+/// than kill. Unlike every other portrait token it is a SATISFIABILITY
+/// requirement as well as a substitution — a lineup with no second enemy
+/// cannot bind it, and the resolver drops such an exchange rather than
+/// rendering a fallback into a line written around a class.
+pub const CC_TARGET: &str = "{cctarget}";
+
+/// Every role name a line addresses with `{mate:<role>}`, in the order the
+/// tokens appear. Duplicates are kept — the caller decides whether it cares.
+///
+/// Shared between the resolver (which substitutes these) and config validation
+/// (which checks the exchange declares them). That sharing is deliberate, and
+/// unlike `emoji_names` in `banter_config.rs`: the two callers are asking the
+/// SAME question — which roles does this line name — so a second scanner could
+/// only drift from this one and let an undeclared role reach a bubble.
+///
+/// An unclosed `{mate:` yields nothing: `parse` already treats a dangling brace
+/// as literal text, so there is no role there to check or substitute.
+pub fn mate_roles(text: &str) -> Vec<&str> {
+    let mut roles = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(MATE_PREFIX) {
+        let after = &rest[start + MATE_PREFIX.len()..];
+        let Some(end) = after.find('}') else { break };
+        roles.push(&after[..end]);
+        rest = &after[end + 1..];
+    }
+    roles
+}
+
+/// Whether a line names [`CC_TARGET`].
+pub fn references_cc_target(text: &str) -> bool {
+    text.contains(CC_TARGET)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,6 +283,46 @@ mod tests {
     fn class_token_round_trips_through_the_parser() {
         let token = class_token(CharacterClass::Warlock, 1);
         assert_eq!(parse(&token), vec![Span::Class(CharacterClass::Warlock, 1)]);
+    }
+
+    #[test]
+    fn mate_roles_lists_every_role_a_line_addresses() {
+        assert_eq!(
+            mate_roles("{ability:Flash of Light} {emoji:arrow} {mate:caller} !"),
+            vec!["caller"]
+        );
+        assert_eq!(
+            mate_roles("{mate:caller} {mate:responder} {mate:caller}"),
+            vec!["caller", "responder", "caller"],
+            "duplicates are kept — the caller decides whether it cares"
+        );
+    }
+
+    /// The scanner must not confuse itself with the tokens that surround it,
+    /// or validation would chase roles nobody wrote.
+    #[test]
+    fn mate_roles_ignores_every_other_token() {
+        assert!(mate_roles("{target} {speaker} {cctarget} {emoji:no}").is_empty());
+        assert!(mate_roles("").is_empty());
+        // A dangling `{mate:` is literal text to `parse`, so there is no role
+        // in it to check or substitute.
+        assert!(mate_roles("{mate:caller").is_empty());
+        // ...and the scan still recovers the well-formed token before it.
+        assert_eq!(mate_roles("{mate:a} {mate:b"), vec!["a"]);
+    }
+
+    #[test]
+    fn the_cc_target_token_is_recognised_only_when_spelled_exactly() {
+        assert!(references_cc_target("{ability:Freezing Trap} {cctarget}"));
+        assert!(!references_cc_target("{target}"));
+        assert!(!references_cc_target("{prev_target}"));
+    }
+
+    /// `{target}` is NOT a substring of `{cctarget}`, which is what lets the
+    /// resolver substitute the two with plain `str::replace` in either order.
+    #[test]
+    fn the_target_token_does_not_occur_inside_the_cc_target_token() {
+        assert!(!CC_TARGET.contains("{target}"));
     }
 
     #[test]

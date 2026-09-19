@@ -15,7 +15,7 @@ use super::super::components::{Combatant, GameRng, Pet, SpeechBubble};
 use super::super::match_config::CharacterClass;
 use super::super::utils::spawn_speech_line;
 use super::resolver::{
-    resolve_exchange, BanterCall, BanterCombatant, BanterLineup, ResolvedExchange,
+    cc_target_class, resolve_exchange, BanterCall, BanterCombatant, BanterLineup, ResolvedExchange,
 };
 use super::watcher::CallWatcher;
 
@@ -291,6 +291,9 @@ pub fn play_banter_beats(
             let call = BanterCall {
                 target: class_at(enemies, change.new_call),
                 prev_target: class_at(enemies, change.previous.slot()),
+                // Computed from the same roster `{target}` indexes, so "not
+                // the kill target" is the call slot and not a class match.
+                cc_target: cc_target_class(enemies, change.new_call),
                 // Teams are 1 and 2, so the opposition is whichever this is not.
                 enemy_team: if change.team == 1 { 2 } else { 1 },
             };
@@ -969,6 +972,81 @@ mod tests {
             vec!["one".to_string(), "two".to_string(), "three".to_string()],
             "the run must play in authored order, each line taking over from the last"
         );
+    }
+
+    /// The scheduler is the only place that knows the enemy roster, so this is
+    /// the half of `{cctarget}` the resolver's own suite cannot reach: that the
+    /// off-target enemy handed to the resolver is the one actually standing on
+    /// the other side of the arena.
+    #[test]
+    fn the_cc_target_names_the_enemy_the_call_did_not() {
+        let mut world = banter_world(
+            &[CharacterClass::Warrior, CharacterClass::Hunter],
+            &[CharacterClass::Mage, CharacterClass::Priest],
+        );
+        let mut config = scheduler_config();
+        config.exchanges = vec![BanterExchange {
+            context: BanterContext::Opening,
+            speakers: vec![
+                speaker("caller", ClassConstraint::Any),
+                speaker("responder", ClassConstraint::Any),
+            ],
+            target: ClassConstraint::Any,
+            beats: vec![beat(
+                "caller",
+                "{ability:Freezing Trap} {cctarget} , {target}",
+            )],
+        }];
+        world.insert_resource(config);
+        // Call slot 0 of team 2 — the Mage. The Priest is the off-target
+        // healer, which is what the token must find.
+        push_change(
+            &mut world,
+            change(1, Some(0), LastSeenCall::NeverObserved, false),
+        );
+
+        run_scheduler(&mut world, 0.1);
+        run_scheduler(&mut world, 1.0);
+        let spoken = bubbles(&mut world);
+        assert_eq!(spoken.len(), 1);
+        assert_eq!(
+            spoken[0].1,
+            "{ability:Freezing Trap} {class:Priest:2} , {class:Mage:2}"
+        );
+    }
+
+    /// ...and in a lineup where the call is the whole enemy side, that same
+    /// pool is silent rather than speaking a line about nobody.
+    #[test]
+    fn a_cc_target_exchange_is_silent_when_the_call_is_the_only_enemy() {
+        let mut world = banter_world(
+            &[CharacterClass::Warrior, CharacterClass::Hunter],
+            &[CharacterClass::Mage],
+        );
+        let mut config = scheduler_config();
+        config.exchanges = vec![BanterExchange {
+            context: BanterContext::Opening,
+            speakers: vec![
+                speaker("caller", ClassConstraint::Any),
+                speaker("responder", ClassConstraint::Any),
+            ],
+            target: ClassConstraint::Any,
+            beats: vec![beat("caller", "{ability:Freezing Trap} {cctarget}")],
+        }];
+        world.insert_resource(config);
+        push_change(
+            &mut world,
+            change(1, Some(0), LastSeenCall::NeverObserved, false),
+        );
+
+        for _ in 0..8 {
+            run_scheduler(&mut world, 1.0);
+        }
+        assert!(
+            bubbles(&mut world).is_empty(),
+            "a 2v1 has nobody to trap, so the exchange never plays"
+        );
+        assert!(world.resource::<BanterScheduler>().queues[0].is_empty());
     }
 
     #[test]
