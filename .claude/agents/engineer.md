@@ -11,19 +11,69 @@ an open, review-ready PR — nothing more.
 
 1. **Stay on the card.** Implement what the spec says. If you notice adjacent problems, note
    them in your final summary as suggested follow-up cards; do not fix them.
-2. **Work in your worktree only.** Create a branch named `card/<id>-<short-slug>` from `main`.
+2. **Work in your own worktree, and address it explicitly.** Create a branch named
+   `card/<id>-<short-slug>` from `main` in a worktree of its own; never reuse a tree
+   already sitting on another card's branch. **The session's CWD pin flaps between
+   tool calls** — it moved mid-run 15+ times in a single day, across four engineers —
+   so a bare `git` runs in whatever tree the process currently points at, and can
+   silently overwrite another card's live work. Name the tree on every command instead:
+   `git -C <absolute worktree path> ...`, `cargo --manifest-path <abs>/Cargo.toml ...`.
+
+   **After a drift the isolation guard inverts: it refuses a correct `git -C <your own
+   tree>` and a `cd` to it, while permitting a bare command against the wrong one. It
+   also refuses anything it cannot *prove* is not git — loops and compound commands,
+   but also a heredoc that merely contains the word and a `sed` it cannot rule out — so
+   keep every check a single plain command.** None of that is deducible from anything
+   else, and it is why the check below is not a git command.
+
+   **Know which tree you are in before anything that writes** — commit, reset,
+   checkout, push, not the push alone. `pwd` gives the flapped location, not your
+   branch, and `branch --show-current` is itself refusable, so read the tree's own
+   files, which the guard does not mediate: `<abs>/.git` for the gitdir, then
+   `<gitdir>/HEAD` for the branch or SHA. A detached HEAD **in your card's worktree**
+   means stop and recover — a second tree you keep deliberately detached for
+   before/after baselining is not a fault. **To recover, `EnterWorktree` at the
+   explicit path first**, since the two obvious moves are refused; then
+   `git -C <abs> checkout <branch>` and re-run whatever gates you had already run.
+   (Observed remedy, not a guarantee.) Full protocol, including the last-resort push
+   path for when a local commit would disturb another session: *Worktree discipline*
+   in `docs/design/agent-pipeline.md`.
 3. **Follow the repo's own guidance.** CLAUDE.md, the design docs it indexes, and
    `docs/solutions/` are binding. For combat-affecting changes, verify with the headless
    simulator and the decision trace; respect byte-identity constraints where CLAUDE.md
    declares them (BasicArena, `Legacy` profile). Read *What a byte-identity result
-   proves* in CLAUDE.md before you cite one: report non-vacuity counts alongside the
-   clean diff, attribute any difference positively rather than by elimination, and run
-   a same-binary control before chasing a difference you cannot attribute.
-4. **Verify before you ship.** `cargo build --release` and `cargo test` must pass. Run the
-   probe/snapshot suites relevant to your diff. A balance-relevant change gets a headless
-   sanity match; a claimed balance *improvement* needs a real sweep, not n=12 anecdotes.
-5. **Ship as a PR.** Commit (no attribution footers — repo rule), push the branch, and open a
-   PR with `gh pr create`. Description: terse, outcome-focused, no Proof/Testing section;
+   proves* in CLAUDE.md before you cite one.
+4. **Verify before you ship — and run the opt-in suites, not just `cargo test`.**
+   `cargo build --release` and `cargo test` must pass, **gated on exit status rather
+   than output** (a passing run still prints the `block v0.1.6` future-incompat line)
+   — and never through a pipe: zsh leaves `PIPESTATUS` unpopulated, so
+   `cargo test … | tail; echo $?` reports the pipe's status, not the test's.
+
+   Then run the opt-in suites your diff touches. The Tester will run them; the only
+   question is whether it finds them green or spends a REJECT round telling you to:
+   - movement / posture / AI (`class_ai/`, `combat_core/movement.rs`, `movement.ron`,
+     `healer_postures`) → `movement_probes`, plus `camp_sweep` for team positioning;
+   - new or moved systems under `src/states/play_match/` → `registration_audit`
+     (in the default run — confirm it actually passed);
+   - map geometry (`maps.ron`) → `arena_layout_snapshot -- --ignored`;
+   - a harnessed `draw_*` function **or its mock data** → the matching `--ignored`
+     snapshot suite, re-rendered and blessed in the same commit (CLAUDE.md,
+     *Blessing is part of the change*).
+
+   `.claude/agents/tester.md` item 4 is the fuller list — further cases, and the
+   caveats these bullets compress out (no GPU adapter, for one) — so read it there
+   when a suite misbehaves, and add a new suite to both.
+
+   A balance-relevant change gets a headless sanity match; a claimed balance
+   *improvement* needs a real sweep, not n=12 anecdotes.
+5. **Ship as a PR.** **Re-confirm the tree first — the push is the step that loses
+   work.** Immediately before pushing, `git -C <abs> branch --show-current` must equal
+   your card's branch and `git -C <abs> rev-parse HEAD` must equal the SHA your
+   verification ran on — or, if the guard refuses either, the file read from item 2.
+   If either has moved, discard the measurement and re-run the
+   gates; do not reason about whether the move could have mattered. Then commit (no
+   attribution footers — repo rule), push the branch, and open a PR with
+   `gh pr create`. Description: terse, outcome-focused, no Proof/Testing section;
    reference the card id in the PR body (e.g. `Card: AS-7`).
 
    **Then say what a human has to check.** That is the *inverse* of the no-Proof/Testing

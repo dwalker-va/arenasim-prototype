@@ -246,7 +246,9 @@ workers from card state, and open PRs are re-discovered via `gh pr list`.
       prompt = card id + title + full spec + any prior findings/answers from the
       activity log and `question.answer`. A `release-manager` card additionally
       gets the Done-card bundle in its prompt (see Release flow) — the agent
-      cannot read the board.
+      cannot read the board. Give it a worktree of its own for the card's
+      branch, or refuse to reuse one whose branch is another card's — see
+      *Worktree discipline*.
 3. For every card matching **all three** of: `column == "review"`; **and**
    (`agent == null` **or** `agent.status == "done"`); **and** an open-PR link
    in `links` (`done` is the normal Engineer hand-off; `null` is a claim reset
@@ -258,7 +260,7 @@ workers from card state, and open PRs are re-discovered via `gh pr list`.
       to `general-purpose` carrying the role prompt from
       `.claude/agents/tester.md` if the definition isn't loaded in this session),
       `isolation: "worktree"`, `name: <card id>-test`, prompt = card id + title +
-      full spec + the PR URL.
+      full spec + the PR URL. Same worktree allocation rule as 2b.
    A `review` card *without* a PR link is not spawnable — it needs a human (or a
    board fix), so treat it like `needs_input`.
 4. On an Engineer's completion notification, parse its `STATUS:` report and
@@ -331,6 +333,108 @@ agent are untouched.
 card, bump `nextId`, activity `by: "claude"`), republish with `url:`. Only the
 orchestrator does this (single-board-writer rule) — it is also how card specs
 handed off from a PM session get filed.
+
+## Worktree discipline
+
+A session's worktree pin **flaps between tool calls**: the process CWD can move to
+another card's tree mid-run, with no warning and no gesture from the agent. Why it
+flaps is a harness question outside this repo; the pipeline's job is to survive it.
+In a single day's session it fired 15+ times across at least four engineers, and
+both ways it goes wrong have already happened:
+
+- **A lost commit** — a write lands in another card's tree. `card-AS-60-dual-wield`
+  was assigned to one Engineer and re-checked-out onto `card/AS-68-trap-dispellers`
+  by a second session that had made no worktree of its own. It is still there, and
+  still being written to: its HEAD moved under the fix's own author, mid-review.
+- **A stale pass** — a Tester read another tree's files and nearly graded them as the
+  PR's, caught only by re-fetching each one via `gh api` at the PR head SHA.
+
+Everything below follows from that one mechanism, and is not re-argued per rule.
+
+**The spawn requirement — allocate a worktree per card, or refuse to reuse one.**
+Before spawning a role agent for a card, the orchestrator either creates a worktree
+of its own for that card's branch, or — if it hands over a tree that already exists
+— confirms that tree's `git branch --show-current` equals the card's branch and
+refuses the spawn otherwise. **This is the orchestrator's defect, not an agent's:**
+the spawn path today hands an agent whatever tree happens to be current, and handing
+over a tree sitting on another card's branch *is* the collision, at the one moment it
+is still cheap to prevent. The rules below teach agents to survive the fault; this is
+the half that stops it happening.
+
+There is **no orchestrator code in this repo** — the orchestrator is an interactive
+Claude Code session following this document — so this is a written requirement to
+check compliance against, not an implemented mechanism, and nothing enforces it.
+
+**Checking it** means joining `git worktree list` against the board's live cards: each
+one's worktree is on *that card's branch and no other*. The join is the whole check,
+and it only runs where a card→tree mapping exists — most trees are harness-named
+`agent-a<hash>`, which records no card, so branch name is the only handle and the check
+says nothing about the rest. When this was written the live list held 49 worktrees, 27
+of them `agent-a<hash>` and 16 detached, and the check **failed** for at least three:
+`card-AS-60-dual-wield` sitting on `card/AS-68-trap-dispellers` (the incident above,
+still live and still being committed to), `card-AS-101-same-role-beats` on
+`card/AS-103-banter-vocab-tokens`, and `as87` on `as97/shaman-weapon-damage`. Nothing
+had asked for the requirement yet — that is the point of writing it down.
+
+**The rules — every agent, every run.**
+
+1. **Every command names its tree.** `git -C <absolute worktree path> <cmd>`, and the
+   same for anything else that reads the tree
+   (`cargo --manifest-path <abs>/Cargo.toml ...`). Pinning the tool to the tree in the
+   same process as the action fails loudly against a wrong path, where a bare command
+   fails silently against a wrong tree.
+2. **Know which tree you are in before anything that writes** — commit, reset,
+   checkout, push; the push is the one that loses *other people's* work, but it is the
+   earlier writes that do the damage locally. `pwd` alone will not tell you: it reports
+   the flapped location, not your tree's branch. A detached HEAD **in your card's
+   worktree** means stop and recover; a second tree kept deliberately detached for
+   before/after baselining is not a fault. (The Tester's whole checkout is detached by
+   sanctioned fallback, so it pins on the PR head SHA, and its trigger is *before it
+   measures and again before it reports* rather than a push it never makes. See
+   `.claude/agents/tester.md`.)
+3. **The push precondition.** Immediately before pushing, confirm that
+   `git -C <abs> branch --show-current` equals the card's branch **and**
+   `git -C <abs> rev-parse HEAD` equals the SHA the verification actually ran on. If
+   either has moved, **discard the measurement and re-run the gates** rather than
+   reasoning about whether the move could have mattered. AS-87's Engineer re-ran after
+   a move and was right to, even though its evidence later showed the earlier run had
+   been on the correct commit.
+4. **The check cannot itself be a git command.** After a drift the guard inverts: it
+   refuses a correct `git -C <the right tree>` and a `cd` to it, while permitting a
+   bare `git` against the wrong one — so `branch --show-current`, the obvious check, is
+   exactly what you may be unable to run. It also refuses anything it cannot *prove* is
+   not git, which is a wider net than it sounds: one Tester's `for` loop over `git -C`
+   came back "too complex to verify", and AS-117's own run was refused for a heredoc
+   whose only offence was containing the word and for a `sed` the guard could not rule
+   out. **Keep every check a single plain command.** What always works is reading the tree's
+   own files, which the guard does not mediate: `<abs>/.git` gives the gitdir, and
+   `<gitdir>/HEAD` gives the branch or SHA. Use `gh api` for the remote side. That read
+   is the identity check — not a fallback to it.
+
+**When it happens anyway — re-pin the session first.** Once the CWD has drifted, the
+guard refuses *both* obvious ways back: a correct `git -C <the right tree>` and a `cd`
+to it. So the first move is **`EnterWorktree` at your worktree's explicit path**, which
+re-pins the session; only then re-attach with `git -C <abs> checkout <branch>` (the
+branch ref usually survives — a rebase moves the ref before HEAD can be disturbed) and
+re-run the gates. Treat `EnterWorktree` as an **observed** remedy, not a guarantee: it
+is what worked for AS-68's run and repeatedly during AS-117's own, and no one has
+tested where it fails.
+
+Rule 4's file read and `EnterWorktree` are the two halves of this and neither
+substitutes for the other: the read is guard-immune but tells you **only where you
+are**, and `EnterWorktree` is the one that gets you out.
+
+*Last resort, only when committing locally would switch a branch out from under
+another session's live work:* push through the GitHub Git Data API (blobs → tree →
+commit → ref update), then verify by reading the commit back off GitHub. One Engineer
+has already had to. It **bypasses local hooks and authors through the `gh`
+credentials**, so it is the last option and never the convenient one.
+
+**Scope.** This section is about *losing commits*. The same flap has a second
+consequence — a headless run reading another tree's **assets** and silently measuring
+the wrong content — which the rules here do not address and which needs its own fix
+(a binary run beside its own pinned assets). Keep the two apart: one costs work, the
+other costs a result you believed.
 
 ## Roles
 
