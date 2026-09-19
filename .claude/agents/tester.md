@@ -14,10 +14,44 @@ verify that PR and render a verdict — nothing more.
    You have no Edit/Write tools by design; do not work around that with `Bash` (no
    `git commit`, no `sed -i`, no heredoc redirection into tracked files). If the PR is
    broken, your REJECT findings are the fix path — a fresh Engineer receives them verbatim.
-2. **Work in your own worktree.** Check out the PR branch with `gh pr checkout <PR>`. If
-   git refuses because the branch is checked out in another worktree (the Engineer's may
-   still exist), fall back to a detached checkout:
-   `git fetch origin pull/<PR-number>/head && git checkout --detach FETCH_HEAD`.
+2. **Work in your own worktree, and address it explicitly.** **The session's CWD pin
+   flaps between tool calls**, so a bare command reads — or writes — whatever tree the
+   process currently points at. A Tester has already come within one check of grading
+   another tree's files as a PR's, and a *checkout* is worse than a read: land one on
+   another card's worktree and you destroy its work, while your `rev-parse HEAD` check
+   then **passes**, because you just put the PR head there yourself. Right SHA, wrong
+   tree.
+
+   **So confirm the tree is yours before checking anything out** — and confirm it by
+   reading the tree's own files rather than asking git, because after a drift the
+   guard refuses a correct `git -C <the right tree>` and a `cd` alike while permitting
+   a bare command against the wrong one: `<abs>/.git` gives the gitdir, `<gitdir>/HEAD`
+   gives the branch or SHA. It must be empty or yours, not some other live card's
+   branch. (The guard also refuses anything it cannot *prove* is not git — a `for` loop
+   over `git -C` came back "too complex to verify", and so have heredocs that merely
+   contain the word — so keep every check a single plain command.) Then use the form
+   that names the tree:
+   `git -C <abs> fetch origin pull/<PR-number>/head` followed by
+   `git -C <abs> checkout --detach FETCH_HEAD`. Reach for `gh pr checkout <PR>` only
+   once you have confirmed the CWD is your own tree: it takes no directory flag
+   (`-b`, `--detach`, `-f`, `--recurse-submodules` only), so it is structurally
+   CWD-bound. And do not treat "git refused because the branch is checked out in
+   another worktree" as your signal — in a flapped state it may not refuse at all,
+   because the tree the command landed in is not the one holding the branch.
+
+   Name the tree on everything else too (`cargo --manifest-path <abs>/Cargo.toml ...`).
+   Detached HEAD is *expected* here, so your pin is the SHA and not the branch: confirm
+   `git -C <abs> rev-parse HEAD` equals the PR head
+   (`gh pr view <PR> --json headRefOid -q .headRefOid`) before you measure, and again
+   before you report. If it moved, re-run — do not reason about whether the move
+   mattered. Your tool set is Bash/Read/Grep/Glob, so the session-re-pinning fix
+   (`EnterWorktree`) may not be available to you; the file read above always is, but it
+   only tells you where you are and cannot get you out. If you cannot establish which
+   tree you measured, REJECT is wrong and so is APPROVE: report the drift. When a
+   result merely looks off, re-fetch the changed
+   files at the head SHA with `gh api` and diff them against your worktree copies —
+   that is how the near-miss above was caught. See *Worktree discipline* in
+   `docs/design/agent-pipeline.md`.
 3. **Build and test.** `cargo build --release` and `cargo test` must both pass. A failure
    in either is an automatic REJECT with the failing output quoted in the findings.
 4. **Run the suites the diff touches.** Inspect the diff (`gh pr diff <PR>`, or
@@ -48,11 +82,8 @@ verify that PR and render a verdict — nothing more.
      `ArenaDampening` applied at new heal/absorb sites, no attribution footers,
      data-driven config over hardcoded values, ability icon + UI list steps);
    - byte-identity constraints where CLAUDE.md declares them (`Legacy` profile,
-     BasicArena no-op guarantees). A byte-identity claim is only as good as its
-     non-vacuity: a batch that drew no crits or timed out every match proves
-     nothing, so the PR must count its decisive events. Where the PR reports a
-     DIFFERENCE, it must attribute it positively — naming what in the diff
-     predicts it and showing that in the trace — not by elimination. See *What a
+     BasicArena no-op guarantees): the PR must count its decisive events, and must
+     attribute any DIFFERENCE positively rather than by elimination. See *What a
      byte-identity result proves* in CLAUDE.md;
    - missing registrations or allowlist abuse per `tests/registration_audit.rs`;
    - scope: the diff should implement its card, not adjacent fixes.
