@@ -913,7 +913,9 @@ Input is injected at BEVY's input events (`CursorMoved` / `MouseButtonInput` /
 `ButtonInput<KeyCode>` and bevy_egui's own conversion both run exactly as they
 do for a physical device. Steps: `hover`, `click <id> [left|right]`, `key`,
 `wait`, `assert-state`, `assert-view`, `assert-note`, `assert-no-note`,
-`assert-visible`, `assert-absent`, `assert-enabled`, `dump`.
+`assert-visible` (drawn AND on screen), `assert-absent` (not drawn at all —
+a widget that is merely scrolled out of view FAILS both, distinctly, so a
+negative can never pass for the wrong reason), `assert-enabled`, `dump`.
 
 A screen opts a widget in with ONE call —
 `ui_driver::mark(ui, rect, enabled, format_args!("kit:{ability:?}"))` — plus

@@ -27,8 +27,31 @@
 //! anything when it is absent or false. With the driver disabled, nothing ever
 //! calls [`arm`], so `ARMED` never exists, so `FRAME` is never created: a
 //! normal client run does one `get_temp::<bool>` lookup per marked widget per
-//! frame and allocates nothing — the id string is a `fmt::Arguments`, so even
-//! the formatting is skipped.
+//! frame and records nothing. Taking the text as `fmt::Arguments` means the
+//! FORMATTING is skipped too.
+//!
+//! # The `format_args!` rule for call sites
+//!
+//! `format_args!` defers formatting, **not evaluation of its arguments**. So
+//! this costs nothing when disabled:
+//!
+//! ```ignore
+//! ui_driver::note(ui, format_args!("equip-row {slot:?} item={id:?}"));
+//! ```
+//!
+//! and this builds a `Vec<String>` and a `String` on every frame with the
+//! driver OFF, because the argument expression runs before `note` is even
+//! called:
+//!
+//! ```ignore
+//! ui_driver::note(ui, format_args!("{}", xs.iter().map(f).collect::<Vec<_>>().join(",")));
+//! ```
+//!
+//! If a note needs assembling, wrap the source in a `Display` and let the
+//! formatter do the work — `view_combatant_ui::OverrideMap` is the worked
+//! example, and it exists because this file's own claim was wrong at that one
+//! call site. `note_does_not_format_its_arguments_when_disabled` pins the
+//! primitive's half.
 //!
 //! `registry_records_nothing_until_it_is_armed` in `tests/ui_driver.rs` proves
 //! that by MUTATION rather than by assertion: it runs the identical call

@@ -15,8 +15,8 @@
 //! assert-view Ability(MortalStrike)
 //! assert-note tooltip:ability:MortalStrike
 //! assert-no-note equip-row:Ring2:override
-//! assert-visible equip:restore
-//! assert-absent pick:BandOfAccuria
+//! assert-visible equip:restore   # drawn AND on screen
+//! assert-absent pick:BandOfAccuria  # not drawn at all (clipped != absent)
 //! assert-enabled equip:restore false
 //! dump
 //! ```
@@ -100,9 +100,16 @@ pub enum Step {
     AssertNote { needle: String },
     /// No note from the last drawn frame contains this substring.
     AssertNoNote { needle: String },
-    /// A widget with this id was drawn on the last frame.
+    /// A widget with this id was drawn on the last frame AND is on screen.
+    /// A widget that is laid out but scrolled out of view FAILS this, and
+    /// says so distinctly.
     AssertVisible { id: String },
-    /// No widget with this id was drawn on the last frame.
+    /// NO widget with this id was drawn on the last frame.
+    ///
+    /// This asks whether the widget EXISTS, not whether it is on screen. A
+    /// widget that is drawn but scrolled out of view fails rather than
+    /// passing: it exists, so "absent" is not the answer, and a negative that
+    /// passes for the wrong reason is the one nobody re-checks.
     AssertAbsent { id: String },
     /// A widget with this id was drawn, with this enabled state.
     AssertEnabled { id: String, enabled: bool },

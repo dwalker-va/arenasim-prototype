@@ -1437,17 +1437,13 @@ fn render_equipment_panel(
 
     // The live override map, as one greppable line. `Loadout` is a BTreeMap,
     // so the order is a property of the type rather than of a hash seed.
-    ui_driver::note(
-        ui,
-        format_args!(
-            "overrides {{{}}}",
-            overrides
-                .iter()
-                .map(|(slot, id)| format!("{slot:?}={id:?}"))
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-    );
+    //
+    // Passed as a `Display` wrapper, NOT as a pre-joined `String`:
+    // `format_args!` defers FORMATTING, not evaluation of its arguments, so a
+    // `.collect().join()` in the argument position would run on every frame
+    // the panel draws even with the driver off. `OverrideMap` writes straight
+    // into the formatter, which `note` only reaches after its armed check.
+    ui_driver::note(ui, format_args!("overrides {{{}}}", OverrideMap(overrides)));
 
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
@@ -1752,6 +1748,25 @@ fn render_equipment_panel(
     }
 
     open_topic
+}
+
+/// The override map rendered lazily, for the UI driver's per-frame note.
+///
+/// The whole point is that nothing is built unless someone formats it. See the
+/// call site in [`render_equipment_panel`] and the `format_args!` rule in
+/// `ui::driver::registry`.
+struct OverrideMap<'a>(&'a Loadout);
+
+impl std::fmt::Display for OverrideMap<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, (slot, id)) in self.0.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{slot:?}={id:?}")?;
+        }
+        Ok(())
+    }
 }
 
 /// Whether a slot row is drawn as overridden. True only when the override is

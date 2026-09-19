@@ -112,13 +112,23 @@ assert-view <Topic>         # the encyclopedia's topic, Debug form, or `none`
 assert-note <substring>     # some note from the last drawn frame contains this
 assert-no-note <substring>
 assert-visible <id>         # drawn AND on screen
-assert-absent <id>
-assert-enabled <id> <true|false>
+assert-absent <id>          # not drawn AT ALL
+assert-enabled <id> <true|false>   # reads state, on screen or not
 dump                        # log every widget and note on the last frame
 ```
 
 An unknown verb is a **parse error**, not a skipped line — a mistyped
 `assert-stat` must not quietly turn a check into a no-op.
+
+**`assert-visible` and `assert-absent` are two halves of one three-way
+question**, and both answer all three cases. A widget is *not drawn*, *drawn
+but clipped*, or *drawn and on screen*; `assert-visible` passes only on the
+third, `assert-absent` only on the first, and the middle case fails BOTH with
+a message saying so. That middle case is why: `assert-absent` originally
+returned "not visible", so "this row is gone" was satisfied by a row that had
+merely scrolled out of sight — a negative that looked conclusive and was not.
+If you want to assert about screen presence, scroll the target into view first
+(`hover` and `click` scroll; an assertion does not).
 
 `dump` is how you learn the ids: run a stub script that navigates and dumps,
 read the log, then write the real assertions.
@@ -161,8 +171,18 @@ Ids are conventions, not types: `menu:MATCH`, `class:Warrior`, `slot:t1s0`,
 
 Without `--ui-script`, `UiDriverPlugin::build` returns before touching the app:
 no systems, no resource. Nothing then calls `registry::arm`, so every `mark`
-and `note` is one failed hash lookup that writes nothing — the id is
-`fmt::Arguments`, so not even the string is built.
+and `note` is one failed hash lookup that records nothing, and taking the text
+as `fmt::Arguments` means it is never formatted either.
+
+**That second half is a property of the call site as much as of the
+primitive.** `format_args!` defers formatting but NOT the evaluation of its
+arguments, so a note that assembles its text in the argument position —
+`format_args!("{}", xs.iter().map(f).collect::<Vec<_>>().join(","))` — builds
+that `Vec` and `String` on every frame with the driver off. The equipment
+panel did exactly that until review caught it. Wrap the source in a `Display`
+and let the formatter do the work (`view_combatant_ui::OverrideMap`), and
+`no_driver_call_site_allocates_before_the_armed_check` keeps the next one
+honest by scanning the real call sites.
 
 That is a claim about **absence**, which a passing test cannot demonstrate: a
 test that goes green with the driver off would go green just as happily if the
@@ -177,6 +197,10 @@ interesting one:
 | --- | --- |
 | `build` schedules `run_ui_script` unconditionally | `the_plugin_schedules_nothing_when_no_script_is_configured` **fails**, naming the leaked system |
 | `mark_into` drops its armed check | `registry_records_nothing_until_it_is_armed` **passed** — the test was blind |
+| the call site pre-joins its `String` again | `no_driver_call_site_allocates_before_the_armed_check` **fails**, naming file and line |
+| `assert-absent` goes back to `!is_visible` | `presence_assertions_separate_not_drawn_from_scrolled_off` **fails** on the clipped case |
+| `hover` settles for `settle` | `a_hover_settles_for_the_long_window_and_a_click_does_not` **fails** |
+| a shipped script is deleted | `every_shipped_script_parses` **fails**, naming the file |
 
 The second test asserted on `registry::snapshot`, which re-checks the armed
 flag itself, so a leaking `mark` still read back as `None`. **The assertion was
@@ -222,7 +246,7 @@ A run that ends without finishing (the window closed early, a panic) leaves
 `Outcome::Incomplete`, which is also a non-zero exit: an unfinished script
 checked nothing, and must not read as a pass.
 
-## The two shipped scripts
+## The shipped scripts
 
 `tests/ui-scripts/view-combatant-tooltips.script` — the five-class walk AS-65
 round 3 did by hand. Per class: the kit-row tooltip body ran, the
@@ -251,6 +275,17 @@ All three are checked for parse errors by `cargo test`
 in the suite. Run them by hand after touching View Combatant, the equipment
 panel, the encyclopedia's navigation, `main.rs`'s graphical dispatch, or
 anything under `src/ui/driver/`.
+
+## What is covered by a test, and what only by running
+
+`tests/ui_driver.rs` covers the parser, the registry (including both halves of
+inertness), and the runner's two PURE seams: `expand`, which decides what a
+step costs in frames, and `evaluate`, which decides every `assert-*` verb.
+
+**The runner's frame loop is not covered by any test.** It needs a window, so
+the scroll-to-reveal arm, the rect-stability gate and the event injection
+itself are established only by running the scripts. Treat a change in
+`run_ui_script` as unverified until all three scripts pass against the client.
 
 ## When a script fails
 

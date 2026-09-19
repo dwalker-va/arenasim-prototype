@@ -24,7 +24,12 @@
 //! Without that flag [`UiDriverPlugin::build`] returns immediately: no
 //! resource, no systems, and — because nothing ever calls [`registry::arm`] —
 //! every [`mark`] and [`note`] in `src/states/` is a single failed hash lookup
-//! that writes nothing and allocates nothing.
+//! that records nothing and formats nothing.
+//!
+//! "Formats nothing" is a property of the CALL SITE as much as of the
+//! primitive: `format_args!` defers formatting but not the evaluation of its
+//! arguments, so a note that assembles a string in the argument position pays
+//! for it every frame regardless. See the rule in [`registry`].
 //!
 //! That claim is about ABSENCE, which a passing test does not demonstrate, so
 //! `tests/ui_driver.rs` proves it by mutation instead: it runs the identical

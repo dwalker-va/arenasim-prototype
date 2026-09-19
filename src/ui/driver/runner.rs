@@ -67,8 +67,13 @@ use super::{Outcome, OutcomeHandle, UiDriverConfig};
 const SCROLL_LINES: f32 = 1.0;
 
 /// One frame's worth of work.
-#[derive(Clone, Debug)]
-enum Micro {
+///
+/// `pub` so `tests/ui_driver.rs` can pin what a step expands into — notably
+/// that a `hover` settles for `hover_settle` and not the ordinary `settle`,
+/// which is the difference between observing a tooltip and observing egui
+/// still deciding whether to show one.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Micro {
     /// Park the synthetic cursor over the named widget. Retries each frame
     /// until the widget appears in the registry, then fails on timeout.
     Move {
@@ -197,7 +202,7 @@ impl UiScriptRun {
 }
 
 /// Expand one script step into its frame-level actions.
-fn expand(step: &Step, settle: u32, hover_settle: u32) -> VecDeque<Micro> {
+pub fn expand(step: &Step, settle: u32, hover_settle: u32) -> VecDeque<Micro> {
     let mut q = VecDeque::new();
     match step {
         Step::Hover { id } => {
@@ -461,32 +466,40 @@ pub fn run_ui_script(
                 window,
             });
         }
-        Micro::Check(step) => {
-            if let Err(reason) = check(&step, &frame, now, &encyclopedia, &mut run) {
+        Micro::Check(step) => match evaluate(&step, &frame, now, &encyclopedia) {
+            Ok(lines) => {
+                for line in lines {
+                    run.log.line(&line);
+                }
+            }
+            Err(reason) => {
                 run.fail(reason);
                 commands.entity(window).despawn();
                 return;
             }
-        }
+        },
     }
 
     registry::arm(&ctx);
 }
 
 /// Evaluate one assertion against the last drawn frame.
-fn check(
+///
+/// Pure, and `pub` on purpose: this is where every `assert-*` verb decides,
+/// and `tests/ui_driver.rs` drives it directly. `Ok` carries the lines to log
+/// on success, so the decision holds no reference to the run.
+pub fn evaluate(
     step: &Step,
     frame: &Frame,
     state: GameState,
     encyclopedia: &EncyclopediaState,
-    run: &mut UiScriptRun,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
+    let ok = |line: String| Ok(vec![line]);
     match step {
         Step::AssertState { state: want } => {
             let got = format!("{state:?}");
             if &got == want {
-                run.log.line(&format!("  ok  state == {got}"));
-                Ok(())
+                ok(format!("  ok  state == {got}"))
             } else {
                 Err(format!("expected state {want}, got {got}"))
             }
@@ -499,16 +512,14 @@ fn check(
             }
             let got = current_topic(encyclopedia);
             if &got == want {
-                run.log.line(&format!("  ok  view == {got}"));
-                Ok(())
+                ok(format!("  ok  view == {got}"))
             } else {
                 Err(format!("expected view {want}, got {got}"))
             }
         }
         Step::AssertNote { needle } => {
             if frame.has_note(needle) {
-                run.log.line(&format!("  ok  note ~ {needle}"));
-                Ok(())
+                ok(format!("  ok  note ~ {needle}"))
             } else {
                 Err(format!(
                     "no note matched `{needle}`. Notes on the last frame: {:?}",
@@ -523,40 +534,50 @@ fn check(
                     frame.notes
                 ))
             } else {
-                run.log.line(&format!("  ok  no note ~ {needle}"));
-                Ok(())
+                ok(format!("  ok  no note ~ {needle}"))
             }
         }
-        Step::AssertVisible { id } => {
-            if frame.is_visible(id) {
-                run.log.line(&format!("  ok  visible {id}"));
-                Ok(())
-            } else if frame.widget(id).is_some() {
-                Err(format!(
-                    "widget `{id}` is laid out but scrolled out of view — \
-                     hover or click it first if that is what you meant"
-                ))
-            } else {
-                Err(format!(
-                    "widget `{id}` was not drawn. Registered: {}",
-                    describe_widgets(frame)
-                ))
-            }
-        }
-        Step::AssertAbsent { id } => {
-            if frame.is_visible(id) {
+        // `assert-visible` and `assert-absent` are the two halves of the SAME
+        // three-way question, and both have to answer all three cases or the
+        // pair stops being a pair. A widget is: not drawn, drawn but clipped,
+        // or drawn and on screen. The middle case is the dangerous one —
+        // `assert-absent` used to pass on it, so "this row is gone" was
+        // satisfied by a row that was merely scrolled out of sight. That is
+        // the Trinket1 trap again (an assertion succeeding for a reason other
+        // than the one it names), and it is worst here, because a negative is
+        // exactly what nobody re-checks by hand.
+        Step::AssertVisible { id } => match presence(frame, id) {
+            Presence::Visible => ok(format!("  ok  visible {id}")),
+            Presence::Clipped => Err(format!(
+                "widget `{id}` is laid out but scrolled out of view. `hover` or \
+                 `click` it first — those scroll a target into view; an assertion \
+                 does not."
+            )),
+            Presence::NotDrawn => Err(format!(
+                "widget `{id}` was not drawn. Registered: {}",
+                describe_widgets(frame)
+            )),
+        },
+        Step::AssertAbsent { id } => match presence(frame, id) {
+            Presence::NotDrawn => ok(format!("  ok  absent {id}")),
+            Presence::Visible => {
                 let rect = frame.widget(id).map(|w| w.rect);
                 Err(format!("widget `{id}` was drawn, on screen, at {rect:?}"))
-            } else {
-                run.log.line(&format!("  ok  absent {id}"));
-                Ok(())
             }
-        }
+            // NOT a pass. `assert-absent` asks whether the widget EXISTS, and
+            // a clipped one does.
+            Presence::Clipped => {
+                let rect = frame.widget(id).map(|w| w.rect);
+                Err(format!(
+                    "widget `{id}` WAS drawn, at {rect:?}, but is scrolled out of \
+                     view — so `assert-absent` cannot answer. It asks whether the \
+                     widget exists at all, not whether it is on screen. Scroll it \
+                     into view (`hover` it) and assert what you actually expect."
+                ))
+            }
+        },
         Step::AssertEnabled { id, enabled } => match frame.widget(id) {
-            Some(w) if w.enabled == *enabled => {
-                run.log.line(&format!("  ok  {id} enabled == {enabled}"));
-                Ok(())
-            }
+            Some(w) if w.enabled == *enabled => ok(format!("  ok  {id} enabled == {enabled}")),
             Some(w) => Err(format!(
                 "widget `{id}` enabled == {}, expected {enabled}",
                 w.enabled
@@ -567,41 +588,47 @@ fn check(
             )),
         },
         Step::Dump => {
-            run.log.line(&format!("  dump state={state:?}"));
+            let mut lines = vec![format!("  dump state={state:?}")];
             if state == GameState::Encyclopedia {
-                let view = current_topic(encyclopedia);
-                run.log.line(&format!("  dump view={view}"));
+                lines.push(format!("  dump view={}", current_topic(encyclopedia)));
             }
-            let widgets: Vec<String> = frame
-                .widgets
-                .iter()
-                .map(|w| {
-                    format!(
-                        "  dump widget {} rect=({:.0},{:.0})-({:.0},{:.0}) enabled={} visible={}",
-                        w.id,
-                        w.rect.min.x,
-                        w.rect.min.y,
-                        w.rect.max.x,
-                        w.rect.max.y,
-                        w.enabled,
-                        w.visible
-                    )
-                })
-                .collect();
-            for l in widgets {
-                run.log.line(&l);
-            }
-            let notes: Vec<String> = frame
-                .notes
-                .iter()
-                .map(|n| format!("  dump note {n}"))
-                .collect();
-            for l in notes {
-                run.log.line(&l);
-            }
-            Ok(())
+            lines.extend(frame.widgets.iter().map(|w| {
+                format!(
+                    "  dump widget {} rect=({:.0},{:.0})-({:.0},{:.0}) enabled={} visible={}",
+                    w.id,
+                    w.rect.min.x,
+                    w.rect.min.y,
+                    w.rect.max.x,
+                    w.rect.max.y,
+                    w.enabled,
+                    w.visible
+                )
+            }));
+            lines.extend(frame.notes.iter().map(|n| format!("  dump note {n}")));
+            Ok(lines)
         }
         // `expand` never routes a non-assertion step here.
         other => Err(format!("internal: {other:?} is not an assertion")),
+    }
+}
+
+/// How a widget stood on the last drawn frame. The three cases `assert-visible`
+/// and `assert-absent` must both distinguish.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Presence {
+    /// Nothing registered under this id.
+    NotDrawn,
+    /// Registered, but outside its clip rect — laid out, unreachable.
+    Clipped,
+    /// Registered and on screen.
+    Visible,
+}
+
+/// Classify a widget on the last drawn frame.
+pub fn presence(frame: &Frame, id: &str) -> Presence {
+    match frame.widget(id) {
+        None => Presence::NotDrawn,
+        Some(w) if w.visible => Presence::Visible,
+        Some(_) => Presence::Clipped,
     }
 }
