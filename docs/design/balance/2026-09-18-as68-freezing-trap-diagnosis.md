@@ -30,7 +30,8 @@ to catch. `try_place_trap_at` recorded `builder.choose(ability, None, ..)` — n
 target at all — which is why this question had never been answerable from a
 sweep. It now records the intended victim. The change is trace-only:
 **300/300 match logs byte-identical** before and after, over a batch carrying
-300 deaths, 203 trap casts and 154 trap triggers.
+**717 eliminations** (plus 194 pet despawns; all 300 matches decisive), 203
+trap casts and 154 trap triggers.
 
 ## What ends a Freezing Trap
 
@@ -47,6 +48,18 @@ sweep. It now records the intended victim. The change is trace-only:
 
 **Every one of the 99 removals was a third party freeing its own trapped ALLY.**
 Not once did the trapped unit remove its own trap — it cannot, and it never did.
+
+**Both zeros are live-detector zeros, not silent ones.** A zero is only worth
+reading if the counter that would have caught it fired somewhere, so:
+
+- **Break-on-damage** fired **99 times** in the same 300 logs — Spider Web 72,
+  Fear 17, **Polymorph 8**, Psychic Scream 1, Frost Nova 1 — and never on
+  Freezing Trap. Polymorph is the one that carries the weight: it declares the
+  same `break_on_damage: 0.0` the trap does, so the exact mechanic was live and
+  breaking an incapacitate-class aura in this batch.
+- **`[CLEANSE]`** fired **113 times** — Serpent Sting 60, Spider Web 46,
+  Psychic Scream 7 — and never on Freezing Trap. A Paladin was present and
+  cleansing; it just never lifted a trap.
 
 **The removals are effectively instant.** Median time from trigger to removal is
 **0.28s**; 94 of the 99 are under one second. The longest is 5.27s. A trap that
@@ -78,15 +91,23 @@ combatant it actually sprang on:
 | Warrior | Warrior | 3 | hit |
 | Paladin | Paladin | 3 | hit |
 
-Every miss is the same shape, and the trace names the cause. At gates-open the
-enemy Rogue is **stealthed**, so `dip_target_eligible` rejects it
-(`!info.stealthed`); the enemy healer is the Hunter's own kill target AND its
-Priest teammate's, so it is in the focus set. `opportunistic_off_target` has no
-candidate left and returns `None`, and control falls to the LEGACY peel branch,
-which throws the trap at the **midpoint between the Hunter and the healer** —
-at t=0, with the healer 70 yards away, that is dead arena centre. The Rogue
-unstealths, runs down the middle, and eats it 15 seconds later. The enemy Priest
-dispels it 0.3s after that.
+Every miss is the same shape, and the trace names the cause.
+`opportunistic_off_target` needs one enemy that is neither in the team's focus
+set nor otherwise ineligible, and at gates-open there is none:
+
+- the enemy **healer** is in the focus set — as the Hunter's OWN kill target in
+  `hp_v_rogp`, or via a teammate's in `hpw_v_mpr`, where the Hunter is on the
+  Mage and both the Priest and the Warrior are on the enemy Priest. Either
+  route puts it there; which one fires is a property of the seed, not of the
+  mechanism;
+- every remaining enemy is **stealthed**, so `dip_target_eligible` rejects it
+  (`!info.stealthed`) — the Rogue, in both comps.
+
+With no candidate left `opportunistic_off_target` returns `None`, and control
+falls to the LEGACY peel branch, which throws the trap at the **midpoint
+between the Hunter and the healer** — at t=0, with the healer 70 yards away,
+that is dead arena centre. The Rogue unstealths, runs down the middle, and eats
+it 15 seconds later. The enemy Priest dispels it 0.3s after that.
 
 The off-target branch ten lines above refuses to throw unless the intended
 victim is the only enemy within the trigger radius of the landing
@@ -166,9 +187,22 @@ address what is going wrong:
 
 The defect the measurement actually points at is **placement and trigger
 ownership**, not target preference: a trap springs on the first body to reach
-it, and the fallback branch aims it into the lane the enemy melee runs down. Two
-follow-ups are named on the card rather than built here, because either is a
-behaviour change with its own sweep.
+it, and the fallback branch aims it into the lane the enemy melee runs down.
+
+Two follow-up cards carry that, rather than this card building it — each is a
+behaviour change needing its own sweep:
+
+- **AS-125 — the placement defect.** Three candidate fixes for the one observed
+  failure: apply the off-target branch's `healer_triggers` guard to the legacy
+  fallback so the Hunter HOLDS rather than throwing into the melee's lane; lead
+  the intended victim's position instead of aiming at a midpoint 35 yards from
+  the Hunter; and make a stealthed-but-known enemy trap-eligible, since
+  `dip_target_eligible`'s `!stealthed` filter is what disables off-target
+  trapping for the whole opener against Rogue comps.
+- **AS-126 (`pm`) — a trapped Felhunter cannot be freed by anyone.** Healers
+  skip pets and the pet cannot self-dispel, so the 8s sticks. It wants a
+  deliberate decision BEFORE AS-125, because today the placement defect is the
+  only thing keeping that interaction from being chosen on purpose.
 
 ## Caveat — AS-67 will move these numbers
 
