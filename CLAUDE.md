@@ -666,6 +666,16 @@ jq -c 'select(.actor.class == "Hunter") | .candidates[] | select(.ability == "Ai
 # Target switches over the match (when did Rogue switch from Paladin to Mage?)
 jq -c 'select(.kind == "target_acquisition" and .changed)' $T
 
+# Who was a trap AIMED at? A trap is placed at a POSITION and springs on the
+# first enemy to reach it, so its victim is not its target and the outcome
+# alone cannot say who the Hunter meant to catch. The chosen event carries the
+# intended victim in `target_id`; pair it with the `[TRAP] ... triggers on ...`
+# line in the .txt log to see whether the trap caught who it was aimed at.
+# (The Frost Trap dropped at the Hunter's own feet aims at nobody: target_id
+# is absent there.) Measured answer: `docs/design/balance/
+# 2026-09-18-as68-freezing-trap-diagnosis.md`.
+jq -c 'select(.outcome.ability == "FreezingTrap") | {t: .sim_time, aimed_at: .outcome.target_id}' $T
+
 # Pet decisions grouped by owner
 jq -c 'select(.kind == "pet_decision") | {owner, pet_type, ability: .outcome.ability}' $T
 

@@ -1,0 +1,155 @@
+cell,seed,trap_owner,victim,victim_class,victim_is_healer,trigger_t,fate,end_t,remover,remover_class
+h_v_p,17,Team 1 Hunter #1,Team 2 Priest #1,Priest,True,43.73,RAN_OUT,,,
+h_v_p,21,Team 1 Hunter #1,Team 2 Priest #1,Priest,True,41.38,RAN_OUT,,,
+hp_v_palwar,0,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,1,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,10,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,11,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,12,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,13,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,14,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,15,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,16,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,17,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,18,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,19,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,2,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,20,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,21,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,22,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,23,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,24,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,3,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,4,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,5,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,6,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,7,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,8,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_palwar,9,Team 1 Hunter #1,Team 2 Warrior #2,Warrior,False,18.82,RAN_OUT,,,
+hp_v_prpal,0,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,22.00,DISPEL,27.27,Team 2 Priest #1,Priest
+hp_v_prpal,1,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,10,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,11,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,12,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,13,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.77,Team 2 Priest #1,Priest
+hp_v_prpal,14,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,15,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,16,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,17,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,18,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,19,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,2,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,29.27,DISPEL,30.40,Team 2 Priest #1,Priest
+hp_v_prpal,20,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,22.00,DISPEL,24.23,Team 2 Priest #1,Priest
+hp_v_prpal,21,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,22,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,23,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,104.07,RAN_OUT,,,
+hp_v_prpal,24,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,22.00,DISPEL,23.55,Team 2 Priest #1,Priest
+hp_v_prpal,3,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,4,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,5,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,6,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,22.00,DISPEL,23.55,Team 2 Priest #1,Priest
+hp_v_prpal,7,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,8,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_prpal,9,Team 1 Hunter #1,Team 2 Paladin #2,Paladin,True,28.87,DISPEL,29.10,Team 2 Priest #1,Priest
+hp_v_rogp,0,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,1,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,10,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,11,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,12,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,13,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,14,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,15,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,16,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,17,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,18,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,19,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,2,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,20,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,21,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,22,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,23,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,24,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,3,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,4,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,5,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,6,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,7,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,8,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogp,9,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,DISPEL,15.45,Team 2 Priest #2,Priest
+hp_v_rogwar,0,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,1,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,10,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,11,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,12,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,13,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,14,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,15,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,16,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,17,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,18,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,19,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,2,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,20,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,21,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,22,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,23,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,24,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,3,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,4,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,5,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,6,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,7,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,8,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_rogwar,9,Team 1 Hunter #1,Team 2 Rogue #1,Rogue,False,14.88,RAN_OUT,,,
+hp_v_warp,3,Team 1 Hunter #1,Team 2 Priest #2,Priest,True,56.43,RAN_OUT,,,
+hp_v_warp,4,Team 1 Hunter #1,Team 2 Priest #2,Priest,True,20.98,RAN_OUT,,,
+hpw_v_mpr,0,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,1,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,10,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,11,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,12,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,13,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,14,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,15,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,16,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,17,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,18,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,19,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,2,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,20,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,21,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,22,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,23,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,24,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,3,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,4,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,5,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,6,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,7,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,8,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_mpr,9,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DISPEL,15.45,Team 2 Priest #2,Priest
+hpw_v_wpr,0,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,1,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,10,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,11,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,12,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,13,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,14,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,15,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,16,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,17,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,18,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,19,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,2,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,20,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,21,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,22,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,23,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,24,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,3,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,4,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,5,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,6,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,7,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,8,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
+hpw_v_wpr,9,Team 1 Hunter #1,Team 2 Rogue #3,Rogue,False,15.17,DEVOUR,15.20,Team 2 Felhunter #1,Felhunter
