@@ -60,6 +60,10 @@ an open, review-ready PR — nothing more.
      snapshot suite, re-rendered and blessed in the same commit (CLAUDE.md,
      *Blessing is part of the change*).
 
+   `.claude/agents/tester.md` item 4 is the fuller list — further cases, and the
+   caveats these bullets compress out (no GPU adapter, for one) — so read it there
+   when a suite misbehaves, and add a new suite to both.
+
    A balance-relevant change gets a headless sanity match; a claimed balance
    *improvement* needs a real sweep, not n=12 anecdotes.
 5. **Ship as a PR.** **Re-confirm the tree first — the push is the step that loses
