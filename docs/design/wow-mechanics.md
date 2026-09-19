@@ -27,6 +27,34 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
 - Ranged: Mage/Priest use "Wand Shots" at 40 unit range
 - Attack speed varies by class
 
+### Dual Wield
+- **Who can**: Warrior, Rogue, Hunter — Classic's list, in
+  `equipment::can_dual_wield`. A Shaman cannot: that is the Burning Crusade
+  Enhancement talent, the same era line the weapon-proficiency table draws when
+  it refuses a Rogue an axe.
+- **What fits where**: a one-handed weapon fits EITHER hand; a two-hander only
+  the main hand; a shield or held frill only the off hand. The item states this
+  as `HeldSlot` (`ItemConfig::held()`), and `ItemSlot::accepts` is membership in
+  that set rather than equality on a slot kind.
+- **Two copies of one weapon is legal**, unlike two copies of one ring. The
+  hands are a pair of sockets and deliberately NOT a unique-equipped pair.
+- **The off hand swings on its own timer** at `OFFHAND_DAMAGE_MULTIPLIER` (50%)
+  of its listed damage, so two weapons of different speeds drift apart over a
+  match. It carries no Heroic Strike bonus — that buffs the main hand's next
+  swing.
+- **Dual wielding costs accuracy**: every swing, BOTH hands, rolls against
+  `DUAL_WIELD_MISS_CHANCE` (19% — Classic's 24% dual-wield white-hit miss less
+  its 5% baseline). This is the sim's only miss roll; a single-wielding
+  attacker never rolls it, which is what keeps every pre-existing match
+  byte-identical.
+- **A Hunter's off hand arms no swing.** Its live weapon socket is the Ranged
+  one, so its main hand does not swing and the off hand has nothing to swing
+  alongside. It may still hold a weapon for the stats.
+- **No default loadout dual wields.** Every capable class ships with an empty
+  off hand (Warrior holds a two-hander, Rogue and Hunter hold nothing there),
+  so this is a build a player opts into, not a balance change applied to
+  everyone.
+
 ---
 
 ## Resource Systems

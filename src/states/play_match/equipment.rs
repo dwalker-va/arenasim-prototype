@@ -253,17 +253,39 @@ impl ItemSlot {
         }
     }
 
-    /// Whether an item of the given kind may be equipped in this socket.
-    pub fn accepts(&self, slot_type: ItemSlotType) -> bool {
-        self.slot_type() == slot_type
+    /// Whether this socket may hold `item`.
+    ///
+    /// **Set membership, not equality.** Every socket outside the hands takes
+    /// exactly one [`ItemSlotType`], so equality is the rule there. The hands
+    /// are the exception, and they are asymmetric: the main hand takes a
+    /// two-hander or a one-hander, the off hand takes a one-hander or an
+    /// off-hand-only item (a shield, a held frill) and never a two-hander.
+    /// That asymmetry is [`HeldSlot`], read off the item via
+    /// [`ItemConfig::held`].
+    ///
+    /// Acceptance is about the SOCKET only. Whether the wearer may put a
+    /// one-hander in its off hand is a per-CLASS capability
+    /// ([`can_dual_wield`]) and is checked by [`socket_rejection`], not here.
+    pub fn accepts(&self, item: &ItemConfig) -> bool {
+        match (self, item.held()) {
+            (ItemSlot::MainHand, Some(held)) => held.fits_main_hand(),
+            (ItemSlot::OffHand, Some(held)) => held.fits_off_hand(),
+            // A hand socket offered something that is not a hand item.
+            (ItemSlot::MainHand | ItemSlot::OffHand, None) => false,
+            _ => self.slot_type() == item.slot,
+        }
     }
 
-    /// The other socket of the same kind, for the kinds that have two
-    /// (rings, trinkets). `None` for every 1:1 socket.
+    /// The socket this one is unique-equipped WITH, for the kinds that have
+    /// two interchangeable sockets (rings, trinkets). `None` otherwise.
     ///
-    /// An item is unique-equipped: it may not occupy a socket and its sibling
-    /// at once — see [`enforce_unique_equipped`].
-    pub fn sibling(&self) -> Option<ItemSlot> {
+    /// **Named for uniqueness, not for adjacency.** "Has a partner socket" and
+    /// "may not hold the same item as its partner" are different properties,
+    /// and the hands are exactly where they come apart: the two hands are a
+    /// pair of sockets, but Classic permits dual-wielding two copies of one
+    /// weapon, so the hands must never answer this. See
+    /// [`enforce_unique_equipped`].
+    pub fn unique_equip_partner(&self) -> Option<ItemSlot> {
         match self {
             ItemSlot::Ring1 => Some(ItemSlot::Ring2),
             ItemSlot::Ring2 => Some(ItemSlot::Ring1),
@@ -274,20 +296,65 @@ impl ItemSlot {
     }
 }
 
-/// Every pair of sibling sockets, primary first. The primary is the socket a
-/// unique-equipped conflict resolves in favour of.
+/// Every pair of unique-equipped sockets, primary first. The primary is the
+/// socket a unique-equipped conflict resolves in favour of.
 ///
 /// Derived from [`ItemSlotType::sockets`] rather than listed by hand, so a
 /// kind that grows a second socket is unique-equipped-enforced the moment it
 /// is — there is no separate list to forget. The primary is the kind's first
 /// socket in canonical order.
-fn sibling_socket_pairs() -> impl Iterator<Item = (ItemSlot, ItemSlot)> {
+///
+/// The hands do not appear here and must not: `MainHand` and `OffHand` are
+/// two distinct kinds of one socket each, so a one-hander reaching both hands
+/// is a fact about [`HeldSlot`] (see [`ItemConfig::sockets`]), never about a
+/// kind owning two sockets. `hands_are_not_a_unique_equip_pair` pins it.
+fn unique_equip_pairs() -> impl Iterator<Item = (ItemSlot, ItemSlot)> {
     ItemSlotType::all()
         .iter()
         .filter_map(|kind| match kind.sockets() {
             [primary, secondary] => Some((*primary, *secondary)),
             _ => None,
         })
+}
+
+/// Which hand or hands may hold an item.
+///
+/// The three states a pair of hands can be offered, as one value. They used to
+/// be spread across two fields — `slot: MainHand | OffHand` and
+/// `two_handed: bool` — which spelled four combinations for three real states,
+/// the fourth (`slot: OffHand, two_handed: true`) being nonsense. [`ItemConfig::held`]
+/// is the single place that normalises them, and `off_hand_items_are_one_handed`
+/// rejects the nonsense combination in the shipped `items.ron`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum HeldSlot {
+    /// Occupies the main hand and locks the off hand out entirely.
+    TwoHand,
+    /// Fits either hand. The off hand additionally requires the wearer's
+    /// class to have [`can_dual_wield`].
+    OneHand,
+    /// Off hand only — a shield, or a held-in-off-hand tome or orb.
+    OffHandOnly,
+}
+
+impl HeldSlot {
+    /// Whether the main hand takes this. Wildcard-free: a new variant has to
+    /// answer for both hands before it compiles.
+    pub fn fits_main_hand(&self) -> bool {
+        match self {
+            HeldSlot::TwoHand | HeldSlot::OneHand => true,
+            HeldSlot::OffHandOnly => false,
+        }
+    }
+
+    /// Whether the off hand takes this, ignoring the wearer's dual-wield
+    /// capability. Wildcard-free for the same reason as
+    /// [`Self::fits_main_hand`].
+    pub fn fits_off_hand(&self) -> bool {
+        match self {
+            HeldSlot::OneHand | HeldSlot::OffHandOnly => true,
+            HeldSlot::TwoHand => false,
+        }
+    }
 }
 
 /// Armor type restriction
@@ -708,6 +775,42 @@ pub struct ItemConfig {
     pub attack_speed: f32,
 }
 
+impl ItemConfig {
+    /// Which hand or hands may hold this item, or `None` when it is not a
+    /// hand item at all.
+    ///
+    /// The ONE place `slot` and `two_handed` are read together, so nothing
+    /// downstream has to remember that an off-hand item is never two-handed or
+    /// that a main-hand item might reach the off hand. Everything that decides
+    /// whether a hand may take an item goes through [`ItemSlot::accepts`],
+    /// which goes through here.
+    pub fn held(&self) -> Option<HeldSlot> {
+        match self.slot {
+            ItemSlotType::MainHand => Some(if self.two_handed {
+                HeldSlot::TwoHand
+            } else {
+                HeldSlot::OneHand
+            }),
+            ItemSlotType::OffHand => Some(HeldSlot::OffHandOnly),
+            _ => None,
+        }
+    }
+
+    /// Every socket this item can occupy, in canonical order.
+    ///
+    /// Item-level, unlike [`ItemSlotType::sockets`], because the hands cannot
+    /// answer at the kind level: two items of kind `MainHand` reach different
+    /// socket sets depending on whether they are two-handed.
+    pub fn sockets(&self) -> &'static [ItemSlot] {
+        match self.held() {
+            Some(HeldSlot::TwoHand) => &[ItemSlot::MainHand],
+            Some(HeldSlot::OneHand) => &[ItemSlot::MainHand, ItemSlot::OffHand],
+            Some(HeldSlot::OffHandOnly) => &[ItemSlot::OffHand],
+            None => self.slot.sockets(),
+        }
+    }
+}
+
 fn default_armor_type() -> ArmorType {
     ArmorType::None
 }
@@ -975,6 +1078,72 @@ pub fn can_equip(class: CharacterClass, item: &ItemConfig) -> bool {
     equip_rejection(class, item).is_none()
 }
 
+/// Whether `class` may hold a one-handed weapon in its OFF hand.
+///
+/// Classic's dual-wield list, and it is short: a Warrior, a Rogue and a Hunter
+/// learn it, nobody else does. A Paladin never dual-wields; a Shaman does not
+/// either in this era (the Enhancement talent that grants it arrived with the
+/// Burning Crusade, alongside the Rogue axes the proficiency table already
+/// refuses); a cloth caster never.
+///
+/// Wildcard-free, like [`weapon_proficiency`]: a new [`CharacterClass`] must
+/// answer for dual wield before it compiles, rather than defaulting into
+/// whichever branch a `_` arm happened to point at. That is the defect this
+/// repo hits most — a hand-maintained capability list that silently omits a
+/// member — and an exhaustive match is what makes the omission loud.
+///
+/// This gates the off HAND only. It says nothing about which weapon TYPES the
+/// class may hold; that is [`weapon_proficiency`], and both gates apply.
+pub fn can_dual_wield(class: CharacterClass) -> bool {
+    match class {
+        CharacterClass::Warrior | CharacterClass::Rogue | CharacterClass::Hunter => true,
+        CharacterClass::Paladin
+        | CharacterClass::Shaman
+        | CharacterClass::Priest
+        | CharacterClass::Mage
+        | CharacterClass::Warlock => false,
+    }
+}
+
+/// Why `class` may not wear `item` in `socket`, or `None` when it may.
+///
+/// The whole equip question in one place: the socket must accept the item's
+/// kind ([`ItemSlot::accepts`]), the class must be able to equip the item at
+/// all ([`equip_rejection`]), and — the gate that only exists once a socket is
+/// named — a one-handed weapon in the OFF hand requires [`can_dual_wield`].
+///
+/// A socket-free [`can_equip`] cannot ask the last question, which is why
+/// every validation and enforcement pass routes through here instead: a Mage
+/// may hold a dagger, and may not hold a second one.
+pub fn socket_rejection(
+    class: CharacterClass,
+    socket: ItemSlot,
+    item: &ItemConfig,
+) -> Option<String> {
+    if !socket.accepts(item) {
+        return Some(format!(
+            "a {} item does not fit the {} socket",
+            item.slot.name(),
+            socket.name()
+        ));
+    }
+    if let Some(reason) = equip_rejection(class, item) {
+        return Some(reason);
+    }
+    if socket == ItemSlot::OffHand
+        && item.held() == Some(HeldSlot::OneHand)
+        && !can_dual_wield(class)
+    {
+        return Some(format!("{} cannot dual wield", class.name()));
+    }
+    None
+}
+
+/// Whether `class` may wear `item` in `socket`. See [`socket_rejection`].
+pub fn can_equip_in_socket(class: CharacterClass, socket: ItemSlot, item: &ItemConfig) -> bool {
+    socket_rejection(class, socket, item).is_none()
+}
+
 /// Validate that all items in a loadout are equippable by the given class
 pub fn validate_class_restrictions(
     class: CharacterClass,
@@ -983,7 +1152,7 @@ pub fn validate_class_restrictions(
 ) -> Result<(), String> {
     for (slot, item_id) in loadout {
         if let Some(item) = items.get(item_id) {
-            if let Some(reason) = equip_rejection(class, item) {
+            if let Some(reason) = socket_rejection(class, *slot, item) {
                 return Err(format!(
                     "{} cannot equip {} ({:?}) in {:?} slot — {}",
                     class.name(),
@@ -993,12 +1162,6 @@ pub fn validate_class_restrictions(
                     reason
                 ));
             }
-            if !slot.accepts(item.slot) {
-                return Err(format!(
-                    "{:?} is a {:?} item but was placed in {:?} slot",
-                    item_id, item.slot, slot
-                ));
-            }
         } else {
             return Err(format!("Unknown item {:?} in {:?} slot", item_id, slot));
         }
@@ -1006,10 +1169,12 @@ pub fn validate_class_restrictions(
     Ok(())
 }
 
-/// Validate that no item occupies both sockets of a sibling pair. Items are
-/// unique-equipped: two ring sockets means two DIFFERENT rings.
+/// Validate that no item occupies both sockets of a unique-equipped pair.
+/// Items are unique-equipped: two ring sockets means two DIFFERENT rings. The
+/// hands are not such a pair — dual-wielding two copies of one weapon is legal
+/// — so this never speaks about them.
 pub fn validate_unique_equipped(loadout: &Loadout, items: &ItemDefinitions) -> Result<(), String> {
-    for (primary, secondary) in sibling_socket_pairs() {
+    for (primary, secondary) in unique_equip_pairs() {
         match (loadout.get(&primary), loadout.get(&secondary)) {
             (Some(a), Some(b)) if a == b => {
                 let name = items.get(a).map_or("unknown item", |i| i.name.as_str());
@@ -1109,21 +1274,21 @@ pub fn enforce_two_hand_conflicts(loadout: &mut Loadout, items: &ItemDefinitions
     let has_2h = loadout
         .get(&ItemSlot::MainHand)
         .and_then(|id| items.get(id))
-        .is_some_and(|item| item.two_handed);
+        .is_some_and(|item| item.held() == Some(HeldSlot::TwoHand));
     if has_2h {
         loadout.remove(&ItemSlot::OffHand);
     }
 }
 
-/// Strip a duplicate from the secondary of a sibling socket pair (rings,
-/// trinkets) when both hold the same item. Call this after `resolve_loadout`
+/// Strip a duplicate from the secondary of a unique-equipped socket pair
+/// (rings, trinkets) when both hold the same item. Call this after `resolve_loadout`
 /// to enforce the unique-equipped constraint, the same way
 /// `enforce_two_hand_conflicts` enforces the 2H one.
 ///
 /// The primary socket keeps the item, mirroring the 2H rule's preference for
 /// the main hand, so the outcome is independent of map iteration order.
 pub fn enforce_unique_equipped(loadout: &mut Loadout) {
-    for (primary, secondary) in sibling_socket_pairs() {
+    for (primary, secondary) in unique_equip_pairs() {
         if let (Some(a), Some(b)) = (loadout.get(&primary), loadout.get(&secondary)) {
             if a == b {
                 loadout.remove(&secondary);
@@ -1132,8 +1297,8 @@ pub fn enforce_unique_equipped(loadout: &mut Loadout) {
     }
 }
 
-/// Strip anything `class` may not equip from a resolved loadout — an item in a
-/// socket that does not accept its kind, or one that fails [`can_equip`].
+/// Strip anything `class` may not wear in the socket it sits in — see
+/// [`socket_rejection`] for the three gates.
 ///
 /// The third constraint pass, alongside [`enforce_two_hand_conflicts`] and
 /// [`enforce_unique_equipped`], and it exists for the same reason: an override
@@ -1146,7 +1311,7 @@ pub fn enforce_class_restrictions(
     items: &ItemDefinitions,
 ) {
     loadout.retain(|slot, item_id| match items.get(item_id) {
-        Some(item) => slot.accepts(item.slot) && can_equip(class, item),
+        Some(item) => can_equip_in_socket(class, *slot, item),
         // An id with no definition has no stats to apply; drop it rather than
         // leave a socket that renders as worn and equips nothing.
         None => false,
@@ -1182,7 +1347,7 @@ pub fn find_one_handed_mainhand(items: &ItemDefinitions, class: CharacterClass) 
     items
         .items_for_slot(ItemSlot::MainHand, class)
         .into_iter()
-        .find(|(_, item)| !item.two_handed)
+        .find(|(_, item)| item.held() == Some(HeldSlot::OneHand))
         .map(|(id, _)| id)
 }
 
@@ -1228,7 +1393,11 @@ impl ItemDefinitions {
     }
 
     /// Return all items the given socket accepts for a class, sorted by name.
-    /// Both ring sockets share one pool, as do both trinket sockets.
+    ///
+    /// Both ring sockets share one pool, as do both trinket sockets. The hands
+    /// share one PARTIALLY: a one-hander appears in both, a two-hander only in
+    /// the main hand, a shield only in the off hand — and a one-hander appears
+    /// in the off hand only for a class with [`can_dual_wield`].
     pub fn items_for_slot(
         &self,
         slot: ItemSlot,
@@ -1237,7 +1406,7 @@ impl ItemDefinitions {
         let mut items: Vec<(ItemId, &ItemConfig)> = self
             .definitions
             .iter()
-            .filter(|(_, item)| slot.accepts(item.slot) && can_equip(class, item))
+            .filter(|(_, item)| can_equip_in_socket(class, slot, item))
             .map(|(id, item)| (*id, item))
             .collect();
         items.sort_by(|a, b| a.1.name.cmp(&b.1.name));
@@ -1246,18 +1415,23 @@ impl ItemDefinitions {
 
     /// The items an equipment picker may offer for `socket`, given what the
     /// character already wears. Same as [`Self::items_for_slot`] minus anything
-    /// already worn in the sibling socket — items are unique-equipped, so an
-    /// offer that would duplicate one is not selectable in the first place.
+    /// already worn in the socket's unique-equip partner — a ring may not be
+    /// worn twice, so an offer that would duplicate one is not selectable in
+    /// the first place. The hands have no such partner, so the picker offers a
+    /// dual-wielder the weapon it already holds: two copies is a legal set.
     pub fn selectable_items_for_slot(
         &self,
         slot: ItemSlot,
         class: CharacterClass,
         loadout: &Loadout,
     ) -> Vec<(ItemId, &ItemConfig)> {
-        let worn_in_sibling = slot.sibling().and_then(|s| loadout.get(&s)).copied();
+        let worn_in_partner = slot
+            .unique_equip_partner()
+            .and_then(|s| loadout.get(&s))
+            .copied();
         self.items_for_slot(slot, class)
             .into_iter()
-            .filter(|(id, _)| Some(*id) != worn_in_sibling)
+            .filter(|(id, _)| Some(*id) != worn_in_partner)
             .collect()
     }
 }
@@ -1407,6 +1581,7 @@ pub fn format_loadout(loadout: &Loadout, items: &ItemDefinitions) -> String {
 mod tests {
     use super::*;
     use crate::states::match_config::CharacterClass;
+    use crate::states::play_match::constants::OFFHAND_DAMAGE_MULTIPLIER;
 
     /// Build a minimal ItemDefinitions from a list of (ItemId, ItemConfig) pairs
     fn make_item_defs(items: Vec<(ItemId, ItemConfig)>) -> ItemDefinitions {
@@ -1633,6 +1808,91 @@ mod tests {
         assert_eq!(combatant.attack_speed, base_speed);
         // But attack_power from the off-hand should still be added
         assert_eq!(combatant.attack_power, 30.0 + 5.0);
+    }
+
+    /// A weapon in the off hand fills the off-hand swing at half its listed
+    /// damage, on its own speed, and leaves the main hand's numbers alone.
+    #[test]
+    fn apply_equipment_offhand_weapon_arms_the_second_swing() {
+        let items = make_item_defs(vec![
+            (
+                ItemId::FrostbiteBlade,
+                weapon_item("Main", ItemSlotType::MainHand, 30.0, 50.0, 2.0),
+            ),
+            (
+                ItemId::SerpentFangDagger,
+                weapon_item("Off", ItemSlotType::MainHand, 10.0, 30.0, 1.5),
+            ),
+        ]);
+        let mut combatant =
+            super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
+
+        let mut loadout = Loadout::new();
+        loadout.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
+        loadout.insert(ItemSlot::OffHand, ItemId::SerpentFangDagger);
+        combatant.apply_equipment(&loadout, &items);
+
+        // Main hand: unchanged behaviour — average damage, weapon speed.
+        assert_eq!(combatant.attack_damage, 40.0);
+        assert_eq!(combatant.attack_speed, 2.0);
+        // Off hand: average damage (20) times the off-hand penalty, own speed.
+        //
+        // The 10.0 is written out rather than computed from
+        // OFFHAND_DAMAGE_MULTIPLIER on purpose — that constant is what this
+        // assertion is here to pin, and reading it on both sides would make
+        // the test true by construction and survive any retune of it.
+        assert_eq!(combatant.offhand_damage, 10.0);
+        assert_eq!(
+            OFFHAND_DAMAGE_MULTIPLIER, 0.5,
+            "the off-hand penalty moved; the literal above is the one to update, \
+             and moving it is a balance change"
+        );
+        assert_eq!(combatant.offhand_speed, 1.5);
+        assert!(combatant.is_dual_wielding());
+    }
+
+    /// A shield or a held frill is `is_weapon: false` and arms nothing — it is
+    /// still a stat stick, exactly as before.
+    #[test]
+    fn apply_equipment_offhand_frill_arms_no_second_swing() {
+        let items = make_item_defs(vec![(
+            ItemId::TomeOfKnowledge,
+            armor_item("Tome", ItemSlotType::OffHand, ArmorType::None),
+        )]);
+        let mut combatant =
+            super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
+
+        let mut loadout = Loadout::new();
+        loadout.insert(ItemSlot::OffHand, ItemId::TomeOfKnowledge);
+        combatant.apply_equipment(&loadout, &items);
+
+        assert_eq!(combatant.offhand_damage, 0.0);
+        assert!(!combatant.is_dual_wielding());
+    }
+
+    /// A Hunter's live weapon socket is the RANGED one — its main hand does
+    /// not swing, so its off hand has nothing to swing alongside and arms no
+    /// second swing however legal the item is.
+    #[test]
+    fn apply_equipment_arms_no_second_swing_for_a_ranged_primary_socket() {
+        let items = make_item_defs(vec![(
+            ItemId::SerpentFangDagger,
+            weapon_item("Dagger", ItemSlotType::MainHand, 10.0, 30.0, 1.5),
+        )]);
+        let mut combatant =
+            super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Hunter);
+        assert_eq!(
+            CharacterClass::Hunter.weapon_slot(),
+            ItemSlot::Ranged,
+            "this probe is about the ranged primary socket"
+        );
+
+        let mut loadout = Loadout::new();
+        loadout.insert(ItemSlot::OffHand, ItemId::SerpentFangDagger);
+        combatant.apply_equipment(&loadout, &items);
+
+        assert_eq!(combatant.offhand_damage, 0.0);
+        assert!(!combatant.is_dual_wielding());
     }
 
     // ---- resolve_loadout tests ----
@@ -2157,35 +2417,170 @@ mod tests {
 
     #[test]
     fn both_ring_sockets_accept_rings() {
-        assert!(ItemSlot::Ring1.accepts(ItemSlotType::Ring));
-        assert!(ItemSlot::Ring2.accepts(ItemSlotType::Ring));
-        assert!(ItemSlot::Trinket1.accepts(ItemSlotType::Trinket));
-        assert!(ItemSlot::Trinket2.accepts(ItemSlotType::Trinket));
+        let ring = armor_item("Ring", ItemSlotType::Ring, ArmorType::None);
+        let trinket = armor_item("Trinket", ItemSlotType::Trinket, ArmorType::None);
+        assert!(ItemSlot::Ring1.accepts(&ring));
+        assert!(ItemSlot::Ring2.accepts(&ring));
+        assert!(ItemSlot::Trinket1.accepts(&trinket));
+        assert!(ItemSlot::Trinket2.accepts(&trinket));
     }
 
     #[test]
     fn sockets_reject_other_slot_types() {
-        assert!(!ItemSlot::Ring1.accepts(ItemSlotType::Neck));
-        assert!(!ItemSlot::Head.accepts(ItemSlotType::Chest));
-        assert!(!ItemSlot::Trinket1.accepts(ItemSlotType::Ring));
+        let neck = armor_item("Neck", ItemSlotType::Neck, ArmorType::None);
+        let chest = armor_item("Chest", ItemSlotType::Chest, ArmorType::Cloth);
+        let ring = armor_item("Ring", ItemSlotType::Ring, ArmorType::None);
+        assert!(!ItemSlot::Ring1.accepts(&neck));
+        assert!(!ItemSlot::Head.accepts(&chest));
+        assert!(!ItemSlot::Trinket1.accepts(&ring));
+        // A hand socket rejects anything that is not a hand item at all.
+        assert!(!ItemSlot::MainHand.accepts(&ring));
+        assert!(!ItemSlot::OffHand.accepts(&ring));
+    }
+
+    /// The asymmetry that makes the hands unlike the ring sockets: only the
+    /// main hand takes a two-hander, only the off hand takes a shield, and a
+    /// one-hander reaches both.
+    #[test]
+    fn hand_sockets_accept_by_held_form() {
+        let one_hander = weapon_item("Sword", ItemSlotType::MainHand, 10.0, 20.0, 2.0);
+        let mut two_hander = weapon_item("Greatsword", ItemSlotType::MainHand, 40.0, 60.0, 3.4);
+        two_hander.two_handed = true;
+        let shield = armor_item("Shield", ItemSlotType::OffHand, ArmorType::None);
+
+        assert_eq!(one_hander.held(), Some(HeldSlot::OneHand));
+        assert_eq!(two_hander.held(), Some(HeldSlot::TwoHand));
+        assert_eq!(shield.held(), Some(HeldSlot::OffHandOnly));
+
+        assert!(ItemSlot::MainHand.accepts(&one_hander));
+        assert!(ItemSlot::OffHand.accepts(&one_hander));
+        assert!(ItemSlot::MainHand.accepts(&two_hander));
+        assert!(!ItemSlot::OffHand.accepts(&two_hander));
+        assert!(!ItemSlot::MainHand.accepts(&shield));
+        assert!(ItemSlot::OffHand.accepts(&shield));
+
+        assert_eq!(
+            one_hander.sockets(),
+            [ItemSlot::MainHand, ItemSlot::OffHand]
+        );
+        assert_eq!(two_hander.sockets(), [ItemSlot::MainHand]);
+        assert_eq!(shield.sockets(), [ItemSlot::OffHand]);
+    }
+
+    /// Acceptance is the SOCKET's question; dual wield is the CLASS's. A Mage
+    /// may hold a dagger and may not hold a second one, and the off-hand
+    /// rejection has to name dual wield rather than blaming the socket.
+    #[test]
+    fn dual_wield_gates_the_off_hand_not_the_socket() {
+        let mut dagger = weapon_item("Dagger", ItemSlotType::MainHand, 10.0, 20.0, 1.8);
+        dagger.weapon_type = WeaponType::Dagger;
+
+        // The socket accepts it for every class — the capability is separate.
+        assert!(ItemSlot::OffHand.accepts(&dagger));
+
+        assert!(can_equip_in_socket(
+            CharacterClass::Rogue,
+            ItemSlot::OffHand,
+            &dagger
+        ));
+        assert!(can_equip_in_socket(
+            CharacterClass::Mage,
+            ItemSlot::MainHand,
+            &dagger
+        ));
+        let reason = socket_rejection(CharacterClass::Mage, ItemSlot::OffHand, &dagger)
+            .expect("a Mage must not dual wield");
+        assert!(
+            reason.contains("dual wield"),
+            "unexpected reason: {}",
+            reason
+        );
+
+        // A shield or frill in the off hand is not dual wielding, so the
+        // capability must not gate it.
+        let frill = armor_item("Tome", ItemSlotType::OffHand, ArmorType::None);
+        assert!(can_equip_in_socket(
+            CharacterClass::Mage,
+            ItemSlot::OffHand,
+            &frill
+        ));
+    }
+
+    /// Dual wield is a per-class capability with an exhaustive table, so a new
+    /// class cannot default into (or out of) it silently.
+    #[test]
+    fn dual_wield_is_the_classic_three() {
+        let wielders: Vec<_> = CharacterClass::all()
+            .iter()
+            .filter(|c| can_dual_wield(**c))
+            .copied()
+            .collect();
+        assert_eq!(
+            wielders,
+            vec![
+                CharacterClass::Warrior,
+                CharacterClass::Rogue,
+                CharacterClass::Hunter,
+            ],
+            "dual wield list changed — is that intended?"
+        );
     }
 
     #[test]
-    fn only_paired_sockets_have_siblings() {
-        assert_eq!(ItemSlot::Ring1.sibling(), Some(ItemSlot::Ring2));
-        assert_eq!(ItemSlot::Ring2.sibling(), Some(ItemSlot::Ring1));
-        assert_eq!(ItemSlot::Trinket1.sibling(), Some(ItemSlot::Trinket2));
-        assert_eq!(ItemSlot::Trinket2.sibling(), Some(ItemSlot::Trinket1));
-        assert_eq!(ItemSlot::Head.sibling(), None);
-        assert_eq!(ItemSlot::MainHand.sibling(), None);
+    fn only_paired_sockets_have_unique_equip_partners() {
+        assert_eq!(
+            ItemSlot::Ring1.unique_equip_partner(),
+            Some(ItemSlot::Ring2)
+        );
+        assert_eq!(
+            ItemSlot::Ring2.unique_equip_partner(),
+            Some(ItemSlot::Ring1)
+        );
+        assert_eq!(
+            ItemSlot::Trinket1.unique_equip_partner(),
+            Some(ItemSlot::Trinket2)
+        );
+        assert_eq!(
+            ItemSlot::Trinket2.unique_equip_partner(),
+            Some(ItemSlot::Trinket1)
+        );
+        assert_eq!(ItemSlot::Head.unique_equip_partner(), None);
+    }
+
+    /// The hands are a PAIR of sockets and are not a UNIQUE-EQUIPPED pair —
+    /// Classic lets a Rogue dual-wield two copies of one dagger. Bundling the
+    /// two properties is what would quietly forbid that, so pin them apart.
+    #[test]
+    fn hands_are_not_a_unique_equip_pair() {
+        assert_eq!(ItemSlot::MainHand.unique_equip_partner(), None);
+        assert_eq!(ItemSlot::OffHand.unique_equip_partner(), None);
+        let pairs: Vec<_> = unique_equip_pairs().collect();
+        assert!(
+            !pairs.iter().any(|(a, b)| {
+                matches!(a, ItemSlot::MainHand | ItemSlot::OffHand)
+                    || matches!(b, ItemSlot::MainHand | ItemSlot::OffHand)
+            }),
+            "the hands must never be unique-equipped with each other: {:?}",
+            pairs
+        );
+
+        // ...and the enforcement pass leaves the same weapon in both hands.
+        let mut loadout = Loadout::new();
+        loadout.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
+        loadout.insert(ItemSlot::OffHand, ItemId::FrostbiteBlade);
+        enforce_unique_equipped(&mut loadout);
+        assert_eq!(
+            loadout.get(&ItemSlot::OffHand),
+            Some(&ItemId::FrostbiteBlade)
+        );
     }
 
     #[test]
-    fn sibling_pairs_are_exactly_the_two_socket_kinds() {
+    fn unique_equip_pairs_are_exactly_the_two_socket_kinds() {
         // The unique-equipped pairing is derived from `sockets()`, so it must
         // cover every kind with two sockets and nothing else, and it must
-        // agree with `sibling()` in both directions.
-        let pairs: Vec<_> = sibling_socket_pairs().collect();
+        // agree with `unique_equip_partner()` in both directions.
+        let pairs: Vec<_> = unique_equip_pairs().collect();
         let two_socket_kinds = ItemSlotType::all()
             .iter()
             .filter(|kind| kind.sockets().len() == 2)
@@ -2199,12 +2594,12 @@ mod tests {
             ]
         );
         for (primary, secondary) in &pairs {
-            assert_eq!(primary.sibling(), Some(*secondary));
-            assert_eq!(secondary.sibling(), Some(*primary));
+            assert_eq!(primary.unique_equip_partner(), Some(*secondary));
+            assert_eq!(secondary.unique_equip_partner(), Some(*primary));
             assert_eq!(primary.slot_type(), secondary.slot_type());
         }
-        // `sibling()` models pairs only; a kind with three sockets would need
-        // both it and the pairing reshaped, so pin the ceiling.
+        // `unique_equip_partner()` models pairs only; a kind with three sockets
+        // would need both it and the pairing reshaped, so pin the ceiling.
         for kind in ItemSlotType::all() {
             assert!(
                 kind.sockets().len() <= 2,
@@ -2451,19 +2846,13 @@ mod tests {
     /// way `JUSTIFIED_EMPTY_SOCKETS` is: an unlisted useless pair fails, and so
     /// does a listed pair that has since become useful.
     const JUSTIFIED_USELESS_SOCKETS: &[(CharacterClass, ItemSlot, &str)] = &[
-        (
-            CharacterClass::Rogue,
-            ItemSlot::OffHand,
-            "a Rogue's off-hand is a second WEAPON (dual wield, AS-60), which this \
-             equipment model does not have; it trains no shield, and a held-in-off-hand \
-             frill is a caster stat stick by definition",
-        ),
-        (
-            CharacterClass::Hunter,
-            ItemSlot::OffHand,
-            "the Rogue's reason exactly — dual wield (AS-60), no shield proficiency, and \
-             frills carry caster stats",
-        ),
+        // Empty, and that is the point: the only two entries this list ever
+        // held were the Rogue's and the Hunter's off hand, both exempted
+        // because "a Rogue's off-hand is a second WEAPON (dual wield, AS-60),
+        // which this equipment model does not have". It has it now, so both
+        // sockets carry something worth equipping and the exemptions are gone.
+        // The `Some(why)` arm below fails on a stale entry, so an exemption
+        // that stops being true cannot sit here unnoticed.
     ];
 
     /// What an item has to carry for `class` to get anything out of it: the
@@ -2811,25 +3200,22 @@ mod tests {
     fn every_item_is_equippable_in_every_socket_of_its_kind() {
         let items = load_item_definitions().expect("items.ron must load");
         for (id, item) in items.iter() {
-            let sockets = item.slot.sockets();
+            let sockets = item.sockets();
             assert!(
                 !sockets.is_empty(),
                 "{:?} has a slot kind with no socket",
                 id
             );
             for socket in sockets {
-                assert!(
-                    socket.accepts(item.slot),
-                    "{:?} is rejected by {:?}",
-                    id,
-                    socket
-                );
+                assert!(socket.accepts(item), "{:?} is rejected by {:?}", id, socket);
                 let mut loadout = Loadout::new();
                 loadout.insert(*socket, *id);
                 let class = *CharacterClass::all()
                     .iter()
-                    .find(|c| can_equip(**c, item))
-                    .unwrap_or_else(|| panic!("{:?} is equippable by no class", id));
+                    .find(|c| can_equip_in_socket(**c, *socket, item))
+                    .unwrap_or_else(|| {
+                        panic!("{:?} is equippable by no class in {:?}", id, socket)
+                    });
                 validate_class_restrictions(class, &loadout, &items)
                     .unwrap_or_else(|e| panic!("{:?} in {:?}: {}", id, socket, e));
             }

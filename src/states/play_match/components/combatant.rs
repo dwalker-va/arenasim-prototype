@@ -1,6 +1,7 @@
 use super::super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::super::ability_config::AbilityConfig;
-use super::super::equipment::{ItemDefinitions, Loadout};
+use super::super::constants::OFFHAND_DAMAGE_MULTIPLIER;
+use super::super::equipment::{ItemDefinitions, ItemSlot, Loadout};
 use super::super::match_config::{
     self, MageArmor, PaladinAura, RogueOpener, RoguePoison, WarlockCurse, WarriorShout,
 };
@@ -318,6 +319,19 @@ pub struct Combatant {
     pub attack_speed: f32,
     /// Timer tracking time until next attack
     pub attack_timer: f32,
+    /// Damage per OFF-HAND swing, already reduced by
+    /// [`OFFHAND_DAMAGE_MULTIPLIER`](super::super::constants::OFFHAND_DAMAGE_MULTIPLIER).
+    ///
+    /// `0.0` means "not dual wielding", and that is the gate every off-hand
+    /// code path reads: no off-hand weapon, no second swing, no dual-wield
+    /// miss roll, no extra RNG draw. Set by
+    /// [`Self::apply_equipment`] and nothing else.
+    pub offhand_damage: f32,
+    /// Off-hand swings per second — the off-hand weapon's own speed, so the
+    /// two hands drift apart over a match instead of landing in lockstep.
+    pub offhand_speed: f32,
+    /// Timer tracking time until the next off-hand swing.
+    pub offhand_timer: f32,
     /// Attack Power - scales physical damage abilities and auto-attacks
     pub attack_power: f32,
     /// Spell Power - scales magical damage and healing abilities
@@ -463,6 +477,9 @@ impl Combatant {
             attack_damage,
             attack_speed,
             attack_timer: 0.0,
+            offhand_damage: 0.0,
+            offhand_speed: 0.0,
+            offhand_timer: 0.0,
             attack_power,
             spell_power,
             crit_chance,
@@ -568,6 +585,17 @@ impl Combatant {
         }
     }
 
+    /// Whether a second weapon is actually swinging.
+    ///
+    /// The ONE gate every off-hand code path reads, so "is there an off-hand
+    /// swing" is asked the same way in all of them. It demands a non-zero
+    /// SPEED as well as non-zero damage: the speed is a divisor, and an item
+    /// authored with damage but no `attack_speed` would otherwise produce an
+    /// infinite swing interval rather than no swing.
+    pub fn is_dual_wielding(&self) -> bool {
+        self.offhand_damage > 0.0 && self.offhand_speed > 0.0
+    }
+
     /// Check if this combatant is alive (health > 0 and not marked dead).
     pub fn is_alive(&self) -> bool {
         self.current_health > 0.0 && !self.is_dead
@@ -631,6 +659,17 @@ impl Combatant {
             "Combatant team must be 1 or 2, got {}",
             self.team
         );
+        // A half-armed off hand is the failure mode `is_dual_wielding` is
+        // written to survive, not one to leave lying around: damage with no
+        // speed would be a swing whose interval is infinite, and speed with no
+        // damage a swing worth nothing. Either says an item was authored with
+        // one of the pair missing.
+        debug_assert!(
+            (self.offhand_damage > 0.0) == (self.offhand_speed > 0.0),
+            "Combatant off hand is half-armed: damage {}, speed {}",
+            self.offhand_damage,
+            self.offhand_speed
+        );
     }
 
     /// Calculate damage for an ability based on character stats.
@@ -689,7 +728,15 @@ impl Combatant {
     /// - Weapon in the class's primary weapon socket
     ///   ([`CharacterClass::weapon_slot`]): REPLACE attack_damage and
     ///   attack_speed, ADD other stats.
-    /// - Off Hand weapons: only ADD non-weapon stats (no attack_damage/attack_speed replacement).
+    /// - Off Hand WEAPON, for a class whose primary weapon socket is the main
+    ///   hand: fills `offhand_damage` / `offhand_speed` — a second swing on its
+    ///   own timer at [`OFFHAND_DAMAGE_MULTIPLIER`](super::super::constants::OFFHAND_DAMAGE_MULTIPLIER)
+    ///   of its listed damage. `attack_damage` / `attack_speed` are untouched:
+    ///   those describe the MAIN hand.
+    /// - Off Hand non-weapons (shields, held frills): only ADD their stats, as
+    ///   before. So does an off-hand weapon on a class that shoots from the
+    ///   ranged socket — a Hunter's main hand does not swing, so its off hand
+    ///   has nothing to swing alongside.
     /// - After all items: reset current_health and current_mana to their new maximums.
     pub fn apply_equipment(&mut self, loadout: &Loadout, items: &ItemDefinitions) {
         // The socket holding this class's primary weapon. NOT `is_melee()`:
@@ -723,7 +770,19 @@ impl Combatant {
                 self.attack_damage = avg_damage;
                 self.attack_speed = item.attack_speed;
             }
-            // Off Hand weapons: no attack_damage/attack_speed replacement (stats already added above)
+            // A WEAPON in the off hand is a second swing, but only for a class
+            // that swings its main hand at all: the off hand accompanies the
+            // main hand, and a Hunter's live socket is the ranged one. Shields
+            // and held frills are `is_weapon: false` and fall through to
+            // stats-only, exactly as before.
+            if item.is_weapon
+                && *slot == ItemSlot::OffHand
+                && primary_weapon_slot == ItemSlot::MainHand
+            {
+                let avg_damage = (item.attack_damage_min + item.attack_damage_max) / 2.0;
+                self.offhand_damage = avg_damage * OFFHAND_DAMAGE_MULTIPLIER;
+                self.offhand_speed = item.attack_speed;
+            }
         }
 
         // Reset current pools to new maximums

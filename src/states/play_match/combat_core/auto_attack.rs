@@ -3,7 +3,9 @@
 use super::super::abilities::{AbilityType, SpellSchool};
 use super::super::ability_config::AbilityDefinitions;
 use super::super::components::*;
-use super::super::constants::CRIT_DAMAGE_MULTIPLIER;
+use super::super::constants::{
+    CRIT_DAMAGE_MULTIPLIER, DUAL_WIELD_MISS_CHANCE, OFFHAND_DAMAGE_MULTIPLIER,
+};
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::has_line_of_sight;
 use super::super::match_config;
@@ -227,9 +229,22 @@ pub fn combat_auto_attack(
         // Update attack timer
         combatant.attack_timer += dt;
 
+        // The off hand keeps its own clock, off its own weapon's speed, so the
+        // two hands drift apart over a match instead of landing in lockstep.
+        // Everything about the off hand is gated on `is_dual_wielding`, which
+        // is false for every single-wielding combatant — so a match with no
+        // second weapon in it ticks no extra state and draws no extra RNG.
+        let dual_wielding = combatant.is_dual_wielding();
+        if dual_wielding {
+            combatant.offhand_timer += dt;
+        }
+
         // Check if ready to attack and has a target
         let attack_interval = effective_attack_interval(&combatant, auras.as_deref());
-        if combatant.attack_timer >= attack_interval {
+        let main_hand_ready = combatant.attack_timer >= attack_interval;
+        let off_hand_ready = dual_wielding
+            && combatant.offhand_timer >= effective_offhand_interval(&combatant, auras.as_deref());
+        if main_hand_ready || off_hand_ready {
             if let Some(target_entity) = combatant.target {
                 // Skip if target is dead (will be retargeted next frame)
                 if !combatant_info
@@ -292,105 +307,163 @@ pub fn combat_auto_attack(
                         continue;
                     }
                     if distance <= attack_range {
-                        // Calculate total damage (base + bonus from Heroic Strike, etc.)
-                        let base_damage =
-                            combatant.attack_damage + combatant.next_attack_bonus_damage;
                         // Roll crit before damage reduction (include dynamic crit bonus from auras)
                         let crit_bonus = super::get_crit_chance_bonus(auras.as_deref());
-                        // Windfury Totem: a MELEE attacker carrying its own WindfuryBuff
-                        // aura has a chance (= aura magnitude) for one bonus swing.
-                        // Gated to melee (R14/AE3) — see `windfury_bonus_chance`.
-                        // Captured here because `auras` is borrowed again below.
-                        let windfury_chance =
-                            windfury_bonus_chance(attacker_is_melee, auras.as_deref());
-                        let is_crit = roll_crit(combatant.crit_chance + crit_bonus, &mut game_rng);
-                        let crit_damage = if is_crit {
-                            base_damage * CRIT_DAMAGE_MULTIPLIER
-                        } else {
-                            base_damage
-                        };
                         // Apply physical damage reduction from curses (Curse of Weakness: -20%)
                         let damage_reduction = get_physical_damage_reduction(auras.as_deref());
                         // Apply Divine Shield outgoing damage penalty (50%)
                         let ds_penalty = get_divine_shield_damage_penalty(auras.as_deref());
-                        let total_damage =
-                            (crit_damage * (1.0 - damage_reduction) * ds_penalty).max(0.0);
-                        let has_bonus = combatant.next_attack_bonus_damage > 0.0;
 
-                        attacks.push((
-                            attacker_entity,
-                            target_entity,
-                            total_damage,
-                            has_bonus,
-                            is_crit,
-                        ));
-
-                        // Windfury Totem proc: a successful roll pushes a duplicate
-                        // (bonus) swing that resolves like a normal weapon hit. Both
-                        // the proc roll and the bonus swing's crit roll draw from the
-                        // seeded game_rng, so match determinism is preserved. This branch
-                        // is only reached when a WindfuryBuff aura is present, so existing
-                        // (totem-free) matches draw zero extra RNG and stay byte-identical.
-                        if let Some(wf_chance) = windfury_chance {
-                            if game_rng.random_f32() < wf_chance {
-                                // Bonus swing uses base weapon damage (the Heroic Strike
-                                // bonus is consumed by the primary swing) and re-rolls crit.
-                                let wf_base = combatant.attack_damage;
-                                let wf_is_crit =
+                        if main_hand_ready {
+                            // Dual wield's price, charged to BOTH hands as it is in
+                            // Classic. The sim has no general miss mechanic, so this
+                            // roll happens ONLY while a second weapon is equipped —
+                            // a single-wielding attacker draws nothing here and its
+                            // match is unchanged.
+                            let missed =
+                                dual_wielding && game_rng.random_f32() < DUAL_WIELD_MISS_CHANCE;
+                            if !missed {
+                                // Calculate total damage (base + bonus from Heroic Strike, etc.)
+                                let base_damage =
+                                    combatant.attack_damage + combatant.next_attack_bonus_damage;
+                                // Windfury Totem: a MELEE attacker carrying its own WindfuryBuff
+                                // aura has a chance (= aura magnitude) for one bonus swing.
+                                // Gated to melee (R14/AE3) — see `windfury_bonus_chance`.
+                                // Captured here because `auras` is borrowed again below.
+                                let windfury_chance =
+                                    windfury_bonus_chance(attacker_is_melee, auras.as_deref());
+                                let is_crit =
                                     roll_crit(combatant.crit_chance + crit_bonus, &mut game_rng);
-                                let wf_crit_damage = if wf_is_crit {
-                                    wf_base * CRIT_DAMAGE_MULTIPLIER
+                                let crit_damage = if is_crit {
+                                    base_damage * CRIT_DAMAGE_MULTIPLIER
                                 } else {
-                                    wf_base
+                                    base_damage
                                 };
-                                let wf_total =
-                                    (wf_crit_damage * (1.0 - damage_reduction) * ds_penalty)
-                                        .max(0.0);
+                                let total_damage =
+                                    (crit_damage * (1.0 - damage_reduction) * ds_penalty).max(0.0);
+                                let has_bonus = combatant.next_attack_bonus_damage > 0.0;
+
                                 attacks.push((
                                     attacker_entity,
                                     target_entity,
-                                    wf_total,
-                                    false,
-                                    wf_is_crit,
+                                    total_damage,
+                                    has_bonus,
+                                    is_crit,
                                 ));
 
-                                // Signature Windfury VFX: a wind funnel swirls up
-                                // around the proccing melee ally. Spawned here like
-                                // FloatingCombatText; the mesh is built only in
-                                // graphical mode (rendering/effects.rs, registered
-                                // solely in states/mod.rs), so headless stays
-                                // mesh-free and deterministic.
-                                commands.spawn((
-                                    WindfuryTornado {
-                                        target: attacker_entity,
-                                        lifetime: 0.6,
-                                        initial_lifetime: 0.6,
-                                        spin: 0.0,
-                                    },
-                                    PlayMatchEntity,
-                                ));
+                                // Windfury Totem proc: a successful roll pushes a duplicate
+                                // (bonus) swing that resolves like a normal weapon hit. Both
+                                // the proc roll and the bonus swing's crit roll draw from the
+                                // seeded game_rng, so match determinism is preserved. This branch
+                                // is only reached when a WindfuryBuff aura is present, so existing
+                                // (totem-free) matches draw zero extra RNG and stay byte-identical.
+                                if let Some(wf_chance) = windfury_chance {
+                                    if game_rng.random_f32() < wf_chance {
+                                        // Bonus swing uses base weapon damage (the Heroic Strike
+                                        // bonus is consumed by the primary swing) and re-rolls crit.
+                                        let wf_base = combatant.attack_damage;
+                                        let wf_is_crit = roll_crit(
+                                            combatant.crit_chance + crit_bonus,
+                                            &mut game_rng,
+                                        );
+                                        let wf_crit_damage = if wf_is_crit {
+                                            wf_base * CRIT_DAMAGE_MULTIPLIER
+                                        } else {
+                                            wf_base
+                                        };
+                                        let wf_total = (wf_crit_damage
+                                            * (1.0 - damage_reduction)
+                                            * ds_penalty)
+                                            .max(0.0);
+                                        attacks.push((
+                                            attacker_entity,
+                                            target_entity,
+                                            wf_total,
+                                            false,
+                                            wf_is_crit,
+                                        ));
+
+                                        // Signature Windfury VFX: a wind funnel swirls up
+                                        // around the proccing melee ally. Spawned here like
+                                        // FloatingCombatText; the mesh is built only in
+                                        // graphical mode (rendering/effects.rs, registered
+                                        // solely in states/mod.rs), so headless stays
+                                        // mesh-free and deterministic.
+                                        commands.spawn((
+                                            WindfuryTornado {
+                                                target: attacker_entity,
+                                                lifetime: 0.6,
+                                                initial_lifetime: 0.6,
+                                                spin: 0.0,
+                                            },
+                                            PlayMatchEntity,
+                                        ));
+                                    }
+                                }
+                                // Break stealth on auto-attack
+                                if combatant.stealthed {
+                                    combatant.stealthed = false;
+                                    info!(
+                                        "Team {} {} breaks stealth with auto-attack!",
+                                        combatant.team,
+                                        combatant.class.name()
+                                    );
+                                }
+
+                                // Warriors generate Rage from auto-attacks
+                                if combatant.resource_type == ResourceType::Rage {
+                                    let rage_gain = 10.0; // Gain 10 rage per auto-attack
+                                    combatant.current_mana = (combatant.current_mana + rage_gain)
+                                        .min(combatant.max_mana);
+                                }
                             }
-                        }
-                        combatant.attack_timer = 0.0;
 
-                        // Consume the bonus damage after queueing the attack
-                        combatant.next_attack_bonus_damage = 0.0;
+                            // A missed swing is still a swing: it costs the timer
+                            // and it consumes the queued Heroic Strike bonus. Only
+                            // the damage, and the rage that damage would have
+                            // generated, are lost.
+                            combatant.attack_timer = 0.0;
 
-                        // Break stealth on auto-attack
-                        if combatant.stealthed {
-                            combatant.stealthed = false;
-                            info!(
-                                "Team {} {} breaks stealth with auto-attack!",
-                                combatant.team,
-                                combatant.class.name()
-                            );
+                            // Consume the bonus damage after queueing the attack
+                            combatant.next_attack_bonus_damage = 0.0;
                         }
 
-                        // Warriors generate Rage from auto-attacks
-                        if combatant.resource_type == ResourceType::Rage {
-                            let rage_gain = 10.0; // Gain 10 rage per auto-attack
-                            combatant.current_mana =
-                                (combatant.current_mana + rage_gain).min(combatant.max_mana);
+                        if off_hand_ready {
+                            let missed = game_rng.random_f32() < DUAL_WIELD_MISS_CHANCE;
+                            if !missed {
+                                // The off hand carries no Heroic Strike bonus:
+                                // that ability buffs "your next swing", and the
+                                // main hand is the one it was queued against.
+                                let base_damage = combatant.offhand_damage;
+                                let is_crit =
+                                    roll_crit(combatant.crit_chance + crit_bonus, &mut game_rng);
+                                let crit_damage = if is_crit {
+                                    base_damage * CRIT_DAMAGE_MULTIPLIER
+                                } else {
+                                    base_damage
+                                };
+                                let total_damage =
+                                    (crit_damage * (1.0 - damage_reduction) * ds_penalty).max(0.0);
+                                attacks.push((
+                                    attacker_entity,
+                                    target_entity,
+                                    total_damage,
+                                    false,
+                                    is_crit,
+                                ));
+
+                                // Rage tracks the damage a swing deals, and an
+                                // off-hand swing deals a fraction of one — so
+                                // it pays the same fraction of the flat
+                                // per-swing rage. Full rate would let a second
+                                // weapon double a Warrior's rage income.
+                                if combatant.resource_type == ResourceType::Rage {
+                                    let rage_gain = 10.0 * OFFHAND_DAMAGE_MULTIPLIER;
+                                    combatant.current_mana = (combatant.current_mana + rage_gain)
+                                        .min(combatant.max_mana);
+                                }
+                            }
+                            combatant.offhand_timer = 0.0;
                         }
                     }
                     // If not in range, timer keeps building up so they attack immediately when in range
@@ -839,7 +912,27 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
 /// never drift from the sim's real cadence. Pure — safe to call from graphical
 /// systems without touching sim state.
 pub fn effective_attack_interval(combatant: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
-    let mut attack_interval = 1.0 / combatant.attack_speed;
+    swing_interval(combatant.attack_speed, auras)
+}
+
+/// The same, for the OFF hand, off its own weapon's speed.
+///
+/// Only meaningful while [`Combatant::is_dual_wielding`] — that predicate is
+/// what guarantees the speed is non-zero, so the reciprocal below is safe.
+pub fn effective_offhand_interval(combatant: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
+    swing_interval(combatant.offhand_speed, auras)
+}
+
+/// One swing interval from one weapon speed.
+///
+/// The two hands share this rather than each spelling out the arithmetic,
+/// **and the operation order below is load-bearing**: it multiplies the
+/// reciprocal by each slow in turn. Folding the slows together first and
+/// multiplying once is algebraically the same and is NOT the same in `f32`,
+/// which would shift the main hand's interval by an ULP and, through the
+/// timer comparison, potentially every match in the project's baselines.
+fn swing_interval(speed: f32, auras: Option<&ActiveAuras>) -> f32 {
+    let mut attack_interval = 1.0 / speed;
     if let Some(auras) = auras {
         for aura in auras.auras.iter() {
             if aura.effect_type == AuraType::AttackSpeedSlow {
