@@ -342,11 +342,15 @@ flaps is a harness question outside this repo; the pipeline's job is to survive 
 In a single day's session it fired 15+ times across at least four engineers, and
 both ways it goes wrong have already happened:
 
-- **A lost commit** — a write lands in another card's tree. `card-AS-60-dual-wield`
-  was assigned to one Engineer and re-checked-out onto `card/AS-68-trap-dispellers`
-  by a second session that had made no worktree of its own.
-- **A stale pass** — a Tester read another tree's files and nearly graded them as the
-  PR's, caught only by re-fetching each one via `gh api` at the PR head SHA.
+- **A lost commit.** A bare `git` command runs wherever the CWD currently points, so
+  a commit, a reset or a force-push lands in another card's tree and silently
+  overwrites live work. The directory `card-AS-60-dual-wield` was assigned to one
+  Engineer and re-checked-out onto `card/AS-68-trap-dispellers` by a second session
+  that had created no worktree of its own — two sessions holding one directory.
+- **A stale pass.** A Tester read another tree's copy of the files and came within
+  one check of grading them as the PR's. It was caught only because that Tester
+  independently re-fetched each file via `gh api` at the PR head SHA and diffed it
+  against its worktree copy.
 
 Everything below follows from that one mechanism, and is not re-argued per rule.
 
@@ -363,8 +367,17 @@ the half that stops it happening.
 There is **no orchestrator code in this repo** — the orchestrator is an interactive
 Claude Code session following this document — so this is a written requirement to
 check compliance against, not an implemented mechanism, and nothing enforces it.
-Compliance is checkable: in `git worktree list`, every live card's worktree appears
-exactly once, against that card's own branch.
+
+**Checking it** means joining `git worktree list` against the board's live cards: each
+one's worktree is on *that card's branch and no other*. The join is the whole check,
+and it only runs where a card→tree mapping exists — most trees are harness-named
+`agent-a<hash>`, which records no card, so branch name is the only handle and the check
+says nothing about the rest. When this was written the live list held 49 worktrees, 27
+of them `agent-a<hash>` and 16 detached, and the check **failed** for at least three:
+`card-AS-60-dual-wield` sitting on `card/AS-68-trap-dispellers` (the incident above,
+still live and still being committed to), `card-AS-101-same-role-beats` on
+`card/AS-103-banter-vocab-tokens`, and `as87` on `as97/shaman-weapon-damage`. Nothing
+had asked for the requirement yet — that is the point of writing it down.
 
 **The rules — every agent, every run.**
 
@@ -373,10 +386,15 @@ exactly once, against that card's own branch.
    (`cargo --manifest-path <abs>/Cargo.toml ...`). Pinning the tool to the tree in the
    same process as the action fails loudly against a wrong path, where a bare command
    fails silently against a wrong tree.
-2. **Check `pwd` and `git -C <abs> branch --show-current` before any push.** An
-   **empty** `branch --show-current` means detached HEAD — stop and re-attach before
-   doing anything else. (The Tester is the exception: its detached-fetch fallback is
-   sanctioned, so it pins on the PR head SHA instead. See `.claude/agents/tester.md`.)
+2. **Know which tree you are in before anything that writes** — commit, reset,
+   checkout, push; the push is the one that loses *other people's* work, but it is the
+   earlier writes that do the damage locally. `pwd` alone will not tell you: it reports
+   the flapped location, not your tree's branch. A detached HEAD **in your card's
+   worktree** means stop and recover; a second tree kept deliberately detached for
+   before/after baselining is not a fault. (The Tester's whole checkout is detached by
+   sanctioned fallback, so it pins on the PR head SHA, and its trigger is *before it
+   measures and again before it reports* rather than a push it never makes. See
+   `.claude/agents/tester.md`.)
 3. **The push precondition.** Immediately before pushing, confirm that
    `git -C <abs> branch --show-current` equals the card's branch **and**
    `git -C <abs> rev-parse HEAD` equals the SHA the verification actually ran on. If
@@ -384,9 +402,15 @@ exactly once, against that card's own branch.
    reasoning about whether the move could have mattered. AS-87's Engineer re-ran after
    a move and was right to, even though its evidence later showed the earlier run had
    been on the correct commit.
-4. **The isolation guard is not the check.** After a drift it is inverted: it refuses
-   a correct `git -C <right path>` and permits a bare `git` against the wrong tree. An
-   agent's own `pwd` and `branch --show-current` are the check.
+4. **The check cannot itself be a git command.** After a drift the guard inverts: it
+   refuses a correct `git -C <the right tree>` and a `cd` to it, while permitting a
+   bare `git` against the wrong one — so `branch --show-current`, the obvious check, is
+   exactly what you may be unable to run. It also rejects compound and looped forms
+   (one Tester's `for` loop over `git -C` came back "too complex to verify"), so
+   **keep every check a single plain command**. What always works is reading the tree's
+   own files, which the guard does not mediate: `<abs>/.git` gives the gitdir, and
+   `<gitdir>/HEAD` gives the branch or SHA. Use `gh api` for the remote side. That read
+   is the identity check — not a fallback to it.
 
 **When it happens anyway — re-pin the session first.** Once the CWD has drifted, the
 guard refuses *both* obvious ways back: a correct `git -C <the right tree>` and a `cd`
@@ -397,11 +421,9 @@ re-run the gates. Treat `EnterWorktree` as an **observed** remedy, not a guarant
 is what worked for AS-68's run and repeatedly during AS-117's own, and no one has
 tested where it fails.
 
-*Diagnosis when even that is unavailable:* the tree's own files are guard-immune. Read
-`<worktree>/.git` for its gitdir, then `<gitdir>/HEAD` for the branch or SHA, and use
-`gh api` for the remote side. These tell you **where you are and nothing more** — they
-are read-only and cannot re-attach you. `EnterWorktree` is the write-side half; this is
-the half that survives when you cannot run git at all.
+Rule 4's file read and `EnterWorktree` are the two halves of this and neither
+substitutes for the other: the read is guard-immune but tells you **only where you
+are**, and `EnterWorktree` is the one that gets you out.
 
 *Last resort, only when committing locally would switch a branch out from under
 another session's live work:* push through the GitHub Git Data API (blobs → tree →

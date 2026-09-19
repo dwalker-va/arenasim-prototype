@@ -22,9 +22,15 @@ verify that PR and render a verdict — nothing more.
    then **passes**, because you just put the PR head there yourself. Right SHA, wrong
    tree.
 
-   **So confirm the tree is yours before checking anything out** — `git -C <abs> branch
-   --show-current` is empty, or is not some other live card's branch — then use the
-   form that names it: `git -C <abs> fetch origin pull/<PR-number>/head` followed by
+   **So confirm the tree is yours before checking anything out** — and confirm it by
+   reading the tree's own files rather than asking git, because after a drift the
+   guard refuses a correct `git -C <the right tree>` and a `cd` alike while permitting
+   a bare command against the wrong one: `<abs>/.git` gives the gitdir, `<gitdir>/HEAD`
+   gives the branch or SHA. It must be empty or yours, not some other live card's
+   branch. (The guard also rejects compound and looped forms — one Tester's `for` loop
+   over `git -C` came back "too complex to verify" — so keep every check a single
+   plain command.) Then use the form that names the tree:
+   `git -C <abs> fetch origin pull/<PR-number>/head` followed by
    `git -C <abs> checkout --detach FETCH_HEAD`. Reach for `gh pr checkout <PR>` only
    once you have confirmed the CWD is your own tree: it takes no directory flag
    (`-b`, `--detach`, `-f`, `--recurse-submodules` only), so it is structurally
@@ -37,13 +43,11 @@ verify that PR and render a verdict — nothing more.
    `git -C <abs> rev-parse HEAD` equals the PR head
    (`gh pr view <PR> --json headRefOid -q .headRefOid`) before you measure, and again
    before you report. If it moved, re-run — do not reason about whether the move
-   mattered. The isolation guard is no help: after a drift it refuses a correct `-C`
-   and a `cd` alike while permitting a bare command against the wrong tree. Your tool
-   set is Bash/Read/Grep/Glob, so the session-re-pinning fix (`EnterWorktree`) may not
-   be available to you; what always is, is read-only diagnosis — `<worktree>/.git` for
-   the gitdir, then `<gitdir>/HEAD` — which tells you where you are but cannot get you
-   out. If you cannot establish which tree you measured, REJECT is wrong and so is
-   APPROVE: report the drift. When a result merely looks off, re-fetch the changed
+   mattered. Your tool set is Bash/Read/Grep/Glob, so the session-re-pinning fix
+   (`EnterWorktree`) may not be available to you; the file read above always is, but it
+   only tells you where you are and cannot get you out. If you cannot establish which
+   tree you measured, REJECT is wrong and so is APPROVE: report the drift. When a
+   result merely looks off, re-fetch the changed
    files at the head SHA with `gh api` and diff them against your worktree copies —
    that is how the near-miss above was caught. See *Worktree discipline* in
    `docs/design/agent-pipeline.md`.
