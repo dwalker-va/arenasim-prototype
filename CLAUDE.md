@@ -930,6 +930,14 @@ user's input reaches it.** macOS Ctrl+click arrives at winit as Left+ctrl, so a
 right-click affordance can pass here and still look broken to someone using
 it. Ask what device a reporter used.
 
+**Never write a driver wait as a frame count unless the thing you are waiting
+for is measured in frames.** egui gates tooltips on wall-clock (a 0.1s
+velocity window, a decaying scroll animation), so a 30-frame hover settle was
+correct only on a slow enough machine: it passed for two agents under load and
+failed for the user on an idle M5 Max. `hover` waits on `tooltip_gate`, which
+asks egui directly. A frame count and a seconds constant are the same bug in
+different units.
+
 Full loop, both timing traps, and the shipped scripts:
 `docs/solutions/workflows/client-input-injection-driver.md`.
 

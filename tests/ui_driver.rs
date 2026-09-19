@@ -678,14 +678,21 @@ fn assert_view_refuses_to_answer_outside_the_encyclopedia() {
     assert!(e.contains("needs the Encyclopedia on screen"), "{e}");
 }
 
-/// A `hover` settles for the LONG window, not the ordinary one.
+/// A `hover` waits on egui's own gates; it does NOT count frames.
 ///
-/// egui gates a tooltip on the pointer's velocity reaching zero, so three
-/// frames is not enough and the five-class script read an empty tooltip on a
-/// working hover. Nothing else in the code says these two numbers differ for
-/// a reason; this does.
+/// This replaced a 30-frame settle, and the replacement is the point. Every
+/// gate egui applies to a tooltip is measured in SECONDS — the 0.1s velocity
+/// window behind `is_still()`, the smooth-scroll animation, the
+/// click-then-move rule — so a frame count is a wall-clock claim in the wrong
+/// unit, and its correctness is a property of the machine that ran it.
+/// Measured: 33 frames spanned 0.175-0.242s on a contended machine against a
+/// 0.1s requirement, a margin under 2x, and the client runs uncapped when
+/// vsync is off. It passed for two agents on a loaded machine and failed for
+/// the user on an idle one.
+///
+/// If someone "simplifies" `SettleForTooltip` back into an `Idle`, this fails.
 #[test]
-fn a_hover_settles_for_the_long_window_and_a_click_does_not() {
+fn a_hover_waits_on_eguis_gates_rather_than_counting_frames() {
     use arenasim::ui::driver::runner::Micro;
 
     let hover = runner::expand(
@@ -693,15 +700,24 @@ fn a_hover_settles_for_the_long_window_and_a_click_does_not() {
             id: "kit:Ambush".into(),
         },
         3,
-        30,
     );
     assert_eq!(
         hover
             .iter()
-            .filter(|m| matches!(m, Micro::Idle(30)))
+            .filter(|m| matches!(m, Micro::SettleForTooltip))
             .count(),
         1,
-        "a hover must settle for hover_settle, not settle: {hover:?}"
+        "a hover must wait on the tooltip gates: {hover:?}"
+    );
+    assert!(
+        matches!(hover.front(), Some(Micro::Move { .. })),
+        "aim first, then wait: {hover:?}"
+    );
+    // The trailing Idle is legitimately frame-shaped: it lets the pass draw
+    // and the registry snapshot catch up. It is NOT the wait.
+    assert!(
+        hover.iter().any(|m| matches!(m, Micro::Idle(3))),
+        "a hover still needs a frame or two for the draw to be observed: {hover:?}"
     );
 
     let click = runner::expand(
@@ -710,11 +726,10 @@ fn a_hover_settles_for_the_long_window_and_a_click_does_not() {
             button: Button::Left,
         },
         3,
-        30,
     );
     assert!(
-        !click.iter().any(|m| matches!(m, Micro::Idle(30))),
-        "a click does not need the tooltip window, only a settled pointer: {click:?}"
+        !click.iter().any(|m| matches!(m, Micro::SettleForTooltip)),
+        "a click has no tooltip to wait for: {click:?}"
     );
     assert_eq!(
         click
@@ -750,7 +765,7 @@ fn only_assertions_expand_to_a_check() {
         },
         Step::Dump,
     ] {
-        let q = runner::expand(&step, 3, 30);
+        let q = runner::expand(&step, 3);
         assert!(
             matches!(q.front(), Some(Micro::Check(_))) && q.len() == 1,
             "{step:?} should expand to exactly one Check, got {q:?}"
@@ -766,10 +781,56 @@ fn only_assertions_expand_to_a_check() {
         Step::Key(NamedKey::Escape),
         Step::Wait { frames: 5 },
     ] {
-        let q = runner::expand(&step, 3, 30);
+        let q = runner::expand(&step, 3);
         assert!(
             !q.iter().any(|m| matches!(m, Micro::Check(_))),
             "{step:?} is an action, not an assertion, got {q:?}"
+        );
+    }
+}
+
+/// The assertions that wait for something to ARRIVE retry; the ones satisfied
+/// by ABSENCE never do.
+///
+/// Retrying a negative would mean "pass on the first frame before the thing
+/// shows up" — a vacuous pass, and the shape this card has spent its life
+/// removing. Retrying `assert-note` / `assert-visible` would quietly change
+/// what they mean: they read the LAST DRAWN FRAME, the one the preceding step
+/// set up.
+#[test]
+fn only_arrival_assertions_retry() {
+    use arenasim::ui::driver::runner::is_retryable;
+
+    for step in [
+        Step::AssertState {
+            state: "ViewCombatant".into(),
+        },
+        Step::AssertView {
+            topic: "none".into(),
+        },
+    ] {
+        assert!(
+            is_retryable(&step),
+            "{step:?} waits for something to arrive and must poll"
+        );
+    }
+
+    for step in [
+        Step::AssertAbsent { id: "x".into() },
+        Step::AssertNoNote { needle: "x".into() },
+        Step::AssertNote { needle: "x".into() },
+        Step::AssertVisible { id: "x".into() },
+        Step::AssertEnabled {
+            id: "x".into(),
+            enabled: true,
+        },
+        Step::Dump,
+    ] {
+        assert!(
+            !is_retryable(&step),
+            "{step:?} must NOT poll — a retried negative passes on the frame \
+             before the thing appears, and a retried frame-read stops meaning \
+             `the frame the last step produced`"
         );
     }
 }

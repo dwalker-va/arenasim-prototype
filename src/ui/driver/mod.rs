@@ -59,18 +59,12 @@ pub use script::Script;
 
 /// Frames of settle after each injected event. Three is comfortably more than
 /// the two egui needs to turn a pointer move into a `hovered()` response.
-pub const DEFAULT_SETTLE_FRAMES: u32 = 3;
-
-/// Frames a `hover` settles for, on top of the move itself.
 ///
-/// Much longer than [`DEFAULT_SETTLE_FRAMES`] because a tooltip is not a
-/// function of position alone: egui's `show_tooltips_only_when_still` gates it
-/// on the pointer's VELOCITY falling to zero, measured over a ~0.1s history
-/// window, and only then does `tooltip_delay` start. Three frames put the
-/// assertion inside that window and the first run of the five-class script
-/// read an empty tooltip on a hover that was in fact working. Half a second at
-/// 60fps clears it with room for a frame-rate dip.
-pub const DEFAULT_HOVER_SETTLE_FRAMES: u32 = 30;
+/// A FRAME count on purpose: it buys passes, not seconds. Anything that is
+/// really a wall-clock wait must not be spelled this way — see
+/// [`runner::tooltip_gate`], which replaced a 30-frame hover settle that was
+/// only ever correct on a slow enough machine.
+pub const DEFAULT_SETTLE_FRAMES: u32 = 3;
 
 /// Frames a step waits for the widget it names before failing. Ten seconds at
 /// 60fps — long enough for an icon-loading frame hitch, short enough that a
@@ -105,7 +99,6 @@ pub struct UiDriverConfig {
     pub log_path: PathBuf,
     pub outcome: OutcomeHandle,
     pub settle_frames: u32,
-    pub hover_settle_frames: u32,
     pub step_timeout_frames: u32,
 }
 
@@ -117,7 +110,6 @@ impl UiDriverConfig {
             log_path,
             outcome: Arc::new(Mutex::new(Outcome::Incomplete)),
             settle_frames: DEFAULT_SETTLE_FRAMES,
-            hover_settle_frames: DEFAULT_HOVER_SETTLE_FRAMES,
             step_timeout_frames: DEFAULT_STEP_TIMEOUT_FRAMES,
         })
     }

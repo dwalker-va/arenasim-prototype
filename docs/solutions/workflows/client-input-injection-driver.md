@@ -216,8 +216,9 @@ interesting one:
 | `mark_into` drops its armed check | `registry_records_nothing_until_it_is_armed` **passed** — the test was blind |
 | the call site pre-joins its `String` again | `no_driver_call_site_allocates_before_the_armed_check` **fails**, naming file and line |
 | `assert-absent` goes back to `!is_visible` | `presence_assertions_separate_not_drawn_from_scrolled_off` **fails** on the clipped case |
-| `hover` settles for `settle` | `a_hover_settles_for_the_long_window_and_a_click_does_not` **fails** |
+| `hover` counts frames instead of waiting on the gates | `a_hover_waits_on_eguis_gates_rather_than_counting_frames` **fails** |
 | a shipped script is deleted | `every_shipped_script_parses` **fails**, naming the file |
+| `hover` waits a fixed 2 frames instead of the gates (what a ~16x faster machine makes 33 frames) | the five-class script **fails 3/3** at the first hover, reproducing the user's message exactly |
 | eager work in the FULLY-QUALIFIED call in `widget.rs` | the audit **fails** at `widget.rs:146` — the case its first version could not see |
 | two offending calls planted in an untouched file, both spellings | the census **fails**, and with the census updated the audit names both lines |
 
@@ -242,16 +243,52 @@ one wheel line. The click landed on *something*, which is the worst failure
 mode available. `Micro::Move` now requires the target rect to be identical on
 two consecutive frames before it aims.
 
-**2. A tooltip is not a function of position.** egui's
-`show_tooltips_only_when_still` gates the tooltip on pointer **velocity**
-reaching zero, measured over a ~0.1s history window, and only then does
-`tooltip_delay` start counting. Three settle frames put the assertion inside
-that window, and the five-class script read an empty tooltip on a hover that
-was working. `hover` therefore settles for `DEFAULT_HOVER_SETTLE_FRAMES` (30,
-about half a second) rather than the ordinary three.
+**2. A tooltip is not a function of position, and it is not a function of
+FRAMES.** This one was got wrong twice, and the second time is the more
+useful lesson.
 
-Both traps share a shape: the driver observed a state that was still changing.
-When a new assertion is flaky, suspect that before suspecting the UI.
+egui will not show a tooltip until several **wall-clock** conditions hold. With
+`tooltip_delay` zeroed (which both instrumented screens do), the binding ones
+are `pointer.is_still()` — velocity over a **0.1 second** position history —
+`smooth_scroll_delta == 0`, an animation that decays over **time**, and
+`clicked_more_recently_than_moved`, which wants the move at least **0.1s**
+after the last click.
+
+The first fix replaced a 3-frame settle with a 30-frame one. It was
+mutation-proved, pinned by a test, and verified green by two agents — and it
+was still wrong, because **a settle counted in frames is a wall-clock claim
+wearing the wrong unit.** Measured: 33 frames spanned 0.175–0.242s on a
+contended machine against a 0.1s requirement — a margin under **2x**. The
+client runs uncapped when vsync is off, so roughly doubling the frame rate
+makes every hover in every script stop producing a tooltip. It duly passed for
+two agents on a loaded machine and failed for the user on an idle one, at the
+second hover — the scrolled one, which needs strictly longer because it adds
+pointer samples and a live scroll animation.
+
+`hover` now waits on `runner::tooltip_gate`, which asks egui the same
+questions `Response::should_show_hover_ui` asks, and completes when they are
+answered. No frame count, no seconds constant — either would be the same bug
+in a different unit.
+
+**THE RULE, which outlives this bug: a wait expressed in frames is only
+correct on the machine that measured it.** Frames and seconds differ by the
+frame rate, which is a property of the hardware, the load, and the vsync
+setting. Before writing a settle, ask what the thing you are waiting for is
+actually measured in. If it is seconds, wait on the condition.
+
+The corollary is milder but real: a fixed frame count is still a guess even
+when the unit is right. `settle` (3) is frame-shaped for frame-shaped reasons
+— it buys egui passes, not time — but a state transition occasionally needs
+one pass more than four, and was observed failing under load. So the two
+assertions that wait for something to ARRIVE (`assert-state`, `assert-view`)
+poll until the step timeout rather than reading once. The negatives
+(`assert-absent`, `assert-no-note`) deliberately do NOT poll: retrying a
+negative means passing on the frame before the thing appears.
+
+All three traps share a shape: the driver observed a state that was still
+changing. When a new assertion is flaky, suspect that before suspecting the
+UI — and check whether your wait and the thing you are waiting for are
+denominated in the same unit.
 
 ## Exit codes
 
@@ -315,9 +352,16 @@ inertness), and the runner's two PURE seams: `expand`, which decides what a
 step costs in frames, and `evaluate`, which decides every `assert-*` verb.
 
 **The runner's frame loop is not covered by any test.** It needs a window, so
-the scroll-to-reveal arm, the rect-stability gate and the event injection
-itself are established only by running the scripts. Treat a change in
-`run_ui_script` as unverified until all three scripts pass against the client.
+the scroll-to-reveal arm, the rect-stability gate, `tooltip_gate` and the
+event injection itself are established only by running the scripts. Treat a
+change in `run_ui_script` as unverified until all three scripts pass against
+the client.
+
+**And a green script run is evidence about the machine that ran it.** This
+card shipped a frame-count settle that two agents verified green on a loaded
+machine and that failed on the user's idle one. If a run's correctness could
+depend on speed, say what the machine was doing — and prefer waiting on a
+condition, which makes the question moot.
 
 ## When a script fails
 

@@ -69,9 +69,9 @@ const SCROLL_LINES: f32 = 1.0;
 /// One frame's worth of work.
 ///
 /// `pub` so `tests/ui_driver.rs` can pin what a step expands into — notably
-/// that a `hover` settles for `hover_settle` and not the ordinary `settle`,
-/// which is the difference between observing a tooltip and observing egui
-/// still deciding whether to show one.
+/// that a `hover` waits on [`tooltip_gate`] rather than on any number of
+/// frames, which is the difference between observing a tooltip and observing
+/// egui still deciding whether to show one.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Micro {
     /// Park the synthetic cursor over the named widget. Retries each frame
@@ -85,6 +85,10 @@ pub enum Micro {
     KeyUp(NamedKey),
     /// Burn `n` further frames.
     Idle(u32),
+    /// Wait until egui would actually show a tooltip for whatever the pointer
+    /// is over. See [`tooltip_gate`] — this is a WALL-CLOCK wait expressed as
+    /// a predicate, not a frame count, because every gate egui applies is.
+    SettleForTooltip,
     /// Evaluate an assertion (or `dump`) against the last drawn frame.
     Check(Step),
 }
@@ -119,10 +123,13 @@ pub struct UiScriptRun {
     /// Frames spent waiting for the widget a `Move` names.
     waiting: u32,
     /// Frames of settle after each injected event.
+    ///
+    /// Deliberately still a FRAME count: it exists to let a pass run and be
+    /// observed (egui resolves interaction against the previous pass, and the
+    /// registry snapshot is one frame behind), which is frame-shaped. The one
+    /// wall-clock claim in the runner is the tooltip, and that is
+    /// [`tooltip_gate`], not this.
     settle: u32,
-    /// Frames of settle after a `hover` — longer, because a tooltip waits on
-    /// the pointer going still, not just on where it is.
-    hover_settle: u32,
     /// Frames a `Move` waits for its widget before failing.
     timeout: u32,
     /// Where the synthetic cursor sits, in egui points.
@@ -155,11 +162,11 @@ impl UiScriptRun {
             path: config.log_path.clone(),
         };
         log.line(&format!(
-            "script {} ({} steps), settle={} hover-settle={} timeout={} frames",
+            "script {} ({} steps), settle={} timeout={} frames; hovers wait on \
+             egui's tooltip gates, not on a frame count",
             config.script.name,
             config.script.steps.len(),
             config.settle_frames,
-            config.hover_settle_frames,
             config.step_timeout_frames,
         ));
         Self {
@@ -171,7 +178,6 @@ impl UiScriptRun {
             line: 0,
             waiting: 0,
             settle: config.settle_frames,
-            hover_settle: config.hover_settle_frames,
             timeout: config.step_timeout_frames,
             cursor: egui::pos2(0.0, 0.0),
             last_seen: None,
@@ -202,12 +208,17 @@ impl UiScriptRun {
 }
 
 /// Expand one script step into its frame-level actions.
-pub fn expand(step: &Step, settle: u32, hover_settle: u32) -> VecDeque<Micro> {
+pub fn expand(step: &Step, settle: u32) -> VecDeque<Micro> {
     let mut q = VecDeque::new();
     match step {
+        // A hover exists to produce a tooltip, and egui decides that on
+        // WALL-CLOCK grounds. So: aim, wait for egui's own gates to open,
+        // then give the draw a couple of frames to run and be observed. Only
+        // that last part is legitimately frame-shaped.
         Step::Hover { id } => {
             q.push_back(Micro::Move { id: id.clone() });
-            q.push_back(Micro::Idle(hover_settle));
+            q.push_back(Micro::SettleForTooltip);
+            q.push_back(Micro::Idle(settle));
         }
         Step::Click { id, button } => {
             q.push_back(Micro::Move { id: id.clone() });
@@ -227,6 +238,101 @@ pub fn expand(step: &Step, settle: u32, hover_settle: u32) -> VecDeque<Micro> {
         other => q.push_back(Micro::Check(other.clone())),
     }
     q
+}
+
+/// Whether an assertion is worth retrying on a later frame.
+///
+/// `settle` is a FRAME count for a frame-shaped reason (see its field doc),
+/// and unlike the tooltip wait it is not smuggling a wall-clock claim. But it
+/// is still a fixed number standing in for "however long this takes", and a
+/// state transition is the case where that bites: a click is seen by the UI
+/// in `Update`, sets `NextState`, and Bevy applies it at the NEXT frame's
+/// `StateTransition` — occasionally a pass later than that, if egui needed an
+/// extra pass to resolve the click. Four frames is usually enough and was
+/// observed failing once under load.
+///
+/// So the two assertions that watch for something to ARRIVE poll until the
+/// step timeout instead of reading once. The cure is the same as the
+/// tooltip's — wait on the condition, not on a count — even though the unit
+/// was right this time.
+///
+/// The NEGATIVES deliberately do not retry. `assert-absent` and
+/// `assert-no-note` are satisfied by the absence of something, so retrying
+/// them would mean "pass on the first frame before it shows up", which is the
+/// vacuous-pass shape this card has spent its whole life removing.
+/// `assert-note` and `assert-visible` read the LAST DRAWN FRAME by
+/// definition — the frame the preceding step set up — so retrying them would
+/// quietly change what they assert.
+pub fn is_retryable(step: &Step) -> bool {
+    matches!(step, Step::AssertState { .. } | Step::AssertView { .. })
+}
+
+/// Whether egui would show a tooltip right now, and if not, which gate is
+/// still shut.
+///
+/// This MIRRORS the wall-clock gates in egui's `Response::should_show_hover_ui`
+/// (`egui-0.31.1/src/response.rs:613`). Mirroring another crate's internals is
+/// a cost, and it is the right one here: the alternative is a fixed wait, and
+/// a fixed wait is what this replaced.
+///
+/// # Why a frame count could never work
+///
+/// Every gate below is measured in SECONDS. A settle counted in frames is a
+/// wall-clock claim wearing the wrong unit, so its correctness is a property
+/// of the machine that ran it:
+///
+/// * `pointer.is_still()` is `velocity == 0`, and velocity comes from a
+///   0.1-SECOND position history. A synthetic move keeps the pointer "moving"
+///   for 0.1s afterwards no matter how many frames that spans.
+/// * `smooth_scroll_delta` is an animation that decays over time, so a target
+///   the driver had to SCROLL to needs strictly longer than one it did not.
+/// * `clicked_more_recently_than_moved` wants the move to land at least 0.1s
+///   after the last click.
+///
+/// Measured on a contended machine, the old 33-frame settle spanned
+/// 0.175-0.242s against a 0.1s requirement — a margin under 2x. Roughly
+/// double the frame rate and every hover in every script stops producing a
+/// tooltip. The client runs uncapped when vsync is off, so that is not a
+/// hypothetical.
+///
+/// The gates this does NOT mirror (an open popup, another tooltip already
+/// showing, the widget not actually hovered) are either impossible here or
+/// are exactly what the following assertion is for.
+fn tooltip_gate(ctx: &egui::Context) -> Result<(), &'static str> {
+    let (delay, only_when_still) = {
+        let style = ctx.style();
+        (
+            style.interaction.tooltip_delay,
+            style.interaction.show_tooltips_only_when_still,
+        )
+    };
+
+    let (since_scroll, since_click, since_move, still, smooth_scroll) = ctx.input(|i| {
+        (
+            i.time_since_last_scroll(),
+            i.pointer.time_since_last_click(),
+            i.pointer.time_since_last_movement(),
+            i.pointer.is_still(),
+            i.smooth_scroll_delta,
+        )
+    });
+
+    if since_scroll < delay {
+        return Err("a scroll is still inside tooltip_delay");
+    }
+    if since_click < since_move + 0.1 {
+        return Err("the last click is more recent than the last move (egui suppresses a tooltip right after a click)");
+    }
+    if only_when_still && !still {
+        return Err("the pointer is not still yet (egui's 0.1s velocity window)");
+    }
+    if only_when_still && smooth_scroll != egui::Vec2::ZERO {
+        return Err("a smooth scroll is still animating");
+    }
+    if delay - since_scroll.min(since_move).min(since_click) > 0.0 {
+        return Err("still inside tooltip_delay");
+    }
+    Ok(())
 }
 
 /// Bevy's physical `KeyCode` and logical `Key` for a script key name.
@@ -331,7 +437,7 @@ pub fn run_ui_script(
         run.log.line(&format!("step {line}: {}", step.describe()));
         run.line = line;
         run.waiting = 0;
-        run.queue = expand(&step, run.settle, run.hover_settle);
+        run.queue = expand(&step, run.settle);
     }
 
     // Exactly one frame-level action per frame, so every injected event gets
@@ -341,6 +447,22 @@ pub fn run_ui_script(
     match action {
         Micro::Idle(0) => {}
         Micro::Idle(n) => run.queue.push_front(Micro::Idle(n - 1)),
+        Micro::SettleForTooltip => match tooltip_gate(&ctx) {
+            Ok(()) => run.waiting = 0,
+            Err(shut) => {
+                run.waiting += 1;
+                if run.waiting > run.timeout {
+                    let timeout = run.timeout;
+                    run.fail(format!(
+                        "waited {timeout} frames for egui to be willing to show a \
+                         tooltip and it never was: {shut}"
+                    ));
+                    commands.entity(window).despawn();
+                    return;
+                }
+                run.queue.push_front(Micro::SettleForTooltip);
+            }
+        },
         Micro::Move { id } => match frame.widget(&id) {
             Some(widget) if widget.visible => {
                 // AIM ONLY AT A RECT THAT HAS STOPPED MOVING. The snapshot is
@@ -471,11 +593,17 @@ pub fn run_ui_script(
                 for line in lines {
                     run.log.line(&line);
                 }
+                run.waiting = 0;
             }
             Err(reason) => {
-                run.fail(reason);
-                commands.entity(window).despawn();
-                return;
+                if is_retryable(&step) && run.waiting < run.timeout {
+                    run.waiting += 1;
+                    run.queue.push_front(Micro::Check(step));
+                } else {
+                    run.fail(reason);
+                    commands.entity(window).despawn();
+                    return;
+                }
             }
         },
     }
