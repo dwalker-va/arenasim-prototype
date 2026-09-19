@@ -187,7 +187,11 @@ honest by scanning the real call sites against an exact per-file census.
 **That audit is a substring scan, not a parse, and its blind spots are
 written into its own doc comment** — read them before trusting a green run.
 The short version: it recognises eager work by spelling, so a helper function
-that allocates internally is invisible to it. Its first version had a far
+that allocates internally is invisible to it; it finds calls by their
+QUALIFIED path, so a bare call behind `use crate::ui::driver::note;` is not
+seen (nothing writes that today); and the per-file census is not a backstop
+for either, because a file whose calls are all invisible contributes no entry
+and the comparison still balances. Its first version had a far
 worse one and shipped green — it matched hardcoded opener strings and skipped
 anything preceded by `:`, making every fully-qualified call invisible,
 including `encyclopedia::widget`'s, the single note every linked icon in the

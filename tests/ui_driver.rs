@@ -795,10 +795,29 @@ fn only_assertions_expand_to_a_check() {
 //     internally — `ui_driver::note(ui, format_args!("{}", summarise(xs)))` —
 //     is invisible to it. Only shapes written inline are caught.
 //   * It finds calls by walking back from `mark(` / `note(` over a path of
-//     `[A-Za-z0-9_:]`, so any spelling rustfmt produces is seen, but a call
-//     split across a line break mid-path, or written with spaces around `::`,
-//     is not. rustfmt produces neither.
+//     `[A-Za-z0-9_:]` and keeping those whose path ends in `driver::`. So it
+//     sees QUALIFIED calls in any spelling — `ui_driver::note(`,
+//     `crate::ui::driver::note(`, `myui::driver::note(` — and nothing else.
+//     In particular it does NOT see a bare call behind a direct import:
+//
+//         use crate::ui::driver::note;
+//         note(ui, format_args!("{}", xs.join(",")));
+//
+//     That is a shape rustfmt produces happily. No call site uses it today
+//     (every import is the module, not the function), and
+//     `the_call_site_scanner_sees_every_spelling` pins that the scanner skips
+//     it, so this comment and the behaviour cannot drift apart.
+//   * A call split across a line break mid-path, or written with spaces
+//     around `::`, is also invisible. rustfmt produces neither.
 //   * It says nothing about cost that is not allocation.
+//
+// THE CENSUS IS NOT A BACKSTOP FOR THE ABOVE. `EXPECTED_CALL_SITES` catches a
+// file whose count CHANGES, which is how a partially-seen file surfaces. But
+// a file whose calls are ALL invisible contributes no entry at all, so the
+// map comparison still balances and the file passes unseen. The census
+// guards files the scanner can already see into; only the spelling test
+// guards the scanner itself. That asymmetry is the whole reason the two
+// claims are separate tests.
 //
 // The first version of this audit had a far worse blind spot and shipped
 // green: it matched four hardcoded opener strings and skipped any match whose
@@ -952,6 +971,12 @@ fn the_call_site_scanner_sees_every_spelling() {
         registry::mark(ctx, rect, true, false, format_args!("e"));
         thing.remark(format_args!("f"));
         fn note(ui: &Ui) {}
+        // A DOCUMENTED BLIND SPOT, pinned so it cannot drift: a bare call
+        // behind `use crate::ui::driver::note;` is not seen. Nothing in the
+        // tree writes this, and the audit's doc comment says so. If you make
+        // the scanner handle it, delete this and update that comment — the
+        // two must not disagree.
+        note(ui, format_args!("g {}", names.join("/")));
     "#;
 
     let found = extract_calls(planted);
@@ -959,7 +984,13 @@ fn the_call_site_scanner_sees_every_spelling() {
     assert_eq!(
         found.len(),
         4,
-        "expected the four driver calls and nothing else, got {texts:#?}"
+        "expected the four QUALIFIED driver calls and nothing else, got {texts:#?}"
+    );
+    assert!(
+        !texts.iter().any(|c| c.starts_with("note(")),
+        "the bare-import form is a documented blind spot; if it is now seen, \
+         say so in the audit's doc comment instead of leaving the two \
+         disagreeing: {texts:#?}"
     );
     assert!(
         texts
