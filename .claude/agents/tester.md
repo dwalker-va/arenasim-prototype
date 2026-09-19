@@ -27,9 +27,10 @@ verify that PR and render a verdict — nothing more.
    guard refuses a correct `git -C <the right tree>` and a `cd` alike while permitting
    a bare command against the wrong one: `<abs>/.git` gives the gitdir, `<gitdir>/HEAD`
    gives the branch or SHA. It must be empty or yours, not some other live card's
-   branch. (The guard also rejects compound and looped forms — one Tester's `for` loop
-   over `git -C` came back "too complex to verify" — so keep every check a single
-   plain command.) Then use the form that names the tree:
+   branch. (The guard also refuses anything it cannot *prove* is not git — a `for` loop
+   over `git -C` came back "too complex to verify", and so have heredocs that merely
+   contain the word — so keep every check a single plain command.) Then use the form
+   that names the tree:
    `git -C <abs> fetch origin pull/<PR-number>/head` followed by
    `git -C <abs> checkout --detach FETCH_HEAD`. Reach for `gh pr checkout <PR>` only
    once you have confirmed the CWD is your own tree: it takes no directory flag

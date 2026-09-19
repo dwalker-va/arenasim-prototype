@@ -344,7 +344,8 @@ both ways it goes wrong have already happened:
 
 - **A lost commit** — a write lands in another card's tree. `card-AS-60-dual-wield`
   was assigned to one Engineer and re-checked-out onto `card/AS-68-trap-dispellers`
-  by a second session that had made no worktree of its own.
+  by a second session that had made no worktree of its own. It is still there, and
+  still being written to: its HEAD moved under the fix's own author, mid-review.
 - **A stale pass** — a Tester read another tree's files and nearly graded them as the
   PR's, caught only by re-fetching each one via `gh api` at the PR head SHA.
 
@@ -401,9 +402,11 @@ had asked for the requirement yet — that is the point of writing it down.
 4. **The check cannot itself be a git command.** After a drift the guard inverts: it
    refuses a correct `git -C <the right tree>` and a `cd` to it, while permitting a
    bare `git` against the wrong one — so `branch --show-current`, the obvious check, is
-   exactly what you may be unable to run. It also rejects compound and looped forms
-   (one Tester's `for` loop over `git -C` came back "too complex to verify"), so
-   **keep every check a single plain command**. What always works is reading the tree's
+   exactly what you may be unable to run. It also refuses anything it cannot *prove* is
+   not git, which is a wider net than it sounds: one Tester's `for` loop over `git -C`
+   came back "too complex to verify", and AS-117's own run was refused for a heredoc
+   whose only offence was containing the word and for a `sed` the guard could not rule
+   out. **Keep every check a single plain command.** What always works is reading the tree's
    own files, which the guard does not mediate: `<abs>/.git` gives the gitdir, and
    `<gitdir>/HEAD` gives the branch or SHA. Use `gh api` for the remote side. That read
    is the identity check — not a fallback to it.
