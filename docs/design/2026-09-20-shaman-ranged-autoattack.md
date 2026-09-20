@@ -1,0 +1,555 @@
+# The Shaman's ranged auto-attack: what it is, what it costs to remove
+
+Card: AS-99. Measured against `aef713c` on 2026-09-20. **This is a measurement,
+not a proposal.** It ends with options and their prices; which way the fiction
+resolves is a design decision and is not made here.
+
+---
+
+## 1. What is actually wrong, in source
+
+Auto-attack RANGE and auto-attack IDENTITY are both derived from the attacker's
+CLASS, never from the item in its weapon socket. The predicate is
+`CharacterClass::is_melee()`, and `combat_core/auto_attack.rs` asks it — or the
+`class == Hunter` fallback beside it — at **seven** sites, not the two the card
+named:
+
+| site | line | what it decides | arm rewired it? |
+|---|---|---|---|
+| range ladder | `auto_attack.rs:276` | `MELEE_RANGE` / `AUTO_SHOT_RANGE` / `WAND_RANGE` | yes |
+| Hunter dead zone | `auto_attack.rs:289` | the 8yd minimum on Auto Shot | yes |
+| line-of-sight gate | `auto_attack.rs:304` | whether occlusion blocks the swing | yes |
+| **Windfury proc** | **`auto_attack.rs:348`** | **`windfury_bonus_chance` — the bonus swing** | **no** |
+| **Frost Armor proc** | **`auto_attack.rs:579`** | **whether the target's chill fires back** | **no** |
+| swing visual flag | `auto_attack.rs:643` | `AutoAttackSwing.ranged` | yes |
+| log name | `auto_attack.rs:664` | `"Auto Attack"` / `"Auto Shot"` / `"Wand Shot"` | yes |
+
+The two **proc gates** are the ones easiest to miss — they consume the same
+`attacker_is_melee` value without deciding range or naming — and they are what
+Option 1's cost in section 5 turns on. (The card cited 261-267 and 577-585;
+AS-122's dual-wield work shifted them.)
+
+`CharacterClass::weapon_slot()` — added by AS-97 precisely to stop `is_melee`
+answering two questions — is consulted by none of them.
+
+**The Shaman is the only class this reaches today, and that is provable from the
+loadout table rather than asserted.** Only two classes hold a non-weapon in
+their Ranged socket (`weapon_type: Relic`, no `is_weapon`): Paladin
+(`LibramOfHope`) and Shaman (`TotemOfLife`). The Paladin is `is_melee`, so it
+takes the `MELEE_RANGE` arm and never reaches the relic. Warrior and Rogue hold
+no Ranged item at all. Mage, Priest, Warlock and Hunter all hold real weapons
+(`Wand` x3, `Bow`). So the Shaman is the one class firing a ranged auto-attack
+with nothing to fire it from — and every future relic wearer inherits the path.
+
+### The numbers, recomputed from `items.ron`
+
+`attack_speed` is attacks per second (`swing_interval = 1.0 / speed`,
+`auto_attack.rs:949`), so raw auto-attack DPS is `avg_damage x speed`:
+
+| class | live weapon | avg dmg | speed | raw auto DPS | range |
+|---|---|---|---|---|---|
+| **Shaman** | `HammerOfTheRighteous` (MainHand mace) | **12.5** | **1.0** | **12.5** | **30yd** |
+| Hunter | `AshwoodBow` | 34.5 | 0.4 | 13.8 | 35yd (8yd dead zone) |
+| Priest | `StaffOfDominance` (Wand) | 11.0 | 0.8 | 8.8 | 30yd |
+| Mage / Warlock | `WandOfShadows` | 10.0 | 0.7 | 7.0 | 30yd |
+| Shaman *before* AS-97 | class base | 7.0 | 0.8 | 5.6 | 30yd |
+
+AS-97 multiplied the Shaman's auto-attack output by **2.23x**. The result is
+**+42%** on the Priest's real wand, **+79%** on the Warlock's, and **91% of a
+Hunter's Auto Shot** — delivered at 30 yards by a healer holding a totem.
+
+---
+
+## 2. What a player actually sees — the card's premise is wrong, in a useful way
+
+The card opens "the client renders it wielding that mace." **It does not.**
+
+Three independent things each rule it out, so the conclusion does not rest on
+any one of them:
+
+1. **No weapon set.** `class_weapon_loadout` (`play_match/mod.rs:1117`) has arms
+   for Warrior, Rogue, Hunter and Paladin and `_ => &[]`. Its own comment says
+   so: *"Classes not listed hold nothing (casters, Shaman) — their auto-attack
+   swing signals no-op against zero sockets."*
+2. **No sockets to animate.** The Shaman therefore has **zero `WeaponSocket`
+   children**, and `consume_swing_signals` iterates sockets — so its landed-attack
+   marker matches nothing and is despawned. No mace model, no swing.
+3. **No projectile even if it had one.** The cosmetic arrow is gated on
+   `WeaponKind::Bow` (`weapon_swing.rs:864`), which a mace would not satisfy.
+
+**The fiction is real but it is TEXTUAL.** Where a player meets it is the
+in-client Combat Log panel (`rendering/combat_log.rs:118`), which prints every
+damage entry verbatim:
+
+```
+[ 13.92s] [DMG] Team 1 Shaman #2's Wand Shot hits Team 2 Priest #2 for 12 damage
+```
+
+Auto-attacks do not appear in the ability timeline (that reads
+`ability_casts_for`), and floating combat text shows only the number.
+
+Two consequences that change how the options price out:
+
+- **Option 2 is cheaper than the card assumes** — there is no thrown-mace
+  animation to remove, only a string to change.
+- **Option 1 creates a new visual gap** — a melee Shaman would punch with empty
+  hands, because the mace still has no model. Making it melee properly wants a
+  `Shaman => Mace` arm in `class_weapon_loadout` in the same change.
+
+---
+
+## 3. Method
+
+Two binaries, one config file, identical seeds, one variable.
+
+- **base** = clean `aef713c`
+- **arm** = base plus a derived-from-equipment model, committed as
+  `2026-09-20-as99-arm.patch` (section 6)
+
+(Both were `sha256 58112da2...` and `9193b81b...` as built here, but those
+hashes are directory-dependent and are not the way to check a rebuild — see
+section 6.)
+
+**Tier: DIRECTIONAL** in AS-104's sense — a focused slice of the cells the change
+reaches, sized in minutes, with a full-strength control. The per-cell figures in
+section 4.2 are **not individually powered** and must not be cited as any comp's
+standing. The aggregate and the control are what carry weight.
+
+- **Win-rate sweep:** 520 paired matches per arm (1,040 total), BasicArena,
+  Legacy AI, 300s cap. 400 Shaman matches (5 DPS partners x 40 seeds x both side
+  assignments) + 120 control matches with no Shaman on either side.
+- **Mechanism slice:** 24 paired matches with full logs, counting Shaman
+  auto-attacks and their damage directly off the `[DMG]` lines. Comps are
+  `[P, Shaman] vs [P, Priest]` for **P in Warrior, Mage, Rogue, Warlock, Hunter,
+  Paladin**, at **seeds 90000-90003** each.
+
+  **The Paladin cell is degenerate and must be read separately.** Paladin is
+  itself a healer, so that cell is a **two-healer vs two-healer** match — unlike
+  the other five, whose partner is a DPS. All four of its matches end
+  `Duration: 309.99s / Winner: DRAW`: they hit the cap without resolving, even
+  through the full arena-dampening ramp. Four 310-second draws against a 38-91s
+  mean elsewhere means that one cell contributes as much auto-attack damage as
+  the other five combined, so section 4.3 reports the slice **both ways**. The
+  win-rate sweep above is unaffected — it uses the five DPS partners only.
+
+**Load conditions, stated because they are the point of AS-104's cost question.**
+The box (18 cores) was shared with two other Engineers and a concurrent sweep.
+`--jobs 6` was chosen deliberately rather than the default of cores-minus-two.
+Base: 520 matches in **433.9s (1.20/s)** at load 26-39. Arm: 520 in **518.2s
+(1.00/s)** at load ~26. Total **under 16 minutes of batch wall clock** — the
+structural argument for the directional tier, since it finished well inside a
+window where `main` did not move (`origin/main` was still `aef713c` afterwards).
+
+**Do not read those rates as the cost of a sweep.** AS-104 instrumented the same
+box during this run and found it **thrashing**, not merely busy: 1,147s of wall
+clock against 797s user and **1,611s system** — two CPU-seconds in the kernel per
+one simulating, averaging 2.1 busy cores of 18. Its measured intrinsic cost is
+**0.46 CPU-seconds per match**, and AS-122 saw 3.7-5.6 matches/sec on a quiet
+box. So the honest reading is that this measurement's *true* cost is a few
+minutes, and the 1.0-1.2/s figures above are an artifact of three agents
+oversubscribing 18 cores.
+
+**Directly confirmed afterwards.** Re-running the identical `sweep.jsonl`
+against the identical arm binary on the same machine once it had gone quiet
+took **205.1s for 520 matches (3.0/s)** at `--jobs 8` — a 3x speedup from load
+alone, with byte-identical results. Contention, not cost. AS-104's number supersedes the comparison an earlier
+draft of this doc drew against AS-86's 0.57/s.
+
+### The harness detects the change before any figure is cited
+
+On the single seeded probe (`Warrior+Shaman vs Warrior+Priest`, seed 90000), the
+**first divergent line in the timestamped event stream** is:
+
+```
+59d58
+< [ 13.92s] [DMG] Team 1 Shaman #2's Wand Shot hits Team 2 Priest #2 for 0 damage (12 absorbed)
+```
+
+Nothing before it differs. That is the event the change predicts, found in the
+trace — attributed positively, not by elimination. Base fires 11 Shaman Wand
+Shots in that match; the arm fires zero auto-attacks of any name.
+
+---
+
+## 4. Results
+
+### 4.1 Split control — the change reaches nothing without a Shaman
+
+**120 matches, 0 rows differing** on winner, end reason and duration. Exact
+row-for-row identity. The diff cannot touch a comp with no Shaman in it.
+
+This is a **split control** — cells the change cannot reach, required to come out
+bit-identical — and it is a correctness check on the instrument, not a
+statistical one.
+
+**Why it is used instead of a same-binary null probe, stated carefully, because
+the obvious reason is wrong.** Determinism here is a property the codebase
+*works to maintain*, not an axiom: CLAUDE.md's *What a byte-identity result
+proves* records AS-58, where hash-ordered float reductions reseeded per process
+produced genuine run-to-run differences with **no code change** (Rogue
+`crit_chance` taking three distinct bit patterns over 40 runs of one unmodified
+binary), and AS-75 leaves four such sites latent. So "identical by construction"
+is not available as an argument, and CLAUDE.md in fact *recommends* the
+same-binary control as a diagnostic for an unattributable difference.
+
+The reason is simpler and empirical: **the split control strictly subsumes a null
+probe.** A null probe asks whether one binary run twice agrees. The split control
+ran **two different binaries** over 120 seeds and got agreement on every field —
+the same assurance and more, since it also proves the diff does not reach those
+cells. Running the weaker test as well would add nothing.
+
+That assurance is **measured rather than assumed**: this PR's Tester rebuilt the
+base binary independently, re-ran the committed `sweep.jsonl`, and got **520/520
+rows byte-identical including every duration to 2dp** — on a differently-loaded
+box, with different worker scheduling, from a separately compiled binary.
+Independently, rebuilding the base binary from the reverted tree in this session
+reproduced its `sha256` exactly (`58112da2...`).
+
+### 4.2 Win rate — the Shaman side loses ~19 points
+
+Both side assignments, so no team-1 ordering artifact can carry the result.
+
+| slice | n | base | arm | delta | flips out / in | z |
+|---|---|---|---|---|---|---|
+| Shaman on team 1 | 200 | 65.5% | 48.5% | **-17.0pt** | 53 / 19 | **-4.01** |
+| Shaman on team 2 (row is the Priest side) | 200 | 33.5% | 54.0% | **+20.5pt** | 21 / 62 | **+4.50** |
+| control (no Shaman) | 120 | 45.0% | 45.0% | 0.0 | 0 / 0 | 0.00 |
+
+**Side-symmetrized, the Shaman side goes 65.8% -> 47.0%: it loses 18.8 points.**
+The two assignments agree in sign and in magnitude, and each is independently
+significant.
+
+**With an interval, because "directional" should mean a stated resolution rather
+than a shrug.** Over all 400 Shaman matches: **SE 3.1pt, z = -6.06, 95% CI
+[-24.8, -12.7]**. The smallest effect this design could reliably have detected
+is **MDE ~ 8.7pt** (80% power, alpha .05, from the run's own discordance), so
+**the observed effect is about 2.2x the resolution floor.** The right reading of
+the tier is not "this slice is small, read it loosely" but *this slice resolves
+about 9 points, and the effect is 19*.
+
+**Non-vacuity.** Every one of the **1,040 matches ended by `kill`** — zero
+timeouts, on either arm. 392 of 400 Shaman-slice rows differ between arms, with
+**153 discordant paired outcomes** on the Shaman-side win/not-win definition the
+flip columns above use (157 rows if any `winner` change counts, draws included).
+There are **4 draws** in the whole sweep — three base-side, one arm-side — so
+nothing here is a draw-rate artifact.
+
+### The number that actually matters is per-partner, and it varies fivefold
+
+Pooling each partner's `clean/` and `swapped/` cells gives **n=80 per cell,
+side-symmetrized, at no extra measurement cost** — so these are not the
+underpowered n=40 figures an earlier draft disclaimed. Three of five are
+individually significant and all five keep their sign:
+
+| the Shaman side's win rate, by partner | base | arm | delta | z |
+|---|---|---|---|---|
+| Warlock+Shaman | 76.2% | 30.0% | **-46.2pt** | **-5.08** |
+| Warrior+Shaman | 58.8% | 25.0% | **-33.8pt** | **-4.44** |
+| Mage+Shaman | 26.2% | 11.2% | **-15.0pt** | **-2.27** |
+| Rogue+Shaman | 73.8% | 72.5% | -1.2pt | -0.19 |
+| Hunter+Shaman | 93.8% | 96.2% | +2.5pt | +0.71 |
+
+**"18.8pt" reads as one fact about the Shaman, and that is misleading.** The
+wand is worth **46 points alongside a Warlock and nothing at all alongside a
+Hunter.** What the user is choosing about is that spread, not the average.
+
+**What sorts the cells is match length**, and the win-rate CSVs carry duration
+on all 400 rows, so this is measurable at the same n=80 rather than borrowed
+from the 4-seed mechanism slice:
+
+| partner | base mean duration | delta |
+|---|---|---|
+| Warrior | 66.4s | -33.8pt |
+| Warlock | 60.9s | -46.2pt |
+| Mage | 44.8s | -15.0pt |
+| Hunter | 38.7s | +2.5pt |
+| Rogue | 27.2s | -1.2pt |
+
+**Pearson r(duration, delta) = -0.895** across the five. The longer a Shaman
+lives, the more of its output is free auto-attacks rather than mana-limited
+casts, and the more removing them costs. The two flat cells are the two where it
+barely wands at all: Rogue matches end at 27s (2.5 auto-attacks per match,
+section 4.3), and Hunter+Shaman is saturated above 93% either way.
+
+**How much corroboration that is, stated precisely, because "independently"
+would be too strong.** Between this slice and section 4.3: the **seeds are
+nearly disjoint** — the mechanism slice runs 90000-90003 for every partner while
+the win-rate cells use per-partner blocks, so Mage, Rogue, Warlock and Hunter
+share **zero** seeds and the total overlap is **4 matches** of 400. So the
+agreement is not resampling. But the **comps are the same** five `[P, Shaman] vs
+[P, Priest]` pairings, and both results are consequences of **one mediating
+variable, match duration** — they are two outcomes downstream of a shared cause,
+not two instruments independently locating a hidden one. The check is still
+non-circular and worth having: win-rate deltas were never computed from
+durations, and mechanism shares never from win rates.
+
+### 4.3 Mechanism — the ranged auto-attack is 41-53% of the Shaman's damage
+
+**Report this as a range, not a point.** The headline depends on whether the
+degenerate Paladin cell (section 3) is counted:
+
+| slice | matches | mean dur | autos/match | auto damage | **auto share of the Shaman's own damage** |
+|---|---|---|---|---|---|
+| all six partners | 24 | 108.4s | 34.7 | 9,192 | **52.8%** |
+| **five DPS partners** | 20 | 68.1s | 17.6 | 4,364 | **41.3%** |
+| Paladin cell alone | 4 | 310.0s | 120.0 | 4,828 | 70.7% |
+
+The four Paladin draws supply **52.5% of the whole slice's auto-attack damage**.
+The 41.3% figure is the one to quote for ordinary play; 52.8% is the slice as
+run, and is inflated by matches that never end.
+
+Per cell, base arm — **n=4 per row, so read the ordering loosely**:
+
+| partner | mean dur | autos/match | auto share |
+|---|---|---|---|
+| Rogue | 38.6s | 2.5 | 14.0% |
+| Hunter | 48.3s | 12.0 | 28.4% |
+| Mage | 79.7s | 17.5 | 33.6% |
+| Warlock | 91.4s | 34.8 | 49.6% |
+| Warrior | 82.4s | 21.2 | 67.7% |
+| *Paladin (4 draws)* | *310.0s* | *120.0* | *70.7%* |
+
+These durations are this slice's own, at four seeds per partner, and they do
+**not** reproduce the ordering of the 80-seed durations in section 4.2: there
+Warrior is the longer cell (66.4s) and Warlock the shorter (60.9s), the reverse
+of the two rows above. **Where the two disagree, section 4.2's are the ones to
+use** — twenty times the seeds, measuring the same quantity. The n=4 figures are
+kept only because the auto-attack counts beside them come from this slice and
+nowhere else.
+
+The share tracks match length, which is the honest mechanism: a Shaman that
+survives longer spends proportionally more of its output on free auto-attacks
+than on mana-limited casts. Section 4.2 puts a number on that relationship at
+n=80 (r = -0.895). **Either way the wand is the single largest component of the
+Shaman's damage**, and that is the claim the options rest on.
+
+The arm-side figures below are for the full 24, matching the table's first row:
+
+| | base | arm |
+|---|---|---|
+| Shaman auto-attacks | **832** (34.7/match) | **6** (0.2/match) |
+| named | 100% `Wand Shot` | 100% `Auto Attack` |
+| auto-attack damage | 9,192 | 66 |
+| **auto share of the Shaman's OWN damage** | **52.8%** | 0.8% |
+| auto share of its team's damage | 26.8% | 0.3% |
+| Shaman total DPS | 6.69 | 3.32 (**-50.4%**) |
+| Shaman team DPS | 13.20 | 9.68 (**-26.7%**) |
+| mean match duration | 108.3s | 98.7s |
+
+DPS rather than totals, because the arm's matches are shorter; the share
+percentages are within-match ratios and are duration-robust either way.
+
+**The phantom wand is the largest single component of the Shaman's damage** —
+41.3% over the five DPS partners, 52.8% including the Paladin draws. Removing it
+roughly halves the class's damage output and takes about a quarter off its
+team's.
+
+### 4.4 The finding that collapses two of the three options into one
+
+**All six residual melee swings in the arm are in the Rogue cell** — a Rogue
+standing on the Shaman. In 20 of 24 matches a melee-ranged Shaman auto-attacked
+**zero times**, across whole 100-second matches.
+
+That is not an accident of tuning, and the static read predicts it.
+
+**The Shaman does pursue — it just stops at 28 yards.**
+`CharacterClass::preferred_range()` returns **28.0** for the Shaman
+(`match_config.rs:450`, "Lightning Bolt 30, so stay at ~28 to use everything"),
+and `combat_core/movement.rs:630` uses exactly that as the pursuit stop
+distance: `if distance > stop_distance` it closes, otherwise it halts. So the
+Shaman walks to 28 yards — comfortably inside the 30-yard wand range, and
+eleven times its melee range — and stops. Nothing in the sim ever asks it to
+close further. A secondary term points the same way: its `wand_pull: 1.0`
+(`movement.ron:103`) is repurposed as a **Lightning Bolt**-range pull
+(`movement_config.rs:260`), and Lightning Bolt's 30.0 (`abilities.ron:1226`)
+equals the shared `wand_range` the term reads.
+
+**Therefore "make it melee-ranged" and "remove it entirely" are the same change,
+3 damage a match apart.** A melee-ranged Shaman would not walk into melee to use
+its mace; it would keep parking at 28 yards and simply stop auto-attacking. The
+card's worry that this would be a "MOVEMENT and positioning change" does not
+materialise, and the reason is robust to the change being contemplated:
+**`preferred_range()` is a separate class ladder that Option 1 does not touch.**
+Making a Shaman actually close to melee would mean editing that too — a further,
+larger decision that none of the options below include.
+
+---
+
+## 5. The options, priced
+
+### Option 1 — derive range and name from the equipped weapon
+
+A class with no weapon in its live socket gets no auto-attack. The general rule
+the card asks for; the Shaman falls to melee range and, in practice, to silence.
+
+- **Balance: -18.8pt to the Shaman side** (measured, directional tier), -50% to
+  its damage output. That is roughly double what AS-97 added, in the opposite
+  direction.
+- **Correctness:** puts range, name, LoS, dead zone and the visual flag on one
+  derived value, so those five cannot disagree again, and covers every future
+  relic class with no further work. It does **not** by itself reach the two proc
+  gates (section 1) — a faithful version must decide those deliberately rather
+  than leave them on the class ladder.
+- **A behavioural consequence the decision turns on: a melee-derived Shaman
+  would start self-proccing Windfury from its own totem.** This is observed, not
+  inferred — `[BUFF] [TOTEM] Windfury Totem buffs Team 1 Shaman #2` appears in
+  the shipped logs of **all 24** mechanism matches, typically within the first
+  frame after the totem drops. `totem_pulse_system` gates only
+  on `ally.team != owner_team`, with no self-exclusion, so the Shaman carries its
+  own Air Totem's `WindfuryBuff` **today**; the only thing keeping it inert is
+  `windfury_bonus_chance` returning `None` for a non-melee attacker.
+  Reclassify the Shaman as melee and the 12% bonus swing arms on its own
+  auto-attacks. Symmetrically, the Frost Armor gate would start chilling a
+  Shaman that melees a Frost-Armored Mage. Neither is obviously wrong — an
+  Enhancement Shaman self-proccing Windfury is Classic-faithful — but both are
+  new behaviour that this option creates and nobody has chosen yet.
+- **Code cost: small.** Section 6 — one enum, one `Combatant` field set in
+  `apply_equipment`, five call sites.
+- **Test cost: exactly one probe, and it is a recalibration not a defect.**
+  `movement_probes::oom_wand::mage_oom_closes_to_wand_range_and_breaks_the_dead_window`
+  fails on the arm (`movement_probes.rs:6509`: "Mage landed only 2 wand shots",
+  floor 4). Its scenario is literally `Mage+Priest vs Warrior+Shaman` and it
+  counts Mage wand shots during the **lone-Shaman** 2v1 window — so halving the
+  Shaman's damage reshapes the window it measures. Its vacuity guards all still
+  pass (the 2v1 opens, ≥200 paired samples, the Mage reaches wand range inside
+  the 20s bound), so the mechanism it pins is intact and only the fixed-seed
+  count floor has moved. Every test target up to and including `movement_probes`
+  passed otherwise; cargo stops at the first failing target, so the ones after it
+  were not reached and are unverified.
+- **Visual cost: a new gap.** The Shaman would swing empty hands; wants a
+  `Shaman => Mace` arm in `class_weapon_loadout` in the same change.
+- **Implies:** the Shaman is a pure caster-healer whose mace is a stat stick.
+  AS-97's decision to make that mace's damage live then buys almost nothing, and
+  is worth revisiting as part of this decision rather than separately.
+
+### Option 2a — keep the numbers, fix only the fiction
+
+Rename it to something a totem-wielding Shaman can plausibly do — a Lightning
+Shield discharge, a Shock — and render it as a spell effect rather than a shot.
+
+- **Balance: zero, provably.** The attack name is a `&'static str` consumed only
+  by the combat log's own surfaces — the damage-breakdown aggregation, the
+  Results screen, the panel's short-label map. Nothing in the sim reads it back
+  (verified by grep across `src/`). Sim-identical; only log text changes.
+- **Code cost: NOT "one string".** Three items, and the second is a trap:
+  - `"Wand Shot"` at `auto_attack.rs:671` is a **shared `else` arm** covering
+    Mage, Priest and Warlock as well. A Shaman-specific rename needs a new
+    class-conditional arm; renaming the arm in place renames every caster's
+    wand.
+  - **Renaming the shared arm silently zeroes an existing probe.**
+    `tests/movement_probes.rs:6417` detects Mage wand shots with
+    `is_wand: line.contains("Wand Shot")`. Rename the shared arm and that count
+    becomes 0 for reasons nothing reports — the probe keeps running and stops
+    measuring. (A correctly scoped Shaman-only rename leaves it alone, which is
+    another reason to add the arm rather than edit the string.)
+  - `results_ui.rs:996` asserts `ability_topic("Wand Shot") == None`, plus a
+    re-bless of any snapshot whose mock carries the old label.
+- **What it does NOT fix:** the 30-yard code path with no weapon behind it
+  survives, and the next relic class inherits it. This is the option AS-97's
+  Tester meant by "fixing either alone just relocates the fiction" — it relocates
+  it into a name that sounds better.
+- **Implies:** the Shaman IS a 30-yard auto-attacker by design and its relic is
+  the implement. Coherent, but a new design claim rather than the status quo:
+  nothing chose it, `is_melee()` did.
+
+### Option 2b — give the Shaman a real ranged implement
+
+**Blocked by the proficiency table, not by taste.** `weapon_proficiency(Shaman)`
+makes Bow, Gun, Crossbow, Thrown **and Wand** all `Untrained`; only `Relic` is
+`Trained`, with the comment *"A Shaman's ranged socket is a Totem socket, not a
+bow socket."* That is Classic-faithful — Shamans have no ranged weapon.
+
+So this means either editing the proficiency table away from Classic, or
+inventing a damage-bearing Relic. The second has a trap worth naming:
+`attack_damage_min/max` and `attack_speed` are **free stats** under the
+item-level budget, so a damaging relic is a budget-free balance lever and the
+budget test would not push back on whatever number is chosen for it.
+
+### Option 3, not measured but nameable — keep 30yd, revert the damage
+
+Leave the ranged auto-attack where it is but stop the MainHand mace feeding it
+(back to the 5.6 DPS class base). Costs strictly less than Option 1 and strictly
+more than zero. I did not measure it and will not interpolate a win rate from a
+damage ratio; it is one more 520-match arm, about nine minutes.
+
+---
+
+## 6. The measurement arm
+
+The arm is not applied to this branch's source, but it **is committed**, as
+`docs/design/2026-09-20-as99-arm.patch`. Apply it to this branch's `src/` with
+`git apply` and rebuild:
+
+```sh
+git apply docs/design/2026-09-20-as99-arm.patch
+cargo build --release
+./target/release/arenasim --batch docs/design/2026-09-20-as99-sweep.jsonl --out /tmp/arm.csv
+diff /tmp/arm.csv docs/design/2026-09-20-as99-arm.csv     # expect no output
+```
+
+**The check is that last line — the OUTPUT — not the binary's hash.** Running
+the committed `sweep.jsonl` against an independently built arm reproduces
+`arm.csv` **520/520 rows byte-identical**, and the same holds for the base arm
+off this branch's unpatched source. Both arms replicate end-to-end from the
+repository, **from binaries whose hashes differ from the originals**.
+
+**Do not check the hash, and this is worth stating because the hash is the
+tempting thing to check.** Rust embeds absolute build paths in the binary, so
+the `sha256` depends on the directory it was compiled in. Rebuilding this patch
+in this session's worktree reproduced
+`9193b81b891227f805c050320f0dbbbd6cb81857ce73d5b732efb5a4a69a4905` — the hash of
+the binary that produced every figure in section 4 — but this PR's Tester,
+building the identical source elsewhere, got `66cd5d6f...`. Both are correct.
+
+So the two claims are different and only one of them travels:
+
+- **identical binary** is an ENVIRONMENT claim. It proves the revert in this
+  session was exact and nothing drifted between measuring and committing, which
+  is genuinely useful — and it is worthless to anyone building in another
+  directory, for whom it will simply appear to fail.
+- **identical output** is the REPRODUCTION claim, and it is the one that holds
+  for any reader anywhere.
+
+An earlier revision of this section quoted the hash as the verification step.
+That was wrong: a verification step that fails for everyone who is not the
+author is worse than none.
+
+What the patch contains:
+
+- `AutoAttackKind { Melee, Shot, Wand, None }` in `components/combatant.rs`;
+- one `Combatant` field, defaulted from the old class ladder verbatim (so any
+  un-equipped combatant is unchanged) and overwritten in `apply_equipment` from
+  the item in `class.weapon_slot()` — `None` when that socket holds no weapon;
+- pets keep the old ladder exactly (they carry no equipment);
+- **five of the seven sites** in section 1 read the derived value (`None`
+  `continue`s). The Windfury and Frost Armor gates were left on
+  `attacker_is_melee`.
+
+**That gap does not compromise the numbers, and the reason is checkable.** In
+the base arm the Shaman is `!is_melee`, so both procs are inert for it there by
+construction. In the measurement arm the Shaman landed **6 melee swings across
+24 matches**, all in the Rogue cell — a Rogue carries no Frost Armor, and six
+swings at a 12% Windfury chance is under one expected bonus swing across the
+whole slice. A faithful Option 1 that rewires both gates would therefore move
+these figures by less than their rounding. It is still the right thing to
+disclose, because the *behaviour* it enables (previous section) is a property of
+the option even where its damage contribution is negligible.
+
+The base binary was likewise rebuilt from the reverted tree in this session and
+hashed identically to the one that produced the measurements (`58112da2...`) —
+the same environment-specific integrity check, carrying the same caveat.
+
+**Committed alongside this doc**, so the whole experiment re-runs from the
+repository:
+
+| file | what it is |
+|---|---|
+| `2026-09-20-as99-arm.patch` | the arm; `git apply` it, rebuild, re-run the sweep |
+| `2026-09-20-as99-sweep.jsonl` | the single 520-config file BOTH arms ran |
+| `2026-09-20-as99-base.csv` | base results, 520 rows |
+| `2026-09-20-as99-arm.csv` | arm results, 520 rows |
+
+The two CSVs pair by `(label, seed)`, so section 4.2's deltas, z-scores and flip
+counts — and the split control's row-for-row identity — are all recomputable
+from the repository without rebuilding anything. Only section 4.3's arm column
+needs the patch.
