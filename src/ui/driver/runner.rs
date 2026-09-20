@@ -282,18 +282,24 @@ pub fn is_retryable(step: &Step) -> bool {
 /// of the machine that ran it:
 ///
 /// * `pointer.is_still()` is `velocity == 0`, and velocity comes from a
-///   0.1-SECOND position history. A synthetic move keeps the pointer "moving"
-///   for 0.1s afterwards no matter how many frames that spans.
+///   position history with a 0.1-SECOND window. How long that takes to drain
+///   after a synthetic move is not fixed — it depends on how many samples
+///   land at the same position, measured here at 10-12 frames — but it is a
+///   property of egui's input history, not a number the driver may assume.
+///   Note the direction: because the window is denominated in seconds, a
+///   FASTER machine fits MORE frames into it, so the frame count a fixed
+///   settle would need grows with the frame rate rather than staying put.
 /// * `smooth_scroll_delta` is an animation that decays over time, so a target
 ///   the driver had to SCROLL to needs strictly longer than one it did not.
 /// * `clicked_more_recently_than_moved` wants the move to land at least 0.1s
 ///   after the last click.
 ///
 /// Measured on a contended machine, the old 33-frame settle spanned
-/// 0.175-0.242s against a 0.1s requirement — a margin under 2x. Roughly
-/// double the frame rate and every hover in every script stops producing a
-/// tooltip. The client runs uncapped when vsync is off, so that is not a
-/// hypothetical.
+/// 0.175-0.242s against a 0.1s window, and the gates opened 10-12 frames
+/// after the move. Halve the frame time and that margin is gone — which
+/// nobody has run, because vsync pins this machine at 60fps, but it is the
+/// reason the constant could not be trusted. The client runs uncapped when
+/// vsync is off.
 ///
 /// The gates this does NOT mirror (an open popup, another tooltip already
 /// showing, the widget not actually hovered) are either impossible here or

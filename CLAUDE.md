@@ -931,11 +931,13 @@ right-click affordance can pass here and still look broken to someone using
 it. Ask what device a reporter used.
 
 **Never write a driver wait as a frame count unless the thing you are waiting
-for is measured in frames.** egui gates tooltips on wall-clock (a 0.1s
-velocity window, a decaying scroll animation), so a 30-frame hover settle was
-correct only on a slow enough machine: it passed for two agents under load and
-failed for the user on an idle M5 Max. `hover` waits on `tooltip_gate`, which
-asks egui directly. A frame count and a seconds constant are the same bug in
+for is measured in frames.** egui gates tooltips on wall-clock — chiefly
+`is_still()`, whose position history has a 0.1-SECOND window — so a 30-frame
+hover settle was correct only on a slow enough machine: it passed for two
+agents under load and failed for the user on an idle M5 Max. Worse, the
+required frame count GROWS with the frame rate, because a faster machine fits
+more samples into that window. `hover` waits on `tooltip_gate`, which asks
+egui directly. A frame count and a seconds constant are the same bug in
 different units.
 
 Full loop, both timing traps, and the shipped scripts:

@@ -92,12 +92,20 @@ reaches it*. For an input affordance, ask what device the reporter used before
 concluding anything. The same caution applies to any gesture the OS rewrites
 before winit sees it.
 
-Two smaller limits, both real:
+Three smaller limits, all real:
 
 * **It sees no pixels.** It knows a tooltip's closure ran, not that the tooltip
   is legible, correctly placed, or not drawn off-screen.
 * **Do not touch the mouse during a run.** Real `CursorMoved` events land in
   the same queue and will fight the synthetic ones.
+* **Every run so far has been with the window FOCUSED, and an unfocused run
+  may pace differently.** `bevy_winit` switches to `ReactiveLowPower` when the
+  window loses focus, and the driver's input is written as Bevy events rather
+  than delivered through winit — so it may not wake the loop, and frames then
+  arrive on the reactive timer instead of continuously. Nothing here depends
+  on a frame count any more, so this should be a slowdown rather than a
+  failure, but it is untested: if a script behaves oddly, check whether the
+  window had focus.
 
 ## Writing a script
 
@@ -257,13 +265,20 @@ after the last click.
 The first fix replaced a 3-frame settle with a 30-frame one. It was
 mutation-proved, pinned by a test, and verified green by two agents — and it
 was still wrong, because **a settle counted in frames is a wall-clock claim
-wearing the wrong unit.** Measured: 33 frames spanned 0.175–0.242s on a
-contended machine against a 0.1s requirement — a margin under **2x**. The
-client runs uncapped when vsync is off, so roughly doubling the frame rate
-makes every hover in every script stop producing a tooltip. It duly passed for
-two agents on a loaded machine and failed for the user on an idle one, at the
-second hover — the scrolled one, which needs strictly longer because it adds
-pointer samples and a live scroll animation.
+wearing the wrong unit.** Measured on a contended machine: 33 frames spanned
+0.175–0.242s, and the binding gate (`is_still()`) opened 10–12 frames after
+the move. **Halve the frame time and that margin is gone** — which nobody has
+run, because vsync pins this machine at 60fps, but it is the reason the
+constant could not be trusted, and the client runs uncapped when vsync is
+off. Note which way it goes: the history window is denominated in seconds, so
+a faster machine fits more frames into it and the frame count needed GROWS.
+
+It duly passed for two agents on a loaded machine and failed for the user on
+an idle one, at the second hover. Why the *second* specifically is not
+established: no hover in any instrumented run here ever scrolled
+(`time_since_last_scroll` was `inf` on all 761 frames), so the tempting
+explanation — that the scrolled target needs longer — is untested on this
+hardware and may not be the user's mechanism at all.
 
 `hover` now waits on `runner::tooltip_gate`, which asks egui the same
 questions `Response::should_show_hover_ui` asks, and completes when they are
