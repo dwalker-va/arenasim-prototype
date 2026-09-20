@@ -248,8 +248,8 @@ kernel for every one simulating, and it is tempting — I did it — to read tha
 as thrashing, because A ran at load 60 with 101 GB of 128 resident. Run B
 says otherwise: at load 6–8 with a third of the workers, the kernel cost per
 match is *the same* (0.85s against 0.92s). It is a property of the workload,
-present on a quiet box, and it is roughly **62% of the total CPU a match
-costs**.
+present on a quiet box, and it is **62–67% of the total CPU a match costs**
+(66.9% in run A, 62.3% in run B, 64.1% pooled over the two).
 
 That kills the inference I drew from run A alone. "A match costs 0.46
 CPU-seconds of `user`, so 18 cores should do ~40/sec" ignores the 0.9s of
@@ -262,21 +262,24 @@ sweep cost and it is not a scheduling problem.
 **Contention is real, and smaller than the card assumed.** A and B ran
 different sweeps, so their matches/sec are not comparable — the honest
 contention figure from this pair is effective cores, 2.10 to 2.79, about
-+33%. The properly controlled measurement is AS-99's, same binary and same
-520 configs with load as the only variable:
++33%. The tighter measurement is AS-99's, same binary and same 520 configs
+with load as the only variable:
 
 | | wall clock | matches/sec |
 |---|---|---|
 | under three-way load | 518.2s | 1.00 |
-| quiet, `--jobs 8` | 205.1s | 3.00 |
+| quiet, `--jobs 8` | 205.1s | 2.54 |
 
-**3x, with the two runs agreeing byte for byte.**
+**2.5x, with the two runs agreeing byte for byte.** One caveat on that pair,
+because this doc asks the same of everyone else: a committed CSV does not
+carry timing, so unlike every other number here it is a reported observation
+rather than something a reader can recompute from the repo.
 
-**So: size a sweep at 2–5 matches/sec, not 0.57 and not 40.** AS-122 reported
-3.7–5.6/sec quiet, which is the top of the observed range. Scheduling is
-worth somewhere between 1.3x and 3x of that, and it is free to claim — but a
-quiet box does not make authority scale cheap, it makes it about three times
-less expensive than the card feared.
+**So: size a sweep at 1–2.5 matches/sec, not 0.57 and not 40.** Every figure
+above lands in that band — 1.00 and 1.52 under load, 2.05 and 2.54 quiet.
+Scheduling is worth somewhere between 1.3x and 2.5x, and it is free to claim
+— but a quiet box does not make authority scale cheap, it makes it about two
+and a half times less expensive than the card feared.
 
 ### Thrashing costs wall clock and nothing else
 
@@ -320,13 +323,26 @@ MEASUREMENT, quietly biasing every mirrored slice this project has published.
 
 | run | mirrored slice | verdict |
 |---|---|---|
-| AS-86 relics | +1.9pt z=2.01 | significant |
+| AS-86 relics, Paladin 2v2 | +1.9pt z=2.01 | significant |
+| AS-86 relics, Shaman 2v2 | −0.4pt z=0.39 | nothing |
+| AS-86 relics, 3v3 | −0.3pt z=0.15 | nothing |
 | AS-87 caster 1H, base 1 | +2.2pt z=2.00 | significant |
 | AS-87 caster 1H, base 2 | +2.8pt z=2.81 | significant (correlated with base 1 — same seeds and comps) |
 | AS-87 caster 1H, base 3 | +2.7pt | **not** significant; a different cell (Priest CLEAN) was |
 | AS-54 Frost Armor | +0.1pt z=0.00 | nothing |
 | AS-97 Shaman weapon | −1.5pt z=0.45 | nothing |
 | AS-122 Rogue off-hand | −0.6pt z=0.23 | nothing (added 2026-09-20, recomputed from the committed CSVs) |
+
+**Nine slices, three significant, and the three sit on two cards** — AS-87's
+base 1 and base 2 are the same cell measured twice off shared seeds and comps,
+so the tally is closer to two independent hits than three.
+
+**One row is outside the probe's scope, and it is a null one.** AS-86
+contributed a 3v3 arm; this probe is 2v2-and-1v1 on `BasicArena` only. The
+significant AS-86 row is the 2v2 Paladin slice, which is inside scope, so the
+conclusion below covers every row it is asked to explain — but a reader
+auditing the tally should be told which row it does not reach rather than left
+to work it out.
 
 AS-60's row is deliberately absent: it armed **team 1 only** via a
 `team1_equipment` override, so its enemy-Rogue cells are a second one-sided

@@ -111,13 +111,31 @@ each other. Combined, team 1 won 50.49% of 5,391 decisive matches, p = 0.48.
 1,339 and 1,573 distinct durations across the two arms — this is 5,640
 different matches, not one match repeated. The draw rates differ sharply and
 for a legible reason: **247 draws (9.4%) on the diagonal against 2 (0.07%) on
-the swap-closed set.** Two identical comps grind to the 300s cap far more
-often than two different ones, which is what you would expect of symmetric
-attrition and is a small check that the diagonal really is mirrored.
+the swap-closed set.** Every one of those 247 is a self-mirror comp, and they
+resolve FAST rather than grinding: 195 of them inside 30 seconds, the largest
+single cluster 37 `Mage vs Mage` draws at exactly 11.95s. Nothing in either
+arm reached the 300s cap — all 5,640 rows carry `end_reason=kill`, and the
+longest match in the probe is 243.02s. These are the dying-blow draws
+`CLAUDE.md` describes: two identical comps at the same seed act in lockstep
+and land simultaneous mutual-lethal blows, which is a DRAW by design. That is
+a sharper check that the diagonal really is mirrored than any attrition
+signature would be — a comp ties itself this way only if both sides are
+running the same fight tick for tick.
 
 **The closure was checked, not assumed.** All 600 swap-closed cells have
 their mirror image present, so comp strength cancels across the set and the
 pooled rate is a slot measurement rather than a comp measurement.
+
+**The swap arm's interval errs wide, not narrow.** Of its 1,500 mirror pairs,
+**1,367 are comp-determined** — the same comp wins in both orderings, so the
+pair contributes exactly one team-1 win and one team-1 loss, with zero
+variance. Only **132 pairs are informative**, the ones where the slot-1 side
+won both orderings: **68 for team 1 against 64 for team 2**. The pooled 1,503
+of 2,998 is algebraically just 1,499 + (68 − 64). Treating all 2,998 matches
+as independent Bernoulli trials therefore OVERSTATES the variance, so the
+reported ±1.79pt — and the combined ±1.3pt — is *wider* than the run actually
+bought. That is the safe direction for a null: the real resolution is tighter
+than the one claimed, and the claim is the one being relied on.
 
 ## What this does and does not settle
 
@@ -139,12 +157,20 @@ comparisons, not of an effect.
 - **A slot effect below ±1.3pt.** Nothing here excludes one. It would be too
   small to produce the observed rows, which is the question that was asked.
 - **An interaction rather than a level.** This measures the *level* of any
-  slot advantage. A strictly conditional effect — one that appears only when
-  both sides get stronger, and vanishes at baseline — would not show up here.
-  It is a more contrived hypothesis than the one tested, and there is no
-  evidence for it; it is named so nobody reads this doc as excluding more
-  than it does.
-- **Anything about maps other than `BasicArena`,** or about 3v3.
+  slot advantage at baseline power, and a level probe is weaker against an
+  advantage that SCALES with power than against a constant one: a strictly
+  conditional effect — one that appears only when both sides get stronger,
+  and vanishes at baseline — would not show up here. That is named so nobody
+  reads this doc as excluding more than it does, but it is not a live
+  hypothesis. It is considerably more contrived than the one tested, no
+  evidence points at it, and AS-87's own history explains the rows without
+  it. **It does not warrant another sweep; treat the question as closed
+  until a row appears that the multiple-comparisons reading cannot hold.**
+- **Anything about maps other than `BasicArena`,** or about 3v3. One row in
+  the `sweep-tiers.md` tally is 3v3 — AS-86's — and this probe does not reach
+  it. It is a null row, and AS-86's *significant* row is the 2v2 Paladin
+  slice, which is in scope, so every row the conclusion is asked to explain
+  is covered.
 
 **The rule from AS-104 stands unchanged.** If a third *card* lands a
 significant mirrored slice, add its row to the tally in

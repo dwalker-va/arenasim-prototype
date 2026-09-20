@@ -529,7 +529,18 @@ The Paladin's **while-CC Divine Shield** (`try_divine_shield_while_cc`, the CC-b
 After editing, validate and sweep:
 ```bash
 cargo test                          # validate() + posture probes/unit tests
-scripts/hunter_2v2_matrix.sh 100    # 2v2-with-healer balance sweep (adapt teams as needed)
+```
+
+Then sweep at the tier the change calls for — see *Run a balance sweep* below
+and `docs/design/balance/sweep-tiers.md`. A retune is DIRECTIONAL unless its
+whole point is the magnitude:
+
+```bash
+scripts/gen_sweep.py --full 2 --exclude-double-healer \
+  --affects Priest --control-cells 8 --n 10 > /tmp/sweep.jsonl
+# one arm per movement.ron, then:
+scripts/paired_sweep.py before.csv after.csv \
+  --affects Priest --tier directional --expect nothing
 ```
 
 ### Class Design
@@ -649,7 +660,7 @@ scripts/gen_sweep.py --full 2 --exclude-double-healer \
   --affects Shaman --control-cells 8 --n 10 > /tmp/sweep.jsonl
 # 2. one arm per binary (or per config), same file both times
 target/release/arenasim --batch /tmp/sweep.jsonl --out before.csv \
-  --jobs 16 --trace-mode off
+  --jobs 6 --trace-mode off   # key --jobs off who else is sweeping, see below
 # 3. the analysis: control, four slices, McNemar, resolution floor, verdict
 scripts/paired_sweep.py before.csv after.csv \
   --affects Shaman --tier directional --expect nothing
@@ -661,17 +672,17 @@ null result means nothing without it. `scripts/agg_sweep.py` does single-arm
 win-rate tables; `scripts/{hunter,mage,shaman}_2v2_matrix.sh` and `--matrix N`
 are the older per-cell-CSV wrappers (columns per `src/headless/matrix.rs:217`).
 
-**Size a sweep at 2-5 matches/sec.** Measured: 1.52/sec at `--jobs 16` under
-three-way load, 2.05/sec at `--jobs 6` on a quiet box, and AS-122 reported
-3.7-5.6/sec quiet. A match costs ~1.37 CPU-seconds, **62% of it kernel time
-that is present on a quiet box too**, and the batch runner reaches only 2-3
-effective cores of 18 whatever `--jobs` says — so contention is worth roughly
-1.3-3x, not the order of magnitude the raw `sys` time suggests. Size `--jobs`
-off how many agents are sweeping RIGHT NOW rather than a number picked at
-launch; a conservative 6 chosen off `uptime` still lost once a third agent
-started. Contention costs wall clock and nothing else — outcomes do not depend
-on how the box was scheduled, so a busy box returns what a quiet one would,
-later.
+**Size a sweep at 1-2.5 matches/sec.** Measured: 1.00/sec and 1.52/sec at
+`--jobs 16` under three-way load, 2.05/sec at `--jobs 6` and 2.54/sec at
+`--jobs 8` on a quiet box. A match costs ~1.37 CPU-seconds, **62-67% of it
+kernel time that is present on a quiet box too**, and the batch runner reaches
+only 2-3 effective cores of 18 whatever `--jobs` says — so contention is worth
+roughly 1.3-2.5x, not the order of magnitude the raw `sys` time suggests.
+Size `--jobs` off how many agents are sweeping RIGHT NOW rather than a number
+picked at launch; a conservative 6 chosen off `uptime` still lost once a
+third agent started. Contention costs wall clock and nothing else — outcomes
+do not depend on how the box was scheduled, so a busy box returns what a
+quiet one would, later.
 
 ### Diagnose AI behaviour with the decision trace
 

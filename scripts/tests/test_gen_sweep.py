@@ -291,14 +291,32 @@ class AffectsTests(GenTestCase):
         controls sharing two distinct opponents, because the stride was a
         multiple of the inner loop's length. The digest ordering is what fixes
         that, and this is the assertion that would have caught it.
+
+        The selection is pinned member by member rather than by a spread
+        floor. A `>=` floor reads as a guard but cannot say which cells were
+        chosen, so a reordering that preserved the count while degrading the
+        spread would pass it. Changing the digest or the enumeration is
+        allowed -- it just has to be a deliberate re-bless of this list.
         """
         run = self.assertOk(
             self.gen("--full", "2", "--exclude-double-healer", "--n", "1",
                      "--affects", "Shaman", "--control-cells", "8"))
         control = [c for c in self.cells(run)
                    if "Shaman" not in c[0] and "Shaman" not in c[1]]
-        self.assertGreaterEqual(len(set(c[0] for c in control)), 5)
-        self.assertGreaterEqual(len(set(c[1] for c in control)), 5)
+        self.assertEqual(set(control), {
+            (("Warrior", "Mage"), ("Mage", "Warlock")),
+            (("Warrior", "Warlock"), ("Warrior", "Priest")),
+            (("Warrior", "Warlock"), ("Rogue", "Hunter")),
+            (("Mage", "Warlock"), ("Warrior", "Mage")),
+            (("Rogue", "Priest"), ("Warrior", "Priest")),
+            (("Rogue", "Warlock"), ("Warlock", "Paladin")),
+            (("Priest", "Hunter"), ("Warlock", "Paladin")),
+            (("Warlock", "Paladin"), ("Warrior", "Hunter")),
+        })
+        # The property that list has to keep, stated so a re-bless is checked
+        # against the historical failure (8 controls, 2 distinct opponents).
+        self.assertEqual(len(set(c[0] for c in control)), 7)
+        self.assertEqual(len(set(c[1] for c in control)), 6)
 
     def test_the_same_arguments_regenerate_the_same_control(self):
         """The two arms of a paired run may generate the sweep separately."""

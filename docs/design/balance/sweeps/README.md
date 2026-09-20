@@ -50,7 +50,9 @@ question. 5,640 configs, every line pinned to `BasicArena`. Regenerate with
 
 ```bash
 <binary> --batch docs/design/balance/sweeps/2026-09-20-as104-slot-diagonal.jsonl \
-  --out diag.csv --jobs 16 --trace-mode off      # and again for -slot-swap
+  --out diag.csv --jobs 6 --trace-mode off       # and again for -slot-swap
+# `--jobs` keys off how many agents are sweeping right now; 6 on a quiet box.
+# See "Sizing --jobs" in ../sweep-tiers.md — 16 is too many.
 docs/design/balance/sweeps/2026-09-20-as104-slot-symmetry.py diag.csv swap.csv
 ```
 

@@ -4,10 +4,15 @@
 Four balance cards produced a tally in which two showed a significant team-1
 gain in the MIRRORED slice -- the slice where the effect should wash. AS-104
 proposed settling it with "a mirrored slice on a NULL change, two identical
-binaries, same seeds". That probe is VACUOUS: the sim is deterministic, so two
-identical binaries produce identical CSVs and every flip count is zero. And
-there is no constructible placebo either -- any change that flips a match
-flipped it because the change reached it.
+binaries, same seeds". That probe cannot answer the question, whichever way
+determinism goes. Two identical binaries at identical seeds either agree or
+they do not. If they agree, every flip count is zero and McNemar's z is 0 --
+the run has no way to say anything about slot 1. If they disagree, what it has
+found is a determinism defect, which is real and worth knowing and still says
+nothing about slot 1. (Determinism here is a property the codebase WORKS TO
+MAINTAIN, not an axiom -- see AS-58 and AS-75 under "What a byte-identity
+result proves" in CLAUDE.md.) And there is no constructible placebo either --
+any change that flips a match flipped it because the change reached it.
 
 What IS answerable is the hypothesis's necessary condition. For a change to
 produce a team-1 gain in a slice where both sides carry it, slot 1 must carry
@@ -122,7 +127,7 @@ def main():
     print("swap-closure check: %d cells, %d without their mirror image"
           % (len(cells), len(unmirrored)))
     if unmirrored:
-        print("  WARNING: the set is NOT closed under swapping the sides, so "
+        print("  FAILED: the set is NOT closed under swapping the sides, so "
               "comp strength does not cancel and the pooled rate above is not "
               "a slot measurement.")
 
@@ -135,6 +140,11 @@ def main():
           % (combined_t1, combined_n, 100 * combined_t1 / combined_n,
              100 * lo, 100 * hi, binom_two_sided(combined_t1, combined_n)))
 
+    # Non-zero on an unclosed swap set, matching paired_sweep.py's control:
+    # the pooled rate above is not a slot measurement, and a caller running
+    # this unattended must not read a printed number as a passing one.
+    return 1 if unmirrored else 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
