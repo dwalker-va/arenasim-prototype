@@ -163,10 +163,30 @@ row-for-row identity. The diff cannot touch a comp with no Shaman in it.
 
 This is a **split control** — cells the change cannot reach, required to come out
 bit-identical — and it is a correctness check on the instrument, not a
-statistical one. It is deliberately not a null probe (two identical binaries on
-the same seeds), which AS-104 established is vacuous here: the sim is
-deterministic, so such a run is identical by construction and every flip count is
-zero before it starts.
+statistical one.
+
+**Why it is used instead of a same-binary null probe, stated carefully, because
+the obvious reason is wrong.** Determinism here is a property the codebase
+*works to maintain*, not an axiom: CLAUDE.md's *What a byte-identity result
+proves* records AS-58, where hash-ordered float reductions reseeded per process
+produced genuine run-to-run differences with **no code change** (Rogue
+`crit_chance` taking three distinct bit patterns over 40 runs of one unmodified
+binary), and AS-75 leaves four such sites latent. So "identical by construction"
+is not available as an argument, and CLAUDE.md in fact *recommends* the
+same-binary control as a diagnostic for an unattributable difference.
+
+The reason is simpler and empirical: **the split control strictly subsumes a null
+probe.** A null probe asks whether one binary run twice agrees. The split control
+ran **two different binaries** over 120 seeds and got agreement on every field —
+the same assurance and more, since it also proves the diff does not reach those
+cells. Running the weaker test as well would add nothing.
+
+That assurance is **measured rather than assumed**: this PR's Tester rebuilt the
+base binary independently, re-ran the committed `sweep.jsonl`, and got **520/520
+rows byte-identical including every duration to 2dp** — on a differently-loaded
+box, with different worker scheduling, from a separately compiled binary.
+Independently, rebuilding the base binary from the reverted tree in this session
+reproduced its `sha256` exactly (`58112da2...`).
 
 ### 4.2 Win rate — the Shaman side loses ~19 points
 
@@ -373,7 +393,23 @@ damage ratio; it is one more 520-match arm, about nine minutes.
 
 ## 6. The measurement arm
 
-The arm is **not in this branch** — it was built, measured and reverted. It is:
+The arm is not applied to this branch's source, but it **is committed**, as
+`docs/design/2026-09-20-as99-arm.patch`. Apply it to this branch's `src/` with
+`git apply` and rebuild:
+
+```sh
+git apply docs/design/2026-09-20-as99-arm.patch
+cargo build --release          # -> sha256 9193b81b...
+```
+
+**That reproduces the measured binary exactly, not merely an equivalent one.**
+The patch was reconstructed after the fact and verified by rebuilding from it:
+the result hashes `9193b81b891227f805c050320f0dbbbd6cb81857ce73d5b732efb5a4a69a4905`,
+bit-identical to the binary that produced every figure in section 4. So a
+reader re-running `2026-09-20-as99-sweep.jsonl` against it is running the same
+experiment rather than a re-implementation of it.
+
+What the patch contains:
 
 - `AutoAttackKind { Melee, Shot, Wand, None }` in `components/combatant.rs`;
 - one `Combatant` field, defaulted from the old class ladder verbatim (so any
@@ -398,6 +434,17 @@ The base binary was rebuilt from the reverted tree and hashes identically to the
 one that produced the measurements (`58112da2...`), so the revert is exact and
 the build reproducible.
 
-Artifacts (session scratchpad, not committed): `sweep.jsonl` — the single config
-file both arms ran — plus `base.csv`, `arm.csv`, `analyse.py`, `mech_count.py`,
-`share.py` and the 48 mechanism logs.
+**Committed alongside this doc**, so the whole experiment re-runs from the
+repository:
+
+| file | what it is |
+|---|---|
+| `2026-09-20-as99-arm.patch` | the arm, rebuilding to `sha256 9193b81b...` |
+| `2026-09-20-as99-sweep.jsonl` | the single 520-config file BOTH arms ran |
+| `2026-09-20-as99-base.csv` | base results, 520 rows |
+| `2026-09-20-as99-arm.csv` | arm results, 520 rows |
+
+The two CSVs pair by `(label, seed)`, so section 4.2's deltas, z-scores and flip
+counts — and the split control's row-for-row identity — are all recomputable
+from the repository without rebuilding anything. Only section 4.3's arm column
+needs the patch.
