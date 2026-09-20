@@ -64,12 +64,18 @@ Hunter's Auto Shot** — delivered at 30 yards by a healer holding a totem.
 
 The card opens "the client renders it wielding that mace." **It does not.**
 
-`class_weapon_loadout` (`play_match/mod.rs:1117`) has arms for Warrior, Rogue,
-Hunter and Paladin and `_ => &[]`. Its own comment says so: *"Classes not listed
-hold nothing (casters, Shaman) — their auto-attack swing signals no-op against
-zero sockets."* The Shaman therefore has **zero `WeaponSocket` children**: no
-mace model, no swing animation, and no thrown projectile. The cosmetic arrow is
-additionally gated on `WeaponKind::Bow`, so it cannot fire either.
+Three independent things each rule it out, so the conclusion does not rest on
+any one of them:
+
+1. **No weapon set.** `class_weapon_loadout` (`play_match/mod.rs:1117`) has arms
+   for Warrior, Rogue, Hunter and Paladin and `_ => &[]`. Its own comment says
+   so: *"Classes not listed hold nothing (casters, Shaman) — their auto-attack
+   swing signals no-op against zero sockets."*
+2. **No sockets to animate.** The Shaman therefore has **zero `WeaponSocket`
+   children**, and `consume_swing_signals` iterates sockets — so its landed-attack
+   marker matches nothing and is despawned. No mace model, no swing.
+3. **No projectile even if it had one.** The cosmetic arrow is gated on
+   `WeaponKind::Bow` (`weapon_swing.rs:864`), which a mace would not satisfy.
 
 **The fiction is real but it is TEXTUAL.** Where a player meets it is the
 in-client Combat Log panel (`rendering/combat_log.rs:118`), which prints every
@@ -96,8 +102,13 @@ Two consequences that change how the options price out:
 
 Two binaries, one config file, identical seeds, one variable.
 
-- **base** = clean `aef713c`, `sha256 58112da2...`
-- **arm** = base plus a derived-from-equipment model (section 6), `sha256 9193b81b...`
+- **base** = clean `aef713c`
+- **arm** = base plus a derived-from-equipment model, committed as
+  `2026-09-20-as99-arm.patch` (section 6)
+
+(Both were `sha256 58112da2...` and `9193b81b...` as built here, but those
+hashes are directory-dependent and are not the way to check a rebuild — see
+section 6.)
 
 **Tier: DIRECTIONAL** in AS-104's sense — a focused slice of the cells the change
 reaches, sized in minutes, with a full-strength control. The per-cell figures in
@@ -136,7 +147,12 @@ one simulating, averaging 2.1 busy cores of 18. Its measured intrinsic cost is
 **0.46 CPU-seconds per match**, and AS-122 saw 3.7-5.6 matches/sec on a quiet
 box. So the honest reading is that this measurement's *true* cost is a few
 minutes, and the 1.0-1.2/s figures above are an artifact of three agents
-oversubscribing 18 cores. AS-104's number supersedes the comparison an earlier
+oversubscribing 18 cores.
+
+**Directly confirmed afterwards.** Re-running the identical `sweep.jsonl`
+against the identical arm binary on the same machine once it had gone quiet
+took **205.1s for 520 matches (3.0/s)** at `--jobs 8` — a 3x speedup from load
+alone, with byte-identical results. Contention, not cost. AS-104's number supersedes the comparison an earlier
 draft of this doc drew against AS-86's 0.57/s.
 
 ### The harness detects the change before any figure is cited
@@ -433,15 +449,37 @@ The arm is not applied to this branch's source, but it **is committed**, as
 
 ```sh
 git apply docs/design/2026-09-20-as99-arm.patch
-cargo build --release          # -> sha256 9193b81b...
+cargo build --release
+./target/release/arenasim --batch docs/design/2026-09-20-as99-sweep.jsonl --out /tmp/arm.csv
+diff /tmp/arm.csv docs/design/2026-09-20-as99-arm.csv     # expect no output
 ```
 
-**That reproduces the measured binary exactly, not merely an equivalent one.**
-The patch was reconstructed after the fact and verified by rebuilding from it:
-the result hashes `9193b81b891227f805c050320f0dbbbd6cb81857ce73d5b732efb5a4a69a4905`,
-bit-identical to the binary that produced every figure in section 4. So a
-reader re-running `2026-09-20-as99-sweep.jsonl` against it is running the same
-experiment rather than a re-implementation of it.
+**The check is that last line — the OUTPUT — not the binary's hash.** Running
+the committed `sweep.jsonl` against an independently built arm reproduces
+`arm.csv` **520/520 rows byte-identical**, and the same holds for the base arm
+off this branch's unpatched source. Both arms replicate end-to-end from the
+repository, **from binaries whose hashes differ from the originals**.
+
+**Do not check the hash, and this is worth stating because the hash is the
+tempting thing to check.** Rust embeds absolute build paths in the binary, so
+the `sha256` depends on the directory it was compiled in. Rebuilding this patch
+in this session's worktree reproduced
+`9193b81b891227f805c050320f0dbbbd6cb81857ce73d5b732efb5a4a69a4905` — the hash of
+the binary that produced every figure in section 4 — but this PR's Tester,
+building the identical source elsewhere, got `66cd5d6f...`. Both are correct.
+
+So the two claims are different and only one of them travels:
+
+- **identical binary** is an ENVIRONMENT claim. It proves the revert in this
+  session was exact and nothing drifted between measuring and committing, which
+  is genuinely useful — and it is worthless to anyone building in another
+  directory, for whom it will simply appear to fail.
+- **identical output** is the REPRODUCTION claim, and it is the one that holds
+  for any reader anywhere.
+
+An earlier revision of this section quoted the hash as the verification step.
+That was wrong: a verification step that fails for everyone who is not the
+author is worse than none.
 
 What the patch contains:
 
@@ -464,16 +502,16 @@ these figures by less than their rounding. It is still the right thing to
 disclose, because the *behaviour* it enables (previous section) is a property of
 the option even where its damage contribution is negligible.
 
-The base binary was rebuilt from the reverted tree and hashes identically to the
-one that produced the measurements (`58112da2...`), so the revert is exact and
-the build reproducible.
+The base binary was likewise rebuilt from the reverted tree in this session and
+hashed identically to the one that produced the measurements (`58112da2...`) —
+the same environment-specific integrity check, carrying the same caveat.
 
 **Committed alongside this doc**, so the whole experiment re-runs from the
 repository:
 
 | file | what it is |
 |---|---|
-| `2026-09-20-as99-arm.patch` | the arm, rebuilding to `sha256 9193b81b...` |
+| `2026-09-20-as99-arm.patch` | the arm; `git apply` it, rebuild, re-run the sweep |
 | `2026-09-20-as99-sweep.jsonl` | the single 520-config file BOTH arms ran |
 | `2026-09-20-as99-base.csv` | base results, 520 rows |
 | `2026-09-20-as99-arm.csv` | arm results, 520 rows |
