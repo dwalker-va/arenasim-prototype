@@ -244,23 +244,13 @@ impl<'a> CombatContext<'a> {
             || self.has_aura(AuraType::Incapacitate)
     }
 
-    /// Check if an entity is currently CC'd (Stun, Fear, Root, or Polymorph).
+    /// Check if an entity is currently under hard CC — see [`is_hard_cc`] for
+    /// the membership and why it is spelled out there rather than here.
     /// Useful for preventing CC overlap on targets.
     pub fn is_ccd(&self, entity: Entity) -> bool {
         self.active_auras
             .get(&entity)
-            .map(|auras| {
-                auras.iter().any(|a| {
-                    matches!(
-                        a.effect_type,
-                        AuraType::Stun
-                            | AuraType::Fear
-                            | AuraType::Root
-                            | AuraType::Polymorph
-                            | AuraType::Incapacitate
-                    )
-                })
-            })
+            .map(|auras| auras.iter().any(|a| is_hard_cc(a.effect_type)))
             .unwrap_or(false)
     }
 
@@ -803,6 +793,65 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         | AuraType::CastTimeIncrease
         | AuraType::AttackPowerReduction
         | AuraType::AttackSpeedSlow => 0,
+    }
+}
+
+/// Is this aura type HARD crowd control — an effect the AI treats as "this
+/// target is already locked down, do not spend another CC on it"?
+///
+/// Written as an exhaustive `match` with NO wildcard, and that is the whole
+/// point of the function existing at all. It used to be a `matches!` inline in
+/// [`CombatContext::is_ccd`], and a `matches!` has an implicit `false` arm: a
+/// new `AuraType` that IS hard CC reads as not-CC everywhere `is_ccd` gates —
+/// burst windows, cast guards, healer-CC checks — with nothing anywhere
+/// failing to say so. The doc comment on `is_ccd` had already drifted (it
+/// listed four types for a list of five) without a single test noticing.
+///
+/// Spelled out, adding a variant to `AuraType` cannot build until someone
+/// decides which side of this line it falls on. Same shape, and for the same
+/// reason, as [`dispel_priority`] below — whose own comment records what a
+/// wildcard cost the last time: `Incapacitate` and `Silence` sat ungraded for
+/// the life of the project because they fell through one.
+pub const fn is_hard_cc(aura: AuraType) -> bool {
+    match aura {
+        // Acting is prevented outright, or movement is (a rooted target is
+        // still a target you should not also sheep).
+        AuraType::Stun
+        | AuraType::Fear
+        | AuraType::Root
+        | AuraType::Polymorph
+        | AuraType::Incapacitate => true,
+
+        // Everything else: impairments, buffs, debuffs, damage and healing
+        // effects. None of them stop a target acting, so none of them make a
+        // fresh CC redundant.
+        AuraType::MovementSpeedSlow
+        | AuraType::MaxHealthIncrease
+        | AuraType::DamageOverTime
+        | AuraType::SpellSchoolLockout
+        | AuraType::HealingReduction
+        | AuraType::MaxManaIncrease
+        | AuraType::AttackPowerIncrease
+        | AuraType::ShadowSight
+        | AuraType::Absorb
+        | AuraType::WeakenedSoul
+        | AuraType::DamageReduction
+        | AuraType::CastTimeIncrease
+        | AuraType::DamageTakenReduction
+        | AuraType::DamageImmunity
+        | AuraType::SpellResistanceBuff
+        | AuraType::AttackPowerReduction
+        | AuraType::CritChanceIncrease
+        | AuraType::ManaRegenIncrease
+        | AuraType::AttackSpeedSlow
+        | AuraType::LockoutDurationReduction
+        | AuraType::FrostArmorBuff
+        | AuraType::Silence
+        | AuraType::WeaponPoison
+        | AuraType::SpellPowerIncrease
+        | AuraType::HealingOverTime
+        | AuraType::WindfuryBuff
+        | AuraType::FearImmunity => false,
     }
 }
 
