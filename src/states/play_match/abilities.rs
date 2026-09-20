@@ -8,9 +8,45 @@ use super::components::{ActiveAuras, AuraType, Combatant};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// Spell schools - determines which spells share lockouts when interrupted.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
-pub enum SpellSchool {
+/// Declare [`SpellSchool`] and everything derived from it: [`SpellSchool::all`].
+///
+/// The variant list is written ONCE. `all()` expands from the same tokens as
+/// the enum, so a school cannot exist without also being enumerable — the
+/// shape `item_ids!` (see `super::equipment`) uses for `ItemId`, for the same
+/// reason.
+///
+/// `all()` used to be a hand-written slice below the enum, and a hand-written
+/// slice goes stale in silence. Adding a school drags you into the exhaustive
+/// matches — the compiler sees to that — but never into the slice, and every
+/// sweep written over `all()` then quietly stops covering the new school while
+/// still reading as whole-enum coverage: the encyclopedia's filter chips would
+/// never offer it, and the dispel-derivation guards in `components::auras`
+/// would skip it. Measured, not theorised: a ninth variant added to the enum
+/// and classified at all seven exhaustive matches left `all()` at eight of
+/// nine with the school's own guard test still green.
+macro_rules! spell_schools {
+    ($( $(#[$meta:meta])* $variant:ident ),* $(,)?) => {
+        /// Spell schools - determines which spells share lockouts when interrupted.
+        ///
+        /// Declared via [`spell_schools!`].
+        #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+        pub enum SpellSchool {
+            $( $(#[$meta])* $variant, )*
+        }
+
+        impl SpellSchool {
+            /// Every school, in declaration order. The single source of truth
+            /// for any surface that enumerates schools (the encyclopedia's
+            /// filter chips). Generated from the enum's own token list, so it
+            /// cannot fall behind it.
+            pub const fn all() -> &'static [SpellSchool] {
+                &[ $( SpellSchool::$variant, )* ]
+            }
+        }
+    };
+}
+
+spell_schools! {
     /// Physical abilities (melee attacks, weapon strikes)
     Physical,
     /// Frost magic (Frostbolt, Frost Nova)
@@ -30,22 +66,6 @@ pub enum SpellSchool {
 }
 
 impl SpellSchool {
-    /// Every school, in declaration order. The single source of truth for any
-    /// surface that enumerates schools (the encyclopedia's filter chips), so a
-    /// school added to the enum joins those lists without a second edit.
-    pub const fn all() -> &'static [SpellSchool] {
-        &[
-            SpellSchool::Physical,
-            SpellSchool::Frost,
-            SpellSchool::Holy,
-            SpellSchool::Shadow,
-            SpellSchool::Arcane,
-            SpellSchool::Fire,
-            SpellSchool::Nature,
-            SpellSchool::None,
-        ]
-    }
-
     /// Canonical per-school RGB (sRGB bytes) — the single color authority shared
     /// by the View Combatant UI (as `egui::Color32`) and world-space casting
     /// visuals (as `bevy::Color`). WoW-canonical hues; exhaustive so a new
@@ -267,79 +287,115 @@ pub fn is_silenced(caster: &super::components::Combatant, auras: Option<&ActiveA
 pub fn is_spell_school_locked(spell_school: SpellSchool, auras: Option<&ActiveAuras>) -> bool {
     if let Some(auras) = auras {
         auras.auras.iter().any(|aura| {
-            if aura.effect_type == AuraType::SpellSchoolLockout {
-                // Convert magnitude back to spell school
-                let locked_school = match aura.magnitude as u8 {
-                    0 => SpellSchool::Physical,
-                    1 => SpellSchool::Frost,
-                    2 => SpellSchool::Holy,
-                    3 => SpellSchool::Shadow,
-                    4 => SpellSchool::Arcane,
-                    5 => SpellSchool::Fire,
-                    6 => SpellSchool::Nature,
-                    7 => SpellSchool::None,
-                    _ => SpellSchool::None,
-                };
-                locked_school == spell_school
-            } else {
-                false
-            }
+            aura.effect_type == AuraType::SpellSchoolLockout
+                // The decode is `SpellSchool::from_lockout_magnitude` and only
+                // that. This carried its own copy of the magnitude table — the
+                // same hand-maintained-list defect one layer down, and the
+                // third copy of a codec that has exactly one correct answer.
+                && SpellSchool::from_lockout_magnitude(aura.magnitude) == spell_school
         })
     } else {
         false
     }
 }
 
+/// Guards for the school codec.
+///
+/// `SpellSchool::all()` going stale is no longer something these tests have to
+/// catch — `spell_schools!` generates it from the enum's own tokens, so the
+/// omission cannot be written. What is left to guard is the one part of the
+/// codec the compiler cannot reach: [`SpellSchool::from_lockout_magnitude`]
+/// ends in a wildcard, so a new school given an unmapped magnitude decodes to
+/// `None` rather than failing to build.
 #[cfg(test)]
 mod spell_school_tests {
     use super::*;
+    use crate::states::play_match::components::Aura;
 
-    /// `SpellSchool::all()` must stay exhaustive.
+    /// No two schools share a lockout magnitude.
     ///
-    /// THE EXHAUSTIVE MATCH IS THE ONLY GUARD. A new variant fails to compile
-    /// here, which is what drags whoever added it into this file; the hope is
-    /// that they then also add it to the slice. Neither assertion below can
-    /// enforce that, and it is worth being exact about why, because a comment
-    /// that credits them with it is how the real guard gets deleted as
-    /// redundant:
-    ///
-    /// - `seen == 8` catches the slice growing past the match (a ninth entry
-    ///   makes `seen` 9), but NOT the slice staying at eight while the enum
-    ///   grows. Add the variant to the or-pattern only and `all()` still yields
-    ///   8 items, `seen` is still 8, and this test is green with `all()` stale.
-    /// - `sorted.len() == 8` is a DEDUP check over the eight entries `all()`
-    ///   did list. An omitted school is not in that list, so it cannot be
-    ///   detected as a duplicate of anything. Inert for the omission case.
-    ///
-    /// Both counts are also the literal 8 rather than a derived one, so neither
-    /// moves when the enum does. Adding a school means editing `all()` by hand
-    /// and bumping both — the compile error is the reminder to do it.
+    /// The lockout aura carries its school in a single `f32`, so a collision
+    /// means an interrupt locks out the wrong school with nothing to notice.
+    /// Counted against `all()` rather than a literal, so it moves with the
+    /// enum instead of needing a bump — which is what the old `seen == 8`
+    /// assertion needed, and why it could not see the omission it was written
+    /// for.
     #[test]
-    fn all_lists_every_school() {
-        let mut seen = 0;
-        for school in SpellSchool::all() {
-            seen += match school {
-                SpellSchool::Physical
-                | SpellSchool::Frost
-                | SpellSchool::Holy
-                | SpellSchool::Shadow
-                | SpellSchool::Arcane
-                | SpellSchool::Fire
-                | SpellSchool::Nature
-                | SpellSchool::None => 1,
-            };
-        }
-        assert_eq!(
-            seen, 8,
-            "SpellSchool::all() no longer lists 8 schools — if a school was added, \
-             bump this count and the dedup count below"
-        );
-        let mut sorted: Vec<u8> = SpellSchool::all()
+    fn lockout_magnitudes_are_unique_across_every_school() {
+        let mut magnitudes: Vec<u8> = SpellSchool::all()
             .iter()
             .map(|s| s.to_lockout_magnitude() as u8)
             .collect();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), 8, "SpellSchool::all() lists a school twice");
+        let listed = magnitudes.len();
+        magnitudes.sort_unstable();
+        magnitudes.dedup();
+        assert_eq!(
+            magnitudes.len(),
+            listed,
+            "two of the {listed} schools encode to the same lockout magnitude — \
+             the codec cannot tell them apart"
+        );
+        assert!(listed >= 8, "the school list should not shrink silently");
+    }
+
+    /// Every school survives the lockout codec round trip.
+    ///
+    /// This is the guard that catches an unclassified NEW school.
+    /// `to_lockout_magnitude` is exhaustive, so a new school must be given a
+    /// magnitude; give it an unmapped one and it decodes to `None` here, give
+    /// it an existing one and the uniqueness check above fires. Either way the
+    /// omission is loud instead of silently locking out the wrong school.
+    #[test]
+    fn every_school_round_trips_through_the_lockout_codec() {
+        for &school in SpellSchool::all() {
+            let magnitude = school.to_lockout_magnitude();
+            assert_eq!(
+                SpellSchool::from_lockout_magnitude(magnitude),
+                school,
+                "{school:?} encodes to {magnitude} but decodes to something else — \
+                 from_lockout_magnitude's wildcard swallowed it"
+            );
+        }
+    }
+
+    /// The lockout READER agrees with the codec for every school, and answers
+    /// `false` for every other school. Swept over `all()`, so a new school is
+    /// covered the moment it is declared.
+    #[test]
+    fn is_spell_school_locked_reads_every_school() {
+        for &locked in SpellSchool::all() {
+            let auras = ActiveAuras {
+                auras: vec![Aura {
+                    effect_type: AuraType::SpellSchoolLockout,
+                    magnitude: locked.to_lockout_magnitude(),
+                    ..Default::default()
+                }],
+            };
+            for &probe in SpellSchool::all() {
+                assert_eq!(
+                    is_spell_school_locked(probe, Some(&auras)),
+                    probe == locked,
+                    "a lockout on {locked:?} answered wrongly for {probe:?}"
+                );
+            }
+        }
+    }
+
+    /// An aura that is not a lockout never locks anything out.
+    #[test]
+    fn a_non_lockout_aura_locks_nothing() {
+        let auras = ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::Stun,
+                magnitude: SpellSchool::Frost.to_lockout_magnitude(),
+                ..Default::default()
+            }],
+        };
+        for &probe in SpellSchool::all() {
+            assert!(
+                !is_spell_school_locked(probe, Some(&auras)),
+                "a Stun carrying a Frost-shaped magnitude locked out {probe:?}"
+            );
+        }
     }
 }
