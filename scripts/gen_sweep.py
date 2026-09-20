@@ -20,6 +20,11 @@ gen_sweep.py --t1 'Hunter+{p}' --t2-size 2 --n 20 --exclude-double-healer > /tmp
 # 3v3: a fixed comp vs every distinct opposing triple (no all-healer)
 gen_sweep.py --t1 'Hunter+Priest+Warrior' --t2-size 3 --n 20 > /tmp/h3v3.jsonl
 
+# DIRECTIONAL tier: every cell a Shaman change can reach, plus 8 control cells
+# it cannot. Cuts the cells, never the seeds -- see the note below.
+gen_sweep.py --full 2 --exclude-double-healer --affects Shaman --n 10 \
+  > /tmp/shaman_directional.jsonl    # 2,330 matches, not 62,500
+
 # Strategy-var sweep: run the generator once per variant with --extra and
 # --label-suffix, then concatenate. --extra is merged into every config and the
 # suffix keeps the variants distinct when aggregating.
@@ -39,8 +44,14 @@ Notes
 - `--extra` is shallow-merged into each config (JSON object). Any field of
   HeadlessMatchConfig works: team1_hunter_pet_types, team1_rogue_openers,
   team1_warrior_shouts, team1_mage_armors, team1_paladin_auras, equipment, etc.
+- `--affects` is the DIRECTIONAL tier's one lever: keep the cells the change
+  can reach and a sample of the ones it cannot, at the same seeds. It cuts
+  CELLS and never seeds, because in a paired design the significance comes
+  from the flip count across the whole run rather than from per-cell
+  precision. See `docs/design/balance/sweep-tiers.md`.
 """
 import argparse
+import hashlib
 import itertools
 import json
 import sys
@@ -98,6 +109,56 @@ def enumerate_opponents(size, exclude_double_healer, exclude_all_healer):
         yield list(combo)
 
 
+def reaches(team1, team2, affected):
+    """True when the change can touch this cell at all."""
+    return bool((set(team1) | set(team2)) & affected)
+
+
+def sample_spread(cells, keep):
+    """`keep` indices into `cells`, spread over BOTH team slots.
+
+    The control's job is to cover the comps the change cannot reach, so the
+    head of the enumeration -- all one corner of that space -- is the wrong
+    sample. Even SPACING is wrong too, and not obviously: the enumeration is a
+    nested product (team1 outer, team2 inner), so a constant stride aliases
+    against the inner dimension. Measured on the 400 Shaman-free cells of the
+    2v2 matrix, a stride of 50 returned eight controls sharing just TWO
+    distinct opponents. Ordering by a digest of the cell breaks that alias in
+    both slots.
+
+    The digest is `blake2b`, not `hash()`, which is salted per process: the two
+    arms of a paired run may generate the sweep separately, and a control
+    sampled differently in each arm would not be a control at all.
+    """
+    if keep <= 0:
+        return []
+    if keep >= len(cells):
+        return list(range(len(cells)))
+    key = [hashlib.blake2b(repr(c).encode("utf-8"), digest_size=8).digest()
+           for c in cells]
+    return sorted(sorted(range(len(cells)), key=lambda i: key[i])[:keep])
+
+
+def select_cells(cells, affected, control_cells):
+    """Split cells into reachable + a sampled control, for the directional tier.
+
+    Returns the kept cells in enumeration order, plus the two counts, so the
+    caller can say on stderr what it cut. A sweep that silently dropped most
+    of its matrix is the kind of thing nobody notices until the aggregate
+    disagrees with a previous run.
+
+    Selection is by INDEX throughout: a cell is a pair of LISTS, which is not
+    hashable, so there is no set of cells to intersect -- and an equality scan
+    would be quadratic over the 625-cell matrix for no gain.
+    """
+    reachable = [i for i, c in enumerate(cells) if reaches(c[0], c[1], affected)]
+    unreachable = [i for i, c in enumerate(cells) if not reaches(c[0], c[1], affected)]
+    picked = sample_spread([cells[i] for i in unreachable], control_cells)
+    keep = set(reachable) | set(unreachable[i] for i in picked)
+    return ([c for i, c in enumerate(cells) if i in keep],
+            len(reachable), len(keep) - len(reachable))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -120,7 +181,26 @@ def main(argv=None):
                     help="JSON object shallow-merged into every config (strategy vars)")
     ap.add_argument("--label-suffix", default=None,
                     help="appended to each label to keep strategy-var variants distinct")
+    ap.add_argument("--affects", default=None, metavar="CLASS[,CLASS...]",
+                    help="DIRECTIONAL tier: keep only the cells this change can "
+                         "reach, plus --control-cells cells it cannot. Cuts "
+                         "cells, never seeds.")
+    ap.add_argument("--control-cells", type=int, default=8, metavar="N",
+                    help="with --affects, how many unreachable cells to keep "
+                         "as the bit-exactness control (default 8, spread over "
+                         "both team slots; 0 drops the control entirely, which "
+                         "is warned about)")
     args = ap.parse_args(argv)
+
+    affected = set()
+    if args.affects:
+        affected = set(c.strip() for c in args.affects.split(",") if c.strip())
+        unknown = sorted(affected - set(CLASSES))
+        if unknown:
+            sys.exit("--affects names unknown class(es) %s; known: %s"
+                     % (", ".join(unknown), ", ".join(CLASSES)))
+        if args.control_cells < 0:
+            sys.exit("--control-cells cannot be negative")
 
     extra = {}
     if args.extra:
@@ -152,8 +232,9 @@ def main(argv=None):
         except ValueError as e:
             sys.exit(str(e))
 
-    out = sys.stdout
-    count = 0
+    # Materialise the cells before emitting, so --affects can cut them as a
+    # set rather than mid-stream.
+    cells = []
     for team1 in team1_set:
         if args.full is not None:
             t2_size = args.full
@@ -163,20 +244,41 @@ def main(argv=None):
             opp_iter = enumerate_opponents(t2_size, args.exclude_double_healer,
                                            not args.include_all_healer)
         for opp in opp_iter:
-            label = "+".join(team1) + "_vs_" + "+".join(opp)
-            if args.label_suffix:
-                label += "#" + args.label_suffix
-            for s in range(args.n):
-                cfg = {
-                    "team1": team1,
-                    "team2": opp,
-                    "random_seed": args.seed_base + s,
-                    "max_duration_secs": args.cap,
-                    "label": label,
-                }
-                cfg.update(extra)
-                out.write(json.dumps(cfg) + "\n")
-                count += 1
+            cells.append((team1, opp))
+
+    if affected:
+        total = len(cells)
+        cells, reachable, control = select_cells(cells, affected, args.control_cells)
+        print("# --affects %s: kept %d reachable + %d control of %d cells"
+              % (",".join(sorted(affected)), reachable, control, total),
+              file=sys.stderr)
+        if reachable == 0:
+            sys.exit(
+                "--affects %s reaches none of the %d cells: the sweep would "
+                "measure nothing. Check the class names against the team "
+                "selection." % (",".join(sorted(affected)), total))
+        if control == 0:
+            print("# WARNING: no control cells. Nothing in this sweep bounds "
+                  "the change's blast radius, and paired_sweep.py will say so.",
+                  file=sys.stderr)
+
+    out = sys.stdout
+    count = 0
+    for team1, opp in cells:
+        label = "+".join(team1) + "_vs_" + "+".join(opp)
+        if args.label_suffix:
+            label += "#" + args.label_suffix
+        for s in range(args.n):
+            cfg = {
+                "team1": team1,
+                "team2": opp,
+                "random_seed": args.seed_base + s,
+                "max_duration_secs": args.cap,
+                "label": label,
+            }
+            cfg.update(extra)
+            out.write(json.dumps(cfg) + "\n")
+            count += 1
     if count == 0:
         # An empty sweep is silent all the way downstream: the batch runner
         # writes an empty CSV, and the first complaint anyone sees is an
