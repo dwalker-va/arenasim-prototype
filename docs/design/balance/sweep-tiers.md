@@ -259,27 +259,47 @@ effective cores out of 18** whichever `--jobs` it is given. That ceiling is
 unexplained and nobody has looked at it; it is the single biggest lever on
 sweep cost and it is not a scheduling problem.
 
-**Contention is real, and smaller than the card assumed.** A and B ran
-different sweeps, so their matches/sec are not comparable — the honest
-contention figure from this pair is effective cores, 2.10 to 2.79, about
-+33%. The tighter measurement is AS-99's, same binary and same 520 configs
-with load as the only variable:
+**Contention is real, smaller than the card assumed, and not cleanly
+measured by either pair here.** A and B ran different sweeps, so their
+matches/sec are not comparable; the honest figure from that pair is
+effective cores, 2.10 to 2.79, about **+33%**. AS-99's pair fixes the sweep
+instead — same binary, same 520 configs — but moves `--jobs` along with the
+load:
 
-| | wall clock | matches/sec |
-|---|---|---|
-| under three-way load | 518.2s | 1.00 |
-| quiet, `--jobs 8` | 205.1s | 2.54 |
+| | `--jobs` | wall clock | matches/sec |
+|---|---|---|---|
+| under three-way load | 6 | 518.2s | 1.00 |
+| quiet | 8 | 205.1s | 2.54 |
 
-**2.5x, with the two runs agreeing byte for byte.** One caveat on that pair,
-because this doc asks the same of everyone else: a committed CSV does not
-carry timing, so unlike every other number here it is a reported observation
-rather than something a reader can recompute from the repo.
+**2.5x, with the two runs agreeing byte for byte — but that is a ceiling on
+contention, not a measurement of it.** Going 6 to 8 jobs on a quieter box can
+only add throughput, so some of 1.00 -> 2.54 is the jobs change rather than
+the load. The confound has a known direction, which is what keeps the number
+useful: **contention is worth AT MOST about 2.5x.** Charging the whole gap to
+load would be attributing a difference by elimination — the mistake this
+section opened by confessing to, committed in its own headline figure.
+
+So the two figures are partial views rather than a disagreement for the
+reader to settle. **+33%** is the effective-cores view: same box, confounded
+by different sweeps. **2.5x** is the throughput view: same sweep, confounded
+by different `--jobs`. The load effect sits at or below the higher of them,
+and **a one-variable pair — same sweep, same `--jobs`, load alone — has not
+been run.** Prefer +33% where a contention figure has to carry weight.
+
+Two further caveats on the AS-99 pair, because this doc asks the same of
+everyone else: a committed CSV does not carry timing, so unlike every other
+number here it is a reported observation rather than something a reader can
+recompute from the repo; and its two `--jobs` values are part of that same
+reported observation, so the confound above is not recoverable from the CSV
+either.
 
 **So: size a sweep at 1–2.5 matches/sec, not 0.57 and not 40.** Every figure
 above lands in that band or at its edge — 1.00 and 1.52 under load, 2.05 and
-2.54 quiet. Scheduling is worth somewhere between 1.3x and 2.5x, and it is
-free to claim — but a quiet box does not make authority scale cheap, it makes
-it about two and a half times less expensive than the card feared.
+2.54 quiet. **That band needs none of the causal argument above**: it is what
+sweeps were observed to run at, not a claim about why. Scheduling is worth
+somewhere between 1.3x and 2.5x, and it is free to claim — but a quiet box
+does not make authority scale cheap, it makes it at most about two and a half
+times less expensive than the card feared.
 
 ### Thrashing costs wall clock and nothing else
 

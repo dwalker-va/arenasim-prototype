@@ -677,10 +677,13 @@ are the older per-cell-CSV wrappers (columns per `src/headless/matrix.rs:217`).
 2.54/sec at `--jobs 8` on a quiet box. A match costs ~1.37 CPU-seconds,
 **62-67% of it kernel time that is present on a quiet box too**, and the
 batch runner reaches only 2-3 effective cores of 18 whatever `--jobs` says —
-so contention is worth roughly 1.3-2.5x, not the order of magnitude the raw
-`sys` time suggests. Size `--jobs` off how many agents are sweeping RIGHT
-NOW rather than a number picked at launch; a conservative 6 chosen off
-`uptime` still lost once a third agent started. Contention costs wall clock
+so contention is worth at most roughly 2.5x, not the order of magnitude the
+raw `sys` time suggests. Read 2.5x as a CEILING: no pair here varied load
+alone, so prefer the effective-cores figure (+33%) where it has to carry
+weight — see "What a sweep actually costs" in the sweep-tiers doc. Size
+`--jobs` off how many agents are sweeping RIGHT NOW rather than a number
+picked at launch; a conservative 6 chosen off `uptime` still lost once a
+third agent started. Contention costs wall clock
 and nothing else — outcomes do not depend on how the box was scheduled, so a
 busy box returns what a quiet one would, later.
 
