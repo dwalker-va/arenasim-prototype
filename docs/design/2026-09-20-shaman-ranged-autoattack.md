@@ -14,15 +14,19 @@ CLASS, never from the item in its weapon socket. The predicate is
 `class == Hunter` fallback beside it — at **five** sites, not the two the card
 named:
 
-| site | line | what it decides |
-|---|---|---|
-| range ladder | `auto_attack.rs:276` | `MELEE_RANGE` / `AUTO_SHOT_RANGE` / `WAND_RANGE` |
-| Hunter dead zone | `auto_attack.rs:289` | the 8yd minimum on Auto Shot |
-| line-of-sight gate | `auto_attack.rs:304` | whether occlusion blocks the swing |
-| swing visual flag | `auto_attack.rs:643` | `AutoAttackSwing.ranged` |
-| log name | `auto_attack.rs:664` | `"Auto Attack"` / `"Auto Shot"` / `"Wand Shot"` |
+| site | line | what it decides | arm rewired it? |
+|---|---|---|---|
+| range ladder | `auto_attack.rs:276` | `MELEE_RANGE` / `AUTO_SHOT_RANGE` / `WAND_RANGE` | yes |
+| Hunter dead zone | `auto_attack.rs:289` | the 8yd minimum on Auto Shot | yes |
+| **Windfury proc** | **`auto_attack.rs:348`** | **`windfury_bonus_chance` — the bonus swing** | **no** |
+| line-of-sight gate | `auto_attack.rs:304` | whether occlusion blocks the swing | yes |
+| **Frost Armor proc** | **`auto_attack.rs:579`** | **whether the target's chill fires back** | **no** |
+| swing visual flag | `auto_attack.rs:643` | `AutoAttackSwing.ranged` | yes |
+| log name | `auto_attack.rs:664` | `"Auto Attack"` / `"Auto Shot"` / `"Wand Shot"` | yes |
 
-(The card cited 261-267 and 577-585; AS-122's dual-wield work shifted them.)
+**Seven sites, not five** — an earlier draft of this doc listed five and missed
+the two proc gates. They matter to Option 1 and are called out again in section
+5. (The card cited 261-267 and 577-585; AS-122's dual-wield work shifted them.)
 
 `CharacterClass::weapon_slot()` — added by AS-97 precisely to stop `is_melee`
 answering two questions — is consulted by none of them.
@@ -102,8 +106,19 @@ standing. The aggregate and the control are what carry weight.
 - **Win-rate sweep:** 520 paired matches per arm (1,040 total), BasicArena,
   Legacy AI, 300s cap. 400 Shaman matches (5 DPS partners x 40 seeds x both side
   assignments) + 120 control matches with no Shaman on either side.
-- **Mechanism slice:** 24 paired matches (6 partners x 4 seeds) with full logs,
-  counting Shaman auto-attacks and their damage directly off the `[DMG]` lines.
+- **Mechanism slice:** 24 paired matches with full logs, counting Shaman
+  auto-attacks and their damage directly off the `[DMG]` lines. Comps are
+  `[P, Shaman] vs [P, Priest]` for **P in Warrior, Mage, Rogue, Warlock, Hunter,
+  Paladin**, at **seeds 90000-90003** each.
+
+  **The Paladin cell is degenerate and must be read separately.** Paladin is
+  itself a healer, so that cell is a **two-healer vs two-healer** match — unlike
+  the other five, whose partner is a DPS. All four of its matches end
+  `Duration: 309.99s / Winner: DRAW`: they hit the cap without resolving, even
+  through the full arena-dampening ramp. Four 310-second draws against a 38-91s
+  mean elsewhere means that one cell contributes as much auto-attack damage as
+  the other five combined, so section 4.3 reports the slice **both ways**. The
+  win-rate sweep above is unaffected — it uses the five DPS partners only.
 
 **Load conditions, stated because they are the point of AS-104's cost question.**
 The box (18 cores) was shared with two other Engineers and a concurrent sweep.
@@ -187,9 +202,38 @@ Hunter+Shaman is saturated above 95% either way, and Rogue matches end before th
 Shaman gets going (2-4 auto-attacks per match, section 4.3). The cells that
 collapse are the long ones.
 
-### 4.3 Mechanism — the ranged auto-attack is half the Shaman's damage
+### 4.3 Mechanism — the ranged auto-attack is 41-53% of the Shaman's damage
 
-24 paired matches, measured off the logs:
+**Report this as a range, not a point.** The headline depends on whether the
+degenerate Paladin cell (section 3) is counted:
+
+| slice | matches | mean dur | autos/match | auto damage | **auto share of the Shaman's own damage** |
+|---|---|---|---|---|---|
+| all six partners | 24 | 108.4s | 34.7 | 9,192 | **52.8%** |
+| **five DPS partners** | 20 | 68.1s | 17.6 | 4,364 | **41.3%** |
+| Paladin cell alone | 4 | 310.0s | 120.0 | 4,828 | 70.7% |
+
+The four Paladin draws supply **52.5% of the whole slice's auto-attack damage**.
+The 41.3% figure is the one to quote for ordinary play; 52.8% is the slice as
+run, and is inflated by matches that never end.
+
+Per cell, base arm:
+
+| partner | mean dur | autos/match | auto share |
+|---|---|---|---|
+| Rogue | 38.6s | 2.5 | 14.0% |
+| Hunter | 48.3s | 12.0 | 28.4% |
+| Mage | 79.7s | 17.5 | 33.6% |
+| Warlock | 91.4s | 34.8 | 49.6% |
+| Warrior | 82.4s | 21.2 | 67.7% |
+| *Paladin (4 draws)* | *310.0s* | *120.0* | *70.7%* |
+
+The share tracks match length, which is the honest mechanism: a Shaman that
+survives longer spends proportionally more of its output on free auto-attacks
+than on mana-limited casts. **Either way it is the single largest component of
+the Shaman's damage**, and that is the claim the options rest on.
+
+The arm-side figures below are for the full 24, matching the table's first row:
 
 | | base | arm |
 |---|---|---|
@@ -205,8 +249,10 @@ collapse are the long ones.
 DPS rather than totals, because the arm's matches are shorter; the share
 percentages are within-match ratios and are duration-robust either way.
 
-**The phantom wand is 52.8% of everything the Shaman deals.** Removing it halves
-the class's damage output and takes a quarter off its team's.
+**The phantom wand is the largest single component of the Shaman's damage** —
+41.3% over the five DPS partners, 52.8% including the Paladin draws. Removing it
+roughly halves the class's damage output and takes about a quarter off its
+team's.
 
 ### 4.4 The finding that collapses two of the three options into one
 
@@ -239,9 +285,21 @@ the card asks for; the Shaman falls to melee range and, in practice, to silence.
 - **Balance: -18.8pt to the Shaman side** (measured, directional tier), -50% to
   its damage output. That is roughly double what AS-97 added, in the opposite
   direction.
-- **Correctness:** fixes all five sites off one derived value, so range, name,
-  LoS, dead zone and the visual flag can never disagree again. Covers every
-  future relic class with no further work.
+- **Correctness:** puts range, name, LoS, dead zone and the visual flag on one
+  derived value, so those five cannot disagree again, and covers every future
+  relic class with no further work. It does **not** by itself reach the two proc
+  gates (section 1) — a faithful version must decide those deliberately rather
+  than leave them on the class ladder.
+- **A behavioural consequence the decision turns on: a melee-derived Shaman
+  would start self-proccing Windfury from its own totem.** `totem_pulse_system`
+  gates only on `ally.team != owner_team` — there is no self-exclusion — so the
+  Shaman already carries its own Air Totem's `WindfuryBuff`. It is inert today
+  only because `windfury_bonus_chance` returns `None` for a non-melee attacker.
+  Reclassify the Shaman as melee and the 12% bonus swing arms on its own
+  auto-attacks. Symmetrically, the Frost Armor gate would start chilling a
+  Shaman that melees a Frost-Armored Mage. Neither is obviously wrong — an
+  Enhancement Shaman self-proccing Windfury is Classic-faithful — but both are
+  new behaviour that this option creates and nobody has chosen yet.
 - **Code cost: small.** Section 6 — one enum, one `Combatant` field set in
   `apply_equipment`, five call sites.
 - **Test cost: exactly one probe, and it is a recalibration not a defect.**
@@ -270,9 +328,19 @@ Shield discharge, a Shock — and render it as a spell effect rather than a shot
   by the combat log's own surfaces — the damage-breakdown aggregation, the
   Results screen, the panel's short-label map. Nothing in the sim reads it back
   (verified by grep across `src/`). Sim-identical; only log text changes.
-- **Code cost: trivial.** One string, plus `results_ui.rs:996` which asserts
-  `ability_topic("Wand Shot") == None`, plus a re-bless of any snapshot whose
-  mock carries the old label.
+- **Code cost: NOT "one string".** Three items, and the second is a trap:
+  - `"Wand Shot"` at `auto_attack.rs:671` is a **shared `else` arm** covering
+    Mage, Priest and Warlock as well. A Shaman-specific rename needs a new
+    class-conditional arm; renaming the arm in place renames every caster's
+    wand.
+  - **Renaming the shared arm silently zeroes an existing probe.**
+    `tests/movement_probes.rs:6417` detects Mage wand shots with
+    `is_wand: line.contains("Wand Shot")`. Rename the shared arm and that count
+    becomes 0 for reasons nothing reports — the probe keeps running and stops
+    measuring. (A correctly scoped Shaman-only rename leaves it alone, which is
+    another reason to add the arm rather than edit the string.)
+  - `results_ui.rs:996` asserts `ability_topic("Wand Shot") == None`, plus a
+    re-bless of any snapshot whose mock carries the old label.
 - **What it does NOT fix:** the 30-yard code path with no weapon behind it
   survives, and the next relic class inherits it. This is the option AS-97's
   Tester meant by "fixing either alone just relocates the fiction" — it relocates
@@ -312,7 +380,23 @@ The arm is **not in this branch** — it was built, measured and reverted. It is
   un-equipped combatant is unchanged) and overwritten in `apply_equipment` from
   the item in `class.weapon_slot()` — `None` when that socket holds no weapon;
 - pets keep the old ladder exactly (they carry no equipment);
-- the five sites in section 1 read the derived value; `None` `continue`s.
+- **five of the seven sites** in section 1 read the derived value (`None`
+  `continue`s). The Windfury and Frost Armor gates were left on
+  `attacker_is_melee`.
+
+**That gap does not compromise the numbers, and the reason is checkable.** In
+the base arm the Shaman is `!is_melee`, so both procs are inert for it there by
+construction. In the measurement arm the Shaman landed **6 melee swings across
+24 matches**, all in the Rogue cell — a Rogue carries no Frost Armor, and six
+swings at a 12% Windfury chance is under one expected bonus swing across the
+whole slice. A faithful Option 1 that rewires both gates would therefore move
+these figures by less than their rounding. It is still the right thing to
+disclose, because the *behaviour* it enables (previous section) is a property of
+the option even where its damage contribution is negligible.
+
+The base binary was rebuilt from the reverted tree and hashes identically to the
+one that produced the measurements (`58112da2...`), so the revert is exact and
+the build reproducible.
 
 Artifacts (session scratchpad, not committed): `sweep.jsonl` — the single config
 file both arms ran — plus `base.csv`, `arm.csv`, `analyse.py`, `mech_count.py`,
