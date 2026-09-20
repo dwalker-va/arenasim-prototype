@@ -25,7 +25,6 @@ import json
 import os
 import sys
 import unittest
-from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -314,23 +313,30 @@ class AffectsTests(GenTestCase):
             (("Priest", "Hunter"), ("Warlock", "Paladin")),
             (("Warlock", "Paladin"), ("Warrior", "Hunter")),
         })
-        # Two claims, not one. The set above pins WHICH cells, and needs a
-        # human to re-bless it. This pins the REQUIREMENT that makes them a
-        # control -- they must not bunch -- and is written so that a re-bless
-        # preserving the spread passes it untouched. So it keeps judging the
-        # new list instead of being re-derived from it, which is what today's
-        # "7 and 6 distinct" could not do: those are implied by the set above,
-        # so a degenerate regeneration would be blessed by editing them.
+        # Two claims, not one. The set above pins WHICH cells and needs a
+        # human to re-bless it; this pins what a control OWES, so it keeps
+        # judging a re-blessed list instead of being re-derived from it.
         #
-        # The bound is the historical failure stated directly: 8 controls on 2
-        # distinct opponents is one comp appearing four times. Two is the most
-        # any comp may claim of the 8, drawn from 20 Shaman-free comps a side.
-        for side, label in ((0, "team1 comp"), (1, "opponent")):
-            comp, seen = Counter(c[side] for c in control).most_common(1)[0]
-            self.assertLessEqual(
-                seen, 2,
-                "controls bunch on one %s: %r takes %d of %d"
-                % (label, comp, seen, len(control)))
+        # What it owes follows from its job. Controls are the cells the change
+        # cannot reach, and paired_sweep.py reads them as a bit-exactness
+        # claim: if the change leaked, they are what says so. A class absent
+        # from them is a class a leak would be invisible in -- and that, not
+        # the comp count, is what the historical failure actually cost. Those
+        # 8 controls on 2 distinct opponents covered 3 of the 7 classes.
+        #
+        # Stated as coverage rather than as a count of distinct comps because
+        # coverage is the duty AND is scale-free with it: measured 7 of 7 on
+        # both sides at --control-cells 8, 12 and 20, for four different
+        # --affects classes. A distinct-comp count is neither. It drifts with
+        # the control count (max multiplicity runs 2, 3, 4 at 8, 12, 20), so
+        # pinning one would pin this call rather than the obligation.
+        owed = set(c for c in gen.CLASSES if c != "Shaman")
+        for side, label in ((0, "team1"), (1, "opponent")):
+            covered = set(x for c in control for x in c[side])
+            self.assertEqual(
+                covered, owed,
+                "a leak into %s would be invisible: the %s side of the control "
+                "set never exercises it" % (sorted(owed - covered), label))
 
     def test_the_same_arguments_regenerate_the_same_control(self):
         """The two arms of a paired run may generate the sweep separately."""
