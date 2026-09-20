@@ -253,11 +253,35 @@ individually significant and all five keep their sign:
 wand is worth **46 points alongside a Warlock and nothing at all alongside a
 Hunter.** What the user is choosing about is that spread, not the average.
 
-The two flat cells are the two where the Shaman barely wands: Hunter+Shaman is
-saturated above 93% either way, and Rogue matches end before the Shaman gets
-going (2.5 auto-attacks per match, section 4.3). The cells that collapse are the
-long ones — Warlock at 91.4s mean, Warrior at 82.4s. So the win-rate spread and
-the mechanism measurement agree on the same cause, independently.
+**What sorts the cells is match length**, and the win-rate CSVs carry duration
+on all 400 rows, so this is measurable at the same n=80 rather than borrowed
+from the 4-seed mechanism slice:
+
+| partner | base mean duration | delta |
+|---|---|---|
+| Warrior | 66.4s | -33.8pt |
+| Warlock | 60.9s | -46.2pt |
+| Mage | 44.8s | -15.0pt |
+| Hunter | 38.7s | +2.5pt |
+| Rogue | 27.2s | -1.2pt |
+
+**Pearson r(duration, delta) = -0.895** across the five. The longer a Shaman
+lives, the more of its output is free auto-attacks rather than mana-limited
+casts, and the more removing them costs. The two flat cells are the two where it
+barely wands at all: Rogue matches end at 27s (2.5 auto-attacks per match,
+section 4.3), and Hunter+Shaman is saturated above 93% either way.
+
+**How much corroboration that is, stated precisely, because "independently"
+would be too strong.** Between this slice and section 4.3: the **seeds are
+nearly disjoint** — the mechanism slice runs 90000-90003 for every partner while
+the win-rate cells use per-partner blocks, so Mage, Rogue, Warlock and Hunter
+share **zero** seeds and the total overlap is **4 matches** of 400. So the
+agreement is not resampling. But the **comps are the same** five `[P, Shaman] vs
+[P, Priest]` pairings, and both results are consequences of **one mediating
+variable, match duration** — they are two outcomes downstream of a shared cause,
+not two instruments independently locating a hidden one. The check is still
+non-circular and worth having: win-rate deltas were never computed from
+durations, and mechanism shares never from win rates.
 
 ### 4.3 Mechanism — the ranged auto-attack is 41-53% of the Shaman's damage
 
@@ -274,7 +298,7 @@ The four Paladin draws supply **52.5% of the whole slice's auto-attack damage**.
 The 41.3% figure is the one to quote for ordinary play; 52.8% is the slice as
 run, and is inflated by matches that never end.
 
-Per cell, base arm:
+Per cell, base arm — **n=4 per row, so read the ordering loosely**:
 
 | partner | mean dur | autos/match | auto share |
 |---|---|---|---|
@@ -285,10 +309,19 @@ Per cell, base arm:
 | Warrior | 82.4s | 21.2 | 67.7% |
 | *Paladin (4 draws)* | *310.0s* | *120.0* | *70.7%* |
 
+These durations are this slice's own, at four seeds per partner, and they do
+**not** reproduce the ordering of the 80-seed durations in section 4.2: there
+Warrior is the longer cell (66.4s) and Warlock the shorter (60.9s), the reverse
+of the two rows above. **Where the two disagree, section 4.2's are the ones to
+use** — twenty times the seeds, measuring the same quantity. The n=4 figures are
+kept only because the auto-attack counts beside them come from this slice and
+nowhere else.
+
 The share tracks match length, which is the honest mechanism: a Shaman that
 survives longer spends proportionally more of its output on free auto-attacks
-than on mana-limited casts. **Either way it is the single largest component of
-the Shaman's damage**, and that is the claim the options rest on.
+than on mana-limited casts. Section 4.2 puts a number on that relationship at
+n=80 (r = -0.895). **Either way the wand is the single largest component of the
+Shaman's damage**, and that is the claim the options rest on.
 
 The arm-side figures below are for the full 24, matching the table's first row:
 
