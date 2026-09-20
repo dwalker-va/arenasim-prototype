@@ -64,8 +64,9 @@
 
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::components::Combatant;
+use arenasim::states::play_match::constants::OFFHAND_DAMAGE_MULTIPLIER;
 use arenasim::states::play_match::equipment::{
-    load_default_loadouts, load_item_definitions, ItemSlot,
+    can_equip_in_socket, load_default_loadouts, load_item_definitions, ItemSlot,
 };
 
 /// The classes that deliberately carry a weapon in a socket they do NOT swing
@@ -284,4 +285,103 @@ fn every_class_swings_the_weapon_in_its_named_socket() {
             slot
         );
     }
+}
+
+/// The Rogue dual wields by default, and is the only class that does (AS-122).
+///
+/// The off hand is a DATA claim — one line in `loadouts.ron` — so nothing in
+/// the type system holds it up. Delete that line and the Rogue quietly loses
+/// the ~10 points of win rate the card measured for it, with every test in the
+/// repo still green. This is the test that goes red instead.
+///
+/// It asserts the whole chain rather than the line's presence, because the
+/// line's presence is not the property that matters: the item must be a
+/// weapon, the Rogue must be allowed to hold it there, and `apply_equipment`
+/// must turn it into a real second swing.
+///
+/// The `false` half is what keeps the `true` half honest. Asserting only that
+/// the Rogue dual wields would pass just as well against an
+/// `is_dual_wielding()` stuck at `true`, or against an `apply_equipment` that
+/// armed the off hand for everybody; requiring the other seven classes to come
+/// out single-wielding rules both out.
+#[test]
+fn the_rogue_is_the_only_class_that_dual_wields_by_default() {
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+
+    let loadout = defaults
+        .get(CharacterClass::Rogue)
+        .expect("Rogue has a default loadout");
+
+    let off_id = loadout.get(&ItemSlot::OffHand).unwrap_or_else(|| {
+        panic!(
+            "the Rogue's default loadout has an empty OffHand socket. AS-122 \
+             armed it with a second Serpent Fang Dagger and measured what that \
+             is worth (docs/design/balance/2026-09-18-as122-rogue-offhand-findings.md); \
+             restoring the empty socket is a balance change, not a cleanup."
+        )
+    });
+    let off = items
+        .get(off_id)
+        .expect("the off-hand item exists in items.ron");
+
+    assert!(
+        off.is_weapon,
+        "the Rogue's off hand holds {}, which is not a weapon — a shield or a \
+         held frill adds stats but arms no second swing",
+        off.name
+    );
+    assert!(
+        can_equip_in_socket(CharacterClass::Rogue, ItemSlot::OffHand, off),
+        "the Rogue may not legally hold {} in its off hand, so the shipped \
+         loadout is one the equipment picker would refuse",
+        off.name
+    );
+
+    // The swing itself, derived from the item rather than restated, so a
+    // re-tuned dagger moves the expectation with it.
+    let mut rogue = Combatant::new(1, 0, CharacterClass::Rogue);
+    rogue.apply_equipment(loadout, &items);
+    let avg = (off.attack_damage_min + off.attack_damage_max) / 2.0;
+    assert!(
+        rogue.is_dual_wielding(),
+        "the Rogue applied its own default loadout and came out single-wielding"
+    );
+    assert_eq!(
+        rogue.offhand_damage,
+        avg * OFFHAND_DAMAGE_MULTIPLIER,
+        "off-hand damage should be {} of {}'s {avg} average",
+        OFFHAND_DAMAGE_MULTIPLIER,
+        off.name
+    );
+    assert_eq!(
+        rogue.offhand_speed, off.attack_speed,
+        "off-hand speed should be {}'s own speed — the two hands keep separate \
+         timers",
+        off.name
+    );
+
+    // ...and nobody else. Pins the doc claim in wow-mechanics.md, and stops
+    // this test passing for a reason that has nothing to do with the Rogue.
+    let mut single_wielders = 0usize;
+    for class in CharacterClass::all() {
+        if *class == CharacterClass::Rogue {
+            continue;
+        }
+        let other = defaults.get(*class).expect("default loadout");
+        let mut c = Combatant::new(1, 0, *class);
+        c.apply_equipment(other, &items);
+        assert!(
+            !c.is_dual_wielding(),
+            "{} dual wields from its default loadout; only the Rogue is meant \
+             to. If that is intended, it is a balance change that needs its own \
+             measurement, and wow-mechanics.md needs updating.",
+            class.name()
+        );
+        single_wielders += 1;
+    }
+    assert_eq!(
+        single_wielders, 7,
+        "expected the other seven classes to be checked"
+    );
 }

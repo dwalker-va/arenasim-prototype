@@ -50,7 +50,7 @@
         },
 
         // ====================================================================
-        // ROGUE — Leather armor, dagger
+        // ROGUE — Leather armor, dual-wielded daggers
         // ====================================================================
         Rogue: {
             Head: NightstalkerCowl,
@@ -67,6 +67,7 @@
             Ring2: RingOfProtection,
             Trinket1: MarkOfTheChampion,
             MainHand: SerpentFangDagger,
+            OffHand: SerpentFangDagger,
         },
 
         // ====================================================================

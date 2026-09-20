@@ -50,10 +50,37 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
 - **A Hunter's off hand arms no swing.** Its live weapon socket is the Ranged
   one, so its main hand does not swing and the off hand has nothing to swing
   alongside. It may still hold a weapon for the stats.
-- **No default loadout dual wields.** Every capable class ships with an empty
-  off hand (Warrior holds a two-hander, Rogue and Hunter hold nothing there),
-  so this is a build a player opts into, not a balance change applied to
-  everyone.
+- **The Rogue dual wields by default**, and is the only class that does: a
+  second Serpent Fang Dagger in its off hand, with the power it is worth
+  measured rather than assumed (AS-122 —
+  `docs/design/balance/2026-09-18-as122-rogue-offhand-findings.md`). The Warrior
+  holds a two-hander and the Hunter's live socket is the Ranged one, so for
+  those two dual wield stays a build a player opts into.
+
+### Windfury Totem procs on the main hand only
+
+The Shaman's Air Totem grants `WindfuryBuff`, and a melee ally carrying it rolls
+for one bonus swing per landed auto. **That roll happens on the main-hand swing
+and nowhere else** — the off-hand branch in `combat_core/auto_attack.rs` has no
+twin of it.
+
+This is a deliberate simplification, and the reason is how the buff was played
+rather than how it was coded:
+
+- In Classic/TBC, Windfury Totem applies a temporary **weapon enchant** while it
+  is active — it occupies a weapon's enchant slot.
+- A Rogue keeps a **poison** in the off hand, which consumes exactly the slot
+  the Windfury enchant would otherwise land in. That *forces* Windfury onto the
+  main hand.
+- Players wanted it there anyway. Windfury was a **proc-per-minute** system, so
+  its procs were a fixed budget, and spending that budget on the main hand — the
+  weapon with the higher top-end damage — was strictly more efficient than
+  sometimes rolling it on the smaller off-hand weapon. The single-poison
+  arrangement got value out of the off hand at the same time.
+
+So main-hand-only is the realistic *outcome* of how the buff was actually used.
+We model that outcome directly rather than modelling the enchant slot that
+produces it.
 
 ---
 
