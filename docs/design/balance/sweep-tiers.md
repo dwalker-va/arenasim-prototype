@@ -276,10 +276,10 @@ carry timing, so unlike every other number here it is a reported observation
 rather than something a reader can recompute from the repo.
 
 **So: size a sweep at 1–2.5 matches/sec, not 0.57 and not 40.** Every figure
-above lands in that band — 1.00 and 1.52 under load, 2.05 and 2.54 quiet.
-Scheduling is worth somewhere between 1.3x and 2.5x, and it is free to claim
-— but a quiet box does not make authority scale cheap, it makes it about two
-and a half times less expensive than the card feared.
+above lands in that band or at its edge — 1.00 and 1.52 under load, 2.05 and
+2.54 quiet. Scheduling is worth somewhere between 1.3x and 2.5x, and it is
+free to claim — but a quiet box does not make authority scale cheap, it makes
+it about two and a half times less expensive than the card feared.
 
 ### Thrashing costs wall clock and nothing else
 
@@ -304,7 +304,7 @@ chose at launch.** `uptime` is worth reading, but reading it once is not
 enough, and this is measured rather than supposed: AS-99 sized its jobs off
 `uptime` *before* starting (load 26–39), picked `--jobs 6` as a deliberately
 conservative division of 18 cores, and still ran at 1.00 matches/sec — the
-same rate it later got 3.00 from on a quiet box at `--jobs 8`. A number
+same rate it later got 2.54 from on a quiet box at `--jobs 8`. A number
 chosen once goes stale the moment another agent starts, which is exactly what
 happened: three agents each independently reasonable and collectively
 thrashing.

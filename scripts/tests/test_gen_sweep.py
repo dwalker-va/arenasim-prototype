@@ -313,10 +313,17 @@ class AffectsTests(GenTestCase):
             (("Priest", "Hunter"), ("Warlock", "Paladin")),
             (("Warlock", "Paladin"), ("Warrior", "Hunter")),
         })
-        # The property that list has to keep, stated so a re-bless is checked
-        # against the historical failure (8 controls, 2 distinct opponents).
-        self.assertEqual(len(set(c[0] for c in control)), 7)
-        self.assertEqual(len(set(c[1] for c in control)), 6)
+        # The list above pins WHICH cells; this pins the property a re-bless
+        # has to preserve, against the historical failure (8 controls, 2
+        # distinct opponents). It is a floor rather than today's 7 and 6 on
+        # purpose: an equality here is re-derived from the same output it
+        # guards, so a degenerate regeneration would be blessed by editing the
+        # number. A floor makes that a deliberate lowering of a standard. It
+        # cannot go vacuous -- membership is already asserted exactly above.
+        self.assertGreaterEqual(len(set(c[0] for c in control)), 6,
+                                "control cells bunched on too few team1 comps")
+        self.assertGreaterEqual(len(set(c[1] for c in control)), 6,
+                                "control cells bunched on too few opponents")
 
     def test_the_same_arguments_regenerate_the_same_control(self):
         """The two arms of a paired run may generate the sweep separately."""

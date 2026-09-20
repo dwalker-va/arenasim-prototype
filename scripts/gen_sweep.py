@@ -4,7 +4,7 @@
 Emits one HeadlessMatchConfig per line: a `team1` template played against an
 enumerated set of opposing teams, N seeds each. Output is fed to:
 
-    arenasim --batch sweep.jsonl --out results.csv --jobs 16
+    arenasim --batch sweep.jsonl --out results.csv --jobs 6
 
 Examples
 --------
