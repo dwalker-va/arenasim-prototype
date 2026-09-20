@@ -11,22 +11,23 @@ resolves is a design decision and is not made here.
 Auto-attack RANGE and auto-attack IDENTITY are both derived from the attacker's
 CLASS, never from the item in its weapon socket. The predicate is
 `CharacterClass::is_melee()`, and `combat_core/auto_attack.rs` asks it — or the
-`class == Hunter` fallback beside it — at **five** sites, not the two the card
+`class == Hunter` fallback beside it — at **seven** sites, not the two the card
 named:
 
 | site | line | what it decides | arm rewired it? |
 |---|---|---|---|
 | range ladder | `auto_attack.rs:276` | `MELEE_RANGE` / `AUTO_SHOT_RANGE` / `WAND_RANGE` | yes |
 | Hunter dead zone | `auto_attack.rs:289` | the 8yd minimum on Auto Shot | yes |
-| **Windfury proc** | **`auto_attack.rs:348`** | **`windfury_bonus_chance` — the bonus swing** | **no** |
 | line-of-sight gate | `auto_attack.rs:304` | whether occlusion blocks the swing | yes |
+| **Windfury proc** | **`auto_attack.rs:348`** | **`windfury_bonus_chance` — the bonus swing** | **no** |
 | **Frost Armor proc** | **`auto_attack.rs:579`** | **whether the target's chill fires back** | **no** |
 | swing visual flag | `auto_attack.rs:643` | `AutoAttackSwing.ranged` | yes |
 | log name | `auto_attack.rs:664` | `"Auto Attack"` / `"Auto Shot"` / `"Wand Shot"` | yes |
 
-**Seven sites, not five** — an earlier draft of this doc listed five and missed
-the two proc gates. They matter to Option 1 and are called out again in section
-5. (The card cited 261-267 and 577-585; AS-122's dual-wield work shifted them.)
+The two **proc gates** are the ones easiest to miss — they consume the same
+`attacker_is_melee` value without deciding range or naming — and they are what
+Option 1's cost in section 5 turns on. (The card cited 261-267 and 577-585;
+AS-122's dual-wield work shifted them.)
 
 `CharacterClass::weapon_slot()` — added by AS-97 precisely to stop `is_melee`
 answering two questions — is consulted by none of them.
@@ -198,29 +199,49 @@ Both side assignments, so no team-1 ordering artifact can carry the result.
 | Shaman on team 2 (row is the Priest side) | 200 | 33.5% | 54.0% | **+20.5pt** | 21 / 62 | **+4.50** |
 | control (no Shaman) | 120 | 45.0% | 45.0% | 0.0 | 0 / 0 | 0.00 |
 
-**Side-symmetrized: the Shaman side loses 18.8 points.** The two assignments
-agree in sign and in magnitude, and each is independently significant.
+**Side-symmetrized, the Shaman side goes 65.8% -> 47.0%: it loses 18.8 points.**
+The two assignments agree in sign and in magnitude, and each is independently
+significant.
 
-**Non-vacuity:** 392 of 400 Shaman-slice rows differ between arms; 155 discordant
-paired outcomes; 3 draws total across both arms, so this is not a draw-rate
-artifact. The mechanism slice landed 832 base auto-attacks with no vacuous match
-(minimum 2 per match).
+**With an interval, because "directional" should mean a stated resolution rather
+than a shrug.** Over all 400 Shaman matches: **SE 3.1pt, z = -6.06, 95% CI
+[-24.8, -12.7]**. The smallest effect this design could reliably have detected
+is **MDE ~ 8.7pt** (80% power, alpha .05, from the run's own discordance), so
+**the observed effect is about 2.2x the resolution floor.** The right reading of
+the tier is not "this slice is small, read it loosely" but *this slice resolves
+about 9 points, and the effect is 19*.
 
-Per-cell, directional only — recorded because the shape is informative, not
-because any cell is powered at n=40:
+**Non-vacuity.** Every one of the **1,040 matches ended by `kill`** — zero
+timeouts, on either arm. 392 of 400 Shaman-slice rows differ between arms, with
+**153 discordant paired outcomes** on the Shaman-side win/not-win definition the
+flip columns above use (157 rows if any `winner` change counts, draws included).
+There are **4 draws** in the whole sweep — three base-side, one arm-side — so
+nothing here is a draw-rate artifact.
 
-| cell (the Shaman side's win rate) | base | arm | delta |
-|---|---|---|---|
-| Hunter+Shaman | 95.0% | 97.5% | +2.5 |
-| Rogue+Shaman | 75.0% | 72.5% | -2.5 |
-| Mage+Shaman | 30.0% | 10.0% | -20.0 |
-| Warrior+Shaman | 55.0% | 25.0% | -30.0 |
-| Warlock+Shaman | 72.5% | 37.5% | -35.0 |
+### The number that actually matters is per-partner, and it varies fivefold
 
-The two flat cells are the two where the Shaman barely wands at all:
-Hunter+Shaman is saturated above 95% either way, and Rogue matches end before the
-Shaman gets going (2-4 auto-attacks per match, section 4.3). The cells that
-collapse are the long ones.
+Pooling each partner's `clean/` and `swapped/` cells gives **n=80 per cell,
+side-symmetrized, at no extra measurement cost** — so these are not the
+underpowered n=40 figures an earlier draft disclaimed. Three of five are
+individually significant and all five keep their sign:
+
+| the Shaman side's win rate, by partner | base | arm | delta | z |
+|---|---|---|---|---|
+| Warlock+Shaman | 76.2% | 30.0% | **-46.2pt** | **-5.08** |
+| Warrior+Shaman | 58.8% | 25.0% | **-33.8pt** | **-4.44** |
+| Mage+Shaman | 26.2% | 11.2% | **-15.0pt** | **-2.27** |
+| Rogue+Shaman | 73.8% | 72.5% | -1.2pt | -0.19 |
+| Hunter+Shaman | 93.8% | 96.2% | +2.5pt | +0.71 |
+
+**"18.8pt" reads as one fact about the Shaman, and that is misleading.** The
+wand is worth **46 points alongside a Warlock and nothing at all alongside a
+Hunter.** What the user is choosing about is that spread, not the average.
+
+The two flat cells are the two where the Shaman barely wands: Hunter+Shaman is
+saturated above 93% either way, and Rogue matches end before the Shaman gets
+going (2.5 auto-attacks per match, section 4.3). The cells that collapse are the
+long ones — Warlock at 91.4s mean, Warrior at 82.4s. So the win-rate spread and
+the mechanism measurement agree on the same cause, independently.
 
 ### 4.3 Mechanism — the ranged auto-attack is 41-53% of the Shaman's damage
 
@@ -280,18 +301,28 @@ team's.
 standing on the Shaman. In 20 of 24 matches a melee-ranged Shaman auto-attacked
 **zero times**, across whole 100-second matches.
 
-That is not an accident of tuning, and the static read predicts it: the Shaman
-has **no pursuit behaviour to lose**. Its only range-seeking scorer term is
-`movement.ron:103` `wand_pull: 1.0`, and that term is repurposed — its own
-comment and `movement_config.rs:260` say so — as a **Lightning Bolt**-range pull.
-Lightning Bolt's range is 30.0 (`abilities.ron:1226`), identical to the shared
-`wand_range: 30.0` the term reads. So the Shaman parks at spell range and stays
-there.
+That is not an accident of tuning, and the static read predicts it.
+
+**The Shaman does pursue — it just stops at 28 yards.**
+`CharacterClass::preferred_range()` returns **28.0** for the Shaman
+(`match_config.rs:450`, "Lightning Bolt 30, so stay at ~28 to use everything"),
+and `combat_core/movement.rs:630` uses exactly that as the pursuit stop
+distance: `if distance > stop_distance` it closes, otherwise it halts. So the
+Shaman walks to 28 yards — comfortably inside the 30-yard wand range, and
+eleven times its melee range — and stops. Nothing in the sim ever asks it to
+close further. A secondary term points the same way: its `wand_pull: 1.0`
+(`movement.ron:103`) is repurposed as a **Lightning Bolt**-range pull
+(`movement_config.rs:260`), and Lightning Bolt's 30.0 (`abilities.ron:1226`)
+equals the shared `wand_range` the term reads.
 
 **Therefore "make it melee-ranged" and "remove it entirely" are the same change,
-3 damage a match apart.** The card's worry that melee-ranging it would be a
-"MOVEMENT and positioning change" does not materialise: no movement config
-changes under any option, and in practice nothing moves.
+3 damage a match apart.** A melee-ranged Shaman would not walk into melee to use
+its mace; it would keep parking at 28 yards and simply stop auto-attacking. The
+card's worry that this would be a "MOVEMENT and positioning change" does not
+materialise, and the reason is robust to the change being contemplated:
+**`preferred_range()` is a separate class ladder that Option 1 does not touch.**
+Making a Shaman actually close to melee would mean editing that too — a further,
+larger decision that none of the options below include.
 
 ---
 
@@ -311,10 +342,13 @@ the card asks for; the Shaman falls to melee range and, in practice, to silence.
   gates (section 1) — a faithful version must decide those deliberately rather
   than leave them on the class ladder.
 - **A behavioural consequence the decision turns on: a melee-derived Shaman
-  would start self-proccing Windfury from its own totem.** `totem_pulse_system`
-  gates only on `ally.team != owner_team` — there is no self-exclusion — so the
-  Shaman already carries its own Air Totem's `WindfuryBuff`. It is inert today
-  only because `windfury_bonus_chance` returns `None` for a non-melee attacker.
+  would start self-proccing Windfury from its own totem.** This is observed, not
+  inferred — `[BUFF] [TOTEM] Windfury Totem buffs Team 1 Shaman #2` appears in
+  the shipped logs of **all 24** mechanism matches, typically within the first
+  frame after the totem drops. `totem_pulse_system` gates only
+  on `ally.team != owner_team`, with no self-exclusion, so the Shaman carries its
+  own Air Totem's `WindfuryBuff` **today**; the only thing keeping it inert is
+  `windfury_bonus_chance` returning `None` for a non-melee attacker.
   Reclassify the Shaman as melee and the 12% bonus swing arms on its own
   auto-attacks. Symmetrically, the Frost Armor gate would start chilling a
   Shaman that melees a Frost-Armored Mage. Neither is obviously wrong — an
