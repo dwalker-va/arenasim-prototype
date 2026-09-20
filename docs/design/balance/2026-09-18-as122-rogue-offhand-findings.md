@@ -28,12 +28,15 @@ input-injection driver), but that change lives in `src/ui/driver/` behind
 to the headless path, so the data describes the sim that ships. The SHAs
 differ; the simulation does not.
 
-**The two bases this was run on agree byte-for-byte.** The whole four-arm
-sweep was run twice, once at `954910e` and once after rebasing onto `f9c4bf8`,
-because the intervening merge (#201) touched `class_ai/hunter.rs`. All four
-CSVs came back with identical md5s, so that merge's instrumentation-only claim
-holds across 10,000 matches and 25 class pairings — and this measurement has a
-same-seed control spanning two commits rather than one.
+**Reported, not reproducible from this branch:** the whole four-arm sweep was
+run twice — once at `954910e`, then again after rebasing onto `f9c4bf8`,
+because the intervening merge (#201) touched `class_ai/hunter.rs` — and all
+four CSVs came back with identical md5s. That is a result observed and
+recorded here, not a check a reader can re-run from the artifact: the
+`954910e` run was local and was never pushed, so nothing in the branch's
+history carries it. Read it as corroboration of #201's instrumentation-only
+claim, not as evidence in its own right. What IS reproducible from this branch
+is the CSVs below, from a fresh build of its head.
 
 Tier: **directional**. 25 cells (every distinct opposing pair, double-healer
 excluded) × n=100 × 2 arms, 300s cap, `--seed-base 0`, so match *i* of a cell

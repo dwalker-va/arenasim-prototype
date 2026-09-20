@@ -7354,11 +7354,34 @@ mod nagrand_teamplan {
     /// of a statue than it was; seed 1 crossed a line drawn in the wrong place.
     ///
     /// So the pin is now distributional and scans the whole set: a per-seed
-    /// FLOOR that a real statue cannot clear, plus a MEDIAN that a general
-    /// collapse toward the band would breach even while individual seeds stayed
-    /// above the floor. Neither alone is sufficient — the floor misses a broad
-    /// sag, and the median misses one frozen seed. Both are set below the
-    /// measured values under both loadouts, so neither is fitted to either one.
+    /// FLOOR that a real statue cannot clear, plus a MEDIAN over all twelve.
+    /// What they divide between them is narrow, and worth stating exactly
+    /// rather than generously:
+    ///
+    /// - the FLOOR catches any single seed dropping into the band;
+    /// - the MEDIAN catches the distribution's CENTRE shifting while every
+    ///   individual seed stays above the floor.
+    ///
+    /// The median is not a broad-sag guard, and it would be wrong to read it as
+    /// one. Degrade every seed uniformly by a factor k and the floor binds
+    /// first (k < 0.833, against the median's k < 0.764) — and because the
+    /// per-seed `assert!` panics inside the loop, the median is never even
+    /// evaluated on a run where a seed fails. A broad sag hits the floor.
+    ///
+    /// # How much room these have (AS-122)
+    ///
+    /// The median is the sturdier of the two: it sits 0.37 below the shipped
+    /// value and moved only 0.16 under a change that moved individual seeds by
+    /// as much as 1.07 (seed 4, 2.24 -> 1.17).
+    ///
+    /// The floor is BETTER-FITTED, NOT UNFITTED, and its headroom is thin:
+    /// 0.75 against a shipped minimum of 0.90 is 0.15, and the mutation that
+    /// proves it live trips it by 0.01. Concretely, **any change that shuffles
+    /// the worst seed by about 17% turns this red** — milder than the change
+    /// that prompted the re-pin. That is deliberate: widening it would buy
+    /// robustness by accepting a threshold a real statue could clear. Written
+    /// down so the next person to move it knows the room they have instead of
+    /// rediscovering it when a green probe goes red.
     #[test]
     fn teamplan_healer_is_not_a_statue_on_basicarena() {
         let mut rates: Vec<f32> = Vec::new();
