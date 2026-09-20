@@ -3544,7 +3544,7 @@ mod rogue_chain {
 
     #[test]
     fn opener_chains_cheapshot_into_kidney_on_kill_target() {
-        let trace = rogue_vs_priest(404);
+        let trace = rogue_vs_priest(405);
         let casts = rogue_casts(&trace);
         assert!(
             casts.len() >= 2,
@@ -3578,7 +3578,16 @@ mod rogue_chain {
         // Shot with a "Kidney held: …" trace note while a Kick or school lockout
         // is already denying the healer's casts. Its presence proves the chain
         // engaged instead of blindly stacking the stun onto a cast Kick handles.
-        let trace = rogue_vs_priest(404);
+        //
+        // Seed moved 404 -> 405 by AS-122, which armed the Rogue's off hand: the
+        // extra swings kill the Priest sooner, and seed 404's match got short
+        // enough (6 AI casts, down from 7) that the hold window never arose. The
+        // BEHAVIOUR is intact — a scan of 18 seeds under the armed loadout found
+        // the note in 16 of them, 404 and 1 being the exceptions — so this is a
+        // seed whose window emptied, not a regression. 405 was chosen because it
+        // carries the note under BOTH loadouts, so the pin is not fitted to the
+        // change that moved it.
+        let trace = rogue_vs_priest(405);
         let held_for_chain = trace.iter().any(|v| {
             v["kind"] == "ability_decision"
                 && v["actor"]["class"] == "Rogue"
@@ -7325,9 +7334,35 @@ mod nagrand_teamplan {
     /// kites. Asserts the healer keeps moving while an enemy is on top of it —
     /// the U6 statue band idiom (statue ~0.65 u/s of pressured time; healthy
     /// movement is well above 1.5).
+    ///
+    /// # Why twelve seeds and two thresholds (AS-122)
+    ///
+    /// This sampled seeds {1, 4, 7} and required every one to clear 1.0 u/s.
+    /// That threshold was never a property of the seed space — it was fitted to
+    /// the three seeds it sampled. Measuring all twelve on the UNMODIFIED
+    /// binary puts seed 6 at 0.78 u/s, so the old assertion would have failed on
+    /// a seed it simply never looked at:
+    ///
+    /// ```text
+    /// empty off hand  1.26 1.73 1.40 2.24 1.86 0.78 1.94 1.65 1.73 1.41 2.88 3.34
+    /// armed off hand  0.90 1.49 1.23 1.17 1.80 1.57 1.57 2.51 1.44 2.29 2.61 3.57
+    /// ```
+    ///
+    /// AS-122 armed the Rogue's off hand, which reshuffled which seed is worst
+    /// (1 replaces 6) without lowering the floor — the minimum actually rose,
+    /// 0.78 -> 0.90, while the median eased 1.73 -> 1.57. The healer is no more
+    /// of a statue than it was; seed 1 crossed a line drawn in the wrong place.
+    ///
+    /// So the pin is now distributional and scans the whole set: a per-seed
+    /// FLOOR that a real statue cannot clear, plus a MEDIAN that a general
+    /// collapse toward the band would breach even while individual seeds stayed
+    /// above the floor. Neither alone is sufficient — the floor misses a broad
+    /// sag, and the median misses one frozen seed. Both are set below the
+    /// measured values under both loadouts, so neither is fitted to either one.
     #[test]
     fn teamplan_healer_is_not_a_statue_on_basicarena() {
-        for seed in [1u64, 4, 7] {
+        let mut rates: Vec<f32> = Vec::new();
+        for seed in 1u64..=12 {
             let mut cfg = create_config(
                 vec!["Warrior", "Priest"],
                 vec!["Rogue", "Priest"],
@@ -7374,11 +7409,22 @@ mod nagrand_teamplan {
                  = {rate:.2} u/s"
             );
             assert!(
-                rate >= 1.0,
-                "seed {seed}: {rate:.2} u/s while a Rogue stands on the healer — the \
-                 flat-field anti-statue key has regressed (statue band is ~0.65)",
+                rate >= 0.75,
+                "seed {seed}: {rate:.2} u/s while a Rogue stands on the healer — that \
+                 is into the ~0.65 statue band, so the flat-field anti-statue key has \
+                 regressed. Measured floor is 0.78 (empty off hand) / 0.90 (armed).",
             );
+            rates.push(rate);
         }
+        rates.sort_by(|a, b| a.partial_cmp(b).expect("no NaN rates"));
+        let median = (rates[5] + rates[6]) / 2.0;
+        println!("median: {median:.2} u/s over {} seeds", rates.len());
+        assert!(
+            median >= 1.2,
+            "median pressured movement {median:.2} u/s across 12 seeds — every seed \
+             may still clear the statue floor while the healer as a whole sags \
+             toward it. Measured median is 1.73 (empty off hand) / 1.57 (armed).",
+        );
     }
 
     /// Exploratory seed scan — re-prints the per-seed numbers behind every pin
