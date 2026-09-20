@@ -6337,7 +6337,26 @@ mod oom_wand {
     // Mage no longer reaches wand range. Seed 16 from a merged-tree
     // `scan_oom_seeds`: Warrior dies at 36.6s, 33 wand hits, 42 Mage damage
     // events through the window the mana refractory used to leave dead.
-    const SEED: u64 = 16;
+    //
+    // Re-pinned for AS-138 (16 -> 33). The Shaman's auto-attack now derives
+    // from its main-hand mace rather than its class, so the lone Shaman this
+    // probe chases lost its 30yd wand and about half its damage output. That
+    // reshapes the 2v1 window the probe measures: at seed 16 the Mage still
+    // goes OOM, still closes, and still wands — but only 2 shots land inside
+    // the (now differently shaped) window, under the floor of 4.
+    //
+    // This is a RECALIBRATION, not a weakened assertion. Both count floors are
+    // unchanged at 4 and 9; only the seed moved. Seed 33 comes from
+    // `scan_oom_seeds` on this tree — Warrior dies at 39.5s, 14 wand hits and
+    // 24 Mage damage events through the window — so the probe now runs with
+    // 3.5x headroom over the wand floor instead of sitting just above it.
+    //
+    // The vacuity guards were separately confirmed to still hold at seed 16
+    // before the re-pin: the probe failed at the wand-count assertion, which
+    // runs AFTER the Warrior-death lookup, the >=200 paired-sample floor and
+    // the "reaches wand range within 20s" bound. The mechanism was intact; the
+    // fixed-seed count was what moved.
+    const SEED: u64 = 33;
 
     /// One damage event parsed from the combat log: `(wall_time, is_wand)`.
     struct MageDamage {
@@ -6504,12 +6523,35 @@ mod oom_wand {
         let wand_shots = post.iter().filter(|d| d.is_wand).count();
         // Floors sit between the disabled baseline (0 wand shots, ~5 total
         // events) and the fixed run (8 wand shots, 13 total events post-mana-fix)
-        // with headroom on both sides. The wand-shot floor is also the OOM proof:
-        // a healthy-mana Mage never wands a lone ranged target.
+        // with headroom on both sides.
+        //
+        // WHAT THIS FLOOR DOES AND DOES NOT DISCRIMINATE (measured, AS-138).
+        // The comment above used to end "the wand-shot floor is also the OOM
+        // proof: a healthy-mana Mage never wands a lone ranged target". That
+        // claim was checked directly, by disabling the OOM wand fallback (the
+        // `KitePosture::wand_oom` arm of the pursuit stop distance in
+        // `combat_core/movement.rs`) and re-running `scan_oom_seeds`:
+        //
+        //   * on main @9f80a37, at the then-pinned seed 16, the count is 33
+        //     wand shots with the fallback ENABLED and 33 with it DISABLED —
+        //     bit-identical, along with 38 of the other 39 seeds in 0..40;
+        //   * on this branch every one of the 40 seeds is identical between
+        //     the two builds.
+        //
+        // So the floor does NOT prove the OOM fallback fired: the Mage reaches
+        // wand range of the lone Shaman for other reasons (the KITE orbit and
+        // the Shaman's own 28yd parking bring them inside 30yd regardless).
+        // The assertion is a BEHAVIOUR PIN — the Mage does close and does chip
+        // through the window — not an isolation of the latch, and its message
+        // says so rather than claiming a mechanism it cannot see. Making it
+        // discriminate again needs a scenario where the Mage's stop distance
+        // is the only thing that can bring it into wand range; that is a
+        // separate piece of work, not a recalibration.
         assert!(
             wand_shots >= 4,
-            "Mage landed only {wand_shots} wand shots in the lone-Shaman window — the OOM \
-             fallback is not closing it to wand range (baseline: 0)"
+            "Mage landed only {wand_shots} wand shots in the lone-Shaman window — it is not \
+             closing to wand range and chipping (baseline: 0). NOTE: this floor pins the \
+             behaviour, not the OOM latch specifically — see the comment above"
         );
         assert!(
             post.len() >= 9,

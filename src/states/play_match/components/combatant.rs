@@ -301,6 +301,10 @@ pub struct Combatant {
     pub slot: u8,
     /// Character class
     pub class: match_config::CharacterClass,
+    /// What this combatant's auto-attack IS — derived from the item actually
+    /// sitting in its live weapon socket (`class.weapon_slot()`), never from
+    /// its class.
+    pub auto_attack_kind: AutoAttackKind,
     /// Resource type (Mana, Energy, Rage)
     pub resource_type: ResourceType,
     /// Maximum health points
@@ -441,6 +445,58 @@ pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
     }
 }
 
+/// What a combatant's auto-attack IS — derived from the weapon it holds.
+///
+/// This replaces the `CharacterClass::is_melee()` ladder that `auto_attack`
+/// used to consult separately at seven sites. `is_melee` answers "does this
+/// CLASS fight in melee", which is a different question from "what is in the
+/// socket the auto-attack swings from" — and the two disagree for any class
+/// whose live weapon socket holds something its class ladder does not predict.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum AutoAttackKind {
+    /// Swung in melee: `MELEE_RANGE`, logged "Auto Attack".
+    Melee,
+    /// Loosed from a bow/gun/crossbow: `AUTO_SHOT_RANGE`, dead zone, "Auto Shot".
+    Shot,
+    /// Fired from a wand: `WAND_RANGE`, logged "Wand Shot".
+    Wand,
+    /// No weapon in the live socket — no auto-attack at all.
+    None,
+}
+
+impl AutoAttackKind {
+    /// The kind implied by a combatant's CLASS, used only as the pre-equipment
+    /// default. Any combatant that is actually equipped has this overwritten by
+    /// `from_equipped` in `Combatant::apply_equipment`.
+    pub fn from_class(class: match_config::CharacterClass) -> Self {
+        // The old class ladder, verbatim, so a bare combatant that never gets
+        // equipment (unit tests, any spawn path that skips `apply_equipment`)
+        // behaves exactly as it did before this change.
+        if class.is_melee() {
+            AutoAttackKind::Melee
+        } else if class == match_config::CharacterClass::Hunter {
+            AutoAttackKind::Shot
+        } else {
+            AutoAttackKind::Wand
+        }
+    }
+
+    /// The kind implied by an item in a given socket, or `None` when the item
+    /// is not a weapon at all (a relic, a shield, a held frill).
+    pub fn from_equipped(slot: ItemSlot, item: &super::super::equipment::ItemConfig) -> Self {
+        use super::super::equipment::WeaponType as W;
+        if !item.is_weapon {
+            return AutoAttackKind::None;
+        }
+        match (slot, item.weapon_type) {
+            (ItemSlot::Ranged, W::Bow | W::Gun | W::Crossbow | W::Thrown) => AutoAttackKind::Shot,
+            (ItemSlot::Ranged, W::Wand) => AutoAttackKind::Wand,
+            // A weapon in a hand socket is swung, whatever it is.
+            _ => AutoAttackKind::Melee,
+        }
+    }
+}
+
 impl Combatant {
     /// Create a new combatant with class-specific stats.
     pub fn new(team: u8, slot: u8, class: match_config::CharacterClass) -> Self {
@@ -468,6 +524,10 @@ impl Combatant {
             team,
             slot,
             class,
+            // Pre-equipment default = the old class ladder verbatim, so a bare
+            // combatant (unit tests, any spawn path that never equips) is
+            // unchanged. `apply_equipment` overwrites it from the live socket.
+            auto_attack_kind: AutoAttackKind::from_class(class),
             resource_type,
             max_health,
             current_health: max_health,
@@ -743,6 +803,11 @@ impl Combatant {
         // that answers attack RANGE, not which socket is live.
         let primary_weapon_slot = self.class.weapon_slot();
 
+        // The live socket decides what the auto-attack IS. Start from "no
+        // weapon" — an empty or relic-filled live socket must end here, and
+        // that is the case the class ladder cannot express.
+        self.auto_attack_kind = AutoAttackKind::None;
+
         for (slot, item_id) in loadout {
             let Some(item) = items.get(item_id) else {
                 continue;
@@ -763,6 +828,11 @@ impl Combatant {
             self.arcane_resistance += item.arcane_resistance;
             self.nature_resistance += item.nature_resistance;
             self.holy_resistance += item.holy_resistance;
+
+            // The live socket names the auto-attack, weapon or not.
+            if *slot == primary_weapon_slot {
+                self.auto_attack_kind = AutoAttackKind::from_equipped(*slot, item);
+            }
 
             // For the primary weapon slot, replace attack_damage and attack_speed
             if item.is_weapon && *slot == primary_weapon_slot {

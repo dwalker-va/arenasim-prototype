@@ -71,43 +71,57 @@ pub fn combat_auto_attack(
         .collect();
 
     // Build a snapshot of combatant info for logging and alive checks
-    // Tuple: (team, class, display_name, is_melee, is_alive, slot_label)
+    // Tuple: (team, display_name, is_alive, slot_label, kind)
     // `slot_label` is the OWNER-relative 0-based slot used to build the unique
     // combat-log id: a combatant's own slot, or a pet's owner slot
     // (pet.slot - PET_SLOT_BASE) so a pet lines up with its owner's number.
-    let combatant_info: std::collections::HashMap<
-        Entity,
-        (u8, match_config::CharacterClass, String, bool, bool, u8),
-    > = combatants
-        .iter()
-        .map(|(entity, _, combatant, _, _, _)| {
-            let (display_name, is_melee, slot_label) =
-                if let Ok(pet) = auto_attack_pet_query.get(entity) {
-                    (
-                        pet.pet_type.name().to_string(),
-                        pet.pet_type.is_melee(),
-                        combatant.owner_relative_slot(),
-                    )
-                } else {
-                    (
-                        combatant.class.name().to_string(),
-                        combatant.class.is_melee(),
-                        combatant.slot,
-                    )
-                };
-            (
-                entity,
+    //
+    // `kind` is the ONLY thing in here that answers "how does this combatant
+    // auto-attack". Neither the class nor `CharacterClass::is_melee()` is
+    // carried, so no site in this system can reach back for the class ladder
+    // that `kind` replaced — range, dead zone, line of sight, both proc gates,
+    // the swing visual and the log name all read this one value and therefore
+    // cannot disagree with one another.
+    let combatant_info: std::collections::HashMap<Entity, (u8, String, bool, u8, AutoAttackKind)> =
+        combatants
+            .iter()
+            .map(|(entity, _, combatant, _, _, _)| {
+                let (display_name, slot_label, kind) =
+                    if let Ok(pet) = auto_attack_pet_query.get(entity) {
+                        // Pets carry no equipment, so there is no socket to derive
+                        // from: a pet's auto-attack is its own pet type's. The
+                        // ranged arm reads the OWNER's class, as it always has.
+                        let melee = pet.pet_type.is_melee();
+                        (
+                            pet.pet_type.name().to_string(),
+                            combatant.owner_relative_slot(),
+                            if melee {
+                                AutoAttackKind::Melee
+                            } else if combatant.class == match_config::CharacterClass::Hunter {
+                                AutoAttackKind::Shot
+                            } else {
+                                AutoAttackKind::Wand
+                            },
+                        )
+                    } else {
+                        (
+                            combatant.class.name().to_string(),
+                            combatant.slot,
+                            combatant.auto_attack_kind,
+                        )
+                    };
                 (
-                    combatant.team,
-                    combatant.class,
-                    display_name,
-                    is_melee,
-                    combatant.is_alive(),
-                    slot_label,
-                ),
-            )
-        })
-        .collect();
+                    entity,
+                    (
+                        combatant.team,
+                        display_name,
+                        combatant.is_alive(),
+                        slot_label,
+                        kind,
+                    ),
+                )
+            })
+            .collect();
 
     // Weapon-poison proc table: Rogues coated with Crippling Poison and the
     // per-swing application chance from the ability config. A successful roll on
@@ -146,7 +160,7 @@ pub fn combat_auto_attack(
     let caster_team = |a: &Aura| {
         a.caster
             .and_then(|c| combatant_info.get(&c))
-            .map(|info| info.0)
+            .map(|(team, ..)| *team)
     };
     let incap_cc_team: std::collections::HashMap<Entity, u8> = combatants
         .iter()
@@ -249,7 +263,7 @@ pub fn combat_auto_attack(
                 // Skip if target is dead (will be retargeted next frame)
                 if !combatant_info
                     .get(&target_entity)
-                    .is_some_and(|info| info.4)
+                    .is_some_and(|(_, _, alive, _, _)| *alive)
                 {
                     continue;
                 }
@@ -269,27 +283,25 @@ pub fn combat_auto_attack(
                 if let Some(&target_pos) = positions.get(&target_entity) {
                     let my_pos = transform.translation;
 
-                    // Use pet-aware is_melee from snapshot (pets inherit owner's class
-                    // but may have different melee/ranged behavior)
-                    let &(_, attacker_class, _, attacker_is_melee, _, _) =
-                        &combatant_info[&attacker_entity];
-                    let attack_range = if attacker_is_melee {
-                        MELEE_RANGE
-                    } else if attacker_class == match_config::CharacterClass::Hunter {
-                        AUTO_SHOT_RANGE
-                    } else {
-                        WAND_RANGE
+                    // The derived kind from the snapshot (pets carry no
+                    // equipment, so they get their own pet type's kind).
+                    let &(_, _, _, _, attacker_kind) = &combatant_info[&attacker_entity];
+                    // Range comes from the EQUIPPED weapon, not the class. A
+                    // live socket with no weapon in it means no auto-attack.
+                    let attack_range = match attacker_kind {
+                        AutoAttackKind::Melee => MELEE_RANGE,
+                        AutoAttackKind::Shot => AUTO_SHOT_RANGE,
+                        AutoAttackKind::Wand => WAND_RANGE,
+                        AutoAttackKind::None => continue,
                     };
                     let distance = my_pos.distance(target_pos);
                     // Hunter dead zone: the ranged Auto Shot can't fire within 8
-                    // yards. This applies ONLY to the ranged Hunter — a melee pet
-                    // (Spider/Boar) inherits the Hunter class but attacks in melee,
-                    // so without the `!attacker_is_melee` guard it would skip every
-                    // swing (it is always inside the dead zone while meleeing).
-                    if attacker_class == match_config::CharacterClass::Hunter
-                        && !attacker_is_melee
-                        && distance < HUNTER_DEAD_ZONE
-                    {
+                    // yards. Keying it on `Shot` rather than on the class is
+                    // what excludes a melee pet (Spider/Boar), which inherits
+                    // the Hunter class but attacks in melee; that previously
+                    // needed a separate `!attacker_is_melee` guard beside the
+                    // class check.
+                    if attacker_kind == AutoAttackKind::Shot && distance < HUNTER_DEAD_ZONE {
                         continue;
                     }
                     // Line-of-sight gate: ranged autos (Hunter Auto Shot,
@@ -301,7 +313,7 @@ pub fn combat_auto_attack(
                     // thin obstacle edge can still trade hits. Empty obstacle
                     // lists → always clear, so this is a byte-identical no-op on
                     // BasicArena / obstacle-free maps.
-                    if !attacker_is_melee
+                    if attacker_kind != AutoAttackKind::Melee
                         && !has_line_of_sight(&map_geometry.volumes, my_pos, target_pos)
                     {
                         continue;
@@ -328,7 +340,8 @@ pub fn combat_auto_attack(
                                     combatant.attack_damage + combatant.next_attack_bonus_damage;
                                 // Windfury Totem: a MELEE attacker carrying its own WindfuryBuff
                                 // aura has a chance (= aura magnitude) for one bonus swing.
-                                // Gated to melee (R14/AE3) — see `windfury_bonus_chance`.
+                                // Gated to melee SWINGS (R14/AE3) — see
+                                // `windfury_bonus_chance`.
                                 // Captured here because `auras` is borrowed again below.
                                 //
                                 // MAIN HAND ONLY — this roll sits in the
@@ -345,7 +358,7 @@ pub fn combat_auto_attack(
                                 // interaction, so we model the outcome and skip
                                 // the slot. See docs/design/wow-mechanics.md.
                                 let windfury_chance =
-                                    windfury_bonus_chance(attacker_is_melee, auras.as_deref());
+                                    windfury_bonus_chance(attacker_kind, auras.as_deref());
                                 let is_crit =
                                     roll_crit(combatant.crit_chance + crit_bonus, &mut game_rng);
                                 let crit_damage = if is_crit {
@@ -517,8 +530,7 @@ pub fn combat_auto_attack(
                 {
                     // Look up the caster's team
                     if let Some(caster_entity) = aura.caster {
-                        if let Some(&(caster_team, _, _, _, _, _)) =
-                            combatant_info.get(&caster_entity)
+                        if let Some(&(caster_team, _, _, _, _)) = combatant_info.get(&caster_entity)
                         {
                             // Only track if the CC is from the opposing team of the target
                             // (i.e., the CC caster is an enemy of the CC'd target)
@@ -549,7 +561,7 @@ pub fn combat_auto_attack(
         // Bug fix: Don't auto-attack targets with breakable CC from a friendly caster.
         // This prevents, e.g., a Warlock pet from breaking its team's Polymorph.
         if let Some(&cc_caster_team) = friendly_cc_team.get(&target_entity) {
-            if let Some(&(attacker_team, _, _, _, _, _)) = combatant_info.get(&attacker_entity) {
+            if let Some(&(attacker_team, _, _, _, _)) = combatant_info.get(&attacker_entity) {
                 if attacker_team == cc_caster_team {
                     continue;
                 }
@@ -572,11 +584,12 @@ pub fn combat_auto_attack(
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
 
-                // Check for Frost Armor proc: if target has FrostArmorBuff and attacker is melee
-                if let Some(&(_, _, _, attacker_is_melee, _, _)) =
-                    combatant_info.get(&attacker_entity)
-                {
-                    if attacker_is_melee {
+                // Frost Armor proc: the chill fires back at an attacker who
+                // struck in MELEE. Keyed on the landed swing's derived kind, so
+                // a caster's wand shot cannot trigger it and a melee weapon
+                // swing always can, whatever class made it.
+                if let Some(&(_, _, _, _, attacker_kind)) = combatant_info.get(&attacker_entity) {
+                    if attacker_kind == AutoAttackKind::Melee {
                         if let Some(ref target_auras_ref) = target_auras {
                             if target_auras_ref
                                 .auras
@@ -602,8 +615,7 @@ pub fn combat_auto_attack(
                             target_auras.as_deref_mut(),
                         );
                         if fresh {
-                            if let Some((_, _, tname, _, _, _)) = combatant_info.get(&target_entity)
-                            {
+                            if let Some((_, tname, _, _, _)) = combatant_info.get(&target_entity) {
                                 combat_log.log(
                                     CombatLogEventType::CrowdControl,
                                     format!(
@@ -633,14 +645,14 @@ pub fn combat_auto_attack(
                 // telegraphs a phantom release stroke. Inert in headless: like
                 // FloatingCombatText, the consuming systems live in
                 // rendering/effects.rs and are registered only in states/mod.rs.
-                if let Some(&(_, _, _, attacker_is_melee, _, _)) =
-                    combatant_info.get(&attacker_entity)
-                {
+                if let Some(&(_, _, _, _, attacker_kind)) = combatant_info.get(&attacker_entity) {
                     commands.spawn((
                         AutoAttackSwing {
                             attacker: attacker_entity,
                             target: target_entity,
-                            ranged: !attacker_is_melee,
+                            // The swing is ranged iff the weapon it comes
+                            // from is a ranged one.
+                            ranged: attacker_kind != AutoAttackKind::Melee,
                         },
                         PlayMatchEntity,
                     ));
@@ -648,27 +660,24 @@ pub fn combat_auto_attack(
 
                 // Log the attack with structured data
                 if let (
-                    Some((
-                        attacker_team,
-                        attacker_class,
-                        attacker_name,
-                        attacker_is_melee,
-                        _,
-                        attacker_slot,
-                    )),
-                    Some((target_team, _target_class, target_name, _, _, target_slot)),
+                    Some((attacker_team, attacker_name, _, attacker_slot, attacker_kind)),
+                    Some((target_team, target_name, _, target_slot, _)),
                 ) = (
                     combatant_info.get(&attacker_entity),
                     combatant_info.get(&target_entity),
                 ) {
+                    // The log name is chosen by the same derived kind as the
+                    // range, so the two can never disagree.
                     let attack_name = if has_bonus {
                         "Heroic Strike" // Enhanced auto-attack
-                    } else if *attacker_is_melee {
-                        "Auto Attack"
-                    } else if *attacker_class == match_config::CharacterClass::Hunter {
-                        "Auto Shot"
                     } else {
-                        "Wand Shot"
+                        match attacker_kind {
+                            AutoAttackKind::Melee => "Auto Attack",
+                            AutoAttackKind::Shot => "Auto Shot",
+                            AutoAttackKind::Wand => "Wand Shot",
+                            // Unreachable: the range gate `continue`s on None.
+                            AutoAttackKind::None => "Auto Attack",
+                        }
                     };
                     let attacker_id = combat_log_id(*attacker_team, *attacker_slot, attacker_name);
                     let target_id = combat_log_id(*target_team, *target_slot, target_name);
@@ -965,10 +974,10 @@ fn swing_interval(speed: f32, auras: Option<&ActiveAuras>) -> f32 {
 /// for ranged/caster allies who are wanding or auto-shooting. Returns `None`
 /// (no bonus swing) for a ranged attacker even if it carries the buff.
 pub(crate) fn windfury_bonus_chance(
-    attacker_is_melee: bool,
+    attacker_kind: AutoAttackKind,
     auras: Option<&ActiveAuras>,
 ) -> Option<f32> {
-    if !attacker_is_melee {
+    if attacker_kind != AutoAttackKind::Melee {
         return None;
     }
     auras.and_then(|a| {
@@ -1029,36 +1038,51 @@ mod windfury_gate_tests {
         }
     }
 
-    /// AE3 (covers R14 Windfury): a MELEE ally carrying the Windfury Totem buff
-    /// gets the bonus-swing chance, but a CASTER/ranged ally in the same totem
-    /// radius (same buff aura) gets NONE — the proc is melee-gated even though
-    /// the totem pulses the buff onto everyone in range.
+    /// AE3 (covers R14 Windfury): the bonus swing is gated on the SWING being
+    /// a melee weapon swing, not on the attacker's class. A totem pulses its
+    /// buff onto everyone in radius, so every one of the four kinds can be
+    /// carrying it; only `Melee` may convert it into a bonus swing.
+    ///
+    /// Enumerated exhaustively over `AutoAttackKind` rather than over a bool,
+    /// because the bool this gate used to take could not tell a bow shot from
+    /// a wand shot from a combatant with no weapon at all — and it read the
+    /// CLASS ladder, so a melee-weapon swing by a class the ladder calls
+    /// ranged (a Shaman with its mace) silently fell into the `None` arm.
     #[test]
-    fn windfury_bonus_only_for_melee_attacker() {
+    fn windfury_bonus_only_for_melee_swings() {
         let buffed = windfury_auras(0.2);
 
-        // Melee ally inside the radius: bonus swing chance == aura magnitude.
+        // The melee swing converts the buff into a bonus-swing chance.
         assert_eq!(
-            windfury_bonus_chance(true, Some(&buffed)),
+            windfury_bonus_chance(AutoAttackKind::Melee, Some(&buffed)),
             Some(0.2),
-            "a melee ally carrying the Windfury buff must get the bonus-swing chance"
+            "a melee weapon swing carrying the Windfury buff must get the bonus-swing chance"
         );
 
-        // Caster/ranged ally inside the same radius (same buff): NO bonus swing.
-        assert_eq!(
-            windfury_bonus_chance(false, Some(&buffed)),
-            None,
-            "a ranged/caster ally must get NO Windfury bonus swing even while \
-             carrying the totem buff"
-        );
+        // Every non-melee kind inside the same radius carries the same buff
+        // and must still get nothing from it.
+        for kind in [
+            AutoAttackKind::Shot,
+            AutoAttackKind::Wand,
+            AutoAttackKind::None,
+        ] {
+            assert_eq!(
+                windfury_bonus_chance(kind, Some(&buffed)),
+                None,
+                "{kind:?} must get NO Windfury bonus swing even while carrying the totem buff"
+            );
+        }
     }
 
-    /// A melee attacker without the buff gets no bonus swing (the aura is the
-    /// gate, not just melee-ness).
+    /// A melee swing without the buff gets no bonus swing (the aura is the
+    /// gate, not just the kind).
     #[test]
     fn windfury_bonus_none_without_buff() {
         let empty = ActiveAuras { auras: vec![] };
-        assert_eq!(windfury_bonus_chance(true, Some(&empty)), None);
-        assert_eq!(windfury_bonus_chance(true, None), None);
+        assert_eq!(
+            windfury_bonus_chance(AutoAttackKind::Melee, Some(&empty)),
+            None
+        );
+        assert_eq!(windfury_bonus_chance(AutoAttackKind::Melee, None), None);
     }
 }

@@ -1108,8 +1108,14 @@ fn walk_phase_seed(xz: Vec2) -> f32 {
 
 /// Class-default weapon set for v1 (plan KTD6): hardcoded per class, positioned
 /// so the deferred equipment-keyed lookup can replace this one match without
-/// touching the animation layer. Classes not listed hold nothing (casters,
-/// Shaman) — their auto-attack swing signals no-op against zero sockets.
+/// touching the animation layer. Classes not listed hold nothing (the wand
+/// casters) — their auto-attack swing signals no-op against zero sockets.
+///
+/// The `Shaman => Mace` arm is a deliberate STOPGAP. Now that the Shaman's
+/// auto-attack derives from its main-hand mace it swings in melee, and without
+/// a socket it would swing empty hands. The right fix is to key this table off
+/// the equipped item rather than the class — which is exactly what AS-124 and
+/// AS-128's Card C exist to do. This arm goes away with them.
 fn class_weapon_loadout(
     class: match_config::CharacterClass,
 ) -> &'static [(WeaponKind, WeaponHand)] {
@@ -1125,6 +1131,7 @@ fn class_weapon_loadout(
             (WeaponKind::Mace, WeaponHand::Main),
             (WeaponKind::Shield, WeaponHand::Off),
         ],
+        C::Shaman => &[(WeaponKind::Mace, WeaponHand::Main)],
         _ => &[],
     }
 }
