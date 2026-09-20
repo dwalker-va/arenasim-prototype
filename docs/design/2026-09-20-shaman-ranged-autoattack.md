@@ -107,11 +107,21 @@ standing. The aggregate and the control are what carry weight.
 
 **Load conditions, stated because they are the point of AS-104's cost question.**
 The box (18 cores) was shared with two other Engineers and a concurrent sweep.
-At `--jobs 6`: base 520 matches in **433.9s (1.20/s)** at load 26-39; arm 520 in
-**518.2s (1.00/s)** at load ~26. For comparison AS-86 recorded 0.57/s. Total
-measurement cost here was **under 16 minutes of batch wall clock** — which is the
-structural argument for the directional tier: it finished well inside a window
-where `main` did not move.
+`--jobs 6` was chosen deliberately rather than the default of cores-minus-two.
+Base: 520 matches in **433.9s (1.20/s)** at load 26-39. Arm: 520 in **518.2s
+(1.00/s)** at load ~26. Total **under 16 minutes of batch wall clock** — the
+structural argument for the directional tier, since it finished well inside a
+window where `main` did not move (`origin/main` was still `aef713c` afterwards).
+
+**Do not read those rates as the cost of a sweep.** AS-104 instrumented the same
+box during this run and found it **thrashing**, not merely busy: 1,147s of wall
+clock against 797s user and **1,611s system** — two CPU-seconds in the kernel per
+one simulating, averaging 2.1 busy cores of 18. Its measured intrinsic cost is
+**0.46 CPU-seconds per match**, and AS-122 saw 3.7-5.6 matches/sec on a quiet
+box. So the honest reading is that this measurement's *true* cost is a few
+minutes, and the 1.0-1.2/s figures above are an artifact of three agents
+oversubscribing 18 cores. AS-104's number supersedes the comparison an earlier
+draft of this doc drew against AS-86's 0.57/s.
 
 ### The harness detects the change before any figure is cited
 
@@ -131,10 +141,17 @@ Shots in that match; the arm fires zero auto-attacks of any name.
 
 ## 4. Results
 
-### 4.1 Control — the change reaches nothing without a Shaman
+### 4.1 Split control — the change reaches nothing without a Shaman
 
 **120 matches, 0 rows differing** on winner, end reason and duration. Exact
 row-for-row identity. The diff cannot touch a comp with no Shaman in it.
+
+This is a **split control** — cells the change cannot reach, required to come out
+bit-identical — and it is a correctness check on the instrument, not a
+statistical one. It is deliberately not a null probe (two identical binaries on
+the same seeds), which AS-104 established is vacuous here: the sim is
+deterministic, so such a run is identical by construction and every flip count is
+zero before it starts.
 
 ### 4.2 Win rate — the Shaman side loses ~19 points
 
