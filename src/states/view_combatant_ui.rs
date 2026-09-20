@@ -52,6 +52,7 @@ use super::encyclopedia::items::{format_item_stats, render_item_tooltip};
 use super::encyclopedia::{
     abilities as encyclopedia_abilities, widget, EncyclopediaData, EncyclopediaState, Topic,
 };
+use crate::ui::driver as ui_driver;
 
 /// Tracks which equipment slot has its picker open (if any)
 #[derive(Default)]
@@ -1322,6 +1323,7 @@ fn render_ability_row(
         egui::vec2(available_width, row_height),
         egui::Sense::click(),
     );
+    ui_driver::mark(ui, rect, true, format_args!("kit:{ability:?}"));
 
     // Draw content manually using painter
     let painter = ui.painter();
@@ -1433,6 +1435,16 @@ fn render_equipment_panel(
     // Track the item whose page a right-click asked for.
     let mut open_topic: Option<Topic> = None;
 
+    // The live override map, as one greppable line. `Loadout` is a BTreeMap,
+    // so the order is a property of the type rather than of a hash seed.
+    //
+    // Passed as a `Display` wrapper, NOT as a pre-joined `String`:
+    // `format_args!` defers FORMATTING, not evaluation of its arguments, so a
+    // `.collect().join()` in the argument position would run on every frame
+    // the panel draws even with the driver off. `OverrideMap` writes straight
+    // into the formatter, which `note` only reaches after its armed check.
+    ui_driver::note(ui, format_args!("overrides {{{}}}", OverrideMap(overrides)));
+
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
 
@@ -1493,6 +1505,20 @@ fn render_equipment_panel(
                 // Allocate a row for icon + text as a single clickable area
                 let (rect, response) = ui
                     .allocate_exact_size(egui::vec2(total_width, row_height), egui::Sense::click());
+                ui_driver::mark(ui, rect, true, format_args!("equip:{slot:?}"));
+                // What the row ACTUALLY rendered — the fact the AS-64 repro
+                // turned on, and one a screenshot-blind agent cannot otherwise
+                // read back. `is_override` is the green colouring.
+                match item_id {
+                    Some(id) => ui_driver::note(
+                        ui,
+                        format_args!("equip-row {slot:?} item={id:?} override={is_override}"),
+                    ),
+                    None => ui_driver::note(
+                        ui,
+                        format_args!("equip-row {slot:?} item=empty override={is_override}"),
+                    ),
+                }
 
                 // Highlight on hover
                 if response.hovered() {
@@ -1555,6 +1581,7 @@ fn render_equipment_panel(
                         // decision 4): the encyclopedia's item page is what
                         // right-click reaches, not a second stat block here.
                         response.on_hover_ui(|ui| {
+                            ui_driver::note(ui, format_args!("tooltip:{:?}", Topic::Item(*id)));
                             render_item_tooltip(ui, item);
                         });
                     }
@@ -1579,6 +1606,14 @@ fn render_equipment_panel(
                 ),
             )
             .on_hover_text("Clear every equipment override for this combatant");
+        // Registered whether or not it is enabled, so `assert-enabled
+        // equip:restore false` can pin the disabled-with-no-overrides state.
+        ui_driver::mark(
+            ui,
+            restore.rect,
+            !overrides.is_empty(),
+            format_args!("equip:restore"),
+        );
         if restore.clicked() {
             restore_clicked = true;
         }
@@ -1667,6 +1702,13 @@ fn render_equipment_panel(
                                 })
                                 .inner;
 
+                            ui_driver::mark(
+                                ui,
+                                response.rect,
+                                true,
+                                format_args!("pick:{item_id:?}"),
+                            );
+
                             if response.clicked() {
                                 selection = Some(*item_id);
                             }
@@ -1706,6 +1748,25 @@ fn render_equipment_panel(
     }
 
     open_topic
+}
+
+/// The override map rendered lazily, for the UI driver's per-frame note.
+///
+/// The whole point is that nothing is built unless someone formats it. See the
+/// call site in [`render_equipment_panel`] and the `format_args!` rule in
+/// `ui::driver::registry`.
+struct OverrideMap<'a>(&'a Loadout);
+
+impl std::fmt::Display for OverrideMap<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, (slot, id)) in self.0.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{slot:?}={id:?}")?;
+        }
+        Ok(())
+    }
 }
 
 /// Whether a slot row is drawn as overridden. True only when the override is
@@ -1896,8 +1957,11 @@ fn render_rogue_opener_panel(
                     // Hover says what the opener does — the same slim summary
                     // the kit rows show, from the same builder.
                     let ability = opener.ability();
-                    response
-                        .on_hover_ui(|ui| encyclopedia_abilities::slim_tooltip(ui, ability, data));
+                    ui_driver::mark(ui, rect, true, format_args!("strategic:{ability:?}"));
+                    response.on_hover_ui(|ui| {
+                        ui_driver::note(ui, format_args!("tooltip:{:?}", Topic::Ability(ability)));
+                        encyclopedia_abilities::slim_tooltip(ui, ability, data)
+                    });
 
                     // Label below icon
                     ui.add_space(4.0);
@@ -2027,8 +2091,11 @@ fn render_strategic_option_panel<T>(
                     }
 
                     let ability = option.ability();
-                    response
-                        .on_hover_ui(|ui| encyclopedia_abilities::slim_tooltip(ui, ability, data));
+                    ui_driver::mark(ui, rect, true, format_args!("strategic:{ability:?}"));
+                    response.on_hover_ui(|ui| {
+                        ui_driver::note(ui, format_args!("tooltip:{:?}", Topic::Ability(ability)));
+                        encyclopedia_abilities::slim_tooltip(ui, ability, data)
+                    });
 
                     ui.add_space(4.0);
                     let label_color = if is_selected {
@@ -2422,7 +2489,19 @@ fn render_warlock_curse_panel(
                         // damage" next to a config that could change underneath
                         // them.
                         let ability = curse.ability();
+                        // One curse row PER ENEMY SLOT, so the id has to name
+                        // the slot or three widgets would share a name.
+                        ui_driver::mark(
+                            ui,
+                            rect,
+                            true,
+                            format_args!("strategic:{ability:?}:e{enemy_slot}"),
+                        );
                         response.on_hover_ui(|ui| {
+                            ui_driver::note(
+                                ui,
+                                format_args!("tooltip:{:?}", Topic::Ability(ability)),
+                            );
                             encyclopedia_abilities::slim_tooltip(ui, ability, data)
                         });
 

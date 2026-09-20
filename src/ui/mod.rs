@@ -10,6 +10,7 @@
 //! All UI is implemented using immediate-mode egui rather than retained-mode Bevy UI.
 //! This provides better maintainability and is more suited to agentic development.
 
+pub mod driver;
 pub mod fonts;
 
 use bevy::prelude::*;

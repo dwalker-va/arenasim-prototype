@@ -69,6 +69,7 @@ use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::equipment::ItemDefinitions;
 use super::view_combatant_ui::{AbilityIcons, ItemIcons};
 use super::GameState;
+use crate::ui::driver as ui_driver;
 
 pub use abilities::AbilityFilters;
 pub use auras::{AuraArt, AuraId, AuraSource, EngineAura};
@@ -457,6 +458,9 @@ pub fn draw_encyclopedia(
                             chrome_button(BACK_LABEL, if can_go_back { TEXT } else { DIM }),
                         )
                         .on_disabled_hover_text("Nothing to go back to");
+                    // Registered even when disabled, so a script can pin
+                    // "Back is dead at the root" rather than only its absence.
+                    ui_driver::mark(ui, back.rect, can_go_back, format_args!("enc:back"));
                     if back.clicked() {
                         action = Some(EncyclopediaAction::Back);
                     }
@@ -466,7 +470,9 @@ pub fn draw_encyclopedia(
                     // than alone at the far right, so the label has to — and
                     // the destination is whatever context opened the
                     // encyclopedia, not a fixed main menu.
-                    if ui.add(chrome_button(&home_label, TEXT)).clicked() {
+                    let home = ui.add(chrome_button(&home_label, TEXT));
+                    ui_driver::mark(ui, home.rect, true, format_args!("enc:home"));
+                    if home.clicked() {
                         action = Some(EncyclopediaAction::Exit);
                     }
 
