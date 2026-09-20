@@ -6,6 +6,10 @@ enumerated set of opposing teams, N seeds each. Output is fed to:
 
     arenasim --batch sweep.jsonl --out results.csv --jobs 6
 
+`--jobs` keys off how many agents are sweeping right now, not off the core
+count; 6 on a quiet box. See "Sizing `--jobs`" in
+docs/design/balance/sweep-tiers.md — 16 is too many.
+
 Examples
 --------
 # 1v1: Hunter vs every class, N=100, 300s cap

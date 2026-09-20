@@ -25,6 +25,7 @@ import json
 import os
 import sys
 import unittest
+from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -313,17 +314,23 @@ class AffectsTests(GenTestCase):
             (("Priest", "Hunter"), ("Warlock", "Paladin")),
             (("Warlock", "Paladin"), ("Warrior", "Hunter")),
         })
-        # The list above pins WHICH cells; this pins the property a re-bless
-        # has to preserve, against the historical failure (8 controls, 2
-        # distinct opponents). It is a floor rather than today's 7 and 6 on
-        # purpose: an equality here is re-derived from the same output it
-        # guards, so a degenerate regeneration would be blessed by editing the
-        # number. A floor makes that a deliberate lowering of a standard. It
-        # cannot go vacuous -- membership is already asserted exactly above.
-        self.assertGreaterEqual(len(set(c[0] for c in control)), 6,
-                                "control cells bunched on too few team1 comps")
-        self.assertGreaterEqual(len(set(c[1] for c in control)), 6,
-                                "control cells bunched on too few opponents")
+        # Two claims, not one. The set above pins WHICH cells, and needs a
+        # human to re-bless it. This pins the REQUIREMENT that makes them a
+        # control -- they must not bunch -- and is written so that a re-bless
+        # preserving the spread passes it untouched. So it keeps judging the
+        # new list instead of being re-derived from it, which is what today's
+        # "7 and 6 distinct" could not do: those are implied by the set above,
+        # so a degenerate regeneration would be blessed by editing them.
+        #
+        # The bound is the historical failure stated directly: 8 controls on 2
+        # distinct opponents is one comp appearing four times. Two is the most
+        # any comp may claim of the 8, drawn from 20 Shaman-free comps a side.
+        for side, label in ((0, "team1 comp"), (1, "opponent")):
+            comp, seen = Counter(c[side] for c in control).most_common(1)[0]
+            self.assertLessEqual(
+                seen, 2,
+                "controls bunch on one %s: %r takes %d of %d"
+                % (label, comp, seen, len(control)))
 
     def test_the_same_arguments_regenerate_the_same_control(self):
         """The two arms of a paired run may generate the sweep separately."""
