@@ -330,6 +330,20 @@ pub fn combat_auto_attack(
                                 // aura has a chance (= aura magnitude) for one bonus swing.
                                 // Gated to melee (R14/AE3) — see `windfury_bonus_chance`.
                                 // Captured here because `auras` is borrowed again below.
+                                //
+                                // MAIN HAND ONLY — this roll sits in the
+                                // main-hand branch and deliberately has no twin
+                                // in the off-hand branch below. In Classic the
+                                // totem is a temporary WEAPON ENCHANT, and a
+                                // Rogue spends its off-hand enchant slot on a
+                                // poison — so the buff lands on the main hand.
+                                // That was also the efficient play: Windfury
+                                // was proc-per-minute, so a fixed budget of
+                                // procs was worth more on the weapon with the
+                                // higher top end. Main-hand-only is the
+                                // realistic outcome of the enchant-slot
+                                // interaction, so we model the outcome and skip
+                                // the slot. See docs/design/wow-mechanics.md.
                                 let windfury_chance =
                                     windfury_bonus_chance(attacker_is_melee, auras.as_deref());
                                 let is_crit =

@@ -33,6 +33,15 @@ as counted by `agg_sweep.py --compare`, the tool the reproduction section
 below tells you to run. The contested cells moved hardest: Rogue mirror 52→82, vs Rogue+Shaman 15→50, vs
 Mage+Priest 14→44, vs Warrior+Rogue 12→42.
 
+**+10.8pt is the ONE-SIDED figure — read it as the mechanic's worth, not as
+the cost of shipping it.** The override arms team 1 only, which is what makes
+this a measurement of the off-hand swing rather than of a rules change: in the
+seven cells where the enemy also fields a Rogue, a dual-wielding Rogue faces a
+single-wielding one, and the mirror's 52→82 is that asymmetry. Arm the socket
+in `loadouts.ron` instead and every Rogue gets it, so those cells largely wash
+and the shipped quantity is a different — smaller — one. AS-122 measured it:
+`2026-09-18-as122-rogue-offhand-findings.md`.
+
 The off-hand item is a second copy of the Rogue's own default main hand, so
 this is the conservative figure: it isolates the mechanic from an item
 upgrade. A tier-1 off-hand lands higher.
@@ -57,10 +66,27 @@ all", not as "the off-hand swing alone is worth +1.8".
 ## What it means
 
 Dual wield priced as a **trade** is worth roughly nothing. Priced as a **free
-slot** it is worth +10.8pt. The Rogue's off-hand socket is empty today, so
-there is no opportunity cost to price the damage against — that, not the
-budget asymmetry, is what drives the number. Pricing that socket is the
-tuning question (AS-122).
+slot** it is worth +10.8pt. The Rogue's off-hand socket was empty when this was
+measured, so there was no opportunity cost to price the damage against — that,
+not the budget asymmetry, is what drives the number.
+
+**That socket has since been priced and filled.** AS-122 armed the Rogue's
+default off hand with the second dagger and measured the shipped change, which
+is a different quantity from the +10.8pt above for the reason given with it.
+See `2026-09-18-as122-rogue-offhand-findings.md`.
+
+## Windfury procs on the main hand only
+
+Windfury Totem's bonus swing rolls on the main-hand swing and has no twin in
+the off-hand branch. This is a modelling simplification, but not a departure
+from Classic's *behaviour*: the totem applies a temporary weapon ENCHANT, and a
+Rogue's off hand carries a poison in that slot, which forces the buff onto the
+main hand. That was also the efficient play — Windfury was proc-per-minute, so
+a fixed budget of procs was worth more spent on the weapon with the higher top
+end than sometimes rolled on the smaller one, and the poison still earned its
+slot. Main-hand-only is the realistic outcome of the enchant-slot interaction,
+so the sim models the outcome and skips the slot. Fuller version in
+`docs/design/wow-mechanics.md`.
 
 ## Reproducing
 
