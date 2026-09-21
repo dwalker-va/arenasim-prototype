@@ -152,9 +152,26 @@ const SPARK_EMISSIVE: (f32, f32, f32) = (2.2, 1.9, 1.35);
 // someone raising these values a little at a time: a compile error stops that
 // at the edit, and a compile error is also the right answer to the card's
 // "do not improve the intensities" instruction. Mortal Strike's constants are
-// private to its module, so they are restated as the ceiling this effect must
-// stay under; if that module is ever quietened below these, THIS is the
-// comment to revisit.
+// private to its module, so they are restated here as the ceiling this effect
+// must stay under.
+//
+// The mirror is a COPY, and it goes stale ASYMMETRICALLY — which is the whole
+// reason the ceiling only licenses one direction of change:
+//
+// * If `mortal_strike.rs` is QUIETENED below one of these, the mirror
+//   overstates the real ceiling and the assertion below stops being the
+//   guard it claims to be. That failure is at least reachable by reading —
+//   THIS is the comment to revisit.
+// * If it is RAISED, the mirror understates the ceiling and nothing anywhere
+//   notices: every assertion still holds, the guard just guards a line that
+//   has moved. So a raise here can never be justified by "Mortal Strike is
+//   louder now" without re-reading that module and updating these five
+//   values in the same edit.
+//
+// Which is why the separation is maintained from THIS side: the lever is the
+// auto's sparks, not Mortal Strike's. Widening the gap by raising the
+// signature would be a change to the signature's own budget, made in its own
+// module, and it would leave this ceiling silently wrong.
 const MS_SPARK_COUNT: u32 = 14;
 const MS_SPARK_SPEED: f32 = 7.5;
 const MS_SPARK_LENGTH: f32 = 0.13;
@@ -213,6 +230,16 @@ pub struct HitSpark {
     velocity: Vec3,
     lifetime: f32,
     initial_lifetime: f32,
+    /// The burst's spatial scale at spawn (crit and pet-victim multipliers
+    /// folded in), kept for the same reason as `initial_lifetime`: the taper
+    /// is a curve over the WHOLE life, so it needs the value it started from.
+    ///
+    /// Reading the spawn scale back off the transform instead would multiply
+    /// the taper in every frame — a fleck at a quarter of its authored length
+    /// by mid-life — and nothing in the module's spawn-count guards would
+    /// notice, because they are all claims about how much is spawned rather
+    /// than about the shape of what is alive.
+    spawn_scale: f32,
 }
 
 /// The additive contact flash at the impact point.
@@ -472,6 +499,7 @@ fn spawn_impact_burst(
                 velocity,
                 lifetime: life,
                 initial_lifetime: life,
+                spawn_scale: scale,
             },
             Mesh3d(spark_mesh.clone()),
             MeshMaterial3d(spark_material.clone()),
@@ -516,8 +544,12 @@ pub fn update_hit_sparks(time: Res<Time>, mut sparks: Query<(&mut HitSpark, &mut
             transform.rotation = Quat::from_rotation_arc(Vec3::Z, velocity.normalize());
         }
         let k = (spark.lifetime / spark.initial_lifetime).clamp(0.0, 1.0);
-        // Thins and shortens out rather than blinking off.
-        let base = transform.scale.max_element();
+        // Thins and shortens out rather than blinking off. Written ABSOLUTELY
+        // off the spawn scale (`mortal_strike.rs`, `update_mortal_strike_sparks`
+        // — the module this mirrors): reading the current scale back would
+        // apply the taper on top of the taper, and the fleck would be gone
+        // long before `SPARK_LIFETIME_SECS`.
+        let base = spark.spawn_scale;
         transform.scale = Vec3::new(
             base * k.max(0.15),
             base * k.max(0.15),

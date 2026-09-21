@@ -31,8 +31,8 @@ use arenasim::states::play_match::{
     cleanup_hit_flinch, cleanup_hit_reactions, consume_hit_reactions, consume_swing_signals,
     hit_flinch_offset, tick_hit_flinch, update_fear_run, update_hit_flashes, update_hit_sparks,
     update_walk_animation, update_wand_missiles, wand_school, HitSpark, SwingStyle, WandMissile,
-    FLINCH_CRIT_MULT, FLINCH_DIP, FLINCH_DURATION_SECS, PET_FLINCH_DURATION_SCALE, SPARK_COUNT,
-    SPARK_SIZE,
+    FLINCH_CRIT_MULT, FLINCH_DIP, FLINCH_DURATION_SECS, PET_FLINCH_DURATION_SCALE,
+    PET_SPARK_SPATIAL_SCALE, SPARK_COUNT, SPARK_CRIT_SCALE, SPARK_SIZE,
 };
 use arenasim::CharacterClass;
 use bevy::prelude::*;
@@ -310,6 +310,121 @@ fn the_flinch_leaves_no_residue_when_it_expires() {
     assert!(app.world().entity(unit).get::<HitFlinch>().is_none());
 }
 
+/// Reach the state a sandbox take ends in — an idle gait still easing an
+/// offset off, and a live flinch — then reset the body the way
+/// `clear_body_state` does, and return the body's world Y one gait frame
+/// later. `rest_y` is 0 and the unit stands at y 1.0, so a clean reset reads
+/// exactly 1.0.
+fn reset_and_step(clear_offset: bool, clear_flinch: bool) -> f32 {
+    let mut app = harness();
+    app.add_systems(
+        Update,
+        (tick_hit_flinch, update_walk_animation, cleanup_hit_flinch).chain(),
+    );
+    let (unit, body) = spawn_unit(
+        &mut app,
+        CharacterClass::Priest,
+        1,
+        Vec3::new(0.0, 1.0, 0.0),
+    );
+    // Walk, so the gait carries a real offset...
+    for i in 0..6 {
+        let x = (i + 1) as f32 * 4.0 * TICK_SECS;
+        app.world_mut()
+            .entity_mut(unit)
+            .get_mut::<Transform>()
+            .unwrap()
+            .translation
+            .x = x;
+        app.update();
+    }
+    // ...then stand still just past the idle threshold, which is where the
+    // settle ease takes over and the offset is still non-zero. `idle_time`
+    // only POSITIONS the scenario; every claim below is world geometry.
+    for _ in 0..8 {
+        app.update();
+        if app
+            .world()
+            .entity(unit)
+            .get::<WalkAnim>()
+            .unwrap()
+            .idle_time
+            > 0.1
+        {
+            break;
+        }
+    }
+    let carried = app
+        .world()
+        .entity(unit)
+        .get::<WalkAnim>()
+        .unwrap()
+        .body_offset;
+    assert!(
+        carried.abs() > 0.02,
+        "the gait settled before the reset ({carried}) — this probe would not \
+         distinguish a cleared channel from a stale one"
+    );
+    app.world_mut().entity_mut(unit).insert(HitFlinch {
+        elapsed: 0.0,
+        duration: FLINCH_DURATION_SECS,
+        depth: FLINCH_DIP,
+    });
+
+    // The reset. Every arm zeroes the transform, which is all the sandbox did
+    // before the body's Y became a composed channel.
+    app.world_mut()
+        .entity_mut(body)
+        .insert(Transform::from_xyz(0.0, 0.0, 0.0));
+    if clear_offset {
+        app.world_mut()
+            .entity_mut(unit)
+            .get_mut::<WalkAnim>()
+            .unwrap()
+            .body_offset = 0.0;
+    }
+    if clear_flinch {
+        app.world_mut().entity_mut(unit).remove::<HitFlinch>();
+    }
+
+    app.update();
+    world_y(&app, body)
+}
+
+#[test]
+fn a_between_takes_reset_must_clear_the_composed_channels_too() {
+    // The contract `clear_body_state` (`animation_sandbox/playback.rs`) has to
+    // meet, pinned in the module that owns the composition it clears.
+    //
+    // Because the gait recovers its own contribution from
+    // `WalkAnim::body_offset` instead of reading the transform back, an
+    // outside reset of the transform no longer reaches the gait: on the
+    // settle-to-idle ease the next frame writes `rest_y + <stale offset>`
+    // back over the height the reset just zeroed. The flinch is the same
+    // story carried by a component. Two FRESH OFFENDER arms — one stale
+    // channel each — keep the clean arm from passing vacuously.
+    const REST: f32 = 1.0;
+
+    let clean = reset_and_step(true, true);
+    assert!(
+        (clean - REST).abs() < 1e-6,
+        "a reset that clears both channels must leave the body at rest, got {clean}"
+    );
+
+    let stale_offset = reset_and_step(false, true);
+    assert!(
+        (stale_offset - REST).abs() > 0.02,
+        "a stale gait offset should have re-offset the body, got {stale_offset} \
+         — the clean arm above proves nothing if this one passes"
+    );
+
+    let stale_flinch = reset_and_step(true, false);
+    assert!(
+        (stale_flinch - REST).abs() > 0.02,
+        "a surviving HitFlinch should have dipped the body, got {stale_flinch}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Trigger set: every landed auto flinches; only melee bursts
 // ---------------------------------------------------------------------------
@@ -536,6 +651,229 @@ fn the_burst_sits_on_the_attackers_side() {
             "fleck at {p} is below the victim's transform, not at chest height"
         );
     }
+}
+
+/// The world-space LENGTH of one fleck's streak, measured by transforming the
+/// two Z-face centres of its cuboid mesh (`SPARK_SIZE` long on Z) into the
+/// world. A length off `GlobalTransform` — never a scale scalar — so the claim
+/// is about what is drawn.
+fn streak_length(g: &GlobalTransform) -> f32 {
+    g.transform_point(Vec3::Z * (SPARK_SIZE * 0.5))
+        .distance(g.transform_point(Vec3::NEG_Z * (SPARK_SIZE * 0.5)))
+}
+
+/// The world-space CROSS-SECTION of one fleck, the same way across its X face.
+/// Only ever compared against another cross-section from the same probe, so
+/// the local half-extent used here need not be the mesh's real one.
+fn streak_cross_section(g: &GlobalTransform) -> f32 {
+    g.transform_point(Vec3::X * (SPARK_SIZE * 0.5))
+        .distance(g.transform_point(Vec3::NEG_X * (SPARK_SIZE * 0.5)))
+}
+
+/// Every fleck of one non-crit melee burst, sampled once per frame for its
+/// whole life: `(length, cross_section)` per frame, per fleck, in spawn order.
+fn fleck_life_histories(dt: Duration) -> Vec<Vec<(f32, f32)>> {
+    let mut app = consumer_app();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(dt));
+    app.add_systems(
+        PostUpdate,
+        (update_hit_sparks, cleanup_hit_reactions)
+            .chain()
+            // Sampled off `GlobalTransform`, so the taper must be written
+            // BEFORE propagation or every reading is a frame stale.
+            .before(bevy::transform::TransformSystem::TransformPropagate),
+    );
+    let (attacker, _) = spawn_unit(
+        &mut app,
+        CharacterClass::Warrior,
+        1,
+        Vec3::new(0.0, 1.0, -2.0),
+    );
+    let (victim, _) = spawn_unit(
+        &mut app,
+        CharacterClass::Priest,
+        2,
+        Vec3::new(0.0, 1.0, 0.0),
+    );
+    // Warm-up: Bevy's first update carries a zero delta, so a burst spawned on
+    // it would sit one frame at its spawn scale and break the frame-count
+    // bracket below. Every frame after this one advances by exactly `dt`.
+    app.update();
+    swing(&mut app, attacker, victim, AutoAttackKind::Melee, false);
+    app.update();
+    assert_eq!(spark_count(&mut app), SPARK_COUNT as usize);
+
+    let mut order: Vec<Entity> = Vec::new();
+    let mut history: Vec<Vec<(f32, f32)>> = Vec::new();
+    loop {
+        let frame: Vec<(Entity, f32, f32)> = app
+            .world_mut()
+            .query_filtered::<(Entity, &GlobalTransform), With<HitSpark>>()
+            .iter(app.world())
+            .map(|(e, g)| (e, streak_length(g), streak_cross_section(g)))
+            .collect();
+        if frame.is_empty() {
+            break;
+        }
+        for (entity, length, cross) in frame {
+            let slot = match order.iter().position(|e| *e == entity) {
+                Some(i) => i,
+                None => {
+                    order.push(entity);
+                    history.push(Vec::new());
+                    history.len() - 1
+                }
+            };
+            history[slot].push((length, cross));
+        }
+        app.update();
+    }
+    history
+}
+
+#[test]
+fn a_fleck_thins_and_shortens_along_the_authored_curve() {
+    // Every other burst guard in the module is about how MUCH is spawned —
+    // the compile-time ceiling against Mortal Strike, the concurrency peak
+    // under focus fire. Nothing watched the SHAPE of a fleck once it was
+    // alive, and a taper that compounded frame over frame stayed inside all
+    // of them while rendering at a fraction of its authored length. This is
+    // the curve claim: at each moment of a fleck's life the drawn streak is
+    // `SPARK_SIZE * (0.4 + 0.6 * k)` and the cross-section tapers as
+    // `max(k, 0.15)`, for `k` the fraction of life remaining.
+    const DT: Duration = Duration::from_millis(10);
+
+    let history = fleck_life_histories(DT);
+    assert_eq!(
+        history.len(),
+        SPARK_COUNT as usize,
+        "every fleck of the burst should have been sampled"
+    );
+
+    let mut samples = 0usize;
+    for (fleck, life) in history.iter().enumerate() {
+        let n = life.len();
+        // Sampled after every frame and despawned the frame its clock crosses
+        // zero, so a fleck seen `n` times had a total life in
+        // `(n*dt, (n+1)*dt]`. That brackets `k` at every sample without
+        // reading a private field off the component.
+        assert!(
+            n >= 15,
+            "fleck {fleck} lived only {n} frames — too coarse to pin a curve"
+        );
+        let k_bounds = |j: usize| {
+            let lo = 1.0 - (j + 1) as f32 / n as f32;
+            let hi = 1.0 - (j + 1) as f32 / (n + 1) as f32;
+            (lo.max(0.0), hi)
+        };
+        let (k0_lo, k0_hi) = k_bounds(0);
+        let (spawn_len, spawn_cross) = life[0];
+
+        for (j, (length, cross)) in life.iter().copied().enumerate() {
+            let (k_lo, k_hi) = k_bounds(j);
+            // Length is an ABSOLUTE claim: a non-crit burst on a player victim
+            // spawns at scale 1.0, so the authored streak is `SPARK_SIZE`.
+            let lo = SPARK_SIZE * (0.4 + 0.6 * k_lo) - 1e-5;
+            let hi = SPARK_SIZE * (0.4 + 0.6 * k_hi) + 1e-5;
+            assert!(
+                length >= lo && length <= hi,
+                "fleck {fleck} frame {j} of {n}: streak {length} outside the \
+                 authored [{lo}, {hi}] (SPARK_SIZE {SPARK_SIZE})"
+            );
+            // Cross-section is a RATIO against this fleck's own first sample,
+            // so it needs no private aspect constant.
+            let ratio = cross / spawn_cross;
+            let ratio_lo = k_lo.max(0.15) / k0_hi.max(0.15) - 1e-4;
+            let ratio_hi = k_hi.max(0.15) / k0_lo.max(0.15) + 1e-4;
+            assert!(
+                ratio >= ratio_lo && ratio <= ratio_hi,
+                "fleck {fleck} frame {j} of {n}: cross-section ratio {ratio} \
+                 outside the authored [{ratio_lo}, {ratio_hi}]"
+            );
+            samples += 1;
+        }
+        // The two ends are the halves a compounding taper destroys, so pin
+        // them explicitly rather than leaving them to the band above.
+        assert!(
+            spawn_len > 0.95 * SPARK_SIZE,
+            "fleck {fleck} starts at streak {spawn_len}, not a full SPARK_SIZE"
+        );
+        let (final_len, _) = life[n - 1];
+        assert!(
+            (0.40 * SPARK_SIZE..=0.45 * SPARK_SIZE).contains(&final_len),
+            "fleck {fleck} ends at streak {final_len}, not the authored {}",
+            0.4 * SPARK_SIZE
+        );
+    }
+    assert!(
+        samples > 150,
+        "only {samples} fleck samples — the curve was barely exercised"
+    );
+}
+
+#[test]
+fn a_crit_throws_the_same_flecks_bigger() {
+    // The taper is a function of remaining life alone, so it must leave the
+    // crit and pet spawn scales untouched. Normalising the ratio out of the
+    // curve would satisfy the probe above and break this one.
+    fn mean_spawn_streak(is_crit: bool, pet_victim: bool) -> f32 {
+        let mut app = consumer_app();
+        app.add_systems(
+            PostUpdate,
+            update_hit_sparks.before(bevy::transform::TransformSystem::TransformPropagate),
+        );
+        let (attacker, _) = spawn_unit(
+            &mut app,
+            CharacterClass::Warrior,
+            1,
+            Vec3::new(0.0, 1.0, -2.0),
+        );
+        let victim = if pet_victim {
+            let (owner, _) = spawn_unit(
+                &mut app,
+                CharacterClass::Hunter,
+                2,
+                Vec3::new(3.0, 1.0, 0.0),
+            );
+            spawn_pet_unit(&mut app, owner, Vec3::new(0.0, 1.0, 0.0)).0
+        } else {
+            spawn_unit(
+                &mut app,
+                CharacterClass::Priest,
+                2,
+                Vec3::new(0.0, 1.0, 0.0),
+            )
+            .0
+        };
+        swing(&mut app, attacker, victim, AutoAttackKind::Melee, is_crit);
+        app.update();
+        let lengths: Vec<f32> = app
+            .world_mut()
+            .query_filtered::<&GlobalTransform, With<HitSpark>>()
+            .iter(app.world())
+            .map(streak_length)
+            .collect();
+        assert_eq!(lengths.len(), SPARK_COUNT as usize);
+        lengths.iter().sum::<f32>() / lengths.len() as f32
+    }
+
+    let normal = mean_spawn_streak(false, false);
+    let crit = mean_spawn_streak(true, false);
+    let pet = mean_spawn_streak(false, true);
+    // One frame of taper has already run on each burst, identically, so these
+    // ratios are the spawn scales to well under a percent.
+    let crit_ratio = crit / normal;
+    let pet_ratio = pet / normal;
+    assert!(
+        (crit_ratio - SPARK_CRIT_SCALE).abs() < 0.02,
+        "a crit fleck is {crit_ratio}x a normal one, not SPARK_CRIT_SCALE \
+         ({SPARK_CRIT_SCALE})"
+    );
+    assert!(
+        (pet_ratio - PET_SPARK_SPATIAL_SCALE).abs() < 0.02,
+        "a fleck off a pet victim is {pet_ratio}x a normal one, not \
+         PET_SPARK_SPATIAL_SCALE ({PET_SPARK_SPATIAL_SCALE})"
+    );
 }
 
 /// Peak concurrent flecks under the cadence three attackers focusing one

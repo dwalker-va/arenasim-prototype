@@ -104,9 +104,9 @@ fn advance_gait(
 /// at any height, and a one-frame drop reads as a pop (more so with weapons
 /// riding the body).
 ///
-/// **This is the ONLY writer of the body's local Y for a living, non-
-/// celebrating unit**, and the flinch is composed here rather than in a system
-/// of its own. Two reasons, both load-bearing:
+/// **This is the only PER-FRAME writer of the body's local Y for a living,
+/// non-celebrating unit**, and the flinch is composed here rather than in a
+/// system of its own. Two reasons, both load-bearing:
 ///
 /// 1. The gait writes Y ABSOLUTELY every frame. A separate flinch system is
 ///    therefore decided entirely by which of the two runs later: ordered
@@ -122,6 +122,23 @@ fn advance_gait(
 /// than read back off the transform, because what is on the transform now
 /// includes the dip. With no flinch live the two are identical, which is why
 /// every existing gait is unchanged.
+///
+/// **Who else writes this Y, and what that costs them.** Three others do, and
+/// keeping `body_offset` rather than reading the transform back is exactly
+/// what makes the list matter — an outside write to the transform no longer
+/// reaches this function, so a writer that wants the body back at rest has to
+/// say so in the channel too:
+///
+/// * `animate_death` (corpse sink) and `update_victory_celebration` (winner
+///   bounce) own the axis outright while their markers are present; all three
+///   gait systems filter on `Without<DeathAnimation>, Without<Celebrating>`,
+///   so they never contend and a handoff back to the gait only happens where
+///   those markers are REMOVED from a living unit.
+/// * `clear_body_state` (`animation_sandbox/playback.rs`) is that one place.
+///   It removes both markers and resets the transform between takes, so it
+///   also zeroes `body_offset` and drops any live `HitFlinch`. Without that,
+///   a reset landing inside the settle ease writes the stale offset back over
+///   the height it just zeroed, and a live flinch dips the next take.
 fn apply_gait_offset(
     children: &Children,
     bodies: &mut Query<(&mut Transform, &VisualBody)>,

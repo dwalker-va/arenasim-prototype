@@ -32,9 +32,10 @@ use super::super::play_match::class_ai::shaman::{totem_spacing_offset, totem_spe
 use super::super::play_match::components::{
     ActiveAuras, AuraPending, AuraType, BerserkerRagePending, CastingState, Celebrating,
     ChannelingState, ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState,
-    DispelPending, DivineShieldPending, HealImpact, HolyShockDamagePending, HolyShockHealPending,
-    InstantAbilityFired, MatchResults, Pet, PetType, PlayMatchEntity, SchoolImpact, ScreamBurst,
-    Totem, TotemElement, TrapType, VictoryCelebration, VisualBody,
+    DispelPending, DivineShieldPending, HealImpact, HitFlinch, HolyShockDamagePending,
+    HolyShockHealPending, InstantAbilityFired, MatchResults, Pet, PetType, PlayMatchEntity,
+    SchoolImpact, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration, VisualBody,
+    WalkAnim,
 };
 use super::super::play_match::spawn_pet;
 use super::super::play_match::{
@@ -395,6 +396,7 @@ pub fn drive_playback(
     stage: Res<SandboxStage>,
     defs: Res<AbilityDefinitions>,
     mut bodies: Query<(&mut Transform, &VisualBody)>,
+    mut gaits: Query<&mut WalkAnim>,
     children: Query<&Children>,
     celebration: Option<ResMut<VictoryCelebration>>,
     mut auras: Query<&mut ActiveAuras>,
@@ -420,6 +422,7 @@ pub fn drive_playback(
             &stage,
             &children,
             &mut bodies,
+            &mut gaits,
             &mut auras,
             &mut combatants,
             &leftovers,
@@ -434,6 +437,7 @@ pub fn drive_playback(
             &stage,
             &children,
             &mut bodies,
+            &mut gaits,
             &mut auras,
             &mut combatants,
             &leftovers,
@@ -534,6 +538,7 @@ pub fn drive_playback(
                 &stage,
                 &children,
                 &mut bodies,
+                &mut gaits,
                 &mut auras,
                 &mut combatants,
                 &leftovers,
@@ -1006,11 +1011,31 @@ fn start_entry(
 ///
 /// `animate_death` writes the `VisualBody` child's transform, so removing the
 /// component alone would leave the caster lying on the floor for the next pass.
+///
+/// **Resetting that transform is only half the job.** The body's local Y is
+/// composed — `rest_y + WalkAnim::body_offset + flinch` (`gait.rs`) — and the
+/// gait recovers its own contribution from `body_offset`, never from what is
+/// on the transform. A write from out here therefore no longer reaches the
+/// gait, so both live contributors have to be cleared in their own terms:
+///
+/// * `HitFlinch` survives outright. A pass cut short between the victim's
+///   auto-attack and the dip's 0.35s expiry leaves the dip composed into the
+///   next take.
+/// * `body_offset` survives whenever the gait is in its settle-to-idle ease —
+///   the ~0.17s at `GAIT_SETTLE_RATE` after a walked take stops moving. The
+///   ease used to read the transform back, which made it a no-op against a
+///   reset; now it writes the stale offset over the height just zeroed and
+///   eases THAT out. (Outside that window the gait is not idle and rewrites
+///   its offset from `phase` anyway, as it always did.)
+///
+/// This function is a WRITER of that channel, and is named as one in
+/// `apply_gait_offset`'s doc.
 fn clear_body_state(
     commands: &mut Commands,
     stage: &SandboxStage,
     children: &Query<&Children>,
     bodies: &mut Query<(&mut Transform, &VisualBody)>,
+    gaits: &mut Query<&mut WalkAnim>,
     auras: &mut Query<&mut ActiveAuras>,
     combatants: &mut Query<&mut Combatant>,
     leftovers: &Query<Entity, (With<PlayMatchEntity>, Without<SandboxEntity>)>,
@@ -1059,6 +1084,15 @@ fn clear_body_state(
         }
         if let Ok(mut combatant) = combatants.get_mut(unit) {
             combatant.target = None;
+        }
+        // The other two contributors to the composed body Y. A `HitFlinch` is
+        // left on the auto-attack entry's victim when a pass is cut short, and
+        // the gait's own channel survives the transform reset below.
+        if let Ok(mut e) = commands.get_entity(unit) {
+            e.remove::<HitFlinch>();
+        }
+        if let Ok(mut walk) = gaits.get_mut(unit) {
+            walk.body_offset = 0.0;
         }
     }
 
