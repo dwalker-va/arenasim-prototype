@@ -63,7 +63,7 @@
 //! reads it — which is the point of asking for the sentence.
 
 use arenasim::states::match_config::CharacterClass;
-use arenasim::states::play_match::components::Combatant;
+use arenasim::states::play_match::components::{AutoAttackKind, Combatant};
 use arenasim::states::play_match::constants::OFFHAND_DAMAGE_MULTIPLIER;
 use arenasim::states::play_match::equipment::{
     can_equip_in_socket, load_default_loadouts, load_item_definitions, ItemSlot,
@@ -383,5 +383,191 @@ fn the_rogue_is_the_only_class_that_dual_wields_by_default() {
     assert_eq!(
         single_wielders, 7,
         "expected the other seven classes to be checked"
+    );
+}
+
+/// What every shipped loadout's auto-attack IS (AS-138).
+///
+/// `Combatant::auto_attack_kind` is derived in `apply_equipment` from the item
+/// in `class.weapon_slot()`, and `combat_core::auto_attack` reads it for range,
+/// the Hunter dead zone, the line-of-sight gate, the Windfury and Frost Armor
+/// proc gates, the swing visual and the log name. So this one value decides
+/// how the whole roster auto-attacks, and it is a DATA claim — change a weapon
+/// in `loadouts.ron` and it changes, with nothing else to notice.
+///
+/// The table below is the user's 2026-09-20 ruling written as an assertion:
+/// *"derive the auto attack from the equipped weapon. Shamans can not equip
+/// wands, but Priests/Mages/Warlocks can."* The Shaman is the row that moved —
+/// it fired a 30yd `Wand Shot` while holding a relic, because the old ladder
+/// asked `CharacterClass::is_melee()` instead of asking the socket.
+///
+/// Asserted as SET EQUALITY over `CharacterClass::all()`, not as a lookup with
+/// a floor: an expectation is required for every class, an unknown class fails
+/// rather than being skipped, and a stale row for a class that no longer
+/// exists fails too. A count floor here would let a class silently drop out.
+const EXPECTED_AUTO_ATTACK: &[(CharacterClass, AutoAttackKind, &str)] = &[
+    (
+        CharacterClass::Warrior,
+        AutoAttackKind::Melee,
+        "ArcaniteReaper, a two-hander in MainHand",
+    ),
+    (
+        CharacterClass::Rogue,
+        AutoAttackKind::Melee,
+        "SerpentFangDagger in MainHand",
+    ),
+    (
+        CharacterClass::Paladin,
+        AutoAttackKind::Melee,
+        "HammerOfTheRighteous in MainHand; its Ranged socket holds a Libram, \
+         which is not what it swings",
+    ),
+    (
+        CharacterClass::Shaman,
+        AutoAttackKind::Melee,
+        "HammerOfTheRighteous in MainHand. Its Ranged socket is a TOTEM socket \
+         holding TotemOfLife, and weapon_proficiency(Shaman) declares Bow, Gun, \
+         Crossbow, Thrown and Wand all Untrained — so it has no ranged \
+         auto-attack to fire",
+    ),
+    (
+        CharacterClass::Hunter,
+        AutoAttackKind::Shot,
+        "AshwoodBow in Ranged — the only Shot in the roster",
+    ),
+    (
+        CharacterClass::Mage,
+        AutoAttackKind::Wand,
+        "WandOfShadows in Ranged; the MainHand caster one-hander is a stat stick",
+    ),
+    (
+        CharacterClass::Priest,
+        AutoAttackKind::Wand,
+        "StaffOfDominance in Ranged; the MainHand caster one-hander is a stat stick",
+    ),
+    (
+        CharacterClass::Warlock,
+        AutoAttackKind::Wand,
+        "WandOfShadows in Ranged; the MainHand caster one-hander is a stat stick",
+    ),
+];
+
+#[test]
+fn every_shipped_loadout_derives_the_expected_auto_attack() {
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+
+    // Every class must have an expectation, and every expectation must name a
+    // class that exists — set equality in both directions.
+    for class in CharacterClass::all() {
+        assert!(
+            EXPECTED_AUTO_ATTACK.iter().any(|(c, _, _)| c == class),
+            "{} has no row in EXPECTED_AUTO_ATTACK. Adding a class means \
+             deciding what it auto-attacks WITH; this list is the place that \
+             decision gets written down.",
+            class.name()
+        );
+    }
+    for (class, _, _) in EXPECTED_AUTO_ATTACK {
+        assert!(
+            CharacterClass::all().contains(class),
+            "EXPECTED_AUTO_ATTACK names {}, which is not a CharacterClass",
+            class.name()
+        );
+    }
+    assert_eq!(
+        EXPECTED_AUTO_ATTACK.len(),
+        CharacterClass::all().len(),
+        "EXPECTED_AUTO_ATTACK must have exactly one row per class (duplicates \
+         would satisfy the two membership checks above)"
+    );
+
+    // The derivation itself, through the production path.
+    for (class, expected, why) in EXPECTED_AUTO_ATTACK {
+        let loadout = defaults
+            .get(*class)
+            .unwrap_or_else(|| panic!("{} has no default loadout", class.name()));
+        let mut combatant = Combatant::new(1, 0, *class);
+        combatant.apply_equipment(loadout, &items);
+        assert_eq!(
+            combatant.auto_attack_kind,
+            *expected,
+            "{} derives {:?} from its shipped loadout, expected {:?} ({}). \
+             This decides its auto-attack RANGE, its log name, its \
+             line-of-sight gate and both proc gates at once, so a surprise \
+             here is a gameplay change nothing else reports.",
+            class.name(),
+            combatant.auto_attack_kind,
+            expected,
+            why
+        );
+    }
+
+    // Non-vacuity: all three live kinds must actually be exercised. Were the
+    // roster ever to collapse onto one kind, every assertion above would still
+    // pass while the interesting cases went untested.
+    for kind in [
+        AutoAttackKind::Melee,
+        AutoAttackKind::Shot,
+        AutoAttackKind::Wand,
+    ] {
+        assert!(
+            EXPECTED_AUTO_ATTACK.iter().any(|(_, k, _)| *k == kind),
+            "no class in the roster auto-attacks as {kind:?} — this audit is \
+             no longer covering that arm of the derivation"
+        );
+    }
+}
+
+/// `AutoAttackKind::None` — a live weapon socket holding no weapon — is the arm
+/// the old class ladder could not express, and NO shipped loadout reaches it.
+/// So it has no coverage from the audit above, and a regression in it would be
+/// invisible until a loadout change made it reachable. Pin it directly.
+#[test]
+fn a_live_socket_holding_no_weapon_yields_no_auto_attack() {
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+
+    // The Shaman's own relic, in the Shaman's own live socket. Its Ranged
+    // socket really does hold TotemOfLife; what makes this case hypothetical
+    // is only that weapon_slot(Shaman) is MainHand, so the relic is never the
+    // live one.
+    let shaman = defaults
+        .get(CharacterClass::Shaman)
+        .expect("Shaman loadout");
+    let relic = *shaman
+        .get(&ItemSlot::Ranged)
+        .expect("the Shaman's Ranged socket holds its relic");
+    assert!(
+        !items.get(&relic).expect("relic is a known item").is_weapon,
+        "the Shaman's Ranged item is a weapon — this test no longer builds the \
+         empty-live-socket case it exists to cover"
+    );
+
+    // A Hunter swings from Ranged, so putting the relic there makes that
+    // socket live and weaponless.
+    assert_eq!(
+        CharacterClass::Hunter.weapon_slot(),
+        ItemSlot::Ranged,
+        "this case is built on the Hunter swinging from Ranged"
+    );
+    let mut loadout = arenasim::states::play_match::equipment::Loadout::new();
+    loadout.insert(ItemSlot::Ranged, relic);
+    let mut combatant = Combatant::new(1, 0, CharacterClass::Hunter);
+    combatant.apply_equipment(&loadout, &items);
+    assert_eq!(
+        combatant.auto_attack_kind,
+        AutoAttackKind::None,
+        "a live socket holding a relic must yield no auto-attack at all"
+    );
+
+    // An EMPTY live socket is the same claim by a different route.
+    let empty = arenasim::states::play_match::equipment::Loadout::new();
+    let mut bare = Combatant::new(1, 0, CharacterClass::Hunter);
+    bare.apply_equipment(&empty, &items);
+    assert_eq!(
+        bare.auto_attack_kind,
+        AutoAttackKind::None,
+        "an empty live socket must yield no auto-attack at all"
     );
 }
