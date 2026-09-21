@@ -324,12 +324,22 @@ class AffectsTests(GenTestCase):
         # the comp count, is what the historical failure actually cost. Those
         # 8 controls on 2 distinct opponents covered 3 of the 7 classes.
         #
-        # Stated as coverage rather than as a count of distinct comps because
-        # coverage is the duty AND is scale-free with it: measured 7 of 7 on
-        # both sides at --control-cells 8, 12 and 20, for four different
-        # --affects classes. A distinct-comp count is neither. It drifts with
-        # the control count (max multiplicity runs 2, 3, 4 at 8, 12, 20), so
-        # pinning one would pin this call rather than the obligation.
+        # Coverage rather than a count of distinct comps, because a comp
+        # count states no duty at all -- it just drifts with the control
+        # count (max multiplicity runs 3, 4, 5 at --control-cells 8, 12, 20
+        # across the eight --affects classes), so pinning one would pin this
+        # call rather than the obligation.
+        #
+        # Coverage IS the duty, but is not discharged everywhere, so read this
+        # as a claim about the call it guards and not about the tool. Measured
+        # over all eight --affects classes at --control-cells 8, 12 and 20, it
+        # holds in 22 of 24. It fails at --affects Warlock --control-cells 8 --
+        # the DEFAULT -- where team1 never exercises Warrior and the opponent
+        # side never exercises Rogue, and again at 12 (team1, Warrior). That is
+        # a live blind spot in sample_spread: a Warlock change leaking into
+        # Warrior's team1 behaviour would pass its control clean. Headroom at
+        # the default is thin enough that a real class already misses the duty,
+        # which is the reason to keep asserting it here rather than to relax it.
         owed = set(c for c in gen.CLASSES if c != "Shaman")
         for side, label in ((0, "team1"), (1, "opponent")):
             covered = set(x for c in control for x in c[side])

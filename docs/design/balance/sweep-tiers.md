@@ -324,7 +324,7 @@ chose at launch.** `uptime` is worth reading, but reading it once is not
 enough, and this is measured rather than supposed: AS-99 sized its jobs off
 `uptime` *before* starting (load 26–39), picked `--jobs 6` as a deliberately
 conservative division of 18 cores, and still ran at 1.00 matches/sec — the
-same run it later got 2.54 from on a quiet box at `--jobs 8`. A number
+same sweep it later got 2.54 from on a quiet box at `--jobs 8`. A number
 chosen once goes stale the moment another agent starts, which is exactly what
 happened: three agents each independently reasonable and collectively
 thrashing.
