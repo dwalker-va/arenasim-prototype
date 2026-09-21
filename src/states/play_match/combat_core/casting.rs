@@ -982,7 +982,6 @@ pub fn process_casting(
         }
     }
 
-    // Charge mana for casts that landed (fizzled/interrupted casts never pushed here)
     // Proc trinkets, SpellCast / Heal. A heal fires BOTH: `Heal` is a strict
     // subset of `SpellCast`, so a trinket keyed to either one sees it, and a
     // wearer of both gets one roll from each. Guarded on emptiness before
@@ -1015,6 +1014,7 @@ pub fn process_casting(
         }
     }
 
+    // Charge mana for casts that landed (fizzled/interrupted casts never pushed here)
     for (caster_entity, cost) in mana_charges {
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
             caster.current_mana -= cost;

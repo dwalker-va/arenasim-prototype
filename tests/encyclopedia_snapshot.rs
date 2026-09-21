@@ -225,6 +225,18 @@ fn encyclopedia_item_detail() {
     );
 }
 
+/// A PROC TRINKET's item page — the page a player shopping for a trinket
+/// actually opens, and the one place the proc's trigger, chance, duration and
+/// internal cooldown appear next to the stats they are budgeted against.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_item_detail_proc_trinket() {
+    snapshot(
+        "encyclopedia_item_detail_proc_trinket",
+        state_at(Topic::Item(ItemId::DragonspineTrophy)),
+    );
+}
+
 /// An active search: grouped, linked result rows over the whole registry —
 /// classes, abilities and items in one list.
 #[test]

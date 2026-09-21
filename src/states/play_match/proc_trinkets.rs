@@ -47,12 +47,18 @@
 //! shapes are deliberately absent — on-crit and on-damage-taken — see the enum's
 //! own documentation.
 //!
-//! **`SpellCast` and `Heal` fire on abilities that have a CAST TIME.** An
-//! instant ability never creates a `CastingState` and never reaches
-//! `process_casting`, so it does not proc them. Every class is still served
-//! (melee kits proc off `MeleeHit`; caster and healer kits are cast-time
-//! abilities), but a proc trinket cannot currently key off Holy Shock or
-//! Sinister Strike.
+//! **`SpellCast` and `Heal` fire on a cast that has a CAST TIME, and only
+//! that.** Two neighbours are outside them, both because they resolve
+//! somewhere other than `process_casting`'s completion pass:
+//!
+//! - an INSTANT ability never creates a `CastingState` at all, so Holy Shock
+//!   and Sinister Strike proc nothing;
+//! - a CHANNEL (Drain Life) is ticked by `process_channeling`, so neither its
+//!   start nor its per-tick healing procs anything.
+//!
+//! Every class is still served — melee kits proc off `MeleeHit`, and the
+//! caster and healer kits are cast-time abilities — so this bounds which
+//! abilities a trinket can key off, not which classes can wear one.
 
 use serde::{Deserialize, Serialize};
 

@@ -621,9 +621,7 @@ pub fn combat_auto_attack(
                 // that value answers, so this is another reader of it rather
                 // than a parallel derivation that could disagree with the
                 // Frost Armor gate twenty lines up.
-                if let Some(&(_, _, _, _, attacker_kind)) =
-                    combatant_info.get(&attacker_entity)
-                {
+                if let Some(&(_, _, _, _, attacker_kind)) = combatant_info.get(&attacker_entity) {
                     if attacker_kind == AutoAttackKind::Melee {
                         melee_proc_hits.push(attacker_entity);
                     }

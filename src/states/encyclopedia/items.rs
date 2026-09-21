@@ -306,6 +306,19 @@ pub fn render_detail(ui: &mut egui::Ui, id: ItemId, data: &EncyclopediaData) -> 
     ui.add_space(14.0);
     widget::stat_rows(ui, "encyclopedia_item_stats", &item_stat_rows(item));
 
+    // A proc is a SENTENCE, so it gets a section of its own rather than a row
+    // in the stat table: that table right-aligns its values into a narrow
+    // column, and a sentence dropped into one overflows the panel instead of
+    // wrapping.
+    if let Some(proc) = &item.proc {
+        widget::section_heading(ui, "PROC");
+        ui.label(
+            egui::RichText::new(proc_description(proc))
+                .size(13.5)
+                .color(TEXT),
+        );
+    }
+
     let usable: Vec<CharacterClass> = CharacterClass::all()
         .iter()
         .copied()
@@ -404,14 +417,6 @@ fn item_stat_rows(item: &ItemConfig) -> Vec<(String, String)> {
         format!("+{:.0}", v)
     });
 
-    // The proc, in the same sentence the loadout editor's tooltip shows —
-    // both read `proc_description`, so a trinket cannot describe itself two
-    // ways. Last, because it is the line a reader is looking for once the
-    // stats have told them whether the item is for them at all.
-    if let Some(proc) = &item.proc {
-        rows.push(("Proc".to_string(), proc_description(proc)));
-    }
-
     rows
 }
 
@@ -426,11 +431,6 @@ fn item_stat_rows(item: &ItemConfig) -> Vec<(String, String)> {
 /// read from one source.
 pub fn item_stat_parts(item: &ItemConfig) -> Vec<String> {
     let mut parts = Vec::new();
-    // The proc leads: it is the reason to wear a proc trinket, and the stats
-    // below it are the small change.
-    if let Some(proc) = &item.proc {
-        parts.push(proc_description(proc));
-    }
 
     if item.is_weapon {
         if item.attack_damage_min > 0.0 || item.attack_damage_max > 0.0 {
@@ -531,6 +531,22 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
             );
         }
     }
+
+    // The proc, in the same sentence the encyclopedia page shows — both read
+    // `proc_description`, so a trinket cannot describe itself two ways. Width
+    // is capped so a tooltip wraps the sentence instead of growing a line
+    // wide enough to leave the screen.
+    if let Some(proc) = &item.proc {
+        ui.add_space(4.0);
+        ui.scope(|ui| {
+            ui.set_max_width(280.0);
+            ui.label(
+                egui::RichText::new(proc_description(proc))
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(170, 170, 170)),
+            );
+        });
+    }
 }
 
 #[cfg(test)]
@@ -553,6 +569,44 @@ mod tests {
                 id
             );
         }
+    }
+
+    /// Every shipped proc renders a sentence naming its trigger, its chance,
+    /// its magnitude, its duration and its internal cooldown. The item page's
+    /// snapshot pins where that sentence SITS; this pins what it says, for
+    /// every trinket, including the ones AS-61 adds.
+    #[test]
+    fn every_shipped_proc_describes_all_of_its_numbers() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let mut checked = 0;
+        for (_, item) in items.iter() {
+            let Some(proc) = &item.proc else { continue };
+            checked += 1;
+            let text = proc_description(proc);
+            for needle in [
+                format!("{:.0}%", proc.chance * 100.0),
+                format!("{:.0}s", proc.duration),
+                format!("{:.0}s", proc.internal_cooldown),
+            ] {
+                assert!(
+                    text.contains(&needle),
+                    "{}'s proc line omits {:?}: {:?}",
+                    item.name,
+                    needle,
+                    text
+                );
+            }
+            assert!(
+                !text.contains("(0)"),
+                "{}'s proc line lost its magnitude: {:?}",
+                item.name,
+                text
+            );
+        }
+        assert!(
+            checked > 0,
+            "no item declares a proc — this checked nothing"
+        );
     }
 
     #[test]
