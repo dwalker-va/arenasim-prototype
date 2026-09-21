@@ -37,6 +37,7 @@ use crate::states::play_match::components::*;
 use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
+use std::collections::HashMap;
 
 // --- The blessed spec -------------------------------------------------------
 //
@@ -293,6 +294,14 @@ pub fn hit_flinch_offset(flinch: &HitFlinch) -> f32 {
 /// Reads the victim's LIVE transform. The sim already resolved damage against
 /// that position, and the burst is sited there rather than tracked, so a unit
 /// that walks on does not drag its own sparks along.
+///
+/// The depth floor is fed from TWO sources — the victim's live component and
+/// the deepest dip already chosen for it THIS tick. Commands are not applied
+/// until the end of the schedule, so several swings landing on one victim in
+/// one tick all read the same pre-tick component; without the second source a
+/// crit sharing a tick with a normal hit would be overwritten at the normal
+/// depth. Measured at 22% of landed autos under focus fire, which is exactly
+/// where the crit contrast is supposed to read.
 pub fn consume_hit_reactions(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -302,6 +311,15 @@ pub fn consume_hit_reactions(
     attackers: Query<(&Transform, &Combatant)>,
     sockets: Query<(&WeaponSocket, &GlobalTransform)>,
 ) {
+    // Deepest dip chosen for each victim so far this tick. A `HashMap` is the
+    // right structure despite the project's rule about hash-ordered float
+    // reductions (CLAUDE.md, *What a byte-identity result proves*): this map
+    // is only ever POINT-LOOKED-UP by entity, never iterated, so its order
+    // reaches no arithmetic. The order the depths are folded in is the signal
+    // query's, unchanged by this map — and `max` is order-independent anyway.
+    // Graphical-only besides; nothing here reaches sim state.
+    let mut pending_depth: HashMap<Entity, f32> = HashMap::new();
+
     for signal in signals.iter() {
         let Ok((victim_tf, victim_pet, live_flinch)) = victims.get(signal.target) else {
             continue;
@@ -326,7 +344,16 @@ pub fn consume_hit_reactions(
         // keeps the compression continuous. Without the floor, a normal hit
         // landing mid-crit-dip would pop the body UPWARD — the one artifact
         // focus fire would produce constantly.
-        let depth = depth.max(live_flinch.map_or(0.0, |f| hit_flinch_offset(f).abs()));
+        //
+        // The floor spans both the ACROSS-tick case (the live component) and
+        // the WITHIN-tick one (a depth this loop has already queued for the
+        // same victim). The second is invisible in the component, because the
+        // insert that carries it is still in the command queue.
+        let floor = live_flinch
+            .map_or(0.0, |f| hit_flinch_offset(f).abs())
+            .max(pending_depth.get(&signal.target).copied().unwrap_or(0.0));
+        let depth = depth.max(floor);
+        pending_depth.insert(signal.target, depth);
         commands.entity(signal.target).insert(HitFlinch {
             elapsed: 0.0,
             duration,

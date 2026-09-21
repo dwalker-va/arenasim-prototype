@@ -573,6 +573,65 @@ fn a_crit_dips_deeper_and_a_refresh_never_pops_the_body_upward() {
     );
 }
 
+#[test]
+fn a_same_tick_crit_keeps_its_depth_whichever_lands_first() {
+    // The test above covers the ACROSS-tick refresh, where the floor can read
+    // the deeper dip off the victim's live component. Within ONE tick it
+    // cannot: the insert carrying the crit's depth is still in the command
+    // queue, so both swings read the same pre-tick component and the later
+    // one wins outright. Measured at 22% of landed autos under focus fire —
+    // the scenario whose whole point is that a crit reads as a crit.
+    //
+    // Both orders, because the defect is order-dependent by construction:
+    // crit-then-normal loses the depth, normal-then-crit happens to keep it.
+    for crit_first in [true, false] {
+        let mut app = consumer_app();
+        let (attacker, _) = spawn_unit(
+            &mut app,
+            CharacterClass::Warrior,
+            1,
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let (second, _) = spawn_unit(&mut app, CharacterClass::Rogue, 1, Vec3::new(0.0, 1.0, 2.0));
+        let (victim, _) = spawn_unit(
+            &mut app,
+            CharacterClass::Priest,
+            2,
+            Vec3::new(2.0, 1.0, 0.0),
+        );
+
+        // Two attackers, one victim, one tick — signals spawned before any
+        // `app.update()`, which is exactly what a shared FixedUpdate tick
+        // hands the consumer.
+        swing(
+            &mut app,
+            attacker,
+            victim,
+            AutoAttackKind::Melee,
+            crit_first,
+        );
+        swing(&mut app, second, victim, AutoAttackKind::Melee, !crit_first);
+        app.update();
+
+        let landed = flinch_of(&app, victim).expect("a same-tick pair still flinches");
+        assert!(
+            (landed.depth - FLINCH_DIP * FLINCH_CRIT_MULT).abs() < 1e-6,
+            "crit_first={crit_first}: dip is {} but a crit shared the tick, so \
+             it should be the crit's {}",
+            landed.depth,
+            FLINCH_DIP * FLINCH_CRIT_MULT
+        );
+        // And both bursts were thrown — the crit's spark scale was never the
+        // thing at risk here, and a fix that collapsed the pair into one
+        // reaction would be a different regression.
+        assert_eq!(
+            spark_count(&mut app),
+            2 * SPARK_COUNT as usize,
+            "crit_first={crit_first}: both contacts should throw a burst"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The burst's world geometry
 // ---------------------------------------------------------------------------
@@ -918,14 +977,29 @@ fn focus_fire_stays_under_one_mortal_strike_of_debris() {
     const MS_SPARK_LENGTH: f32 = 0.13;
     let ms_budget = MS_SPARK_COUNT * MS_SPARK_LENGTH;
 
-    // MEASURED at the blessed values: 22 concurrent flecks drawing 1.32
-    // streak-units, against one Mortal Strike flourish's 14 / 1.82 — so the
-    // WORST sustained case the game produces still draws under three
-    // quarters of a single signature beat.
+    // The peak this cadence actually produces at the blessed values, pinned
+    // rather than described. A loose bound with an exact number in the
+    // comment beside it reads as verified and is not — so the number IS the
+    // assertion. `streak` is `peak * SPARK_SIZE` by construction, so pinning
+    // the count pins the streak too (22 * 0.06 = 1.32 against one Mortal
+    // Strike flourish's 14 * 0.13 = 1.82).
+    //
+    // What would have to change for this to move: `SPARK_COUNT`,
+    // `SPARK_LIFETIME_SECS` or its 0.7-1.3 per-fleck jitter — which is to say
+    // exactly the intensity knobs the card froze and the compile-time ceiling
+    // watches from the other side. A failure here is a real question, not
+    // noise. (The harness tick and the 0.2s cadence are test-local and
+    // spelled out in the call.)
+    const FOCUS_FIRE_PEAK: usize = 22;
     let (peak, streak) = sustained_burst_peak(0.2, 2.0);
     assert!(
         peak > SPARK_COUNT as usize,
         "bursts never overlapped — probe is vacuous"
+    );
+    assert_eq!(
+        peak, FOCUS_FIRE_PEAK,
+        "the three-attacker peak moved off its measured value; \
+         {streak} streak-units drawn"
     );
     // The slow end of the same three-attacker band.
     let (peak_03, streak_03) = sustained_burst_peak(0.3, 2.4);

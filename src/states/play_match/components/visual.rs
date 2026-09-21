@@ -1313,7 +1313,10 @@ pub struct AutoAttackSwing {
 ///
 /// Refreshed rather than stacked: a second hit inside the window restarts the
 /// dip at the deeper of the two depths, so focus fire reads as a body being
-/// held down rather than as an offset that keeps growing.
+/// held down rather than as an offset that keeps growing. That holds WITHIN a
+/// tick as well as across one — `consume_hit_reactions` floors against the
+/// depths it has already queued this tick, because its own inserts are not
+/// visible in this component until the schedule ends.
 ///
 /// Graphical-only: spawned by `consume_hit_reactions`, which is registered in
 /// `states/mod.rs` and nowhere else.
