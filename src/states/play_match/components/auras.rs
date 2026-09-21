@@ -1222,16 +1222,120 @@ impl DRCategory {
         self as usize
     }
 
-    /// Map an AuraType to its DR category. Returns None for non-CC auras.
+    /// Map an AuraType to its diminishing-returns category. `None` means the
+    /// mechanic is not diminished.
+    ///
+    /// **Exhaustive on purpose — do not add a `_ =>` arm.** Same hazard class
+    /// as [`AuraType::is_magic_dispellable`] and [`AuraType::is_hostile_effect`],
+    /// and worse than either, because here `None` is not a classification —
+    /// it is an EXEMPTION. `None` is the value that makes `apply_pending_auras`
+    /// skip the diminishing-returns block whole: no immunity rejection, no
+    /// duration scaling, no CC-replacement swap, and no `[CC]` log line. A
+    /// crowd-control variant that fell through a wildcard would therefore be
+    /// exempt from DR entirely, chainable without limit, and invisible — there
+    /// is no log entry to notice it by and no test in this repo observes "the
+    /// CC that was never a DR candidate".
+    ///
+    /// That is not hypothetical. `AttackSpeedSlow` fell through the wildcard
+    /// this match used to end in: a 5-second slow that outlived a DR-immune
+    /// rejection its own paired face did not. It was fixed one level up, at the
+    /// compound — leaving the wildcard to catch the next variant, which it
+    /// would not have. The compiler refusing to build until variant N+1 is
+    /// classified is the only guard that holds.
+    ///
+    /// **Why one value and not two.** Listing the undiminished variants below
+    /// as `None` does make one value carry both "not crowd control" and "not
+    /// diminished", and splitting them into a `DRTreatment` enum was
+    /// considered. It is not worth it here:
+    ///
+    /// - No consumer can tell the two apart. Every call site either binds the
+    ///   `Some` or compares against one specific `Some(..)`; not one branches
+    ///   on WHY the category is absent. The two non-`Some` values would be
+    ///   behaviourally identical everywhere — a type inviting a later reader to
+    ///   branch on a distinction that does not exist.
+    /// - `Option<DRCategory>` is a composition seam, not a local choice.
+    ///   [`Aura::dr_category`] folds this into `dr_category_override`, which is
+    ///   `Option<DRCategory>` deserialized from `abilities.ron`. There `None`
+    ///   means a THIRD thing — "no override" — so a richer type would either
+    ///   stop at a pointless conversion or leak into the config format.
+    /// - The two sibling classifiers in this file met the same overload and
+    ///   answered it the same way. `is_magic_dispellable` returns a bare
+    ///   `bool` whose `false` means six different things, and makes each one
+    ///   legible by GROUPING the arms and saying why per group. A third
+    ///   classifier with a bespoke return type costs more in cross-reading
+    ///   than it buys.
+    ///
+    /// So the reason lives in the grouping instead, and the group that matters
+    /// is the first `None` one: hostile effects that DO restrict the target and
+    /// are still deliberately undiminished. That is where a new CC would be
+    /// misfiled, and it is the group to read twice.
+    ///
+    /// `dr_category_selection_is_exactly_the_diminished_set` pins the split, so
+    /// a silent reclassification of an EXISTING variant — which the compiler
+    /// cannot catch — fails too.
     pub fn from_aura_type(aura_type: &AuraType) -> Option<DRCategory> {
         match aura_type {
+            // Crowd control. Each category diminishes independently; the two
+            // dedicated buckets (`KidneyShotStun`, `Horror`) are reachable only
+            // through an aura's `dr_category_override`, never from here.
             AuraType::Stun => Some(DRCategory::Stuns),
             AuraType::Fear => Some(DRCategory::Fears),
             AuraType::Polymorph | AuraType::Incapacitate => Some(DRCategory::Incapacitates),
             AuraType::Root => Some(DRCategory::Roots),
             AuraType::MovementSpeedSlow => Some(DRCategory::Slows),
             AuraType::Silence => Some(DRCategory::Silence),
-            _ => None,
+
+            // READ THIS GROUP TWICE. Hostile effects that genuinely restrict
+            // what the target can do, or how fast it does it, and are still
+            // deliberately NOT diminished. Each exclusion is a decision:
+            //
+            // `SpellSchoolLockout` is the interrupt lockout. Lockouts carry no
+            // DR in WoW, and giving them one would make interrupts worthless
+            // against a caster who simply ate the first two.
+            //
+            // `CastTimeIncrease` is Curse of Tongues — a casting tax rather
+            // than a lockout. It does not stop a cast, so there is no chain to
+            // diminish.
+            //
+            // `AttackSpeedSlow` is the variant this match's old wildcard swept
+            // up, and its exclusion is now load-bearing rather than accidental.
+            // It is the rider half of Frost Armor's proc; the FACE of that
+            // compound is the paired `MovementSpeedSlow`, which carries the
+            // `Slows` bucket for both. Diminishing the rider as well would
+            // charge one proc against `Slows` twice.
+            AuraType::SpellSchoolLockout
+            | AuraType::CastTimeIncrease
+            | AuraType::AttackSpeedSlow => None,
+
+            // Hostile, but damage and stat taxes rather than control — there is
+            // no window of lost agency for DR to shorten. Mortal Strike's
+            // healing cut, Curse of Weakness, Demoralizing Shout, and every DoT.
+            AuraType::DamageOverTime
+            | AuraType::HealingReduction
+            | AuraType::DamageReduction
+            | AuraType::AttackPowerReduction => None,
+
+            // Beneficial. DR exists to cap how long one side can hold the other
+            // still; nothing about a buff on its own holder is a chain to cap.
+            AuraType::Absorb
+            | AuraType::MaxHealthIncrease
+            | AuraType::MaxManaIncrease
+            | AuraType::AttackPowerIncrease
+            | AuraType::SpellPowerIncrease
+            | AuraType::HealingOverTime
+            | AuraType::WindfuryBuff
+            | AuraType::DamageTakenReduction
+            | AuraType::DamageImmunity
+            | AuraType::CritChanceIncrease
+            | AuraType::ManaRegenIncrease
+            | AuraType::LockoutDurationReduction
+            | AuraType::FrostArmorBuff
+            | AuraType::SpellResistanceBuff
+            | AuraType::FearImmunity => None,
+
+            // Mechanical markers, not effects. They track state (a spent soul,
+            // a coated weapon, a revealed unit) and nobody chains them.
+            AuraType::WeakenedSoul | AuraType::ShadowSight | AuraType::WeaponPoison => None,
         }
     }
 }
@@ -1888,5 +1992,66 @@ mod tests {
             "Divine Shield retains against hostile effects — a physical debuff \
              must remain one, or the bubble stops clearing it"
         );
+    }
+}
+
+#[cfg(test)]
+mod dr_category_tests {
+    use super::{AuraType, DRCategory};
+
+    /// The exhaustive match in [`DRCategory::from_aura_type`] forces variant
+    /// N+1 to be CLASSIFIED, but it cannot notice an existing variant being
+    /// RECLASSIFIED — moving `Silence` from its `Some` arm into a `None` group
+    /// compiles perfectly and silently exempts it from diminishing returns.
+    ///
+    /// So pin the split as a SET EQUALITY over `AuraType::ALL`, not a floor:
+    /// both directions fail. A diminished variant that stops being diminished
+    /// fails, and an undiminished variant that starts being diminished fails
+    /// too — the second is a balance change and should have to be typed here.
+    #[test]
+    fn dr_category_selection_is_exactly_the_diminished_set() {
+        let expected: [(AuraType, DRCategory); 7] = [
+            (AuraType::Stun, DRCategory::Stuns),
+            (AuraType::Fear, DRCategory::Fears),
+            (AuraType::Polymorph, DRCategory::Incapacitates),
+            (AuraType::Incapacitate, DRCategory::Incapacitates),
+            (AuraType::Root, DRCategory::Roots),
+            (AuraType::MovementSpeedSlow, DRCategory::Slows),
+            (AuraType::Silence, DRCategory::Silence),
+        ];
+
+        for ty in AuraType::ALL {
+            let actual = DRCategory::from_aura_type(&ty);
+            let wanted = expected
+                .iter()
+                .find(|(listed, _)| *listed == ty)
+                .map(|(_, category)| *category);
+            assert_eq!(
+                actual, wanted,
+                "{ty:?} maps to {actual:?} but this test expects {wanted:?}. If the \
+                 change was deliberate, update the list here and say so — a `None` \
+                 makes apply_pending_auras skip the DR block whole (no immunity \
+                 rejection, no duration scaling, no [CC] log line), so an exemption \
+                 added by accident is invisible in every match log."
+            );
+        }
+    }
+
+    /// The two dedicated buckets are reachable only through an aura's
+    /// `dr_category_override`. If `from_aura_type` ever started returning one,
+    /// every ability applying that `AuraType` would silently join a bucket
+    /// built for exactly one ability.
+    #[test]
+    fn dedicated_buckets_are_never_derived_from_the_aura_type() {
+        for ty in AuraType::ALL {
+            let category = DRCategory::from_aura_type(&ty);
+            assert!(
+                category != Some(DRCategory::KidneyShotStun)
+                    && category != Some(DRCategory::Horror),
+                "{ty:?} derives {category:?} from its AuraType — that bucket is \
+                 override-only, and deriving it would pull every ability sharing \
+                 this AuraType into a single ability's DR bucket"
+            );
+        }
     }
 }
