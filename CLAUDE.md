@@ -673,7 +673,7 @@ win-rate tables; `scripts/{hunter,mage,shaman}_2v2_matrix.sh` and `--matrix N`
 are the older per-cell-CSV wrappers (columns per `src/headless/matrix.rs:217`).
 
 **Size a sweep at 1-2.5 matches/sec.** Measured: 1.00/sec at `--jobs 6` and
-1.52/sec at `--jobs 16` under three-way load, 2.05/sec at `--jobs 6` and
+1.52/sec at `--jobs 16` under load, 2.05/sec at `--jobs 6` and
 2.54/sec at `--jobs 8` on a quiet box. A match costs ~1.37 CPU-seconds,
 **62-67% of it kernel time that is present on a quiet box too**, and the
 batch runner reaches only 2-3 effective cores of 18 whatever `--jobs` says —

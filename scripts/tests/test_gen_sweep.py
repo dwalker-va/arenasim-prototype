@@ -336,10 +336,11 @@ class AffectsTests(GenTestCase):
         # holds in 22 of 24. It fails at --affects Warlock --control-cells 8 --
         # the DEFAULT -- where team1 never exercises Warrior and the opponent
         # side never exercises Rogue, and again at 12 (team1, Warrior). That is
-        # a live blind spot in sample_spread: a Warlock change leaking into
-        # Warrior's team1 behaviour would pass its control clean. Headroom at
-        # the default is thin enough that a real class already misses the duty,
-        # which is the reason to keep asserting it here rather than to relax it.
+        # a live blind spot in sample_spread, tracked as AS-143: a Warlock
+        # change leaking into Warrior's team1 behaviour would pass its control
+        # clean. Headroom at the default is thin enough that a real class
+        # already misses the duty, which is the reason to keep asserting it
+        # here rather than to relax it.
         owed = set(c for c in gen.CLASSES if c != "Shaman")
         for side, label in ((0, "team1"), (1, "opponent")):
             covered = set(x for c in control for x in c[side])
