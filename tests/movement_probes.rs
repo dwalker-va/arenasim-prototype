@@ -2941,6 +2941,7 @@ mod bucket_a_unit {
             dr_category_override: None,
             dispel_type: DispelType::Auto,
             compound: None,
+            distinct_by_source: false,
         }
     }
 
@@ -4594,6 +4595,7 @@ mod u9_seek_reset {
             dr_category_override: None,
             dispel_type: DispelType::Auto,
             compound: None,
+            distinct_by_source: false,
         }
     }
 

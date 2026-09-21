@@ -54,7 +54,7 @@ pub fn build_registry(items: &ItemDefinitions, abilities: &AbilityDefinitions) -
     super::classes::search_entries(&mut entries);
     super::abilities::search_entries(abilities, &mut entries);
     super::items::search_entries(items, &mut entries);
-    super::auras::search_entries(abilities, &mut entries);
+    super::auras::search_entries(abilities, items, &mut entries);
     entries.sort_by(|a, b| {
         a.topic
             .section()
@@ -163,7 +163,7 @@ mod tests {
     fn every_entity_is_searchable_without_a_hand_authored_entry() {
         let (items, abilities) = fixtures();
         let registry = build_registry(&items, &abilities);
-        let auras = super::super::auras::catalog(&abilities).len();
+        let auras = super::super::auras::catalog(&abilities, &items).len();
         assert_eq!(
             registry.len(),
             CharacterClass::all().len()

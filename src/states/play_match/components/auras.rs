@@ -739,6 +739,22 @@ pub struct Aura {
     /// Every member of a compound carries the SAME value here, and the members
     /// are applied together, expire together and are removed together.
     pub compound: Option<CompoundDebuff>,
+    /// Whether this aura's identity is its SOURCE rather than its
+    /// `effect_type` — that is, whether a buff of the same type from a
+    /// DIFFERENT source may be up at the same time.
+    ///
+    /// `false` for every ability-applied aura, which is the long-standing
+    /// rule: one `MaxHealthIncrease` at a time, whether it came from Power
+    /// Word: Fortitude or Commanding Shout. `apply_pending_auras` enforces it
+    /// by keying the buff on its `effect_type`.
+    ///
+    /// `true` for a PROC TRINKET's buff, and it has to be. A trinket granting
+    /// attack power is a different thing from Battle Shout granting attack
+    /// power, and a wearer may have both — indeed the point of the second
+    /// trinket socket is that two different trinkets are live at once. Keyed
+    /// on `ability_name` instead, exactly as `Absorb` already is for the same
+    /// reason (two different shields coexist).
+    pub distinct_by_source: bool,
 }
 
 impl Aura {
@@ -1082,6 +1098,7 @@ impl AuraPending {
                 // An ability applies at most one aura, so a RON-defined aura is never
                 // part of a compound debuff. See `CompoundDebuff`.
                 compound: None,
+                distinct_by_source: false,
             },
         })
     }
@@ -1130,6 +1147,7 @@ impl AuraPending {
                 // An ability applies at most one aura, so a RON-defined aura is never
                 // part of a compound debuff. See `CompoundDebuff`.
                 compound: None,
+                distinct_by_source: false,
             },
         })
     }
@@ -1178,6 +1196,7 @@ impl AuraPending {
                 // An ability applies at most one aura, so a RON-defined aura is never
                 // part of a compound debuff. See `CompoundDebuff`.
                 compound: None,
+                distinct_by_source: false,
             },
         })
     }
@@ -1526,6 +1545,7 @@ mod compound_tests {
             effect_type,
             duration: 5.0,
             compound: Some(CompoundDebuff::FrostArmorChill),
+            distinct_by_source: false,
             ..Default::default()
         }
     }

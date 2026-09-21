@@ -17,6 +17,7 @@ use crate::states::match_config::CharacterClass;
 use crate::states::play_match::equipment::{
     can_equip, ArmorType, ItemConfig, ItemDefinitions, ItemId, ItemSlotType, WeaponType,
 };
+use crate::states::play_match::proc_trinkets::proc_description;
 
 use super::search::SearchEntry;
 use super::widget;
@@ -403,6 +404,14 @@ fn item_stat_rows(item: &ItemConfig) -> Vec<(String, String)> {
         format!("+{:.0}", v)
     });
 
+    // The proc, in the same sentence the loadout editor's tooltip shows —
+    // both read `proc_description`, so a trinket cannot describe itself two
+    // ways. Last, because it is the line a reader is looking for once the
+    // stats have told them whether the item is for them at all.
+    if let Some(proc) = &item.proc {
+        rows.push(("Proc".to_string(), proc_description(proc)));
+    }
+
     rows
 }
 
@@ -417,6 +426,11 @@ fn item_stat_rows(item: &ItemConfig) -> Vec<(String, String)> {
 /// read from one source.
 pub fn item_stat_parts(item: &ItemConfig) -> Vec<String> {
     let mut parts = Vec::new();
+    // The proc leads: it is the reason to wear a proc trinket, and the stats
+    // below it are the small change.
+    if let Some(proc) = &item.proc {
+        parts.push(proc_description(proc));
+    }
 
     if item.is_weapon {
         if item.attack_damage_min > 0.0 || item.attack_damage_max > 0.0 {

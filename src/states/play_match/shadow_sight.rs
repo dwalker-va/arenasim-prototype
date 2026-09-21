@@ -212,6 +212,7 @@ pub fn check_orb_pickups(
                         dr_category_override: None,
                         dispel_type: DispelType::Auto,
                         compound: None,
+                        distinct_by_source: false,
                     },
                 });
 

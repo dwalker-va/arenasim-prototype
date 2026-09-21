@@ -72,6 +72,8 @@ use crate::states::play_match::constants::{
 use crate::states::play_match::effects::backlash::{
     dispel_backlash_silence_aura, DISPEL_BACKLASH_SILENCE_DURATION,
 };
+use crate::states::play_match::equipment::{ItemDefinitions, ItemId};
+use crate::states::play_match::proc_trinkets::proc_description;
 use crate::states::play_match::rendering::is_buff_aura;
 use crate::states::play_match::shadow_sight::{
     SHADOW_SIGHT_BREAK_ON_DAMAGE, SHADOW_SIGHT_DURATION, SHADOW_SIGHT_SPAWN_TIME,
@@ -179,6 +181,11 @@ pub enum EngineAura {
     /// engine learned to bind the two effects into one debuff; see
     /// [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff).
     FrostArmorChill,
+    /// The stat buff a PROC TRINKET grants its wearer, named after the trinket.
+    /// Nested on [`ItemId`] and derived from `items.ron` — every item carrying
+    /// a `proc:` block gets an entry, so trinket N+1 (the whole point of
+    /// AS-61) needs no variant here.
+    ProcTrinketBuff(ItemId),
 }
 
 impl EngineAura {
@@ -186,7 +193,7 @@ impl EngineAura {
     ///
     /// The two nested variants expand from their own sources, so this list only
     /// has to name the genuinely one-off auras.
-    pub fn all(abilities: &AbilityDefinitions) -> Vec<EngineAura> {
+    pub fn all(abilities: &AbilityDefinitions, items: &ItemDefinitions) -> Vec<EngineAura> {
         let mut all = vec![
             EngineAura::WeakenedSoul,
             EngineAura::ShadowSight,
@@ -208,6 +215,17 @@ impl EngineAura {
             .collect();
         interrupts.sort_unstable();
         all.extend(interrupts.into_iter().map(EngineAura::InterruptLockout));
+        // Walked in `ItemId::all()` order rather than `items.iter()` order:
+        // `ItemDefinitions` is backed by a `HashMap`, and the catalog's sort is
+        // by NAME, so two items sharing a name would otherwise come out in a
+        // per-process order.
+        all.extend(
+            ItemId::all()
+                .iter()
+                .filter(|id| items.get(id).is_some_and(|i| i.proc.is_some()))
+                .copied()
+                .map(EngineAura::ProcTrinketBuff),
+        );
         all
     }
 }
@@ -461,16 +479,16 @@ impl NamedAura {
 ///
 /// Deterministic: `AbilityDefinitions` iterates a `HashMap`, so the sort is
 /// what makes the index, the search registry and the snapshots stable.
-pub fn catalog(abilities: &AbilityDefinitions) -> Vec<NamedAura> {
+pub fn catalog(abilities: &AbilityDefinitions, items: &ItemDefinitions) -> Vec<NamedAura> {
     let mut entries: Vec<NamedAura> = abilities
         .iter()
         .filter_map(|(ability, _)| ron_entry(*ability, abilities))
         .collect();
 
     entries.extend(
-        EngineAura::all(abilities)
+        EngineAura::all(abilities, items)
             .into_iter()
-            .map(|engine| engine_entry(engine, abilities)),
+            .filter_map(|engine| engine_entry(engine, abilities, items)),
     );
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     entries
@@ -479,10 +497,14 @@ pub fn catalog(abilities: &AbilityDefinitions) -> Vec<NamedAura> {
 /// Build the ONE entry an address names, without walking the catalog. Used
 /// where only a single aura is on screen (a tooltip); the index and the
 /// sibling cross-links still need the whole thing.
-pub fn entry_of(id: AuraId, abilities: &AbilityDefinitions) -> Option<NamedAura> {
+pub fn entry_of(
+    id: AuraId,
+    abilities: &AbilityDefinitions,
+    items: &ItemDefinitions,
+) -> Option<NamedAura> {
     match id {
         AuraId::Ability(ability) => ron_entry(ability, abilities),
-        AuraId::Engine(engine) => Some(engine_entry(engine, abilities)),
+        AuraId::Engine(engine) => engine_entry(engine, abilities, items),
     }
 }
 
@@ -646,6 +668,11 @@ fn engine_art(engine: EngineAura) -> AuraArt {
         | EngineAura::WeaponPoisonCoating(_)
         | EngineAura::DispelBacklashSilence
         | EngineAura::FrostArmorChill => AuraArt::FromSource,
+        // No ability applies it, so there is no ability icon to borrow. One
+        // shared proc-buff tile rather than the trinket's own art: `AuraArt`
+        // addresses an ability icon or a generic aura key, and teaching it to
+        // address an ITEM icon is a bigger change than this entry is worth.
+        EngineAura::ProcTrinketBuff(_) => AuraArt::Own("aura_proc_trinket"),
     }
 }
 
@@ -654,7 +681,14 @@ fn engine_art(engine: EngineAura) -> AuraArt {
 /// Every value here is read from the constant, shared constructor or spec the
 /// apply site reads, so the page cannot state a number the simulation does not
 /// use.
-fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura {
+/// `None` only for a `ProcTrinketBuff` address whose item no longer carries a
+/// proc — an address that `EngineAura::all` cannot produce, but that a stale
+/// navigation stack can still hold.
+fn engine_entry(
+    engine: EngineAura,
+    abilities: &AbilityDefinitions,
+    items: &ItemDefinitions,
+) -> Option<NamedAura> {
     let spec = match engine {
         EngineAura::WeakenedSoul => EngineSpec {
             name: "Weakened Soul".to_string(),
@@ -807,6 +841,30 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
                     .to_string(),
             }
         }
+        EngineAura::ProcTrinketBuff(item) => {
+            let def = items.get(&item)?;
+            let proc = def.proc.as_ref()?;
+            EngineSpec {
+                name: def.name.clone(),
+                frame_name: None,
+                mechanic: proc.effect,
+                // The trinket is not an ability and has no page of its own to
+                // link to from here; the ITEM's page is where its numbers live,
+                // and the provenance line below names it.
+                source: AuraSource::Mechanic("a proc trinket you are wearing"),
+                magnitude: proc.magnitude,
+                school: None,
+                // A proc buff is never broken by damage — see `ProcConfig::aura`.
+                break_on_damage: -1.0,
+                persistence: Persistence::Seconds(proc.duration),
+                riders: EngineSpec::no_riders(),
+                // Read straight off the same `ProcConfig` the simulation rolls
+                // against, so the page cannot state a chance, a duration or a
+                // cooldown the trinket does not have. The trinket is not named
+                // again here — the page header IS its name.
+                provenance: proc_description(proc),
+            }
+        }
     };
 
     let EngineSpec {
@@ -869,7 +927,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
         )
     };
 
-    NamedAura {
+    Some(NamedAura {
         id: AuraId::Engine(engine),
         name,
         frame_name,
@@ -882,7 +940,7 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
         magnitude_coefficient: 0.0,
         description,
         provenance: Some(provenance),
-    }
+    })
 }
 
 // ============================================================================
@@ -890,8 +948,12 @@ fn engine_entry(engine: EngineAura, abilities: &AbilityDefinitions) -> NamedAura
 // ============================================================================
 
 /// Contribute every named aura to the search registry.
-pub fn search_entries(abilities: &AbilityDefinitions, out: &mut Vec<SearchEntry>) {
-    for entry in catalog(abilities) {
+pub fn search_entries(
+    abilities: &AbilityDefinitions,
+    items: &ItemDefinitions,
+    out: &mut Vec<SearchEntry>,
+) {
+    for entry in catalog(abilities, items) {
         out.push(SearchEntry::new(
             Topic::Aura(entry.id),
             entry.name.clone(),
@@ -914,7 +976,11 @@ struct Identity {
     art: AuraArt,
 }
 
-fn identity(id: AuraId, abilities: &AbilityDefinitions) -> Option<Identity> {
+fn identity(
+    id: AuraId,
+    abilities: &AbilityDefinitions,
+    items: &ItemDefinitions,
+) -> Option<Identity> {
     match id {
         AuraId::Ability(ability) => {
             let def = abilities.get(&ability)?;
@@ -927,7 +993,7 @@ fn identity(id: AuraId, abilities: &AbilityDefinitions) -> Option<Identity> {
             })
         }
         AuraId::Engine(engine) => {
-            let entry = engine_entry(engine, abilities);
+            let entry = engine_entry(engine, abilities, items)?;
             Some(Identity {
                 name: entry.name,
                 mechanic: entry.mechanic,
@@ -939,21 +1005,33 @@ fn identity(id: AuraId, abilities: &AbilityDefinitions) -> Option<Identity> {
 }
 
 /// The display name of one aura address, for [`Topic::name`].
-pub fn name_of(id: AuraId, abilities: &AbilityDefinitions) -> Option<String> {
-    identity(id, abilities).map(|identity| identity.name)
+pub fn name_of(
+    id: AuraId,
+    abilities: &AbilityDefinitions,
+    items: &ItemDefinitions,
+) -> Option<String> {
+    identity(id, abilities, items).map(|identity| identity.name)
 }
 
 /// The `Buff · Mechanic` subtitle of one aura address, for [`Topic::subtitle`].
-pub fn subtitle_of(id: AuraId, abilities: &AbilityDefinitions) -> Option<String> {
-    identity(id, abilities).map(|identity| subtitle_for(identity.mechanic))
+pub fn subtitle_of(
+    id: AuraId,
+    abilities: &AbilityDefinitions,
+    items: &ItemDefinitions,
+) -> Option<String> {
+    identity(id, abilities, items).map(|identity| subtitle_for(identity.mechanic))
 }
 
 /// The icon key of one aura address, in the keyspace `AbilityIcons` uses: an
 /// ability's display NAME for a borrowed icon, or a `GENERIC_AURA_ICONS` key
 /// for an aura with art of its own. `None` only if the address resolves to
 /// nothing — every catalog entry has an icon.
-pub fn icon_key(id: AuraId, abilities: &AbilityDefinitions) -> Option<String> {
-    let identity = identity(id, abilities)?;
+pub fn icon_key(
+    id: AuraId,
+    abilities: &AbilityDefinitions,
+    items: &ItemDefinitions,
+) -> Option<String> {
+    let identity = identity(id, abilities, items)?;
     match identity.art {
         AuraArt::Own(key) => Some(key.to_string()),
         AuraArt::FromSource => {
@@ -969,7 +1047,7 @@ pub fn icon_key(id: AuraId, abilities: &AbilityDefinitions) -> Option<String> {
 
 /// The buff/debuff index. Returns the aura whose row was clicked.
 pub fn render_index(ui: &mut egui::Ui, data: &EncyclopediaData) -> Option<Topic> {
-    let catalog = catalog(data.abilities);
+    let catalog = catalog(data.abilities, data.items);
 
     ui.label(
         egui::RichText::new(
@@ -1026,7 +1104,7 @@ pub fn render_index(ui: &mut egui::Ui, data: &EncyclopediaData) -> Option<Topic>
 
 /// One named aura's page. Returns the topic a link on it opened.
 pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> Option<Topic> {
-    let catalog = catalog(data.abilities);
+    let catalog = catalog(data.abilities, data.items);
     let Some(entry) = find(&catalog, id) else {
         ui.label(egui::RichText::new("Unknown aura").size(16.0).color(MUTED));
         return None;
@@ -1170,7 +1248,7 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
 
 /// The tooltip shown wherever a named aura's icon is hovered.
 pub fn render_tooltip(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) {
-    let Some(entry) = entry_of(id, data.abilities) else {
+    let Some(entry) = entry_of(id, data.abilities, data.items) else {
         ui.label(egui::RichText::new("Unknown aura").size(14.0).color(MUTED));
         return;
     };
@@ -1390,6 +1468,25 @@ mod tests {
         load_ability_definitions().expect("abilities.ron must load")
     }
 
+    fn items() -> ItemDefinitions {
+        crate::states::play_match::equipment::load_item_definitions().expect("items.ron must load")
+    }
+
+    /// Every shipped proc trinket's display name — which is also the name of
+    /// the buff it grants. DERIVED from `items.ron` rather than listed, so the
+    /// content pass can add trinket N+1 without editing a guard; the guards
+    /// below still NAME every non-proc member, so an ordinary entry losing its
+    /// source or its art is caught exactly as before.
+    fn proc_trinket_names() -> Vec<String> {
+        let items = items();
+        ItemId::all()
+            .iter()
+            .filter_map(|id| items.get(id))
+            .filter(|item| item.proc.is_some())
+            .map(|item| item.name.clone())
+            .collect()
+    }
+
     /// A CARDINALITY check, and only that: the ron half of the catalog is the
     /// same SIZE as the set of abilities carrying an `applies_aura` block, and
     /// the catalog is the two sources concatenated. It never asks WHICH
@@ -1404,7 +1501,7 @@ mod tests {
             .iter()
             .filter(|(_, def)| def.applies_aura.is_some())
             .count();
-        let entries = catalog(&abilities);
+        let entries = catalog(&abilities, &items());
         let from_ron = entries
             .iter()
             .filter(|e| matches!(e.id, AuraId::Ability(_)))
@@ -1415,7 +1512,7 @@ mod tests {
         );
         assert_eq!(
             entries.len(),
-            from_ron + EngineAura::all(&abilities).len(),
+            from_ron + EngineAura::all(&abilities, &items()).len(),
             "every engine-registry aura must also produce an entry"
         );
     }
@@ -1439,13 +1536,14 @@ mod tests {
                 continue;
             }
             checked += 1;
-            let entry = entry_of(AuraId::Ability(*ability), &abilities).unwrap_or_else(|| {
-                panic!(
-                    "{:?}'s ability page links to Topic::Aura(AuraId::Ability({:?})), \
+            let entry =
+                entry_of(AuraId::Ability(*ability), &abilities, &items()).unwrap_or_else(|| {
+                    panic!(
+                        "{:?}'s ability page links to Topic::Aura(AuraId::Ability({:?})), \
                      which resolves to nothing — a dead link",
-                    ability, ability
-                )
-            });
+                        ability, ability
+                    )
+                });
             assert_eq!(
                 entry.id,
                 AuraId::Ability(*ability),
@@ -1471,10 +1569,10 @@ mod tests {
     #[test]
     fn every_engine_aura_address_resolves() {
         let abilities = abilities();
-        let engine = EngineAura::all(&abilities);
+        let engine = EngineAura::all(&abilities, &items());
         assert!(!engine.is_empty(), "the engine registry went empty");
         for aura in engine {
-            let entry = entry_of(AuraId::Engine(aura), &abilities)
+            let entry = entry_of(AuraId::Engine(aura), &abilities, &items())
                 .unwrap_or_else(|| panic!("{:?} has no catalog entry — a dead link", aura));
             assert_eq!(
                 entry.id,
@@ -1488,7 +1586,7 @@ mod tests {
     #[test]
     fn the_catalog_is_named_auras_not_aura_types() {
         // The finding this card exists for: one AuraType, many named entries.
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let dots: Vec<&str> = entries
             .iter()
             .filter(|e| e.mechanic == AuraType::DamageOverTime)
@@ -1504,8 +1602,14 @@ mod tests {
     #[test]
     fn ordering_is_deterministic_and_names_are_unique() {
         let abilities = abilities();
-        let a: Vec<String> = catalog(&abilities).into_iter().map(|e| e.name).collect();
-        let b: Vec<String> = catalog(&abilities).into_iter().map(|e| e.name).collect();
+        let a: Vec<String> = catalog(&abilities, &items())
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        let b: Vec<String> = catalog(&abilities, &items())
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
         assert_eq!(
             a, b,
             "a HashMap-backed source must be sorted into a stable order"
@@ -1520,7 +1624,7 @@ mod tests {
 
     #[test]
     fn every_entry_renders_a_complete_page() {
-        for entry in catalog(&abilities()) {
+        for entry in catalog(&abilities(), &items()) {
             assert!(!entry.name.is_empty(), "{:?} has no name", entry.id);
             assert!(
                 !entry.description.is_empty(),
@@ -1543,7 +1647,7 @@ mod tests {
     /// but a dispel can only take Corruption.
     #[test]
     fn dispel_classification_is_per_aura_not_per_mechanic() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let by_name = |name: &str| {
             entries
                 .iter()
@@ -1571,7 +1675,7 @@ mod tests {
     /// for both.
     #[test]
     fn a_physical_slow_is_not_dispellable_but_a_frost_one_is() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let by_name = |name: &str| {
             entries
                 .iter()
@@ -1594,7 +1698,7 @@ mod tests {
     /// physical DoT, which is the asymmetry the card was opened on.
     #[test]
     fn a_physical_debuff_reads_as_physical_on_both_the_badge_and_the_stat_block() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let by_name = |name: &str| {
             entries
                 .iter()
@@ -1624,7 +1728,7 @@ mod tests {
     /// Corruption, and the school alone would call it dispellable magic.
     #[test]
     fn a_curse_reads_as_a_curse_not_as_unremovable() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let by_name = |name: &str| {
             entries
                 .iter()
@@ -1691,7 +1795,7 @@ mod tests {
             "Immune to dispel",
             "Cannot be removed",
         ];
-        for entry in catalog(&abilities()) {
+        for entry in catalog(&abilities(), &items()) {
             let (badge, tooltip) = entry.removal();
             assert!(
                 BADGES.contains(&badge),
@@ -1724,7 +1828,7 @@ mod tests {
     /// exactly as they were.
     #[test]
     fn the_immune_to_dispel_rung_is_pinned() {
-        let mut rows: Vec<String> = catalog(&abilities())
+        let mut rows: Vec<String> = catalog(&abilities(), &items())
             .iter()
             .filter(|e| e.removal().0 == "Immune to dispel")
             .map(|e| {
@@ -1761,7 +1865,7 @@ mod tests {
     /// a page overclaiming.
     #[test]
     fn cannot_be_removed_is_reserved_for_the_untouchable_set() {
-        let untouchable: Vec<String> = catalog(&abilities())
+        let untouchable: Vec<String> = catalog(&abilities(), &items())
             .into_iter()
             .filter(|e| e.removal().0 == "Cannot be removed")
             .map(|e| e.name.clone())
@@ -1783,7 +1887,7 @@ mod tests {
 
     #[test]
     fn engine_auras_carry_the_simulations_own_numbers() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let weakened = entries
             .iter()
             .find(|e| e.name == "Weakened Soul")
@@ -1824,7 +1928,7 @@ mod tests {
     #[test]
     fn every_interrupt_with_a_lockout_is_a_named_debuff() {
         let abilities = abilities();
-        let entries = catalog(&abilities);
+        let entries = catalog(&abilities, &items());
         let mut checked = 0;
         for (_, def) in abilities.iter() {
             if !def.is_interrupt || def.lockout_duration <= 0.0 {
@@ -1853,7 +1957,7 @@ mod tests {
     /// from its own gold-bordered coating marker to the enemy slow's page.
     #[test]
     fn reused_engine_names_get_an_entry_each() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let by_name = |name: &str| {
             entries
                 .iter()
@@ -1938,7 +2042,7 @@ mod tests {
     // Pinning a relationship between constants IS this test; const-folding is the point.
     #[allow(clippy::assertions_on_constants)]
     fn engine_entries_take_break_on_damage_from_their_apply_site() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let shadow_sight = entries
             .iter()
             .find(|e| e.name == "Shadow Sight")
@@ -1963,7 +2067,7 @@ mod tests {
     /// play. The stat block says so, derived from the RON coefficient.
     #[test]
     fn a_spell_power_scaled_aura_says_it_scales() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let shield = entries
             .iter()
             .find(|e| e.name == "Power Word: Shield")
@@ -2005,7 +2109,7 @@ mod tests {
     /// test is about — the badge saying "Slow" is a separate question.
     #[test]
     fn every_mechanic_with_a_named_aura_reaches_a_page() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         for mechanic in [
             AuraType::Silence,
             AuraType::AttackSpeedSlow,
@@ -2021,7 +2125,7 @@ mod tests {
 
     #[test]
     fn siblings_are_the_other_entries_sharing_a_mechanic() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let rend = entries.iter().find(|e| e.name == "Rend").expect("Rend");
         let sibs = siblings(&entries, rend.mechanic, rend.id);
         assert!(
@@ -2042,7 +2146,7 @@ mod tests {
     /// because the proc pages were never the broken direction.
     #[test]
     fn a_buff_reaches_the_other_auras_its_ability_applies() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let buff = entries
             .iter()
             .find(|e| e.id == AuraId::Ability(AbilityType::FrostArmor))
@@ -2067,7 +2171,7 @@ mod tests {
     /// helper exists to close, so it must not be able to reintroduce one.
     #[test]
     fn source_siblings_are_symmetric_and_exclude_self() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         let mut paired = 0usize;
         for entry in &entries {
             for other in source_siblings(&entries, entry.source, entry.id) {
@@ -2097,7 +2201,7 @@ mod tests {
 
     #[test]
     fn buffs_and_debuffs_both_have_entries() {
-        let entries = catalog(&abilities());
+        let entries = catalog(&abilities(), &items());
         assert!(entries.iter().any(|e| e.is_buff()));
         assert!(entries.iter().any(|e| !e.is_buff()));
     }
@@ -2115,7 +2219,7 @@ mod tests {
     fn every_entry_names_what_applies_it() {
         let abilities = abilities();
         let mut ability_less: Vec<String> = Vec::new();
-        for entry in catalog(&abilities) {
+        for entry in catalog(&abilities, &items()) {
             match entry.source {
                 AuraSource::Ability(ability) => {
                     assert!(
@@ -2152,11 +2256,13 @@ mod tests {
             }
         }
         ability_less.sort();
+        let mut expected = proc_trinket_names();
+        expected.push("Shadow Sight".to_string());
+        expected.sort();
         assert_eq!(
-            ability_less,
-            vec!["Shadow Sight".to_string()],
-            "an arena orb pickup is the only aura no ability applies — a new one here is \
-             either a genuine mechanic or a `source` nobody filled in"
+            ability_less, expected,
+            "an arena orb pickup and the proc trinkets are the only auras no ability applies \
+             — a new one here is either a genuine mechanic or a `source` nobody filled in"
         );
     }
 
@@ -2167,7 +2273,7 @@ mod tests {
     #[test]
     fn an_ability_can_find_every_aura_it_applies() {
         let abilities = abilities();
-        let catalog = catalog(&abilities);
+        let catalog = catalog(&abilities, &items());
 
         let mut shield: Vec<&str> = applied_by(&catalog, AbilityType::PowerWordShield)
             .iter()
@@ -2216,8 +2322,8 @@ mod tests {
     fn every_entry_resolves_to_an_icon_that_exists() {
         let abilities = abilities();
         let mut own_art: Vec<String> = Vec::new();
-        for entry in catalog(&abilities) {
-            let key = icon_key(entry.id, &abilities)
+        for entry in catalog(&abilities, &items()) {
+            let key = icon_key(entry.id, &abilities, &items())
                 .unwrap_or_else(|| panic!("{} has no icon key — a placeholder tile", entry.name));
             match entry.art {
                 AuraArt::Own(expected) => {
@@ -2252,10 +2358,14 @@ mod tests {
             }
         }
         own_art.sort();
+        let mut expected = proc_trinket_names();
+        expected.push("Shadow Sight".to_string());
+        expected.push("Weakened Soul".to_string());
+        expected.sort();
         assert_eq!(
-            own_art,
-            vec!["Shadow Sight".to_string(), "Weakened Soul".to_string()],
-            "the two auras whose own art beats a borrowed icon"
+            own_art, expected,
+            "the auras whose own art beats a borrowed icon: two one-offs, plus every proc \
+             trinket buff (no ability applies one, so there is no icon to borrow)"
         );
 
         // The encyclopedia's loader waits for EVERY handle it opened before it

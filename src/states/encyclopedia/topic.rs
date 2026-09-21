@@ -113,7 +113,7 @@ impl Topic {
                 .get(&ability)
                 .map(|config| config.name.clone())
                 .unwrap_or_else(|| spaced_debug(&ability)),
-            Topic::Aura(id) => super::auras::name_of(id, data.abilities)
+            Topic::Aura(id) => super::auras::name_of(id, data.abilities, data.items)
                 .unwrap_or_else(|| "Unknown aura".to_string()),
         }
     }
@@ -133,7 +133,9 @@ impl Topic {
             },
             // An aura's subtitle is its polarity and mechanic ("Debuff ·
             // Damage over Time").
-            Topic::Aura(id) => super::auras::subtitle_of(id, data.abilities).unwrap_or_default(),
+            Topic::Aura(id) => {
+                super::auras::subtitle_of(id, data.abilities, data.items).unwrap_or_default()
+            }
         }
     }
 
@@ -159,10 +161,12 @@ impl Topic {
                 data.ability_icons
                     .and_then(|icons| icons.textures.get(name).copied())
             }
-            Topic::Aura(id) => super::auras::icon_key(id, data.abilities).and_then(|key| {
-                data.ability_icons
-                    .and_then(|icons| icons.textures.get(&key).copied())
-            }),
+            Topic::Aura(id) => {
+                super::auras::icon_key(id, data.abilities, data.items).and_then(|key| {
+                    data.ability_icons
+                        .and_then(|icons| icons.textures.get(&key).copied())
+                })
+            }
         }
     }
 

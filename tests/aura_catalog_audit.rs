@@ -80,8 +80,16 @@ use arenasim::states::match_config::RoguePoison;
 use arenasim::states::play_match::ability_config::load_ability_definitions;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::components::{weapon_poison_marker_aura, TotemElement};
+use arenasim::states::play_match::equipment::ItemId;
 
 use common::source_audit::{brace_body, load_sources};
+
+/// The shipped item pool, which the catalog needs for its proc-trinket
+/// entries. Loaded rather than mocked, so a proc added to `items.ron`
+/// is covered by every guard in this file with no edit here.
+fn shipped_items() -> arenasim::states::play_match::equipment::ItemDefinitions {
+    arenasim::states::play_match::equipment::load_item_definitions().expect("items.ron must load")
+}
 
 /// Every directory holding code that can apply an aura in production. The whole
 /// of `src/` rather than `src/states/play_match/`: `src/headless/runner.rs`
@@ -153,6 +161,14 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
         "src/states/play_match/totems.rs",
         "ability_name: buff_name.to_string()",
         "a totem's pulsed buff; asserted per element by \
+         `named_auras_built_from_helpers_also_resolve`.",
+    ),
+    (
+        "src/states/play_match/proc_trinkets.rs",
+        "ability_name: source_name.to_string()",
+        "a proc trinket's buff, named after the trinket. `EngineAura::ProcTrinketBuff` is \
+         derived from the `proc:` blocks in items.ron, so trinket N+1 is catalogued with no \
+         code in either place; asserted per shipped trinket by \
          `named_auras_built_from_helpers_also_resolve`.",
     ),
 ];
@@ -241,7 +257,7 @@ struct ScannedAura {
 fn known_pairs(
     abilities: &arenasim::states::play_match::ability_config::AbilityDefinitions,
 ) -> BTreeSet<(String, String)> {
-    catalog(abilities)
+    catalog(abilities, &shipped_items())
         .into_iter()
         .flat_map(|entry| {
             entry
@@ -533,6 +549,58 @@ fn named_auras_built_from_helpers_also_resolve() {
             sample.ability_name
         );
     }
+
+    // `proc_trinkets::ProcConfig::aura` names a proc's buff after the trinket.
+    // Built through the SIMULATION's own constructor — the one `roll_procs`
+    // calls — so a trinket whose buff the catalog does not cover fails here
+    // rather than showing the player a frame with no page behind it.
+    //
+    // Two claims, deliberately separate: this walks every shipped proc and
+    // checks each resolves; `at_least_one_proc_trinket_ships` below is what
+    // stops the loop going vacuous if the pool ever empties.
+    let items = shipped_items();
+    for id in ItemId::all() {
+        let Some(item) = items.get(id) else { continue };
+        let Some(proc) = item.proc.as_ref() else {
+            continue;
+        };
+        let sample = proc.aura(&item.name);
+        let mechanic = format!("{:?}", sample.effect_type);
+        assert!(
+            known.contains(&(sample.ability_name.clone(), mechanic.clone())),
+            "the proc trinket \"{}\" grants a ({}) buff the frames call \"{}\", and the \
+             catalog has no entry for it",
+            item.name,
+            mechanic,
+            sample.ability_name
+        );
+    }
+}
+
+/// The companion claim to the proc-trinket loop above: it walks a pool, so an
+/// empty pool would pass it silently. This says the pool is not empty and names
+/// what it should contain — the proof set AS-140 shipped, one per trigger.
+#[test]
+fn at_least_one_proc_trinket_ships() {
+    let items = shipped_items();
+    let mut with_procs: Vec<&str> = ItemId::all()
+        .iter()
+        .filter_map(|id| items.get(id))
+        .filter(|item| item.proc.is_some())
+        .map(|item| item.name.as_str())
+        .collect();
+    with_procs.sort_unstable();
+    assert_eq!(
+        with_procs,
+        vec![
+            "Dragonspine Trophy",
+            "Reliquary of Renewal",
+            "Sigil of Arcane Surge",
+            "Whetstone of Fury",
+        ],
+        "the shipped proc-trinket set changed — extend this list deliberately, and check \
+         `named_auras_built_from_helpers_also_resolve` still covers every member"
+    );
 }
 
 /// Every allowlist entry must still correspond to a literal in the sources —
@@ -560,7 +628,7 @@ fn the_allowlist_has_no_stale_entries() {
 #[test]
 fn the_catalog_disambiguates_every_reused_engine_name() {
     let abilities = load_ability_definitions().expect("abilities.ron must load");
-    let entries = catalog(&abilities);
+    let entries = catalog(&abilities, &shipped_items());
 
     for reused in ["Crippling Poison", "Unstable Affliction", "Frost Armor"] {
         let sharing: Vec<&str> = entries
@@ -600,7 +668,7 @@ fn the_catalog_disambiguates_every_reused_engine_name() {
 #[test]
 fn catalog_display_names_are_unique() {
     let abilities = load_ability_definitions().expect("abilities.ron must load");
-    let entries = catalog(&abilities);
+    let entries = catalog(&abilities, &shipped_items());
 
     let mut by_name: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     for entry in &entries {

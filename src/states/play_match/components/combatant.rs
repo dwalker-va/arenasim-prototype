@@ -409,6 +409,15 @@ pub struct Combatant {
     pub mage_armor: MageArmor,
     /// Paladin-specific: which aura to apply (Devotion Aura, Shadow Resistance Aura, or Concentration Aura)
     pub paladin_aura: PaladinAura,
+    /// Equipped proc trinkets and their live internal cooldowns, in socket
+    /// order. Filled by [`Combatant::apply_equipment`].
+    ///
+    /// EMPTY for every loadout that carries no proc trinket, and the emptiness
+    /// is load-bearing rather than incidental: each combat hook returns on it
+    /// BEFORE touching the seeded RNG, so a match between combatants with no
+    /// proc trinket draws exactly the numbers it drew before proc trinkets
+    /// existed, and is bit-identical.
+    pub proc_trinkets: Vec<crate::states::play_match::proc_trinkets::ProcSlot>,
 }
 
 /// How long the weapon-poison marker is stamped for. Longer than any match's
@@ -442,6 +451,7 @@ pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
         dr_category_override: None,
         dispel_type: super::DispelType::Auto,
         compound: None,
+        distinct_by_source: false,
     }
 }
 
@@ -572,6 +582,7 @@ impl Combatant {
             warrior_shout: WarriorShout::default(),
             mage_armor: MageArmor::default(),
             paladin_aura: PaladinAura::default(),
+            proc_trinkets: Vec::new(),
         }
     }
 
@@ -832,6 +843,24 @@ impl Combatant {
             // The live socket names the auto-attack, weapon or not.
             if *slot == primary_weapon_slot {
                 self.auto_attack_kind = AutoAttackKind::from_equipped(*slot, item);
+            }
+
+            // A proc trinket's trigger and effect, captured together with the
+            // item's DISPLAY NAME so the combat hooks need no
+            // `ItemDefinitions` of their own. Built here because
+            // `apply_equipment` is the one seam both spawn paths — graphical
+            // `spawn_combatant` and `headless::runner` — already go through,
+            // so there is no second place to remember. A `Loadout` is a
+            // `BTreeMap`, so this list comes out in `ItemSlot` order and the
+            // order procs roll in is a property of the type.
+            if let Some(proc) = &item.proc {
+                self.proc_trinkets
+                    .push(crate::states::play_match::proc_trinkets::ProcSlot {
+                        item: *item_id,
+                        name: item.name.clone(),
+                        config: proc.clone(),
+                        remaining_icd: 0.0,
+                    });
             }
 
             // For the primary weapon slot, replace attack_damage and attack_speed

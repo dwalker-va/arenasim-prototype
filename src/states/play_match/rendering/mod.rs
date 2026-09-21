@@ -52,6 +52,9 @@ pub const GENERIC_AURA_ICONS: &[(&str, &str)] = &[
     ("aura_lockout", "icons/auras/lockout.jpg"),
     ("aura_weakened_soul", "icons/auras/weakened_soul.jpg"),
     ("aura_shadow_sight", "icons/auras/shadow_sight.jpg"),
+    // Shared by every PROC TRINKET buff: no ability applies one, so there is
+    // no ability icon to borrow.
+    ("aura_proc_trinket", "icons/auras/proc_trinket.jpg"),
 ];
 
 /// Get the icon key for an aura.
