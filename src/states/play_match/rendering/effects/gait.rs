@@ -1,3 +1,4 @@
+use super::hit_reaction::hit_flinch_offset;
 use crate::states::play_match::components::*;
 use bevy::prelude::*;
 
@@ -96,28 +97,51 @@ fn advance_gait(
     idle
 }
 
-/// Write a gait's vertical offset to a unit's [`VisualBody`] child.
+/// Write a gait's vertical offset to a unit's [`VisualBody`] child, with the
+/// victim's hit flinch composed on top.
 ///
 /// Settling into idle EASES down to rest instead of snapping — a gait can stop
 /// at any height, and a one-frame drop reads as a pop (more so with weapons
 /// riding the body).
+///
+/// **This is the ONLY writer of the body's local Y for a living, non-
+/// celebrating unit**, and the flinch is composed here rather than in a system
+/// of its own. Two reasons, both load-bearing:
+///
+/// 1. The gait writes Y ABSOLUTELY every frame. A separate flinch system is
+///    therefore decided entirely by which of the two runs later: ordered
+///    before the gait it is erased, and a probe that only ever tested a
+///    STATIONARY victim would not notice, because an idle gait's ease leaves
+///    the dip mostly intact. In a real match the moving victim is the common
+///    case, so "invisible on anything that walks" is the default failure.
+/// 2. Composed here it needs no ordering edge at all, and it cleans up for
+///    free the frame the component expires — the same property that made Y
+///    the right channel for the panic tremble (see [`update_fear_run`]).
+///
+/// The gait's own contribution is tracked in [`WalkAnim::body_offset`] rather
+/// than read back off the transform, because what is on the transform now
+/// includes the dip. With no flinch live the two are identical, which is why
+/// every existing gait is unchanged.
 fn apply_gait_offset(
     children: &Children,
     bodies: &mut Query<(&mut Transform, &VisualBody)>,
+    walk: &mut WalkAnim,
     idle: bool,
     offset: f32,
     settle_step: f32,
+    flinch: f32,
 ) {
+    if idle {
+        let err = -walk.body_offset;
+        walk.body_offset += err.clamp(-settle_step, settle_step);
+    } else {
+        walk.body_offset = offset;
+    }
     for child in children.iter() {
         let Ok((mut body_transform, body)) = bodies.get_mut(child) else {
             continue;
         };
-        if idle {
-            let err = body.rest_y - body_transform.translation.y;
-            body_transform.translation.y += err.clamp(-settle_step, settle_step);
-        } else {
-            body_transform.translation.y = body.rest_y + offset;
-        }
+        body_transform.translation.y = body.rest_y + walk.body_offset + flinch;
     }
 }
 
@@ -148,7 +172,13 @@ fn apply_gait_offset(
 pub fn update_walk_animation(
     time: Res<Time>,
     mut movers: Query<
-        (&Transform, &mut WalkAnim, &Combatant, &Children),
+        (
+            &Transform,
+            &mut WalkAnim,
+            &Combatant,
+            &Children,
+            Option<&HitFlinch>,
+        ),
         (
             Without<DeathAnimation>,
             Without<Celebrating>,
@@ -159,7 +189,7 @@ pub fn update_walk_animation(
     >,
     mut bodies: Query<(&mut Transform, &VisualBody)>,
 ) {
-    for (transform, mut walk, combatant, children) in movers.iter_mut() {
+    for (transform, mut walk, combatant, children, flinch) in movers.iter_mut() {
         // Read the sim entity's XZ, but write only the child's local Y.
         let idle = advance_gait(
             &mut walk,
@@ -168,12 +198,15 @@ pub fn update_walk_animation(
             combatant.is_alive(),
             time.delta_secs(),
         );
+        let bob = walk.phase.sin() * WALK_BOB_AMPLITUDE;
         apply_gait_offset(
             children,
             &mut bodies,
+            &mut walk,
             idle,
-            walk.phase.sin() * WALK_BOB_AMPLITUDE,
+            bob,
             GAIT_SETTLE_RATE * time.delta_secs(),
+            flinch_offset_of(flinch),
         );
     }
 }
@@ -198,7 +231,13 @@ pub fn update_walk_animation(
 pub fn update_sheep_hop(
     time: Res<Time>,
     mut movers: Query<
-        (&Transform, &mut WalkAnim, &Combatant, &Children),
+        (
+            &Transform,
+            &mut WalkAnim,
+            &Combatant,
+            &Children,
+            Option<&HitFlinch>,
+        ),
         (
             With<PolymorphedVisual>,
             Without<DeathAnimation>,
@@ -208,7 +247,7 @@ pub fn update_sheep_hop(
     >,
     mut bodies: Query<(&mut Transform, &VisualBody)>,
 ) {
-    for (transform, mut walk, combatant, children) in movers.iter_mut() {
+    for (transform, mut walk, combatant, children, flinch) in movers.iter_mut() {
         let idle = advance_gait(
             &mut walk,
             transform.translation.xz(),
@@ -220,9 +259,11 @@ pub fn update_sheep_hop(
         apply_gait_offset(
             children,
             &mut bodies,
+            &mut walk,
             idle,
             lift,
             GAIT_SETTLE_RATE * time.delta_secs(),
+            flinch_offset_of(flinch),
         );
     }
 }
@@ -267,7 +308,13 @@ pub fn update_sheep_hop(
 pub fn update_fear_run(
     time: Res<Time>,
     mut movers: Query<
-        (&Transform, &mut WalkAnim, &Combatant, &Children),
+        (
+            &Transform,
+            &mut WalkAnim,
+            &Combatant,
+            &Children,
+            Option<&HitFlinch>,
+        ),
         (
             With<FearedVisual>,
             Without<PolymorphedVisual>,
@@ -282,7 +329,7 @@ pub fn update_fear_run(
     >,
     mut bodies: Query<(&mut Transform, &VisualBody)>,
 ) {
-    for (transform, mut walk, combatant, children) in movers.iter_mut() {
+    for (transform, mut walk, combatant, children, flinch) in movers.iter_mut() {
         let idle = advance_gait(
             &mut walk,
             transform.translation.xz(),
@@ -304,9 +351,17 @@ pub fn update_fear_run(
         apply_gait_offset(
             children,
             &mut bodies,
+            &mut walk,
             false,
             bob + tremble,
             GAIT_SETTLE_RATE * time.delta_secs(),
+            flinch_offset_of(flinch),
         );
     }
+}
+
+/// The dip a victim's live [`HitFlinch`] contributes this frame, or `0.0` when
+/// it has none. Pulled out so all three gaits read the flinch identically.
+fn flinch_offset_of(flinch: Option<&HitFlinch>) -> f32 {
+    flinch.map_or(0.0, hit_flinch_offset)
 }

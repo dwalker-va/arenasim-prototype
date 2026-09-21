@@ -86,6 +86,7 @@ impl Harness {
                     phase: 0.0,
                     previous_xz: Vec2::ZERO,
                     idle_time: 0.0,
+                    body_offset: 0.0,
                 },
             ))
             .id();

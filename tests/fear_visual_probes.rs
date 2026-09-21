@@ -138,6 +138,7 @@ impl Harness {
                     phase: 0.0,
                     previous_xz: Vec2::ZERO,
                     idle_time: 0.0,
+                    body_offset: 0.0,
                 },
             ))
             .id();
@@ -687,6 +688,7 @@ fn spawn_gait_unit(app: &mut App) -> (Entity, Entity) {
                 phase: 0.0,
                 previous_xz: Vec2::ZERO,
                 idle_time: 0.0,
+                body_offset: 0.0,
             },
         ))
         .id();

@@ -1121,6 +1121,9 @@ fn walk_phase_seed(xz: Vec2) -> f32 {
 fn class_weapon_loadout(
     class: match_config::CharacterClass,
 ) -> &'static [(WeaponKind, WeaponHand)] {
+    // Exhaustive since the caster wands landed — every class holds something,
+    // so there is no `_` arm left and a NEW class is a compile error here
+    // rather than a combatant that silently swings empty hands.
     use match_config::CharacterClass as C;
     match class {
         C::Warrior => &[(WeaponKind::TwoHandAxe, WeaponHand::Main)],
@@ -1134,7 +1137,15 @@ fn class_weapon_loadout(
             (WeaponKind::Shield, WeaponHand::Off),
         ],
         C::Shaman => &[(WeaponKind::Mace, WeaponHand::Main)],
-        _ => &[],
+        // The three casters that actually fire a wand: `apply_equipment`
+        // derives `AutoAttackKind::Wand` for each of them from the item in
+        // their Ranged socket, and `weapon_slot()` sends all three there.
+        //
+        // The Shaman is deliberately NOT here even though its wand school is
+        // mapped (`wand_attack::wand_school`): since AS-138 it swings the mace
+        // above and its Ranged socket holds a relic, so a wand in its hand
+        // would be a prop it never uses.
+        C::Mage | C::Priest | C::Warlock => &[(WeaponKind::Wand, WeaponHand::Main)],
     }
 }
 
@@ -1146,6 +1157,7 @@ fn weapon_asset_path(kind: WeaponKind) -> &'static str {
         WeaponKind::Bow => "models/weapons/bow_wooden.glb",
         WeaponKind::Mace => "models/weapons/hammer_double.glb",
         WeaponKind::Shield => "models/weapons/shield_round.gltf",
+        WeaponKind::Wand => "models/weapons/wand_rod.gltf",
     }
 }
 
@@ -1195,6 +1207,15 @@ fn weapon_mount(kind: WeaponKind, hand: WeaponHand) -> Transform {
         WeaponKind::Shield => Transform::from_xyz(0.78 * side, 0.15, 0.0)
             .with_rotation(Quat::from_rotation_y(0.25 * side))
             .with_scale(Vec3::splat(0.9)),
+        // The wand is HELD RAISED between shots, not carried at the hip: the
+        // client's precast kit loops `HoldThrown` (anim 111), the same pose a
+        // thrown weapon is cocked in, and that raised hold is the rod's
+        // resting state (research §4). Mounted high on the hand side and
+        // pitched back off vertical so the gem clears the shoulder line and
+        // the flick has somewhere to travel to.
+        WeaponKind::Wand => Transform::from_xyz(0.62 * side, 0.55, 0.05)
+            .with_rotation(Quat::from_rotation_x(-0.45))
+            .with_scale(Vec3::splat(1.0)),
     }
 }
 
@@ -1286,6 +1307,7 @@ pub(crate) fn spawn_combatant(
                 phase: walk_phase_seed(position.xz()),
                 previous_xz: position.xz(),
                 idle_time: 0.0,
+                body_offset: 0.0,
             },
         ))
         .id();
@@ -1431,6 +1453,7 @@ pub(crate) fn spawn_pet(
                 phase: walk_phase_seed(pet_position.xz()),
                 previous_xz: pet_position.xz(),
                 idle_time: 0.0,
+                body_offset: 0.0,
             },
         ))
         .with_child((

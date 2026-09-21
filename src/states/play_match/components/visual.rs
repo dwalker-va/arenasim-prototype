@@ -1,6 +1,7 @@
 use super::super::abilities::{AbilityType, SpellSchool};
 use super::super::match_config::CharacterClass;
 use super::auras::AuraType;
+use super::combatant::AutoAttackKind;
 use bevy::prelude::*;
 use bevy_egui::egui;
 
@@ -1152,6 +1153,17 @@ pub struct WalkAnim {
     /// attached to it. Idle is declared only after this exceeds a real pause
     /// (~0.1s), so the bob holds its height between ticks.
     pub idle_time: f32,
+    /// The gait's CURRENT contribution to the [`VisualBody`] child's local Y,
+    /// owned and rewritten by `apply_gait_offset` every frame.
+    ///
+    /// The body's Y is now composed — `rest_y + body_offset + flinch` (see
+    /// [`HitFlinch`]) — so the gait can no longer recover its own contribution
+    /// by reading the transform back: what it would read includes the dip. The
+    /// settle-to-idle ease is the one place that used to do exactly that, so
+    /// the channel it eases is kept here instead. Equivalent to the read-back
+    /// whenever no flinch is live, which is why the composition did not move
+    /// any existing gait.
+    pub body_offset: f32,
 }
 
 /// The rendered body of a combatant or pet: a CHILD entity carrying `Mesh3d`,
@@ -1190,6 +1202,11 @@ pub enum WeaponKind {
     Bow,
     Mace,
     Shield,
+    /// A caster's wand: held raised between shots and flicked per shot, never
+    /// swung. The client's wand autos animate as `HoldThrown` -> `AttackThrown`
+    /// (see the AS-132 client-data doc §4), which is why this is its own kind
+    /// rather than a re-skinned melee weapon.
+    Wand,
 }
 
 /// Which hand position a [`WeaponSocket`] occupies. The Paladin's shield is
@@ -1272,10 +1289,43 @@ pub struct WeaponSocket {
 pub struct AutoAttackSwing {
     pub attacker: Entity,
     pub target: Entity,
-    /// True for ranged autos (Hunter Auto Shot AND caster Wand Shots). The
-    /// consumer additionally gates the cosmetic arrow on the attacker holding a
-    /// Bow-kind main hand, so wand shots and socketless attackers no-op.
-    pub ranged: bool,
+    /// The swing's DERIVED kind, copied from the attacker's
+    /// [`AutoAttackKind`] — the same value that chose the range gate and the
+    /// combat-log name, so a consumer can never disagree with the sim about
+    /// what kind of attack just landed. Replaces an earlier `ranged: bool`,
+    /// which could not tell a wand shot from an arrow.
+    pub kind: AutoAttackKind,
+    /// Whether the landed swing crit. Selects the deeper flinch
+    /// (`CombatCritical`) and the bigger impact burst; cosmetic only.
+    pub is_crit: bool,
+}
+
+/// A victim's hit reaction: a short downward compression of the
+/// [`VisualBody`] child, one per landed auto-attack.
+///
+/// Lives on the SIM entity of the VICTIM (combatant or pet). Carries no
+/// geometry of its own — `apply_gait_offset` composes
+/// [`hit_flinch_offset`](crate::states::play_match::hit_flinch_offset) onto
+/// the gait channel, so exactly one system writes the body's local Y and
+/// there is no ordering hazard between the flinch and the walk bob / sheep
+/// hop / panic run. That also makes the flinch visible on a MOVING victim,
+/// which a separate writer ordered before the gait would not be.
+///
+/// Refreshed rather than stacked: a second hit inside the window restarts the
+/// dip at the deeper of the two depths, so focus fire reads as a body being
+/// held down rather than as an offset that keeps growing.
+///
+/// Graphical-only: spawned by `consume_hit_reactions`, which is registered in
+/// `states/mod.rs` and nowhere else.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct HitFlinch {
+    /// Seconds since the dip started.
+    pub elapsed: f32,
+    /// Total duration of this dip — per-VICTIM, because the client authors
+    /// the wound animation per rig (human 1000 ms, wolf 667 ms).
+    pub duration: f32,
+    /// Peak downward displacement in arena units, already scaled for a crit.
+    pub depth: f32,
 }
 
 /// Which named stroke a [`WeaponSocket`]'s current release is playing.
