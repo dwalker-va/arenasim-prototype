@@ -1114,8 +1114,10 @@ fn walk_phase_seed(xz: Vec2) -> f32 {
 /// The `Shaman => Mace` arm is a deliberate STOPGAP. Now that the Shaman's
 /// auto-attack derives from its main-hand mace it swings in melee, and without
 /// a socket it would swing empty hands. The right fix is to key this table off
-/// the equipped item rather than the class — which is exactly what AS-124 and
-/// AS-128's Card C exist to do. This arm goes away with them.
+/// the equipped item rather than the class — which is exactly what AS-124,
+/// AS-128's Card C and AS-132 (cluster C) exist to do. This arm goes away with
+/// them, and AS-132 should note that it lives only on this branch: on `main`
+/// four classes (Mage, Priest, Warlock, Shaman) have no entry here at all.
 fn class_weapon_loadout(
     class: match_config::CharacterClass,
 ) -> &'static [(WeaponKind, WeaponHand)] {

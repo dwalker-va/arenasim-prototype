@@ -426,7 +426,7 @@ const EXPECTED_AUTO_ATTACK: &[(CharacterClass, AutoAttackKind, &str)] = &[
         CharacterClass::Shaman,
         AutoAttackKind::Melee,
         "HammerOfTheRighteous in MainHand. Its Ranged socket is a TOTEM socket \
-         holding TotemOfLife, and weapon_proficiency(Shaman) declares Wow, Gun, \
+         holding TotemOfLife, and weapon_proficiency(Shaman) declares Bow, Gun, \
          Crossbow, Thrown and Wand all Untrained — so it has no ranged \
          auto-attack to fire",
     ),
