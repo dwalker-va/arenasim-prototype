@@ -2,7 +2,7 @@
 """Scaffolding shared by every offline fixture suite under `scripts/tests/`.
 
 Two suites grew here independently -- the one over `db2_spell_sweep.py` and the
-four over the balance sweep tools -- and arrived at the same three pieces. They
+five over the balance sweep tools -- and arrived at the same three pieces. They
 live here once:
 
 * **Offline by construction.** `install_no_subprocess` replaces a module's

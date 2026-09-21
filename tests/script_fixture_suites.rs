@@ -74,7 +74,7 @@ fn run_suite(relative: &str) {
     }
 }
 
-/// The scaffolding the other five suites inherit their offline guarantee from,
+/// The scaffolding the other six suites inherit their offline guarantee from,
 /// plus the repo-wide interpreter floor.
 #[test]
 fn harness_suite_passes() {
@@ -107,4 +107,14 @@ fn comp_tiers_fixture_suite_passes() {
 #[test]
 fn gen_sweep_fixture_suite_passes() {
     run_suite("scripts/tests/test_gen_sweep.py");
+}
+
+/// The tier vocabulary and every reporting rule that goes with it: the
+/// control verdict, the resolution floor printed beside each delta, the slice
+/// count, the mirrored-slice caution. `docs/design/balance/sweep-tiers.md`
+/// says a findings doc may quote these sentences; this is what keeps them
+/// true.
+#[test]
+fn paired_sweep_fixture_suite_passes() {
+    run_suite("scripts/tests/test_paired_sweep.py");
 }

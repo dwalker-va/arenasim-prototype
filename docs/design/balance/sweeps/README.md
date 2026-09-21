@@ -33,3 +33,31 @@ sweeps/2026-09-13-as54-paired.py before.csv after.csv
 McNemar on the flip counts, Wilson intervals for the level, and the slices the
 change can physically reach. It lives beside its input rather than in
 `scripts/` because its slicing knows what a Frost Armor chill is.
+
+Its generic half has since been promoted to `scripts/paired_sweep.py`, which
+does the control / CLEAN / AGAINST / MIRRORED split off a `--affects` class
+list and prints the resolution floor and the slice count — see
+`docs/design/balance/sweep-tiers.md`. Reach for that first; write a script
+here only when the slicing needs to know something a class name cannot say.
+
+## `2026-09-20-as104-slot-diagonal.jsonl`, `2026-09-20-as104-slot-swap.jsonl`
+
+Behind `2026-09-20-as104-slot-symmetry-findings.md` (card AS-104). A ONE-ARM
+probe, so there is no before/after: it asks whether team slot 1 is advantaged
+at all, which is the necessary condition behind the team-1 mirrored-slice
+question. 5,640 configs, every line pinned to `BasicArena`. Regenerate with
+`2026-09-20-as104-make-probe.py`, and analyse with:
+
+```bash
+<binary> --batch docs/design/balance/sweeps/2026-09-20-as104-slot-diagonal.jsonl \
+  --out diag.csv --jobs 6 --trace-mode off       # and again for -slot-swap
+# `--jobs` keys off how many agents are sweeping right now; 6 on a quiet box.
+# See "Sizing --jobs" in ../sweep-tiers.md — 16 is too many.
+docs/design/balance/sweeps/2026-09-20-as104-slot-symmetry.py diag.csv swap.csv
+```
+
+- `-slot-diagonal` — identical comps on both sides (25 2v2 teams + 8 1v1
+  self-mirrors, 80 seeds). No comp-strength confound is possible.
+- `-slot-swap` — every ordered pair of 25 distinct 2v2 teams, 5 seeds. Closed
+  under swapping the sides, so comp strength cancels across each pair; the
+  script checks that closure rather than assuming it.

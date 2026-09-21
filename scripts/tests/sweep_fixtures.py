@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Fixture builders for the offline suites over `scripts/`' sweep tools.
 
-`agg_sweep.py`, `comp_tiers.py`, `gen_sweep.py` and `headtohead_sweep.py` all
-speak the same two file formats -- the batch JSONL that `arenasim --batch`
+`agg_sweep.py`, `comp_tiers.py`, `gen_sweep.py`, `headtohead_sweep.py` and
+`paired_sweep.py` all speak the same two file formats -- the batch JSONL that `arenasim --batch`
 consumes and the per-match CSV it emits -- so the builders for those live here
-once instead of four times.
+once instead of five times.
 
 The scaffolding that is not specific to those two formats -- the no-subprocess
 guard, the `main(argv)` driver, the scratch directory, the shared output
@@ -12,8 +12,8 @@ assertions, the interpreter floor -- lives in `_harness.py`, which the
 `db2_spell_sweep.py` suite shares.
 
 Not a test file: `unittest` discovery ignores it, and it is imported by
-`test_agg_sweep.py`, `test_comp_tiers.py`, `test_gen_sweep.py` and
-`test_headtohead_sweep.py`.
+`test_agg_sweep.py`, `test_comp_tiers.py`, `test_gen_sweep.py`,
+`test_headtohead_sweep.py` and `test_paired_sweep.py`.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def read_batch_jsonl(path):
 
 
 class FixtureTestCase(ScriptTestCase):
-    """The shared base, plus the batch formats these four suites are built on."""
+    """The shared base, plus the batch formats these five suites are built on."""
 
     def setUp(self):
         self.tmp = self.temp_dir(prefix="sweep-fixture-")

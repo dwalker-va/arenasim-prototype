@@ -145,11 +145,11 @@ properties make an omission or a broken assumption visible in the output:
 
 The reporting blocks have their own offline fixture suite,
 `scripts/tests/test_db2_spell_sweep.py`, driving `main(argv)` over hand-built
-CSVs with no network round-trip. `cargo test` runs it, with the four balance
+CSVs with no network round-trip. `cargo test` runs it, with the five balance
 sweep suites and the harness's own, via `tests/script_fixture_suites.rs`; run
 it directly while editing it. Add a case there for any new claim the script
 prints — a reporting regression is otherwise invisible until a human reads a
-sweep. The scaffolding all five share — the no-subprocess guard that keeps
+sweep. The scaffolding all six share — the no-subprocess guard that keeps
 them offline, the `main(argv)` driver, the scratch directory, the output
 assertions and the Python 3.9 interpreter floor — lives in
 `scripts/tests/_harness.py` and is itself pinned by
@@ -250,6 +250,9 @@ For deeper context, see these focused references:
   answer "is the new AI better", so set the sides differently and run both
   assignments — see *How to measure a step* in that doc, and `tests/camp_sweep.rs`.
   Background on the camp: **[the camp handoff](docs/design/2026-08-01-nagrand-camp-handoff.md)**.
+- **[Sweep Tiers](docs/design/balance/sweep-tiers.md)** - what DIRECTIONAL and
+  AUTHORITY mean, how to size and report each, and what a sweep costs on this
+  box. A card states its tier and its success condition when it is written.
 - **[Stat Scaling](docs/design/stat-scaling-system.md)** - Damage/healing formulas and coefficients
 - **[Game Design](docs/design/game-design-doc.md)** - High-level game vision
 - **[Concepts](CONCEPTS.md)** - Vocabulary substrate: the words that mean something
@@ -526,7 +529,18 @@ The Paladin's **while-CC Divine Shield** (`try_divine_shield_while_cc`, the CC-b
 After editing, validate and sweep:
 ```bash
 cargo test                          # validate() + posture probes/unit tests
-scripts/hunter_2v2_matrix.sh 100    # 2v2-with-healer balance sweep (adapt teams as needed)
+```
+
+Then sweep at the tier the change calls for — see *Run a balance sweep* below
+and `docs/design/balance/sweep-tiers.md`. A retune is DIRECTIONAL unless its
+whole point is the magnitude:
+
+```bash
+scripts/gen_sweep.py --full 2 --exclude-double-healer \
+  --affects Priest --control-cells 8 --n 10 > /tmp/sweep.jsonl
+# one arm per movement.ron, then:
+scripts/paired_sweep.py before.csv after.csv \
+  --affects Priest --tier directional --expect nothing
 ```
 
 ### Class Design
@@ -618,25 +632,60 @@ with probability ~3e-8 — of order one flipped match per few hundred thousand a
 talking, and a window that DID straddle a grid point would flip at it, so a
 clean 2-ULP bracket over one window is no licence for last-ULP changes at large.
 
-### Run a 2v2-with-healer balance sweep
+### Run a balance sweep — and pick its TIER first
 
-`--matrix N` runs the 7×7 1v1 matrix. For 2v2-with-healer validation
-(Hunter+Priest vs each-class+Priest), use the wrapper script:
+**[Sweep tiers](docs/design/balance/sweep-tiers.md) is the authority. Read it
+before sizing a sweep or citing one.** Two named instruments, and a card
+states which it is using and why when the card is written:
+
+- **DIRECTIONAL** — the cells the change can reach, sized in minutes. Answers
+  *which way, roughly how much*. **May not be cited as a class's standing.**
+- **AUTHORITY** — the full treatment, for a number that will be cited later (a
+  canonical baseline, or a change whose whole point is the magnitude).
+
+**The cheap tier is SMALLER, not looser.** Both keep every rule about what a
+number means: paired at identical seeds, McNemar on the flips, non-vacuity
+reported, no per-cell figures at small n. What the directional tier cuts is
+CELLS, never seeds — in a paired design the significance comes from the flip
+count across the whole run, not from per-cell precision.
+
+The pipeline is three commands. Both arms run the SAME JSONL, so every match
+has a twin differing only by the change:
 
 ```bash
-# Default N=100, output to match_logs/hunter_2v2_<timestamp>.csv
 cargo build --release
-scripts/hunter_2v2_matrix.sh 100 --seed-base 0
-
-# Custom output path (e.g., commit to docs/design/balance/)
-scripts/hunter_2v2_matrix.sh 100 \
-  --seed-base 0 \
-  --out docs/design/balance/matrix_baseline_<date>_2v2.csv
+# 1. cells: everything a Shaman change reaches, plus 8 control cells it cannot
+#    (233 cells x 10 seeds = 2,330 matches, the default directional size)
+scripts/gen_sweep.py --full 2 --exclude-double-healer \
+  --affects Shaman --control-cells 8 --n 10 > /tmp/sweep.jsonl
+# 2. one arm per binary (or per config), same file both times
+target/release/arenasim --batch /tmp/sweep.jsonl --out before.csv \
+  --jobs 6 --trace-mode off   # key --jobs off who else is sweeping, see below
+# 3. the analysis: control, four slices, McNemar, resolution floor, verdict
+scripts/paired_sweep.py before.csv after.csv \
+  --affects Shaman --tier directional --expect nothing
 ```
 
-CSV columns are byte-compatible with the 1v1 matrix output from
-`src/headless/matrix.rs:217` (`team1,team2,runs,team1_wins,team2_wins,
-draws,team1_winrate,draw_rate,avg_duration_secs`).
+`--expect` is the card's success condition; `paired_sweep.py` answers it in
+its own terms and prints the resolution the run actually bought, because a
+null result means nothing without it. `scripts/agg_sweep.py` does single-arm
+win-rate tables; `scripts/{hunter,mage,shaman}_2v2_matrix.sh` and `--matrix N`
+are the older per-cell-CSV wrappers (columns per `src/headless/matrix.rs:217`).
+
+**Size a sweep at 1-2.5 matches/sec.** Measured: 1.00/sec at `--jobs 6` under
+three-way load and 1.52/sec at `--jobs 16` under load, 2.05/sec at `--jobs 6`
+and 2.54/sec at `--jobs 8` on a quiet box. A match costs ~1.37 CPU-seconds,
+**62-67% of it kernel time that is present on a quiet box too**, and the
+batch runner reaches only 2-3 effective cores of 18 whatever `--jobs` says —
+so contention is worth at most roughly 2.5x, not the order of magnitude the
+raw `sys` time suggests. Read 2.5x as a CEILING: no pair here varied load
+alone, so prefer the effective-cores figure (+33%) where it has to carry
+weight — see "What a sweep actually costs" in the sweep-tiers doc. Size
+`--jobs` off how many agents are sweeping RIGHT NOW rather than a number
+picked at launch; a conservative 6 chosen off `uptime` still lost once a
+third agent started. Contention costs wall clock
+and nothing else — outcomes do not depend on how the box was scheduled, so a
+busy box returns what a quiet one would, later.
 
 ### Diagnose AI behaviour with the decision trace
 
