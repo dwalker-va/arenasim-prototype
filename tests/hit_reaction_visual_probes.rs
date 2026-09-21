@@ -977,29 +977,24 @@ fn focus_fire_stays_under_one_mortal_strike_of_debris() {
     const MS_SPARK_LENGTH: f32 = 0.13;
     let ms_budget = MS_SPARK_COUNT * MS_SPARK_LENGTH;
 
-    // The peak this cadence actually produces at the blessed values, pinned
-    // rather than described. A loose bound with an exact number in the
-    // comment beside it reads as verified and is not — so the number IS the
-    // assertion. `streak` is `peak * SPARK_SIZE` by construction, so pinning
-    // the count pins the streak too (22 * 0.06 = 1.32 against one Mortal
-    // Strike flourish's 14 * 0.13 = 1.82).
+    // The BUDGET claim is the load-bearing one, and it is index-robust: the
+    // peak observed across 40 spawn-order shifts is 21-24, drawing 1.26-1.44
+    // streak-units, all of it under one Mortal Strike flourish's 1.82.
     //
-    // What would have to change for this to move: `SPARK_COUNT`,
-    // `SPARK_LIFETIME_SECS` or its 0.7-1.3 per-fleck jitter — which is to say
-    // exactly the intensity knobs the card froze and the compile-time ceiling
-    // watches from the other side. A failure here is a real question, not
-    // noise. (The harness tick and the 0.2s cadence are test-local and
-    // spelled out in the call.)
+    // `FOCUS_FIRE_PEAK` below is a CHANGE DETECTOR, not a safety bound —
+    // deliberately brittle, so a quiet drift in what this cadence draws is
+    // visible at all. Three inputs move it. Two are knobs the card froze:
+    // `SPARK_COUNT` and `SPARK_LIFETIME_SECS` (with its 0.7-1.3 per-fleck
+    // jitter). The third is not a knob at all — `spawn_impact_burst` seeds
+    // its jitter from `seed_source.index()`, the VICTIM'S ENTITY INDEX, so an
+    // edit to `harness()` / `spawn_unit`, or a Bevy bump that changes the
+    // startup entity count, can move this by a few with no constant touched.
+    // Re-measure before reading a small move as a knob change.
     const FOCUS_FIRE_PEAK: usize = 22;
     let (peak, streak) = sustained_burst_peak(0.2, 2.0);
     assert!(
         peak > SPARK_COUNT as usize,
         "bursts never overlapped — probe is vacuous"
-    );
-    assert_eq!(
-        peak, FOCUS_FIRE_PEAK,
-        "the three-attacker peak moved off its measured value; \
-         {streak} streak-units drawn"
     );
     // The slow end of the same three-attacker band.
     let (peak_03, streak_03) = sustained_burst_peak(0.3, 2.4);
@@ -1011,6 +1006,16 @@ fn focus_fire_stays_under_one_mortal_strike_of_debris() {
         streak < ms_budget,
         "sustained focus fire peaks at {peak} flecks / {streak} streak-units, \
          over one Mortal Strike's {ms_budget}"
+    );
+    // Tripwire last, so a failure here is read against a budget claim that
+    // has already passed.
+    assert_eq!(
+        peak, FOCUS_FIRE_PEAK,
+        "TRIPWIRE, not a budget violation: the peak moved to {peak} flecks / \
+         {streak} streak-units, which is still under Mortal Strike's \
+         {ms_budget}. A move of a few with no constant touched is most likely \
+         the victim's entity index shifting — see the comment above — so \
+         re-measure and re-pin rather than treating this as a regression."
     );
 
     // The single-attacker cadence the bench measured, for contrast: no
