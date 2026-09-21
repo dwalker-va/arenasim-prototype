@@ -358,6 +358,34 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Victim hit reactions (flinch + melee impact burst + wand missile).
+        // Reads the SAME `AutoAttackSwing` markers as `consume_swing_signals`
+        // — which DESPAWNS them — so `.before` it is a real dependency, not a
+        // preference. Same FixedUpdate rationale as its sibling: several sim
+        // ticks can fall inside one rendered frame, and a focus-fire flurry
+        // consumed at render rate would collapse into a single reaction.
+        .add_systems(
+            FixedUpdate,
+            play_match::consume_hit_reactions
+                .after(CombatSystemPhase::CombatResolution)
+                .before(play_match::consume_swing_signals)
+                .run_if(in_combat_scene),
+        )
+        // Hit-reaction debris and the cosmetic wand bolt: per-rendered-frame
+        // cosmetic transforms, ordinary Update visual group. The FLINCH is
+        // not here — it is composed into the gait writer below, which owns
+        // the body's local Y.
+        .add_systems(
+            Update,
+            (
+                play_match::update_hit_sparks,
+                play_match::update_hit_flashes,
+                play_match::update_wand_missiles,
+                play_match::cleanup_hit_reactions,
+            )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Landed instant-melee signals (Mortal Strike's signature stroke +
         // flourish). Same FixedUpdate rationale as `consume_swing_signals`
         // above. `.after` it so that when an ordinary auto and a Mortal
@@ -865,13 +893,31 @@ impl Plugin for StatesPlugin {
         // Walking animation: vertical bob on moving combatants/pets, and
         // the hop that replaces it while a unit is polymorphed. Must run
         // after movement has settled so the post-movement XZ is read.
+        //
+        // `.chain()`ed with the hit-flinch clock either side. The three gaits
+        // are mutually exclusive by query filter and all take the same
+        // `&mut Transform` body query, so Bevy already serialised them —
+        // chaining costs no parallelism and buys two real orderings:
+        //
+        // * `tick_hit_flinch` runs FIRST, so a gait renders the dip on the
+        //   frame it was advanced rather than one behind;
+        // * `cleanup_hit_flinch` runs LAST, so a flinch is never removed
+        //   between the tick and the gait that would have drawn it.
+        //
+        // The flinch has NO writer of its own: `apply_gait_offset` composes
+        // it, because the gaits set the body's local Y absolutely every frame
+        // and a separate writer would be erased by whichever ran later — on
+        // a MOVING victim, which is the common case in a real match.
         .add_systems(
             Update,
             (
+                play_match::tick_hit_flinch,
                 play_match::update_walk_animation,
                 play_match::update_sheep_hop,
                 play_match::update_fear_run,
+                play_match::cleanup_hit_flinch,
             )
+                .chain()
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )

@@ -74,3 +74,7 @@ mod frost_nova;
 pub use frost_nova::*;
 mod spell_bolts;
 pub use spell_bolts::*;
+mod hit_reaction;
+pub use hit_reaction::*;
+mod wand_attack;
+pub use wand_attack::*;

@@ -19,7 +19,7 @@ use std::time::Duration;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::combat_core::refused_fraction;
-use arenasim::states::play_match::components::AutoAttackSwing;
+use arenasim::states::play_match::components::{AutoAttackKind, AutoAttackSwing};
 use arenasim::states::play_match::components::{
     Combatant, DeathAnimation, HealingRefused, InstantAbilityFired, SwingStyle, VisualBody,
     WeaponHand, WeaponKind, WeaponSocket,
@@ -215,7 +215,8 @@ fn an_ordinary_auto_clears_a_signature_style() {
     app.world_mut().spawn(AutoAttackSwing {
         attacker,
         target,
-        ranged: false,
+        kind: AutoAttackKind::Melee,
+        is_crit: false,
     });
     app.update();
 
@@ -245,7 +246,8 @@ fn a_same_tick_auto_does_not_downgrade_the_signature() {
     app.world_mut().spawn(AutoAttackSwing {
         attacker,
         target,
-        ranged: false,
+        kind: AutoAttackKind::Melee,
+        is_crit: false,
     });
     app.world_mut().spawn(InstantAbilityFired {
         caster: attacker,

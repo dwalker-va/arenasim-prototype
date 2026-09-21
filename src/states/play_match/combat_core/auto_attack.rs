@@ -650,9 +650,12 @@ pub fn combat_auto_attack(
                         AutoAttackSwing {
                             attacker: attacker_entity,
                             target: target_entity,
-                            // The swing is ranged iff the weapon it comes
-                            // from is a ranged one.
-                            ranged: attacker_kind != AutoAttackKind::Melee,
+                            // The DERIVED kind, not a re-derivation of it:
+                            // the same value that picked the range gate above
+                            // and the log name below, so no consumer can
+                            // disagree with the sim about what landed.
+                            kind: attacker_kind,
+                            is_crit,
                         },
                         PlayMatchEntity,
                     ));

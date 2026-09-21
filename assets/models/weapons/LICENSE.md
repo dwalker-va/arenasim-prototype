@@ -23,3 +23,13 @@ Created by Quaternius (https://quaternius.com), downloaded from Poly Pizza
 - `hammer_double.glb` — Paladin one-hand blunt weapon — https://poly.pizza/m/UIXvQ73DS1
   (no true one-handed mace exists as CC0 low-poly glTF on the surveyed sources;
   this warhammer is scaled to a one-hand grip and reads as the mace silhouette)
+
+## Authored for ArenaSim (CC0)
+
+Released to the public domain under CC0 by this project.
+
+- `wand_rod.gltf` — caster wand (Mage / Priest / Warlock). Generated geometry:
+  a tapered 8-sided haft along local +Y with a faceted gem at the tip, 40
+  triangles, flat-shaded, with the vertex buffer embedded as a data URI (no
+  sidecar `.bin`, no texture). No suitable CC0 low-poly wand existed on the
+  surveyed sources, and the shape is simple enough to author directly.

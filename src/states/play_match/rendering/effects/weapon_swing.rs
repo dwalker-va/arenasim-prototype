@@ -1,3 +1,4 @@
+use super::wand_attack::{WAND_FLICK_DEG, WAND_FLICK_SECS};
 use crate::states::play_match::components::*;
 use bevy::color::LinearRgba;
 use bevy::prelude::*;
@@ -647,6 +648,40 @@ fn swing_param_timed(
     0.0
 }
 
+/// The stroke timing a socket of this KIND plays, for this style.
+///
+/// A signature stroke belongs to the ABILITY, not to whatever is being held —
+/// `swing_pose_arc` already ignores `WeaponKind` for the named arcs, and this
+/// mirrors that on the timing axis: every style but `Auto` is returned
+/// untouched. The one per-kind timing in the game is the wand's, whose client
+/// source is a flick rather than a swing; scaling all three phases by the same
+/// factor keeps the stroke's SHAPE and only changes how long it takes, so the
+/// wand still eases in, holds and follows through like everything else.
+///
+/// Returns the style's own profile unchanged for every kind but
+/// [`WeaponKind::Wand`], which is what keeps every existing swing identical.
+// `!(total > 0.0)` is deliberate, exactly as in `swing_param_timed` above: a
+// NaN total must fall into the guard, not slip past a `<=` that is false for
+// NaN.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
+fn auto_profile_for_kind(style: SwingStyle, kind: WeaponKind) -> SwingProfile {
+    let profile = style.profile();
+    if style != SwingStyle::Auto || kind != WeaponKind::Wand {
+        return profile;
+    }
+    let total = profile.total();
+    if !(total > 0.0) {
+        return profile;
+    }
+    let k = WAND_FLICK_SECS / total;
+    SwingProfile {
+        release_secs: profile.release_secs * k,
+        impact_hold_secs: profile.impact_hold_secs * k,
+        follow_secs: profile.follow_secs * k,
+        ..profile
+    }
+}
+
 /// Per-kind pose offset for a swing parameter: local rotation + translation
 /// applied on top of the socket's rest mount. Melee kinds arc around local X
 /// (raise back on windup, chop through on release); daggers add a forward jab;
@@ -669,6 +704,22 @@ fn swing_pose(kind: WeaponKind, s: f32) -> Transform {
                 .with_rotation(Quat::from_rotation_x(0.2 * pull - 0.1 * thrust));
         }
         WeaponKind::Shield => 0.0, // static (plan R9)
+        WeaponKind::Wand => {
+            // A wrist FLICK, not a swing: the client plays `AttackThrown`
+            // (anim 107) out of a `HoldThrown` loop, so the rod snaps forward
+            // from its raised rest and comes back. Rotation only — a wand
+            // neither chops nor lunges — and much shallower than the melee
+            // arc below, which is what keeps a caster's auto from reading as
+            // a melee attack. Signed like the sagittal chop: positive pitches
+            // forward, so the release is positive and the (rare, in-melee)
+            // windup lifts it a little further back.
+            let flick = WAND_FLICK_DEG.to_radians();
+            if s < 0.0 {
+                0.35 * flick * s
+            } else {
+                flick * s
+            }
+        }
         // TwoHandAxe / Mace: big readable arc, raised back past vertical on
         // windup and chopped forward-down through the target on release. In
         // the socket frame, POSITIVE X-rotation pitches forward — windup is
@@ -818,8 +869,12 @@ fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
 /// FixedUpdate (graphical-only): consume the sim's landed-attack markers.
 /// Main-hand sockets of the attacker begin their release stroke aimed at the
 /// hit target; a Bow main hand additionally looses a cosmetic arrow. Attackers
-/// with no sockets (pets, wand casters, un-animated classes) no-op — the
-/// marker is simply despawned.
+/// with no sockets (pets, un-animated classes) no-op — the marker is simply
+/// despawned.
+///
+/// This system DESPAWNS the marker, so it is the last consumer:
+/// `hit_reaction::consume_hit_reactions` is ordered `.before` it in
+/// `states/mod.rs`.
 pub fn consume_swing_signals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -861,7 +916,7 @@ pub fn consume_swing_signals(
             // Cosmetic arrow: bow-kind main hand only. This single gate keeps
             // caster Wand Shots (ranged, no bow) and any future non-bow ranged
             // weapon from loosing arrows.
-            if signal.ranged && socket.kind == WeaponKind::Bow {
+            if signal.kind == AutoAttackKind::Shot && socket.kind == WeaponKind::Bow {
                 if let (Ok(from_tf), Some(to)) = (positions.get(signal.attacker), target_pos) {
                     let from = from_tf.translation + Vec3::Y * 1.1;
                     let dir = (to - from).normalize_or_zero();
@@ -940,8 +995,8 @@ pub fn animate_weapon_swings(
         }
 
         // The active stroke's timing and arc. `Auto` reproduces the original
-        // consts and the sagittal chop exactly.
-        let profile = socket.swing_style.profile();
+        // consts and the sagittal chop exactly, for every kind but the wand.
+        let profile = auto_profile_for_kind(socket.swing_style, socket.kind);
 
         // Advance / expire the release stroke. `windup_s` is frozen during
         // the stroke — it is the sweep's starting pose — and zeroed at expiry
@@ -990,15 +1045,24 @@ pub fn animate_weapon_swings(
             && channeling.is_none()
             && !is_incapacitated(auras)
         {
-            let (reach, min_reach) = if socket.kind == WeaponKind::Bow {
-                (AUTO_SHOT_RANGE + 2.0, HUNTER_DEAD_ZONE)
-            } else {
-                (MELEE_RANGE + 1.5, 0.0)
+            let band = match socket.kind {
+                WeaponKind::Bow => Some((AUTO_SHOT_RANGE + 2.0, HUNTER_DEAD_ZONE)),
+                // A wand is HELD RAISED between shots — the client loops
+                // `HoldThrown` and never draws the rod back — so there is no
+                // windup to telegraph and the flick IS the whole gesture.
+                // `None` leaves `windup_window` at 0, which
+                // `swing_param_timed`'s degenerate guard reads as "hold at
+                // rest"; the release stroke is unaffected, since it keys off
+                // the sim's landed-hit marker.
+                WeaponKind::Wand => None,
+                _ => Some((MELEE_RANGE + 1.5, 0.0)),
             };
-            if target_dist <= reach && target_dist >= min_reach {
-                interval = effective_attack_interval(combatant, auras);
-                windup_window = (interval * SWING_WINDUP_FRACTION)
-                    .clamp(SWING_WINDUP_MIN_SECS, SWING_WINDUP_MAX_SECS);
+            if let Some((reach, min_reach)) = band {
+                if target_dist <= reach && target_dist >= min_reach {
+                    interval = effective_attack_interval(combatant, auras);
+                    windup_window = (interval * SWING_WINDUP_FRACTION)
+                        .clamp(SWING_WINDUP_MIN_SECS, SWING_WINDUP_MAX_SECS);
+                }
             }
         }
 
@@ -1458,6 +1522,7 @@ mod swing_tests {
             WeaponKind::Bow,
             WeaponKind::Mace,
             WeaponKind::Shield,
+            WeaponKind::Wand,
         ] {
             for s in [-1.0, -0.4, 0.0, 0.35, 1.0] {
                 let direct = swing_pose(kind, s);
@@ -1466,6 +1531,65 @@ mod swing_tests {
                 assert_eq!(direct.translation, via_arc.translation, "{kind:?} at s={s}");
             }
         }
+    }
+
+    #[test]
+    fn only_the_wand_rescales_the_auto_stroke() {
+        // Fail-first guard on the one per-kind timing in the game: if this
+        // ever applies to another kind, every auto-attack in that class
+        // silently changes speed.
+        let auto = SwingStyle::Auto.profile();
+        for kind in [
+            WeaponKind::TwoHandAxe,
+            WeaponKind::Dagger,
+            WeaponKind::Bow,
+            WeaponKind::Mace,
+            WeaponKind::Shield,
+        ] {
+            let p = auto_profile_for_kind(SwingStyle::Auto, kind);
+            assert_eq!(p.release_secs, auto.release_secs, "{kind:?}");
+            assert_eq!(p.impact_hold_secs, auto.impact_hold_secs, "{kind:?}");
+            assert_eq!(p.follow_secs, auto.follow_secs, "{kind:?}");
+        }
+        let wand = auto_profile_for_kind(SwingStyle::Auto, WeaponKind::Wand);
+        assert!((wand.total() - WAND_FLICK_SECS).abs() < 1e-5);
+        assert!(wand.total() < auto.total());
+        // The SHAPE is preserved: the same phase proportions, just quicker.
+        assert!((wand.release_secs / wand.total() - auto.release_secs / auto.total()).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_signature_stroke_ignores_the_weapon_being_held() {
+        // A styled stroke belongs to the ability, so holding a wand must not
+        // rescale it — the same rule `swing_pose_arc` follows for the arc.
+        for style in [
+            SwingStyle::MortalStrike,
+            SwingStyle::CheapShot,
+            SwingStyle::KidneyShot,
+            SwingStyle::HammerOfJustice,
+        ] {
+            let direct = style.profile();
+            let via = auto_profile_for_kind(style, WeaponKind::Wand);
+            assert_eq!(direct.total(), via.total(), "{style:?}");
+        }
+    }
+
+    #[test]
+    fn the_wand_flick_is_a_shallow_forward_snap() {
+        let release = swing_pose(WeaponKind::Wand, 1.0);
+        let (axis, angle) = release.rotation.to_axis_angle();
+        // Signed like the sagittal chop: positive X-rotation pitches forward.
+        let signed = if axis.x >= 0.0 { angle } else { -angle };
+        assert!((signed - WAND_FLICK_DEG.to_radians()).abs() < 1e-4);
+        // ...and far shallower than the melee chop it must not read as.
+        let chop = swing_pose(WeaponKind::TwoHandAxe, 1.0)
+            .rotation
+            .to_axis_angle()
+            .1;
+        assert!(signed.abs() < chop * 0.5, "flick {signed} vs chop {chop}");
+        // Rotation only: a wand neither lunges nor draws back.
+        assert_eq!(release.translation, Vec3::ZERO);
+        assert_eq!(swing_pose(WeaponKind::Wand, -1.0).translation, Vec3::ZERO);
     }
 
     #[test]
