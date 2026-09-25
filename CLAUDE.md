@@ -668,7 +668,17 @@ scripts/paired_sweep.py before.csv after.csv \
 
 `--expect` is the card's success condition; `paired_sweep.py` answers it in
 its own terms and prints the resolution the run actually bought, because a
-null result means nothing without it. `scripts/agg_sweep.py` does single-arm
+null result means nothing without it.
+
+**The control fields every class the change cannot reach, on both sides.**
+`gen_sweep.py` builds it that way and refuses a `--control-cells` below the
+fewest cells that can (4 for a one-class 2v2 change, 7 for 1v1; the default 8
+clears both; `0` drops the control with a warning). `paired_sweep.py` prints
+which classes the control fields per side, and a class the sweep fields in an
+unaffected team but the control never does is a `CONTROL BLIND SPOT` — the
+control fails and the tool exits 1, because a leak into that class would pass
+it clean. `--control-elsewhere` excuses it only by a declaration printed into
+the report. Detail in the sweep-tiers doc. `scripts/agg_sweep.py` does single-arm
 win-rate tables; `scripts/{hunter,mage,shaman}_2v2_matrix.sh` and `--matrix N`
 are the older per-cell-CSV wrappers (columns per `src/headless/matrix.rs:217`).
 
