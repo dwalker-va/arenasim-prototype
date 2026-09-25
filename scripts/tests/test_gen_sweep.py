@@ -21,6 +21,7 @@ Run directly, or via `cargo test --test script_fixture_suites`:
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import sys
@@ -315,32 +316,10 @@ class AffectsTests(GenTestCase):
         })
         # Two claims, not one. The set above pins WHICH cells and needs a
         # human to re-bless it; this pins what a control OWES, so it keeps
-        # judging a re-blessed list instead of being re-derived from it.
-        #
-        # What it owes follows from its job. Controls are the cells the change
-        # cannot reach, and paired_sweep.py reads them as a bit-exactness
-        # claim: if the change leaked, they are what says so. A class absent
-        # from them is a class a leak would be invisible in -- and that, not
-        # the comp count, is what the historical failure actually cost. Those
-        # 8 controls on 2 distinct opponents covered 3 of the 7 classes.
-        #
-        # Coverage rather than a count of distinct comps, because a comp
-        # count states no duty at all -- it just drifts with the control
-        # count (max multiplicity runs 3, 4, 5 at --control-cells 8, 12, 20
-        # across the eight --affects classes), so pinning one would pin this
-        # call rather than the obligation.
-        #
-        # Coverage IS the duty, but is not discharged everywhere, so read this
-        # as a claim about the call it guards and not about the tool. Measured
-        # over all eight --affects classes at --control-cells 8, 12 and 20, it
-        # holds in 22 of 24. It fails at --affects Warlock --control-cells 8 --
-        # the DEFAULT -- where team1 never exercises Warrior and the opponent
-        # side never exercises Rogue, and again at 12 (team1, Warrior). That is
-        # a live blind spot in sample_spread, tracked as AS-143: a Warlock
-        # change leaking into Warrior's team1 behaviour would pass its control
-        # clean. Headroom at the default is thin enough that a real class
-        # already misses the duty, which is the reason to keep asserting it
-        # here rather than to relax it.
+        # judging a re-blessed list instead of being re-derived from it. The
+        # same duty is asserted for every --affects class, shape and accepted
+        # count in ControlCoverageTests below; this is its instance at the
+        # call the set pins.
         owed = set(c for c in gen.CLASSES if c != "Shaman")
         for side, label in ((0, "team1"), (1, "opponent")):
             covered = set(x for c in control for x in c[side])
@@ -399,18 +378,251 @@ class AffectsTests(GenTestCase):
         self.assertErrHas(plain, "# wrote 625 match configs")
 
 
+def product_cells(team1_set, team2_set):
+    """Cells the way main() builds them: every team1 against every opponent."""
+    return [(list(a), list(b)) for a in team1_set for b in team2_set]
+
+
+# Every cell shape the generator can build, from its own enumeration functions
+# rather than from a list of expected teams. The full matrices at each size,
+# with and without the healer exclusions, plus the two template shapes whose
+# team1 side is narrower than the roster (a pinned class, and a wildcard).
+def _shapes():
+    shapes = {}
+    for size in (1, 2, 3):
+        for edh in (False, True):
+            teams = list(gen.enumerate_opponents(size, edh, False))
+            shapes["--full %d%s" % (size, " --exclude-double-healer" if edh else "")] = \
+                product_cells(teams, teams)
+    shapes["--t1 {p} --t2-size 1"] = product_cells(
+        gen.expand_t1("{p}"), gen.enumerate_opponents(1, False, True))
+    shapes["--t1 Hunter+{p} --t2-size 2 --exclude-double-healer"] = product_cells(
+        gen.expand_t1("Hunter+{p}"), gen.enumerate_opponents(2, True, True))
+    return shapes
+
+
+SHAPES = _shapes()
+
+
+def unreachable(cells, affected):
+    return [c for c in cells if not gen.reaches(c[0], c[1], affected)]
+
+
+def fielded(cells, side):
+    return set(x for c in cells for x in c[side])
+
+
+def brute_force_floor(cells, side):
+    """Fewest distinct teams on `side` fielding every class that side fields.
+
+    Independent of the tool's dynamic programme: plain enumeration of team
+    subsets, smallest first.
+    """
+    teams = sorted(set(tuple(c[side]) for c in cells))
+    universe = fielded(cells, side)
+    for k in range(1, len(teams) + 1):
+        for combo in itertools.combinations(teams, k):
+            if set(x for t in combo for x in t) == universe:
+                return k
+    raise AssertionError("no cover at all")
+
+
+class ControlCoverageTests(unittest.TestCase):
+    """AS-143: the control owes every class the change cannot reach, on BOTH sides.
+
+    Controls are the cells the change cannot reach, and paired_sweep.py reads
+    them as a bit-exactness claim: if the change leaked, they are what says so.
+    A class absent from them on a side is a class a leak into that side would
+    be invisible in -- and the control would still pass, quietly, and be cited
+    as evidence the change stayed home. The first sampler's 8 controls on 2
+    distinct opponents covered 3 of the 7 classes; its digest-ordered successor
+    missed Warrior on team1 and Rogue on the opponent side at --affects Warlock
+    and the default count, because a uniform 8-cell sample of the 2v2 matrix
+    under-covers about 70% of the time and the digest was one draw from that.
+
+    Coverage rather than a count of distinct comps, because a comp count
+    states no duty at all -- it drifts with the control count -- so pinning
+    one would pin a call rather than the obligation.
+
+    These assert the DUTY, over every --affects class, every shape above and
+    every count the tool accepts. What a side owes is derived from the cells
+    it could have been given, never from a class list.
+
+    "Every count" is split at K0, the first length at which the plain digest
+    prefix covers both sides. Below K0 every count is checked one by one --
+    that is where the repair does its work. From K0 up, the tool's result IS
+    the prefix, and a longer prefix fields everything a shorter one did, so
+    coverage there follows from that equality; the equality is checked at
+    every count for 16 past K0 and at a stride to the end of the range (each
+    call costs a full digest pass, and the 3v3 matrix has 1,225 unreachable
+    cells per class). Above the whole unreachable set a count keeps every cell.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        # One sampler call per (shape, class, count), shared by the two tests
+        # that judge it: each call is a full digest pass over up to 1,225 cells.
+        cls.picks = {}
+        for shape, klass, un in cls.each_case():
+            below, above = cls.counts(un)
+            for keep in below + above:
+                cls.picks[(shape, klass, keep)] = gen.sample_spread(un, keep)
+
+    @staticmethod
+    def each_case():
+        for shape, cells in sorted(SHAPES.items()):
+            for cls in gen.CLASSES:
+                un = unreachable(cells, {cls})
+                if un:
+                    yield shape, cls, un
+
+    @staticmethod
+    def owed(un):
+        return (fielded(un, 0), fielded(un, 1))
+
+    @classmethod
+    def first_covering_prefix(cls, un):
+        order, owed = gen.digest_order(un), cls.owed(un)
+        for k in range(1, len(un) + 1):
+            chosen = [un[i] for i in order[:k]]
+            if (fielded(chosen, 0), fielded(chosen, 1)) == owed:
+                return k
+        raise AssertionError("the whole set does not cover itself")
+
+    @classmethod
+    def counts(cls, un):
+        """(counts below K0, counts from K0 up) that the tool accepts."""
+        floor, k0, n = gen.control_floor(un)[0], cls.first_covering_prefix(un), len(un)
+        above = set(range(k0, min(n, k0 + 16) + 1)) | set(range(k0, n + 1, 17)) | {n}
+        return list(range(floor, k0)), sorted(c for c in above if c >= floor)
+
+    def assert_covers(self, shape, cls, un, keep):
+        picked = self.picks[(shape, cls, keep)]
+        self.assertEqual(len(set(picked)), keep)
+        chosen = [un[i] for i in picked]
+        for side, label in ((0, "team1"), (1, "opponent")):
+            owed = self.owed(un)[side]
+            self.assertEqual(
+                fielded(chosen, side), owed,
+                "%s --affects %s --control-cells %d: a leak into %s would be "
+                "invisible, the %s side of the control never fields it"
+                % (shape, cls, keep, sorted(owed - fielded(chosen, side)), label))
+        return picked
+
+    def test_every_accepted_count_fields_every_unreachable_class_on_both_sides(self):
+        judged = set()
+        for shape, cls, un in self.each_case():
+            below, above = self.counts(un)
+            for keep in below + above:
+                self.assert_covers(shape, cls, un, keep)
+                judged.add((shape, cls, keep))
+        # The AS-143 cases by name: Warlock at the default, and at 12.
+        for keep in (8, 12):
+            self.assertIn(("--full 2 --exclude-double-healer", "Warlock", keep), judged)
+
+    def test_a_control_that_already_covered_is_left_exactly_as_it_was(self):
+        """Coverage is repaired, never redrawn.
+
+        Where the plain digest prefix already covered, the result IS that
+        prefix, so every invocation whose control already did its job emits
+        the sweep it always did -- and a committed JSONL regenerated from its
+        own command still pairs with the one it was committed beside.
+        """
+        preserved, repaired = set(), set()
+        for shape, cls, un in self.each_case():
+            order = gen.digest_order(un)
+            below, above = self.counts(un)
+            for keep in below:
+                self.assertNotEqual(self.picks[(shape, cls, keep)], sorted(order[:keep]))
+                repaired.add((shape, cls, keep))
+            for keep in above:
+                self.assertEqual(self.picks[(shape, cls, keep)], sorted(order[:keep]),
+                                 "%s --affects %s --control-cells %d" % (shape, cls, keep))
+                preserved.add((shape, cls, keep))
+        # Both branches exercised, by name: the AS-143 case was repaired, and
+        # the call test_the_control_spreads_over_both_team_slots pins was not.
+        self.assertIn(("--full 2 --exclude-double-healer", "Warlock", 8), repaired)
+        self.assertIn(("--full 2 --exclude-double-healer", "Shaman", 8), preserved)
+
+    def test_a_full_matrix_owes_every_class_but_the_affected_one(self):
+        """The derived duty, spelled out where the roster is the whole answer."""
+        for shape, cls, un in self.each_case():
+            if not shape.startswith("--full"):
+                continue
+            owed = set(gen.CLASSES) - {cls}
+            self.assertEqual(fielded(un, 0), owed, shape)
+            self.assertEqual(fielded(un, 1), owed, shape)
+            chosen = [un[i] for i in gen.sample_spread(un, 8)]
+            self.assertEqual((fielded(chosen, 0), fielded(chosen, 1)), (owed, owed),
+                             "%s --affects %s at the default count" % (shape, cls))
+
+    def test_a_multi_class_change_is_covered_too(self):
+        for shape in ("--full 1", "--full 2 --exclude-double-healer"):
+            for pair in itertools.combinations(gen.CLASSES, 2):
+                un = unreachable(SHAPES[shape], set(pair))
+                floor = gen.control_floor(un)[0]
+                for keep in sorted(set((floor, max(floor, 8)))):
+                    chosen = [un[i] for i in gen.sample_spread(un, keep)]
+                    self.assertEqual(
+                        (fielded(chosen, 0), fielded(chosen, 1)),
+                        (fielded(un, 0), fielded(un, 1)),
+                        "%s --affects %s --control-cells %d" % (shape, ",".join(pair), keep))
+
+    def test_sample_spread_refuses_a_count_below_the_floor(self):
+        un = unreachable(SHAPES["--full 1"], {"Shaman"})
+        floor = gen.control_floor(un)[0]
+        with self.assertRaises(ValueError) as caught:
+            gen.sample_spread(un, floor - 1)
+        self.assertIn("fewest that can is %d" % floor, str(caught.exception))
+
+    def test_cells_that_are_not_a_product_of_two_sides_are_refused(self):
+        """The floor's arithmetic pairs any team1 cover with any opponent cover."""
+        un = unreachable(SHAPES["--full 1"], {"Shaman"})
+        with self.assertRaises(ValueError) as caught:
+            gen.sample_spread(un[:-1], 8)
+        self.assertIn("full product", str(caught.exception))
+
+
+class ControlFloorTests(unittest.TestCase):
+    def test_the_floor_is_the_true_minimum_cover(self):
+        """Checked against plain enumeration, not against the tool's own DP."""
+        for shape, cls, un in ControlCoverageTests.each_case():
+            f1, f2 = brute_force_floor(un, 0), brute_force_floor(un, 1)
+            self.assertEqual(gen.control_floor(un), (max(f1, f2), f1, f2),
+                             "%s --affects %s" % (shape, cls))
+
+
+class ControlFloorCliTests(GenTestCase):
+    def test_a_count_below_the_floor_is_refused_and_the_floor_is_named(self):
+        floor = gen.control_floor(unreachable(SHAPES["--full 1"], {"Shaman"}))
+        run = self.gen("--full", "1", "--n", "1", "--affects", "Shaman",
+                       "--control-cells", str(floor[0] - 1))
+        self.assertIsInstance(run.code, str)
+        self.assertIn("the fewest control cells that can is %d (team1 needs %d, "
+                      "the opponent side %d)" % floor, run.code)
+        self.assertEqual(run.out, "")
+
+    def test_the_floor_itself_is_accepted(self):
+        floor = gen.control_floor(unreachable(SHAPES["--full 1"], {"Shaman"}))[0]
+        run = self.assertOk(self.gen("--full", "1", "--n", "1", "--affects", "Shaman",
+                                     "--control-cells", str(floor)))
+        self.assertErrHas(run, "+ %d control" % floor)
+
+
 class SampleSpreadTests(unittest.TestCase):
+    CELLS = unreachable(SHAPES["--full 2 --exclude-double-healer"], {"Shaman"})
+
     def test_a_non_positive_keep_selects_nothing(self):
-        self.assertEqual(gen.sample_spread([1, 2, 3], 0), [])
-        self.assertEqual(gen.sample_spread([1, 2, 3], -4), [])
+        self.assertEqual(gen.sample_spread(self.CELLS, 0), [])
+        self.assertEqual(gen.sample_spread(self.CELLS, -4), [])
 
     def test_indices_come_back_in_enumeration_order(self):
-        picked = gen.sample_spread([("a", i) for i in range(50)], 9)
+        picked = gen.sample_spread(self.CELLS, 9)
         self.assertEqual(picked, sorted(picked))
         self.assertEqual(len(set(picked)), 9)
 
     def test_keeping_everything_is_every_index(self):
-        self.assertEqual(gen.sample_spread(["x", "y"], 5), [0, 1])
+        self.assertEqual(gen.sample_spread(self.CELLS[:2], 5), [0, 1])
 
 
 class ReachesTests(unittest.TestCase):

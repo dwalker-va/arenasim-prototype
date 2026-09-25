@@ -13,7 +13,10 @@ reach, given by `--affects`:
     CONTROL    neither side fields an affected class. The change cannot reach
                these matches, so they must be bit-identical in winner AND
                duration. This is a CORRECTNESS check, it saturates at a few
-               hundred matches, and it is separate from the delta.
+               hundred matches, and it is separate from the delta. It is a
+               claim only over the classes it fields, so those are printed
+               per side, and a class it could have fielded and did not is a
+               blind spot that fails it.
     CLEAN      only team1 fields one. This is the effect, uncontaminated.
     AGAINST    only team2 fields one. The same effect, pointed the other way.
     MIRRORED   both sides field one, so the effect is expected to WASH.
@@ -209,12 +212,41 @@ def build_slices(keys, before, affected):
     return buckets
 
 
-def report_control(keys, before, after, elsewhere=None):
+def control_coverage(control, keys, before, affected):
+    """Per side, (owed, fielded): which unaffected classes the control must field.
+
+    A side OWES every class it fields, anywhere in the sweep, in a team with no
+    affected class -- the teams a control cell could have been built from. That
+    is derived from the sweep itself, so a template that pins team1 owes only
+    what team1 ever fields, and a class that only ever appears beside an
+    affected one is owed nowhere: no control could have fielded it.
+    """
+    sides = []
+    for side in (1, 2):
+        owed, fielded = set(), set()
+        for k in keys:
+            team = classes(before[k][side])
+            if not team & affected:
+                owed |= team
+        for k in control:
+            fielded |= classes(before[k][side])
+        sides.append((owed, fielded))
+    return sides
+
+
+def report_control(keys, before, after, elsewhere=None, coverage=None):
     """The control as the bit-exactness claim it is, not as a win rate.
 
     A control slice that MOVES is an instrument failure — the change reached a
     match it cannot reach — and is worth more than any delta in the run, so it
     is printed first and stated as pass or fail rather than as a rate.
+
+    An identical control is a claim only over the classes it FIELDS, so which
+    those are is printed with it, per side (AS-143). A class the sweep could
+    have put in the control and did not is a blind spot: a leak into it would
+    pass the control clean. That fails the control just as an absent one does,
+    and `--control-elsewhere` excuses it the same way, by a declaration printed
+    into the report.
     """
     n = len(keys)
     if n == 0:
@@ -231,11 +263,34 @@ def report_control(keys, before, after, elsewhere=None):
         return False
     same = sum(1 for k in keys
                if before[k][0] == after[k][0] and before[k][3] == after[k][3])
-    if same == n:
+    blind = []
+    if coverage is not None:
+        for label, (owed, fielded) in zip(("team1", "team2"), coverage):
+            print("CONTROL FIELDS on %s: %s (%d of the %d unaffected classes "
+                  "the sweep fields there)"
+                  % (label, ", ".join(sorted(fielded)) or "nothing",
+                     len(fielded), len(owed)))
+            if owed - fielded:
+                blind.append("%s on %s" % (", ".join(sorted(owed - fielded)), label))
+    if same == n and not blind:
         print("CONTROL: %d/%d matches with no affected class on either side are "
               "IDENTICAL in winner and duration. The diff's blast radius is "
               "bounded by measurement." % (same, n))
         return True
+    if same == n:
+        print("CONTROL: %d/%d matches with no affected class on either side are "
+              "IDENTICAL in winner and duration — but only over the classes "
+              "they field." % (same, n))
+        print("CONTROL BLIND SPOT: the control never fields %s. A leak into "
+              "those would pass it clean, so it does not bound the blast "
+              "radius there." % "; nor ".join(blind))
+        if elsewhere:
+            print("  Covered elsewhere, by declaration — %s" % elsewhere)
+            return True
+        print("  Regenerate the sweep (gen_sweep.py's control fields every "
+              "class on both sides), or pass --control-elsewhere with where those "
+              "classes are covered.")
+        return False
     print("CONTROL FAILED: %d of %d unreachable matches DIFFER in winner or "
           "duration. The change reached a match it cannot reach — fix the "
           "instrument before reading any delta below." % (n - same, n))
@@ -351,10 +406,12 @@ def main(argv=None):
                          "verdict state the resolution the run bought, because "
                          "a null is meaningless without it.")
     ap.add_argument("--control-elsewhere", metavar="WHERE", default=None,
-                    help="declare that this pair has no unreachable cells and "
-                         "say where the control lives instead (e.g. 'a separate "
-                         "Hunter arm, <file>'). Printed into the report; "
-                         "without it a controlless run exits non-zero.")
+                    help="declare that this pair has no unreachable cells, or "
+                         "that its control misses a class it could have "
+                         "fielded, and say where that is covered instead (e.g. "
+                         "'a separate Hunter arm, <file>'). Printed into the "
+                         "report; without it such a run exits non-zero. It "
+                         "never excuses a control that moved.")
     ap.add_argument("--per-cell", action="store_true",
                     help="also print per-cell deltas, each with its own "
                          "half-width. Off by default: at directional n a cell "
@@ -385,8 +442,9 @@ def main(argv=None):
     print()
 
     buckets = build_slices(keys, before, affected)
-    control_ok = report_control(buckets["control"], before, after,
-                                args.control_elsewhere)
+    control_ok = report_control(
+        buckets["control"], before, after, args.control_elsewhere,
+        control_coverage(buckets["control"], keys, before, affected))
     print()
 
     reachable = buckets["clean"] + buckets["against"] + buckets["mirrored"]

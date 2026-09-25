@@ -82,6 +82,21 @@ enumeration is a nested product and a constant stride aliases against it — eve
 spacing over the 400 Shaman-free 2v2 cells returned eight controls sharing two
 opponents.
 
+**The control fields every class the change cannot reach, on both sides, by
+construction** (AS-143). A leak into a class the control never fields would
+pass it clean, and the pass would then be cited as evidence the change stayed
+home. Ordering alone did not get this: a uniform 8-cell sample of the 2v2
+matrix misses some class on some side about 70% of the time, and the digest
+order missed Warrior on team 1 and Rogue on team 2 for `--affects Warlock` at
+the default count. So the sampler walks the digest order but passes over any
+cell that would leave too few picks to finish covering, and refuses a
+`--control-cells` below the fewest cells that can cover — computed from the
+cells, not the roster (4 for a one-class 2v2 change, 7 for 1v1, 3 for 3v3 on
+today's eight classes). Where the digest order already covered, its output is
+unchanged. `paired_sweep.py` prints which classes the control fields on each
+side, and a class the sweep fields in an unaffected team but the control never
+does fails the control as a **blind spot**.
+
 ## Sizing one
 
 **Default: about 2,500 paired matches per arm, plus 8 control cells.** That is

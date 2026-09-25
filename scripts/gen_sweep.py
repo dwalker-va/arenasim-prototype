@@ -53,6 +53,9 @@ Notes
   CELLS and never seeds, because in a paired design the significance comes
   from the flip count across the whole run rather than from per-cell
   precision. See `docs/design/balance/sweep-tiers.md`.
+- The control fields every class the change cannot reach on BOTH sides, by
+  construction: a leak into a class it never fields would pass it clean.
+  `--control-cells` below the fewest cells that can do that is refused.
 """
 import argparse
 import hashlib
@@ -118,29 +121,144 @@ def reaches(team1, team2, affected):
     return bool((set(team1) | set(team2)) & affected)
 
 
+def _side_masks(cells, side):
+    """Each cell's classes on one side as a bitmask, plus the side's universe.
+
+    The universe is every class that side fields anywhere in `cells` -- derived
+    from the cells, never from the roster, so a template that pins team1 to
+    one class owes that one class and no other.
+    """
+    universe = sorted(set(c for cell in cells for c in cell[side]))
+    bit = dict((c, 1 << i) for i, c in enumerate(universe))
+    masks = []
+    for cell in cells:
+        m = 0
+        for c in cell[side]:
+            m |= bit[c]
+        masks.append(m)
+    return masks, (1 << len(universe)) - 1
+
+
+def _cover_table(masks, full):
+    """`table[u]` = fewest of these teams that together field every class in `u`.
+
+    Exact, by dynamic programming over subsets of the side's universe (at most
+    eight classes, so 256 states). Whatever team covers the lowest missing
+    class is in some optimal cover, so only those teams need trying.
+    """
+    teams = sorted(set(masks))
+    table = [0] * (full + 1)
+    for u in range(1, full + 1):
+        low = u & -u
+        table[u] = 1 + min(table[u & ~t] for t in teams if t & low)
+    return table
+
+
+def control_floor(cells):
+    """The fewest control cells that field every class on BOTH sides.
+
+    Returns `(floor, team1_floor, opponent_floor)`. Each side's floor is an
+    exact minimum set cover of its universe by the teams it fields, and the
+    cells form a full product of the two sides' teams (see `sample_spread`),
+    so any team1 cover pairs with any opponent cover: the joint floor is the
+    larger of the two. At the default roster it is 4 for 2v2, 7 for 1v1 and 3
+    for 3v3 with one class affected -- but those are this roster's values, not
+    constants; the function is what answers.
+    """
+    if not cells:
+        return (0, 0, 0)
+    floors = []
+    for side in (0, 1):
+        masks, full = _side_masks(cells, side)
+        floors.append(_cover_table(masks, full)[full])
+    return (max(floors), floors[0], floors[1])
+
+
 def sample_spread(cells, keep):
-    """`keep` indices into `cells`, spread over BOTH team slots.
+    """`keep` indices into `cells`: a control that fields every class on both sides.
 
-    The control's job is to cover the comps the change cannot reach, so the
-    head of the enumeration -- all one corner of that space -- is the wrong
-    sample. Even SPACING is wrong too, and not obviously: the enumeration is a
-    nested product (team1 outer, team2 inner), so a constant stride aliases
-    against the inner dimension. Measured on the 400 Shaman-free cells of the
-    2v2 matrix, a stride of 50 returned eight controls sharing just TWO
-    distinct opponents. Ordering by a digest of the cell breaks that alias in
-    both slots.
+    The control's duty follows from how `paired_sweep.py` reads it: the cells
+    the change cannot reach, held to bit-exactness. A class the control never
+    fields on a side is a class a leak into that side would be invisible in --
+    and the control would still PASS, quietly, and be cited as evidence the
+    change stayed home. So coverage is a constraint here, not a hoped-for
+    property of the sample. A uniform 8-cell sample of the 2v2 matrix misses
+    some class on some side about 70% of the time, with no preference for
+    either side; the digest order alone got 22 of 24 (class, count) cases
+    right by luck, and missed Warlock's at the default count (AS-143).
 
-    The digest is `blake2b`, not `hash()`, which is salted per process: the two
-    arms of a paired run may generate the sweep separately, and a control
-    sampled differently in each arm would not be a control at all.
+    ORDER. Cells are ranked by a digest of the cell, not taken from the head
+    of the enumeration (all one corner of the space) and not at a constant
+    stride: the enumeration is a nested product, so a stride aliases against
+    its inner dimension. Measured on the 400 Shaman-free cells of the 2v2
+    matrix, a stride of 50 returned eight controls sharing just TWO distinct
+    opponents. The digest is `blake2b`, not `hash()`, which is salted per
+    process: the two arms of a paired run may generate the sweep separately,
+    and a control sampled differently in each would not be a control at all.
+
+    SELECTION. Each pick is the earliest cell in that order that still leaves
+    enough picks to finish covering both sides. "Enough" is exact (the cover
+    floor of what is still unfielded), so the walk always finishes covered
+    when `keep` is at least the floor: a cell pairing the next team of an
+    optimal team1 cover with the next of an optimal opponent cover always
+    qualifies. When the plain digest prefix already covers, no cell is ever
+    passed over and the result is exactly that prefix -- which is why every
+    `--affects` invocation whose control already covered emits the same
+    sweep it always did.
+
+    Requires `keep` >= `control_floor(cells)[0]` (or `keep` <= 0, which is no
+    control at all): a smaller control cannot discharge the duty, and raises
+    rather than quietly under-covering. Also requires `cells` to be the full
+    product of its two sides' teams, which the unreachable set always is --
+    reachability is decided per side -- and on which the floor's arithmetic
+    rests.
     """
     if keep <= 0:
         return []
     if keep >= len(cells):
         return list(range(len(cells)))
+    teams1 = set(tuple(c[0]) for c in cells)
+    teams2 = set(tuple(c[1]) for c in cells)
+    if len(set((tuple(c[0]), tuple(c[1])) for c in cells)) != len(teams1) * len(teams2):
+        raise ValueError(
+            "control cells are not the full product of their two sides' teams, "
+            "so the coverage floor does not apply to them")
+    floor = control_floor(cells)[0]
+    if keep < floor:
+        raise ValueError(
+            "%d control cells cannot field every class on both sides; the "
+            "fewest that can is %d" % (keep, floor))
+
+    order = digest_order(cells)
+    m1, full1 = _side_masks(cells, 0)
+    m2, full2 = _side_masks(cells, 1)
+    t1, t2 = _cover_table(m1, full1), _cover_table(m2, full2)
+
+    picked, taken = [], set()
+    left1, left2 = full1, full2           # classes not yet fielded, per side
+    while len(picked) < keep and (left1 or left2):
+        budget = keep - len(picked) - 1   # picks left AFTER this one
+        for i in order:
+            if i in taken:
+                continue
+            n1, n2 = left1 & ~m1[i], left2 & ~m2[i]
+            if max(t1[n1], t2[n2]) <= budget:
+                picked.append(i)
+                taken.add(i)
+                left1, left2 = n1, n2
+                break
+        else:  # unreachable while keep >= floor; see the docstring
+            raise AssertionError("coverage walk found no feasible cell")
+    # Covered: every remaining cell is feasible, so the rest is plain order.
+    picked.extend([i for i in order if i not in taken][:keep - len(picked)])
+    return sorted(picked)
+
+
+def digest_order(cells):
+    """Indices into `cells`, ranked by a stable digest of each cell."""
     key = [hashlib.blake2b(repr(c).encode("utf-8"), digest_size=8).digest()
            for c in cells]
-    return sorted(sorted(range(len(cells)), key=lambda i: key[i])[:keep])
+    return sorted(range(len(cells)), key=lambda i: key[i])
 
 
 def select_cells(cells, affected, control_cells):
@@ -191,9 +309,11 @@ def main(argv=None):
                          "cells, never seeds.")
     ap.add_argument("--control-cells", type=int, default=8, metavar="N",
                     help="with --affects, how many unreachable cells to keep "
-                         "as the bit-exactness control (default 8, spread over "
-                         "both team slots; 0 drops the control entirely, which "
-                         "is warned about)")
+                         "as the bit-exactness control (default 8). The control "
+                         "always fields every unaffected class on both sides, "
+                         "so a count below the fewest cells that can do that "
+                         "is refused; 0 drops the control entirely, which is "
+                         "warned about")
     args = ap.parse_args(argv)
 
     affected = set()
@@ -252,6 +372,16 @@ def main(argv=None):
 
     if affected:
         total = len(cells)
+        unreachable = [c for c in cells if not reaches(c[0], c[1], affected)]
+        floor, floor1, floor2 = control_floor(unreachable)
+        if 0 < args.control_cells < floor:
+            sys.exit(
+                "--control-cells %d cannot field every unaffected class on both "
+                "sides; the fewest control cells that can is %d (team1 needs %d, "
+                "the opponent side %d). A control that misses a class still "
+                "passes, and a leak into that class passes with it. Ask for at "
+                "least %d, or 0 to drop the control outright."
+                % (args.control_cells, floor, floor1, floor2, floor))
         cells, reachable, control = select_cells(cells, affected, args.control_cells)
         print("# --affects %s: kept %d reachable + %d control of %d cells"
               % (",".join(sorted(affected)), reachable, control, total),

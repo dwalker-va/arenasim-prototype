@@ -225,6 +225,120 @@ class ControlTests(PairedTestCase):
         self.assertEqual(run.code, 1, run)
 
 
+class ControlCoverageTests(PairedTestCase):
+    """AS-143: an identical control is a claim only over the classes it fields.
+
+    Before this, a control that never fielded a class printed the same PASS as
+    one that fielded all of them, so a reader could not tell a discharged
+    duty from an undischarged one.
+    """
+
+    # The eight controls gen_sweep.py drew for `--full 2 --exclude-double-healer
+    # --affects Warlock` at the default count, before AS-143: Warrior only ever
+    # an opponent, Rogue only ever on team1.
+    AS143_CONTROL = [
+        ("Mage+Hunter", "Warrior+Paladin"), ("Mage+Shaman", "Paladin+Hunter"),
+        ("Rogue+Priest", "Warrior+Priest"), ("Rogue+Priest", "Warrior+Shaman"),
+        ("Rogue+Paladin", "Warrior+Shaman"), ("Rogue+Shaman", "Priest+Hunter"),
+        ("Paladin+Hunter", "Warrior+Shaman"), ("Hunter+Shaman", "Mage+Shaman"),
+    ]
+
+    def sweep(self, control, reach):
+        rows = []
+        for i, (t1, t2) in enumerate(control):
+            rows += arm_rows("ctl%d" % i, t1, t2, wins(2) + losses(2))
+        for i, (t1, t2) in enumerate(reach):
+            rows += arm_rows("hit%d" % i, t1, t2, wins(2) + losses(2))
+        return rows
+
+    def test_the_as143_control_is_reported_as_a_blind_spot_not_a_pass(self):
+        # Reachable cells in which Warrior plays team1 and Rogue plays the
+        # opponent side, beside a Warlock: the sweep fields both there, so the
+        # control could have fielded them.
+        rows = self.sweep(self.AS143_CONTROL, [
+            ("Warrior+Mage", "Warlock+Priest"),
+            ("Warlock+Mage", "Rogue+Priest"),
+        ])
+        run = self.run_tool(rows, rows, "--affects", "Warlock", "--tier", "directional")
+        self.assertEqual(run.code, 1, run)
+        self.assertHas(run, "CONTROL FIELDS on team1: Hunter, Mage, Paladin, Priest, "
+                            "Rogue, Shaman (6 of the 7 unaffected classes")
+        self.assertHas(run, "CONTROL FIELDS on team2: Hunter, Mage, Paladin, Priest, "
+                            "Shaman, Warrior (6 of the 7 unaffected classes")
+        self.assertHas(run, "CONTROL BLIND SPOT: the control never fields Warrior on "
+                            "team1; nor Rogue on team2.")
+        self.assertLacks(run, "bounded by measurement")
+
+    def test_a_control_that_fields_every_class_names_them_and_passes(self):
+        rows = self.sweep([("Mage+Priest", "Warrior+Rogue")],
+                          [("Shaman+Mage", "Warrior+Rogue"),
+                           ("Mage+Priest", "Shaman+Warrior")])
+        run = self.run_tool(rows, rows, "--affects", "Shaman", "--tier", "directional")
+        self.assertEqual(run.code, 0, run)
+        self.assertHas(run, "CONTROL FIELDS on team1: Mage, Priest (2 of the 2")
+        self.assertHas(run, "CONTROL FIELDS on team2: Rogue, Warrior (2 of the 2")
+        self.assertLacks(run, "BLIND SPOT")
+        self.assertHas(run, "bounded by measurement")
+
+    def test_an_unaffected_team_outside_the_control_is_owed_by_it(self):
+        """The AGAINST cell fields Warrior+Rogue on team1 with no affected class.
+
+        A control cell could have been built from that team, so the control
+        owes it -- the case the Warlock default missed.
+        """
+        rows = self.sweep([("Mage+Priest", "Warrior+Rogue")],
+                          [("Warrior+Rogue", "Shaman+Priest")])
+        run = self.run_tool(rows, rows, "--affects", "Shaman", "--tier", "directional")
+        self.assertEqual(run.code, 1, run)
+        self.assertHas(run, "CONTROL FIELDS on team1: Mage, Priest (2 of the 4")
+        self.assertHas(run, "never fields Rogue, Warrior on team1.")
+
+    def test_a_class_that_only_ever_plays_beside_an_affected_one_is_not_owed(self):
+        """No control could have fielded it, so its absence is not a blind spot."""
+        rows = self.sweep([("Mage+Priest", "Warrior+Rogue")],
+                          [("Shaman+Hunter", "Warrior+Rogue")])
+        run = self.run_tool(rows, rows, "--affects", "Shaman", "--tier", "directional")
+        self.assertEqual(run.code, 0, run)
+        self.assertHas(run, "CONTROL FIELDS on team1: Mage, Priest (2 of the 2")
+        self.assertLacks(run, "BLIND SPOT")
+
+    def test_the_generator_and_the_report_agree_on_what_a_control_owes(self):
+        """gen_sweep.py's control, read by this tool, has no blind spot.
+
+        The two tools derive the duty independently -- the generator from the
+        cells it could sample, this report from the teams the sweep fields --
+        so this is the check that they are describing the same obligation.
+        Every --affects class, at the default count, in the 2v2 and 1v1
+        matrices (the second is where the old sampler failed 8 of 8).
+        """
+        import gen_sweep as gen
+        import json
+        install_no_subprocess(gen)
+        for shape in (["--full", "2", "--exclude-double-healer"], ["--full", "1"]):
+            for cls in gen.CLASSES:
+                made = run_main(gen.main, shape + ["--n", "1", "--affects", cls])
+                self.assertEqual(made.code, 0, made)
+                rows = []
+                for line in made.out.splitlines():
+                    cfg = json.loads(line)
+                    rows += arm_rows(cfg["label"], "+".join(cfg["team1"]),
+                                     "+".join(cfg["team2"]), wins(1))
+                run = self.run_tool(rows, rows, "--affects", cls,
+                                    "--tier", "directional")
+                self.assertEqual(run.code, 0, "%s --affects %s\n%s" % (shape, cls, run))
+                self.assertLacks(run, "BLIND SPOT")
+                owed = len(gen.CLASSES) - 1
+                self.assertHas(run, "(%d of the %d unaffected classes" % (owed, owed))
+
+    def test_a_blind_spot_covered_elsewhere_must_be_declared_in_the_report(self):
+        rows = self.sweep(self.AS143_CONTROL, [("Warrior+Mage", "Warlock+Priest")])
+        run = self.run_tool(rows, rows, "--affects", "Warlock", "--tier", "directional",
+                            "--control-elsewhere", "a Warrior arm, w.csv")
+        self.assertEqual(run.code, 0, run)
+        self.assertHas(run, "never fields Warrior on team1.")
+        self.assertHas(run, "Covered elsewhere, by declaration — a Warrior arm, w.csv")
+
+
 class ReportTests(PairedTestCase):
     def test_a_delta_is_printed_with_the_floor_that_bounds_it(self):
         before = arm_rows("hit", "Shaman+Mage", "Warrior+Rogue",
