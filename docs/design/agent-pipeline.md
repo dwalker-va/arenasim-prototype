@@ -2,7 +2,8 @@
 
 Status: **v1 shipped 2026-09-05** (board + orchestrator protocol + Engineer role);
 **Tester stage shipped** (card AS-1); **Release Manager stage shipped** (card AS-2);
-**`human_review` column shipped 2026-09-10** (card AS-39).
+**`human_review` column shipped 2026-09-10** (card AS-39); **board moved off the
+claude.ai artifact onto a local MCP daemon** (card AS-153).
 
 A lightweight kanban board drives autonomous agent sessions on the dev machine.
 The board is the **source of truth for workflow state**; PRs are the source of
@@ -10,40 +11,93 @@ truth for code. GitHub issues are not used.
 
 ## The board
 
-- Artifact: **ArenaSim Dispatch**. The board URL is deliberately not written
-  into the repo (it is a private artifact URL): it lives in the orchestrator's
-  project memory, and the artifact appears in the owner's `/artifacts` list by
-  title.
-- The page declares the `artifact` capability: every user interaction (drag,
-  edit, answer) republishes the page with the new state embedded. State lives in
-  the `<script id="state" type="application/json">` block of the published HTML.
-- Because republishes push **watch notifications** to any local session watching
-  the artifact, the board is a *push* trigger — no polling.
+- **ArenaSim Dispatch** is a local service, `tools/dispatch-board/` (setup in
+  its README and in CLAUDE.md, *Dispatch board MCP*). **One daemon** owns the
+  board database and serves, on `127.0.0.1:7453`:
+  - `/mcp` — MCP over Streamable HTTP, registered in `.mcp.json` as the
+    `dispatch-board` `http` server. Every session — orchestrator, PM — talks to
+    the same process through the `mcp__dispatch-board__*` tools.
+  - `/` — the web UI: the six columns plus the archived toggle, drag between
+    columns, the card drawer, answering a question, the PR-link dialog. It is
+    the artifact page ported, refreshing live as other writers change the board.
+  - an event feed, which `dist/cli.js wait` blocks on (see *Waking the
+    orchestrator*).
+- The database is SQLite (WAL) at the **main checkout's** gitignored
+  `.dispatch/board.db`, so every worktree sees one board.
+  `node tools/dispatch-board/dist/cli.js export` writes the whole board as JSON
+  — the backup, and the rollback path to an artifact board.
+- The daemon is the user's to run (a terminal of its own), and it must be up
+  before a session that uses it starts, or that session reconnects with `/mcp`.
+- Localhost only, by design: there is no phone or remote access.
 
-**Single board writer.** Exactly one session publishes the board artifact: the
-orchestrator. Every other session — PM sessions included — reads it freely but
-never publishes; the in-page save from a user gesture (drag, edit, answer) is
-the one designed-in second writer. Card creation or moves requested by a PM
-session flow through the orchestrator (see Roles). This is the general form of
-the single-orchestrator rule in Known limits: last-writer-wins publishing
-tolerates one automated writer, not several.
+**All writes go through the daemon, which enforces versions and claims.** This
+replaces the single-board-writer rule, which existed because the artifact was
+last-writer-wins: one automated publisher was safe, several were not. The
+daemon refuses what that rule used to prevent by convention:
 
-### State schema (`schema: 1`)
+- every card carries a `version`, and a write naming a stale one is **refused
+  with the current card** — nothing is ever overwritten by a writer that had
+  not seen the latest state;
+- a claim is **compare-and-set** (`claim_card`): of two sessions claiming the
+  same card, exactly one wins and the other is refused, so a claim can no
+  longer be double-spawned by overlapping reads;
+- the column rules (the PR-link gate, the `in_progress` claim reset) hold for
+  every writer, the web UI and MCP alike.
+
+What that **relaxes**: a PM session may file cards itself with `create_card`
+(the id is allocated by the daemon) and move its own scoping card, so the
+`.claude/pm-outbox/` handoff becomes optional (see Roles). What it **does not**
+relax: there is still **ONE orchestrator** spawning workers. The claim guard
+stops a double spawn of one card, but a second orchestrator would still be
+running the whole pipeline alongside the first — and its startup sweep would
+release the first one's live claims (see Known limits). Workers (Engineer,
+Tester, Release Manager) never write to the board; they report to the
+orchestrator.
+
+Every write names an **actor** — the writing session's tag (`orchestrator` for
+the orchestrator, `board` for every web-UI gesture, e.g. `pm-AS-28` for a PM
+session). It is recorded on the write's event, which is how a waiting session
+ignores its own writes. Activity entries keep their `by` (defaulting to the
+actor).
+
+### State schema (tables)
+
+The card document keeps the artifact's `schema: 1` fields and meanings, so
+the protocol reads as it always has:
 
 ```json
-{ "schema": 1, "nextId": 3, "cards": [ {
-    "id": "AS-1", "title": "...", "body": "<spec>",
-    "column": "backlog | needs_input | in_progress | review | human_review | done | archived",
-    "role": "engineer | tester | release-manager | pm",
-    "priority": "P1 | P2 | P3",
-    "links": [{"label": "PR #112", "url": "..."}],
-    "question": {"text": "...", "answer": "..."} | null,
-    "agent": {"status": "working | done", "started": "ISO", "finished": "ISO"} | null,
-    "released": "v0.2.0" | absent (release tag; set by the orchestrator when a release bundles the card),
-    "activity": [{"t": "ISO", "by": "board | claude | orchestrator | engineer | tester | release-manager", "msg": "..."}],
-    "created": "ISO", "updated": "ISO"
-} ] }
+{ "id": "AS-1", "title": "...", "body": "<spec>",
+  "column": "backlog | needs_input | in_progress | review | human_review | done | archived",
+  "role": "engineer | tester | release-manager | pm",
+  "priority": "P1 | P2 | P3",
+  "links": [{"label": "PR #112", "url": "..."}],
+  "question": {"text": "...", "answer": "..."} | null,
+  "agent": {"status": "working | done", "started": "ISO", "finished": "ISO", "name": "Engineer-AS-1"} | null,
+  "released": "v0.2.0" | absent (release tag; set by the orchestrator when a release bundles the card),
+  "activity": [{"t": "ISO", "by": "board | claude | orchestrator | engineer | tester | release-manager | pm | user", "msg": "..."}],
+  "created": "ISO", "updated": "ISO" }
 ```
+
+Stored as four tables:
+
+| Table | Holds |
+|---|---|
+| `cards` | one row per card: the document above minus `activity`, its `version`, and `column`/`role` as indexed generated columns. Every write bumps `version` by one. |
+| `activity` | one row per activity entry, **append-only** (triggers refuse UPDATE and DELETE). |
+| `events` | one row per write — `cursor` (monotonic), `t`, `actor`, `kind` (`created`, `moved`, `edited`, `answered`, `claimed`, `claim_released`, `claim_finished`, `activity`, `body_appended`, `deleted`), `card`, `data`. The wake-up feed. |
+| `meta` | `next_id` and the id prefix — id allocation is the daemon's, so no caller keeps `nextId`. |
+
+`agent.name` is new: `claim_card` records the spawned agent's name there, so
+the live-claim audit joins claims to live agents mechanically. Archived cards
+from the artifact era keep their legacy shapes (a bare-string `agent`, a
+missing `priority`); `export` returns them exactly as imported.
+
+**Reading it costs little.** `list_cards` returns **summaries** — id, title,
+column, role, priority, agent, links, updated, released, version — never a
+body or activity, and leaves `archived` out unless asked. `get_card` is the
+one call that returns a body, and `activity_limit` trims its log. That is the
+context fix: the artifact put ~15k tokens of page into the orchestrator on
+every read.
 
 ### Column semantics
 
@@ -57,19 +111,21 @@ tolerates one automated writer, not several.
 | `done` | **merged** — the PR is in `main` and the work is finished | bundled into the next release (see Release flow) |
 | `archived` | shipped in a release (or was that release's trigger card); `released` holds the tag | none — terminal |
 
-**The `agent` field is the dedup guard.** Any gesture that moves a card *into*
-`in_progress` (drag, edit, question answered) sets `agent: null`, which means
-"needs a spawn". The orchestrator sets `agent: {status: "working", ...}` **before**
-spawning, so overlapping notifications never double-spawn. Bouncing a card from
-Review back to In Progress is therefore automatically a respawn. The same guard
-covers the Review column: a `review` card needs a Tester spawn when `agent` is
-`null` (a claim reset by startup recovery) *or* `agent.status` is `"done"` (the
-Engineer's normal hand-off); the orchestrator flips it to `working` before
-spawning the Tester, so overlapping notifications never double-spawn there
-either. **Scoping cards invert the guard's meaning:** nothing is ever spawned
+**The `agent` field is the dedup guard, and the daemon enforces it.** Any
+gesture that moves a card *into* `in_progress` (drag, edit, question answered —
+or any `move_card`) sets `agent: null`, which means "needs a spawn". The
+orchestrator takes the card with `claim_card` **before** spawning, and
+`claim_card` is compare-and-set: it writes `agent: {status: "working", started,
+name}` only if the card is claimable *at that instant* — `in_progress` with
+`agent == null`, or `review` with `agent == null` *or* `agent.status == "done"`
+(the Engineer's normal hand-off; `null` there is a claim reset by startup
+recovery). A second claim is refused, so overlapping wakes can never
+double-spawn, and a refused claim means "someone holds it — do not spawn".
+Bouncing a card from Review back to In Progress is therefore automatically a
+respawn. **Scoping cards invert the guard's meaning:** nothing is ever spawned
 for a `role: "pm"` card, so `agent: null` on one is a *resting state*, not a
 spawn request, and stays `null` for the card's whole life. Step 2 skips pm
-cards by role rather than relying on the guard to hold them back.
+cards by role, and `claim_card` refuses them outright as a backstop.
 
 #### The eyeball loop (`human_review`)
 
@@ -109,10 +165,13 @@ spawns a Tester for any `review` card with a PR link whose `agent` is `null`
 respawned on every wake, forever. Keeping the approved-but-unmerged state in its
 own column leaves that dedup guard untouched.
 
-**Board behaviour** (already live; documented here, not proposed): the PR-link
-gate AS-4 added for `review` now also covers `human_review` — dragging a non-pm
-card there without a PR link opens the attach-PR dialog, and `role: "pm"` cards
-remain exempt. Cards in `human_review` render an "awaiting your merge" tag.
+**Board behaviour:** the PR-link gate AS-4 added for `review` also covers
+`human_review`, and the daemon enforces it for every writer: a non-pm card
+cannot enter either column without a PR link in `links` (a `move_card` may add
+the link in its own `patch`), and a card already there cannot have its last
+link patched away. In the web UI, dragging a linkless card there opens the
+attach-PR dialog; `role: "pm"` cards remain exempt. Cards in `human_review`
+render an "awaiting your merge" tag.
 
 #### Scoping cards (`role: "pm"`)
 
@@ -133,7 +192,8 @@ code and spawns no agent: the work happens in an interactive PM session the
 **The draft/agreement loop.** A scoping card cycles `in_progress` →
 `needs_input` (a draft is in the outbox) → `in_progress` (the user wants
 changes) → `needs_input` (the next draft) → … → `done` (the user agrees and the
-orchestrator files the cards). `needs_input`'s existing automation already
+cards are filed — by the PM session itself with `create_card`, or by the
+orchestrator from the outbox). `needs_input`'s existing automation already
 implements this — the return to `in_progress` with `agent: null` is exactly
 "the user sent the draft back", and step 2's pm exemption guarantees no agent
 is spawned to meet it. Agreement on the *first* draft is explicitly not
@@ -145,9 +205,9 @@ verdict, a merge — exists for a card that ships no code.
 **Review and Human Review are skipped, not policed.** There is no Tester for card
 text, and no PR to merge. A pm card misfiled into either column is already inert —
 step 3 spawns a Tester only for a card carrying an open-PR link, `human_review`
-has no automation at all, and the board's PR-link gate on both columns exempts pm
-cards (AS-4). This documents a property the pipeline already has; nothing new
-enforces it.
+has no automation at all, `claim_card` refuses pm cards, and the PR-link gate on
+both columns exempts them (AS-4). This documents a property the pipeline already
+has; nothing new enforces it.
 
 **Done means *filed*, not *written* — and not *merged*.** A scoping card is done
 when its derived cards exist on the board and the user has agreed to them. An
@@ -159,11 +219,63 @@ bundles exclude it (see Release flow).
 ## The orchestrator
 
 Any long-running interactive Claude Code session on this machine. It is the only
-thing that spawns worker sessions; the board page never does.
+thing that spawns worker sessions; the board never does. Every board read and
+write below is an `mcp__dispatch-board__*` tool call with `actor:
+"orchestrator"`; `<main>` is the main checkout's absolute path (the session's
+CWD flaps — see *Worktree discipline* — so never rely on a relative one).
 
-**Start one:** open a session at the repo (or a worktree), then
-`Artifact action:"watch" url:<board url>`. A session that published or read the
-board recently usually gets its watch restored on `--resume`.
+**Refusals are answers, not errors to retry blindly.** `stale_version` means
+the card changed since you read it: the refusal carries the current card —
+re-apply your change to that version. `claim_refused` means another claim holds the card:
+do not spawn. `gate_refused` means a non-pm card is missing its PR link.
+
+### Waking the orchestrator
+
+A user gesture in the web UI (drag, edit, answer) — or another session's write
+— must wake the orchestrator. The daemon records every write as an event with
+a monotonic cursor, and `dist/cli.js wait` turns that feed into the shape
+Claude Code's **Monitor** tool consumes: each stdout line becomes one
+notification, lines within 200ms arrive as one, and a monitor expires after
+at most 30 minutes (`timeout_ms` is capped at 1800000) and must be re-armed.
+
+Arm it with:
+
+```
+Monitor({
+  command: "node <main>/tools/dispatch-board/dist/cli.js wait --follow --since <cursor> --ignore-actor orchestrator",
+  description: "Dispatch board events",
+  timeout_ms: 1800000
+})
+```
+
+- Each event is one JSON line: `{"cursor": 42, "t": "...", "actor": "board",
+  "kind": "moved", "card": "AS-7", "data": {"from": "backlog", "to":
+  "in_progress"}}`. The orchestrator's own writes never appear
+  (`--ignore-actor orchestrator`); user gestures (`actor: "board"`) and other
+  sessions' writes (a PM's `create_card`) do.
+- **On expiry, re-arm** with `--since` set to the `cursor` of the last line it
+  printed (or the cursor you armed it with, if it printed none). Nothing is
+  lost across the gap: events wait in the database, and the new monitor prints
+  everything after that cursor at once.
+- Take the starting cursor **before** the startup read
+  (`node <main>/tools/dispatch-board/dist/cli.js head`), then read, then arm
+  from it — an event landing between the read and the arm is then replayed
+  rather than skipped. (`--since head` means "from now" and has exactly that
+  gap.)
+- If the daemon is down, the monitor prints `{"error": "daemon_unreachable",
+  ...}` rather than going silent, keeps retrying, and prints `{"reconnected":
+  true}` when it is back. Tell the user; the daemon is theirs to start.
+- A notification is only a wake-up. Its line says what changed, but the steps
+  below always re-read the board rather than acting on the line alone — several
+  events can batch into one notification, and the board is the truth.
+
+(`wait` without `--follow` prints the first batch and exits — the shape for
+`Bash run_in_background`, one notification per arm. The orchestrator uses
+`--follow`, which needs no re-arm per event.)
+
+**Start one:** open a session at the repo (or a worktree); confirm the daemon
+answers and take the cursor (`dist/cli.js head`); run the startup recovery
+below; then arm the monitor from that cursor.
 
 **Becoming orchestrator (startup recovery).** Workers are in-process subagents,
 so they die with the orchestrator session that spawned them — while their card
@@ -172,17 +284,16 @@ as "already being worked" forever. A fresh orchestrator has spawned nothing
 yet, so **every `working` claim it finds at startup was made by a previous
 session and is stale by definition** — no liveness probing is needed. (That
 argument holds only under the single-orchestrator assumption — see Known
-limits.) Therefore, immediately after starting the watch (before processing any
-notification), read the board once and sweep:
+limits.) Therefore, before arming the monitor, `list_cards(column:
+["in_progress", "review"])` once and sweep:
 
 - Every `in_progress` card with `agent.status == "working"` (an Engineer or
-  other role agent died mid-run): set `agent: null` and append an activity
-  entry (`by: "orchestrator"`, noting the recovery). The normal spawn rule
-  (step 2 below) then respawns it on this same pass.
+  other role agent died mid-run): `release_claim(id, activity: <noting the
+  recovery>)`. The normal spawn rule (step 2 below) then respawns it on this
+  same pass.
 - Every `review` card with `agent.status == "working"` (a Tester died
-  mid-run): set `agent: null`, same activity entry. The review-entry rule
-  (step 3 below) then respawns the Tester, since the PR link is still in
-  `links`.
+  mid-run): the same `release_claim`. The review-entry rule (step 3 below)
+  then respawns the Tester, since the PR link is still in `links`.
 
 The sweep touches nothing else. `human_review` and `done` cards are past their
 agent work (no role runs on either); `needs_input` cards already carry
@@ -192,38 +303,35 @@ when it archives it, so a lingering `agent: working` on an archived trigger
 implies a crash mid-archival; either way `archived` is terminal, and the sweep
 must leave it alone.
 
-Republish the board once with all resets applied, then run the notification
-steps below against the recovered state.
+Then run the wake steps below against the recovered state.
 
 **Orchestrator death + resume.** When the orchestrator session dies (terminal
 closed, machine rebooted, session killed), its in-process workers die with it —
-but their PRs and branches survive on GitHub, and their worktree changes
-survive on disk. Two ways back:
+but their PRs and branches survive on GitHub, their worktree changes survive on
+disk, and the board survives in the daemon, which is its own process. Two ways
+back:
 
 1. **First choice: resume the session.** `claude --resume` (or `--continue`)
-   in the orchestrator's directory restores the session. The artifact watch on
-   the most-recently-used artifact is usually restored automatically, so board
-   drags wake it again — but verify with the Artifact `status` action before
-   trusting it, and re-arm with an explicit `watch` if it did not come back.
-2. **Fresh session as the new orchestrator.** The board URL is deliberately
-   not in the repo (see The board); recover it from the orchestrator's project
-   memory, or find the artifact in the owner's `/artifacts` list by title.
-   Then, in order:
+   in the orchestrator's directory restores the session but **not** its
+   monitor: re-arm it from the last cursor you processed, which replays every
+   event since.
+2. **Fresh session as the new orchestrator.** In order:
    a. Confirm the old orchestrator session is actually dead (single-orchestrator
       rule — a live predecessor means stop here).
-   b. Read the artifact and adopt the live copy as the local base.
-   c. Explicitly re-arm the watch (`Artifact action:"watch"` — a read alone
-      does not subscribe; only a publish or an explicit watch action does).
-   d. Run the startup-recovery sweep above (every `working` claim is stale by
-      definition) and the live-claim audit.
+   b. Run *Start one* above: the cursor, the startup-recovery sweep (every
+      `working` claim is stale by definition), the live-claim audit, then the
+      monitor.
 
 Either way, nothing that matters is lost with the process: the sweep re-spawns
 workers from card state, and open PRs are re-discovered via `gh pr list`.
 
-**On each republish notification:**
+**On each wake** (a monitor notification, or a worker's completion). Every
+versioned write passes the `version` of the card as you last read it — from
+`list_cards`, `get_card`, or the previous write's result:
 
-1. `Artifact action:"read"` the board; save the HTML to a local file; extract the
-   state JSON block.
+1. `list_cards()` — summaries of every non-archived card. `get_card(id)` only
+   for a card you are about to spawn for (its body is the spec) or whose
+   question/activity you need.
 2. For every card with `column == "in_progress"` and `agent == null`, **except
    cards with `role: "pm"`** — a scoping card in `in_progress` is worked by an
    interactive session the *user* opens, the orchestrator never spawns for it,
@@ -233,76 +341,80 @@ workers from card state, and open PRs are re-discovered via `gh pr list`.
    subagent — cannot wait on user input, which is the whole reason PM work is an
    interactive session. The orchestrator may note the skip in the activity log
    (*"PM session expected; no agent spawned"*), but only when no such entry is
-   already the card's latest: it wakes on every republish, and an unconditional
-   append would spam the log for as long as the card sits there.
-   a. Set `agent: {status: "working", started: <now>}`, append an activity entry
-      (`by: "orchestrator"`), and **republish the board first** (edit the state
-      line in the saved HTML, publish that file with `url:` the board URL; on a
-      publish conflict, re-read and re-apply).
+   already the card's latest (`get_card(id, activity_limit: 1)`): it wakes on
+   every board event, and an unconditional append would spam the log for as
+   long as the card sits there.
+   a. `claim_card(id, name: <the agent's name, e.g. "Engineer-AS-7">)`
+      **first**. If it is refused, someone holds the card: skip it, do not
+      spawn.
    b. Spawn the card's role agent via the Agent tool —
       `subagent_type: <card role>` (fall back to `general-purpose` carrying the
       role prompt from `.claude/agents/<role>.md` if the definition isn't
-      loaded in this session), `isolation: "worktree"`, `name: <card id>`,
-      prompt = card id + title + full spec + any prior findings/answers from the
-      activity log and `question.answer`. A `release-manager` card additionally
-      gets the Done-card bundle in its prompt (see Release flow) — the agent
-      cannot read the board. Give it a worktree of its own for the card's
-      branch, or refuse to reuse one whose branch is another card's — see
-      *Worktree discipline*.
+      loaded in this session), `isolation: "worktree"`, `name: <the claimed
+      name>`, prompt = card id + title + full spec + any prior findings/answers
+      from the activity log and `question.answer`. A `release-manager` card
+      additionally gets the Done-card bundle in its prompt (see Release flow) —
+      the agent does not read the board. Give it a worktree of its own for the
+      card's branch, or refuse to reuse one whose branch is another card's —
+      see *Worktree discipline*.
 3. For every card matching **all three** of: `column == "review"`; **and**
    (`agent == null` **or** `agent.status == "done"`); **and** an open-PR link
    in `links` (`done` is the normal Engineer hand-off; `null` is a claim reset
    by startup recovery):
-   a. Set `agent: {status: "working", started: <now>}`, append an activity entry
-      (`by: "orchestrator"`), and **republish the board first** (same conflict
-      rule as 2a).
+   a. `claim_card(id, name: "<card id>-test")` first; refused means skip, as
+      in 2a.
    b. Spawn the Tester via the Agent tool — `subagent_type: "tester"` (fall back
       to `general-purpose` carrying the role prompt from
       `.claude/agents/tester.md` if the definition isn't loaded in this session),
       `isolation: "worktree"`, `name: <card id>-test`, prompt = card id + title +
       full spec + the PR URL. Same worktree allocation rule as 2b.
    A `review` card *without* a PR link is not spawnable — it needs a human (or a
-   board fix), so treat it like `needs_input`.
+   board fix), so treat it like `needs_input`. (The daemon's PR-link gate makes
+   that a pm card's state only.)
 4. On an Engineer's completion notification, parse its `STATUS:` report and
-   republish the board accordingly:
-   - `READY_FOR_REVIEW` → `column: "review"`, `agent.status: "done"`, add the PR
-     to `links`, append the SUMMARY as activity. (Step 3 then spawns the Tester
-     on this same pass.)
-   - `NEEDS_INPUT` → `column: "needs_input"`, `question: {text: QUESTION}`,
-     `agent: null`, activity entry.
-   - `FAILED` → `column: "needs_input"` with the failure as the question text,
-     `agent: null`, activity entry (same claim reset as the NEEDS_INPUT branch).
+   write the board accordingly:
+   - `READY_FOR_REVIEW` → one `move_card(id, "review", patch: {links:
+     <existing + the PR>, agent: {...agent, status: "done", finished: <now>}},
+     activity: <the SUMMARY>, by: "engineer")`. Column and claim change in the
+     same write, so no interrupted turn can leave one without the other.
+     (Step 3 then spawns the Tester on this same pass.)
+   - `NEEDS_INPUT` → `move_card(id, "needs_input", patch: {question: {text:
+     QUESTION}, agent: null}, activity: …)`.
+   - `FAILED` → the same single `move_card` as NEEDS_INPUT, with the failure as
+     the question text (same claim reset).
 5. On a Tester's completion notification, parse its `VERDICT:` report and
-   republish the board accordingly:
-   - `APPROVE` → `column: "human_review"`, `agent.status: "done"`, append the
-     FINDINGS note as activity (`by: "tester"`). The card now waits on the
-     **user**, who either merges the PR — the pipeline's one human gate, which
-     the Engineer and Tester contracts both forbid them from passing — or
-     bounces it back to `in_progress` with eyeball feedback. Both exits are user
-     gestures and the orchestrator runs nothing on the column (see The eyeball
-     loop). It is `agent.status: "done"` that makes the separate column
-     necessary: an approved card left in `review` would match step 3's spawn
-     condition and be handed back to a Tester on every wake.
-   - `REJECT` → `column: "in_progress"`, append the FINDINGS **verbatim** to the
-     card `body` under a dated `## Tester findings` heading (they are the next
-     Engineer's spec addendum), set `agent: null` (step 2 then spawns a fresh
-     Engineer, who receives the findings as part of the spec), activity entry.
-   - A malformed report (no parseable `VERDICT:`) → `column: "needs_input"` with
-     the raw report as the question text; never guess a verdict.
+   write the board accordingly:
+   - `APPROVE` → one `move_card(id, "human_review", patch: {agent:
+     {...agent, status: "done", finished: <now>}}, activity: <the FINDINGS
+     note>, by: "tester")`. The card now waits on the **user**, who either merges the PR — the pipeline's
+     one human gate, which the Engineer and Tester contracts both forbid them
+     from passing — or bounces it back to `in_progress` with eyeball feedback.
+     Both exits are user gestures and the orchestrator runs nothing on the
+     column (see The eyeball loop). It is `agent.status: "done"` that makes the
+     separate column necessary: an approved card left in `review` would match
+     step 3's spawn condition and be handed back to a Tester on every wake.
+   - `REJECT` → `append_to_body(id, heading: "Tester findings — <date>", text:
+     <the FINDINGS verbatim>, by: "tester")` (they are the next Engineer's spec
+     addendum), then `move_card(id, "in_progress", activity: …)`, which sets
+     `agent: null` itself — step 2 then spawns a fresh Engineer, who receives
+     the findings as part of the spec.
+   - A malformed report (no parseable `VERDICT:`) → `move_card(id,
+     "needs_input", patch: {question: {text: <the raw report>}, agent: null})`;
+     never guess a verdict.
 6. On a Release Manager's completion notification, parse its `STATUS:` report:
-   - `RELEASED` → for every card in `CARDS:`, set `released: <TAG>` and
-     `column: "archived"`; the release-manager trigger card itself (if the run
-     was card-triggered) is archived like the bundled cards — set
-     `released: <TAG>` and `column: "archived"` on it too — with one extra step
-     the bundled cards don't need: close out its claim,
-     `agent.status: "done"`, `agent.finished: <now>` (the trigger entered
+   - `RELEASED` → for every card in `CARDS:`, `move_card(id, "archived",
+     patch: {released: <TAG>})`; the release-manager trigger card itself (if
+     the run was card-triggered) is archived like the bundled cards — the same
+     `move_card` with `released: <TAG>` — with one extra step the bundled cards
+     don't need: close out its claim in the same write (`patch.agent:
+     {...agent, status: "done", finished: <now>}` — the trigger entered
      `in_progress` under a `working` claim; archiving without closing it would
-     leave a dangling `working` with no `finished` timestamp), appending the
-     tag + release URL as activity (`by: "release-manager"`). It never parks in
+     leave a dangling `working` with no `finished` timestamp), appending the tag
+     + release URL as activity (`by: "release-manager"`). It never parks in
      `done`: a release run produces no PR, so a trigger card left in `done`
      would block every subsequent bundle. Any `done` `role: "pm"` card without a
      `released` field is stamped and archived on the same pass for the same
-     reason, even though it was never bundled (see Release flow). Republish.
+     reason, even though it was never bundled (see Release flow).
    - `NEEDS_INPUT` / `FAILED` → same handling as the Engineer's (step 4): the
      triggering card (if the run was card-triggered) goes to `needs_input` with
      the question or failure text; a user-requested run just surfaces it to the
@@ -317,22 +429,22 @@ workers from card state, and open PRs are re-discovered via `gh pr list`.
    orchestrator session's next visible message.
 
 **Live-claim audit — every wake, not just startup.** Steps 2a and 3a claim
-before spawning (republish first, then spawn), so a turn interrupted between
-the two leaves `agent: working` on the board with no agent ever spawned — under
-a *live* orchestrator, where startup recovery never fires because there was no
-restart. So on each wake, before processing the steps above, the orchestrator
-audits the `working` claims on `in_progress` and `review` cards (the same two
-columns the startup sweep covers — never `archived`) against its actual live
-agent list (the agents addressable in this session): any `working` claim with
-no matching live agent is a dropped spawn — respawn it (run the spawn half of
-step 2b/3b under the existing claim) or reset it to `agent: null` and let the
-normal spawn rules pick it up on the same pass. Claims with a matching live
-agent are untouched.
+before spawning, so a turn interrupted between the two leaves `agent: working`
+on the board with no agent ever spawned — under a *live* orchestrator, where
+startup recovery never fires because there was no restart. So on each wake,
+before processing the steps above, the orchestrator audits the `working`
+claims on `in_progress` and `review` cards (the same two columns the startup
+sweep covers — never `archived`) against its actual live agent list (the
+agents addressable in this session), joining on `agent.name`: any `working`
+claim with no matching live agent is a dropped spawn — respawn it (run the
+spawn half of step 2b/3b under the existing claim) or `release_claim(id, name:
+<that name>)` and let the normal spawn rules pick it up on the same pass.
+Claims with a matching live agent are untouched.
 
-**Writing cards as Claude:** read the board, edit the state JSON (append a
-card, bump `nextId`, activity `by: "claude"`), republish with `url:`. Only the
-orchestrator does this (single-board-writer rule) — it is also how card specs
-handed off from a PM session get filed.
+**Writing cards as Claude:** `create_card(title, body, role, priority?, actor:
+<your session tag>, by: "claude")` — the daemon allocates the id and the card
+lands in `backlog`. Any session may do this, a PM session included (see Roles);
+it is also how the orchestrator files specs a PM session left in the outbox.
 
 ## Worktree discipline
 
@@ -444,32 +556,29 @@ other costs a result you believed.
   scroll or compact out of history) and not a spawned subagent (workers cannot
   wait on user input). A `role: "pm"` scoping card is the handoff: its body
   carries the full context; the PM session reads the board and the relevant
-  files, refines with the user for as long as needed, and ends by handing the
-  **orchestrator** the card specs to file (under the single-board-writer rule
-  the PM session never publishes the board itself). PM sessions do not spawn
-  engineers; their actionable output is card text, not code.
+  files, refines with the user for as long as needed, and ends with the
+  derived cards filed on the board. PM sessions do not spawn engineers; their
+  actionable output is card text, not code.
 
   **Starting one.** The start gesture is the same as an engineer card's: the
   **user drags the scoping card into In Progress**. The only difference is who
   opens the session — a human, because step 2 skips pm cards and the
   orchestrator never spawns one. So the PM session's *first* turn reads the
-  board and, if its card is still in `backlog`, asks the user to drag it. From
-  there the card follows the draft/agreement loop in Scoping cards, and is done
-  only once the derived cards are filed on the board and the user has agreed to
-  them.
+  board (`get_card`) and, if its card is still in `backlog`, asks the user to
+  drag it. From there the card follows the draft/agreement loop in Scoping
+  cards, and is done only once the derived cards are filed on the board and the
+  user has agreed to them.
 
-  **The handoff.** The durable artifact is a file, not a message: the PM
-  session writes its final output — the card specs to file — to
-  `.claude/pm-outbox/<card-id>.md` in the repo checkout (gitignored: handoffs
-  are working files, not repo content), then tells the user it is done. The
-  default path from there is user-relayed: the user notifies the orchestrator
-  ("AS-25 scoping is done"), which reads the outbox file and files the cards.
-  When live cross-session messaging is available, the PM session may
-  additionally message the orchestrator as a wake-up — but it still writes the
-  outbox file first; the message is the wake-up, the file is the payload.
-  (Cross-session discovery is not reliable — sessions under different
-  accounts or clients may simply not reach each other — so the file-plus-user
-  path is the protocol, and the message is the nice-to-have.)
+  **The handoff.** A PM session writes to the board directly, through the
+  daemon, with its own actor tag (e.g. `pm-AS-28`): once the user agrees, it
+  files the derived cards with `create_card` and moves its scoping card to
+  `done` itself. Its writes wake the orchestrator like any other session's, so
+  there is nothing to relay. The `.claude/pm-outbox/<card-id>.md` file
+  (gitignored: working files, not repo content) is now **optional** — still
+  the right home for a long draft the user is asked to agree to (the
+  `needs_input` question can point at it), and the fallback when the daemon is
+  down: the user tells the orchestrator ("AS-25 scoping is done"), which reads
+  the file and files the cards itself.
 - **Engineer** — `.claude/agents/engineer.md`. Isolated worktree → PR, whose description
   states what a human must check (see The eyeball loop). Reports
   `READY_FOR_REVIEW / NEEDS_INPUT / FAILED` in a fixed format.
@@ -576,26 +685,32 @@ though it was never in the bundle — so Done stays clean and no pm card lingers
 to be re-considered by a later run. The `released` field is also the dedup
 guard for the *next* bundle: only Done cards without it are release candidates.
 
-## Known limits (v1)
+## Known limits
 
 - **One orchestrator at a time.** The startup-recovery argument — "every
   `working` claim found at startup is stale by definition" — is only true
   because a fresh orchestrator has spawned nothing yet *and no other session
   has either*. A second orchestrator starting while the first still has live
-  workers would read those live claims as stale, sweep them to `agent: null`,
-  and duplicate-spawn every card the first orchestrator is already working.
-  There is no claim-ownership mechanism; the protocol simply assumes one
+  workers would read those live claims as stale, release them to `agent:
+  null`, and duplicate-spawn every card the first orchestrator is already
+  working. The daemon's compare-and-set claim stops two claims on one card; it
+  cannot stop a sweep that deliberately releases a live claim, and nothing
+  records which orchestrator a claim belongs to. The protocol simply assumes one
   orchestrator session exists at a time, and the user must not start a second
-  while one is running. The single-board-writer rule (see The board) is this
-  constraint generalized to publishing: other sessions, PM included, read the
-  board but never publish it.
+  while one is running.
 - Workers are in-process subagents: they die if the orchestrator session dies
   (their worktree changes survive). The stale `agent: working` claim they leave
   behind is handled by the next orchestrator's startup recovery sweep (see
   *Becoming orchestrator*), which resets it so the normal spawn rules respawn
   the card — but until an orchestrator session connects, the card simply sits
   claimed.
-- Watches are session-local; if no orchestrator session is open, drags simply
-  queue up as board state until one connects and reads the board.
-- Board writes are last-writer-wins with conflict-reload; fine for one human +
-  a couple of sessions, not for a team.
+- Wake-up needs a live monitor. If no orchestrator session is open — or its
+  monitor expired and was not re-armed — gestures simply queue up as events and
+  board state until one arms a monitor from its last cursor (which replays
+  them) or reads the board.
+- The daemon is a single point of failure by design: while it is down, the
+  MCP tools fail, the web UI shows a banner, and `wait` prints
+  `daemon_unreachable`. No state is lost — the database is on disk — and
+  `export` works without it.
+- Localhost only: one human and a few sessions on one machine, not a team, and
+  no phone or remote access.

@@ -12,9 +12,9 @@ nothing more.
 
 ## What you can and cannot see
 
-You **cannot read the Dispatch board** — it is a claude.ai artifact only the orchestrator
-reads and writes. The bundle in your prompt is your complete and only card input; do not
-try to discover "missed" Done cards yourself. Archiving the bundled cards off the board
+You **do not read the Dispatch board** — only the orchestrator drives it (the local
+`dispatch-board` daemon; do not query it, by MCP or by `curl`). The bundle in your prompt
+is your complete and only card input; do not try to discover "missed" Done cards yourself. Archiving the bundled cards off the board
 after the release — and the trigger card too, when the run was card-triggered — is the
 **orchestrator's** job, not yours.
 
@@ -104,8 +104,8 @@ after the release — and the trigger card too, when the run was card-triggered 
    tracked files (you have no Edit/Write tools by design; do not work around that with
    `Bash` redirection into tracked files — scratch files outside the repo are fine).
    The only artifacts you create are the tag and the release, both via `gh`.
-7. **Never** merge PRs, push to `main`, delete or move existing tags, edit the Dispatch
-   board artifact, or expand the bundle beyond what the prompt listed.
+7. **Never** merge PRs, push to `main`, delete or move existing tags, write to the Dispatch
+   board, or expand the bundle beyond what the prompt listed.
 
 ## When you are blocked
 

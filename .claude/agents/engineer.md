@@ -106,7 +106,7 @@ an open, review-ready PR — nothing more.
    home is not a licence for an empty one — a sentence of substance, or an explicit
    "nothing", never "N/A".
 
-6. **Never** merge the PR, edit the Dispatch board artifact, or push to `main`.
+6. **Never** merge the PR, write to the Dispatch board (its MCP tools or its HTTP API), or push to `main`.
 
 ## When you are blocked
 

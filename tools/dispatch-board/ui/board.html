@@ -1,0 +1,457 @@
+<!doctype html>
+<!-- ArenaSim Dispatch, served by tools/dispatch-board (node dist/cli.js serve).
+     Ported from the claude.ai artifact: same look and gestures, persistence
+     swapped for the local daemon's versioned JSON API. -->
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ArenaSim Dispatch</title><link id="fonts" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"><style id="css">
+:root{
+  color-scheme:light dark;
+  --ground:#ECEFF1;--surface:#FBFCFD;--surface2:#F1F3F5;--ink:#1B222B;--muted:#5B6673;
+  --line:#D5DBE1;--accent:#8A6A2F;--accent-ink:#6E5322;--btn-primary-ink:#FFFFFF;
+  --c-backlog:#5B6673;--c-input:#A87409;--c-progress:#2F6FA8;--c-review:#7B5EA7;--c-human:#2F7D8A;--c-done:#3E7A4E;
+  --p1:#B04030;--p2:#C08A1E;--p3:#9AA4AE;
+  --chip-eng:#E3EDF6;--chip-eng-ink:#2F6FA8;--chip-else:#EEE9F6;--chip-else-ink:#7B5EA7;
+  --shadow:0 1px 2px rgba(20,26,33,.08),0 4px 14px rgba(20,26,33,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#131619;--surface:#1C2126;--surface2:#181D21;--ink:#E7EAED;--muted:#97A1AC;
+    --line:#30383F;--accent:#C9A45C;--accent-ink:#C9A45C;--btn-primary-ink:#1B1508;
+    --c-backlog:#8B96A1;--c-input:#D9A93C;--c-progress:#5E9AD0;--c-review:#A98FD6;--c-human:#6FB6C4;--c-done:#6FAE7E;
+    --p1:#D06A5B;--p2:#D8A83E;--p3:#6B7681;
+    --chip-eng:#24333F;--chip-eng-ink:#8FBBE0;--chip-else:#2E2939;--chip-else-ink:#BFA9E6;
+    --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#131619;--surface:#1C2126;--surface2:#181D21;--ink:#E7EAED;--muted:#97A1AC;
+  --line:#30383F;--accent:#C9A45C;--accent-ink:#C9A45C;--btn-primary-ink:#1B1508;
+  --c-backlog:#8B96A1;--c-input:#D9A93C;--c-progress:#5E9AD0;--c-review:#A98FD6;--c-human:#6FB6C4;--c-done:#6FAE7E;
+  --p1:#D06A5B;--p2:#D8A83E;--p3:#6B7681;
+  --chip-eng:#24333F;--chip-eng-ink:#8FBBE0;--chip-else:#2E2939;--chip-else-ink:#BFA9E6;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);
+}
+*{box-sizing:border-box}
+html{background:var(--ground)}
+body{margin:0;background:var(--ground);color:var(--ink);font:14px/1.5 "IBM Plex Sans",system-ui,-apple-system,sans-serif}
+img{max-width:100%}
+[hidden]{display:none!important}
+button{font:inherit;cursor:pointer}
+button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--c-progress);outline-offset:1px}
+.hdr{display:flex;align-items:baseline;gap:14px;padding:16px 20px 10px}
+.hdr h1{font:700 22px/1 "Barlow Semi Condensed",system-ui,sans-serif;letter-spacing:.02em;margin:0;color:var(--ink)}
+.hdr h1 .ax{color:var(--accent-ink)}
+.hdr .sub{color:var(--muted);font-size:12.5px}
+.hdr .spacer{flex:1}
+.stat{color:var(--muted);font:400 12px "IBM Plex Mono",monospace}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:7px;padding:7px 13px;font-weight:500}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--btn-primary-ink);font-weight:600}
+.btn.danger{color:var(--p1);border-color:var(--p1)}
+.btn:disabled{opacity:.45;cursor:default}
+.robanner{margin:0 20px 8px;padding:8px 12px;border:1px solid var(--line);border-radius:7px;background:var(--surface2);color:var(--muted);font-size:12.5px}
+.boardwrap{overflow-x:auto;padding:6px 20px 24px}
+.board{display:grid;grid-template-columns:repeat(6,minmax(216px,1fr));gap:12px;min-width:1344px;align-items:stretch}
+.col{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:10px;min-height:120px;display:flex;flex-direction:column}
+.col.dragover{border-color:var(--c-progress);background:var(--surface)}
+.colhead{display:flex;align-items:baseline;gap:8px;padding:2px 4px 8px}
+.colhead .nm{font:600 14px/1 "Barlow Semi Condensed",sans-serif;text-transform:uppercase;letter-spacing:.07em}
+.colhead .ct{font:500 11.5px "IBM Plex Mono",monospace;color:var(--muted)}
+.colhead .hint{margin-left:auto;color:var(--muted);font-size:11px}
+.col[data-col="backlog"] .nm{color:var(--c-backlog)}
+.col[data-col="needs_input"] .nm{color:var(--c-input)}
+.col[data-col="in_progress"] .nm{color:var(--c-progress)}
+.col[data-col="review"] .nm{color:var(--c-review)}
+.col[data-col="human_review"] .nm{color:var(--c-human)}
+.col[data-col="done"] .nm{color:var(--c-done)}
+.col[data-col="archived"]{border-style:dashed}
+.col[data-col="archived"] .nm{color:var(--muted)}
+.cards{display:flex;flex-direction:column;gap:8px;min-height:36px;flex:1}
+.card{background:var(--surface);border:1px solid var(--line);border-left-width:3px;border-radius:8px;padding:9px 11px;box-shadow:var(--shadow);cursor:pointer}
+.card.p-P1{border-left-color:var(--p1)}
+.card.p-P2{border-left-color:var(--p2)}
+.card.p-P3{border-left-color:var(--p3)}
+.card .top{display:flex;gap:8px;align-items:baseline}
+.card .cid{font:500 11px "IBM Plex Mono",monospace;color:var(--muted)}
+.card .pri{margin-left:auto;font:500 10.5px "IBM Plex Mono",monospace;color:var(--muted)}
+.card .ttl{font-weight:500;margin:3px 0 6px;line-height:1.35}
+.card .foot{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.chip{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:99px;background:var(--chip-else);color:var(--chip-else-ink)}
+.chip.engineer{background:var(--chip-eng);color:var(--chip-eng-ink)}
+.tag{font:500 11px "IBM Plex Mono",monospace;color:var(--muted)}
+.tag.q{color:var(--c-input)}
+.tag.agent{color:var(--c-progress)}
+.tag a{color:var(--c-progress);text-decoration:none}
+.tag a:hover{text-decoration:underline}
+.tag.rel{color:var(--c-done)}
+.tag.hum{color:var(--c-human)}
+.empty{color:var(--muted);font-size:12px;padding:6px 4px;font-style:italic}
+.overlay{position:fixed;inset:0;background:rgba(10,14,18,.45);display:flex;justify-content:flex-end;z-index:20}
+.overlay.center{justify-content:center;align-items:flex-start;padding-top:9vh}
+.drawer{width:min(430px,94vw);height:100%;overflow-y:auto;background:var(--surface);border-left:1px solid var(--line);padding:18px 20px 30px}
+.modal{width:min(480px,94vw);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;height:fit-content;box-shadow:var(--shadow)}
+.drawer h2,.modal h2{font:600 17px "Barlow Semi Condensed",sans-serif;margin:0 0 2px;letter-spacing:.03em}
+.mrow{display:flex;flex-direction:column;gap:4px;margin-top:12px}
+.mrow label{font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.mrow input,.mrow textarea,.mrow select{font:inherit;color:var(--ink);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+.mrow textarea{min-height:110px;resize:vertical;font-size:13px}
+.tworow{display:flex;gap:10px}.tworow .mrow{flex:1}
+.dactions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.qbox{margin-top:14px;border:1px solid var(--c-input);border-radius:8px;padding:10px 12px;background:var(--surface2)}
+.qbox .qt{font-weight:600;color:var(--c-input);font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.act{margin-top:18px}
+.act h3{font:600 12px "Barlow Semi Condensed",sans-serif;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 6px}
+.aitem{display:flex;gap:8px;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px}
+.aitem .at{font:400 11px "IBM Plex Mono",monospace;color:var(--muted);white-space:nowrap;padding-top:1px}
+.aitem .aby{font-weight:600;color:var(--muted)}
+.links{display:flex;flex-direction:column;gap:3px;margin-top:10px}
+.links a{color:var(--c-progress);font-size:13px;text-decoration:none}
+.links a:hover{text-decoration:underline}
+.spec{white-space:pre-wrap;font-size:13px;color:var(--ink);background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:4px}
+.closex{position:sticky;top:0;float:right;border:none;background:none;color:var(--muted);font-size:20px;line-height:1;padding:2px 6px}
+@media (prefers-reduced-motion: no-preference){.card{transition:box-shadow .12s}.card:hover{box-shadow:0 2px 6px rgba(20,26,33,.16),0 8px 20px rgba(20,26,33,.10)}}
+</style></head><body><div id="app"></div><script id="code">
+(function(){
+"use strict";
+// Ported from the ArenaSim Dispatch artifact. The look, the columns, the
+// drawer, the question box and the PR-link gate are the artifact's; what
+// changed is persistence: every gesture is one versioned write to the local
+// daemon (actor "board"), and the page refreshes live from its event stream.
+var COLUMNS = [
+  {key:"backlog", label:"Backlog", hint:"queued"},
+  {key:"needs_input", label:"Needs Input", hint:"blocked on you"},
+  {key:"in_progress", label:"In Progress", hint:"spawns an agent"},
+  {key:"review", label:"Review", hint:"awaiting verification"},
+  {key:"human_review", label:"Human Review", hint:"your eyeball + merge"},
+  {key:"done", label:"Done", hint:"merged"}
+];
+var ARCHIVED = {key:"archived", label:"Archived", hint:"released"};
+var ROLES = ["engineer","tester","release-manager","pm"];
+var GATED = ["review","human_review"];
+
+var state = {cards: []};
+var full = {};            // id -> full card (body + activity), fetched when its drawer opens
+var connected = false, loadedOnce = false;
+var openCardId = null, showNew = false, confirmDelete = false, statusMsg = "connecting…", showArchived = false;
+var pending = null;       // {id, column, patch, why}: a gated move waiting on the PR-link dialog
+var app = document.getElementById("app");
+
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function fmt(t){
+  // Board timestamps are UTC without a zone suffix.
+  try{ var s=String(t); if(/^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d)?$/.test(s)) s+="Z";
+    var d=new Date(s); if(isNaN(d)) return t; return d.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); }
+  catch(e){ return t; }
+}
+function card(id){ for(var i=0;i<state.cards.length;i++) if(state.cards[i].id===id) return state.cards[i]; return null; }
+function gated(c, col){ return GATED.indexOf(col) >= 0 && c.role !== "pm" && !(c.links||[]).length; }
+
+function api(method, path, body){
+  var opts = {method: method, headers: {}};
+  if(body !== undefined){ opts.headers["content-type"] = "application/json"; opts.body = JSON.stringify(body); }
+  return fetch(path, opts).then(function(r){
+    return r.json().catch(function(){ return {}; }).then(function(b){ return {status: r.status, body: b}; });
+  });
+}
+
+var loading = false, reload = false;
+function load(){
+  if(loading){ reload = true; return; }
+  loading = true;
+  api("GET", "/api/board").then(function(r){
+    loading = false;
+    if(r.status !== 200) throw new Error("HTTP " + r.status);
+    state.cards = r.body.cards; loadedOnce = true;
+    if(openCardId && card(openCardId) && full[openCardId] && full[openCardId].version !== card(openCardId).version) fetchFull(openCardId);
+    render();
+    if(reload){ reload = false; load(); }
+  }).catch(function(){ loading = false; connected = false; statusMsg = "daemon unreachable — retrying"; render(); });
+}
+function fetchFull(id){
+  return api("GET", "/api/cards/" + encodeURIComponent(id)).then(function(r){
+    if(r.status === 200){ full[id] = r.body; render(); }
+    else if(r.status === 404 && openCardId === id){ openCardId = null; render(); }
+  });
+}
+
+// One place that turns a write's response into board feedback.
+function afterWrite(r, okMsg){
+  if(r.status === 200){ statusMsg = okMsg || ("saved " + fmt(new Date().toISOString().slice(0,19))); }
+  else if(r.status === 409){ statusMsg = "changed elsewhere — reloaded; check it and try again"; }
+  else { statusMsg = (r.body && r.body.message) || ("save failed (HTTP " + r.status + ")"); }
+  load();
+  return r.status === 200;
+}
+
+function moveCard(id, col, why, patch){
+  var c = card(id); if(!c || c.column === col) return;
+  var withLinks = patch && patch.links ? Object.assign({}, c, {links: patch.links}) : c;
+  if(gated(withLinks, col)){ pending = {id: id, column: col, patch: patch || {}, why: why}; render(); return; }
+  var body = {column: col, expected_version: (full[id] && openCardId === id ? full[id].version : c.version),
+              activity: (why || "Moved") + ": " + c.column + " → " + col};
+  if(patch && Object.keys(patch).length) body.patch = patch;
+  statusMsg = "saving…"; render();
+  return api("POST", "/api/cards/" + encodeURIComponent(id) + "/move", body).then(function(r){ return afterWrite(r); });
+}
+
+function cardHtml(c){
+  var tags = "";
+  if(c.column === "needs_input" && c.question && c.question.text) tags += "<span class=\"tag q\">? waiting on answer</span>";
+  if(c.column === "human_review") tags += "<span class=\"tag hum\">awaiting your merge</span>";
+  if(c.agent && c.agent.status === "working") tags += "<span class=\"tag agent\">agent working since " + esc(fmt(c.agent.started)) + "</span>";
+  if(c.released) tags += "<span class=\"tag rel\">released " + esc(c.released) + "</span>";
+  for(var i=0;i<(c.links||[]).length;i++){
+    tags += "<span class=\"tag\"><a href=\"" + esc(c.links[i].url) + "\" target=\"_blank\" rel=\"noopener\">" + esc(c.links[i].label) + "</a></span>";
+  }
+  return "<div class=\"card p-" + esc(c.priority) + "\" draggable=\"" + connected + "\" tabindex=\"0\" data-id=\"" + esc(c.id) + "\">"
+    + "<div class=\"top\"><span class=\"cid\">" + esc(c.id) + "</span><span class=\"pri\">" + esc(c.priority) + "</span></div>"
+    + "<div class=\"ttl\">" + esc(c.title) + "</div>"
+    + "<div class=\"foot\"><span class=\"chip " + (c.role==="engineer"?"engineer":"") + "\">" + esc(c.role) + "</span>" + tags + "</div>"
+    + "</div>";
+}
+
+function drawerHtml(s){
+  var c = full[s.id];
+  var ro = !connected;
+  if(!c){
+    return "<div class=\"overlay\" id=\"ovl\"><div class=\"drawer\" role=\"dialog\" aria-label=\"Card detail\">"
+      + "<button class=\"closex\" id=\"d-close\" aria-label=\"Close\">×</button><div class=\"stat\">loading " + esc(s.id) + "…</div></div></div>";
+  }
+  var q = "";
+  if(c.question && c.question.text && !c.question.answer){
+    q = "<div class=\"qbox\"><div class=\"qt\">Agent needs input</div><div>" + esc(c.question.text) + "</div>"
+      + "<div class=\"mrow\"><label for=\"d-answer\">Answer</label><textarea id=\"d-answer\" " + (ro?"disabled":"") + "></textarea></div>"
+      + "<div class=\"dactions\"><button class=\"btn primary\" id=\"d-answerbtn\" " + (ro?"disabled":"") + ">Answer &amp; resume</button></div></div>";
+  }
+  var links = "";
+  for(var i=0;i<(c.links||[]).length;i++) links += "<a href=\"" + esc(c.links[i].url) + "\" target=\"_blank\" rel=\"noopener\">" + esc(c.links[i].label) + "</a>";
+  var acts = "", al = c.activity || [];
+  for(var j=al.length-1;j>=0;j--){
+    var a = al[j];
+    acts += "<div class=\"aitem\"><span class=\"at\">" + esc(fmt(a.t)) + "</span><span><span class=\"aby\">" + esc(a.by) + "</span> — " + esc(a.msg) + "</span></div>";
+  }
+  var colOpts = "", roleOpts = "", priOpts = "";
+  for(var k=0;k<COLUMNS.length;k++) colOpts += "<option value=\"" + COLUMNS[k].key + "\"" + (c.column===COLUMNS[k].key?" selected":"") + ">" + COLUMNS[k].label + "</option>";
+  colOpts += "<option value=\"archived\"" + (c.column==="archived"?" selected":"") + ">Archived</option>";
+  for(var r=0;r<ROLES.length;r++) roleOpts += "<option" + (c.role===ROLES[r]?" selected":"") + ">" + ROLES[r] + "</option>";
+  var pris = ["P1","P2","P3"]; if(c.priority && pris.indexOf(c.priority) < 0) pris.push(c.priority);
+  pris.forEach(function(p){ priOpts += "<option" + (c.priority===p?" selected":"") + ">" + esc(p) + "</option>"; });
+  return "<div class=\"overlay\" id=\"ovl\"><div class=\"drawer\" data-id=\"" + esc(c.id) + "\" role=\"dialog\" aria-label=\"Card detail\">"
+    + "<button class=\"closex\" id=\"d-close\" aria-label=\"Close\">×</button>"
+    + "<div class=\"cid\" style=\"font:500 11px 'IBM Plex Mono',monospace;color:var(--muted)\">" + esc(c.id) + " · created " + esc(fmt(c.created)) + " · v" + esc(c.version) + "</div>"
+    + "<div class=\"mrow\"><label for=\"d-title\">Title</label><input id=\"d-title\" value=\"" + esc(c.title) + "\" " + (ro?"disabled":"") + "></div>"
+    + "<div class=\"tworow\">"
+    + "<div class=\"mrow\"><label for=\"d-col\">Column</label><select id=\"d-col\" " + (ro?"disabled":"") + ">" + colOpts + "</select></div>"
+    + "<div class=\"mrow\"><label for=\"d-role\">Role</label><select id=\"d-role\" " + (ro?"disabled":"") + ">" + roleOpts + "</select></div>"
+    + "<div class=\"mrow\"><label for=\"d-pri\">Priority</label><select id=\"d-pri\" " + (ro?"disabled":"") + ">" + priOpts + "</select></div>"
+    + "</div>"
+    + "<div class=\"mrow\"><label for=\"d-body\">Spec</label><textarea id=\"d-body\" " + (ro?"disabled":"") + ">" + esc(c.body) + "</textarea></div>"
+    + q
+    + (links ? "<div class=\"links\">" + links + "</div>" : "")
+    + "<div class=\"dactions\">"
+    + "<button class=\"btn primary\" id=\"d-save\" " + (ro?"disabled":"") + ">Save changes</button>"
+    + "<button class=\"btn danger\" id=\"d-delete\" " + (ro?"disabled":"") + ">" + (confirmDelete?"Confirm delete":"Delete card") + "</button>"
+    + "</div>"
+    + "<div class=\"act\"><h3>Activity</h3>" + acts + "</div>"
+    + "</div></div>";
+}
+
+function modalHtml(){
+  return "<div class=\"overlay center\" id=\"ovl\"><div class=\"modal\" role=\"dialog\" aria-label=\"New card\">"
+    + "<h2>New card</h2>"
+    + "<div class=\"mrow\"><label for=\"n-title\">Title</label><input id=\"n-title\" placeholder=\"What needs to be done\"></div>"
+    + "<div class=\"mrow\"><label for=\"n-body\">Spec</label><textarea id=\"n-body\" placeholder=\"Enough detail that an Engineer session can start without asking anything.\"></textarea></div>"
+    + "<div class=\"tworow\">"
+    + "<div class=\"mrow\"><label for=\"n-role\">Role</label><select id=\"n-role\"><option>engineer</option><option>tester</option><option>release-manager</option></select></div>"
+    + "<div class=\"mrow\"><label for=\"n-pri\">Priority</label><select id=\"n-pri\"><option>P1</option><option selected>P2</option><option>P3</option></select></div>"
+    + "</div>"
+    + "<div class=\"dactions\"><button class=\"btn primary\" id=\"n-create\">Add to Backlog</button><button class=\"btn\" id=\"n-cancel\">Cancel</button></div>"
+    + "</div></div>";
+}
+
+function prModalHtml(c, col){
+  var label = col === "human_review" ? "Human Review" : "Review";
+  return "<div class=\"overlay center\" id=\"provl\" data-id=\"" + esc(c.id) + "\"><div class=\"modal\" role=\"dialog\" aria-label=\"PR link required\">"
+    + "<h2>" + esc(c.id) + " needs a PR link to enter " + label + "</h2>"
+    + "<div class=\"mrow\"><label for=\"pr-url\">PR URL</label><input id=\"pr-url\" placeholder=\"https://github.com/.../pull/123\"></div>"
+    + "<div class=\"dactions\"><button class=\"btn primary\" id=\"pr-save\">Attach &amp; move to " + label + "</button><button class=\"btn\" id=\"pr-cancel\">Cancel</button></div>"
+    + "</div></div>";
+}
+
+// Live refreshes re-render the page; keep what the user is typing. Values
+// are restored only into the SAME overlay they were typed in (same card's
+// drawer, the new-card modal, the same card's PR dialog).
+var FIELDS = {drawer: ["d-title","d-body","d-col","d-role","d-pri","d-answer"], create: ["n-title","n-body","n-role","n-pri"], pr: ["pr-url"]};
+function overlayKeys(){
+  var dr = document.querySelector(".drawer[data-id]"), pr = document.getElementById("provl");
+  return {drawer: dr ? dr.dataset.id : null, create: !!document.getElementById("n-title"), pr: pr ? pr.dataset.id : null};
+}
+function captureDraft(){
+  var d = {keys: overlayKeys(), values: {}, focus: null};
+  Object.keys(FIELDS).forEach(function(k){ FIELDS[k].forEach(function(f){ var el = document.getElementById(f); if(el) d.values[f] = el.value; }); });
+  var ae = document.activeElement;
+  if(ae && ae.id && Object.prototype.hasOwnProperty.call(d.values, ae.id)) d.focus = {id: ae.id, start: ae.selectionStart, end: ae.selectionEnd, scroll: ae.scrollTop};
+  return d;
+}
+function restoreDraft(d){
+  var now = overlayKeys();
+  var same = {drawer: d.keys.drawer && d.keys.drawer === now.drawer, create: d.keys.create && now.create, pr: d.keys.pr && d.keys.pr === now.pr};
+  Object.keys(FIELDS).forEach(function(k){
+    if(!same[k]) return;
+    FIELDS[k].forEach(function(f){
+      var el = document.getElementById(f);
+      if(el && Object.prototype.hasOwnProperty.call(d.values, f)) el.value = d.values[f];
+      if(d.focus && d.focus.id === f && el){ el.focus(); try{ el.setSelectionRange(d.focus.start, d.focus.end); }catch(e){} el.scrollTop = d.focus.scroll; }
+    });
+  });
+}
+
+function render(){
+  var keep = captureDraft();
+  var archivedCards = state.cards.filter(function(c){ return c.column === "archived"; });
+  var visCols = COLUMNS.slice();
+  if(showArchived && archivedCards.length) visCols.push(ARCHIVED);
+  var cols = "";
+  for(var i=0;i<visCols.length;i++){
+    var col = visCols[i];
+    var cs = state.cards.filter(function(c){ return c.column === col.key; });
+    var inner = cs.map(cardHtml).join("") || "<div class=\"empty\">" + (loadedOnce ? "empty" : "…") + "</div>";
+    cols += "<div class=\"col\" data-col=\"" + col.key + "\">"
+      + "<div class=\"colhead\"><span class=\"nm\">" + col.label + "</span><span class=\"ct\">" + cs.length + "</span><span class=\"hint\">" + col.hint + "</span></div>"
+      + "<div class=\"cards\">" + inner + "</div></div>";
+  }
+  app.innerHTML =
+    "<div class=\"hdr\"><h1>ArenaSim <span class=\"ax\">Dispatch</span></h1>"
+    + "<span class=\"sub\">" + state.cards.length + " cards · drag to In&nbsp;Progress to put an agent on it</span>"
+    + "<span class=\"spacer\"></span><span class=\"stat\">" + esc(statusMsg) + "</span>"
+    + (archivedCards.length ? "<button class=\"btn\" id=\"archbtn\">" + (showArchived ? "Hide archived" : "Archived (" + archivedCards.length + ")") + "</button>" : "")
+    + "<button class=\"btn primary\" id=\"newbtn\" " + (connected?"":"disabled") + ">New card</button></div>"
+    + (!connected && loadedOnce ? "<div class=\"robanner\">The board daemon is unreachable — changes can't be saved until it is back. Retrying…</div>" : "")
+    + "<div class=\"boardwrap\"><div class=\"board\" style=\"grid-template-columns:repeat(" + visCols.length + ",minmax(216px,1fr));min-width:" + (visCols.length*224) + "px\">" + cols + "</div></div>"
+    + (openCardId && card(openCardId) ? drawerHtml({id: openCardId}) : "")
+    + (showNew ? modalHtml() : "")
+    + (pending && card(pending.id) ? prModalHtml(card(pending.id), pending.column) : "");
+  restoreDraft(keep);
+  wire();
+}
+function closeAll(){ openCardId = null; showNew = false; confirmDelete = false; pending = null; }
+
+function wire(){
+  var newbtn = document.getElementById("newbtn");
+  if(newbtn) newbtn.onclick = function(){ showNew = true; render(); var t=document.getElementById("n-title"); if(t) t.focus(); };
+  var archbtn = document.getElementById("archbtn");
+  if(archbtn) archbtn.onclick = function(){ showArchived = !showArchived; render(); };
+  var provl = document.getElementById("provl");
+  if(provl){
+    provl.onclick = function(e){ if(e.target === provl){ pending = null; render(); } };
+    document.getElementById("pr-cancel").onclick = function(){ pending = null; render(); };
+    document.getElementById("pr-save").onclick = function(){
+      var p = pending, c = p && card(p.id); if(!c){ pending = null; render(); return; }
+      var u = document.getElementById("pr-url").value.trim();
+      if(!/^https?:\/\//.test(u)) return;
+      var m = u.match(/\/pull\/(\d+)/);
+      var links = (c.links || []).concat([{label: m ? "PR #" + m[1] : "PR", url: u}]);
+      var patch = Object.assign({}, p.patch, {links: links});
+      pending = null;
+      var r = moveCard(c.id, p.column, (p.why || "Dragged") + " with PR link attached via review gate", patch);
+      if(r) r.then(function(ok){ if(ok && openCardId === c.id){ openCardId = null; render(); } });
+    };
+    var pu = document.getElementById("pr-url"); if(pu && document.activeElement !== pu) pu.focus();
+  }
+  app.querySelectorAll(".card").forEach(function(el){
+    el.onclick = function(){ openCardId = el.dataset.id; confirmDelete = false; fetchFull(openCardId); render(); };
+    el.onkeydown = function(e){ if(e.key==="Enter"){ openCardId = el.dataset.id; confirmDelete=false; fetchFull(openCardId); render(); } };
+    el.ondragstart = function(e){ e.dataTransfer.setData("text/plain", el.dataset.id); e.dataTransfer.effectAllowed = "move"; };
+  });
+  app.querySelectorAll(".col").forEach(function(el){
+    el.ondragover = function(e){ if(!connected) return; e.preventDefault(); el.classList.add("dragover"); };
+    el.ondragleave = function(){ el.classList.remove("dragover"); };
+    el.ondrop = function(e){
+      e.preventDefault(); el.classList.remove("dragover");
+      if(!connected) return;
+      var id = e.dataTransfer.getData("text/plain");
+      if(id) moveCard(id, el.dataset.col, "Dragged");
+    };
+  });
+  var ovl = document.getElementById("ovl");
+  if(ovl) ovl.onclick = function(e){ if(e.target === ovl){ closeAll(); render(); } };
+  var dclose = document.getElementById("d-close");
+  if(dclose) dclose.onclick = function(){ closeAll(); render(); };
+  var dsave = document.getElementById("d-save");
+  if(dsave) dsave.onclick = function(){
+    var c = full[openCardId]; if(!c) return;
+    var t = document.getElementById("d-title").value.trim();
+    var b = document.getElementById("d-body").value;
+    var col = document.getElementById("d-col").value;
+    var role = document.getElementById("d-role").value;
+    var pri = document.getElementById("d-pri").value;
+    var patch = {}, changed = [];
+    if(t && t !== c.title){ patch.title = t; changed.push("title"); }
+    if(b !== (c.body == null ? "" : c.body)){ patch.body = b; changed.push("spec"); }
+    if(role !== c.role){ patch.role = role; changed.push("role"); }
+    if(pri !== c.priority){ patch.priority = pri; changed.push("priority"); }
+    var id = c.id, req;
+    if(col !== c.column){
+      var probe = Object.assign({}, card(id), patch.role ? {role: patch.role} : {});
+      if(gated(probe, col)){ pending = {id: id, column: col, patch: patch, why: changed.length ? "Edited " + changed.join(", ") + "; moved" : "Moved"}; render(); return; }
+      req = api("POST", "/api/cards/" + encodeURIComponent(id) + "/move", Object.assign(
+        {column: col, expected_version: c.version, activity: (changed.length ? "Edited " + changed.join(", ") + "; moved" : "Moved") + ": " + c.column + " → " + col},
+        changed.length ? {patch: patch} : {}));
+    } else if(changed.length){
+      req = api("POST", "/api/cards/" + encodeURIComponent(id) + "/update", {patch: patch, expected_version: c.version, activity: "Edited " + changed.join(", ")});
+    } else { closeAll(); render(); return; }
+    statusMsg = "saving…"; render();
+    req.then(function(r){
+      if(afterWrite(r)){ if(openCardId === id){ closeAll(); } render(); }
+      else { fetchFull(id); }   // keep the drawer and the typed edits; show the new version
+    });
+  };
+  var ddel = document.getElementById("d-delete");
+  if(ddel) ddel.onclick = function(){
+    if(!confirmDelete){ confirmDelete = true; render(); return; }
+    var c = full[openCardId]; if(!c) return;
+    api("POST", "/api/cards/" + encodeURIComponent(c.id) + "/delete", {expected_version: c.version}).then(function(r){
+      if(afterWrite(r, "deleted " + c.id)){ closeAll(); } else { confirmDelete = false; fetchFull(c.id); }
+      render();
+    });
+  };
+  var dans = document.getElementById("d-answerbtn");
+  if(dans) dans.onclick = function(){
+    var c = full[openCardId]; if(!c || !c.question) return;
+    var a = document.getElementById("d-answer").value.trim();
+    if(!a) return;
+    api("POST", "/api/cards/" + encodeURIComponent(c.id) + "/answer", {answer: a, expected_version: c.version}).then(function(r){
+      if(afterWrite(r)){ closeAll(); } else { fetchFull(c.id); }
+      render();
+    });
+  };
+  var ncreate = document.getElementById("n-create");
+  if(ncreate) ncreate.onclick = function(){
+    var t = document.getElementById("n-title").value.trim();
+    if(!t) return;
+    api("POST", "/api/cards", {
+      title: t, body: document.getElementById("n-body").value,
+      role: document.getElementById("n-role").value, priority: document.getElementById("n-pri").value
+    }).then(function(r){
+      if(afterWrite(r, r.status === 200 ? "created " + r.body.id : "")){ showNew = false; }
+      render();
+    });
+  };
+  var ncancel = document.getElementById("n-cancel");
+  if(ncancel) ncancel.onclick = function(){ showNew = false; render(); };
+}
+
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape" && (openCardId || showNew || pending)){ closeAll(); render(); }
+});
+
+// Live refresh: the daemon nudges this page on every board event, whoever wrote it.
+var timer = null;
+function scheduleLoad(){ if(timer) return; timer = setTimeout(function(){ timer = null; load(); }, 120); }
+var es = new EventSource("/api/stream");
+es.onopen = function(){ connected = true; if(statusMsg === "connecting…" || /unreachable/.test(statusMsg)) statusMsg = "connected"; load(); };
+es.onmessage = function(){ scheduleLoad(); };
+es.onerror = function(){ connected = false; statusMsg = "daemon unreachable — retrying"; render(); };
+render();
+load();
+})();
+</script></body></html>

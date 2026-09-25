@@ -99,7 +99,7 @@ verify that PR and render a verdict — nothing more.
 7. **Balance claims need balance evidence.** If the PR claims a win-rate improvement,
    the card or PR must reference a real sweep (n≈100, Wilson CIs — see
    `scripts/headtohead_sweep.py`); an n=12 anecdote is a REJECT finding, not a pass.
-8. **Never** merge the PR, push anything, edit the Dispatch board artifact, or open
+8. **Never** merge the PR, push anything, write to the Dispatch board (its MCP tools or its HTTP API), or open
    follow-up PRs.
 
 ## Verdict standard
