@@ -1,3 +1,4 @@
+use super::dot_state::DotStateVisual;
 use crate::states::play_match::components::*;
 use bevy::color::LinearRgba;
 use bevy::prelude::*;
@@ -90,20 +91,16 @@ pub fn cleanup_expired_backlash_bursts(
 // Generic affliction indicator: a `DotDripEmitter` per (target, kind) spawns
 // small falling drops — green for poisons, red for bleeds. Color is game
 // language shared across abilities; new afflictions are one row in
-// `drip_kind_for_aura`. Drips mirror the FlameParticle idiom (velocity +
-// lifetime + shrink), emitters follow the detector/cleanup convention.
+// `DotStateVisual::for_dot` (`dot_state.rs`). Drips mirror the FlameParticle
+// idiom (velocity + lifetime + shrink), emitters follow the detector/cleanup
+// convention.
 
-/// Map an aura to the affliction family it should drip as, or None for DoTs
-/// with their own identity (the Warlock DoT aura visuals in
-/// `warlock_dots.rs` — Corruption, Curse of Agony, Unstable Affliction).
-/// Keys on the exact RON `name:` string, same as the class-AI dedup checks.
+/// Map an aura to the affliction family it should drip as. Routed through
+/// [`DotStateVisual::for_aura`] — the one DoT router the lands-silently audit
+/// sweeps — so a new poison or bleed joins the drips by gaining a row there.
 fn drip_kind_for_aura(aura: &Aura) -> Option<DripKind> {
-    if aura.effect_type != AuraType::DamageOverTime {
-        return None;
-    }
-    match aura.ability_name.as_str() {
-        "Serpent Sting" => Some(DripKind::Poison), // future rogue poisons join here
-        "Rend" => Some(DripKind::Bleed),           // future Rupture/Garrote join here
+    match DotStateVisual::for_aura(aura) {
+        Some(DotStateVisual::Drip(kind)) => Some(kind),
         _ => None,
     }
 }

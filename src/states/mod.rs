@@ -811,6 +811,25 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Immolate's burn STATE (rendering/effects/immolate.rs): client kit
+        // 235's flame licks climbing the victim from the feet plus crown
+        // embers, for as long as the DoT runs. Routed through the shared
+        // DoT router (`DotStateVisual`). Graphical only — never registered
+        // in headless systems.rs. Chained: the animate pass must see the rig
+        // `spawn` just built, and the billboard runs on final positions.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_immolate_burns,   // Detect Immolate, build the rig
+                play_match::animate_immolate_burns, // Follow the victim, emit licks + embers
+                play_match::age_immolate_sparks,    // Rise, ramp, retire
+                play_match::billboard_immolate_sparks, // Upright, camera-facing
+                play_match::cleanup_immolate_burns, // End the fire with the DoT
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // DoT drip indicators: green poison / red bleed drops on afflicted
         // targets (graphical only — never registered in headless systems.rs).
         .add_systems(
