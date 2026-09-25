@@ -828,6 +828,182 @@ pub struct BerserkGlow {
 }
 
 // ============================================================================
+// Aura application — the shared family cue
+// ============================================================================
+//
+// One brief, apply-moment band for every aura type whose application nothing
+// else draws: the stat buffs (Arcane Intellect, the Mage armors, Power Word:
+// Fortitude, the shouts, the Paladin auras), the Rogue's poison coating and
+// every totem landing. Differentiated only by the aura's school tint and by
+// polarity (a buff rises up the body, a debuff presses down it), so the NEXT
+// aura of an existing type costs nothing and a new aura TYPE costs one arm in
+// `AuraApplyRoute::for_aura`, which the compiler forces somebody to write.
+//
+// Graphical-only: detected off `ActiveAuras` transitions by
+// `rendering/effects/aura_band.rs`, never spawned by core, so headless stays
+// byte-identical by construction and every application path (pending auras,
+// totem pulses, the Frost Trap zone, spawn-stamped poison) reaches the one
+// classifier below.
+
+/// What an aura's APPLICATION shows in the world — the single routing decision
+/// for the shared [`AuraBand`] cue.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AuraApplyRoute {
+    /// The shared family cue: an [`AuraBand`] sweeps the bearer's body.
+    Band,
+    /// A bespoke effect already draws this type's application. The band stays
+    /// off it so it never doubles a treatment that exists.
+    Owned(AuraApplyOwner),
+    /// Deliberately undrawn HERE: the family has its own card, whose treatment
+    /// will own the apply moment as well as the state.
+    Deferred(DeferredAuraFamily),
+}
+
+/// The bespoke effect that owns an aura type's application moment — the named,
+/// reviewable suppression set for [`AuraBand`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AuraApplyOwner {
+    /// Root crystals / web sheet and the stun whirl (`hard_cc.rs`).
+    HardCc,
+    /// Fear shroud, apply flash and flee run (`fear.rs`).
+    FearShroud,
+    /// Sheep body swap and transform puffs (`polymorph.rs`).
+    Polymorph,
+    /// Freezing Trap's ice block (`ice_block.rs`).
+    IceBlock,
+    /// Shield bubbles: absorbs, Divine Shield, and Weakened Soul, which only
+    /// ever lands WITH Power Word: Shield's bubble (`shield_bubbles.rs`).
+    ShieldBubble,
+    /// Berserker Rage's mask (`berserk.rs`).
+    BerserkMask,
+    /// Curse of Weakness / Curse of Tongues apply apparitions — the only
+    /// sources of these two types (`warlock_dots.rs`).
+    CurseApparition,
+    /// The DoT layer: Corruption / Unstable Affliction / Curse of Agony apply
+    /// bursts and the Rend / Serpent Sting drips (`warlock_dots.rs`,
+    /// `affliction.rs`). Per-DoT coverage inside that layer is the DoT
+    /// family's own audit.
+    DotLayer,
+    /// Mortal Wounds: the debuff lands on a hit whose impact is already drawn
+    /// (Mortal Strike's flourish, Aimed Shot's impact), and its tell is the
+    /// heal fracture at the moment it bites (`mortal_wounds.rs`).
+    MortalWounds,
+    /// An interrupt's lockout: the victim's casting orb sputters
+    /// (`casting_orbs.rs`).
+    InterruptSputter,
+    /// Unstable Affliction's dispel backlash burst, the only source of Silence
+    /// (`affliction.rs`).
+    BacklashBurst,
+    /// Shadow Sight: the orb pickup animation (`shadow_sight` orbs).
+    ShadowSightOrb,
+}
+
+/// A family whose apply moment is deliberately left to its own card.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DeferredAuraFamily {
+    /// Movement and attack-speed slows (Frostbolt, Concussive Shot, Frost
+    /// Shock, Crippling Poison's proc, Frost Armor's chill, the Frost Trap
+    /// zone). The slow family's victim treatment (AS-133) owns both the apply
+    /// moment and the state; a band here would double it, and would double
+    /// every bolt and arrow impact a slow rides on until then.
+    Slow,
+}
+
+impl AuraApplyRoute {
+    /// Route an aura type's application.
+    ///
+    /// **EXHAUSTIVE on purpose — never add a `_ =>` arm.** A new aura type must
+    /// be SEEN here and given an answer: the band, a named bespoke owner, or a
+    /// named deferral. A wildcard would quietly file variant N+1 under one of
+    /// those, and a silent aura application is exactly the defect this router
+    /// exists to end. Pinned as a set equality over [`AuraType::ALL`] by
+    /// `tests/aura_band_visual_probes.rs`.
+    pub fn for_aura(aura: AuraType) -> Self {
+        match aura {
+            AuraType::MaxHealthIncrease
+            | AuraType::MaxManaIncrease
+            | AuraType::AttackPowerIncrease
+            | AuraType::AttackPowerReduction
+            | AuraType::DamageTakenReduction
+            | AuraType::SpellResistanceBuff
+            | AuraType::CritChanceIncrease
+            | AuraType::ManaRegenIncrease
+            | AuraType::LockoutDurationReduction
+            | AuraType::FrostArmorBuff
+            | AuraType::WeaponPoison
+            | AuraType::SpellPowerIncrease
+            | AuraType::HealingOverTime
+            | AuraType::WindfuryBuff => AuraApplyRoute::Band,
+
+            AuraType::Root | AuraType::Stun => AuraApplyRoute::Owned(AuraApplyOwner::HardCc),
+            AuraType::Fear => AuraApplyRoute::Owned(AuraApplyOwner::FearShroud),
+            AuraType::Polymorph => AuraApplyRoute::Owned(AuraApplyOwner::Polymorph),
+            AuraType::Incapacitate => AuraApplyRoute::Owned(AuraApplyOwner::IceBlock),
+            AuraType::Absorb | AuraType::DamageImmunity | AuraType::WeakenedSoul => {
+                AuraApplyRoute::Owned(AuraApplyOwner::ShieldBubble)
+            }
+            AuraType::FearImmunity => AuraApplyRoute::Owned(AuraApplyOwner::BerserkMask),
+            AuraType::DamageReduction | AuraType::CastTimeIncrease => {
+                AuraApplyRoute::Owned(AuraApplyOwner::CurseApparition)
+            }
+            AuraType::DamageOverTime => AuraApplyRoute::Owned(AuraApplyOwner::DotLayer),
+            AuraType::HealingReduction => AuraApplyRoute::Owned(AuraApplyOwner::MortalWounds),
+            AuraType::SpellSchoolLockout => AuraApplyRoute::Owned(AuraApplyOwner::InterruptSputter),
+            AuraType::Silence => AuraApplyRoute::Owned(AuraApplyOwner::BacklashBurst),
+            AuraType::ShadowSight => AuraApplyRoute::Owned(AuraApplyOwner::ShadowSightOrb),
+
+            AuraType::MovementSpeedSlow | AuraType::AttackSpeedSlow => {
+                AuraApplyRoute::Deferred(DeferredAuraFamily::Slow)
+            }
+        }
+    }
+
+    /// Whether the application of this route reaches the scene at all — false
+    /// only for a named [`AuraApplyRoute::Deferred`] family.
+    pub fn is_drawn(self) -> bool {
+        !matches!(self, AuraApplyRoute::Deferred(_))
+    }
+}
+
+/// Which way an [`AuraBand`] sweeps. DERIVED from the sim's own exhaustive
+/// hostility classifier ([`AuraType::is_hostile_effect`]) — polarity has one
+/// correct answer per type, so it is never restated here.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AuraBandPolarity {
+    /// A beneficial aura: the band rises from the feet past the crown, opening.
+    Buff,
+    /// A hostile aura: the band presses down from the crown to the feet,
+    /// tightening.
+    Debuff,
+}
+
+impl AuraBandPolarity {
+    pub fn of(aura: AuraType) -> Self {
+        if aura.is_hostile_effect() {
+            AuraBandPolarity::Debuff
+        } else {
+            AuraBandPolarity::Buff
+        }
+    }
+}
+
+/// The aura-application cue: one soft ring that sweeps the bearer's body once,
+/// tinted by the aura's school. Graphical-only (spawned by the renderer's
+/// `detect_aura_applications`, never by core).
+#[derive(Component, Clone, Debug)]
+pub struct AuraBand {
+    /// The unit the aura landed on — the band follows it.
+    pub target: Entity,
+    pub polarity: AuraBandPolarity,
+    /// Seconds since the band was born.
+    pub age: f32,
+    /// Whether the bearer is a pet (smaller body, lower centre).
+    pub is_pet: bool,
+    /// The band's colour (the aura's school, or the neutral tint).
+    pub tint: Color,
+}
+
+// ============================================================================
 // Warlock DoT aura visuals (Corruption / Curse of Agony / Unstable Affliction)
 // ============================================================================
 //
