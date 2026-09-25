@@ -1,7 +1,7 @@
 //! Dispel Effect Processing
 //!
 //! Processes dispel effects from Priest's Dispel Magic, Paladin's Cleanse,
-//! and Felhunter's Devour Magic.
+//! Felhunter's Devour Magic, Shaman's Purge and the Bird's Master's Call.
 
 use bevy::prelude::*;
 use smallvec::SmallVec;
@@ -13,10 +13,11 @@ use crate::states::play_match::effects::backlash::{
 };
 use crate::states::play_match::utils::combat_log_id_for;
 
-/// Process pending dispels from Dispel Magic, Cleanse, or Devour Magic.
+/// Process pending dispels from Dispel Magic, Cleanse, Devour Magic, Purge or
+/// Master's Call.
 ///
 /// When a dispel is queued, a DispelPending component is spawned. This system
-/// finds the target's auras and removes a random dispellable one.
+/// finds the target's auras its [`DispelScope`] takes and removes a random one.
 pub fn process_dispels(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
@@ -47,25 +48,14 @@ pub fn process_dispels(
                 .auras
                 .iter()
                 .enumerate()
-                .filter(|(_, a)| {
-                    // If aura_type_filter is set, only match those specific types.
-                    // This is how the Shaman's Purge strips a chosen enemy buff
-                    // (it pins the filter to a `can_be_purged` type) and how
-                    // Master's Call removes only movement impairments from an ally.
-                    if let Some(ref filter) = pending.aura_type_filter {
-                        filter.contains(&a.effect_type)
-                    } else {
-                        // Cleanse also lifts poison/disease; Dispel Magic doesn't.
-                        a.can_be_dispelled() || (pending.removes_poison && a.is_cleansable_poison())
-                    }
-                })
+                .filter(|(_, a)| pending.scope.takes(a))
                 .map(|(i, _)| i)
                 .collect();
 
             if !dispellable_indices.is_empty() {
                 // Randomly select one to remove (WoW Classic behavior). This
                 // randomness is INTENTIONAL design, not a rough edge: even when
-                // the caster pinned an `aura_type_filter` (e.g. Shaman Purge), a
+                // the caster pinned the scope to one type (e.g. Shaman Purge), a
                 // target carrying multiple matching auras gets a coin-flip among
                 // them. Keeping dispels/purges probabilistic adds matchup
                 // variance and forces heavier purge investment to reliably strip

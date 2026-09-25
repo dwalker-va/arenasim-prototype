@@ -176,9 +176,15 @@ pub enum DispelType {
     /// an ability that does not exist yet. When a decurse lands, the exhaustive
     /// matches on this enum force every removal site to decide about it.
     Curse,
-    /// A PHYSICAL debuff — an arrow in the leg, a torn wound, a boot to the
-    /// head. There is no magic on it to dissipate, so no ordinary removal
-    /// touches it: not a dispel, not a cleanse, not a purge.
+    /// A PHYSICAL effect — an arrow in the leg, a torn wound, a boot to the
+    /// head; or, on the buff side, what an ITEM does for its wearer. There is
+    /// no magic on it to dissipate, so no ordinary removal touches it: not a
+    /// dispel, not a cleanse, not a purge.
+    ///
+    /// A proc trinket's buff is physical however magical it looks: an item's
+    /// effect is not a spell, so an enemy purge has nothing to take hold of.
+    /// That one is declared by `ProcConfig::aura` rather than derived from a
+    /// school, because a trinket has no school.
     ///
     /// **Physical is not permanent either.** It yields to an effect that clears
     /// physical harm specifically. Such effects are rare and will get less rare
@@ -769,6 +775,20 @@ impl Aura {
             .or_else(|| DRCategory::from_aura_type(&self.effect_type))
     }
 
+    /// Whether this aura occupies the one-per-TYPE buff slot for `effect` —
+    /// that is, whether it should stop a type-keyed buff of `effect` (Battle
+    /// Shout, Power Word: Fortitude, Arcane Intellect) from landing, or from
+    /// being cast at all.
+    ///
+    /// A [`Aura::distinct_by_source`] buff has the same `effect_type` and does
+    /// NOT occupy the slot: a live Dragonspine Trophy proc is not a Battle
+    /// Shout, and must not stop one. Every site asking "does this target
+    /// already have the buff" asks it here, so the rule reads the same whichever
+    /// of the two arrives first.
+    pub fn holds_type_slot(&self, effect: AuraType) -> bool {
+        self.effect_type == effect && !self.distinct_by_source
+    }
+
     /// Returns true if this aura can be removed by a DISPEL — Dispel Magic,
     /// Cleanse, or the Felhunter's Devour Magic. All three take magic and only
     /// magic; Cleanse additionally takes poison, which it asks about through
@@ -929,7 +949,24 @@ impl Aura {
     /// construction, and `an_entry_previews_on_the_caster_only_for_a_beneficial_aura`
     /// / `an_entry_previews_on_the_dummy_only_for_a_non_beneficial_aura` in the
     /// animation sandbox pin both directions of that.
+    ///
+    /// **The removal class decides first, and it can only say no** — the same
+    /// order [`Aura::can_be_dispelled`] uses, for the same reason. A purge
+    /// takes MAGIC. A buff that is not magic has nothing on it to strip,
+    /// whatever its mechanic: a proc trinket's attack-power buff is the same
+    /// `AttackPowerIncrease` as a shout, and is `DispelType::Physical` because
+    /// an item's effect is not a spell (see `ProcConfig::aura`).
     pub fn can_be_purged(&self) -> bool {
+        // **Exhaustive on purpose — do not add a `_ =>` arm.** A removal class
+        // silently falling through to the magic branch is a buff becoming
+        // purgeable without anyone deciding it should be.
+        match self.dispel_type {
+            DispelType::Poison | DispelType::Disease | DispelType::Curse | DispelType::Physical => {
+                return false
+            }
+            DispelType::Auto => {}
+        }
+
         match self.effect_type {
             // Beneficial buffs: defensives, throughput, and minor utility.
             AuraType::Absorb
@@ -1689,12 +1726,50 @@ mod tests {
     use super::*;
 
     /// Build a minimal aura carrying only `effect_type` — `can_be_purged`
-    /// inspects nothing else.
+    /// inspects nothing else but the removal class, which defaults to `Auto`.
     fn aura(effect_type: AuraType) -> Aura {
         Aura {
             effect_type,
             ..Default::default()
         }
+    }
+
+    /// The removal class vetoes a purge before the mechanic is asked: every
+    /// buff type that is purgeable as magic is NOT purgeable as a physical
+    /// buff (a proc trinket's), nor under any other non-magic class.
+    #[test]
+    fn a_non_magic_buff_is_never_purgeable_whatever_its_type() {
+        let purgeable: Vec<AuraType> = AuraType::ALL
+            .iter()
+            .copied()
+            .filter(|ty| aura(*ty).can_be_purged())
+            .collect();
+        assert!(!purgeable.is_empty(), "no purgeable type — vacuous");
+        for ty in purgeable {
+            for class in [
+                DispelType::Physical,
+                DispelType::Poison,
+                DispelType::Disease,
+                DispelType::Curse,
+            ] {
+                let mut a = aura(ty);
+                a.dispel_type = class;
+                assert!(!a.can_be_purged(), "{ty:?} as {class:?} is purgeable");
+            }
+        }
+    }
+
+    /// A source-keyed buff never holds its type's one-per-type slot; a
+    /// type-keyed one of the same type does. This is the question every "does
+    /// the target already have this buff" check asks, the AI's included.
+    #[test]
+    fn only_a_type_keyed_buff_holds_the_type_slot() {
+        let shout = aura(AuraType::AttackPowerIncrease);
+        let mut proc = aura(AuraType::AttackPowerIncrease);
+        proc.distinct_by_source = true;
+        assert!(shout.holds_type_slot(AuraType::AttackPowerIncrease));
+        assert!(!proc.holds_type_slot(AuraType::AttackPowerIncrease));
+        assert!(!shout.holds_type_slot(AuraType::MaxHealthIncrease));
     }
 
     /// Beneficial auras the Shaman's Purge strips: defensives, throughput

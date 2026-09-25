@@ -421,8 +421,9 @@ impl NamedAura {
     /// end — "Curse ... none in the arena yet" is a different statement from
     /// "cannot be removed", and a Warlock reading the page should see the
     /// difference. The absolute rung is reserved for what genuinely nothing
-    /// touches: the unpurgeable self-buffs (Divine Shield, Berserker Rage) and
-    /// the mechanical markers (Weakened Soul, Shadow Sight, weapon poisons).
+    /// touches: the unpurgeable self-buffs (Divine Shield, Berserker Rage), a
+    /// proc trinket's physical buff, and the mechanical markers (Weakened
+    /// Soul, Shadow Sight, weapon poisons).
     ///
     /// The buff half is disjoint by construction: a dispel lifts harmful magic
     /// off an ally, a purge strips buffs off an enemy.
@@ -439,6 +440,15 @@ impl NamedAura {
                 "Curse",
                 "Curse. Not affected by dispels or cleanses; removed by curse-removal effects — \
                  none in the arena yet.",
+            )
+        } else if self.sample.is_physical() && !self.sample.is_hostile_effect() {
+            // A physical BUFF — what an item does for its wearer. Nothing
+            // clears it early: the "effects that clear physical debuffs" the
+            // debuff arm below points at are about harm, and a buff is not.
+            (
+                "Cannot be removed",
+                "Physical — an item's effect, not a spell, however it looks. No dispel, cleanse \
+                 or purge can take it off. It ends when it ends.",
             )
         } else if self.sample.is_physical() {
             (
@@ -631,6 +641,11 @@ struct EngineSpec {
     /// aura the first hit removed. Every entry names its own value so the page
     /// can only ever say what the engine does.
     break_on_damage: f32,
+    /// The removal class, read from the constructor the apply site uses
+    /// wherever there is one. Not defaulted, for the same reason as
+    /// `break_on_damage`: a proc trinket's buff is `Physical`, and a page
+    /// defaulting it to `Auto` would advertise a purge that cannot happen.
+    dispel_type: DispelType,
     persistence: Persistence,
     /// The RIDER effects of a compound debuff — the effects this entry covers
     /// beyond its face. Empty for every ordinary aura. See
@@ -698,6 +713,7 @@ fn engine_entry(
             magnitude: 0.0,
             school: None,
             break_on_damage: -1.0,
+            dispel_type: DispelType::Auto,
             persistence: Persistence::Seconds(WEAKENED_SOUL_DURATION),
             riders: EngineSpec::no_riders(),
             provenance: "Placed on the ally the moment the shield lands: one cast applies both."
@@ -711,6 +727,7 @@ fn engine_entry(
             magnitude: 1.0,
             school: None,
             break_on_damage: SHADOW_SIGHT_BREAK_ON_DAMAGE,
+            dispel_type: DispelType::Auto,
             persistence: Persistence::Seconds(SHADOW_SIGHT_DURATION),
             riders: EngineSpec::no_riders(),
             provenance: format!(
@@ -727,6 +744,7 @@ fn engine_entry(
             magnitude: FROST_TRAP_SLOW_MAGNITUDE,
             school: Some(SpellSchool::Frost),
             break_on_damage: -1.0,
+            dispel_type: DispelType::Auto,
             persistence: Persistence::WhileSourceActive("while you stand in the zone"),
             riders: EngineSpec::no_riders(),
             provenance: format!(
@@ -746,6 +764,7 @@ fn engine_entry(
                 magnitude,
                 school: Some(school),
                 break_on_damage: -1.0,
+                dispel_type: DispelType::Auto,
                 persistence: Persistence::WhileSourceActive("while you stand near the totem"),
                 riders: EngineSpec::no_riders(),
                 provenance: format!(
@@ -769,6 +788,7 @@ fn engine_entry(
                 magnitude: 0.0,
                 school: None,
                 break_on_damage: -1.0,
+                dispel_type: DispelType::Auto,
                 persistence: Persistence::Seconds(
                     def.map(|d| d.lockout_duration).unwrap_or_default(),
                 ),
@@ -789,6 +809,7 @@ fn engine_entry(
                 magnitude: sample.magnitude,
                 school: sample.spell_school,
                 break_on_damage: sample.break_on_damage_threshold,
+                dispel_type: sample.dispel_type,
                 persistence: Persistence::WholeMatch,
                 riders: EngineSpec::no_riders(),
                 provenance: "A Rogue carries this from the opening bell — it marks the coated \
@@ -807,6 +828,7 @@ fn engine_entry(
                 magnitude: sample.magnitude,
                 school: sample.spell_school,
                 break_on_damage: sample.break_on_damage_threshold,
+                dispel_type: sample.dispel_type,
                 persistence: Persistence::Seconds(sample.duration),
                 riders: EngineSpec::no_riders(),
                 provenance: "Punishes whoever lifts an Unstable Affliction off an ally, \
@@ -832,6 +854,7 @@ fn engine_entry(
                 magnitude: face.magnitude,
                 school: face.spell_school,
                 break_on_damage: face.break_on_damage_threshold,
+                dispel_type: face.dispel_type,
                 persistence: Persistence::Seconds(face.duration),
                 riders: vec![rider],
                 provenance: "Hung on any melee attacker who strikes a Mage wearing Frost Armor. \
@@ -856,6 +879,7 @@ fn engine_entry(
                 school: None,
                 // A proc buff is never broken by damage — see `ProcConfig::aura`.
                 break_on_damage: -1.0,
+                dispel_type: proc.aura(&def.name).dispel_type,
                 persistence: Persistence::Seconds(proc.duration),
                 riders: EngineSpec::no_riders(),
                 // Read straight off the same `ProcConfig` the simulation rolls
@@ -875,6 +899,7 @@ fn engine_entry(
         magnitude,
         school,
         break_on_damage,
+        dispel_type,
         persistence,
         riders,
         provenance,
@@ -899,7 +924,7 @@ fn engine_entry(
         break_on_damage_threshold: break_on_damage,
         tick_interval,
         spell_school: school,
-        dispel_type: DispelType::Auto,
+        dispel_type,
         ..Default::default()
     };
 
@@ -1861,8 +1886,8 @@ mod tests {
     }
 
     /// The absolute rung is for what genuinely nothing touches: the deliberately
-    /// unpurgeable self-buffs and the mechanical markers. Anything else on it is
-    /// a page overclaiming.
+    /// unpurgeable self-buffs, every proc trinket's physical buff, and the
+    /// mechanical markers. Anything else on it is a page overclaiming.
     #[test]
     fn cannot_be_removed_is_reserved_for_the_untouchable_set() {
         let untouchable: Vec<String> = catalog(&abilities(), &items())
@@ -1872,15 +1897,20 @@ mod tests {
             .collect();
         let mut sorted = untouchable.clone();
         sorted.sort();
+        let mut expected = proc_trinket_names();
+        expected.extend(
+            [
+                "Berserker Rage",
+                "Crippling Poison (weapon coating)",
+                "Divine Shield",
+                "Shadow Sight",
+                "Weakened Soul",
+            ]
+            .map(String::from),
+        );
+        expected.sort();
         assert_eq!(
-            sorted,
-            vec![
-                "Berserker Rage".to_string(),
-                "Crippling Poison (weapon coating)".to_string(),
-                "Divine Shield".to_string(),
-                "Shadow Sight".to_string(),
-                "Weakened Soul".to_string(),
-            ],
+            sorted, expected,
             "unexpected entry claiming nothing can remove it"
         );
     }

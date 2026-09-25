@@ -22,7 +22,7 @@ use arenasim::states::play_match::combat_core::{
 };
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, Combatant, CompoundDebuff,
-    DRCategory, DRTracker, DispelPending, GameRng,
+    DRCategory, DRTracker, DispelPending, DispelScope, GameRng,
 };
 use arenasim::states::play_match::effects::process_dispels;
 use arenasim::CharacterClass;
@@ -48,7 +48,7 @@ fn chilled_victim(app: &mut App, extra: Vec<Aura>) -> Entity {
         .id()
 }
 
-fn queue_dispel(app: &mut App, target: Entity, filter: Option<Vec<AuraType>>) {
+fn queue_dispel(app: &mut App, target: Entity, scope: DispelScope) {
     let dispeller = app
         .world_mut()
         .spawn(Combatant::new(1, 1, CharacterClass::Warlock))
@@ -59,8 +59,7 @@ fn queue_dispel(app: &mut App, target: Entity, filter: Option<Vec<AuraType>>) {
         log_prefix: "[DEVOUR]",
         caster_class: CharacterClass::Warlock,
         heal_on_success: None,
-        aura_type_filter: filter,
-        removes_poison: false,
+        scope,
     });
 }
 
@@ -79,7 +78,7 @@ fn remaining(app: &App, entity: Entity) -> Vec<AuraType> {
 fn devour_magic_takes_the_whole_chill() {
     let mut app = harness();
     let victim = chilled_victim(&mut app, vec![]);
-    queue_dispel(&mut app, victim, None);
+    queue_dispel(&mut app, victim, DispelScope::Magic);
     app.update();
 
     assert!(
@@ -100,7 +99,7 @@ fn masters_call_takes_the_whole_chill() {
     queue_dispel(
         &mut app,
         victim,
-        Some(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
+        DispelScope::Impairments(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
     );
     app.update();
 
@@ -129,7 +128,7 @@ fn the_rider_is_what_slows_the_swing() {
         )
     };
 
-    queue_dispel(&mut app, victim, None);
+    queue_dispel(&mut app, victim, DispelScope::Magic);
     app.update();
 
     let entity = app.world().entity(victim);
@@ -160,7 +159,11 @@ fn only_the_rolled_debuff_leaves() {
         ..Default::default()
     };
     let victim = chilled_victim(&mut app, vec![unrelated]);
-    queue_dispel(&mut app, victim, Some(vec![AuraType::MovementSpeedSlow]));
+    queue_dispel(
+        &mut app,
+        victim,
+        DispelScope::Impairments(vec![AuraType::MovementSpeedSlow]),
+    );
     app.update();
 
     assert_eq!(remaining(&app, victim), vec![AuraType::DamageOverTime]);

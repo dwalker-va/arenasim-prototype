@@ -1073,7 +1073,7 @@ pub struct ManaBurnPending {
 /// Note: The actual aura removed is randomly selected in process_dispels (WoW Classic behavior).
 ///
 /// Used by Priest (Dispel Magic), Paladin (Cleanse), Felhunter (Devour Magic),
-/// and Bird (Master's Call).
+/// Shaman (Purge) and Bird (Master's Call).
 #[derive(Component)]
 pub struct DispelPending {
     /// Target entity to dispel
@@ -1088,11 +1088,46 @@ pub struct DispelPending {
     pub caster_class: match_config::CharacterClass,
     /// Entity to heal on successful dispel (Felhunter's Devour Magic heals itself)
     pub heal_on_success: Option<(Entity, f32)>,
-    /// Optional filter: only remove auras matching these types (Master's Call only removes movement impairments)
-    pub aura_type_filter: Option<Vec<AuraType>>,
-    /// When true, this dispel also removes poison/disease debuffs (Paladin Cleanse).
-    /// Dispel Magic / Devour Magic leave poisons untouched (false).
-    pub removes_poison: bool,
+    /// Which auras this removal may take — see [`DispelScope`].
+    pub scope: DispelScope,
+}
+
+/// WHICH auras a pending removal may take: one variant per kind of removal in
+/// the game, answered per aura by [`DispelScope::takes`].
+///
+/// Eligibility is decided HERE and nowhere else, by an exhaustive match, so a
+/// new kind of removal has to say what it takes rather than inheriting some
+/// other kind's rule. The random pick among whatever qualifies stays in
+/// `process_dispels`, and stays random on purpose.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DispelScope {
+    /// Dispel Magic, Devour Magic: harmful magic
+    /// ([`Aura::can_be_dispelled`](super::Aura::can_be_dispelled)).
+    Magic,
+    /// Paladin Cleanse: harmful magic, or a poison or disease.
+    MagicOrPoison,
+    /// Shaman Purge: an enemy's buff of this one type — the type the AI chose
+    /// — that [`Aura::can_be_purged`](super::Aura::can_be_purged).
+    ///
+    /// Asked PER AURA, not per type. A proc trinket's attack-power buff shares
+    /// its type with Battle Shout, but it is not magic, and a purge pinned to
+    /// the type must still pass it over.
+    Purge(AuraType),
+    /// Master's Call: a movement impairment of one of these types, whatever
+    /// its removal class — it clears physical harm as well as magic.
+    Impairments(Vec<AuraType>),
+}
+
+impl DispelScope {
+    /// Whether this removal may take `aura`.
+    pub fn takes(&self, aura: &super::Aura) -> bool {
+        match self {
+            DispelScope::Magic => aura.can_be_dispelled(),
+            DispelScope::MagicOrPoison => aura.can_be_dispelled() || aura.is_cleansable_poison(),
+            DispelScope::Purge(effect) => aura.effect_type == *effect && aura.can_be_purged(),
+            DispelScope::Impairments(effects) => effects.contains(&aura.effect_type),
+        }
+    }
 }
 
 #[cfg(test)]

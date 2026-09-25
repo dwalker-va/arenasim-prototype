@@ -421,6 +421,42 @@ any ring fits either ring socket, and the same item may not occupy both
    - Budget usage = sum of (stat_value × weight) across all non-free stats
    - Items may exceed the budget by up to 5% tolerance
 
+   **A trinket may carry a `proc:` block** — a trigger and an effect on that
+   trinket's OWN internal cooldown (`src/states/play_match/proc_trinkets.rs`):
+   ```ron
+   proc: Some((
+       trigger: MeleeHit,         // MeleeHit | SpellCast | Heal
+       chance: 0.15,              // per qualifying event, in (0.0, 1.0]
+       effect: AttackPowerIncrease,
+       magnitude: 55.0,           // in the effect aura's own units
+       duration: 10.0,
+       internal_cooldown: 45.0,   // must be >= duration
+   )),
+   ```
+   - **Triggers:** `MeleeHit` is a landed MELEE swing (never a ranged Auto Shot
+     or a wand); `SpellCast` is a completed cast with a cast time that LANDED —
+     the point mana is charged, so a fizzled or interrupted cast procs nothing,
+     and neither does an instant or a channel; `Heal` is the healing subset of
+     `SpellCast`.
+   - **Per-trinket ICD, no global lock.** A proc cannot fire again while its own
+     buff is up (`internal_cooldown >= duration` is validated), and two
+     DIFFERENT trinkets can be live at once. A proc buff coexists with a
+     same-stat buff from an ability (Battle Shout and a Dragonspine proc stack).
+   - **Pricing.** The proc is charged to the budget at
+     `stat_weight × magnitude × duration / (duration + internal_cooldown)` — the
+     ICD's LONG-RUN uptime bound. `chance` does not enter the price. It is not a
+     ceiling over a short life: a trinket starts ready, so a life shorter than
+     one cycle runs above it (Dragonspine realises 23% against its 18.2% bound in
+     a 43s arena life — `realised_uptime_against_the_long_run_bound` in
+     `tests/proc_trinket_probes.rs`). Only the six stat auras
+     `proc_effect_budget_weight` prices may be an `effect`.
+   - **Procs are not purgeable.** A proc buff is `DispelType::Physical` — an
+     item's effect is not a spell, however magical it looks — so no purge,
+     dispel or cleanse removes it.
+   - Every item with a `proc:` gets its own Buffs & Debuffs entry in the
+     encyclopedia, and its proc sentence on the item page and the equipment
+     picker tooltip, with no code change.
+
 3. **Add to a class loadout** in `loadouts.ron` if it should be default equipment
 
 4. **Add `ItemId` variant** in `equipment.rs` to the `ItemId` enum
@@ -1042,8 +1078,10 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
 - **Sections:** `classes.rs` (base stats from `class_base_stats`, kit from
   `AbilityDefinitions::abilities_for_class`, a subsection per pet), `abilities.rs`
   (all 70, filterable by class and school, grouped by owning class in the derived
-  kit order — do NOT add a second sort), `items.rs`. Buffs & Debuffs is the one
-  section still rendering a placeholder.
+  kit order — do NOT add a second sort), `items.rs`, and `auras.rs` (Buffs &
+  Debuffs: every aura an ability applies, plus the engine-originated ones —
+  totem buffs, interrupt lockouts, one entry per proc trinket, and the rest —
+  each with a removal badge answered by the engine's own dispel predicates).
 - **Ability and aura PROSE is `src/states/ability_text.rs`** — one generator, shared
   with View Combatant, so an ability's description reads the same wherever the
   player meets it. Totem text wins over a hand-written `abilities.ron`

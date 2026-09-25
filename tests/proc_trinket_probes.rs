@@ -222,3 +222,153 @@ fn the_heal_trigger_does_not_fire_on_a_damage_cast() {
         mage
     );
 }
+
+/// Run a match with its combat log written, and return the log's text.
+fn logged_match(cfg: HeadlessMatchConfig) -> String {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let path = tmp.path().to_path_buf();
+    drop(tmp);
+    let cfg = HeadlessMatchConfig {
+        output_path: Some(path.to_string_lossy().into_owned()),
+        ..cfg
+    };
+    run_headless_match_observed(cfg, false, None, |_| {}).expect("match runs");
+    let text = std::fs::read_to_string(&path).expect("the match log was written");
+    let _ = std::fs::remove_file(&path);
+    text
+}
+
+/// A proc's buff line names the TRINKET. Every attack-power buff lands through
+/// the same branch of `apply_pending_auras` as Battle Shout, which once printed
+/// "Battle Shout" whatever the source — so a Dragonspine proc read as a second
+/// shout in the log, at the proc's +55.
+///
+/// Same seed as `a_melee_proc_fires_and_coexists_with_battle_shout`, where the
+/// proc demonstrably fires, so the absence below is not a match without one.
+#[test]
+fn a_proc_buff_is_logged_under_the_trinket_s_name() {
+    let log = logged_match(config(
+        "Warrior",
+        "Priest",
+        770_140,
+        &[("Trinket2", "DragonspineTrophy")],
+    ));
+    assert!(
+        log.contains("procs Dragonspine Trophy"),
+        "the proc never fired, so this test proves nothing"
+    );
+    assert!(
+        log.contains("gains Dragonspine Trophy (+55 attack power)"),
+        "the proc's [BUFF] line does not name the trinket"
+    );
+    assert!(
+        !log.contains("gains Battle Shout (+55"),
+        "a Dragonspine proc was logged as Battle Shout"
+    );
+    // ...and the real shout still logs as itself.
+    assert!(
+        log.contains("gains Battle Shout (+"),
+        "Battle Shout stopped logging under its own name"
+    );
+}
+
+/// `MeleeHit` is a MELEE swing. A Hunter's Auto Shot is an auto-attack too, but
+/// it is loosed from the ranged socket (`AutoAttackKind::Shot`), and must not
+/// fire a melee proc.
+///
+/// Counted, not assumed: the logs are required to hold at least 50 of the
+/// Hunter's Auto Shots, and at Dragonspine's 15% a trigger that DID fire on
+/// shots would stay silent across 50 of them with probability 0.85^50 < 0.1%.
+#[test]
+fn a_ranged_auto_attack_does_not_fire_a_melee_proc() {
+    let mut shots = 0;
+    for seed in 770_150..770_155 {
+        let log = logged_match(config(
+            "Hunter",
+            "Priest",
+            seed,
+            &[("Trinket2", "DragonspineTrophy")],
+        ));
+        shots += log.matches("Team 1 Hunter #1's Auto Shot").count();
+        assert!(
+            !log.contains("procs Dragonspine Trophy"),
+            "seed {seed}: a Hunter's Auto Shot procced a melee trinket"
+        );
+    }
+    assert!(
+        shots >= 50,
+        "only {shots} Auto Shots across the seeds — too few for the silence to mean anything"
+    );
+}
+
+/// The REALISED uptime of each melee proc against the long-run bound it is
+/// priced at, over 60 Warrior+Priest mirrors — the measurement the
+/// `proc_trinkets` module docs quote. A report, not an assertion: `--ignored`,
+/// and read with `--nocapture`.
+///
+/// ```text
+/// cargo test --release --test proc_trinket_probes -- --ignored --nocapture
+/// ```
+///
+/// The wearer is team 1's Warrior, carrying both melee trinkets. Team 1's
+/// Warrior is set to Demoralizing Shout so nothing else on its side grants
+/// attack power — any `AttackPowerIncrease` on it IS the Dragonspine buff, and
+/// `CritChanceIncrease` has no source but Whetstone. Uptime is measured per
+/// frame over the frames the wearer is alive after the gates, pooled across
+/// matches.
+#[test]
+#[ignore]
+fn realised_uptime_against_the_long_run_bound() {
+    let mut alive = 0u64;
+    let mut dragonspine = 0u64;
+    let mut whetstone = 0u64;
+    let mut both = 0u64;
+    for seed in 900_000..900_060 {
+        let mut gear: HashMap<String, String> = HashMap::new();
+        gear.insert("Trinket1".into(), "DragonspineTrophy".into());
+        gear.insert("Trinket2".into(), "WhetstoneOfFury".into());
+        let cfg = HeadlessMatchConfig {
+            team1: vec!["Warrior".into(), "Priest".into()],
+            team2: vec!["Warrior".into(), "Priest".into()],
+            random_seed: Some(seed),
+            team1_equipment: vec![gear],
+            team1_warrior_shouts: vec!["demoralizing".into()],
+            ..Default::default()
+        };
+        run_headless_match_observed(cfg, true, None, |frame| {
+            if !frame.gates_open {
+                return;
+            }
+            for c in frame.combatants.values() {
+                if c.team != 1 || c.slot != 0 || c.is_pet || !c.alive {
+                    continue;
+                }
+                alive += 1;
+                let ap = c.aura_types.contains(&AuraType::AttackPowerIncrease);
+                let crit = c.aura_types.contains(&AuraType::CritChanceIncrease);
+                dragonspine += ap as u64;
+                whetstone += crit as u64;
+                both += (ap && crit) as u64;
+            }
+        })
+        .expect("match runs");
+    }
+    let pct = |n: u64| 100.0 * n as f64 / alive as f64;
+    println!("wearer alive post-gate frames: {alive}");
+    println!(
+        "Dragonspine Trophy: realised {:.1}% vs long-run bound {:.1}%",
+        pct(dragonspine),
+        100.0 * 10.0 / 55.0
+    );
+    println!(
+        "Whetstone of Fury:  realised {:.1}% vs long-run bound {:.1}%",
+        pct(whetstone),
+        100.0 * 8.0 / 68.0
+    );
+    println!(
+        "both up: {:.1}% vs {:.1}% if independent",
+        pct(both),
+        pct(dragonspine) * pct(whetstone) / 100.0
+    );
+    assert!(alive > 0 && dragonspine > 0 && whetstone > 0, "vacuous run");
+}

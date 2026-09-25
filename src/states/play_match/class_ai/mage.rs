@@ -351,7 +351,7 @@ fn try_arcane_intellect(
             .map(|auras| {
                 auras
                     .iter()
-                    .any(|a| a.effect_type == AuraType::MaxManaIncrease)
+                    .any(|a| a.holds_type_slot(AuraType::MaxManaIncrease))
             })
             .unwrap_or(false);
         if has_arcane_intellect {

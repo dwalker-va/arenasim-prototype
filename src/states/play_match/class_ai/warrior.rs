@@ -283,7 +283,7 @@ fn try_battle_shout(
             .map(|auras| {
                 auras
                     .iter()
-                    .any(|a| a.effect_type == AuraType::AttackPowerIncrease)
+                    .any(|a| a.holds_type_slot(AuraType::AttackPowerIncrease))
             })
             .unwrap_or(false);
 
@@ -461,7 +461,7 @@ fn try_commanding_shout(
             .map(|auras| {
                 auras
                     .iter()
-                    .any(|a| a.effect_type == AuraType::MaxHealthIncrease)
+                    .any(|a| a.holds_type_slot(AuraType::MaxHealthIncrease))
             })
             .unwrap_or(false);
 

@@ -755,7 +755,8 @@
         // The proc is charged to the item budget at its expected value
         // (weight * magnitude * duration/(duration+icd)), so the big burst
         // number buys a small sustained one: Dragonspine's +55 attack power
-        // averages +10 AP, and costs the 15 budget points that averages to.
+        // averages +10 AP over a long life, and costs the 15 budget points that
+        // averages to. (A short life runs above that — a trinket starts ready.)
         // ====================================================================
 
         DragonspineTrophy: (

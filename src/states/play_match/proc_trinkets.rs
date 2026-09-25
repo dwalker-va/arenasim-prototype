@@ -13,22 +13,37 @@
 //! see it unless it is priced explicitly. It is priced at its EXPECTED VALUE:
 //!
 //! ```text
-//! cost = stat_weight(effect) * magnitude * uptime_ceiling
-//! uptime_ceiling = duration / (duration + internal_cooldown)
+//! cost = stat_weight(effect) * magnitude * long_run_uptime
+//! long_run_uptime = duration / (duration + internal_cooldown)
 //! ```
 //!
-//! The uptime term is the ICD-bounded CEILING, not a realised rate. That is
-//! deliberate and it is the only defensible choice for a budget check: realised
-//! uptime depends on who wears the item, which enemy they face and how the match
-//! goes, none of which are properties of the ITEM. The ceiling is a property of
-//! the item, so the ceiling is what the budget can check. The realised rate is a
-//! thing to MEASURE, and is reported per sweep rather than assumed here.
+//! The uptime term is the ICD's LONG-RUN BOUND: each proc buys `duration` of
+//! buff and then cannot return for `internal_cooldown`, so over a life long
+//! enough to hold many cycles the buff can be up for at most that fraction. It
+//! is not a realised rate, deliberately: realised uptime depends on who wears
+//! the item, which enemy they face and how the match goes, none of which are
+//! properties of the ITEM. The bound is a property of the item, so the bound is
+//! what the budget can check. The realised rate is a thing to MEASURE.
 //!
-//! A corollary worth stating plainly: **`chance` is a feel knob, not a power
-//! knob.** Two trinkets with the same effect, duration and ICD cost the same
-//! whether they proc at 5% or 50%, because the ICD — not the trigger rate — is
-//! what bounds sustained uptime. A low `chance` only means the wearer reaches
-//! that ceiling less often, which the pricing treats as the wearer's loss.
+//! **The bound is not a ceiling over a short life.** A trinket starts READY, so
+//! the first proc of a life lands with no cooldown behind it, and over any
+//! window shorter than one `duration + internal_cooldown` cycle realised uptime
+//! can run above the bound — up to all of a life that ends inside its first
+//! buff. Arena lives are that short. Measured by
+//! `realised_uptime_against_the_long_run_bound` (an `#[ignore]`d report in
+//! `tests/proc_trinket_probes.rs`) over 60 Warrior+Priest mirrors, a Warrior
+//! wearing both melee trinkets — alive for 43s after the gates, on average —
+//! had Dragonspine Trophy's buff up for 23.0% of that time against a bound of
+//! 18.2%, and Whetstone of Fury's for 16.7% against 11.8%. So an early proc
+//! runs ABOVE its price, and the price is exact only for a life long enough to
+//! average that out.
+//!
+//! A corollary: **in the long run `chance` is a feel knob, not a power knob.**
+//! Two trinkets with the same effect, duration and ICD cost the same whether
+//! they proc at 5% or 50%, because the ICD — not the trigger rate — is what
+//! bounds sustained uptime. Over a short life that stops being true: a higher
+//! chance lands the free first proc sooner, and the price does not see that
+//! either.
 //!
 //! ## Determinism
 //!
@@ -168,12 +183,17 @@ pub struct ProcConfig {
 }
 
 impl ProcConfig {
-    /// The largest fraction of a match this proc's buff can be up for, given
-    /// its own ICD: it lasts `duration` and then cannot return for
+    /// The LONG-RUN bound on the fraction of a life this proc's buff can be up
+    /// for, given its own ICD: it lasts `duration` and then cannot return for
     /// `internal_cooldown - duration`. Reached only by a wearer who procs on
-    /// the first eligible event after every cooldown, so it is a ceiling and
-    /// not a prediction.
-    pub fn uptime_ceiling(&self) -> f32 {
+    /// the first eligible event after every cooldown, so it is not a
+    /// prediction.
+    ///
+    /// Nor is it a ceiling over a SHORT life. A trinket starts ready, so a life
+    /// shorter than one `duration + internal_cooldown` cycle can spend more
+    /// than this fraction buffed — see the module docs for the measured
+    /// figures.
+    pub fn long_run_uptime(&self) -> f32 {
         self.duration / (self.duration + self.internal_cooldown)
     }
 
@@ -183,7 +203,7 @@ impl ProcConfig {
     pub fn budget_cost(&self) -> f32 {
         proc_effect_budget_weight(self.effect).unwrap_or(0.0)
             * self.magnitude
-            * self.uptime_ceiling()
+            * self.long_run_uptime()
     }
 
     /// The buff this proc grants, ready to hand to `AuraPending`.
@@ -192,6 +212,11 @@ impl ProcConfig {
     /// from another source — a Warrior's Battle Shout does not swallow an
     /// attack-power proc, and two different trinkets granting the same stat are
     /// both live. That is the behaviour the second trinket socket depends on.
+    ///
+    /// `DispelType::Physical`, so **no purge or dispel can remove it**. A purge
+    /// takes magic, and an item's effect is not a spell however magical it
+    /// looks. Declared here rather than derived from a school because a
+    /// trinket has no school to derive it from.
     pub fn aura(&self, source_name: &str) -> Aura {
         Aura {
             effect_type: self.effect,
@@ -209,7 +234,7 @@ impl ProcConfig {
             applied_this_frame: false,
             backlash_damage: None,
             dr_category_override: None,
-            dispel_type: DispelType::Auto,
+            dispel_type: DispelType::Physical,
             compound: None,
             distinct_by_source: true,
         }
@@ -446,9 +471,9 @@ mod tests {
     // ---- the pricing rule ----
 
     #[test]
-    fn uptime_ceiling_is_duration_over_duration_plus_icd() {
+    fn long_run_uptime_is_duration_over_duration_plus_icd() {
         let c = cfg(AuraType::AttackPowerIncrease, 55.0, 10.0, 40.0);
-        assert!((c.uptime_ceiling() - 0.2).abs() < 1e-6);
+        assert!((c.long_run_uptime() - 0.2).abs() < 1e-6);
     }
 
     #[test]
@@ -474,9 +499,11 @@ mod tests {
 
     #[test]
     fn chance_does_not_change_the_price() {
-        // Stated in the module docs: the ICD bounds sustained uptime, so the
-        // trigger rate is a feel knob. If this ever stops holding, the doc is
-        // wrong and so is every trinket priced under it.
+        // Stated in the module docs: the ICD bounds LONG-RUN uptime, so in the
+        // long run the trigger rate is a feel knob and the price ignores it.
+        // That is a claim about the price, not about an arena life — over a
+        // life shorter than one cycle a higher chance lands the free first
+        // proc sooner, which is the module docs' caveat and not this test's.
         let mut cheap = cfg(AuraType::SpellPowerIncrease, 50.0, 12.0, 50.0);
         cheap.chance = 0.01;
         let mut certain = cheap.clone();
@@ -663,6 +690,24 @@ mod tests {
             &mut rng,
         );
         assert_eq!(granted.len(), 2);
+    }
+
+    #[test]
+    fn a_proc_buff_is_physical_so_nothing_can_purge_or_dispel_it() {
+        // The user's rule: trinket procs are not magic, so no purge takes them.
+        // Asked through the engine's own predicates, over every priced effect,
+        // because each one is also a type a magic buff carries (Battle Shout,
+        // Arcane Intellect, ...) and so a type a purge is pinned to.
+        for effect in AuraType::ALL
+            .iter()
+            .copied()
+            .filter(|a| proc_effect_budget_weight(*a).is_some())
+        {
+            let aura = cfg(effect, 10.0, 10.0, 45.0).aura("Some Trinket");
+            assert!(aura.is_physical(), "{effect:?} proc is not physical");
+            assert!(!aura.can_be_purged(), "{effect:?} proc is purgeable");
+            assert!(!aura.can_be_dispelled(), "{effect:?} proc is dispellable");
+        }
     }
 
     #[test]

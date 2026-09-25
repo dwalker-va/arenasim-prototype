@@ -32,7 +32,7 @@ use super::super::play_match::class_ai::shaman::{totem_spacing_offset, totem_spe
 use super::super::play_match::components::{
     ActiveAuras, AuraPending, AuraType, BerserkerRagePending, CastingState, Celebrating,
     ChannelingState, ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState,
-    DispelPending, DivineShieldPending, HealImpact, HitFlinch, HolyShockDamagePending,
+    DispelPending, DispelScope, DivineShieldPending, HealImpact, HitFlinch, HolyShockDamagePending,
     HolyShockHealPending, InstantAbilityFired, MatchResults, Pet, PetType, PlayMatchEntity,
     SchoolImpact, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration, VisualBody,
     WalkAnim,
@@ -775,25 +775,15 @@ fn start_component_entry(
         }
         AbilityType::DispelMagic | AbilityType::PaladinCleanse | AbilityType::Purge => {
             let target = dummy.unwrap_or(caster);
-            // Purge strips BUFFS through a pinned filter, exactly as the Shaman
-            // AI spawns it (`class_ai/mod.rs`, `[PURGE]`) — the staged Arcane
-            // Intellect is a `MaxManaIncrease`. Unfiltered, `process_dispels`
-            // falls back to `can_be_dispelled`, which only matches debuffs, and
-            // a Purge previewed nothing.
-            let (log_prefix, removes_poison, heal_on_success, aura_type_filter): (
-                &'static str,
-                bool,
-                Option<(Entity, f32)>,
-                Option<Vec<AuraType>>,
-            ) = match ability {
-                AbilityType::PaladinCleanse => ("[CLEANSE]", true, None, None),
-                AbilityType::Purge => (
-                    "[PURGE]",
-                    false,
-                    None,
-                    Some(vec![AuraType::MaxManaIncrease]),
-                ),
-                _ => ("[DISPEL]", false, None, None),
+            // Purge strips BUFFS under a scope pinned to one type, exactly as
+            // the Shaman AI spawns it (`class_ai/mod.rs`, `[PURGE]`) — the
+            // staged Arcane Intellect is a `MaxManaIncrease`. Under the
+            // dispel scope it would match only debuffs, and a Purge would
+            // preview nothing.
+            let (log_prefix, scope): (&'static str, DispelScope) = match ability {
+                AbilityType::PaladinCleanse => ("[CLEANSE]", DispelScope::MagicOrPoison),
+                AbilityType::Purge => ("[PURGE]", DispelScope::Purge(AuraType::MaxManaIncrease)),
+                _ => ("[DISPEL]", DispelScope::Magic),
             };
             commands.spawn((
                 DispelPending {
@@ -801,9 +791,8 @@ fn start_component_entry(
                     dispeller: caster,
                     log_prefix,
                     caster_class: info.class,
-                    heal_on_success,
-                    aura_type_filter,
-                    removes_poison,
+                    heal_on_success: None,
+                    scope,
                 },
                 PlayMatchEntity,
             ));
@@ -1460,8 +1449,7 @@ pub fn drive_sandbox_pet(
                         log_prefix: "[DEVOUR]",
                         caster_class: pet_combatant.class,
                         heal_on_success: Some((pet, 20.0)),
-                        aura_type_filter: None,
-                        removes_poison: false,
+                        scope: DispelScope::Magic,
                     });
                 }
                 _ => {}
