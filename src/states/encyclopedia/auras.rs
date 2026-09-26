@@ -2430,9 +2430,10 @@ mod tests {
             "every proc trinket buff, and nothing else, wears its item's icon"
         );
 
-        // The encyclopedia's loader waits for EVERY handle it opened before it
-        // registers any texture, and it now opens this whole table — so one
-        // missing file here blanks every icon on the screen, not just an aura's.
+        // The encyclopedia's loader opens this whole table. A missing file no
+        // longer holds the other icons back (`icon_load_settled` counts a
+        // failed load as done), but the aura it belongs to still draws a
+        // placeholder, so every path must exist.
         for (key, path) in GENERIC_AURA_ICONS {
             let on_disk = std::path::Path::new("assets").join(path);
             assert!(

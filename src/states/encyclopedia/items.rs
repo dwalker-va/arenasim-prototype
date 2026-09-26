@@ -495,11 +495,11 @@ pub fn format_item_stats(item: &ItemConfig) -> String {
     item_stat_parts(item).join(", ")
 }
 
-/// Render a tooltip showing an item's full stat breakdown.
 /// The colour a proc's sentence is drawn in, wherever an item shows it — the
 /// tooltip here and the equipment picker's second line.
 pub const PROC_TEXT_COLOR: egui::Color32 = egui::Color32::from_rgb(170, 170, 170);
 
+/// Render a tooltip showing an item's full stat breakdown.
 pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
     ui.label(
         egui::RichText::new(&item.name)

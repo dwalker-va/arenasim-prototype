@@ -83,6 +83,17 @@ pub fn item_aura_icons(items: &ItemDefinitions) -> Vec<(String, String)> {
     icons
 }
 
+/// Whether an icon handle has stopped resolving — LOADED, or FAILED (a missing
+/// file, an undecodable one). The icon loaders wait on this and then register
+/// only what actually loaded, so a single bad icon degrades to "no icon"
+/// instead of holding the whole batch — and every icon on the screen — back
+/// forever. Shared by `load_spell_icons` and `load_ability_icons` so the two
+/// cannot disagree about what "done" means.
+pub fn icon_load_settled(state: &bevy::asset::LoadState) -> bool {
+    use bevy::asset::LoadState;
+    !matches!(state, LoadState::Loading | LoadState::NotLoaded)
+}
+
 /// Get the icon key for an aura.
 ///
 /// An aura an ITEM applied draws the item's icon ([`item_aura_icon_key`]).
@@ -237,13 +248,10 @@ pub fn load_spell_icons(
     // the whole registration forever and blank EVERY in-match icon. Once nothing
     // is still loading, register only the textures that actually loaded; a
     // missing icon then degrades to "no icon" instead of breaking the UI.
-    use bevy::asset::LoadState;
-    let still_loading = icon_handles.handles.iter().any(|(_, h)| {
-        matches!(
-            asset_server.load_state(h.id()),
-            LoadState::Loading | LoadState::NotLoaded
-        )
-    });
+    let still_loading = icon_handles
+        .handles
+        .iter()
+        .any(|(_, h)| !icon_load_settled(&asset_server.load_state(h.id())));
     if still_loading {
         return; // Wait for images to finish loading or fail
     }

@@ -29,7 +29,7 @@ use super::play_match::equipment::{
     resolve_loadout, DefaultLoadouts, HeldSlot, ItemConfig, ItemDefinitions, ItemId, ItemSlot,
     Loadout,
 };
-use super::play_match::rendering::{item_aura_icons, GENERIC_AURA_ICONS};
+use super::play_match::rendering::{icon_load_settled, item_aura_icons, GENERIC_AURA_ICONS};
 use super::play_match::AbilityType;
 use super::{
     match_config::{
@@ -216,14 +216,27 @@ pub fn load_ability_icons(
         return; // Wait for next frame to check if loaded
     }
 
-    // Check if all images are loaded
-    let all_loaded = icon_handles.handles.iter().all(|(_, h)| images.contains(h));
-    if !all_loaded {
-        return; // Wait for images to load
+    // Wait while any handle is still resolving — but a FAILED load (a missing
+    // or undecodable file) counts as resolved, exactly as in the in-match
+    // loader, so one bad icon cannot hold back every other icon on the
+    // encyclopedia and View Combatant screens.
+    let still_loading = icon_handles
+        .handles
+        .iter()
+        .any(|(_, h)| !icon_load_settled(&asset_server.load_state(h.id())));
+    if still_loading {
+        return; // Wait for images to finish loading or fail
     }
 
-    // Register textures with egui
+    // Register textures with egui, skipping any that failed to load
     for (ability_name, handle) in &icon_handles.handles {
+        if !images.contains(handle) {
+            warn!(
+                "Ability icon for '{}' failed to load; rendering without it",
+                ability_name
+            );
+            continue;
+        }
         let texture_id = contexts.add_image(handle.clone());
         ability_icons
             .textures
