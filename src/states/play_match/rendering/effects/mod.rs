@@ -82,3 +82,5 @@ mod hit_reaction;
 pub use hit_reaction::*;
 mod wand_attack;
 pub use wand_attack::*;
+mod aura_band;
+pub use aura_band::*;

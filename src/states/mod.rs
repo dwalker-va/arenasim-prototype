@@ -386,6 +386,23 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // The aura-application band: the shared cue for every aura whose
+        // application no bespoke effect draws (`AuraApplyRoute::for_aura`).
+        // Detected off `ActiveAuras` transitions, so it reads LEVEL state and
+        // belongs at render rate — an aura that lands on any sim tick is still
+        // in the list when this frame looks. Graphical-only; never registered
+        // in `add_core_combat_systems`, so headless is untouched.
+        .add_systems(
+            Update,
+            (
+                play_match::detect_aura_applications,
+                play_match::update_aura_bands,
+                play_match::cleanup_aura_bands,
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Landed instant-melee signals (Mortal Strike's signature stroke +
         // flourish). Same FixedUpdate rationale as `consume_swing_signals`
         // above. `.after` it so that when an ordinary auto and a Mortal
