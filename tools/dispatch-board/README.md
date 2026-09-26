@@ -8,7 +8,11 @@ board and serves, on `127.0.0.1:7453`,
   (orchestrator, PM, subagents) talks to the same process;
 - `/` — the web UI (the ported artifact page: six columns, drag, drawer,
   answering a question, the attach-PR dialog);
-- `/api/events` — the event feed the `wait` CLI blocks on.
+- `/api/events` — the event feed the `wait` CLI blocks on;
+- `/favicon.svg`, `/favicon-32.png`, `/favicon-16.png` — the tab icon: the
+  game's own `packaging/icon.svg` and `packaging/icon/icon_{32,16}.png`
+  (emitted by `packaging/generate_icon.py`), read in place from this checkout
+  on every request, never copied here. A missing file 404s the icon only.
 
 The protocol it implements is `docs/design/agent-pipeline.md`.
 

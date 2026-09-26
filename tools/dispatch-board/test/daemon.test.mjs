@@ -4,9 +4,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { request } from "node:http";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { lockPath } from "../dist/paths.js";
-import { spawnDaemon, mcpClient, call, post, tempDir, CLI } from "./helpers.mjs";
+import { spawnDaemon, mcpClient, call, post, tempDir, CLI, PKG } from "./helpers.mjs";
 
 /** Run `cli.js wait ...` and resolve with its stdout lines and exit code. */
 function runWait(args) {
@@ -374,4 +375,34 @@ test("wake-up: a FRESH waiter armed with --board catches a board replaced while 
   await call(client, "create_card", { title: "old 3", role: "engineer", actor: "pm" });
   const ok = await runWait(["--since", String(armed.cursor), "--board", armed.board, "--port", String(old.port)]).done;
   assert.deepEqual(ok.lines.map((l) => [l.kind, l.cursor]), [["created", 4]]);
+});
+
+test("tab icon: the daemon serves the game's own packaging icon, and the page links it SVG-first", async (t) => {
+  const d = await spawnDaemon(t);
+  const packaging = join(PKG, "..", "..", "packaging");
+  for (const [route, file, type] of [
+    ["/favicon.svg", "icon.svg", "image/svg+xml"],
+    ["/favicon-32.png", "icon/icon_32.png", "image/png"],
+    ["/favicon-16.png", "icon/icon_16.png", "image/png"],
+  ]) {
+    const r = await fetch(`${d.base}${route}`);
+    assert.equal(r.status, 200, route);
+    assert.match(r.headers.get("content-type"), new RegExp(type.replace("+", "\\+")));
+    assert.ok(Buffer.from(await r.arrayBuffer()).equals(readFileSync(join(packaging, file))), `${route} is not packaging/${file}`);
+  }
+  const html = await (await fetch(`${d.base}/`)).text();
+  const icons = [...html.matchAll(/<link rel="icon"[^>]*href="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(icons, ["/favicon.svg", "/favicon-32.png", "/favicon-16.png"]);
+});
+
+test("tab icon: a missing icon file 404s the icon and never breaks the page", async (t) => {
+  const tmp = tempDir();
+  t.after(tmp.cleanup);
+  const { startDaemon } = await import("../dist/server.js");
+  const daemon = await startDaemon({ dbPath: tmp.db, port: 0, iconDir: join(tmp.dir, "no-such-packaging"), log: () => {} });
+  t.after(() => daemon.close());
+  const base = `http://127.0.0.1:${daemon.port}`;
+  assert.equal((await fetch(`${base}/favicon.svg`)).status, 404);
+  assert.equal((await fetch(`${base}/favicon-32.png`)).status, 404);
+  assert.equal((await fetch(`${base}/`)).status, 200);
 });

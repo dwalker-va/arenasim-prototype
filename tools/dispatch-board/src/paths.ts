@@ -15,6 +15,20 @@ export function packageDir(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..");
 }
 
+/** The checkout this daemon runs from (tools/dispatch-board/../..). */
+export function repoRoot(): string {
+  return resolve(packageDir(), "..", "..");
+}
+
+/**
+ * The game's icon, as `packaging/generate_icon.py` emits it — the single
+ * source. The board serves these files in place (never a copy), so a
+ * regenerated icon reaches the browser tab with no change here.
+ */
+export function packagingIconDir(): string {
+  return join(repoRoot(), "packaging");
+}
+
 /** The main checkout's root, from any worktree of it. */
 export function mainCheckoutRoot(fromRepoRoot: string): string {
   const dotGit = join(fromRepoRoot, ".git");
@@ -32,8 +46,7 @@ export function mainCheckoutRoot(fromRepoRoot: string): string {
 
 export function defaultDbPath(): string {
   if (process.env.DISPATCH_BOARD_DB) return resolve(process.env.DISPATCH_BOARD_DB);
-  const repoRoot = resolve(packageDir(), "..", "..");
-  return join(mainCheckoutRoot(repoRoot), ".dispatch", "board.db");
+  return join(mainCheckoutRoot(repoRoot()), ".dispatch", "board.db");
 }
 
 export function defaultPort(): number {

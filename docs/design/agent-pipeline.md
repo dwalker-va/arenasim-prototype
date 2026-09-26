@@ -20,6 +20,8 @@ truth for code. GitHub issues are not used.
   - `/` — the web UI: the six columns plus the archived toggle, drag between
     columns, the card drawer, answering a question, the attach-PR dialog. It is
     the artifact page ported, refreshing live as other writers change the board.
+    Its tab icon is the game's own (`packaging/icon.svg` and PNGs, served in
+    place from the checkout).
   - an event feed, which `dist/cli.js wait` blocks on (see *Waking the
     orchestrator*).
 - The database is SQLite (WAL) at the **main checkout's** gitignored

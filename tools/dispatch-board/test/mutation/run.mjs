@@ -139,6 +139,14 @@ const MUTANTS = [
     ],
   },
   {
+    // The tab icon must be the game's own packaging file, not a stand-in.
+    name: "tab-icon-source",
+    file: "dist/server.js",
+    find: '"/favicon.svg": ["icon.svg", "image/svg+xml"],',
+    replace: '"/favicon.svg": [join("icon", "icon_16.png"), "image/svg+xml"],',
+    mustFail: ["tab icon: the daemon serves the game's own packaging icon, and the page links it SVG-first"],
+  },
+  {
     name: "signal-handler-ordering",
     file: "dist/cli.js",
     find: 'process.on("SIGINT", stop);\n    process.on("SIGTERM", stop);\n    await ready;',

@@ -19,12 +19,19 @@ import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Board, BoardError, BoardEvent, SUMMARY_FIELDS, checkVersion } from "./board.js";
 import { buildMcpServer } from "./mcp.js";
-import { liveDaemon, lockPath } from "./paths.js";
+import { liveDaemon, lockPath, packagingIconDir } from "./paths.js";
 
 /** Actor tag for every write made through the web UI — a user gesture. */
 export const UI_ACTOR = "board";
 
 const UI_FIELDS = [...SUMMARY_FIELDS, "question", "created"];
+
+/** Tab-icon routes -> the game's own icon files, relative to `packaging/`. */
+const ICONS: Record<string, [file: string, type: string]> = {
+  "/favicon.svg": ["icon.svg", "image/svg+xml"],
+  "/favicon-32.png": [join("icon", "icon_32.png"), "image/png"],
+  "/favicon-16.png": [join("icon", "icon_16.png"), "image/png"],
+};
 
 function uiHtmlPath(): string {
   // dist/server.js -> ../ui/board.html
@@ -78,6 +85,8 @@ export interface DaemonOptions {
   port: number;
   host?: string;
   log?: (msg: string) => void;
+  /** Where the tab icon is read from; default: the checkout's `packaging/`. */
+  iconDir?: string;
 }
 
 export interface Daemon {
@@ -166,6 +175,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
 
     if (req.method === "GET" && (path === "/" || path === "/index.html")) {
       send(res, 200, readFileSync(uiHtmlPath(), "utf8"), "text/html; charset=utf-8");
+      return;
+    }
+
+    if (req.method === "GET" && Object.hasOwn(ICONS, path)) {
+      // Read per request, so a regenerated icon shows up without a restart.
+      // A missing file is a 404 for the icon alone; the page never depends on it.
+      const [file, type] = ICONS[path];
+      let bytes: Buffer;
+      try {
+        bytes = readFileSync(join(opts.iconDir ?? packagingIconDir(), file));
+      } catch {
+        throw new HttpError(404, `no icon at packaging/${file}`);
+      }
+      res.writeHead(200, { "content-type": type, "cache-control": "no-cache" });
+      res.end(bytes);
       return;
     }
 
