@@ -256,15 +256,24 @@ function checkAgentTransition(id: string, stored: unknown, patch: Record<string,
   }
 }
 
+/** Who holds a claim, for its activity line (legacy boards stored a bare string). */
+function claimant(a: unknown): string {
+  return isObj(a) && typeof a.name === "string" ? a.name : typeof a === "string" && a ? a : "unnamed";
+}
+
+/** The one wording every path uses when a claim ends; it always names the claimant. */
+function claimLine(how: "released" | "finished", agent: unknown): string {
+  return how === "released" ? `Claim released (was ${claimant(agent)})` : `Claim finished (${claimant(agent)})`;
+}
+
 /**
  * The activity line for a patch that changes `agent`, or null when it does
  * not. A claim never ends silently, whichever tool ended it.
  */
 function claimChangeNote(stored: unknown, patch: Record<string, unknown>): string | null {
   if (!("agent" in patch) || JSON.stringify(patch.agent) === JSON.stringify(stored ?? null)) return null;
-  const who = (a: unknown) => (isObj(a) && typeof a.name === "string" ? a.name : typeof a === "string" ? a : "unnamed");
-  if (patch.agent === null) return stored == null ? null : `Claim cleared (was ${who(stored)})`;
-  return `Claim finished (${who(stored)})`;
+  if (patch.agent === null) return stored == null ? null : claimLine("released", stored);
+  return claimLine("finished", stored);
 }
 
 function checkAppend(a: unknown): { heading: string; text: string } | undefined {
@@ -704,8 +713,9 @@ export class Board extends EventEmitter {
       }
       doc.agent = kind === "claim_released" ? null : { ...agent, status: "done", finished: now() };
       this.commitDoc(id, r.version, doc);
-      const dflt = kind === "claim_released" ? `Claim released (was ${String(agent.name ?? "unnamed")})` : "Claim finished";
-      this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: meta.activity ?? dflt });
+      // The claim line always lands; a caller's own note is an additional line.
+      if (meta.activity) this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: meta.activity });
+      this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: claimLine(kind === "claim_released" ? "released" : "finished", agent) });
       this.recordEvent(actor, kind, id, { name: agent.name ?? null });
       return this.getCard(id, { activity_limit: 5 });
     });

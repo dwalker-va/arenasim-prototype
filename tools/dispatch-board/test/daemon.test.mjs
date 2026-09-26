@@ -215,7 +215,7 @@ test("claims: update_card / move_card / the UI cannot take or silently drop a cl
   const rel = await post(d.base, `/api/cards/${c.id}/release`, { expected_version: c.version });
   assert.equal(rel.status, 200, JSON.stringify(rel.body));
   assert.equal(rel.body.agent, null);
-  assert.match(rel.body.activity.at(-1).msg, /by the user \(was Engineer-A\)/);
+  assert.deepEqual(rel.body.activity.slice(-2).map((a) => a.msg), ["Released from the board by the user", "Claim released (was Engineer-A)"]);
   const ev = await call(client, "events_since", { cursor: 0, ignore_actors: ["orchestrator", "o"] });
   assert.deepEqual(ev.value.events.map((e) => [e.actor, e.kind]), [["board", "claim_released"]]);
 });

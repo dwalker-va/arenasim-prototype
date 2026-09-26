@@ -467,7 +467,20 @@ function wire(){
   var dclose = document.getElementById("d-close");
   if(dclose) dclose.onclick = function(){ closeAll(); render(); };
   var drebase = document.getElementById("d-rebase");
-  if(drebase) drebase.onclick = function(){ base = snapshot(full[openCardId]); statusMsg = "edits kept on v" + base.version + " — review and save"; render(); };
+  if(drebase) drebase.onclick = function(){
+    // Adopt the new version: from here the user's edits are measured against
+    // IT, so each edited field's baseline becomes what the adopted card renders
+    // into that input (setting a field back to its pre-conflict value is then
+    // a real change). Rendered by drawerHtml itself, so the browser normalises
+    // it exactly as a real render would.
+    var c = full[openCardId], edited = drawerEdits(drawerValues(), openCardId);
+    var tmp = document.createElement("div");
+    tmp.innerHTML = drawerHtml({id: c.id}, {});
+    Object.keys(edited).forEach(function(k){ var el = tmp.querySelector("#" + DRAWER[k]); if(el) rendered[DRAWER[k]] = el.value; });
+    base = snapshot(c);
+    statusMsg = "edits kept on v" + base.version + " — review and save";
+    render();
+  };
   var ddiscard = document.getElementById("d-discard");
   if(ddiscard) ddiscard.onclick = function(){ discardDraft = true; render(); };
   var drel = document.getElementById("d-release");
@@ -499,7 +512,13 @@ function wire(){
         changed.length ? {patch: patch} : {}));
     } else if(changed.length){
       req = api("POST", "/api/cards/" + encodeURIComponent(id) + "/update", {patch: patch, expected_version: expected, activity: "Edited " + changed.join(", ")});
-    } else { closeAll(); render(); return; }
+    } else {
+      // Nothing to send. With the changed-elsewhere notice up, the drawer is
+      // showing a stale mix: re-render onto the current card rather than
+      // closing as if something were saved.
+      if(base.version !== c.version){ render(); return; }
+      closeAll(); render(); return;
+    }
     statusMsg = "saving…"; render();
     req.then(function(r){
       if(afterWrite(r)){ if(openCardId === id){ closeAll(); } render(); }

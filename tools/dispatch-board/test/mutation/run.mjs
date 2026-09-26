@@ -102,6 +102,17 @@ const MUTANTS = [
     ],
   },
   {
+    // Round 3: Keep adopts the new version but leaves edits measured against the old one.
+    name: "keep-rebaselines-edits",
+    file: "ui/board.html",
+    find: 'Object.keys(edited).forEach(function(k){ var el = tmp.querySelector("#" + DRAWER[k]); if(el) rendered[DRAWER[k]] = el.value; });',
+    replace: "",
+    mustFail: [
+      "drawer: after Keep, setting priority back to its pre-conflict value is sent",
+      "drawer: after Keep, setting column back to its pre-conflict value is sent",
+    ],
+  },
+  {
     name: "signal-handler-ordering",
     file: "dist/cli.js",
     find: 'process.on("SIGINT", stop);\n    process.on("SIGTERM", stop);\n    await ready;',

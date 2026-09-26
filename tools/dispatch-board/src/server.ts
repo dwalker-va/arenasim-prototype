@@ -256,15 +256,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             // The user clearing a claim they judge stale (no orchestrator to
             // sweep it). Versioned, like every other gesture, and logged.
             checkVersion(b.expected_version);
-            const held = board.getCard(id).agent as { name?: string } | null;
             send(
               res,
               200,
-              board.releaseClaim(id, {
-                ...meta,
-                expected_version: b.expected_version,
-                activity: `Claim released from the board by the user (was ${String(held?.name ?? "unnamed")})`,
-              }),
+              board.releaseClaim(id, { ...meta, expected_version: b.expected_version, activity: "Released from the board by the user" }),
             );
             return;
           }

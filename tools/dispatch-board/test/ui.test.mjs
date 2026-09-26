@@ -168,6 +168,59 @@ for (const [shape, body] of [
   });
 }
 
+// After "Keep my edits on vN" the user's edits are measured against vN: setting
+// a field back to what it was BEFORE the conflict is a real change against vN.
+for (const [what, field, from, mine, foreign, restore] of [
+  ["priority", "d-pri", "P2", "P1", { priority: "P3" }, "P2"],
+  ["column", "d-col", "review", "done", "human_review", "review"],
+]) {
+  test(`drawer: after Keep, setting ${what} back to its pre-conflict value is sent`, async (t) => {
+    const d = await spawnDaemon(t);
+    const client = await mcpClient(t, d.base);
+    const c = await reviewCard(client);
+    const page = await openPage(t, d.base);
+    await page.open(c.id, c.version);
+    assert.equal(page.value(field), from);
+
+    page.set(field, mine);
+    const after =
+      typeof foreign === "string"
+        ? (await call(client, "move_card", { id: c.id, column: foreign, expected_version: c.version, actor: "orchestrator" })).value
+        : (await call(client, "update_card", { id: c.id, patch: foreign, expected_version: c.version, actor: "orchestrator" })).value;
+    await page.refresh(after.version);
+    page.doc.getElementById("d-rebase").click();
+    page.set(field, restore);
+    await page.save();
+
+    const now = await getCard(client, c.id);
+    if (what === "priority") {
+      assert.equal(now.priority, "P2", `the set-back edit was dropped (${page.status()})`);
+      assert.equal(now.activity.at(-1).msg, "Edited priority");
+    } else {
+      assert.equal(now.column, "review", `the set-back move was dropped (${page.status()})`);
+      assert.match(now.activity.at(-1).msg, /^Moved: human_review → review$/);
+    }
+  });
+}
+
+test("drawer: without Keep, setting an edit back undoes it — nothing is sent, and the drawer stays open on the notice", async (t) => {
+  const d = await spawnDaemon(t);
+  const client = await mcpClient(t, d.base);
+  const c = await reviewCard(client);
+  const page = await openPage(t, d.base);
+  await page.open(c.id, c.version);
+  page.set("d-pri", "P1");
+  const after = (await call(client, "update_card", { id: c.id, patch: { priority: "P3" }, expected_version: c.version, actor: "orchestrator" })).value;
+  await page.refresh(after.version);
+  page.set("d-pri", "P2");
+  page.doc.getElementById("d-save").click();
+  await sleep(300);
+  const now = await getCard(client, c.id);
+  assert.deepEqual([now.priority, now.version], ["P3", after.version], "an undone edit was sent");
+  assert.ok(page.doc.getElementById("d-save"), "the drawer closed as if saved while the notice was up");
+  assert.equal(page.value("d-pri"), "P3", "the drawer still shows a value the card does not have");
+});
+
 test("drawer: an edit that a foreign write overtakes is refused, not written over it", async (t) => {
   const d = await spawnDaemon(t);
   const client = await mcpClient(t, d.base);
@@ -261,5 +314,5 @@ test("drawer: a working claim is released only by the explicit, logged gesture",
   await until("the release", () => /released/.test(page.status()));
   const now = await getCard(client, c.id);
   assert.equal(now.agent, null);
-  assert.match(now.activity.at(-1).msg, /released from the board by the user \(was Engineer-AS-1\)/);
+  assert.deepEqual(now.activity.slice(-2).map((a) => a.msg), ["Released from the board by the user", "Claim released (was Engineer-AS-1)"]);
 });

@@ -138,7 +138,7 @@ card drawer (for a claim the user judges stale with no orchestrator running),
 which is versioned, logged in the card's activity, and wakes the orchestrator
 like any other gesture. A claim never ends silently: every write that changes
 `agent` (a patch, or a move into `in_progress`) adds an activity line saying
-whose claim was cleared or finished.
+whose claim was released or finished.
 Bouncing a card from Review back to In Progress is therefore automatically a
 respawn. **Scoping cards invert the guard's meaning:** nothing is ever spawned
 for a `role: "pm"` card, so `agent: null` on one is a *resting state*, not a
@@ -305,8 +305,9 @@ Monitor({
 `--follow`, which needs no re-arm per event.)
 
 **Start one:** open a session at the repo (or a worktree); confirm the daemon
-answers and take the cursor (`dist/cli.js head`); run the startup recovery
-below; then arm the monitor from that cursor.
+answers and take the cursor and board id (`dist/cli.js head`, which prints
+`{"cursor", "board"}`); run the startup recovery below; then arm the monitor
+from them (`--since <cursor> --board <board>`).
 
 **Becoming orchestrator (startup recovery).** Workers are in-process subagents,
 so they die with the orchestrator session that spawned them — while their card
@@ -344,14 +345,15 @@ back:
 
 1. **First choice: resume the session.** `claude --resume` (or `--continue`)
    in the orchestrator's directory restores the session but **not** its
-   monitor: re-arm it from the last cursor you processed, which replays every
-   event since.
+   monitor: re-arm it from the last cursor you processed, with the same
+   `--board`, which replays every event since (or prints `board_replaced` if
+   the board was re-created meanwhile).
 2. **Fresh session as the new orchestrator.** In order:
    a. Confirm the old orchestrator session is actually dead (single-orchestrator
       rule — a live predecessor means stop here).
-   b. Run *Start one* above: the cursor, the startup-recovery sweep (every
-      `working` claim is stale by definition), the live-claim audit, then the
-      monitor.
+   b. Run *Start one* above: the cursor and board id, the startup-recovery
+      sweep (every `working` claim is stale by definition), the live-claim
+      audit, then the monitor (`--since <cursor> --board <board>`).
 
 Either way, nothing that matters is lost with the process: the sweep re-spawns
 workers from card state, and open PRs are re-discovered via `gh pr list`.

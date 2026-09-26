@@ -155,6 +155,16 @@ test("claim rule: pm cards and non-spawn columns are never claimable", (t) => {
   refused(() => board.claimCard(done.id, "E", { actor: "o" }), "claim_refused");
 });
 
+test("release_claim and finish_claim always name the claimant; a custom activity is an extra line", (t) => {
+  const { board } = tempBoard(t);
+  let c = seed(board, { column: "in_progress", agent: "working" });
+  c = board.finishClaim(c.id, { actor: "o" });
+  assert.equal(c.activity.at(-1).msg, "Claim finished (Seeded-Agent)");
+  const r = seed(board, { column: "in_progress", agent: "working" });
+  const rel = board.releaseClaim(r.id, { actor: "o", activity: "startup recovery" });
+  assert.deepEqual(rel.activity.slice(-2).map((a) => a.msg), ["startup recovery", "Claim released (was Seeded-Agent)"]);
+});
+
 test("release_claim and finish_claim act only on a working claim", (t) => {
   const { board } = tempBoard(t);
   const c = seed(board, { column: "in_progress" });
@@ -176,7 +186,7 @@ test("a claim never ends silently: every patch or move that changes agent writes
   const link = [{ label: "PR", url: "https://github.com/x/y/pull/1" }];
   let c = seed(board, { column: "in_progress", agent: "working" });
   c = board.updateCard(c.id, { agent: null }, c.version, { actor: "o" });
-  assert.equal(c.activity.at(-1).msg, "Claim cleared (was Seeded-Agent)");
+  assert.equal(c.activity.at(-1).msg, "Claim released (was Seeded-Agent)");
 
   c = board.claimCard(c.id, "Engineer-2", { actor: "o" });
   c = board.moveCard(c.id, "review", c.version, { actor: "o", activity: "SUMMARY", patch: { links: link, agent: { ...c.agent, status: "done" } } });
@@ -300,7 +310,7 @@ test("move_card with append: findings and the move are ONE write (the Tester REJ
   assert.deepEqual(r.activity.slice(-3).map((a) => [a.by, a.msg]), [
     ["tester", "Appended to spec: Tester findings — 2026-09-25"],
     ["tester", "REJECT"],
-    ["tester", "Claim cleared (was AS-1-test)"],
+    ["tester", "Claim released (was AS-1-test)"],
   ]);
   const evs = board.eventsSince(h).events;
   assert.deepEqual(evs.map((e) => [e.kind, e.data.to, e.data.appended]), [["moved", "in_progress", "Tester findings — 2026-09-25"]]);
