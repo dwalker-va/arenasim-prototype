@@ -106,7 +106,7 @@ an open, review-ready PR — nothing more.
    home is not a licence for an empty one — a sentence of substance, or an explicit
    "nothing", never "N/A".
 
-6. **Never** merge the PR, edit the Dispatch board artifact, or push to `main`.
+6. **Never** merge the PR, write to the Dispatch board (its MCP tools or its HTTP API), or push to `main`.
 
 ## When you are blocked
 
@@ -121,7 +121,12 @@ structure) — that is your job.
 ```
 STATUS: READY_FOR_REVIEW | NEEDS_INPUT | FAILED
 PR: <url, or "none">
+WORKTREE: <absolute path of the worktree your card's branch is checked out in>
 SUMMARY: <2-5 sentences: what changed, how it was verified, anything a reviewer must know>
 QUESTION: <only when STATUS is NEEDS_INPUT — the single question blocking you>
 FOLLOWUPS: <optional: suggested new cards, one per line, or omit>
 ```
+
+`WORKTREE` is the tree you worked in, on the card's branch — the same absolute path
+you address with `git -C`. The orchestrator records it on the card so the user can `cd`
+there and run your change; give it on every STATUS, NEEDS_INPUT and FAILED included.
