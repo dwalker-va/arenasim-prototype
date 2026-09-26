@@ -368,6 +368,15 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
    `src/states/ability_text.rs`, generated from the fields you set in step 3, so only an
    effect the numeric fields cannot express needs a `description` in the RON.
 
+   **The per-ability VISUAL is not free, and `cargo test` will say so.**
+   `tests/lands_silently_audit.rs` scans the config into families (heal, direct
+   damage, DoT, crowd control, buff/debuff, dispel, interrupt) and fails until the
+   new ability is named as a member of each family it joins AND its landing reaches
+   a visual in that family — or it is named on that family's known-silent list with
+   the card that will draw it. A DoT's state is routed by its RON `name:` through
+   `DotStateVisual::for_dot` (`rendering/effects/dot_state.rs`), the one router every
+   DoT renderer asks.
+
 8. **Test with headless simulation**:
    ```bash
    cargo run --release -- --headless /tmp/test.json

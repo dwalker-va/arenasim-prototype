@@ -3,6 +3,7 @@ use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use std::f32::consts::{FRAC_PI_2, TAU};
 
+use super::dot_state::{has_dot_state, DotStateVisual};
 use super::heal_impact::COMBATANT_BODY_RADIUS;
 use super::school_impact::{IMPACT_HEAD_Y, IMPACT_PET_BODY_Y, IMPACT_PET_STATURE};
 use super::spell_bolts::{soft_dot_texture, star_flash_texture};
@@ -793,7 +794,7 @@ pub fn spawn_warlock_dot_visuals(
         let is_pet = pet.is_some();
         let assets = assets.get_or_insert_with(|| DotAssets::build(&mut meshes, &mut images));
 
-        if has_warlock_dot(auras, CORRUPTION_AURA) && !shrouded.contains(&entity) {
+        if has_dot_state(auras, DotStateVisual::CorruptionShroud) && !shrouded.contains(&entity) {
             spawn_shroud_rig(
                 &mut commands,
                 &mut meshes,
@@ -813,7 +814,9 @@ pub fn spawn_warlock_dot_visuals(
             );
         }
 
-        if has_warlock_dot(auras, UA_AURA) && !ua_lit.contains(&entity) {
+        if has_dot_state(auras, DotStateVisual::UnstableAfflictionState)
+            && !ua_lit.contains(&entity)
+        {
             spawn_ua_rig(
                 &mut commands,
                 &mut materials,
@@ -2171,10 +2174,10 @@ pub fn cleanup_warlock_dot_visuals(
     >,
     targets: Query<(&Combatant, Option<&ActiveAuras>)>,
 ) {
-    let state_lives = |target: Entity, aura: &str| -> bool {
+    let state_lives = |target: Entity, kind: DotStateVisual| -> bool {
         targets
             .get(target)
-            .map(|(c, a)| c.is_alive() && has_warlock_dot(a, aura))
+            .map(|(c, a)| c.is_alive() && has_dot_state(a, kind))
             .unwrap_or(false)
     };
     let target_alive = |target: Entity| -> bool {
@@ -2185,12 +2188,12 @@ pub fn cleanup_warlock_dot_visuals(
     };
 
     for (entity, rig) in shrouds.iter() {
-        if !state_lives(rig.target, CORRUPTION_AURA) {
+        if !state_lives(rig.target, DotStateVisual::CorruptionShroud) {
             commands.entity(entity).despawn();
         }
     }
     for (entity, rig) in ua_rigs.iter() {
-        if !state_lives(rig.target, UA_AURA) {
+        if !state_lives(rig.target, DotStateVisual::UnstableAfflictionState) {
             commands.entity(entity).despawn();
         }
     }
