@@ -17,7 +17,7 @@ import { readFileSync, unlinkSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { Board, BoardError, BoardEvent, SUMMARY_FIELDS, checkVersion } from "./board.js";
+import { Board, BoardError, BoardEvent, PR_URL, SUMMARY_FIELDS, checkVersion } from "./board.js";
 import { buildMcpServer } from "./mcp.js";
 import { liveDaemon, lockPath, packagingIconDir } from "./paths.js";
 
@@ -32,6 +32,14 @@ const ICONS: Record<string, [file: string, type: string]> = {
   "/favicon-32.png": [join("icon", "icon_32.png"), "image/png"],
   "/favicon-16.png": [join("icon", "icon_16.png"), "image/png"],
 };
+
+/** The page, with the board's PR_URL substituted in so the UI shares its one definition. */
+export function uiPage(): string {
+  const html = readFileSync(uiHtmlPath(), "utf8");
+  const token = "/*@PR_URL*/null";
+  if (!html.includes(token)) throw new Error("ui/board.html is missing its /*@PR_URL*/null slot");
+  return html.replace(token, `new RegExp(${JSON.stringify(PR_URL.source)}, ${JSON.stringify(PR_URL.flags)})`);
+}
 
 function uiHtmlPath(): string {
   // dist/server.js -> ../ui/board.html
@@ -174,7 +182,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     }
 
     if (req.method === "GET" && (path === "/" || path === "/index.html")) {
-      send(res, 200, readFileSync(uiHtmlPath(), "utf8"), "text/html; charset=utf-8");
+      send(res, 200, uiPage(), "text/html; charset=utf-8");
       return;
     }
 

@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { request } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { lockPath } from "../dist/paths.js";
+import { lockPath, packagingIconDir } from "../dist/paths.js";
 import { spawnDaemon, mcpClient, call, post, tempDir, CLI, PKG } from "./helpers.mjs";
 
 /** Run `cli.js wait ...` and resolve with its stdout lines and exit code. */
@@ -379,7 +379,12 @@ test("wake-up: a FRESH waiter armed with --board catches a board replaced while 
 
 test("tab icon: the daemon serves the game's own packaging icon, and the page links it SVG-first", async (t) => {
   const d = await spawnDaemon(t);
-  const packaging = join(PKG, "..", "..", "packaging");
+  const packaging = packagingIconDir(); // the same resolution the daemon uses
+  if (!process.env.DISPATCH_BOARD_PACKAGING_DIR) {
+    // ...which, in a checkout, is the repository's own packaging/ — the output of packaging/generate_icon.py.
+    assert.equal(packaging, join(PKG, "..", "..", "packaging"));
+  }
+  assert.ok(existsSync(join(packaging, "generate_icon.py")), `${packaging} is not the game's packaging/ directory`);
   for (const [route, file, type] of [
     ["/favicon.svg", "icon.svg", "image/svg+xml"],
     ["/favicon-32.png", "icon/icon_32.png", "image/png"],

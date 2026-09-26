@@ -177,7 +177,10 @@ function fmt(t){
 }
 function card(id){ for(var i=0;i<state.cards.length;i++) if(state.cards[i].id===id) return state.cards[i]; return null; }
 // The card's OWN PR is `pr`; `links` are references and never satisfy the gate.
-function hasPr(c){ return !!(c.pr && typeof c.pr.url === "string" && /\/pull\/\d+\/?$/.test(c.pr.url)); }
+// The board's own PR-URL definition (board.ts PR_URL), put here by the daemon
+// when it serves this page — never a second copy that could drift from it.
+var PR_URL = /*@PR_URL*/null;
+function hasPr(c){ return !!(c.pr && typeof c.pr.url === "string" && PR_URL.test(c.pr.url)); }
 function gated(c, col){ return GATED.indexOf(col) >= 0 && c.role !== "pm" && !hasPr(c); }
 // The worktree is shown where the user might test the card: while it is live.
 var WT_COLUMNS = ["in_progress","review","human_review"];
@@ -477,7 +480,7 @@ function wire(){
     document.getElementById("pr-save").onclick = function(){
       var p = pending, c = p && card(p.id); if(!c){ pending = null; render(); return; }
       var u = document.getElementById("pr-url").value.trim();
-      if(!/^https?:\/\/\S+\/pull\/\d+\/?$/.test(u)){ statusMsg = "that is not a pull-request URL (…/pull/<n>)"; render(); return; }
+      if(!PR_URL.test(u)){ statusMsg = "that is not a pull-request URL (…/pull/<n>)"; render(); return; }
       var patch = Object.assign({}, p.patch, {pr: {url: u}});
       pending = null;
       var r = moveCard(c.id, p.column, (p.why || "Dragged") + " with its PR attached via review gate", patch, p.expected, p.from);

@@ -55,8 +55,12 @@ export interface Pr {
   number: number;
   url: string;
 }
-/** A pull request URL; the number is read from it. */
-const PR_URL = /^https?:\/\/[^\s/]+\/\S*\/pull\/(\d+)\/?$/;
+/**
+ * A pull request URL; the number is read from it. The ONE definition: the
+ * daemon also serves it to the web UI (see server.ts), so the page's gate
+ * check can never be looser or stricter than the board's.
+ */
+export const PR_URL = /^https?:\/\/[^\s/]+\/\S*\/pull\/(\d+)\/?$/;
 export interface ActivityEntry {
   t: string;
   by: string;
@@ -292,35 +296,63 @@ function hasPr(doc: Record<string, unknown>): boolean {
  * own report (`by: "engineer"`, message starting READY — "READY_FOR_REVIEW —
  * PR #N ...") and the orchestrator's record of it (`by: "orchestrator"`,
  * starting "ENGINEER DONE" or "READY FOR REVIEW"). The PR is the first
- * "PR #N" in each such entry. Exactly one distinct N across a card's
+ * "PR #N" in each such entry. The orchestrator's move record ("Moved:
+ * in_progress -> review. PR #N ...") counts too, but only when the PR is its
+ * immediate subject: further into such an entry a PR is usually a reference
+ * (a merge order, a sibling card). Exactly one distinct N across a card's
  * hand-offs gives `pr`; none gives null; several give null and are reported
  * as ambiguous. The url is the card's own link to /pull/N when it has one,
  * else built from the board's single repository base (reported as
  * constructed; with no single base it is left null and reported ambiguous).
  */
-export function derivePr(cards: Record<string, unknown>[]): {
+export function derivePr(
+  cards: Record<string, unknown>[],
+  /** The whole board, whose PR urls name the repository; defaults to `cards`. */
+  board: Record<string, unknown>[] = cards,
+): {
   pr: Record<string, Pr | null>;
   ambiguous: { id: string; candidates: number[] }[];
   constructed: string[];
+  /** Hand-off entries naming 2+ distinct PRs: the first was taken; listed so a human can check it. */
+  multi: { id: string; t: string; numbers: number[] }[];
 } {
-  const isHandoff = (a: ActivityEntry) =>
-    (a.by === "engineer" && /^READY/.test(a.msg)) || (a.by === "orchestrator" && /^(ENGINEER DONE|READY FOR REVIEW)/.test(a.msg));
+  // The PR a hand-off entry names as the card's own; null for a hand-off
+  // naming none; undefined for an entry that is not a hand-off record.
+  const handoffPr = (a: ActivityEntry): number | null | undefined => {
+    if ((a.by === "engineer" && /^READY/.test(a.msg)) || (a.by === "orchestrator" && /^(ENGINEER DONE|READY FOR REVIEW)/.test(a.msg))) {
+      const m = /PR #(\d+)/.exec(a.msg);
+      return m ? Number(m[1]) : null;
+    }
+    if (a.by === "orchestrator") {
+      const m = /^Moved: in_progress (?:->|→) review\. PR #(\d+)\b/.exec(a.msg);
+      if (m) return Number(m[1]);
+    }
+    return undefined;
+  };
   const bases = new Set<string>();
-  for (const c of cards) {
-    for (const l of Array.isArray(c.links) ? c.links : []) {
+  for (const c of board) {
+    // Every PR url the board already has — reference links and carried prs — names its repository.
+    for (const l of [...(Array.isArray(c.links) ? c.links : []), ...(isObj(c.pr) ? [c.pr] : [])]) {
       const m = isObj(l) && typeof l.url === "string" ? /^(https?:\/\/\S+?)\/pull\/\d+\/?$/.exec(l.url) : null;
       if (m) bases.add(m[1]);
     }
   }
   const base = bases.size === 1 ? [...bases][0] : null;
-  const out = { pr: {} as Record<string, Pr | null>, ambiguous: [] as { id: string; candidates: number[] }[], constructed: [] as string[] };
+  const out = {
+    pr: {} as Record<string, Pr | null>,
+    ambiguous: [] as { id: string; candidates: number[] }[],
+    constructed: [] as string[],
+    multi: [] as { id: string; t: string; numbers: number[] }[],
+  };
   for (const c of cards) {
     const id = String(c.id);
     const nums = new Set<number>();
     for (const a of (Array.isArray(c.activity) ? c.activity : []) as ActivityEntry[]) {
-      if (!isHandoff(a)) continue;
-      const m = /PR #(\d+)/.exec(a.msg);
-      if (m) nums.add(Number(m[1]));
+      const n = handoffPr(a);
+      if (n === undefined) continue;
+      if (n !== null) nums.add(n);
+      const named = [...new Set([...a.msg.matchAll(/PR #(\d+)/g)].map((m) => Number(m[1])))];
+      if (named.length > 1) out.multi.push({ id, t: a.t, numbers: named });
     }
     if (nums.size !== 1) {
       out.pr[id] = null;
@@ -917,7 +949,16 @@ export class Board extends EventEmitter {
     cards: number;
     activity: number;
     nextId: number;
-    migration: { pr_derived: number; pr_null: number; pr_kept: number; ambiguous: { id: string; candidates: number[] }[]; constructed_url: string[] };
+    migration: {
+      pr_derived: number;
+      pr_null: number;
+      pr_kept: number;
+      ambiguous: { id: string; candidates: number[] }[];
+      constructed_url: string[];
+      /** Non-pm cards still in flight (review, human_review, unreleased done) left with no pr: act on these. */
+      live_without_pr: string[];
+      multi_pr_handoffs: { id: string; t: string; numbers: number[] }[];
+    };
   } {
     const actor = checkActor(meta.actor);
     if (!isObj(state)) invalid("state must be an object");
@@ -940,7 +981,7 @@ export class Board extends EventEmitter {
       if (typeof c.title !== "string") invalid(`${String(c.id)}: title must be a string`);
       if ("pr" in c) {
         try {
-          checkPr(c.pr);
+          c.pr = checkPr(c.pr); // stored normalised: {number, url}
         } catch {
           invalid(`${String(c.id)}: pr must be null or {number, url} with a pull-request url`);
         }
@@ -959,13 +1000,21 @@ export class Board extends EventEmitter {
     // derived (see derivePr); a card without `worktree` gets null. A state
     // that already carries them (a re-import of an export) keeps them as is.
     const toDerive = (cards as Record<string, unknown>[]).filter((c) => !("pr" in c));
-    const derived = derivePr(toDerive);
+    const derived = derivePr(toDerive, cards as Record<string, unknown>[]);
     const migration = {
       pr_derived: Object.values(derived.pr).filter((p) => p !== null).length,
       pr_null: Object.values(derived.pr).filter((p) => p === null).length,
       pr_kept: cards.length - toDerive.length,
       ambiguous: derived.ambiguous,
       constructed_url: derived.constructed,
+      live_without_pr: (cards as Record<string, unknown>[])
+        .filter((c) => {
+          const pr = "pr" in c ? c.pr : derived.pr[String(c.id)];
+          const live = c.column === "review" || c.column === "human_review" || (c.column === "done" && !c.released);
+          return live && c.role !== "pm" && pr == null;
+        })
+        .map((c) => String(c.id)),
+      multi_pr_handoffs: derived.multi,
     };
     return this.write(() => {
       if (!this.isEmpty()) throw new BoardError("not_empty", "import only loads into an EMPTY database; this one already has cards");

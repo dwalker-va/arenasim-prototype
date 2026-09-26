@@ -83,7 +83,15 @@ Import migrates artifact-era cards to the current model: each gains `pr` (the
 card's own PR, derived from its hand-off record — never from `links`, which
 are references) and `worktree` (null). The rule is in
 `docs/design/agent-pipeline.md` (*State schema*); `import` prints what it
-derived, what it left null, and every ambiguous or url-constructed card.
+derived, what it left null, every ambiguous or url-constructed card, every
+in-flight card left without a `pr` (`live_without_pr` — set those by hand),
+and every hand-off entry naming more than one PR.
+
+`npm run test:mutation` runs an unmutated copy first as a control: every test a
+mutant names must pass there, or no kill is counted. The copies live under
+`.mutants/`, outside the checkout layout, so the harness hands them the real
+`packaging/` and board fixture (`DISPATCH_BOARD_PACKAGING_DIR`,
+`DISPATCH_BOARD_FIXTURE`).
 
 ## Test
 

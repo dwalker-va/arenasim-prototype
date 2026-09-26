@@ -5,12 +5,12 @@
 // so a concurrent write is either kept or the save is refused, never undone.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { JSDOM } from "jsdom";
-import { spawnDaemon, mcpClient, call, PKG } from "./helpers.mjs";
+import { spawnDaemon, mcpClient, call } from "./helpers.mjs";
 
-const HTML = readFileSync(join(PKG, "ui", "board.html"), "utf8");
+// The page as the daemon serves it (with the board's PR_URL substituted in).
+const { uiPage } = await import("../dist/server.js");
+const HTML = uiPage();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function until(what, pred, ms = 5000) {
@@ -358,4 +358,10 @@ test("worktree: copyable in the drawer, on the card face while active, not on a 
   assert.equal(field.value, tree, "the drawer's path is not the full, pasteable path");
   assert.ok(field.readOnly, "the path is informational");
   assert.ok(page.doc.getElementById("d-worktree-copy"), "no copy button");
+});
+
+test("the page's PR check is the board's own definition, not a copy", async () => {
+  const { PR_URL } = await import("../dist/board.js");
+  assert.ok(HTML.includes(JSON.stringify(PR_URL.source)), "the served page does not carry board.ts's PR_URL");
+  assert.doesNotMatch(HTML, /\\\/pull\\\/\\d\+/, "the page carries a hand-written PR regex of its own");
 });

@@ -126,6 +126,45 @@ test("migration: pr is derived from the Engineer's own hand-off, never from refe
   assert.deepEqual(r.constructed, ["AS-2", "AS-3"], "urls built from the board's single repository base are reported");
 });
 
+test("migration: the orchestrator's move-to-review record counts only when the PR is its subject", () => {
+  const moved = (text) => act("t", "orchestrator", text);
+  const r = derivePr([
+    // AS-138's shape: the hand-off names the card's own PR right after the move
+    { id: "AS-1", links: [], activity: [moved("Moved: in_progress -> review. PR #207 at e353d9e. Tester-AS-138 spawned.")] },
+    { id: "AS-2", links: [], activity: [moved("Moved: in_progress → review. PR #9 verified OPEN, head c719c7f")] },
+    // a move entry whose first PR is a reference (a merge-order note) is not a hand-off record
+    { id: "AS-3", links: [{ label: "PR #158 (merge first)", url: "https://github.com/o/r/pull/158" }], activity: [moved("Moved: in_progress -> review. Tester spawned. MERGE ORDER: after #158 - PR #158 first")] },
+    // and it never outvotes the Engineer's own report
+    { id: "AS-4", links: [], activity: [handoff(206), moved("Moved: in_progress -> review at 73fda84. Round-4 Tester spawned; AS-138 PR #207 next")] },
+  ]);
+  assert.deepEqual(Object.fromEntries(Object.entries(r.pr).map(([k, v]) => [k, v && v.number])), { "AS-1": 207, "AS-2": 9, "AS-3": null, "AS-4": 206 });
+});
+
+test("migration report: lists live cards left without a pr, and hand-offs naming several PRs", (t) => {
+  const { board } = tempBoard(t);
+  const base = { title: "t", body: "", role: "engineer", priority: "P2", question: null, agent: null, created: "c", updated: "u", links: [] };
+  const state = {
+    schema: 1,
+    nextId: 9,
+    cards: [
+      { id: "AS-1", ...base, column: "done", activity: [] }, // live: done, unreleased
+      { id: "AS-2", ...base, column: "done", released: "v1", activity: [] }, // shipped: not listed
+      { id: "AS-3", ...base, column: "review", activity: [] }, // live
+      { id: "AS-4", ...base, column: "human_review", activity: [] }, // live
+      { id: "AS-5", ...base, column: "backlog", activity: [] }, // not started: not listed
+      { id: "AS-6", ...base, column: "done", role: "pm", activity: [] }, // pm: no PR by design
+      { id: "AS-7", ...base, column: "done", activity: [act("t", "engineer", "READY_FOR_REVIEW — PR #5, rebased onto PR #4")] },
+      { id: "AS-8", ...base, column: "archived", activity: [], pr: { url: "https://github.com/o/r/pull/8" } },
+    ],
+  };
+  const r = board.importState(structuredClone(state), { actor: "import" });
+  assert.deepEqual(r.migration.live_without_pr, ["AS-1", "AS-3", "AS-4"]);
+  assert.deepEqual(r.migration.multi_pr_handoffs, [{ id: "AS-7", t: "t", numbers: [5, 4] }]);
+  assert.equal(board.getCard("AS-7").pr.number, 5);
+  // A carried pr is stored normalised: a {url}-only pr gains its number.
+  assert.deepEqual(board.getCard("AS-8").pr, { number: 8, url: "https://github.com/o/r/pull/8" });
+});
+
 test("migration: import adds pr and worktree; a state that already carries them keeps them; export is exact otherwise", (t) => {
   const { board } = tempBoard(t);
   const base = { title: "t", body: "", column: "archived", role: "engineer", priority: "P2", question: null, agent: null, created: "c", updated: "u" };
@@ -139,7 +178,7 @@ test("migration: import adds pr and worktree; a state that already carries them 
     ],
   };
   const r = board.importState(structuredClone(state), { actor: "import" });
-  assert.deepEqual(r.migration, { pr_derived: 1, pr_null: 1, pr_kept: 1, ambiguous: [], constructed_url: [] });
+  assert.deepEqual(r.migration, { pr_derived: 1, pr_null: 1, pr_kept: 1, ambiguous: [], constructed_url: [], live_without_pr: [], multi_pr_handoffs: [] });
   const out = board.exportState();
   const expected = structuredClone(state);
   expected.cards[0].pr = { number: 5, url: "https://github.com/o/r/pull/5" };

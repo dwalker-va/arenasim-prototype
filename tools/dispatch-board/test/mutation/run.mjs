@@ -8,12 +8,48 @@
 // applied — the edit must match exactly once, so a refactor that moves a guard
 // fails this script loudly instead of silently mutating nothing. The mutant's
 // suite must FAIL, and must fail in the tests named for that guard.
+//
+// A kill only counts if the named tests fail BECAUSE of the mutation. So the
+// copies see the real repository — the checkout's packaging/ icon and the
+// saved board fixture, which a two-deep .mutants/ copy cannot reach by
+// relative path — and an UNMUTATED copy in the same layout runs first as the
+// control: every test any mutant names must PASS there, or no mutant counts.
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const { packagingIconDir } = await import("../../dist/paths.js");
+const { realBoardPage } = await import("../helpers.mjs");
+
+// What the package resolves from its real place, handed to every copy explicitly.
+const ENV = {
+  ...process.env,
+  DISPATCH_BOARD_PACKAGING_DIR: packagingIconDir(),
+  ...(realBoardPage() ? { DISPATCH_BOARD_FIXTURE: realBoardPage() } : {}),
+};
+const SUITES = ["board", "race", "daemon", "roundtrip", "ui", "prwork"];
+
+/** A copy of the package's dist/ui/test under .mutants/<name>/, optionally with one edit applied. */
+function copyTo(name) {
+  const dir = join(PKG, ".mutants", name);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  for (const sub of ["dist", "ui", "test"]) cpSync(join(PKG, sub), join(dir, sub), { recursive: true });
+  return dir;
+}
+
+function runSuite(dir) {
+  const tests = SUITES.map((n) => join(dir, "test", `${n}.test.mjs`));
+  const r = spawnSync(process.execPath, ["--test", ...tests], { encoding: "utf8", cwd: dir, env: ENV });
+  const lines = [...r.stdout.matchAll(/^(not ok|ok) \d+ - (.*)$/gm)];
+  return {
+    status: r.status,
+    failed: lines.filter((l) => l[1] === "not ok").map((l) => l[2]),
+    passed: lines.filter((l) => l[1] === "ok" && !/ # SKIP\b/.test(l[2])).map((l) => l[2]),
+  };
+}
 
 const MUTANTS = [
   {
@@ -117,9 +153,17 @@ const MUTANTS = [
     // Round 5: a card's own PR comes from its hand-off record, never from any activity naming a PR.
     name: "migration-handoff-only",
     file: "dist/board.js",
-    find: 'const isHandoff = (a) => (a.by === "engineer" && /^READY/.test(a.msg)) || (a.by === "orchestrator" && /^(ENGINEER DONE|READY FOR REVIEW)/.test(a.msg));',
-    replace: "const isHandoff = (a) => true;",
+    find: 'if ((a.by === "engineer" && /^READY/.test(a.msg)) || (a.by === "orchestrator" && /^(ENGINEER DONE|READY FOR REVIEW)/.test(a.msg))) {',
+    replace: "if (true) {",
     mustFail: ["migration: pr is derived from the Engineer's own hand-off, never from reference links"],
+  },
+  {
+    // Round 6: a move record counts only when its PR is the move's own subject, not any PR it mentions.
+    name: "moved-record-subject-only",
+    file: "dist/board.js",
+    find: "const m = /^Moved: in_progress (?:->|→) review\\. PR #(\\d+)\\b/.exec(a.msg);",
+    replace: "const m = /^Moved: in_progress (?:->|→) review[\\s\\S]*?PR #(\\d+)\\b/.exec(a.msg);",
+    mustFail: ["migration: the orchestrator's move-to-review record counts only when the PR is its subject"],
   },
   {
     name: "attach-dialog-sets-pr",
@@ -155,12 +199,23 @@ const MUTANTS = [
   },
 ];
 
+// The control: the unmutated copy, same layout, same environment.
+const control = runSuite(copyTo("control"));
+rmSync(join(PKG, ".mutants", "control"), { recursive: true, force: true });
+const named = [...new Set(MUTANTS.flatMap((m) => m.mustFail))];
+const notPassing = named.filter((n) => !control.passed.some((p) => p.startsWith(n)));
+if (control.status !== 0 || notPassing.length) {
+  console.log("FAIL control: the UNMUTATED copy is not green, so no kill below could be attributed to its mutation");
+  for (const f of control.failed) console.log(`       failing: ${f}`);
+  for (const n of notPassing) console.log(`       not passing (failing, skipped or missing): ${n}`);
+  rmSync(join(PKG, ".mutants"), { recursive: true, force: true });
+  process.exit(1);
+}
+console.log(`ok   control: the unmutated copy passes all ${control.passed.length} tests, including all ${named.length} a mutant names`);
+
 let failures = 0;
 for (const m of MUTANTS) {
-  const dir = join(PKG, ".mutants", m.name);
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
-  for (const sub of ["dist", "ui", "test"]) cpSync(join(PKG, sub), join(dir, sub), { recursive: true });
+  const dir = copyTo(m.name);
   const target = join(dir, m.file);
   const src = readFileSync(target, "utf8");
   const hits = src.split(m.find).length - 1;
@@ -171,9 +226,8 @@ for (const m of MUTANTS) {
   }
   writeFileSync(target, src.replace(m.find, m.replace));
 
-  const tests = ["board", "race", "daemon", "roundtrip", "ui", "prwork"].map((n) => join(dir, "test", `${n}.test.mjs`));
-  const r = spawnSync(process.execPath, ["--test", ...tests], { encoding: "utf8", cwd: dir });
-  const failed = [...r.stdout.matchAll(/^not ok \d+ - (.*)$/gm)].map((x) => x[1]);
+  const r = runSuite(dir);
+  const failed = r.failed;
   const missing = m.mustFail.filter((name) => !failed.some((f) => f.startsWith(name)));
   if (r.status === 0 || missing.length) {
     console.log(`FAIL ${m.name}: the suite did not catch this mutant`);

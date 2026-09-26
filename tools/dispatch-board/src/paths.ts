@@ -26,6 +26,9 @@ export function repoRoot(): string {
  * regenerated icon reaches the browser tab with no change here.
  */
 export function packagingIconDir(): string {
+  // DISPATCH_BOARD_PACKAGING_DIR: for a copy of this package that is not in
+  // its checkout (the mutation harness's copies) — never needed in normal use.
+  if (process.env.DISPATCH_BOARD_PACKAGING_DIR) return resolve(process.env.DISPATCH_BOARD_PACKAGING_DIR);
   return join(repoRoot(), "packaging");
 }
 

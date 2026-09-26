@@ -118,9 +118,16 @@ gets `null`. A card without `pr` gets it derived from its **hand-off record**:
 activity entries by `engineer` whose message starts `READY` (the Engineer's
 `READY_FOR_REVIEW — PR #N …`) or by `orchestrator` starting `ENGINEER DONE` /
 `READY FOR REVIEW` (the orchestrator's record of that hand-off). The PR is the
-first `PR #N` in each such entry. One distinct `N` across a card's hand-offs
-gives `pr`; none gives `null`; several give `null` and are listed as ambiguous
-in the import report. Link labels are never read — "PR #206 (the authority
+first `PR #N` in each such entry. The orchestrator's move record counts too,
+but only as `Moved: in_progress -> review. PR #N …` — the PR as the move's
+immediate subject — because further into those entries a PR is usually a
+reference (a merge order, a sibling card). One distinct `N` across a card's
+hand-offs gives `pr`; none gives `null`; several give `null` and are listed as
+ambiguous in the import report. The report also lists, by id, every non-pm
+card left with `pr: null` while still in flight (`review`, `human_review`, or
+`done` without `released`) — those need a hand-set `pr` before the Tester or
+the release can use them — and every hand-off entry that names more than one
+PR, where the first was taken. Link labels are never read — "PR #206 (the authority
 this would amend)" is a reference. The url is the card's own link to
 `/pull/N` when it has one, else built from the board's single repository base
 (the report lists those too). A state that already carries the fields (a
