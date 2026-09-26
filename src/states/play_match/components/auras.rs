@@ -1,6 +1,7 @@
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityConfig;
 use super::super::constants::{DR_IMMUNE_LEVEL, DR_MULTIPLIERS, DR_RESET_TIMER};
+use super::super::equipment::ItemId;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -745,22 +746,17 @@ pub struct Aura {
     /// Every member of a compound carries the SAME value here, and the members
     /// are applied together, expire together and are removed together.
     pub compound: Option<CompoundDebuff>,
-    /// Whether this aura's identity is its SOURCE rather than its
-    /// `effect_type` — that is, whether a buff of the same type from a
-    /// DIFFERENT source may be up at the same time.
+    /// The ITEM that applied this aura, when an item rather than an ability
+    /// did — today, a proc trinket's buff. `None` for every other aura.
     ///
-    /// `false` for every ability-applied aura, which is the long-standing
-    /// rule: one `MaxHealthIncrease` at a time, whether it came from Power
-    /// Word: Fortitude or Commanding Shout. `apply_pending_auras` enforces it
-    /// by keying the buff on its `effect_type`.
+    /// It is what lets a proc buff address its trinket: the buff bar and the
+    /// team frames draw the item's own icon from it, where a proc would
+    /// otherwise have no applying ability to borrow art from.
     ///
-    /// `true` for a PROC TRINKET's buff, and it has to be. A trinket granting
-    /// attack power is a different thing from Battle Shout granting attack
-    /// power, and a wearer may have both — indeed the point of the second
-    /// trinket socket is that two different trinkets are live at once. Keyed
-    /// on `ability_name` instead, exactly as `Absorb` already is for the same
-    /// reason (two different shields coexist).
-    pub distinct_by_source: bool,
+    /// It also makes the aura [`Aura::distinct_by_source`]. One field rather
+    /// than a flag beside it, so "keyed on its source" and "has a source item"
+    /// cannot disagree.
+    pub source_item: Option<ItemId>,
 }
 
 impl Aura {
@@ -775,6 +771,25 @@ impl Aura {
             .or_else(|| DRCategory::from_aura_type(&self.effect_type))
     }
 
+    /// Whether this aura's identity is its SOURCE rather than its
+    /// `effect_type` — that is, whether a buff of the same type from a
+    /// DIFFERENT source may be up at the same time.
+    ///
+    /// `false` for every ability-applied aura, which is the long-standing
+    /// rule: one `MaxHealthIncrease` at a time, whether it came from Power
+    /// Word: Fortitude or Commanding Shout. `apply_pending_auras` enforces it
+    /// by keying the buff on its `effect_type`.
+    ///
+    /// `true` for an aura an ITEM applied (a proc trinket's buff), and it has
+    /// to be. A trinket granting attack power is a different thing from Battle
+    /// Shout granting attack power, and a wearer may have both — indeed the
+    /// point of the second trinket socket is that two different trinkets are
+    /// live at once. Keyed on `ability_name` instead, exactly as `Absorb`
+    /// already is for the same reason (two different shields coexist).
+    pub fn distinct_by_source(&self) -> bool {
+        self.source_item.is_some()
+    }
+
     /// Whether this aura occupies the one-per-TYPE buff slot for `effect` —
     /// that is, whether it should stop a type-keyed buff of `effect` (Battle
     /// Shout, Power Word: Fortitude, Arcane Intellect) from landing, or from
@@ -786,7 +801,7 @@ impl Aura {
     /// already have the buff" asks it here, so the rule reads the same whichever
     /// of the two arrives first.
     pub fn holds_type_slot(&self, effect: AuraType) -> bool {
-        self.effect_type == effect && !self.distinct_by_source
+        self.effect_type == effect && !self.distinct_by_source()
     }
 
     /// Returns true if this aura can be removed by a DISPEL — Dispel Magic,
@@ -1135,7 +1150,7 @@ impl AuraPending {
                 // An ability applies at most one aura, so a RON-defined aura is never
                 // part of a compound debuff. See `CompoundDebuff`.
                 compound: None,
-                distinct_by_source: false,
+                source_item: None,
             },
         })
     }
@@ -1184,7 +1199,7 @@ impl AuraPending {
                 // An ability applies at most one aura, so a RON-defined aura is never
                 // part of a compound debuff. See `CompoundDebuff`.
                 compound: None,
-                distinct_by_source: false,
+                source_item: None,
             },
         })
     }
@@ -1233,7 +1248,7 @@ impl AuraPending {
                 // An ability applies at most one aura, so a RON-defined aura is never
                 // part of a compound debuff. See `CompoundDebuff`.
                 compound: None,
-                distinct_by_source: false,
+                source_item: None,
             },
         })
     }
@@ -1582,7 +1597,7 @@ mod compound_tests {
             effect_type,
             duration: 5.0,
             compound: Some(CompoundDebuff::FrostArmorChill),
-            distinct_by_source: false,
+            source_item: None,
             ..Default::default()
         }
     }
@@ -1766,7 +1781,7 @@ mod tests {
     fn only_a_type_keyed_buff_holds_the_type_slot() {
         let shout = aura(AuraType::AttackPowerIncrease);
         let mut proc = aura(AuraType::AttackPowerIncrease);
-        proc.distinct_by_source = true;
+        proc.source_item = Some(ItemId::DragonspineTrophy);
         assert!(shout.holds_type_slot(AuraType::AttackPowerIncrease));
         assert!(!proc.holds_type_slot(AuraType::AttackPowerIncrease));
         assert!(!shout.holds_type_slot(AuraType::MaxHealthIncrease));

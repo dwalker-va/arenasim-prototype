@@ -950,7 +950,7 @@ pub fn frost_armor_movement_slow_aura() -> Aura {
         dr_category_override: None,
         dispel_type: DispelType::Auto,
         compound: Some(CompoundDebuff::FrostArmorChill),
-        distinct_by_source: false,
+        source_item: None,
     }
 }
 
@@ -976,7 +976,7 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
         dr_category_override: None,
         dispel_type: DispelType::Auto,
         compound: Some(CompoundDebuff::FrostArmorChill),
-        distinct_by_source: false,
+        source_item: None,
     }
 }
 

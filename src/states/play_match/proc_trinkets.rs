@@ -208,7 +208,8 @@ impl ProcConfig {
 
     /// The buff this proc grants, ready to hand to `AuraPending`.
     ///
-    /// `distinct_by_source` is set, so this buff coexists with a same-stat buff
+    /// `source_item` is set, so the buff draws its trinket's icon and is
+    /// `distinct_by_source` — it coexists with a same-stat buff
     /// from another source — a Warrior's Battle Shout does not swallow an
     /// attack-power proc, and two different trinkets granting the same stat are
     /// both live. That is the behaviour the second trinket socket depends on.
@@ -217,7 +218,7 @@ impl ProcConfig {
     /// takes magic, and an item's effect is not a spell however magical it
     /// looks. Declared here rather than derived from a school because a
     /// trinket has no school to derive it from.
-    pub fn aura(&self, source_name: &str) -> Aura {
+    pub fn aura(&self, item: ItemId, source_name: &str) -> Aura {
         Aura {
             effect_type: self.effect,
             duration: self.duration,
@@ -236,7 +237,7 @@ impl ProcConfig {
             dr_category_override: None,
             dispel_type: DispelType::Physical,
             compound: None,
-            distinct_by_source: true,
+            source_item: Some(item),
         }
     }
 }
@@ -410,7 +411,7 @@ pub fn roll_procs(
         }
         if game_rng.random_f32() < slot.config.chance {
             slot.remaining_icd = slot.config.internal_cooldown;
-            granted.push(slot.config.aura(&slot.name));
+            granted.push(slot.config.aura(slot.item, &slot.name));
         }
     }
     granted
@@ -703,7 +704,8 @@ mod tests {
             .copied()
             .filter(|a| proc_effect_budget_weight(*a).is_some())
         {
-            let aura = cfg(effect, 10.0, 10.0, 45.0).aura("Some Trinket");
+            let aura =
+                cfg(effect, 10.0, 10.0, 45.0).aura(ItemId::DragonspineTrophy, "Some Trinket");
             assert!(aura.is_physical(), "{effect:?} proc is not physical");
             assert!(!aura.can_be_purged(), "{effect:?} proc is purgeable");
             assert!(!aura.can_be_dispelled(), "{effect:?} proc is dispellable");
@@ -715,8 +717,9 @@ mod tests {
         // Without this, a Warrior's Battle Shout (AttackPowerIncrease) would
         // swallow an attack-power proc for the whole match — the buff dedup in
         // `apply_pending_auras` keys on effect_type unless told otherwise.
-        let aura = cfg(AuraType::AttackPowerIncrease, 55.0, 10.0, 45.0).aura("Dragonspine Trophy");
-        assert!(aura.distinct_by_source);
+        let aura = cfg(AuraType::AttackPowerIncrease, 55.0, 10.0, 45.0)
+            .aura(ItemId::DragonspineTrophy, "Dragonspine Trophy");
+        assert!(aura.distinct_by_source());
         assert_eq!(aura.ability_name, "Dragonspine Trophy");
         assert_eq!(
             aura.break_on_damage_threshold, -1.0,

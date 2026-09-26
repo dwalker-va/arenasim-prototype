@@ -185,7 +185,7 @@ mod tests {
             dr_category_override: None,
             dispel_type: DispelType::Auto,
             compound: None,
-            distinct_by_source: false,
+            source_item: None,
         }
     }
 
@@ -496,7 +496,7 @@ mod tests {
                 dr_category_override: None,
                 dispel_type: DispelType::Auto,
                 compound: None,
-                distinct_by_source: false,
+                source_item: None,
             }],
         };
 
@@ -559,7 +559,7 @@ mod tests {
                 dr_category_override: None,
                 dispel_type: DispelType::Auto,
                 compound: None,
-                distinct_by_source: false,
+                source_item: None,
             }],
         };
 
@@ -655,7 +655,7 @@ mod tests {
                 dr_category_override: None,
                 dispel_type: DispelType::Auto,
                 compound: None,
-                distinct_by_source: false,
+                source_item: None,
             }],
         };
         assert!(!has_absorb_shield(Some(&auras)));
@@ -691,7 +691,7 @@ mod tests {
                 dr_category_override: None,
                 dispel_type: DispelType::Auto,
                 compound: None,
-                distinct_by_source: false,
+                source_item: None,
             }],
         };
         assert!(has_weakened_soul(Some(&auras)));
@@ -843,7 +843,7 @@ mod tests {
             dr_category_override: None,
             dispel_type: DispelType::Auto,
             compound: None,
-            distinct_by_source: false,
+            source_item: None,
         }
     }
 

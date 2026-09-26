@@ -453,9 +453,13 @@ any ring fits either ring socket, and the same item may not occupy both
    - **Procs are not purgeable.** A proc buff is `DispelType::Physical` — an
      item's effect is not a spell, however magical it looks — so no purge,
      dispel or cleanse removes it.
-   - Every item with a `proc:` gets its own Buffs & Debuffs entry in the
-     encyclopedia, and its proc sentence on the item page and the equipment
-     picker tooltip, with no code change.
+   - Every item with a `proc:` gets, with no code change: its own Buffs &
+     Debuffs entry in the encyclopedia; its proc sentence (`proc_description`,
+     the one generator) on the item page, the item tooltip and a second line
+     under its row in View Combatant's equipment picker; and a proc buff that
+     wears the TRINKET's icon (`ItemConfig.icon`) in the buff bar, the team
+     frames and the encyclopedia — the buff carries `Aura::source_item`, and
+     `item_aura_icons` registers the art in both aura icon loaders.
 
 3. **Add to a class loadout** in `loadouts.ron` if it should be default equipment
 

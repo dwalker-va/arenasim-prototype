@@ -74,7 +74,7 @@ use crate::states::play_match::effects::backlash::{
 };
 use crate::states::play_match::equipment::{ItemDefinitions, ItemId};
 use crate::states::play_match::proc_trinkets::proc_description;
-use crate::states::play_match::rendering::is_buff_aura;
+use crate::states::play_match::rendering::{is_buff_aura, item_aura_icon_key};
 use crate::states::play_match::shadow_sight::{
     SHADOW_SIGHT_BREAK_ON_DAMAGE, SHADOW_SIGHT_DURATION, SHADOW_SIGHT_SPAWN_TIME,
 };
@@ -276,8 +276,8 @@ pub enum Persistence {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuraSource {
     /// Applied by an ability with a page of its own. That page is where the
-    /// APPLIED BY section links — and, unless the entry carries [`AuraArt::Own`],
-    /// where its icon comes from.
+    /// APPLIED BY section links — and, when the entry carries
+    /// [`AuraArt::FromSource`], where its icon comes from.
     Ability(AbilityType),
     /// Applied by a match mechanic with no ability behind it — the arena's
     /// Shadow Sight orbs are the only one today. The string names the mechanic
@@ -325,6 +325,9 @@ pub enum AuraArt {
     /// the same table the actor frames load from, so a page and a buff bar
     /// cannot show different art for one aura.
     Own(&'static str),
+    /// The aura wears the icon of the ITEM that applies it — a proc trinket's
+    /// buff. Resolved through `item_aura_icon_key`, the key the buff bar uses.
+    Item(ItemId),
 }
 
 /// One catalog entry: a named aura, fully resolved.
@@ -683,11 +686,10 @@ fn engine_art(engine: EngineAura) -> AuraArt {
         | EngineAura::WeaponPoisonCoating(_)
         | EngineAura::DispelBacklashSilence
         | EngineAura::FrostArmorChill => AuraArt::FromSource,
-        // No ability applies it, so there is no ability icon to borrow. One
-        // shared proc-buff tile rather than the trinket's own art: `AuraArt`
-        // addresses an ability icon or a generic aura key, and teaching it to
-        // address an ITEM icon is a bigger change than this entry is worth.
-        EngineAura::ProcTrinketBuff(_) => AuraArt::Own("aura_proc_trinket"),
+        // No ability applies it; the TRINKET does, and the buff wears the
+        // trinket's own icon — as it does in the buff bar, which reads the
+        // same key off the aura's `source_item`.
+        EngineAura::ProcTrinketBuff(item) => AuraArt::Item(item),
     }
 }
 
@@ -879,7 +881,7 @@ fn engine_entry(
                 school: None,
                 // A proc buff is never broken by damage — see `ProcConfig::aura`.
                 break_on_damage: -1.0,
-                dispel_type: proc.aura(&def.name).dispel_type,
+                dispel_type: proc.aura(item, &def.name).dispel_type,
                 persistence: Persistence::Seconds(proc.duration),
                 riders: EngineSpec::no_riders(),
                 // Read straight off the same `ProcConfig` the simulation rolls
@@ -1059,6 +1061,7 @@ pub fn icon_key(
     let identity = identity(id, abilities, items)?;
     match identity.art {
         AuraArt::Own(key) => Some(key.to_string()),
+        AuraArt::Item(item) => Some(item_aura_icon_key(item)),
         AuraArt::FromSource => {
             let ability = identity.source.ability()?;
             abilities.get(&ability).map(|def| def.name.clone())
@@ -1487,7 +1490,7 @@ fn badge(ui: &mut egui::Ui, label: &str, color: egui::Color32) -> egui::Response
 mod tests {
     use super::*;
     use crate::states::play_match::ability_config::load_ability_definitions;
-    use crate::states::play_match::rendering::GENERIC_AURA_ICONS;
+    use crate::states::play_match::rendering::{item_aura_icons, GENERIC_AURA_ICONS};
 
     fn abilities() -> AbilityDefinitions {
         load_ability_definitions().expect("abilities.ron must load")
@@ -2352,6 +2355,7 @@ mod tests {
     fn every_entry_resolves_to_an_icon_that_exists() {
         let abilities = abilities();
         let mut own_art: Vec<String> = Vec::new();
+        let mut item_art: Vec<String> = Vec::new();
         for entry in catalog(&abilities, &items()) {
             let key = icon_key(entry.id, &abilities, &items())
                 .unwrap_or_else(|| panic!("{} has no icon key — a placeholder tile", entry.name));
@@ -2378,6 +2382,31 @@ mod tests {
                     );
                     own_art.push(entry.name.clone());
                 }
+                AuraArt::Item(item) => {
+                    // The key the buff bar draws a proc under, registered by
+                    // `item_aura_icons` — which both loaders read — at the
+                    // trinket's own icon file.
+                    assert_eq!(key, item_aura_icon_key(item));
+                    let path = item_aura_icons(&items())
+                        .into_iter()
+                        .find(|(registered, _)| *registered == key)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "{}'s item icon {:?} is registered by no loader",
+                                entry.name, key
+                            )
+                        })
+                        .1;
+                    assert_eq!(path, items().get(&item).expect("defined").icon);
+                    let on_disk = std::path::Path::new("assets").join(&path);
+                    assert!(
+                        on_disk.exists(),
+                        "{} points at {}, which is not in the asset tree",
+                        entry.name,
+                        on_disk.display()
+                    );
+                    item_art.push(entry.name.clone());
+                }
                 AuraArt::FromSource => {
                     let ability = entry
                         .source
@@ -2388,14 +2417,17 @@ mod tests {
             }
         }
         own_art.sort();
+        assert_eq!(
+            own_art,
+            vec!["Shadow Sight".to_string(), "Weakened Soul".to_string()],
+            "the auras whose own art beats a borrowed icon"
+        );
+        item_art.sort();
         let mut expected = proc_trinket_names();
-        expected.push("Shadow Sight".to_string());
-        expected.push("Weakened Soul".to_string());
         expected.sort();
         assert_eq!(
-            own_art, expected,
-            "the auras whose own art beats a borrowed icon: two one-offs, plus every proc \
-             trinket buff (no ability applies one, so there is no icon to borrow)"
+            item_art, expected,
+            "every proc trinket buff, and nothing else, wears its item's icon"
         );
 
         // The encyclopedia's loader waits for EVERY handle it opened before it

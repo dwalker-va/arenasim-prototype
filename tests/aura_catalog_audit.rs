@@ -564,7 +564,7 @@ fn named_auras_built_from_helpers_also_resolve() {
         let Some(proc) = item.proc.as_ref() else {
             continue;
         };
-        let sample = proc.aura(&item.name);
+        let sample = proc.aura(*id, &item.name);
         let mechanic = format!("{:?}", sample.effect_type);
         assert!(
             known.contains(&(sample.ability_name.clone(), mechanic.clone())),

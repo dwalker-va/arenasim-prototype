@@ -243,6 +243,7 @@ fn aura(effect_type: AuraType, name: &str, school: Option<SpellSchool>) -> Aura 
         dr_category_override: None,
         dispel_type: DispelType::Auto,
         compound: None,
+        source_item: None,
     }
 }
 

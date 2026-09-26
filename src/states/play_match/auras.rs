@@ -492,7 +492,7 @@ pub fn apply_pending_auras(
             //     Battle Shout, and the second trinket socket is only worth
             //     filling if two different trinkets can be live at once.
             let source_keyed =
-                pending.aura.effect_type == AuraType::Absorb || pending.aura.distinct_by_source;
+                pending.aura.effect_type == AuraType::Absorb || pending.aura.distinct_by_source();
             let buff_key: String = if source_keyed {
                 format!(
                     "source:{:?}:{}",
@@ -556,7 +556,7 @@ pub fn apply_pending_auras(
             // A proc trinket's buff says so in the log, once per buff that
             // actually LANDED. That line is what a sweep counts to report how
             // often procs fired — a decisive-event count, not an assumption.
-            if pending.aura.distinct_by_source {
+            if pending.aura.distinct_by_source() {
                 combat_log.log(
                     CombatLogEventType::Buff,
                     format!("{} procs {}", target_id, pending.aura.ability_name),
@@ -1394,7 +1394,7 @@ mod tests {
             dr_category_override: None,
             dispel_type: DispelType::Auto,
             compound: None,
-            distinct_by_source: false,
+            source_item: None,
         }
     }
 

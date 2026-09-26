@@ -129,7 +129,7 @@ pub fn trap_system(
                                 dr_category_override: None,
                                 dispel_type: DispelType::Auto,
                                 compound: None,
-                                distinct_by_source: false,
+                                source_item: None,
                             },
                         },
                         PlayMatchEntity,
@@ -269,7 +269,7 @@ pub fn slow_zone_system(
                             dr_category_override: None,
                             dispel_type: DispelType::Auto,
                             compound: None,
-                            distinct_by_source: false,
+                            source_item: None,
                         });
                     }
                 } else {
@@ -293,7 +293,7 @@ pub fn slow_zone_system(
                             dr_category_override: None,
                             dispel_type: DispelType::Auto,
                             compound: None,
-                            distinct_by_source: false,
+                            source_item: None,
                         }],
                     });
                 }

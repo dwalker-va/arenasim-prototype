@@ -451,7 +451,7 @@ pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
         dr_category_override: None,
         dispel_type: super::DispelType::Auto,
         compound: None,
-        distinct_by_source: false,
+        source_item: None,
     }
 }
 

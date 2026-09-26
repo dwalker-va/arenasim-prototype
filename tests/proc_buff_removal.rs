@@ -22,6 +22,7 @@ use arenasim::states::play_match::components::{
     DispelScope, GameRng,
 };
 use arenasim::states::play_match::effects::process_dispels;
+use arenasim::states::play_match::equipment::ItemId;
 use arenasim::states::play_match::proc_trinkets::{ProcConfig, ProcTrigger};
 use arenasim::CharacterClass;
 
@@ -35,7 +36,7 @@ fn dragonspine_buff() -> Aura {
         duration: 10.0,
         internal_cooldown: 45.0,
     }
-    .aura("Dragonspine Trophy")
+    .aura(ItemId::DragonspineTrophy, "Dragonspine Trophy")
 }
 
 /// A Battle Shout buff as the ability path builds it: type-keyed, magic.
