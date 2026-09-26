@@ -1,9 +1,10 @@
 /**
  * The MCP surface: one tool per board operation, each a thin call into Board.
  *
- * Every WRITE takes `actor` — the writing session's tag (the orchestrator
- * uses "orchestrator"). It is recorded on the event the write produces, which
- * is what lets a session's `wait` ignore its own writes. `by` (optional)
+ * Every WRITE takes `actor` — the writing session's tag. It is recorded on
+ * the event the write produces, which is what lets a session's `wait` ignore
+ * its own writes; "orchestrator" is reserved for the orchestrator, whose wait
+ * ignores it (the tag is caller-supplied: trusted localhost, not auth). `by` (optional)
  * is the activity-log author and defaults to the actor.
  *
  * Refusals (stale version, failed claim, PR-link gate) come back as tool
@@ -16,7 +17,7 @@ import { Board, BoardError, COLUMNS, ROLES } from "./board.js";
 const actor = z
   .string()
   .min(1)
-  .describe('Your session/actor tag, recorded on the event this write makes (the orchestrator uses "orchestrator"). A `wait --ignore-actor <tag>` skips events carrying it.');
+  .describe('Your session/actor tag, recorded on the event this write makes. "orchestrator" is the orchestrator\'s alone — its wait ignores that tag, so no other session may use it. A `wait --ignore-actor <tag>` skips events carrying it.');
 const by = z.string().min(1).optional().describe("Activity-log author (e.g. orchestrator, tester, pm). Defaults to actor.");
 const id = z.string().min(1).describe("Card id, e.g. AS-7");
 const expectedVersion = z
@@ -35,7 +36,7 @@ const patch = z
     question: z.object({ text: z.string(), answer: z.string().optional() }).nullable(),
     agent: z
       .object({
-        status: z.enum(["working", "done"]),
+        status: z.literal("done").describe("Close out the card's working claim. A claim is only ever TAKEN with claim_card."),
         started: z.string().optional(),
         finished: z.string().optional(),
         name: z.string().optional(),
@@ -121,7 +122,7 @@ export function buildMcpServer(board: Board): McpServer {
     "update_card",
     {
       description:
-        "Patch card fields (title, body, role, priority, links, question, agent, released) under optimistic concurrency. Column changes go through move_card. Optionally append an activity line in the same write.",
+        "Patch card fields (title, body, role, priority, links, question, agent, released) under optimistic concurrency. Column changes go through move_card. `agent` may be null (clear the claim) or {status: done} (close out a WORKING claim) — never working: claims come only from claim_card. Optionally append an activity line in the same write.",
       inputSchema: { id, patch, expected_version: expectedVersion, activity: z.string().optional(), actor, by },
     },
     async (a) => run(() => board.updateCard(a.id, a.patch, a.expected_version, { actor: a.actor, by: a.by, activity: a.activity })),
@@ -131,11 +132,22 @@ export function buildMcpServer(board: Board): McpServer {
     "move_card",
     {
       description:
-        "Move a card to a column, atomically with an optional patch and activity line. Enforces the column rules: a non-pm card needs a PR link (in links, or in this move's patch) to enter review or human_review; entering in_progress sets agent: null.",
-      inputSchema: { id, column, expected_version: expectedVersion, patch: patch.optional(), activity: z.string().optional(), actor, by },
+        "Move a card to a column, atomically with an optional patch, body append and activity line — all one write. Enforces the column rules: a non-pm card needs a PR link with a url (in links, or in this move's patch) to enter review or human_review; entering in_progress sets agent: null. `append` adds `## <heading>` + text to the body in the same write (a Tester REJECT: findings + the move back to in_progress).",
+      inputSchema: {
+        id,
+        column,
+        expected_version: expectedVersion,
+        patch: patch.optional(),
+        append: z.object({ heading: z.string().min(1), text: z.string().min(1) }).optional(),
+        activity: z.string().optional(),
+        actor,
+        by,
+      },
     },
     async (a) =>
-      run(() => board.moveCard(a.id, a.column, a.expected_version, { actor: a.actor, by: a.by, activity: a.activity, patch: a.patch })),
+      run(() =>
+        board.moveCard(a.id, a.column, a.expected_version, { actor: a.actor, by: a.by, activity: a.activity, patch: a.patch, append: a.append }),
+      ),
   );
 
   server.registerTool(
@@ -204,7 +216,7 @@ export function buildMcpServer(board: Board): McpServer {
     "events_since",
     {
       description:
-        "Board events (created, moved, edited, answered, claimed, claim_released, claim_finished, activity, body_appended, deleted) after `cursor`, oldest first. Returns the next cursor to pass. ignore_actors drops your own writes. cursor 0 = from the beginning; `head` gives the current cursor without events.",
+        "Board events (created, moved, edited, answered, claimed, claim_released, claim_finished, activity, body_appended, deleted) after `cursor`, oldest first. Returns the next cursor to pass. ignore_actors drops your own writes. cursor 0 = from the beginning; `head` gives the current cursor without events. A cursor past `head` is refused (cursor_ahead): it belongs to a re-created board — re-read the board and resume from head.",
       inputSchema: {
         cursor: z.number().int().min(0),
         ignore_actors: z.array(z.string()).optional(),
@@ -212,7 +224,7 @@ export function buildMcpServer(board: Board): McpServer {
       },
       annotations: { readOnlyHint: true },
     },
-    async (a) => run(() => ({ ...board.eventsSince(a.cursor, a), head: board.head() })),
+    async (a) => run(() => ({ ...board.eventsSince(a.cursor, a), head: board.head(), board: board.boardId() })),
   );
 
   return server;

@@ -26,6 +26,7 @@
  */
 import Database from "better-sqlite3";
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -75,7 +76,8 @@ export type ErrorCode =
   | "claim_refused"
   | "gate_refused"
   | "invalid"
-  | "not_empty";
+  | "not_empty"
+  | "cursor_ahead";
 
 export class BoardError extends Error {
   constructor(
@@ -186,6 +188,12 @@ function checkActor(actor: unknown): string {
   return actor;
 }
 
+/** Every versioned write names the version it read; a missing one would make the write unconditional. */
+export function checkVersion(v: unknown): number {
+  if (!Number.isInteger(v)) invalid("expected_version is required: the integer version of the card as you read it");
+  return v as number;
+}
+
 function checkColumn(c: unknown): Column {
   if (!(COLUMNS as readonly unknown[]).includes(c)) invalid(`column must be one of ${COLUMNS.join(", ")}`);
   return c as Column;
@@ -217,8 +225,15 @@ function checkPatch(patch: Record<string, unknown>): void {
           invalid("question must be null or {text, answer?}");
         break;
       case "agent":
-        if (v !== null && !(isObj(v) && (v.status === "working" || v.status === "done")))
-          invalid("agent must be null or {status: working|done, started?, finished?, name?}");
+        // A working claim is made ONLY by claim_card, which applies the claim
+        // rule; a patch may clear a claim or close one out, never take one.
+        if (v !== null && !(isObj(v) && v.status === "done")) {
+          invalid(
+            isObj(v) && v.status === "working"
+              ? "agent.status 'working' is set only by claim_card, which enforces the claim rule"
+              : "agent in a patch must be null or {status: done, started?, finished?, name?}",
+          );
+        }
         break;
       case "released":
         if (typeof v !== "string" || !v) invalid("released must be a non-empty tag string");
@@ -228,7 +243,31 @@ function checkPatch(patch: Record<string, unknown>): void {
 }
 
 function hasLinks(doc: Record<string, unknown>): boolean {
-  return Array.isArray(doc.links) && doc.links.length > 0;
+  return Array.isArray(doc.links) && doc.links.some((l) => isObj(l) && typeof l.url === "string" && l.url.trim() !== "");
+}
+
+/**
+ * A patched agent {status: done} closes out a working claim; it may not
+ * invent one. Checked against the STORED agent, inside the write.
+ */
+function checkAgentTransition(id: string, stored: unknown, patch: Record<string, unknown>, current: () => Card): void {
+  if (isObj(patch.agent) && !(isObj(stored) && stored.status === "working")) {
+    throw new BoardError("claim_refused", `${id} has no working claim to mark done`, current());
+  }
+}
+
+function checkAppend(a: unknown): { heading: string; text: string } | undefined {
+  if (a === undefined) return undefined;
+  if (!isObj(a) || typeof a.heading !== "string" || !a.heading.trim() || typeof a.text !== "string" || !a.text.trim()) {
+    invalid("append must be {heading, text}, both non-empty");
+  }
+  return { heading: a.heading as string, text: a.text as string };
+}
+
+/** The body with `text` appended under a `## heading` section. */
+function withSection(body: unknown, heading: string, text: string): string {
+  const b = typeof body === "string" ? body : "";
+  return `${b.replace(/\s+$/, "")}\n\n## ${heading.replace(/^#+\s*/, "")}\n\n${text}`;
 }
 
 /** The AS-4 PR-link gate: a non-pm card enters review/human_review only with a link. */
@@ -281,7 +320,9 @@ export class Board extends EventEmitter {
       this.db.pragma("journal_mode = WAL");
       this.db.pragma("foreign_keys = ON");
       this.db.exec(SCHEMA);
-      this.db.prepare("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', '1'), ('next_id', '1'), ('id_prefix', 'AS-')").run();
+      this.db
+        .prepare("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', '1'), ('next_id', '1'), ('id_prefix', 'AS-'), ('board_id', ?)")
+        .run(randomUUID());
     }
   }
 
@@ -448,6 +489,15 @@ export class Board extends EventEmitter {
     return c;
   }
 
+  /**
+   * This database's identity, minted when it was created. A re-created board
+   * (export -> fresh db -> import) restarts its event cursors, so a waiter
+   * compares this to know its cursor still means anything.
+   */
+  boardId(): string {
+    return this.meta("board_id");
+  }
+
   /** The latest event cursor (0 on a board with no events). */
   head(): number {
     return (this.db.prepare("SELECT coalesce(max(cursor), 0) AS c FROM events").get() as { c: number }).c;
@@ -463,6 +513,12 @@ export class Board extends EventEmitter {
     opts: { ignore_actors?: string[]; limit?: number } = {},
   ): { events: BoardEvent[]; cursor: number } {
     const limit = Math.max(1, Math.min(opts.limit ?? 200, 1000));
+    const head = this.head();
+    if (cursor > head) {
+      // Waiting here would be silent forever: the cursor belongs to some other
+      // (re-created) board. Refuse, so the caller says so and resumes from head.
+      throw new BoardError("cursor_ahead", `cursor ${cursor} is past this board's newest event (${head}); the database was re-created — re-read the board and resume from head`);
+    }
     const rows = this.db
       .prepare("SELECT cursor, t, actor, kind, card_id AS card, data FROM events WHERE cursor > ? ORDER BY cursor LIMIT ?")
       .all(cursor, limit) as (Omit<BoardEvent, "data"> & { data: string })[];
@@ -536,9 +592,10 @@ export class Board extends EventEmitter {
     if (!isObj(patch)) invalid("patch must be an object");
     checkPatch(patch);
     if (!Object.keys(patch).length && !meta.activity) invalid("empty patch");
-    if (expectedVersion === undefined) invalid("expected_version is required");
+    checkVersion(expectedVersion);
     return this.write(() => {
       const { r, doc } = this.loadExpecting(id, expectedVersion);
+      checkAgentTransition(id, doc.agent, patch, () => this.current(id));
       Object.assign(doc, patch);
       if (GATED_COLUMNS.includes(doc.column as string) && !gateAllows(doc, doc.column as string)) {
         throw new BoardError("gate_refused", `${id} is in ${String(doc.column)}: a non-pm card there must keep a PR link`, this.current(id));
@@ -554,21 +611,24 @@ export class Board extends EventEmitter {
     id: string,
     column: string,
     expectedVersion: number,
-    meta: WriteMeta & { activity?: string; patch?: Record<string, unknown> },
+    meta: WriteMeta & { activity?: string; patch?: Record<string, unknown>; append?: { heading: string; text: string } },
   ): Card {
     const actor = checkActor(meta.actor);
     const to = checkColumn(column);
     const patch = meta.patch ?? {};
     if (!isObj(patch)) invalid("patch must be an object");
     checkPatch(patch);
+    const append = checkAppend(meta.append);
     if (to === "in_progress" && patch.agent !== undefined && patch.agent !== null) {
       invalid("entering in_progress clears the claim (agent: null); claim it with claim_card afterwards");
     }
-    if (expectedVersion === undefined) invalid("expected_version is required");
+    checkVersion(expectedVersion);
     return this.write(() => {
       const { r, doc } = this.loadExpecting(id, expectedVersion);
       const from = doc.column as string;
+      checkAgentTransition(id, doc.agent, patch, () => this.current(id));
       Object.assign(doc, patch);
+      if (append) doc.body = withSection(doc.body, append.heading, append.text);
       if (!gateAllows(doc, to)) {
         throw new BoardError(
           "gate_refused",
@@ -579,8 +639,14 @@ export class Board extends EventEmitter {
       doc.column = to;
       if (to === "in_progress") doc.agent = null;
       this.commitDoc(id, r.version, doc);
+      if (append) this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: `Appended to spec: ${append.heading}` });
       this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: meta.activity ?? `Moved: ${from} → ${to}` });
-      this.recordEvent(actor, "moved", id, { from, to, ...(Object.keys(patch).length ? { fields: Object.keys(patch) } : {}) });
+      this.recordEvent(actor, "moved", id, {
+        from,
+        to,
+        ...(Object.keys(patch).length ? { fields: Object.keys(patch) } : {}),
+        ...(append ? { appended: append.heading } : {}),
+      });
       return this.getCard(id, { activity_limit: 5 });
     });
   }
@@ -653,12 +719,10 @@ export class Board extends EventEmitter {
   /** Append findings under a `## <heading>` to the body — the Tester/User findings path. */
   appendToBody(id: string, heading: string, text: string, meta: WriteMeta & { activity?: string }): Card {
     const actor = checkActor(meta.actor);
-    if (typeof heading !== "string" || !heading.trim()) invalid("heading is required");
-    if (typeof text !== "string" || !text.trim()) invalid("text is required");
+    checkAppend({ heading, text });
     return this.write(() => {
       const { r, doc } = this.loadExpecting(id, undefined);
-      const body = typeof doc.body === "string" ? doc.body : "";
-      doc.body = `${body.replace(/\s+$/, "")}\n\n## ${heading.replace(/^#+\s*/, "")}\n\n${text}`;
+      doc.body = withSection(doc.body, heading, text);
       this.commitDoc(id, r.version, doc);
       this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: meta.activity ?? `Appended to spec: ${heading}` });
       this.recordEvent(actor, "body_appended", id, { heading });
@@ -670,7 +734,7 @@ export class Board extends EventEmitter {
   answerQuestion(id: string, answer: string, expectedVersion: number, meta: WriteMeta): Card {
     const actor = checkActor(meta.actor);
     if (typeof answer !== "string" || !answer.trim()) invalid("answer is required");
-    if (expectedVersion === undefined) invalid("expected_version is required");
+    checkVersion(expectedVersion);
     return this.write(() => {
       const { r, doc } = this.loadExpecting(id, expectedVersion);
       const q = doc.question;
@@ -691,6 +755,7 @@ export class Board extends EventEmitter {
   /** Remove a card from the board (the page's drawer delete). Its activity rows are kept. */
   deleteCard(id: string, expectedVersion: number, meta: WriteMeta): void {
     const actor = checkActor(meta.actor);
+    checkVersion(expectedVersion);
     this.write(() => {
       const { r } = this.loadExpecting(id, expectedVersion);
       const info = this.db

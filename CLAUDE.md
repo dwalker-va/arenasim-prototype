@@ -92,7 +92,8 @@ daemon owns a SQLite board and serves MCP (registered in `.mcp.json` as the
 build shape as the Wowhead server — `dist/` and `node_modules/` are gitignored:
 
 ```bash
-cd tools/dispatch-board && npm install && npm run build
+# from the repo root
+npm --prefix tools/dispatch-board ci && npm --prefix tools/dispatch-board run build
 node tools/dispatch-board/dist/cli.js serve   # leave running; DB: <main checkout>/.dispatch/board.db
 ```
 

@@ -37,7 +37,11 @@ daemon refuses what that rule used to prevent by convention:
 
 - every card carries a `version`, and a write naming a stale one is **refused
   with the current card** — nothing is ever overwritten by a writer that had
-  not seen the latest state;
+  not seen the latest state. That includes the web UI's card drawer: its edits
+  are based on the version it opened on, Save sends only the fields the user
+  changed, and a write that landed meanwhile either survives untouched or
+  refuses the save — the drawer then says what changed and the user chooses to
+  keep their edits on the new version or discard them;
 - a claim is **compare-and-set** (`claim_card`): of two sessions claiming the
   same card, exactly one wins and the other is refused, so a claim can no
   longer be double-spawned by overlapping reads;
@@ -58,7 +62,11 @@ Every write names an **actor** — the writing session's tag (`orchestrator` for
 the orchestrator, `board` for every web-UI gesture, e.g. `pm-AS-28` for a PM
 session). It is recorded on the write's event, which is how a waiting session
 ignores its own writes. Activity entries keep their `by` (defaulting to the
-actor).
+actor). **`orchestrator` is the orchestrator's tag alone:** its wait ignores
+that tag, so a write any other session made under it would never wake the
+orchestrator. The tag is caller-supplied — the daemon trusts localhost, it does
+not authenticate — so this is a rule every session keeps, not one the daemon
+enforces.
 
 ### State schema (tables)
 
@@ -121,6 +129,14 @@ name}` only if the card is claimable *at that instant* — `in_progress` with
 (the Engineer's normal hand-off; `null` there is a claim reset by startup
 recovery). A second claim is refused, so overlapping wakes can never
 double-spawn, and a refused claim means "someone holds it — do not spawn".
+`claim_card` is also the **only** way a claim is taken: a patch (`update_card`,
+`move_card`) may set `agent` to `null` or close a `working` claim out to
+`{status: "done"}`, and the daemon refuses any patch that sets `working` or
+marks a card `done` that holds no working claim. The web UI never patches
+`agent` at all; its one claim gesture is an explicit **Release claim** in the
+card drawer (for a claim the user judges stale with no orchestrator running),
+which is versioned, logged in the card's activity, and wakes the orchestrator
+like any other gesture.
 Bouncing a card from Review back to In Progress is therefore automatically a
 respawn. **Scoping cards invert the guard's meaning:** nothing is ever spawned
 for a `role: "pm"` card, so `agent: null` on one is a *resting state*, not a
@@ -170,7 +186,8 @@ own column leaves that dedup guard untouched.
 cannot enter either column without a PR link in `links` (a `move_card` may add
 the link in its own `patch`), and a card already there cannot have its last
 link patched away. In the web UI, dragging a linkless card there opens the
-attach-PR dialog; `role: "pm"` cards remain exempt. Cards in `human_review`
+attach-PR dialog; `role: "pm"` cards remain exempt. A link counts only if its
+`url` is non-empty. Cards in `human_review`
 render an "awaiting your merge" tag.
 
 #### Scoping cards (`role: "pm"`)
@@ -265,6 +282,12 @@ Monitor({
 - If the daemon is down, the monitor prints `{"error": "daemon_unreachable",
   ...}` rather than going silent, keeps retrying, and prints `{"reconnected":
   true}` when it is back. Tell the user; the daemon is theirs to start.
+- A cursor that no longer means anything is printed too: `{"error":
+  "cursor_ahead", ...}` (the cursor is past the board's newest event) or
+  `{"error": "board_replaced", ...}` (the daemon now serves a different
+  database — a restore re-creates the board and restarts its cursors). The
+  monitor resumes from the board's head; events between the two boards cannot
+  be replayed, so **re-read the board** (run the wake steps) on either line.
 - A notification is only a wake-up. Its line says what changed, but the steps
   below always re-read the board rather than acting on the line alone — several
   events can batch into one notification, and the board is the truth.
@@ -393,11 +416,13 @@ versioned write passes the `version` of the card as you last read it — from
      column (see The eyeball loop). It is `agent.status: "done"` that makes the
      separate column necessary: an approved card left in `review` would match
      step 3's spawn condition and be handed back to a Tester on every wake.
-   - `REJECT` → `append_to_body(id, heading: "Tester findings — <date>", text:
-     <the FINDINGS verbatim>, by: "tester")` (they are the next Engineer's spec
-     addendum), then `move_card(id, "in_progress", activity: …)`, which sets
-     `agent: null` itself — step 2 then spawns a fresh Engineer, who receives
-     the findings as part of the spec.
+   - `REJECT` → one `move_card(id, "in_progress", append: {heading: "Tester
+     findings — <date>", text: <the FINDINGS verbatim>}, activity: …, by:
+     "tester")`. The findings (the next Engineer's spec addendum) and the move
+     land in the same write, so no interrupted turn can leave findings appended
+     to a card still in `review` under the Tester's claim. Entering
+     `in_progress` sets `agent: null` itself — step 2 then spawns a fresh
+     Engineer, who receives the findings as part of the spec.
    - A malformed report (no parseable `VERDICT:`) → `move_card(id,
      "needs_input", patch: {question: {text: <the raw report>}, agent: null})`;
      never guess a verdict.

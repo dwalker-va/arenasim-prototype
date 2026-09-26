@@ -81,6 +81,13 @@ async function cmdServe(a: Args): Promise<void> {
  * An unreachable daemon is printed as a line too (`{"error":
  * "daemon_unreachable"}`) — silence must never mean "down". One-shot mode
  * then exits 2; follow mode retries and prints `{"reconnected": true}`.
+ *
+ * A cursor that no longer means anything is printed too, never waited on in
+ * silence: past the board's newest event (`{"error": "cursor_ahead"}`), or
+ * from a board the daemon no longer serves (`{"error": "board_replaced"}` —
+ * the db was re-created, which restarts cursors). Both resume from the
+ * board's head; the line tells the reader to re-read the board. One-shot mode
+ * exits 3 after printing it.
  */
 async function cmdWait(a: Args): Promise<void> {
   const port = Number(flag(a, "port") ?? defaultPort());
@@ -93,24 +100,51 @@ async function cmdWait(a: Args): Promise<void> {
   let cursor: number | undefined = sinceArg === "head" ? undefined : Number(sinceArg);
   if (cursor !== undefined && (!Number.isInteger(cursor) || cursor < 0)) die("--since must be a cursor (integer >= 0) or 'head'");
   let down = false;
+  let boardId: string | undefined;
+
+  const resync = (error: string, detail: string, head: number, board: string) => {
+    out({ error, cursor, head, board, detail: `${detail}; resuming from head ${head} — re-read the board` });
+    cursor = head;
+    boardId = board;
+    if (!follow) process.exit(3);
+  };
 
   for (;;) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) process.exit(0);
     try {
-      if (cursor === undefined) {
-        const h = (await (await fetch(`${base}/api/health`)).json()) as { head: number };
-        cursor = h.head;
+      if (cursor === undefined || boardId === undefined) {
+        // First contact: learn which board this cursor counts (and, for
+        // --since head, where "now" is).
+        const h = (await (await fetch(`${base}/api/health`)).json()) as { head: number; board: string };
+        if (cursor === undefined) cursor = h.head;
+        boardId = h.board;
       }
       const q = new URLSearchParams({ since: String(cursor), wait: String(Math.max(1, Math.min(60, Math.ceil(remaining / 1000)))) });
       for (const i of ignore) q.append("ignore_actor", i);
       const resp = await fetch(`${base}/api/events?${q}`);
+      if (resp.status === 409) {
+        const e = (await resp.json()) as { error: string; message: string; head: number; board: string };
+        if (e.error === "cursor_ahead") {
+          down = false;
+          resync("cursor_ahead", e.message, e.head, e.board);
+          continue;
+        }
+      }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
-      const r = (await resp.json()) as { events: unknown[]; cursor: number };
+      const r = (await resp.json()) as { events: unknown[]; cursor: number; board: string };
       if (down) {
         down = false;
         out({ reconnected: true, cursor });
       }
+      if (r.board !== boardId) {
+        // Same port, different database: this cursor counted another board's
+        // events. Drop the batch rather than deliver it as news.
+        const h = (await (await fetch(`${base}/api/health`)).json()) as { head: number; board: string };
+        resync("board_replaced", `the daemon now serves board ${h.board}, not ${boardId} (the db was re-created)`, h.head, h.board);
+        continue;
+      }
+      boardId = r.board;
       cursor = r.cursor;
       for (const ev of r.events) out(ev);
       if (r.events.length && !follow) process.exit(0);

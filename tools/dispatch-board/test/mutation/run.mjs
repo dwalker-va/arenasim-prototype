@@ -58,6 +58,37 @@ const MUTANTS = [
       "wake-up: a UI drag wakes a waiter; the orchestrator's own writes do not",
     ],
   },
+  {
+    name: "delete-version-check",
+    file: "dist/board.js",
+    find: "checkVersion(expectedVersion);\n        this.write(() => {",
+    replace: "this.write(() => {",
+    mustFail: [
+      "version guard: every versioned write refuses a missing or non-integer expected_version",
+      "web UI API: a delete without expected_version is refused and deletes nothing",
+    ],
+  },
+  {
+    name: "working-only-via-claim",
+    file: "dist/board.js",
+    find: 'if (v !== null && !(isObj(v) && v.status === "done")) {',
+    replace: 'if (v !== null && !(isObj(v) && (v.status === "working" || v.status === "done"))) {',
+    mustFail: ["claim rule: agent.status working comes only from claim_card, never a patch"],
+  },
+  {
+    name: "drawer-base-version",
+    file: "ui/board.html",
+    find: "var id = c.id, expected = base.version, req;",
+    replace: "var id = c.id, expected = c.version, req;",
+    mustFail: ["drawer: an edit that a foreign write overtakes is refused, not written over it"],
+  },
+  {
+    name: "drawer-restores-only-edits",
+    file: "ui/board.html",
+    find: 'var keep = k !== "drawer" || keepDrawer.indexOf(f) >= 0;',
+    replace: "var keep = true;",
+    mustFail: ["drawer: a foreign write seen before editing survives a one-field save"],
+  },
 ];
 
 let failures = 0;
@@ -76,7 +107,7 @@ for (const m of MUTANTS) {
   }
   writeFileSync(target, src.replace(m.find, m.replace));
 
-  const tests = ["board", "race", "daemon", "roundtrip"].map((n) => join(dir, "test", `${n}.test.mjs`));
+  const tests = ["board", "race", "daemon", "roundtrip", "ui"].map((n) => join(dir, "test", `${n}.test.mjs`));
   const r = spawnSync(process.execPath, ["--test", ...tests], { encoding: "utf8", cwd: dir });
   const failed = [...r.stdout.matchAll(/^not ok \d+ - (.*)$/gm)].map((x) => x[1]);
   const missing = m.mustFail.filter((name) => !failed.some((f) => f.startsWith(name)));

@@ -98,6 +98,9 @@ button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focu
 .dactions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
 .qbox{margin-top:14px;border:1px solid var(--c-input);border-radius:8px;padding:10px 12px;background:var(--surface2)}
 .qbox .qt{font-weight:600;color:var(--c-input);font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.stale{margin-top:12px;border:1px solid var(--p1);border-radius:8px;padding:10px 12px;background:var(--surface2);font-size:12.5px}
+.stale .qt{font-weight:600;color:var(--p1);font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.claim{margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--c-progress)}
 .act{margin-top:18px}
 .act h3{font:600 12px "Barlow Semi Condensed",sans-serif;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 6px}
 .aitem{display:flex;gap:8px;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px}
@@ -116,6 +119,14 @@ button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focu
 // drawer, the question box and the PR-link gate are the artifact's; what
 // changed is persistence: every gesture is one versioned write to the local
 // daemon (actor "board"), and the page refreshes live from its event stream.
+//
+// The drawer never writes a value the user did not change. Its edits are
+// based on one version of the card (`base`: the version it opened on, or
+// the one the user explicitly rebased onto); Save sends only the fields that
+// differ from that base, conditioned on the base's version, so a write that
+// landed meanwhile either survives (fields the user left alone are never
+// sent) or refuses the save (the version check). While the drawer has no
+// edits, a live refresh simply moves the base forward.
 var COLUMNS = [
   {key:"backlog", label:"Backlog", hint:"queued"},
   {key:"needs_input", label:"Needs Input", hint:"blocked on you"},
@@ -127,12 +138,16 @@ var COLUMNS = [
 var ARCHIVED = {key:"archived", label:"Archived", hint:"released"};
 var ROLES = ["engineer","tester","release-manager","pm"];
 var GATED = ["review","human_review"];
+// Drawer field -> its input. The drawer's edits are these, diffed against `base`.
+var DRAWER = {title: "d-title", body: "d-body", column: "d-col", role: "d-role", priority: "d-pri"};
 
 var state = {cards: []};
 var full = {};            // id -> full card (body + activity), fetched when its drawer opens
 var connected = false, loadedOnce = false;
 var openCardId = null, showNew = false, confirmDelete = false, statusMsg = "connecting…", showArchived = false;
-var pending = null;       // {id, column, patch, why}: a gated move waiting on the PR-link dialog
+var pending = null;       // {id, column, patch, why, expected}: a gated move waiting on the PR-link dialog
+var base = null;          // the open drawer's card as its edits are based on: {id, version, title, body, column, role, priority}
+var confirmRelease = false, discardDraft = false;
 var app = document.getElementById("app");
 
 function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
@@ -143,7 +158,27 @@ function fmt(t){
   catch(e){ return t; }
 }
 function card(id){ for(var i=0;i<state.cards.length;i++) if(state.cards[i].id===id) return state.cards[i]; return null; }
-function gated(c, col){ return GATED.indexOf(col) >= 0 && c.role !== "pm" && !(c.links||[]).length; }
+function hasLink(c){ return (c.links||[]).some(function(l){ return l && typeof l.url === "string" && l.url.trim() !== ""; }); }
+function gated(c, col){ return GATED.indexOf(col) >= 0 && c.role !== "pm" && !hasLink(c); }
+function snapshot(c){
+  return {id: c.id, version: c.version, title: c.title == null ? "" : String(c.title), body: c.body == null ? "" : String(c.body),
+          column: c.column, role: c.role == null ? "" : String(c.role), priority: c.priority == null ? "" : String(c.priority)};
+}
+// The drawer fields whose value (from `values`, input id -> value) differs from the base.
+function drawerEdits(values){
+  var out = {};
+  if(!base) return out;
+  Object.keys(DRAWER).forEach(function(k){
+    var v = values[DRAWER[k]];
+    if(v !== undefined && v !== base[k]) out[k] = v;
+  });
+  return out;
+}
+function drawerValues(){
+  var v = {};
+  Object.keys(DRAWER).forEach(function(k){ var el = document.getElementById(DRAWER[k]); if(el) v[DRAWER[k]] = el.value; });
+  return v;
+}
 
 function api(method, path, body){
   var opts = {method: method, headers: {}};
@@ -176,18 +211,22 @@ function fetchFull(id){
 // One place that turns a write's response into board feedback.
 function afterWrite(r, okMsg){
   if(r.status === 200){ statusMsg = okMsg || ("saved " + fmt(new Date().toISOString().slice(0,19))); }
-  else if(r.status === 409){ statusMsg = "changed elsewhere — reloaded; check it and try again"; }
+  else if(r.status === 409){ statusMsg = "changed elsewhere — not saved; see the card"; }
   else { statusMsg = (r.body && r.body.message) || ("save failed (HTTP " + r.status + ")"); }
   load();
   return r.status === 200;
 }
 
-function moveCard(id, col, why, patch){
-  var c = card(id); if(!c || c.column === col) return;
+// A move from `from` (the column the gesture saw) at `expected` (the version it
+// saw: the board's for a drag, the drawer's base for a drawer save).
+function moveCard(id, col, why, patch, expected, from){
+  var c = card(id); if(!c) return;
+  from = from || c.column;
+  if(from === col) return;
+  if(expected === undefined) expected = c.version;
   var withLinks = patch && patch.links ? Object.assign({}, c, {links: patch.links}) : c;
-  if(gated(withLinks, col)){ pending = {id: id, column: col, patch: patch || {}, why: why}; render(); return; }
-  var body = {column: col, expected_version: (full[id] && openCardId === id ? full[id].version : c.version),
-              activity: (why || "Moved") + ": " + c.column + " → " + col};
+  if(gated(withLinks, col)){ pending = {id: id, column: col, patch: patch || {}, why: why, expected: expected, from: from}; render(); return; }
+  var body = {column: col, expected_version: expected, activity: (why || "Moved") + ": " + from + " → " + col};
   if(patch && Object.keys(patch).length) body.patch = patch;
   statusMsg = "saving…"; render();
   return api("POST", "/api/cards/" + encodeURIComponent(id) + "/move", body).then(function(r){ return afterWrite(r); });
@@ -209,7 +248,7 @@ function cardHtml(c){
     + "</div>";
 }
 
-function drawerHtml(s){
+function drawerHtml(s, edits){
   var c = full[s.id];
   var ro = !connected;
   if(!c){
@@ -234,10 +273,31 @@ function drawerHtml(s){
   colOpts += "<option value=\"archived\"" + (c.column==="archived"?" selected":"") + ">Archived</option>";
   for(var r=0;r<ROLES.length;r++) roleOpts += "<option" + (c.role===ROLES[r]?" selected":"") + ">" + ROLES[r] + "</option>";
   var pris = ["P1","P2","P3"]; if(c.priority && pris.indexOf(c.priority) < 0) pris.push(c.priority);
+  if(!c.priority) priOpts += "<option value=\"\" selected>—</option>";   // legacy card with no priority: show it unset, don't invent one
   pris.forEach(function(p){ priOpts += "<option" + (c.priority===p?" selected":"") + ">" + esc(p) + "</option>"; });
+  // The drawer holds edits based on an older version: say so, name what moved,
+  // and make adopting the new version the user's act, not a silent rebase.
+  var stale = "";
+  if(base && base.id === c.id && base.version !== c.version){
+    var now = snapshot(c), moved = [];
+    Object.keys(DRAWER).forEach(function(k){ if(now[k] !== base[k]) moved.push(k === "body" ? "spec" : k); });
+    var clash = moved.filter(function(k){ return edits[k === "spec" ? "body" : k] !== undefined; });
+    stale = "<div class=\"stale\"><div class=\"qt\">Changed elsewhere since you started editing</div>"
+      + "<div>v" + esc(base.version) + " → v" + esc(c.version) + (moved.length ? ": " + esc(moved.join(", ")) : " (activity, links or claim)") + " changed. "
+      + (clash.length ? "You edited " + esc(clash.join(", ")) + " too — keeping your edits replaces the new value. " : "")
+      + "Fields you did not touch already show the new values. Saving is refused until you choose.</div>"
+      + "<div class=\"dactions\"><button class=\"btn primary\" id=\"d-rebase\" " + (ro?"disabled":"") + ">Keep my edits on v" + esc(c.version) + "</button>"
+      + "<button class=\"btn\" id=\"d-discard\">Discard my edits</button></div></div>";
+  }
+  var claim = "";
+  if(c.agent && c.agent.status === "working"){
+    claim = "<div class=\"claim\"><span>" + esc(c.agent.name || "an agent") + " working since " + esc(fmt(c.agent.started)) + "</span>"
+      + "<button class=\"btn\" id=\"d-release\" " + (ro?"disabled":"") + ">" + (confirmRelease ? "Confirm: release this claim" : "Release claim") + "</button></div>";
+  }
   return "<div class=\"overlay\" id=\"ovl\"><div class=\"drawer\" data-id=\"" + esc(c.id) + "\" role=\"dialog\" aria-label=\"Card detail\">"
     + "<button class=\"closex\" id=\"d-close\" aria-label=\"Close\">×</button>"
     + "<div class=\"cid\" style=\"font:500 11px 'IBM Plex Mono',monospace;color:var(--muted)\">" + esc(c.id) + " · created " + esc(fmt(c.created)) + " · v" + esc(c.version) + "</div>"
+    + stale + claim
     + "<div class=\"mrow\"><label for=\"d-title\">Title</label><input id=\"d-title\" value=\"" + esc(c.title) + "\" " + (ro?"disabled":"") + "></div>"
     + "<div class=\"tworow\">"
     + "<div class=\"mrow\"><label for=\"d-col\">Column</label><select id=\"d-col\" " + (ro?"disabled":"") + ">" + colOpts + "</select></div>"
@@ -292,14 +352,17 @@ function captureDraft(){
   if(ae && ae.id && Object.prototype.hasOwnProperty.call(d.values, ae.id)) d.focus = {id: ae.id, start: ae.selectionStart, end: ae.selectionEnd, scroll: ae.scrollTop};
   return d;
 }
-function restoreDraft(d){
+// `keepDrawer` lists the drawer inputs to restore: only the ones the user
+// edited. Every other drawer field shows the card as it is now.
+function restoreDraft(d, keepDrawer){
   var now = overlayKeys();
   var same = {drawer: d.keys.drawer && d.keys.drawer === now.drawer, create: d.keys.create && now.create, pr: d.keys.pr && d.keys.pr === now.pr};
   Object.keys(FIELDS).forEach(function(k){
     if(!same[k]) return;
     FIELDS[k].forEach(function(f){
       var el = document.getElementById(f);
-      if(el && Object.prototype.hasOwnProperty.call(d.values, f)) el.value = d.values[f];
+      var keep = k !== "drawer" || keepDrawer.indexOf(f) >= 0;
+      if(el && keep && Object.prototype.hasOwnProperty.call(d.values, f)) el.value = d.values[f];
       if(d.focus && d.focus.id === f && el){ el.focus(); try{ el.setSelectionRange(d.focus.start, d.focus.end); }catch(e){} el.scrollTop = d.focus.scroll; }
     });
   });
@@ -307,6 +370,14 @@ function restoreDraft(d){
 
 function render(){
   var keep = captureDraft();
+  // The drawer's edits, against its base, before anything is redrawn.
+  var edits = (base && keep.keys.drawer === base.id && !discardDraft) ? drawerEdits(keep.values) : {};
+  // No edits yet: follow the card forward. With edits: hold the base until the
+  // user rebases or discards (see the drawer's changed-elsewhere notice).
+  if(!openCardId) base = null;
+  else if(full[openCardId] && (!base || base.id !== openCardId || discardDraft || !Object.keys(edits).length)) base = snapshot(full[openCardId]);
+  discardDraft = false;
+  var keepDrawer = Object.keys(edits).map(function(k){ return DRAWER[k]; }).concat(["d-answer"]);
   var archivedCards = state.cards.filter(function(c){ return c.column === "archived"; });
   var visCols = COLUMNS.slice();
   if(showArchived && archivedCards.length) visCols.push(ARCHIVED);
@@ -327,13 +398,14 @@ function render(){
     + "<button class=\"btn primary\" id=\"newbtn\" " + (connected?"":"disabled") + ">New card</button></div>"
     + (!connected && loadedOnce ? "<div class=\"robanner\">The board daemon is unreachable — changes can't be saved until it is back. Retrying…</div>" : "")
     + "<div class=\"boardwrap\"><div class=\"board\" style=\"grid-template-columns:repeat(" + visCols.length + ",minmax(216px,1fr));min-width:" + (visCols.length*224) + "px\">" + cols + "</div></div>"
-    + (openCardId && card(openCardId) ? drawerHtml({id: openCardId}) : "")
+    + (openCardId && card(openCardId) ? drawerHtml({id: openCardId}, edits) : "")
     + (showNew ? modalHtml() : "")
     + (pending && card(pending.id) ? prModalHtml(card(pending.id), pending.column) : "");
-  restoreDraft(keep);
+  restoreDraft(keep, keepDrawer);
   wire();
 }
-function closeAll(){ openCardId = null; showNew = false; confirmDelete = false; pending = null; }
+function openDrawer(id){ openCardId = id; base = null; confirmDelete = false; confirmRelease = false; fetchFull(id); render(); }
+function closeAll(){ openCardId = null; showNew = false; confirmDelete = false; confirmRelease = false; pending = null; base = null; }
 
 function wire(){
   var newbtn = document.getElementById("newbtn");
@@ -352,14 +424,14 @@ function wire(){
       var links = (c.links || []).concat([{label: m ? "PR #" + m[1] : "PR", url: u}]);
       var patch = Object.assign({}, p.patch, {links: links});
       pending = null;
-      var r = moveCard(c.id, p.column, (p.why || "Dragged") + " with PR link attached via review gate", patch);
+      var r = moveCard(c.id, p.column, (p.why || "Dragged") + " with PR link attached via review gate", patch, p.expected, p.from);
       if(r) r.then(function(ok){ if(ok && openCardId === c.id){ openCardId = null; render(); } });
     };
     var pu = document.getElementById("pr-url"); if(pu && document.activeElement !== pu) pu.focus();
   }
   app.querySelectorAll(".card").forEach(function(el){
-    el.onclick = function(){ openCardId = el.dataset.id; confirmDelete = false; fetchFull(openCardId); render(); };
-    el.onkeydown = function(e){ if(e.key==="Enter"){ openCardId = el.dataset.id; confirmDelete=false; fetchFull(openCardId); render(); } };
+    el.onclick = function(){ openDrawer(el.dataset.id); };
+    el.onkeydown = function(e){ if(e.key==="Enter") openDrawer(el.dataset.id); };
     el.ondragstart = function(e){ e.dataTransfer.setData("text/plain", el.dataset.id); e.dataTransfer.effectAllowed = "move"; };
   });
   app.querySelectorAll(".col").forEach(function(el){
@@ -376,33 +448,44 @@ function wire(){
   if(ovl) ovl.onclick = function(e){ if(e.target === ovl){ closeAll(); render(); } };
   var dclose = document.getElementById("d-close");
   if(dclose) dclose.onclick = function(){ closeAll(); render(); };
+  var drebase = document.getElementById("d-rebase");
+  if(drebase) drebase.onclick = function(){ base = snapshot(full[openCardId]); statusMsg = "edits kept on v" + base.version + " — review and save"; render(); };
+  var ddiscard = document.getElementById("d-discard");
+  if(ddiscard) ddiscard.onclick = function(){ discardDraft = true; render(); };
+  var drel = document.getElementById("d-release");
+  if(drel) drel.onclick = function(){
+    if(!confirmRelease){ confirmRelease = true; render(); return; }
+    var c = full[openCardId]; if(!c) return;
+    confirmRelease = false;
+    api("POST", "/api/cards/" + encodeURIComponent(c.id) + "/release", {expected_version: c.version}).then(function(r){
+      afterWrite(r, "claim released on " + c.id); fetchFull(c.id);
+    });
+  };
   var dsave = document.getElementById("d-save");
   if(dsave) dsave.onclick = function(){
-    var c = full[openCardId]; if(!c) return;
-    var t = document.getElementById("d-title").value.trim();
-    var b = document.getElementById("d-body").value;
-    var col = document.getElementById("d-col").value;
-    var role = document.getElementById("d-role").value;
-    var pri = document.getElementById("d-pri").value;
+    var c = full[openCardId]; if(!c || !base) return;
+    // Only what the user changed, against the version those changes were based on.
+    var e = drawerEdits(drawerValues());
     var patch = {}, changed = [];
-    if(t && t !== c.title){ patch.title = t; changed.push("title"); }
-    if(b !== (c.body == null ? "" : c.body)){ patch.body = b; changed.push("spec"); }
-    if(role !== c.role){ patch.role = role; changed.push("role"); }
-    if(pri !== c.priority){ patch.priority = pri; changed.push("priority"); }
-    var id = c.id, req;
-    if(col !== c.column){
+    if(e.title !== undefined && e.title.trim()){ patch.title = e.title.trim(); changed.push("title"); }
+    if(e.body !== undefined){ patch.body = e.body; changed.push("spec"); }
+    if(e.role !== undefined){ patch.role = e.role; changed.push("role"); }
+    if(e.priority !== undefined && e.priority){ patch.priority = e.priority; changed.push("priority"); }
+    var id = c.id, expected = base.version, req;
+    if(e.column !== undefined){
+      var why = changed.length ? "Edited " + changed.join(", ") + "; moved" : "Moved";
       var probe = Object.assign({}, card(id), patch.role ? {role: patch.role} : {});
-      if(gated(probe, col)){ pending = {id: id, column: col, patch: patch, why: changed.length ? "Edited " + changed.join(", ") + "; moved" : "Moved"}; render(); return; }
+      if(gated(probe, e.column)){ pending = {id: id, column: e.column, patch: patch, why: why, expected: expected, from: base.column}; render(); return; }
       req = api("POST", "/api/cards/" + encodeURIComponent(id) + "/move", Object.assign(
-        {column: col, expected_version: c.version, activity: (changed.length ? "Edited " + changed.join(", ") + "; moved" : "Moved") + ": " + c.column + " → " + col},
+        {column: e.column, expected_version: expected, activity: why + ": " + base.column + " → " + e.column},
         changed.length ? {patch: patch} : {}));
     } else if(changed.length){
-      req = api("POST", "/api/cards/" + encodeURIComponent(id) + "/update", {patch: patch, expected_version: c.version, activity: "Edited " + changed.join(", ")});
+      req = api("POST", "/api/cards/" + encodeURIComponent(id) + "/update", {patch: patch, expected_version: expected, activity: "Edited " + changed.join(", ")});
     } else { closeAll(); render(); return; }
     statusMsg = "saving…"; render();
     req.then(function(r){
       if(afterWrite(r)){ if(openCardId === id){ closeAll(); } render(); }
-      else { fetchFull(id); }   // keep the drawer and the typed edits; show the new version
+      else { fetchFull(id); }   // keep the drawer and the typed edits; the notice shows what changed
     });
   };
   var ddel = document.getElementById("d-delete");

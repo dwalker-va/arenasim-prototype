@@ -4,7 +4,9 @@
  *   /mcp          MCP over Streamable HTTP (stateless: a fresh server per
  *                 request, so a daemon restart never strands a client session)
  *   /             the web UI (ui/board.html)
- *   /api/...      the UI's JSON API (every write is actor "board")
+ *   /api/...      the UI's JSON API (every write is actor "board"; the UI
+ *                 never sets `agent` — its one claim gesture is an explicit,
+ *                 logged Release claim)
  *   /api/events   long-poll event feed — what `cli.js wait` blocks on
  *   /api/stream   SSE nudges for the UI's live refresh
  *
@@ -15,7 +17,7 @@ import { readFileSync, unlinkSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { Board, BoardError, BoardEvent, SUMMARY_FIELDS } from "./board.js";
+import { Board, BoardError, BoardEvent, SUMMARY_FIELDS, checkVersion } from "./board.js";
 import { buildMcpServer } from "./mcp.js";
 import { liveDaemon, lockPath } from "./paths.js";
 
@@ -64,6 +66,7 @@ function boardErrorStatus(e: BoardError): number {
     case "stale_version":
     case "claim_refused":
     case "not_empty":
+    case "cursor_ahead":
       return 409;
     default:
       return 422;
@@ -167,7 +170,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     }
 
     if (req.method === "GET" && path === "/api/health") {
-      send(res, 200, { ok: true, pid: process.pid, db: opts.dbPath, head: board.head() });
+      send(res, 200, { ok: true, pid: process.pid, db: opts.dbPath, board: board.boardId(), head: board.head() });
       return;
     }
 
@@ -183,8 +186,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       const ignore = url.searchParams.getAll("ignore_actor");
       const ac = new AbortController();
       res.on("close", () => ac.abort());
-      const r = await waitForEvents(board, since, ignore, waitS * 1000, ac.signal);
-      if (!res.writableEnded && !res.destroyed) send(res, 200, r);
+      let r;
+      try {
+        r = await waitForEvents(board, since, ignore, waitS * 1000, ac.signal);
+      } catch (e) {
+        if (e instanceof BoardError && e.code === "cursor_ahead") {
+          send(res, 409, { ...e.toJSON(), head: board.head(), board: board.boardId() });
+          return;
+        }
+        throw e;
+      }
+      if (!res.writableEnded && !res.destroyed) send(res, 200, { ...r, board: board.boardId() });
       return;
     }
 
@@ -201,7 +213,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       return;
     }
 
-    const cardMatch = /^\/api\/cards\/([^/]+)(?:\/(move|update|answer|delete))?$/.exec(path);
+    const cardMatch = /^\/api\/cards\/([^/]+)(?:\/(move|update|answer|delete|release))?$/.exec(path);
     if (req.method === "GET" && cardMatch && !cardMatch[2]) {
       send(res, 200, board.getCard(decodeURIComponent(cardMatch[1])));
       return;
@@ -221,6 +233,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       }
       if (cardMatch && cardMatch[2]) {
         const id = decodeURIComponent(cardMatch[1]);
+        if (b.patch && typeof b.patch === "object" && "agent" in b.patch) {
+          // A patched agent would release (or close) a live claim with no trace of
+          // who ended it; the board's one claim gesture is the explicit release.
+          throw new BoardError("invalid", "the board UI does not set agent; use Release claim to clear a stale claim");
+        }
         switch (cardMatch[2]) {
           case "move":
             send(res, 200, board.moveCard(id, b.column, b.expected_version, { ...meta, patch: b.patch, activity: b.activity }));
@@ -235,6 +252,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             board.deleteCard(id, b.expected_version, meta);
             send(res, 200, { ok: true });
             return;
+          case "release": {
+            // The user clearing a claim they judge stale (no orchestrator to
+            // sweep it). Versioned, like every other gesture, and logged.
+            checkVersion(b.expected_version);
+            const held = board.getCard(id).agent as { name?: string } | null;
+            send(
+              res,
+              200,
+              board.releaseClaim(id, {
+                ...meta,
+                expected_version: b.expected_version,
+                activity: `Claim released from the board by the user (was ${String(held?.name ?? "unnamed")})`,
+              }),
+            );
+            return;
+          }
         }
       }
     }

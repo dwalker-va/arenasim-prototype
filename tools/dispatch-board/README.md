@@ -55,7 +55,11 @@ prints one JSON line per board event (`{"cursor", "t", "actor", "kind",
 notification per line. Without `--follow` it prints the first batch and exits
 (for `Bash run_in_background`). `--ignore-actor` drops a session's own writes;
 the cursor on each line is what to resume from. An unreachable daemon prints
-`{"error": "daemon_unreachable", ...}` rather than going silent.
+`{"error": "daemon_unreachable", ...}` rather than going silent, and a cursor
+that no longer belongs to the served board — past its head (`cursor_ahead`), or
+from a database since re-created (`board_replaced`, detected by the board id
+each db mints) — prints an error line and resumes from head (one-shot mode
+exits 3).
 
 ## Backup, import, rollback
 
@@ -71,7 +75,7 @@ is also the way back to an artifact board.
 ## Test
 
 ```bash
-npm test                 # the suite: concurrency, rules, round trip, daemon, wake-up
+npm test                 # the suite: concurrency, rules, round trip, daemon, wake-up, UI drawer (jsdom)
 npm run test:mutation    # removes each guard from dist/ and proves the suite fails
 ```
 

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { request } from "node:http";
-import { spawnDaemon, mcpClient, call, post, CLI } from "./helpers.mjs";
+import { spawnDaemon, mcpClient, call, post, tempDir, CLI } from "./helpers.mjs";
 
 /** Run `cli.js wait ...` and resolve with its stdout lines and exit code. */
 function runWait(args) {
@@ -172,4 +172,139 @@ test("one daemon per db: a second daemon on the same db refuses to start", async
   const code = await new Promise((r) => second.on("exit", r));
   assert.notEqual(code, 0);
   assert.match(err, /already owns/);
+});
+
+test("web UI API: a delete without expected_version is refused and deletes nothing", async (t) => {
+  const d = await spawnDaemon(t);
+  const c = (await post(d.base, "/api/cards", { title: "keep me", role: "engineer" })).body;
+  for (const body of [{}, { expected_version: null }, { expected_version: String(c.version) }]) {
+    const r = await post(d.base, `/api/cards/${c.id}/delete`, body);
+    assert.equal(r.status, 422, JSON.stringify(r.body));
+  }
+  assert.equal((await fetch(`${d.base}/api/cards/${c.id}`)).status, 200);
+  assert.equal((await post(d.base, `/api/cards/${c.id}/delete`, { expected_version: c.version })).status, 200);
+});
+
+test("claims: update_card / move_card / the UI cannot take or silently drop a claim", async (t) => {
+  const d = await spawnDaemon(t);
+  const client = await mcpClient(t, d.base);
+  let c = (await call(client, "create_card", { title: "c", role: "engineer", actor: "o" })).value;
+  c = (await call(client, "move_card", { id: c.id, column: "in_progress", expected_version: c.version, actor: "o" })).value;
+  c = (await call(client, "claim_card", { id: c.id, name: "Engineer-A", actor: "orchestrator" })).value;
+
+  // MCP: a patch cannot set working (the schema says so before the board does).
+  const steal = await client.callTool({
+    name: "update_card",
+    arguments: { id: c.id, patch: { agent: { status: "working", name: "Engineer-B" } }, expected_version: c.version, actor: "o" },
+  });
+  assert.equal(steal.isError, true);
+  // The UI API: no agent in a patch at all — not working, not null.
+  for (const agent of [{ status: "working", name: "Engineer-B" }, null]) {
+    const u = await post(d.base, `/api/cards/${c.id}/update`, { patch: { agent }, expected_version: c.version });
+    assert.equal(u.status, 422, JSON.stringify(u.body));
+    const m = await post(d.base, `/api/cards/${c.id}/move`, { column: "backlog", patch: { agent }, expected_version: c.version });
+    assert.equal(m.status, 422, JSON.stringify(m.body));
+  }
+  const now = (await call(client, "get_card", { id: c.id })).value;
+  assert.deepEqual([now.version, now.agent.name, now.agent.status], [c.version, "Engineer-A", "working"]);
+
+  // The explicit gesture: versioned, logged, and it wakes the orchestrator.
+  assert.equal((await post(d.base, `/api/cards/${c.id}/release`, {})).status, 422, "a versionless release");
+  const rel = await post(d.base, `/api/cards/${c.id}/release`, { expected_version: c.version });
+  assert.equal(rel.status, 200, JSON.stringify(rel.body));
+  assert.equal(rel.body.agent, null);
+  assert.match(rel.body.activity.at(-1).msg, /by the user \(was Engineer-A\)/);
+  const ev = await call(client, "events_since", { cursor: 0, ignore_actors: ["orchestrator", "o"] });
+  assert.deepEqual(ev.value.events.map((e) => [e.actor, e.kind]), [["board", "claim_released"]]);
+});
+
+test("MCP: move_card with append is the one-write REJECT", async (t) => {
+  const d = await spawnDaemon(t);
+  const client = await mcpClient(t, d.base);
+  const link = [{ label: "PR #1", url: "https://github.com/o/r/pull/1" }];
+  let c = (await call(client, "create_card", { title: "c", body: "spec", role: "engineer", column: "review", links: link, actor: "o" })).value;
+  c = (await call(client, "claim_card", { id: c.id, name: "AS-1-test", actor: "orchestrator" })).value;
+  const r = await call(client, "move_card", {
+    id: c.id,
+    column: "in_progress",
+    expected_version: c.version,
+    append: { heading: "Tester findings — 2026-09-25", text: "1. broken" },
+    actor: "orchestrator",
+    by: "tester",
+  });
+  assert.ok(r.ok, JSON.stringify(r.value));
+  assert.deepEqual([r.value.version, r.value.column, r.value.agent], [c.version + 1, "in_progress", null]);
+  assert.match(r.value.body, /## Tester findings — 2026-09-25\n\n1\. broken$/);
+});
+
+test("wake-up: a cursor past head is printed and resumed from head, never waited on silently", async (t) => {
+  const d = await spawnDaemon(t);
+  const client = await mcpClient(t, d.base);
+  const c = (await call(client, "create_card", { title: "c", role: "engineer", actor: "pm" })).value;
+
+  const once = await runWait(["--since", "999999", "--port", String(d.port)]).done;
+  assert.equal(once.code, 3, once.stderr);
+  assert.equal(once.lines[0].error, "cursor_ahead");
+  assert.equal(once.lines[0].head, 1);
+
+  const w = runWait(["--follow", "--since", "999999", "--port", String(d.port)]);
+  t.after(() => w.child.kill());
+  for (let i = 0; i < 50 && !w.stdoutSoFar(); i++) await sleep(100);
+  await call(client, "append_activity", { id: c.id, msg: "after the reset", actor: "pm" });
+  for (let i = 0; i < 50 && w.stdoutSoFar().split("\n").filter(Boolean).length < 2; i++) await sleep(100);
+  const lines = w.stdoutSoFar().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(lines[0].error, "cursor_ahead");
+  assert.deepEqual([lines[1].kind, lines[1].cursor], ["activity", 2], "follow mode resumes from head and delivers the next event");
+
+  const mcp = await client.callTool({ name: "events_since", arguments: { cursor: 999999 } });
+  assert.equal(mcp.isError, true);
+  assert.equal(JSON.parse(mcp.content[0].text).error, "cursor_ahead");
+});
+
+test("wake-up: a re-created board behind the same port is printed, not delivered as news", async (t) => {
+  const d = await spawnDaemon(t);
+  const client = await mcpClient(t, d.base);
+  for (let i = 0; i < 3; i++) await call(client, "create_card", { title: `old ${i}`, role: "engineer", actor: "pm" });
+  const w = runWait(["--follow", "--since", "3", "--port", String(d.port)]);
+  t.after(() => w.child.kill());
+  await sleep(300);
+  await d.stop();
+
+  // A different database on the same port, which already has MORE events than
+  // the waiter's cursor: without the board check, events 4.. would be read as new.
+  const tmp = tempDir();
+  t.after(() => tmp.cleanup());
+  const second = spawn(process.execPath, [CLI, "serve", "--db", tmp.db, "--port", String(d.port)], { stdio: ["ignore", "ignore", "pipe"] });
+  t.after(() => second.kill());
+  await new Promise((res) => second.stderr.on("data", (x) => /serving/.test(String(x)) && res()));
+  const c2 = await mcpClient(t, d.base);
+  for (let i = 0; i < 5; i++) await call(c2, "create_card", { title: `new ${i}`, role: "engineer", actor: "pm" });
+
+  for (let i = 0; i < 80 && !/board_replaced/.test(w.stdoutSoFar()); i++) await sleep(100);
+  const lines = w.stdoutSoFar().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const kinds = lines.map((l) => l.error ?? (l.reconnected ? "reconnected" : l.kind));
+  assert.ok(kinds.includes("board_replaced"), JSON.stringify(lines));
+  assert.ok(!lines.some((l) => l.kind === "created"), `a replaced board's events were delivered: ${JSON.stringify(lines)}`);
+  assert.equal(lines.find((l) => l.error === "board_replaced").head, 5);
+});
+
+test("wake-up: --follow across a restart of the SAME board resumes exactly once, with no resync", async (t) => {
+  const d = await spawnDaemon(t);
+  const client = await mcpClient(t, d.base);
+  const c = (await call(client, "create_card", { title: "c", role: "engineer", actor: "pm" })).value;
+  const w = runWait(["--follow", "--since", "1", "--port", String(d.port)]);
+  t.after(() => w.child.kill());
+  await sleep(300);
+  await d.stop();
+  const again = spawn(process.execPath, [CLI, "serve", "--db", d.db, "--port", String(d.port)], { stdio: ["ignore", "ignore", "pipe"] });
+  t.after(() => new Promise((res) => (again.exitCode !== null ? res() : (again.once("exit", res), again.kill()))));
+  await new Promise((res) => again.stderr.on("data", (x) => /serving/.test(String(x)) && res()));
+  const c2 = await mcpClient(t, d.base);
+  await call(c2, "append_activity", { id: c.id, msg: "after restart", actor: "pm" });
+  for (let i = 0; i < 80 && !/"activity"/.test(w.stdoutSoFar()); i++) await sleep(100);
+  const lines = w.stdoutSoFar().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.deepEqual(
+    lines.map((l) => l.error ?? (l.reconnected ? "reconnected" : `${l.kind}@${l.cursor}`)),
+    ["daemon_unreachable", "reconnected", "activity@2"],
+  );
 });
