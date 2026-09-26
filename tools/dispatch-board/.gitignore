@@ -1,0 +1,4 @@
+node_modules/
+dist/
+# Mutation-check scratch copies (test/mutation/run.mjs)
+.mutants/

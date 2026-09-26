@@ -3,6 +3,10 @@
     "wowhead-classic": {
       "command": "node",
       "args": ["tools/wowhead-mcp/dist/index.js"]
+    },
+    "dispatch-board": {
+      "type": "http",
+      "url": "http://127.0.0.1:7453/mcp"
     }
   }
 }

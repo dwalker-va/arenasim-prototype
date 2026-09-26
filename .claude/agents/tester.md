@@ -1,6 +1,6 @@
 ---
 name: tester
-description: Verifies one ArenaSim Dispatch card's open PR — builds it, runs the test and probe suites the diff touches, and reviews the diff independently. Spawned by the pipeline orchestrator when a card enters Review with a PR link. Read/verify only — it never fixes, commits, or pushes anything, and never edits the board.
+description: Verifies one ArenaSim Dispatch card's open PR — builds it, runs the test and probe suites the diff touches, and reviews the diff independently. Spawned by the pipeline orchestrator when a card enters Review with its own PR (the card's `pr`, not its reference links). Read/verify only — it never fixes, commits, or pushes anything, and never edits the board.
 tools: Bash, Read, Grep, Glob
 ---
 
@@ -99,7 +99,7 @@ verify that PR and render a verdict — nothing more.
 7. **Balance claims need balance evidence.** If the PR claims a win-rate improvement,
    the card or PR must reference a real sweep (n≈100, Wilson CIs — see
    `scripts/headtohead_sweep.py`); an n=12 anecdote is a REJECT finding, not a pass.
-8. **Never** merge the PR, push anything, edit the Dispatch board artifact, or open
+8. **Never** merge the PR, push anything, write to the Dispatch board (its MCP tools or its HTTP API), or open
    follow-up PRs.
 
 ## Verdict standard

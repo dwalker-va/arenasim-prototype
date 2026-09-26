@@ -83,7 +83,28 @@ Returns: item level, slot, armor type, armor value, damage/speed, bonus stats (s
 Use spell tools when implementing new abilities to get accurate Classic-era values.
 Use item tools when adding items to `items.ron` or downloading equipment icons.
 
-### 3. Client-data DB2 sweep (`scripts/db2_spell_sweep.py`)
+### 3. Dispatch board MCP (`tools/dispatch-board/`)
+
+The agent pipeline's kanban board (`docs/design/agent-pipeline.md`): ONE local
+daemon owns a SQLite board and serves MCP (registered in `.mcp.json` as the
+`dispatch-board` `http` server at `http://127.0.0.1:7453/mcp`), the web UI at
+`http://127.0.0.1:7453/`, and the event feed the orchestrator waits on. Same
+build shape as the Wowhead server — `dist/` and `node_modules/` are gitignored:
+
+```bash
+# from the repo root
+npm --prefix tools/dispatch-board ci && npm --prefix tools/dispatch-board run build
+node tools/dispatch-board/dist/cli.js serve   # leave running; DB: <main checkout>/.dispatch/board.db
+```
+
+Start the daemon **before** the sessions that use it, or reconnect via `/mcp`
+afterwards: a down `http` server just shows as failed and its
+`mcp__dispatch-board__*` tools are absent. Every worktree resolves the same
+DB (the main checkout's), so there is one board. `npm test` there runs its own
+suite (not part of `cargo test` — see its README for why); `dist/cli.js export`
+is the backup.
+
+### 4. Client-data DB2 sweep (`scripts/db2_spell_sweep.py`)
 
 **The canonical join for client-data research.** Wowhead gives you gameplay
 numbers; the *visual* research the animation cards run (AS-9, AS-15, AS-19,
