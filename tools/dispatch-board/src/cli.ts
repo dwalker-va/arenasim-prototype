@@ -3,9 +3,9 @@
  * dispatch-board CLI.
  *
  *   serve                          run the daemon (MCP + web UI + event feed)
- *   wait [--since N|head] [--ignore-actor A]... [--follow] [--timeout S]
+ *   wait [--since N|head] [--board ID] [--ignore-actor A]... [--follow] [--timeout S]
  *                                  block for board events, one JSON line each
- *   head                           print the current event cursor
+ *   head                           print {"cursor", "board"}: where to arm a wait from
  *   import <state.json|board.html> load a board state into an EMPTY db
  *   export [--out FILE]            write the full state as JSON
  *
@@ -62,12 +62,18 @@ function out(obj: unknown): void {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function cmdServe(a: Args): Promise<void> {
-  const d = await startDaemon({ dbPath: flag(a, "db") ?? defaultDbPath(), port: Number(flag(a, "port") ?? defaultPort()) });
+  const ready = startDaemon({ dbPath: flag(a, "db") ?? defaultDbPath(), port: Number(flag(a, "port") ?? defaultPort()) });
+  // Handlers go in BEFORE the daemon can announce itself: a SIGTERM that
+  // arrives the moment it says "serving" must still close it and its lock.
   const stop = () => {
-    void d.close().then(() => process.exit(0));
+    void ready.then((d) => d.close()).then(
+      () => process.exit(0),
+      () => process.exit(0),
+    );
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
+  await ready;
 }
 
 /**
@@ -87,7 +93,9 @@ async function cmdServe(a: Args): Promise<void> {
  * from a board the daemon no longer serves (`{"error": "board_replaced"}` —
  * the db was re-created, which restarts cursors). Both resume from the
  * board's head; the line tells the reader to re-read the board. One-shot mode
- * exits 3 after printing it.
+ * exits 3 after printing it. `--board ID` names the board the cursor came
+ * from, so a FRESH waiter (a re-arm) catches a replacement too; without it
+ * the board is learned on first contact.
  */
 async function cmdWait(a: Args): Promise<void> {
   const port = Number(flag(a, "port") ?? defaultPort());
@@ -100,7 +108,7 @@ async function cmdWait(a: Args): Promise<void> {
   let cursor: number | undefined = sinceArg === "head" ? undefined : Number(sinceArg);
   if (cursor !== undefined && (!Number.isInteger(cursor) || cursor < 0)) die("--since must be a cursor (integer >= 0) or 'head'");
   let down = false;
-  let boardId: string | undefined;
+  let boardId: string | undefined = flag(a, "board");
 
   const resync = (error: string, detail: string, head: number, board: string) => {
     out({ error, cursor, head, board, detail: `${detail}; resuming from head ${head} — re-read the board` });
@@ -118,7 +126,7 @@ async function cmdWait(a: Args): Promise<void> {
         // --since head, where "now" is).
         const h = (await (await fetch(`${base}/api/health`)).json()) as { head: number; board: string };
         if (cursor === undefined) cursor = h.head;
-        boardId = h.board;
+        if (boardId === undefined) boardId = h.board;
       }
       const q = new URLSearchParams({ since: String(cursor), wait: String(Math.max(1, Math.min(60, Math.ceil(remaining / 1000)))) });
       for (const i of ignore) q.append("ignore_actor", i);
@@ -163,8 +171,8 @@ async function cmdHead(a: Args): Promise<void> {
   const port = Number(flag(a, "port") ?? defaultPort());
   const base = flag(a, "url") ?? `http://127.0.0.1:${port}`;
   try {
-    const h = (await (await fetch(`${base}/api/health`)).json()) as { head: number };
-    out(h.head);
+    const h = (await (await fetch(`${base}/api/health`)).json()) as { head: number; board: string };
+    out({ cursor: h.head, board: h.board });
   } catch (e) {
     die(`daemon unreachable at ${base}: ${String((e as Error).message ?? e)}`, 2);
   }
@@ -206,9 +214,10 @@ function cmdExport(a: Args): void {
 const HELP = `usage: node dist/cli.js <command>
 
   serve                         run the daemon (MCP at /mcp, web UI at /, event feed)
-  wait [--since N|head] [--ignore-actor TAG]... [--follow] [--timeout SECONDS]
+  wait [--since N|head] [--board ID] [--ignore-actor TAG]... [--follow] [--timeout SECONDS]
                                 block for board events; one JSON line per event
-  head                          print the current event cursor
+                                (--board: the board id the cursor came from)
+  head                          print {"cursor", "board"}: where to arm a wait from
   import <state.json|page.html> load a board state into an EMPTY db (daemon stopped)
   export [--out FILE]           write the full board state as JSON
 

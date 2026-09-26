@@ -256,6 +256,17 @@ function checkAgentTransition(id: string, stored: unknown, patch: Record<string,
   }
 }
 
+/**
+ * The activity line for a patch that changes `agent`, or null when it does
+ * not. A claim never ends silently, whichever tool ended it.
+ */
+function claimChangeNote(stored: unknown, patch: Record<string, unknown>): string | null {
+  if (!("agent" in patch) || JSON.stringify(patch.agent) === JSON.stringify(stored ?? null)) return null;
+  const who = (a: unknown) => (isObj(a) && typeof a.name === "string" ? a.name : typeof a === "string" ? a : "unnamed");
+  if (patch.agent === null) return stored == null ? null : `Claim cleared (was ${who(stored)})`;
+  return `Claim finished (${who(stored)})`;
+}
+
 function checkAppend(a: unknown): { heading: string; text: string } | undefined {
   if (a === undefined) return undefined;
   if (!isObj(a) || typeof a.heading !== "string" || !a.heading.trim() || typeof a.text !== "string" || !a.text.trim()) {
@@ -266,8 +277,9 @@ function checkAppend(a: unknown): { heading: string; text: string } | undefined 
 
 /** The body with `text` appended under a `## heading` section. */
 function withSection(body: unknown, heading: string, text: string): string {
-  const b = typeof body === "string" ? body : "";
-  return `${b.replace(/\s+$/, "")}\n\n## ${heading.replace(/^#+\s*/, "")}\n\n${text}`;
+  const b = typeof body === "string" ? body.replace(/\s+$/, "") : "";
+  const section = `## ${heading.replace(/^#+\s*/, "")}\n\n${text}`;
+  return b ? `${b}\n\n${section}` : section;
 }
 
 /** The AS-4 PR-link gate: a non-pm card enters review/human_review only with a link. */
@@ -596,12 +608,14 @@ export class Board extends EventEmitter {
     return this.write(() => {
       const { r, doc } = this.loadExpecting(id, expectedVersion);
       checkAgentTransition(id, doc.agent, patch, () => this.current(id));
+      const claimNote = claimChangeNote(doc.agent, patch);
       Object.assign(doc, patch);
       if (GATED_COLUMNS.includes(doc.column as string) && !gateAllows(doc, doc.column as string)) {
         throw new BoardError("gate_refused", `${id} is in ${String(doc.column)}: a non-pm card there must keep a PR link`, this.current(id));
       }
       this.commitDoc(id, r.version, doc);
       if (meta.activity) this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: meta.activity });
+      if (claimNote) this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: claimNote });
       this.recordEvent(actor, "edited", id, { fields: Object.keys(patch) });
       return this.getCard(id, { activity_limit: 5 });
     });
@@ -627,6 +641,7 @@ export class Board extends EventEmitter {
       const { r, doc } = this.loadExpecting(id, expectedVersion);
       const from = doc.column as string;
       checkAgentTransition(id, doc.agent, patch, () => this.current(id));
+      const stored = doc.agent;
       Object.assign(doc, patch);
       if (append) doc.body = withSection(doc.body, append.heading, append.text);
       if (!gateAllows(doc, to)) {
@@ -638,9 +653,11 @@ export class Board extends EventEmitter {
       }
       doc.column = to;
       if (to === "in_progress") doc.agent = null;
+      const claimNote = claimChangeNote(stored, { agent: doc.agent ?? null });
       this.commitDoc(id, r.version, doc);
       if (append) this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: `Appended to spec: ${append.heading}` });
       this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: meta.activity ?? `Moved: ${from} → ${to}` });
+      if (claimNote) this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: claimNote });
       this.recordEvent(actor, "moved", id, {
         from,
         to,

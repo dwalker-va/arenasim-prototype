@@ -67,7 +67,8 @@ export async function spawnDaemon(t, extraEnv = {}) {
   });
   const stop = () =>
     new Promise((res) => {
-      if (child.exitCode !== null) return res();
+      // A signal-killed child has exitCode null and signalCode set: either means it is gone.
+      if (child.exitCode !== null || child.signalCode !== null) return res();
       child.once("exit", () => res());
       child.kill("SIGTERM");
     });

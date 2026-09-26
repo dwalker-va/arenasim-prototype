@@ -123,6 +123,51 @@ test("drawer: a foreign write seen before editing survives a one-field save", as
   assert.equal(now.activity.at(-1).msg, "Edited priority", "the save sent more than the one changed field");
 });
 
+test("drawer: a field the user never touched follows EVERY refresh, and is never sent", async (t) => {
+  const d = await spawnDaemon(t);
+  const client = await mcpClient(t, d.base);
+  const c = await reviewCard(client);
+  const page = await openPage(t, d.base);
+  await page.open(c.id, c.version);
+
+  page.set("d-pri", "P1"); // the user's only edit
+  const r1 = await call(client, "append_to_body", { id: c.id, heading: "Round 1 findings", text: "one", actor: "orchestrator" });
+  await page.refresh(r1.value.version);
+  const r2 = await call(client, "append_to_body", { id: c.id, heading: "Round 2 findings", text: "two", actor: "orchestrator" });
+  await page.refresh(r2.value.version);
+
+  assert.match(page.value("d-body"), /Round 2 findings/, "the untouched spec froze at an intermediate version");
+  assert.doesNotMatch(page.doc.querySelector(".stale").textContent, /You edited/, "the notice claims an edit the user never made");
+  page.doc.getElementById("d-rebase").click();
+  await page.save();
+  const now = await getCard(client, c.id);
+  assert.equal(now.priority, "P1");
+  assert.match(now.body, /Round 1 findings[\s\S]*Round 2 findings/, "a foreign append was erased");
+  assert.equal(now.activity.at(-1).msg, "Edited priority");
+});
+
+for (const [shape, body] of [
+  ["an empty spec after its first append", ""],
+  ["a spec with a leading newline", "\nleading newline"],
+  ["a CRLF spec", "line one\r\nline two\r\n"],
+]) {
+  test(`drawer: ${shape} is not an edit the user made`, async (t) => {
+    const d = await spawnDaemon(t);
+    const client = await mcpClient(t, d.base);
+    let c = (await call(client, "create_card", { title: "shape", body, role: "engineer", actor: "pm-test" })).value;
+    if (body === "") c = (await call(client, "append_to_body", { id: c.id, heading: "Tester findings", text: "1. x", actor: "orchestrator" })).value;
+    const stored = c.body;
+    const page = await openPage(t, d.base);
+    await page.open(c.id, c.version);
+    page.set("d-pri", "P1");
+    await page.save();
+    const now = await getCard(client, c.id);
+    assert.equal(now.priority, "P1", page.status());
+    assert.equal(now.body, stored, "a priority-only save rewrote the spec");
+    assert.equal(now.activity.at(-1).msg, "Edited priority");
+  });
+}
+
 test("drawer: an edit that a foreign write overtakes is refused, not written over it", async (t) => {
   const d = await spawnDaemon(t);
   const client = await mcpClient(t, d.base);

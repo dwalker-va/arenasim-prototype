@@ -4,6 +4,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { request } from "node:http";
+import { existsSync } from "node:fs";
+import { lockPath } from "../dist/paths.js";
 import { spawnDaemon, mcpClient, call, post, tempDir, CLI } from "./helpers.mjs";
 
 /** Run `cli.js wait ...` and resolve with its stdout lines and exit code. */
@@ -307,4 +309,70 @@ test("wake-up: --follow across a restart of the SAME board resumes exactly once,
     lines.map((l) => l.error ?? (l.reconnected ? "reconnected" : `${l.kind}@${l.cursor}`)),
     ["daemon_unreachable", "reconnected", "activity@2"],
   );
+});
+
+/** Spawn a daemon and SIGTERM it synchronously, in the same tick it announces itself. */
+function termOnServing() {
+  const tmp = tempDir();
+  const child = spawn(process.execPath, [CLI, "serve", "--db", tmp.db, "--port", "0"], { stdio: ["ignore", "ignore", "pipe"] });
+  let err = "";
+  child.stderr.on("data", (x) => {
+    err += x;
+    if (/serving/.test(err) && child.signalCode === null && !child.killed) child.kill("SIGTERM");
+  });
+  return new Promise((res) =>
+    child.once("exit", (code, signal) => {
+      const lock = existsSync(lockPath(tmp.db));
+      tmp.cleanup();
+      res({ code, signal, lock });
+    }),
+  );
+}
+
+test("shutdown: a SIGTERM the instant the daemon says it is serving is handled gracefully", async () => {
+  // The daemon installs its handlers before it announces itself, so no
+  // SIGTERM after "serving" can take the default action (dying without
+  // removing its lock). Many trials: the window this closes is a race.
+  const trials = [];
+  for (let batch = 0; batch < 4; batch++) trials.push(...(await Promise.all(Array.from({ length: 10 }, termOnServing))));
+  const bad = trials.filter((r) => r.code !== 0 || r.signal !== null || r.lock);
+  assert.deepEqual(bad, [], `${bad.length}/${trials.length} daemons died by signal or kept their lock`);
+});
+
+test("shutdown: the test helper's stop() settles on a daemon that died by signal, and twice", async (t) => {
+  const d = await spawnDaemon(t);
+  await new Promise((res) => {
+    d.child.once("exit", res);
+    d.child.kill("SIGKILL");
+  });
+  await d.stop();
+  await d.stop();
+});
+
+test("wake-up: a FRESH waiter armed with --board catches a board replaced while it was not running", async (t) => {
+  const old = await spawnDaemon(t);
+  const client = await mcpClient(t, old.base);
+  for (let i = 0; i < 3; i++) await call(client, "create_card", { title: `old ${i}`, role: "engineer", actor: "pm" });
+  const headRun = spawn(process.execPath, [CLI, "head", "--port", String(old.port)], { stdio: ["ignore", "pipe", "ignore"] });
+  let headOut = "";
+  headRun.stdout.on("data", (x) => (headOut += x));
+  await new Promise((r) => headRun.on("exit", r));
+  const armed = JSON.parse(headOut);
+  assert.equal(armed.cursor, 3);
+  assert.match(armed.board, /^[0-9a-f-]{36}$/);
+
+  // The re-created board already has MORE events than the saved cursor.
+  const fresh = await spawnDaemon(t);
+  const c2 = await mcpClient(t, fresh.base);
+  for (let i = 0; i < 5; i++) await call(c2, "create_card", { title: `new ${i}`, role: "engineer", actor: "pm" });
+
+  const r = await runWait(["--since", String(armed.cursor), "--board", armed.board, "--port", String(fresh.port)]).done;
+  assert.equal(r.code, 3, r.stderr);
+  assert.deepEqual(r.lines.map((l) => l.error ?? l.kind), ["board_replaced"], "a replaced board's events were delivered as news");
+  assert.equal(r.lines[0].head, 5);
+
+  // Armed with the board it came from, the same cursor delivers normally.
+  await call(client, "create_card", { title: "old 3", role: "engineer", actor: "pm" });
+  const ok = await runWait(["--since", String(armed.cursor), "--board", armed.board, "--port", String(old.port)]).done;
+  assert.deepEqual(ok.lines.map((l) => [l.kind, l.cursor]), [["created", 4]]);
 });

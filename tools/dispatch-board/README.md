@@ -47,7 +47,8 @@ node dist/cli.js serve --db /tmp/dispatch-scratch/board.db --port 17453
 ## Wake-up (`wait`)
 
 ```bash
-node dist/cli.js wait --follow --since <cursor> --ignore-actor orchestrator
+node dist/cli.js head    # {"cursor": N, "board": "<id>"}
+node dist/cli.js wait --follow --since <cursor> --board <id> --ignore-actor orchestrator
 ```
 
 prints one JSON line per board event (`{"cursor", "t", "actor", "kind",
@@ -57,9 +58,11 @@ notification per line. Without `--follow` it prints the first batch and exits
 the cursor on each line is what to resume from. An unreachable daemon prints
 `{"error": "daemon_unreachable", ...}` rather than going silent, and a cursor
 that no longer belongs to the served board — past its head (`cursor_ahead`), or
-from a database since re-created (`board_replaced`, detected by the board id
-each db mints) — prints an error line and resumes from head (one-shot mode
-exits 3).
+from a database other than the one `--board` names (`board_replaced`: each db
+mints an id, and cursors restart when a board is re-created) — prints an error
+line and resumes from head (one-shot mode exits 3). Without `--board` the id
+is learned on first contact, which protects only a waiter that was already
+running across the swap.
 
 ## Backup, import, rollback
 

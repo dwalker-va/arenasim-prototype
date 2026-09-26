@@ -136,7 +136,9 @@ marks a card `done` that holds no working claim. The web UI never patches
 `agent` at all; its one claim gesture is an explicit **Release claim** in the
 card drawer (for a claim the user judges stale with no orchestrator running),
 which is versioned, logged in the card's activity, and wakes the orchestrator
-like any other gesture.
+like any other gesture. A claim never ends silently: every write that changes
+`agent` (a patch, or a move into `in_progress`) adds an activity line saying
+whose claim was cleared or finished.
 Bouncing a card from Review back to In Progress is therefore automatically a
 respawn. **Scoping cards invert the guard's meaning:** nothing is ever spawned
 for a `role: "pm"` card, so `agent: null` on one is a *resting state*, not a
@@ -259,7 +261,7 @@ Arm it with:
 
 ```
 Monitor({
-  command: "node <main>/tools/dispatch-board/dist/cli.js wait --follow --since <cursor> --ignore-actor orchestrator",
+  command: "node <main>/tools/dispatch-board/dist/cli.js wait --follow --since <cursor> --board <board> --ignore-actor orchestrator",
   description: "Dispatch board events",
   timeout_ms: 1800000
 })
@@ -271,23 +273,29 @@ Monitor({
   (`--ignore-actor orchestrator`); user gestures (`actor: "board"`) and other
   sessions' writes (a PM's `create_card`) do.
 - **On expiry, re-arm** with `--since` set to the `cursor` of the last line it
-  printed (or the cursor you armed it with, if it printed none). Nothing is
-  lost across the gap: events wait in the database, and the new monitor prints
-  everything after that cursor at once.
+  printed (or the cursor you armed it with, if it printed none), and the same
+  `--board`. Nothing is lost across the gap: events wait in the database, and
+  the new monitor prints everything after that cursor at once.
 - Take the starting cursor **before** the startup read
-  (`node <main>/tools/dispatch-board/dist/cli.js head`), then read, then arm
-  from it — an event landing between the read and the arm is then replayed
-  rather than skipped. (`--since head` means "from now" and has exactly that
-  gap.)
+  (`node <main>/tools/dispatch-board/dist/cli.js head`, which prints
+  `{"cursor": N, "board": "<id>"}`), then read, then arm from it — an event
+  landing between the read and the arm is then replayed rather than skipped.
+  (`--since head` means "from now" and has exactly that gap.)
+- `--board` is the id of the database the cursor counts. Cursors restart when
+  the board is re-created (a restore: export, fresh db, import), so a re-armed
+  monitor that did not carry the id could read the new board's events as news
+  past its old cursor; with it, the monitor notices the swap even though it was
+  not running when it happened.
 - If the daemon is down, the monitor prints `{"error": "daemon_unreachable",
   ...}` rather than going silent, keeps retrying, and prints `{"reconnected":
   true}` when it is back. Tell the user; the daemon is theirs to start.
 - A cursor that no longer means anything is printed too: `{"error":
   "cursor_ahead", ...}` (the cursor is past the board's newest event) or
   `{"error": "board_replaced", ...}` (the daemon now serves a different
-  database — a restore re-creates the board and restarts its cursors). The
-  monitor resumes from the board's head; events between the two boards cannot
-  be replayed, so **re-read the board** (run the wake steps) on either line.
+  database than `--board` names). The monitor resumes from the board's head;
+  events between the two boards cannot be replayed, so **re-read the board**
+  (run the wake steps) on either line, and carry the line's `board` into later
+  re-arms.
 - A notification is only a wake-up. Its line says what changed, but the steps
   below always re-read the board rather than acting on the line alone — several
   events can batch into one notification, and the board is the truth.

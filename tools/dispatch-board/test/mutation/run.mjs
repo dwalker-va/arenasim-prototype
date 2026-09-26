@@ -89,6 +89,25 @@ const MUTANTS = [
     replace: "var keep = true;",
     mustFail: ["drawer: a foreign write seen before editing survives a one-field save"],
   },
+  {
+    // The round-2 rule: edits diffed against the held base, not the rendered value.
+    name: "drawer-dirty-tracking",
+    file: "ui/board.html",
+    find: "if(v !== undefined && rendered[f] !== undefined && v !== rendered[f]) out[k] = v;",
+    replace: "if(v !== undefined && base && v !== base[k]) out[k] = v;",
+    mustFail: [
+      "drawer: a field the user never touched follows EVERY refresh, and is never sent",
+      "drawer: a spec with a leading newline is not an edit the user made",
+      "drawer: a CRLF spec is not an edit the user made",
+    ],
+  },
+  {
+    name: "signal-handler-ordering",
+    file: "dist/cli.js",
+    find: 'process.on("SIGINT", stop);\n    process.on("SIGTERM", stop);\n    await ready;',
+    replace: 'await ready;\n    process.on("SIGINT", stop);\n    process.on("SIGTERM", stop);',
+    mustFail: ["shutdown: a SIGTERM the instant the daemon says it is serving is handled gracefully"],
+  },
 ];
 
 let failures = 0;

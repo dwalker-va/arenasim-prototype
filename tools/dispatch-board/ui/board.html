@@ -122,11 +122,17 @@ button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focu
 //
 // The drawer never writes a value the user did not change. Its edits are
 // based on one version of the card (`base`: the version it opened on, or
-// the one the user explicitly rebased onto); Save sends only the fields that
-// differ from that base, conditioned on the base's version, so a write that
-// landed meanwhile either survives (fields the user left alone are never
-// sent) or refuses the save (the version check). While the drawer has no
-// edits, a live refresh simply moves the base forward.
+// the one the user explicitly rebased onto); Save sends only the fields the
+// user changed, conditioned on the base's version, so a write that landed
+// meanwhile either survives (fields the user left alone are never sent) or
+// refuses the save (the version check). While the drawer has no edits, a
+// live refresh simply moves the base forward.
+//
+// "Changed" means the input differs from the value the drawer last RENDERED
+// into it — DOM against DOM, never DOM against the card. So the browser's
+// normalisation (a <textarea> drops a leading newline and turns CRLF into
+// LF) is never mistaken for an edit, and a field the user left alone follows
+// every refresh even while the base is held for the fields they did touch.
 var COLUMNS = [
   {key:"backlog", label:"Backlog", hint:"queued"},
   {key:"needs_input", label:"Needs Input", hint:"blocked on you"},
@@ -138,7 +144,7 @@ var COLUMNS = [
 var ARCHIVED = {key:"archived", label:"Archived", hint:"released"};
 var ROLES = ["engineer","tester","release-manager","pm"];
 var GATED = ["review","human_review"];
-// Drawer field -> its input. The drawer's edits are these, diffed against `base`.
+// Drawer field -> its input. The drawer's edits are these inputs, diffed against `rendered`.
 var DRAWER = {title: "d-title", body: "d-body", column: "d-col", role: "d-role", priority: "d-pri"};
 
 var state = {cards: []};
@@ -148,6 +154,7 @@ var openCardId = null, showNew = false, confirmDelete = false, statusMsg = "conn
 var pending = null;       // {id, column, patch, why, expected}: a gated move waiting on the PR-link dialog
 var base = null;          // the open drawer's card as its edits are based on: {id, version, title, body, column, role, priority}
 var confirmRelease = false, discardDraft = false;
+var rendered = {}, renderedFor = null;   // input id -> the value the drawer last rendered into it, for card `renderedFor`
 var app = document.getElementById("app");
 
 function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
@@ -164,13 +171,14 @@ function snapshot(c){
   return {id: c.id, version: c.version, title: c.title == null ? "" : String(c.title), body: c.body == null ? "" : String(c.body),
           column: c.column, role: c.role == null ? "" : String(c.role), priority: c.priority == null ? "" : String(c.priority)};
 }
-// The drawer fields whose value (from `values`, input id -> value) differs from the base.
-function drawerEdits(values){
+// The user's edits: drawer fields whose value (from `values`, input id ->
+// value) differs from what the drawer last rendered into them.
+function drawerEdits(values, id){
   var out = {};
-  if(!base) return out;
+  if(!id || renderedFor !== id) return out;
   Object.keys(DRAWER).forEach(function(k){
-    var v = values[DRAWER[k]];
-    if(v !== undefined && v !== base[k]) out[k] = v;
+    var f = DRAWER[k], v = values[f];
+    if(v !== undefined && rendered[f] !== undefined && v !== rendered[f]) out[k] = v;
   });
   return out;
 }
@@ -370,8 +378,9 @@ function restoreDraft(d, keepDrawer){
 
 function render(){
   var keep = captureDraft();
-  // The drawer's edits, against its base, before anything is redrawn.
-  var edits = (base && keep.keys.drawer === base.id && !discardDraft) ? drawerEdits(keep.values) : {};
+  // The user's edits, read before anything is redrawn.
+  if(discardDraft || !openCardId || keep.keys.drawer !== openCardId){ rendered = {}; renderedFor = null; }
+  var edits = drawerEdits(keep.values, openCardId);
   // No edits yet: follow the card forward. With edits: hold the base until the
   // user rebases or discards (see the drawer's changed-elsewhere notice).
   if(!openCardId) base = null;
@@ -402,6 +411,15 @@ function render(){
     + (showNew ? modalHtml() : "")
     + (pending && card(pending.id) ? prModalHtml(card(pending.id), pending.column) : "");
   restoreDraft(keep, keepDrawer);
+  // Remember what the drawer now shows in every field the user has not
+  // edited; an edited field keeps the value it was edited FROM.
+  if(openCardId && document.querySelector(".drawer[data-id]")){
+    if(renderedFor !== openCardId){ rendered = {}; renderedFor = openCardId; }
+    Object.keys(DRAWER).forEach(function(k){
+      var el = document.getElementById(DRAWER[k]);
+      if(el && edits[k] === undefined) rendered[DRAWER[k]] = el.value;
+    });
+  }
   wire();
 }
 function openDrawer(id){ openCardId = id; base = null; confirmDelete = false; confirmRelease = false; fetchFull(id); render(); }
@@ -465,7 +483,7 @@ function wire(){
   if(dsave) dsave.onclick = function(){
     var c = full[openCardId]; if(!c || !base) return;
     // Only what the user changed, against the version those changes were based on.
-    var e = drawerEdits(drawerValues());
+    var e = drawerEdits(drawerValues(), openCardId);
     var patch = {}, changed = [];
     if(e.title !== undefined && e.title.trim()){ patch.title = e.title.trim(); changed.push("title"); }
     if(e.body !== undefined){ patch.body = e.body; changed.push("spec"); }

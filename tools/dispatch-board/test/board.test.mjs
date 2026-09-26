@@ -171,6 +171,22 @@ test("release_claim and finish_claim act only on a working claim", (t) => {
   assert.ok(finished.agent.finished);
 });
 
+test("a claim never ends silently: every patch or move that changes agent writes an activity line", (t) => {
+  const { board } = tempBoard(t);
+  const link = [{ label: "PR", url: "https://github.com/x/y/pull/1" }];
+  let c = seed(board, { column: "in_progress", agent: "working" });
+  c = board.updateCard(c.id, { agent: null }, c.version, { actor: "o" });
+  assert.equal(c.activity.at(-1).msg, "Claim cleared (was Seeded-Agent)");
+
+  c = board.claimCard(c.id, "Engineer-2", { actor: "o" });
+  c = board.moveCard(c.id, "review", c.version, { actor: "o", activity: "SUMMARY", patch: { links: link, agent: { ...c.agent, status: "done" } } });
+  assert.deepEqual(c.activity.slice(-2).map((a) => a.msg), ["SUMMARY", "Claim finished (Engineer-2)"]);
+
+  // An edit that leaves agent alone says nothing about it.
+  c = board.updateCard(c.id, { priority: "P1" }, c.version, { actor: "o" });
+  assert.equal(c.activity.at(-1).msg, "Claim finished (Engineer-2)", "a non-agent patch logged a claim change");
+});
+
 // ---------------------------------------------------------------- column rules
 
 test("PR-link gate: a linkless non-pm card is refused into review and human_review", (t) => {
@@ -281,7 +297,11 @@ test("move_card with append: findings and the move are ONE write (the Tester REJ
   assert.equal(r.version, claimed.version + 1, "one write, one version");
   assert.equal(r.body, "b\n\n## Tester findings — 2026-09-25\n\n1. broken");
   assert.deepEqual([r.column, r.agent], ["in_progress", null]);
-  assert.deepEqual(r.activity.slice(-2).map((a) => [a.by, a.msg]), [["tester", "Appended to spec: Tester findings — 2026-09-25"], ["tester", "REJECT"]]);
+  assert.deepEqual(r.activity.slice(-3).map((a) => [a.by, a.msg]), [
+    ["tester", "Appended to spec: Tester findings — 2026-09-25"],
+    ["tester", "REJECT"],
+    ["tester", "Claim cleared (was AS-1-test)"],
+  ]);
   const evs = board.eventsSince(h).events;
   assert.deepEqual(evs.map((e) => [e.kind, e.data.to, e.data.appended]), [["moved", "in_progress", "Tester findings — 2026-09-25"]]);
 
@@ -290,6 +310,12 @@ test("move_card with append: findings and the move are ONE write (the Tester REJ
   refused(() => board.moveCard(again.id, "review", again.version, { actor: "o", append: { heading: "x", text: "y" } }), "gate_refused");
   assert.equal(board.getCard(again.id).body, "b");
   refused(() => board.moveCard(again.id, "backlog", again.version, { actor: "o", append: { heading: "", text: "y" } }), "invalid");
+});
+
+test("append_to_body on an empty spec starts it at the heading, with no leading blank lines", (t) => {
+  const { board } = tempBoard(t);
+  const c = board.createCard({ title: "empty", role: "engineer" }, { actor: "o" });
+  assert.equal(board.appendToBody(c.id, "Tester findings", "1. x", { actor: "o" }).body, "## Tester findings\n\n1. x");
 });
 
 test("append_to_body adds a ## heading section", (t) => {
