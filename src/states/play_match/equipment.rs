@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
+use super::proc_trinkets::ProcConfig;
 use crate::states::match_config::CharacterClass;
 
 /// What a character wears: one item per equip socket.
@@ -564,6 +565,13 @@ item_ids! {
     MarkOfTheChampion,
     EssenceOfEternalLife,
 
+    // === Proc Trinkets (all classes) — a trigger and an effect on a
+    //     per-trinket internal cooldown. See the `proc_trinkets` module.
+    DragonspineTrophy,
+    WhetstoneOfFury,
+    SigilOfArcaneSurge,
+    ReliquaryOfRenewal,
+
     // === Melee Weapons ===
     ArcaniteReaper,
     FrostbiteBlade,
@@ -773,6 +781,18 @@ pub struct ItemConfig {
     /// Weapon attack speed (replaces combatant attack_speed for primary weapon slot)
     #[serde(default)]
     pub attack_speed: f32,
+
+    // === Proc ===
+    /// A TRIGGER and an EFFECT on this item's own internal cooldown — the
+    /// Dragonspine Trophy shape. `None` for every ordinary item.
+    ///
+    /// Priced into the stat budget by [`calculate_budget_usage`] at its
+    /// expected value, so a proc is NOT a budget-free power lever; and
+    /// structurally checked (priceable effect, firing chance, an internal
+    /// cooldown at least as long as the buff) by
+    /// `all_shipped_procs_are_well_formed`. See the `proc_trinkets` module.
+    #[serde(default)]
+    pub proc: Option<ProcConfig>,
 }
 
 impl ItemConfig {
@@ -1201,6 +1221,11 @@ use super::constants::{
 
 /// Calculate the total budget usage for an item based on its budgeted stats.
 /// Free stats (armor, attack_damage_min/max, attack_speed) are excluded.
+///
+/// A PROC is charged too, at its expected value — see
+/// [`ProcConfig::budget_cost`]. Without that term a trigger-and-effect would be
+/// invisible to the budget, because it is not a stat field, and a proc of any
+/// magnitude would pass this check.
 pub fn calculate_budget_usage(item: &ItemConfig) -> f32 {
     item.max_health * WEIGHT_MAX_HEALTH
         + item.max_mana * WEIGHT_MAX_MANA
@@ -1215,6 +1240,7 @@ pub fn calculate_budget_usage(item: &ItemConfig) -> f32 {
         + item.arcane_resistance * WEIGHT_RESISTANCE
         + item.nature_resistance * WEIGHT_RESISTANCE
         + item.holy_resistance * WEIGHT_RESISTANCE
+        + item.proc.as_ref().map_or(0.0, |p| p.budget_cost())
 }
 
 /// Calculate the effective budget cap for an item based on its level and slot.
@@ -1619,6 +1645,7 @@ mod tests {
             attack_damage_min: 0.0,
             attack_damage_max: 0.0,
             attack_speed: 0.0,
+            proc: None,
         }
     }
 
@@ -1658,6 +1685,7 @@ mod tests {
             attack_damage_min: dmg_min,
             attack_damage_max: dmg_max,
             attack_speed: speed,
+            proc: None,
         }
     }
 
@@ -3291,6 +3319,7 @@ mod tests {
             attack_damage_min: 0.0,
             attack_damage_max: 0.0,
             attack_speed: 0.0,
+            proc: None,
         }
     }
 
@@ -3403,6 +3432,88 @@ mod tests {
             violations.len(),
             violations.join("\n")
         );
+    }
+
+    /// Every shipped proc must be priceable, able to fire, and unable to
+    /// stack on itself. `all_items_within_budget` above already charges the
+    /// proc's expected value, so the two together are the whole check: this
+    /// one says the declaration is coherent, that one says it is affordable.
+    #[test]
+    fn all_shipped_procs_are_well_formed() {
+        use super::super::proc_trinkets::validate_proc;
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let mut violations: Vec<String> = Vec::new();
+        let mut checked = 0;
+
+        for (item_id, item) in &item_defs.definitions {
+            if let Some(proc) = &item.proc {
+                checked += 1;
+                if let Err(msg) = validate_proc(&format!("{:?}", item_id), proc) {
+                    violations.push(msg);
+                }
+            }
+        }
+
+        assert!(violations.is_empty(), "{}", violations.join("\n"));
+        // The loop walks a pool; an empty pool would pass it silently. The
+        // MEMBERS are named in `at_least_one_proc_trinket_ships`
+        // (tests/aura_catalog_audit.rs); here the claim is only that this
+        // guard had subjects at all.
+        assert!(
+            checked > 0,
+            "no item declares a proc, so this guard checked nothing"
+        );
+    }
+
+    /// The pricing rule bites. A proc the budget does NOT see would make every
+    /// proc free, which is the defect this whole term exists to prevent — so
+    /// plant an offender and require the shipped check to reject it.
+    ///
+    /// The numbers are the card's worked example: +100 attack power at 20%
+    /// uptime is 1.5 * 100 * 0.20 = 30 points, against an ilvl-58 trinket's
+    /// 24.5 — over budget on the proc alone, with no stats at all.
+    #[test]
+    fn budget_rejects_a_proc_that_is_over_budget_on_its_own() {
+        use super::super::components::AuraType;
+        use super::super::proc_trinkets::{ProcConfig, ProcTrigger};
+
+        let mut item = budget_test_item(ItemSlotType::Trinket, 58);
+        assert!(
+            validate_item_budget("Bare Trinket", &item).is_ok(),
+            "the fixture must start within budget or this proves nothing"
+        );
+
+        item.proc = Some(ProcConfig {
+            trigger: ProcTrigger::MeleeHit,
+            chance: 0.15,
+            effect: AuraType::AttackPowerIncrease,
+            magnitude: 100.0,
+            duration: 10.0,
+            internal_cooldown: 40.0,
+        });
+        let err = validate_item_budget("Overbudget Proc", &item)
+            .expect_err("a 30-point proc on a 24.5-point trinket must be rejected");
+        assert!(err.contains("over budget"), "{}", err);
+    }
+
+    /// ...and the same proc at a longer internal cooldown fits, so the
+    /// rejection above is the PRICE talking and not a blanket ban on procs.
+    #[test]
+    fn budget_accepts_the_same_proc_once_its_cooldown_prices_it_in() {
+        use super::super::components::AuraType;
+        use super::super::proc_trinkets::{ProcConfig, ProcTrigger};
+
+        let mut item = budget_test_item(ItemSlotType::Trinket, 58);
+        item.proc = Some(ProcConfig {
+            trigger: ProcTrigger::MeleeHit,
+            chance: 0.15,
+            effect: AuraType::AttackPowerIncrease,
+            magnitude: 100.0,
+            duration: 10.0,
+            // 10/110 uptime -> 1.5 * 100 * 0.0909 = 13.6 points.
+            internal_cooldown: 100.0,
+        });
+        assert!(validate_item_budget("Priced Proc", &item).is_ok());
     }
 
     #[test]

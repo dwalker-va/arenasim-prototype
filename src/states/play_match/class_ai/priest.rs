@@ -603,7 +603,7 @@ fn try_fortitude(
             .map(|auras| {
                 auras
                     .iter()
-                    .any(|a| a.effect_type == AuraType::MaxHealthIncrease)
+                    .any(|a| a.holds_type_slot(AuraType::MaxHealthIncrease))
             })
             .unwrap_or(false);
         if has_fortitude {
@@ -821,6 +821,7 @@ fn try_power_word_shield(
             dr_category_override: None,
             dispel_type: DispelType::Auto,
             compound: None,
+            source_item: None,
         },
     });
 

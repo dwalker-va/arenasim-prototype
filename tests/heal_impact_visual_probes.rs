@@ -852,6 +852,7 @@ fn totem_hot_aura(caster: Entity) -> Aura {
         dr_category_override: None,
         dispel_type: DispelType::Auto,
         compound: None,
+        source_item: None,
     }
 }
 

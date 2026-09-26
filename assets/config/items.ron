@@ -749,6 +749,81 @@
         ),
 
         // ====================================================================
+        // PROC TRINKETS
+        //
+        // A trigger plus an effect, on this trinket's OWN internal cooldown.
+        // The proc is charged to the item budget at its expected value
+        // (weight * magnitude * duration/(duration+icd)), so the big burst
+        // number buys a small sustained one: Dragonspine's +55 attack power
+        // averages +10 AP over a long life, and costs the 15 budget points that
+        // averages to. (A short life runs above that — a trinket starts ready.)
+        // ====================================================================
+
+        DragonspineTrophy: (
+            name: "Dragonspine Trophy",
+            item_level: 58,
+            icon: "icons/items/inv_misc_bone_06.jpg",
+            slot: Trinket,
+            attack_power: 4.0,
+            proc: Some((
+                trigger: MeleeHit,
+                chance: 0.15,
+                effect: AttackPowerIncrease,
+                magnitude: 55.0,
+                duration: 10.0,
+                internal_cooldown: 45.0,
+            )),
+        ),
+
+        WhetstoneOfFury: (
+            name: "Whetstone of Fury",
+            item_level: 55,
+            icon: "icons/items/inv_stone_sharpeningstone_05.jpg",
+            slot: Trinket,
+            max_health: 12.0,
+            proc: Some((
+                trigger: MeleeHit,
+                chance: 0.10,
+                effect: CritChanceIncrease,
+                magnitude: 0.10,
+                duration: 8.0,
+                internal_cooldown: 60.0,
+            )),
+        ),
+
+        SigilOfArcaneSurge: (
+            name: "Sigil of Arcane Surge",
+            item_level: 58,
+            icon: "icons/items/inv_misc_stonetablet_11.jpg",
+            slot: Trinket,
+            spell_power: 3.0,
+            proc: Some((
+                trigger: SpellCast,
+                chance: 0.12,
+                effect: SpellPowerIncrease,
+                magnitude: 55.0,
+                duration: 12.0,
+                internal_cooldown: 50.0,
+            )),
+        ),
+
+        ReliquaryOfRenewal: (
+            name: "Reliquary of Renewal",
+            item_level: 58,
+            icon: "icons/items/inv_misc_book_11.jpg",
+            slot: Trinket,
+            max_mana: 4.0,
+            proc: Some((
+                trigger: Heal,
+                chance: 0.20,
+                effect: ManaRegenIncrease,
+                magnitude: 12.0,
+                duration: 10.0,
+                internal_cooldown: 45.0,
+            )),
+        ),
+
+        // ====================================================================
         // MELEE WEAPONS
         // ====================================================================
 

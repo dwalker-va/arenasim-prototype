@@ -41,6 +41,14 @@ pub fn regenerate_resources(
                 (combatant.current_mana + effective_mana_regen * dt).min(combatant.max_mana);
         }
 
+        // Tick down proc-trinket internal cooldowns — the same concept as
+        // the ability cooldowns below, in the same loop, so there is no second
+        // system to register and forget. Guarded on emptiness so a combatant
+        // wearing no proc trinket is not even touched.
+        if !combatant.proc_trinkets.is_empty() {
+            super::super::proc_trinkets::tick_proc_cooldowns(&mut combatant.proc_trinkets, dt);
+        }
+
         // Tick down ability cooldowns
         let abilities_on_cooldown: Vec<AbilityType> =
             combatant.ability_cooldowns.keys().copied().collect();
@@ -396,6 +404,14 @@ pub fn process_casting(
     // = caster is the target), and nothing in pass 2 re-reads caster mana, so
     // end-of-system application is equivalent and order-independent.
     let mut mana_charges: Vec<(Entity, f32)> = Vec::new();
+    // Casters whose cast RESOLVED this frame, and whether it was a heal.
+    // Collected at the same two resolution points mana is charged at — so a
+    // cast that was interrupted, or that fizzled at completion on line of
+    // sight or a dead target, procs nothing, exactly as it pays nothing.
+    // Rolled after the loop for the same reason mana is charged after it: the
+    // roll needs the CASTER's combatant mutably, and this loop holds the
+    // target's (which on a self-cast is the same entity).
+    let mut cast_proc_events: Vec<(Entity, bool)> = Vec::new();
 
     // Process completed casts
     for (
@@ -460,6 +476,7 @@ pub fn process_casting(
             // projectile lands regardless of later LoS (R7), so mana is charged
             // at spawn, after the LoS-at-completion gate above.
             mana_charges.push((caster_entity, mana_cost));
+            cast_proc_events.push((caster_entity, def.is_heal()));
             commands.spawn((
                 CastEnding {
                     caster: caster_entity,
@@ -558,6 +575,7 @@ pub fn process_casting(
         // cost mana exactly as before. Anything that fizzled above `continue`d
         // without reaching this line and costs nothing.
         mana_charges.push((caster_entity, mana_cost));
+        cast_proc_events.push((caster_entity, def.is_heal()));
         commands.spawn((
             CastEnding {
                 caster: caster_entity,
@@ -961,6 +979,38 @@ pub fn process_casting(
 
             let message = format!("{} has been eliminated", target_id);
             combat_log.log_death(target_id.clone(), Some(caster_id.clone()), message);
+        }
+    }
+
+    // Proc trinkets, SpellCast / Heal. A heal fires BOTH: `Heal` is a strict
+    // subset of `SpellCast`, so a trinket keyed to either one sees it, and a
+    // wearer of both gets one roll from each. Guarded on emptiness before
+    // `roll_procs`, so a caster wearing no proc trinket draws no RNG here.
+    for (caster_entity, was_heal) in cast_proc_events {
+        let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) else {
+            continue;
+        };
+        if caster.proc_trinkets.is_empty() {
+            continue;
+        }
+        let fired: &[super::super::proc_trinkets::ProcTrigger] = if was_heal {
+            &[
+                super::super::proc_trinkets::ProcTrigger::SpellCast,
+                super::super::proc_trinkets::ProcTrigger::Heal,
+            ]
+        } else {
+            &[super::super::proc_trinkets::ProcTrigger::SpellCast]
+        };
+        let granted = super::super::proc_trinkets::roll_procs(
+            &mut caster.proc_trinkets,
+            fired,
+            &mut game_rng,
+        );
+        for aura in granted {
+            commands.spawn(AuraPending {
+                target: caster_entity,
+                aura,
+            });
         }
     }
 

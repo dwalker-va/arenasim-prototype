@@ -26,9 +26,10 @@ use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::components::{class_base_stats, ClassBaseStats, PetType, ResourceType};
 use super::play_match::equipment::{
     enforce_two_hand_conflicts, find_one_handed_mainhand, resolve_equipped_loadout,
-    resolve_loadout, DefaultLoadouts, HeldSlot, ItemDefinitions, ItemId, ItemSlot, Loadout,
+    resolve_loadout, DefaultLoadouts, HeldSlot, ItemConfig, ItemDefinitions, ItemId, ItemSlot,
+    Loadout,
 };
-use super::play_match::rendering::GENERIC_AURA_ICONS;
+use super::play_match::rendering::{icon_load_settled, item_aura_icons, GENERIC_AURA_ICONS};
 use super::play_match::AbilityType;
 use super::{
     match_config::{
@@ -42,7 +43,8 @@ use bevy_egui::{egui, EguiContexts};
 use std::collections::HashMap;
 // Item presentation lives in the encyclopedia's Items section — the loadout
 // editor renders the same tooltip and stat line so the two never drift.
-use super::encyclopedia::items::{format_item_stats, render_item_tooltip};
+use super::encyclopedia::items::{format_item_stats, render_item_tooltip, PROC_TEXT_COLOR};
+use super::play_match::proc_trinkets::proc_description;
 // This screen is a loadout EDITOR, not a reference work: every fact about an
 // ability, item or class it shows is one the encyclopedia already owns, so it
 // links there instead of reprinting it. `widget::link_with` carries the shared
@@ -182,6 +184,7 @@ pub fn load_ability_icons(
     mut icon_handles: ResMut<AbilityIconHandles>,
     images: Res<Assets<Image>>,
     ability_definitions: Res<AbilityDefinitions>,
+    item_definitions: Res<ItemDefinitions>,
 ) {
     // Only load once
     if ability_icons.loaded {
@@ -204,17 +207,36 @@ pub fn load_ability_icons(
             let handle: Handle<Image> = asset_server.load(*path);
             icon_handles.handles.push((key.to_string(), handle));
         }
+        // An item-applied aura (a proc buff) draws its item, under the same
+        // key the buff bar uses.
+        for (key, path) in item_aura_icons(&item_definitions) {
+            let handle: Handle<Image> = asset_server.load(path);
+            icon_handles.handles.push((key, handle));
+        }
         return; // Wait for next frame to check if loaded
     }
 
-    // Check if all images are loaded
-    let all_loaded = icon_handles.handles.iter().all(|(_, h)| images.contains(h));
-    if !all_loaded {
-        return; // Wait for images to load
+    // Wait while any handle is still resolving — but a FAILED load (a missing
+    // or undecodable file) counts as resolved, exactly as in the in-match
+    // loader, so one bad icon cannot hold back every other icon on the
+    // encyclopedia and View Combatant screens.
+    let still_loading = icon_handles
+        .handles
+        .iter()
+        .any(|(_, h)| !icon_load_settled(&asset_server.load_state(h.id())));
+    if still_loading {
+        return; // Wait for images to finish loading or fail
     }
 
-    // Register textures with egui
+    // Register textures with egui, skipping any that failed to load
     for (ability_name, handle) in &icon_handles.handles {
+        if !images.contains(handle) {
+            warn!(
+                "Ability icon for '{}' failed to load; rendering without it",
+                ability_name
+            );
+            continue;
+        }
         let texture_id = contexts.add_image(handle.clone());
         ability_icons
             .textures
@@ -1423,7 +1445,6 @@ fn render_equipment_panel(
     overrides: &Loadout,
     item_icons: &Option<Res<ItemIcons>>,
 ) -> Option<Topic> {
-    let gold = egui::Color32::from_rgb(255, 215, 0);
     let title_color = egui::Color32::from_rgb(230, 204, 153);
     let subtitle_color = egui::Color32::from_rgb(170, 170, 170);
     let muted_color = egui::Color32::from_rgb(90, 90, 90);
@@ -1652,75 +1673,12 @@ fn render_equipment_panel(
                 let valid_items = items.selectable_items_for_slot(open_slot, class, resolved);
                 let current_item = resolved.get(&open_slot);
 
-                egui::ScrollArea::vertical()
-                    .max_height(400.0)
-                    .show(ui, |ui| {
-                        let picker_icon_size = 22.0;
-
-                        for (item_id, item) in &valid_items {
-                            let is_equipped = current_item == Some(item_id);
-
-                            let stat_text = format_item_stats(item);
-                            let display = if stat_text.is_empty() {
-                                item.name.clone()
-                            } else {
-                                format!("{}  —  {}", item.name, stat_text)
-                            };
-
-                            let name_color = if is_equipped {
-                                gold
-                            } else {
-                                egui::Color32::from_rgb(220, 220, 220)
-                            };
-
-                            // Row with icon + text
-                            let response = ui
-                                .horizontal(|ui| {
-                                    // Draw item icon if available
-                                    if let Some(icons) = item_icons {
-                                        if let Some(&texture_id) = icons.textures.get(item_id) {
-                                            let (icon_rect, _) = ui.allocate_exact_size(
-                                                egui::vec2(picker_icon_size, picker_icon_size),
-                                                egui::Sense::hover(),
-                                            );
-                                            ui.painter().image(
-                                                texture_id,
-                                                icon_rect,
-                                                egui::Rect::from_min_max(
-                                                    egui::pos2(0.0, 0.0),
-                                                    egui::pos2(1.0, 1.0),
-                                                ),
-                                                egui::Color32::WHITE,
-                                            );
-                                        }
-                                    }
-
-                                    ui.selectable_label(
-                                        is_equipped,
-                                        egui::RichText::new(&display).size(13.0).color(name_color),
-                                    )
-                                })
-                                .inner;
-
-                            ui_driver::mark(
-                                ui,
-                                response.rect,
-                                true,
-                                format_args!("pick:{item_id:?}"),
-                            );
-
-                            if response.clicked() {
-                                selection = Some(*item_id);
-                            }
-                            // Right-click reads instead of equipping. The picker
-                            // stays open and this screen keeps its state, so the
-                            // trip to the item's page costs the player nothing:
-                            // Back lands them right back on this pick.
-                            if response.secondary_clicked() {
-                                open_topic = open_topic.or(Some(Topic::Item(*item_id)));
-                            }
-                        }
-                    });
+                let picked =
+                    draw_item_picker_list(ui, &valid_items, current_item, item_icons.as_deref());
+                selection = picked.equip;
+                if let Some(id) = picked.read {
+                    open_topic = open_topic.or(Some(Topic::Item(id)));
+                }
             });
 
         // Handle Escape to close
@@ -1748,6 +1706,130 @@ fn render_equipment_panel(
     }
 
     open_topic
+}
+
+/// What the player did in the equipment picker's list this frame.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ItemPickerAction {
+    /// Left-click: equip this item.
+    pub equip: Option<ItemId>,
+    /// Right-click: open this item's encyclopedia page instead.
+    pub read: Option<ItemId>,
+}
+
+/// Width the picker wraps a proc row's second line at, so a long proc
+/// sentence breaks onto another line instead of widening the window.
+const PICKER_PROC_WRAP: f32 = 360.0;
+
+/// The text of one picker row: `Name  —  stats`, and — for an item carrying a
+/// proc — a second, quieter line saying what the proc does. That line is
+/// `proc_description`, the same sentence the item tooltip and the encyclopedia
+/// print, so the picker cannot describe a trinket a third way. Rows without a
+/// proc are exactly one line, as before.
+pub fn item_picker_row_text(item: &ItemConfig, name_color: egui::Color32) -> egui::text::LayoutJob {
+    let stat_text = format_item_stats(item);
+    let first = if stat_text.is_empty() {
+        item.name.clone()
+    } else {
+        format!("{}  —  {}", item.name, stat_text)
+    };
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        &first,
+        0.0,
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(13.0),
+            color: name_color,
+            ..Default::default()
+        },
+    );
+    if let Some(proc) = &item.proc {
+        job.append(
+            &format!("\n{}", proc_description(proc)),
+            0.0,
+            egui::TextFormat {
+                font_id: egui::FontId::proportional(11.5),
+                color: PROC_TEXT_COLOR,
+                ..Default::default()
+            },
+        );
+        job.wrap.max_width = PICKER_PROC_WRAP;
+    }
+    job
+}
+
+/// The equipment picker's scrolling list of selectable items — the pure draw,
+/// split from the Bevy wrapper so `tests/item_picker_snapshot.rs` can render
+/// it offscreen. `valid_items` is what the socket accepts;
+/// `current` is what it holds now (drawn gold and selected).
+pub fn draw_item_picker_list(
+    ui: &mut egui::Ui,
+    valid_items: &[(ItemId, &ItemConfig)],
+    current: Option<&ItemId>,
+    item_icons: Option<&ItemIcons>,
+) -> ItemPickerAction {
+    let mut action = ItemPickerAction::default();
+    let gold = egui::Color32::from_rgb(255, 215, 0);
+    egui::ScrollArea::vertical()
+        .max_height(400.0)
+        .show(ui, |ui| {
+            let picker_icon_size = 22.0;
+
+            for (item_id, item) in valid_items {
+                let is_equipped = current == Some(item_id);
+                let name_color = if is_equipped {
+                    gold
+                } else {
+                    egui::Color32::from_rgb(220, 220, 220)
+                };
+
+                // Row with icon + text
+                let response = ui
+                    .horizontal(|ui| {
+                        // Draw item icon if available
+                        if let Some(icons) = item_icons {
+                            if let Some(&texture_id) = icons.textures.get(item_id) {
+                                let (icon_rect, _) = ui.allocate_exact_size(
+                                    egui::vec2(picker_icon_size, picker_icon_size),
+                                    egui::Sense::hover(),
+                                );
+                                ui.painter().image(
+                                    texture_id,
+                                    icon_rect,
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    ),
+                                    egui::Color32::WHITE,
+                                );
+                            }
+                        }
+
+                        // Laid out here rather than handed over as a job, so
+                        // the proc line wraps at `PICKER_PROC_WRAP` instead of
+                        // at whatever width the window would grow to.
+                        let galley = ui.fonts(|fonts| {
+                            fonts.layout_job(item_picker_row_text(item, name_color))
+                        });
+                        ui.selectable_label(is_equipped, galley)
+                    })
+                    .inner;
+
+                ui_driver::mark(ui, response.rect, true, format_args!("pick:{item_id:?}"));
+
+                if response.clicked() {
+                    action.equip = Some(*item_id);
+                }
+                // Right-click reads instead of equipping. The picker stays
+                // open and this screen keeps its state, so the trip to the
+                // item's page costs the player nothing: Back lands them right
+                // back on this pick.
+                if response.secondary_clicked() {
+                    action.read = Some(*item_id);
+                }
+            }
+        });
+    action
 }
 
 /// The override map rendered lazily, for the UI driver's per-frame note.

@@ -24,6 +24,7 @@ pub use team_frames::*;
 
 use super::ability_config::AbilityDefinitions;
 use super::components::{Aura, AuraType, SpellIconHandles, SpellIcons};
+use super::equipment::{ItemDefinitions, ItemId};
 use bevy::prelude::*;
 use bevy_egui::egui;
 
@@ -54,9 +55,54 @@ pub const GENERIC_AURA_ICONS: &[(&str, &str)] = &[
     ("aura_shadow_sight", "icons/auras/shadow_sight.jpg"),
 ];
 
+/// The icon key an aura applied by `item` draws under — a proc trinket's buff
+/// wears its trinket's own icon.
+///
+/// Lives in the same string keyspace as the ability names and the
+/// `GENERIC_AURA_ICONS` keys, and is registered into BOTH aura-drawing icon
+/// registries by [`item_aura_icons`] — `SpellIcons` in-match (buff bar, team
+/// frames) and `AbilityIcons` outside it (encyclopedia, View Combatant) — so
+/// every surface draws one aura with one icon. The `item:` prefix cannot
+/// collide with an ability name or a generic key.
+pub fn item_aura_icon_key(item: ItemId) -> String {
+    format!("item:{:?}", item)
+}
+
+/// `(key, path)` for every item that can APPLY an aura — today, every item
+/// carrying a `proc:` — keyed by [`item_aura_icon_key`]. Derived from
+/// `items.ron`, so trinket N+1 gets its icon registered with no code change.
+pub fn item_aura_icons(items: &ItemDefinitions) -> Vec<(String, String)> {
+    let mut icons: Vec<(String, String)> = items
+        .iter()
+        .filter(|(_, item)| item.proc.is_some() && !item.icon.is_empty())
+        .map(|(id, item)| (item_aura_icon_key(*id), item.icon.clone()))
+        .collect();
+    // `ItemDefinitions` is a HashMap; sort so the load order is not
+    // per-process. Nothing reads the order, but nothing should have to know.
+    icons.sort();
+    icons
+}
+
+/// Whether an icon handle has stopped resolving — LOADED, or FAILED (a missing
+/// file, an undecodable one). The icon loaders wait on this and then register
+/// only what actually loaded, so a single bad icon degrades to "no icon"
+/// instead of holding the whole batch — and every icon on the screen — back
+/// forever. Shared by `load_spell_icons` and `load_ability_icons` so the two
+/// cannot disagree about what "done" means.
+pub fn icon_load_settled(state: &bevy::asset::LoadState) -> bool {
+    use bevy::asset::LoadState;
+    !matches!(state, LoadState::Loading | LoadState::NotLoaded)
+}
+
 /// Get the icon key for an aura.
-/// Returns the ability name if it has a specific icon, otherwise returns a generic key.
+///
+/// An aura an ITEM applied draws the item's icon ([`item_aura_icon_key`]).
+/// Otherwise: the applying ability's name if it has a specific icon, else a
+/// generic per-type key.
 pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) -> String {
+    if let Some(item) = aura.source_item {
+        return item_aura_icon_key(item);
+    }
     // Check if the ability that created this aura has a specific icon
     let has_icon = ability_definitions
         .iter()
@@ -167,6 +213,7 @@ pub fn load_spell_icons(
     mut icon_handles: ResMut<SpellIconHandles>,
     images: Res<Assets<Image>>,
     ability_definitions: Res<AbilityDefinitions>,
+    item_definitions: Res<ItemDefinitions>,
 ) {
     // Only load once
     if spell_icons.loaded {
@@ -187,6 +234,12 @@ pub fn load_spell_icons(
             let handle: Handle<Image> = asset_server.load(*path);
             icon_handles.handles.push((key.to_string(), handle));
         }
+        // ...and the art of every item that can apply an aura, so a proc buff
+        // draws its trinket.
+        for (key, path) in item_aura_icons(&item_definitions) {
+            let handle: Handle<Image> = asset_server.load(path);
+            icon_handles.handles.push((key, handle));
+        }
         return; // Wait for next frame to check if loaded
     }
 
@@ -195,13 +248,10 @@ pub fn load_spell_icons(
     // the whole registration forever and blank EVERY in-match icon. Once nothing
     // is still loading, register only the textures that actually loaded; a
     // missing icon then degrades to "no icon" instead of breaking the UI.
-    use bevy::asset::LoadState;
-    let still_loading = icon_handles.handles.iter().any(|(_, h)| {
-        matches!(
-            asset_server.load_state(h.id()),
-            LoadState::Loading | LoadState::NotLoaded
-        )
-    });
+    let still_loading = icon_handles
+        .handles
+        .iter()
+        .any(|(_, h)| !icon_load_settled(&asset_server.load_state(h.id())));
     if still_loading {
         return; // Wait for images to finish loading or fail
     }
@@ -278,4 +328,64 @@ pub fn draw_text_with_outline(
 
     // Draw main text
     painter.text(pos, align, text, font_id, color);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::states::play_match::equipment::load_item_definitions;
+
+    /// The buff bar and team frames draw a proc buff under its TRINKET's key,
+    /// and that key is one the loaders actually register — at the trinket's
+    /// own icon, for every shipped proc trinket. Named members, not a count:
+    /// the proc set is read from `items.ron` and each must appear.
+    #[test]
+    fn a_proc_buff_draws_its_own_trinket() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let abilities = AbilityDefinitions::default();
+        let registered = item_aura_icons(&items);
+        let mut procs = 0;
+        for (id, item) in items.iter() {
+            let Some(proc) = &item.proc else { continue };
+            procs += 1;
+            let aura = proc.aura(*id, &item.name);
+            let key = get_aura_icon_key(&aura, &abilities);
+            assert_eq!(
+                key,
+                item_aura_icon_key(*id),
+                "{} draws the wrong key",
+                item.name
+            );
+            assert!(
+                registered.contains(&(key.clone(), item.icon.clone())),
+                "{}'s key {key} is not registered at its icon {}",
+                item.name,
+                item.icon
+            );
+        }
+        assert!(procs > 0, "no proc trinket ships — vacuous");
+        assert_eq!(
+            registered.len(),
+            procs,
+            "a non-proc item is registered as aura art"
+        );
+    }
+
+    /// An aura with no source item still resolves exactly as before: two
+    /// different trinkets never share a key, and an ordinary buff never takes
+    /// an item's.
+    #[test]
+    fn only_an_item_sourced_aura_takes_an_item_key() {
+        let abilities = AbilityDefinitions::default();
+        let plain = Aura {
+            effect_type: AuraType::AttackPowerIncrease,
+            ability_name: "Battle Shout".to_string(),
+            ..Default::default()
+        };
+        assert!(!get_aura_icon_key(&plain, &abilities).starts_with("item:"));
+        assert_ne!(
+            item_aura_icon_key(ItemId::DragonspineTrophy),
+            item_aura_icon_key(ItemId::WhetstoneOfFury)
+        );
+    }
 }

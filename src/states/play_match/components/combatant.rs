@@ -409,6 +409,15 @@ pub struct Combatant {
     pub mage_armor: MageArmor,
     /// Paladin-specific: which aura to apply (Devotion Aura, Shadow Resistance Aura, or Concentration Aura)
     pub paladin_aura: PaladinAura,
+    /// Equipped proc trinkets and their live internal cooldowns, in socket
+    /// order. Filled by [`Combatant::apply_equipment`].
+    ///
+    /// EMPTY for every loadout that carries no proc trinket, and the emptiness
+    /// is load-bearing rather than incidental: each combat hook returns on it
+    /// BEFORE touching the seeded RNG, so a match between combatants with no
+    /// proc trinket draws exactly the numbers it drew before proc trinkets
+    /// existed, and is bit-identical.
+    pub proc_trinkets: Vec<crate::states::play_match::proc_trinkets::ProcSlot>,
 }
 
 /// How long the weapon-poison marker is stamped for. Longer than any match's
@@ -442,6 +451,7 @@ pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
         dr_category_override: None,
         dispel_type: super::DispelType::Auto,
         compound: None,
+        source_item: None,
     }
 }
 
@@ -572,6 +582,7 @@ impl Combatant {
             warrior_shout: WarriorShout::default(),
             mage_armor: MageArmor::default(),
             paladin_aura: PaladinAura::default(),
+            proc_trinkets: Vec::new(),
         }
     }
 
@@ -834,6 +845,24 @@ impl Combatant {
                 self.auto_attack_kind = AutoAttackKind::from_equipped(*slot, item);
             }
 
+            // A proc trinket's trigger and effect, captured together with the
+            // item's DISPLAY NAME so the combat hooks need no
+            // `ItemDefinitions` of their own. Built here because
+            // `apply_equipment` is the one seam both spawn paths — graphical
+            // `spawn_combatant` and `headless::runner` — already go through,
+            // so there is no second place to remember. A `Loadout` is a
+            // `BTreeMap`, so this list comes out in `ItemSlot` order and the
+            // order procs roll in is a property of the type.
+            if let Some(proc) = &item.proc {
+                self.proc_trinkets
+                    .push(crate::states::play_match::proc_trinkets::ProcSlot {
+                        item: *item_id,
+                        name: item.name.clone(),
+                        config: proc.clone(),
+                        remaining_icd: 0.0,
+                    });
+            }
+
             // For the primary weapon slot, replace attack_damage and attack_speed
             if item.is_weapon && *slot == primary_weapon_slot {
                 let avg_damage = (item.attack_damage_min + item.attack_damage_max) / 2.0;
@@ -1044,7 +1073,7 @@ pub struct ManaBurnPending {
 /// Note: The actual aura removed is randomly selected in process_dispels (WoW Classic behavior).
 ///
 /// Used by Priest (Dispel Magic), Paladin (Cleanse), Felhunter (Devour Magic),
-/// and Bird (Master's Call).
+/// Shaman (Purge) and Bird (Master's Call).
 #[derive(Component)]
 pub struct DispelPending {
     /// Target entity to dispel
@@ -1059,11 +1088,46 @@ pub struct DispelPending {
     pub caster_class: match_config::CharacterClass,
     /// Entity to heal on successful dispel (Felhunter's Devour Magic heals itself)
     pub heal_on_success: Option<(Entity, f32)>,
-    /// Optional filter: only remove auras matching these types (Master's Call only removes movement impairments)
-    pub aura_type_filter: Option<Vec<AuraType>>,
-    /// When true, this dispel also removes poison/disease debuffs (Paladin Cleanse).
-    /// Dispel Magic / Devour Magic leave poisons untouched (false).
-    pub removes_poison: bool,
+    /// Which auras this removal may take — see [`DispelScope`].
+    pub scope: DispelScope,
+}
+
+/// WHICH auras a pending removal may take: one variant per kind of removal in
+/// the game, answered per aura by [`DispelScope::takes`].
+///
+/// Eligibility is decided HERE and nowhere else, by an exhaustive match, so a
+/// new kind of removal has to say what it takes rather than inheriting some
+/// other kind's rule. The random pick among whatever qualifies stays in
+/// `process_dispels`, and stays random on purpose.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DispelScope {
+    /// Dispel Magic, Devour Magic: harmful magic
+    /// ([`Aura::can_be_dispelled`](super::Aura::can_be_dispelled)).
+    Magic,
+    /// Paladin Cleanse: harmful magic, or a poison or disease.
+    MagicOrPoison,
+    /// Shaman Purge: an enemy's buff of this one type — the type the AI chose
+    /// — that [`Aura::can_be_purged`](super::Aura::can_be_purged).
+    ///
+    /// Asked PER AURA, not per type. A proc trinket's attack-power buff shares
+    /// its type with Battle Shout, but it is not magic, and a purge pinned to
+    /// the type must still pass it over.
+    Purge(AuraType),
+    /// Master's Call: a movement impairment of one of these types, whatever
+    /// its removal class — it clears physical harm as well as magic.
+    Impairments(Vec<AuraType>),
+}
+
+impl DispelScope {
+    /// Whether this removal may take `aura`.
+    pub fn takes(&self, aura: &super::Aura) -> bool {
+        match self {
+            DispelScope::Magic => aura.can_be_dispelled(),
+            DispelScope::MagicOrPoison => aura.can_be_dispelled() || aura.is_cleansable_poison(),
+            DispelScope::Purge(effect) => aura.effect_type == *effect && aura.can_be_purged(),
+            DispelScope::Impairments(effects) => effects.contains(&aura.effect_type),
+        }
+    }
 }
 
 #[cfg(test)]

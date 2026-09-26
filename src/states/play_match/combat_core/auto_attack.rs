@@ -198,6 +198,11 @@ pub fn combat_auto_attack(
 
     // Collect attacks that will happen this frame (attacker, target, damage)
     let mut attacks = Vec::new();
+    // Attackers whose MELEE swing LANDED this frame, in the order the swings
+    // landed. A `Vec`, not a set: each landed swing is its own proc-trinket
+    // event, and the order is the RNG draw order, so it has to be the order
+    // the sim produced rather than whatever a hash gives back.
+    let mut melee_proc_hits: Vec<Entity> = Vec::new();
 
     // Track damage per target for batching floating combat text.
     // BTreeMap (not HashMap) so iteration order is deterministic by Entity —
@@ -602,6 +607,26 @@ pub fn combat_auto_attack(
                     }
                 }
 
+                // Proc trinkets, MeleeHit: recorded here — beside the
+                // Crippling Poison roll, inside the branch that only a swing
+                // landing on a LIVING target reaches — so a swing dropped by
+                // the friendly-CC guard or by a same-frame death never procs.
+                // The roll itself waits until after this loop, because it
+                // needs the ATTACKER's combatant mutably and this loop holds
+                // the TARGET's.
+                //
+                // Keyed on `AutoAttackKind::Melee` — the value AS-138 derives
+                // once from the live weapon socket — and NOT on the class.
+                // "Was this a melee weapon strike" is precisely the question
+                // that value answers, so this is another reader of it rather
+                // than a parallel derivation that could disagree with the
+                // Frost Armor gate twenty lines up.
+                if let Some(&(_, _, _, _, attacker_kind)) = combatant_info.get(&attacker_entity) {
+                    if attacker_kind == AutoAttackKind::Melee {
+                        melee_proc_hits.push(attacker_entity);
+                    }
+                }
+
                 // Crippling Poison proc: a coated Rogue's landed swing has a
                 // chance to apply/refresh the slow. Refreshed in place so it
                 // never diminishes (poisons sidestep the slow DR category).
@@ -735,6 +760,30 @@ pub fn combat_auto_attack(
                     }
                 }
             }
+        }
+    }
+
+    // Proc trinkets, MeleeHit: one roll per ready trinket per landed swing.
+    // `proc_trinkets` is empty for every combatant not wearing one, and the
+    // guard below returns BEFORE `roll_procs` — so a match in which nobody
+    // wears a proc trinket draws no RNG here and stays bit-identical.
+    for attacker_entity in melee_proc_hits {
+        let Ok((_, _, mut attacker, _, _, _)) = combatants.get_mut(attacker_entity) else {
+            continue;
+        };
+        if attacker.proc_trinkets.is_empty() {
+            continue;
+        }
+        let granted = super::super::proc_trinkets::roll_procs(
+            &mut attacker.proc_trinkets,
+            &[super::super::proc_trinkets::ProcTrigger::MeleeHit],
+            &mut game_rng,
+        );
+        for aura in granted {
+            commands.spawn(AuraPending {
+                target: attacker_entity,
+                aura,
+            });
         }
     }
 
@@ -901,6 +950,7 @@ pub fn frost_armor_movement_slow_aura() -> Aura {
         dr_category_override: None,
         dispel_type: DispelType::Auto,
         compound: Some(CompoundDebuff::FrostArmorChill),
+        source_item: None,
     }
 }
 
@@ -926,6 +976,7 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
         dr_category_override: None,
         dispel_type: DispelType::Auto,
         compound: Some(CompoundDebuff::FrostArmorChill),
+        source_item: None,
     }
 }
 

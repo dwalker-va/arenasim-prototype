@@ -225,6 +225,18 @@ fn encyclopedia_item_detail() {
     );
 }
 
+/// A PROC TRINKET's item page — the page a player shopping for a trinket
+/// actually opens, and the one place the proc's trigger, chance, duration and
+/// internal cooldown appear next to the stats they are budgeted against.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_item_detail_proc_trinket() {
+    snapshot(
+        "encyclopedia_item_detail_proc_trinket",
+        state_at(Topic::Item(ItemId::DragonspineTrophy)),
+    );
+}
+
 /// An active search: grouped, linked result rows over the whole registry —
 /// classes, abilities and items in one list.
 #[test]
@@ -295,6 +307,28 @@ fn encyclopedia_aura_detail_engine() {
         ))),
     );
     snapshot("encyclopedia_aura_detail_engine", state);
+}
+
+/// A PROC TRINKET's buff page — a shape no other entry has: no ability applies
+/// it, its art is its own, and its provenance line carries the trigger, the
+/// chance, the duration and the internal cooldown read straight off the
+/// `proc:` block the simulation rolls against.
+///
+/// Worth a snapshot of its own because it is the only place a player meets a
+/// proc's numbers in prose, and AS-61 will add a spread of trinkets that all
+/// render through this one page.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_proc_trinket() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::ProcTrinketBuff(
+                arenasim::states::play_match::equipment::ItemId::DragonspineTrophy,
+            )),
+        ))),
+    );
+    snapshot("encyclopedia_aura_detail_proc_trinket", state);
 }
 
 /// A COMPOUND debuff's page: one entry stating BOTH of the effects a Frost

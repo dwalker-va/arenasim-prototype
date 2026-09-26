@@ -38,7 +38,8 @@ use super::ability_config::AbilityDefinitions;
 use super::ai_profile::AiProfile;
 use super::arena_bounds::ArenaBounds;
 use super::components::{
-    ActiveAuras, Aura, AuraType, Combatant, DRCategory, DRTracker, DispelPending, PetType,
+    ActiveAuras, Aura, AuraType, Combatant, DRCategory, DRTracker, DispelPending, DispelScope,
+    PetType,
 };
 use super::constants::GCD;
 use super::map_geometry::ObstacleVolume;
@@ -876,6 +877,17 @@ pub fn dispel_removes_poison(ability_type: AbilityType) -> bool {
     matches!(ability_type, AbilityType::PaladinCleanse)
 }
 
+/// The [`DispelScope`] an ally dispel ability removes under — the reach
+/// [`dispel_removes_poison`] describes, as the value `process_dispels` and the
+/// AI's own candidate scan both ask.
+pub fn ally_dispel_scope(ability_type: AbilityType) -> DispelScope {
+    if dispel_removes_poison(ability_type) {
+        DispelScope::MagicOrPoison
+    } else {
+        DispelScope::Magic
+    }
+}
+
 /// Shared dispel logic used by Priest (Dispel Magic) and Paladin (Cleanse).
 ///
 /// Finds the ally with the highest priority dispellable debuff and casts
@@ -945,7 +957,7 @@ pub fn try_dispel_ally(
         return false;
     }
 
-    let removes_poison = dispel_removes_poison(ability_type);
+    let scope = ally_dispel_scope(ability_type);
 
     // Find ally with highest priority dispellable debuff
     let mut best_candidate: Option<(Entity, i32)> = None;
@@ -969,7 +981,7 @@ pub fn try_dispel_ally(
         // Find highest priority dispellable debuff on this ally
         let mut highest_priority = -1;
         for aura in ally_auras {
-            if !(aura.can_be_dispelled() || removes_poison && aura.is_cleansable_poison()) {
+            if !scope.takes(aura) {
                 continue;
             }
 
@@ -1032,8 +1044,7 @@ pub fn try_dispel_ally(
         log_prefix,
         caster_class,
         heal_on_success: None,
-        aura_type_filter: None,
-        removes_poison,
+        scope,
     });
 
     info!(
@@ -1060,7 +1071,7 @@ pub fn try_dispel_ally(
 /// friendly-CC concern) and `check_target_immune: true` (respect Divine Shield;
 /// range/mana/lockout/silence handled by the guard). Predicate failures emit
 /// typed reject events; success emits choose and spawns a `DispelPending` whose
-/// `aura_type_filter` is pinned to the single chosen (purgeable) buff type, so
+/// scope is pinned to the single chosen (purgeable) buff type, so
 /// `process_dispels` strips that beneficial aura from the enemy — a random pick
 /// only if the enemy holds several auras of that same type (intentional).
 #[allow(clippy::too_many_arguments)]
@@ -1208,8 +1219,7 @@ pub fn try_purge_enemy(
         log_prefix: "[PURGE]",
         caster_class: combatant.class,
         heal_on_success: None,
-        aura_type_filter: Some(vec![chosen_aura]),
-        removes_poison: false,
+        scope: DispelScope::Purge(chosen_aura),
     });
 
     true
@@ -1268,11 +1278,10 @@ mod dispel_reach_tests {
         ];
 
         for (ability, magic, poison, curse, physical) in expected {
-            let removes_poison = dispel_removes_poison(ability);
-            // The filter `process_dispels` applies, spelled once here so the
-            // matrix tests the real expression and not a paraphrase of it.
-            let removes =
-                |a: &Aura| a.can_be_dispelled() || (removes_poison && a.is_cleansable_poison());
+            // The scope `process_dispels` applies for this ability, so the
+            // matrix tests the real predicate and not a paraphrase of it.
+            let scope = ally_dispel_scope(ability);
+            let removes = |a: &Aura| scope.takes(a);
 
             assert_eq!(
                 removes(&corruption),

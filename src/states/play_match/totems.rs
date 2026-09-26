@@ -57,6 +57,7 @@ fn make_totem_aura(
         dr_category_override: None,
         dispel_type: DispelType::Auto,
         compound: None,
+        source_item: None,
     }
 }
 

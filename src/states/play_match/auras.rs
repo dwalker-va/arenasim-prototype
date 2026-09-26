@@ -482,10 +482,22 @@ pub fn apply_pending_auras(
                 | AuraType::WindfuryBuff
         );
         if is_buff_aura {
-            // For Absorb shields, use ability_name as the key to allow different absorbs to coexist
-            // For other buffs, use the aura type
-            let buff_key: String = if pending.aura.effect_type == AuraType::Absorb {
-                format!("absorb:{}", pending.aura.ability_name)
+            // Most buffs are one-per-TYPE: a second MaxHealthIncrease is
+            // refused whether it came from Power Word: Fortitude or Commanding
+            // Shout. Two kinds of buff are identified by their SOURCE instead,
+            // and so coexist with a same-type sibling:
+            //   - an Absorb, so Ice Barrier and PW:S can both be up;
+            //   - anything carrying `distinct_by_source`, which today means a
+            //     PROC TRINKET's buff. A trinket granting attack power is not
+            //     Battle Shout, and the second trinket socket is only worth
+            //     filling if two different trinkets can be live at once.
+            let source_keyed =
+                pending.aura.effect_type == AuraType::Absorb || pending.aura.distinct_by_source();
+            let buff_key: String = if source_keyed {
+                format!(
+                    "source:{:?}:{}",
+                    pending.aura.effect_type, pending.aura.ability_name
+                )
             } else {
                 format!("type:{:?}", pending.aura.effect_type)
             };
@@ -498,18 +510,19 @@ pub fn apply_pending_auras(
 
             // Check if target already has this specific buff from a PREVIOUS frame
             let already_has_buff_existing = if let Some(ref auras) = active_auras {
-                if pending.aura.effect_type == AuraType::Absorb {
-                    // For absorbs, check same ability name
+                if source_keyed {
+                    // Source-keyed: only the SAME source blocks a reapply.
                     auras.auras.iter().any(|a| {
-                        a.effect_type == AuraType::Absorb
+                        a.effect_type == pending.aura.effect_type
                             && a.ability_name == pending.aura.ability_name
                     })
                 } else {
-                    // For other buffs, check same effect type
+                    // Type-keyed: any buff holding the type's slot blocks it —
+                    // which a source-keyed one of the same type does not.
                     auras
                         .auras
                         .iter()
-                        .any(|a| a.effect_type == pending.aura.effect_type)
+                        .any(|a| a.holds_type_slot(pending.aura.effect_type))
                 }
             } else {
                 false
@@ -517,15 +530,15 @@ pub fn apply_pending_auras(
 
             // Also check auras we're accumulating this frame for entities without ActiveAuras
             let already_has_buff_new = if let Some(new_auras) = new_auras_map.get(&pending.target) {
-                if pending.aura.effect_type == AuraType::Absorb {
+                if source_keyed {
                     new_auras.iter().any(|a| {
-                        a.effect_type == AuraType::Absorb
+                        a.effect_type == pending.aura.effect_type
                             && a.ability_name == pending.aura.ability_name
                     })
                 } else {
                     new_auras
                         .iter()
-                        .any(|a| a.effect_type == pending.aura.effect_type)
+                        .any(|a| a.holds_type_slot(pending.aura.effect_type))
                 }
             } else {
                 false
@@ -539,6 +552,16 @@ pub fn apply_pending_auras(
 
             // Mark this buff as applied for this frame
             applied_buffs.insert((pending.target, buff_key));
+
+            // A proc trinket's buff says so in the log, once per buff that
+            // actually LANDED. That line is what a sweep counts to report how
+            // often procs fired — a decisive-event count, not an assumption.
+            if pending.aura.distinct_by_source() {
+                combat_log.log(
+                    CombatLogEventType::Buff,
+                    format!("{} procs {}", target_id, pending.aura.ability_name),
+                );
+            }
         }
 
         // Handle MaxHealthIncrease aura - apply HP buff immediately
@@ -548,55 +571,65 @@ pub fn apply_pending_auras(
             target_combatant.current_health += hp_bonus; // Give them the extra HP
 
             info!(
-                "{} receives Power Word: Fortitude (+{:.0} max HP, now {:.0}/{:.0})",
-                target_id, hp_bonus, target_combatant.current_health, target_combatant.max_health
+                "{} receives {} (+{:.0} max HP, now {:.0}/{:.0})",
+                target_id,
+                pending.aura.ability_name,
+                hp_bonus,
+                target_combatant.current_health,
+                target_combatant.max_health
             );
 
-            // Log to combat log
+            // Log to combat log. Named from the aura, never hardcoded: Power
+            // Word: Fortitude, Commanding Shout and a proc trinket all land
+            // here, and each line must say which one it was.
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "{} gains Power Word: Fortitude (+{:.0} max HP)",
-                    target_id, hp_bonus
+                    "{} gains {} (+{:.0} max HP)",
+                    target_id, pending.aura.ability_name, hp_bonus
                 ),
             );
         }
 
-        // Handle MaxManaIncrease aura (Arcane Intellect) - apply mana buff immediately
+        // Handle MaxManaIncrease aura (Arcane Intellect, or a proc) - apply mana buff immediately
         if pending.aura.effect_type == AuraType::MaxManaIncrease {
             let mana_bonus = pending.aura.magnitude;
             target_combatant.max_mana += mana_bonus;
             target_combatant.current_mana += mana_bonus; // Give them the extra mana
 
             info!(
-                "{} receives Arcane Intellect (+{:.0} max mana, now {:.0}/{:.0})",
-                target_id, mana_bonus, target_combatant.current_mana, target_combatant.max_mana
+                "{} receives {} (+{:.0} max mana, now {:.0}/{:.0})",
+                target_id,
+                pending.aura.ability_name,
+                mana_bonus,
+                target_combatant.current_mana,
+                target_combatant.max_mana
             );
 
             // Log to combat log
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "{} gains Arcane Intellect (+{:.0} max mana)",
-                    target_id, mana_bonus
+                    "{} gains {} (+{:.0} max mana)",
+                    target_id, pending.aura.ability_name, mana_bonus
                 ),
             );
         }
 
-        // Handle AttackPowerIncrease aura (Battle Shout) - dynamic, no stat mutation
+        // Handle AttackPowerIncrease aura (Battle Shout, or a proc) - dynamic, no stat mutation
         if pending.aura.effect_type == AuraType::AttackPowerIncrease {
             let ap_bonus = pending.aura.magnitude;
 
             info!(
-                "{} receives Battle Shout (+{:.0} attack power)",
-                target_id, ap_bonus,
+                "{} receives {} (+{:.0} attack power)",
+                target_id, pending.aura.ability_name, ap_bonus,
             );
 
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "{} gains Battle Shout (+{:.0} attack power)",
-                    target_id, ap_bonus
+                    "{} gains {} (+{:.0} attack power)",
+                    target_id, pending.aura.ability_name, ap_bonus
                 ),
             );
         }
@@ -1361,6 +1394,7 @@ mod tests {
             dr_category_override: None,
             dispel_type: DispelType::Auto,
             compound: None,
+            source_item: None,
         }
     }
 

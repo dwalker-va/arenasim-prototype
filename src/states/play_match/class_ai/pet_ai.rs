@@ -728,8 +728,7 @@ fn try_devour_magic(
         log_prefix: "[DEVOUR]",
         caster_class: CharacterClass::Warlock,
         heal_on_success: Some((entity, heal_amount)),
-        aura_type_filter: None,
-        removes_poison: false,
+        scope: DispelScope::Magic,
     });
 
     true
@@ -834,8 +833,7 @@ pub(crate) fn execute_masters_call(
         log_prefix: "[MASTERS_CALL]",
         caster_class: CharacterClass::Hunter,
         heal_on_success: None,
-        aura_type_filter: Some(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
-        removes_poison: false,
+        scope: DispelScope::Impairments(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
     });
 
     commands.spawn((

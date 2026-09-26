@@ -11,6 +11,10 @@
 //! (MinimalPlugins clock, gates forced open, only `process_casting` registered)
 //! so they pin the wiring — where in the two-pass system the deduction happens —
 //! not just the helper. Each asserts on the caster's `current_mana` delta.
+//!
+//! The proc-trinket `SpellCast` / `Heal` triggers are collected at the same two
+//! resolution points, so the same scenarios pin them too — see the section at
+//! the end of this file.
 
 use std::time::Duration;
 
@@ -292,4 +296,139 @@ fn stun_cancels_cast_charges_no_mana_and_spawns_interrupted_marker() {
         vec![CastEndingKind::Interrupted],
         "a CC-cancelled cast must spawn exactly one Interrupted CastEnding"
     );
+}
+
+// ============================================================================
+// Proc trinkets ride the SAME resolution point
+// ============================================================================
+//
+// `SpellCast` / `Heal` proc triggers are collected where mana is charged, so a
+// cast that pays nothing procs nothing. These pin that with a proc that fires
+// on its first chance (chance 1.0): a fired proc puts the slot on its internal
+// cooldown and queues an `AuraPending`, and nothing in this harness ticks the
+// cooldown or applies the aura, so both are still there to read.
+
+use arenasim::states::play_match::components::AuraPending;
+use arenasim::states::play_match::equipment::ItemId;
+use arenasim::states::play_match::proc_trinkets::{ProcConfig, ProcSlot, ProcTrigger};
+
+const CERTAIN_PROC_ICD: f32 = 45.0;
+
+/// Equip `caster` with one proc that fires on its first `trigger` event.
+fn wear_certain_proc(app: &mut App, caster: Entity, trigger: ProcTrigger) {
+    app.world_mut()
+        .get_mut::<Combatant>(caster)
+        .unwrap()
+        .proc_trinkets
+        .push(ProcSlot {
+            item: ItemId::SigilOfArcaneSurge,
+            name: "Certain Proc".to_string(),
+            config: ProcConfig {
+                trigger,
+                chance: 1.0,
+                effect: AuraType::SpellPowerIncrease,
+                magnitude: 10.0,
+                duration: 10.0,
+                internal_cooldown: CERTAIN_PROC_ICD,
+            },
+            remaining_icd: 0.0,
+        });
+}
+
+/// Whether the caster's proc fired: its cooldown started AND its buff was
+/// queued. Both are asserted to agree, so a half-wired hook fails here too.
+fn proc_fired(app: &mut App, caster: Entity) -> bool {
+    let on_cooldown = app.world().get::<Combatant>(caster).unwrap().proc_trinkets[0].remaining_icd
+        == CERTAIN_PROC_ICD;
+    let queued = app
+        .world_mut()
+        .query::<&AuraPending>()
+        .iter(app.world())
+        .any(|p| p.target == caster && p.aura.ability_name == "Certain Proc");
+    assert_eq!(
+        on_cooldown, queued,
+        "the proc's cooldown and its queued buff disagree"
+    );
+    on_cooldown
+}
+
+/// The control: the same Frostbolt, landing, fires a `SpellCast` proc. Without
+/// it the three silences below could be a harness that never procs anything.
+#[test]
+fn a_landed_cast_fires_a_spell_cast_proc() {
+    let mut app = harness_app(Vec::new());
+    let mage = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(0.0, 1.0, -12.0));
+    let victim = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(0.0, 1.0, 12.0));
+    wear_certain_proc(&mut app, mage, ProcTrigger::SpellCast);
+    begin_completing_cast(&mut app, mage, AbilityType::Frostbolt, victim);
+
+    run(&mut app);
+
+    assert!(
+        proc_fired(&mut app, mage),
+        "a landed Frostbolt did not proc"
+    );
+}
+
+/// A cast juked out of line of sight at completion fizzles, and procs nothing.
+#[test]
+fn a_fizzled_cast_fires_no_proc() {
+    let mut app = harness_app(vec![blocking_pillar()]);
+    let mage = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(0.0, 1.0, -12.0));
+    let victim = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(0.0, 1.0, 12.0));
+    wear_certain_proc(&mut app, mage, ProcTrigger::SpellCast);
+    begin_completing_cast(&mut app, mage, AbilityType::Frostbolt, victim);
+
+    run(&mut app);
+
+    assert_eq!(cast_endings(&mut app, mage), vec![CastEndingKind::Fizzled]);
+    assert!(!proc_fired(&mut app, mage), "a fizzled cast procced");
+}
+
+/// A heal onto a target dead at completion fizzles, and fires neither the
+/// `Heal` trigger nor the `SpellCast` one it is a subset of.
+#[test]
+fn a_fizzled_heal_fires_no_proc() {
+    let mut app = harness_app(Vec::new());
+    let priest = spawn_combatant(&mut app, CharacterClass::Priest, Vec3::new(0.0, 1.0, 0.0));
+    let ally = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(2.0, 1.0, 0.0));
+    app.world_mut()
+        .get_mut::<Combatant>(ally)
+        .unwrap()
+        .current_health = 0.0;
+    wear_certain_proc(&mut app, priest, ProcTrigger::Heal);
+    begin_completing_cast(&mut app, priest, AbilityType::FlashHeal, ally);
+
+    run(&mut app);
+
+    assert_eq!(
+        cast_endings(&mut app, priest),
+        vec![CastEndingKind::Fizzled]
+    );
+    assert!(!proc_fired(&mut app, priest), "a fizzled heal procced");
+}
+
+/// A cast cancelled by crowd control never completes, and procs nothing.
+#[test]
+fn an_interrupted_cast_fires_no_proc() {
+    let mut app = harness_app(Vec::new());
+    let mage = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(0.0, 1.0, -12.0));
+    let victim = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(0.0, 1.0, 12.0));
+    wear_certain_proc(&mut app, mage, ProcTrigger::SpellCast);
+    begin_completing_cast(&mut app, mage, AbilityType::Frostbolt, victim);
+    app.world_mut().entity_mut(mage).insert(ActiveAuras {
+        auras: vec![Aura {
+            effect_type: AuraType::Stun,
+            duration: 5.0,
+            ..Default::default()
+        }],
+    });
+
+    run(&mut app);
+
+    assert_eq!(
+        cast_endings(&mut app, mage),
+        vec![CastEndingKind::Interrupted]
+    );
+    assert!(!proc_fired(&mut app, mage), "an interrupted cast procced");
 }

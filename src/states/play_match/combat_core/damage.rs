@@ -374,6 +374,7 @@ fn apply_interrupt_lockout(
             dr_category_override: None,
             dispel_type: DispelType::Auto,
             compound: None,
+            source_item: None,
         },
     });
 
