@@ -82,7 +82,7 @@ async function reviewCard(client) {
     body: "original spec",
     role: "engineer",
     column: "review",
-    links: [{ label: "PR #1", url: "https://github.com/o/r/pull/1" }],
+    pr: { url: "https://github.com/o/r/pull/1" },
     actor: "pm-test",
   });
   assert.ok(c.ok, JSON.stringify(c.value));
@@ -315,4 +315,47 @@ test("drawer: a working claim is released only by the explicit, logged gesture",
   const now = await getCard(client, c.id);
   assert.equal(now.agent, null);
   assert.deepEqual(now.activity.slice(-2).map((a) => a.msg), ["Released from the board by the user", "Claim released (was Engineer-AS-1)"]);
+});
+
+test("attach dialog: a card with only reference links is gated, and the dialog sets its own pr", async (t) => {
+  const d = await spawnDaemon(t);
+  const client = await mcpClient(t, d.base);
+  const refs = [{ label: "PR #154 (prerequisite)", url: "https://github.com/o/r/pull/154" }];
+  let c = (await call(client, "create_card", { title: "gated", role: "engineer", links: refs, actor: "pm-test" })).value;
+  c = (await call(client, "move_card", { id: c.id, column: "in_progress", expected_version: c.version, actor: "o" })).value;
+  const page = await openPage(t, d.base);
+  await page.open(c.id, c.version);
+  page.set("d-col", "review");
+  page.doc.getElementById("d-save").click();
+  await until("the attach dialog", () => page.doc.getElementById("pr-url"));
+  page.doc.getElementById("pr-url").value = "https://github.com/o/r/pull/215";
+  page.doc.getElementById("pr-save").click();
+  await until("the move", () => /saved/.test(page.status()));
+  const now = await getCard(client, c.id);
+  assert.equal(now.column, "review");
+  assert.deepEqual(now.pr, { number: 215, url: "https://github.com/o/r/pull/215" });
+  assert.deepEqual(now.links, refs, "the dialog must not file the card's own PR among its references");
+});
+
+test("worktree: copyable in the drawer, on the card face while active, not on a done card's face", async (t) => {
+  const d = await spawnDaemon(t);
+  const client = await mcpClient(t, d.base);
+  const tree = "/Users/someone/Projects/arenasim-prototype/.claude/worktrees/agent-abc123";
+  let c = (await call(client, "create_card", { title: "wt", role: "engineer", actor: "o" })).value;
+  c = (await call(client, "move_card", { id: c.id, column: "in_progress", expected_version: c.version, actor: "o" })).value;
+  c = (await call(client, "claim_card", { id: c.id, name: "Engineer-AS-1", worktree: tree, actor: "orchestrator" })).value;
+  let d2 = (await call(client, "create_card", { title: "finished", role: "engineer", actor: "o" })).value;
+  d2 = (await call(client, "move_card", { id: d2.id, column: "done", expected_version: d2.version, patch: { worktree: tree + "-old" }, actor: "o" })).value;
+
+  const page = await openPage(t, d.base);
+  const face = page.doc.querySelector(`.card[data-id="${c.id}"] .wt`);
+  assert.ok(face, "no worktree on an in_progress card's face");
+  assert.match(face.textContent + (face.getAttribute("title") ?? ""), /agent-abc123/);
+  assert.equal(page.doc.querySelector(`.card[data-id="${d2.id}"] .wt`), null, "a done card's face shows its (probably cleaned-up) tree");
+
+  await page.open(c.id, c.version);
+  const field = page.doc.getElementById("d-worktree");
+  assert.equal(field.value, tree, "the drawer's path is not the full, pasteable path");
+  assert.ok(field.readOnly, "the path is informational");
+  assert.ok(page.doc.getElementById("d-worktree-copy"), "no copy button");
 });

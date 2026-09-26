@@ -107,6 +107,17 @@ button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focu
 .aitem .at{font:400 11px "IBM Plex Mono",monospace;color:var(--muted);white-space:nowrap;padding-top:1px}
 .aitem .aby{font-weight:600;color:var(--muted)}
 .links{display:flex;flex-direction:column;gap:3px;margin-top:10px}
+.links h3,.ownpr h3{font:600 12px "Barlow Semi Condensed",sans-serif;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 2px}
+.ownpr{margin-top:12px}
+.ownpr a{color:var(--c-progress);font-size:13px;font-weight:600;text-decoration:none}
+.tag.own a{font-weight:600}
+.wt{display:flex;gap:6px;align-items:center;margin-top:6px;font:400 11px "IBM Plex Mono",monospace;color:var(--muted);min-width:0}
+.wt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.wt button,.wtcopy{border:1px solid var(--line);background:var(--surface2);color:var(--muted);border-radius:5px;padding:0 6px;font:500 10.5px "IBM Plex Sans",sans-serif;flex:none}
+.wtrow{display:flex;gap:8px}
+.wtrow input{flex:1;min-width:0;font:400 12px "IBM Plex Mono",monospace!important}
+.wtold{margin-top:12px;font-size:12px;color:var(--muted)}
+.wtold input{width:100%;font:400 11.5px "IBM Plex Mono",monospace;color:var(--muted);background:none;border:none;padding:0}
 .links a{color:var(--c-progress);font-size:13px;text-decoration:none}
 .links a:hover{text-decoration:underline}
 .spec{white-space:pre-wrap;font-size:13px;color:var(--ink);background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:4px}
@@ -165,8 +176,20 @@ function fmt(t){
   catch(e){ return t; }
 }
 function card(id){ for(var i=0;i<state.cards.length;i++) if(state.cards[i].id===id) return state.cards[i]; return null; }
-function hasLink(c){ return (c.links||[]).some(function(l){ return l && typeof l.url === "string" && l.url.trim() !== ""; }); }
-function gated(c, col){ return GATED.indexOf(col) >= 0 && c.role !== "pm" && !hasLink(c); }
+// The card's OWN PR is `pr`; `links` are references and never satisfy the gate.
+function hasPr(c){ return !!(c.pr && typeof c.pr.url === "string" && /\/pull\/\d+\/?$/.test(c.pr.url)); }
+function gated(c, col){ return GATED.indexOf(col) >= 0 && c.role !== "pm" && !hasPr(c); }
+// The worktree is shown where the user might test the card: while it is live.
+var WT_COLUMNS = ["in_progress","review","human_review"];
+function copyText(text){
+  function fallback(){
+    var ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select(); var ok = false; try{ ok = document.execCommand("copy"); }catch(e){} document.body.removeChild(ta); return ok;
+  }
+  function done(ok){ statusMsg = ok ? "copied " + text : "copy failed — select the path and copy it"; render(); }
+  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function(){ done(true); }, function(){ done(fallback()); });
+  else done(fallback());
+}
 function snapshot(c){
   return {id: c.id, version: c.version, title: c.title == null ? "" : String(c.title), body: c.body == null ? "" : String(c.body),
           column: c.column, role: c.role == null ? "" : String(c.role), priority: c.priority == null ? "" : String(c.priority)};
@@ -232,7 +255,7 @@ function moveCard(id, col, why, patch, expected, from){
   from = from || c.column;
   if(from === col) return;
   if(expected === undefined) expected = c.version;
-  var withLinks = patch && patch.links ? Object.assign({}, c, {links: patch.links}) : c;
+  var withLinks = patch && patch.pr ? Object.assign({}, c, {pr: patch.pr}) : c;
   if(gated(withLinks, col)){ pending = {id: id, column: col, patch: patch || {}, why: why, expected: expected, from: from}; render(); return; }
   var body = {column: col, expected_version: expected, activity: (why || "Moved") + ": " + from + " → " + col};
   if(patch && Object.keys(patch).length) body.patch = patch;
@@ -246,6 +269,7 @@ function cardHtml(c){
   if(c.column === "human_review") tags += "<span class=\"tag hum\">awaiting your merge</span>";
   if(c.agent && c.agent.status === "working") tags += "<span class=\"tag agent\">agent working since " + esc(fmt(c.agent.started)) + "</span>";
   if(c.released) tags += "<span class=\"tag rel\">released " + esc(c.released) + "</span>";
+  if(hasPr(c)) tags += "<span class=\"tag own\"><a href=\"" + esc(c.pr.url) + "\" target=\"_blank\" rel=\"noopener\">PR #" + esc(c.pr.number) + "</a></span>";
   for(var i=0;i<(c.links||[]).length;i++){
     tags += "<span class=\"tag\"><a href=\"" + esc(c.links[i].url) + "\" target=\"_blank\" rel=\"noopener\">" + esc(c.links[i].label) + "</a></span>";
   }
@@ -253,6 +277,10 @@ function cardHtml(c){
     + "<div class=\"top\"><span class=\"cid\">" + esc(c.id) + "</span><span class=\"pri\">" + esc(c.priority) + "</span></div>"
     + "<div class=\"ttl\">" + esc(c.title) + "</div>"
     + "<div class=\"foot\"><span class=\"chip " + (c.role==="engineer"?"engineer":"") + "\">" + esc(c.role) + "</span>" + tags + "</div>"
+    + (c.worktree && WT_COLUMNS.indexOf(c.column) >= 0
+        ? "<div class=\"wt\" title=\"" + esc(c.worktree) + "\"><span>" + esc(c.worktree.split("/").filter(Boolean).pop() || c.worktree) + "</span>"
+          + "<button class=\"wtcopy\" data-path=\"" + esc(c.worktree) + "\" aria-label=\"Copy worktree path\">copy path</button></div>"
+        : "")
     + "</div>";
 }
 
@@ -271,6 +299,16 @@ function drawerHtml(s, edits){
   }
   var links = "";
   for(var i=0;i<(c.links||[]).length;i++) links += "<a href=\"" + esc(c.links[i].url) + "\" target=\"_blank\" rel=\"noopener\">" + esc(c.links[i].label) + "</a>";
+  var ownPr = hasPr(c) ? "<div class=\"ownpr\"><h3>Pull request</h3><a href=\"" + esc(c.pr.url) + "\" target=\"_blank\" rel=\"noopener\">PR #" + esc(c.pr.number) + "</a></div>" : "";
+  // Live card: the path to cd into, with a copy button. Done/archived: kept
+  // for the record, de-emphasised (the tree has probably been cleaned up).
+  var wt = "";
+  if(c.worktree && WT_COLUMNS.indexOf(c.column) >= 0){
+    wt = "<div class=\"mrow\"><label for=\"d-worktree\">Worktree</label><div class=\"wtrow\"><input id=\"d-worktree\" readonly value=\"" + esc(c.worktree) + "\">"
+      + "<button class=\"btn\" id=\"d-worktree-copy\">Copy</button></div></div>";
+  } else if(c.worktree){
+    wt = "<div class=\"wtold\">Worktree (may have been cleaned up)<input id=\"d-worktree\" readonly value=\"" + esc(c.worktree) + "\"></div>";
+  }
   var acts = "", al = c.activity || [];
   for(var j=al.length-1;j>=0;j--){
     var a = al[j];
@@ -305,7 +343,7 @@ function drawerHtml(s, edits){
   return "<div class=\"overlay\" id=\"ovl\"><div class=\"drawer\" data-id=\"" + esc(c.id) + "\" role=\"dialog\" aria-label=\"Card detail\">"
     + "<button class=\"closex\" id=\"d-close\" aria-label=\"Close\">×</button>"
     + "<div class=\"cid\" style=\"font:500 11px 'IBM Plex Mono',monospace;color:var(--muted)\">" + esc(c.id) + " · created " + esc(fmt(c.created)) + " · v" + esc(c.version) + "</div>"
-    + stale + claim
+    + stale + claim + wt
     + "<div class=\"mrow\"><label for=\"d-title\">Title</label><input id=\"d-title\" value=\"" + esc(c.title) + "\" " + (ro?"disabled":"") + "></div>"
     + "<div class=\"tworow\">"
     + "<div class=\"mrow\"><label for=\"d-col\">Column</label><select id=\"d-col\" " + (ro?"disabled":"") + ">" + colOpts + "</select></div>"
@@ -314,7 +352,8 @@ function drawerHtml(s, edits){
     + "</div>"
     + "<div class=\"mrow\"><label for=\"d-body\">Spec</label><textarea id=\"d-body\" " + (ro?"disabled":"") + ">" + esc(c.body) + "</textarea></div>"
     + q
-    + (links ? "<div class=\"links\">" + links + "</div>" : "")
+    + ownPr
+    + (links ? "<div class=\"links\"><h3>References</h3>" + links + "</div>" : "")
     + "<div class=\"dactions\">"
     + "<button class=\"btn primary\" id=\"d-save\" " + (ro?"disabled":"") + ">Save changes</button>"
     + "<button class=\"btn danger\" id=\"d-delete\" " + (ro?"disabled":"") + ">" + (confirmDelete?"Confirm delete":"Delete card") + "</button>"
@@ -338,8 +377,9 @@ function modalHtml(){
 
 function prModalHtml(c, col){
   var label = col === "human_review" ? "Human Review" : "Review";
-  return "<div class=\"overlay center\" id=\"provl\" data-id=\"" + esc(c.id) + "\"><div class=\"modal\" role=\"dialog\" aria-label=\"PR link required\">"
-    + "<h2>" + esc(c.id) + " needs a PR link to enter " + label + "</h2>"
+  return "<div class=\"overlay center\" id=\"provl\" data-id=\"" + esc(c.id) + "\"><div class=\"modal\" role=\"dialog\" aria-label=\"PR required\">"
+    + "<h2>" + esc(c.id) + " needs its own PR to enter " + label + "</h2>"
+    + "<div class=\"stat\">The pull request that implements this card. Reference links do not count.</div>"
     + "<div class=\"mrow\"><label for=\"pr-url\">PR URL</label><input id=\"pr-url\" placeholder=\"https://github.com/.../pull/123\"></div>"
     + "<div class=\"dactions\"><button class=\"btn primary\" id=\"pr-save\">Attach &amp; move to " + label + "</button><button class=\"btn\" id=\"pr-cancel\">Cancel</button></div>"
     + "</div></div>";
@@ -437,16 +477,20 @@ function wire(){
     document.getElementById("pr-save").onclick = function(){
       var p = pending, c = p && card(p.id); if(!c){ pending = null; render(); return; }
       var u = document.getElementById("pr-url").value.trim();
-      if(!/^https?:\/\//.test(u)) return;
-      var m = u.match(/\/pull\/(\d+)/);
-      var links = (c.links || []).concat([{label: m ? "PR #" + m[1] : "PR", url: u}]);
-      var patch = Object.assign({}, p.patch, {links: links});
+      if(!/^https?:\/\/\S+\/pull\/\d+\/?$/.test(u)){ statusMsg = "that is not a pull-request URL (…/pull/<n>)"; render(); return; }
+      var patch = Object.assign({}, p.patch, {pr: {url: u}});
       pending = null;
-      var r = moveCard(c.id, p.column, (p.why || "Dragged") + " with PR link attached via review gate", patch, p.expected, p.from);
+      var r = moveCard(c.id, p.column, (p.why || "Dragged") + " with its PR attached via review gate", patch, p.expected, p.from);
       if(r) r.then(function(ok){ if(ok && openCardId === c.id){ openCardId = null; render(); } });
     };
     var pu = document.getElementById("pr-url"); if(pu && document.activeElement !== pu) pu.focus();
   }
+  app.querySelectorAll(".wtcopy").forEach(function(b){
+    b.onclick = function(e){ e.stopPropagation(); copyText(b.dataset.path); };
+    b.onkeydown = function(e){ e.stopPropagation(); };
+  });
+  var wtc = document.getElementById("d-worktree-copy");
+  if(wtc) wtc.onclick = function(){ copyText(document.getElementById("d-worktree").value); };
   app.querySelectorAll(".card").forEach(function(el){
     el.onclick = function(){ openDrawer(el.dataset.id); };
     el.onkeydown = function(e){ if(e.key==="Enter") openDrawer(el.dataset.id); };

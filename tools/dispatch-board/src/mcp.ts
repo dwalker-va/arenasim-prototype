@@ -25,7 +25,15 @@ const expectedVersion = z
   .int()
   .describe("The card version you read. A stale version is REFUSED with the current card; re-read and re-apply.");
 const column = z.enum(COLUMNS);
-const link = z.object({ label: z.string(), url: z.string() });
+const link = z.object({ label: z.string(), url: z.string() }).describe("A reference (a prerequisite PR, where a finding was made, a workshop page) — never the card's own PR");
+const pr = z
+  .object({ url: z.string().describe("The card's OWN pull request, https://.../pull/<n>"), number: z.number().int().optional() })
+  .nullable()
+  .describe("The card's own implementing PR. The review/human_review gate and the Tester spawn read this, not links.");
+const worktree = z
+  .string()
+  .nullable()
+  .describe("Absolute path of the worktree the card's branch is checked out in (the Engineer's tree). Informational: recorded, never checked.");
 const patch = z
   .object({
     title: z.string().min(1),
@@ -33,6 +41,8 @@ const patch = z
     role: z.enum(ROLES),
     priority: z.string().regex(/^P[1-4]$/),
     links: z.array(link),
+    pr,
+    worktree,
     question: z.object({ text: z.string(), answer: z.string().optional() }).nullable(),
     agent: z
       .object({
@@ -77,7 +87,7 @@ export function buildMcpServer(board: Board): McpServer {
     "list_cards",
     {
       description:
-        "Card SUMMARIES (id, title, column, role, priority, agent, links, updated, released, version) — never bodies or activity. " +
+        "Card SUMMARIES (id, title, column, role, priority, agent, pr, worktree, links, updated, released, version) — never bodies or activity. " +
         "Archived cards are excluded unless you ask for column 'archived' or include_archived. `fields` picks other doc fields (e.g. [\"question\"]); [\"*\"] returns every field except activity.",
       inputSchema: {
         column: z.union([column, z.array(column)]).optional(),
@@ -111,6 +121,8 @@ export function buildMcpServer(board: Board): McpServer {
         priority: z.string().regex(/^P[1-4]$/).optional(),
         column: column.optional(),
         links: z.array(link).optional(),
+        pr: pr.optional(),
+        worktree: worktree.optional(),
         actor,
         by,
       },
@@ -122,7 +134,7 @@ export function buildMcpServer(board: Board): McpServer {
     "update_card",
     {
       description:
-        "Patch card fields (title, body, role, priority, links, question, agent, released) under optimistic concurrency. Column changes go through move_card. `agent` may be null (clear the claim) or {status: done} (close out a WORKING claim) — never working: claims come only from claim_card. Optionally append an activity line in the same write.",
+        "Patch card fields (title, body, role, priority, links, pr, worktree, question, agent, released) under optimistic concurrency. Column changes go through move_card. `agent` may be null (clear the claim) or {status: done} (close out a WORKING claim) — never working: claims come only from claim_card. Optionally append an activity line in the same write.",
       inputSchema: { id, patch, expected_version: expectedVersion, activity: z.string().optional(), actor, by },
     },
     async (a) => run(() => board.updateCard(a.id, a.patch, a.expected_version, { actor: a.actor, by: a.by, activity: a.activity })),
@@ -132,7 +144,7 @@ export function buildMcpServer(board: Board): McpServer {
     "move_card",
     {
       description:
-        "Move a card to a column, atomically with an optional patch, body append and activity line — all one write. Enforces the column rules: a non-pm card needs a PR link with a url (in links, or in this move's patch) to enter review or human_review; entering in_progress sets agent: null. `append` adds `## <heading>` + text to the body in the same write (a Tester REJECT: findings + the move back to in_progress).",
+        "Move a card to a column, atomically with an optional patch, body append and activity line — all one write. Enforces the column rules: a non-pm card needs its own PR (`pr`, already set or in this move's patch; `links` are references and never count) to enter review or human_review; entering in_progress sets agent: null. `append` adds `## <heading>` + text to the body in the same write (a Tester REJECT: findings + the move back to in_progress).",
       inputSchema: {
         id,
         column,
@@ -154,10 +166,17 @@ export function buildMcpServer(board: Board): McpServer {
     "claim_card",
     {
       description:
-        "Compare-and-set claim BEFORE spawning: sets agent {status: working, started, name} only if the card is claimable right now (in_progress with agent null; review with agent null or status done; never a pm card). A second claim FAILS — if this fails, do not spawn.",
-      inputSchema: { id, name: z.string().min(1).describe("The agent being spawned, e.g. Engineer-AS-7"), activity: z.string().optional(), actor, by },
+        "Compare-and-set claim BEFORE spawning: sets agent {status: working, started, name} only if the card is claimable right now (in_progress with agent null; review with agent null or status done; never a pm card). A second claim FAILS — if this fails, do not spawn. `worktree` records the spawned Engineer's tree (omit it for a Tester, whose tree is not the card's branch).",
+      inputSchema: {
+        id,
+        name: z.string().min(1).describe("The agent being spawned, e.g. Engineer-AS-7"),
+        worktree: z.string().optional().describe("Absolute path of the worktree the Engineer will work in, if known"),
+        activity: z.string().optional(),
+        actor,
+        by,
+      },
     },
-    async (a) => run(() => board.claimCard(a.id, a.name, { actor: a.actor, by: a.by, activity: a.activity })),
+    async (a) => run(() => board.claimCard(a.id, a.name, { actor: a.actor, by: a.by, activity: a.activity, worktree: a.worktree })),
   );
 
   const claimClose = {

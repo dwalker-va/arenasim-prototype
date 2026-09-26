@@ -63,7 +63,7 @@ test("MCP: concurrent claims from separate clients resolve to exactly one winner
   assert.ok(results.filter((r) => !r.ok).every((r) => r.value.error === "claim_refused"));
 });
 
-test("MCP: the PR-link gate refuses a linkless engineer card and admits a pm card", async (t) => {
+test("MCP: the PR gate refuses an engineer card without its own pr and admits a pm card", async (t) => {
   const d = await spawnDaemon(t);
   const client = await mcpClient(t, d.base);
   const eng = (await call(client, "create_card", { title: "e", role: "engineer", actor: "o" })).value;
@@ -139,7 +139,7 @@ test("web UI: served at /, and the UI API enforces the same gate and versions", 
   const withLink = await post(d.base, `/api/cards/${created.body.id}/move`, {
     column: "review",
     expected_version: created.body.version,
-    patch: { links: [{ label: "PR #5", url: "https://github.com/o/r/pull/5" }] },
+    patch: { pr: { url: "https://github.com/o/r/pull/5" } },
   });
   assert.equal(withLink.status, 200);
   const stale = await post(d.base, `/api/cards/${created.body.id}/update`, { patch: { title: "x" }, expected_version: created.body.version });
@@ -223,8 +223,7 @@ test("claims: update_card / move_card / the UI cannot take or silently drop a cl
 test("MCP: move_card with append is the one-write REJECT", async (t) => {
   const d = await spawnDaemon(t);
   const client = await mcpClient(t, d.base);
-  const link = [{ label: "PR #1", url: "https://github.com/o/r/pull/1" }];
-  let c = (await call(client, "create_card", { title: "c", body: "spec", role: "engineer", column: "review", links: link, actor: "o" })).value;
+  let c = (await call(client, "create_card", { title: "c", body: "spec", role: "engineer", column: "review", pr: { url: "https://github.com/o/r/pull/1" }, actor: "o" })).value;
   c = (await call(client, "claim_card", { id: c.id, name: "AS-1-test", actor: "orchestrator" })).value;
   const r = await call(client, "move_card", {
     id: c.id,

@@ -42,13 +42,21 @@ export const COLUMNS = [
 export type Column = (typeof COLUMNS)[number];
 export const ROLES = ["engineer", "tester", "release-manager", "pm"] as const;
 export type Role = (typeof ROLES)[number];
-/** Columns a non-pm card may not enter without a PR link (the AS-4 gate). */
+/** Columns a non-pm card may not enter without its own PR, `pr` (the AS-4 gate). */
 export const GATED_COLUMNS: readonly string[] = ["review", "human_review"];
 
+/** A reference: a prerequisite PR, the PR where a finding was made, a workshop page. */
 export interface Link {
   label: string;
   url: string;
 }
+/** The card's OWN implementing pull request — never one of its references. */
+export interface Pr {
+  number: number;
+  url: string;
+}
+/** A pull request URL; the number is read from it. */
+const PR_URL = /^https?:\/\/[^\s/]+\/\S*\/pull\/(\d+)\/?$/;
 export interface ActivityEntry {
   t: string;
   by: string;
@@ -102,6 +110,8 @@ export const SUMMARY_FIELDS = [
   "role",
   "priority",
   "agent",
+  "pr",
+  "worktree",
   "links",
   "updated",
   "released",
@@ -114,6 +124,8 @@ const PATCHABLE = new Set([
   "role",
   "priority",
   "links",
+  "pr",
+  "worktree",
   "question",
   "agent",
   "released",
@@ -199,7 +211,28 @@ function checkColumn(c: unknown): Column {
   return c as Column;
 }
 
-function checkPatch(patch: Record<string, unknown>): void {
+function checkPr(v: unknown): Pr | null {
+  if (v === null) return null;
+  const url = isObj(v) && typeof v.url === "string" ? v.url.trim() : "";
+  const m = PR_URL.exec(url);
+  if (!m) invalid("pr must be null or {url: <a pull-request URL, .../pull/<n>>, number?}");
+  const number = Number(m[1]);
+  if ((v as Record<string, unknown>).number !== undefined && (v as Record<string, unknown>).number !== number) {
+    invalid(`pr.number ${String((v as Record<string, unknown>).number)} does not match its url (#${number})`);
+  }
+  return { number, url };
+}
+
+/** A worktree is recorded, never checked: any absolute, single-line path. */
+function checkWorktree(v: unknown): string | null {
+  if (v === null) return null;
+  if (typeof v !== "string" || !v.startsWith("/") || /[\r\n]/.test(v)) invalid("worktree must be null or an absolute path");
+  return v as string;
+}
+
+/** Validate a patch; returns it with `pr` normalised to {number, url}. */
+function checkPatch(patch: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...patch };
   for (const [k, v] of Object.entries(patch)) {
     if (k === "column") invalid("column changes go through move_card, which enforces the column rules");
     if (!PATCHABLE.has(k)) invalid(`field '${k}' is not patchable (patchable: ${[...PATCHABLE].join(", ")})`);
@@ -238,12 +271,76 @@ function checkPatch(patch: Record<string, unknown>): void {
       case "released":
         if (typeof v !== "string" || !v) invalid("released must be a non-empty tag string");
         break;
+      case "pr":
+        out.pr = checkPr(v);
+        break;
+      case "worktree":
+        checkWorktree(v);
+        break;
     }
   }
+  return out;
 }
 
-function hasLinks(doc: Record<string, unknown>): boolean {
-  return Array.isArray(doc.links) && doc.links.some((l) => isObj(l) && typeof l.url === "string" && l.url.trim() !== "");
+function hasPr(doc: Record<string, unknown>): boolean {
+  return isObj(doc.pr) && typeof doc.pr.url === "string" && PR_URL.test(doc.pr.url);
+}
+
+/**
+ * Migration: each card's own PR, derived from its hand-off record — never
+ * from `links`, which are references. The hand-off entries are the Engineer's
+ * own report (`by: "engineer"`, message starting READY — "READY_FOR_REVIEW —
+ * PR #N ...") and the orchestrator's record of it (`by: "orchestrator"`,
+ * starting "ENGINEER DONE" or "READY FOR REVIEW"). The PR is the first
+ * "PR #N" in each such entry. Exactly one distinct N across a card's
+ * hand-offs gives `pr`; none gives null; several give null and are reported
+ * as ambiguous. The url is the card's own link to /pull/N when it has one,
+ * else built from the board's single repository base (reported as
+ * constructed; with no single base it is left null and reported ambiguous).
+ */
+export function derivePr(cards: Record<string, unknown>[]): {
+  pr: Record<string, Pr | null>;
+  ambiguous: { id: string; candidates: number[] }[];
+  constructed: string[];
+} {
+  const isHandoff = (a: ActivityEntry) =>
+    (a.by === "engineer" && /^READY/.test(a.msg)) || (a.by === "orchestrator" && /^(ENGINEER DONE|READY FOR REVIEW)/.test(a.msg));
+  const bases = new Set<string>();
+  for (const c of cards) {
+    for (const l of Array.isArray(c.links) ? c.links : []) {
+      const m = isObj(l) && typeof l.url === "string" ? /^(https?:\/\/\S+?)\/pull\/\d+\/?$/.exec(l.url) : null;
+      if (m) bases.add(m[1]);
+    }
+  }
+  const base = bases.size === 1 ? [...bases][0] : null;
+  const out = { pr: {} as Record<string, Pr | null>, ambiguous: [] as { id: string; candidates: number[] }[], constructed: [] as string[] };
+  for (const c of cards) {
+    const id = String(c.id);
+    const nums = new Set<number>();
+    for (const a of (Array.isArray(c.activity) ? c.activity : []) as ActivityEntry[]) {
+      if (!isHandoff(a)) continue;
+      const m = /PR #(\d+)/.exec(a.msg);
+      if (m) nums.add(Number(m[1]));
+    }
+    if (nums.size !== 1) {
+      out.pr[id] = null;
+      if (nums.size > 1) out.ambiguous.push({ id, candidates: [...nums].sort((x, y) => x - y) });
+      continue;
+    }
+    const n = [...nums][0];
+    const own = (Array.isArray(c.links) ? c.links : []).find(
+      (l) => isObj(l) && typeof l.url === "string" && new RegExp(`/pull/${n}/?$`).test(l.url) && PR_URL.test(l.url),
+    ) as Link | undefined;
+    if (own) out.pr[id] = { number: n, url: own.url };
+    else if (base) {
+      out.pr[id] = { number: n, url: `${base}/pull/${n}` };
+      out.constructed.push(id);
+    } else {
+      out.pr[id] = null;
+      out.ambiguous.push({ id, candidates: [n] });
+    }
+  }
+  return out;
 }
 
 /**
@@ -291,9 +388,9 @@ function withSection(body: unknown, heading: string, text: string): string {
   return b ? `${b}\n\n${section}` : section;
 }
 
-/** The AS-4 PR-link gate: a non-pm card enters review/human_review only with a link. */
+/** The AS-4 PR gate: a non-pm card enters review/human_review only with its own PR. */
 function gateAllows(doc: Record<string, unknown>, to: string): boolean {
-  return !GATED_COLUMNS.includes(to) || doc.role === "pm" || hasLinks(doc);
+  return !GATED_COLUMNS.includes(to) || doc.role === "pm" || hasPr(doc);
 }
 
 /**
@@ -560,17 +657,21 @@ export class Board extends EventEmitter {
       priority?: string;
       column?: string;
       links?: Link[];
+      pr?: unknown;
+      worktree?: string | null;
     },
     meta: WriteMeta,
   ): Card {
     const actor = checkActor(meta.actor);
     const column = checkColumn(input.column ?? "backlog");
-    checkPatch({
+    const checked = checkPatch({
       title: input.title,
       body: input.body ?? "",
       role: input.role,
       priority: input.priority ?? "P2",
       links: input.links ?? [],
+      pr: input.pr ?? null,
+      worktree: input.worktree ?? null,
     });
     return this.write(() => {
       const prefix = this.meta("id_prefix");
@@ -586,6 +687,8 @@ export class Board extends EventEmitter {
         role: input.role,
         priority: input.priority ?? "P2",
         links: input.links ?? [],
+        pr: checked.pr,
+        worktree: checked.worktree,
         question: null,
         agent: null,
         activity: null,
@@ -593,7 +696,7 @@ export class Board extends EventEmitter {
         updated: t,
       };
       if (!gateAllows(doc, column)) {
-        throw new BoardError("gate_refused", `a non-pm card needs a PR link to enter ${column}`);
+        throw new BoardError("gate_refused", `a non-pm card needs its own PR (pr) to enter ${column}`);
       }
       this.db.prepare("INSERT INTO cards(id, doc) VALUES (?, ?)").run(id, JSON.stringify(doc));
       this.db.prepare("UPDATE meta SET value = ? WHERE key = 'next_id'").run(String(n + 1));
@@ -611,7 +714,7 @@ export class Board extends EventEmitter {
   ): Card {
     const actor = checkActor(meta.actor);
     if (!isObj(patch)) invalid("patch must be an object");
-    checkPatch(patch);
+    patch = checkPatch(patch);
     if (!Object.keys(patch).length && !meta.activity) invalid("empty patch");
     checkVersion(expectedVersion);
     return this.write(() => {
@@ -620,7 +723,7 @@ export class Board extends EventEmitter {
       const claimNote = claimChangeNote(doc.agent, patch);
       Object.assign(doc, patch);
       if (GATED_COLUMNS.includes(doc.column as string) && !gateAllows(doc, doc.column as string)) {
-        throw new BoardError("gate_refused", `${id} is in ${String(doc.column)}: a non-pm card there must keep a PR link`, this.current(id));
+        throw new BoardError("gate_refused", `${id} is in ${String(doc.column)}: a non-pm card there must keep its own PR (pr)`, this.current(id));
       }
       this.commitDoc(id, r.version, doc);
       if (meta.activity) this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: meta.activity });
@@ -638,9 +741,8 @@ export class Board extends EventEmitter {
   ): Card {
     const actor = checkActor(meta.actor);
     const to = checkColumn(column);
-    const patch = meta.patch ?? {};
-    if (!isObj(patch)) invalid("patch must be an object");
-    checkPatch(patch);
+    if (!isObj(meta.patch ?? {})) invalid("patch must be an object");
+    const patch = checkPatch(meta.patch ?? {});
     const append = checkAppend(meta.append);
     if (to === "in_progress" && patch.agent !== undefined && patch.agent !== null) {
       invalid("entering in_progress clears the claim (agent: null); claim it with claim_card afterwards");
@@ -656,7 +758,7 @@ export class Board extends EventEmitter {
       if (!gateAllows(doc, to)) {
         throw new BoardError(
           "gate_refused",
-          `${id} needs a PR link to enter ${to} (role ${String(doc.role)}; only pm cards are exempt). Add it to links in this move's patch.`,
+          `${id} needs its own PR to enter ${to} (role ${String(doc.role)}; only pm cards are exempt). Set pr: {url} in this move's patch — links are references and do not count.`,
           this.current(id),
         );
       }
@@ -681,14 +783,17 @@ export class Board extends EventEmitter {
    * Compare-and-set claim. Succeeds for exactly one caller per claimable
    * state; every other concurrent or later claim is refused with the card.
    */
-  claimCard(id: string, name: string, meta: WriteMeta & { activity?: string }): Card {
+  claimCard(id: string, name: string, meta: WriteMeta & { activity?: string; worktree?: string }): Card {
     const actor = checkActor(meta.actor);
     if (typeof name !== "string" || !name.trim()) invalid("name (the agent being spawned) is required");
+    // The spawned agent's tree, when the caller knows it: recorded, never checked.
+    const worktree = meta.worktree === undefined ? undefined : checkWorktree(meta.worktree);
     return this.write(() => {
       const { r, doc } = this.loadExpecting(id, undefined);
       const why = claimRefusal(doc);
       if (why) throw new BoardError("claim_refused", `${id}: ${why}`, this.current(id));
       doc.agent = { status: "working", started: now(), name };
+      if (worktree !== undefined) doc.worktree = worktree;
       this.commitDoc(id, r.version, doc);
       this.appendActivityRow(id, { t: now(), by: meta.by ?? actor, msg: meta.activity ?? `Claimed for ${name}` });
       this.recordEvent(actor, "claimed", id, { name, column: doc.column });
@@ -805,7 +910,15 @@ export class Board extends EventEmitter {
    * preserving ids, card order, every field (legacy shapes included),
    * activity and timestamps exactly. Refuses a non-empty database.
    */
-  importState(state: unknown, meta: WriteMeta): { cards: number; activity: number; nextId: number } {
+  importState(
+    state: unknown,
+    meta: WriteMeta,
+  ): {
+    cards: number;
+    activity: number;
+    nextId: number;
+    migration: { pr_derived: number; pr_null: number; pr_kept: number; ambiguous: { id: string; candidates: number[] }[]; constructed_url: string[] };
+  } {
     const actor = checkActor(meta.actor);
     if (!isObj(state)) invalid("state must be an object");
     if (state.schema !== 1) invalid(`unsupported schema ${String(state.schema)} (expected 1)`);
@@ -825,6 +938,14 @@ export class Board extends EventEmitter {
       prefix = m[1];
       maxNum = Math.max(maxNum, Number(m[2]));
       if (typeof c.title !== "string") invalid(`${String(c.id)}: title must be a string`);
+      if ("pr" in c) {
+        try {
+          checkPr(c.pr);
+        } catch {
+          invalid(`${String(c.id)}: pr must be null or {number, url} with a pull-request url`);
+        }
+      }
+      if ("worktree" in c) checkWorktree(c.worktree);
       checkColumn(c.column);
       if (!Array.isArray(c.activity)) invalid(`${String(c.id)}: activity must be an array`);
       (c.activity as unknown[]).forEach((a, j) => {
@@ -834,12 +955,26 @@ export class Board extends EventEmitter {
       });
     });
     if ((state.nextId as number) <= maxNum) invalid(`nextId ${String(state.nextId)} is not above the highest card number ${maxNum}`);
+    // Migration to the current card model: a card without `pr` gets it
+    // derived (see derivePr); a card without `worktree` gets null. A state
+    // that already carries them (a re-import of an export) keeps them as is.
+    const toDerive = (cards as Record<string, unknown>[]).filter((c) => !("pr" in c));
+    const derived = derivePr(toDerive);
+    const migration = {
+      pr_derived: Object.values(derived.pr).filter((p) => p !== null).length,
+      pr_null: Object.values(derived.pr).filter((p) => p === null).length,
+      pr_kept: cards.length - toDerive.length,
+      ambiguous: derived.ambiguous,
+      constructed_url: derived.constructed,
+    };
     return this.write(() => {
       if (!this.isEmpty()) throw new BoardError("not_empty", "import only loads into an EMPTY database; this one already has cards");
       let acts = 0;
       const ins = this.db.prepare("INSERT INTO cards(id, doc) VALUES (?, ?)");
       for (const c of cards as Record<string, unknown>[]) {
-        const doc = { ...c, activity: null };
+        const doc: Record<string, unknown> = { ...c, activity: null };
+        if (!("pr" in c)) doc.pr = derived.pr[String(c.id)];
+        if (!("worktree" in c)) doc.worktree = null;
         ins.run(c.id, JSON.stringify(doc));
         for (const a of c.activity as ActivityEntry[]) {
           this.appendActivityRow(c.id as string, a);
@@ -849,7 +984,7 @@ export class Board extends EventEmitter {
       this.db.prepare("UPDATE meta SET value = ? WHERE key = 'next_id'").run(String(state.nextId));
       if (prefix !== null) this.db.prepare("UPDATE meta SET value = ? WHERE key = 'id_prefix'").run(prefix);
       this.recordEvent(actor, "imported", null, { cards: cards.length, activity: acts });
-      return { cards: cards.length, activity: acts, nextId: state.nextId as number };
+      return { cards: cards.length, activity: acts, nextId: state.nextId as number, migration };
     });
   }
 

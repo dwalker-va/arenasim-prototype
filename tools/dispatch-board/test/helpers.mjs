@@ -30,12 +30,12 @@ export function tempBoard(t) {
 }
 
 /**
- * A card taken straight to `column` with the given links, for rule tests.
+ * A card taken straight to `column` with the given own PR, for rule tests.
  * `agent` is "working" or "done": the claim is taken the only way one can be
  * — claim_card — and "done" then closes it out.
  */
-export function seed(board, { role = "engineer", column = "backlog", links = [], agent } = {}) {
-  let c = board.createCard({ title: "t", body: "b", role, links }, { actor: "seed" });
+export function seed(board, { role = "engineer", column = "backlog", pr = null, agent } = {}) {
+  let c = board.createCard({ title: "t", body: "b", role, pr }, { actor: "seed" });
   if (column !== "backlog") c = board.moveCard(c.id, column, c.version, { actor: "seed" });
   if (agent === "working" || agent === "done") c = board.claimCard(c.id, "Seeded-Agent", { actor: "seed" });
   if (agent === "done") c = board.finishClaim(c.id, { actor: "seed" });

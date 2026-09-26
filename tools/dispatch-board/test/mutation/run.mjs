@@ -39,13 +39,14 @@ const MUTANTS = [
     ],
   },
   {
-    name: "pr-link-gate",
+    name: "pr-gate",
     file: "dist/board.js",
-    find: 'return !GATED_COLUMNS.includes(to) || doc.role === "pm" || hasLinks(doc);',
+    find: 'return !GATED_COLUMNS.includes(to) || doc.role === "pm" || hasPr(doc);',
     replace: "return true;",
     mustFail: [
-      "PR-link gate: a linkless non-pm card is refused into review and human_review",
-      "MCP: the PR-link gate refuses a linkless engineer card and admits a pm card",
+      "PR gate: a non-pm card without its own pr is refused into review and human_review",
+      "MCP: the PR gate refuses an engineer card without its own pr and admits a pm card",
+      "PR gate: reference links alone never admit a card to review or human_review",
     ],
   },
   {
@@ -113,6 +114,31 @@ const MUTANTS = [
     ],
   },
   {
+    // Round 5: a card's own PR comes from its hand-off record, never from any activity naming a PR.
+    name: "migration-handoff-only",
+    file: "dist/board.js",
+    find: 'const isHandoff = (a) => (a.by === "engineer" && /^READY/.test(a.msg)) || (a.by === "orchestrator" && /^(ENGINEER DONE|READY FOR REVIEW)/.test(a.msg));',
+    replace: "const isHandoff = (a) => true;",
+    mustFail: ["migration: pr is derived from the Engineer's own hand-off, never from reference links"],
+  },
+  {
+    name: "attach-dialog-sets-pr",
+    file: "ui/board.html",
+    find: "var patch = Object.assign({}, p.patch, {pr: {url: u}});",
+    replace: 'var patch = Object.assign({}, p.patch, {links: (c.links || []).concat([{label: "PR", url: u}])});',
+    mustFail: ["attach dialog: a card with only reference links is gated, and the dialog sets its own pr"],
+  },
+  {
+    name: "claim-records-worktree",
+    file: "dist/board.js",
+    find: "if (worktree !== undefined)\n                doc.worktree = worktree;",
+    replace: "",
+    mustFail: [
+      "READY_FOR_REVIEW: pr, worktree, the claim close-out and the move are ONE write",
+      "worktree: set at claim, re-set by a later round's claim, absolute paths only, never checked on disk",
+    ],
+  },
+  {
     name: "signal-handler-ordering",
     file: "dist/cli.js",
     find: 'process.on("SIGINT", stop);\n    process.on("SIGTERM", stop);\n    await ready;',
@@ -137,7 +163,7 @@ for (const m of MUTANTS) {
   }
   writeFileSync(target, src.replace(m.find, m.replace));
 
-  const tests = ["board", "race", "daemon", "roundtrip", "ui"].map((n) => join(dir, "test", `${n}.test.mjs`));
+  const tests = ["board", "race", "daemon", "roundtrip", "ui", "prwork"].map((n) => join(dir, "test", `${n}.test.mjs`));
   const r = spawnSync(process.execPath, ["--test", ...tests], { encoding: "utf8", cwd: dir });
   const failed = [...r.stdout.matchAll(/^not ok \d+ - (.*)$/gm)].map((x) => x[1]);
   const missing = m.mustFail.filter((name) => !failed.some((f) => f.startsWith(name)));

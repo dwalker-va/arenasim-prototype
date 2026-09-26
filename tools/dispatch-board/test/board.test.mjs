@@ -94,8 +94,8 @@ test("claim rule: agent.status working comes only from claim_card, never a patch
     refused(() => board.updateCard(c.id, { agent: working }, c.version, { actor: "o" }), "invalid");
   }
   // ...and not through move_card's patch either.
-  const link = [{ label: "PR", url: "https://github.com/x/y/pull/1" }];
-  refused(() => board.moveCard(backlog.id, "review", backlog.version, { actor: "o", patch: { links: link, agent: working } }), "invalid");
+  const pr = { url: "https://github.com/x/y/pull/1" };
+  refused(() => board.moveCard(backlog.id, "review", backlog.version, { actor: "o", patch: { pr, agent: working } }), "invalid");
   assert.equal(board.getCard(live.id).agent.name, "Seeded-Agent");
   assert.equal(board.getCard(backlog.id).agent, null);
   assert.equal(board.getCard(pm.id).agent, null);
@@ -105,9 +105,9 @@ test("claim rule: a patched agent done only closes out a working claim", (t) => 
   const { board } = tempBoard(t);
   const idle = seed(board, { column: "in_progress" });
   refused(() => board.updateCard(idle.id, { agent: { status: "done" } }, idle.version, { actor: "o" }), "claim_refused");
-  const link = [{ label: "PR", url: "https://github.com/x/y/pull/1" }];
+  const pr = { url: "https://github.com/x/y/pull/1" };
   refused(
-    () => board.moveCard(idle.id, "review", idle.version, { actor: "o", patch: { links: link, agent: { status: "done" } } }),
+    () => board.moveCard(idle.id, "review", idle.version, { actor: "o", patch: { pr, agent: { status: "done" } } }),
     "claim_refused",
   );
   assert.equal(board.getCard(idle.id).column, "in_progress");
@@ -116,7 +116,7 @@ test("claim rule: a patched agent done only closes out a working claim", (t) => 
   const c = board.claimCard(idle.id, "Engineer-1", { actor: "o" });
   const moved = board.moveCard(c.id, "review", c.version, {
     actor: "o",
-    patch: { links: link, agent: { ...c.agent, status: "done", finished: "f" } },
+    patch: { pr, agent: { ...c.agent, status: "done", finished: "f" } },
   });
   assert.deepEqual([moved.column, moved.agent.status, moved.agent.name], ["review", "done", "Engineer-1"]);
 });
@@ -135,11 +135,11 @@ test("claim guard: a second claim on the same card fails", (t) => {
 
 test("claim rule: review is claimable at agent null or status done, not while working", (t) => {
   const { board } = tempBoard(t);
-  const link = [{ label: "PR #1", url: "https://github.com/x/y/pull/1" }];
-  const handedOff = seed(board, { column: "review", links: link, agent: "done" });
+  const pr = { url: "https://github.com/x/y/pull/1" };
+  const handedOff = seed(board, { column: "review", pr, agent: "done" });
   assert.equal(board.claimCard(handedOff.id, "Tester-1", { actor: "o" }).agent.status, "working");
 
-  const reset = seed(board, { column: "review", links: link });
+  const reset = seed(board, { column: "review", pr });
   assert.equal(board.claimCard(reset.id, "Tester-2", { actor: "o" }).agent.status, "working");
 
   refused(() => board.claimCard(handedOff.id, "Tester-3", { actor: "o" }), "claim_refused");
@@ -183,13 +183,13 @@ test("release_claim and finish_claim act only on a working claim", (t) => {
 
 test("a claim never ends silently: every patch or move that changes agent writes an activity line", (t) => {
   const { board } = tempBoard(t);
-  const link = [{ label: "PR", url: "https://github.com/x/y/pull/1" }];
+  const pr = { url: "https://github.com/x/y/pull/1" };
   let c = seed(board, { column: "in_progress", agent: "working" });
   c = board.updateCard(c.id, { agent: null }, c.version, { actor: "o" });
   assert.equal(c.activity.at(-1).msg, "Claim released (was Seeded-Agent)");
 
   c = board.claimCard(c.id, "Engineer-2", { actor: "o" });
-  c = board.moveCard(c.id, "review", c.version, { actor: "o", activity: "SUMMARY", patch: { links: link, agent: { ...c.agent, status: "done" } } });
+  c = board.moveCard(c.id, "review", c.version, { actor: "o", activity: "SUMMARY", patch: { pr, agent: { ...c.agent, status: "done" } } });
   assert.deepEqual(c.activity.slice(-2).map((a) => a.msg), ["SUMMARY", "Claim finished (Engineer-2)"]);
 
   // An edit that leaves agent alone says nothing about it.
@@ -199,7 +199,7 @@ test("a claim never ends silently: every patch or move that changes agent writes
 
 // ---------------------------------------------------------------- column rules
 
-test("PR-link gate: a linkless non-pm card is refused into review and human_review", (t) => {
+test("PR gate: a non-pm card without its own pr is refused into review and human_review", (t) => {
   const { board } = tempBoard(t);
   for (const role of ["engineer", "tester", "release-manager"]) {
     for (const to of ["review", "human_review"]) {
@@ -210,7 +210,7 @@ test("PR-link gate: a linkless non-pm card is refused into review and human_revi
   }
 });
 
-test("PR-link gate: a pm card is admitted; a link in the move's own patch satisfies it", (t) => {
+test("PR gate: a pm card is admitted; a pr in the move's own patch satisfies it", (t) => {
   const { board } = tempBoard(t);
   const pm = seed(board, { role: "pm", column: "in_progress" });
   assert.equal(board.moveCard(pm.id, "review", pm.version, { actor: "board" }).column, "review");
@@ -218,31 +218,13 @@ test("PR-link gate: a pm card is admitted; a link in the move's own patch satisf
   assert.equal(board.moveCard(pm2.id, "human_review", pm2.version, { actor: "board" }).column, "human_review");
 
   const eng = seed(board, { column: "in_progress" });
-  const moved = board.moveCard(eng.id, "review", eng.version, {
-    actor: "orchestrator",
-    patch: { links: [{ label: "PR #9", url: "https://github.com/x/y/pull/9" }] },
-  });
+  const moved = board.moveCard(eng.id, "review", eng.version, { actor: "orchestrator", patch: { pr: { url: "https://github.com/x/y/pull/9" } } });
   assert.equal(moved.column, "review");
-});
-
-test("PR-link gate: a link without a url does not satisfy it", (t) => {
-  const { board } = tempBoard(t);
-  const c = seed(board, { column: "in_progress" });
-  for (const links of [[{ label: "", url: "" }], [{ label: "PR", url: "   " }]]) {
-    refused(() => board.moveCard(c.id, "review", c.version, { actor: "o", patch: { links } }), "gate_refused");
-  }
-  refused(() => board.createCard({ title: "x", role: "engineer", column: "review", links: [{ label: "", url: "" }] }, { actor: "o" }), "gate_refused");
-});
-
-test("PR-link gate: a gated card cannot have its last link patched away", (t) => {
-  const { board } = tempBoard(t);
-  const c = seed(board, { column: "review", links: [{ label: "PR #1", url: "u" }] });
-  refused(() => board.updateCard(c.id, { links: [] }, c.version, { actor: "a" }), "gate_refused");
 });
 
 test("entering in_progress sets agent: null", (t) => {
   const { board } = tempBoard(t);
-  const c = seed(board, { column: "review", links: [{ label: "PR", url: "u" }], agent: "done" });
+  const c = seed(board, { column: "review", pr: { url: "https://github.com/x/y/pull/1" }, agent: "done" });
   const back = board.moveCard(c.id, "in_progress", c.version, { actor: "board" });
   assert.equal(back.agent, null);
 });
@@ -294,8 +276,8 @@ test("activity is append-only at the storage layer", (t) => {
 
 test("move_card with append: findings and the move are ONE write (the Tester REJECT)", (t) => {
   const { board } = tempBoard(t);
-  const link = [{ label: "PR #1", url: "https://github.com/x/y/pull/1" }];
-  const c = seed(board, { column: "review", links: link });
+  const pr = { url: "https://github.com/x/y/pull/1" };
+  const c = seed(board, { column: "review", pr });
   const claimed = board.claimCard(c.id, "AS-1-test", { actor: "orchestrator" });
   const h = board.head();
   const r = board.moveCard(claimed.id, "in_progress", claimed.version, {
@@ -345,7 +327,7 @@ test("list_cards returns summaries, never bodies or activity, and hides archived
   assert.equal(rows.length, 1);
   assert.equal(rows[0].body, undefined);
   assert.equal(rows[0].activity, undefined);
-  assert.deepEqual(Object.keys(rows[0]).sort(), ["agent", "column", "id", "links", "priority", "role", "title", "updated", "version"]);
+  assert.deepEqual(Object.keys(rows[0]).sort(), ["agent", "column", "id", "links", "pr", "priority", "role", "title", "updated", "version", "worktree"]);
   assert.equal(board.listCards({ include_archived: true }).length, 2);
   assert.equal(board.listCards({ column: "archived" }).length, 1);
   assert.equal(board.listCards({ fields: ["body"] })[0].body, "b");

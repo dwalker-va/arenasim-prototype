@@ -7,7 +7,7 @@ board and serves, on `127.0.0.1:7453`,
   `.mcp.json` as the `dispatch-board` `http` server, so every session
   (orchestrator, PM, subagents) talks to the same process;
 - `/` — the web UI (the ported artifact page: six columns, drag, drawer,
-  answering a question, the PR-link dialog);
+  answering a question, the attach-PR dialog);
 - `/api/events` — the event feed the `wait` CLI blocks on.
 
 The protocol it implements is `docs/design/agent-pipeline.md`.
@@ -74,6 +74,12 @@ node dist/cli.js import saved-artifact-page.html    # reads its <script id="stat
 
 `export` writes the artifact's own `{schema: 1, nextId, cards}` shape, so it
 is also the way back to an artifact board.
+
+Import migrates artifact-era cards to the current model: each gains `pr` (the
+card's own PR, derived from its hand-off record — never from `links`, which
+are references) and `worktree` (null). The rule is in
+`docs/design/agent-pipeline.md` (*State schema*); `import` prints what it
+derived, what it left null, and every ambiguous or url-constructed card.
 
 ## Test
 

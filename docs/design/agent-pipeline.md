@@ -18,7 +18,7 @@ truth for code. GitHub issues are not used.
     `dispatch-board` `http` server. Every session — orchestrator, PM — talks to
     the same process through the `mcp__dispatch-board__*` tools.
   - `/` — the web UI: the six columns plus the archived toggle, drag between
-    columns, the card drawer, answering a question, the PR-link dialog. It is
+    columns, the card drawer, answering a question, the attach-PR dialog. It is
     the artifact page ported, refreshing live as other writers change the board.
   - an event feed, which `dist/cli.js wait` blocks on (see *Waking the
     orchestrator*).
@@ -45,7 +45,7 @@ daemon refuses what that rule used to prevent by convention:
 - a claim is **compare-and-set** (`claim_card`): of two sessions claiming the
   same card, exactly one wins and the other is refused, so a claim can no
   longer be double-spawned by overlapping reads;
-- the column rules (the PR-link gate, the `in_progress` claim reset) hold for
+- the column rules (the PR gate, the `in_progress` claim reset) hold for
   every writer, the web UI and MCP alike.
 
 What that **relaxes**: a PM session may file cards itself with `create_card`
@@ -78,7 +78,9 @@ the protocol reads as it always has:
   "column": "backlog | needs_input | in_progress | review | human_review | done | archived",
   "role": "engineer | tester | release-manager | pm",
   "priority": "P1 | P2 | P3",
-  "links": [{"label": "PR #112", "url": "..."}],
+  "links": [{"label": "PR #154 (prerequisite)", "url": "..."}],   (references only)
+  "pr": {"number": 112, "url": ".../pull/112"} | null,             (the card's OWN PR)
+  "worktree": "/abs/path/to/the/engineer/worktree" | null,
   "question": {"text": "...", "answer": "..."} | null,
   "agent": {"status": "working | done", "started": "ISO", "finished": "ISO", "name": "Engineer-AS-1"} | null,
   "released": "v0.2.0" | absent (release tag; set by the orchestrator when a release bundles the card),
@@ -96,12 +98,36 @@ Stored as four tables:
 | `meta` | `next_id` and the id prefix — id allocation is the daemon's, so no caller keeps `nextId`. |
 
 `agent.name` is new: `claim_card` records the spawned agent's name there, so
-the live-claim audit joins claims to live agents mechanically. Archived cards
+the live-claim audit joins claims to live agents mechanically.
+
+`pr` and `worktree` are new too. **`pr` is the card's own implementing pull
+request; `links` are references** — a prerequisite PR that had to merge before
+the card could start, the PR where a finding was made, a workshop page. The
+review gate, the Tester spawn and the release bundle all read `pr`, never
+`links`, so a reference can no longer pass for the card's own work.
+**`worktree`** is the absolute path of the tree the card's branch is checked
+out in (the Engineer's, never a Tester's detached tree), so the user can `cd`
+there and `cargo run --release`. It is informational: the daemon records and
+shows it and never checks, creates or deletes the directory; a merged card's
+tree may be long gone.
+
+**Importing an artifact-era board migrates it.** A card without `worktree`
+gets `null`. A card without `pr` gets it derived from its **hand-off record**:
+activity entries by `engineer` whose message starts `READY` (the Engineer's
+`READY_FOR_REVIEW — PR #N …`) or by `orchestrator` starting `ENGINEER DONE` /
+`READY FOR REVIEW` (the orchestrator's record of that hand-off). The PR is the
+first `PR #N` in each such entry. One distinct `N` across a card's hand-offs
+gives `pr`; none gives `null`; several give `null` and are listed as ambiguous
+in the import report. Link labels are never read — "PR #206 (the authority
+this would amend)" is a reference. The url is the card's own link to
+`/pull/N` when it has one, else built from the board's single repository base
+(the report lists those too). A state that already carries the fields (a
+re-import of an export) keeps them. Archived cards
 from the artifact era keep their legacy shapes (a bare-string `agent`, a
 missing `priority`); `export` returns them exactly as imported.
 
 **Reading it costs little.** `list_cards` returns **summaries** — id, title,
-column, role, priority, agent, links, updated, released, version — never a
+column, role, priority, agent, pr, worktree, links, updated, released, version — never a
 body or activity, and leaves `archived` out unless asked. `get_card` is the
 one call that returns a body, and `activity_limit` trims its log. That is the
 context fix: the artifact put ~15k tokens of page into the orchestrator on
@@ -161,7 +187,9 @@ whether an impact feels right, whether a joke lands). It is the *inverse* of the
 Proof/Testing section: that one lists what passed, this one lists what was never
 verified. "Nothing needs human testing" is written out rather than omitted, so a
 genuinely empty eyeball pass is distinguishable from an author who never considered one.
-The Engineer writes it; the Tester verifies the claim before APPROVE.
+The Engineer writes it; the Tester verifies the claim before APPROVE. The card's
+`worktree` (in its drawer, with a copy button) is where to look: `cd` there and
+`cargo run --release`.
 
 From `human_review` there are exactly **two exits, and both are the user's
 gesture**. No automation runs on the column:
@@ -177,19 +205,22 @@ append, same claim reset, same respawn onto the same PR — and differs only in 
 wrote the findings. That symmetry is why the column needs no new machinery.
 
 **Why a separate column, and not "leave approved cards in `review`".** Step 3
-spawns a Tester for any `review` card with a PR link whose `agent` is `null`
+spawns a Tester for any `review` card with a `pr` whose `agent` is `null`
 **or** `agent.status == "done"` — and the APPROVE path sets exactly
 `agent.status: "done"`. An approved card left in `review` would therefore be
 respawned on every wake, forever. Keeping the approved-but-unmerged state in its
 own column leaves that dedup guard untouched.
 
-**Board behaviour:** the PR-link gate AS-4 added for `review` also covers
+**Board behaviour:** the PR gate AS-4 added for `review` also covers
 `human_review`, and the daemon enforces it for every writer: a non-pm card
-cannot enter either column without a PR link in `links` (a `move_card` may add
-the link in its own `patch`), and a card already there cannot have its last
-link patched away. In the web UI, dragging a linkless card there opens the
-attach-PR dialog; `role: "pm"` cards remain exempt. A link counts only if its
-`url` is non-empty. Cards in `human_review`
+cannot enter either column without its own PR — `pr`, a pull-request URL (a
+`move_card` may set it in its own `patch`) — and a card already there cannot
+have it cleared. Reference `links` never satisfy the gate. In the web UI,
+dragging a card with no `pr` there opens the attach-PR dialog, which sets
+`pr`; `role: "pm"` cards remain exempt. A card's face shows its own PR apart
+from its references, and, while it is in `in_progress`, `review` or
+`human_review`, its worktree with a copy button (the drawer shows the full
+path). Cards in `human_review`
 render an "awaiting your merge" tag.
 
 #### Scoping cards (`role: "pm"`)
@@ -223,8 +254,8 @@ verdict, a merge — exists for a card that ships no code.
 
 **Review and Human Review are skipped, not policed.** There is no Tester for card
 text, and no PR to merge. A pm card misfiled into either column is already inert —
-step 3 spawns a Tester only for a card carrying an open-PR link, `human_review`
-has no automation at all, `claim_card` refuses pm cards, and the PR-link gate on
+step 3 spawns a Tester only for a card carrying its own `pr`, `human_review`
+has no automation at all, `claim_card` refuses pm cards, and the PR gate on
 both columns exempts them (AS-4). This documents a property the pipeline already
 has; nothing new enforces it.
 
@@ -246,7 +277,7 @@ CWD flaps — see *Worktree discipline* — so never rely on a relative one).
 **Refusals are answers, not errors to retry blindly.** `stale_version` means
 the card changed since you read it: the refusal carries the current card —
 re-apply your change to that version. `claim_refused` means another claim holds the card:
-do not spawn. `gate_refused` means a non-pm card is missing its PR link.
+do not spawn. `gate_refused` means a non-pm card is missing its own `pr`.
 
 ### Waking the orchestrator
 
@@ -325,7 +356,7 @@ limits.) Therefore, before arming the monitor, `list_cards(column:
   same pass.
 - Every `review` card with `agent.status == "working"` (a Tester died
   mid-run): the same `release_claim`. The review-entry rule (step 3 below)
-  then respawns the Tester, since the PR link is still in `links`.
+  then respawns the Tester, since the card's `pr` is still set.
 
 The sweep touches nothing else. `human_review` and `done` cards are past their
 agent work (no role runs on either); `needs_input` cards already carry
@@ -377,9 +408,10 @@ versioned write passes the `version` of the card as you last read it — from
    already the card's latest (`get_card(id, activity_limit: 1)`): it wakes on
    every board event, and an unconditional append would spam the log for as
    long as the card sits there.
-   a. `claim_card(id, name: <the agent's name, e.g. "Engineer-AS-7">)`
+   a. `claim_card(id, name: <the agent's name, e.g. "Engineer-AS-7">,
+      worktree: <the tree's absolute path, when you know it before spawning>)`
       **first**. If it is refused, someone holds the card: skip it, do not
-      spawn.
+      spawn. A later round's claim re-sets `worktree` when it runs elsewhere.
    b. Spawn the card's role agent via the Agent tool —
       `subagent_type: <card role>` (fall back to `general-purpose` carrying the
       role prompt from `.claude/agents/<role>.md` if the definition isn't
@@ -391,28 +423,30 @@ versioned write passes the `version` of the card as you last read it — from
       card's branch, or refuse to reuse one whose branch is another card's —
       see *Worktree discipline*.
 3. For every card matching **all three** of: `column == "review"`; **and**
-   (`agent == null` **or** `agent.status == "done"`); **and** an open-PR link
-   in `links` (`done` is the normal Engineer hand-off; `null` is a claim reset
-   by startup recovery):
-   a. `claim_card(id, name: "<card id>-test")` first; refused means skip, as
-      in 2a.
+   (`agent == null` **or** `agent.status == "done"`); **and** its own `pr` is
+   set (`done` is the normal Engineer hand-off; `null` is a claim reset by
+   startup recovery). Never pick a PR out of `links` — those are references:
+   a. `claim_card(id, name: "<card id>-test")` first — no `worktree`: the
+      Tester's tree is not the card's branch; refused means skip, as in 2a.
    b. Spawn the Tester via the Agent tool — `subagent_type: "tester"` (fall back
       to `general-purpose` carrying the role prompt from
       `.claude/agents/tester.md` if the definition isn't loaded in this session),
       `isolation: "worktree"`, `name: <card id>-test`, prompt = card id + title +
-      full spec + the PR URL. Same worktree allocation rule as 2b.
-   A `review` card *without* a PR link is not spawnable — it needs a human (or a
-   board fix), so treat it like `needs_input`. (The daemon's PR-link gate makes
+      full spec + `pr.url`. Same worktree allocation rule as 2b.
+   A `review` card *without* a `pr` is not spawnable — it needs a human (or a
+   board fix), so treat it like `needs_input`. (The daemon's PR gate makes
    that a pm card's state only.)
 4. On an Engineer's completion notification, parse its `STATUS:` report and
    write the board accordingly:
-   - `READY_FOR_REVIEW` → one `move_card(id, "review", patch: {links:
-     <existing + the PR>, agent: {...agent, status: "done", finished: <now>}},
-     activity: <the SUMMARY>, by: "engineer")`. Column and claim change in the
-     same write, so no interrupted turn can leave one without the other.
-     (Step 3 then spawns the Tester on this same pass.)
+   - `READY_FOR_REVIEW` → one `move_card(id, "review", patch: {pr: {url:
+     <PR>}, worktree: <WORKTREE>, agent: {...agent, status: "done", finished:
+     <now>}}, activity: <the SUMMARY>, by: "engineer")`. PR, tree, column and
+     claim change in the same write, so no interrupted turn can leave one
+     without the others. `links` is untouched: the card's own PR is not a
+     reference. (Step 3 then spawns the Tester on this same pass.)
    - `NEEDS_INPUT` → `move_card(id, "needs_input", patch: {question: {text:
-     QUESTION}, agent: null}, activity: …)`.
+     QUESTION}, agent: null, worktree: <WORKTREE, when the report has one>},
+     activity: …)`.
    - `FAILED` → the same single `move_card` as NEEDS_INPUT, with the failure as
      the question text (same claim reset).
 5. On a Tester's completion notification, parse its `VERDICT:` report and
@@ -654,7 +688,7 @@ spawn path then fires). Both routes converge on the same spawn.
 **What the orchestrator passes.** The Release Manager cannot read the board, so
 the orchestrator assembles the bundle from board state and puts it in the spawn
 prompt: every card in `done` without a `released` field **and without
-`role: "pm"`**, each as its id, title, PR link(s) from `links`, and the
+`role: "pm"`**, each as its id, title, its own PR (`pr.url`), and the
 Engineer's SUMMARY from the activity log. Two kinds of card are excluded by
 construction:
 
@@ -662,7 +696,7 @@ construction:
   `in_progress`, and every previous run's trigger was stamped and archived with
   its bundle (see post-release archival below).
 - A **scoping card** (`role: "pm"`) — it ships no code and carries no PR, so
-  handing it to the Release Manager would trip the missing-PR-link blocker on a
+  handing it to the Release Manager would trip the missing-PR blocker on a
   card that cannot satisfy it. It is stamped and archived with the release
   anyway (below), just never bundled.
 
