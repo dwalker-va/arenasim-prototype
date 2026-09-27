@@ -56,6 +56,8 @@ fn harness() -> App {
     ));
     app.init_asset::<Mesh>();
     app.init_asset::<StandardMaterial>();
+    // The swing consumer builds the Auto Shot arrow's ribbon sprite.
+    app.init_asset::<Image>();
     app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
     app
 }

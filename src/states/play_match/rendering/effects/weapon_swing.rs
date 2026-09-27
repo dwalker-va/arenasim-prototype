@@ -1,6 +1,7 @@
+use super::hunter_shots::{spawn_auto_shot_arrow, AutoShotArrowAssets};
+use super::school_impact::impact_origin;
 use super::wand_attack::{WAND_FLICK_DEG, WAND_FLICK_SECS};
 use crate::states::play_match::components::*;
-use bevy::color::LinearRgba;
 use bevy::prelude::*;
 
 // ==============================================================================
@@ -28,9 +29,6 @@ const SWING_FOLLOW_SECS: f32 = 0.25;
 const SWING_WINDUP_FRACTION: f32 = 0.30;
 const SWING_WINDUP_MIN_SECS: f32 = 0.15;
 const SWING_WINDUP_MAX_SECS: f32 = 0.60;
-/// Cosmetic arrow flight speed (yd/s) and hard despawn backstop.
-const COSMETIC_ARROW_SPEED: f32 = 45.0;
-const COSMETIC_ARROW_TTL: f32 = 1.5;
 
 // ------------------------------------------------------------------------
 // Named swing styles
@@ -879,6 +877,8 @@ pub fn consume_swing_signals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut arrow_assets: Local<Option<AutoShotArrowAssets>>,
     signals: Query<(Entity, &AutoAttackSwing)>,
     mut sockets: Query<&mut WeaponSocket>,
     positions: Query<&Transform, With<Combatant>>,
@@ -915,28 +915,20 @@ pub fn consume_swing_signals(
             }
             // Cosmetic arrow: bow-kind main hand only. This single gate keeps
             // caster Wand Shots (ranged, no bow) and any future non-bow ranged
-            // weapon from loosing arrows.
+            // weapon from loosing arrows. It homes on the victim from here on
+            // (`update_cosmetic_arrows`); this aim is only its first heading.
             if signal.kind == AutoAttackKind::Shot && socket.kind == WeaponKind::Bow {
                 if let (Ok(from_tf), Some(to)) = (positions.get(signal.attacker), target_pos) {
-                    let from = from_tf.translation + Vec3::Y * 1.1;
-                    let dir = (to - from).normalize_or_zero();
-                    commands.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.06, 0.06, 0.55))),
-                        MeshMaterial3d(materials.add(StandardMaterial {
-                            base_color: Color::srgb(0.85, 0.78, 0.55),
-                            emissive: LinearRgba::new(0.25, 0.2, 0.1, 1.0),
-                            unlit: false,
-                            ..default()
-                        })),
-                        Transform::from_translation(from)
-                            .with_rotation(Quat::from_rotation_arc(Vec3::Z, dir)),
-                        CosmeticArrow {
-                            to: to + Vec3::Y * 1.0,
-                            speed: COSMETIC_ARROW_SPEED,
-                            ttl: COSMETIC_ARROW_TTL,
-                        },
-                        PlayMatchEntity,
-                    ));
+                    let assets = arrow_assets.get_or_insert_with(|| {
+                        AutoShotArrowAssets::build(&mut meshes, &mut materials, &mut images)
+                    });
+                    spawn_auto_shot_arrow(
+                        &mut commands,
+                        assets,
+                        from_tf.translation + Vec3::Y * 1.1,
+                        signal.target,
+                        impact_origin(ImpactAnchor::Chest, to, false),
+                    );
                 }
             }
         }
@@ -1220,29 +1212,6 @@ pub fn animate_body_lean(
             body.translation.x = step_dir.x * step;
             body.translation.z = step_dir.z * step;
         }
-    }
-}
-
-/// Update (graphical-only): fly cosmetic arrows to their captured destination
-/// and despawn on arrival (or on the TTL backstop — the damage already landed,
-/// the arrow is pure theater).
-pub fn update_cosmetic_arrows(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut arrows: Query<(Entity, &mut CosmeticArrow, &mut Transform)>,
-) {
-    let dt = time.delta_secs();
-    for (entity, mut arrow, mut transform) in arrows.iter_mut() {
-        arrow.ttl -= dt;
-        let to_target = arrow.to - transform.translation;
-        let step = arrow.speed * dt;
-        if arrow.ttl <= 0.0 || to_target.length() <= step {
-            commands.entity(entity).despawn();
-            continue;
-        }
-        let dir = to_target.normalize_or_zero();
-        transform.translation += dir * step;
-        transform.rotation = Quat::from_rotation_arc(Vec3::Z, dir);
     }
 }
 

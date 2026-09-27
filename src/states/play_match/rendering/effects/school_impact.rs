@@ -4,6 +4,9 @@ use bevy::prelude::*;
 use bevy::render::mesh::ConeAnchor;
 use std::f32::consts::TAU;
 
+use super::hunter_shots::{
+    hunter_shot_for, particle_rotation, spawn_client_particle, ClientEmitter, EmitterAssets,
+};
 use super::spell_bolts::{build_arc_band, soft_dot_texture, star_flash_texture};
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::components::*;
@@ -16,9 +19,8 @@ use crate::states::play_match::components::*;
 // `InstantAbilityFired` drives the caster-side flourishes; both are caster-side.
 // A projectile's LANDING is a hook of its own, and until this module only the
 // bespoke bolts (`spell_bolts.rs`) and Death Coil reached anything through it.
-// Aimed Shot, Arcane Shot, Serpent Sting and Concussive Shot arrived in
-// silence, and Mind Blast landed as a hardcoded-purple sphere that nothing else
-// could reuse.
+// The Hunter shots arrived in silence, and Mind Blast landed as a
+// hardcoded-purple sphere that nothing else could reuse.
 //
 // This is the recolour tier the animation walk always intended: ONE burst —
 // a flash at the point of contact, an optional expanding band, a spray whose
@@ -31,20 +33,14 @@ use crate::states::play_match::components::*;
 // `SpellXSpellVisual -> SpellVisualEvent -> SpellVisualKit ->
 // SpellVisualKitModelAttach -> SpellVisualEffectName` and parsing the M2s:
 //
-// - **Aimed Shot, Arcane Shot and Concussive Shot share ONE visual** —
-//   `arcaneshot_missile.m2` in flight and `spells/magic_impact_chest.m2`
-//   (fdid 166525) at chest attachment 34 on landing. The three arrows are the
-//   same hit in the source, which is exactly the shared-tier premise. The model
-//   is pure particles (no mesh): a `cyanstarflash` star flash, a
-//   `shockwave10d` ring expanding 0.23 -> 1.37 over 500ms, `blue_glow2` sparks
-//   falling under 6.7 gravity, `toonsmoke16` puffs and an `aurarune7` rune —
-//   6 emitters, all additive, everything over by 1600ms, bounding radius 3.78.
-// - **Serpent Sting** lands with `spells/bestowdisease_impact_chest.m2`
-//   (165679): a 167ms burst of ~25 small `flare.blp` droplets at 3.3 yd/s
-//   that are ALPHA-blended, not additive, then a 3s lingering
-//   `clouds8x8fade` cloud in dark olive. The cloud is the DoT's job here —
-//   `affliction.rs` already drips green for the sting's whole duration — so the
-//   impact takes only the droplet burst.
+// - **The Hunter shots do not take their school's row.** Aimed, Arcane and
+//   Concussive Shot share ONE landing in the client
+//   (`spells/magic_impact_chest.m2`) whatever school our RON gives them, and
+//   Serpent Sting lingers in its own green cloud
+//   (`bestowdisease_impact_chest.m2`). Both play as transcribed emitter tables
+//   through [`ImpactStyle::emitters`], defined once in `hunter_shots.rs` and
+//   reached through the [`landing_style`] override. See
+//   docs/design/2026-09-26-hunter-shot-client-data.md.
 // - **Mind Blast is not a burst.** `spells/mindblast_head.m2` (166558) attaches
 //   to HEAD attachment 20 and smoulders: `flamelick_purple` licks rising at
 //   negative gravity for 200-1400ms, a few `lavalump2` embers, and
@@ -66,19 +62,17 @@ use crate::states::play_match::components::*;
 //
 // Two deliberate divergences from the source:
 //
-//   1. **Colour comes from `SpellSchool`, not the models.** The arrows' shared
-//      impact is violet-with-green in the source regardless of school; here
-//      Arcane Shot is Arcane pink and the two Physical arrows are hueless, on
-//      the precedent Frost Nova and Shadow Bolt set. Physical is the one
-//      school that cannot use its own `color_rgb8`: that tan (199,156,110) is
+//   1. **Colour comes from `SpellSchool`, not the models** — for every row
+//      here; the client-faithful overrides above are the exception. Physical
+//      is the one school that cannot use its own `color_rgb8`: that tan (199,156,110) is
 //      within a few percent of the arena floor (0.79,0.66,0.46), so an additive
 //      tan burst would lift the sand by almost nothing and read as a plain
 //      brightening of the capsule. A Physical hit is bone-white splinters and
 //      a hueless flash instead — the struck-metal vocabulary Mortal Strike
 //      already uses, with the school's identity carried by MATERIAL and
 //      MOTION, not hue.
-//   2. **Everything is compressed.** The arrows recast on the GCD; a literal
-//      1.6s magic burst would still be up when the next landed.
+//   2. **Everything is compressed.** A literal 1.6s magic burst on a spell
+//      that recasts on the GCD would still be up when the next landed.
 
 /// Height of the chest anchor above a combatant's transform.
 ///
@@ -177,8 +171,10 @@ pub struct ImpactStyle {
     pub color: Color,
     /// Multiplier from the school colour to the additive emissive.
     pub emissive: f32,
-    pub flash_radius: f32,
-    pub flash_secs: f32,
+    /// `(radius, secs)` of the star flash at the point of contact. Every
+    /// school row has one; a client-faithful landing that the source draws
+    /// without one (the Hunter shots) has `None`.
+    pub flash: Option<(f32, f32)>,
     /// `(radius, secs)` of an expanding band — magic language, so Physical
     /// and Nature have none.
     pub ring: Option<(f32, f32)>,
@@ -186,12 +182,16 @@ pub struct ImpactStyle {
     /// `(radius, secs, alpha)` of a dark blended mass behind the flash.
     pub blot: Option<(f32, f32, f32)>,
     pub smoulder: Option<Smoulder>,
+    /// Transcribed client particle emitters, played as they are keyed in the
+    /// source M2 (`hunter_shots.rs`). Empty for every school row. Not scaled
+    /// by the hit's magnitude or a crit — the client does neither.
+    pub emitters: &'static [ClientEmitter],
 }
 
 impl ImpactStyle {
     /// How long the whole landing plays.
     pub fn life(&self) -> f32 {
-        let mut life = self.flash_secs;
+        let mut life = self.flash.map(|(_, secs)| secs).unwrap_or(0.0);
         if let Some((_, secs)) = self.ring {
             life = life.max(secs);
         }
@@ -204,6 +204,9 @@ impl ImpactStyle {
         if let Some(s) = self.smoulder {
             life = life.max(s.secs + s.life);
         }
+        for e in self.emitters {
+            life = life.max(e.end() + e.life);
+        }
         life
     }
 }
@@ -215,8 +218,7 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
         SpellSchool::Physical => ImpactStyle {
             color: PHYSICAL_COLOR,
             emissive: 1.6,
-            flash_radius: 0.50,
-            flash_secs: 0.12,
+            flash: Some((0.50, 0.12)),
             ring: None,
             spray: Some(Spray {
                 count: 12,
@@ -232,12 +234,12 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
             }),
             blot: None,
             smoulder: None,
+            emitters: &[],
         },
         SpellSchool::Arcane => ImpactStyle {
             color,
             emissive: 2.6,
-            flash_radius: 0.70,
-            flash_secs: 0.14,
+            flash: Some((0.70, 0.14)),
             ring: Some((1.15, 0.32)),
             spray: Some(Spray {
                 count: 10,
@@ -253,12 +255,12 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
             }),
             blot: None,
             smoulder: None,
+            emitters: &[],
         },
         SpellSchool::Nature => ImpactStyle {
             color,
             emissive: 2.0,
-            flash_radius: 0.48,
-            flash_secs: 0.12,
+            flash: Some((0.48, 0.12)),
             ring: None,
             spray: Some(Spray {
                 count: 22,
@@ -274,12 +276,12 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
             }),
             blot: None,
             smoulder: None,
+            emitters: &[],
         },
         SpellSchool::Shadow => ImpactStyle {
             color,
             emissive: 3.2,
-            flash_radius: 0.55,
-            flash_secs: 0.16,
+            flash: Some((0.55, 0.16)),
             ring: None,
             spray: None,
             blot: Some((0.42, 0.30, 0.85)),
@@ -290,12 +292,12 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
                 life: 0.70,
                 radius: 0.13,
             }),
+            emitters: &[],
         },
         SpellSchool::Frost => ImpactStyle {
             color,
             emissive: 2.4,
-            flash_radius: 0.65,
-            flash_secs: 0.14,
+            flash: Some((0.65, 0.14)),
             ring: Some((1.05, 0.32)),
             spray: Some(Spray {
                 count: 10,
@@ -311,12 +313,12 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
             }),
             blot: None,
             smoulder: None,
+            emitters: &[],
         },
         SpellSchool::Fire => ImpactStyle {
             color,
             emissive: 2.8,
-            flash_radius: 0.70,
-            flash_secs: 0.14,
+            flash: Some((0.70, 0.14)),
             ring: None,
             spray: Some(Spray {
                 count: 14,
@@ -332,12 +334,12 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
             }),
             blot: None,
             smoulder: None,
+            emitters: &[],
         },
         SpellSchool::Holy => ImpactStyle {
             color,
             emissive: 2.4,
-            flash_radius: 0.70,
-            flash_secs: 0.16,
+            flash: Some((0.70, 0.16)),
             ring: Some((1.10, 0.36)),
             spray: Some(Spray {
                 count: 8,
@@ -353,16 +355,17 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
             }),
             blot: None,
             smoulder: None,
+            emitters: &[],
         },
         SpellSchool::None => ImpactStyle {
             color,
             emissive: 1.4,
-            flash_radius: 0.45,
-            flash_secs: 0.12,
+            flash: Some((0.45, 0.12)),
             ring: None,
             spray: None,
             blot: None,
             smoulder: None,
+            emitters: &[],
         },
     }
 }
@@ -370,20 +373,27 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
 /// The row a landing actually plays: its school's, unless the ability
 /// overrides it.
 ///
-/// Mana Burn is the one override so far. It is Shadow, but the client gives
+/// The Hunter shots override by the client's own grouping, not by school:
+/// Aimed, Arcane and Concussive Shot share ONE landing (`magic_impact_chest`)
+/// whatever their RON schools say, and Serpent Sting has its own lingering
+/// cloud. Both are defined once, in `hunter_shots.rs`.
+///
+/// Mana Burn is the other override. It is Shadow, but the client gives
 /// it its own model (`manaburn_chest.m2`, chest attachment 34) where Mind
 /// Blast smoulders on the head — so it takes the Shadow colour and none of
 /// Mind Blast's shape: a chest flash and a fan of sparks pulled UPWARD out of
-/// the victim, the mana leaving. Brief, like the arrows. (The model itself
+/// the victim, the mana leaving. Brief. (The model itself
 /// could not be fetched — the CASC endpoint refuses that file — so the
 /// shape is designed from the attachment and the name, not the emitters.)
 pub fn landing_style(ability: AbilityType, school: SpellSchool) -> ImpactStyle {
+    if let Some(kind) = hunter_shot_for(ability) {
+        return kind.landing_style();
+    }
     match ability {
         AbilityType::ManaBurn => ImpactStyle {
             color: school.color(),
             emissive: 3.0,
-            flash_radius: 0.55,
-            flash_secs: 0.14,
+            flash: Some((0.55, 0.14)),
             ring: None,
             spray: Some(Spray {
                 count: 14,
@@ -399,6 +409,7 @@ pub fn landing_style(ability: AbilityType, school: SpellSchool) -> ImpactStyle {
             }),
             blot: Some((0.34, 0.22, 0.75)),
             smoulder: None,
+            emitters: &[],
         },
         _ => impact_style(school),
     }
@@ -502,6 +513,8 @@ pub struct ImpactAssets {
     chip: Handle<Mesh>,
     drop: Handle<Mesh>,
     blot: Handle<Mesh>,
+    /// Sprites and ramp palettes for the client-emitter landings.
+    emitters: EmitterAssets,
 }
 
 impl ImpactAssets {
@@ -526,6 +539,7 @@ impl ImpactAssets {
             ),
             drop: meshes.add(Sphere::new(1.0)),
             blot: meshes.add(Sphere::new(1.0)),
+            emitters: EmitterAssets::build(meshes, images),
         }
     }
 
@@ -606,20 +620,22 @@ pub fn spawn_school_impacts(
             );
         }
 
-        parts.push(
-            commands
-                .spawn((
-                    ImpactSprite {
-                        role: ImpactRole::Flash,
-                        radius: style.flash_radius * size,
-                    },
-                    Mesh3d(assets.quad.clone()),
-                    MeshMaterial3d(glow(&mut materials, Some(assets.star.clone()))),
-                    Transform::default(),
-                    NotShadowCaster,
-                ))
-                .id(),
-        );
+        if let Some((radius, _)) = style.flash {
+            parts.push(
+                commands
+                    .spawn((
+                        ImpactSprite {
+                            role: ImpactRole::Flash,
+                            radius: radius * size,
+                        },
+                        Mesh3d(assets.quad.clone()),
+                        MeshMaterial3d(glow(&mut materials, Some(assets.star.clone()))),
+                        Transform::default(),
+                        NotShadowCaster,
+                    ))
+                    .id(),
+            );
+        }
 
         if let Some((radius, _)) = style.ring {
             parts.push(
@@ -706,6 +722,11 @@ pub fn spawn_school_impacts(
         let smoulder_material = style
             .smoulder
             .map(|_| mote_material(&mut materials, SprayKind::Spark, true, style.color));
+        let palettes = style
+            .emitters
+            .iter()
+            .map(|e| assets.emitters.palette(&mut materials, e))
+            .collect();
 
         commands.entity(entity).insert((
             Transform::from_translation(at).with_rotation(impact_rotation(impact.from)),
@@ -715,6 +736,8 @@ pub fn spawn_school_impacts(
                 smoulder_material,
                 emit_carry: 0.0,
                 emitted: 0,
+                emitter_carry: [0.0; 4],
+                palettes,
             },
         ));
         commands.entity(entity).add_children(&parts);
@@ -735,12 +758,15 @@ pub fn animate_school_impacts(
     mut commands: Commands,
     time: Res<Time>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    // `Option<&Children>`: a pure-emitter landing (the Hunter shots) spawns
+    // with NO static pieces — its first child arrives with its first particle
+    // — and a plain `&Children` query would skip it forever.
     mut impacts: Query<(
         Entity,
         &mut SchoolImpact,
         &mut ImpactRig,
         &mut Transform,
-        &Children,
+        Option<&Children>,
     )>,
     // Read-only victim lookup, provably disjoint from the mutable part queries
     // below or Bevy rejects the set as B0001.
@@ -819,29 +845,60 @@ pub fn animate_school_impacts(
             }
         }
 
-        for child in children.iter() {
+        // Client emitters play inside their own keyed windows. Every particle
+        // is a child of the rig, so it rides the victim and dies with it.
+        for (ei, emitter) in style
+            .emitters
+            .iter()
+            .enumerate()
+            .take(rig.emitter_carry.len())
+        {
+            if age < emitter.start() || age >= emitter.end() {
+                continue;
+            }
+            rig.emitter_carry[ei] += emitter.rate * dt;
+            while rig.emitter_carry[ei] >= 1.0 {
+                rig.emitter_carry[ei] -= 1.0;
+                let i = rig.emitted;
+                rig.emitted = rig.emitted.wrapping_add(1);
+                let seed = entity.index().wrapping_add(i.wrapping_mul(0x85EB_CA6B));
+                let particle = spawn_client_particle(
+                    &mut commands,
+                    &rig.mote_mesh,
+                    emitter,
+                    &rig.palettes[ei],
+                    Vec3::ZERO,
+                    seed,
+                    true,
+                );
+                commands.entity(entity).add_child(particle);
+            }
+        }
+
+        for child in children.into_iter().flat_map(|c| c.iter()) {
             if let Ok((sprite, mut part, material)) = sprites.get_mut(child) {
                 let (span, scale, alpha) = match sprite.role {
                     ImpactRole::Flash => {
-                        let k = (age / style.flash_secs).clamp(0.0, 1.0);
+                        let flash_secs = style.flash.map(|(_, s)| s).unwrap_or(0.0);
+                        let k = (age / flash_secs.max(1e-4)).clamp(0.0, 1.0);
                         // Snaps open, then collapses — an expanding flash covers
                         // the debris exactly when it needs to be seen.
                         let open = (k / 0.25).clamp(0.0, 1.0);
                         (
-                            style.flash_secs,
+                            flash_secs,
                             sprite.radius * 2.0 * (0.4 + 0.6 * open) * (1.0 - 0.5 * k),
                             1.0 - k,
                         )
                     }
                     ImpactRole::Ring => {
-                        let secs = style.ring.map(|(_, s)| s).unwrap_or(style.flash_secs);
+                        let secs = style.ring.map(|(_, s)| s).unwrap_or(0.0).max(1e-4);
                         let k = (age / secs).clamp(0.0, 1.0);
                         // Fast out of the gate then easing off, as a shockwave
                         // loses speed.
                         (secs, sprite.radius * k.sqrt(), 1.0 - k)
                     }
                     ImpactRole::Blot => {
-                        let (_, secs, alpha) = style.blot.unwrap_or((1.0, style.flash_secs, 1.0));
+                        let (_, secs, alpha) = style.blot.unwrap_or((1.0, 1e-4, 1.0));
                         let k = (age / secs).clamp(0.0, 1.0);
                         (
                             secs,
@@ -916,6 +973,7 @@ pub fn billboard_school_impacts(
             Without<SchoolImpact>,
             Without<ImpactSprite>,
             Without<ImpactMote>,
+            Without<ClientParticle>,
         ),
     >,
     rigs: Query<(&Transform, &Children), With<SchoolImpact>>,
@@ -933,6 +991,16 @@ pub fn billboard_school_impacts(
             Without<SchoolImpact>,
             Without<Camera3d>,
             Without<ImpactSprite>,
+            Without<ClientParticle>,
+        ),
+    >,
+    mut particles: Query<
+        (&ClientParticle, &mut Transform),
+        (
+            Without<SchoolImpact>,
+            Without<Camera3d>,
+            Without<ImpactSprite>,
+            Without<ImpactMote>,
         ),
     >,
 ) {
@@ -953,6 +1021,9 @@ pub fn billboard_school_impacts(
                 if mote.kind == SprayKind::Spark {
                     part.rotation = facing;
                 }
+            }
+            if let Ok((particle, mut part)) = particles.get_mut(child) {
+                part.rotation = particle_rotation(particle, rig.rotation, cam.rotation);
             }
         }
     }

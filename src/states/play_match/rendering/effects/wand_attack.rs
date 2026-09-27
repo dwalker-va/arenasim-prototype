@@ -241,10 +241,10 @@ pub fn wand_muzzle(
 /// Update (graphical-only): fly each bolt toward its snapshotted target point,
 /// and despawn it on arrival.
 ///
-/// Same shape as `update_cosmetic_arrows`, and deliberately so: both are
-/// unattached cosmetic projectiles chasing a fixed point with a TTL backstop.
-/// The bolt despawns on ARRIVAL rather than TTLing out in the victim's chest,
-/// which is the gap the Hunter's arrow still has.
+/// An unattached cosmetic projectile chasing a fixed point with a TTL
+/// backstop. The bolt despawns on ARRIVAL rather than TTLing out in the
+/// victim's chest. (The Auto Shot arrow, `update_cosmetic_arrows`, goes one
+/// further and homes on its victim.)
 pub fn update_wand_missiles(
     mut commands: Commands,
     time: Res<Time>,

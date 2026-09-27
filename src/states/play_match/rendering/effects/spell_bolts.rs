@@ -340,7 +340,7 @@ pub(crate) fn soft_dot_texture() -> Image {
 /// cores however tightly they are packed — which is exactly how the first build
 /// shipped, as a dotted line. Holding alpha flat along the length lets adjacent
 /// stretched segments merge into one continuous ribbon.
-fn soft_band_texture() -> Image {
+pub(crate) fn soft_band_texture() -> Image {
     use bevy::image::Image;
     use bevy::render::render_asset::RenderAssetUsages;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
