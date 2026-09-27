@@ -33,6 +33,60 @@ const LOW_HP_GLOW_PULSE: f32 = 0.7;
 const LOW_HP_PULSE_SPEED: f32 = 2.0;
 
 // ==============================================================================
+// HUD Anchor Interpolation
+// ==============================================================================
+
+/// Record each combatant's translation at the start of every sim tick, so the
+/// HUD can interpolate between the last two ticks (`hud_anchor_translation`).
+///
+/// Runs in `FixedFirst` — once per tick, before the tick's movement — so after
+/// the fixed loop the component holds the position one tick behind the
+/// `Transform`. Graphical-only; draws no RNG and writes nothing the sim reads.
+pub fn record_previous_sim_translation(
+    mut commands: Commands,
+    mut combatants: Query<
+        (Entity, &Transform, Option<&mut PreviousSimTranslation>),
+        With<Combatant>,
+    >,
+) {
+    for (entity, transform, previous) in combatants.iter_mut() {
+        match previous {
+            Some(mut previous) => previous.0 = transform.translation,
+            None => {
+                commands
+                    .entity(entity)
+                    .insert(PreviousSimTranslation(transform.translation));
+            }
+        }
+    }
+}
+
+/// The world position the health bar block (bar, cast/channel bar, status
+/// labels) hangs from: the combatant's translation interpolated between its
+/// last two sim ticks by how far real time has run past the latest one.
+///
+/// The sim moves units at 60Hz and the display renders faster, while the
+/// camera follows smoothly every frame. Anchored to the raw `Transform`, a
+/// walking unit's label jumped a full tick's travel on frames where a tick
+/// landed and slid backwards under the camera on frames where none did —
+/// measured at ~120fps on a stealthed Rogue's approach: +2.19px, -0.14px,
+/// +2.19px, -0.14px. That frame-rate back-and-forth is what read as fuzzy
+/// text. Interpolated, the anchor advances a proportional share every frame.
+///
+/// Rounding to pixels would not help: epaint already snaps text to physical
+/// pixels (`TessellationOptions::round_text_to_pixels`).
+pub fn hud_anchor_translation(
+    current: Vec3,
+    previous: Option<&PreviousSimTranslation>,
+    overstep_fraction: f32,
+) -> Vec3 {
+    match previous {
+        Some(previous) => previous.0.lerp(current, overstep_fraction.clamp(0.0, 1.0)),
+        None => current,
+    }
+}
+
+// ==============================================================================
 // Time Controls
 // ==============================================================================
 
@@ -259,12 +313,14 @@ pub fn render_health_bars(
     combatants: Query<(
         &Combatant,
         &Transform,
+        Option<&PreviousSimTranslation>,
         Option<&CastingState>,
         Option<&ChannelingState>,
         Option<&ActiveAuras>,
     )>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     time: Res<Time<Real>>,
+    fixed_time: Res<Time<Fixed>>,
     camera_controller: Res<CameraController>,
 ) {
     // Use try_ctx_mut to gracefully handle window close
@@ -285,11 +341,19 @@ pub fn render_health_bars(
     let pulse_phase = time.elapsed_secs() * LOW_HP_PULSE_SPEED * std::f32::consts::TAU;
     let pulse_intensity = LOW_HP_GLOW_BASE + LOW_HP_GLOW_PULSE * (0.5 + 0.5 * pulse_phase.sin());
 
+    let overstep_fraction = fixed_time.overstep_fraction();
+
     egui::Area::new(egui::Id::new("health_bars"))
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
-            for (combatant, transform, casting_state, channeling_state, active_auras) in
-                combatants.iter()
+            for (
+                combatant,
+                transform,
+                previous_translation,
+                casting_state,
+                channeling_state,
+                active_auras,
+            ) in combatants.iter()
             {
                 if !combatant.is_alive() {
                     continue;
@@ -298,7 +362,11 @@ pub fn render_health_bars(
                 // Project 3D position to 2D screen space
                 // Offset high enough to clear aura icons below the bars
                 let health_bar_offset = Vec3::new(0.0, 3.5, 0.0); // Above head
-                let world_pos = transform.translation + health_bar_offset;
+                let world_pos = hud_anchor_translation(
+                    transform.translation,
+                    previous_translation,
+                    overstep_fraction,
+                ) + health_bar_offset;
 
                 if let Ok(screen_pos) = camera.world_to_viewport(camera_transform, world_pos) {
                     let health_percent = combatant.current_health / combatant.max_health;

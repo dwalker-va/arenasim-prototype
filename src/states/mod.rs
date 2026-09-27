@@ -1070,6 +1070,15 @@ impl Plugin for StatesPlugin {
                 .after(play_match::watch_kill_target_calls)
                 .run_if(in_state(GameState::PlayMatch)),
         )
+        // The health bar block's anchor is interpolated between the last two
+        // sim ticks; this records the earlier end. `FixedFirst` runs once per
+        // tick BEFORE that tick moves anyone, so it cannot see a half-moved
+        // world and needs no phase constraint. Writes only a component the
+        // sim never reads.
+        .add_systems(
+            FixedFirst,
+            play_match::record_previous_sim_translation.run_if(in_state(GameState::PlayMatch)),
+        )
         // UI rendering systems
         .add_systems(
             Update,

@@ -27,6 +27,13 @@ pub struct FloatingCombatText {
     pub is_crit: bool,
 }
 
+/// A combatant's translation at the START of the latest sim tick — the other
+/// end of the segment its HUD anchor is interpolated along
+/// (`rendering::hud::hud_anchor_translation`). Graphical-only: recorded in
+/// `FixedFirst` by `record_previous_sim_translation`, never read by the sim.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct PreviousSimTranslation(pub Vec3);
+
 /// Where on the victim a shared impact plays.
 ///
 /// The Classic client attaches the Hunter shots' impact to chest attachment 34 and
