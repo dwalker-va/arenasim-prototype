@@ -19,8 +19,10 @@
 //!   and cast event rows only — zero `StartEvent 6` impact rows, so no impact
 //!   model, no impact sound, no commanded victim anim (§2.5). The victim's
 //!   reaction is the generic flinch and nothing else; a bespoke wand impact
-//!   burst would be un-Classic. `hit_reaction.rs` owns that flinch, and fires
-//!   it for a wand hit exactly as for any other auto.
+//!   burst would be un-Classic. `hit_reaction.rs` owns that flinch. It plays
+//!   when the bolt ARRIVES, not at the damage: the bolt leaves a
+//!   `RangedHitArrival` the frame it lands, exactly as the Auto Shot arrow
+//!   does, and the flinch is released off that.
 //! * **A rod held raised, flicked per shot.** Precast kit 372 loops
 //!   `HoldThrown` (anim 111) between shots and each cast kit plays
 //!   `AttackThrown` (anim 107) — the character holds the wand up, thrown-weapon
@@ -84,7 +86,8 @@ const _: () = {
 };
 
 /// Hard despawn backstop, in seconds. A missile normally despawns on arrival;
-/// this only catches a bolt whose victim despawned mid-flight.
+/// this only catches a bolt that somehow never gets there. It still releases
+/// its hit's reaction when it expires, so the backstop can never swallow one.
 const WAND_MISSILE_TTL: f32 = 2.0;
 
 /// How far in front of the caster's chest a bolt is launched when the caster
@@ -129,8 +132,9 @@ pub fn wand_school(class: CharacterClass) -> SpellSchool {
 // --- Runtime components (graphical-only) ------------------------------------
 
 /// One wand bolt in flight. Purely cosmetic: the sim resolved this hit before
-/// the bolt was spawned, so the bolt's arrival carries no damage and its
-/// despawn triggers nothing.
+/// the bolt was spawned, so the bolt's arrival carries no damage. What it
+/// does carry is the hit's REACTION: its retirement leaves the
+/// `RangedHitArrival` that releases the victim's flinch.
 #[derive(Component)]
 pub struct WandMissile {
     /// Where the bolt is flying, snapshotted at the shot — the sim already
@@ -138,16 +142,23 @@ pub struct WandMissile {
     /// moved on.
     to: Vec3,
     ttl: f32,
+    /// The victim whose flinch waits on this bolt.
+    target: Entity,
+    /// Whether the landed shot crit, carried to the arrival so the held
+    /// flinch plays the crit's deeper dip.
+    is_crit: bool,
 }
 
 // --- Spawn ------------------------------------------------------------------
 
-/// Launch one cosmetic wand bolt from `muzzle` toward `to`.
+/// Launch one cosmetic wand bolt from `muzzle` toward `to`, carrying the
+/// landed hit on `target` whose flinch it will release on arrival.
 ///
 /// Called from `hit_reaction::consume_hit_reactions` at the landed shot, the
 /// way `instant_ability.rs` calls into `mortal_strike.rs` — one consumer of
 /// the sim's landed-attack marker, routing to the effect the swing's kind
 /// selects.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_wand_missile(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -155,6 +166,8 @@ pub fn spawn_wand_missile(
     school: SpellSchool,
     muzzle: Vec3,
     to: Vec3,
+    target: Entity,
+    is_crit: bool,
 ) {
     let dir = (to - muzzle).normalize_or_zero();
     let color = school.color();
@@ -199,6 +212,8 @@ pub fn spawn_wand_missile(
             WandMissile {
                 to,
                 ttl: WAND_MISSILE_TTL,
+                target,
+                is_crit,
             },
             Mesh3d(meshes.add(Sphere::new(WAND_CORE_RADIUS))),
             MeshMaterial3d(core_material),
@@ -239,12 +254,17 @@ pub fn wand_muzzle(
 // --- Update / cleanup -------------------------------------------------------
 
 /// Update (graphical-only): fly each bolt toward its snapshotted target point,
-/// and despawn it on arrival.
+/// and retire it on arrival — leaving the [`RangedHitArrival`] that releases
+/// the victim's flinch, so the wand's reaction lands with its bolt rather than
+/// a whole flight ahead of it.
 ///
 /// An unattached cosmetic projectile chasing a fixed point with a TTL
 /// backstop. The bolt despawns on ARRIVAL rather than TTLing out in the
 /// victim's chest. (The Auto Shot arrow, `update_cosmetic_arrows`, goes one
-/// further and homes on its victim.)
+/// further and homes on its victim.) Every retirement leaves the marker — the
+/// TTL path too — and a victim that despawned mid-flight still gets one,
+/// which its consumer drops for want of a body; so each landed wand hit is
+/// released exactly once whatever becomes of its bolt.
 pub fn update_wand_missiles(
     mut commands: Commands,
     time: Res<Time>,
@@ -256,6 +276,16 @@ pub fn update_wand_missiles(
         let to_target = missile.to - transform.translation;
         let step = WAND_MISSILE_SPEED * dt;
         if missile.ttl <= 0.0 || to_target.length() <= step {
+            commands.spawn((
+                RangedHitArrival {
+                    target: missile.target,
+                    kind: AutoAttackKind::Wand,
+                    is_crit: missile.is_crit,
+                    // Back along the bolt's own heading: the side it struck.
+                    from: -(transform.rotation * Vec3::Z),
+                },
+                PlayMatchEntity,
+            ));
             commands.entity(entity).despawn();
             continue;
         }

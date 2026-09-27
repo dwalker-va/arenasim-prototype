@@ -1,6 +1,7 @@
-//! The victim hit reaction observed in a REAL match: Hunter v Warrior, booted
-//! into `PlayMatch` through the real `StatesPlugin` schedule the way `--replay`
-//! does, with every graphical system registered where the client registers it.
+//! The victim hit reaction observed in a REAL match — Hunter v Warrior, and a
+//! wand-user's match, Priest v Warrior — booted into `PlayMatch` through the
+//! real `StatesPlugin` schedule the way `--replay` does, with every graphical
+//! system registered where the client registers it.
 //!
 //! ## Why this exists
 //!
@@ -18,6 +19,10 @@
 //! child's local Y after every gait writer has run — on victims that are
 //! moving when struck, and it covers the whole chain in between: the Shot's
 //! swing, its arrow's arrival marker, and the flinch that arrival starts.
+//!
+//! The wand match pins the same chain for a wand bolt: every wand hit's
+//! flinch starts on the frame its bolt ARRIVES, never at the damage — the
+//! flinch used to lead its own bolt by up to a second at wand range.
 //!
 //! Runs with no window or GPU (same shape as `tests/replay_boot_icons.rs`).
 //! Visual-only systems never touch the sim, so the match is the seeded one.
@@ -38,14 +43,14 @@ use arenasim::states::play_match::systems::CombatSystemPhase;
 use arenasim::states::play_match::{
     cleanup_hit_flinch, consume_hit_reactions, consume_ranged_hit_arrivals, hit_flinch_weight,
     update_cosmetic_arrows, update_fear_run, update_sheep_hop, update_walk_animation,
-    AbilityConfigPlugin, GameRng, MapConfigPlugin, MovementConfigPlugin,
+    update_wand_missiles, AbilityConfigPlugin, GameRng, MapConfigPlugin, MovementConfigPlugin,
 };
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::{CharacterClass, HeadlessMatchConfig};
 
 /// One rendered frame at 60 fps — one sim tick, the client's own cadence.
 const FRAME: Duration = Duration::from_micros(16_667);
-/// Long enough for the seeded match below to reach its end.
+/// Long enough for the seeded matches below to reach their end.
 const MAX_FRAMES: usize = 60 * 90;
 /// A victim that moved further than this in the frame it was struck was
 /// walking, so its gait was bobbing under the flinch.
@@ -57,8 +62,9 @@ struct Seen {
     frame: usize,
     /// `(frame, attacker, target, kind)` per landed auto.
     swings: Vec<(usize, Entity, Entity, AutoAttackKind)>,
-    /// `(frame, target)` per arrow arrival, read before its consumer.
-    arrivals: Vec<(usize, Entity)>,
+    /// `(frame, target, kind)` per projectile arrival, read before its
+    /// consumer.
+    arrivals: Vec<(usize, Entity, AutoAttackKind)>,
     /// Per frame, per victim with a live flinch, as drawn.
     samples: Vec<Sample>,
     last_xz: Vec<(Entity, Vec2)>,
@@ -80,10 +86,8 @@ struct Sample {
     moved: f32,
 }
 
-fn boot() -> App {
-    let cfg: HeadlessMatchConfig =
-        serde_json::from_str(r#"{"team1":["Hunter"],"team2":["Warrior"],"random_seed":7}"#)
-            .unwrap();
+fn boot(cfg: &str) -> App {
+    let cfg: HeadlessMatchConfig = serde_json::from_str(cfg).unwrap();
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_plugins(AssetPlugin::default())
@@ -132,6 +136,7 @@ fn boot() -> App {
         Update,
         observe_arrivals
             .after(update_cosmetic_arrows)
+            .after(update_wand_missiles)
             .before(consume_ranged_hit_arrivals),
     )
     // After every gait writer, before the expired flinch is removed: the body
@@ -158,7 +163,7 @@ fn observe_swings(mut seen: ResMut<Seen>, swings: Query<&AutoAttackSwing>) {
 fn observe_arrivals(mut seen: ResMut<Seen>, arrivals: Query<&RangedHitArrival>) {
     let frame = seen.frame;
     for a in arrivals.iter() {
-        seen.arrivals.push((frame, a.target));
+        seen.arrivals.push((frame, a.target, a.kind));
     }
 }
 
@@ -214,23 +219,32 @@ struct Match {
     warrior: Entity,
 }
 
-fn play() -> Match {
-    let mut app = boot();
+/// Play the seeded match `cfg` to its end and hand back what was observed.
+fn play_seen(cfg: &str) -> Seen {
+    let mut app = boot(cfg);
     for _ in 0..MAX_FRAMES {
         app.update();
         if app.world().resource::<State<GameState>>().get() != &GameState::PlayMatch {
             break;
         }
     }
-    let seen = std::mem::take(&mut *app.world_mut().resource_mut::<Seen>());
-    let find = |class| {
-        seen.players
-            .iter()
-            .find(|(_, c)| *c == class)
-            .map(|(e, _)| *e)
-            .expect("both players were observed")
-    };
-    let (hunter, warrior) = (find(CharacterClass::Hunter), find(CharacterClass::Warrior));
+    std::mem::take(&mut *app.world_mut().resource_mut::<Seen>())
+}
+
+fn player(seen: &Seen, class: CharacterClass) -> Entity {
+    seen.players
+        .iter()
+        .find(|(_, c)| *c == class)
+        .map(|(e, _)| *e)
+        .unwrap_or_else(|| panic!("no {class:?} was observed"))
+}
+
+fn play() -> Match {
+    let seen = play_seen(r#"{"team1":["Hunter"],"team2":["Warrior"],"random_seed":7}"#);
+    let (hunter, warrior) = (
+        player(&seen, CharacterClass::Hunter),
+        player(&seen, CharacterClass::Warrior),
+    );
     Match {
         seen,
         hunter,
@@ -306,7 +320,11 @@ fn the_flinch_reads_on_moving_victims_in_a_real_match() {
         "vacuous: only {} Auto Shots landed in the seeded match",
         shots.len()
     );
-    let arrivals: Vec<_> = seen.arrivals.iter().filter(|a| a.1 == m.warrior).collect();
+    let arrivals: Vec<_> = seen
+        .arrivals
+        .iter()
+        .filter(|a| a.1 == m.warrior && a.2 == AutoAttackKind::Shot)
+        .collect();
     assert_eq!(
         arrivals.len(),
         shots.len(),
@@ -377,5 +395,101 @@ fn the_flinch_reads_on_moving_victims_in_a_real_match() {
     assert!(
         moving_melee_on_warrior >= 3,
         "vacuous: only {moving_melee_on_warrior} pet blows on a moving Warrior"
+    );
+}
+
+/// The wand-user's match: every wand hit's flinch starts on the frame its bolt
+/// arrives — never at the damage, which is the swing's frame and up to a
+/// second of flight earlier at wand range.
+///
+/// Priest v Warrior, because a Warrior takes no other auto-attack damage from
+/// a lone Priest: every flinch that starts on it is a wand hit's, so "no
+/// flinch before its bolt" can be asserted over EVERY flinch it shows, not
+/// only the ones a probe chose to look at.
+#[test]
+fn a_wand_hit_flinches_when_its_bolt_arrives_in_a_real_match() {
+    let seen = play_seen(r#"{"team1":["Priest"],"team2":["Warrior"],"random_seed":1}"#);
+    let (priest, warrior) = (
+        player(&seen, CharacterClass::Priest),
+        player(&seen, CharacterClass::Warrior),
+    );
+
+    let wands: Vec<_> = seen
+        .swings
+        .iter()
+        .filter(|s| s.1 == priest && s.3 == AutoAttackKind::Wand)
+        .collect();
+    assert!(
+        wands.len() >= 5,
+        "vacuous: only {} wand hits landed in the seeded match",
+        wands.len()
+    );
+    assert!(
+        wands.iter().all(|s| s.2 == warrior),
+        "a wand hit landed on something other than the Warrior"
+    );
+    let arrivals: Vec<_> = seen
+        .arrivals
+        .iter()
+        .filter(|a| a.2 == AutoAttackKind::Wand)
+        .collect();
+    assert_eq!(
+        arrivals.len(),
+        wands.len(),
+        "every landed wand hit must reach its victim exactly once"
+    );
+
+    // Each bolt arrives after its hit landed, and its arrival starts the
+    // Warrior's flinch that very frame.
+    let mut lags = Vec::new();
+    for (hit, arrival) in wands.iter().zip(&arrivals) {
+        assert_eq!(arrival.1, warrior);
+        assert!(
+            arrival.0 > hit.0,
+            "a bolt arrives after it is thrown, not with the damage"
+        );
+        lags.push(arrival.0 - hit.0);
+        let window = window_from(&seen, warrior, arrival.0);
+        assert!(
+            !window.is_empty() && window[0].elapsed <= FRAME.as_secs_f32() + 1e-4,
+            "the bolt arriving at frame {} started no flinch on the Warrior that frame",
+            arrival.0
+        );
+    }
+
+    // ...and NOTHING starts a flinch on the Warrior at any other frame — in
+    // particular not at a wand hit's damage frame, ahead of its bolt.
+    let arrival_frames: Vec<usize> = arrivals.iter().map(|a| a.0).collect();
+    let starts: Vec<usize> = seen
+        .samples
+        .iter()
+        .filter(|s| s.unit == warrior && s.elapsed <= FRAME.as_secs_f32() + 1e-4)
+        .map(|s| s.frame)
+        .collect();
+    for frame in &starts {
+        assert!(
+            arrival_frames.contains(frame),
+            "a flinch started on the Warrior at frame {frame}, where no bolt arrived"
+        );
+    }
+    assert_eq!(starts.len(), wands.len(), "one flinch per wand hit");
+
+    // Non-vacuity of "held": every bolt spends frames in the air, even the
+    // point-blank ones thrown with the Warrior on top of the Priest, and the
+    // match includes the defect's worst case — a bolt thrown from across the
+    // arena, whose damage-timed flinch would have led it by half a second or
+    // more.
+    println!(
+        "{} wand hits / {} arrivals; flight lag in frames: {lags:?}",
+        wands.len(),
+        arrivals.len(),
+    );
+    assert!(
+        lags.iter().all(|&l| l >= 2),
+        "a bolt arrived within a frame of its damage — nothing was held: {lags:?}"
+    );
+    assert!(
+        lags.iter().any(|&l| l >= 30),
+        "vacuous: no bolt in the match flew for half a second or more: {lags:?}"
     );
 }

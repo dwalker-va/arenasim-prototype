@@ -1486,6 +1486,7 @@ pub fn update_cosmetic_arrows(
             commands.spawn((
                 RangedHitArrival {
                     target: arrow.target,
+                    kind: AutoAttackKind::Shot,
                     is_crit: arrow.is_crit,
                     from: -(transform.rotation * Vec3::Z),
                 },

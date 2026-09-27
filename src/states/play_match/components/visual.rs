@@ -1807,20 +1807,26 @@ pub struct CosmeticArrow {
     pub ribbon_material: Handle<StandardMaterial>,
 }
 
-/// A ranged physical auto (`AutoAttackKind::Shot`) whose projectile has just
+/// A ranged auto (`AutoAttackKind::Shot` or `Wand`) whose projectile has just
 /// reached its victim: a bare marker entity, consumed and despawned by
 /// `hit_reaction::consume_ranged_hit_arrivals`, which plays the victim's
-/// flinch and impact burst.
+/// reaction — the flinch, plus the impact burst for a kind that throws one.
 ///
 /// It exists because the sim resolves an auto's damage AT THE SWING and the
-/// cosmetic arrow flies afterwards, so a reaction hung on the damage would
-/// lead its own arrow by the whole flight. Left behind by
-/// `update_cosmetic_arrows` the frame the arrow's tip arrives — or, for a shot
-/// that looses no arrow, by `consume_swing_signals` at once, so every landed
-/// Shot still reacts exactly once. Graphical-only; the sim never sees it.
+/// cosmetic projectile flies afterwards, so a reaction hung on the damage
+/// would lead its own projectile by the whole flight. Left behind the frame
+/// the projectile arrives — by `update_cosmetic_arrows` for an arrow,
+/// `update_wand_missiles` for a wand bolt — or, for a shot that has nothing
+/// in flight, at once by whichever consumer would have launched it
+/// (`consume_swing_signals` for a Shot, `consume_hit_reactions` for a wand),
+/// so every landed ranged auto still reacts exactly once. Graphical-only; the
+/// sim never sees it.
 #[derive(Component)]
 pub struct RangedHitArrival {
     pub target: Entity,
+    /// Which ranged auto arrived. Selects the reaction: a Shot throws the
+    /// weapon-spark burst, a wand bolt the flinch alone.
+    pub kind: AutoAttackKind,
     pub is_crit: bool,
     /// The direction the shot came FROM, as seen from the victim — the side
     /// of the silhouette it struck. Only its horizontal part is read.
