@@ -294,6 +294,21 @@ pub struct HitFlash {
 /// visually finished by the time `cleanup_hit_flinch` removes the component —
 /// there is no frame where removal itself moves the body.
 pub fn hit_flinch_offset(flinch: &HitFlinch) -> f32 {
+    -flinch.depth * hit_flinch_weight(flinch)
+}
+
+/// How far into the flinch the body is right now, `0.0..=1.0`: the dip's
+/// envelope, and the share of the gait's own motion the flinch takes over.
+///
+/// A dip ADDED to a walking gait is invisible: the walk bob is ±0.10 at a
+/// stride's cadence, the dip is 0.10 over about the same time, and the sum
+/// reads as one more bob — measured in a real Hunter v Warrior match, where
+/// the struck body mostly ROSE through its own "dip". So the gait writers
+/// fade their motion out under this envelope (`apply_gait_offset`) and the
+/// struck body hitches and sinks, as the client's wound anim overrides the
+/// run cycle. On a unit standing still the gait is already at rest and this
+/// changes nothing. Exactly `0.0` at `elapsed >= duration`, like the dip.
+pub fn hit_flinch_weight(flinch: &HitFlinch) -> f32 {
     if flinch.duration <= 0.0 {
         return 0.0;
     }
@@ -301,14 +316,13 @@ pub fn hit_flinch_offset(flinch: &HitFlinch) -> f32 {
     // Fast in over the rise fraction, slow out over the remainder. The
     // recovery is eased (squared) so the body settles rather than snapping
     // back through rest.
-    let shape = if t < FLINCH_RISE_FRAC {
+    if t < FLINCH_RISE_FRAC {
         t / FLINCH_RISE_FRAC.max(f32::EPSILON)
     } else {
         let k = (1.0 - t) / (1.0 - FLINCH_RISE_FRAC).max(f32::EPSILON);
         let k = k.clamp(0.0, 1.0);
         k * k
-    };
-    -flinch.depth * shape
+    }
 }
 
 // --- Spawn ------------------------------------------------------------------

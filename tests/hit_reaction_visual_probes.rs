@@ -15,7 +15,12 @@
 //! ever tested a STATIONARY victim would pass on that broken build, because
 //! an idle gait's settle-ease leaves most of the dip intact. So the probe
 //! drives the same scripted walk twice, once with a flinch and once without,
-//! and demands the difference be exactly the dip.
+//! and demands the flinched body be exactly the faded gait plus the dip.
+//!
+//! Composition alone is not visibility: a dip merely ADDED to the walk bob is
+//! the same size and cadence as the bob, and in a real match it disappeared
+//! into the stride. `tests/hit_reaction_match_flow.rs` holds the reaction to
+//! reading on moving victims in a real Hunter v Warrior match.
 //!
 //! Runs on `MinimalPlugins` + `AssetPlugin` + `TransformPlugin` — no window,
 //! no GPU. `TransformPlugin` is load-bearing: without it `GlobalTransform`
@@ -31,11 +36,11 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::components::{CosmeticArrow, RangedHitArrival};
 use arenasim::states::play_match::{
     cleanup_hit_flinch, cleanup_hit_reactions, consume_hit_reactions, consume_ranged_hit_arrivals,
-    consume_swing_signals, hit_flinch_offset, tick_hit_flinch, update_cosmetic_arrows,
-    update_fear_run, update_hit_flashes, update_hit_sparks, update_walk_animation,
-    update_wand_missiles, wand_school, HitSpark, SwingStyle, WandMissile, AUTO_ARROW_SPEED,
-    FLINCH_CRIT_MULT, FLINCH_DIP, FLINCH_DURATION_SECS, PET_FLINCH_DURATION_SCALE,
-    PET_SPARK_SPATIAL_SCALE, SPARK_COUNT, SPARK_CRIT_SCALE, SPARK_SIZE,
+    consume_swing_signals, hit_flinch_offset, hit_flinch_weight, tick_hit_flinch,
+    update_cosmetic_arrows, update_fear_run, update_hit_flashes, update_hit_sparks,
+    update_walk_animation, update_wand_missiles, wand_school, HitSpark, SwingStyle, WandMissile,
+    AUTO_ARROW_SPEED, FLINCH_CRIT_MULT, FLINCH_DIP, FLINCH_DURATION_SECS,
+    PET_FLINCH_DURATION_SCALE, PET_SPARK_SPATIAL_SCALE, SPARK_COUNT, SPARK_CRIT_SCALE, SPARK_SIZE,
 };
 use arenasim::CharacterClass;
 use bevy::prelude::*;
@@ -159,14 +164,15 @@ fn world_y(app: &App, body: Entity) -> f32 {
 // The flinch: composed into the gait, and therefore visible on a MOVING victim
 // ---------------------------------------------------------------------------
 
-/// Drive a scripted walk for `frames` ticks and return the body's world Y at
-/// each frame. With `flinch`, a `HitFlinch` is inserted before the first tick.
+/// Drive a scripted walk for `frames` ticks and return, per frame, the body's
+/// world Y, the flinch's dip and its weight (the share of the gait it fades
+/// out). With `flinch`, a `HitFlinch` is inserted before the first tick.
 ///
 /// The walk is scripted (the test writes the sim Transform each frame), and
 /// `advance_gait`'s phase depends only on distance travelled, so two runs of
 /// this produce an identical bob track — which is what makes the difference
 /// between them attributable to the flinch and nothing else.
-fn walk_track(frames: usize, flinch: bool) -> Vec<(f32, f32)> {
+fn walk_track(frames: usize, flinch: bool) -> Vec<(f32, f32, f32)> {
     let mut app = harness();
     app.add_systems(
         Update,
@@ -199,12 +205,10 @@ fn walk_track(frames: usize, flinch: bool) -> Vec<(f32, f32)> {
         // The dip the gait actually saw this frame, read off the live
         // component rather than re-derived from an assumed clock — the
         // claim under test is the COMPOSITION, not Bevy's first delta.
-        let dip = app
-            .world()
-            .entity(unit)
-            .get::<HitFlinch>()
-            .map_or(0.0, hit_flinch_offset);
-        track.push((world_y(&app, body), dip));
+        let live = app.world().entity(unit).get::<HitFlinch>();
+        let dip = live.map_or(0.0, hit_flinch_offset);
+        let weight = live.map_or(0.0, hit_flinch_weight);
+        track.push((world_y(&app, body), dip, weight));
     }
     track
 }
@@ -215,12 +219,16 @@ fn the_flinch_is_visible_on_a_walking_victim() {
     // the flinch. A build that let the gait overwrite the dip — which is what
     // a separately-ordered flinch system does — returns two identical tracks
     // and fails here, while a stationary-victim probe would still pass.
+    //
+    // The unit stands at y = 1.0, so a body's height above its rest is its
+    // world Y less that.
     let frames = 10;
     let plain = walk_track(frames, false);
     let dipped = walk_track(frames, true);
 
     // The walk itself is genuinely moving, or the probe proves nothing about
     // the moving case: the bob must actually vary across the window.
+    const BASE: f32 = 1.0;
     let bob_span = plain.iter().map(|s| s.0).fold(f32::MIN, f32::max)
         - plain.iter().map(|s| s.0).fold(f32::MAX, f32::min);
     assert!(
@@ -229,19 +237,27 @@ fn the_flinch_is_visible_on_a_walking_victim() {
          distinguish a composed flinch from an overwritten one"
     );
 
-    // ...and the flinch is EXACTLY additive on top of it, frame by frame.
+    // ...and the flinched body is EXACTLY the gait faded by the flinch's
+    // weight, plus the dip, frame by frame.
     let mut deepest = 0.0f32;
-    for (i, (&(p, control_dip), &(d, expected))) in plain.iter().zip(dipped.iter()).enumerate() {
+    for (i, (&(p, control_dip, _), &(d, dip, weight))) in
+        plain.iter().zip(dipped.iter()).enumerate()
+    {
         assert_eq!(control_dip, 0.0, "the control run must carry no flinch");
+        let expected = (p - BASE) * (1.0 - weight) + dip;
         assert!(
-            (d - p - expected).abs() < 1e-5,
-            "frame {i}: walking body at {d}, control at {p}, dip should be {expected}"
+            ((d - BASE) - expected).abs() < 1e-5,
+            "frame {i}: walking body at {d}, control at {p}, weight {weight}, \
+             dip {dip}: expected {expected} above rest"
         );
-        deepest = deepest.min(d - p);
+        deepest = deepest.min(d - BASE);
     }
+    // Measured from REST, not from the control: the struck body reaches the
+    // bottom of the dip whatever phase its stride was in, the way a
+    // stationary one does.
     assert!(
         deepest <= -FLINCH_DIP * 0.9,
-        "the walking victim never dipped near FLINCH_DIP (deepest {deepest})"
+        "the walking victim never dipped near FLINCH_DIP below rest (deepest {deepest})"
     );
 }
 

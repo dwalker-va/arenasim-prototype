@@ -1,4 +1,4 @@
-use super::hit_reaction::hit_flinch_offset;
+use super::hit_reaction::{hit_flinch_offset, hit_flinch_weight};
 use crate::states::play_match::components::*;
 use bevy::prelude::*;
 
@@ -134,6 +134,14 @@ fn advance_gait(
 /// includes the dip. With no flinch live the two are identical, which is why
 /// every existing gait is unchanged.
 ///
+/// **The flinch takes the gait over, it does not ride on it.** The gait's
+/// motion is faded out under the flinch's envelope ([`hit_flinch_weight`])
+/// while the dip plays, then faded back in. Merely ADDING the dip made it
+/// invisible on anything moving: the walk bob is ±0.10 at a stride's cadence,
+/// the dip is 0.10 over about the same time, and in a real match the struck
+/// body mostly rose through its own "dip". `body_offset` keeps the gait's
+/// full, unfaded value, so the stride resumes where it would have been.
+///
 /// **Who else writes this Y, and what that costs them.** Three others do, and
 /// keeping `body_offset` rather than reading the transform back is exactly
 /// what makes the list matter — an outside write to the transform no longer
@@ -157,8 +165,9 @@ fn apply_gait_offset(
     idle: bool,
     offset: f32,
     settle_step: f32,
-    flinch: f32,
+    flinch: (f32, f32),
 ) {
+    let (dip, weight) = flinch;
     if idle {
         let err = -walk.body_offset;
         walk.body_offset += err.clamp(-settle_step, settle_step);
@@ -169,7 +178,7 @@ fn apply_gait_offset(
         let Ok((mut body_transform, body)) = bodies.get_mut(child) else {
             continue;
         };
-        body_transform.translation.y = body.rest_y + walk.body_offset + flinch;
+        body_transform.translation.y = body.rest_y + walk.body_offset * (1.0 - weight) + dip;
     }
 }
 
@@ -388,8 +397,9 @@ pub fn update_fear_run(
     }
 }
 
-/// The dip a victim's live [`HitFlinch`] contributes this frame, or `0.0` when
-/// it has none. Pulled out so all three gaits read the flinch identically.
-fn flinch_offset_of(flinch: Option<&HitFlinch>) -> f32 {
-    flinch.map_or(0.0, hit_flinch_offset)
+/// The dip a victim's live [`HitFlinch`] contributes this frame and the share
+/// of the gait it takes over, or `(0.0, 0.0)` when it has none. Pulled out so
+/// all three gaits read the flinch identically.
+fn flinch_offset_of(flinch: Option<&HitFlinch>) -> (f32, f32) {
+    flinch.map_or((0.0, 0.0), |f| (hit_flinch_offset(f), hit_flinch_weight(f)))
 }
