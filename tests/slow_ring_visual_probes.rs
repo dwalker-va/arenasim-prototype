@@ -19,7 +19,7 @@ use bevy::time::TimeUpdateStrategy;
 use arenasim::states::play_match::abilities::{AbilityType, SpellSchool};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, Combatant, SchoolImpact, SlowBindRing, SlowScuff,
+    ActiveAuras, Aura, AuraType, Combatant, Pet, PetType, SchoolImpact, SlowBindRing, SlowScuff,
     SlowTrailEmitter, SlowZone, VisualBody, WalkAnim,
 };
 use arenasim::states::play_match::{
@@ -30,11 +30,19 @@ use arenasim::states::play_match::{
 };
 use arenasim::CharacterClass;
 
-/// 20ms: fine enough to see the ring's 0.395s life in ~20 frames.
+/// 20ms: fine enough to see the ring's 0.7s life in ~35 frames.
 const TICK: Duration = Duration::from_millis(20);
 const DT: f32 = 0.02;
 /// Frostbolt's slowed walk: 5 yd/s base x 0.7.
 const SLOWED_SPEED: f32 = 3.5;
+
+/// The combatant body: `Capsule3d::new(0.5, 1.5)` centred at y=1.0
+/// (`play_match/mod.rs`), so 0.5yd from the axis to its skin.
+const BODY_RADIUS: f32 = 0.5;
+/// The pet body: `Capsule3d::new(0.35, 0.6)` tilted horizontal — 0.35yd from
+/// the axis to its flank, 0.3 + 0.35 = 0.65yd from its centre to its snout.
+const PET_FLANK: f32 = 0.35;
+const PET_SNOUT: f32 = 0.65;
 
 fn slow(name: &str, magnitude: f32) -> Aura {
     Aura {
@@ -76,6 +84,15 @@ impl Harness {
 
     /// A combatant with a `VisualBody` child, mirroring the real hierarchy.
     fn spawn_unit(&mut self, at: Vec3, auras: Vec<Aura>) -> Entity {
+        self.spawn(at, auras, false)
+    }
+
+    /// A Hunter's pet, otherwise as [`Harness::spawn_unit`].
+    fn spawn_pet(&mut self, at: Vec3, auras: Vec<Aura>) -> Entity {
+        self.spawn(at, auras, true)
+    }
+
+    fn spawn(&mut self, at: Vec3, auras: Vec<Aura>, is_pet: bool) -> Entity {
         let body = self
             .app
             .world_mut()
@@ -98,8 +115,46 @@ impl Harness {
                 ActiveAuras { auras },
             ))
             .id();
+        if is_pet {
+            let owner = self
+                .app
+                .world_mut()
+                .spawn(Combatant::new(1, 0, CharacterClass::Hunter))
+                .id();
+            self.app.world_mut().entity_mut(unit).insert(Pet {
+                owner,
+                pet_type: PetType::Boar,
+            });
+        }
         self.app.world_mut().entity_mut(unit).add_child(body);
         unit
+    }
+
+    /// Replace `e`'s auras, the way the sim applies, refreshes or clears them.
+    fn set_auras(&mut self, e: Entity, auras: Vec<Aura>) {
+        self.app
+            .world_mut()
+            .get_mut::<ActiveAuras>(e)
+            .unwrap()
+            .auras = auras;
+    }
+
+    /// The live core stroke's material colour, as the renderer will draw it.
+    fn core_color(&mut self) -> Option<Color> {
+        let handle = {
+            let mut q = self
+                .app
+                .world_mut()
+                .query::<(&SlowBindRing, &MeshMaterial3d<StandardMaterial>)>();
+            q.iter(self.app.world())
+                .find(|(r, _)| !r.halo)
+                .map(|(_, m)| m.0.clone())?
+        };
+        self.app
+            .world()
+            .resource::<Assets<StandardMaterial>>()
+            .get(&handle)
+            .map(|m| m.base_color)
     }
 
     fn pos(&self, e: Entity) -> Vec3 {
@@ -359,6 +414,101 @@ fn the_ring_grows_as_a_constant_width_band_and_fades() {
 }
 
 // =============================================================================
+// Legibility: where the ring can be seen, and for how long
+// =============================================================================
+//
+// At the client's own numbers the ring was barely visible in play: it was
+// born inside the body and gone before it was clear of it. These pin the two
+// properties that fixed it, in world space, so a retune cannot quietly put the
+// ring back under the capsule.
+
+/// Every frame of one ring's life: (outer radius, inner radius) of its core.
+fn one_ring_life(h: &mut Harness, unit: Entity) -> Vec<(f32, f32)> {
+    h.walk(unit, Vec3::X, SLOWED_SPEED, 1);
+    let mut life = vec![];
+    while let Some((_, _, outer, width)) = h.cores().first().copied() {
+        life.push((outer, outer - width));
+        h.idle(1);
+    }
+    life
+}
+
+#[test]
+fn the_ring_is_born_outside_the_body_it_binds() {
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, 1.0, 0.0), vec![slow("Frostbolt", 0.7)]);
+    let life = one_ring_life(&mut h, unit);
+    assert!(
+        life.len() > 10,
+        "guard: the ring lived {} frames",
+        life.len()
+    );
+    for (outer, inner) in &life {
+        assert!(
+            *inner >= BODY_RADIUS - 1e-3,
+            "band {inner}..{outer} is under the {BODY_RADIUS}yd capsule"
+        );
+    }
+    // It ends well clear of the body, beside it as well as in front.
+    let (_, last_inner) = *life.last().unwrap();
+    assert!(
+        last_inner >= 2.0 * BODY_RADIUS,
+        "the ring dies at inner radius {last_inner}, still hugging the body"
+    );
+}
+
+#[test]
+fn a_pets_ring_is_born_outside_the_pet() {
+    let mut h = Harness::new();
+    let pet = h.spawn_pet(Vec3::new(0.0, 0.75, 0.0), vec![slow("Frostbolt", 0.7)]);
+    let life = one_ring_life(&mut h, pet);
+    assert!(
+        life.len() > 10,
+        "guard: the ring lived {} frames",
+        life.len()
+    );
+    let (_, born_inner) = life[0];
+    assert!(
+        born_inner >= PET_FLANK,
+        "a pet's ring is born at {born_inner}, inside its {PET_FLANK}yd flank"
+    );
+    let (_, last_inner) = *life.last().unwrap();
+    assert!(
+        last_inner >= PET_SNOUT,
+        "a pet's ring dies at {last_inner}, never clearing its {PET_SNOUT}yd snout"
+    );
+}
+
+#[test]
+fn the_ring_is_up_for_most_of_each_pulse() {
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, 1.0, 0.0), vec![slow("Frostbolt", 0.7)]);
+    // Settle into the beat, then count over whole periods.
+    h.walk(unit, Vec3::X, SLOWED_SPEED, 5);
+    let frames = (3.0 * SLOW_RING_PERIOD / DT).round() as usize;
+    let mut bright = 0;
+    for _ in 0..frames {
+        h.walk(unit, Vec3::X, SLOWED_SPEED, 1);
+        // Drawn at half its full alpha or more (the core's full alpha is 0.8).
+        if h.core_color().is_some_and(|c| c.alpha() >= 0.4) {
+            bright += 1;
+        }
+    }
+    let duty = bright as f32 / frames as f32;
+    assert!(
+        duty >= 0.5,
+        "the ring is bright for {:.0}% of each pulse",
+        100.0 * duty
+    );
+    // ...but it still pulses: a beat with no gap would read as a steady ring.
+    assert!(
+        duty <= 0.8,
+        "the ring is bright for {:.0}% of each pulse; the beat has no gap",
+        100.0 * duty
+    );
+}
+
+// =============================================================================
 // The scuff
 // =============================================================================
 
@@ -422,6 +572,40 @@ fn other_slows_bring_no_flash() {
     h.spawn_unit(Vec3::new(0.0, 1.0, 0.0), vec![slow("Frostbolt", 0.7)]);
     h.idle(10);
     assert!(h.flashes().is_empty());
+}
+
+#[test]
+fn a_refreshed_poison_does_not_flash_again() {
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(
+        Vec3::new(0.0, 1.0, 0.0),
+        vec![slow("Crippling Poison", 0.3)],
+    );
+    h.idle(5);
+    assert_eq!(h.flashes().len(), 1, "guard: the application flashed");
+    // A proc on a still-poisoned victim resets the timer; the aura never lapses.
+    let mut refreshed = slow("Crippling Poison", 0.3);
+    refreshed.duration = 12.0;
+    h.set_auras(unit, vec![refreshed]);
+    h.idle(5);
+    assert_eq!(h.flashes().len(), 1, "a refresh replayed the flash");
+}
+
+#[test]
+fn a_reapplied_poison_flashes_again() {
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(
+        Vec3::new(0.0, 1.0, 0.0),
+        vec![slow("Crippling Poison", 0.3)],
+    );
+    h.idle(5);
+    // Lapses (dispelled or expired), then lands again.
+    h.set_auras(unit, vec![]);
+    h.idle(5);
+    assert_eq!(h.flashes().len(), 1, "guard: nothing flashes on the lapse");
+    h.set_auras(unit, vec![slow("Crippling Poison", 0.3)]);
+    h.idle(5);
+    assert_eq!(h.flashes().len(), 2, "a fresh application must flash");
 }
 
 // =============================================================================
@@ -522,6 +706,17 @@ fn the_ring_takes_the_hardest_slows_tint() {
         vec![slow("Frostbolt", 0.7), slow("Crippling Poison", 0.3)],
     );
     h.walk(unit, Vec3::X, 1.5, 2);
-    let (ring, _, _, _) = h.cores()[0];
-    assert_eq!(ring.tint, SlowTint::Nature.color());
+    // Off the material the renderer draws, not the stored tint.
+    let drawn = h.core_color().unwrap().to_srgba();
+    let nature = SlowTint::Nature.color().to_srgba();
+    for (d, n) in [
+        (drawn.red, nature.red),
+        (drawn.green, nature.green),
+        (drawn.blue, nature.blue),
+    ] {
+        assert!(
+            (d - n).abs() < 1e-4,
+            "drawn {drawn:?}, Nature is {nature:?}"
+        );
+    }
 }

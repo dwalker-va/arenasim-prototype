@@ -24,7 +24,7 @@ use crate::states::play_match::components::*;
 // attachment): a flat ring pulsing at about 1 Hz. Two parts:
 //
 //   Bind ring -> one flat additive annulus per 1.0s pulse that grows from
-//                0.26 to 1.53yd across, holds full alpha to 0.65 of its life,
+//                1.2 to 2.4yd across, holds full alpha to 0.65 of its life,
 //                then fades. The client emits ~5 rings per pulse; one reads
 //                cleaner. Deliberate departure: the ring FOLLOWS the victim.
 //                The client's is world space, and at running speed it is left
@@ -34,6 +34,20 @@ use crate::states::play_match::components::*;
 //                `movement_trails.rs` lays the charge trail, fading over 0.6s.
 //                At a fixed lifetime a harder slow leaves a shorter scuff, so
 //                its length is itself a cue.
+//
+// **Sized against the body, not the client's model.** At the client's own
+// numbers (0.26 -> 1.53yd, a 0.07yd band, 0.395s) the ring was barely visible
+// in play, and it was geometry, not colour: the capsule is 0.5yd in radius, so
+// the ring spent the first half of its life INSIDE the body's footprint, and
+// from the default camera (51 degrees up) the body hides the ring's far half
+// at any radius under ~1yd. What was left was a 1-2px near-side arc for ~0.1s
+// a second. So the ring is born with its band on the capsule's edge and grows
+// to clear the body's silhouette either side; the band matches the selection
+// ring's (`selection.rs`), the ground ring that already reads at play zoom;
+// and a ring lives 0.7s, the span the client's own pulse is live (its 0-333ms
+// burst plus one 0.395s ring life), so the 1 Hz beat still has a gap. Alpha and
+// emissive gain are unchanged: the tints already add about as much luminance
+// as the sand has, so contrast was never the missing part.
 //
 // **Only while moving.** A stationary slowed unit shows nothing — the aura icon
 // carries the debuff, as it does for any stationary unit — so the treatment
@@ -55,21 +69,25 @@ use crate::states::play_match::components::*;
 // visuals — so headless stays byte-identical by construction.
 
 // ------------------------------------------------------------------------------
-// Constants — every value is a Slow Trail Bench default (signed off 2026-09-26)
+// Constants — Slow Trail Bench defaults (signed off 2026-09-26), except the
+// ring's size, band and lifetime, re-sized against the body (header)
 // ------------------------------------------------------------------------------
 
 /// Seconds between bind-ring pulses (client: the 1000ms Stand loop).
 pub const SLOW_RING_PERIOD: f32 = 1.0;
-/// Seconds one ring lives (client emitter 1: 0.395s).
-pub const SLOW_RING_LIFETIME: f32 = 0.395;
-/// Ring diameter at birth and at death, yards (client size track 0.26 -> 1.53).
-pub const SLOW_RING_DIAMETER_START: f32 = 0.26;
-pub const SLOW_RING_DIAMETER_END: f32 = 1.53;
+/// Seconds one ring lives: the span the client's pulse is live in each loop
+/// (a 0-333ms burst of 0.395s rings), not one client ring's life.
+pub const SLOW_RING_LIFETIME: f32 = 0.7;
+/// Ring diameter at birth and at death, yards. Born with its band's inner
+/// edge on the 0.5yd capsule; dies clear of the body's silhouette either side.
+pub const SLOW_RING_DIAMETER_START: f32 = 1.2;
+pub const SLOW_RING_DIAMETER_END: f32 = 2.4;
 /// Fraction of its life a ring holds full alpha before the fade begins.
 pub const SLOW_RING_FADE_FROM: f32 = 0.65;
-/// Width of the ring's core band, yards. Constant as the ring grows: it is a
-/// stroke, not a scaled disc.
-pub const SLOW_RING_BAND_WIDTH: f32 = 0.07;
+/// Width of the ring's core band, yards: the selection ring's 0.2yd tube
+/// (`selection.rs`), the ground ring that already reads at play zoom. Constant
+/// as the ring grows: it is a stroke, not a scaled disc.
+pub const SLOW_RING_BAND_WIDTH: f32 = 0.2;
 const SLOW_RING_ALPHA: f32 = 0.8;
 /// The soft edge, drawn as the bench drew it: a second, wider stroke under the
 /// core at a quarter of its alpha.
@@ -96,8 +114,11 @@ const SLOW_SCUFF_END_WIDTH: f32 = 0.5;
 pub const SLOW_RING_Y: f32 = 0.05;
 pub const SLOW_SCUFF_Y: f32 = 0.04;
 
-/// Uniform scale on a pet's ring and scuff, the `hard_cc.rs` pet stature.
-pub const SLOW_PET_STATURE: f32 = 0.55;
+/// Uniform scale on a pet's ring and scuff. Not the `hard_cc.rs` 0.55: that
+/// would bear a pet's ring inside its body. The pet is a horizontal
+/// `Capsule3d::new(0.35, 0.6)` — 0.35yd to its flank, 0.65yd to its snout — so
+/// 0.8 is born clear of the flank and clears the snout by mid-life.
+pub const SLOW_PET_STATURE: f32 = 0.8;
 
 // ==============================================================================
 // Routing

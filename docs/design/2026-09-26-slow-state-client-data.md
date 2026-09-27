@@ -90,6 +90,15 @@ of staying in world space. Previewed at the client's values, a world-space ring 
 at the feet and is left behind within a fraction of its 0.4 s life at running speed, so
 it read as detached from the unit rather than as a binding on it.
 
+**Second departure (2026-09-26, in-client review): the ring is sized against our body.**
+At the client's numbers the ring was barely visible in play. Our capsule is 0.5 yd in
+radius, so a ring growing from 0.26 yd across spent half its life inside the body's
+footprint, and from the default camera the body hides its far half until it is ~1 yd
+out. The ring now grows 1.2 -> 2.4 yd (born with its band on the capsule's edge), its
+band is 0.2 yd (the selection ring's), and it lives 0.7 s, the span the client's own
+pulse is live (a 0-333 ms burst of 0.395 s rings). Alpha, tint and the 1 Hz beat are
+unchanged.
+
 ### No state: Frost Shock, Crippling Poison, Frost Trap
 
 - **Frost Shock:** visual 144 has cast and impact kits only (confirms the 2026-09-06 doc).
