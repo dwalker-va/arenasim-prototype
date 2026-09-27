@@ -102,3 +102,25 @@ Warrior+Shaman cells of `2026-09-28-as167-weapon-speed.jsonl`, 10 seeds each
 to `0.0` in `class_ai/shaman.rs` (`TotemElement::Air`, `0.12` -> `0.0`). The
 roll still happens, so the RNG draw order is unchanged. The results are
 `2026-09-28-as167_windfury_off_{before_17cb9f0,after}.csv`.
+
+## `2026-09-27-as125-hunter-directional.jsonl`
+
+Behind `2026-09-27-as125-freezing-trap-dispeller.md` (card AS-125). The
+DIRECTIONAL tier for a Hunter change: 301 reachable 2v2 cells plus 8 control
+cells, 10 seeds, 3,090 configs, on the default map (`BasicArena`; the lines
+carry no `map` field). Regenerate with:
+
+```bash
+scripts/gen_sweep.py --full 2 --exclude-double-healer \
+  --affects Hunter --control-cells 8 --n 10
+```
+
+Beside it, the trap-mechanism instrument the findings doc's per-trap tables
+come from: `2026-09-27-as125-trapmech.py <binary> <outdir> <jobs> [seeds]`
+runs 17 trap-relevant comps traced, pairs every Freezing Trap's intended victim
+(trace `target_id`) with whom it sprang on and how it ended (match log), and
+`2026-09-27-as125-trapsumm.py <outdir>...` tabulates them. Each match runs in
+its own directory with a link to the measured binary's own `assets/`, because
+single-match traces are stamped to the second and would collide in parallel.
+`2026-09-27-as125-variant-a.patch` is candidate A measured on its own, against
+`a2f483a`.
