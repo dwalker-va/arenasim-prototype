@@ -68,7 +68,9 @@ def analyse(name, seed, d, log):
                 continue
             a = v.get("actor")
             if a:
-                ents[a["entity_id"]] = (a["team"], a["class"], a.get("slot"))
+                # A pet's actor view carries its owner's class; its own kind
+                # is the pet decision's top-level `pet_type`.
+                ents[a["entity_id"]] = (a["team"], v.get("pet_type") or a["class"], a.get("slot"))
             t = v.get("target")
             if t and "entity_id" in t:
                 ents.setdefault(t["entity_id"], (None, t.get("class"), None))

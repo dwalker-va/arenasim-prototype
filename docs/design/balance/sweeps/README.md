@@ -103,24 +103,30 @@ to `0.0` in `class_ai/shaman.rs` (`TotemElement::Air`, `0.12` -> `0.0`). The
 roll still happens, so the RNG draw order is unchanged. The results are
 `2026-09-28-as167_windfury_off_{before_17cb9f0,after}.csv`.
 
-## `2026-09-27-as125-hunter-directional.jsonl`
+## `2026-09-27-as125-hunter-directional.jsonl` and `-hunter-1v1.jsonl`
 
 Behind `2026-09-27-as125-freezing-trap-dispeller.md` (card AS-125). The
-DIRECTIONAL tier for a Hunter change: 301 reachable 2v2 cells plus 8 control
-cells, 10 seeds, 3,090 configs, on the default map (`BasicArena`; the lines
-carry no `map` field). Regenerate with:
+DIRECTIONAL tier for a Hunter change, on the default map (`BasicArena`; the
+lines carry no `map` field): 2v2 is 301 reachable cells plus 8 control cells,
+10 seeds, 3,090 configs; 1v1 is 15 reachable plus 8 control cells, 50 seeds,
+1,150 configs. Regenerate with:
 
 ```bash
 scripts/gen_sweep.py --full 2 --exclude-double-healer \
   --affects Hunter --control-cells 8 --n 10
+scripts/gen_sweep.py --full 1 --affects Hunter --control-cells 8 --n 50
 ```
 
-Beside it, the trap-mechanism instrument the findings doc's per-trap tables
+`2026-09-27-as125-by-enemy.py <before.csv> <after.csv>` turns either pair of
+result CSVs into the per-enemy-comp table (Hunter-side win rate, flips, McNemar
+z per enemy comp), because a pooled bucket hides comps that move in opposite
+directions.
+
+Beside them, the trap-mechanism instrument the findings doc's per-trap tables
 come from: `2026-09-27-as125-trapmech.py <binary> <outdir> <jobs> [seeds]`
 runs 17 trap-relevant comps traced, pairs every Freezing Trap's intended victim
 (trace `target_id`) with whom it sprang on and how it ended (match log), and
-`2026-09-27-as125-trapsumm.py <outdir>...` tabulates them. Each match runs in
+records each match's winner and first throw; `2026-09-27-as125-trapsumm.py
+<before_outdir> [<after_outdir>]` tabulates them per comp. Each match runs in
 its own directory with a link to the measured binary's own `assets/`, because
 single-match traces are stamped to the second and would collide in parallel.
-`2026-09-27-as125-variant-a.patch` is candidate A measured on its own, against
-`a2f483a`.
