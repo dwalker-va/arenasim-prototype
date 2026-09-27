@@ -1035,14 +1035,31 @@ pub fn can_free_ally(
     if freer.entity == victim.entity || freer.team != victim.team || !freer.is_alive {
         return false;
     }
+    ally_removals_of(abilities, freer)
+        .any(|r| (r.reaches_pets || !victim.is_pet) && r.scope.takes(aura))
+}
+
+/// Could `freer` lift `aura` off a (non-pet) teammate at all — is it a
+/// dispeller for this aura, whoever its teammates turn out to be? The question
+/// to ask when the teammate may be one the asker cannot see: a stealthed Rogue
+/// is not in the Hunter's view, but its Priest still frees it.
+pub fn frees_teammates(abilities: &AbilityDefinitions, freer: &CombatantInfo, aura: &Aura) -> bool {
+    freer.is_alive && ally_removals_of(abilities, freer).any(|r| r.scope.takes(aura))
+}
+
+/// The ally removals in `unit`'s own kit: a pet's by its pet type, anyone
+/// else's by class.
+fn ally_removals_of<'a>(
+    abilities: &'a AbilityDefinitions,
+    unit: &'a CombatantInfo,
+) -> impl Iterator<Item = AllyRemoval> + 'a {
     abilities
         .iter()
-        .filter(|(_, def)| match freer.pet_type {
+        .filter(move |(_, def)| match unit.pet_type {
             Some(pet) => def.pet == Some(pet),
-            None => def.class == freer.class && def.pet.is_none(),
+            None => def.class == unit.class && def.pet.is_none(),
         })
         .filter_map(|(ability, _)| ally_removal(*ability))
-        .any(|r| (r.reaches_pets || !victim.is_pet) && r.scope.takes(aura))
 }
 
 /// The first living teammate of `victim` in this view that could free it from

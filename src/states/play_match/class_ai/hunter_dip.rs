@@ -138,6 +138,23 @@ pub fn trap_victim_worth_it(
     super::ally_freer(ctx, abilities, victim, &aura).is_none()
 }
 
+/// Does the enemy field a dispeller for a Freezing Trap — a living unit, seen
+/// by the Hunter, whose kit frees a teammate from it? Asked of the dispeller
+/// alone, not of the teammates it could free, because the teammate that walks
+/// into a trap may be one the Hunter cannot see: at gates-open the enemy Rogue
+/// is stealthed, and its Priest frees it all the same.
+pub fn enemy_can_free_a_trap(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    owner: Entity,
+    my_team: u8,
+) -> bool {
+    let aura = crate::states::play_match::traps::freezing_trap_aura(owner);
+    ctx.combatants
+        .values()
+        .any(|e| e.team != my_team && super::frees_teammates(abilities, e, &aura))
+}
+
 /// Best eligible OFF-target enemy within `reach` that the team is NOT already
 /// killing (so the trap CCs the off-target, not the kill target), and whose trap
 /// is worth throwing ([`trap_victim_worth_it`]). Prefers a healer (highest CC

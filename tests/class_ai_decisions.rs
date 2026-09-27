@@ -1425,3 +1425,40 @@ fn a_trap_is_worth_throwing_only_where_nobody_frees_it_or_at_the_healer() {
     // Warlock + Rogue: the Felhunter frees the Rogue.
     assert_eq!(worth(&[(a, Rogue), (b, Warlock)], true), [false, false]);
 }
+
+/// Whether the enemy fields a dispeller for a Freezing Trap is asked of the
+/// dispeller ALONE, never of the teammates the Hunter can see: at gates-open
+/// the enemy Rogue is stealthed and absent from the Hunter's view, yet a lone
+/// visible Priest still frees whoever walks into a lane trap.
+#[test]
+fn the_enemy_dispeller_is_found_without_seeing_whom_it_would_free() {
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::hunter_dip::enemy_can_free_a_trap;
+
+    let defs = AbilityDefinitions::default();
+    let hunter = Entity::from_raw(0);
+    let fields_dispeller = |enemies: &[CombatantInfo]| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        for e in enemies {
+            snap.combatants.insert(e.entity, e.clone());
+        }
+        enemy_can_free_a_trap(&snap.context_for(hunter), &defs, hunter, 1)
+    };
+    let e = |i: u32, class: CharacterClass| info(Entity::from_raw(i), 2, class);
+
+    use CharacterClass::*;
+    assert!(fields_dispeller(&[e(1, Priest)]), "a lone visible Priest");
+    assert!(fields_dispeller(&[e(1, Paladin), e(2, Warrior)]));
+    assert!(fields_dispeller(&[
+        e(1, Warlock),
+        pet_info(Entity::from_raw(2), 2, Warlock)
+    ]));
+    assert!(!fields_dispeller(&[e(1, Rogue), e(2, Warrior)]));
+    assert!(!fields_dispeller(&[e(1, Shaman), e(2, Mage)]));
+    // A dead dispeller frees nobody.
+    let dead_priest = CombatantInfo {
+        is_alive: false,
+        ..e(1, Priest)
+    };
+    assert!(!fields_dispeller(&[dead_priest, e(2, Warrior)]));
+}

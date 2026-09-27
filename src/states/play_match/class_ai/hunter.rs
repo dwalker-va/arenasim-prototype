@@ -403,12 +403,12 @@ pub fn decide_hunter_action(
     // no other enemy may be within the trigger radius of the landing. When it
     // can't land cleanly, we hold the trap for the dip rather than feed it to
     // the chaser. With no off-target (e.g. 1v1, or the healer IS the kill
-    // target) the only other use is the PEEL on a melee attacking the team
-    // (`freezing_trap_peel`), landed on its path, under the same rule: only when it alone can
-    // spring it, and never on a victim an enemy could free.
-    // Otherwise the trap is HELD. The gates-open throw into the melee lane
-    // (AS-68) was this fallback aimed at a healer 70 yards away, at the
-    // midpoint, with nothing checked.
+    // target) the fallback throws only where NOTHING the enemy fields could
+    // free whoever springs it (`fallback_trap`): then any enemy caught is held
+    // the full duration, and the trap goes on the path of a melee attacking
+    // the team, or into the lane toward the trap candidate. Against a
+    // dispeller the fallback HOLDS — the gates-open throw into the melee lane
+    // (AS-68) was this fallback feeding a stealthed Rogue to its own Priest.
     let off_target = super::hunter_dip::opportunistic_off_target(
         ctx,
         abilities,
@@ -457,34 +457,59 @@ pub fn decide_hunter_action(
             }
         }
         // else: HOLD — the dip will walk us into range to land it on the healer.
-    } else if let Some((trap_target, trap_pos, peel_path_end)) =
-        freezing_trap_peel(ctx, entity, combatant.team, my_pos)
-    {
-        let trap_castable = !combatant
-            .ability_cooldowns
-            .contains_key(&AbilityType::FreezingTrap);
+    } else if let Some(fallback) = fallback_trap(
+        ctx,
+        abilities,
+        entity,
+        combatant.team,
+        my_pos,
+        target_entity,
+    ) {
         let range = abilities
             .get(&AbilityType::FreezingTrap)
             .map_or(0.0, |d| d.range);
-        let landing = peel_landing(trap_pos, peel_path_end, my_pos, range);
-        let hold = match landing {
-            Some(landing) => {
-                fallback_trap_hold(ctx, abilities, entity, combatant.team, trap_target, landing)
+        let throw = fallback.and_then(|(victim, from, to)| {
+            peel_landing(from, to, my_pos, range)
+                .map(|landing| (victim, landing))
+                .ok_or(TRAP_HELD_OUT_OF_RANGE)
+        });
+        match throw {
+            // Two-way CC guard (R8/R9): never aim Freezing Trap at a target the
+            // team has DoT'd — the first tick breaks the incapacitate
+            // (break_on_damage: 0.0). Reactive and binary: skip this tick, no
+            // fallthrough to a second candidate. Only traced when the trap is
+            // otherwise castable — while it's on cooldown, fall through so the
+            // trace records OnCooldown instead of masking it as the DoT guard.
+            Ok((victim, _))
+                if ctx.has_friendly_dots_on_target(victim)
+                    && !combatant
+                        .ability_cooldowns
+                        .contains_key(&AbilityType::FreezingTrap) =>
+            {
+                builder.reject(
+                    AbilityType::FreezingTrap,
+                    RejectionReason::FriendlyBreakableCC,
+                );
             }
-            None => Some(TRAP_HELD_OUT_OF_RANGE),
-        };
-        // Two-way CC guard (R8/R9): never aim Freezing Trap at a target the
-        // team has DoT'd — the first tick breaks the incapacitate
-        // (break_on_damage: 0.0). Reactive and binary: skip this tick, no
-        // fallthrough to a second candidate. While the trap is on cooldown
-        // the trace records OnCooldown, never a guard that would mask it.
-        if ctx.has_friendly_dots_on_target(trap_target) && trap_castable {
-            builder.reject(
-                AbilityType::FreezingTrap,
-                RejectionReason::FriendlyBreakableCC,
-            );
-        } else if let Some(note) = hold {
-            match combatant.ability_cooldowns.get(&AbilityType::FreezingTrap) {
+            Ok((victim, landing)) => {
+                if try_place_trap_at(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    landing,
+                    Some(victim),
+                    TrapType::Freezing,
+                    &ctx.bounds,
+                    &mut builder,
+                ) {
+                    builder.finish();
+                    return true;
+                }
+            }
+            Err(note) => match combatant.ability_cooldowns.get(&AbilityType::FreezingTrap) {
                 Some(remaining) => builder.reject(
                     AbilityType::FreezingTrap,
                     RejectionReason::OnCooldown {
@@ -497,22 +522,7 @@ pub fn decide_hunter_action(
                         note: note.to_string(),
                     },
                 ),
-            }
-        } else if try_place_trap_at(
-            commands,
-            combat_log,
-            abilities,
-            entity,
-            combatant,
-            my_pos,
-            landing.unwrap_or(my_pos),
-            Some(trap_target),
-            TrapType::Freezing,
-            &ctx.bounds,
-            &mut builder,
-        ) {
-            builder.finish();
-            return true;
+            },
         }
     }
 
@@ -570,33 +580,57 @@ pub fn decide_hunter_action(
 // Helper Functions
 // ==============================================================================
 
-/// The Freezing Trap PEEL victim, when there is no off-target to CC: the melee
-/// kite-threat (Warrior/Rogue) nearest the Hunter that is attacking the
-/// Hunter's team, with where it is and where it is going (its target's
-/// position). A peel is the one use of the trap on an enemy the team is
-/// fighting, so nothing else qualifies — a trapped healer or caster the team is
-/// killing only breaks on the team's next hit. Single source of truth shared by
-/// trap placement and the sting's trap-candidate reservation — if these
-/// drifted apart, the sting would either re-open the trap-suppression hole the
-/// reservation closes or be reserved for a trap that never comes.
-fn freezing_trap_peel(
+/// The fallback Freezing Trap, when there is no off-target to CC: the victim
+/// and the path it is expected to run, whose midpoint the trap lands on
+/// ([`peel_landing`]) — or why the trap is held, or `None` when there is no
+/// one to aim at.
+///
+/// It throws only where NOTHING the enemy fields could free whoever springs it
+/// ([`enemy_can_free_a_trap`](super::hunter_dip::enemy_can_free_a_trap)). A
+/// fallback throw cannot choose who walks into it — at gates-open the likeliest
+/// victim is a Rogue the Hunter cannot even see — so it is worth throwing
+/// exactly when every enemy it could catch would stay caught. Then:
+/// - a melee (Warrior/Rogue) attacking the Hunter's team is peeled on its path
+///   to the teammate it is attacking;
+/// - otherwise the trap goes into the lane toward the trap candidate (the
+///   enemy healer, else the kill target) — the lane the enemy runs down.
+///
+/// Single source of truth shared by trap placement and the sting's
+/// trap-candidate reservation — if these drifted apart, the sting would either
+/// re-open the trap-suppression hole the reservation closes or be reserved for
+/// a trap that never comes.
+fn fallback_trap(
     ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     my_team: u8,
     my_pos: Vec3,
-) -> Option<(Entity, Vec3, Vec3)> {
-    let (melee, pos) = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)?;
-    let attacked = ctx
-        .combatants
-        .get(&melee)?
-        .target
-        .and_then(|t| ctx.combatants.get(&t))
-        .filter(|t| t.team == my_team && t.is_alive && !t.is_pet)?;
-    Some((melee, pos, attacked.position))
+    kill_target: Entity,
+) -> Option<Result<(Entity, Vec3, Vec3), &'static str>> {
+    if super::hunter_dip::enemy_can_free_a_trap(ctx, abilities, entity, my_team) {
+        return Some(Err(TRAP_HELD_FREEABLE));
+    }
+    let peel =
+        super::dps_postures::nearest_melee_threat(ctx, entity, my_pos).and_then(|(melee, pos)| {
+            ctx.combatants
+                .get(&melee)?
+                .target
+                .and_then(|t| ctx.combatants.get(&t))
+                .filter(|t| t.team == my_team && t.is_alive && !t.is_pet)
+                .map(|attacked| (melee, pos, attacked.position))
+        });
+    if peel.is_some() {
+        return peel.map(Ok);
+    }
+    let lane = ctx.enemy_healer().unwrap_or(kill_target);
+    ctx.combatants
+        .get(&lane)
+        .filter(|info| info.is_alive)
+        .map(|info| Ok((lane, info.position, my_pos)))
 }
 
-/// Where the peel lands: on the melee's path to the teammate it is attacking —
-/// the midpoint of that path, or, when the midpoint is beyond the trap's
+/// Where the fallback lands: on the victim's path — for a peel, the melee's
+/// path to the teammate it is attacking — at the midpoint of that path, or, when the midpoint is beyond the trap's
 /// placement range, the point of the path nearest it that is in range. `None`
 /// when no point of the path is in range. Not led: the path to its target IS
 /// where the melee is going, whereas its velocity before it starts moving is
@@ -636,31 +670,6 @@ fn peel_landing(
     Some(at(0.5_f32.clamp(lo, hi)))
 }
 
-/// Why the peel Freezing Trap must be HELD this tick, or `None` when the throw
-/// is clean. The same two rules the off-target branch answers to, because a
-/// trap springs on the FIRST enemy to reach it, whoever it was aimed at:
-/// - the victim must be worth trapping — not a non-healer an enemy dispeller
-///   would free in a fraction of a second
-///   ([`trap_victim_worth_it`](super::hunter_dip::trap_victim_worth_it));
-/// - the victim must be the only living enemy close enough to the landing to
-///   spring it ([`victim_springs_it`]).
-fn fallback_trap_hold(
-    ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
-    entity: Entity,
-    my_team: u8,
-    victim: Entity,
-    landing: Vec3,
-) -> Option<&'static str> {
-    if !super::hunter_dip::trap_victim_worth_it(ctx, abilities, entity, victim) {
-        return Some(TRAP_HELD_FREEABLE);
-    }
-    if !victim_springs_it(ctx, my_team, victim, landing) {
-        return Some(TRAP_HELD_CROWDED);
-    }
-    None
-}
-
 /// Is `victim` the only living enemy close enough to `landing` to spring a
 /// trap there? A trap springs on the FIRST enemy inside its radius, whoever it
 /// was aimed at, so every Freezing Trap placement asks this before it throws.
@@ -673,11 +682,10 @@ fn victim_springs_it(ctx: &CombatContext, my_team: u8, victim: Entity, landing: 
     })
 }
 
-/// Trace notes for a held peel Freezing Trap ([`fallback_trap_hold`],
+/// Trace notes for a held fallback Freezing Trap ([`fallback_trap`],
 /// [`peel_landing`]).
-pub const TRAP_HELD_OUT_OF_RANGE: &str = "trap held: the melee's path is out of placement range";
-pub const TRAP_HELD_FREEABLE: &str = "trap held: an enemy would free the victim";
-pub const TRAP_HELD_CROWDED: &str = "trap held: another enemy could spring it first";
+pub const TRAP_HELD_FREEABLE: &str = "trap held: an enemy dispeller would free the victim";
+pub const TRAP_HELD_OUT_OF_RANGE: &str = "trap held: the victim's path is out of placement range";
 
 fn find_nearest_enemy(
     self_entity: Entity,
@@ -1228,8 +1236,17 @@ fn try_serpent_sting(
         .ability_cooldowns
         .contains_key(&AbilityType::FreezingTrap)
         && !ctx.has_friendly_dots_on_target(target_entity);
-    let peel = freezing_trap_peel(ctx, entity, combatant.team, my_pos).map(|(e, _, _)| e);
-    if trap_poised && peel == Some(target_entity) {
+    let fallback = fallback_trap(
+        ctx,
+        abilities,
+        entity,
+        combatant.team,
+        my_pos,
+        target_entity,
+    )
+    .and_then(|f| f.ok())
+    .map(|(victim, _, _)| victim);
+    if trap_poised && fallback == Some(target_entity) {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
