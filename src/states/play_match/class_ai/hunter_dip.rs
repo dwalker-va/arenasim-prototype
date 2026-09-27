@@ -112,12 +112,42 @@ fn dip_target_eligible(ctx: &CombatContext, my_team: u8, target: Entity) -> bool
         && !ctx.has_friendly_dots_on_target(target)
 }
 
+/// Is a Freezing Trap on `victim` worth throwing, by who could undo it? A trap
+/// an enemy can lift is a spent GCD — AS-68 measured the median removal at
+/// 0.28s — so a victim some living teammate of theirs can free
+/// ([`ally_freer`](super::ally_freer), the engine's own removal rules) is
+/// passed over. A HEALER is the exception: trapping the dispeller is the point,
+/// and where a second dispeller stands behind it — a Warlock's Felhunter, a
+/// second healer — the Hunter still takes the healer and lets that dispeller
+/// spend itself undoing it. That is the intended counter being PLAYED; the
+/// Felhunter is never aimed at (pets are not trap candidates), so it is never
+/// engineered out.
+pub fn trap_victim_worth_it(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    owner: Entity,
+    victim: Entity,
+) -> bool {
+    let Some(info) = ctx.combatants.get(&victim) else {
+        return false;
+    };
+    if info.class.is_healer() {
+        return true;
+    }
+    let aura = crate::states::play_match::traps::freezing_trap_aura(owner);
+    super::ally_freer(ctx, abilities, victim, &aura).is_none()
+}
+
 /// Best eligible OFF-target enemy within `reach` that the team is NOT already
-/// killing (so the trap CCs the off-target, not the kill target). Prefers a
-/// healer (highest CC value — shut down enemy sustain) and breaks ties by
-/// nearest. `reach` may be `f32::INFINITY` for the no-walk opportunistic path.
+/// killing (so the trap CCs the off-target, not the kill target), and whose trap
+/// is worth throwing ([`trap_victim_worth_it`]). Prefers a healer (highest CC
+/// value — shut down enemy sustain, and the dispeller itself) and breaks ties
+/// by nearest. `reach` may be `f32::INFINITY` for the no-walk opportunistic
+/// path.
 pub fn dip_target_candidate(
     ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    owner: Entity,
     my_team: u8,
     my_pos: Vec3,
     reach: f32,
@@ -129,6 +159,7 @@ pub fn dip_target_candidate(
         .filter(|e| !focused.contains(&e.entity))
         .filter(|e| dip_target_eligible(ctx, my_team, e.entity))
         .filter(|e| my_pos.distance(e.position) <= reach)
+        .filter(|e| trap_victim_worth_it(ctx, abilities, owner, e.entity))
         .min_by(|a, b| {
             // Healers first (`!is_healer` is false=0 for healers, sorts first),
             // then nearest.
@@ -147,6 +178,7 @@ pub fn dip_target_candidate(
 /// internally, no reach limit. Returns `(entity, position)`.
 pub fn opportunistic_off_target(
     ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     my_team: u8,
     own_target: Option<Entity>,
@@ -156,7 +188,15 @@ pub fn opportunistic_off_target(
     if let Some(own) = own_target {
         focused.insert(own);
     }
-    let target = dip_target_candidate(ctx, my_team, my_pos, f32::INFINITY, &focused)?;
+    let target = dip_target_candidate(
+        ctx,
+        abilities,
+        entity,
+        my_team,
+        my_pos,
+        f32::INFINITY,
+        &focused,
+    )?;
     ctx.combatants
         .get(&target)
         .filter(|i| i.is_alive)
@@ -269,7 +309,15 @@ pub fn evaluate_hunter_dip(
     if let Some(own) = combatant.target {
         focused.insert(own);
     }
-    let Some(target) = dip_target_candidate(ctx, combatant.team, my_pos, reach, &focused) else {
+    let Some(target) = dip_target_candidate(
+        ctx,
+        abilities,
+        entity,
+        combatant.team,
+        my_pos,
+        reach,
+        &focused,
+    ) else {
         return HunterDipPlan::Rotation;
     };
 

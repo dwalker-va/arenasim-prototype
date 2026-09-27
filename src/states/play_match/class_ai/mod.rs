@@ -980,6 +980,86 @@ pub fn ally_dispel_scope(ability_type: AbilityType) -> DispelScope {
     }
 }
 
+/// The movement impairments Master's Call lifts — roots and slows, whatever
+/// their removal class. Shared by the cast (`pet_ai`) and [`ally_removal`].
+pub const MASTERS_CALL_IMPAIRMENTS: [AuraType; 2] = [AuraType::Root, AuraType::MovementSpeedSlow];
+
+/// How an ability frees a TEAMMATE: the removal it performs, and whether its
+/// candidate scan reaches the team's pets.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AllyRemoval {
+    pub scope: DispelScope,
+    pub reaches_pets: bool,
+}
+
+/// The ally removal `ability` performs, or `None` when it frees nobody.
+///
+/// Every `is_dispel` ability is answered here BY NAME —
+/// `ally_removal_names_every_dispel` fails until a new one is classified, so a
+/// dispel cannot join the game without deciding whether it frees allies. The
+/// `reaches_pets` column is the pet rule the casting AIs apply: the healers'
+/// shared scan ([`try_dispel_ally`]) skips pets, Devour Magic's takes any living
+/// teammate. Change it here and both the cast and every question asked of it
+/// (the Hunter's "can anyone free my trap's victim?") move together.
+pub fn ally_removal(ability: AbilityType) -> Option<AllyRemoval> {
+    match ability {
+        AbilityType::DispelMagic | AbilityType::PaladinCleanse => Some(AllyRemoval {
+            scope: ally_dispel_scope(ability),
+            reaches_pets: false,
+        }),
+        AbilityType::DevourMagic => Some(AllyRemoval {
+            scope: ally_dispel_scope(ability),
+            reaches_pets: true,
+        }),
+        AbilityType::MastersCall => Some(AllyRemoval {
+            scope: DispelScope::Impairments(MASTERS_CALL_IMPAIRMENTS.to_vec()),
+            reaches_pets: false,
+        }),
+        // Strips an ENEMY's buff; frees nobody.
+        AbilityType::Purge => None,
+        _ => None,
+    }
+}
+
+/// Could `freer` lift `aura` off its teammate `victim`? Asked of the freer's own
+/// kit (a pet's by its pet type, anyone else's by class) through
+/// [`ally_removal`] and the removal scope `process_dispels` applies — the
+/// engine's rules, not a list of classes. A unit never frees itself: whatever
+/// `aura` is, the question is whether a THIRD party can.
+pub fn can_free_ally(
+    abilities: &AbilityDefinitions,
+    freer: &CombatantInfo,
+    victim: &CombatantInfo,
+    aura: &Aura,
+) -> bool {
+    if freer.entity == victim.entity || freer.team != victim.team || !freer.is_alive {
+        return false;
+    }
+    abilities
+        .iter()
+        .filter(|(_, def)| match freer.pet_type {
+            Some(pet) => def.pet == Some(pet),
+            None => def.class == freer.class && def.pet.is_none(),
+        })
+        .filter_map(|(ability, _)| ally_removal(*ability))
+        .any(|r| (r.reaches_pets || !victim.is_pet) && r.scope.takes(aura))
+}
+
+/// The first living teammate of `victim` in this view that could free it from
+/// `aura` ([`can_free_ally`]), if any.
+pub fn ally_freer(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    victim: Entity,
+    aura: &Aura,
+) -> Option<Entity> {
+    let victim_info = ctx.combatants.get(&victim)?;
+    ctx.combatants
+        .values()
+        .find(|freer| can_free_ally(abilities, freer, victim_info, aura))
+        .map(|freer| freer.entity)
+}
+
 /// Shared dispel logic used by Priest (Dispel Magic) and Paladin (Cleanse).
 ///
 /// Finds the ally with the highest priority dispellable debuff and casts
@@ -1050,13 +1130,18 @@ pub fn try_dispel_ally(
     }
 
     let scope = ally_dispel_scope(ability_type);
+    let reaches_pets = ally_removal(ability_type).is_some_and(|r| r.reaches_pets);
 
     // Find ally with highest priority dispellable debuff
     let mut best_candidate: Option<(Entity, i32)> = None;
 
     for (e, info) in ctx.combatants.iter() {
-        // Must be alive ally, skip pets (Felhunter handles its own dispels)
-        if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
+        // Must be alive ally; pets only where this dispel reaches them
+        // (`ally_removal` — the healers' dispels do not).
+        if info.team != combatant.team
+            || info.current_health <= 0.0
+            || (info.is_pet && !reaches_pets)
+        {
             continue;
         }
 
@@ -1398,6 +1483,45 @@ mod dispel_reach_tests {
             );
             assert_eq!(removes(&rend), physical, "{ability:?} vs Rend");
         }
+    }
+
+    /// Every `is_dispel` ability is classified by [`ally_removal`] BY NAME, and
+    /// the classification is pinned: the named set is asserted EQUAL to the
+    /// config's dispels, so a new dispel fails here until someone decides
+    /// whether it frees allies, and a renamed one cannot fall to the `_` arm.
+    #[test]
+    fn ally_removal_names_every_dispel() {
+        let defs = AbilityDefinitions::default();
+        let mut dispels: Vec<AbilityType> = defs
+            .iter()
+            .filter(|(_, def)| def.is_dispel)
+            .map(|(ability, _)| *ability)
+            .collect();
+        dispels.sort_by_key(|a| format!("{a:?}"));
+        assert_eq!(
+            dispels,
+            vec![
+                AbilityType::DevourMagic,
+                AbilityType::DispelMagic,
+                AbilityType::MastersCall,
+                AbilityType::PaladinCleanse,
+                AbilityType::Purge,
+            ],
+            "a dispel was added or renamed: classify it in `ally_removal`"
+        );
+        let freeing: Vec<(AbilityType, bool)> = dispels
+            .iter()
+            .filter_map(|a| ally_removal(*a).map(|r| (*a, r.reaches_pets)))
+            .collect();
+        assert_eq!(
+            freeing,
+            vec![
+                (AbilityType::DevourMagic, true),
+                (AbilityType::DispelMagic, false),
+                (AbilityType::MastersCall, false),
+                (AbilityType::PaladinCleanse, false),
+            ]
+        );
     }
 
     /// Only the Cleanse reaches poison. Scans the whole ability config so a new

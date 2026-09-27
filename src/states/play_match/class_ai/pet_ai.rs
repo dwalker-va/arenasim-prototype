@@ -834,7 +834,7 @@ pub(crate) fn execute_masters_call(
         log_prefix: "[MASTERS_CALL]",
         caster_class: CharacterClass::Hunter,
         heal_on_success: None,
-        scope: DispelScope::Impairments(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
+        scope: DispelScope::Impairments(super::MASTERS_CALL_IMPAIRMENTS.to_vec()),
     });
 
     commands.spawn((

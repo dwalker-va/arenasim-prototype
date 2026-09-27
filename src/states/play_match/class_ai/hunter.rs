@@ -105,19 +105,23 @@ pub fn decide_hunter_action(
             // Lead a moving target into its path; drop directly on a planted one.
             let landing =
                 super::hunter_dip::trap_lead_landing(ctx, target, my_pos).unwrap_or(my_pos);
-            if try_place_trap_at(
-                commands,
-                combat_log,
-                abilities,
-                entity,
-                combatant,
-                my_pos,
-                landing,
-                Some(target),
-                TrapType::Freezing,
-                &ctx.bounds,
-                &mut builder,
-            ) {
+            // Same clean-landing rule as every other placement: a lead that
+            // carries the landing onto another enemy waits for the next tick.
+            if victim_springs_it(ctx, combatant.team, target, landing)
+                && try_place_trap_at(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    landing,
+                    Some(target),
+                    TrapType::Freezing,
+                    &ctx.bounds,
+                    &mut builder,
+                )
+            {
                 builder.finish();
                 commands.entity(entity).try_insert(completed_state);
                 emit_dip_complete(decision_trace, ctx, target, my_pos);
@@ -392,16 +396,22 @@ pub fn decide_hunter_action(
     }
 
     // Freezing Trap. Preferred use is CC on the OFF-target enemy healer (the
-    // one the team is NOT killing) — but a placed trap triggers on the first
-    // enemy in radius, so we aim at the healer's POSITION (not the midpoint) and
-    // HOLD unless the healer itself will trigger it: it must be in throw range
-    // and no other enemy may be within the trigger radius of the landing. When
-    // it can't land cleanly, we hold the trap for the dip rather than feed it to
-    // the chaser. With no off-target healer (e.g. 1v1, or the healer IS the kill
-    // target) we fall back to the legacy peel: trap the candidate at the
-    // midpoint so the Hunter keeps its melee-peel in healer-less matchups.
+    // one the team is NOT killing, and the dispeller who would otherwise free
+    // any other victim) — but a placed trap triggers on the first enemy in
+    // radius, so we aim at the healer's POSITION (not the midpoint) and HOLD
+    // unless the healer itself will trigger it: it must be in throw range and
+    // no other enemy may be within the trigger radius of the landing. When it
+    // can't land cleanly, we hold the trap for the dip rather than feed it to
+    // the chaser. With no off-target (e.g. 1v1, or the healer IS the kill
+    // target) the only other use is the PEEL on a melee attacking the team
+    // (`freezing_trap_peel`), landed on its path, under the same rule: only when it alone can
+    // spring it, and never on a victim an enemy could free.
+    // Otherwise the trap is HELD. The gates-open throw into the melee lane
+    // (AS-68) was this fallback aimed at a healer 70 yards away, at the
+    // midpoint, with nothing checked.
     let off_target = super::hunter_dip::opportunistic_off_target(
         ctx,
+        abilities,
         entity,
         combatant.team,
         combatant.target,
@@ -416,12 +426,7 @@ pub fn decide_hunter_action(
             super::hunter_dip::trap_lead_landing(ctx, healer, my_pos).unwrap_or(healer_pos);
         // No other living enemy close enough to the landing to beat the target
         // to the trigger.
-        let healer_triggers = !ctx.combatants.values().any(|other| {
-            other.team != combatant.team
-                && other.is_alive
-                && other.entity != healer
-                && other.position.distance(landing) <= TRAP_TRIGGER_RADIUS
-        });
+        let healer_triggers = victim_springs_it(ctx, combatant.team, healer, landing);
         if plant_close && healer_triggers {
             // Two-way CC guard (R8/R9): a friendly DoT on the healer pops the
             // incap on the first tick — skip (only when the trap is castable).
@@ -452,44 +457,62 @@ pub fn decide_hunter_action(
             }
         }
         // else: HOLD — the dip will walk us into range to land it on the healer.
-    } else {
-        let trap_target = freezing_trap_candidate(ctx, target_entity);
-        if let Some(trap_target_info) = ctx
-            .combatants
-            .get(&trap_target)
-            .filter(|info| info.is_alive)
-        {
-            // Two-way CC guard (R8/R9): never aim Freezing Trap at a target the
-            // team has DoT'd — the first tick breaks the incapacitate
-            // (break_on_damage: 0.0). Reactive and binary: skip this tick, no
-            // fallthrough to a second candidate. Only traced when the trap is
-            // otherwise castable — while it's on cooldown, fall through so the
-            // trace records OnCooldown instead of masking it as the DoT guard.
-            if ctx.has_friendly_dots_on_target(trap_target)
-                && !combatant
-                    .ability_cooldowns
-                    .contains_key(&AbilityType::FreezingTrap)
-            {
-                builder.reject(
-                    AbilityType::FreezingTrap,
-                    RejectionReason::FriendlyBreakableCC,
-                );
-            } else if try_place_trap_at(
-                commands,
-                combat_log,
-                abilities,
-                entity,
-                combatant,
-                my_pos,
-                (my_pos + trap_target_info.position) / 2.0,
-                Some(trap_target),
-                TrapType::Freezing,
-                &ctx.bounds,
-                &mut builder,
-            ) {
-                builder.finish();
-                return true;
+    } else if let Some((trap_target, trap_pos, peel_path_end)) =
+        freezing_trap_peel(ctx, entity, combatant.team, my_pos)
+    {
+        let trap_castable = !combatant
+            .ability_cooldowns
+            .contains_key(&AbilityType::FreezingTrap);
+        let range = abilities
+            .get(&AbilityType::FreezingTrap)
+            .map_or(0.0, |d| d.range);
+        let landing = peel_landing(trap_pos, peel_path_end, my_pos, range);
+        let hold = match landing {
+            Some(landing) => {
+                fallback_trap_hold(ctx, abilities, entity, combatant.team, trap_target, landing)
             }
+            None => Some(TRAP_HELD_OUT_OF_RANGE),
+        };
+        // Two-way CC guard (R8/R9): never aim Freezing Trap at a target the
+        // team has DoT'd — the first tick breaks the incapacitate
+        // (break_on_damage: 0.0). Reactive and binary: skip this tick, no
+        // fallthrough to a second candidate. While the trap is on cooldown
+        // the trace records OnCooldown, never a guard that would mask it.
+        if ctx.has_friendly_dots_on_target(trap_target) && trap_castable {
+            builder.reject(
+                AbilityType::FreezingTrap,
+                RejectionReason::FriendlyBreakableCC,
+            );
+        } else if let Some(note) = hold {
+            match combatant.ability_cooldowns.get(&AbilityType::FreezingTrap) {
+                Some(remaining) => builder.reject(
+                    AbilityType::FreezingTrap,
+                    RejectionReason::OnCooldown {
+                        remaining: *remaining,
+                    },
+                ),
+                None => builder.reject(
+                    AbilityType::FreezingTrap,
+                    RejectionReason::PreconditionUnmet {
+                        note: note.to_string(),
+                    },
+                ),
+            }
+        } else if try_place_trap_at(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            landing.unwrap_or(my_pos),
+            Some(trap_target),
+            TrapType::Freezing,
+            &ctx.bounds,
+            &mut builder,
+        ) {
+            builder.finish();
+            return true;
         }
     }
 
@@ -547,13 +570,114 @@ pub fn decide_hunter_action(
 // Helper Functions
 // ==============================================================================
 
-/// The entity Freezing Trap wants: the enemy healer, falling back to the kill
-/// target. Single source of truth shared by trap placement and the sting's
-/// trap-candidate reservation — if these drifted apart, the sting would
-/// silently re-open the trap-suppression hole the reservation closes.
-fn freezing_trap_candidate(ctx: &CombatContext, fallback: Entity) -> Entity {
-    ctx.enemy_healer().unwrap_or(fallback)
+/// The Freezing Trap PEEL victim, when there is no off-target to CC: the melee
+/// kite-threat (Warrior/Rogue) nearest the Hunter that is attacking the
+/// Hunter's team, with where it is and where it is going (its target's
+/// position). A peel is the one use of the trap on an enemy the team is
+/// fighting, so nothing else qualifies — a trapped healer or caster the team is
+/// killing only breaks on the team's next hit. Single source of truth shared by
+/// trap placement and the sting's trap-candidate reservation — if these
+/// drifted apart, the sting would either re-open the trap-suppression hole the
+/// reservation closes or be reserved for a trap that never comes.
+fn freezing_trap_peel(
+    ctx: &CombatContext,
+    entity: Entity,
+    my_team: u8,
+    my_pos: Vec3,
+) -> Option<(Entity, Vec3, Vec3)> {
+    let (melee, pos) = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)?;
+    let attacked = ctx
+        .combatants
+        .get(&melee)?
+        .target
+        .and_then(|t| ctx.combatants.get(&t))
+        .filter(|t| t.team == my_team && t.is_alive && !t.is_pet)?;
+    Some((melee, pos, attacked.position))
 }
+
+/// Where the peel lands: on the melee's path to the teammate it is attacking —
+/// the midpoint of that path, or, when the midpoint is beyond the trap's
+/// placement range, the point of the path nearest it that is in range. `None`
+/// when no point of the path is in range. Not led: the path to its target IS
+/// where the melee is going, whereas its velocity before it starts moving is
+/// only its facing — and leading by that at 70 yards puts the trap beside the
+/// lane it is about to run down. (1v1 vs Warrior this is the old midpoint
+/// throw pulled in to range, and it springs 10/10.)
+fn peel_landing(
+    victim_pos: Vec3,
+    victim_target_pos: Vec3,
+    my_pos: Vec3,
+    range: f32,
+) -> Option<Vec3> {
+    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+    let (from, to, me) = (flat(victim_pos), flat(victim_target_pos), flat(my_pos));
+    let path = to - from;
+    let at = |t: f32| from + path * t;
+    if at(0.5).distance(me) <= range {
+        return Some(at(0.5));
+    }
+    // |from + path*t - me|^2 = range^2, solved for the in-range interval of t.
+    let rel = from - me;
+    let (qa, qb, qc) = (
+        path.dot(path),
+        2.0 * rel.dot(path),
+        rel.dot(rel) - range * range,
+    );
+    let disc = qb * qb - 4.0 * qa * qc;
+    if qa <= f32::EPSILON || disc < 0.0 {
+        return None;
+    }
+    let root = disc.sqrt();
+    let (lo, hi) = ((-qb - root) / (2.0 * qa), (-qb + root) / (2.0 * qa));
+    let (lo, hi) = (lo.max(0.0), hi.min(1.0));
+    if lo > hi {
+        return None;
+    }
+    Some(at(0.5_f32.clamp(lo, hi)))
+}
+
+/// Why the peel Freezing Trap must be HELD this tick, or `None` when the throw
+/// is clean. The same two rules the off-target branch answers to, because a
+/// trap springs on the FIRST enemy to reach it, whoever it was aimed at:
+/// - the victim must be worth trapping — not a non-healer an enemy dispeller
+///   would free in a fraction of a second
+///   ([`trap_victim_worth_it`](super::hunter_dip::trap_victim_worth_it));
+/// - the victim must be the only living enemy close enough to the landing to
+///   spring it ([`victim_springs_it`]).
+fn fallback_trap_hold(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    my_team: u8,
+    victim: Entity,
+    landing: Vec3,
+) -> Option<&'static str> {
+    if !super::hunter_dip::trap_victim_worth_it(ctx, abilities, entity, victim) {
+        return Some(TRAP_HELD_FREEABLE);
+    }
+    if !victim_springs_it(ctx, my_team, victim, landing) {
+        return Some(TRAP_HELD_CROWDED);
+    }
+    None
+}
+
+/// Is `victim` the only living enemy close enough to `landing` to spring a
+/// trap there? A trap springs on the FIRST enemy inside its radius, whoever it
+/// was aimed at, so every Freezing Trap placement asks this before it throws.
+fn victim_springs_it(ctx: &CombatContext, my_team: u8, victim: Entity, landing: Vec3) -> bool {
+    !ctx.combatants.values().any(|other| {
+        other.team != my_team
+            && other.is_alive
+            && other.entity != victim
+            && other.position.distance(landing) <= TRAP_TRIGGER_RADIUS
+    })
+}
+
+/// Trace notes for a held peel Freezing Trap ([`fallback_trap_hold`],
+/// [`peel_landing`]).
+pub const TRAP_HELD_OUT_OF_RANGE: &str = "trap held: the melee's path is out of placement range";
+pub const TRAP_HELD_FREEABLE: &str = "trap held: an enemy would free the victim";
+pub const TRAP_HELD_CROWDED: &str = "trap held: another enemy could spring it first";
 
 fn find_nearest_enemy(
     self_entity: Entity,
@@ -1104,7 +1228,8 @@ fn try_serpent_sting(
         .ability_cooldowns
         .contains_key(&AbilityType::FreezingTrap)
         && !ctx.has_friendly_dots_on_target(target_entity);
-    if trap_poised && freezing_trap_candidate(ctx, target_entity) == target_entity {
+    let peel = freezing_trap_peel(ctx, entity, combatant.team, my_pos).map(|(e, _, _)| e);
+    if trap_poised && peel == Some(target_entity) {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
@@ -1562,4 +1687,85 @@ fn dispatch_predicates_for_damaging(
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RANGE: f32 = 30.0;
+
+    /// The peel lands on the melee's path: the midpoint when it is in range.
+    #[test]
+    fn peel_lands_at_the_midpoint_of_the_path_when_in_range() {
+        let landing = peel_landing(
+            Vec3::new(20.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            RANGE,
+        )
+        .unwrap();
+        assert!(
+            landing.distance(Vec3::new(10.0, 0.0, 0.0)) < 1e-4,
+            "{landing}"
+        );
+    }
+
+    /// At the gates the melee is 70 yards out and its midpoint 35 — beyond
+    /// placement range. The landing is pulled in along the SAME line (its path
+    /// to the Hunter), not led off it by a facing-only velocity.
+    #[test]
+    fn a_distant_melee_is_peeled_on_its_path_at_placement_range() {
+        let landing = peel_landing(
+            Vec3::new(35.0, 1.0, -3.0),
+            Vec3::new(-35.0, 1.0, -3.0),
+            Vec3::new(-35.0, 1.0, -3.0),
+            RANGE,
+        )
+        .unwrap();
+        assert!(
+            landing.distance(Vec3::new(-5.0, 0.0, -3.0)) < 1e-3,
+            "{landing}"
+        );
+    }
+
+    /// A melee attacking a teammate far from the Hunter: the landing is the
+    /// in-range point of ITS path nearest the midpoint, or nothing at all.
+    #[test]
+    fn a_peel_on_a_teammate_stays_on_the_melee_path_or_holds() {
+        let me = Vec3::ZERO;
+        // Path from (40, 0, 10) to (40, 0, -10): its nearest point to me is 40
+        // out, so no point of it is in range.
+        assert_eq!(
+            peel_landing(
+                Vec3::new(40.0, 0.0, 10.0),
+                Vec3::new(40.0, 0.0, -10.0),
+                me,
+                RANGE
+            ),
+            None
+        );
+        // Path from (50, 0, 0) to (10, 0, 0): midpoint 30 out is in range.
+        let mid = peel_landing(
+            Vec3::new(50.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 0.0),
+            me,
+            RANGE,
+        )
+        .unwrap();
+        assert!(mid.distance(Vec3::new(30.0, 0.0, 0.0)) < 1e-4, "{mid}");
+        // Path from (60, 0, 0) to (20, 0, 0): midpoint 40 out; nearest in-range
+        // point on the path is 30 out.
+        let pulled = peel_landing(
+            Vec3::new(60.0, 0.0, 0.0),
+            Vec3::new(20.0, 0.0, 0.0),
+            me,
+            RANGE,
+        )
+        .unwrap();
+        assert!(
+            pulled.distance(Vec3::new(30.0, 0.0, 0.0)) < 1e-3,
+            "{pulled}"
+        );
+    }
 }

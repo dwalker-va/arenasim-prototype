@@ -1315,3 +1315,113 @@ fn team_hp_advantage_zero_when_self_absent() {
         0.0
     );
 }
+
+// ============================================================================
+// Freezing Trap — who can free its victim (AS-125)
+// ============================================================================
+
+/// Who can lift a Freezing Trap off a teammate, asked of EVERY class and of
+/// the Felhunter through the engine's own removal rules (`can_free_ally`), and
+/// asserted as named sets. The Hunter's trap AI holds a trap whose victim an
+/// enemy could free, so this table is what decides where traps go: a class
+/// joining the non-pet row without anyone deciding it should would silently
+/// stop every Hunter trapping its teammates.
+///
+/// The pet row is the AS-129 seam: today only the Felhunter reaches a pet, so
+/// a trapped Felhunter is freed by nobody (it cannot act while trapped). Make
+/// the healers' dispels reach pets and this row, not the Hunter AI, changes.
+#[test]
+fn who_can_free_a_freezing_trap() {
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::can_free_ally;
+    use arenasim::states::play_match::traps::freezing_trap_aura;
+
+    let defs = AbilityDefinitions::default();
+    let hunter = Entity::from_raw(99);
+    let aura = freezing_trap_aura(hunter);
+    let victim = info(Entity::from_raw(1), 2, CharacterClass::Warrior);
+    let pet_victim = pet_info(Entity::from_raw(2), 2, CharacterClass::Warlock);
+
+    let freers_of = |victim: &CombatantInfo| {
+        let mut freers: Vec<String> = CharacterClass::all()
+            .iter()
+            .map(|class| info(Entity::from_raw(10), 2, *class))
+            .chain(std::iter::once(pet_info(
+                Entity::from_raw(11),
+                2,
+                CharacterClass::Warlock,
+            )))
+            .filter(|freer| can_free_ally(&defs, freer, victim, &aura))
+            .map(|freer| match freer.pet_type {
+                Some(pet) => pet.name().to_string(),
+                None => freer.class.name().to_string(),
+            })
+            .collect();
+        freers.sort();
+        freers
+    };
+
+    assert_eq!(
+        freers_of(&victim),
+        vec!["Felhunter", "Paladin", "Priest"],
+        "who frees a trapped teammate"
+    );
+    assert_eq!(
+        freers_of(&pet_victim),
+        vec!["Felhunter"],
+        "who frees a trapped pet"
+    );
+
+    // Nobody frees themselves, and nobody frees an ENEMY.
+    let priest = info(Entity::from_raw(1), 2, CharacterClass::Priest);
+    assert!(!can_free_ally(&defs, &priest, &priest, &aura));
+    let enemy_priest = info(Entity::from_raw(3), 1, CharacterClass::Priest);
+    assert!(!can_free_ally(&defs, &enemy_priest, &victim, &aura));
+}
+
+/// The Hunter's "is this trap worth throwing" rule, over the team shapes the
+/// AS-125 ruling names. A non-healer is worth a trap only when no teammate of
+/// its can free it; a healer — the dispeller the trap is FOR — is always worth
+/// one, including beside a Felhunter that could devour it (the intended
+/// counter is left to play out, never engineered out).
+#[test]
+fn a_trap_is_worth_throwing_only_where_nobody_frees_it_or_at_the_healer() {
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::hunter_dip::trap_victim_worth_it;
+
+    let defs = AbilityDefinitions::default();
+    let hunter = Entity::from_raw(0);
+    let (a, b, felhunter) = (
+        Entity::from_raw(1),
+        Entity::from_raw(2),
+        Entity::from_raw(3),
+    );
+
+    let worth = |team: &[(Entity, CharacterClass)], with_felhunter: bool| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        for (e, class) in team {
+            snap.combatants.insert(*e, info(*e, 2, *class));
+        }
+        if with_felhunter {
+            snap.combatants
+                .insert(felhunter, pet_info(felhunter, 2, CharacterClass::Warlock));
+        }
+        let ctx = snap.context_for(hunter);
+        team.iter()
+            .map(|(e, _)| trap_victim_worth_it(&ctx, &defs, hunter, *e))
+            .collect::<Vec<_>>()
+    };
+
+    use CharacterClass::*;
+    // The dispeller is the target; the DPS it would free is not.
+    assert_eq!(worth(&[(a, Priest), (b, Warrior)], false), [true, false]);
+    // Nobody on the team can free anybody: both are fair game.
+    assert_eq!(worth(&[(a, Rogue), (b, Warrior)], false), [true, true]);
+    // The Shaman frees nobody (Purge strips enemy buffs), so its DPS is fair.
+    assert_eq!(worth(&[(a, Shaman), (b, Warrior)], false), [true, true]);
+    // Warlock + healer: two dispellers. The healer stays the target; the
+    // Warlock, freed by both, does not.
+    assert_eq!(worth(&[(a, Priest), (b, Warlock)], true), [true, false]);
+    // Warlock + Rogue: the Felhunter frees the Rogue.
+    assert_eq!(worth(&[(a, Rogue), (b, Warlock)], true), [false, false]);
+}

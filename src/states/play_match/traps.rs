@@ -13,6 +13,33 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use bevy::prelude::*;
 use std::f32::consts::PI;
 
+/// The aura a sprung Freezing Trap lands on its victim. The one definition:
+/// `trap_system` applies it, and the Hunter AI asks the engine's removal rules
+/// whether an enemy could lift THIS aura before it throws (`can_free_ally`), so
+/// the question and the answer cannot drift apart.
+pub fn freezing_trap_aura(owner: Entity) -> Aura {
+    Aura {
+        effect_type: AuraType::Incapacitate,
+        duration: 8.0,
+        magnitude: 0.0,
+        tick_interval: 0.0,
+        time_until_next_tick: 0.0,
+        caster: Some(owner),
+        ability_name: "Freezing Trap".to_string(),
+        break_on_damage_threshold: 0.0, // Breaks on ANY damage
+        accumulated_damage: 0.0,
+        fear_direction: (0.0, 0.0),
+        fear_direction_timer: 0.0,
+        spell_school: Some(SpellSchool::Frost),
+        applied_this_frame: false,
+        backlash_damage: None,
+        dr_category_override: None,
+        dispel_type: DispelType::Auto,
+        compound: None,
+        source_item: None,
+    }
+}
+
 /// Single system handling the full trap lifecycle:
 /// 1. Decrement arm_timer, consider armed when timer hits 0
 /// 2. For armed traps: check proximity against enemy combatants and pets
@@ -105,26 +132,7 @@ pub fn trap_system(
                     commands.spawn((
                         AuraPending {
                             target: target_entity,
-                            aura: Aura {
-                                effect_type: AuraType::Incapacitate,
-                                duration: 8.0,
-                                magnitude: 0.0,
-                                tick_interval: 0.0,
-                                time_until_next_tick: 0.0,
-                                caster: Some(trap.owner),
-                                ability_name: "Freezing Trap".to_string(),
-                                break_on_damage_threshold: 0.0, // Breaks on ANY damage
-                                accumulated_damage: 0.0,
-                                fear_direction: (0.0, 0.0),
-                                fear_direction_timer: 0.0,
-                                spell_school: Some(SpellSchool::Frost),
-                                applied_this_frame: false,
-                                backlash_damage: None,
-                                dr_category_override: None,
-                                dispel_type: DispelType::Auto,
-                                compound: None,
-                                source_item: None,
-                            },
+                            aura: freezing_trap_aura(trap.owner),
                         },
                         PlayMatchEntity,
                     ));

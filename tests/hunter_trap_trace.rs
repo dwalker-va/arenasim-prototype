@@ -53,17 +53,14 @@ fn run_trace(cfg: HeadlessMatchConfig) -> String {
 #[test]
 fn a_placed_freezing_trap_records_the_enemy_it_was_aimed_at() {
     // Three comps so the assertion spans the branches that place a Freezing
-    // Trap: the opportunistic off-target drop, the dip cast, and the legacy
-    // midpoint fallback. A comp is only useful here if it actually throws one,
-    // which the non-vacuity floor below enforces.
+    // Trap: the dip cast and opportunistic off-target drop on a healer (both
+    // double-healer and single-healer), and the peel on a melee. A comp is only
+    // useful here if it actually throws one, which the non-vacuity floor below
+    // enforces.
     let comps: [(&[&str], &[&str], u64); 3] = [
-        (&["Hunter", "Priest"], &["Rogue", "Priest"], 0),
-        (&["Hunter", "Priest"], &["Paladin", "Warrior"], 0),
-        (
-            &["Hunter", "Priest", "Warrior"],
-            &["Mage", "Priest", "Rogue"],
-            0,
-        ),
+        (&["Hunter", "Priest"], &["Priest", "Paladin"], 0),
+        (&["Hunter", "Priest"], &["Warrior", "Priest"], 4),
+        (&["Hunter"], &["Warrior"], 0),
     ];
 
     let mut traps_traced = 0usize;
@@ -134,5 +131,163 @@ fn a_placed_freezing_trap_records_the_enemy_it_was_aimed_at() {
         traps_traced >= 3,
         "only {traps_traced} Freezing Traps traced across three comps — the \
          probe went vacuous, so its pass says nothing about the instrumentation"
+    );
+}
+
+/// One traced match that also keeps its `.txt` log, for probes that pair an
+/// aim (trace) with an outcome (the `[TRAP] ... triggers on ...` log line).
+fn run_trace_and_log(mut cfg: HeadlessMatchConfig) -> (Vec<serde_json::Value>, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("match.txt");
+    let trace = dir.path().join("trace.jsonl");
+    cfg.output_path = Some(log.to_string_lossy().into_owned());
+    run_headless_match_with(
+        cfg,
+        false,
+        Some(TraceConfig {
+            output_path: trace.clone(),
+        }),
+    )
+    .expect("headless match");
+    let events = std::fs::read_to_string(&trace)
+        .expect("read trace")
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    (events, std::fs::read_to_string(&log).expect("read log"))
+}
+
+fn hunter_trap_events(events: &[serde_json::Value]) -> impl Iterator<Item = &serde_json::Value> {
+    events.iter().filter(|v| {
+        v.get("kind").and_then(|k| k.as_str()) == Some("ability_decision")
+            && v.pointer("/actor/class").and_then(|c| c.as_str()) == Some("Hunter")
+    })
+}
+
+/// AS-125 — the opener no longer throws the trap into the melee's lane.
+///
+/// These are AS-68's three miss comps. In each, the Hunter's team is killing
+/// the enemy healer and the enemy Rogue opens from stealth, so at gates-open
+/// there was no off-target and the legacy fallback lobbed the trap at the
+/// midpoint between the Hunter and the healer 70 yards away — arena centre,
+/// where the Rogue ran over it and the healer dispelled it 0.3s later, every
+/// seed. Now the trap is HELD: no Freezing Trap is chosen in the opening, and
+/// the trace names why — the one melee there is to peel is a Rogue its own
+/// healer would free.
+#[test]
+fn the_opener_holds_the_trap_instead_of_throwing_it_into_the_melee_lane() {
+    use arenasim::states::play_match::class_ai::hunter::TRAP_HELD_FREEABLE;
+
+    let comps: [(&[&str], &[&str]); 3] = [
+        (&["Hunter", "Priest"], &["Rogue", "Priest"]),
+        (&["Hunter", "Warrior"], &["Rogue", "Priest"]),
+        (
+            &["Hunter", "Priest", "Warrior"],
+            &["Mage", "Priest", "Rogue"],
+        ),
+    ];
+    const OPENING_SECS: f64 = 15.0;
+
+    let mut held_as_freeable = 0usize;
+    for (team1, team2) in comps {
+        let mut cfg = config(team1, team2, 0);
+        cfg.max_duration_secs = 30.0;
+        let (events, _) = run_trace_and_log(cfg);
+        for v in hunter_trap_events(&events) {
+            let t = v.get("sim_time").and_then(|x| x.as_f64()).unwrap();
+            if v.pointer("/outcome/ability").and_then(|a| a.as_str()) == Some("FreezingTrap") {
+                assert!(
+                    t > OPENING_SECS,
+                    "{team1:?} vs {team2:?}: Freezing Trap thrown {t:.1}s after the \
+                     gates — the opening throw into the melee lane is back"
+                );
+            }
+            held_as_freeable += v
+                .get("candidates")
+                .and_then(|c| c.as_array())
+                .into_iter()
+                .flatten()
+                .filter(|c| {
+                    c.get("ability").and_then(|a| a.as_str()) == Some("FreezingTrap")
+                        && c.pointer("/reason/PreconditionUnmet/note")
+                            .and_then(|n| n.as_str())
+                            == Some(TRAP_HELD_FREEABLE)
+                })
+                .count();
+        }
+    }
+    // Non-vacuity: a match in which the trap was never even considered would
+    // pass the no-throw assertion for the wrong reason.
+    assert!(
+        held_as_freeable > 0,
+        "no Freezing Trap was held for a freeable victim across the three comps — \
+         the probe no longer exercises the hold"
+    );
+}
+
+/// AS-125 — the held trap goes to the dispeller, cleanly.
+///
+/// Hunter+Priest vs Warrior+Priest: the Hunter's team kills the Warrior, so the
+/// enemy Priest is the off-target and the one enemy able to free anyone. The
+/// Hunter holds the trap until it can land it with the Priest the only enemy
+/// near the landing, and then it springs on the Priest. Seeds 3 and 4 each
+/// throw one; every trap thrown is asserted aimed at the Priest AND sprung on
+/// it.
+#[test]
+fn the_held_trap_springs_on_the_dispeller_it_was_aimed_at() {
+    let mut thrown = 0usize;
+    for seed in [3u64, 4] {
+        let mut cfg = config(&["Hunter", "Priest"], &["Warrior", "Priest"], seed);
+        cfg.max_duration_secs = 60.0;
+        let (events, log) = run_trace_and_log(cfg);
+
+        let mut class_of: HashMap<u64, String> = HashMap::new();
+        for v in &events {
+            if let (Some(id), Some(class)) = (
+                v.pointer("/actor/entity_id").and_then(|x| x.as_u64()),
+                v.pointer("/actor/class").and_then(|x| x.as_str()),
+            ) {
+                class_of.insert(id, class.to_string());
+            }
+        }
+        let aims: Vec<String> = hunter_trap_events(&events)
+            .filter(|v| {
+                v.pointer("/outcome/ability").and_then(|a| a.as_str()) == Some("FreezingTrap")
+            })
+            .map(|v| {
+                let id = v
+                    .pointer("/outcome/target_id")
+                    .and_then(|x| x.as_u64())
+                    .unwrap();
+                class_of.get(&id).cloned().unwrap_or_default()
+            })
+            .collect();
+        let sprung: Vec<&str> = log
+            .lines()
+            .filter(|l| l.contains("Freezing Trap triggers on"))
+            .collect();
+
+        assert!(
+            aims.iter().all(|c| c == "Priest"),
+            "seed {seed}: Freezing Trap aimed at {aims:?}, not the enemy Priest"
+        );
+        assert_eq!(
+            sprung.len(),
+            aims.len(),
+            "seed {seed}: {} thrown, {} sprung: {sprung:?}",
+            aims.len(),
+            sprung.len()
+        );
+        assert!(
+            sprung
+                .iter()
+                .all(|l| l.contains("triggers on Team 2 Priest")),
+            "seed {seed}: a trap aimed at the Priest sprang on someone else: {sprung:?}"
+        );
+        thrown += aims.len();
+    }
+    assert!(
+        thrown >= 2,
+        "only {thrown} Freezing Traps thrown across the pinned seeds — the probe went vacuous"
     );
 }
