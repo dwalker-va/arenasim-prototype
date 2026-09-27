@@ -512,15 +512,14 @@ fn try_frost_nova(
 
     // Carry each target's pet-aware combat-log id so the root-CC log below
     // attributes correctly when Frost Nova catches an enemy pet.
-    let mut frost_nova_targets: Vec<(Entity, Vec3, crate::combat::log::CombatantId)> = Vec::new();
-    for (enemy_entity, info) in ctx.combatants.iter() {
-        if info.team != combatant.team && info.is_alive {
-            let distance = my_pos.distance(info.position);
-            if distance <= nova_def.range {
-                frost_nova_targets.push((*enemy_entity, info.position, info.log_id()));
-            }
-        }
-    }
+    // Victims come from `area_victims`, not `ctx.combatants`: the Nova was
+    // DECIDED on a seen enemy above, but an area does not aim, so a stealthed
+    // Rogue standing in it is caught — and revealed by the damage.
+    let frost_nova_targets: Vec<(Entity, Vec3, crate::combat::log::CombatantId)> = ctx
+        .area_victims(combatant.team, my_pos, nova_def.range)
+        .into_iter()
+        .map(|info| (info.entity, info.position, info.log_id()))
+        .collect();
 
     let self_auras = ctx
         .active_auras

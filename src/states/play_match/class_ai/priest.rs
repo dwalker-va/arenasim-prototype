@@ -1110,18 +1110,9 @@ fn any_enemy_focusing(entity: Entity, my_team: u8, ctx: &CombatContext) -> bool 
     ctx.combatants.iter().any(|(e, info)| {
         info.team != my_team
             && info.is_alive
-            && !info.stealthed
             && info.target == Some(entity)
             && !attack_prevented_by_cc(ctx, *e)
     })
-}
-
-/// Any living enemy stealthed — an unaccounted-for opener; standing still in
-/// a long cast is the ideal Cheap Shot victim.
-fn any_enemy_stealthed(my_team: u8, ctx: &CombatContext) -> bool {
-    ctx.combatants
-        .iter()
-        .any(|(_, info)| info.team != my_team && info.is_alive && info.stealthed)
 }
 
 /// The Mana Burn positioning window: `Some(enemy healer position)` when the
@@ -1139,7 +1130,7 @@ fn mana_burn_pull_target(
     if info.current_mana < MANA_BURN_MIN_TARGET_MANA {
         return None;
     }
-    if any_enemy_stealthed(combatant.team, ctx) {
+    if ctx.enemy_hidden() {
         return None;
     }
     if any_enemy_focusing(entity, combatant.team, ctx) {
@@ -1224,7 +1215,7 @@ fn try_mana_burn(
     // gate can't see the opener coming — and a Priest standing still in a
     // long cast is the ideal Cheap Shot victim. Don't hard-cast while an
     // enemy is unaccounted for. (Hard casts only, like the gates above.)
-    if def.cast_time > 0.0 && any_enemy_stealthed(combatant.team, ctx) {
+    if def.cast_time > 0.0 && ctx.enemy_hidden() {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
@@ -1358,15 +1349,14 @@ pub use super::healer_postures::{escape_distance_gained, escape_window};
 // assets/config/movement.ron (RON-first policy).
 
 /// Per-target Psychic Scream dip eligibility (mirrors `hoj_target_eligible`,
-/// keyed to Fear-DR): alive enemy non-pet, not stealthed, not immune, not
-/// Fear-DR-immune.
+/// keyed to Fear-DR): alive enemy non-pet, not immune, not Fear-DR-immune —
+/// and seen, which `ctx.combatants` guarantees for any entry it holds.
 fn scream_dip_target_eligible(ctx: &CombatContext, my_team: u8, target: Entity) -> bool {
     let Some(info) = ctx.combatants.get(&target) else {
         return false;
     };
     info.team != my_team
         && info.current_health > 0.0
-        && !info.stealthed
         && !info.is_pet
         && !ctx.entity_is_immune(target)
         && !ctx.is_dr_immune(target, DRCategory::Fears)
@@ -1495,7 +1485,7 @@ fn scream_dip_should_abort(
         return true; // budget exceeded
     }
     if !scream_dip_target_eligible(ctx, combatant.team, target) {
-        return true; // target dead / immune / DR-immune / stealthed
+        return true; // target dead / immune / DR-immune / unseen
     }
     ctx.alive_allies()
         .into_iter()

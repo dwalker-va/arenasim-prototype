@@ -90,8 +90,8 @@ pub fn rotation_hoj_allowed(posture: Posture, enemy_healer_alive: bool) -> bool 
 }
 
 /// Per-target Hammer of Justice eligibility — the exact filter set the
-/// rotation's target scan applies (alive enemy non-pet, not stealthed, not
-/// damage-immune, not stun-DR-immune). Shared by the rotation, the DIP entry
+/// rotation's target scan applies (alive enemy non-pet, not damage-immune, not
+/// stun-DR-immune; unseen enemies are never in `ctx.combatants`). Shared by the rotation, the DIP entry
 /// predicate, and the DIP arrival/abort re-checks so the dip can never walk
 /// toward a guaranteed-rejected cast (R8).
 pub fn hoj_target_eligible(ctx: &CombatContext, my_team: u8, target: Entity) -> bool {
@@ -100,7 +100,6 @@ pub fn hoj_target_eligible(ctx: &CombatContext, my_team: u8, target: Entity) -> 
     };
     info.team != my_team
         && info.current_health > 0.0
-        && !info.stealthed
         && !info.is_pet
         && !ctx.entity_is_immune(target)
         && !ctx.is_dr_immune(target, DRCategory::Stuns)
@@ -252,7 +251,7 @@ pub fn decide_paladin_action(
     }
 
     // Priority 3: Emergency healing via Holy Shock.
-    if has_emergency_target(combatant.team, ctx.combatants) {
+    if has_emergency_target(combatant.team, &ctx.combatants) {
         if try_holy_shock_heal(
             commands,
             combat_log,
@@ -933,9 +932,7 @@ fn try_holy_shock_damage(
     let damage_target = ctx
         .combatants
         .iter()
-        .filter(|(_, info)| {
-            info.team != combatant.team && info.current_health > 0.0 && !info.stealthed
-        })
+        .filter(|(_, info)| info.team != combatant.team && info.current_health > 0.0)
         .filter(|(e, _)| !ctx.entity_is_immune(**e))
         .find_map(|(e, info)| {
             if my_pos.distance(info.position) <= HOLY_SHOCK_DAMAGE_RANGE {

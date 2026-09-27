@@ -206,12 +206,9 @@ pub fn acquire_targets(
                 )
             };
 
-        // Visibility check: can see enemy if:
-        // 1. Enemy is not stealthed, OR
-        // 2. I have Shadow Sight buff, OR
-        // 3. Enemy has Shadow Sight buff (they're revealed by picking it up)
+        // Visibility: the shared rule every class AI's view is built from.
         let can_see = |stealthed: bool, enemy_has_shadow_sight: bool| -> bool {
-            !stealthed || i_have_shadow_sight || enemy_has_shadow_sight
+            class_ai::stealth_visible(stealthed, i_have_shadow_sight, enemy_has_shadow_sight)
         };
 
         // Check if current target is still valid (alive, on enemy team, visible, and not immune)
@@ -510,7 +507,7 @@ pub fn acquire_targets(
                         CandidateStatus::Rejected,
                         Some(TargetRejectionReason::Immune),
                     );
-                } else if *stealthed && !i_have_shadow_sight && !enemy_ss {
+                } else if !can_see(*stealthed, *enemy_ss) {
                     tbuilder.score(
                         *enemy_entity,
                         *enemy_class,

@@ -378,7 +378,7 @@ pub fn dip_should_abort(
         return true; // budget exceeded
     }
     if !hoj_target_eligible(ctx, combatant.team, target) {
-        return true; // target dead / immune / DR-immune / stealthed
+        return true; // target dead / immune / DR-immune / unseen
     }
     // Teammate HP dive (AE3).
     ctx.alive_allies()

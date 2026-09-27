@@ -31,6 +31,7 @@ pub mod warlock;
 pub mod warrior;
 
 use bevy::prelude::*;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use super::abilities::AbilityType;
@@ -161,15 +162,32 @@ impl CombatantInfo {
 /// This struct provides a read-only view of the game state that AI modules
 /// can use to make decisions without directly accessing ECS queries.
 ///
-/// The `combatants` map contains ALL entities including pets.
+/// The `combatants` map is what the deciding unit can PERCEIVE: every ally
+/// and pet, and every enemy it can see. An enemy it cannot see (a stealthed
+/// Rogue, absent Shadow Sight — see [`stealth_visible`]) is simply not in the
+/// map, so no class AI, posture scorer or pet can target, peel, kite or
+/// trigger on it, whatever it forgets to check. The only way to build a
+/// context is [`CombatContext::new`], which applies that filter; the struct
+/// has private fields precisely so a literal cannot skip it.
+///
 /// Use `alive_enemies()` / `alive_allies()` for primary-combatant-only queries.
 /// When iterating `combatants` directly, filter with `!info.is_pet`
 /// unless the ability should affect pets (e.g., AoE damage, auto-attacks).
 pub struct CombatContext<'a> {
-    /// Map of entity to combatant info (per-frame snapshot).
+    /// The combatants this unit can perceive (see the struct docs), per-frame
+    /// snapshot. Borrowed straight from the snapshot whenever nothing is
+    /// hidden from this observer, so the filter costs nothing once every
+    /// Rogue is revealed.
     /// `BTreeMap` is used (not `HashMap`) so iteration order is deterministic
     /// across runs — required for seeded replays. See `CombatSnapshot` docs.
-    pub combatants: &'a BTreeMap<Entity, CombatantInfo>,
+    pub combatants: Cow<'a, BTreeMap<Entity, CombatantInfo>>,
+    /// Every combatant in the arena, hidden ones included. Private: it is
+    /// read only by the few questions that are about the arena rather than
+    /// about what this unit sees — area-effect victims, team HP totals, and
+    /// whether an enemy is unaccounted for.
+    roster: &'a BTreeMap<Entity, CombatantInfo>,
+    /// Living enemies in `roster` but not in `combatants`.
+    hidden_enemies: usize,
     /// Map of entity to their active auras
     pub active_auras: &'a BTreeMap<Entity, Vec<Aura>>,
     /// Map of entity to their DR tracker (for immunity queries)
@@ -198,6 +216,89 @@ pub struct CombatContext<'a> {
 }
 
 impl<'a> CombatContext<'a> {
+    /// Build the context `self_entity` decides from. `roster` is every
+    /// combatant in the arena; the context's `combatants` is the subset
+    /// `self_entity` (on `observer_team`) can perceive — every ally, and every
+    /// enemy [`stealth_visible`] lets it see. `observer_team` is passed rather
+    /// than looked up because a pet decides from a roster it is not in.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        self_entity: Entity,
+        observer_team: u8,
+        roster: &'a BTreeMap<Entity, CombatantInfo>,
+        active_auras: &'a BTreeMap<Entity, Vec<Aura>>,
+        dr_trackers: &'a BTreeMap<Entity, DRTracker>,
+        ability_cooldowns: &'a BTreeMap<Entity, BTreeMap<AbilityType, f32>>,
+        obstacles: &'a [ObstacleVolume],
+        bounds: ArenaBounds,
+        ai_profile: AiProfile,
+    ) -> Self {
+        let has_shadow_sight = |entity: Entity| {
+            active_auras
+                .get(&entity)
+                .is_some_and(|auras| auras.iter().any(|a| a.effect_type == AuraType::ShadowSight))
+        };
+        let observer_has_shadow_sight = has_shadow_sight(self_entity);
+        let hidden = |info: &CombatantInfo| {
+            info.team != observer_team
+                && !stealth_visible(
+                    info.stealthed,
+                    observer_has_shadow_sight,
+                    has_shadow_sight(info.entity),
+                )
+        };
+        let hidden_enemies = roster
+            .values()
+            .filter(|info| info.is_alive && hidden(info))
+            .count();
+        let combatants = if roster.values().any(hidden) {
+            Cow::Owned(
+                roster
+                    .iter()
+                    .filter(|(_, info)| !hidden(info))
+                    .map(|(entity, info)| (*entity, *info))
+                    .collect(),
+            )
+        } else {
+            Cow::Borrowed(roster)
+        };
+        Self {
+            combatants,
+            roster,
+            hidden_enemies,
+            active_auras,
+            dr_trackers,
+            ability_cooldowns,
+            obstacles,
+            bounds,
+            ai_profile,
+            self_entity,
+        }
+    }
+
+    /// True when a living enemy is in the arena that this unit cannot see —
+    /// an opener is unaccounted for. The one perception question that is
+    /// answered from the roster: you know the enemy team, not where it is.
+    pub fn enemy_hidden(&self) -> bool {
+        self.hidden_enemies > 0
+    }
+
+    /// Every living enemy of `team` (pets included) physically within
+    /// `radius` of `center`, SEEN OR NOT, in deterministic entity order.
+    ///
+    /// For RESOLVING an area effect, never for deciding to cast one: an area
+    /// does not aim, so a stealthed Rogue standing in a Frost Nova is caught by
+    /// it (and revealed by its damage — `apply_damage_with_absorb`). Decide
+    /// from `combatants`; resolve from here.
+    pub fn area_victims(&self, team: u8, center: Vec3, radius: f32) -> Vec<&CombatantInfo> {
+        self.roster
+            .values()
+            .filter(|info| {
+                info.team != team && info.is_alive && center.distance(info.position) <= radius
+            })
+            .collect()
+    }
+
     /// Get info about self
     pub fn self_info(&self) -> Option<&CombatantInfo> {
         self.combatants.get(&self.self_entity)
@@ -350,7 +451,9 @@ impl<'a> CombatContext<'a> {
         let Some(my_team) = self.self_info().map(|i| i.team) else {
             return 0.0;
         };
-        let sums = team_hp_sums(self.combatants);
+        // The roster, not the view: a hidden Rogue's health is still on the
+        // enemy team's side of the ledger.
+        let sums = team_hp_sums(self.roster);
         let own = sums.get(&my_team).copied().unwrap_or(0.0);
         let enemy: f32 = sums
             .iter()
@@ -360,32 +463,15 @@ impl<'a> CombatContext<'a> {
         own - enemy
     }
 
-    /// Check if `entity` currently has a specific aura type.
-    fn entity_has_aura(&self, entity: Entity, aura_type: AuraType) -> bool {
-        self.active_auras
-            .get(&entity)
-            .map(|auras| auras.iter().any(|a| a.effect_type == aura_type))
-            .unwrap_or(false)
-    }
-
-    /// Visibility check mirroring the `can_see` closure in `combat_ai.rs`:
-    /// a stealthed enemy is invisible unless the observer has Shadow Sight,
-    /// or the enemy itself holds Shadow Sight (picking up the buff reveals
-    /// the holder).
-    fn visible_to(&self, observer: Entity, enemy: &CombatantInfo) -> bool {
-        !enemy.stealthed
-            || self.entity_has_aura(observer, AuraType::ShadowSight)
-            || self.entity_has_aura(enemy.entity, AuraType::ShadowSight)
-    }
-
     // ------------------------------------------------------------------
     // Threat predicates (healer postures — R6/R7 trigger and window inputs)
     // ------------------------------------------------------------------
 
     /// Visible enemies whose current target is `me`. Enemy pets count as
     /// threats (`is_pet` entities are included, unlike `alive_enemies()`).
-    /// Stealth-filtered: a stealthed enemy is NOT a threat unless shadow
-    /// sight applies — healers never pre-dodge invisible Rogues.
+    /// Stealth-filtered by construction (`combatants` holds only what `me`
+    /// can see), so healers never pre-dodge invisible Rogues. `me` must be
+    /// the context's own `self_entity` — the view is that unit's perception.
     ///
     /// Iterates the `BTreeMap` snapshot, so the returned order is
     /// deterministic (ascending `Entity`).
@@ -395,16 +481,14 @@ impl<'a> CombatContext<'a> {
         };
         self.combatants
             .values()
-            .filter(|c| {
-                c.team != my_team && c.is_alive && c.target == Some(me) && self.visible_to(me, c)
-            })
+            .filter(|c| c.team != my_team && c.is_alive && c.target == Some(me))
             .collect()
     }
 
     /// Visible alive enemies (pets included) within `radius` of `pos` —
     /// the proximity half of the PRESSURED threat set (an enemy in your face
-    /// is a threat even when it currently targets someone else). Same stealth
-    /// filtering as `enemies_targeting`; same deterministic BTree order.
+    /// is a threat even when it currently targets someone else). Same
+    /// perception view as `enemies_targeting`; same deterministic BTree order.
     pub fn visible_enemies_within(
         &self,
         me: Entity,
@@ -416,12 +500,7 @@ impl<'a> CombatContext<'a> {
         };
         self.combatants
             .values()
-            .filter(|c| {
-                c.team != my_team
-                    && c.is_alive
-                    && pos.distance(c.position) <= radius
-                    && self.visible_to(me, c)
-            })
+            .filter(|c| c.team != my_team && c.is_alive && pos.distance(c.position) <= radius)
             .collect()
     }
 
@@ -594,6 +673,19 @@ pub fn team_hp_sums(combatants: &BTreeMap<Entity, CombatantInfo>) -> BTreeMap<u8
         }
     }
     sums
+}
+
+/// THE stealth visibility rule — the one copy. An enemy is visible unless it
+/// is stealthed, and a stealthed enemy is visible anyway when the observer
+/// holds Shadow Sight or the enemy does (picking up the buff reveals the
+/// holder). Target acquisition (`combat_ai::acquire_targets`) and every class
+/// AI's view ([`CombatContext::new`]) both ask here.
+pub fn stealth_visible(
+    enemy_stealthed: bool,
+    observer_has_shadow_sight: bool,
+    enemy_has_shadow_sight: bool,
+) -> bool {
+    !enemy_stealthed || observer_has_shadow_sight || enemy_has_shadow_sight
 }
 
 /// Press-when-ahead predicate: own team leads by at least the margin. A plain

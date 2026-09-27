@@ -247,6 +247,69 @@ mod tests {
         assert!(auras.auras.is_empty(), "Depleted shield should be removed");
     }
 
+    // Stealth breaks where damage reaches health — the rule is "any damage
+    // except damage fully absorbed", decided here in the one funnel.
+
+    fn stealthed_rogue(health: f32) -> Combatant {
+        let mut rogue = Combatant::new(2, 0, match_config::CharacterClass::Rogue);
+        rogue.max_health = health;
+        rogue.current_health = health;
+        assert!(rogue.stealthed, "a Rogue spawns stealthed");
+        rogue
+    }
+
+    #[test]
+    fn damage_to_health_breaks_stealth() {
+        let mut rogue = stealthed_rogue(100.0);
+        apply_damage_with_absorb(10.0, &mut rogue, None, SpellSchool::Frost);
+        assert!(!rogue.stealthed, "damage that reached health must reveal");
+    }
+
+    #[test]
+    fn partially_absorbed_damage_breaks_stealth() {
+        let mut rogue = stealthed_rogue(100.0);
+        let mut auras = ActiveAuras {
+            auras: vec![create_absorb_aura(20.0, "Power Word: Shield")],
+        };
+        let (to_health, _) =
+            apply_damage_with_absorb(50.0, &mut rogue, Some(&mut auras), SpellSchool::None);
+        assert!(to_health > 0.0);
+        assert!(
+            !rogue.stealthed,
+            "the remainder past the shield must reveal"
+        );
+    }
+
+    #[test]
+    fn fully_absorbed_damage_keeps_stealth() {
+        let mut rogue = stealthed_rogue(100.0);
+        let mut auras = ActiveAuras {
+            auras: vec![create_absorb_aura(50.0, "Power Word: Shield")],
+        };
+        let (to_health, absorbed) =
+            apply_damage_with_absorb(30.0, &mut rogue, Some(&mut auras), SpellSchool::None);
+        assert_eq!((to_health, absorbed), (0.0, 30.0));
+        assert!(
+            rogue.stealthed,
+            "a hit the shield eats entirely must not reveal"
+        );
+    }
+
+    #[test]
+    fn immune_damage_keeps_stealth() {
+        let mut rogue = stealthed_rogue(100.0);
+        let mut immunity = create_absorb_aura(0.0, "Divine Shield");
+        immunity.effect_type = AuraType::DamageImmunity;
+        let mut auras = ActiveAuras {
+            auras: vec![immunity],
+        };
+        apply_damage_with_absorb(30.0, &mut rogue, Some(&mut auras), SpellSchool::Holy);
+        assert!(
+            rogue.stealthed,
+            "damage blocked outright never reaches health"
+        );
+    }
+
     #[test]
     fn test_multiple_shields_stack() {
         let mut target = create_test_combatant(100.0);

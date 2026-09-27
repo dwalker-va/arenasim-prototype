@@ -34,6 +34,12 @@ pub(crate) fn resistance_school_index(school: SpellSchool) -> Option<usize> {
 /// If the target has an Absorb aura, damage is first subtracted from the shield.
 /// Any remaining damage is applied to health. Depleted shields are removed.
 ///
+/// Damage that reaches health breaks stealth. This is the one site every
+/// damage source funnels through — direct hits, auto-attacks, projectiles,
+/// DoT ticks, area effects, backlash — so the break lives here rather than at
+/// each caller. Damage a shield fully absorbs, or that Divine Shield blocks,
+/// never touches health and leaves stealth intact.
+///
 /// # Panics (debug only)
 /// Panics if damage is negative (damage should always be >= 0).
 pub fn apply_damage_with_absorb(
@@ -134,6 +140,10 @@ pub fn apply_damage_with_absorb(
         auras
             .auras
             .retain(|a| !(a.effect_type == AuraType::Absorb && a.magnitude <= 0.0));
+    }
+
+    if remaining_damage > 0.0 {
+        target.stealthed = false;
     }
 
     // Apply remaining damage to health

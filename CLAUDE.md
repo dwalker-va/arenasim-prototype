@@ -362,6 +362,15 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
 4. **Add AI logic** in the appropriate `class_ai/<class>.rs` file:
    - Implement when to use the ability in the class's `decide_action()` method
    - Use `CombatContext` helpers like `ctx.target_info()`, `ctx.has_aura()`, etc.
+   - **Stealth needs no check.** `ctx.combatants` is what the deciding unit can
+     PERCEIVE — a stealthed enemy it cannot see is not in it (`CombatContext::new`
+     builds the view from `stealth_visible`, the one visibility rule), so decide
+     from it freely. The one exception is RESOLVING an area effect: take its
+     victims from `ctx.area_victims(...)`, which includes unseen enemies, because
+     an area does not aim. Damage that reaches health breaks stealth in
+     `apply_damage_with_absorb`; a fully absorbed hit does not.
+     `tests/stealth_enforcement.rs` drives every class AI against a stealthed
+     Rogue.
    - **AI decision trace** — at each predicate gate that rejects this ability,
      call `builder.reject(AbilityType::NewAbility, RejectionReason::...)`
      (use `classify_pre_cast_failure` for `pre_cast_ok` failures). On the
