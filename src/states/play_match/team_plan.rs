@@ -42,7 +42,8 @@ use bevy::prelude::*;
 use std::collections::BTreeMap;
 
 use super::ai_profile::AiProfiles;
-use super::components::{Combatant, MatchCountdown};
+use super::class_ai::stealth_visible;
+use super::components::{ActiveAuras, AuraType, Combatant, MatchCountdown};
 use super::constants::PET_SLOT_BASE;
 use super::map_config::ActiveMapGeometry;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
@@ -234,6 +235,8 @@ pub struct CallCandidate {
     pub slot: u8,
     pub pos: Vec2,
     pub stealthed: bool,
+    /// Holds Shadow Sight — sees stealthed enemies, and is seen while stealthed.
+    pub has_shadow_sight: bool,
     pub is_melee: bool,
     pub is_healer: bool,
     pub is_pet: bool,
@@ -260,9 +263,12 @@ pub struct CallCandidate {
 /// - The reference point is the centroid of our living non-pet MELEE (they are
 ///   the units that must close, so the call minimises their approach); with no
 ///   melee alive, the centroid of the whole living team.
-/// - Stealthed enemies cannot be called — a team call on a unit nobody can see
-///   is an order to stand around. If every enemy is stealthed, there is no call
-///   and per-unit acquisition (which handles Shadow Sight orbs) takes over.
+/// - An enemy nobody on the team can see cannot be called — a team call on a
+///   unit nobody can see is an order to stand around. "Can see" is
+///   [`stealth_visible`], the one rule, asked for the team: a stealthed enemy is
+///   callable when any living teammate holds Shadow Sight, or when it holds the
+///   buff itself. If every enemy is hidden, there is no call and per-unit
+///   acquisition takes over.
 /// - Enemy pets are never called.
 /// - Ties break by (team, slot): deterministic, like every other tie in the
 ///   planner.
@@ -299,9 +305,16 @@ fn centroid(points: impl Iterator<Item = Vec2>) -> Vec2 {
 }
 
 fn choose_from(team: u8, units: &[CallCandidate], reference: Vec2) -> Option<Entity> {
+    let team_has_shadow_sight = units
+        .iter()
+        .any(|u| u.team == team && u.has_shadow_sight);
     units
         .iter()
-        .filter(|u| u.team != team && !u.is_pet && !u.stealthed)
+        .filter(|u| {
+            u.team != team
+                && !u.is_pet
+                && stealth_visible(u.stealthed, team_has_shadow_sight, u.has_shadow_sight)
+        })
         .min_by(|a, b| {
             // Healers first, then distance, then the deterministic tie-break.
             b.is_healer
@@ -504,7 +517,7 @@ pub fn teams_in_contact(own: &[Vec2], enemies: &[Vec2], engage_radius: f32) -> b
 /// pet dying does not change what a team is trying to do.
 pub fn update_team_plans(
     countdown: Res<MatchCountdown>,
-    combatants: Query<(Entity, &Combatant, &Transform)>,
+    combatants: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>)>,
     geometry: Option<Res<ActiveMapGeometry>>,
     profile: Option<Res<AiProfiles>>,
     mut plans: ResMut<TeamPlans>,
@@ -524,13 +537,18 @@ pub fn update_team_plans(
     // costs one O(n*m) pass over at most six units per frame.
     let living: Vec<CallCandidate> = combatants
         .iter()
-        .filter(|(_, c, _)| c.is_alive())
-        .map(|(e, c, t)| CallCandidate {
+        .filter(|(_, c, _, _)| c.is_alive())
+        .map(|(e, c, t, auras)| CallCandidate {
             entity: e,
             team: c.team,
             slot: c.slot,
             pos: Vec2::new(t.translation.x, t.translation.z),
             stealthed: c.stealthed,
+            has_shadow_sight: auras.is_some_and(|a| {
+                a.auras
+                    .iter()
+                    .any(|aura| aura.effect_type == AuraType::ShadowSight)
+            }),
             is_melee: c.class.is_melee(),
             is_healer: c.class.is_healer(),
             is_pet: c.slot >= PET_SLOT_BASE,
@@ -580,7 +598,7 @@ pub fn update_team_plans(
     // a debugger. Sorted so the fingerprint does not depend on query order.
     let mut roster: Vec<(u8, u8)> = combatants
         .iter()
-        .map(|(_, c, _)| c)
+        .map(|(_, c, _, _)| c)
         .filter(|c| c.is_alive() && c.slot < PET_SLOT_BASE)
         .map(|c| (c.team, c.slot))
         .collect();
@@ -618,7 +636,7 @@ pub fn update_team_plans(
 
         let classes: Vec<CharacterClass> = combatants
             .iter()
-            .map(|(_, c, _)| c)
+            .map(|(_, c, _, _)| c)
             .filter(|c| c.team == team && c.is_alive() && c.slot < PET_SLOT_BASE)
             .map(|c| c.class)
             .collect();
@@ -1244,6 +1262,7 @@ mod tests {
             slot,
             pos: Vec2::new(x, z),
             stealthed: false,
+            has_shadow_sight: false,
             is_melee: false,
             is_healer: false,
             is_pet: false,
@@ -1304,6 +1323,51 @@ mod tests {
         );
         units[2].stealthed = true;
         assert_eq!(choose_kill_target(1, &units), None, "all hidden: no call");
+    }
+
+    /// Shadow Sight on EITHER side makes a stealthed enemy callable — the same
+    /// rule per-unit acquisition and every class AI's view use. A teammate
+    /// holding it sees for the team; an enemy holding it is revealed by it.
+    #[test]
+    fn shadow_sight_makes_a_stealthed_enemy_callable() {
+        let hidden = CallCandidate {
+            stealthed: true,
+            ..cand(10, 2, 0, 5.0, 0.0)
+        };
+        let melee = CallCandidate {
+            is_melee: true,
+            ..cand(1, 1, 0, 0.0, 0.0)
+        };
+        let far = cand(11, 2, 1, 20.0, 0.0);
+        assert_eq!(choose_kill_target(1, &[melee, hidden, far]), Some(e(11)));
+
+        let seeing_ally = CallCandidate {
+            has_shadow_sight: true,
+            ..cand(2, 1, 1, 0.0, 40.0)
+        };
+        assert_eq!(
+            choose_kill_target(1, &[melee, seeing_ally, hidden, far]),
+            Some(e(10)),
+            "a teammate's Shadow Sight sees for the team"
+        );
+        let holder = CallCandidate {
+            has_shadow_sight: true,
+            ..hidden
+        };
+        assert_eq!(
+            choose_kill_target(1, &[melee, holder, far]),
+            Some(e(10)),
+            "the enemy holding Shadow Sight is revealed by it"
+        );
+        let enemy_sees = CallCandidate {
+            has_shadow_sight: true,
+            ..far
+        };
+        assert_eq!(
+            choose_kill_target(1, &[melee, hidden, enemy_sees]),
+            Some(e(11)),
+            "an ENEMY's Shadow Sight sees nothing for us"
+        );
     }
 
     /// Pets are never the call — killing a pet wins nothing — and a dead team

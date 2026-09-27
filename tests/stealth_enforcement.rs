@@ -30,6 +30,7 @@ use arenasim::states::play_match::class_ai::{
     self, CombatContext, CombatantInfo, QueuedAoeDamage, QueuedInstantAttack,
 };
 use arenasim::states::play_match::decision_trace::{AbilityOutcome, DecisionTrace, EventPayload};
+use arenasim::states::play_match::team_solve;
 use arenasim::states::play_match::{
     AbilityDefinitions, Aura, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
     DispelType, GameRng, HolyShockDamagePending, InstantAbilityFired, MovementConfig,
@@ -173,6 +174,26 @@ fn shadow_sight_on_either_side_reveals() {
     let ctx = arena.ctx_for(MAGE);
     assert_eq!(
         perceived(&ctx),
+        vec![MAGE, ALLY_ROGUE, ENEMY_ROGUE, ENEMY_WARRIOR]
+    );
+}
+
+#[test]
+fn the_team_solve_positions_around_exactly_what_its_unit_sees() {
+    // The solve reads the view and adds no stealth filter of its own: without
+    // Shadow Sight the hidden Rogue is absent, with it the Rogue is there.
+    let solved = |arena: &Arena| -> Vec<Entity> {
+        team_solve::world_from_context(&arena.ctx_for(MAGE), 40.0, 12.0, None)
+            .units
+            .iter()
+            .map(|u| u.entity)
+            .collect()
+    };
+    let mut arena = arena();
+    assert_eq!(solved(&arena), vec![MAGE, ALLY_ROGUE, ENEMY_WARRIOR]);
+    arena.auras.insert(MAGE, vec![shadow_sight()]);
+    assert_eq!(
+        solved(&arena),
         vec![MAGE, ALLY_ROGUE, ENEMY_ROGUE, ENEMY_WARRIOR]
     );
 }

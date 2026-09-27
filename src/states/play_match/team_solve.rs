@@ -923,22 +923,20 @@ fn can_cast_heal(
 /// Build a [`SolveWorld`] from the AI's per-frame view.
 ///
 /// Living units only, in the `BTreeMap` order `CombatContext` already
-/// guarantees, so the solve's inputs are deterministic without a sort. Stealthed
-/// enemies are EXCLUDED: the solve must not position around information the team
-/// does not have, and every other threat consumer in this codebase filters them
-/// the same way.
+/// guarantees, so the solve's inputs are deterministic without a sort. The
+/// units are `ctx.combatants` — what this unit PERCEIVES — so an enemy it cannot
+/// see is already absent and the solve never positions around information the
+/// team does not have; one it can see through Shadow Sight is present.
 pub fn world_from_context(
     ctx: &super::class_ai::CombatContext,
     heal_range: f32,
     threat_radius: f32,
     kill_target: Option<Entity>,
 ) -> SolveWorld {
-    let my_team = ctx.self_info().map(|c| c.team);
     let units = ctx
         .combatants
         .values()
         .filter(|c| c.is_alive)
-        .filter(|c| Some(c.team) == my_team || !c.stealthed)
         .map(|c| SolveUnit {
             entity: c.entity,
             team: c.team,
