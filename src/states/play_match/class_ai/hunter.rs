@@ -834,6 +834,29 @@ fn try_place_trap_at(
         return false;
     }
 
+    // Clamp to octagonal arena bounds (midpoint can land outside corners)
+    let position = crate::states::play_match::combat_core::clamp_to_arena(bounds, position);
+
+    // The trap's configured `range` is a real limit on where it lands. Traps
+    // are PLACED AT RANGE on purpose — the later-expansion Trap Launcher
+    // model, not Classic's drop-at-feet, which left traps underpowered — so do
+    // not "restore" a feet-only drop here. A landing beyond range is REFUSED,
+    // not pulled in: the placement was chosen for where it lands (a lane, a
+    // lead on a victim), and a clamped landing is a different decision nobody
+    // made. The caller holds and asks again next tick, closer. Measured on the
+    // clamped landing, planar, exactly as `spawn_trap` measures its throw.
+    let distance = Vec3::new(my_pos.x, 0.0, my_pos.z).distance(Vec3::new(position.x, 0.0, position.z));
+    if distance > def.range {
+        builder.reject(
+            ability,
+            RejectionReason::OutOfRange {
+                distance,
+                max: def.range,
+            },
+        );
+        return false;
+    }
+
     // Trace the INTENDED victim, not just the ability. A trap is placed at a
     // POSITION and springs on whoever reaches it first, so the entity the
     // Hunter aimed at is not recoverable from the outcome — without this the
@@ -842,8 +865,6 @@ fn try_place_trap_at(
     // Frost Trap dropped at the Hunter's own feet, which aims at nobody.
     builder.choose(ability, intended, true);
 
-    // Clamp to octagonal arena bounds (midpoint can land outside corners)
-    let position = crate::states::play_match::combat_core::clamp_to_arena(bounds, position);
     spawn_trap(
         commands,
         entity,

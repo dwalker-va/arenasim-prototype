@@ -365,3 +365,84 @@ fn a_one_v_one_trap_is_thrown_at_whoever_nobody_can_free() {
         assert!(thrown >= 3, "Hunter vs {enemy}: only {thrown} traps across 3 seeds");
     }
 }
+
+/// AS-125 — no trap is ever thrown farther than its configured range.
+///
+/// Traps are placed at range (the Trap Launcher model), up to the ability's
+/// `range` in `abilities.ron`, and never beyond it: the fallback's lane throw
+/// used to land ~35yd out against a 30yd range. Asserted on GEOMETRY, per
+/// throw: every trap in flight, from where the Hunter stood to where it lands,
+/// read off the running match. A trap closer than `TRAP_LAUNCH_MIN_RANGE` is
+/// dropped without flying, so the static check below covers those.
+#[test]
+fn no_trap_lands_beyond_its_range() {
+    use arenasim::headless::run_headless_match_observed;
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::components::TrapType;
+    use arenasim::states::play_match::constants::TRAP_LAUNCH_MIN_RANGE;
+    use std::collections::BTreeSet;
+
+    let defs = AbilityDefinitions::default();
+    let range = |t: TrapType| {
+        defs.get_unchecked(&match t {
+            TrapType::Freezing => AbilityType::FreezingTrap,
+            TrapType::Frost => AbilityType::FrostTrap,
+        })
+        .range
+    };
+    for t in [TrapType::Freezing, TrapType::Frost] {
+        assert!(
+            TRAP_LAUNCH_MIN_RANGE <= range(t),
+            "a {t:?} dropped without flying could land beyond its range"
+        );
+    }
+
+    // Comps whose lane throw opens the match (it landed ~35yd out before the
+    // range was enforced), plus the aimed healer trap.
+    let comps: [(&[&str], &[&str]); 5] = [
+        (&["Hunter"], &["Warrior"]),
+        (&["Hunter"], &["Warlock"]),
+        (&["Hunter", "Priest"], &["Rogue", "Warrior"]),
+        (&["Hunter", "Priest"], &["Shaman", "Rogue"]),
+        (&["Hunter", "Priest"], &["Priest", "Paladin"]),
+    ];
+    let mut seen: BTreeSet<(usize, u64, bevy::prelude::Entity)> = BTreeSet::new();
+    let mut kinds: BTreeSet<&str> = BTreeSet::new();
+    for (i, (team1, team2)) in comps.iter().enumerate() {
+        for seed in 0u64..2 {
+            let mut cfg = config(team1, team2, seed);
+            cfg.max_duration_secs = 90.0;
+            run_headless_match_observed(cfg, true, None, |frame| {
+                for launch in &frame.trap_launches {
+                    if !seen.insert((i, seed, launch.entity)) {
+                        continue;
+                    }
+                    let flat = |v: bevy::prelude::Vec3| bevy::prelude::Vec3::new(v.x, 0.0, v.z);
+                    let thrown = flat(launch.origin).distance(flat(launch.landing));
+                    assert!(
+                        thrown <= range(launch.trap_type) + 1e-3,
+                        "{team1:?} vs {team2:?} seed {seed}: {:?} thrown {thrown:.2}yd \
+                         against a {:.0}yd range",
+                        launch.trap_type,
+                        range(launch.trap_type)
+                    );
+                    kinds.insert(match launch.trap_type {
+                        TrapType::Freezing => "Freezing",
+                        TrapType::Frost => "Frost",
+                    });
+                }
+            })
+            .expect("headless match");
+        }
+    }
+    // Non-vacuity: a probe that saw no throw proves nothing about range. Only
+    // Freezing Trap flies in practice — the Frost Trap peel lands at the
+    // Hunter's feet or between it and a melee inside 20yd, so under
+    // `TRAP_LAUNCH_MIN_RANGE` — and the static check above covers that drop.
+    assert!(
+        seen.len() >= 8 && kinds.contains("Freezing"),
+        "only {} thrown traps observed ({kinds:?}) — the range probe went vacuous",
+        seen.len()
+    );
+}
