@@ -671,7 +671,7 @@ pub fn combat_auto_attack(
                 // FloatingCombatText, the consuming systems live in
                 // rendering/effects.rs and are registered only in states/mod.rs.
                 if let Some(&(_, _, _, _, attacker_kind)) = combatant_info.get(&attacker_entity) {
-                    commands.spawn((
+                    let mut swing = commands.spawn((
                         AutoAttackSwing {
                             attacker: attacker_entity,
                             target: target_entity,
@@ -684,6 +684,12 @@ pub fn combat_auto_attack(
                         },
                         PlayMatchEntity,
                     ));
+                    // The empowered swing, keyed on the same `has_bonus` that
+                    // names it "Heroic Strike" in the log below. A component
+                    // on the same marker, so no extra entity is spawned.
+                    if has_bonus {
+                        swing.insert(HeroicStrikeSwing);
+                    }
                 }
 
                 // Log the attack with structured data

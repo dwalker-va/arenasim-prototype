@@ -41,9 +41,10 @@
 //! explicitly named bespoke branch. GENERIC visuals count (a stock
 //! school-impact row is a visual); a channel every ability shares regardless
 //! of which one was used (the auto-attack swing, floating combat text, the
-//! team-frame icon) does not, because it cannot tell the player the ability
-//! landed. Heroic Strike is the example: its bonus rides the ordinary swing,
-//! so casting it changes nothing on screen.
+//! team-frame icon, the casting-orb sputter) does not, because it cannot tell
+//! the player the ability landed. Heroic Strike was the example until its
+//! empowered swing was marked (`HeroicStrikeSwing`) and dressed: its bonus
+//! rides the ordinary swing, which alone would change nothing on screen.
 
 use std::collections::BTreeSet;
 
@@ -54,7 +55,8 @@ use arenasim::states::play_match::components::{
     AuraType, CurseKind, HealImpact, InstantAbilityFired, SchoolImpact, TotemElement,
 };
 use arenasim::states::play_match::{
-    bolt_kind_for, curse_spec, hunter_shot_for, DotStateVisual, SlowTint,
+    bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, DotStateVisual,
+    InterruptLanding, SlowTint,
 };
 
 use AbilityType::*;
@@ -327,14 +329,17 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
         LightningBolt => Some("forked-arc strike (casting.rs → lightning_bolt.rs)"),
         Immolate => Some("landing flame burst (casting.rs → flame.rs)"),
         DrainLife => Some("drain beam (drain_life.rs, keyed on the channel's ability)"),
+        // The empowered swing carries `HeroicStrikeSwing` (auto_attack.rs);
+        // heroic_strike.rs lays its trail and lands it through the client
+        // landing router, so the router must answer for it.
+        HeroicStrike if client_landing_style(a).is_some() => {
+            Some("trail + decisivestrike landing (HeroicStrikeSwing → heroic_strike.rs)")
+        }
         _ => None,
     }
 }
 
-const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
-    HeroicStrike,
-    "no card yet — its bonus rides the ordinary auto-attack swing",
-)];
+const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
 
 #[test]
 fn direct_damage_finds_every_member() {
@@ -646,17 +651,25 @@ fn is_interrupt(_: AbilityType, c: &AbilityConfig) -> bool {
 
 const INTERRUPT_MEMBERS: &[AbilityType] = &[Kick, Pummel, SpellLock, WindShear];
 
-/// The INTERRUPTER's side. The victim's side is the casting-orb sputter
-/// (`casting_orbs.rs`), which every interrupt shares and which cannot tell
-/// the player who interrupted — so it does not count here.
+/// The VICTIM's side: the mark the interrupt lands on the chest of the unit
+/// whose cast it cut (`InterruptedBy` → `client_landings.rs`). That is what
+/// tells an interrupt from a fizzle — the casting-orb sputter, which both
+/// share, cannot — so it is the landing every member must reach. Routed
+/// through `InterruptLanding::for_ability`, and the landing router must then
+/// actually draw it.
 fn interrupt_visual(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
-    InstantAbilityFired::is_spawned_for(a).then_some("interrupt stroke (instant_ability.rs)")
+    let landing = InterruptLanding::for_ability(a)?;
+    client_landing_style(a)?;
+    Some(match landing {
+        InterruptLanding::Shockwave => "shockwave on the victim's chest (client_landings.rs)",
+        InterruptLanding::Seal => "closing rune seal on the victim's chest (client_landings.rs)",
+        InterruptLanding::WindShockwave => {
+            "wind-blue shockwave on the victim's chest (client_landings.rs)"
+        }
+    })
 }
 
-const INTERRUPT_KNOWN_SILENT: &[(AbilityType, &str)] = &[
-    (SpellLock, "AS-137 (interrupts)"),
-    (WindShear, "AS-137 (interrupts)"),
-];
+const INTERRUPT_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
 
 #[test]
 fn interrupt_finds_every_member() {
@@ -671,6 +684,37 @@ fn interrupt_lands_nothing_silently() {
         interrupt_visual,
         INTERRUPT_KNOWN_SILENT,
     );
+}
+
+/// The user's per-interrupt decisions, pinned on the router: Kick and Pummel
+/// share the client's shockwave, Spell Lock takes Counterspell's seal, and
+/// Wind Shear the shockwave in wind-blue. A wrong route fails here even
+/// though it is not silent.
+#[test]
+fn each_interrupt_lands_its_decided_mark() {
+    assert_eq!(
+        InterruptLanding::for_ability(Kick),
+        Some(InterruptLanding::Shockwave)
+    );
+    assert_eq!(
+        InterruptLanding::for_ability(Pummel),
+        Some(InterruptLanding::Shockwave)
+    );
+    assert_eq!(
+        InterruptLanding::for_ability(SpellLock),
+        Some(InterruptLanding::Seal)
+    );
+    assert_eq!(
+        InterruptLanding::for_ability(WindShear),
+        Some(InterruptLanding::WindShockwave)
+    );
+    // Kick and Pummel keep their weapon strokes on the interrupter's side.
+    for a in [Kick, Pummel] {
+        assert!(
+            InstantAbilityFired::is_spawned_for(a),
+            "{a:?} lost its stroke"
+        );
+    }
 }
 
 // ── the families cover the config ───────────────────────────────────────────

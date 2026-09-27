@@ -28,7 +28,7 @@ use arenasim::states::play_match::{
     animate_body_lean, cleanup_heal_fracture, cleanup_mortal_strike,
     consume_instant_ability_signals, consume_swing_signals, spawn_heal_fracture,
     update_heal_fracture, update_mortal_strike_flash, update_mortal_strike_impacts,
-    update_mortal_strike_sparks, update_mortal_strike_trail, MortalStrikePendingImpact,
+    update_mortal_strike_sparks, update_weapon_trails, MortalStrikePendingImpact,
     MortalStrikeSpark, RefusedHealMote,
 };
 use arenasim::CharacterClass;
@@ -333,7 +333,7 @@ fn the_flourish_expires_without_leaking_entities() {
         Update,
         (
             consume_instant_ability_signals,
-            update_mortal_strike_trail,
+            update_weapon_trails,
             update_mortal_strike_impacts,
             update_mortal_strike_flash,
             update_mortal_strike_sparks,
@@ -370,7 +370,7 @@ fn the_flourish_expires_without_leaking_entities() {
 
     let trails = app
         .world_mut()
-        .query::<&arenasim::states::play_match::MortalStrikeTrail>()
+        .query::<&arenasim::states::play_match::WeaponTrail>()
         .iter(app.world())
         .count();
     let flashes = app

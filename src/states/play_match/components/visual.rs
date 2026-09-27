@@ -44,7 +44,9 @@ pub enum ImpactAnchor {
 /// and `InstantAbilityFired`. Spawned by combat code at the site where the
 /// ability RESOLVES (`process_projectile_hits` for projectiles, the
 /// instant-effect landing in `process_casting` for Mind Blast), so it exists in
-/// both modes like `BoltImpact`; rendered only in graphical mode. Purely
+/// both modes like `BoltImpact`; rendered only in graphical mode. The interrupt
+/// landings and Heroic Strike's are spawned graphical-side instead, off the
+/// markers the sim tags (`InterruptedBy`, `HeroicStrikeSwing`). Purely
 /// cosmetic: it reads combat state, writes none, and draws no `game_rng`.
 #[derive(Component)]
 pub struct SchoolImpact {
@@ -143,8 +145,9 @@ pub struct ImpactRig {
     pub emit_carry: f32,
     /// How many the smoulder has emitted, seeding their scatter.
     pub emitted: u32,
-    /// Fractional particles owed per client emitter (`ImpactStyle::emitters`).
-    pub emitter_carry: [f32; 4],
+    /// Fractional particles owed per client emitter (`ImpactStyle::emitters`),
+    /// one slot per emitter.
+    pub emitter_carry: Vec<f32>,
     /// One colour-ramp palette per client emitter, in emitter order.
     pub palettes: Vec<std::sync::Arc<[Handle<StandardMaterial>]>>,
 }
@@ -1467,6 +1470,16 @@ pub struct AutoAttackSwing {
     pub is_crit: bool,
 }
 
+/// Rides an [`AutoAttackSwing`] marker when the swing carried a queued Heroic
+/// Strike (`next_attack_bonus_damage`), which is otherwise invisible: the bonus
+/// rides the ordinary swing, and until this only the combat-log name knew.
+/// Inserted on the same marker entity in the apply loop, so the sim spawns
+/// nothing extra; read by the graphical `spawn_heroic_strike_flourish`
+/// (`rendering/effects/heroic_strike.rs`) before `consume_swing_signals`
+/// despawns the marker.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct HeroicStrikeSwing;
+
 /// A victim's hit reaction: a short downward compression of the
 /// [`VisualBody`] child, one per landed auto-attack.
 ///
@@ -1686,6 +1699,22 @@ pub struct CastEnding {
     pub kind: CastEndingKind,
 }
 
+/// Rides a [`CastEnding`] marker when an interrupt ABILITY cut the cast
+/// short, naming it and who used it. Spawned on the same marker entity at the
+/// two ability-interrupt sites in `process_interrupts`, and nowhere else: a
+/// cast broken by crowd control or Silence, or one that fizzled, carries none.
+/// Read by the graphical `spawn_interrupt_landings`
+/// (`rendering/effects/client_landings.rs`), which lands the interrupt's mark
+/// on the victim. A component on the existing marker rather than a field of it,
+/// so the sim spawns no extra entity and every other ending site is untouched.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct InterruptedBy {
+    /// The interrupt ability (Kick, Pummel, Spell Lock, Wind Shear).
+    pub ability: AbilityType,
+    /// Who used it.
+    pub interrupter: Entity,
+}
+
 /// Lifecycle phase of a [`CastingOrb`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CastingOrbPhase {
@@ -1808,6 +1837,12 @@ pub enum ParticleFacing {
     Camera,
     /// Lying flat in the ground plane and turning about world up — the rune.
     Flat,
+    /// Facing the camera and turning in the view plane — a seal rune closing
+    /// on the chest (Spell Lock).
+    Seal,
+    /// Facing the camera, its long axis laid along the particle's own flight —
+    /// a ribbon-blur or a streak (Holy Shock).
+    Streak,
 }
 
 /// One particle of a transcribed client emitter
@@ -1826,6 +1861,9 @@ pub struct ClientParticle {
     pub gravity: f32,
     /// Diameter at birth, midlife and death, yards.
     pub size: [f32; 3],
+    /// Where in the life the middle ramp key sits, 0..1 (0.5 for most
+    /// emitters; the source keys some earlier or later).
+    pub mid: f32,
     pub palette: std::sync::Arc<[Handle<StandardMaterial>]>,
     /// The palette step currently on the mesh.
     pub step: usize,

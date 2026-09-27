@@ -257,7 +257,12 @@ pub fn add_core_combat_systems<M, N>(
             pet_ai_system.run_if(decide.clone()),
             ApplyDeferred, // Flush CastingState for interrupt checks
             check_interrupts.run_if(decide.clone()),
-            process_interrupts.run_if(decide.clone()),
+            // Resolution, not decision: it only acts on an `InterruptPending`
+            // something already queued, so it runs wherever combat resolves —
+            // including the Animation Sandbox, whose interrupt previews queue
+            // one against a staged cast. Headless passes always-true for both
+            // conditions, so nothing there moves.
+            process_interrupts,
             process_casting,
             process_channeling,
             move_projectiles,

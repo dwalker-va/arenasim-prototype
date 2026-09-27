@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::ConeAnchor;
 use std::f32::consts::TAU;
 
+use super::client_landings::client_landing_style;
 use super::hunter_shots::{
     hunter_shot_for, particle_rotation, spawn_client_particle, ClientEmitter, EmitterAssets,
 };
@@ -46,7 +47,11 @@ use crate::states::play_match::components::*;
 //   negative gravity for 200-1400ms, a few `lavalump2` embers, and
 //   alpha-blended `toonsmoke16` in violet fading to grey, all over by 2000ms.
 //   Its legacy sphere sat at chest height and expanded; the source lingers on
-//   the head and rises. This is why [`ImpactAnchor::Head`] exists.
+//   the head and rises. This is why [`ImpactAnchor::Head`] exists. It plays as
+//   the transcribed emitters, as does Holy Shock's damage leg
+//   (`holysmite_low_chest.m2`), both defined in `client_landings.rs` with the
+//   interrupt and Heroic Strike landings and reached through the same
+//   [`landing_style`] override as the Hunter shots.
 // - **Frost Shock lands as the generic frost hit.** Its impact kit (214)
 //   resolves to `spells/ice_impactdd_med_chest.m2` (fdid 166370) at chest
 //   attachment 34 — the SAME model Frostbolt's landing uses (kit 4991), so the
@@ -102,6 +107,10 @@ pub const IMPACT_MAGNITUDE_FLOOR: f32 = 0.70;
 /// drove floating text and nothing else in world space until this.
 pub const IMPACT_CRIT_SCALE: f32 = 1.35;
 pub const IMPACT_CRIT_SPRAY: f32 = 1.5;
+
+/// Slack on a client emitter's owed count, so an integrated burst of exactly
+/// N does not lose its last particle to float drift.
+const EMIT_EPSILON: f32 = 1e-3;
 
 /// Soft-rimmed band, same construction as the bolt shockwave.
 const IMPACT_RING_THICKNESS: f32 = 0.24;
@@ -376,7 +385,9 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
 /// The Hunter shots override by the client's own grouping, not by school:
 /// Aimed, Arcane and Concussive Shot share ONE landing (`magic_impact_chest`)
 /// whatever their RON schools say, and Serpent Sting has its own lingering
-/// cloud. Both are defined once, in `hunter_shots.rs`.
+/// cloud. Both are defined once, in `hunter_shots.rs`. Mind Blast, Holy
+/// Shock's damage leg, Heroic Strike and the interrupts play their client
+/// models' emitters in the same way (`client_landings.rs`).
 ///
 /// Mana Burn is the other override. It is Shadow, but the client gives
 /// it its own model (`manaburn_chest.m2`, chest attachment 34) where Mind
@@ -388,6 +399,11 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
 pub fn landing_style(ability: AbilityType, school: SpellSchool) -> ImpactStyle {
     if let Some(kind) = hunter_shot_for(ability) {
         return kind.landing_style();
+    }
+    // Mind Blast, Holy Shock's damage leg, Heroic Strike and the four
+    // interrupts: client emitter tables (`client_landings.rs`).
+    if let Some(style) = client_landing_style(ability) {
+        return style;
     }
     match ability {
         AbilityType::ManaBurn => ImpactStyle {
@@ -736,7 +752,7 @@ pub fn spawn_school_impacts(
                 smoulder_material,
                 emit_carry: 0.0,
                 emitted: 0,
-                emitter_carry: [0.0; 4],
+                emitter_carry: vec![0.0; style.emitters.len()],
                 palettes,
             },
         ));
@@ -846,18 +862,21 @@ pub fn animate_school_impacts(
         }
 
         // Client emitters play inside their own keyed windows. Every particle
-        // is a child of the rig, so it rides the victim and dies with it.
+        // is a child of the rig, so it rides the victim and dies with it. What
+        // each owes is the rate integrated over this frame's span, so a burst
+        // or a keyed ramp emits its count at any frame rate. A rig spawned
+        // with a NEGATIVE age (Heroic Strike's, held for the blade) owes
+        // nothing until its age crosses zero.
         for (ei, emitter) in style
             .emitters
             .iter()
             .enumerate()
             .take(rig.emitter_carry.len())
         {
-            if age < emitter.start() || age >= emitter.end() {
-                continue;
-            }
-            rig.emitter_carry[ei] += emitter.rate * dt;
-            while rig.emitter_carry[ei] >= 1.0 {
+            rig.emitter_carry[ei] += emitter.count_between(age - dt, age);
+            // The epsilon keeps float drift from dropping the last particle
+            // of an exact count.
+            while rig.emitter_carry[ei] >= 1.0 - EMIT_EPSILON {
                 rig.emitter_carry[ei] -= 1.0;
                 let i = rig.emitted;
                 rig.emitted = rig.emitted.wrapping_add(1);

@@ -206,9 +206,6 @@ pub struct AbilityConfig {
     /// This is a charge/gap-closer ability (Charge)
     #[serde(default)]
     pub is_charge: bool,
-    /// Spawn visual impact effect on hit (Mind Blast)
-    #[serde(default)]
-    pub spawn_impact_effect: bool,
 
     // === Channeling ===
     /// Duration of channel in seconds (None = not a channeled spell)
@@ -671,7 +668,6 @@ mod tests {
             lockout_duration: 0.0,
             requires_stealth: false,
             is_charge: false,
-            spawn_impact_effect: false,
             channel_duration: None,
             channel_tick_interval: 1.0,
             channel_healing_per_tick: 0.0,

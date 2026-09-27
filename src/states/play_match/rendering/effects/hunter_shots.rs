@@ -108,6 +108,10 @@ const TRAIL_OVERLAP: f32 = 1.35;
 const RUNE_SPIN: f32 = 2.0;
 /// Generated rune sprite, pixels on a side.
 const RUNE_PX: u32 = 96;
+/// Generated shockwave ring sprite, pixels on a side.
+const RING_PX: u32 = 128;
+/// How much longer than wide a streak particle is drawn.
+const STREAK_STRETCH: f32 = 4.0;
 
 // ── The emitter model ──────────────────────────────────────────────────────
 
@@ -120,6 +124,15 @@ pub enum EmitterSprite {
     Flare,
     /// The expanding rune (`aurarune7`), lying flat in the ground plane.
     Rune,
+    /// A thin shockwave ring (`shockwave8`, `whiteringthin128`), facing the
+    /// camera.
+    Ring,
+    /// A rune disc facing the camera and turning in the view plane
+    /// (`aurarune256`, Counterspell's seal).
+    Seal,
+    /// A soft glow stretched along the particle's own flight (the ribbon-blur
+    /// and streak emitters), facing the camera.
+    Streak,
 }
 
 /// One particle emitter, transcribed from its M2 record.
@@ -140,7 +153,9 @@ pub struct ClientEmitter {
     pub window: Option<(f32, f32)>,
     pub life: f32,
     /// Launch speed, yd/s, in a uniformly random direction (straight up for a
-    /// `rise` emitter).
+    /// `rise` emitter). NEGATIVE converges: the particle is born out along its
+    /// direction and travels in, arriving near the centre at the end of its
+    /// life.
     pub speed: f32,
     /// Downward acceleration, yd/s².
     pub gravity: f32,
@@ -155,6 +170,16 @@ pub struct ClientEmitter {
     pub alpha: [f32; 3],
     /// Diameter, yards.
     pub size: [f32; 3],
+    /// Where in the life the three ramps' middle key sits, 0..1. The source
+    /// keys most emitters at half-life; some earlier (0.25) or later (0.75).
+    pub mid: f32,
+    /// A keyed rate track, `(seconds, particles per second)` linearly
+    /// interpolated, for an emitter whose rate RAMPS (Mind Blast, Holy Shock)
+    /// rather than holding one `rate` across its window. When set, `rate` is
+    /// ignored and `window` must span the track exactly — build both with
+    /// [`ClientEmitter::tracked`] — so that scaling the window (the `time`
+    /// knob) stretches the track with it.
+    pub track: Option<&'static [(f32, f32)]>,
 }
 
 impl ClientEmitter {
@@ -166,6 +191,57 @@ impl ClientEmitter {
     /// When the emission window closes; `0.0` for an always-on emitter.
     pub fn end(&self) -> f32 {
         self.window.map(|(_, e)| e).unwrap_or(0.0)
+    }
+
+    /// The window a rate `track` spans: its first key to its last.
+    pub const fn tracked(track: &'static [(f32, f32)]) -> Option<(f32, f32)> {
+        Some((track[0].0, track[track.len() - 1].0))
+    }
+
+    /// The constant rate that emits `count` particles across `window` — how a
+    /// one-off burst is written as an emitter.
+    pub const fn burst(count: f32, window: (f32, f32)) -> f32 {
+        count / (window.1 - window.0)
+    }
+
+    /// How far the window has been stretched from the track's own keys.
+    fn track_stretch(&self, track: &[(f32, f32)]) -> f32 {
+        let keyed = track[track.len() - 1].0 - track[0].0;
+        let window = self.end() - self.start();
+        if keyed > 0.0 {
+            window / keyed
+        } else {
+            1.0
+        }
+    }
+
+    /// Particles emitted between `t0` and `t1` seconds after the hit — the
+    /// integral of the rate over that span, clipped to the window. Integrated
+    /// rather than sampled per frame, so a burst written as a short window
+    /// emits its whole count whatever the frame rate.
+    pub fn count_between(&self, t0: f32, t1: f32) -> f32 {
+        let (start, end) = (self.start(), self.end());
+        let (a, b) = (t0.max(start), t1.min(end));
+        if b <= a {
+            return 0.0;
+        }
+        let Some(track) = self.track else {
+            return self.rate * (b - a);
+        };
+        // Integrate the piecewise-linear track in its own key time.
+        let k = self.track_stretch(track);
+        let (a, b) = (track[0].0 + (a - start) / k, track[0].0 + (b - start) / k);
+        let mut total = 0.0;
+        for pair in track.windows(2) {
+            let ((x0, r0), (x1, r1)) = (pair[0], pair[1]);
+            let (lo, hi) = (a.max(x0), b.min(x1));
+            if hi <= lo || x1 <= x0 {
+                continue;
+            }
+            let at = |x: f32| r0 + (r1 - r0) * (x - x0) / (x1 - x0);
+            total += 0.5 * (at(lo) + at(hi)) * (hi - lo);
+        }
+        total * k
     }
 
     /// The emitter played at a different scale. Size, spawn volume and speed
@@ -188,18 +264,25 @@ impl ClientEmitter {
     }
 }
 
-/// Linear interpolation over a birth / midlife / death ramp.
-fn ramp3(keys: [f32; 3], t: f32) -> f32 {
+/// Linear interpolation over a birth / `mid` / death ramp.
+fn ramp3(keys: [f32; 3], mid: f32, t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
-    if t < 0.5 {
-        keys[0] + (keys[1] - keys[0]) * (t / 0.5)
+    let mid = mid.clamp(1e-3, 1.0 - 1e-3);
+    if t < mid {
+        keys[0] + (keys[1] - keys[0]) * (t / mid)
     } else {
-        keys[1] + (keys[2] - keys[1]) * ((t - 0.5) / 0.5)
+        keys[1] + (keys[2] - keys[1]) * ((t - mid) / (1.0 - mid))
     }
 }
 
-fn ramp_color(keys: [[u8; 3]; 3], t: f32) -> Color {
-    let channel = |c: usize| ramp3([keys[0][c] as f32, keys[1][c] as f32, keys[2][c] as f32], t);
+fn ramp_color(keys: [[u8; 3]; 3], mid: f32, t: f32) -> Color {
+    let channel = |c: usize| {
+        ramp3(
+            [keys[0][c] as f32, keys[1][c] as f32, keys[2][c] as f32],
+            mid,
+            t,
+        )
+    };
     Color::srgb(channel(0) / 255.0, channel(1) / 255.0, channel(2) / 255.0)
 }
 
@@ -229,6 +312,8 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         color: [[22, 34, 168], [78, 33, 201], [203, 103, 255]],
         alpha: [0.59, 0.98, 0.0],
         size: [0.142, 0.264, 0.142],
+        mid: 0.5,
+        track: None,
     },
     ClientEmitter {
         name: "arcaneshot_missile/e1 sparks",
@@ -245,6 +330,8 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         color: [[77, 15, 207], [114, 59, 190], [165, 222, 255]],
         alpha: [1.0, 1.0, 0.0],
         size: [0.083, 0.028, 0.014],
+        mid: 0.5,
+        track: None,
     },
     ClientEmitter {
         name: "arcaneshot_missile/e2 sparks",
@@ -261,6 +348,8 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         color: [[84, 0, 237], [131, 94, 237], [183, 227, 255]],
         alpha: [0.39, 1.0, 0.0],
         size: [0.083, 0.028, 0.014],
+        mid: 0.5,
+        track: None,
     },
     ClientEmitter {
         name: "arcaneshot_missile/e3 core stream",
@@ -277,6 +366,8 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         color: [[0, 0, 154], [97, 67, 207], [245, 245, 236]],
         alpha: [0.39, 1.0, 0.2],
         size: [0.194, 0.139, 0.028],
+        mid: 0.5,
+        track: None,
     },
 ];
 
@@ -299,6 +390,8 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         color: [[119, 201, 2], [141, 207, 12], [209, 234, 92]],
         alpha: [0.19, 0.77, 0.0],
         size: [0.142, 0.264, 0.142],
+        mid: 0.5,
+        track: None,
     },
     ClientEmitter {
         name: "poisonshot_missile/e1 sparks",
@@ -315,6 +408,8 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         color: [[109, 183, 55], [144, 208, 106], [230, 255, 92]],
         alpha: [1.0, 1.0, 0.0],
         size: [0.056, 0.028, 0.014],
+        mid: 0.5,
+        track: None,
     },
     ClientEmitter {
         name: "poisonshot_missile/e2 sparks",
@@ -331,6 +426,8 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         color: [[109, 201, 0], [161, 237, 52], [202, 255, 127]],
         alpha: [0.39, 1.0, 0.0],
         size: [0.056, 0.028, 0.014],
+        mid: 0.5,
+        track: None,
     },
     ClientEmitter {
         name: "poisonshot_missile/e3 core stream",
@@ -347,6 +444,8 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         color: [[158, 255, 64], [109, 201, 0], [91, 169, 0]],
         alpha: [0.39, 1.0, 0.2],
         size: [0.139, 0.083, 0.028],
+        mid: 0.5,
+        track: None,
     },
 ];
 
@@ -370,6 +469,8 @@ const MAGIC_IMPACT_KEPT: [ClientEmitter; 3] = [
         color: [[35, 123, 233], [188, 188, 188], [145, 81, 205]],
         alpha: [1.0, 1.0, 0.0],
         size: [0.4, 0.6, 0.828],
+        mid: 0.5,
+        track: None,
     },
     ClientEmitter {
         name: "magic_impact_chest/e4 stars",
@@ -386,6 +487,8 @@ const MAGIC_IMPACT_KEPT: [ClientEmitter; 3] = [
         color: [[35, 123, 233], [163, 55, 239], [255, 255, 255]],
         alpha: [1.0, 1.0, 0.0],
         size: [0.15, 0.217, 0.031],
+        mid: 0.5,
+        track: None,
     },
     ClientEmitter {
         name: "magic_impact_chest/e5 rune",
@@ -402,6 +505,8 @@ const MAGIC_IMPACT_KEPT: [ClientEmitter; 3] = [
         color: [[37, 249, 82], [151, 64, 233], [255, 255, 255]],
         alpha: [0.53, 0.78, 0.0],
         size: [0.197, 0.925, 1.764],
+        mid: 0.5,
+        track: None,
     },
 ];
 
@@ -424,6 +529,8 @@ const BESTOWDISEASE_IMPACT: [ClientEmitter; 3] = [
         color: [[0, 119, 38], [171, 214, 0], [194, 196, 0]],
         alpha: [0.0, 1.0, 0.0],
         size: [0.028, 0.556, 0.028],
+        mid: 0.5,
+        track: None,
     },
     ClientEmitter {
         name: "bestowdisease_impact_chest/e1 smoke",
@@ -440,6 +547,8 @@ const BESTOWDISEASE_IMPACT: [ClientEmitter; 3] = [
         color: [[18, 55, 0], [106, 146, 0], [163, 196, 64]],
         alpha: [0.39, 1.0, 0.0],
         size: [0.222, 0.306, 0.694],
+        mid: 0.5,
+        track: None,
     },
     ClientEmitter {
         name: "bestowdisease_impact_chest/e2 spray",
@@ -456,10 +565,12 @@ const BESTOWDISEASE_IMPACT: [ClientEmitter; 3] = [
         color: [[49, 102, 1], [99, 136, 20], [115, 152, 1]],
         alpha: [1.0, 1.0, 0.0],
         size: [0.111, 0.056, 0.028],
+        mid: 0.5,
+        track: None,
     },
 ];
 
-const fn scale_all<const N: usize>(
+pub(super) const fn scale_all<const N: usize>(
     table: [ClientEmitter; N],
     size: f32,
     spread: f32,
@@ -594,6 +705,13 @@ fn particle_launch(e: &ClientEmitter, seed: u32) -> (Vec3, Vec3) {
     let theta = draw(seed, 5) * TAU;
     let r = (1.0 - u * u).max(0.0).sqrt();
     let dir = Vec3::new(r * theta.cos(), u, r * theta.sin());
+    if e.speed < 0.0 {
+        // Converging: born out along the direction, far enough to arrive
+        // near the centre as the life runs out (0.9 of the way), and
+        // travelling in.
+        let reach = -e.speed * e.life * 0.9;
+        return (offset + dir * reach, dir * e.speed);
+    }
     let velocity = if e.rise {
         Vec3::new(dir.x * 0.2, 1.0, dir.z * 0.2) * e.speed
     } else {
@@ -616,7 +734,9 @@ pub fn spawn_client_particle(
     let (offset, velocity) = particle_launch(e, seed);
     let facing = match e.sprite {
         EmitterSprite::Rune => ParticleFacing::Flat,
-        _ => ParticleFacing::Camera,
+        EmitterSprite::Seal => ParticleFacing::Seal,
+        EmitterSprite::Streak => ParticleFacing::Streak,
+        EmitterSprite::Glow | EmitterSprite::Flare | EmitterSprite::Ring => ParticleFacing::Camera,
     };
     let mut particle = commands.spawn((
         ClientParticle {
@@ -625,6 +745,7 @@ pub fn spawn_client_particle(
             velocity,
             gravity: e.gravity,
             size: e.size,
+            mid: e.mid,
             palette: palette.clone(),
             step: 0,
             facing,
@@ -691,6 +812,51 @@ fn rune_texture() -> Image {
     )
 }
 
+/// A thin soft ring, white, with the shape in the alpha channel — the
+/// shockwave the interrupt and Heroic Strike landings expand.
+fn ring_texture() -> Image {
+    use bevy::image::Image;
+    use bevy::render::render_asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+
+    let size = RING_PX;
+    let mut data = vec![0u8; (size * size * 4) as usize];
+    let centre = (size as f32 - 1.0) / 2.0;
+    for y in 0..size {
+        for x in 0..size {
+            let dx = (x as f32 - centre) / centre;
+            let dy = (y as f32 - centre) / centre;
+            let r = (dx * dx + dy * dy).sqrt();
+            // A bright rim with a soft falloff on the inside, as a shockwave
+            // trails its front.
+            let rim = (1.0 - ((r - 0.9) / 0.06).abs()).clamp(0.0, 1.0);
+            let wake = if (0.62..0.9).contains(&r) {
+                0.35 * ((r - 0.62) / 0.28)
+            } else {
+                0.0
+            };
+            let alpha = rim.max(wake);
+            let i = ((y * size + x) * 4) as usize;
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+            data[i + 3] = (alpha * 255.0) as u8;
+        }
+    }
+
+    Image::new(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+}
+
 /// Sprites and the ramp palettes every client emitter draws with. Built once
 /// per system, lazily; a palette is built the first time its emitter plays and
 /// shared by every particle it ever emits.
@@ -699,6 +865,7 @@ pub struct EmitterAssets {
     dot: Handle<Image>,
     star: Handle<Image>,
     rune: Handle<Image>,
+    ring: Handle<Image>,
     palettes: HashMap<&'static str, Arc<[Handle<StandardMaterial>]>>,
 }
 
@@ -709,6 +876,7 @@ impl EmitterAssets {
             dot: images.add(soft_dot_texture()),
             star: images.add(star_flash_texture()),
             rune: images.add(rune_texture()),
+            ring: images.add(ring_texture()),
             palettes: HashMap::new(),
         }
     }
@@ -727,15 +895,16 @@ impl EmitterAssets {
             return p.clone();
         }
         let texture = match e.sprite {
-            EmitterSprite::Glow => self.dot.clone(),
+            EmitterSprite::Glow | EmitterSprite::Streak => self.dot.clone(),
             EmitterSprite::Flare => self.star.clone(),
-            EmitterSprite::Rune => self.rune.clone(),
+            EmitterSprite::Rune | EmitterSprite::Seal => self.rune.clone(),
+            EmitterSprite::Ring => self.ring.clone(),
         };
         let palette: Arc<[Handle<StandardMaterial>]> = (0..PALETTE_STEPS)
             .map(|i| {
                 let t = (i as f32 + 0.5) / PALETTE_STEPS as f32;
-                let color = ramp_color(e.color, t);
-                let alpha = ramp3(e.alpha, t);
+                let color = ramp_color(e.color, e.mid, t);
+                let alpha = ramp3(e.alpha, e.mid, t);
                 materials.add(if e.additive {
                     // The sprite drives BOTH channels, and `unlit` stays false
                     // or Bevy discards the emissive (see `spell_bolts.rs`).
@@ -775,13 +944,27 @@ fn emissive_of(color: Color, strength: f32) -> LinearRgba {
 }
 
 /// The rotation a particle needs under a parent turned by `parent`, so that a
-/// camera-facing one faces `camera` and a flat one lies in the ground plane.
+/// camera-facing one faces `camera`, a flat one lies in the ground plane, a
+/// seal turns in the view plane and a streak lies along its flight.
 pub fn particle_rotation(particle: &ClientParticle, parent: Quat, camera: Quat) -> Quat {
     let world = match particle.facing {
         ParticleFacing::Camera => camera,
         // `Rectangle` faces +Z; tipped back a quarter turn it faces world up.
         ParticleFacing::Flat => {
             Quat::from_rotation_y(particle.age * RUNE_SPIN) * Quat::from_rotation_x(-FRAC_PI_2)
+        }
+        ParticleFacing::Seal => camera * Quat::from_rotation_z(particle.age * RUNE_SPIN),
+        ParticleFacing::Streak => {
+            // Roll the camera-facing quad about the view axis until its long
+            // (local Y) axis lies along the flight as the camera sees it.
+            let v = parent * particle.velocity;
+            let (right, up) = (camera * Vec3::X, camera * Vec3::Y);
+            let (sx, sy) = (v.dot(right), v.dot(up));
+            if sx * sx + sy * sy > 1e-8 {
+                camera * Quat::from_rotation_z((-sx).atan2(sy))
+            } else {
+                camera
+            }
         }
     };
     parent.inverse() * world
@@ -817,7 +1000,11 @@ pub fn animate_client_particles(
         let velocity = p.velocity;
         transform.translation += velocity * dt;
         let t = p.age / p.life;
-        transform.scale = Vec3::splat(ramp3(p.size, t).max(1e-4));
+        let size = ramp3(p.size, p.mid, t).max(1e-4);
+        transform.scale = match p.facing {
+            ParticleFacing::Streak => Vec3::new(size, size * STREAK_STRETCH, size),
+            _ => Vec3::splat(size),
+        };
         let step = palette_step(t);
         if step != p.step {
             p.step = step;
@@ -1304,10 +1491,13 @@ mod tests {
     #[test]
     fn a_ramp_hits_its_three_keys() {
         let keys = [0.2, 1.0, 0.4];
-        assert!((ramp3(keys, 0.0) - 0.2).abs() < 1e-6);
-        assert!((ramp3(keys, 0.5) - 1.0).abs() < 1e-6);
-        assert!((ramp3(keys, 1.0) - 0.4).abs() < 1e-6);
-        assert!((ramp3(keys, 0.25) - 0.6).abs() < 1e-6);
+        assert!((ramp3(keys, 0.5, 0.0) - 0.2).abs() < 1e-6);
+        assert!((ramp3(keys, 0.5, 0.5) - 1.0).abs() < 1e-6);
+        assert!((ramp3(keys, 0.5, 1.0) - 0.4).abs() < 1e-6);
+        assert!((ramp3(keys, 0.5, 0.25) - 0.6).abs() < 1e-6);
+        // An early middle key moves the peak, not the ends.
+        assert!((ramp3(keys, 0.25, 0.25) - 1.0).abs() < 1e-6);
+        assert!((ramp3(keys, 0.25, 1.0) - 0.4).abs() < 1e-6);
     }
 
     #[test]

@@ -33,9 +33,9 @@ use super::super::play_match::components::{
     ActiveAuras, AuraPending, AuraType, BerserkerRagePending, CastingState, Celebrating,
     ChannelingState, ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState,
     DispelPending, DispelScope, DivineShieldPending, HealImpact, HitFlinch, HolyShockDamagePending,
-    HolyShockHealPending, InstantAbilityFired, MatchResults, Pet, PetType, PlayMatchEntity,
-    SchoolImpact, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration, VisualBody,
-    WalkAnim,
+    HolyShockHealPending, InstantAbilityFired, InterruptPending, MatchResults, Pet, PetType,
+    PlayMatchEntity, SchoolImpact, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration,
+    VisualBody, WalkAnim,
 };
 use super::super::play_match::spawn_pet;
 use super::super::play_match::{
@@ -155,10 +155,11 @@ pub enum EntryFamily {
     /// Body motion started by inserting the driving component.
     Body,
     /// Defined as data (`abilities.ron`) but with no application code, or with
-    /// no distinct visual of its own, so it has nothing to preview. Two
-    /// abilities: Wind Shear (data-only) and Heroic Strike (a next-swing bonus
-    /// previewed by the Auto attack body animation). The count is pinned by
-    /// `every_ability_classifies_and_only_two_are_unsupported`.
+    /// no distinct visual of its own, so it has nothing to preview. No ability
+    /// is here today — Wind Shear and Heroic Strike, the last two, gained
+    /// visuals in AS-157 — and `every_ability_classifies_and_none_is_unsupported`
+    /// keeps it that way; the variant is held, like the panel's `soon` tag,
+    /// for the next ability defined before its visual.
     Unsupported,
 }
 
@@ -216,6 +217,8 @@ pub(crate) fn entry_needs_dummy(entry: SandboxEntry, defs: &AbilityDefinitions) 
     use AbilityType::*;
     match ability {
         SpiderWeb | BoarCharge | SpellLock | DevourMagic => true,
+        // The empowered swing needs a victim to swing at.
+        HeroicStrike => true,
         AirTotem | WaterTotem | EarthTotem | FireTotem | FreezingTrap | FrostTrap | MastersCall => {
             false
         }
@@ -233,6 +236,9 @@ fn mechanism_for(ability: AbilityType, config: &AbilityConfig) -> EntryFamily {
         // movement instants (sandbox-owned dash driver, KTD6).
         DivineShield | BerserkerRage | HolyShock | DispelMagic | PaladinCleanse | Purge
         | Charge | Disengage => EntryFamily::Component,
+        // A next-swing bonus: the sandbox queues it on the caster and lets the
+        // real auto-attack swing it at the dummy (`drive_playback`).
+        HeroicStrike => EntryFamily::Component,
         // M4 — world-entity drops and pet-dispatched abilities (Hunter pets +
         // the Warlock's Felhunter), all driven by drive_sandbox_pet.
         AirTotem | WaterTotem | EarthTotem | FireTotem | FreezingTrap | FrostTrap | SpiderWeb
@@ -250,11 +256,13 @@ fn mechanism_for(ability: AbilityType, config: &AbilityConfig) -> EntryFamily {
         // explicit Component/Entity arms, which win by position for any
         // ability that ever appears in both (the classification test walks
         // every marker ability to catch exactly that shadowing).
-        // (On the sandbox dummy an interrupt's outcome is a no-op — nothing
-        // is casting — so the gesture IS the preview.)
+        // (An interrupt's gesture fires at the interrupt lead, into a cast
+        // the dummy is staged with — see `drive_sandbox_interrupt`.)
         a if InstantAbilityFired::is_spawned_for(a) => EntryFamily::Residue,
-        // Data-only (no application code) / no distinct visual beyond the swing.
-        WindShear | HeroicStrike => EntryFamily::Unsupported,
+        // Wind Shear fires through `combat_ai.rs`'s interrupt dispatch with no
+        // caster gesture: its whole visual is the landing on the victim, which
+        // the sandbox's interrupt preview produces (`drive_sandbox_interrupt`).
+        WindShear => EntryFamily::Residue,
         // Config-derived default: channels, else Cast (hard casts and every
         // single-target damage/aura/projectile instant resolve through a
         // `CastingState`).
@@ -473,6 +481,32 @@ pub fn drive_playback(
                 if let (Some(dummy), Ok(mut combatant)) = (stage.dummy, combatants.get_mut(caster))
                 {
                     combatant.target = Some(dummy);
+                }
+            }
+            // Heroic Strike is the same live swing with the bonus queued, as
+            // `try_heroic_strike` queues it — so it is the real empowered
+            // swing that plays. The timer is primed so that swing is the
+            // first one, the moment the caster is in range.
+            if playback.selected == Some(SandboxEntry::Ability(AbilityType::HeroicStrike)) {
+                if let (Some(dummy), Ok(mut combatant)) = (stage.dummy, combatants.get_mut(caster))
+                {
+                    combatant.target = Some(dummy);
+                    combatant.next_attack_bonus_damage = combatant.attack_damage * 0.5;
+                    combatant.attack_timer = HEROIC_STRIKE_PRIMED_TIMER;
+                }
+            }
+            // An interrupt preview needs a cast to cut. The dummy starts one
+            // at the caster; `drive_sandbox_interrupt` cuts it at
+            // `INTERRUPT_LEAD_SECS`, through the match's own
+            // `process_interrupts`.
+            if let (Some(SandboxEntry::Ability(ab)), Some(dummy)) = (playback.selected, stage.dummy)
+            {
+                if defs.get(&ab).is_some_and(|c| c.is_interrupt) {
+                    commands.entity(dummy).insert(CastingState::new(
+                        INTERRUPT_VICTIM_CAST,
+                        caster,
+                        INTERRUPT_VICTIM_CAST_SECS,
+                    ));
                 }
             }
             // A dispel needs a dispellable aura present BEFORE process_dispels
@@ -802,6 +836,9 @@ fn start_component_entry(
                 target: dummy.unwrap_or(caster),
             });
         }
+        // Queued on the caster by `drive_playback`, which owns the mutable
+        // `Combatant`; the real auto-attack swings it.
+        AbilityType::HeroicStrike => {}
         AbilityType::Disengage => {
             // The caster stages at -x with the dummy at +x, so the retreat leap
             // is in -x.
@@ -945,6 +982,10 @@ fn start_entry(
                 Some(EntryFamily::Entity) => {
                     start_entity_entry(commands, ability, caster, caster_home, caster_info)
                 }
+                // An interrupt needs a cast to cut: `drive_playback` stages
+                // one on the dummy now, and `drive_sandbox_interrupt` fires
+                // the interrupt into it once it has visibly grown.
+                Some(EntryFamily::Residue) if config.is_interrupt => true,
                 Some(EntryFamily::Residue) => {
                     commands.entity(caster).insert(CastingState::new(
                         ability,
@@ -1073,12 +1114,17 @@ fn clear_body_state(
         }
         if let Ok(mut combatant) = combatants.get_mut(unit) {
             combatant.target = None;
+            // A Heroic Strike pass cut short before its swing.
+            combatant.next_attack_bonus_damage = 0.0;
         }
         // The other two contributors to the composed body Y. A `HitFlinch` is
         // left on the auto-attack entry's victim when a pass is cut short, and
         // the gait's own channel survives the transform reset below.
         if let Ok(mut e) = commands.get_entity(unit) {
             e.remove::<HitFlinch>();
+            // An interrupt preview's victim cast, if the pass ended before it
+            // was cut.
+            e.remove::<CastingState>();
         }
         if let Ok(mut walk) = gaits.get_mut(unit) {
             walk.body_offset = 0.0;
@@ -1107,6 +1153,78 @@ fn clear_body_state(
 /// Comfortably inside `MELEE_RANGE` (2.5) so no swing is dropped for being a
 /// hair out of range.
 const MELEE_STANDOFF: f32 = 2.0;
+
+/// The Heroic Strike entry's primed attack timer: past any weapon's interval,
+/// so the first swing — the empowered one — lands the moment the caster is in
+/// range instead of up to a whole interval into a 4s pass.
+const HEROIC_STRIKE_PRIMED_TIMER: f32 = 10.0;
+
+/// The cast an interrupt preview cuts. Immolate's orange orb shares a hue with
+/// none of the four interrupt landings, so the landing and the orb's sputter
+/// read apart.
+const INTERRUPT_VICTIM_CAST: AbilityType = AbilityType::Immolate;
+/// Long enough that the interrupt always lands mid-cast.
+const INTERRUPT_VICTIM_CAST_SECS: f32 = 3.0;
+/// When an interrupt preview fires into the victim's cast: late enough that
+/// the casting orb has visibly grown, so its sputter reads.
+pub const INTERRUPT_LEAD_SECS: f32 = 1.0;
+
+/// Whether `elapsed` has just crossed the interrupt lead, given where it was
+/// last frame. A restart rewinds `elapsed` to zero, so every pass crosses it
+/// once.
+fn crosses_interrupt_lead(last: f32, elapsed: f32) -> bool {
+    last < INTERRUPT_LEAD_SECS && elapsed >= INTERRUPT_LEAD_SECS
+}
+
+/// Fires the interrupt of an interrupt preview into the dummy's staged cast.
+///
+/// A match queues Kick, Pummel and Wind Shear from `combat_ai.rs`, which the
+/// sandbox does not run, so this queues the same `InterruptPending` and lets
+/// the match's `process_interrupts` resolve it — the cast is cut, the orb
+/// sputters, and the landing plays, all from the code a match uses. Kick's and
+/// Pummel's weapon strokes come with it (`spawn_sandbox_cosmetic`). Spell
+/// Lock is the Felhunter's, so `drive_sandbox_pet` fires it at the same lead.
+pub fn drive_sandbox_interrupt(
+    mut commands: Commands,
+    playback: Res<SandboxPlayback>,
+    stage: Res<SandboxStage>,
+    defs: Res<AbilityDefinitions>,
+    mut last: Local<f32>,
+) {
+    let elapsed = if playback.playing {
+        playback.elapsed
+    } else {
+        0.0
+    };
+    let crossed = crosses_interrupt_lead(*last, elapsed);
+    *last = elapsed;
+    if !crossed {
+        return;
+    }
+    let Some(SandboxEntry::Ability(ability)) = playback.selected else {
+        return;
+    };
+    if ability == AbilityType::SpellLock {
+        return;
+    }
+    let (Some(caster), Some(dummy), Some(config)) = (stage.caster, stage.dummy, defs.get(&ability))
+    else {
+        return;
+    };
+    if !config.is_interrupt {
+        return;
+    }
+    commands.spawn((
+        InterruptPending {
+            caster,
+            target: dummy,
+            ability,
+            lockout_duration: config.lockout_duration,
+        },
+        PlayMatchEntity,
+    ));
+    spawn_sandbox_cosmetic(&mut commands, ability, caster, dummy);
+}
 
 /// How far from the caster the dummy stands to preview Frost Nova, in yards.
 ///
@@ -1189,7 +1307,8 @@ pub fn position_caster(
             WALK_RADIUS,
             WALK_ANGULAR_SPEED,
         ),
-        Some(SandboxEntry::Body(BodyAnimation::AutoAttack)) => {
+        Some(SandboxEntry::Body(BodyAnimation::AutoAttack))
+        | Some(SandboxEntry::Ability(AbilityType::HeroicStrike)) => {
             // Melee must close. Ranged is already in range at the staged
             // separation and must NOT close: the Hunter's Auto Shot is
             // cancelled inside its dead zone, so walking it in would silence
@@ -1390,8 +1509,15 @@ pub fn drive_sandbox_pet(
     if stage.pet.is_some() {
         return;
     }
+    // Spell Lock cuts the dummy's staged cast, so it waits until the cast
+    // has grown (the same lead the other interrupts fire at). The Felhunter
+    // is summoned meanwhile and bound on the first frame past the lead.
+    let waiting = ability == AbilityType::SpellLock && playback.elapsed < INTERRUPT_LEAD_SECS;
 
     if let Some((pet, _)) = pets.iter().find(|(_, p)| p.owner == caster) {
+        if waiting {
+            return;
+        }
         // The spawn resolved — bind it and fire the ability ONCE from the same
         // code gameplay uses.
         let Some(def) = defs.get(&ability) else {
@@ -1607,7 +1733,11 @@ mod tests {
         assert_eq!(mech(DivineShield), EntryFamily::Component);
         assert_eq!(mech(Charge), EntryFamily::Component); // movement
         assert_eq!(mech(PsychicScream), EntryFamily::Residue);
-        assert_eq!(mech(WindShear), EntryFamily::Unsupported);
+        // Wind Shear has no caster gesture; its preview is the interrupt
+        // landing, fired at the lead like Kick's and Pummel's.
+        assert_eq!(mech(WindShear), EntryFamily::Residue);
+        // The empowered swing: the bonus queued, the real auto swings it.
+        assert_eq!(mech(HeroicStrike), EntryFamily::Component);
         // Every ability whose combat path spawns an `InstantAbilityFired` — a
         // marker emitted by code the sandbox does not run. `mechanism_for`
         // now DERIVES its Residue arm from this predicate, so membership can
@@ -1636,23 +1766,48 @@ mod tests {
     }
 
     #[test]
-    fn every_ability_classifies_and_only_two_are_unsupported() {
-        // Wind Shear is data-only (no application code); Heroic Strike's
-        // next-swing bonus has no distinct cast visual (preview via Auto attack).
-        // Everything else maps to a real, previewable mechanism.
+    fn every_ability_classifies_and_none_is_unsupported() {
+        // Wind Shear and Heroic Strike were the last two: Wind Shear fires
+        // through the interrupt dispatch and lands its ring on the victim,
+        // and Heroic Strike's empowered swing lays its trail and ring. Every
+        // ability now maps to a real, previewable mechanism.
         let defs = AbilityDefinitions::default();
         let unsupported: Vec<AbilityType> = defs
             .iter()
             .filter(|(a, c)| mechanism_for(**a, c) == EntryFamily::Unsupported)
             .map(|(a, _)| *a)
             .collect();
+        assert_eq!(unsupported, vec![], "unexpected Unsupported set");
+    }
+
+    #[test]
+    fn every_interrupt_previews_against_a_staged_cast() {
+        // An interrupt is only visible against a cast, so each one must be a
+        // playable entry that needs the dummy (the victim it cuts).
+        let defs = AbilityDefinitions::default();
+        let interrupts: Vec<AbilityType> = defs
+            .iter()
+            .filter(|(_, c)| c.is_interrupt)
+            .map(|(a, _)| *a)
+            .collect();
         assert_eq!(
-            unsupported.len(),
-            2,
-            "unexpected Unsupported set: {unsupported:?}"
+            interrupts.len(),
+            4,
+            "Kick, Pummel, Spell Lock, Wind Shear: {interrupts:?}"
         );
-        assert!(unsupported.contains(&AbilityType::WindShear));
-        assert!(unsupported.contains(&AbilityType::HeroicStrike));
+        for a in interrupts {
+            let family = mechanism_for(a, defs.get(&a).unwrap());
+            assert!(family.is_playable(), "{a:?} is {family:?}");
+            assert!(entry_needs_dummy(SandboxEntry::Ability(a), &defs), "{a:?}");
+        }
+        // The lead fires once per pass, on the frame it is crossed.
+        assert!(crosses_interrupt_lead(0.98, 1.01));
+        assert!(!crosses_interrupt_lead(1.01, 1.03));
+        assert!(!crosses_interrupt_lead(0.5, 0.9));
+        assert!(
+            INTERRUPT_LEAD_SECS < INTERRUPT_VICTIM_CAST_SECS,
+            "the victim's cast would complete before it is interrupted"
+        );
     }
 
     #[test]
@@ -1669,9 +1824,9 @@ mod tests {
         //
         // Each pair below is the RULE stated — damage or a hostile aura aims at
         // the dummy, a self buff does not — not a value read back off the
-        // implementation. The set is the sandbox's staged class plus the one row
-        // its fixture borrows, and the exhaustiveness assertion underneath keeps
-        // a newly defined Mage spell from slipping past unclassified.
+        // implementation. The set is the sandbox's staged class plus Heroic
+        // Strike, and the exhaustiveness assertion underneath keeps a newly
+        // defined Mage spell from slipping past unclassified.
         let defs = AbilityDefinitions::default();
         let needs = |a: AbilityType| entry_needs_dummy(SandboxEntry::Ability(a), &defs);
         let pinned = [
@@ -1686,8 +1841,10 @@ mod tests {
             (AbilityType::FrostArmor, false),
             (AbilityType::MageArmorSpell, false),
             (AbilityType::MoltenArmor, false),
-            // The fixture's `n/a` row, borrowed from the Warrior.
-            (AbilityType::HeroicStrike, false),
+            // A next-swing bonus with no damage fields of its own, which the
+            // config rule alone would call self-targeted: it needs the dummy
+            // as the victim of the swing.
+            (AbilityType::HeroicStrike, true),
         ];
         for (ability, expected) in pinned {
             assert_eq!(

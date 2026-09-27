@@ -240,6 +240,12 @@ pub fn process_interrupts(
                         caster: interrupt.target,
                         kind: CastEndingKind::Interrupted,
                     },
+                    // Names the interrupt, so its landing plays on the victim
+                    // (graphical only; inert in headless).
+                    InterruptedBy {
+                        ability: interrupt.ability,
+                        interrupter: interrupt.caster,
+                    },
                     PlayMatchEntity,
                 ));
 
@@ -289,6 +295,10 @@ pub fn process_interrupts(
                         CastEnding {
                             caster: interrupt.target,
                             kind: CastEndingKind::Interrupted,
+                        },
+                        InterruptedBy {
+                            ability: interrupt.ability,
+                            interrupter: interrupt.caster,
                         },
                         PlayMatchEntity,
                     ));

@@ -138,7 +138,6 @@
             damage_coefficient: 0.6,
             damage_scales_with: SpellPower,
             spell_school: Shadow,
-            spawn_impact_effect: true,
         ),
 
         PowerWordFortitude: (

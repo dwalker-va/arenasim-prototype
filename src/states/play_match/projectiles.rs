@@ -12,13 +12,8 @@ use bevy::color::LinearRgba;
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-/// Returns true if the ability should use a smaller web projectile mesh.
-fn is_web_projectile(ability: AbilityType) -> bool {
-    matches!(ability, AbilityType::SpiderWeb)
-}
-
 /// Spawn visual meshes for newly created projectiles.
-/// Creates a glowing sphere (casters) or a small web cuboid that travels through the air.
+/// Creates a glowing sphere for the projectiles no bespoke rig draws.
 /// Note: Projectiles already have a Transform (added in process_casting for headless compatibility).
 pub fn spawn_projectile_visuals(
     mut commands: Commands,
@@ -42,12 +37,15 @@ pub fn spawn_projectile_visuals(
         if super::rendering::hunter_shot_for(projectile.ability).is_some() {
             continue;
         }
+        // The Web is the client's spinning web disc, which
+        // `spawn_web_missile_visuals` (`rendering/effects/web_missile.rs`)
+        // hangs on the projectile.
+        if super::rendering::is_web_missile(projectile.ability) {
+            continue;
+        }
 
         // Choose mesh shape based on ability type
-        let mesh = if is_web_projectile(projectile.ability) {
-            // Web: slightly smaller elongated cuboid
-            meshes.add(Cuboid::new(0.06, 0.06, 0.4))
-        } else if projectile.ability == AbilityType::DeathCoil {
+        let mesh = if projectile.ability == AbilityType::DeathCoil {
             // Death Coil: chunky bright orb — it has almost no travel as a
             // self-peel, so make the coil itself read at point-blank range.
             meshes.add(Sphere::new(0.55))
