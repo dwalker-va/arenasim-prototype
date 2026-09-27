@@ -47,7 +47,29 @@ by someone who was not there.
 
 | File | Captured | Notes |
 |---|---|---|
-| `legacy_behaviour_2026-09-13_frost_armor_chill.txt` | 2026-09-13 | **Current.** After the Frost Armor chill became one compound debuff (card AS-54). Captured against a FRESH run of `main` @ `3c61185` rather than against the file below — see the note under the table. |
+| `legacy_behaviour_2026-09-27_immolate_rng.txt` | 2026-09-27 | **Current.** After Immolate's apply burst stopped drawing from `game_rng` (card AS-154). Captured against a FRESH run of `main` @ `a2f483a` — see the note under the table. |
+| `legacy_behaviour_2026-09-13_frost_armor_chill.txt` | 2026-09-13 | After the Frost Armor chill became one compound debuff (card AS-54). Captured against a FRESH run of `main` @ `3c61185` rather than against the file below — see the note under the table. |
+
+### 2026-09-27 — Immolate's burst leaves the sim RNG (AS-154)
+
+Immolate's apply-moment flame burst drew 57-85 values from `game_rng` on every
+landing, in headless too. It is now a deterministic marker the graphical client
+expands with its own RNG, so every roll after an Immolate landing is
+re-randomised. That is the only change: no rule, number or AI decision moved.
+
+**Eight of 27 cells moved, all `healer_v_healer`** — the only comp here with a
+Warlock. The ninth, `TwinPillars healer_v_healer 4`, is byte-identical, and the
+change predicts that too: both of its Immolate casts were interrupted or never
+landed, so it never drew the burst. The 18 `ranged_v_melee` and `pet_comp`
+cells are byte-identical, log SHA included.
+
+**Measured against a fresh run of `main` @ `a2f483a`, not against the
+2026-09-13 file.** `main` had drifted under that file on all 27 cells by then,
+so diffing against it would have attributed other cards' changes to this one.
+
+The balance side is a paired directional sweep, not these cells: 3,090 matches
+at identical seeds, Warlock -0.6pt (z=0.95, resolves >=1.2pt), control 80/80
+identical.
 | `legacy_behaviour_2026-08-02_backlash_ids.txt` | 2026-08-02 | After the `[BACKLASH]` log-id fix. Verified reproducible: two independent runs agreed on all 27 cells. |
 | `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | After moving the simulation to `FixedUpdate`. Verified reproducible when captured. |
 | `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | Pre-fixed-timestep. Also verified reproducible when captured. |
