@@ -950,6 +950,7 @@ pub fn consume_swing_signals(
             commands.spawn((
                 RangedHitArrival {
                     target: signal.target,
+                    kind: AutoAttackKind::Shot,
                     is_crit: signal.is_crit,
                     from,
                 },

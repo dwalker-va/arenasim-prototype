@@ -463,14 +463,16 @@ fn a_between_takes_reset_must_clear_the_composed_channels_too() {
 fn consumer_app() -> App {
     let mut app = harness();
     // Production ordering: the reaction consumer runs BEFORE the swing
-    // consumer, which despawns the marker; the arrow flies after both, and a
-    // Shot's held reaction is played off the arrival it leaves behind.
+    // consumer, which despawns the marker; the arrow and the wand bolt fly
+    // after both, and a ranged auto's held reaction is played off the arrival
+    // its projectile leaves behind.
     app.add_systems(
         Update,
         (
             consume_hit_reactions,
             consume_swing_signals,
             update_cosmetic_arrows,
+            update_wand_missiles,
             consume_ranged_hit_arrivals,
         )
             .chain(),
@@ -493,8 +495,11 @@ fn every_landed_auto_flinches_its_victim() {
     //
     // The attacker holds no weapon socket, so the Shot row looses no arrow:
     // it is the no-arrow fallback, which must still react (at once, having
-    // nothing in flight to wait for). The held timing is pinned by
-    // `a_shot_reacts_the_frame_its_arrow_arrives` below.
+    // nothing in flight to wait for). The wand row still launches a bolt —
+    // from in front of the caster's chest — and reacts when it lands, three
+    // yards on. The held timings are pinned by
+    // `a_shot_reacts_the_frame_its_arrow_arrives` and
+    // `a_wand_hit_flinches_the_frame_its_bolt_arrives` below.
     for kind in [
         AutoAttackKind::Melee,
         AutoAttackKind::Shot,
@@ -510,6 +515,14 @@ fn every_landed_auto_flinches_its_victim() {
         );
         swing(&mut app, attacker, victim, kind, false);
         app.update();
+        if kind == AutoAttackKind::Wand {
+            for _ in 0..10 {
+                if flinch_of(&app, victim).is_some() {
+                    break;
+                }
+                app.update();
+            }
+        }
         assert!(
             flinch_of(&app, victim).is_some(),
             "{kind:?} left its victim with no hit reaction"
@@ -697,6 +710,7 @@ fn arrow_app() -> App {
             consume_hit_reactions,
             consume_swing_signals,
             update_cosmetic_arrows,
+            update_wand_missiles,
             consume_ranged_hit_arrivals,
             tick_hit_flinch,
             update_walk_animation,
@@ -1387,7 +1401,6 @@ fn focus_fire_with_a_hunter_in_it_stays_under_one_mortal_strike() {
 #[test]
 fn a_wand_shot_launches_a_bolt_that_reaches_the_victims_chest() {
     let mut app = consumer_app();
-    app.add_systems(PostUpdate, update_wand_missiles);
     let caster_pos = Vec3::new(0.0, 1.0, 0.0);
     let victim_pos = Vec3::new(0.0, 1.0, 12.0);
     let (caster, caster_body) = spawn_unit(&mut app, CharacterClass::Mage, 1, caster_pos);
@@ -1456,7 +1469,6 @@ fn a_bolt_that_never_arrives_still_despawns() {
     // The TTL backstop: a victim that despawns mid-flight must not strand a
     // bolt for the rest of the match.
     let mut app = consumer_app();
-    app.add_systems(PostUpdate, update_wand_missiles);
     let (caster, _) = spawn_unit(
         &mut app,
         CharacterClass::Warlock,
@@ -1490,6 +1502,206 @@ fn a_bolt_that_never_arrives_still_despawns() {
             .len(),
         0,
         "a bolt outlived its TTL backstop"
+    );
+}
+
+/// One wand hit from a caster holding a wand at `caster_pos` onto a
+/// stationary victim at `victim_pos`, flown to completion through the whole
+/// production chain. Per frame: whether the bolt is still in the air, the
+/// victim body's WORLD y, and the victim's live flinch.
+fn fly_one_bolt(
+    caster_pos: Vec3,
+    victim_pos: Vec3,
+    is_crit: bool,
+) -> Vec<(bool, f32, Option<HitFlinch>)> {
+    let mut app = arrow_app();
+    let (caster, caster_body) = spawn_unit(&mut app, CharacterClass::Priest, 1, caster_pos);
+    spawn_wand_socket(&mut app, caster, caster_body);
+    let (victim, victim_body) = spawn_unit(&mut app, CharacterClass::Warrior, 2, victim_pos);
+    // Propagate the socket's GlobalTransform, so the bolt leaves the rod.
+    app.update();
+    assert!(
+        (world_y(&app, victim_body) - victim_pos.y).abs() < 1e-6,
+        "the idle victim must stand at rest before the shot"
+    );
+
+    swing(&mut app, caster, victim, AutoAttackKind::Wand, is_crit);
+    let mut track = Vec::new();
+    for _ in 0..60 {
+        app.update();
+        track.push((
+            bolt_count(&mut app) > 0,
+            world_y(&app, victim_body),
+            flinch_of(&app, victim),
+        ));
+    }
+    track
+}
+
+fn bolt_count(app: &mut App) -> usize {
+    app.world_mut()
+        .query::<&WandMissile>()
+        .iter(app.world())
+        .len()
+}
+
+#[test]
+fn a_wand_hit_flinches_the_frame_its_bolt_arrives() {
+    // AS-165's defect, measured: the sim resolves a wand hit's damage at the
+    // swing, and a flinch hung there leads its own bolt by up to a second at
+    // wand range. So the claim is about WHEN, read off the world: the frame
+    // the victim's body first dips must be the frame the bolt retires, one
+    // flight-time after the swing — and not one frame before it.
+    let caster_pos = Vec3::new(0.0, 1.0, 0.0);
+    let victim_pos = Vec3::new(0.0, 1.0, 28.0);
+    for is_crit in [false, true] {
+        let track = fly_one_bolt(caster_pos, victim_pos, is_crit);
+        let rest = victim_pos.y;
+
+        let arrived = track
+            .iter()
+            .position(|(in_air, _, _)| !in_air)
+            .expect("the bolt never arrived");
+        let flinched = track
+            .iter()
+            .position(|(_, _, f)| f.is_some())
+            .expect("the victim never flinched");
+        let dipped = track
+            .iter()
+            .position(|&(_, y, _)| y < rest - 1e-4)
+            .expect("the victim's body never dipped");
+
+        // Non-vacuity: the bolt was in flight for many frames, so "at the
+        // swing" and "at the arrival" are far apart.
+        assert!(arrived >= 10, "the bolt arrived on frame {arrived}");
+        assert_eq!(
+            flinched, arrived,
+            "crit={is_crit}: the flinch started on frame {flinched} but the \
+             bolt arrived on frame {arrived}"
+        );
+        assert_eq!(
+            dipped, arrived,
+            "crit={is_crit}: the body dipped on frame {dipped} but the bolt \
+             arrived on frame {arrived}"
+        );
+        // Started ON the arrival frame, not carried over from an earlier one.
+        let first = track[arrived].2.unwrap();
+        assert!(
+            first.elapsed <= TICK_SECS + 1e-6,
+            "the arrival-frame flinch is already {}s old",
+            first.elapsed
+        );
+
+        // ...one flight time after the swing. The bolt leaves the rod (about
+        // chest height beside the caster) for the victim's chest anchor, at
+        // the wand's 30 yd/s; the rod's offset is well under a frame's travel.
+        let flight = ((victim_pos + Vec3::Y * 0.55) - caster_pos).length() / 30.0;
+        let arrived_at = (arrived + 1) as f32 * TICK_SECS;
+        assert!(
+            (arrived_at - flight).abs() <= 2.0 * TICK_SECS,
+            "arrival at {arrived_at}s, flight time {flight}s"
+        );
+
+        // Exactly one reaction: the flinch runs its course from the arrival
+        // without ever restarting, and nothing else ever starts one.
+        let mut last = -1.0;
+        let mut restarts = 0;
+        for (_, _, f) in &track[arrived..] {
+            if let Some(f) = f {
+                if f.elapsed < last {
+                    restarts += 1;
+                }
+                last = f.elapsed;
+            }
+        }
+        assert_eq!(restarts, 0, "a second flinch started after the arrival");
+        assert!(
+            track.last().unwrap().2.is_none(),
+            "the flinch never finished"
+        );
+
+        // The crit rides the bolt to the arrival: its dip is the crit's.
+        let deepest = track.iter().map(|&(_, y, _)| y - rest).fold(0.0, f32::min);
+        let expect = FLINCH_DIP * if is_crit { FLINCH_CRIT_MULT } else { 1.0 };
+        assert!(
+            (deepest + expect).abs() < expect * 0.15,
+            "crit={is_crit}: deepest dip {deepest}, expected about -{expect}"
+        );
+    }
+}
+
+#[test]
+fn a_wand_hit_with_no_bolt_to_fly_reacts_at_once() {
+    // The no-bolt fallback: a caster that is gone by the time the reaction
+    // consumer runs cannot launch one, and the hit must still react — at
+    // once, having nothing in flight to wait for — exactly once, and with no
+    // sparks (a wand's reaction is the flinch alone, however it arrives).
+    let mut app = arrow_app();
+    let ghost = app.world_mut().spawn_empty().id();
+    let (victim, _) = spawn_unit(
+        &mut app,
+        CharacterClass::Priest,
+        2,
+        Vec3::new(0.0, 1.0, 20.0),
+    );
+    app.world_mut().entity_mut(ghost).despawn();
+    swing(&mut app, ghost, victim, AutoAttackKind::Wand, false);
+    app.update();
+    assert_eq!(bolt_count(&mut app), 0, "a bolt was launched from nobody");
+    let flinch = flinch_of(&app, victim).expect("the fallback hit never reacted");
+    assert!(flinch.elapsed <= TICK_SECS + 1e-6);
+    assert_eq!(spark_count(&mut app), 0);
+    let mut last = flinch.elapsed;
+    for _ in 0..10 {
+        app.update();
+        if let Some(f) = flinch_of(&app, victim) {
+            assert!(f.elapsed >= last, "the fallback reacted twice");
+            last = f.elapsed;
+        }
+    }
+    assert_eq!(
+        app.world_mut()
+            .query::<&RangedHitArrival>()
+            .iter(app.world())
+            .len(),
+        0,
+        "the arrival marker leaked"
+    );
+}
+
+#[test]
+fn a_wand_bolt_whose_victim_died_in_flight_reacts_nothing_and_leaks_nothing() {
+    let mut app = arrow_app();
+    let (caster, caster_body) = spawn_unit(
+        &mut app,
+        CharacterClass::Warlock,
+        1,
+        Vec3::new(0.0, 1.0, 0.0),
+    );
+    spawn_wand_socket(&mut app, caster, caster_body);
+    let (victim, _) = spawn_unit(
+        &mut app,
+        CharacterClass::Priest,
+        2,
+        Vec3::new(0.0, 1.0, 25.0),
+    );
+    app.update();
+    swing(&mut app, caster, victim, AutoAttackKind::Wand, false);
+    app.update();
+    assert_eq!(bolt_count(&mut app), 1);
+    app.world_mut().entity_mut(victim).despawn();
+    for _ in 0..60 {
+        app.update();
+    }
+    assert_eq!(bolt_count(&mut app), 0, "the bolt never retired");
+    assert_eq!(spark_count(&mut app), 0, "a burst played on no body");
+    assert_eq!(
+        app.world_mut()
+            .query::<&RangedHitArrival>()
+            .iter(app.world())
+            .len(),
+        0,
+        "the arrival marker leaked"
     );
 }
 

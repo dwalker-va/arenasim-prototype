@@ -17,14 +17,16 @@
 //!   only the generic flinch is the faithful result (research §2.5,
 //!   constraint 5). The Shot's burst is the second deviation below.
 //!
-//! **A Shot reacts when its arrow ARRIVES, not when its damage lands.** The
-//! sim resolves an auto's damage at the swing and the cosmetic arrow flies
-//! afterwards, so a reaction hung on the damage finishes before the arrow gets
-//! there (a 0.35 s flinch against 0.36 s of flight at 16 yd, worse with range).
-//! [`consume_hit_reactions`] therefore skips the Shot, and
-//! [`consume_ranged_hit_arrivals`] plays the whole of its reaction off the
-//! `RangedHitArrival` the arrow leaves behind. The wand bolt is not held: its
-//! reaction is the flinch alone, and it still plays at the damage.
+//! **A ranged auto reacts when its projectile ARRIVES, not when its damage
+//! lands.** The sim resolves an auto's damage at the swing and the cosmetic
+//! arrow or wand bolt flies afterwards, so a reaction hung on the damage
+//! finishes before the projectile gets there (a 0.35 s flinch against 0.36 s
+//! of arrow flight at 16 yd; a wand bolt is up to 1.0 s in the air at 30).
+//! [`consume_hit_reactions`] therefore plays no reaction for a Shot or a wand
+//! hit — for a wand it only launches the bolt — and
+//! [`consume_ranged_hit_arrivals`] plays the whole of it off the
+//! `RangedHitArrival` the projectile leaves behind: the flinch and burst for
+//! a Shot, the flinch alone for a wand.
 //!
 //! **The impact burst is a WEAPON SPARK, not blood — a deliberate,
 //! user-directed deviation from the client.** Classic shows `bloodspurt.m2`,
@@ -336,8 +338,11 @@ pub fn hit_flinch_weight(flinch: &HitFlinch) -> f32 {
 /// frame, and a reaction deferred to `Update` would collapse a focus-fire
 /// flurry into a single dip.
 ///
-/// A Shot is skipped outright: its reaction waits for its arrow, and
-/// [`consume_ranged_hit_arrivals`] plays it (module header).
+/// A Shot is skipped outright and a wand hit only launches its bolt: both
+/// reactions wait for their projectile, and [`consume_ranged_hit_arrivals`]
+/// plays them (module header). A wand hit whose caster is gone, so that no
+/// bolt can be launched, leaves its arrival at once — nothing is in flight to
+/// wait for, and it must still react.
 ///
 /// Reads the victim's LIVE transform. The sim already resolved damage against
 /// that position, and the burst is sited there rather than tracked, so a unit
@@ -362,7 +367,35 @@ pub fn consume_hit_reactions(
         };
         let is_pet = victim_pet.is_some();
 
-        // --- the flinch: every landed auto, whatever the weapon ------------
+        // --- the wand: launch the bolt, whose arrival releases the flinch --
+        if signal.kind == AutoAttackKind::Wand {
+            let aim = impact_origin(ImpactAnchor::Chest, victim_tf.translation, is_pet);
+            if let Ok((attacker_tf, attacker)) = attackers.get(signal.attacker) {
+                spawn_wand_missile(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    wand_school(attacker.class),
+                    wand_muzzle(signal.attacker, attacker_tf.translation, aim, &sockets),
+                    aim,
+                    signal.target,
+                    signal.is_crit,
+                );
+            } else {
+                commands.spawn((
+                    RangedHitArrival {
+                        target: signal.target,
+                        kind: AutoAttackKind::Wand,
+                        is_crit: signal.is_crit,
+                        from: Vec3::ZERO,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
+            continue;
+        }
+
+        // --- the flinch: every landed melee auto ---------------------------
         insert_flinch(
             &mut commands,
             &mut pending_depth,
@@ -393,34 +426,19 @@ pub fn consume_hit_reactions(
                 if is_pet { PET_SPARK_SPATIAL_SCALE } else { 1.0 },
             );
         }
-
-        // --- the wand missile: a cosmetic bolt, no impact of its own -------
-        if signal.kind == AutoAttackKind::Wand {
-            let Ok((attacker_tf, attacker)) = attackers.get(signal.attacker) else {
-                continue;
-            };
-            let aim = impact_origin(ImpactAnchor::Chest, victim_tf.translation, is_pet);
-            spawn_wand_missile(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                wand_school(attacker.class),
-                wand_muzzle(signal.attacker, attacker_tf.translation, aim, &sockets),
-                aim,
-            );
-        }
     }
 }
 
-/// Update (graphical-only): play a Shot's held reaction — the flinch AND the
-/// burst — the frame its arrow arrives.
+/// Update (graphical-only): play a ranged auto's held reaction the frame its
+/// projectile arrives — the flinch AND the burst for a Shot's arrow, the
+/// flinch alone for a wand bolt ([`auto_throws_sparks`]).
 ///
-/// Ordered after `update_cosmetic_arrows`, which leaves the
-/// [`RangedHitArrival`] behind, and before `tick_hit_flinch`, so the dip
-/// renders on the arrival frame rather than one behind; both in
-/// `states/mod.rs`. `Update` rather than FixedUpdate because the arrow flies
-/// at render rate: the arrival is a rendered-frame event, and several
-/// arrivals inside one frame each still get their own burst here.
+/// Ordered after `update_cosmetic_arrows` and `update_wand_missiles`, which
+/// leave the [`RangedHitArrival`] behind, and before `tick_hit_flinch`, so the
+/// dip renders on the arrival frame rather than one behind; all in
+/// `states/mod.rs`. `Update` rather than FixedUpdate because the projectiles
+/// fly at render rate: the arrival is a rendered-frame event, and several
+/// arrivals inside one frame each still get their own reaction here.
 ///
 /// The burst is sited on the side the arrow STRUCK, read off the arrow's own
 /// heading rather than the Hunter's position — the Hunter may have walked on
@@ -449,7 +467,7 @@ pub fn consume_ranged_hit_arrivals(
             live_flinch,
             arrival.is_crit,
         );
-        if auto_throws_sparks(AutoAttackKind::Shot) {
+        if auto_throws_sparks(arrival.kind) {
             let (impact, outward) = impact_point(victim_tf.translation, arrival.from, is_pet);
             spawn_impact_burst(
                 &mut commands,
