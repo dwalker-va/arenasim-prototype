@@ -216,8 +216,7 @@ mod tests {
     fn test_damage_with_no_shields() {
         let mut target = create_test_combatant(100.0);
 
-        let (actual_damage, absorbed) =
-            hit(30.0, &mut target, None, SpellSchool::None);
+        let (actual_damage, absorbed) = hit(30.0, &mut target, None, SpellSchool::None);
 
         assert_eq!(actual_damage, 30.0, "All damage should hit health");
         assert_eq!(absorbed, 0.0, "No damage should be absorbed");
@@ -235,8 +234,7 @@ mod tests {
             auras: vec![create_absorb_aura(50.0, "Power Word: Shield")],
         };
 
-        let (actual_damage, absorbed) =
-            hit(30.0, &mut target, Some(&mut auras), SpellSchool::None);
+        let (actual_damage, absorbed) = hit(30.0, &mut target, Some(&mut auras), SpellSchool::None);
 
         assert_eq!(actual_damage, 0.0, "No damage should hit health");
         assert_eq!(absorbed, 30.0, "All damage should be absorbed");
@@ -254,8 +252,7 @@ mod tests {
             auras: vec![create_absorb_aura(20.0, "Power Word: Shield")],
         };
 
-        let (actual_damage, absorbed) =
-            hit(50.0, &mut target, Some(&mut auras), SpellSchool::None);
+        let (actual_damage, absorbed) = hit(50.0, &mut target, Some(&mut auras), SpellSchool::None);
 
         assert_eq!(absorbed, 20.0, "Shield should absorb its full amount");
         assert_eq!(actual_damage, 30.0, "Remaining damage should hit health");
@@ -315,8 +312,7 @@ mod tests {
         let mut auras = ActiveAuras {
             auras: vec![create_absorb_aura(20.0, "Power Word: Shield")],
         };
-        let (to_health, _) =
-            hit(50.0, &mut rogue, Some(&mut auras), SpellSchool::None);
+        let (to_health, _) = hit(50.0, &mut rogue, Some(&mut auras), SpellSchool::None);
         assert!(to_health > 0.0);
         assert!(
             !rogue.stealthed,
@@ -330,8 +326,7 @@ mod tests {
         let mut auras = ActiveAuras {
             auras: vec![create_absorb_aura(50.0, "Power Word: Shield")],
         };
-        let (to_health, absorbed) =
-            hit(30.0, &mut rogue, Some(&mut auras), SpellSchool::None);
+        let (to_health, absorbed) = hit(30.0, &mut rogue, Some(&mut auras), SpellSchool::None);
         assert_eq!((to_health, absorbed), (0.0, 30.0));
         assert!(
             rogue.stealthed,
@@ -364,8 +359,7 @@ mod tests {
             ],
         };
 
-        let (actual_damage, absorbed) =
-            hit(50.0, &mut target, Some(&mut auras), SpellSchool::None);
+        let (actual_damage, absorbed) = hit(50.0, &mut target, Some(&mut auras), SpellSchool::None);
 
         assert_eq!(
             absorbed, 50.0,
@@ -386,8 +380,7 @@ mod tests {
     fn test_damage_exceeds_health() {
         let mut target = create_test_combatant(50.0);
 
-        let (actual_damage, absorbed) =
-            hit(100.0, &mut target, None, SpellSchool::None);
+        let (actual_damage, absorbed) = hit(100.0, &mut target, None, SpellSchool::None);
 
         assert_eq!(
             actual_damage, 50.0,
@@ -401,8 +394,7 @@ mod tests {
     fn test_zero_damage() {
         let mut target = create_test_combatant(100.0);
 
-        let (actual_damage, absorbed) =
-            hit(0.0, &mut target, None, SpellSchool::None);
+        let (actual_damage, absorbed) = hit(0.0, &mut target, None, SpellSchool::None);
 
         assert_eq!(actual_damage, 0.0, "No damage dealt");
         assert_eq!(absorbed, 0.0, "No damage absorbed");
@@ -416,8 +408,7 @@ mod tests {
             auras: vec![create_absorb_aura(25.0, "Power Word: Shield")],
         };
 
-        let (actual_damage, absorbed) =
-            hit(25.0, &mut target, Some(&mut auras), SpellSchool::None);
+        let (actual_damage, absorbed) = hit(25.0, &mut target, Some(&mut auras), SpellSchool::None);
 
         assert_eq!(absorbed, 25.0);
         assert_eq!(actual_damage, 0.0);
@@ -607,8 +598,7 @@ mod tests {
             }],
         };
 
-        let (actual, absorbed) =
-            hit(100.0, &mut target, Some(&mut auras), SpellSchool::Physical);
+        let (actual, absorbed) = hit(100.0, &mut target, Some(&mut auras), SpellSchool::Physical);
 
         assert_eq!(actual, 0.0);
         assert_eq!(absorbed, 0.0);
@@ -628,8 +618,7 @@ mod tests {
             auras: vec![create_absorb_aura(1000.0, "Ice Barrier")], // soak everything
         };
 
-        let (actual, absorbed) =
-            hit(100.0, &mut target, Some(&mut auras), SpellSchool::Frost);
+        let (actual, absorbed) = hit(100.0, &mut target, Some(&mut auras), SpellSchool::Frost);
 
         assert_eq!(actual, 0.0, "All post-resist damage absorbed");
         assert!(
@@ -670,8 +659,7 @@ mod tests {
             }],
         };
 
-        let (actual, _) =
-            hit(100.0, &mut target, Some(&mut auras), SpellSchool::Shadow);
+        let (actual, _) = hit(100.0, &mut target, Some(&mut auras), SpellSchool::Shadow);
 
         // effective resistance = 0 base + 60 aura = 60 → 15% reduction
         assert!(

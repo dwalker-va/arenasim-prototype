@@ -760,18 +760,18 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
     use AbilityType::*;
     match ability {
         FrostNova | PsychicScream | DemoralizingShout | FreezingTrap | FrostTrap => true,
-        Frostbolt | FlashHeal | HeroicStrike | Ambush | CheapShot | MindBlast
-        | SinisterStrike | Charge | KidneyShot | PowerWordFortitude | Rend | MortalStrike
-        | Pummel | BerserkerRage | Kick | CripplingPoison | Corruption | Shadowbolt | Fear
-        | Immolate | DrainLife | CurseOfAgony | CurseOfWeakness | CurseOfTongues
-        | UnstableAffliction | DeathCoil | ArcaneIntellect | BattleShout | IceBarrier
-        | PowerWordShield | Polymorph | DispelMagic | ManaBurn | FlashOfLight | HolyLight
-        | HolyShock | HammerOfJustice | PaladinCleanse | DevotionAura | DivineShield
-        | SpellLock | DevourMagic | AimedShot | ArcaneShot | ConcussiveShot | SerpentSting
-        | Disengage | SpiderWeb | BoarCharge | MastersCall | CommandingShout | FrostArmor
-        | MageArmorSpell | MoltenArmor | ShadowResistanceAura | ConcentrationAura
-        | LightningBolt | FrostShock | LesserHealingWave | Purge | WindShear | AirTotem
-        | WaterTotem | EarthTotem | FireTotem => false,
+        Frostbolt | FlashHeal | HeroicStrike | Ambush | CheapShot | MindBlast | SinisterStrike
+        | Charge | KidneyShot | PowerWordFortitude | Rend | MortalStrike | Pummel
+        | BerserkerRage | Kick | CripplingPoison | Corruption | Shadowbolt | Fear | Immolate
+        | DrainLife | CurseOfAgony | CurseOfWeakness | CurseOfTongues | UnstableAffliction
+        | DeathCoil | ArcaneIntellect | BattleShout | IceBarrier | PowerWordShield | Polymorph
+        | DispelMagic | ManaBurn | FlashOfLight | HolyLight | HolyShock | HammerOfJustice
+        | PaladinCleanse | DevotionAura | DivineShield | SpellLock | DevourMagic | AimedShot
+        | ArcaneShot | ConcussiveShot | SerpentSting | Disengage | SpiderWeb | BoarCharge
+        | MastersCall | CommandingShout | FrostArmor | MageArmorSpell | MoltenArmor
+        | ShadowResistanceAura | ConcentrationAura | LightningBolt | FrostShock
+        | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem | EarthTotem
+        | FireTotem => false,
     }
 }
 
@@ -785,7 +785,10 @@ fn drive_area_effect(ability: AbilityType) -> Result<String, String> {
             .iter()
             .find(|t| t.ends_with(what))
             .cloned()
-            .ok_or(format!("{what:?} never reached it: {:?} / {:?}", r.choices, r.touches))
+            .ok_or(format!(
+                "{what:?} never reached it: {:?} / {:?}",
+                r.choices, r.touches
+            ))
     };
     match ability {
         AbilityType::FrostNova => touched(
@@ -894,7 +897,13 @@ fn every_area_effect_reaches_a_stealthed_enemy() {
     // Named, not counted: the set is exactly these, in enum order.
     assert_eq!(
         areas,
-        vec![FrostNova, PsychicScream, FreezingTrap, FrostTrap, DemoralizingShout]
+        vec![
+            FrostNova,
+            PsychicScream,
+            FreezingTrap,
+            FrostTrap,
+            DemoralizingShout
+        ]
     );
     let mut failures = Vec::new();
     for ability in areas {
@@ -966,7 +975,13 @@ fn a_hostile_aura_that_lands_reveals() {
         )
     );
     // Not only crowd control: any hostile effect, e.g. a stat debuff.
-    assert!(land(aura(AuraType::AttackPowerReduction, "Demoralizing Shout"), false).0);
+    assert!(
+        land(
+            aura(AuraType::AttackPowerReduction, "Demoralizing Shout"),
+            false
+        )
+        .0
+    );
 }
 
 #[test]
@@ -978,7 +993,10 @@ fn a_blocked_or_friendly_aura_does_not_reveal() {
     );
     // Friendly: a buff is not hostile.
     assert_eq!(
-        land(aura(AuraType::MaxHealthIncrease, "Power Word: Fortitude"), false),
+        land(
+            aura(AuraType::MaxHealthIncrease, "Power Word: Fortitude"),
+            false
+        ),
         (false, vec![])
     );
 }

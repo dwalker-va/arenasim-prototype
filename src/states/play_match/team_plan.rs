@@ -305,9 +305,7 @@ fn centroid(points: impl Iterator<Item = Vec2>) -> Vec2 {
 }
 
 fn choose_from(team: u8, units: &[CallCandidate], reference: Vec2) -> Option<Entity> {
-    let team_has_shadow_sight = units
-        .iter()
-        .any(|u| u.team == team && u.has_shadow_sight);
+    let team_has_shadow_sight = units.iter().any(|u| u.team == team && u.has_shadow_sight);
     units
         .iter()
         .filter(|u| {
