@@ -196,7 +196,8 @@ pub fn combat_auto_attack(
         })
         .collect();
 
-    // Collect attacks that will happen this frame (attacker, target, damage)
+    // Collect attacks that will happen this frame (attacker, target, damage,
+    // Heroic Strike bonus, crit, the hand that swung)
     let mut attacks = Vec::new();
     // Attackers whose MELEE swing LANDED this frame, in the order the swings
     // landed. A `Vec`, not a set: each landed swing is its own proc-trinket
@@ -381,6 +382,7 @@ pub fn combat_auto_attack(
                                     total_damage,
                                     has_bonus,
                                     is_crit,
+                                    WeaponHand::Main,
                                 ));
 
                                 // Windfury Totem proc: a successful roll pushes a duplicate
@@ -413,6 +415,7 @@ pub fn combat_auto_attack(
                                             wf_total,
                                             false,
                                             wf_is_crit,
+                                            WeaponHand::Main,
                                         ));
 
                                         // Signature Windfury VFX: a wind funnel swirls up
@@ -482,6 +485,7 @@ pub fn combat_auto_attack(
                                     total_damage,
                                     false,
                                     is_crit,
+                                    WeaponHand::Off,
                                 ));
 
                                 // Rage tracks the damage a swing deals, and an
@@ -549,7 +553,7 @@ pub fn combat_auto_attack(
         }
     }
 
-    for (attacker_entity, target_entity, damage, has_bonus, is_crit) in attacks {
+    for (attacker_entity, target_entity, damage, has_bonus, is_crit, hand) in attacks {
         // If any attack to this target crits, mark the FCT as crit
         crit_per_target
             .entry(target_entity)
@@ -697,6 +701,7 @@ pub fn combat_auto_attack(
                             // disagree with the sim about what landed.
                             kind: attacker_kind,
                             is_crit,
+                            hand,
                         },
                         PlayMatchEntity,
                     ));

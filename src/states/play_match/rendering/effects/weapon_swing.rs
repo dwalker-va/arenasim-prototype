@@ -606,6 +606,37 @@ fn swing_param(
     )
 }
 
+/// Whether a weapon of this kind swings at all. The shield is held, never
+/// swung: it neither telegraphs nor strikes.
+fn swings(kind: WeaponKind) -> bool {
+    kind != WeaponKind::Shield
+}
+
+/// The sim clock a socket in `hand` follows: its hand's swing timer and that
+/// hand's effective interval. `None` for an off hand with no weapon armed in
+/// it — the sim swings nothing there, so there is nothing to telegraph.
+fn hand_clock(
+    combatant: &Combatant,
+    auras: Option<&ActiveAuras>,
+    hand: WeaponHand,
+) -> Option<(f32, f32)> {
+    use crate::states::play_match::combat_core::{
+        effective_attack_interval, effective_offhand_interval,
+    };
+    match hand {
+        WeaponHand::Main => Some((
+            combatant.attack_timer,
+            effective_attack_interval(combatant, auras),
+        )),
+        WeaponHand::Off => combatant.is_dual_wielding().then(|| {
+            (
+                combatant.offhand_timer,
+                effective_offhand_interval(combatant, auras),
+            )
+        }),
+    }
+}
+
 /// [`swing_param`] with the phase durations supplied by a [`SwingProfile`]
 /// instead of the bare consts. The windup branch is unaffected — it is driven
 /// by the sim's attack timer, which a styled stroke does not change.
@@ -891,13 +922,6 @@ pub fn consume_swing_signals(
     for (signal_entity, signal) in signals.iter() {
         let target_pos = positions.get(signal.target).map(|t| t.translation).ok();
         let mut loosed_arrow = false;
-        // Dual-wield alternation: the sim has ONE attack timer, so each landed
-        // auto swings whichever dagger is flagged as next, then hands the flag
-        // to its twin. Single-weapon classes keep the flag on the main hand
-        // permanently.
-        let has_off_dagger = sockets.iter().any(|s| {
-            s.owner == signal.attacker && s.hand == WeaponHand::Off && s.kind == WeaponKind::Dagger
-        });
         for mut socket in sockets.iter_mut() {
             if socket.owner != signal.attacker {
                 continue;
@@ -905,10 +929,11 @@ pub fn consume_swing_signals(
             if let Some(pos) = target_pos {
                 socket.aim = pos; // both hands track the victim
             }
-            if !socket.winds_up_next {
-                if has_off_dagger && socket.kind == WeaponKind::Dagger {
-                    socket.winds_up_next = true; // this twin swings the NEXT auto
-                }
+            // The weapon in the hand that swung strikes, and only that one:
+            // each hand has its own sim timer, so a dual-wielder's daggers
+            // strike when their own swings land — together when the timers
+            // coincide, apart when the weapons' speeds differ.
+            if socket.hand != signal.hand || !swings(socket.kind) {
                 continue;
             }
             socket.release_t = Some(0.0);
@@ -916,9 +941,6 @@ pub fn consume_swing_signals(
             // style still set from a stroke that has not expired yet, so a
             // Mortal Strike's timing can never bleed into the next swing.
             socket.swing_style = SwingStyle::Auto;
-            if has_off_dagger && socket.kind == WeaponKind::Dagger {
-                socket.winds_up_next = false; // twin takes over
-            }
             // Cosmetic arrow: bow-kind main hand only. This single gate keeps
             // caster Wand Shots (ranged, no bow) and any future non-bow ranged
             // weapon from loosing arrows. It homes on the victim from here on
@@ -980,7 +1002,6 @@ pub fn animate_weapon_swings(
         Without<WeaponSocket>,
     >,
 ) {
-    use crate::states::play_match::combat_core::effective_attack_interval;
     use crate::states::play_match::utils::is_incapacitated;
     use crate::states::play_match::{AUTO_SHOT_RANGE, HUNTER_DEAD_ZONE, MELEE_RANGE};
 
@@ -1054,7 +1075,13 @@ pub fn animate_weapon_swings(
         // telegraphing in those states reads as a stuck animation.
         let mut windup_window = 0.0;
         let mut interval = 0.0;
-        if socket.winds_up_next
+        // The hand's OWN clock: an off-hand weapon telegraphs off the off-hand
+        // timer, and only while the owner actually dual-wields — a class that
+        // draws a second dagger it has no weapon equipped for never swings it.
+        let clock = hand_clock(combatant, auras, socket.hand);
+        let (timer, hand_interval) = clock.unwrap_or((0.0, 0.0));
+        if clock.is_some()
+            && swings(socket.kind)
             && socket.release_t.is_none()
             && combatant.is_alive()
             && !combatant.stealthed
@@ -1076,7 +1103,7 @@ pub fn animate_weapon_swings(
             };
             if let Some((reach, min_reach)) = band {
                 if target_dist <= reach && target_dist >= min_reach {
-                    interval = effective_attack_interval(combatant, auras);
+                    interval = hand_interval;
                     windup_window = (interval * SWING_WINDUP_FRACTION)
                         .clamp(SWING_WINDUP_MIN_SECS, SWING_WINDUP_MAX_SECS);
                 }
@@ -1089,7 +1116,7 @@ pub fn animate_weapon_swings(
         // release stroke stays raw — its sharpness IS the hit — and sweeps
         // from the frozen windup depth through to full extension.
         let s_raw = swing_param_timed(
-            combatant.attack_timer,
+            timer,
             interval,
             windup_window,
             socket.release_t,

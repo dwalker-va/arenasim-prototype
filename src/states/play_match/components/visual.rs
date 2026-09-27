@@ -1391,10 +1391,11 @@ pub enum WeaponKind {
     Wand,
 }
 
-/// Which hand position a [`WeaponSocket`] occupies. The Paladin's shield is
-/// held statically; the Rogue's daggers alternate hands cosmetically — the
-/// sim has a single attack timer, so each landed auto swings whichever dagger
-/// is flagged `winds_up_next`.
+/// Which hand a [`WeaponSocket`] occupies, and which hand an
+/// [`AutoAttackSwing`] came from. The sim swings each hand on its own timer
+/// (`attack_timer` / `offhand_timer`), so a dual-wielder's daggers each follow
+/// their own hand's swings rather than taking turns. The Paladin's shield is
+/// held statically.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WeaponHand {
     Main,
@@ -1421,11 +1422,6 @@ pub struct WeaponSocket {
     pub rest: Transform,
     pub release_t: Option<f32>,
     pub aim: Vec3,
-    /// True when THIS socket telegraphs and plays the owner's next swing.
-    /// Main hand at spawn; for dual daggers the signal consumer flips it
-    /// between hands after each landed auto so the pair alternates. Always
-    /// false for the shield.
-    pub winds_up_next: bool,
     /// Smoothed aim correction, as a yaw angle LOCAL to the owner's facing
     /// (radians). The weapon is rigid to the body — when the body turns, the
     /// weapon turns with it instantly — and this angle eases toward the
@@ -1480,6 +1476,11 @@ pub struct AutoAttackSwing {
     /// Whether the landed swing crit. Selects the deeper flinch
     /// (`CombatCritical`) and the bigger impact burst; cosmetic only.
     pub is_crit: bool,
+    /// The hand that swung: `Off` only for a dual-wielder's off-hand swing,
+    /// `Main` for everything else (a Windfury bonus swing included, since the
+    /// totem procs off the main hand). The swing consumer releases the socket
+    /// in THIS hand, so each weapon strikes exactly when its own timer lands.
+    pub hand: WeaponHand,
 }
 
 /// Rides an [`AutoAttackSwing`] marker when the swing carried a queued Heroic

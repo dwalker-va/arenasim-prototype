@@ -28,7 +28,7 @@ use arenasim::states::play_match::combat_core::{combat_auto_attack, process_inte
 use arenasim::states::play_match::components::{
     AutoAttackKind, AutoAttackSwing, CastEnding, CastEndingKind, CastingState, ClientParticle,
     Combatant, GameRng, HeroicStrikeSwing, ImpactAnchor, InterruptPending, InterruptedBy,
-    MatchCountdown, ParticleFacing, Projectile, SchoolImpact,
+    MatchCountdown, ParticleFacing, Projectile, SchoolImpact, WeaponHand,
 };
 use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::{
@@ -328,6 +328,7 @@ fn swing(app: &mut App, attacker: Entity, target: Entity, heroic: bool) {
         target,
         kind: AutoAttackKind::Melee,
         is_crit: false,
+        hand: WeaponHand::Main,
     });
     if heroic {
         e.insert(HeroicStrikeSwing);
