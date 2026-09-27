@@ -563,12 +563,7 @@ fn find_nearest_enemy(
 ) -> (Option<(Entity, f32)>, Option<f32>) {
     let mut nearest: Option<(Entity, f32)> = None;
     for (entity, info) in ctx.combatants.iter() {
-        if *entity == self_entity
-            || info.team == my_team
-            || !info.is_alive
-            || info.is_pet
-            || info.stealthed
-        {
+        if *entity == self_entity || info.team == my_team || !info.is_alive || info.is_pet {
             continue;
         }
         let dist = my_pos.distance(info.position);
@@ -1541,9 +1536,6 @@ fn dispatch_predicates_for_damaging(
         return Some(RejectionReason::NoValidTarget);
     }
     if target_info.is_pet || target_info.team == pet_info.team {
-        return Some(RejectionReason::NoValidTarget);
-    }
-    if target_info.stealthed {
         return Some(RejectionReason::NoValidTarget);
     }
 

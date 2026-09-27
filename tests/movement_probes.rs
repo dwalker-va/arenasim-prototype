@@ -4695,16 +4695,17 @@ mod u9_seek_reset {
         let ability_cooldowns = BTreeMap::new();
         let obstacles = Vec::new();
 
-        let ctx = CombatContext {
-            ai_profile: Default::default(),
-            bounds: Default::default(),
-            combatants: &combatants,
-            active_auras: &active_auras,
-            dr_trackers: &dr_trackers,
-            ability_cooldowns: &ability_cooldowns,
-            obstacles: &obstacles,
-            self_entity: warrior,
-        };
+        let ctx = CombatContext::new(
+            warrior,
+            combatants[&warrior].team,
+            &combatants,
+            &active_auras,
+            &dr_trackers,
+            &ability_cooldowns,
+            &obstacles,
+            Default::default(),
+            Default::default(),
+        );
 
         let mut reset_state = MeleeResetState {
             armed_until,

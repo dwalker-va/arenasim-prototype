@@ -241,26 +241,27 @@ impl CombatSnapshot {
         }
     }
 
-    /// Borrow a `CombatContext` view of this snapshot for the given combatant.
+    /// Borrow a `CombatContext` view of this snapshot for the given combatant:
+    /// what that combatant can perceive (see [`CombatContext::new`]).
     ///
-    /// Cheap — just hands out three `&` references and copies one `Entity`.
+    /// Cheap — hands out `&` references, and copies the combatant map only
+    /// while an enemy is hidden from this observer.
     pub fn context_for(&self, self_entity: Entity) -> CombatContext<'_> {
-        CombatContext {
-            bounds: self.bounds,
+        let team = self.combatants.get(&self_entity).map(|c| c.team);
+        CombatContext::new(
+            self_entity,
+            team.unwrap_or_default(),
+            &self.combatants,
+            &self.active_auras,
+            &self.dr_trackers,
+            &self.ability_cooldowns,
+            &self.obstacles,
+            self.bounds,
             // The acting unit's OWN profile — this is what makes every
             // downstream `ctx.ai_profile.is_team_plan()` gate per-team.
-            ai_profile: self
-                .combatants
-                .get(&self_entity)
-                .map(|c| self.ai_profile.for_team(c.team))
+            team.map(|t| self.ai_profile.for_team(t))
                 .unwrap_or_default(),
-            combatants: &self.combatants,
-            active_auras: &self.active_auras,
-            dr_trackers: &self.dr_trackers,
-            ability_cooldowns: &self.ability_cooldowns,
-            obstacles: &self.obstacles,
-            self_entity,
-        }
+        )
     }
 
     /// Mutate the snapshot to reflect an instant CC just landed by a class AI

@@ -209,17 +209,18 @@ pub fn pet_ai_system(
         }
 
         let my_pos = transform.translation;
-        let ctx = CombatContext {
-            combatants: &combatant_info,
-            active_auras: &active_auras_map,
-            dr_trackers: &dr_trackers,
-            ability_cooldowns: &ability_cooldowns,
-            obstacles: &map_geometry.volumes,
-            bounds: map_geometry.bounds,
+        let ctx = CombatContext::new(
+            entity,
+            combatant.team,
+            &combatant_info,
+            &active_auras_map,
+            &dr_trackers,
+            &ability_cooldowns,
+            &map_geometry.volumes,
+            map_geometry.bounds,
             // Pets have no team-level behaviours; Legacy is always correct here.
-            ai_profile: Default::default(),
-            self_entity: entity,
-        };
+            Default::default(),
+        );
 
         // Build an ActorView for the pet. Pets don't appear in combatant_info
         // (which is non-pet only), so we synthesize one from raw fields.
@@ -929,11 +930,7 @@ fn spider_autonomous_dispatch(
         builder.reject(ability, RejectionReason::NoValidTarget);
         return;
     };
-    if !target_info.is_alive
-        || target_info.is_pet
-        || target_info.stealthed
-        || target_info.team == combatant.team
-    {
+    if !target_info.is_alive || target_info.is_pet || target_info.team == combatant.team {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return;
     }
@@ -1013,11 +1010,7 @@ fn boar_autonomous_dispatch(
         builder.reject(ability, RejectionReason::NoValidTarget);
         return;
     };
-    if !target_info.is_alive
-        || target_info.is_pet
-        || target_info.stealthed
-        || target_info.team == combatant.team
-    {
+    if !target_info.is_alive || target_info.is_pet || target_info.team == combatant.team {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return;
     }

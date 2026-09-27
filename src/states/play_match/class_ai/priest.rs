@@ -36,7 +36,7 @@ use super::healer_postures::{
     medic_chase_override, medic_chase_tick, start_movement_event, start_movement_event_with_target,
 };
 
-use super::CombatContext;
+use super::{CombatContext, CombatantInfo};
 
 /// Per-tick output of [`evaluate_priest_posture`], threaded into
 /// [`decide_priest_action`] (mirrors the Paladin's `PaladinMovementPlan`):
@@ -412,17 +412,18 @@ fn try_psychic_scream(
         scream_def,
         entity,
         combatant,
+        my_pos,
         same_frame_cc_queue,
-        &targets,
         ctx,
         builder,
     );
     true
 }
 
-/// Fear-eligible enemies within `radius` of `my_pos`: visible + alive (helper),
-/// not immune, not Fear-DR-immune. Shared by the defensive predicate and the
-/// offensive dip cast. AoE filtering is the caller's job (R5).
+/// Fear-eligible enemies within `radius` of `my_pos` that the Priest can SEE:
+/// visible + alive (helper), not immune, not Fear-DR-immune. What the scream is
+/// DECIDED on — shared by the defensive predicate and the offensive dip cast.
+/// Who it lands on is [`scream_victims`]. AoE filtering is the caller's job (R5).
 fn scream_targets(ctx: &CombatContext, entity: Entity, my_pos: Vec3, radius: f32) -> Vec<Entity> {
     // Returns just entities (Copy) — this is a per-tick *predicate* helper whose
     // result is usually discarded, so it must not allocate. The pet-aware id is
@@ -437,9 +438,26 @@ fn scream_targets(ctx: &CombatContext, entity: Entity, my_pos: Vec3, radius: f32
         .collect()
 }
 
+/// Every fear-eligible enemy the scream LANDS on: within `radius` of `my_pos`,
+/// seen or not (`area_victims` — an area does not aim, so a stealthed Rogue in
+/// it is feared, and the Fear reveals it), not immune, not Fear-DR-immune.
+fn scream_victims<'c>(
+    ctx: &'c CombatContext,
+    team: u8,
+    my_pos: Vec3,
+    radius: f32,
+) -> Vec<&'c CombatantInfo> {
+    ctx.area_victims(team, my_pos, radius)
+        .into_iter()
+        .filter(|info| {
+            !ctx.entity_is_immune(info.entity) && !ctx.is_dr_immune(info.entity, DRCategory::Fears)
+        })
+        .collect()
+}
+
 /// Apply Psychic Scream: record the choice, spend GCD/mana/cooldown, queue Fear
-/// on each target (same-frame CC visible), and log. Assumes `targets` is
-/// non-empty and readiness is already checked by the caller.
+/// on each of its [`scream_victims`] (same-frame CC visible), and log. The
+/// caller decided it on a non-empty `scream_targets` and checked readiness.
 #[allow(clippy::too_many_arguments)]
 fn fire_psychic_scream(
     commands: &mut Commands,
@@ -447,8 +465,8 @@ fn fire_psychic_scream(
     scream_def: &AbilityConfig,
     entity: Entity,
     combatant: &mut Combatant,
+    my_pos: Vec3,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
-    targets: &[Entity],
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) {
@@ -487,16 +505,13 @@ fn fire_psychic_scream(
         .map(|a| a.duration)
         .unwrap_or(0.0);
     let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
-    for target_entity in targets {
+    let victims = scream_victims(ctx, combatant.team, my_pos, scream_def.range);
+    for victim in &victims {
         // Resolve the pet-aware id here (committed cast only, not per predicate
-        // tick). The entity came from `scream_targets` → `visible_enemies_within`,
-        // so it is always present in `ctx.combatants`; skip defensively rather
-        // than fear-and-log an empty target id if that invariant ever changes.
-        let Some(target_id) = ctx.combatants.get(target_entity).map(|i| i.log_id()) else {
-            continue;
-        };
-        if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, scream_def) {
-            same_frame_cc_queue.push((*target_entity, aura_pending.aura.clone()));
+        // tick).
+        let target_id = victim.log_id();
+        if let Some(aura_pending) = AuraPending::from_ability(victim.entity, entity, scream_def) {
+            same_frame_cc_queue.push((victim.entity, aura_pending.aura.clone()));
             commands.spawn(aura_pending);
         }
 
@@ -517,7 +532,7 @@ fn fire_psychic_scream(
         "Team {} {} casts Psychic Scream! (AOE fear) - {} enemies feared",
         combatant.team,
         combatant.class.name(),
-        targets.len()
+        victims.len()
     );
 }
 
@@ -567,8 +582,8 @@ fn try_dip_psychic_scream(
         scream_def,
         entity,
         combatant,
+        my_pos,
         same_frame_cc_queue,
-        &targets,
         ctx,
         builder,
     );
@@ -1110,18 +1125,9 @@ fn any_enemy_focusing(entity: Entity, my_team: u8, ctx: &CombatContext) -> bool 
     ctx.combatants.iter().any(|(e, info)| {
         info.team != my_team
             && info.is_alive
-            && !info.stealthed
             && info.target == Some(entity)
             && !attack_prevented_by_cc(ctx, *e)
     })
-}
-
-/// Any living enemy stealthed — an unaccounted-for opener; standing still in
-/// a long cast is the ideal Cheap Shot victim.
-fn any_enemy_stealthed(my_team: u8, ctx: &CombatContext) -> bool {
-    ctx.combatants
-        .iter()
-        .any(|(_, info)| info.team != my_team && info.is_alive && info.stealthed)
 }
 
 /// The Mana Burn positioning window: `Some(enemy healer position)` when the
@@ -1139,7 +1145,7 @@ fn mana_burn_pull_target(
     if info.current_mana < MANA_BURN_MIN_TARGET_MANA {
         return None;
     }
-    if any_enemy_stealthed(combatant.team, ctx) {
+    if ctx.enemy_hidden() {
         return None;
     }
     if any_enemy_focusing(entity, combatant.team, ctx) {
@@ -1224,7 +1230,7 @@ fn try_mana_burn(
     // gate can't see the opener coming — and a Priest standing still in a
     // long cast is the ideal Cheap Shot victim. Don't hard-cast while an
     // enemy is unaccounted for. (Hard casts only, like the gates above.)
-    if def.cast_time > 0.0 && any_enemy_stealthed(combatant.team, ctx) {
+    if def.cast_time > 0.0 && ctx.enemy_hidden() {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
@@ -1358,15 +1364,14 @@ pub use super::healer_postures::{escape_distance_gained, escape_window};
 // assets/config/movement.ron (RON-first policy).
 
 /// Per-target Psychic Scream dip eligibility (mirrors `hoj_target_eligible`,
-/// keyed to Fear-DR): alive enemy non-pet, not stealthed, not immune, not
-/// Fear-DR-immune.
+/// keyed to Fear-DR): alive enemy non-pet, not immune, not Fear-DR-immune —
+/// and seen, which `ctx.combatants` guarantees for any entry it holds.
 fn scream_dip_target_eligible(ctx: &CombatContext, my_team: u8, target: Entity) -> bool {
     let Some(info) = ctx.combatants.get(&target) else {
         return false;
     };
     info.team != my_team
         && info.current_health > 0.0
-        && !info.stealthed
         && !info.is_pet
         && !ctx.entity_is_immune(target)
         && !ctx.is_dr_immune(target, DRCategory::Fears)
@@ -1495,7 +1500,7 @@ fn scream_dip_should_abort(
         return true; // budget exceeded
     }
     if !scream_dip_target_eligible(ctx, combatant.team, target) {
-        return true; // target dead / immune / DR-immune / stealthed
+        return true; // target dead / immune / DR-immune / unseen
     }
     ctx.alive_allies()
         .into_iter()

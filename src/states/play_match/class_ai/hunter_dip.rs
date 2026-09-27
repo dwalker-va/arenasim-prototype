@@ -106,7 +106,6 @@ fn dip_target_eligible(ctx: &CombatContext, my_team: u8, target: Entity) -> bool
     };
     info.team != my_team
         && info.is_alive
-        && !info.stealthed
         && !info.is_pet
         && !ctx.entity_is_immune(target)
         && !ctx.is_dr_immune(target, DRCategory::Incapacitates)

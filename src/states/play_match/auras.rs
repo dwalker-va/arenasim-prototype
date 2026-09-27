@@ -564,6 +564,18 @@ pub fn apply_pending_auras(
             }
         }
 
+        // The aura has cleared every gate above, so it LANDS here — and a
+        // hostile one reveals a stealthed target. This is the one aura funnel,
+        // the counterpart of the damage break in `apply_damage_with_absorb`: a
+        // blocked aura (immune, DR-immune, charging) never reaches this line.
+        if pending.aura.is_hostile_effect() {
+            super::combat_core::reveal_stealthed(
+                &mut target_combatant,
+                &pending.aura.ability_name,
+                &mut combat_log,
+            );
+        }
+
         // Handle MaxHealthIncrease aura - apply HP buff immediately
         if pending.aura.effect_type == AuraType::MaxHealthIncrease {
             let hp_bonus = pending.aura.magnitude;
@@ -1049,6 +1061,8 @@ pub fn process_dot_ticks(
             &mut target,
             Some(&mut target_auras),
             spell_school,
+            &ability_name,
+            &mut combat_log,
         );
 
         // Track damage for aura breaking (only actual damage, not absorbed)

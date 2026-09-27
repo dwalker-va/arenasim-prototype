@@ -150,16 +150,17 @@ fn run_charge_decision(obstacles: Vec<ObstacleVolume>) -> DecisionTrace {
     let dr_trackers = BTreeMap::new();
     let ability_cooldowns = BTreeMap::new();
 
-    let ctx = CombatContext {
-        ai_profile: Default::default(),
-        bounds: Default::default(),
-        combatants: &combatants,
-        active_auras: &active_auras,
-        dr_trackers: &dr_trackers,
-        ability_cooldowns: &ability_cooldowns,
-        obstacles: &obstacles,
-        self_entity: warrior_entity,
-    };
+    let ctx = CombatContext::new(
+        warrior_entity,
+        combatants[&warrior_entity].team,
+        &combatants,
+        &active_auras,
+        &dr_trackers,
+        &ability_cooldowns,
+        &obstacles,
+        Default::default(),
+        Default::default(),
+    );
 
     let mut instant_attacks: Vec<QueuedInstantAttack> = Vec::new();
     let mut battle_shouted: HashSet<Entity> = HashSet::new();

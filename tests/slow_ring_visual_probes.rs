@@ -16,6 +16,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::MeshAabb;
 use bevy::time::TimeUpdateStrategy;
 
+use arenasim::combat::log::CombatLog;
 use arenasim::states::play_match::abilities::{AbilityType, SpellSchool};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
@@ -654,6 +655,8 @@ fn frost_trap_zone_slow_name() -> String {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
+    // The zone logs a reveal when it slows a stealthed enemy.
+    app.init_resource::<CombatLog>();
     app.add_systems(Update, slow_zone_system);
     let hunter = app
         .world_mut()

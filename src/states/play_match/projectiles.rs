@@ -303,6 +303,8 @@ pub fn process_projectile_hits(
                     &mut target,
                     target_auras.as_deref_mut(),
                     def.spell_school,
+                    &def.name,
+                    &mut combat_log,
                 );
 
                 // Warriors generate Rage from taking damage (only on actual health damage)

@@ -22,7 +22,7 @@ pub fn trap_system(
     time: Res<Time>,
     mut combat_log: ResMut<CombatLog>,
     mut traps: Query<(Entity, &mut Trap, &Transform)>,
-    mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<Trap>>,
+    combatants: Query<(Entity, &Combatant, &Transform), Without<Trap>>,
     pet_query: Query<&Pet>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -51,7 +51,7 @@ pub fn trap_system(
         let trap_pos = trap_transform.translation;
         let mut triggered_by: Option<(Entity, u8, String)> = None;
 
-        for (target_entity, target_combatant, target_transform) in combatants.iter_mut() {
+        for (target_entity, target_combatant, target_transform) in combatants.iter() {
             // Skip dead combatants
             if !target_combatant.is_alive() {
                 continue;
@@ -83,16 +83,10 @@ pub fn trap_system(
                 .map(|(_, c, _)| combat_log_id_for(c, pet_query.get(trap.owner).ok()))
                 .unwrap_or_else(|_| format!("Team {}", trap.owner_team));
 
-            // Traps break stealth on trigger
-            if let Ok((_, mut target_combatant, _)) = combatants.get_mut(target_entity) {
-                if target_combatant.stealthed {
-                    target_combatant.stealthed = false;
-                    combat_log.log(
-                        CombatLogEventType::CrowdControl,
-                        format!("[STEALTH] {} breaks stealth from trap!", target_name),
-                    );
-                }
-            }
+            // A trap springs on whoever walks into it, seen or not, and the
+            // hostile aura it lands is what reveals a stealthed victim: the
+            // Freezing Trap's Incapacitate through `apply_pending_auras`, the
+            // Frost Trap's slow through `slow_zone_system`.
 
             // Spawn visual burst at trap position before despawning
             commands.spawn((
@@ -188,9 +182,10 @@ pub fn trap_system(
 pub fn slow_zone_system(
     mut commands: Commands,
     time: Res<Time>,
+    mut combat_log: ResMut<CombatLog>,
     mut zones: Query<(Entity, &mut SlowZone, &Transform)>,
     mut combatants: Query<
-        (Entity, &Combatant, &Transform, Option<&mut ActiveAuras>),
+        (Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>),
         Without<SlowZone>,
     >,
     celebration: Option<Res<VictoryCelebration>>,
@@ -213,7 +208,7 @@ pub fn slow_zone_system(
         let zone_pos = zone_transform.translation;
 
         // Check all enemy combatants for proximity
-        for (target_entity, target_combatant, target_transform, active_auras) in
+        for (target_entity, mut target_combatant, target_transform, active_auras) in
             combatants.iter_mut()
         {
             // Skip dead combatants
@@ -238,6 +233,15 @@ pub fn slow_zone_system(
                         continue;
                     }
                 }
+                // An area does not aim: the zone slows a stealthed enemy
+                // standing in it, and the slow reveals it. The slow is pushed
+                // here rather than through `AuraPending` (so it never
+                // diminishes), so it reveals here too.
+                super::combat_core::reveal_stealthed(
+                    &mut target_combatant,
+                    "Frost Trap",
+                    &mut combat_log,
+                );
                 // Enemy is inside zone — refresh or apply slow aura
                 if let Some(mut auras) = active_auras {
                     // Look for existing Frost Trap slow aura

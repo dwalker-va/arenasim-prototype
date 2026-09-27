@@ -167,8 +167,8 @@ pub fn mage_kite_sustain(ctx: &CombatContext, me: Entity, my_pos: Vec3, ring: f3
 /// does NOT flee — fleeing a caster just forfeits its own DPS. The Paladin is
 /// excluded too: its melee damage isn't meaningful pressure, and avoiding its
 /// Hammer of Justice is a separate "avoid CC" movement concern (deferred).
-/// Stealthed enemies are excluded — the kiter can't see a stealthed Rogue, so
-/// it must not react to its position until stealth breaks. Enemy melee *pets*
+/// A stealthed enemy is never in `ctx.combatants`, so the kiter cannot react to
+/// a Rogue's position until stealth breaks. Enemy melee *pets*
 /// are excluded for now (the `!is_pet` filter); folding them in is deferred.
 pub fn melee_within(ctx: &CombatContext, me: Entity, my_pos: Vec3, radius: f32) -> bool {
     let team = self_team(ctx, me);
@@ -176,7 +176,6 @@ pub fn melee_within(ctx: &CombatContext, me: Entity, my_pos: Vec3, radius: f32) 
         !info.is_pet
             && info.team != team
             && info.is_alive
-            && !info.stealthed
             && is_kite_threat(info.class)
             && info.position.distance(my_pos) <= radius
     })
@@ -192,8 +191,8 @@ fn is_kite_threat(class: CharacterClass) -> bool {
 /// Nearest kite-threat melee enemy (Warrior/Rogue) to `my_pos`, if any. The
 /// Hunter's preferred Frost Trap peel target: a slow zone is most valuable under
 /// the melee that's pressuring it, not on a pet or a stray-closest caster.
-/// Stealthed and pet enemies are excluded (same visibility rules as
-/// `melee_within`).
+/// Pet enemies are excluded (and, as everywhere, unseen ones are not in
+/// `ctx.combatants`).
 pub fn nearest_melee_threat(
     ctx: &CombatContext,
     me: Entity,
@@ -202,9 +201,7 @@ pub fn nearest_melee_threat(
     let team = self_team(ctx, me);
     ctx.combatants
         .values()
-        .filter(|i| {
-            !i.is_pet && i.team != team && i.is_alive && !i.stealthed && is_kite_threat(i.class)
-        })
+        .filter(|i| !i.is_pet && i.team != team && i.is_alive && is_kite_threat(i.class))
         .min_by(|a, b| {
             a.position
                 .distance(my_pos)
@@ -432,12 +429,12 @@ fn build_kiter_inputs(
     committed_direction: Option<Vec2>,
 ) -> ScorerInputs {
     let self_team = self_team(ctx, entity);
-    // Stealthed enemies are excluded — the kiter can't see them, so it must not
-    // flee from a stealthed Rogue's position until stealth breaks.
+    // A stealthed Rogue is not in `ctx.combatants`, so the kiter cannot flee
+    // from its position until stealth breaks.
     let threats: Vec<Vec3> = ctx
         .combatants
         .values()
-        .filter(|i| !i.is_pet && i.team != self_team && i.is_alive && !i.stealthed)
+        .filter(|i| !i.is_pet && i.team != self_team && i.is_alive)
         .map(|i| i.position)
         .collect();
 

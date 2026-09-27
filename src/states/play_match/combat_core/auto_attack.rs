@@ -575,12 +575,19 @@ pub fn combat_auto_attack(
 
         if let Ok((_, _, mut target, _, _, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
+                let attack_name = combatant_info
+                    .get(&attacker_entity)
+                    .map_or("Auto Attack", |&(_, _, _, _, kind)| {
+                        auto_attack_name(has_bonus, kind)
+                    });
                 // Apply damage with absorb shield consideration
                 let (actual_damage, absorbed) = apply_damage_with_absorb(
                     damage,
                     &mut target,
                     target_auras.as_deref_mut(),
                     SpellSchool::Physical,
+                    attack_name,
+                    &mut combat_log,
                 );
 
                 // Warriors generate Rage from taking damage (only on actual health damage)
@@ -640,6 +647,15 @@ pub fn combat_auto_attack(
                             target_auras.as_deref_mut(),
                         );
                         if fresh {
+                            // A hostile aura landing reveals. The direct push
+                            // above bypasses `apply_pending_auras`, so the
+                            // reveal it would make is made here. (Only a swing
+                            // a shield fully absorbed leaves anything to reveal.)
+                            super::reveal_stealthed(
+                                &mut target,
+                                "Crippling Poison",
+                                &mut combat_log,
+                            );
                             if let Some((_, tname, _, _, _)) = combatant_info.get(&target_entity) {
                                 combat_log.log(
                                     CombatLogEventType::CrowdControl,
@@ -696,17 +712,7 @@ pub fn combat_auto_attack(
                 ) {
                     // The log name is chosen by the same derived kind as the
                     // range, so the two can never disagree.
-                    let attack_name = if has_bonus {
-                        "Heroic Strike" // Enhanced auto-attack
-                    } else {
-                        match attacker_kind {
-                            AutoAttackKind::Melee => "Auto Attack",
-                            AutoAttackKind::Shot => "Auto Shot",
-                            AutoAttackKind::Wand => "Wand Shot",
-                            // Unreachable: the range gate `continue`s on None.
-                            AutoAttackKind::None => "Auto Attack",
-                        }
-                    };
+                    let attack_name = auto_attack_name(has_bonus, *attacker_kind);
                     let attacker_id = combat_log_id(*attacker_team, *attacker_slot, attacker_name);
                     let target_id = combat_log_id(*target_team, *target_slot, target_name);
 
@@ -1020,6 +1026,21 @@ fn swing_interval(speed: f32, auras: Option<&ActiveAuras>) -> f32 {
         }
     }
     attack_interval
+}
+
+/// The combat-log name of an auto-attack: Heroic Strike when the swing carries
+/// its bonus, otherwise named by the attacker's derived weapon kind.
+fn auto_attack_name(has_bonus: bool, kind: AutoAttackKind) -> &'static str {
+    if has_bonus {
+        return "Heroic Strike"; // Enhanced auto-attack
+    }
+    match kind {
+        AutoAttackKind::Melee => "Auto Attack",
+        AutoAttackKind::Shot => "Auto Shot",
+        AutoAttackKind::Wand => "Wand Shot",
+        // Unreachable: the range gate `continue`s on None.
+        AutoAttackKind::None => "Auto Attack",
+    }
 }
 
 /// Windfury Totem bonus-swing chance for this attacker. Returns `Some(magnitude)`
