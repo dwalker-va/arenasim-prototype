@@ -1917,6 +1917,56 @@ pub struct ClientParticle {
     pub owned: bool,
 }
 
+/// The drawn body of one Shaman totem (`rendering/effects/totems.rs`): the
+/// carved post, its rune plate, the orbiting ribbons and the flame and death
+/// emitters.
+///
+/// A top-level entity DETACHED from the gameplay [`Totem`](super::Totem), which
+/// it stands beside but never touches: the sim despawns the totem the moment it
+/// expires or is replaced, and the rig outlives it by the death sequence. It
+/// notices the despawn itself and starts dying then.
+#[derive(Component)]
+pub struct TotemRig {
+    /// The gameplay totem this rig draws. Once it is gone the rig dies.
+    pub totem: Entity,
+    pub element: super::TotemElement,
+    /// Seconds since the rig was built.
+    pub age: f32,
+    /// Seconds into the death sequence, from the frame the totem despawned.
+    pub death_age: Option<f32>,
+    /// The tilting body under the rig; the post, rune plate and orbit hang
+    /// off it.
+    pub body: Entity,
+    pub post: Entity,
+    pub rune: Entity,
+    pub orbit: Entity,
+    /// This rig's own copy of its element's ribbon material, so its ribbons
+    /// can fade out at death without fading every other totem's.
+    pub ribbon_material: Handle<StandardMaterial>,
+    /// Deterministic particle seed (the totem's entity index).
+    pub seed: u32,
+    /// Particles emitted so far, the running part of every particle seed.
+    pub emitted: u32,
+    /// Fractional particles owed to the flame, dust and smoke.
+    pub carry: [f32; 3],
+    /// Sprite and palettes for the flame, dust and smoke particles.
+    pub quad: Handle<Mesh>,
+    pub palettes: [std::sync::Arc<[Handle<StandardMaterial>]>; 3],
+}
+
+/// A child of a [`TotemRig`]: which piece it is.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TotemPart {
+    /// Pivots at the base; carries the birth wobble and the death tilt.
+    Body,
+    /// The carved post mesh, rising at birth by its vertical scale.
+    Post,
+    /// The circular glyph plate on the post's front.
+    Rune,
+    /// The ribbons, turning about the post's axis.
+    Orbit,
+}
+
 /// Marker component for the player's selection ring — a translucent torus
 /// laid flat at the selected combatant's feet. One ring exists at most.
 #[derive(Component)]

@@ -680,7 +680,7 @@ fn shot_jitter(seed: u32) -> f32 {
 }
 
 /// The `k`th independent jitter draw for particle `seed`.
-fn draw(seed: u32, k: u32) -> f32 {
+pub(super) fn draw(seed: u32, k: u32) -> f32 {
     shot_jitter(seed ^ k.wrapping_mul(0x9E37_79B9).wrapping_add(k))
 }
 
@@ -764,7 +764,7 @@ pub fn spawn_client_particle(
 
 /// A rune: a thin ring with eight ticks inside it, white, with the whole shape
 /// in the alpha channel. Generated, like every other sprite here.
-fn rune_texture() -> Image {
+pub(super) fn rune_texture() -> Image {
     use bevy::image::Image;
     use bevy::render::render_asset::RenderAssetUsages;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
