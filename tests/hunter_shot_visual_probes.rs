@@ -487,7 +487,7 @@ fn loose_arrow(app: &mut App, from: Vec3, target: Entity) -> Entity {
                   mut materials: ResMut<Assets<StandardMaterial>>,
                   mut images: ResMut<Assets<Image>>| {
                 let assets = AutoShotArrowAssets::build(&mut meshes, &mut materials, &mut images);
-                spawn_auto_shot_arrow(&mut commands, &assets, from, target, aim);
+                spawn_auto_shot_arrow(&mut commands, &assets, from, target, aim, false);
             },
         )
         .unwrap();

@@ -1370,12 +1370,14 @@ impl AutoShotArrowAssets {
 
 /// Loose the cosmetic arrow for a landed bow Auto Shot, from `from` at
 /// `target`. The entity sits at the TIP; the shaft hangs back along local -Z.
+/// `is_crit` rides to the arrival, where the victim's held reaction plays.
 pub fn spawn_auto_shot_arrow(
     commands: &mut Commands,
     assets: &AutoShotArrowAssets,
     from: Vec3,
     target: Entity,
     aim: Vec3,
+    is_crit: bool,
 ) {
     let dir = (aim - from).normalize_or_zero();
     let shaft_len = AUTO_ARROW_LENGTH - ARROW_HEAD_LEN;
@@ -1424,6 +1426,7 @@ pub fn spawn_auto_shot_arrow(
             Visibility::default(),
             CosmeticArrow {
                 target,
+                is_crit,
                 to: aim,
                 speed: AUTO_ARROW_SPEED,
                 ribbon_carry: 0.0,
@@ -1439,7 +1442,8 @@ pub fn spawn_auto_shot_arrow(
 /// Update (graphical-only): fly each arrow at its victim's LIVE chest anchor
 /// and retire it the frame its tip arrives — it ends at the target, never in
 /// the air where the target used to be. The damage already landed; the arrow
-/// is pure theater, and the victim's wound flinch is its whole landing.
+/// is pure theater, and its landing is the victim's hit reaction, released
+/// here as a [`RangedHitArrival`] rather than at the damage (see there).
 pub fn update_cosmetic_arrows(
     mut commands: Commands,
     time: Res<Time>,
@@ -1474,6 +1478,19 @@ pub fn update_cosmetic_arrows(
             next,
         );
         if arrived {
+            // The side it struck is the side it flew in from: back along the
+            // arrow's own heading, which stays well-defined when the last
+            // step is vanishingly short. A victim that despawned mid-flight
+            // still leaves the marker; its consumer drops it, having no body
+            // to react.
+            commands.spawn((
+                RangedHitArrival {
+                    target: arrow.target,
+                    is_crit: arrow.is_crit,
+                    from: -(transform.rotation * Vec3::Z),
+                },
+                PlayMatchEntity,
+            ));
             commands.entity(entity).despawn();
             continue;
         }

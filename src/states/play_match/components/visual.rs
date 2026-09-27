@@ -1783,12 +1783,17 @@ pub struct OriginalWeaponMaterial(pub Handle<StandardMaterial>);
 /// `rendering/effects/hunter_shots.rs`, registered only in `states/mod.rs`.
 ///
 /// The entity sits at the arrow's TIP and the shaft hangs back along local
-/// -Z, so "arrived" means the point reached the victim.
+/// -Z, so "arrived" means the point reached the victim. The victim's hit
+/// reaction is HELD until then: the arrow leaves a [`RangedHitArrival`] behind
+/// the frame it arrives.
 #[derive(Component)]
 pub struct CosmeticArrow {
     /// The victim. The arrow homes on its chest anchor every frame, so it
     /// ends AT the target however far it has run since the hit.
     pub target: Entity,
+    /// Whether the landed shot crit, carried to the arrival so the held
+    /// reaction plays the crit's deeper flinch and bigger burst.
+    pub is_crit: bool,
     /// Last known aim point — flown to if the victim despawns mid-flight.
     pub to: Vec3,
     /// Yards per second of cosmetic travel.
@@ -1800,6 +1805,26 @@ pub struct CosmeticArrow {
     pub last_pos: Vec3,
     pub ribbon_mesh: Handle<Mesh>,
     pub ribbon_material: Handle<StandardMaterial>,
+}
+
+/// A ranged physical auto (`AutoAttackKind::Shot`) whose projectile has just
+/// reached its victim: a bare marker entity, consumed and despawned by
+/// `hit_reaction::consume_ranged_hit_arrivals`, which plays the victim's
+/// flinch and impact burst.
+///
+/// It exists because the sim resolves an auto's damage AT THE SWING and the
+/// cosmetic arrow flies afterwards, so a reaction hung on the damage would
+/// lead its own arrow by the whole flight. Left behind by
+/// `update_cosmetic_arrows` the frame the arrow's tip arrives — or, for a shot
+/// that looses no arrow, by `consume_swing_signals` at once, so every landed
+/// Shot still reacts exactly once. Graphical-only; the sim never sees it.
+#[derive(Component)]
+pub struct RangedHitArrival {
+    pub target: Entity,
+    pub is_crit: bool,
+    /// The direction the shot came FROM, as seen from the victim — the side
+    /// of the silhouette it struck. Only its horizontal part is read.
+    pub from: Vec3,
 }
 
 /// The emitter state a Hunter shot missile carries while it flies.
