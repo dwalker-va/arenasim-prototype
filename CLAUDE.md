@@ -367,10 +367,15 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
      builds the view from `stealth_visible`, the one visibility rule), so decide
      from it freely. The one exception is RESOLVING an area effect: take its
      victims from `ctx.area_victims(...)`, which includes unseen enemies, because
-     an area does not aim. Damage that reaches health breaks stealth in
-     `apply_damage_with_absorb`; a fully absorbed hit does not.
+     an area does not aim. Two funnels reveal, both through
+     `combat_core::reveal_stealthed` (which logs `[STEALTH] X is revealed by
+     Y`): damage that reaches health, in `apply_damage_with_absorb`, and a
+     hostile aura (`is_hostile_effect`) that lands, in `apply_pending_auras`. A
+     fully absorbed hit or a blocked aura reveals nothing.
      `tests/stealth_enforcement.rs` drives every class AI against a stealthed
-     Rogue.
+     Rogue, and classifies every ability as an enemy area effect or not (an
+     exhaustive match — a new ability must answer it); each area effect must
+     be shown catching a stealthed Rogue standing in it.
    - **AI decision trace** — at each predicate gate that rejects this ability,
      call `builder.reject(AbilityType::NewAbility, RejectionReason::...)`
      (use `classify_pre_cast_failure` for `pre_cast_ok` failures). On the

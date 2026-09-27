@@ -16,6 +16,13 @@
 //! being named. Each class is paired with a control run in
 //! which the same Rogue is VISIBLE and the class must act on it — without that,
 //! a class that simply did nothing in this scenario would pass vacuously.
+//!
+//! The other half of the rule: an AREA does not aim. Every ability that affects
+//! enemies in an area is named in `reaches_enemies_in_an_area` (an exhaustive
+//! match over `AbilityType`), and `every_area_effect_reaches_a_stealthed_enemy`
+//! drives each one with a stealthed Rogue standing in it. What lands then
+//! reveals it — damage to health, or a hostile aura that lands — and the aura
+//! half of that is pinned here through the real `apply_pending_auras`.
 
 use std::collections::{BTreeMap, HashSet};
 
