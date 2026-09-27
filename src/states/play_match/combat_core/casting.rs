@@ -612,6 +612,8 @@ pub fn process_casting(
                 &mut target,
                 target_auras.as_deref_mut(),
                 def.spell_school,
+                &def.name,
+                &mut combat_log,
             );
 
             // Warriors generate Rage from taking damage (only on actual health damage)
@@ -1102,6 +1104,7 @@ pub fn process_channeling(
         u8,
         match_config::CharacterClass,
         SpellSchool,
+        AbilityType,
     )> = Vec::new();
 
     // Build a snapshot of positions and health for lookups
@@ -1248,6 +1251,7 @@ pub fn process_channeling(
                 caster.slot,
                 caster.class,
                 ability_def.spell_school,
+                channeling.ability,
             ));
 
             // Track healing for caster (Drain Life heals 0 if target has DamageImmunity)
@@ -1347,6 +1351,7 @@ pub fn process_channeling(
         caster_slot,
         caster_class,
         spell_school,
+        channel_ability,
     ) in damage_to_apply
     {
         // Apply damage to target
@@ -1359,6 +1364,8 @@ pub fn process_channeling(
                     &mut target,
                     target_auras.as_deref_mut(),
                     spell_school,
+                    &abilities.get_unchecked(&channel_ability).name,
+                    &mut combat_log,
                 );
 
                 // Track damage for aura breaking

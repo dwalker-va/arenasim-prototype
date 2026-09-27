@@ -342,6 +342,11 @@ fn try_battle_shout(
 
 /// Try to cast Demoralizing Shout to debuff nearby enemies with AttackPowerReduction.
 /// Returns true if the ability was used.
+///
+/// Decided on the enemies the Warrior can SEE — an unshouted one in range is
+/// the reason to shout — but it lands on every unshouted enemy in range, seen
+/// or not (`area_victims`): a shout does not aim, so a stealthed Rogue inside
+/// it is debuffed, and the debuff reveals it.
 fn try_demoralizing_shout(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -356,32 +361,22 @@ fn try_demoralizing_shout(
     let ability = AbilityType::DemoralizingShout;
     let def = abilities.get_unchecked(&ability);
 
-    let mut targets: Vec<Entity> = Vec::new();
+    let unshouted = |enemy: &Entity| {
+        let already_has = ctx.active_auras.get(enemy).is_some_and(|auras| {
+            auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::AttackPowerReduction)
+        });
+        !already_has && !shouted_this_frame.contains(enemy)
+    };
+    let seen_reason = ctx.combatants.iter().any(|(enemy_entity, info)| {
+        info.team != combatant.team
+            && info.current_health > 0.0
+            && my_pos.distance(info.position) <= SHOUT_RANGE
+            && unshouted(enemy_entity)
+    });
 
-    for (enemy_entity, info) in ctx.combatants.iter() {
-        if info.team == combatant.team || info.current_health <= 0.0 {
-            continue;
-        }
-        if my_pos.distance(info.position) > SHOUT_RANGE {
-            continue;
-        }
-
-        let already_has = ctx
-            .active_auras
-            .get(enemy_entity)
-            .map(|auras| {
-                auras
-                    .iter()
-                    .any(|a| a.effect_type == AuraType::AttackPowerReduction)
-            })
-            .unwrap_or(false);
-
-        if !already_has && !shouted_this_frame.contains(enemy_entity) {
-            targets.push(*enemy_entity);
-        }
-    }
-
-    if targets.is_empty() {
+    if !seen_reason {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     }
@@ -413,7 +408,13 @@ fn try_demoralizing_shout(
         "uses",
     );
 
-    for target in targets {
+    let victims: Vec<Entity> = ctx
+        .area_victims(combatant.team, my_pos, SHOUT_RANGE)
+        .into_iter()
+        .map(|info| info.entity)
+        .filter(|enemy| unshouted(enemy))
+        .collect();
+    for target in victims {
         shouted_this_frame.insert(target);
         if let Some(aura_pending) = AuraPending::from_ability(target, entity, def) {
             commands.spawn(aura_pending);

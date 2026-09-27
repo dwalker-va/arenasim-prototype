@@ -10,18 +10,23 @@
 //! of every class against a stealthed enemy Rogue standing in melee range,
 //! low on health, targeting the decider — with the decider's own `target` and
 //! `cc_target` forced onto the Rogue, the worst case acquisition can never
-//! produce. The class set is an exhaustive `match`, so a ninth class does not
-//! compile until it is named here. Each class is paired with a control run in
+//! produce. The classes it iterates are every variant the enum's own derive
+//! knows (`every_variant`), and it dispatches them through an exhaustive
+//! `match`, so a ninth class cannot be skipped by the loop nor compile without
+//! being named. Each class is paired with a control run in
 //! which the same Rogue is VISIBLE and the class must act on it — without that,
 //! a class that simply did nothing in this scenario would pass vacuously.
 
 use std::collections::{BTreeMap, HashSet};
 
+use bevy::ecs::system::RunSystemOnce;
 use bevy::ecs::world::CommandQueue;
 use bevy::prelude::*;
+use serde::de::value::{Error as DeError, U32Deserializer};
+use serde::Deserialize;
 
 use arenasim::combat::log::CombatLog;
-use arenasim::states::match_config::CharacterClass;
+use arenasim::states::match_config::{CharacterClass, WarriorShout};
 use arenasim::states::play_match::class_ai::hunter_dip::HunterDipPlan;
 use arenasim::states::play_match::class_ai::paladin::PaladinMovementPlan;
 use arenasim::states::play_match::class_ai::priest::PriestMovementPlan;
@@ -32,8 +37,10 @@ use arenasim::states::play_match::class_ai::{
 use arenasim::states::play_match::decision_trace::{AbilityOutcome, DecisionTrace, EventPayload};
 use arenasim::states::play_match::team_solve;
 use arenasim::states::play_match::{
-    AbilityDefinitions, Aura, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
-    DispelType, GameRng, HolyShockDamagePending, InstantAbilityFired, MovementConfig,
+    apply_pending_auras, slow_zone_system, trap_system, AbilityDefinitions, AbilityType,
+    ArenaDampening, Aura, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
+    DRCategory, DRTracker, DispelType, GameRng, HolyShockDamagePending, InstantAbilityFired,
+    MovementConfig, Trap, TrapType,
 };
 
 /// Ticks per run. A class may spend its first decisions on self-buffs
@@ -272,12 +279,37 @@ struct Run {
 /// writes through (Frost Nova's damage queue, same-frame CC, spawned auras)
 /// and the components a cast or instant leaves behind.
 fn run(class: CharacterClass, rogue_state: Rogue, distance: f32) -> Run {
-    run_with(class, rogue_state, distance, false)
+    run_with(class, rogue_state, distance, Setup::default())
 }
 
-/// `run`, optionally with a VISIBLE enemy Warrior standing on the Rogue's spot
-/// — something the decider can see and act on, beside something it cannot.
-fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, bystander: bool) -> Run {
+/// What a run adds to the plain scenario.
+struct Setup {
+    /// A VISIBLE enemy Warrior standing on the Rogue's spot — something the
+    /// decider can see and act on, beside something it cannot.
+    bystander: bool,
+    /// A Priest decider under pressure: the gate on its defensive Psychic
+    /// Scream, computed by its posture layer rather than its decider.
+    pressured: bool,
+    /// Adjusts the decider before the run (a strategic option, say).
+    prepare: fn(&mut Combatant),
+}
+
+impl Default for Setup {
+    fn default() -> Self {
+        Self {
+            bystander: false,
+            pressured: false,
+            prepare: |_| {},
+        }
+    }
+}
+
+fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Setup) -> Run {
+    let Setup {
+        bystander,
+        pressured,
+        prepare,
+    } = setup;
     let mut world = World::new();
     let me = world.spawn_empty().id();
     let rogue = world.spawn_empty().id();
@@ -295,6 +327,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, bystander:
     combatant.current_mana = combatant.max_mana;
     combatant.target = Some(rogue);
     combatant.cc_target = Some(rogue);
+    prepare(&mut combatant);
 
     let mut roster = BTreeMap::new();
     let mut my_info = info(me, 1, class, my_pos);
@@ -412,7 +445,10 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, bystander:
                     &ctx,
                     &mut set_a,
                     &mut set_b,
-                    &PriestMovementPlan::default(),
+                    &PriestMovementPlan {
+                        pressured,
+                        ..PriestMovementPlan::default()
+                    },
                     &movement,
                     &mut same_frame_cc,
                     &mut trace,
@@ -595,7 +631,7 @@ const DISTANCES: [f32; 2] = [2.0, 12.0];
 fn every_class_ai_respects_stealth() {
     let mut leaks = Vec::new();
     let mut vacuous = Vec::new();
-    for &class in CharacterClass::all() {
+    for class in every_variant::<CharacterClass>() {
         let mut acted_on_visible = false;
         for distance in DISTANCES {
             acted_on_visible |= !run(class, Rogue::Visible, distance).touches.is_empty();
@@ -639,7 +675,15 @@ fn an_area_decided_on_a_seen_enemy_still_catches_the_stealthed_one() {
     // The half of the rule that is NOT "never act on it": a Frost Nova the
     // Mage casts at a Warrior it can see lands on the stealthed Rogue beside
     // it too — an area does not aim — and its damage is what reveals it.
-    let with_rogue = run_with(CharacterClass::Mage, Rogue::Stealthed, 2.0, true);
+    let with_rogue = run_with(
+        CharacterClass::Mage,
+        Rogue::Stealthed,
+        2.0,
+        Setup {
+            bystander: true,
+            ..Setup::default()
+        },
+    );
     assert!(
         with_rogue.choices.iter().any(|c| c == "FrostNova on -"),
         "the Mage should Nova the visible Warrior: {:?}",
@@ -652,5 +696,282 @@ fn an_area_decided_on_a_seen_enemy_still_catches_the_stealthed_one() {
             .any(|t| t.ends_with("caught it in Frost Nova")),
         "the Nova must catch the stealthed Rogue standing in it: {:?}",
         with_rogue.touches
+    );
+}
+
+// ============================================================================
+// Every variant, as the enum's own derive knows them
+// ============================================================================
+
+/// Every variant of a fieldless enum, read off its derived `Deserialize` by
+/// variant INDEX — so the list is the enum itself, not a hand-kept slice that
+/// can fall behind it. Stops at the first index the derive rejects, and asserts
+/// that rejection is "no such variant" rather than something that would
+/// silently truncate the list.
+fn every_variant<T: for<'de> Deserialize<'de>>() -> Vec<T> {
+    let mut all = Vec::new();
+    for index in 0u32.. {
+        match T::deserialize(U32Deserializer::<DeError>::new(index)) {
+            Ok(variant) => all.push(variant),
+            Err(e) => {
+                assert!(
+                    e.to_string().contains("variant index"),
+                    "variant {index} did not deserialize for a reason other than being \
+                     past the end: {e}"
+                );
+                return all;
+            }
+        }
+    }
+    unreachable!()
+}
+
+#[test]
+fn the_guard_drives_every_class_the_enum_has() {
+    // The class guard iterates `every_variant`; `CharacterClass::all()` is the
+    // hand-kept list the rest of the game iterates. They must agree.
+    let derived = every_variant::<CharacterClass>();
+    assert_eq!(derived.len(), 8, "{derived:?}");
+    assert_eq!(derived, CharacterClass::all().to_vec());
+}
+
+// ============================================================================
+// Area effects reach the unseen, and what they land reveals
+// ============================================================================
+
+/// Whether `ability` affects ENEMIES in an area — everyone standing in it, as
+/// opposed to a target it was aimed at. Such an effect is decided on what its
+/// caster can see but lands on every enemy in it, seen or not, so a stealthed
+/// Rogue standing in it is caught (and revealed by what lands).
+///
+/// Exhaustive on purpose — no `_ =>` arm. A new ability does not compile until
+/// someone answers this question for it, and a `true` answer fails
+/// `every_area_effect_reaches_a_stealthed_enemy` until the ability has a driver
+/// there proving it. Area effects on ALLIES (shouts, totems, Paladin auras)
+/// answer `false`: an ally is always seen.
+fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
+    use AbilityType::*;
+    match ability {
+        FrostNova | PsychicScream | DemoralizingShout | FreezingTrap | FrostTrap => true,
+        Frostbolt | FlashHeal | HeroicStrike | Ambush | CheapShot | MindBlast
+        | SinisterStrike | Charge | KidneyShot | PowerWordFortitude | Rend | MortalStrike
+        | Pummel | BerserkerRage | Kick | CripplingPoison | Corruption | Shadowbolt | Fear
+        | Immolate | DrainLife | CurseOfAgony | CurseOfWeakness | CurseOfTongues
+        | UnstableAffliction | DeathCoil | ArcaneIntellect | BattleShout | IceBarrier
+        | PowerWordShield | Polymorph | DispelMagic | ManaBurn | FlashOfLight | HolyLight
+        | HolyShock | HammerOfJustice | PaladinCleanse | DevotionAura | DivineShield
+        | SpellLock | DevourMagic | AimedShot | ArcaneShot | ConcussiveShot | SerpentSting
+        | Disengage | SpiderWeb | BoarCharge | MastersCall | CommandingShout | FrostArmor
+        | MageArmorSpell | MoltenArmor | ShadowResistanceAura | ConcentrationAura
+        | LightningBolt | FrostShock | LesserHealingWave | Purge | WindShear | AirTotem
+        | WaterTotem | EarthTotem | FireTotem => false,
+    }
+}
+
+/// Run `ability` with a stealthed Rogue standing inside it, beside a visible
+/// enemy the caster decides on, and say what reached the Rogue. `Err` when
+/// nothing did.
+fn drive_area_effect(ability: AbilityType) -> Result<String, String> {
+    let touched = |class, setup: Setup, what: &str| {
+        let r = run_with(class, Rogue::Stealthed, 2.0, setup);
+        r.touches
+            .iter()
+            .find(|t| t.ends_with(what))
+            .cloned()
+            .ok_or(format!("{what:?} never reached it: {:?} / {:?}", r.choices, r.touches))
+    };
+    match ability {
+        AbilityType::FrostNova => touched(
+            CharacterClass::Mage,
+            Setup {
+                bystander: true,
+                ..Setup::default()
+            },
+            "caught it in Frost Nova",
+        ),
+        AbilityType::PsychicScream => touched(
+            CharacterClass::Priest,
+            Setup {
+                bystander: true,
+                pressured: true,
+                ..Setup::default()
+            },
+            "applied Fear",
+        ),
+        AbilityType::DemoralizingShout => touched(
+            CharacterClass::Warrior,
+            Setup {
+                bystander: true,
+                prepare: |warrior| warrior.warrior_shout = WarriorShout::DemoralizingShout,
+                ..Setup::default()
+            },
+            "applied AttackPowerReduction",
+        ),
+        AbilityType::FreezingTrap => spring_trap(TrapType::Freezing),
+        AbilityType::FrostTrap => spring_trap(TrapType::Frost),
+        other => Err(format!("{other:?} is an area effect with no driver here")),
+    }
+}
+
+fn world_with_rogue(rogue_pos: Vec3) -> (World, Entity, Entity) {
+    let mut world = World::new();
+    world.insert_resource(CombatLog::default());
+    world.insert_resource(ArenaDampening::default());
+    world.insert_resource(Time::<()>::default());
+    let hunter = world
+        .spawn((
+            Combatant::new(1, 0, CharacterClass::Hunter),
+            Transform::from_translation(Vec3::new(-20.0, 0.0, 0.0)),
+        ))
+        .id();
+    let rogue = world
+        .spawn((
+            Combatant::new(2, 0, CharacterClass::Rogue),
+            Transform::from_translation(rogue_pos),
+        ))
+        .id();
+    assert!(world.get::<Combatant>(rogue).unwrap().stealthed);
+    (world, hunter, rogue)
+}
+
+fn stealth_log(world: &World) -> Vec<String> {
+    world
+        .resource::<CombatLog>()
+        .entries
+        .iter()
+        .map(|e| e.message.clone())
+        .filter(|m| m.starts_with("[STEALTH]"))
+        .collect()
+}
+
+/// A trap springing under a stealthed Rogue, through the real systems: the
+/// trap catches it, and the aura the trap lands is what reveals it.
+fn spring_trap(trap_type: TrapType) -> Result<String, String> {
+    let (mut world, hunter, rogue) = world_with_rogue(Vec3::new(1.0, 0.0, 0.0));
+    world.spawn((
+        Trap {
+            trap_type,
+            owner_team: 1,
+            owner: hunter,
+            arm_timer: 0.0,
+            trigger_radius: 3.0,
+            triggered: false,
+        },
+        Transform::default(),
+    ));
+    world.run_system_once(trap_system).unwrap();
+    match trap_type {
+        TrapType::Freezing => {
+            world.run_system_once(apply_pending_auras).unwrap();
+        }
+        TrapType::Frost => {
+            world.run_system_once(slow_zone_system).unwrap();
+        }
+    }
+    let revealed = !world.get::<Combatant>(rogue).unwrap().stealthed;
+    let lines = stealth_log(&world);
+    if revealed && lines.len() == 1 {
+        Ok(lines[0].clone())
+    } else {
+        Err(format!("revealed={revealed}, log={lines:?}"))
+    }
+}
+
+#[test]
+fn every_area_effect_reaches_a_stealthed_enemy() {
+    use AbilityType::*;
+    let areas: Vec<AbilityType> = every_variant::<AbilityType>()
+        .into_iter()
+        .filter(|a| reaches_enemies_in_an_area(*a))
+        .collect();
+    // Named, not counted: the set is exactly these, in enum order.
+    assert_eq!(
+        areas,
+        vec![FrostNova, PsychicScream, FreezingTrap, FrostTrap, DemoralizingShout]
+    );
+    let mut failures = Vec::new();
+    for ability in areas {
+        if let Err(why) = drive_area_effect(ability) {
+            failures.push(format!("{ability:?}: {why}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "area effects that did not reach a stealthed Rogue standing in them:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn a_trap_reveals_through_the_aura_it_lands() {
+    assert_eq!(
+        spring_trap(TrapType::Freezing),
+        Ok("[STEALTH] Team 2 Rogue #1 is revealed by Freezing Trap".to_string())
+    );
+    assert_eq!(
+        spring_trap(TrapType::Frost),
+        Ok("[STEALTH] Team 2 Rogue #1 is revealed by Frost Trap".to_string())
+    );
+}
+
+// ============================================================================
+// The aura funnel: a hostile aura that lands reveals; nothing else does
+// ============================================================================
+
+fn aura(effect_type: AuraType, name: &str) -> Aura {
+    Aura {
+        effect_type,
+        duration: 8.0,
+        ability_name: name.to_string(),
+        ..shadow_sight()
+    }
+}
+
+/// Queue `aura` on a stealthed Rogue, run the real `apply_pending_auras`, and
+/// report whether it was revealed and what the stealth log said.
+fn land(aura: Aura, fear_dr_immune: bool) -> (bool, Vec<String>) {
+    let (mut world, _, rogue) = world_with_rogue(Vec3::ZERO);
+    if fear_dr_immune {
+        let mut dr = DRTracker::default();
+        while !dr.is_immune(DRCategory::Fears) {
+            dr.apply(DRCategory::Fears);
+        }
+        world.entity_mut(rogue).insert(dr);
+    }
+    world.spawn(AuraPending {
+        target: rogue,
+        aura,
+    });
+    world.run_system_once(apply_pending_auras).unwrap();
+    (
+        !world.get::<Combatant>(rogue).unwrap().stealthed,
+        stealth_log(&world),
+    )
+}
+
+#[test]
+fn a_hostile_aura_that_lands_reveals() {
+    assert_eq!(
+        land(aura(AuraType::Fear, "Psychic Scream"), false),
+        (
+            true,
+            vec!["[STEALTH] Team 2 Rogue #1 is revealed by Psychic Scream".to_string()]
+        )
+    );
+    // Not only crowd control: any hostile effect, e.g. a stat debuff.
+    assert!(land(aura(AuraType::AttackPowerReduction, "Demoralizing Shout"), false).0);
+}
+
+#[test]
+fn a_blocked_or_friendly_aura_does_not_reveal() {
+    // Blocked: a Fear the Rogue is DR-immune to never lands.
+    assert_eq!(
+        land(aura(AuraType::Fear, "Psychic Scream"), true),
+        (false, vec![])
+    );
+    // Friendly: a buff is not hostile.
+    assert_eq!(
+        land(aura(AuraType::MaxHealthIncrease, "Power Word: Fortitude"), false),
+        (false, vec![])
     );
 }

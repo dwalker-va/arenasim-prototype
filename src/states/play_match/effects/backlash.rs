@@ -121,6 +121,8 @@ pub fn process_backlash(
                 &mut dispeller,
                 dispeller_auras.map(|a| a.into_inner()),
                 SpellSchool::Shadow,
+                "Unstable Affliction",
+                &mut combat_log,
             );
             (
                 actual_damage,

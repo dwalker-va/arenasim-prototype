@@ -190,6 +190,8 @@ pub fn process_holy_shock_damage(
                 &mut target,
                 target_auras.as_deref_mut(),
                 crate::states::play_match::abilities::SpellSchool::Holy,
+                "Holy Shock",
+                &mut combat_log,
             );
 
             // Pet-aware: try_holy_shock_damage's target filter does not exclude

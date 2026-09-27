@@ -1294,6 +1294,8 @@ pub fn decide_abilities(
                     &mut target,
                     target_auras.as_deref_mut(),
                     ability_spell_school,
+                    &ability_name,
+                    &mut combat_log,
                 );
                 actual_damage = dmg;
                 // Pet-aware ids for structured fields + message/trace text.
@@ -1457,6 +1459,8 @@ pub fn decide_abilities(
                     &mut target,
                     target_auras.as_deref_mut(),
                     super::abilities::SpellSchool::Frost,
+                    "Frost Nova",
+                    &mut combat_log,
                 );
                 actual_damage = dmg;
                 // Pet-aware target id (structured fields + message text).
