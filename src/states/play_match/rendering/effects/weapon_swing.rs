@@ -870,6 +870,11 @@ fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
 /// with no sockets (pets, un-animated classes) no-op — the marker is simply
 /// despawned.
 ///
+/// A Shot's hit reaction is held for its arrow (`RangedHitArrival`), so this
+/// is also where a Shot that looses NO arrow gets its reaction released at
+/// once — the loosing decision lives here, and so must its fallback, or a
+/// Shot from an attacker without a bow socket would never react at all.
+///
 /// This system DESPAWNS the marker, so it is the last consumer:
 /// `hit_reaction::consume_hit_reactions` is ordered `.before` it in
 /// `states/mod.rs`.
@@ -885,6 +890,7 @@ pub fn consume_swing_signals(
 ) {
     for (signal_entity, signal) in signals.iter() {
         let target_pos = positions.get(signal.target).map(|t| t.translation).ok();
+        let mut loosed_arrow = false;
         // Dual-wield alternation: the sim has ONE attack timer, so each landed
         // auto swings whichever dagger is flagged as next, then hands the flag
         // to its twin. Single-weapon classes keep the flag on the main hand
@@ -928,9 +934,27 @@ pub fn consume_swing_signals(
                         from_tf.translation + Vec3::Y * 1.1,
                         signal.target,
                         impact_origin(ImpactAnchor::Chest, to, false),
+                        signal.is_crit,
                     );
+                    loosed_arrow = true;
                 }
             }
+        }
+        if signal.kind == AutoAttackKind::Shot && !loosed_arrow {
+            // Nothing in flight to wait for: the shot arrives now, struck
+            // from the attacker's side.
+            let from = match (positions.get(signal.attacker), target_pos) {
+                (Ok(attacker), Some(target)) => attacker.translation - target,
+                _ => Vec3::ZERO,
+            };
+            commands.spawn((
+                RangedHitArrival {
+                    target: signal.target,
+                    is_crit: signal.is_crit,
+                    from,
+                },
+                PlayMatchEntity,
+            ));
         }
         commands.entity(signal_entity).despawn();
     }

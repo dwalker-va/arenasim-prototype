@@ -11,12 +11,20 @@
 //!   (`CombatWound`, anim 9): no DB2 row commands the melee flinch, but the bow
 //!   and thrown impact kits explicitly command anim 9, so a ranged-auto flinch
 //!   is client-faithful. Research §1.1, §2.5.
-//! * **The impact burst** fires on MELEE autos only (players and pets). The
+//! * **The impact burst** fires on PHYSICAL autos — melee (players and pets)
+//!   and the Hunter's Shot — and never on a wand ([`auto_throws_sparks`]). The
 //!   client's wand SpellVisuals carry zero impact rows, so a wand hit showing
-//!   only the generic flinch is the faithful result and a bespoke wand impact
-//!   burst is not (research §2.5, constraint 5). The Hunter's arrow likewise
-//!   gets no bespoke arrival flash — its bow impact kit is sound + CombatWound
-//!   and nothing else.
+//!   only the generic flinch is the faithful result (research §2.5,
+//!   constraint 5). The Shot's burst is the second deviation below.
+//!
+//! **A Shot reacts when its arrow ARRIVES, not when its damage lands.** The
+//! sim resolves an auto's damage at the swing and the cosmetic arrow flies
+//! afterwards, so a reaction hung on the damage finishes before the arrow gets
+//! there (a 0.35 s flinch against 0.36 s of flight at 16 yd, worse with range).
+//! [`consume_hit_reactions`] therefore skips the Shot, and
+//! [`consume_ranged_hit_arrivals`] plays the whole of its reaction off the
+//! `RangedHitArrival` the arrow leaves behind. The wand bolt is not held: its
+//! reaction is the flinch alone, and it still plays at the damage.
 //!
 //! **The impact burst is a WEAPON SPARK, not blood — a deliberate,
 //! user-directed deviation from the client.** Classic shows `bloodspurt.m2`,
@@ -25,6 +33,13 @@
 //! at auto-attack frequency the two channels would collide. Metallic
 //! warm-white sparks read as WEAPON impact and leave the bleed vocabulary
 //! alone. Do not "restore faithfulness" here; the deviation is the design.
+//!
+//! **The Shot's burst is a second deliberate, user-directed deviation.** The
+//! client's bow impact kit is sound plus `CombatWound` with no model, so any
+//! burst on an arrow is invented. It is here because a physical projectile
+//! striking a body should read like a physical weapon striking a body (user
+//! ruling, 2026-09-21); a wand bolt is magic and does not. Do not remove it in
+//! a client-data pass either.
 //!
 //! All randomness is a self-contained visual-only hash, never the sim
 //! `game_rng`, and every system here is registered in `states/mod.rs` only, so
@@ -84,6 +99,10 @@ pub const PET_FLINCH_DURATION_SCALE: f32 = 0.67;
 
 /// What a melee impact throws off. Named as the spec names it; see the
 /// module header for why this is not blood.
+///
+/// A Hunter's Shot throws the SAME burst, off the same `SPARK_*` constants
+/// below — sharing them is the intent ("just like melee weapons", user ruling
+/// 2026-09-21), not an omission awaiting a ranged set. Do not fork them.
 pub const MELEE_IMPACT_STYLE: MeleeImpactStyle = MeleeImpactStyle::WeaponSpark;
 
 /// Flecks per burst. Below Mortal Strike's 14, which is the adjacency this
@@ -221,6 +240,18 @@ pub enum MeleeImpactStyle {
     WeaponSpark,
 }
 
+// --- The trigger set ---------------------------------------------------------
+
+/// Whether a landed auto of this kind throws the weapon-spark burst.
+///
+/// Physical autos do: melee, and a Shot loosed from a bow, gun or crossbow —
+/// the second of which is INVENTED, a user-directed deviation from the
+/// client's model-less bow impact kit (see the module header; do not
+/// "restore" it). A wand bolt is magic and keeps the flinch alone.
+pub fn auto_throws_sparks(kind: AutoAttackKind) -> bool {
+    matches!(kind, AutoAttackKind::Melee | AutoAttackKind::Shot)
+}
+
 // --- Runtime components (graphical-only) ------------------------------------
 
 /// One metallic fleck. A transient, unattached world particle with ballistic
@@ -263,6 +294,21 @@ pub struct HitFlash {
 /// visually finished by the time `cleanup_hit_flinch` removes the component —
 /// there is no frame where removal itself moves the body.
 pub fn hit_flinch_offset(flinch: &HitFlinch) -> f32 {
+    -flinch.depth * hit_flinch_weight(flinch)
+}
+
+/// How far into the flinch the body is right now, `0.0..=1.0`: the dip's
+/// envelope, and the share of the gait's own motion the flinch takes over.
+///
+/// A dip ADDED to a walking gait is invisible: the walk bob is ±0.10 at a
+/// stride's cadence, the dip is 0.10 over about the same time, and the sum
+/// reads as one more bob — measured in a real Hunter v Warrior match, where
+/// the struck body mostly ROSE through its own "dip". So the gait writers
+/// fade their motion out under this envelope (`apply_gait_offset`) and the
+/// struck body hitches and sinks, as the client's wound anim overrides the
+/// run cycle. On a unit standing still the gait is already at rest and this
+/// changes nothing. Exactly `0.0` at `elapsed >= duration`, like the dip.
+pub fn hit_flinch_weight(flinch: &HitFlinch) -> f32 {
     if flinch.duration <= 0.0 {
         return 0.0;
     }
@@ -270,14 +316,13 @@ pub fn hit_flinch_offset(flinch: &HitFlinch) -> f32 {
     // Fast in over the rise fraction, slow out over the remainder. The
     // recovery is eased (squared) so the body settles rather than snapping
     // back through rest.
-    let shape = if t < FLINCH_RISE_FRAC {
+    if t < FLINCH_RISE_FRAC {
         t / FLINCH_RISE_FRAC.max(f32::EPSILON)
     } else {
         let k = (1.0 - t) / (1.0 - FLINCH_RISE_FRAC).max(f32::EPSILON);
         let k = k.clamp(0.0, 1.0);
         k * k
-    };
-    -flinch.depth * shape
+    }
 }
 
 // --- Spawn ------------------------------------------------------------------
@@ -291,17 +336,12 @@ pub fn hit_flinch_offset(flinch: &HitFlinch) -> f32 {
 /// frame, and a reaction deferred to `Update` would collapse a focus-fire
 /// flurry into a single dip.
 ///
+/// A Shot is skipped outright: its reaction waits for its arrow, and
+/// [`consume_ranged_hit_arrivals`] plays it (module header).
+///
 /// Reads the victim's LIVE transform. The sim already resolved damage against
 /// that position, and the burst is sited there rather than tracked, so a unit
 /// that walks on does not drag its own sparks along.
-///
-/// The depth floor is fed from TWO sources — the victim's live component and
-/// the deepest dip already chosen for it THIS tick. Commands are not applied
-/// until the end of the schedule, so several swings landing on one victim in
-/// one tick all read the same pre-tick component; without the second source a
-/// crit sharing a tick with a normal hit would be overwritten at the normal
-/// depth. Measured at 22% of landed autos under focus fire, which is exactly
-/// where the crit contrast is supposed to read.
 pub fn consume_hit_reactions(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -311,62 +351,37 @@ pub fn consume_hit_reactions(
     attackers: Query<(&Transform, &Combatant)>,
     sockets: Query<(&WeaponSocket, &GlobalTransform)>,
 ) {
-    // Deepest dip chosen for each victim so far this tick. A `HashMap` is the
-    // right structure despite the project's rule about hash-ordered float
-    // reductions (CLAUDE.md, *What a byte-identity result proves*): this map
-    // is only ever POINT-LOOKED-UP by entity, never iterated, so its order
-    // reaches no arithmetic. The order the depths are folded in is the signal
-    // query's, unchanged by this map — and `max` is order-independent anyway.
-    // Graphical-only besides; nothing here reaches sim state.
-    let mut pending_depth: HashMap<Entity, f32> = HashMap::new();
+    let mut pending_depth = PendingDepth::new();
 
     for signal in signals.iter() {
+        if signal.kind == AutoAttackKind::Shot {
+            continue;
+        }
         let Ok((victim_tf, victim_pet, live_flinch)) = victims.get(signal.target) else {
             continue;
         };
         let is_pet = victim_pet.is_some();
 
         // --- the flinch: every landed auto, whatever the weapon ------------
-        let duration = FLINCH_DURATION_SECS
-            * if is_pet {
-                PET_FLINCH_DURATION_SCALE
-            } else {
-                1.0
-            };
-        let depth = FLINCH_DIP
-            * if signal.is_crit {
-                FLINCH_CRIT_MULT
-            } else {
-                1.0
-            };
-        // Refresh, never stack: a second hit inside the window restarts the
-        // dip, and starting it no shallower than where the body already is
-        // keeps the compression continuous. Without the floor, a normal hit
-        // landing mid-crit-dip would pop the body UPWARD — the one artifact
-        // focus fire would produce constantly.
-        //
-        // The floor spans both the ACROSS-tick case (the live component) and
-        // the WITHIN-tick one (a depth this loop has already queued for the
-        // same victim). The second is invisible in the component, because the
-        // insert that carries it is still in the command queue.
-        let floor = live_flinch
-            .map_or(0.0, |f| hit_flinch_offset(f).abs())
-            .max(pending_depth.get(&signal.target).copied().unwrap_or(0.0));
-        let depth = depth.max(floor);
-        pending_depth.insert(signal.target, depth);
-        commands.entity(signal.target).insert(HitFlinch {
-            elapsed: 0.0,
-            duration,
-            depth,
-        });
+        insert_flinch(
+            &mut commands,
+            &mut pending_depth,
+            signal.target,
+            is_pet,
+            live_flinch,
+            signal.is_crit,
+        );
 
-        // --- the impact burst: MELEE only (client-faithful) ----------------
-        if signal.kind == AutoAttackKind::Melee {
+        // --- the impact burst: physical autos only -------------------------
+        if auto_throws_sparks(signal.kind) {
             let Ok((attacker_tf, _)) = attackers.get(signal.attacker) else {
                 continue;
             };
-            let (impact, outward) =
-                impact_point(victim_tf.translation, attacker_tf.translation, is_pet);
+            let (impact, outward) = impact_point(
+                victim_tf.translation,
+                attacker_tf.translation - victim_tf.translation,
+                is_pet,
+            );
             spawn_impact_burst(
                 &mut commands,
                 &mut meshes,
@@ -397,18 +412,133 @@ pub fn consume_hit_reactions(
     }
 }
 
-/// Where a melee contact plays: the victim's chest anchor, pushed out along
-/// the horizontal bearing to the ATTACKER so the burst sits on the struck side
-/// of the silhouette rather than inside it.
+/// Update (graphical-only): play a Shot's held reaction — the flinch AND the
+/// burst — the frame its arrow arrives.
+///
+/// Ordered after `update_cosmetic_arrows`, which leaves the
+/// [`RangedHitArrival`] behind, and before `tick_hit_flinch`, so the dip
+/// renders on the arrival frame rather than one behind; both in
+/// `states/mod.rs`. `Update` rather than FixedUpdate because the arrow flies
+/// at render rate: the arrival is a rendered-frame event, and several
+/// arrivals inside one frame each still get their own burst here.
+///
+/// The burst is sited on the side the arrow STRUCK, read off the arrow's own
+/// heading rather than the Hunter's position — the Hunter may have walked on
+/// during the flight, and at 30+ yards a bearing to it says nothing the arrow
+/// does not say better.
+pub fn consume_ranged_hit_arrivals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    arrivals: Query<(Entity, &RangedHitArrival)>,
+    victims: Query<(&Transform, Option<&Pet>, Option<&HitFlinch>), With<Combatant>>,
+) {
+    let mut pending_depth = PendingDepth::new();
+
+    for (marker, arrival) in arrivals.iter() {
+        commands.entity(marker).despawn();
+        let Ok((victim_tf, victim_pet, live_flinch)) = victims.get(arrival.target) else {
+            continue;
+        };
+        let is_pet = victim_pet.is_some();
+        insert_flinch(
+            &mut commands,
+            &mut pending_depth,
+            arrival.target,
+            is_pet,
+            live_flinch,
+            arrival.is_crit,
+        );
+        if auto_throws_sparks(AutoAttackKind::Shot) {
+            let (impact, outward) = impact_point(victim_tf.translation, arrival.from, is_pet);
+            spawn_impact_burst(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                arrival.target,
+                impact,
+                outward,
+                arrival.is_crit,
+                if is_pet { PET_SPARK_SPATIAL_SCALE } else { 1.0 },
+            );
+        }
+    }
+}
+
+/// Deepest dip chosen for each victim so far in one consumer's pass.
+///
+/// A `HashMap` is the right structure despite the project's rule about
+/// hash-ordered float reductions (CLAUDE.md, *What a byte-identity result
+/// proves*): this map is only ever POINT-LOOKED-UP by entity, never iterated,
+/// so its order reaches no arithmetic. The order the depths are folded in is
+/// the caller's query order, unchanged by this map — and `max` is
+/// order-independent anyway. Graphical-only besides; nothing here reaches sim
+/// state.
+type PendingDepth = HashMap<Entity, f32>;
+
+/// Start (or refresh) a victim's flinch.
+///
+/// The depth floor is fed from TWO sources — the victim's live component and
+/// the deepest dip already chosen for it in this pass (`pending`). Commands
+/// are not applied until the end of the schedule, so several hits landing on
+/// one victim in one pass all read the same pre-pass component; without the
+/// second source a crit sharing a tick with a normal hit would be overwritten
+/// at the normal depth. Measured at 22% of landed autos under focus fire,
+/// which is exactly where the crit contrast is supposed to read.
+fn insert_flinch(
+    commands: &mut Commands,
+    pending: &mut PendingDepth,
+    target: Entity,
+    is_pet: bool,
+    live_flinch: Option<&HitFlinch>,
+    is_crit: bool,
+) {
+    let duration = FLINCH_DURATION_SECS
+        * if is_pet {
+            PET_FLINCH_DURATION_SCALE
+        } else {
+            1.0
+        };
+    let depth = FLINCH_DIP * if is_crit { FLINCH_CRIT_MULT } else { 1.0 };
+    // Refresh, never stack: a second hit inside the window restarts the dip,
+    // and starting it no shallower than where the body already is keeps the
+    // compression continuous. Without the floor, a normal hit landing
+    // mid-crit-dip would pop the body UPWARD — the one artifact focus fire
+    // would produce constantly.
+    //
+    // The floor spans both the ACROSS-pass case (the live component) and the
+    // WITHIN-pass one (a depth this pass has already queued for the same
+    // victim). The second is invisible in the component, because the insert
+    // that carries it is still in the command queue.
+    let floor = live_flinch
+        .map_or(0.0, |f| hit_flinch_offset(f).abs())
+        .max(pending.get(&target).copied().unwrap_or(0.0));
+    let depth = depth.max(floor);
+    pending.insert(target, depth);
+    commands.entity(target).insert(HitFlinch {
+        elapsed: 0.0,
+        duration,
+        depth,
+    });
+}
+
+/// Where a physical contact plays: the victim's chest anchor, pushed out along
+/// the horizontal part of `from` — the direction the blow came from, as seen
+/// from the victim — so the burst sits on the struck side of the silhouette
+/// rather than inside it. For a melee hit `from` points at the attacker; for a
+/// Shot it points back along the arrow's heading. Only its DIRECTION is read,
+/// so the geometry is the same at 2 yards and at 35: the burst never drifts
+/// toward a distant Hunter, and an arrow dropping in from above still reads
+/// as striking the side it came from.
 ///
 /// The standoff clears `COMBATANT_BODY_RADIUS` plus a whole streak length, so
 /// even a fleck thrown straight back at the attacker starts outside the body.
 /// It is NOT scaled down for a pet victim: a pet's capsule is smaller, so the
 /// combatant radius already clears it, and shrinking the standoff would only
 /// move the burst toward the body it has to stay clear of.
-fn impact_point(victim: Vec3, attacker: Vec3, is_pet: bool) -> (Vec3, Vec3) {
+fn impact_point(victim: Vec3, from: Vec3, is_pet: bool) -> (Vec3, Vec3) {
     let chest = impact_origin(ImpactAnchor::Chest, victim, is_pet);
-    let bearing = (attacker - victim).with_y(0.0);
+    let bearing = from.with_y(0.0);
     // Two units at the same XZ (not reachable in the sim, but cheap to make
     // total) leave the burst on the chest anchor, spraying straight up,
     // rather than at NaN.
@@ -715,7 +845,7 @@ mod tests {
     fn the_impact_point_clears_the_body_on_the_attackers_side() {
         let victim = Vec3::new(10.0, 1.0, 4.0);
         let attacker = Vec3::new(12.0, 1.0, 4.0);
-        let (p, out) = impact_point(victim, attacker, false);
+        let (p, out) = impact_point(victim, attacker - victim, false);
         assert!(
             (out.length() - 1.0).abs() < 1e-5,
             "outward is a unit bearing"
@@ -727,8 +857,28 @@ mod tests {
     }
 
     #[test]
+    fn a_distant_shot_sits_exactly_where_an_adjacent_blow_would() {
+        // Only the bearing's DIRECTION is read, so a Shot from 35 yards —
+        // arriving from above, as the arrow does — plays at the same point as
+        // a melee blow from the same side at 2.
+        let victim = Vec3::new(3.0, 1.0, -1.0);
+        let near = impact_point(victim, Vec3::new(0.0, 0.0, -2.0), false);
+        let far = impact_point(victim, Vec3::new(0.0, 12.0, -35.0), false);
+        assert!((near.0 - far.0).length() < 1e-5);
+        assert!((near.1 - far.1).length() < 1e-5);
+    }
+
+    #[test]
+    fn only_physical_autos_throw_sparks() {
+        assert!(auto_throws_sparks(AutoAttackKind::Melee));
+        assert!(auto_throws_sparks(AutoAttackKind::Shot));
+        assert!(!auto_throws_sparks(AutoAttackKind::Wand));
+        assert!(!auto_throws_sparks(AutoAttackKind::None));
+    }
+
+    #[test]
     fn coincident_units_do_not_produce_a_nan_impact_point() {
-        let (p, out) = impact_point(Vec3::new(1.0, 0.0, 2.0), Vec3::new(1.0, 0.0, 2.0), false);
+        let (p, out) = impact_point(Vec3::new(1.0, 0.0, 2.0), Vec3::ZERO, false);
         assert!(p.is_finite());
         assert_eq!(out, Vec3::Y, "a degenerate bearing sprays straight up");
     }

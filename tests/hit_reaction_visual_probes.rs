@@ -1,6 +1,7 @@
 //! Probes for the victim hit reaction and the caster wand auto
 //! (`hit_reaction.rs`, `wand_attack.rs`, and the flinch composition in
-//! `gait.rs`).
+//! `gait.rs`), including the Shot's reaction held for its arrow's arrival
+//! (`hunter_shots.rs`, `update_cosmetic_arrows`).
 //!
 //! Every geometric claim here is read off `GlobalTransform` — world positions
 //! and world distances — never off a stored field or a scale scalar, so a
@@ -14,7 +15,12 @@
 //! ever tested a STATIONARY victim would pass on that broken build, because
 //! an idle gait's settle-ease leaves most of the dip intact. So the probe
 //! drives the same scripted walk twice, once with a flinch and once without,
-//! and demands the difference be exactly the dip.
+//! and demands the flinched body be exactly the faded gait plus the dip.
+//!
+//! Composition alone is not visibility: a dip merely ADDED to the walk bob is
+//! the same size and cadence as the bob, and in a real match it disappeared
+//! into the stride. `tests/hit_reaction_match_flow.rs` holds the reaction to
+//! reading on moving victims in a real Hunter v Warrior match.
 //!
 //! Runs on `MinimalPlugins` + `AssetPlugin` + `TransformPlugin` — no window,
 //! no GPU. `TransformPlugin` is load-bearing: without it `GlobalTransform`
@@ -27,12 +33,14 @@ use arenasim::states::play_match::components::{
     AutoAttackKind, AutoAttackSwing, Combatant, HitFlinch, Pet, PetType, VisualBody, WalkAnim,
     WeaponHand, WeaponKind, WeaponSocket,
 };
+use arenasim::states::play_match::components::{CosmeticArrow, RangedHitArrival};
 use arenasim::states::play_match::{
-    cleanup_hit_flinch, cleanup_hit_reactions, consume_hit_reactions, consume_swing_signals,
-    hit_flinch_offset, tick_hit_flinch, update_fear_run, update_hit_flashes, update_hit_sparks,
+    cleanup_hit_flinch, cleanup_hit_reactions, consume_hit_reactions, consume_ranged_hit_arrivals,
+    consume_swing_signals, hit_flinch_offset, hit_flinch_weight, tick_hit_flinch,
+    update_cosmetic_arrows, update_fear_run, update_hit_flashes, update_hit_sparks,
     update_walk_animation, update_wand_missiles, wand_school, HitSpark, SwingStyle, WandMissile,
-    FLINCH_CRIT_MULT, FLINCH_DIP, FLINCH_DURATION_SECS, PET_FLINCH_DURATION_SCALE,
-    PET_SPARK_SPATIAL_SCALE, SPARK_COUNT, SPARK_CRIT_SCALE, SPARK_SIZE,
+    AUTO_ARROW_SPEED, FLINCH_CRIT_MULT, FLINCH_DIP, FLINCH_DURATION_SECS,
+    PET_FLINCH_DURATION_SCALE, PET_SPARK_SPATIAL_SCALE, SPARK_COUNT, SPARK_CRIT_SCALE, SPARK_SIZE,
 };
 use arenasim::CharacterClass;
 use bevy::prelude::*;
@@ -97,11 +105,21 @@ fn spawn_pet_unit(app: &mut App, owner: Entity, pos: Vec3) -> (Entity, Entity) {
 }
 
 fn spawn_wand_socket(app: &mut App, owner: Entity, body: Entity) -> Entity {
+    spawn_socket(app, owner, body, WeaponKind::Wand)
+}
+
+/// A Hunter's bow: the socket `consume_swing_signals` looses the Auto Shot
+/// arrow from.
+fn spawn_bow_socket(app: &mut App, owner: Entity, body: Entity) -> Entity {
+    spawn_socket(app, owner, body, WeaponKind::Bow)
+}
+
+fn spawn_socket(app: &mut App, owner: Entity, body: Entity, kind: WeaponKind) -> Entity {
     let socket = app
         .world_mut()
         .spawn((
             WeaponSocket {
-                kind: WeaponKind::Wand,
+                kind,
                 hand: WeaponHand::Main,
                 owner,
                 rest: Transform::from_xyz(0.62, 0.55, 0.05),
@@ -146,14 +164,15 @@ fn world_y(app: &App, body: Entity) -> f32 {
 // The flinch: composed into the gait, and therefore visible on a MOVING victim
 // ---------------------------------------------------------------------------
 
-/// Drive a scripted walk for `frames` ticks and return the body's world Y at
-/// each frame. With `flinch`, a `HitFlinch` is inserted before the first tick.
+/// Drive a scripted walk for `frames` ticks and return, per frame, the body's
+/// world Y, the flinch's dip and its weight (the share of the gait it fades
+/// out). With `flinch`, a `HitFlinch` is inserted before the first tick.
 ///
 /// The walk is scripted (the test writes the sim Transform each frame), and
 /// `advance_gait`'s phase depends only on distance travelled, so two runs of
 /// this produce an identical bob track — which is what makes the difference
 /// between them attributable to the flinch and nothing else.
-fn walk_track(frames: usize, flinch: bool) -> Vec<(f32, f32)> {
+fn walk_track(frames: usize, flinch: bool) -> Vec<(f32, f32, f32)> {
     let mut app = harness();
     app.add_systems(
         Update,
@@ -186,12 +205,10 @@ fn walk_track(frames: usize, flinch: bool) -> Vec<(f32, f32)> {
         // The dip the gait actually saw this frame, read off the live
         // component rather than re-derived from an assumed clock — the
         // claim under test is the COMPOSITION, not Bevy's first delta.
-        let dip = app
-            .world()
-            .entity(unit)
-            .get::<HitFlinch>()
-            .map_or(0.0, hit_flinch_offset);
-        track.push((world_y(&app, body), dip));
+        let live = app.world().entity(unit).get::<HitFlinch>();
+        let dip = live.map_or(0.0, hit_flinch_offset);
+        let weight = live.map_or(0.0, hit_flinch_weight);
+        track.push((world_y(&app, body), dip, weight));
     }
     track
 }
@@ -202,12 +219,16 @@ fn the_flinch_is_visible_on_a_walking_victim() {
     // the flinch. A build that let the gait overwrite the dip — which is what
     // a separately-ordered flinch system does — returns two identical tracks
     // and fails here, while a stationary-victim probe would still pass.
+    //
+    // The unit stands at y = 1.0, so a body's height above its rest is its
+    // world Y less that.
     let frames = 10;
     let plain = walk_track(frames, false);
     let dipped = walk_track(frames, true);
 
     // The walk itself is genuinely moving, or the probe proves nothing about
     // the moving case: the bob must actually vary across the window.
+    const BASE: f32 = 1.0;
     let bob_span = plain.iter().map(|s| s.0).fold(f32::MIN, f32::max)
         - plain.iter().map(|s| s.0).fold(f32::MAX, f32::min);
     assert!(
@@ -216,19 +237,27 @@ fn the_flinch_is_visible_on_a_walking_victim() {
          distinguish a composed flinch from an overwritten one"
     );
 
-    // ...and the flinch is EXACTLY additive on top of it, frame by frame.
+    // ...and the flinched body is EXACTLY the gait faded by the flinch's
+    // weight, plus the dip, frame by frame.
     let mut deepest = 0.0f32;
-    for (i, (&(p, control_dip), &(d, expected))) in plain.iter().zip(dipped.iter()).enumerate() {
+    for (i, (&(p, control_dip, _), &(d, dip, weight))) in
+        plain.iter().zip(dipped.iter()).enumerate()
+    {
         assert_eq!(control_dip, 0.0, "the control run must carry no flinch");
+        let expected = (p - BASE) * (1.0 - weight) + dip;
         assert!(
-            (d - p - expected).abs() < 1e-5,
-            "frame {i}: walking body at {d}, control at {p}, dip should be {expected}"
+            ((d - BASE) - expected).abs() < 1e-5,
+            "frame {i}: walking body at {d}, control at {p}, weight {weight}, \
+             dip {dip}: expected {expected} above rest"
         );
-        deepest = deepest.min(d - p);
+        deepest = deepest.min(d - BASE);
     }
+    // Measured from REST, not from the control: the struck body reaches the
+    // bottom of the dip whatever phase its stride was in, the way a
+    // stationary one does.
     assert!(
         deepest <= -FLINCH_DIP * 0.9,
-        "the walking victim never dipped near FLINCH_DIP (deepest {deepest})"
+        "the walking victim never dipped near FLINCH_DIP below rest (deepest {deepest})"
     );
 }
 
@@ -434,10 +463,17 @@ fn a_between_takes_reset_must_clear_the_composed_channels_too() {
 fn consumer_app() -> App {
     let mut app = harness();
     // Production ordering: the reaction consumer runs BEFORE the swing
-    // consumer, which despawns the marker.
+    // consumer, which despawns the marker; the arrow flies after both, and a
+    // Shot's held reaction is played off the arrival it leaves behind.
     app.add_systems(
         Update,
-        (consume_hit_reactions, consume_swing_signals).chain(),
+        (
+            consume_hit_reactions,
+            consume_swing_signals,
+            update_cosmetic_arrows,
+            consume_ranged_hit_arrivals,
+        )
+            .chain(),
     );
     app
 }
@@ -454,6 +490,11 @@ fn spark_count(app: &mut App) -> usize {
 fn every_landed_auto_flinches_its_victim() {
     // Melee, pet melee, wand hit and auto-shot arrival — the client's generic
     // hit-react path. `wand_flinch_on_hit` from the spec is the Wand row.
+    //
+    // The attacker holds no weapon socket, so the Shot row looses no arrow:
+    // it is the no-arrow fallback, which must still react (at once, having
+    // nothing in flight to wait for). The held timing is pinned by
+    // `a_shot_reacts_the_frame_its_arrow_arrives` below.
     for kind in [
         AutoAttackKind::Melee,
         AutoAttackKind::Shot,
@@ -477,13 +518,21 @@ fn every_landed_auto_flinches_its_victim() {
 }
 
 #[test]
-fn only_melee_autos_throw_sparks() {
-    // Client-faithful: the wand SpellVisuals carry zero impact rows, and the
-    // bow impact kit is sound + CombatWound with no model. A burst on either
-    // would be invented.
+fn only_physical_autos_throw_sparks() {
+    // The wand row is client-faithful: the wand SpellVisuals carry zero
+    // impact rows, and a wand bolt is magic, so its hit is the flinch alone.
+    //
+    // The Shot row is a DELIBERATE DEVIATION from the client, by user ruling
+    // (2026-09-21): the bow impact kit is sound + CombatWound with no model,
+    // so this burst is invented — because an arrow striking a body should
+    // read like a weapon striking a body. It throws the melee burst, off the
+    // same SPARK_* constants. Do not "restore" the client's silence here.
+    //
+    // No socket on the attacker, so the Shot arrives at once (the no-arrow
+    // fallback); the arrow-held timing is the probes below.
     for (kind, expect) in [
         (AutoAttackKind::Melee, SPARK_COUNT as usize),
-        (AutoAttackKind::Shot, 0),
+        (AutoAttackKind::Shot, SPARK_COUNT as usize),
         (AutoAttackKind::Wand, 0),
     ] {
         let mut app = consumer_app();
@@ -632,6 +681,228 @@ fn a_same_tick_crit_keeps_its_depth_whichever_lands_first() {
             "crit_first={crit_first}: both contacts should throw a burst"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// The Shot: its reaction is held until the arrow arrives
+// ---------------------------------------------------------------------------
+
+/// The whole production chain for one landed auto, through the gait that
+/// draws the dip: swing -> arrow flight -> arrival -> flinch clock -> body.
+fn arrow_app() -> App {
+    let mut app = harness();
+    app.add_systems(
+        Update,
+        (
+            consume_hit_reactions,
+            consume_swing_signals,
+            update_cosmetic_arrows,
+            consume_ranged_hit_arrivals,
+            tick_hit_flinch,
+            update_walk_animation,
+            cleanup_hit_flinch,
+        )
+            .chain(),
+    );
+    app
+}
+
+fn arrow_count(app: &mut App) -> usize {
+    app.world_mut()
+        .query::<&CosmeticArrow>()
+        .iter(app.world())
+        .len()
+}
+
+fn spark_positions(app: &mut App) -> Vec<Vec3> {
+    app.world_mut()
+        .query::<(&HitSpark, &GlobalTransform)>()
+        .iter(app.world())
+        .map(|(_, g)| g.translation())
+        .collect()
+}
+
+/// One Shot from a bow-holding Hunter at `hunter_pos` onto a stationary
+/// victim at `victim_pos`, flown to completion. Per frame: whether the arrow
+/// is still in the air, the victim body's WORLD y, and the live spark count.
+fn fly_one_shot(hunter_pos: Vec3, victim_pos: Vec3, is_crit: bool) -> Vec<(bool, f32, usize)> {
+    let mut app = arrow_app();
+    let (hunter, hunter_body) = spawn_unit(&mut app, CharacterClass::Hunter, 1, hunter_pos);
+    spawn_bow_socket(&mut app, hunter, hunter_body);
+    let (victim, victim_body) = spawn_unit(&mut app, CharacterClass::Priest, 2, victim_pos);
+    app.update();
+    assert!(
+        (world_y(&app, victim_body) - victim_pos.y).abs() < 1e-6,
+        "the idle victim must stand at rest before the shot"
+    );
+
+    swing(&mut app, hunter, victim, AutoAttackKind::Shot, is_crit);
+    let mut track = Vec::new();
+    for _ in 0..60 {
+        app.update();
+        track.push((
+            arrow_count(&mut app) > 0,
+            world_y(&app, victim_body),
+            spark_count(&mut app),
+        ));
+    }
+    track
+}
+
+#[test]
+fn a_shot_reacts_the_frame_its_arrow_arrives() {
+    // The card's defect, measured: the sim resolves a Shot's damage at the
+    // swing, and a reaction hung there is over before the arrow lands. So the
+    // claim is about WHEN, read off the world — the frame the victim's body
+    // first dips and the frame the burst first appears must both be the frame
+    // the arrow retires, and that frame must be one flight-time after the
+    // swing, not the swing itself.
+    let hunter_pos = Vec3::new(0.0, 1.0, 0.0);
+    let victim_pos = Vec3::new(0.0, 1.0, 30.0);
+    for is_crit in [false, true] {
+        let track = fly_one_shot(hunter_pos, victim_pos, is_crit);
+        let rest = victim_pos.y;
+
+        let arrived = track
+            .iter()
+            .position(|&(in_air, _, _)| !in_air)
+            .expect("the arrow never arrived");
+        let dipped = track
+            .iter()
+            .position(|&(_, y, _)| y < rest - 1e-4)
+            .expect("the victim never flinched");
+        let burst = track
+            .iter()
+            .position(|&(_, _, sparks)| sparks > 0)
+            .expect("the shot never threw its burst");
+
+        // Non-vacuity: the arrow was genuinely in flight for many frames, so
+        // "at the swing" and "at the arrival" are far apart.
+        assert!(arrived >= 5, "the arrow arrived on frame {arrived}");
+        assert_eq!(
+            dipped, arrived,
+            "crit={is_crit}: the victim dipped on frame {dipped} but the arrow \
+             arrived on frame {arrived}"
+        );
+        assert_eq!(
+            burst, arrived,
+            "crit={is_crit}: the burst appeared on frame {burst} but the arrow \
+             arrived on frame {arrived}"
+        );
+
+        // ...and the arrival is one flight time after the swing: the arrow is
+        // loosed 1.1 above the Hunter and ends on the victim's chest anchor
+        // (0.55 above its transform), at AUTO_ARROW_SPEED.
+        let flight = ((victim_pos + Vec3::Y * 0.55) - (hunter_pos + Vec3::Y * 1.1)).length()
+            / AUTO_ARROW_SPEED;
+        let arrived_at = (arrived + 1) as f32 * TICK_SECS;
+        assert!(
+            (arrived_at - flight).abs() <= TICK_SECS,
+            "arrival at {arrived_at}s, flight time {flight}s"
+        );
+
+        // The crit rides the arrow to the arrival: its dip is the crit's.
+        let deepest = track.iter().map(|&(_, y, _)| y - rest).fold(0.0, f32::min);
+        let expect = FLINCH_DIP * if is_crit { FLINCH_CRIT_MULT } else { 1.0 };
+        assert!(
+            (deepest + expect).abs() < expect * 0.15,
+            "crit={is_crit}: deepest dip {deepest}, expected about -{expect}"
+        );
+    }
+}
+
+#[test]
+fn a_shot_bursts_on_the_side_its_arrow_struck() {
+    // The burst is sited off the ARROW'S heading, not the Hunter's position.
+    // The Hunter looses from due -Z and then walks well off to +X before the
+    // arrow lands; a burst sited toward the Hunter would swing round to +X.
+    // It must stay on the -Z face, at the victim — not somewhere along the
+    // arrow's path, and not drifted toward a distant shooter.
+    let mut app = arrow_app();
+    let victim_pos = Vec3::new(0.0, 1.0, 0.0);
+    let (hunter, hunter_body) = spawn_unit(
+        &mut app,
+        CharacterClass::Hunter,
+        1,
+        Vec3::new(0.0, 1.0, -30.0),
+    );
+    spawn_bow_socket(&mut app, hunter, hunter_body);
+    let (victim, _) = spawn_unit(&mut app, CharacterClass::Priest, 2, victim_pos);
+    app.update();
+
+    swing(&mut app, hunter, victim, AutoAttackKind::Shot, false);
+    app.update();
+    app.world_mut()
+        .entity_mut(hunter)
+        .get_mut::<Transform>()
+        .unwrap()
+        .translation = Vec3::new(25.0, 1.0, -10.0);
+
+    let mut positions = Vec::new();
+    for _ in 0..60 {
+        app.update();
+        positions = spark_positions(&mut app);
+        if !positions.is_empty() {
+            break;
+        }
+    }
+    assert_eq!(
+        positions.len(),
+        SPARK_COUNT as usize,
+        "the shot threw no burst"
+    );
+    for p in positions {
+        let offset = (p - victim_pos).with_y(0.0);
+        assert!(
+            offset.z < -BODY_RADIUS,
+            "fleck at {p} is not on the face the arrow struck"
+        );
+        assert!(
+            offset.x.abs() < 0.05,
+            "fleck at {p} swung toward the Hunter's new position"
+        );
+        assert!(
+            offset.length() < BODY_RADIUS + 3.0 * SPARK_SIZE,
+            "fleck at {p} is not at the victim"
+        );
+        assert!(p.y > victim_pos.y, "fleck at {p} is below chest height");
+    }
+}
+
+#[test]
+fn an_arrow_whose_victim_died_in_flight_reacts_nothing_and_leaks_nothing() {
+    let mut app = arrow_app();
+    let (hunter, hunter_body) = spawn_unit(
+        &mut app,
+        CharacterClass::Hunter,
+        1,
+        Vec3::new(0.0, 1.0, 0.0),
+    );
+    spawn_bow_socket(&mut app, hunter, hunter_body);
+    let (victim, _) = spawn_unit(
+        &mut app,
+        CharacterClass::Priest,
+        2,
+        Vec3::new(0.0, 1.0, 20.0),
+    );
+    app.update();
+    swing(&mut app, hunter, victim, AutoAttackKind::Shot, false);
+    app.update();
+    assert_eq!(arrow_count(&mut app), 1);
+    app.world_mut().entity_mut(victim).despawn();
+    for _ in 0..60 {
+        app.update();
+    }
+    assert_eq!(arrow_count(&mut app), 0, "the arrow never retired");
+    assert_eq!(spark_count(&mut app), 0, "a burst played on no body");
+    assert_eq!(
+        app.world_mut()
+            .query::<&RangedHitArrival>()
+            .iter(app.world())
+            .len(),
+        0,
+        "the arrival marker leaked"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -939,7 +1210,16 @@ fn a_crit_throws_the_same_flecks_bigger() {
 
 /// Peak concurrent flecks under the cadence three attackers focusing one
 /// target actually produce, and the total streak length that peak draws.
-fn sustained_burst_peak(interval_secs: f32, seconds: f32) -> (usize, f32) {
+///
+/// With `ranged`, every third landing is a Hunter's Shot from 30 yards, whose
+/// burst lands a flight time after its swing — so its flecks can pile onto
+/// melee bursts the swing cadence alone would have kept apart. The Hunter is
+/// spawned AFTER the victim so the victim's entity index — the spark jitter's
+/// seed — is the melee-only run's.
+///
+/// Returns the peak, the streak it draws, and how many arrows ARRIVED (each
+/// one a Shot burst) inside the window — the ranged run's non-vacuity count.
+fn sustained_burst_peak(interval_secs: f32, seconds: f32, ranged: bool) -> (usize, f32, usize) {
     let mut app = consumer_app();
     app.add_systems(PostUpdate, (update_hit_sparks, cleanup_hit_reactions));
     let (attacker, _) = spawn_unit(
@@ -954,18 +1234,46 @@ fn sustained_burst_peak(interval_secs: f32, seconds: f32) -> (usize, f32) {
         2,
         Vec3::new(0.0, 1.0, 0.0),
     );
+    let hunter = ranged.then(|| {
+        let (hunter, body) = spawn_unit(
+            &mut app,
+            CharacterClass::Hunter,
+            1,
+            Vec3::new(0.0, 1.0, -30.0),
+        );
+        spawn_bow_socket(&mut app, hunter, body);
+        hunter
+    });
 
     let frames = (seconds / TICK_SECS).round() as usize;
     let every = (interval_secs / TICK_SECS).round().max(1.0) as usize;
     let mut peak = 0usize;
+    let mut landed = 0usize;
+    let mut arrivals = 0usize;
+    let mut in_air = 0usize;
     for frame in 0..frames {
         if frame % every == 0 {
-            swing(&mut app, attacker, victim, AutoAttackKind::Melee, false);
+            match hunter {
+                Some(hunter) if landed % 3 == 2 => {
+                    swing(&mut app, hunter, victim, AutoAttackKind::Shot, false)
+                }
+                _ => swing(&mut app, attacker, victim, AutoAttackKind::Melee, false),
+            }
+            landed += 1;
         }
+        let loosed = app
+            .world_mut()
+            .query::<&AutoAttackSwing>()
+            .iter(app.world())
+            .filter(|s| s.kind == AutoAttackKind::Shot)
+            .count();
         app.update();
+        let now = arrow_count(&mut app);
+        arrivals += (in_air + loosed).saturating_sub(now);
+        in_air = now;
         peak = peak.max(spark_count(&mut app));
     }
-    (peak, peak as f32 * SPARK_SIZE)
+    (peak, peak as f32 * SPARK_SIZE, arrivals)
 }
 
 #[test]
@@ -993,13 +1301,13 @@ fn focus_fire_stays_under_one_mortal_strike_of_debris() {
     // startup entity count, can move this by a few with no constant touched.
     // Re-measure before reading a small move as a knob change.
     const FOCUS_FIRE_PEAK: usize = 22;
-    let (peak, streak) = sustained_burst_peak(0.2, 2.0);
+    let (peak, streak, _) = sustained_burst_peak(0.2, 2.0, false);
     assert!(
         peak > SPARK_COUNT as usize,
         "bursts never overlapped — probe is vacuous"
     );
     // The slow end of the same three-attacker band.
-    let (peak_03, streak_03) = sustained_burst_peak(0.3, 2.4);
+    let (peak_03, streak_03, _) = sustained_burst_peak(0.3, 2.4, false);
     assert!(
         streak_03 <= streak,
         "the 0.3s cadence ({peak_03} flecks) cannot outdraw the 0.2s one ({peak})"
@@ -1022,8 +1330,54 @@ fn focus_fire_stays_under_one_mortal_strike_of_debris() {
 
     // The single-attacker cadence the bench measured, for contrast: no
     // overlap at all at 1.6s.
-    let (slow_peak, _) = sustained_burst_peak(1.6, 3.2);
+    let (slow_peak, _, _) = sustained_burst_peak(1.6, 3.2, false);
     assert_eq!(slow_peak, SPARK_COUNT as usize);
+}
+
+#[test]
+fn focus_fire_with_a_hunter_in_it_stays_under_one_mortal_strike() {
+    // The Shot's burst is a new contributor to the same budget. Same cadence
+    // and victim as above, with every third landing an arrow from 30 yards:
+    // the arrow's flight shifts that burst off the swing cadence, so it can
+    // overlap bursts the melee-only run keeps apart. Same comparative claim,
+    // same tripwire discipline — see the melee-only test for both.
+    const MS_SPARK_COUNT: f32 = 14.0;
+    const MS_SPARK_LENGTH: f32 = 0.13;
+    let ms_budget = MS_SPARK_COUNT * MS_SPARK_LENGTH;
+
+    // Measured at the same 22 as the melee-only run, and 21-24 across the
+    // same 40 spawn-order shifts, shift for shift. Not because the Shot
+    // bursts are missing — `arrivals` counts them, and they land two frames
+    // off the melee phase — but because a Shot REPLACES a melee landing
+    // rather than adding one, and the off-phase arrivals never stack above
+    // the peak the melee pairs already set. A Hunter that raises this is a
+    // cadence change, not a spark change: read it that way.
+    const FOCUS_FIRE_PEAK_WITH_RANGED: usize = 22;
+    //
+    // Three seconds rather than two, so four arrows land inside the window
+    // instead of two: the question is what a Shot's burst piles onto, and
+    // each arrival is one more chance to pile.
+    let (peak, streak, arrivals) = sustained_burst_peak(0.2, 3.0, true);
+    assert!(
+        arrivals >= 4,
+        "only {arrivals} arrows arrived in the window — the ranged contributor \
+         is barely in the mix"
+    );
+    assert!(
+        peak > SPARK_COUNT as usize,
+        "bursts never overlapped — probe is vacuous"
+    );
+    assert!(
+        streak < ms_budget,
+        "focus fire with a Hunter peaks at {peak} flecks / {streak} streak-units, \
+         over one Mortal Strike's {ms_budget}"
+    );
+    assert_eq!(
+        peak, FOCUS_FIRE_PEAK_WITH_RANGED,
+        "TRIPWIRE, not a budget violation: the peak moved to {peak} flecks / \
+         {streak} streak-units, still under Mortal Strike's {ms_budget}. \
+         Re-measure and re-pin (see the melee-only test's note)."
+    );
 }
 
 // ---------------------------------------------------------------------------

@@ -398,6 +398,19 @@ impl Plugin for StatesPlugin {
                 .before(play_match::consume_swing_signals)
                 .run_if(in_combat_scene),
         )
+        // A Shot's held hit reaction, played the frame its arrow arrives.
+        // `.after(update_cosmetic_arrows)`, which leaves the arrival marker
+        // behind (Bevy's auto-inserted sync point makes it visible here the
+        // same frame); `.before(tick_hit_flinch)`, so the dip renders on the
+        // arrival frame, exactly as a FixedUpdate-inserted melee dip does.
+        .add_systems(
+            Update,
+            play_match::consume_ranged_hit_arrivals
+                .after(CombatSystemPhase::CombatResolution)
+                .after(play_match::update_cosmetic_arrows)
+                .before(play_match::tick_hit_flinch)
+                .run_if(in_combat_scene),
+        )
         // Hit-reaction debris and the cosmetic wand bolt: per-rendered-frame
         // cosmetic transforms, ordinary Update visual group. The FLINCH is
         // not here — it is composed into the gait writer below, which owns
