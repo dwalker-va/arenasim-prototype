@@ -8,7 +8,9 @@
 //! headless too) until it became a deterministic marker plus a graphical-only
 //! system with its own RNG.
 //!
-//! Two checks, one per place such a draw can hide:
+//! Two checks, covering `process_casting` and `rendering/` only — not every
+//! place such a draw could hide (a visual spawned from another sim system is
+//! outside this audit):
 //!
 //! 1. **`process_casting`** — the resolution site every visual landing spawns
 //!    from. Every `game_rng` in its body must be handed (`&mut game_rng`) to a

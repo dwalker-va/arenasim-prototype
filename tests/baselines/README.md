@@ -49,6 +49,9 @@ by someone who was not there.
 |---|---|---|
 | `legacy_behaviour_2026-09-27_immolate_rng.txt` | 2026-09-27 | **Current.** After Immolate's apply burst stopped drawing from `game_rng` (card AS-154). Captured against a FRESH run of `main` @ `a2f483a` — see the note under the table. |
 | `legacy_behaviour_2026-09-13_frost_armor_chill.txt` | 2026-09-13 | After the Frost Armor chill became one compound debuff (card AS-54). Captured against a FRESH run of `main` @ `3c61185` rather than against the file below — see the note under the table. |
+| `legacy_behaviour_2026-08-02_backlash_ids.txt` | 2026-08-02 | After the `[BACKLASH]` log-id fix. Verified reproducible: two independent runs agreed on all 27 cells. |
+| `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | After moving the simulation to `FixedUpdate`. Verified reproducible when captured. |
+| `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | Pre-fixed-timestep. Also verified reproducible when captured. |
 
 ### 2026-09-27 — Immolate's burst leaves the sim RNG (AS-154)
 
@@ -70,9 +73,6 @@ so diffing against it would have attributed other cards' changes to this one.
 The balance side is a paired directional sweep, not these cells: 3,090 matches
 at identical seeds, Warlock -0.6pt (z=0.95, resolves >=1.2pt), control 80/80
 identical.
-| `legacy_behaviour_2026-08-02_backlash_ids.txt` | 2026-08-02 | After the `[BACKLASH]` log-id fix. Verified reproducible: two independent runs agreed on all 27 cells. |
-| `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | After moving the simulation to `FixedUpdate`. Verified reproducible when captured. |
-| `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | Pre-fixed-timestep. Also verified reproducible when captured. |
 
 ### 2026-09-13 — the Frost Armor chill (AS-54)
 
