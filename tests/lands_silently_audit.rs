@@ -36,7 +36,7 @@
 //!
 //! Something in world space that the ability's landing routes to — through a
 //! router that names the ability or its aura type (`SchoolImpact::anchor_for`,
-//! `bolt_kind_for`, `InstantAbilityFired::is_spawned_for`,
+//! `hunter_shot_for`, `bolt_kind_for`, `InstantAbilityFired::is_spawned_for`,
 //! `DotStateVisual::for_dot`, `HealImpact::kind_for`, the curse table), or an
 //! explicitly named bespoke branch. GENERIC visuals count (a stock
 //! school-impact row is a visual); a channel every ability shares regardless
@@ -53,7 +53,9 @@ use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::components::{
     AuraType, CurseKind, HealImpact, InstantAbilityFired, SchoolImpact, TotemElement,
 };
-use arenasim::states::play_match::{bolt_kind_for, curse_spec, DotStateVisual, SlowTint};
+use arenasim::states::play_match::{
+    bolt_kind_for, curse_spec, hunter_shot_for, DotStateVisual, SlowTint,
+};
 
 use AbilityType::*;
 
@@ -307,6 +309,11 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
     if bolt_kind_for(a).is_some() {
         return Some("bespoke bolt impact (spell_bolts.rs)");
     }
+    // The client's Hunter shot landing, played through the shared impact's
+    // `landing_style` override — so it needs the anchor too.
+    if hunter_shot_for(a).is_some() && SchoolImpact::anchor_for(a).is_some() {
+        return Some("client Hunter shot landing (hunter_shots.rs)");
+    }
     if SchoolImpact::anchor_for(a).is_some() {
         return Some("school impact (school_impact.rs)");
     }
@@ -342,6 +349,20 @@ fn direct_damage_lands_nothing_silently() {
         damage_landing,
         DIRECT_DAMAGE_KNOWN_SILENT,
     );
+}
+
+/// The four Hunter shots land through the client's landing, not their school
+/// rows — including the two the direct-damage sweep does not reach (Serpent
+/// Sting is judged as a DoT and Concussive Shot as control, on their STATES).
+/// A pin on the router, so one dropping back to a school row fails here.
+#[test]
+fn the_hunter_shots_land_through_the_client_landing() {
+    for a in [AimedShot, ArcaneShot, ConcussiveShot, SerpentSting] {
+        assert!(
+            hunter_shot_for(a).is_some() && SchoolImpact::anchor_for(a).is_some(),
+            "{a:?} must reach the client Hunter shot landing"
+        );
+    }
 }
 
 // ── family: damage over time ────────────────────────────────────────────────

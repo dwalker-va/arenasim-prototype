@@ -428,13 +428,13 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
-        // Weapon swing animation + cosmetic arrows: per-rendered-frame
-        // cosmetic transforms, ordinary Update visual group.
+        // Weapon swing animation: per-rendered-frame cosmetic transforms,
+        // ordinary Update visual group. (The Auto Shot arrow flies with the
+        // Hunter shots, below, because it lays the same ribbon.)
         .add_systems(
             Update,
             (
                 play_match::animate_weapon_swings,
-                play_match::update_cosmetic_arrows,
                 play_match::update_weapon_stealth_fade,
             )
                 .after(CombatSystemPhase::CombatResolution)
@@ -672,11 +672,19 @@ impl Plugin for StatesPlugin {
         // because it cancels the rig's own aim out of every flat child and
         // therefore has to see the poses those two just wrote. `.chain()`
         // guarantees all of it.
+        //
+        // The Hunter shots and the Auto Shot arrow ride here too: their
+        // ribbons are `BoltTrail` segments, so they are laid BEFORE
+        // `billboard_bolt_sprites` turns them, or a new segment would draw
+        // one frame edge-on.
         .add_systems(
             Update,
             (
                 play_match::spawn_bolt_visuals,
                 play_match::animate_bolts,
+                play_match::spawn_hunter_shot_visuals,
+                play_match::animate_hunter_shots,
+                play_match::update_cosmetic_arrows,
                 play_match::billboard_bolt_sprites,
                 play_match::update_bolt_trails,
                 play_match::update_bolt_motes,
@@ -687,7 +695,11 @@ impl Plugin for StatesPlugin {
                 // billboard contract as the bespoke bolt bursts above.
                 play_match::spawn_school_impacts,
                 play_match::animate_school_impacts,
+                // Every client-emitter particle (missile and landing) ages
+                // here, after both have emitted and before either is turned.
+                play_match::animate_client_particles,
                 play_match::billboard_school_impacts,
+                play_match::billboard_hunter_shots,
             )
                 .chain()
                 .after(CombatSystemPhase::CombatResolution)

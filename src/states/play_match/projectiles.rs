@@ -12,24 +12,13 @@ use bevy::color::LinearRgba;
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-/// Returns true if the ability should use an arrow (cuboid) mesh instead of sphere.
-fn is_arrow_projectile(ability: AbilityType) -> bool {
-    matches!(
-        ability,
-        AbilityType::AimedShot
-            | AbilityType::ArcaneShot
-            | AbilityType::ConcussiveShot
-            | AbilityType::SerpentSting
-    )
-}
-
 /// Returns true if the ability should use a smaller web projectile mesh.
 fn is_web_projectile(ability: AbilityType) -> bool {
     matches!(ability, AbilityType::SpiderWeb)
 }
 
 /// Spawn visual meshes for newly created projectiles.
-/// Creates a glowing sphere (casters) or elongated cuboid (Hunter arrows) that travels through the air.
+/// Creates a glowing sphere (casters) or a small web cuboid that travels through the air.
 /// Note: Projectiles already have a Transform (added in process_casting for headless compatibility).
 pub fn spawn_projectile_visuals(
     mut commands: Commands,
@@ -47,12 +36,15 @@ pub fn spawn_projectile_visuals(
         if super::rendering::bolt_kind_for(projectile.ability).is_some() {
             continue;
         }
+        // The Hunter shots are the client's glowing shot, not an arrow —
+        // `spawn_hunter_shot_visuals` (`rendering/effects/hunter_shots.rs`)
+        // owns them, and their colour lives there, not in the RON.
+        if super::rendering::hunter_shot_for(projectile.ability).is_some() {
+            continue;
+        }
 
         // Choose mesh shape based on ability type
-        let mesh = if is_arrow_projectile(projectile.ability) {
-            // Arrow: elongated cuboid, long axis on Z (matches rotation_arc(Z, direction))
-            meshes.add(Cuboid::new(0.08, 0.08, 0.6))
-        } else if is_web_projectile(projectile.ability) {
+        let mesh = if is_web_projectile(projectile.ability) {
             // Web: slightly smaller elongated cuboid
             meshes.add(Cuboid::new(0.06, 0.06, 0.4))
         } else if projectile.ability == AbilityType::DeathCoil {
@@ -506,7 +498,8 @@ pub fn process_projectile_hits(
         }
 
         // The shared, school-coloured landing for every projectile without a
-        // bespoke one (the arrows and the sting). `anchor_for` is the single
+        // bespoke one (the Hunter shots, whose client landing overrides their
+        // school rows — see `landing_style`). `anchor_for` is the single
         // list; Web is deliberately absent from it — its landing is the root
         // state `hard_cc.rs` already draws. Cosmetic: reads the hit, writes
         // nothing, draws no `game_rng`. Same shape as the markers above.

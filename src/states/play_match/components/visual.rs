@@ -29,7 +29,7 @@ pub struct FloatingCombatText {
 
 /// Where on the victim a shared impact plays.
 ///
-/// The Classic client attaches the arrows' impact to chest attachment 34 and
+/// The Classic client attaches the Hunter shots' impact to chest attachment 34 and
 /// Mind Blast's to head attachment 20; the two heights are what separate a
 /// body hit from a mind hit at a glance. See `rendering/effects/school_impact.rs`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -143,6 +143,10 @@ pub struct ImpactRig {
     pub emit_carry: f32,
     /// How many the smoulder has emitted, seeding their scatter.
     pub emitted: u32,
+    /// Fractional particles owed per client emitter (`ImpactStyle::emitters`).
+    pub emitter_carry: [f32; 4],
+    /// One colour-ramp palette per client emitter, in emitter order.
+    pub palettes: Vec<std::sync::Arc<[Handle<StandardMaterial>]>>,
 }
 
 /// Signature Lightning Bolt strike: an instant forked "flash-crack" arc drawn
@@ -1747,15 +1751,89 @@ pub struct OriginalWeaponMaterial(pub Handle<StandardMaterial>);
 /// A purely cosmetic arrow for Hunter Auto Shot. Damage already landed
 /// (hit-scan) when this spawns; the arrow just flies the visual. Never touches
 /// the sim `Projectile` machinery — spawn/move/cleanup live in
-/// `rendering/effects.rs`, registered only in `states/mod.rs`.
+/// `rendering/effects/hunter_shots.rs`, registered only in `states/mod.rs`.
+///
+/// The entity sits at the arrow's TIP and the shaft hangs back along local
+/// -Z, so "arrived" means the point reached the victim.
 #[derive(Component)]
 pub struct CosmeticArrow {
-    /// World-space destination, captured at the hit frame.
+    /// The victim. The arrow homes on its chest anchor every frame, so it
+    /// ends AT the target however far it has run since the hit.
+    pub target: Entity,
+    /// Last known aim point — flown to if the victim despawns mid-flight.
     pub to: Vec3,
     /// Yards per second of cosmetic travel.
     pub speed: f32,
-    /// Seconds remaining before a hard despawn (backstop if it never arrives).
-    pub ttl: f32,
+    /// Distance travelled since the last ribbon segment, in yards.
+    pub ribbon_carry: f32,
+    /// Where the tip was last frame, so ribbon spacing is measured along the
+    /// step rather than sampled at frame boundaries.
+    pub last_pos: Vec3,
+    pub ribbon_mesh: Handle<Mesh>,
+    pub ribbon_material: Handle<StandardMaterial>,
+}
+
+/// The emitter state a Hunter shot missile carries while it flies.
+///
+/// Lives on the `Projectile` entity itself, like `BoltRig`, so the core dies
+/// with the projectile on impact. The particles and ribbon it sheds are NOT
+/// children: they are left behind in world space and fade on their own clock.
+#[derive(Component)]
+pub struct HunterShotRig {
+    pub kind: crate::states::play_match::rendering::HunterShotKind,
+    /// Fractional particles owed per emitter since the last one was spawned.
+    pub carry: [f32; 4],
+    /// How many particles this missile has shed, seeding their scatter.
+    pub emitted: u32,
+    /// Distance travelled since the last ribbon segment, in yards.
+    pub ribbon_carry: f32,
+    /// Where the missile was last frame.
+    pub last_pos: Vec3,
+    /// Per-missile scatter seed. Visual only — never `game_rng`.
+    pub seed: u32,
+    pub quad: Handle<Mesh>,
+    pub ribbon_material: Handle<StandardMaterial>,
+    /// One colour-ramp palette per emitter, in emitter order.
+    pub palettes: Vec<std::sync::Arc<[Handle<StandardMaterial>]>>,
+}
+
+/// A billboarded glow in a Hunter shot missile's core.
+#[derive(Component)]
+pub struct HunterShotCore;
+
+/// How a client-emitter particle is oriented.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ParticleFacing {
+    /// A sprite turned to face the camera.
+    Camera,
+    /// Lying flat in the ground plane and turning about world up — the rune.
+    Flat,
+}
+
+/// One particle of a transcribed client emitter
+/// (`rendering/effects/hunter_shots.rs`).
+///
+/// Its colour and alpha ramp is carried by swapping between the emitter's
+/// pre-built palette materials as it ages — one material per ramp step, shared
+/// by every particle of that emitter — and its size ramp by scale, so nothing
+/// per-particle is ever written to an asset.
+#[derive(Component)]
+pub struct ClientParticle {
+    pub age: f32,
+    pub life: f32,
+    pub velocity: Vec3,
+    /// Downward acceleration, yd/s².
+    pub gravity: f32,
+    /// Diameter at birth, midlife and death, yards.
+    pub size: [f32; 3],
+    pub palette: std::sync::Arc<[Handle<StandardMaterial>]>,
+    /// The palette step currently on the mesh.
+    pub step: usize,
+    pub facing: ParticleFacing,
+    /// `true` when a parent rig retires this particle (a landing's pieces die
+    /// with its `SchoolImpact`); `false` for a world-space particle that
+    /// despawns itself at the end of its life.
+    pub owned: bool,
 }
 
 /// Marker component for the player's selection ring — a translucent torus

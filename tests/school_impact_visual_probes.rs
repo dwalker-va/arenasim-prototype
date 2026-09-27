@@ -116,8 +116,11 @@ impl Harness {
             .id()
     }
 
-    /// Land a hit on `victim`, as the spawn sites would, with a representative
-    /// ability of the school (none of these override their school's row).
+    /// Land a hit on `victim`, as the spawn sites would, with an ability that
+    /// plays its school's row. The Hunter shots override theirs
+    /// (`hunter_shots.rs`), so none of them stands in here; and because the
+    /// harness spawns the landing itself, the stand-in need not be one the
+    /// router sends to this tier.
     fn land(
         &mut self,
         school: SpellSchool,
@@ -128,13 +131,18 @@ impl Harness {
         is_crit: bool,
     ) -> Entity {
         let ability = match school {
-            SpellSchool::Physical => AbilityType::AimedShot,
-            SpellSchool::Nature => AbilityType::SerpentSting,
+            SpellSchool::Physical => AbilityType::MortalStrike,
+            SpellSchool::Nature => AbilityType::LightningBolt,
             SpellSchool::Shadow => AbilityType::MindBlast,
             SpellSchool::Holy => AbilityType::HolyShock,
             SpellSchool::Frost => AbilityType::FrostShock,
-            _ => AbilityType::ArcaneShot,
+            _ => AbilityType::Polymorph,
         };
+        assert_eq!(
+            landing_style(ability, school),
+            impact_style(school),
+            "the harness stand-in for {school:?} must play the school row"
+        );
         self.land_ability(ability, school, anchor, victim, from, magnitude, is_crit)
     }
 
@@ -347,8 +355,8 @@ fn colour_comes_from_the_school_authority() {
 }
 
 /// Additive can only brighten. On pale sand a landing needs something that
-/// DARKENS or it reads as blended and slight — the Shadow Bolt lesson. The
-/// three schools that actually land through this tier today each carry one.
+/// DARKENS or it reads as blended and slight — the Shadow Bolt lesson. Physical,
+/// Nature and Shadow each carry one.
 #[test]
 fn each_live_school_has_a_piece_that_can_darken() {
     let physical = impact_style(SpellSchool::Physical);
@@ -764,11 +772,9 @@ fn mana_burn_overrides_the_shadow_row_without_leaving_its_colour() {
         burn.life() < blast.life() * 0.5,
         "a mana burn is a snap, not a smoulder"
     );
-    // Every other ability plays its school's row unchanged.
+    // Every ability without an override plays its school's row unchanged.
+    // (The Hunter shots override theirs — `tests/hunter_shot_visual_probes.rs`.)
     for (ability, school) in [
-        (AbilityType::AimedShot, SpellSchool::Physical),
-        (AbilityType::ArcaneShot, SpellSchool::Arcane),
-        (AbilityType::SerpentSting, SpellSchool::Nature),
         (AbilityType::HolyShock, SpellSchool::Holy),
         // Its impact kit (214) resolves to the SAME model Frostbolt's does
         // (`ice_impactdd_med_chest.m2`) — the generic frost hit, so the stock

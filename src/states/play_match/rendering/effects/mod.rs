@@ -78,6 +78,8 @@ mod frost_nova;
 pub use frost_nova::*;
 mod spell_bolts;
 pub use spell_bolts::*;
+mod hunter_shots;
+pub use hunter_shots::*;
 mod hit_reaction;
 pub use hit_reaction::*;
 mod wand_attack;
