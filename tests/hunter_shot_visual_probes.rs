@@ -322,6 +322,7 @@ fn the_rune_lies_flat_under_any_yaw() {
         velocity: Vec3::ZERO,
         gravity: 0.0,
         size: [0.2, 0.9, 1.7],
+        mid: 0.5,
         palette: std::sync::Arc::from(Vec::<Handle<StandardMaterial>>::new()),
         step: 0,
         facing: ParticleFacing::Flat,

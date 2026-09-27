@@ -133,8 +133,8 @@ impl Harness {
         let ability = match school {
             SpellSchool::Physical => AbilityType::MortalStrike,
             SpellSchool::Nature => AbilityType::LightningBolt,
-            SpellSchool::Shadow => AbilityType::MindBlast,
-            SpellSchool::Holy => AbilityType::HolyShock,
+            SpellSchool::Shadow => AbilityType::Shadowbolt,
+            SpellSchool::Holy => AbilityType::HolyLight,
             SpellSchool::Frost => AbilityType::FrostShock,
             _ => AbilityType::Polymorph,
         };
@@ -663,8 +663,9 @@ fn splinters_splash_back_toward_the_caster_and_fall() {
     );
 }
 
-/// Mind Blast's landing smoulders: motes keep appearing after the hit and
-/// they RISE from the head, in world space.
+/// The Shadow row smoulders: motes keep appearing after the hit and they RISE
+/// from the head, in world space. (Mind Blast itself now plays its client
+/// model's emitters — `tests/client_landing_visual_probes.rs`.)
 #[test]
 fn the_head_smoulder_keeps_emitting_and_rises() {
     let mut h = Harness::new();
@@ -752,10 +753,10 @@ fn droplets_fall() {
 fn mana_burn_overrides_the_shadow_row_without_leaving_its_colour() {
     let burn = landing_style(AbilityType::ManaBurn, SpellSchool::Shadow);
     let blast = landing_style(AbilityType::MindBlast, SpellSchool::Shadow);
-    assert_eq!(
-        blast,
+    assert_ne!(
+        burn,
         impact_style(SpellSchool::Shadow),
-        "Mind Blast IS the Shadow row"
+        "Mana Burn overrides the Shadow row"
     );
     assert_ne!(burn, blast, "Mana Burn must not read as Mind Blast");
     let (b, s) = (
@@ -774,8 +775,9 @@ fn mana_burn_overrides_the_shadow_row_without_leaving_its_colour() {
     );
     // Every ability without an override plays its school's row unchanged.
     // (The Hunter shots override theirs — `tests/hunter_shot_visual_probes.rs`.)
+    // (Mind Blast and Holy Shock play their client models' emitters —
+    // `tests/client_landing_visual_probes.rs`.)
     for (ability, school) in [
-        (AbilityType::HolyShock, SpellSchool::Holy),
         // Its impact kit (214) resolves to the SAME model Frostbolt's does
         // (`ice_impactdd_med_chest.m2`) — the generic frost hit, so the stock
         // Frost row IS the faithful rendition and no override may exist.

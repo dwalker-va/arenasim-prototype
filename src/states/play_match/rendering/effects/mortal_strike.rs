@@ -25,29 +25,48 @@ use bevy::render::render_resource::PrimitiveTopology;
 
 // --- Tuning knobs -----------------------------------------------------------
 
-/// How long a trail sample survives after it is laid down (seconds). The whole
-/// streak is this much of the blade's recent path, so it doubles as the trail's
-/// apparent length.
+/// The look of one weapon trail. Mortal Strike's is [`MORTAL_STRIKE_TRAIL`];
+/// Heroic Strike lays the same ribbon in its own client colour and length
+/// (`heroic_strike.rs`), on the ordinary swing rather than a styled stroke.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WeaponTrailStyle {
+    /// How long a trail sample survives after it is laid down (seconds). The
+    /// whole streak is this much of the blade's recent path, so it doubles as
+    /// the trail's apparent length.
+    pub lifetime: f32,
+    /// How far down the blade from the tip the ribbon's inner edge sits (model
+    /// units along the weapon's local +Y, its haft axis). The ribbon spans tip
+    /// to this point, so a larger value is a wider streak.
+    pub span: f32,
+    /// Peak opacity at the leading edge.
+    pub alpha: f32,
+    pub base_color: (f32, f32, f32),
+    pub emissive: (f32, f32, f32),
+}
+
+/// Mortal Strike's crimson streak.
 ///
-/// Long enough that most of the release sweep is on screen AT ONCE — with no
-/// body animation, the drawn arc is the clearest statement of the stroke's
-/// shape, and a short trail shows only a moving smear instead of a diagonal.
-const TRAIL_LIFETIME: f32 = 0.32;
-/// How far down the blade from the tip the ribbon's inner edge sits (model
-/// units along the weapon's local +Y, its haft axis). The ribbon spans tip to
-/// this point, so a larger value is a wider streak.
-const TRAIL_SPAN: f32 = 0.55;
+/// Its lifetime is long enough that most of the release sweep is on screen AT
+/// ONCE — with no body animation, the drawn arc is the clearest statement of
+/// the stroke's shape, and a short trail shows only a moving smear instead of
+/// a diagonal. The crimson is kept clear of Berserker Rage's additive
+/// orange-red `(1.0, 0.35, 0.1)` by being markedly redder, and clear of Rend's
+/// opaque blood by being an additive light streak rather than a liquid.
+pub const MORTAL_STRIKE_TRAIL: WeaponTrailStyle = WeaponTrailStyle {
+    lifetime: 0.32,
+    span: 0.55,
+    alpha: 0.68,
+    base_color: (0.72, 0.10, 0.06),
+    emissive: (2.6, 0.22, 0.14),
+};
+
 /// Distance from the socket origin (the grip) to the blade tip, in the
 /// weapon's local frame. The mount's own scale is applied on top by the
 /// socket's `GlobalTransform`.
 const TRAIL_TIP_LOCAL: f32 = 1.25;
-/// Peak trail opacity at the leading edge.
-const TRAIL_ALPHA: f32 = 0.68;
-/// Trail crimson. Kept clear of Berserker Rage's additive orange-red
-/// `(1.0, 0.35, 0.1)` by being markedly redder, and clear of Rend's opaque
-/// blood by being an additive light streak rather than a liquid.
-const TRAIL_BASE_COLOR: (f32, f32, f32) = (0.72, 0.10, 0.06);
-const TRAIL_EMISSIVE: (f32, f32, f32) = (2.6, 0.22, 0.14);
+/// Mortal Strike's flash and sparks share its trail's colour.
+const TRAIL_BASE_COLOR: (f32, f32, f32) = MORTAL_STRIKE_TRAIL.base_color;
+const TRAIL_EMISSIVE: (f32, f32, f32) = MORTAL_STRIKE_TRAIL.emissive;
 /// Below this many samples there is no quad to build yet.
 const TRAIL_MIN_SAMPLES: usize = 2;
 /// Hard cap on retained samples — a frame spike must not grow the mesh without
@@ -91,21 +110,23 @@ const CRIT_SCALE: f32 = 1.35;
 
 // --- Runtime components (graphical-only) ------------------------------------
 
-/// One live Mortal Strike weapon trail, following its owner's main-hand blade.
+/// One live weapon trail (Mortal Strike's, or Heroic Strike's), following its
+/// owner's main-hand blade.
 ///
 /// Samples the socket's world-space blade segment every frame while the stroke
 /// is playing, then stops sampling and lets the tail age out. Owner-scoped by
 /// construction (one trail entity per stroke, holding its owner), so two
 /// Warriors striking at once never share geometry.
 #[derive(Component)]
-pub struct MortalStrikeTrail {
+pub struct WeaponTrail {
     /// The SIM combatant swinging (not the socket or the body child).
     owner: Entity,
+    style: WeaponTrailStyle,
     /// World-space (tip, inner) pairs, oldest first.
     samples: Vec<(Vec3, Vec3)>,
     /// Seconds of stroke left to sample. Counts down past zero: once negative
     /// the blade has stopped and the tail is fading, and the trail is despawned
-    /// at `-TRAIL_LIFETIME`.
+    /// at `-style.lifetime`.
     sampling_left: f32,
     mesh: Handle<Mesh>,
 }
@@ -178,9 +199,6 @@ pub fn spawn_mortal_strike_flourish(
     stroke_secs: f32,
     impact_at: f32,
 ) {
-    let (br, bg, bb) = TRAIL_BASE_COLOR;
-    let (er, eg, eb) = TRAIL_EMISSIVE;
-
     // The impact waits for the blade; only the trail starts now.
     commands.spawn((
         MortalStrikePendingImpact {
@@ -190,9 +208,29 @@ pub fn spawn_mortal_strike_flourish(
         },
         PlayMatchEntity,
     ));
+    spawn_weapon_trail(
+        commands,
+        meshes,
+        materials,
+        attacker,
+        MORTAL_STRIKE_TRAIL,
+        stroke_secs,
+    );
+}
 
-    // --- trail -------------------------------------------------------------
-    // An empty placeholder mesh; `update_mortal_strike_trail` rewrites its
+/// Start a trail on `attacker`'s main-hand blade that samples for
+/// `stroke_secs` — the length of the stroke it follows — and then ages out.
+pub fn spawn_weapon_trail(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    attacker: Entity,
+    style: WeaponTrailStyle,
+    stroke_secs: f32,
+) {
+    let (br, bg, bb) = style.base_color;
+    let (er, eg, eb) = style.emissive;
+    // An empty placeholder mesh; `update_weapon_trails` rewrites its
     // attributes each frame from the accumulated samples.
     let mesh = meshes.add(empty_trail_mesh());
     let trail_material = materials.add(StandardMaterial {
@@ -204,8 +242,9 @@ pub fn spawn_mortal_strike_flourish(
         ..default()
     });
     commands.spawn((
-        MortalStrikeTrail {
+        WeaponTrail {
             owner: attacker,
+            style,
             samples: Vec::new(),
             sampling_left: stroke_secs,
             mesh: mesh.clone(),
@@ -347,10 +386,10 @@ fn empty_trail_mesh() -> Mesh {
 /// the trail follows the real animated weapon rather than re-deriving the pose.
 /// Sampling stops when the stroke's duration is spent; the tail then ages out
 /// and the entity despawns in `cleanup_mortal_strike`.
-pub fn update_mortal_strike_trail(
+pub fn update_weapon_trails(
     time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut trails: Query<&mut MortalStrikeTrail>,
+    mut trails: Query<&mut WeaponTrail>,
     sockets: Query<(&WeaponSocket, &GlobalTransform)>,
 ) {
     let dt = time.delta_secs();
@@ -363,12 +402,13 @@ pub fn update_mortal_strike_trail(
         trail.sampling_left -= dt;
 
         if sampling {
-            // Main hand only: Mortal Strike is a single-weapon special, and a
+            // Main hand only: both trails are single-weapon specials, and a
             // dual-wielder would otherwise lay down two crossing ribbons.
+            let span = trail.style.span;
             let segment = sockets.iter().find_map(|(socket, global)| {
                 (socket.owner == trail.owner && socket.hand == WeaponHand::Main).then(|| {
                     let tip = global.transform_point(Vec3::Y * TRAIL_TIP_LOCAL);
-                    let inner = global.transform_point(Vec3::Y * (TRAIL_TIP_LOCAL - TRAIL_SPAN));
+                    let inner = global.transform_point(Vec3::Y * (TRAIL_TIP_LOCAL - span));
                     (tip, inner)
                 })
             });
@@ -381,39 +421,40 @@ pub fn update_mortal_strike_trail(
         }
 
         // Drop samples older than the trail's memory. Samples are laid down one
-        // per frame, so the count that fits in TRAIL_LIFETIME depends on frame
+        // per frame, so the count that fits in its lifetime depends on frame
         // rate; deriving it from dt keeps the streak the same LENGTH IN TIME at
         // any frame rate rather than the same number of quads.
-        let keep = ((TRAIL_LIFETIME / dt.max(1e-4)).ceil() as usize).clamp(2, TRAIL_MAX_SAMPLES);
+        let keep =
+            ((trail.style.lifetime / dt.max(1e-4)).ceil() as usize).clamp(2, TRAIL_MAX_SAMPLES);
         if trail.samples.len() > keep {
             let excess = trail.samples.len() - keep;
             trail.samples.drain(0..excess);
         }
 
         if let Some(mesh) = meshes.get_mut(&trail.mesh) {
-            rebuild_trail_mesh(mesh, &trail.samples, fade_of(&trail));
+            rebuild_trail_mesh(mesh, &trail.samples, fade_of(&trail), trail.style.alpha);
         }
     }
 }
 
 /// Overall trail opacity: full while the stroke plays, then a quick fade so the
 /// streak dissipates instead of vanishing on a frame boundary.
-fn fade_of(trail: &MortalStrikeTrail) -> f32 {
+fn fade_of(trail: &WeaponTrail) -> f32 {
     if trail.sampling_left > 0.0 {
         1.0
     } else {
-        (1.0 + trail.sampling_left / TRAIL_LIFETIME).clamp(0.0, 1.0)
+        (1.0 + trail.sampling_left / trail.style.lifetime).clamp(0.0, 1.0)
     }
 }
 
 /// Rewrite a trail's ribbon geometry from its samples: a quad strip between the
 /// blade-tip path and the inner-edge path, with vertex alpha ramping from
 /// nothing at the oldest sample to `fade` at the newest, so the streak tapers
-/// off behind the blade.
+/// off behind the blade. `alpha` is the style's peak opacity.
 ///
 /// Same shape as `build_dispel_ribbon_mesh`'s strip, with the helix centerline
 /// swapped for the recorded sweep.
-fn rebuild_trail_mesh(mesh: &mut Mesh, samples: &[(Vec3, Vec3)], fade: f32) {
+fn rebuild_trail_mesh(mesh: &mut Mesh, samples: &[(Vec3, Vec3)], fade: f32, alpha: f32) {
     let n = samples.len();
     if n < TRAIL_MIN_SAMPLES || fade <= 0.0 {
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new());
@@ -444,8 +485,8 @@ fn rebuild_trail_mesh(mesh: &mut Mesh, samples: &[(Vec3, Vec3)], fade: f32) {
         uvs.push([t, 1.0]);
         // The inner edge is dimmer, so the band reads as a streak trailing the
         // edge rather than a flat slab.
-        colors.push([1.0, 1.0, 1.0, a * TRAIL_ALPHA]);
-        colors.push([1.0, 1.0, 1.0, a * TRAIL_ALPHA * 0.25]);
+        colors.push([1.0, 1.0, 1.0, a * alpha]);
+        colors.push([1.0, 1.0, 1.0, a * alpha * 0.25]);
     }
 
     let mut indices = Vec::with_capacity((n - 1) * 6);
@@ -513,13 +554,13 @@ pub fn update_mortal_strike_sparks(
 /// Cleanup (graphical-only): despawn spent flourish pieces.
 pub fn cleanup_mortal_strike(
     mut commands: Commands,
-    trails: Query<(Entity, &MortalStrikeTrail)>,
+    trails: Query<(Entity, &WeaponTrail)>,
     flashes: Query<(Entity, &MortalStrikeFlash)>,
     sparks: Query<(Entity, &MortalStrikeSpark)>,
 ) {
     for (entity, trail) in trails.iter() {
         // Done once the stroke has finished AND the tail has fully aged out.
-        if trail.sampling_left <= -TRAIL_LIFETIME {
+        if trail.sampling_left <= -trail.style.lifetime {
             commands.entity(entity).despawn();
         }
     }
@@ -542,7 +583,7 @@ mod tests {
     #[test]
     fn trail_mesh_is_empty_below_two_samples() {
         let mut mesh = empty_trail_mesh();
-        rebuild_trail_mesh(&mut mesh, &[(Vec3::ZERO, Vec3::Y)], 1.0);
+        rebuild_trail_mesh(&mut mesh, &[(Vec3::ZERO, Vec3::Y)], 1.0, 0.68);
         assert_eq!(mesh.count_vertices(), 0);
     }
 
@@ -554,7 +595,7 @@ mod tests {
             (Vec3::new(1.0, 1.2, 0.0), Vec3::new(1.0, 0.7, 0.0)),
             (Vec3::new(2.0, 1.6, 0.0), Vec3::new(2.0, 1.1, 0.0)),
         ];
-        rebuild_trail_mesh(&mut mesh, &samples, 1.0);
+        rebuild_trail_mesh(&mut mesh, &samples, 1.0, 0.68);
         assert_eq!(mesh.count_vertices(), 6, "two vertices per sample");
         let Some(Indices::U32(indices)) = mesh.indices() else {
             panic!("expected U32 indices");
@@ -570,7 +611,7 @@ mod tests {
             (Vec3::X, Vec3::X + Vec3::Y),
             (Vec3::X * 2.0, Vec3::X * 2.0 + Vec3::Y),
         ];
-        rebuild_trail_mesh(&mut mesh, &samples, 1.0);
+        rebuild_trail_mesh(&mut mesh, &samples, 1.0, 0.68);
         let colors = mesh
             .attribute(Mesh::ATTRIBUTE_COLOR)
             .and_then(|a| match a {

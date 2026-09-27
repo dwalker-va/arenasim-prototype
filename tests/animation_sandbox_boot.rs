@@ -231,3 +231,119 @@ fn every_dispel_entry_strips_something_in_the_sandbox() {
         );
     }
 }
+
+/// Every interrupt entry must CUT a cast and land its mark on the dummy, and
+/// Heroic Strike must swing its empowered blow — driven the way the panel
+/// drives them.
+///
+/// An interrupt previews nothing against a unit that is not casting, and a
+/// match queues Kick, Pummel and Wind Shear from `combat_ai.rs`, which the
+/// sandbox does not run. So the entry stages a cast on the dummy and fires the
+/// interrupt into it through the match's own `process_interrupts`; this asks
+/// for the landing that path spawns, on the dummy, and for the cast it cut.
+#[test]
+fn every_interrupt_entry_cuts_a_cast_and_heroic_strike_swings_its_blow() {
+    use arenasim::states::animation_sandbox::playback::{
+        EntryFamily, SandboxEntry, SandboxPlayback,
+    };
+    use arenasim::states::animation_sandbox::{SandboxConfig, SandboxStage};
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::components::{CastingState, SchoolImpact};
+    use arenasim::states::play_match::WeaponTrail;
+    use bevy::time::TimeUpdateStrategy;
+    use std::time::Duration;
+
+    for (ability, family, class) in [
+        (
+            AbilityType::Kick,
+            EntryFamily::Residue,
+            CharacterClass::Rogue,
+        ),
+        (
+            AbilityType::Pummel,
+            EntryFamily::Residue,
+            CharacterClass::Warrior,
+        ),
+        (
+            AbilityType::WindShear,
+            EntryFamily::Residue,
+            CharacterClass::Shaman,
+        ),
+        (
+            AbilityType::SpellLock,
+            EntryFamily::Entity,
+            CharacterClass::Warlock,
+        ),
+        (
+            AbilityType::HeroicStrike,
+            EntryFamily::Component,
+            CharacterClass::Warrior,
+        ),
+    ] {
+        let mut app = boot_app();
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            16,
+        )));
+        app.update();
+        app.insert_resource(SandboxConfig {
+            caster_class: class,
+            ..Default::default()
+        });
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::AnimationSandbox);
+        for _ in 0..4 {
+            app.update();
+        }
+        {
+            let mut playback = app.world_mut().resource_mut::<SandboxPlayback>();
+            playback.select(SandboxEntry::Ability(ability), family);
+            playback.restart_requested = true;
+        }
+        let dummy = app
+            .world()
+            .resource::<SandboxStage>()
+            .dummy
+            .expect("the default staging has a dummy");
+
+        // Before the lead the dummy is mid-cast and nothing has landed.
+        for _ in 0..30 {
+            app.update();
+        }
+        if ability != AbilityType::HeroicStrike {
+            let cast = app.world().get::<CastingState>(dummy);
+            assert!(
+                cast.is_some_and(|c| !c.interrupted),
+                "{ability:?}: the dummy should be casting before the interrupt"
+            );
+        }
+
+        // Past the 1.0s lead (and, for Heroic Strike, the blade's arrival).
+        let mut landed = false;
+        let mut cut = false;
+        let mut trail = false;
+        for _ in 0..60 {
+            app.update();
+            let mut impacts = app.world_mut().query::<&SchoolImpact>();
+            landed |= impacts
+                .iter(app.world())
+                .any(|i| i.ability == ability && i.target == dummy);
+            cut |= app
+                .world()
+                .get::<CastingState>(dummy)
+                .is_none_or(|c| c.interrupted);
+            let mut trails = app.world_mut().query::<&WeaponTrail>();
+            trail |= trails.iter(app.world()).count() > 0;
+        }
+        assert!(
+            landed,
+            "{ability:?} ({class:?}) landed nothing on the dummy"
+        );
+        if ability == AbilityType::HeroicStrike {
+            assert!(trail, "Heroic Strike laid no trail");
+        } else {
+            assert!(cut, "{ability:?} did not cut the dummy's cast");
+        }
+    }
+}

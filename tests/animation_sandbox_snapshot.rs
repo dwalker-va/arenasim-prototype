@@ -22,8 +22,8 @@
 //! commit (see CLAUDE.md's snapshot-loop section).
 //!
 //! What the mock itself claims is guarded without a GPU:
-//! `fixture_still_covers_every_row_state`, `fixture_rows_are_the_panels_own`
-//! and `fixture_transport_state_is_reachable` below run in the default `cargo
+//! `fixture_still_covers_every_row_state` and
+//! `fixture_transport_state_is_reachable` below run in the default `cargo
 //! test`, as does `entry_needs_dummy_classifies_the_sandbox_rows` in
 //! `playback.rs`. Those exist because a fixture that quietly stops covering a
 //! state — or draws a panel the app cannot serve — moves no pixels, so the
@@ -31,15 +31,13 @@
 //!
 //! ## What is hand-set here
 //!
-//! Exactly one fact: `BORROWED_ROW` — WHICH ability is borrowed from a class
-//! the fixture does not stage, so the panel has an `Unsupported` row to draw
-//! (the Mage has none). Its label, family and `needs_dummy` are derived like
-//! every other row's; only the decision to include it is a choice.
-//!
-//! Everything else — the row list, every row's label, family and
+//! Nothing about the rows. The row list, every row's label, family and
 //! `needs_dummy`, the SELECTED readout, the transport's duration and speed —
-//! comes from the code that produces it, through the same calls
-//! `ui::sandbox_ui` makes. The rest of the view is scene-setting the user
+//! all come from the code that produces them, through the same calls
+//! `ui::sandbox_ui` makes. (The fixture used to borrow Heroic Strike from the
+//! Warrior to draw an `n/a` row; no ability is `Unsupported` any more, so the
+//! `n/a` tag is unreachable in the shipped panel and the fixture no longer
+//! fakes one.) The rest of the view is scene-setting the user
 //! picks at runtime (which class is staged, dummy on or off, paused or
 //! playing) plus one free choice with no producing code (`PLAYHEAD_FRACTION`).
 //!
@@ -70,32 +68,9 @@ use egui_kittest::Harness;
 /// would serve it — the fixture picks WHICH class, not which of her spells.
 const FIXTURE_CLASS: CharacterClass = CharacterClass::Mage;
 
-/// The one ability borrowed from a class the fixture does not stage — and the
-/// only fact in this file chosen by hand rather than derived.
-///
-/// It is here to cover the `n/a` tag and its "no application code / no distinct
-/// cast visual" hover, which `FIXTURE_CLASS` cannot: the only two `Unsupported`
-/// abilities in the game are Wind Shear and Heroic Strike, and the Mage owns
-/// neither. `fixture_rows_are_the_panels_own` holds it to being exactly one
-/// extra row; `fixture_still_covers_every_row_state` holds it to still being
-/// `Unsupported`.
-const BORROWED_ROW: AbilityType = AbilityType::HeroicStrike;
-
-/// One row built exactly as the panel builds it, searching EVERY class.
-///
-/// `entry_rows` is per-class and the borrowed row belongs to a class the
-/// fixture does not stage, so the lookup spans all of them.
-fn panel_row(defs: &AbilityDefinitions, entry: SandboxEntry) -> EntryRow {
-    CharacterClass::all()
-        .iter()
-        .flat_map(|class| entry_rows(*class, defs, |_| None))
-        .find(|row| row.entry == entry)
-        .unwrap_or_else(|| panic!("{entry:?} is not a sandbox entry under any class"))
-}
-
 /// The fixture's entry list: the staged class's ENTIRE list as `ui::entry_rows`
 /// builds it — every ability `abilities.ron` attributes to her, in the panel's
-/// own order, followed by the body rows — plus the single borrowed row.
+/// own order, followed by the body rows.
 ///
 /// Nothing in a row is written here. Label, family and `needs_dummy` all come
 /// back from the same `entry_rows` call `sandbox_ui` makes, so the fixture is
@@ -106,70 +81,15 @@ fn panel_row(defs: &AbilityDefinitions, entry: SandboxEntry) -> EntryRow {
 /// Mage Armor and Molten Armor while the module doc said "a Mage's own rows"
 /// (AS-72).
 ///
-/// One row shape has NO representation here and cannot have one: the `soon`
-/// tag needs a family that is non-playable and not `Unsupported`, and
-/// `EntryFamily::is_playable` is true for every family except `Unsupported`.
-/// That branch is unreachable in the shipped panel too — it is the residue of
-/// the staged mechanism rollout, held for the next unwired mechanism. Faking it
-/// here would pin a state the real UI cannot produce, which is the exact defect
-/// this fixture was rebuilt to remove.
+/// Two row shapes have NO representation here and cannot have one: the `soon`
+/// tag needs a family that is non-playable and not `Unsupported`, and the
+/// `n/a` tag needs an `Unsupported` ability, of which there are none. Both
+/// branches are unreachable in the shipped panel too — held for the next
+/// unwired mechanism or data-only ability. Faking either here would pin a
+/// state the real UI cannot produce, which is the exact defect this fixture
+/// was rebuilt to remove.
 fn mock_rows() -> Vec<EntryRow> {
-    let defs = AbilityDefinitions::default();
-    let mut rows = entry_rows(FIXTURE_CLASS, &defs, |_| None);
-
-    // Ahead of the BODY rows, so the borrowed row lands in the ABILITIES
-    // section in the reading order the panel would give a class ability.
-    let first_body = rows
-        .iter()
-        .position(|row| row.family == EntryFamily::Body)
-        .unwrap_or(rows.len());
-    rows.insert(
-        first_body,
-        panel_row(&defs, SandboxEntry::Ability(BORROWED_ROW)),
-    );
-    rows
-}
-
-/// The borrowed row is the fixture's one departure from a panel the app could
-/// serve, so it is worth proving it is still exactly that — one extra row, and
-/// otherwise the staged class's own list, entire and in order.
-///
-/// This is what makes the row list unable to drift back into a silent subset.
-/// The list it replaced showed five of the Mage's eight abilities under a doc
-/// that read as all of them, for three passes, because nothing compared it to
-/// what the class actually has.
-#[test]
-fn fixture_rows_are_the_panels_own() {
-    let defs = AbilityDefinitions::default();
-    let panel: Vec<SandboxEntry> = entry_rows(FIXTURE_CLASS, &defs, |_| None)
-        .iter()
-        .map(|row| row.entry)
-        .collect();
-    let fixture: Vec<SandboxEntry> = mock_rows().iter().map(|row| row.entry).collect();
-    let borrowed = SandboxEntry::Ability(BORROWED_ROW);
-
-    assert!(
-        !panel.contains(&borrowed),
-        "{BORROWED_ROW:?} is now a {FIXTURE_CLASS:?} ability, so it is no longer \
-         borrowed — drop it from `mock_rows` and let the class list carry it"
-    );
-    assert_eq!(
-        fixture.iter().filter(|e| **e == borrowed).count(),
-        1,
-        "the borrowed row must appear exactly once"
-    );
-    assert_eq!(
-        fixture
-            .iter()
-            .copied()
-            .filter(|e| *e != borrowed)
-            .collect::<Vec<_>>(),
-        panel,
-        "the fixture's rows are no longer {FIXTURE_CLASS:?}'s own list plus the \
-         one borrowed row — either a row was dropped (the panel would then draw \
-         a class that cannot cast her own spells) or a second row was added \
-         without being documented as a departure"
-    );
+    entry_rows(FIXTURE_CLASS, &AbilityDefinitions::default(), |_| None)
 }
 
 /// The fixture is only worth its render time while it still reaches the row
@@ -186,12 +106,6 @@ fn fixture_rows_are_the_panels_own() {
 #[test]
 fn fixture_still_covers_every_row_state() {
     let rows = mock_rows();
-    assert!(
-        rows.iter().any(|r| r.family == EntryFamily::Unsupported),
-        "no `n/a` row left — the fixture borrows {BORROWED_ROW:?} solely to \
-         cover the Unsupported tag and its hover; if it gained a visual, \
-         borrow the other Unsupported ability (Wind Shear) instead"
-    );
     assert!(
         rows.iter().any(|r| r.needs_dummy),
         "no `needs dummy` row left — the paused/no-dummy snapshot exists to \
@@ -251,7 +165,12 @@ fn view(selected: Option<SandboxEntry>, paused: bool, dummy_enabled: bool) -> Sa
     // reaches that function's own `None => 0.0` arm.
     let mut playback = SandboxPlayback::default();
     if let Some(entry) = selected {
-        playback.select(entry, panel_row(&defs, entry).family);
+        let family = mock_rows()
+            .iter()
+            .find(|row| row.entry == entry)
+            .unwrap_or_else(|| panic!("{entry:?} is not a {FIXTURE_CLASS:?} sandbox entry"))
+            .family;
+        playback.select(entry, family);
     }
     let duration = entry_duration(&playback, &defs);
 
@@ -340,7 +259,7 @@ fn render(name: &str, view: SandboxView) {
 }
 
 /// The ordinary working state: an entry selected and playing, dummy staged.
-/// With the dummy on, only the `n/a` row is greyed.
+/// With the dummy on, no row is greyed.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn animation_sandbox() {

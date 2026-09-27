@@ -237,6 +237,7 @@ impl Plugin for StatesPlugin {
                     animation_sandbox::playback::position_caster,
                     animation_sandbox::playback::drive_sandbox_dash,
                     animation_sandbox::playback::drive_sandbox_pet,
+                    animation_sandbox::playback::drive_sandbox_interrupt,
                     animation_sandbox::ui::sandbox_ui,
                     animation_sandbox::ui::apply_camera_preset,
                 )
@@ -334,6 +335,22 @@ impl Plugin for StatesPlugin {
                 .before(play_match::move_projectiles)
                 .run_if(in_combat_scene),
         )
+        // The Web's spinning disc: the same slot, for the same reason, as the
+        // generic projectile visuals it replaces for that one missile.
+        .add_systems(
+            FixedUpdate,
+            play_match::spawn_web_missile_visuals
+                .in_set(CombatSystemPhase::CombatAndMovement)
+                .after(play_match::process_channeling)
+                .before(play_match::move_projectiles)
+                .run_if(in_combat_scene),
+        )
+        .add_systems(
+            Update,
+            play_match::spin_web_discs
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Match end is a SIM decision, so it belongs on the sim clock. In
         // `Update` it was evaluated once per rendered frame — coarser than a
         // tick, and at a cadence that varied with frame rate — while headless
@@ -367,6 +384,16 @@ impl Plugin for StatesPlugin {
         .add_systems(
             FixedUpdate,
             play_match::consume_hit_reactions
+                .after(CombatSystemPhase::CombatResolution)
+                .before(play_match::consume_swing_signals)
+                .run_if(in_combat_scene),
+        )
+        // Heroic Strike's trail and landing, read off the empowered swing's
+        // `HeroicStrikeSwing` — on the SAME marker `consume_swing_signals`
+        // despawns, so `.before` it is a real dependency.
+        .add_systems(
+            FixedUpdate,
+            play_match::spawn_heroic_strike_flourish
                 .after(CombatSystemPhase::CombatResolution)
                 .before(play_match::consume_swing_signals)
                 .run_if(in_combat_scene),
@@ -463,6 +490,16 @@ impl Plugin for StatesPlugin {
             FixedUpdate,
             play_match::consume_cast_ending_signals
                 .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Interrupt landings: the mark an interrupt ability lands on its
+        // victim, read off the `InterruptedBy` riding the `CastEnding` marker
+        // — which `consume_cast_ending_signals` despawns, so `.before` it.
+        .add_systems(
+            FixedUpdate,
+            play_match::spawn_interrupt_landings
+                .after(CombatSystemPhase::CombatResolution)
+                .before(play_match::consume_cast_ending_signals)
                 .run_if(in_combat_scene),
         )
         // Casting orb (gathering-orb cast animation): spawn/animate/motes/
@@ -582,7 +619,7 @@ impl Plugin for StatesPlugin {
                 // not compile. Graphical-only.
                 (
                     (
-                        play_match::update_mortal_strike_trail,
+                        play_match::update_weapon_trails,
                         // Fires the held flash/sparks when the blade
                         // arrives. Chained ahead of the updaters so a burst
                         // spawned this frame is not aged before it renders.
