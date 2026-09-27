@@ -115,7 +115,7 @@ const IMPACT_RING_SEGMENTS: u32 = 72;
 
 /// Bone-white. See divergence 1 — Physical cannot use its own school colour on
 /// this floor.
-const PHYSICAL_COLOR: Color = Color::srgb(0.96, 0.94, 0.90);
+pub(super) const PHYSICAL_COLOR: Color = Color::srgb(0.96, 0.94, 0.90);
 /// The dark drop Nature's droplets are drawn in. Alpha-blended, so it DARKENS
 /// the sand the way the source's `flare.blp` batch does; a bright green
 /// additive drop is invisible against a lit capsule.

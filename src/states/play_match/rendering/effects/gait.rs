@@ -61,6 +61,17 @@ const FEAR_TREMBLE_AMPLITUDE: f32 = 0.04;
 /// still trembles (the fixed-timestep-strobe trap).
 const FEAR_TREMBLE_FREQ: f32 = 42.0;
 
+/// Whether a unit counts as MOVING, read off the idle clock its gait keeps.
+///
+/// The one definition of "moving" for anything drawn off a unit's travel: the
+/// gaits use it to decide when to settle, and the slow treatment
+/// (`slow_ring.rs`) uses it to decide when to draw at all. It inherits the
+/// gait's time-based hold, so a unit the sim only moves on FixedUpdate ticks
+/// does not flicker to "stopped" on the render frames in between.
+pub fn gait_is_moving(walk: &WalkAnim) -> bool {
+    walk.idle_time <= WALK_IDLE_HOLD
+}
+
 /// Fold this frame's horizontal travel into a gait's phase and idle clock, and
 /// report whether the unit should be held at rest.
 ///
@@ -89,7 +100,7 @@ fn advance_gait(
         walk.idle_time += delta_secs;
     }
 
-    let idle = !alive || walk.idle_time > WALK_IDLE_HOLD;
+    let idle = !alive || !gait_is_moving(walk);
     if !idle {
         let step = (distance / step_length * std::f32::consts::TAU).min(WALK_MAX_PHASE_STEP);
         walk.phase = (walk.phase + step).rem_euclid(std::f32::consts::TAU);

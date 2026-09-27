@@ -26,8 +26,7 @@ use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::components::{
     weapon_poison_marker_aura, ActiveAuras, Aura, AuraApplyOwner, AuraApplyRoute, AuraBand,
-    AuraBandPolarity, AuraType, Combatant, DeferredAuraFamily, DispelType, Pet, PetType,
-    TotemElement,
+    AuraBandPolarity, AuraType, Combatant, DispelType, Pet, PetType, TotemElement,
 };
 use arenasim::states::play_match::{
     cleanup_aura_bands, detect_aura_applications, update_aura_bands, AuraBandArc, AuraBandMaterial,
@@ -73,9 +72,6 @@ const BAND_TYPES: &[AuraType] = &[
     AuraType::WindfuryBuff,
 ];
 
-/// The deliberately undrawn: the slow family, left to its own card.
-const DEFERRED_TYPES: &[AuraType] = &[AuraType::MovementSpeedSlow, AuraType::AttackSpeedSlow];
-
 fn names(types: impl IntoIterator<Item = AuraType>) -> BTreeSet<String> {
     types.into_iter().map(|t| format!("{t:?}")).collect()
 }
@@ -92,22 +88,6 @@ fn the_band_serves_exactly_the_family() {
         names(BAND_TYPES.iter().copied()),
         "the aura types routed to the shared band changed — decide each one on purpose"
     );
-}
-
-#[test]
-fn only_the_slow_family_is_undrawn() {
-    let undrawn = names(
-        AuraType::ALL
-            .into_iter()
-            .filter(|t| !AuraApplyRoute::for_aura(*t).is_drawn()),
-    );
-    assert_eq!(undrawn, names(DEFERRED_TYPES.iter().copied()));
-    for t in DEFERRED_TYPES {
-        assert_eq!(
-            AuraApplyRoute::for_aura(*t),
-            AuraApplyRoute::Deferred(DeferredAuraFamily::Slow)
-        );
-    }
 }
 
 #[test]
@@ -132,6 +112,8 @@ fn every_bespoke_owner_is_one_that_exists() {
         (AuraType::SpellSchoolLockout, InterruptSputter),
         (AuraType::Silence, BacklashBurst),
         (AuraType::ShadowSight, ShadowSightOrb),
+        (AuraType::MovementSpeedSlow, SlowRing),
+        (AuraType::AttackSpeedSlow, SlowRing),
     ];
     let owned = names(
         AuraType::ALL
@@ -142,11 +124,8 @@ fn every_bespoke_owner_is_one_that_exists() {
     for (t, owner) in expected {
         assert_eq!(AuraApplyRoute::for_aura(*t), AuraApplyRoute::Owned(*owner));
     }
-    // Band + owned + deferred partition the whole enum.
-    assert_eq!(
-        BAND_TYPES.len() + expected.len() + DEFERRED_TYPES.len(),
-        AuraType::ALL.len()
-    );
+    // Band + owned partition the whole enum.
+    assert_eq!(BAND_TYPES.len() + expected.len(), AuraType::ALL.len());
 }
 
 /// The abilities the animation-gap audit found silent because their aura's
@@ -543,7 +522,7 @@ fn many_landings_in_one_frame_read_as_one_band_per_polarity() {
 }
 
 #[test]
-fn owned_and_deferred_applications_raise_no_band() {
+fn owned_applications_raise_no_band() {
     let mut h = Harness::new();
     let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
     let others: Vec<Aura> = AuraType::ALL

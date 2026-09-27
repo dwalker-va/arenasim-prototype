@@ -53,7 +53,7 @@ use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::components::{
     AuraType, CurseKind, HealImpact, InstantAbilityFired, SchoolImpact, TotemElement,
 };
-use arenasim::states::play_match::{bolt_kind_for, curse_spec, DotStateVisual};
+use arenasim::states::play_match::{bolt_kind_for, curse_spec, DotStateVisual, SlowTint};
 
 use AbilityType::*;
 
@@ -440,7 +440,9 @@ const CONTROL_MEMBERS: &[AbilityType] = &[
 
 /// The victim treatment of a member's control aura. Keyed on the aura TYPE
 /// (the renderers poll `ActiveAuras` for it), except Incapacitate, whose ice
-/// block is spawned by the trap trigger rather than by the aura.
+/// block is spawned by the trap trigger rather than by the aura, and a slow,
+/// whose ring is tinted through `SlowTint::for_slow` by the aura's RON
+/// `name:` — so a slow with no tint arm lands silently.
 fn control_treatment(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
     let mut treatment = None;
     for t in granted_auras(a, c) {
@@ -453,6 +455,9 @@ fn control_treatment(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> 
             AuraType::Fear => Some("fear shroud (fear.rs)"),
             AuraType::Polymorph => Some("sheep swap (polymorph.rs)"),
             AuraType::Incapacitate if a == FreezingTrap => Some("ice block (traps.rs)"),
+            AuraType::MovementSpeedSlow => {
+                SlowTint::for_slow(&c.name).map(|_| "slow bind ring + scuff (slow_ring.rs)")
+            }
             _ => None,
         };
         // Every control aura must be drawn for the member to pass.
@@ -461,14 +466,6 @@ fn control_treatment(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> 
     treatment
 }
 
-const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[
-    // `MovementSpeedSlow` has no victim treatment anywhere.
-    (Frostbolt, "AS-133 (slows)"),
-    (ConcussiveShot, "AS-133 (slows)"),
-    (FrostShock, "AS-133 (slows)"),
-    (CripplingPoison, "AS-133 (slows)"),
-];
-
 #[test]
 fn control_finds_every_member() {
     assert_finds("crowd-control", is_control, CONTROL_MEMBERS);
@@ -476,12 +473,7 @@ fn control_finds_every_member() {
 
 #[test]
 fn control_lands_nothing_silently() {
-    assert_judged(
-        "crowd-control",
-        is_control,
-        control_treatment,
-        CONTROL_KNOWN_SILENT,
-    );
+    assert_judged("crowd-control", is_control, control_treatment, &[]);
 }
 
 // ── family: buff / debuff application ───────────────────────────────────────
@@ -519,7 +511,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
 /// The family-wide aura-application cue — what draws a status aura that no
 /// bespoke effect owns. Nothing does today, which is the AS-134 gap. When
 /// AS-134's `AuraApplyRoute` lands, this body becomes
-/// `AuraApplyRoute::for_aura(t).is_drawn().then_some("…")` and the AS-134
+/// `(AuraApplyRoute::for_aura(t) == AuraApplyRoute::Band).then_some("…")` and the AS-134
 /// entries below come off the known-silent list in the same diff (the sweep
 /// fails until they do).
 fn family_application_cue(_t: AuraType) -> Option<&'static str> {
@@ -670,7 +662,8 @@ const NO_FAMILY: &[(AbilityType, &str)] = &[
     (
         FrostTrap,
         "a placement — trap, trigger burst and slow-zone decal (traps.rs, ice_block.rs); \
-         its slow is applied by the zone, not declared in the RON",
+         its slow is applied by the zone, not declared in the RON, and a body it slows \
+         carries the bind ring (slow_ring.rs)",
     ),
 ];
 

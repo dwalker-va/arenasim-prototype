@@ -957,6 +957,20 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Slow treatment: the bind ring at a slowed victim's feet and the
+        // scuff along its path, only while it moves. After the gaits, which
+        // keep the idle clock `gait_is_moving` reads.
+        .add_systems(
+            Update,
+            (
+                play_match::update_slow_treatment,
+                play_match::update_slow_rings,
+                play_match::update_slow_scuffs,
+            )
+                .chain()
+                .after(play_match::cleanup_hit_flinch)
+                .run_if(in_combat_scene),
+        )
         // Kill-target call watcher (banter, graphical-only). An explicit
         // per-team diff of `MatchConfig`, NOT Bevy change detection —
         // `ResMut` deref marks the whole resource changed whether or not a

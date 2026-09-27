@@ -60,8 +60,9 @@ const PET_SCALE: f32 = 0.55;
 /// position, invoking `emit(mid, dir)` every `spacing` yards of actual
 /// travel and advancing `last_emit`. The loop matters: one fast frame can
 /// cover several spacings, and each element must land ON the path, not at
-/// the endpoint. Shared by every path-laid trail (Charge, Disengage).
-fn emit_along_path(
+/// the endpoint. Shared by every path-laid trail (Charge, Disengage, and the
+/// slow scuff in `slow_ring.rs`).
+pub(super) fn emit_along_path(
     last_emit: &mut Vec3,
     pos: Vec3,
     spacing: f32,

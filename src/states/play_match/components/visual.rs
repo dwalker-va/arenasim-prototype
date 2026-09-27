@@ -854,9 +854,6 @@ pub enum AuraApplyRoute {
     /// A bespoke effect already draws this type's application. The band stays
     /// off it so it never doubles a treatment that exists.
     Owned(AuraApplyOwner),
-    /// Deliberately undrawn HERE: the family has its own card, whose treatment
-    /// will own the apply moment as well as the state.
-    Deferred(DeferredAuraFamily),
 }
 
 /// The bespoke effect that owns an aura type's application moment — the named,
@@ -896,25 +893,21 @@ pub enum AuraApplyOwner {
     BacklashBurst,
     /// Shadow Sight: the orb pickup animation (`shadow_sight` orbs).
     ShadowSightOrb,
-}
-
-/// A family whose apply moment is deliberately left to its own card.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum DeferredAuraFamily {
-    /// Movement and attack-speed slows (Frostbolt, Concussive Shot, Frost
-    /// Shock, Crippling Poison's proc, Frost Armor's chill, the Frost Trap
-    /// zone). The slow family's victim treatment (AS-133) owns both the apply
-    /// moment and the state; a band here would double it, and would double
-    /// every bolt and arrow impact a slow rides on until then.
-    Slow,
+    /// The slow family — movement slows and Frost Armor's paired attack-speed
+    /// chill (`slow_ring.rs`). The bind ring and scuff draw the STATE while the
+    /// victim moves; the apply moment is the hit a slow rides on (the bolt or
+    /// arrow impact, the swing into Frost Armor, the Frost Trap zone's decal),
+    /// plus Crippling Poison's proc flash, which has no hit of its own. A band
+    /// here would double every one of those impacts.
+    SlowRing,
 }
 
 impl AuraApplyRoute {
     /// Route an aura type's application.
     ///
     /// **EXHAUSTIVE on purpose — never add a `_ =>` arm.** A new aura type must
-    /// be SEEN here and given an answer: the band, a named bespoke owner, or a
-    /// named deferral. A wildcard would quietly file variant N+1 under one of
+    /// be SEEN here and given an answer: the band, or a named bespoke owner. A
+    /// wildcard would quietly file variant N+1 under one of
     /// those, and a silent aura application is exactly the defect this router
     /// exists to end. Pinned as a set equality over [`AuraType::ALL`] by
     /// `tests/aura_band_visual_probes.rs`.
@@ -953,15 +946,9 @@ impl AuraApplyRoute {
             AuraType::ShadowSight => AuraApplyRoute::Owned(AuraApplyOwner::ShadowSightOrb),
 
             AuraType::MovementSpeedSlow | AuraType::AttackSpeedSlow => {
-                AuraApplyRoute::Deferred(DeferredAuraFamily::Slow)
+                AuraApplyRoute::Owned(AuraApplyOwner::SlowRing)
             }
         }
-    }
-
-    /// Whether the application of this route reaches the scene at all — false
-    /// only for a named [`AuraApplyRoute::Deferred`] family.
-    pub fn is_drawn(self) -> bool {
-        !matches!(self, AuraApplyRoute::Deferred(_))
     }
 }
 
@@ -2151,4 +2138,50 @@ pub struct BoltImpactSprite {
 pub struct BoltImpactShard {
     pub velocity: Vec3,
     pub spin: f32,
+}
+
+// ============================================================================
+// Slow treatment — the bind ring and scuff (`rendering/effects/slow_ring.rs`)
+// ============================================================================
+
+/// Per-victim state of the slow treatment, present exactly while the unit is
+/// alive and carries a routed `MovementSpeedSlow`. Graphical-only: inserted and
+/// removed by `update_slow_treatment`, never read by the sim.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct SlowTrailEmitter {
+    /// Ground point the scuff was last laid to. Distance-paced from here, the
+    /// way the charge trail lays its segments.
+    pub last_emit: Vec3,
+    /// Seconds since the last bind ring. Keeps counting while the unit stands
+    /// still, so the first step after a stop pulses at once.
+    pub since_pulse: f32,
+    /// Whether a Crippling Poison slow was on the unit last frame — the edge
+    /// its proc flash fires on.
+    pub crippled: bool,
+}
+
+/// One pulse of the bind ring: a flat annulus at the victim's feet that grows
+/// and fades over its life. It FOLLOWS the victim (see `slow_ring.rs`).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct SlowBindRing {
+    pub owner: Entity,
+    /// Seconds since the pulse.
+    pub age: f32,
+    /// Body-size scale on the ring's diameter: 1.0 for a combatant, smaller
+    /// for a pet.
+    pub stature: f32,
+    pub tint: Color,
+    /// The soft outer stroke rather than the core band.
+    pub halo: bool,
+}
+
+/// One segment of the scuff streak laid along a slowed victim's path. Stays
+/// where it was laid and fades.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct SlowScuff {
+    /// Seconds since it was laid.
+    pub age: f32,
+    /// Body-size scale on its width: 1.0 for a combatant, smaller for a pet.
+    pub stature: f32,
+    pub tint: Color,
 }
