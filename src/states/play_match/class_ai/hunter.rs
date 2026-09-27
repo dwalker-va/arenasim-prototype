@@ -11,6 +11,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
+use std::collections::BTreeSet;
 
 use super::super::arena_bounds::ArenaBounds;
 use super::super::utils::log_ability_use;
@@ -398,22 +399,21 @@ pub fn decide_hunter_action(
     // Freezing Trap. Preferred use is CC on the OFF-target enemy healer (the
     // one the team is NOT killing, and the dispeller who would otherwise free
     // any other victim) — but a placed trap triggers on the first enemy in
-    // radius, so we aim at the healer's POSITION (not the midpoint) and HOLD
-    // unless the healer itself will trigger it: it must be in throw range and
-    // no other enemy may be within the trigger radius of the landing. When it
+    // radius, so we aim at the off-target's POSITION (not the midpoint) and
+    // HOLD unless it will trigger it itself: it must be in throw range and no
+    // other enemy may be within the trigger radius of the landing. When it
     // can't land cleanly, we hold the trap for the dip rather than feed it to
     // the chaser. With no off-target (e.g. 1v1, or the healer IS the kill
-    // target) the fallback throws the trap into the lane toward the trap
-    // candidate, where the enemy runs — but only when NOTHING the enemy fields
-    // could free whoever springs it (`fallback_trap`). Against a dispeller it
-    // HOLDS: the gates-open throw into the melee lane (AS-68) was this
-    // fallback feeding a stealthed Rogue to its own Priest.
+    // target and nobody else is worth a trap) the fallback throws the trap into
+    // the lane toward the trap candidate, where the enemy runs — when the enemy
+    // expected to spring it is worth trapping (`fallback_trap`).
+    let focused = super::hunter_dip::trap_focus(ctx, entity, combatant.target);
     let off_target = super::hunter_dip::opportunistic_off_target(
         ctx,
         abilities,
         entity,
         combatant.team,
-        combatant.target,
+        &focused,
         my_pos,
     );
     if let Some((healer, healer_pos)) = off_target {
@@ -456,9 +456,15 @@ pub fn decide_hunter_action(
             }
         }
         // else: HOLD — the dip will walk us into range to land it on the healer.
-    } else if let Some(fallback) =
-        fallback_trap(ctx, abilities, entity, combatant.team, target_entity)
-    {
+    } else if let Some(fallback) = fallback_trap(
+        ctx,
+        abilities,
+        entity,
+        combatant.team,
+        my_pos,
+        target_entity,
+        &focused,
+    ) {
         match fallback {
             // Two-way CC guard (R8/R9): never aim Freezing Trap at a target the
             // team has DoT'd — the first tick breaks the incapacitate
@@ -466,8 +472,8 @@ pub fn decide_hunter_action(
             // fallthrough to a second candidate. Only traced when the trap is
             // otherwise castable — while it's on cooldown, fall through so the
             // trace records OnCooldown instead of masking it as the DoT guard.
-            Ok(trap_target)
-                if ctx.has_friendly_dots_on_target(trap_target)
+            Ok(FallbackThrow { candidate, .. })
+                if ctx.has_friendly_dots_on_target(candidate)
                     && !combatant
                         .ability_cooldowns
                         .contains_key(&AbilityType::FreezingTrap) =>
@@ -477,11 +483,7 @@ pub fn decide_hunter_action(
                     RejectionReason::FriendlyBreakableCC,
                 );
             }
-            Ok(trap_target) => {
-                let lane = ctx
-                    .combatants
-                    .get(&trap_target)
-                    .map_or(my_pos, |info| (my_pos + info.position) / 2.0);
+            Ok(FallbackThrow { lane, victim, .. }) => {
                 if try_place_trap_at(
                     commands,
                     combat_log,
@@ -490,7 +492,7 @@ pub fn decide_hunter_action(
                     combatant,
                     my_pos,
                     lane,
-                    Some(trap_target),
+                    Some(victim),
                     TrapType::Freezing,
                     &ctx.bounds,
                     &mut builder,
@@ -570,16 +572,32 @@ pub fn decide_hunter_action(
 // Helper Functions
 // ==============================================================================
 
-/// The fallback Freezing Trap, when there is no off-target to CC: the trap
-/// candidate — the enemy healer, falling back to the kill target — whose lane
-/// the trap is thrown into, or why the trap is HELD; `None` when the candidate
-/// is dead.
+/// A fallback Freezing Trap to throw: the trap `candidate` — the enemy healer,
+/// falling back to the kill target — the `lane` landing (the midpoint toward
+/// it, where the enemy runs), and the `victim` expected to spring it there,
+/// which is who the throw was decided on and so whom the trace records it as
+/// aimed at.
+#[derive(Clone, Copy, Debug)]
+struct FallbackThrow {
+    candidate: Entity,
+    lane: Vec3,
+    victim: Entity,
+}
+
+/// The fallback Freezing Trap, when there is no off-target to CC — a
+/// [`FallbackThrow`], or why the trap is HELD; `None` when the candidate is
+/// dead.
 ///
-/// It throws only where NOTHING the enemy fields could free whoever springs it
-/// ([`enemy_can_free_a_trap`](super::hunter_dip::enemy_can_free_a_trap)). The
-/// lane throw cannot choose who walks into it — at gates-open the likeliest
-/// victim is a Rogue the Hunter cannot even see — so it is worth throwing
-/// exactly when every enemy it could catch would stay caught.
+/// The lane throw aims at no one, so it is decided on the enemy it would
+/// actually catch ([`expected_trap_victim`](super::hunter_dip::expected_trap_victim),
+/// the visible enemy nearest the landing): it throws when that enemy is worth
+/// a trap ([`trap_victim_worth_it`](super::hunter_dip::trap_victim_worth_it)
+/// — nobody would free it, or only a unit `focused` is being killed), and
+/// holds when a teammate of its would just free it. While an enemy is hidden
+/// it holds whenever a visible enemy could free that unseen one
+/// ([`unseen_victim_would_be_freed`](super::hunter_dip::unseen_victim_would_be_freed)):
+/// at gates-open the lane's victim is a stealthed Rogue, and AS-68's opener
+/// was this fallback feeding it to its own Priest.
 ///
 /// Single source of truth shared by trap placement and the sting's
 /// trap-candidate reservation — if these drifted apart, the sting would either
@@ -590,16 +608,31 @@ fn fallback_trap(
     abilities: &AbilityDefinitions,
     entity: Entity,
     my_team: u8,
+    my_pos: Vec3,
     kill_target: Entity,
-) -> Option<Result<Entity, &'static str>> {
+    focused: &BTreeSet<Entity>,
+) -> Option<Result<FallbackThrow, &'static str>> {
     let candidate = ctx.enemy_healer().unwrap_or(kill_target);
-    ctx.combatants
+    let candidate_pos = ctx
+        .combatants
         .get(&candidate)
-        .filter(|info| info.is_alive)?;
-    if super::hunter_dip::enemy_can_free_a_trap(ctx, abilities, entity, my_team) {
+        .filter(|info| info.is_alive)?
+        .position;
+    if super::hunter_dip::unseen_victim_would_be_freed(ctx, abilities, entity, my_team) {
+        return Some(Err(TRAP_HELD_UNSEEN));
+    }
+    let lane = (my_pos + candidate_pos) / 2.0;
+    // The candidate itself is a living enemy in view, so there is always one.
+    let victim =
+        super::hunter_dip::expected_trap_victim(ctx, my_team, lane).unwrap_or(candidate);
+    if !super::hunter_dip::trap_victim_worth_it(ctx, abilities, entity, victim, focused) {
         return Some(Err(TRAP_HELD_FREEABLE));
     }
-    Some(Ok(candidate))
+    Some(Ok(FallbackThrow {
+        candidate,
+        lane,
+        victim,
+    }))
 }
 
 /// Is `victim` the only living enemy close enough to `landing` to spring a
@@ -616,8 +649,13 @@ fn victim_springs_it(ctx: &CombatContext, my_team: u8, victim: Entity, landing: 
     })
 }
 
-/// Trace note for a held fallback Freezing Trap ([`fallback_trap`]).
-pub const TRAP_HELD_FREEABLE: &str = "trap held: an enemy dispeller would free the victim";
+/// Trace note for a fallback Freezing Trap held because the enemy it would
+/// catch has a teammate who would free it ([`fallback_trap`]).
+pub const TRAP_HELD_FREEABLE: &str = "trap held: a teammate would free the enemy it would catch";
+
+/// Trace note for a fallback Freezing Trap held because an enemy the Hunter
+/// cannot see could spring it and be freed ([`fallback_trap`]).
+pub const TRAP_HELD_UNSEEN: &str = "trap held: an unseen enemy could spring it and be freed";
 
 fn find_nearest_enemy(
     self_entity: Entity,
@@ -1168,9 +1206,18 @@ fn try_serpent_sting(
         .ability_cooldowns
         .contains_key(&AbilityType::FreezingTrap)
         && !ctx.has_friendly_dots_on_target(target_entity);
-    let fallback =
-        fallback_trap(ctx, abilities, entity, combatant.team, target_entity).and_then(|f| f.ok());
-    if trap_poised && fallback == Some(target_entity) {
+    let focused = super::hunter_dip::trap_focus(ctx, entity, combatant.target);
+    let fallback = fallback_trap(
+        ctx,
+        abilities,
+        entity,
+        combatant.team,
+        my_pos,
+        target_entity,
+        &focused,
+    )
+    .and_then(|f| f.ok());
+    if trap_poised && fallback.is_some_and(|f| f.candidate == target_entity) {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {

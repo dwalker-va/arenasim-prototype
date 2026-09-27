@@ -112,43 +112,86 @@ fn dip_target_eligible(ctx: &CombatContext, my_team: u8, target: Entity) -> bool
         && !ctx.has_friendly_dots_on_target(target)
 }
 
-/// Is a Freezing Trap on `victim` worth throwing, by who could undo it? A trap
-/// an enemy can lift is a spent GCD — AS-68 measured the median removal at
-/// 0.28s — so a victim some living teammate of theirs can free
-/// ([`ally_freer`](super::ally_freer), the engine's own removal rules) is
-/// passed over. A HEALER is the exception: trapping the dispeller is the point,
-/// and where a second dispeller stands behind it — a Warlock's Felhunter, a
-/// second healer — the Hunter still takes the healer and lets that dispeller
-/// spend itself undoing it. That is the intended counter being PLAYED; the
-/// Felhunter is never aimed at (pets are not trap candidates), so it is never
-/// engineered out.
+/// The units the Hunter's team is killing: [`team_focus`] plus the Hunter's own
+/// kill target. The own-target fold is load-bearing in 1v1, where there are no
+/// allies and so no `team_focus` at all.
+pub fn trap_focus(
+    ctx: &CombatContext,
+    entity: Entity,
+    own_target: Option<Entity>,
+) -> std::collections::BTreeSet<Entity> {
+    let mut focused = team_focus(ctx, entity);
+    focused.extend(own_target);
+    focused
+}
+
+/// Is a Freezing Trap on `victim` worth throwing, by who could undo it?
+///
+/// - A **healer** always is: trapping the dispeller is the point, and where a
+///   second dispeller stands behind it — a Warlock's Felhunter, a second healer
+///   — the Hunter still takes the healer and lets that dispeller spend itself
+///   undoing it. That is the intended counter being PLAYED.
+/// - Anyone else is worth it when no living teammate of theirs could free it
+///   ([`ally_freers`](super::ally_freers), the engine's own removal rules) —
+///   a trapped Felhunter included, which nobody can free —
+/// - **or when every such teammate is one the Hunter's team is killing**
+///   (`focused`). Freeing it then costs the focused dispeller a GCD it needed
+///   for its own survival: the trap is a trade, not a spent GCD.
+///
+/// Otherwise the trap would be lifted for nothing — AS-68 measured the median
+/// removal at 0.28s — and is held.
 pub fn trap_victim_worth_it(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
     owner: Entity,
     victim: Entity,
+    focused: &std::collections::BTreeSet<Entity>,
 ) -> bool {
     let Some(info) = ctx.combatants.get(&victim) else {
         return false;
     };
-    if info.class.is_healer() {
+    if !info.is_pet && info.class.is_healer() {
         return true;
     }
     let aura = crate::states::play_match::traps::freezing_trap_aura(owner);
-    super::ally_freer(ctx, abilities, victim, &aura).is_none()
+    super::ally_freers(ctx, abilities, victim, &aura)
+        .iter()
+        .all(|freer| focused.contains(freer))
 }
 
-/// Does the enemy field a dispeller for a Freezing Trap — a living unit, seen
-/// by the Hunter, whose kit frees a teammate from it? Asked of the dispeller
-/// alone, not of the teammates it could free, because the teammate that walks
-/// into a trap may be one the Hunter cannot see: at gates-open the enemy Rogue
-/// is stealthed, and its Priest frees it all the same.
-pub fn enemy_can_free_a_trap(
+/// The enemy a trap landing at `landing` would catch: a trap springs on the
+/// FIRST enemy inside its trigger radius, so its likeliest victim is the
+/// living enemy — pets included — nearest the landing. Only enemies the Hunter
+/// can see are candidates; [`unseen_victim_would_be_freed`] answers for the
+/// rest.
+pub fn expected_trap_victim(ctx: &CombatContext, my_team: u8, landing: Vec3) -> Option<Entity> {
+    ctx.combatants
+        .values()
+        .filter(|e| e.team != my_team && e.is_alive)
+        .min_by(|a, b| {
+            a.position
+                .distance(landing)
+                .partial_cmp(&b.position.distance(landing))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|e| e.entity)
+}
+
+/// Could a trap thrown into open ground be sprung by an enemy the Hunter
+/// cannot see, and that enemy then be freed? True while an enemy is hidden
+/// ([`CombatContext::enemy_hidden`]) and a visible enemy's kit frees a
+/// teammate from the trap ([`frees_teammates`](super::frees_teammates)) —
+/// asked of the dispeller, because the victim is not in view: at gates-open
+/// the enemy Rogue is stealthed, runs into the lane, and its Priest frees it.
+pub fn unseen_victim_would_be_freed(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
     owner: Entity,
     my_team: u8,
 ) -> bool {
+    if !ctx.enemy_hidden() {
+        return false;
+    }
     let aura = crate::states::play_match::traps::freezing_trap_aura(owner);
     ctx.combatants
         .values()
@@ -176,7 +219,7 @@ pub fn dip_target_candidate(
         .filter(|e| !focused.contains(&e.entity))
         .filter(|e| dip_target_eligible(ctx, my_team, e.entity))
         .filter(|e| my_pos.distance(e.position) <= reach)
-        .filter(|e| trap_victim_worth_it(ctx, abilities, owner, e.entity))
+        .filter(|e| trap_victim_worth_it(ctx, abilities, owner, e.entity, focused))
         .min_by(|a, b| {
             // Healers first (`!is_healer` is false=0 for healers, sorts first),
             // then nearest.
@@ -190,21 +233,16 @@ pub fn dip_target_candidate(
         .map(|e| e.entity)
 }
 
-/// The off-target candidate for the no-walk opportunistic placement: the team's
-/// focus set (plus the Hunter's own kill target `own_target`) computed
-/// internally, no reach limit. Returns `(entity, position)`.
+/// The off-target candidate for the no-walk opportunistic placement: no reach
+/// limit, excluding `focused` ([`trap_focus`]). Returns `(entity, position)`.
 pub fn opportunistic_off_target(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
     entity: Entity,
     my_team: u8,
-    own_target: Option<Entity>,
+    focused: &std::collections::BTreeSet<Entity>,
     my_pos: Vec3,
 ) -> Option<(Entity, Vec3)> {
-    let mut focused = team_focus(ctx, entity);
-    if let Some(own) = own_target {
-        focused.insert(own);
-    }
     let target = dip_target_candidate(
         ctx,
         abilities,
@@ -212,7 +250,7 @@ pub fn opportunistic_off_target(
         my_team,
         my_pos,
         f32::INFINITY,
-        &focused,
+        focused,
     )?;
     ctx.combatants
         .get(&target)
@@ -322,10 +360,7 @@ pub fn evaluate_hunter_dip(
     // CCs the off-target, never the target being killed. The own-target guard is
     // load-bearing in 1v1, where there are no allies (empty `team_focus`) — else
     // the Hunter would dip into its own target (e.g. point-blank onto a Warlock).
-    let mut focused = team_focus(ctx, entity);
-    if let Some(own) = combatant.target {
-        focused.insert(own);
-    }
+    let focused = trap_focus(ctx, entity, combatant.target);
     let Some(target) = dip_target_candidate(
         ctx,
         abilities,

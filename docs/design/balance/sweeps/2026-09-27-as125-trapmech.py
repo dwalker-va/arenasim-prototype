@@ -3,7 +3,9 @@
 
 usage: trapmech.py <binary> <outdir> <jobs> [seeds]
 Each match runs in its own cwd (so the seconds-stamped trace cannot collide).
-Writes <outdir>/traps.csv and <outdir>/matches.csv.
+Writes <outdir>/traps.csv (one row per Freezing Trap thrown) and
+<outdir>/matches.csv (one row per match: trap counts, winner, first throw in
+seconds after the gates).
 """
 import csv, json, os, re, subprocess, sys, glob
 from concurrent.futures import ThreadPoolExecutor
@@ -48,6 +50,9 @@ def run(job, binary, outdir):
     return analyse(name, seed, d, log)
 
 
+# Log timestamps count from the start of the 10s countdown.
+GATES_OPEN = 10.0
+
 NAME = re.compile(r"(Team \d \w+ #\d(?:'s \w+)?)")
 
 
@@ -73,7 +78,7 @@ def analyse(name, seed, d, log):
                                (v.get("target") or {}).get("entity_id"),
                                (v.get("target") or {}).get("distance")))
     lines = open(log).read().splitlines()
-    winner = next((l for l in lines if "Winner" in l or "WINNER" in l or "Result" in l), "")
+    winner = next((l.split(":", 1)[1].strip() for l in lines if l.startswith("Winner:")), "")
     # events
     casts, triggers, removals, breaks = [], [], [], []
     for l in lines:
@@ -114,7 +119,8 @@ def analyse(name, seed, d, log):
             "removal": rem[1][:120] if rem else "",
             "removal_delay": round(rem[0] - trig[0], 2) if rem else "",
         })
-    return name, seed, rows, len(casts), len(triggers), len(chosen)
+    first = round(casts[0] - GATES_OPEN, 2) if casts else ""
+    return name, seed, rows, len(casts), len(triggers), len(chosen), winner, first
 
 
 def main(argv):
@@ -124,14 +130,17 @@ def main(argv):
     jobs_list = [(n, s) for n in COMPS for s in seeds]
     all_rows, mrows = [], []
     with ThreadPoolExecutor(jobs) as ex:
-        for name, seed, rows, nc, nt, nch in ex.map(lambda j: run(j, binary, outdir), jobs_list):
+        for name, seed, rows, nc, nt, nch, winner, first in ex.map(
+                lambda j: run(j, binary, outdir), jobs_list):
             all_rows += rows
-            mrows.append({"comp": name, "seed": seed, "casts": nc, "triggers": nt, "chosen": nch})
+            mrows.append({"comp": name, "seed": seed, "casts": nc, "triggers": nt, "chosen": nch,
+                          "winner": winner, "first_cast_after_gates": first})
     with open(os.path.join(outdir, "traps.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(all_rows[0].keys()) if all_rows else ["comp"])
         w.writeheader(); w.writerows(all_rows)
     with open(os.path.join(outdir, "matches.csv"), "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["comp", "seed", "casts", "triggers", "chosen"])
+        w = csv.DictWriter(f, fieldnames=["comp", "seed", "casts", "triggers", "chosen",
+                                          "winner", "first_cast_after_gates"])
         w.writeheader(); w.writerows(mrows)
     print("done", len(all_rows), "traps")
 

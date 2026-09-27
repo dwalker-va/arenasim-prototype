@@ -172,11 +172,11 @@ fn hunter_trap_events(events: &[serde_json::Value]) -> impl Iterator<Item = &ser
 /// midpoint between the Hunter and the healer 70 yards away — arena centre,
 /// where the Rogue ran over it and the healer dispelled it 0.3s later, every
 /// seed. Now the trap is HELD: no Freezing Trap is chosen in the opening, and
-/// the trace names why — the one melee there is to peel is a Rogue its own
-/// healer would free.
+/// the trace names why — an enemy the Hunter cannot see could spring it, and
+/// the healer in view would free it.
 #[test]
 fn the_opener_holds_the_trap_instead_of_throwing_it_into_the_melee_lane() {
-    use arenasim::states::play_match::class_ai::hunter::TRAP_HELD_FREEABLE;
+    use arenasim::states::play_match::class_ai::hunter::TRAP_HELD_UNSEEN;
 
     let comps: [(&[&str], &[&str]); 3] = [
         (&["Hunter", "Priest"], &["Rogue", "Priest"]),
@@ -188,7 +188,7 @@ fn the_opener_holds_the_trap_instead_of_throwing_it_into_the_melee_lane() {
     ];
     const OPENING_SECS: f64 = 15.0;
 
-    let mut held_as_freeable = 0usize;
+    let mut held_unseen = 0usize;
     for (team1, team2) in comps {
         let mut cfg = config(team1, team2, 0);
         cfg.max_duration_secs = 30.0;
@@ -202,7 +202,7 @@ fn the_opener_holds_the_trap_instead_of_throwing_it_into_the_melee_lane() {
                      gates — the opening throw into the melee lane is back"
                 );
             }
-            held_as_freeable += v
+            held_unseen += v
                 .get("candidates")
                 .and_then(|c| c.as_array())
                 .into_iter()
@@ -211,7 +211,7 @@ fn the_opener_holds_the_trap_instead_of_throwing_it_into_the_melee_lane() {
                     c.get("ability").and_then(|a| a.as_str()) == Some("FreezingTrap")
                         && c.pointer("/reason/PreconditionUnmet/note")
                             .and_then(|n| n.as_str())
-                            == Some(TRAP_HELD_FREEABLE)
+                            == Some(TRAP_HELD_UNSEEN)
                 })
                 .count();
         }
@@ -219,8 +219,8 @@ fn the_opener_holds_the_trap_instead_of_throwing_it_into_the_melee_lane() {
     // Non-vacuity: a match in which the trap was never even considered would
     // pass the no-throw assertion for the wrong reason.
     assert!(
-        held_as_freeable > 0,
-        "no Freezing Trap was held for a freeable victim across the three comps — \
+        held_unseen > 0,
+        "no Freezing Trap was held for an unseen victim across the three comps — \
          the probe no longer exercises the hold"
     );
 }
@@ -290,4 +290,78 @@ fn the_held_trap_springs_on_the_dispeller_it_was_aimed_at() {
         thrown >= 2,
         "only {thrown} Freezing Traps thrown across the pinned seeds — the probe went vacuous"
     );
+}
+
+/// AS-125 — a lone enemy nobody can free is trapped, and the throw is decided on
+/// whoever would actually spring it.
+///
+/// 1v1, so there is no off-target and every trap is the fallback's lane throw.
+/// Against a Priest the only enemy is the Priest, whom nobody can free. Against
+/// a Warlock the Felhunter could free its Warlock but nobody frees the
+/// Felhunter, and the Felhunter is the one that runs into the lane. Pinned: a
+/// trap is thrown in every seed, the trace records it aimed at the enemy it
+/// then springs on, and against the Warlock that enemy is the Felhunter and
+/// nobody lifts it early.
+#[test]
+fn a_one_v_one_trap_is_thrown_at_whoever_nobody_can_free() {
+    for (enemy, expected) in [("Priest", "Priest"), ("Warlock", "Felhunter")] {
+        let mut thrown = 0usize;
+        for seed in 0u64..3 {
+            let mut cfg = config(&["Hunter"], &[enemy], seed);
+            cfg.max_duration_secs = 60.0;
+            let (events, log) = run_trace_and_log(cfg);
+
+            // A pet's actor view carries its OWNER's class; its own kind is the
+            // pet decision's top-level `pet_type`.
+            let mut class_of: HashMap<u64, String> = HashMap::new();
+            for v in &events {
+                if let Some(id) = v.pointer("/actor/entity_id").and_then(|x| x.as_u64()) {
+                    let name = v
+                        .get("pet_type")
+                        .or_else(|| v.pointer("/actor/class"))
+                        .and_then(|x| x.as_str())
+                        .unwrap_or_default();
+                    class_of.insert(id, name.to_string());
+                }
+            }
+            let aims: Vec<String> = hunter_trap_events(&events)
+                .filter(|v| {
+                    v.pointer("/outcome/ability").and_then(|a| a.as_str())
+                        == Some("FreezingTrap")
+                })
+                .map(|v| {
+                    let id = v
+                        .pointer("/outcome/target_id")
+                        .and_then(|x| x.as_u64())
+                        .unwrap();
+                    class_of.get(&id).cloned().unwrap_or_default()
+                })
+                .collect();
+            assert!(
+                !aims.is_empty(),
+                "Hunter vs {enemy}, seed {seed}: no Freezing Trap thrown in 60s — \
+                 the trap is held against an enemy nobody can free"
+            );
+            assert!(
+                aims.iter().all(|a| a == expected),
+                "Hunter vs {enemy}, seed {seed}: trap aimed at {aims:?}, not the {expected}"
+            );
+            let sprung: Vec<&str> = log
+                .lines()
+                .filter(|l| l.contains("Freezing Trap triggers on"))
+                .collect();
+            assert!(
+                sprung.iter().all(|l| l.contains(&format!(" {expected} #"))),
+                "Hunter vs {enemy}, seed {seed}: a trap sprang on someone other than \
+                 the {expected}: {sprung:?}"
+            );
+            assert!(
+                !log.contains("Freezing Trap removed from"),
+                "Hunter vs {enemy}, seed {seed}: a trap was freed, but nobody can \
+                 free its victim"
+            );
+            thrown += aims.len();
+        }
+        assert!(thrown >= 3, "Hunter vs {enemy}: only {thrown} traps across 3 seeds");
+    }
 }

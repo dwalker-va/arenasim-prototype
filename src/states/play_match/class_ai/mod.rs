@@ -998,9 +998,12 @@ pub struct AllyRemoval {
 /// `ally_removal_names_every_dispel` fails until a new one is classified, so a
 /// dispel cannot join the game without deciding whether it frees allies. The
 /// `reaches_pets` column is the pet rule the casting AIs apply: the healers'
-/// shared scan ([`try_dispel_ally`]) skips pets, Devour Magic's takes any living
-/// teammate. Change it here and both the cast and every question asked of it
-/// (the Hunter's "can anyone free my trap's victim?") move together.
+/// shared scan ([`try_dispel_ally`]) skips pets, Devour Magic's
+/// (`pet_ai::try_devour_magic`) takes any living teammate. Both scans read
+/// their scope and pet reach from here, so change a dispel here and its cast
+/// and every question asked of it (the Hunter's "can anyone free my trap's
+/// victim?") move together. Master's Call shares only its scope
+/// ([`MASTERS_CALL_IMPAIRMENTS`]): it frees roots and slows, never a trap.
 pub fn ally_removal(ability: AbilityType) -> Option<AllyRemoval> {
     match ability {
         AbilityType::DispelMagic | AbilityType::PaladinCleanse => Some(AllyRemoval {
@@ -1062,19 +1065,22 @@ fn ally_removals_of<'a>(
         .filter_map(|(ability, _)| ally_removal(*ability))
 }
 
-/// The first living teammate of `victim` in this view that could free it from
-/// `aura` ([`can_free_ally`]), if any.
-pub fn ally_freer(
+/// Every living teammate of `victim` in this view that could free it from
+/// `aura` ([`can_free_ally`]), in deterministic entity order.
+pub fn ally_freers(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
     victim: Entity,
     aura: &Aura,
-) -> Option<Entity> {
-    let victim_info = ctx.combatants.get(&victim)?;
+) -> Vec<Entity> {
+    let Some(victim_info) = ctx.combatants.get(&victim) else {
+        return Vec::new();
+    };
     ctx.combatants
         .values()
-        .find(|freer| can_free_ally(abilities, freer, victim_info, aura))
+        .filter(|freer| can_free_ally(abilities, freer, victim_info, aura))
         .map(|freer| freer.entity)
+        .collect()
 }
 
 /// Shared dispel logic used by Priest (Dispel Magic) and Paladin (Cleanse).
@@ -1146,8 +1152,10 @@ pub fn try_dispel_ally(
         return false;
     }
 
-    let scope = ally_dispel_scope(ability_type);
-    let reaches_pets = ally_removal(ability_type).is_some_and(|r| r.reaches_pets);
+    let AllyRemoval {
+        scope,
+        reaches_pets,
+    } = ally_removal(ability_type).expect("the healers' dispels free allies");
 
     // Find ally with highest priority dispellable debuff
     let mut best_candidate: Option<(Entity, i32)> = None;

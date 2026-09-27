@@ -1380,14 +1380,17 @@ fn who_can_free_a_freezing_trap() {
 }
 
 /// The Hunter's "is this trap worth throwing" rule, over the team shapes the
-/// AS-125 ruling names. A non-healer is worth a trap only when no teammate of
-/// its can free it; a healer — the dispeller the trap is FOR — is always worth
-/// one, including beside a Felhunter that could devour it (the intended
-/// counter is left to play out, never engineered out).
+/// AS-125 rulings name. A healer — the dispeller the trap is FOR — is always
+/// worth one, including beside a Felhunter that could devour it (the intended
+/// counter is left to play out). Anyone else is worth one when no teammate of
+/// its could free it — a trapped Felhunter included — or when every teammate
+/// that could is one the Hunter's team is killing (its dispel then costs the
+/// focused dispeller a GCD).
 #[test]
-fn a_trap_is_worth_throwing_only_where_nobody_frees_it_or_at_the_healer() {
+fn a_trap_is_worth_throwing_where_nobody_but_the_focus_frees_it() {
     use arenasim::states::play_match::ability_config::AbilityDefinitions;
     use arenasim::states::play_match::class_ai::hunter_dip::trap_victim_worth_it;
+    use std::collections::BTreeSet;
 
     let defs = AbilityDefinitions::default();
     let hunter = Entity::from_raw(0);
@@ -1397,7 +1400,8 @@ fn a_trap_is_worth_throwing_only_where_nobody_frees_it_or_at_the_healer() {
         Entity::from_raw(3),
     );
 
-    let worth = |team: &[(Entity, CharacterClass)], with_felhunter: bool| {
+    // Worth-it for `a`, `b` and (when fielded) the Felhunter, in that order.
+    let worth = |team: &[(Entity, CharacterClass)], with_felhunter: bool, focus: &[Entity]| {
         let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
         for (e, class) in team {
             snap.combatants.insert(*e, info(*e, 2, *class));
@@ -1407,58 +1411,85 @@ fn a_trap_is_worth_throwing_only_where_nobody_frees_it_or_at_the_healer() {
                 .insert(felhunter, pet_info(felhunter, 2, CharacterClass::Warlock));
         }
         let ctx = snap.context_for(hunter);
+        let focused: BTreeSet<Entity> = focus.iter().copied().collect();
         team.iter()
-            .map(|(e, _)| trap_victim_worth_it(&ctx, &defs, hunter, *e))
+            .map(|(e, _)| *e)
+            .chain(with_felhunter.then_some(felhunter))
+            .map(|e| trap_victim_worth_it(&ctx, &defs, hunter, e, &focused))
             .collect::<Vec<_>>()
     };
 
     use CharacterClass::*;
-    // The dispeller is the target; the DPS it would free is not.
-    assert_eq!(worth(&[(a, Priest), (b, Warrior)], false), [true, false]);
+    // The dispeller is the target; the DPS it would free is not...
+    assert_eq!(worth(&[(a, Priest), (b, Warrior)], false, &[b]), [true, false]);
+    // ...until the dispeller is the one being killed: freeing the Warrior
+    // then costs the focused Priest its GCD.
+    assert_eq!(worth(&[(a, Priest), (b, Warrior)], false, &[a]), [true, true]);
     // Nobody on the team can free anybody: both are fair game.
-    assert_eq!(worth(&[(a, Rogue), (b, Warrior)], false), [true, true]);
+    assert_eq!(worth(&[(a, Rogue), (b, Warrior)], false, &[]), [true, true]);
     // The Shaman frees nobody (Purge strips enemy buffs), so its DPS is fair.
-    assert_eq!(worth(&[(a, Shaman), (b, Warrior)], false), [true, true]);
+    assert_eq!(worth(&[(a, Shaman), (b, Warrior)], false, &[]), [true, true]);
     // Warlock + healer: two dispellers. The healer stays the target; the
-    // Warlock, freed by both, does not.
-    assert_eq!(worth(&[(a, Priest), (b, Warlock)], true), [true, false]);
-    // Warlock + Rogue: the Felhunter frees the Rogue.
-    assert_eq!(worth(&[(a, Rogue), (b, Warlock)], true), [false, false]);
+    // Warlock is freed by the Felhunter even while the Priest is focused; the
+    // Felhunter itself nobody can free.
+    assert_eq!(
+        worth(&[(a, Priest), (b, Warlock)], true, &[a]),
+        [true, false, true]
+    );
+    // Warlock + Rogue: the Felhunter frees both, so neither is worth a trap —
+    // but a trapped Felhunter stays trapped.
+    assert_eq!(
+        worth(&[(a, Rogue), (b, Warlock)], true, &[b]),
+        [false, false, true]
+    );
+    // 1v1 Warlock: the Felhunter is fair game, its Warlock is not.
+    assert_eq!(worth(&[(b, Warlock)], true, &[b]), [false, true]);
 }
 
-/// Whether the enemy fields a dispeller for a Freezing Trap is asked of the
-/// dispeller ALONE, never of the teammates the Hunter can see: at gates-open
-/// the enemy Rogue is stealthed and absent from the Hunter's view, yet a lone
-/// visible Priest still frees whoever walks into a lane trap.
+/// A trap thrown into open ground can be sprung by an enemy the Hunter cannot
+/// see, so while an enemy is hidden the question is asked of the visible
+/// dispeller alone: at gates-open the enemy Rogue is stealthed and absent from
+/// the Hunter's view, yet a lone visible Priest frees whoever walks into a
+/// lane trap. With nothing hidden, the question does not arise.
 #[test]
-fn the_enemy_dispeller_is_found_without_seeing_whom_it_would_free() {
+fn an_unseen_victim_is_answered_by_the_dispeller_in_view() {
     use arenasim::states::play_match::ability_config::AbilityDefinitions;
-    use arenasim::states::play_match::class_ai::hunter_dip::enemy_can_free_a_trap;
+    use arenasim::states::play_match::class_ai::hunter_dip::unseen_victim_would_be_freed;
 
     let defs = AbilityDefinitions::default();
     let hunter = Entity::from_raw(0);
-    let fields_dispeller = |enemies: &[CombatantInfo]| {
+    let freed = |enemies: &[CombatantInfo]| {
         let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
         for e in enemies {
-            snap.combatants.insert(e.entity, e.clone());
+            snap.combatants.insert(e.entity, *e);
         }
-        enemy_can_free_a_trap(&snap.context_for(hunter), &defs, hunter, 1)
+        unseen_victim_would_be_freed(&snap.context_for(hunter), &defs, hunter, 1)
     };
     let e = |i: u32, class: CharacterClass| info(Entity::from_raw(i), 2, class);
+    let hidden = |i: u32, class: CharacterClass| CombatantInfo {
+        stealthed: true,
+        ..e(i, class)
+    };
 
     use CharacterClass::*;
-    assert!(fields_dispeller(&[e(1, Priest)]), "a lone visible Priest");
-    assert!(fields_dispeller(&[e(1, Paladin), e(2, Warrior)]));
-    assert!(fields_dispeller(&[
-        e(1, Warlock),
-        pet_info(Entity::from_raw(2), 2, Warlock)
+    assert!(
+        freed(&[hidden(1, Rogue), e(2, Priest)]),
+        "a stealthed Rogue beside a visible Priest"
+    );
+    assert!(freed(&[hidden(1, Rogue), e(2, Paladin)]));
+    assert!(freed(&[
+        hidden(1, Rogue),
+        e(2, Warlock),
+        pet_info(Entity::from_raw(3), 2, Warlock)
     ]));
-    assert!(!fields_dispeller(&[e(1, Rogue), e(2, Warrior)]));
-    assert!(!fields_dispeller(&[e(1, Shaman), e(2, Mage)]));
+    assert!(!freed(&[hidden(1, Rogue), e(2, Warrior)]));
+    assert!(!freed(&[hidden(1, Rogue), e(2, Shaman)]));
+    // Nothing hidden: the expected victim is in view and answers for itself.
+    assert!(!freed(&[e(1, Rogue), e(2, Priest)]));
     // A dead dispeller frees nobody.
     let dead_priest = CombatantInfo {
         is_alive: false,
-        ..e(1, Priest)
+        ..e(2, Priest)
     };
-    assert!(!fields_dispeller(&[dead_priest, e(2, Warrior)]));
+    assert!(!freed(&[hidden(1, Rogue), dead_priest]));
 }
