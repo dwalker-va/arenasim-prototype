@@ -21,9 +21,8 @@
 //! ## Which applications get it
 //!
 //! [`AuraApplyRoute::for_aura`] decides, exhaustively over `AuraType`: the band,
-//! a named bespoke owner (CC, shields, the DoT layer, ...) that already draws
-//! the application, or a named deferral (the slow family). Nothing here
-//! re-decides it.
+//! or a named bespoke owner (CC, shields, the DoT layer, the slow ring, ...)
+//! that already draws the application. Nothing here re-decides it.
 //!
 //! ## Detection — renderer-side, off `ActiveAuras`
 //!

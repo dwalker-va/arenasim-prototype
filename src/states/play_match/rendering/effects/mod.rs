@@ -84,3 +84,5 @@ mod wand_attack;
 pub use wand_attack::*;
 mod aura_band;
 pub use aura_band::*;
+mod slow_ring;
+pub use slow_ring::*;
