@@ -617,8 +617,14 @@ impl Plugin for StatesPlugin {
                     play_match::update_fear_shards,        // Fall/tumble/fade shroud shatter shards
                     play_match::cleanup_fear_shards,       // Despawn expired shatter shards
                 ),
-                play_match::spawn_flame_visuals, // Visual meshes for flame particles
-                play_match::update_flame_particles, // Move/fade flame particles
+                // Immolate apply burst: marker -> particles -> meshes -> motion.
+                // Graphical-only, so the burst's scatter never reaches headless.
+                (
+                    play_match::spawn_immolate_apply_bursts, // Marker to flame particles
+                    play_match::spawn_flame_visuals,         // Visual meshes for flame particles
+                    play_match::update_flame_particles,      // Move/fade flame particles
+                )
+                    .chain(),
                 // Lightning Bolt signature flash-crack, nested to keep the
                 // outer tuple within Bevy's 20-item .add_systems limit.
                 // Graphical-only (never registered in systems.rs) — headless

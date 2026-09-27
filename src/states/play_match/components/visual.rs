@@ -156,7 +156,7 @@ pub struct ImpactRig {
 /// from caster to target at the moment the cast lands.
 ///
 /// Spawned deterministically in the shared casting-completion path (no `game_rng`
-/// draw, unlike Immolate's particles), so it is byte-neutral in headless. The
+/// draw), so it is byte-neutral in headless. The
 /// graphical-only systems in `rendering/effects/lightning_bolt.rs` consume it,
 /// generate the jagged geometry with a visual-only RNG, and animate the flash
 /// plus impact burst. `start`/`end` are snapshots taken at cast completion (the
@@ -313,6 +313,18 @@ pub struct FearFlash {
     pub lifetime: f32,
     /// Initial lifetime for the grow/fade curve.
     pub initial_lifetime: f32,
+}
+
+/// Immolate's apply-moment flame burst, as a one-frame marker.
+///
+/// Spawned deterministically at the Immolate landing in `process_casting` (no
+/// `game_rng` draw), so the burst's look can never move a match. The
+/// graphical-only `spawn_immolate_apply_bursts` (`rendering/effects/flame.rs`)
+/// turns it into [`FlameParticle`]s with a visual-only RNG and despawns it.
+#[derive(Component)]
+pub struct ImmolateApplyBurst {
+    /// Victim position at the landing; the burst does not follow the victim.
+    pub origin: Vec3,
 }
 
 /// A rising flame particle for fire spell effects (e.g., Immolate).

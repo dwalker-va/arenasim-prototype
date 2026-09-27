@@ -5027,17 +5027,19 @@ mod u10_press {
     }
 
     /// F4 endgame guard: the healer-heavy comp RESOLVES by elimination — never
-    /// the 300s cap draw — at the pinned seeds, and seed 2 does so at ~93s,
+    /// the 300s cap draw — at the pinned seeds, and seed 30 does so at ~92s,
     /// PAST the 75s dampening onset (a real attrition endgame that still
     /// terminates because the leader presses instead of LoS-stalling). The
     /// deep-dampening example was seed 5 (~85s), but tangent steering shortened
     /// seed 5's endgame to ~48s (the pressing team closes on the pillar-dancing
-    /// loser faster); seed 2 still runs long (92.7s kill), so it carries the
-    /// past-75s assertion now. The AE sweep owns the aggregate draw-rate; this
-    /// pins the mechanism end-to-end.
+    /// loser faster); seed 2 then carried it (92.7s) until AS-154 took
+    /// Immolate's burst off `game_rng`, which re-randomised this Warlock comp
+    /// and brought seed 2 in to 61.0s. Seed 30 (92.2s kill, a GOOD row in
+    /// `scan_press_seeds`) carries the past-75s assertion now. The AE sweep
+    /// owns the aggregate draw-rate; this pins the mechanism end-to-end.
     #[test]
     fn press_comp_resolves_before_cap() {
-        for seed in [2u64, 5u64] {
+        for seed in [2u64, 5u64, 30u64] {
             let s = measure(seed);
             assert_eq!(
                 s.end_reason,
@@ -5053,10 +5055,10 @@ mod u10_press {
                 s.match_time,
             );
         }
-        // Seed 2 specifically resolves deep into dampening (past 75s).
+        // Seed 30 specifically resolves deep into dampening (past 75s).
         assert!(
-            measure(2).match_time > 75.0,
-            "seed 2 should resolve past the 75s dampening onset (real attrition endgame)",
+            measure(30).match_time > 75.0,
+            "seed 30 should resolve past the 75s dampening onset (real attrition endgame)",
         );
     }
 
