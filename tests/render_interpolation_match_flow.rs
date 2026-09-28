@@ -36,8 +36,16 @@
 //!    to physical pixels on its own, so with a fractional origin the copies
 //!    round different ways as the unit walks and the letters change shape.
 //!
+//! 3. drawing the HUD after propagation never outruns egui's font atlas: on
+//!    every frame egui re-uploads its managed texture (new glyphs), the new
+//!    image's `AssetEvent::Added` is flushed in that same frame, before the
+//!    render world extracts it. When it was not, that frame rendered with no
+//!    font texture, and every piece of egui text and every filled shape
+//!    blinked out while icon images stayed — 24 of 24 atlas updates in a
+//!    probed run of the client.
+//!
 //! Runs with no GPU (same shape as `tests/hit_reaction_match_flow.rs`); the
-//! second test adds a `Window` COMPONENT, never an OS window. Visual-only
+//! later tests add a `Window` COMPONENT, never an OS window. Visual-only
 //! systems never touch the sim, so the match is the seeded one.
 
 use std::time::Duration;
@@ -457,5 +465,86 @@ fn stealth_label_is_locked_to_the_drawn_unit_and_rasterises_identically() {
         shape[1..].to_vec(),
         expected,
         "outline copies, in physical pixels"
+    );
+}
+
+/// Per frame: every managed egui texture whose `Image` handle changed, and
+/// whether that handle's `Added` event was flushed in the same frame.
+#[derive(Resource, Default)]
+struct Uploads {
+    handles: std::collections::HashMap<(Entity, u64), AssetId<Image>>,
+    frame: usize,
+    /// Every re-upload seen, as (frame, flushed that frame).
+    seen: Vec<(usize, bool)>,
+}
+
+fn observe_uploads(
+    mut uploads: ResMut<Uploads>,
+    managed: Res<bevy_egui::EguiManagedTextures>,
+    mut events: EventReader<AssetEvent<Image>>,
+) {
+    uploads.frame += 1;
+    let added: std::collections::HashSet<AssetId<Image>> = events
+        .read()
+        .filter_map(|e| match e {
+            AssetEvent::Added { id } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    let frame = uploads.frame;
+    for (key, texture) in managed.iter() {
+        let id = texture.handle.id();
+        if uploads.handles.insert(*key, id) != Some(id) {
+            uploads.seen.push((frame, added.contains(&id)));
+        }
+    }
+}
+
+#[test]
+fn a_font_atlas_upload_is_ready_in_the_frame_that_draws_with_it() {
+    let frame = Duration::from_micros(8_333);
+    let mut app = boot(frame);
+    app.add_plugins(bevy_egui::EguiPlugin {
+        enable_multipass_for_primary_context: false,
+    });
+    let mut window = Window {
+        resolution: WindowResolution::new(WINDOW.0, WINDOW.1)
+            .with_scale_factor_override(PIXELS_PER_POINT),
+        ..default()
+    };
+    window.resolution.set_scale_factor(PIXELS_PER_POINT);
+    app.world_mut().spawn((window, PrimaryWindow));
+    app.init_resource::<bevy::render::camera::ManualTextureViews>()
+        .add_systems(
+            PostUpdate,
+            bevy::render::camera::camera_system
+                .after(bevy::transform::TransformSystem::TransformPropagate),
+        )
+        .init_resource::<Uploads>()
+        .add_systems(Last, observe_uploads);
+    for _ in 0..frames_for(frame) {
+        app.update();
+    }
+    let uploads = std::mem::take(&mut *app.world_mut().resource_mut::<Uploads>());
+
+    assert!(
+        uploads.seen.len() >= 3,
+        "only {} font atlas uploads in the match — nothing exercised the upload path",
+        uploads.seen.len()
+    );
+    let late: Vec<usize> = uploads
+        .seen
+        .iter()
+        .filter(|(_, flushed)| !flushed)
+        .map(|(f, _)| *f)
+        .collect();
+    assert!(
+        late.is_empty(),
+        "{} of {} font atlas uploads were flushed a frame late (frames {late:?}): \
+         the render world has no font texture on those frames, so all egui text \
+         and filled shapes blink out — egui's texture upload must run before \
+         `AssetEvents` in `PostUpdate`",
+        late.len(),
+        uploads.seen.len()
     );
 }

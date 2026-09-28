@@ -22,8 +22,11 @@
 //! ends at its spawn point. A tick that moves an entity farther than any mover
 //! can travel in one tick (`MAX_TICK_TRAVEL`) is a teleport and is drawn there
 //! directly. And a render-frame system that moves an entity itself (outside the
-//! sim) is taken at its word: the restore sees the translation is no longer the
-//! one it drew, keeps the new one, and restarts the segment from it.
+//! sim) keeps its move: the restore applies it to the sim's own value, not to
+//! the blended one, and restarts the segment from there.
+//!
+//! Registered for `PlayMatch` only: the Animation Sandbox stages and dashes its
+//! units from render-frame systems, and is drawn at the raw sim positions.
 
 use crate::states::play_match::components::*;
 use bevy::prelude::*;
@@ -96,13 +99,66 @@ pub fn restore_sim_translation(mut query: Query<(&mut Transform, &mut RenderInte
         let Some(drawn) = interpolation.drawn.take() else {
             continue;
         };
+        // Something other than this module may have moved the entity during
+        // the render half of the frame. Its MOVE is kept, applied to the sim's
+        // own value — never the blended position it was applied on top of —
+        // and the segment restarts from the result.
         if transform.translation == drawn {
             transform.translation = interpolation.current;
         } else {
-            // Moved during the render half of the frame by something other
-            // than this module: that position is now the truth.
-            interpolation.previous = transform.translation;
-            interpolation.current = transform.translation;
+            let kept = interpolation.current + (transform.translation - drawn);
+            transform.translation = kept;
+            interpolation.previous = kept;
+            interpolation.current = kept;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    fn restore(transform: Vec3, drawn: Vec3, current: Vec3) -> (Vec3, RenderInterpolation) {
+        let mut world = World::new();
+        let entity = world
+            .spawn((
+                Transform::from_translation(transform),
+                RenderInterpolation {
+                    previous: Vec3::ZERO,
+                    current,
+                    drawn: Some(drawn),
+                },
+            ))
+            .id();
+        world.run_system_once(restore_sim_translation).unwrap();
+        (
+            world.get::<Transform>(entity).unwrap().translation,
+            *world.get::<RenderInterpolation>(entity).unwrap(),
+        )
+    }
+
+    #[test]
+    fn restore_hands_the_sim_back_its_own_translation() {
+        let current = Vec3::new(1.0, 0.75, -2.0);
+        let (translation, interpolation) = restore(
+            Vec3::new(0.5, 0.75, -1.0),
+            Vec3::new(0.5, 0.75, -1.0),
+            current,
+        );
+        assert_eq!(translation, current);
+        assert_eq!(interpolation.drawn, None);
+    }
+
+    #[test]
+    fn a_render_frame_move_is_kept_on_the_sim_value_not_the_blended_one() {
+        // A render-frame system lifted the drawn unit by 2 yards. The sim gets
+        // its own x/z back with the lift on top — never the blended x/z.
+        let current = Vec3::new(1.0, 0.75, -2.0);
+        let drawn = Vec3::new(0.5, 0.75, -1.0);
+        let (translation, interpolation) = restore(drawn + Vec3::Y * 2.0, drawn, current);
+        assert_eq!(translation, current + Vec3::Y * 2.0);
+        assert_eq!(interpolation.previous, translation);
+        assert_eq!(interpolation.current, translation);
     }
 }

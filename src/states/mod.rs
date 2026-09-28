@@ -3,6 +3,7 @@
 //! Defines the core game states and transitions between them.
 
 use bevy::app::RunFixedMainLoopSystem;
+use bevy::asset::AssetEvents;
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
 use bevy_egui::{egui, EguiContexts, EguiPostUpdateSet};
@@ -1106,6 +1107,21 @@ impl Plugin for StatesPlugin {
         // as drawn and the camera as it renders. From `Update` the camera's
         // `GlobalTransform` is last frame's. The whole chain moves together so
         // the egui paint order between these screens is unchanged.
+        //
+        // Drawing this late needs one edge bevy_egui does not declare: its
+        // texture upload must precede the asset-event flush. When a draw puts
+        // new glyphs in the font atlas, `update_egui_textures_system` stores
+        // the atlas as a NEW `Image` asset, and the render world only
+        // prepares an image once its `AssetEvent::Added` has been flushed
+        // (`AssetEvents`, also in `PostUpdate`, unordered against egui). With
+        // the UI waiting on transform propagation, the flush ran first on
+        // every such frame, so the frame rendered with no font texture and
+        // every piece of egui text and every filled shape vanished for a
+        // frame while image-textured icons stayed.
+        .configure_sets(
+            PostUpdate,
+            EguiPostUpdateSet::PostProcessOutput.before(AssetEvents),
+        )
         .add_systems(
             PostUpdate,
             // Chained: egui systems are serialized on EguiContexts anyway,

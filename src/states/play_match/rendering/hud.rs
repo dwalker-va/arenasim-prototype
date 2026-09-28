@@ -84,7 +84,7 @@ pub fn whole_physical_pixels(points: f32, pixels_per_point: f32) -> f32 {
 /// frame, so the letters visibly changed shape frame to frame: on a 2x
 /// display a walking STEALTH label took 12 distinct pixel layouts, each side's
 /// outline 1 or 2 physical pixels and the text a pixel either way against the
-/// bar (`tests/hud_anchor_match_flow.rs`).
+/// bar (`tests/render_interpolation_match_flow.rs`).
 /// On a whole-pixel origin every offset the block adds rounds the same way
 /// every frame, so the block moves as one rigid, pixel-identical image.
 pub fn nameplate_origin(
