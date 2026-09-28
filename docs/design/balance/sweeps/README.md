@@ -123,13 +123,16 @@ z per enemy comp), because a pooled bucket hides comps that move in opposite
 directions.
 
 Beside them, the trap-mechanism instrument the findings doc's per-trap tables
-come from: `2026-09-27-as125-trapmech.py <binary> <outdir> <jobs> [seeds]`
-runs 17 trap-relevant comps traced, pairs every Freezing Trap's intended victim
-(trace `target_id`, empty for a throw decided on an enemy the Hunter could not
-see) with whom it sprang on and how it ended (match log), and records each
-match's winner and first throw; `2026-09-27-as125-trapsumm.py
-<before_outdir> [<after_outdir>]` tabulates them per comp, including the
-decided-victim vs springer match rate. Each match runs in its own directory
+come from: `2026-09-27-as125-trapmech.py <binary> <outdir> <jobs> [seeds]
+[comps]` runs 27 trap-relevant comps traced — every melee + healer shape the
+healer trap reaches, in both slot orders the directional sweep fields for
+Rogue + Priest — pairs every Freezing Trap's intended victim (trace
+`target_id`, empty for a throw decided on an enemy the Hunter could not see)
+with whom it sprang on, how it ended and how long its victim was held (match
+log), and records each match's winner and first throw;
+`2026-09-27-as125-trapsumm.py <before_outdir> [<after_outdir>]` tabulates them
+per comp, including the decided-victim vs springer match rate and the traps
+that caught a healer. Each match runs in its own directory
 with a link to the measured binary's own `assets/`, because single-match
 traces are stamped to the second and would collide in parallel. The binary
 must sit in a checkout (a `Cargo.toml` above it): a binary that classifies as

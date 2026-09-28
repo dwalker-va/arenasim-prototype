@@ -11,9 +11,13 @@ Where they sprang: of the sprung traps decided on a NAMED enemy (the trace's
 `target_id`), `hit` sprang on that enemy and `miss` on someone else — hit/(hit
 +miss) is the decided-victim vs springer match rate. `unseen` counts sprung
 traps thrown for an enemy the Hunter could not see, which carry no aim.
+`healer` counts the traps that sprang on a healer, with the mean seconds it
+was held.
 """
 import csv, statistics, sys
 from collections import Counter, defaultdict
+
+HEALERS = {"Priest", "Paladin", "Shaman"}
 
 
 def load(d):
@@ -33,6 +37,8 @@ def summarise(traps, matches, comp):
     named = [r for r in sprung if r["intended_class"]]
     hit = sum(1 for r in named if r["sprung_class"] == r["intended_class"])
     firsts = [float(m["first_cast_after_gates"]) for m in ms if m["first_cast_after_gates"]]
+    on_healer = [r for r in sprung if r["sprung_class"] in HEALERS]
+    held = [float(r["held"]) for r in on_healer if r.get("held")]
     return {
         "n": len(ms),
         "win": sum(1 for m in ms if m["winner"] == "Team 1"),
@@ -45,6 +51,8 @@ def summarise(traps, matches, comp):
         "unseen": len(sprung) - len(named),
         "removed": c["removed"], "broke": c["broke"], "ran_out": c["ran_out"],
         "unsprung": c["unsprung"],
+        "healer": len(on_healer),
+        "healer_s": sum(held),
     }
 
 
@@ -53,7 +61,8 @@ def fmt(s):
     return (f"win {s['win']:2d}/{s['n']:<2d} traps {s['traps']:3d} ({s['per_match']:.2f}/m) "
             f"zero {s['zero']:2d} first {first} hit {s['hit']:3d} miss {s['miss']:3d} "
             f"unseen {s['unseen']:3d} "
-            f"rem {s['removed']:3d} brk {s['broke']:3d} full {s['ran_out']:3d} uns {s['unsprung']:2d}")
+            f"rem {s['removed']:3d} brk {s['broke']:3d} full {s['ran_out']:3d} uns {s['unsprung']:2d} "
+            f"healer {s['healer']:3d} ({s['healer_s'] / s['healer'] if s['healer'] else 0:4.1f}s)")
 
 
 def main(argv):

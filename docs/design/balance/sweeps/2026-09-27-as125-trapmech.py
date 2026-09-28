@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """AS-125 mechanism runner: traced headless matches -> per-trap rows.
 
-usage: trapmech.py <binary> <outdir> <jobs> [seeds]
+usage: trapmech.py <binary> <outdir> <jobs> [seeds] [comp,comp,...]
 Each match runs in its own cwd (so the seconds-stamped trace cannot collide).
-Writes <outdir>/traps.csv (one row per Freezing Trap thrown) and
-<outdir>/matches.csv (one row per match: trap counts, winner, first throw in
-seconds after the gates).
+Writes <outdir>/traps.csv (one row per Freezing Trap thrown: its decided
+victim, whom it sprang on, its fate, the incapacitate `duration` applied and
+the seconds the victim was actually `held` — the duration, cut short by a
+removal or a break) and <outdir>/matches.csv (one row per match: trap counts,
+winner, first throw in seconds after the gates). The optional last argument
+runs only the named comps.
 """
 import csv, json, os, re, subprocess, sys, glob
 from concurrent.futures import ThreadPoolExecutor
@@ -24,6 +27,16 @@ COMPS = {
     "hw_v_rogp": (["Hunter", "Warrior"], ["Rogue", "Priest"]),
     "hpw_v_mpr": (["Hunter", "Priest", "Warrior"], ["Mage", "Priest", "Rogue"]),
     "hpw_v_wpr": (["Hunter", "Priest", "Warrior"], ["Warlock", "Priest", "Rogue"]),
+    "hp_v_rogpal": (["Hunter", "Priest"], ["Rogue", "Paladin"]),
+    "hp_v_warsh": (["Hunter", "Priest"], ["Warrior", "Shaman"]),
+    "hw_v_warp": (["Hunter", "Warrior"], ["Warrior", "Priest"]),
+    "hm_v_rogp": (["Hunter", "Mage"], ["Rogue", "Priest"]),
+    "hwl_v_rogp": (["Hunter", "Warlock"], ["Rogue", "Priest"]),
+    "hr_v_rogp": (["Hunter", "Rogue"], ["Rogue", "Priest"]),
+    "hpal_v_rogp": (["Hunter", "Paladin"], ["Rogue", "Priest"]),
+    "ph_v_rogp": (["Priest", "Hunter"], ["Rogue", "Priest"]),
+    "wh_v_rogp": (["Warrior", "Hunter"], ["Rogue", "Priest"]),
+    "palh_v_rogp": (["Paladin", "Hunter"], ["Rogue", "Priest"]),
     "h_v_war": (["Hunter"], ["Warrior"]),
     "h_v_rog": (["Hunter"], ["Rogue"]),
     "h_v_pri": (["Hunter"], ["Priest"]),
@@ -82,7 +95,7 @@ def analyse(name, seed, d, log):
     lines = open(log).read().splitlines()
     winner = next((l.split(":", 1)[1].strip() for l in lines if l.startswith("Winner:")), "")
     # events
-    casts, triggers, removals, breaks = [], [], [], []
+    casts, triggers, removals, breaks, applied = [], [], [], [], []
     for l in lines:
         m = re.match(r"\[\s*([\d.]+)s\]", l)
         if not m:
@@ -93,6 +106,8 @@ def analyse(name, seed, d, log):
         elif "Freezing Trap triggers on" in l:
             victim = l.split("triggers on ")[1].split(" —")[0]
             triggers.append((ts, victim))
+        elif re.search(r"\] Freezing Trap on .* \(([\d.]+)s", l):
+            applied.append((ts, float(re.search(r"\(([\d.]+)s", l).group(1))))
         elif "Freezing Trap broke from damage" in l:
             breaks.append(ts)
         elif "Freezing Trap" in l and ("[DISPEL]" in l or "[DEVOUR]" in l or "[CLEANSE]" in l
@@ -106,6 +121,12 @@ def analyse(name, seed, d, log):
         if trig:
             rem = next(((t, l) for t, l in removals if t >= trig[0] and t < trig[0] + 8.5), None)
             brk = next((t for t in breaks if t >= trig[0] and t < trig[0] + 8.5), None)
+        dur = next((a for t, a in applied if trig and trig[0] <= t < trig[0] + 0.5), None)
+        if trig and dur is not None:
+            ends = [dur] + ([rem[0] - trig[0]] if rem else []) + ([brk - trig[0]] if brk else [])
+            held = round(min(ends), 2)
+        else:
+            held = ""
         ch = chosen[i] if i < len(chosen) else None
         intended = ents.get(ch[2]) if ch else None
         kill_t = ch[3] if ch else None
@@ -120,12 +141,19 @@ def analyse(name, seed, d, log):
             "fate": ("removed" if rem else "broke" if brk else "ran_out") if trig else "unsprung",
             "removal": rem[1][:120] if rem else "",
             "removal_delay": round(rem[0] - trig[0], 2) if rem else "",
+            "duration": dur if dur is not None else "",
+            "held": held,
         })
     first = round(casts[0] - GATES_OPEN, 2) if casts else ""
     return name, seed, rows, len(casts), len(triggers), len(chosen), winner, first
 
 
 def main(argv):
+    if len(argv) > 4:
+        keep = set(argv[4].split(","))
+        for k in list(COMPS):
+            if k not in keep:
+                del COMPS[k]
     binary, outdir, jobs = argv[0], argv[1], int(argv[2])
     seeds = range(int(argv[3])) if len(argv) > 3 else range(10)
     os.makedirs(outdir, exist_ok=True)
