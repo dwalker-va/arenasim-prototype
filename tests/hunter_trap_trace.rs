@@ -493,7 +493,7 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
     };
 
     let mut named = 0usize;
-    for seed in [14u64, 16] {
+    for seed in [3u64, 16] {
         let mut cfg = config(&["Hunter", "Priest"], &["Warlock", "Rogue"], seed);
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
@@ -542,4 +542,60 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
         sprung.len() == 1 && sprung[0].contains(" Rogue #"),
         "the opening lane trap sprang on {sprung:?}, not the Rogue"
     );
+}
+
+/// AS-125 — with the Rogue on the Hunter, the trap goes on the enemy Priest.
+///
+/// Hunter+Priest vs Rogue+Priest: the Hunter is killing the Priest when the
+/// Rogue opens on it. Freezing Trap is thrown at the Priest (the trace names
+/// it), springs on the Priest, and the Hunter moves its target to the Rogue —
+/// every shot holds fire on a trapped enemy, so staying on the Priest would
+/// idle it. Pinned seeds where the Priest reaches the landing as it arms.
+#[test]
+fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
+    let mut caught = 0usize;
+    for seed in [0u64, 5, 14] {
+        let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
+        cfg.max_duration_secs = 45.0;
+        let (events, log) = run_trace_and_log(cfg);
+        let class_of: HashMap<u64, String> = events
+            .iter()
+            .filter_map(|v| {
+                Some((
+                    v.pointer("/actor/entity_id")?.as_u64()?,
+                    v.pointer("/actor/class")?.as_str()?.to_string(),
+                ))
+            })
+            .collect();
+        let decisions: Vec<&serde_json::Value> = hunter_trap_events(&events).collect();
+        let throw = decisions
+            .iter()
+            .position(|v| {
+                v.pointer("/outcome/ability").and_then(|a| a.as_str()) == Some("FreezingTrap")
+            })
+            .unwrap_or_else(|| panic!("seed {seed}: no Freezing Trap thrown"));
+        let aimed = decisions[throw]
+            .pointer("/outcome/target_id")
+            .and_then(|x| x.as_u64())
+            .and_then(|id| class_of.get(&id).cloned());
+        assert_eq!(aimed.as_deref(), Some("Priest"), "seed {seed}: aimed at");
+        let next_target = decisions[throw + 1..]
+            .iter()
+            .find_map(|v| v.pointer("/target/class").and_then(|c| c.as_str()));
+        assert_eq!(
+            next_target,
+            Some("Rogue"),
+            "seed {seed}: the Hunter's next target"
+        );
+        let sprung = log
+            .lines()
+            .find_map(|l| l.split("Freezing Trap triggers on ").nth(1))
+            .unwrap_or_default();
+        assert!(
+            sprung.contains(" Priest #"),
+            "seed {seed}: the healer trap sprang on {sprung:?}"
+        );
+        caught += 1;
+    }
+    assert_eq!(caught, 3);
 }

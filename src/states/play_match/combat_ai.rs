@@ -935,6 +935,8 @@ pub fn decide_abilities(
                             entry,
                             sustain,
                             wand_gate,
+                            // The Mage has no trap.
+                            None,
                             time.elapsed_secs(),
                             &mut decision_trace,
                         );
@@ -1210,6 +1212,17 @@ pub fn decide_abilities(
                                 my_pos,
                                 cfg.kite_sustain_radius,
                             );
+                            // While Freezing Trap is ready and an enemy healer
+                            // would be caught cleanly, the kite bends to keep
+                            // it within throw range; on cooldown, unchanged.
+                            let trap_setup = class_ai::hunter_dip::trap_setup(
+                                &abilities,
+                                entity,
+                                &combatant,
+                                my_pos,
+                                auras.as_deref(),
+                                &ctx,
+                            );
                             class_ai::dps_postures::evaluate_dps_posture(
                                 &mut commands,
                                 entity,
@@ -1225,6 +1238,7 @@ pub fn decide_abilities(
                                 // No wand gate: the Hunter has no wand and shoots,
                                 // it doesn't fall back to a wand when OOM.
                                 None,
+                                trap_setup,
                                 time.elapsed_secs(),
                                 &mut decision_trace,
                             );
@@ -1243,6 +1257,7 @@ pub fn decide_abilities(
                     &ctx,
                     &mut instant_attacks,
                     dip_plan,
+                    &movement_config.hunter.weights,
                     &mut decision_trace,
                 )
             }

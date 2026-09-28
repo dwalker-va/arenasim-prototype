@@ -30,6 +30,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::movement_config::DpsMovementConfig;
 
 use super::cast_guard::{pre_cast_ok, PreCastOpts};
+use super::dps_postures::TrapSetup;
 use super::healer_postures::start_movement_event_with_target;
 use super::CombatContext;
 use crate::states::play_match::constants::{
@@ -153,11 +154,228 @@ pub fn trap_victim_worth_it(
     if !info.is_pet && info.class.is_healer() {
         return true;
     }
+    trap_would_stick(ctx, abilities, owner, victim, focused)
+}
+
+/// Would a Freezing Trap on `victim` stay on it? True when no living teammate
+/// of `victim` could free it ([`ally_freers`](super::ally_freers), the engine's
+/// own removal rules), or every one that could is one the Hunter's team is
+/// killing (`focused`).
+pub fn trap_would_stick(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    owner: Entity,
+    victim: Entity,
+    focused: &std::collections::BTreeSet<Entity>,
+) -> bool {
     let aura = crate::states::play_match::traps::freezing_trap_aura(owner);
     super::ally_freers(ctx, abilities, victim, &aura)
         .iter()
         .all(|freer| focused.contains(freer))
 }
+
+/// The enemy healer to Freezing Trap while a melee is on the Hunter — the
+/// "trap the dispeller" ruling played under pressure. The trap goes on the
+/// HEALER, not the melee: with its healer frozen, the melee running the Hunter
+/// down is unhealed for the trap's duration.
+///
+/// Who, not where — the landing is checked at the throw. An enemy healer that:
+///
+/// - is trap-eligible (alive, not immune, not incapacitate-DR-immune, no
+///   friendly DoT to break it on its first tick);
+/// - **would not be freed** ([`trap_would_stick`]) — a Rogue or Warrior
+///   partner cannot free it, a Felhunter or a second healer can;
+/// - is not a unit a teammate of the Hunter's is killing ([`team_focus`]):
+///   every damage source holds fire on a trapped enemy, so trapping it would
+///   idle that teammate for the trap's duration. The Hunter's OWN kill target
+///   does not hold it: the Hunter moves its target to the melee on it when it
+///   throws ([`pressure_trap_retarget`]).
+///
+/// `None` when no enemy healer is in view; otherwise the first eligible
+/// healer, or why the last one considered was passed over.
+pub fn pressure_trap_healer(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    my_team: u8,
+    own_target: Option<Entity>,
+) -> Option<Result<Entity, &'static str>> {
+    let focused = trap_focus(ctx, entity, own_target);
+    let team = team_focus(ctx, entity);
+    let mut verdict = None;
+    for healer in ctx
+        .alive_enemies()
+        .into_iter()
+        .filter(|e| !e.is_pet && e.class.is_healer())
+    {
+        let result = if !dip_target_eligible(ctx, my_team, healer.entity) {
+            Err(PRESSURE_TRAP_INELIGIBLE)
+        } else if team.contains(&healer.entity) {
+            Err(PRESSURE_TRAP_TEAM_ATTACKING)
+        } else if !trap_would_stick(ctx, abilities, entity, healer.entity, &focused) {
+            Err(PRESSURE_TRAP_FREEABLE)
+        } else {
+            Ok(healer.entity)
+        };
+        verdict = Some(result);
+        if result.is_ok() {
+            break;
+        }
+    }
+    verdict
+}
+
+/// Where a pressure trap on `healer` would land from `my_pos`, when it would
+/// catch it cleanly: within the trap's configured range, `healer` predicted to
+/// spring it ([`predicted_trap_springer`]) and no other enemy near the landing
+/// now. `Err` names why the throw is held.
+pub fn pressure_trap_landing(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    my_team: u8,
+    my_pos: Vec3,
+    healer: Entity,
+) -> Result<Vec3, &'static str> {
+    let landing = trap_lead_landing(ctx, healer, my_pos).ok_or(PRESSURE_TRAP_NO_HEALER)?;
+    let range = abilities.get_unchecked(&AbilityType::FreezingTrap).range;
+    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+    if flat(my_pos).distance(flat(landing)) > range {
+        return Err(PRESSURE_TRAP_OUT_OF_RANGE);
+    }
+    let crowded = ctx.combatants.values().any(|other| {
+        other.team != my_team
+            && other.is_alive
+            && other.entity != healer
+            && other.position.distance(landing) <= TRAP_TRIGGER_RADIUS
+    });
+    if crowded || predicted_trap_springer(ctx, my_team, my_pos, landing) != Some(healer) {
+        return Err(PRESSURE_TRAP_NOT_CLEAN);
+    }
+    Ok(landing)
+}
+
+/// The Hunter's kill target after a pressure trap on `healer`: when the Hunter
+/// was killing the healer, it moves to the melee on it (`melee`) — every shot
+/// holds fire on a trapped enemy, so staying on the healer would idle the
+/// Hunter for the trap's duration. Otherwise the target is unchanged.
+pub fn pressure_trap_retarget(
+    own_target: Option<Entity>,
+    healer: Entity,
+    melee: Entity,
+) -> Option<Entity> {
+    if own_target == Some(healer) {
+        Some(melee)
+    } else {
+        own_target
+    }
+}
+
+/// The enemy healer the Hunter's kite should keep within throw range, or
+/// `None`: Freezing Trap is ready to cast, and a [`pressure_trap_healer`]
+/// exists. Movement is unchanged whenever this is `None` — in particular while
+/// the trap is on cooldown.
+pub fn trap_setup_healer(
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+) -> Option<Entity> {
+    let def = abilities.get_unchecked(&AbilityType::FreezingTrap);
+    let ready = pre_cast_ok(
+        AbilityType::FreezingTrap,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    );
+    if !ready {
+        return None;
+    }
+    pressure_trap_healer(ctx, abilities, entity, combatant.team, combatant.target)?.ok()
+}
+
+/// How close to the healer the Hunter repositions to trap it: the trap's
+/// configured range, less the trigger radius the lead landing may carry it.
+pub fn trap_setup_range(abilities: &AbilityDefinitions) -> f32 {
+    abilities.get_unchecked(&AbilityType::FreezingTrap).range - TRAP_TRIGGER_RADIUS
+}
+
+/// The [`TrapSetup`] the Hunter's KITE scores against: the
+/// [`trap_setup_healer`]'s position and [`trap_setup_range`], or `None`.
+pub fn trap_setup(
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+) -> Option<TrapSetup> {
+    let healer = trap_setup_healer(abilities, entity, combatant, my_pos, auras, ctx)?;
+    Some(TrapSetup {
+        healer: ctx.combatants.get(&healer)?.position,
+        range: trap_setup_range(abilities),
+    })
+}
+
+/// Disengage's leap direction with the trap setup folded in: straight `away`
+/// from the melee, bent toward `healer` when the straight leap would land
+/// beyond `range` of it. Weighted as the KITE scorer weighs the same two pulls
+/// (`flee` away, `trap_setup` toward), so the leap and the kite agree; with
+/// `trap_setup` below `flee` the leap always still carries the Hunter away
+/// from the melee. Planar; `away` is returned unchanged when there is nothing
+/// to bend toward.
+pub fn trap_setup_disengage(
+    away: Vec3,
+    my_pos: Vec3,
+    leap: f32,
+    healer: Vec3,
+    range: f32,
+    flee: f32,
+    trap_setup: f32,
+) -> Vec3 {
+    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+    let straight = flat(my_pos) + flat(away) * leap;
+    if trap_setup <= 0.0 || straight.distance(flat(healer)) <= range {
+        return away;
+    }
+    let toward = (flat(healer) - flat(my_pos)).normalize_or_zero();
+    let bent = (flat(away) * flee + toward * trap_setup).normalize_or_zero();
+    if bent.dot(away) > 0.0 {
+        bent
+    } else {
+        away
+    }
+}
+
+/// Trace note: a pressure trap held because the healer is immune, DR-immune
+/// to incapacitates, or carries a friendly DoT that would break it.
+pub const PRESSURE_TRAP_INELIGIBLE: &str = "healer trap held: the healer cannot be trapped now";
+
+/// Trace note: a pressure trap held because a teammate of the Hunter's is
+/// killing the healer.
+pub const PRESSURE_TRAP_TEAM_ATTACKING: &str = "healer trap held: a teammate is killing the healer";
+
+/// Trace note: a pressure trap held because a teammate of the healer's would
+/// free it.
+pub const PRESSURE_TRAP_FREEABLE: &str = "healer trap held: a teammate would free the healer";
+
+/// Trace note: a pressure trap held because its lead landing is beyond the
+/// trap's configured range.
+pub const PRESSURE_TRAP_OUT_OF_RANGE: &str = "healer trap held: the healer is out of throw range";
+
+/// Trace note: a pressure trap held because the healer is not the enemy that
+/// would spring it — another enemy is near the landing, or it would not reach
+/// the landing once the trap arms.
+pub const PRESSURE_TRAP_NOT_CLEAN: &str =
+    "healer trap held: the healer would not spring it cleanly";
+
+/// Trace note: the healer left the Hunter's view between choosing and landing.
+const PRESSURE_TRAP_NO_HEALER: &str = "healer trap held: the healer is not in view";
 
 /// How long after a lane trap ARMS its victim must be predicted to reach it.
 /// Motion is extrapolated from this frame's heading, and every unit re-decides

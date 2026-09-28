@@ -1065,6 +1065,22 @@ fn ally_removals_of<'a>(
         .filter_map(|(ability, _)| ally_removal(*ability))
 }
 
+/// How far `unit` can interrupt a cast from: the longest range among the
+/// `is_interrupt` abilities in its own kit (a pet's by its pet type, anyone
+/// else's by class), or `None` when it has no interrupt. Read from the config,
+/// so a new interrupt is counted without a code change.
+pub fn interrupt_reach(abilities: &AbilityDefinitions, unit: &CombatantInfo) -> Option<f32> {
+    abilities
+        .iter()
+        .filter(|(_, def)| match unit.pet_type {
+            Some(pet) => def.pet == Some(pet),
+            None => def.class == unit.class && def.pet.is_none(),
+        })
+        .filter(|(_, def)| def.is_interrupt)
+        .map(|(_, def)| def.range)
+        .reduce(f32::max)
+}
+
 /// Every living teammate of `victim` in this view that could free it from
 /// `aura` ([`can_free_ally`]), in deterministic entity order.
 pub fn ally_freers(

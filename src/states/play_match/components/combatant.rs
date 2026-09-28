@@ -410,6 +410,10 @@ pub struct Combatant {
     pub mage_armor: MageArmor,
     /// Paladin-specific: which aura to apply (Devotion Aura, Shadow Resistance Aura, or Concentration Aura)
     pub paladin_aura: PaladinAura,
+    /// Hunter-specific: whether the opener is over — set by the Hunter's
+    /// first Aimed Shot or Serpent Sting. In the opener, Aimed Shot goes
+    /// before the sting when it has time to finish.
+    pub hunter_opened: bool,
     /// Equipped proc trinkets and their live internal cooldowns, in socket
     /// order. Filled by [`Combatant::apply_equipment`].
     ///
@@ -584,6 +588,7 @@ impl Combatant {
             warrior_shout: WarriorShout::default(),
             mage_armor: MageArmor::default(),
             paladin_aura: PaladinAura::default(),
+            hunter_opened: false,
             proc_trinkets: Vec::new(),
         }
     }

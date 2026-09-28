@@ -564,6 +564,7 @@ with the context-steering mask refactor.
 - `commitment_bonus` (1.5/1.5) — bonus toward the committed direction during the commit window
 - `los_seek` (0.0 for healers; Mage 2.0 / Hunter 1.0) — reward for candidate steps that have/restore line of sight to the kill target; drives occluded-in-range casters to orbit to a sighted angle instead of idling
 - `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (`press_advantage_margin`)
+- `trap_setup` (Hunter 3.0, 0.0 for everyone else) — while Freezing Trap is ready and an enemy healer would be caught by it (`hunter_dip::trap_setup_healer`), pull toward that healer once a KITE step would leave it beyond throw range (the trap's `range` less its trigger radius); zero inside that range, absent while the trap is on cooldown. Kept below `flee` so the kite still escapes the melee, bent toward the healer. Disengage bends its leap by the same two weights (`hunter_dip::trap_setup_disengage`) and names the healer as the Disengage's `target_id` in the trace when it did; KITE decisions carry the term as a `trap_setup` scorer term
 
 **Medic chase (heal-seeking movement)** — shared across Priest/Paladin/Shaman
 (`healer_postures::medic_chase_override` / `medic_chase_tick`; no RON knob,
@@ -829,6 +830,11 @@ jq -c 'select(.kind == "target_acquisition" and .changed)' $T
 # absent there.) Measured answer: `docs/design/balance/
 # 2026-09-18-as68-freezing-trap-diagnosis.md`.
 jq -c 'select(.outcome.ability == "FreezingTrap") | {t: .sim_time, aimed_at: .outcome.target_id}' $T
+
+# Why a Freezing Trap on the enemy healer was held while a melee was on the
+# Hunter (`hunter::try_pressure_trap`) — out of throw range, would not spring
+# it cleanly, a teammate killing it, a teammate of its would free it:
+jq -r 'select(.actor.class == "Hunter") | .candidates[]? | select(.ability == "FreezingTrap") | .reason.PreconditionUnmet.note // empty' $T | grep '^healer trap' | sort | uniq -c
 
 # Pet decisions grouped by owner
 jq -c 'select(.kind == "pet_decision") | {owner, pet_type, ability: .outcome.ability}' $T
