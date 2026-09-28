@@ -1,7 +1,7 @@
 //! Weapon-socket audit (AS-97)
 //!
 //! `Combatant::apply_equipment` replaces a combatant's `attack_damage` and
-//! `attack_speed` from ONE socket: the one [`CharacterClass::weapon_slot`]
+//! `weapon_speed` from ONE socket: the one [`CharacterClass::weapon_slot`]
 //! names. Every other equipped item only adds. So if that predicate and the
 //! socket a class's loadout actually fills disagree, the class silently keeps
 //! its class base weapon stats — no panic, no warning, nothing in a match log
@@ -64,14 +64,14 @@
 
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::components::{AutoAttackKind, Combatant};
-use arenasim::states::play_match::constants::OFFHAND_DAMAGE_MULTIPLIER;
+use arenasim::states::play_match::constants::{OFFHAND_DAMAGE_MULTIPLIER, UNARMED_WEAPON_SPEED};
 use arenasim::states::play_match::equipment::{
     can_equip_in_socket, load_default_loadouts, load_item_definitions, ItemSlot,
 };
 
 /// The classes that deliberately carry a weapon in a socket they do NOT swing
 /// from, with the reason. A stat stick: its `attack_damage_*` and
-/// `attack_speed` never reach the combatant.
+/// `weapon_speed` never reach the combatant.
 ///
 /// Checked in BOTH directions, like the other justification lists in this
 /// repo — an undeclared second weapon fails, and so does a declared pair that
@@ -102,7 +102,7 @@ const DECLARED_STAT_STICK_WEAPONS: &[(CharacterClass, ItemSlot, &str)] = &[
 ///
 /// Off-hand is excluded on purpose rather than by accident. `apply_equipment`
 /// documents and implements that an off-hand weapon never replaces
-/// attack_damage / attack_speed, so an off-hand weapon is not a candidate for
+/// attack_damage / weapon_speed, so an off-hand weapon is not a candidate for
 /// "the socket that is live" and must not make this audit ambiguous.
 ///
 /// A class may hold a weapon in a replacement-INELIGIBLE socket: a Mage,
@@ -140,7 +140,7 @@ fn weapon_slot_matches_the_socket_each_loadout_fills() {
             live.contains(&expected),
             "{} carries no weapon in {:?}, the socket \
              CharacterClass::weapon_slot() names — it fills {:?} instead. \
-             apply_equipment replaces attack_damage / attack_speed ONLY from \
+             apply_equipment replaces attack_damage / weapon_speed ONLY from \
              the named socket, so as written this class fights with its class \
              base weapon stats. Fix whichever of the two is wrong: the match \
              arm in src/states/match_config.rs, or the socket in \
@@ -216,10 +216,10 @@ fn weapon_slot_matches_the_socket_each_loadout_fills() {
 /// The Shaman's mace is live, with the numbers it is live AT.
 ///
 /// The audit above proves the predicate and the loadout agree. This proves the
-/// agreement reaches the combatant: `Hammer of the Righteous` is 10–15 damage
-/// at speed 1.0, so a Shaman that has applied its loadout swings for the 12.5
-/// average at 1.0 — not the 7.0 / 0.8 class base it shipped with while the
-/// socket pick was wrong.
+/// agreement reaches the combatant: `Hammer of the Righteous` is 27–40.5
+/// damage at speed 2.7, so a Shaman that has applied its loadout swings for
+/// the 33.75 average every 2.7s — not the 7.0 class base damage at the unarmed
+/// speed it carries before equipment.
 #[test]
 fn shaman_equips_its_main_hand_mace() {
     let items = load_item_definitions().expect("items.ron must load");
@@ -227,8 +227,8 @@ fn shaman_equips_its_main_hand_mace() {
 
     let mut shaman = Combatant::new(1, 0, CharacterClass::Shaman);
     assert_eq!(
-        (shaman.attack_damage, shaman.attack_speed),
-        (7.0, 0.8),
+        (shaman.attack_damage, shaman.weapon_speed),
+        (7.0, UNARMED_WEAPON_SPEED),
         "class base stats moved; this test's before/after framing needs updating"
     );
 
@@ -238,12 +238,12 @@ fn shaman_equips_its_main_hand_mace() {
     shaman.apply_equipment(loadout, &items);
 
     assert_eq!(
-        shaman.attack_damage, 12.5,
-        "Shaman attack_damage: expected the mace's 10-15 average"
+        shaman.attack_damage, 33.75,
+        "Shaman attack_damage: expected the mace's 27-40.5 average"
     );
     assert_eq!(
-        shaman.attack_speed, 1.0,
-        "Shaman attack_speed: expected the mace's speed"
+        shaman.weapon_speed, 2.7,
+        "Shaman weapon_speed: expected the mace's speed"
     );
 }
 
@@ -278,9 +278,9 @@ fn every_class_swings_the_weapon_in_its_named_socket() {
             slot
         );
         assert_eq!(
-            c.attack_speed,
-            weapon.attack_speed,
-            "{} attack_speed should come from {:?}",
+            c.weapon_speed,
+            weapon.weapon_speed,
+            "{} weapon_speed should come from {:?}",
             class.name(),
             slot
         );
@@ -355,7 +355,7 @@ fn the_rogue_is_the_only_class_that_dual_wields_by_default() {
         off.name
     );
     assert_eq!(
-        rogue.offhand_speed, off.attack_speed,
+        rogue.offhand_weapon_speed, off.weapon_speed,
         "off-hand speed should be {}'s own speed — the two hands keep separate \
          timers",
         off.name

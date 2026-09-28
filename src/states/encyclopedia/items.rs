@@ -367,15 +367,12 @@ fn item_stat_rows(item: &ItemConfig) -> Vec<(String, String)> {
                 item.attack_damage_min, item.attack_damage_max
             ),
         ));
-        if item.attack_speed > 0.0 {
-            rows.push((
-                "Attack speed".to_string(),
-                format!("{:.1}/s", item.attack_speed),
-            ));
+        if item.weapon_speed > 0.0 {
+            rows.push(("Speed".to_string(), format!("{:.2}", item.weapon_speed)));
             let mid = (item.attack_damage_min + item.attack_damage_max) / 2.0;
             rows.push((
                 "Damage per second".to_string(),
-                format!("{:.1}", mid * item.attack_speed),
+                format!("{:.1}", mid / item.weapon_speed),
             ));
         }
     }
@@ -439,8 +436,8 @@ pub fn item_stat_parts(item: &ItemConfig) -> Vec<String> {
                 item.attack_damage_min, item.attack_damage_max
             ));
         }
-        if item.attack_speed > 0.0 {
-            parts.push(format!("{:.1} Speed", item.attack_speed));
+        if item.weapon_speed > 0.0 {
+            parts.push(format!("Speed {:.2}", item.weapon_speed));
         }
     }
 
@@ -557,6 +554,7 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
 mod tests {
     use super::*;
     use crate::states::play_match::equipment::load_item_definitions;
+    use crate::states::play_match::proc_trinkets::ProcRate;
 
     #[test]
     fn every_item_has_a_subtitle_and_is_usable_by_someone() {
@@ -575,7 +573,7 @@ mod tests {
         }
     }
 
-    /// Every shipped proc renders a sentence naming its trigger, its chance,
+    /// Every shipped proc renders a sentence naming its trigger, its rate,
     /// its magnitude, its duration and its internal cooldown. The item page's
     /// snapshot pins where that sentence SITS; this pins what it says, for
     /// every trinket, including the ones AS-61 adds.
@@ -588,7 +586,10 @@ mod tests {
             checked += 1;
             let text = proc_description(proc);
             for needle in [
-                format!("{:.0}%", proc.chance * 100.0),
+                match proc.rate {
+                    ProcRate::Chance(chance) => format!("{:.0}%", chance * 100.0),
+                    ProcRate::PerMinute(ppm) => format!("{} per minute", ppm),
+                },
                 format!("{:.0}s", proc.duration),
                 format!("{:.0}s", proc.internal_cooldown),
             ] {

@@ -1,7 +1,13 @@
 // Item Definitions for ArenaSim Equipment System
 //
 // Each item has a unique ItemId key and provides stat bonuses.
-// Weapons (is_weapon: true) replace attack_damage/attack_speed on the primary weapon slot.
+// Weapons (is_weapon: true) replace attack_damage/weapon_speed on the primary weapon slot.
+// `weapon_speed` is seconds per swing — the Classic tooltip's "Speed", copied
+// exactly from the real Classic item named beside it (same weapon type and
+// hand, same role, nearest item level; the same-named item when one exists
+// within 5 item levels). Damage per swing is the item's weapon DPS times that
+// speed, and a two-hander's DPS carries Classic's two-hander premium over the
+// one-hander it displaces — see docs/design/balance/2026-09-28-as167-weapon-speed.md.
 // Non-weapon items add their stats to the combatant's base stats.
 //
 // Changes here take effect on restart without recompiling.
@@ -767,7 +773,7 @@
             attack_power: 4.0,
             proc: Some((
                 trigger: MeleeHit,
-                chance: 0.15,
+                rate: PerMinute(9.0),
                 effect: AttackPowerIncrease,
                 magnitude: 55.0,
                 duration: 10.0,
@@ -783,7 +789,7 @@
             max_health: 12.0,
             proc: Some((
                 trigger: MeleeHit,
-                chance: 0.10,
+                rate: PerMinute(6.0),
                 effect: CritChanceIncrease,
                 magnitude: 0.10,
                 duration: 8.0,
@@ -799,7 +805,7 @@
             spell_power: 3.0,
             proc: Some((
                 trigger: SpellCast,
-                chance: 0.12,
+                rate: Chance(0.12),
                 effect: SpellPowerIncrease,
                 magnitude: 55.0,
                 duration: 12.0,
@@ -815,7 +821,7 @@
             max_mana: 4.0,
             proc: Some((
                 trigger: Heal,
-                chance: 0.20,
+                rate: Chance(0.20),
                 effect: ManaRegenIncrease,
                 magnitude: 12.0,
                 duration: 10.0,
@@ -830,6 +836,8 @@
         // A two-hander is priced at what the one-hander + off-hand pair it
         // displaces spends (Frostbite Blade + Wall of the Dead, 25.5), not at its full-slot cap (45.0): the
         // same points, spent on offense where the pair spends them on a shield.
+        // Its weapon DPS is Frostbite Blade's x Classic's two-hander premium at
+        // this tier, Arcanite Reaper 53.82 / Dal'Rend's Sacred Charge 41.43 = 1.30.
         ArcaniteReaper: (
             name: "Arcanite Reaper",
             item_level: 60,
@@ -838,9 +846,9 @@
             weapon_type: Axe,
             is_weapon: true,
             two_handed: true,
-            attack_damage_min: 14.0,
-            attack_damage_max: 18.0,
-            attack_speed: 0.9,
+            attack_damage_min: 57.02,
+            attack_damage_max: 73.30,
+            weapon_speed: 3.8, // Classic: Arcanite Reaper (12784)
             attack_power: 11.0,
             crit_chance: 0.03,
         ),
@@ -852,9 +860,9 @@
             slot: MainHand,
             weapon_type: Sword,
             is_weapon: true,
-            attack_damage_min: 10.0,
-            attack_damage_max: 14.0,
-            attack_speed: 1.1,
+            attack_damage_min: 30.8,
+            attack_damage_max: 43.12,
+            weapon_speed: 2.8, // Classic: Dal'Rend's Sacred Charge (12940)
             attack_power: 3.0,
             crit_chance: 0.01,
         ),
@@ -866,9 +874,9 @@
             slot: MainHand,
             weapon_type: Dagger,
             is_weapon: true,
-            attack_damage_min: 8.0,
-            attack_damage_max: 12.0,
-            attack_speed: 1.5,
+            attack_damage_min: 20.4,
+            attack_damage_max: 30.6,
+            weapon_speed: 1.7, // Classic: Felstriker (12590)
             attack_power: 4.0,
             crit_chance: 0.02,
         ),
@@ -880,15 +888,17 @@
             slot: MainHand,
             weapon_type: Mace,
             is_weapon: true,
-            attack_damage_min: 10.0,
-            attack_damage_max: 15.0,
-            attack_speed: 1.0,
+            attack_damage_min: 27.0,
+            attack_damage_max: 40.5,
+            weapon_speed: 2.7, // Classic: The Hammer of Grace (11923)
             spell_power: 6.0,
         ),
 
         // A two-hander is priced at what the one-hander + off-hand pair it
         // displaces spends (Witchblade + Tome of Knowledge, 32.5), not at its full-slot cap (43.5): more spell
         // power and a smaller pool than the pair, at the same price.
+        // Its weapon DPS is Witchblade's x Classic's two-hander premium, Elemental
+        // Mage Staff 57.50 / Witchblade 40.63 = 1.42.
         CrescentStaff: (
             name: "Crescent Staff",
             item_level: 58,
@@ -897,9 +907,9 @@
             weapon_type: Staff,
             is_weapon: true,
             two_handed: true,
-            attack_damage_min: 6.0,
-            attack_damage_max: 10.0,
-            attack_speed: 0.7,
+            attack_damage_min: 45.86,
+            attack_damage_max: 76.42,
+            weapon_speed: 3.2, // Classic: Elemental Mage Staff (944)
             spell_power: 15.0,
             max_mana: 10.0,
         ),
@@ -935,9 +945,9 @@
             slot: MainHand,
             weapon_type: Dagger,
             is_weapon: true,
-            attack_damage_min: 7.0,
-            attack_damage_max: 11.0,
-            attack_speed: 1.5,
+            attack_damage_min: 16.8,
+            attack_damage_max: 26.4,
+            weapon_speed: 1.6, // Classic: Witchblade (13964)
             spell_power: 5.0,
             max_mana: 6.0,
         ),
@@ -953,9 +963,9 @@
             slot: Ranged,
             weapon_type: Wand,
             is_weapon: true,
-            attack_damage_min: 8.0,
-            attack_damage_max: 12.0,
-            attack_speed: 0.7,
+            attack_damage_min: 10.08,
+            attack_damage_max: 15.12,
+            weapon_speed: 1.8, // Classic: Skul's Ghastly Touch (13396)
             spell_power: 4.0,
         ),
 
@@ -966,9 +976,9 @@
             slot: Ranged,
             weapon_type: Wand,
             is_weapon: true,
-            attack_damage_min: 9.0,
-            attack_damage_max: 13.0,
-            attack_speed: 0.8,
+            attack_damage_min: 11.52,
+            attack_damage_max: 16.64,
+            weapon_speed: 1.6, // Classic: Mana Channeling Wand (18483)
             spell_power: 6.0,
             max_mana: 8.0,
         ),
@@ -980,9 +990,9 @@
             slot: Ranged,
             weapon_type: Bow,
             is_weapon: true,
-            attack_damage_min: 30.0, // was 20 — Hunter is dead-weight (32% 2v2 / 34% 3v3); 1.5x Auto Shot
-            attack_damage_max: 39.0, // was 26
-            attack_speed: 0.4,
+            attack_damage_min: 28.8,
+            attack_damage_max: 37.44,
+            weapon_speed: 2.4, // Classic: Satyr's Bow (18323)
             attack_power: 4.0,
             max_mana: 2.0,
         ),
@@ -994,9 +1004,9 @@
             slot: Ranged,
             weapon_type: Crossbow,
             is_weapon: true,
-            attack_damage_min: 22.0,
-            attack_damage_max: 28.0,
-            attack_speed: 0.35,
+            attack_damage_min: 22.33,
+            attack_damage_max: 28.42,
+            weapon_speed: 2.9, // Classic: Stoneshatter (18388)
             attack_power: 3.0,
             crit_chance: 0.02,
         ),
@@ -1838,6 +1848,8 @@
         // A two-hander is priced at what the one-hander + off-hand pair it
         // displaces spends (Stormblade Edge + Bulwark of the Guardian, 39.0), not at its full-slot cap (56.25): the
         // same points, spent on offense where the pair spends them on a shield.
+        // Its weapon DPS is Stormblade Edge's x Classic's two-hander premium at
+        // this tier, Draconic Avenger 68.13 / Brutality Blade 51.60 = 1.32.
         BloodlordsBattleaxe: (
             name: "Bloodlord's Battleaxe",
             item_level: 75,
@@ -1847,9 +1859,9 @@
             weapon_type: Axe,
             is_weapon: true,
             two_handed: true,
-            attack_damage_min: 18.0,
-            attack_damage_max: 24.0,
-            attack_speed: 0.9,
+            attack_damage_min: 59.75,
+            attack_damage_max: 79.67,
+            weapon_speed: 3.2, // Classic: Draconic Avenger (19354)
             attack_power: 16.0,
             crit_chance: 0.05,
         ),
@@ -1862,9 +1874,9 @@
             slot: MainHand,
             weapon_type: Sword,
             is_weapon: true,
-            attack_damage_min: 12.0,
-            attack_damage_max: 18.0,
-            attack_speed: 1.1,
+            attack_damage_min: 33.0,
+            attack_damage_max: 49.5,
+            weapon_speed: 2.5, // Classic: Brutality Blade (18832)
             attack_power: 6.0,
             crit_chance: 0.02,
         ),
@@ -1877,9 +1889,9 @@
             slot: MainHand,
             weapon_type: Dagger,
             is_weapon: true,
-            attack_damage_min: 10.0,
-            attack_damage_max: 16.0,
-            attack_speed: 1.5,
+            attack_damage_min: 24.0,
+            attack_damage_max: 38.4,
+            weapon_speed: 1.6, // Classic: Core Hound Tooth (18805)
             attack_power: 6.0,
             crit_chance: 0.03,
         ),
@@ -1892,9 +1904,9 @@
             slot: MainHand,
             weapon_type: Mace,
             is_weapon: true,
-            attack_damage_min: 12.0,
-            attack_damage_max: 18.0,
-            attack_speed: 1.0,
+            attack_damage_min: 32.4,
+            attack_damage_max: 48.6,
+            weapon_speed: 2.7, // Classic: Aurastone Hammer (17105)
             spell_power: 10.0,
             max_health: 4.0,
         ),
@@ -1902,6 +1914,8 @@
         // A two-hander is priced at what the one-hander + off-hand pair it
         // displaces spends (Claw of Chromaggus + Grimoire of Shadows, 47.0), not at its full-slot cap (54.75): more
         // spell power and a smaller pool than the pair, at the same price.
+        // Its weapon DPS is Claw of Chromaggus's x Classic's two-hander premium,
+        // Staff of Dominance 57.07 / Claw of Chromaggus 42.33 = 1.35.
         RunestaffOfElements: (
             name: "Runestaff of Elements",
             item_level: 73,
@@ -1911,9 +1925,9 @@
             weapon_type: Staff,
             is_weapon: true,
             two_handed: true,
-            attack_damage_min: 8.0,
-            attack_damage_max: 14.0,
-            attack_speed: 0.7,
+            attack_damage_min: 49.05,
+            attack_damage_max: 85.83,
+            weapon_speed: 2.9, // Classic: Staff of Dominance (18842)
             spell_power: 20.0,
             max_mana: 17.0,
         ),
@@ -1934,9 +1948,9 @@
             slot: MainHand,
             weapon_type: Dagger,
             is_weapon: true,
-            attack_damage_min: 9.0,
-            attack_damage_max: 14.0,
-            attack_speed: 1.5,
+            attack_damage_min: 20.25,
+            attack_damage_max: 31.5,
+            weapon_speed: 1.5, // Classic: Claw of Chromaggus (19347)
             spell_power: 7.0,
             max_mana: 8.0,
             mana_regen: 0.5,
@@ -1950,9 +1964,9 @@
             slot: MainHand,
             weapon_type: Sword,
             is_weapon: true,
-            attack_damage_min: 11.0,
-            attack_damage_max: 17.0,
-            attack_speed: 1.1,
+            attack_damage_min: 29.04,
+            attack_damage_max: 44.88,
+            weapon_speed: 2.4, // Classic: Azuresong Mageblade (17103)
             spell_power: 8.0,
             max_health: 4.0,
             crit_chance: 0.01,
@@ -1970,9 +1984,9 @@
             slot: Ranged,
             weapon_type: Wand,
             is_weapon: true,
-            attack_damage_min: 10.0,
-            attack_damage_max: 16.0,
-            attack_speed: 0.7,
+            attack_damage_min: 11.9,
+            attack_damage_max: 19.04,
+            weapon_speed: 1.7, // Classic: Cold Snap (19130)
             spell_power: 8.0,
             max_mana: 10.0,
         ),
@@ -1985,9 +1999,9 @@
             slot: Ranged,
             weapon_type: Bow,
             is_weapon: true,
-            attack_damage_min: 24.0,
-            attack_damage_max: 32.0,
-            attack_speed: 0.4,
+            attack_damage_min: 27.84,
+            attack_damage_max: 37.12,
+            weapon_speed: 2.9, // Classic: Rhok'delar, Longbow of the Ancient Keepers (18713)
             attack_power: 8.0,
             crit_chance: 0.02,
         ),
@@ -2000,9 +2014,9 @@
             slot: Ranged,
             weapon_type: Crossbow,
             is_weapon: true,
-            attack_damage_min: 26.0,
-            attack_damage_max: 34.0,
-            attack_speed: 0.35,
+            attack_damage_min: 28.21,
+            attack_damage_max: 36.89,
+            weapon_speed: 3.1, // Classic: Crossbow of Imminent Doom (21459)
             attack_power: 6.0,
             crit_chance: 0.03,
         ),

@@ -25,7 +25,23 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
 - Disabled while casting
 - Melee: Within MELEE_RANGE (2.5 units)
 - Ranged: Mage/Priest use "Wand Shots" at 40 unit range
-- Attack speed varies by class
+- **Every swing's speed comes from the weapon.** `ItemConfig::weapon_speed` is
+  seconds per swing, the Classic tooltip's "Speed", copied from a named real
+  Classic item for every weapon — main hand, off hand, two-hander, bow,
+  crossbow and wand (AS-167; the stand-in table is
+  `docs/design/balance/2026-09-28-as167-weapon-speed.md`). There is no
+  per-class speed. A combatant built without equipment swings at
+  `UNARMED_WEAPON_SPEED` (2.0s, Classic's unarmed speed); an equipped one whose
+  live socket is empty does not auto-attack at all.
+- **A two-hander carries Classic's weapon-DPS premium** over the one-hander it
+  displaces (1.30-1.42x, per tier, from the Classic items' own DPS) — the
+  damage that buys back the off hand it gives up.
+- **Per-swing procs are rated per minute.** Proc trinkets on `MeleeHit`,
+  Crippling Poison and Windfury Totem each declare procs per minute; a landed
+  swing converts that to a chance with Classic's PPM formula
+  (`proc_trinkets::per_swing_chance`, `ppm * speed / 60`, clamped at 1.0), so
+  a slow weapon's fewer swings each proc more often and the rate does not
+  depend on the weapon.
 
 ### Dual Wield
 - **Who can**: Warrior, Rogue, Hunter — Classic's list, in
@@ -96,7 +112,10 @@ produces it.
 
 ### Rage (Warrior)
 - Max: 100
-- Generates on damage dealt and received
+- Generates on damage dealt and received. A landed swing pays
+  `RAGE_PER_WEAPON_SECOND` (9) per second of its weapon's speed — 34.2 for a
+  3.8s two-hander — so a slow weapon earns the same rage per second as a fast
+  one; an off-hand swing pays half its own weapon's share.
 - Decays over time out of combat
 - No passive regeneration
 

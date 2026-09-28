@@ -63,7 +63,7 @@ fn harness_app(seed: u64) -> App {
 fn spawn_attacker(app: &mut App, main_damage: f32, main_speed: f32) -> Entity {
     let mut combatant = Combatant::new(1, 0, CharacterClass::Warrior);
     combatant.attack_damage = main_damage;
-    combatant.attack_speed = main_speed;
+    combatant.weapon_speed = main_speed;
     combatant.crit_chance = 0.0;
     app.world_mut()
         .spawn((Transform::from_translation(Vec3::ZERO), combatant))
@@ -77,7 +77,7 @@ fn spawn_victim(app: &mut App) -> Entity {
     combatant.max_health = 1_000_000.0;
     combatant.current_health = 1_000_000.0;
     // Never swing back: this probe measures one direction only.
-    combatant.attack_speed = 0.000_01;
+    combatant.weapon_speed = 100_000.0;
     app.world_mut()
         .spawn((
             Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
@@ -89,7 +89,7 @@ fn spawn_victim(app: &mut App) -> Entity {
 fn arm_off_hand(app: &mut App, attacker: Entity, damage: f32, speed: f32) {
     let mut c = app.world_mut().get_mut::<Combatant>(attacker).unwrap();
     c.offhand_damage = damage;
-    c.offhand_speed = speed;
+    c.offhand_weapon_speed = speed;
 }
 
 fn set_target(app: &mut App, attacker: Entity, target: Entity) {
@@ -217,7 +217,8 @@ fn the_off_hand_swings_at_half_damage() {
 #[test]
 fn the_off_hand_runs_on_its_own_timer() {
     let slow = dual_wield_damage(3, 20.0, 1.0, 10.0, 1.0);
-    let fast = dual_wield_damage(3, 20.0, 1.0, 10.0, 3.0);
+    // Weapon speeds are seconds per swing: the fast off hand swings every 1/3s.
+    let fast = dual_wield_damage(3, 20.0, 1.0, 10.0, 1.0 / 3.0);
 
     assert!(
         fast > slow * 1.3,
@@ -287,7 +288,7 @@ fn the_miss_penalty_reaches_the_main_hand() {
     let single = single_wield_damage(5, 20.0, 1.0);
     // A real second weapon, but one whose own contribution is negligible: a
     // very slow off hand swings about twice in the window.
-    let dual_slow_off_hand = dual_wield_damage(5, 20.0, 1.0, 0.01, 0.1);
+    let dual_slow_off_hand = dual_wield_damage(5, 20.0, 1.0, 0.01, 10.0);
 
     assert!(
         dual_slow_off_hand < single,
@@ -404,12 +405,13 @@ fn swings_by_hand(app: &mut App, attacker: Entity) -> (u32, u32) {
 
 /// Every landed swing names the hand that swung, and each hand's count tracks
 /// its OWN weapon's speed — the property the renderer relies on to strike with
-/// the right dagger. With the off hand 2.5x the main hand's speed, a marker
+/// the right dagger. With the off hand swinging 2.5x as often, a marker
 /// that named the wrong hand (or alternated hands) would pull the ratio
 /// toward 1.
 #[test]
 fn each_landed_swing_names_the_hand_that_swung() {
-    let (main_speed, off_speed) = (1.0, 2.5);
+    // Weapon speeds in seconds per swing: the off hand swings 2.5x as often.
+    let (main_speed, off_speed) = (1.0, 0.4);
     let mut app = harness_app(11);
     let attacker = spawn_attacker(&mut app, 20.0, main_speed);
     let victim = spawn_victim(&mut app);
@@ -418,9 +420,9 @@ fn each_landed_swing_names_the_hand_that_swung() {
     run(&mut app, WINDOW_TICKS);
 
     let (main, off) = swings_by_hand(&mut app, attacker);
-    // Each hand lands about `window * speed * (1 - miss)` swings.
+    // Each hand lands about `window / speed * (1 - miss)` swings.
     let secs = (WINDOW_TICKS / TICKS_PER_SEC) as f32;
-    let expect = |speed: f32| secs * speed * (1.0 - DUAL_WIELD_MISS_CHANCE);
+    let expect = |speed: f32| secs / speed * (1.0 - DUAL_WIELD_MISS_CHANCE);
     for (label, got, speed) in [("main", main, main_speed), ("off", off, off_speed)] {
         let want = expect(speed);
         assert!(
@@ -430,9 +432,9 @@ fn each_landed_swing_names_the_hand_that_swung() {
     }
     let ratio = off as f32 / main as f32;
     assert!(
-        (ratio - off_speed / main_speed).abs() < 0.6,
+        (ratio - main_speed / off_speed).abs() < 0.6,
         "off/main swing ratio {ratio} should track the speed ratio {}",
-        off_speed / main_speed
+        main_speed / off_speed
     );
 }
 

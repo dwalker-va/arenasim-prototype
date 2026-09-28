@@ -310,7 +310,7 @@ fn stun_cancels_cast_charges_no_mana_and_spawns_interrupted_marker() {
 
 use arenasim::states::play_match::components::AuraPending;
 use arenasim::states::play_match::equipment::ItemId;
-use arenasim::states::play_match::proc_trinkets::{ProcConfig, ProcSlot, ProcTrigger};
+use arenasim::states::play_match::proc_trinkets::{ProcConfig, ProcRate, ProcSlot, ProcTrigger};
 
 const CERTAIN_PROC_ICD: f32 = 45.0;
 
@@ -325,7 +325,7 @@ fn wear_certain_proc(app: &mut App, caster: Entity, trigger: ProcTrigger) {
             name: "Certain Proc".to_string(),
             config: ProcConfig {
                 trigger,
-                chance: 1.0,
+                rate: ProcRate::Chance(1.0),
                 effect: AuraType::SpellPowerIncrease,
                 magnitude: 10.0,
                 duration: 10.0,

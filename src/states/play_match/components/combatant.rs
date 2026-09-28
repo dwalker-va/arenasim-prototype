@@ -1,6 +1,6 @@
 use super::super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::super::ability_config::AbilityConfig;
-use super::super::constants::OFFHAND_DAMAGE_MULTIPLIER;
+use super::super::constants::{OFFHAND_DAMAGE_MULTIPLIER, UNARMED_WEAPON_SPEED};
 use super::super::equipment::{ItemDefinitions, ItemSlot, Loadout};
 use super::super::match_config::{
     self, MageArmor, PaladinAura, RogueOpener, RoguePoison, WarlockCurse, WarriorShout,
@@ -61,8 +61,6 @@ pub struct ClassBaseStats {
     pub starting_resource: f32,
     /// Base weapon damage per auto-attack swing, before equipment
     pub attack_damage: f32,
-    /// Base swings per second, before a weapon's speed replaces it
-    pub attack_speed: f32,
     /// Base attack power
     pub attack_power: f32,
     /// Base spell power
@@ -93,7 +91,6 @@ pub const fn class_base_stats(class: match_config::CharacterClass) -> ClassBaseS
             resource_regen: 0.0,
             starting_resource: 0.0,
             attack_damage: 12.0,
-            attack_speed: 1.0,
             attack_power: 30.0,
             spell_power: 0.0,
             crit_chance: 0.08,
@@ -108,7 +105,6 @@ pub const fn class_base_stats(class: match_config::CharacterClass) -> ClassBaseS
             resource_regen: 0.0,
             starting_resource: 200.0,
             attack_damage: 10.0,
-            attack_speed: 0.7,
             attack_power: 0.0,
             spell_power: 50.0,
             crit_chance: 0.06,
@@ -123,7 +119,6 @@ pub const fn class_base_stats(class: match_config::CharacterClass) -> ClassBaseS
             resource_regen: 20.0,
             starting_resource: 100.0,
             attack_damage: 10.0,
-            attack_speed: 1.3,
             attack_power: 35.0,
             spell_power: 0.0,
             crit_chance: 0.10,
@@ -138,7 +133,6 @@ pub const fn class_base_stats(class: match_config::CharacterClass) -> ClassBaseS
             resource_regen: 0.0,
             starting_resource: 150.0,
             attack_damage: 6.0,
-            attack_speed: 0.8,
             attack_power: 0.0,
             spell_power: 40.0,
             crit_chance: 0.04,
@@ -155,7 +149,6 @@ pub const fn class_base_stats(class: match_config::CharacterClass) -> ClassBaseS
             resource_regen: 0.0,
             starting_resource: 180.0,
             attack_damage: 8.0,
-            attack_speed: 0.7,
             attack_power: 0.0,
             spell_power: 45.0,
             crit_chance: 0.05,
@@ -171,7 +164,6 @@ pub const fn class_base_stats(class: match_config::CharacterClass) -> ClassBaseS
             resource_regen: 0.0,
             starting_resource: 160.0,
             attack_damage: 8.0,
-            attack_speed: 0.9,
             attack_power: 20.0,
             spell_power: 35.0,
             crit_chance: 0.06,
@@ -190,7 +182,6 @@ pub const fn class_base_stats(class: match_config::CharacterClass) -> ClassBaseS
             resource_regen: 0.0,
             starting_resource: 240.0,
             attack_damage: 18.0,
-            attack_speed: 0.4,
             attack_power: 30.0,
             spell_power: 0.0,
             crit_chance: 0.07,
@@ -206,7 +197,6 @@ pub const fn class_base_stats(class: match_config::CharacterClass) -> ClassBaseS
             resource_regen: 0.0,
             starting_resource: 160.0,
             attack_damage: 7.0,
-            attack_speed: 0.8,
             attack_power: 0.0,
             spell_power: 42.0,
             crit_chance: 0.05,
@@ -319,8 +309,10 @@ pub struct Combatant {
     pub mana_regen: f32,
     /// Base damage per attack
     pub attack_damage: f32,
-    /// Attacks per second
-    pub attack_speed: f32,
+    /// Seconds between swings of the live weapon socket's weapon — the Classic
+    /// tooltip's "Speed". Set from the equipped item by
+    /// [`Self::apply_equipment`]; [`UNARMED_WEAPON_SPEED`] until then.
+    pub weapon_speed: f32,
     /// Timer tracking time until next attack
     pub attack_timer: f32,
     /// Damage per OFF-HAND swing, already reduced by
@@ -331,9 +323,9 @@ pub struct Combatant {
     /// miss roll, no extra RNG draw. Set by
     /// [`Self::apply_equipment`] and nothing else.
     pub offhand_damage: f32,
-    /// Off-hand swings per second — the off-hand weapon's own speed, so the
-    /// two hands drift apart over a match instead of landing in lockstep.
-    pub offhand_speed: f32,
+    /// Seconds between OFF-HAND swings — the off-hand weapon's own speed, so
+    /// the two hands drift apart over a match instead of landing in lockstep.
+    pub offhand_weapon_speed: f32,
     /// Timer tracking time until the next off-hand swing.
     pub offhand_timer: f32,
     /// Attack Power - scales physical damage abilities and auto-attacks
@@ -519,7 +511,6 @@ impl Combatant {
             resource_regen,
             starting_resource,
             attack_damage,
-            attack_speed,
             attack_power,
             spell_power,
             crit_chance,
@@ -545,10 +536,12 @@ impl Combatant {
             current_mana: starting_resource,
             mana_regen: resource_regen,
             attack_damage,
-            attack_speed,
+            // No weapon has set a speed yet; `apply_equipment` replaces this
+            // from the live socket's item. See `UNARMED_WEAPON_SPEED`.
+            weapon_speed: UNARMED_WEAPON_SPEED,
             attack_timer: 0.0,
             offhand_damage: 0.0,
-            offhand_speed: 0.0,
+            offhand_weapon_speed: 0.0,
             offhand_timer: 0.0,
             attack_power,
             spell_power,
@@ -628,7 +621,7 @@ impl Combatant {
                 pet.current_mana = 200.0;
                 pet.mana_regen = 10.0;
                 pet.attack_damage = 8.0;
-                pet.attack_speed = 1.2;
+                pet.weapon_speed = 1.0 / 1.2;
                 pet.attack_power = 20.0;
                 pet.spell_power = owner.spell_power * 0.3;
                 pet.crit_chance = 0.05;
@@ -646,7 +639,7 @@ impl Combatant {
                 pet.current_mana = 100.0;
                 pet.mana_regen = 5.0;
                 pet.attack_damage = 7.0;
-                pet.attack_speed = 1.3;
+                pet.weapon_speed = 1.0 / 1.3;
                 pet.attack_power = owner.attack_power * 0.5;
                 pet.spell_power = 0.0;
                 pet.crit_chance = 0.05;
@@ -661,10 +654,10 @@ impl Combatant {
     /// The ONE gate every off-hand code path reads, so "is there an off-hand
     /// swing" is asked the same way in all of them. It demands a non-zero
     /// SPEED as well as non-zero damage: the speed is a divisor, and an item
-    /// authored with damage but no `attack_speed` would otherwise produce an
+    /// authored with damage but no `weapon_speed` would otherwise produce an
     /// infinite swing interval rather than no swing.
     pub fn is_dual_wielding(&self) -> bool {
-        self.offhand_damage > 0.0 && self.offhand_speed > 0.0
+        self.offhand_damage > 0.0 && self.offhand_weapon_speed > 0.0
     }
 
     /// Check if this combatant is alive (health > 0 and not marked dead).
@@ -736,10 +729,10 @@ impl Combatant {
         // damage a swing worth nothing. Either says an item was authored with
         // one of the pair missing.
         debug_assert!(
-            (self.offhand_damage > 0.0) == (self.offhand_speed > 0.0),
+            (self.offhand_damage > 0.0) == (self.offhand_weapon_speed > 0.0),
             "Combatant off hand is half-armed: damage {}, speed {}",
             self.offhand_damage,
-            self.offhand_speed
+            self.offhand_weapon_speed
         );
     }
 
@@ -798,11 +791,11 @@ impl Combatant {
     /// - Armor/accessory items: ADD their stats to combatant fields.
     /// - Weapon in the class's primary weapon socket
     ///   ([`CharacterClass::weapon_slot`]): REPLACE attack_damage and
-    ///   attack_speed, ADD other stats.
+    ///   weapon_speed, ADD other stats.
     /// - Off Hand WEAPON, for a class whose primary weapon socket is the main
-    ///   hand: fills `offhand_damage` / `offhand_speed` — a second swing on its
+    ///   hand: fills `offhand_damage` / `offhand_weapon_speed` — a second swing on its
     ///   own timer at [`OFFHAND_DAMAGE_MULTIPLIER`](super::super::constants::OFFHAND_DAMAGE_MULTIPLIER)
-    ///   of its listed damage. `attack_damage` / `attack_speed` are untouched:
+    ///   of its listed damage. `attack_damage` / `weapon_speed` are untouched:
     ///   those describe the MAIN hand.
     /// - Off Hand non-weapons (shields, held frills): only ADD their stats, as
     ///   before. So does an off-hand weapon on a class that shoots from the
@@ -863,11 +856,11 @@ impl Combatant {
                     });
             }
 
-            // For the primary weapon slot, replace attack_damage and attack_speed
+            // For the primary weapon slot, replace attack_damage and weapon_speed
             if item.is_weapon && *slot == primary_weapon_slot {
                 let avg_damage = (item.attack_damage_min + item.attack_damage_max) / 2.0;
                 self.attack_damage = avg_damage;
-                self.attack_speed = item.attack_speed;
+                self.weapon_speed = item.weapon_speed;
             }
             // A WEAPON in the off hand is a second swing, but only for a class
             // that swings its main hand at all: the off hand accompanies the
@@ -880,7 +873,7 @@ impl Combatant {
             {
                 let avg_damage = (item.attack_damage_min + item.attack_damage_max) / 2.0;
                 self.offhand_damage = avg_damage * OFFHAND_DAMAGE_MULTIPLIER;
-                self.offhand_speed = item.attack_speed;
+                self.offhand_weapon_speed = item.weapon_speed;
             }
         }
 
@@ -1166,7 +1159,10 @@ mod tests {
                 c.attack_damage, base.attack_damage,
                 "{class:?} attack_damage"
             );
-            assert_eq!(c.attack_speed, base.attack_speed, "{class:?} attack_speed");
+            assert_eq!(
+                c.weapon_speed, UNARMED_WEAPON_SPEED,
+                "{class:?} weapon_speed before equipment"
+            );
             assert_eq!(c.attack_power, base.attack_power, "{class:?} attack_power");
             assert_eq!(c.spell_power, base.spell_power, "{class:?} spell_power");
             assert_eq!(c.crit_chance, base.crit_chance, "{class:?} crit_chance");
@@ -1185,8 +1181,10 @@ mod tests {
     fn base_stats_are_value_identical_to_the_pre_extraction_table() {
         use match_config::CharacterClass as C;
         // (class, health, max_resource, regen, starting, attack_damage,
-        //  attack_speed, attack_power, spell_power, crit, move_speed)
-        let expected: &[(C, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32)] = &[
+        //  attack_power, spell_power, crit, move_speed). The per-class swing
+        //  speed that sat between attack_damage and attack_power is gone: a
+        //  weapon's speed comes from its item (AS-167).
+        let expected: &[(C, f32, f32, f32, f32, f32, f32, f32, f32, f32)] = &[
             (
                 C::Warrior,
                 300.0,
@@ -1194,7 +1192,6 @@ mod tests {
                 0.0,
                 0.0,
                 12.0,
-                1.0,
                 30.0,
                 0.0,
                 0.08,
@@ -1207,7 +1204,6 @@ mod tests {
                 0.0,
                 200.0,
                 10.0,
-                0.7,
                 0.0,
                 50.0,
                 0.06,
@@ -1220,7 +1216,6 @@ mod tests {
                 20.0,
                 100.0,
                 10.0,
-                1.3,
                 35.0,
                 0.0,
                 0.10,
@@ -1233,7 +1228,6 @@ mod tests {
                 0.0,
                 150.0,
                 6.0,
-                0.8,
                 0.0,
                 40.0,
                 0.04,
@@ -1246,7 +1240,6 @@ mod tests {
                 0.0,
                 180.0,
                 8.0,
-                0.7,
                 0.0,
                 45.0,
                 0.05,
@@ -1259,7 +1252,6 @@ mod tests {
                 0.0,
                 160.0,
                 8.0,
-                0.9,
                 20.0,
                 35.0,
                 0.06,
@@ -1272,7 +1264,6 @@ mod tests {
                 0.0,
                 240.0,
                 18.0,
-                0.4,
                 30.0,
                 0.0,
                 0.07,
@@ -1285,7 +1276,6 @@ mod tests {
                 0.0,
                 160.0,
                 7.0,
-                0.8,
                 0.0,
                 42.0,
                 0.05,
@@ -1297,7 +1287,7 @@ mod tests {
             C::all().len(),
             "a class is missing from the pin"
         );
-        for &(class, hp, res, regen, start, dmg, spd, ap, sp, crit, mv) in expected {
+        for &(class, hp, res, regen, start, dmg, ap, sp, crit, mv) in expected {
             let b = class_base_stats(class);
             assert_eq!(
                 (
@@ -1306,13 +1296,12 @@ mod tests {
                     b.resource_regen,
                     b.starting_resource,
                     b.attack_damage,
-                    b.attack_speed,
                     b.attack_power,
                     b.spell_power,
                     b.crit_chance,
                     b.movement_speed
                 ),
-                (hp, res, regen, start, dmg, spd, ap, sp, crit, mv),
+                (hp, res, regen, start, dmg, ap, sp, crit, mv),
                 "{class:?} base stats changed"
             );
             assert_eq!(b.armor, 0.0, "{class:?} base armor is equipment-only");

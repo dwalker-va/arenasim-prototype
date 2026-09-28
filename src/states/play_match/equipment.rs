@@ -727,7 +727,7 @@ pub struct ItemConfig {
     /// If set, only these classes can equip this item
     #[serde(default)]
     pub allowed_classes: Option<Vec<CharacterClass>>,
-    /// Whether this item is a weapon (replaces attack_damage/attack_speed instead of adding)
+    /// Whether this item is a weapon (replaces attack_damage/weapon_speed instead of adding)
     #[serde(default)]
     pub is_weapon: bool,
     /// Whether this is a two-handed weapon (prevents off-hand equip)
@@ -778,9 +778,13 @@ pub struct ItemConfig {
     /// Weapon maximum damage (replaces combatant attack_damage for primary weapon slot)
     #[serde(default)]
     pub attack_damage_max: f32,
-    /// Weapon attack speed (replaces combatant attack_speed for primary weapon slot)
+    /// Seconds between swings — the Classic tooltip's "Speed" (a 3.80 two-hander
+    /// swings once every 3.8 seconds). The equipped item is the only source of
+    /// a hand's swing speed: `apply_equipment` copies it into the combatant for
+    /// the live socket and the off hand. Every weapon declares one
+    /// (`every_weapon_declares_its_classic_speed`); `0.0` on a non-weapon.
     #[serde(default)]
-    pub attack_speed: f32,
+    pub weapon_speed: f32,
 
     // === Proc ===
     /// A TRIGGER and an EFFECT on this item's own internal cooldown — the
@@ -1220,7 +1224,7 @@ use super::constants::{
 };
 
 /// Calculate the total budget usage for an item based on its budgeted stats.
-/// Free stats (armor, attack_damage_min/max, attack_speed) are excluded.
+/// Free stats (armor, attack_damage_min/max, weapon_speed) are excluded.
 ///
 /// A PROC is charged too, at its expected value — see
 /// [`ProcConfig::budget_cost`]. Without that term a trigger-and-effect would be
@@ -1651,7 +1655,7 @@ mod tests {
             holy_resistance: 0.0,
             attack_damage_min: 0.0,
             attack_damage_max: 0.0,
-            attack_speed: 0.0,
+            weapon_speed: 0.0,
             proc: None,
         }
     }
@@ -1691,7 +1695,7 @@ mod tests {
             holy_resistance: 0.0,
             attack_damage_min: dmg_min,
             attack_damage_max: dmg_max,
-            attack_speed: speed,
+            weapon_speed: speed,
             proc: None,
         }
     }
@@ -1800,7 +1804,7 @@ mod tests {
 
         // Weapon should replace attack_damage with average
         assert_eq!(combatant.attack_damage, 25.0); // (20+30)/2
-        assert_eq!(combatant.attack_speed, 0.5);
+        assert_eq!(combatant.weapon_speed, 0.5);
         // attack_power from weapon should still be added
         assert_eq!(combatant.attack_power, 30.0 + 5.0); // base 30 + weapon 5
     }
@@ -1820,7 +1824,7 @@ mod tests {
         combatant.apply_equipment(&loadout, &items);
 
         assert_eq!(combatant.attack_damage, 12.0); // (10+14)/2
-        assert_eq!(combatant.attack_speed, 0.8);
+        assert_eq!(combatant.weapon_speed, 0.8);
     }
 
     #[test]
@@ -1832,7 +1836,7 @@ mod tests {
         let mut combatant =
             super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
         let base_damage = combatant.attack_damage;
-        let base_speed = combatant.attack_speed;
+        let base_speed = combatant.weapon_speed;
 
         let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
@@ -1840,7 +1844,7 @@ mod tests {
 
         // Off hand weapon should NOT replace attack damage/speed
         assert_eq!(combatant.attack_damage, base_damage);
-        assert_eq!(combatant.attack_speed, base_speed);
+        assert_eq!(combatant.weapon_speed, base_speed);
         // But attack_power from the off-hand should still be added
         assert_eq!(combatant.attack_power, 30.0 + 5.0);
     }
@@ -1869,7 +1873,7 @@ mod tests {
 
         // Main hand: unchanged behaviour — average damage, weapon speed.
         assert_eq!(combatant.attack_damage, 40.0);
-        assert_eq!(combatant.attack_speed, 2.0);
+        assert_eq!(combatant.weapon_speed, 2.0);
         // Off hand: average damage (20) times the off-hand penalty, own speed.
         //
         // The 10.0 is written out rather than computed from
@@ -1882,7 +1886,7 @@ mod tests {
             "the off-hand penalty moved; the literal above is the one to update, \
              and moving it is a balance change"
         );
-        assert_eq!(combatant.offhand_speed, 1.5);
+        assert_eq!(combatant.offhand_weapon_speed, 1.5);
         assert!(combatant.is_dual_wielding());
     }
 
@@ -2835,7 +2839,7 @@ mod tests {
             assert!(!relic.is_weapon, "{:?} is a relic flagged as a weapon", id);
             assert_eq!(relic.attack_damage_min, 0.0, "{:?} relic swings", id);
             assert_eq!(relic.attack_damage_max, 0.0, "{:?} relic swings", id);
-            assert_eq!(relic.attack_speed, 0.0, "{:?} relic swings", id);
+            assert_eq!(relic.weapon_speed, 0.0, "{:?} relic swings", id);
         }
 
         // The proficiency table, not the class list, is what shuts the door.
@@ -3325,7 +3329,7 @@ mod tests {
             holy_resistance: 0.0,
             attack_damage_min: 0.0,
             attack_damage_max: 0.0,
-            attack_speed: 0.0,
+            weapon_speed: 0.0,
             proc: None,
         }
     }
@@ -3385,7 +3389,7 @@ mod tests {
         item.is_weapon = true;
         item.attack_damage_min = 100.0;
         item.attack_damage_max = 200.0;
-        item.attack_speed = 2.0;
+        item.weapon_speed = 2.0;
         item.attack_power = 3.0;
         // usage = only 3*1.5 = 4.5 (weapon DPS excluded), budget = 60*0.75*0.5625 = 25.3125
         assert!(validate_item_budget("Weapon Test", &item).is_ok());
@@ -3519,6 +3523,125 @@ mod tests {
         );
     }
 
+    /// Every weapon swings at the exact speed of the real Classic item it
+    /// stands in for, and the set of weapons is named rather than counted: a
+    /// new weapon — main hand, off hand, two-hander, bow, crossbow or wand —
+    /// fails here until it is given a Classic speed and a row, and a weapon
+    /// that loses its `weapon_speed` fails on the value.
+    ///
+    /// The stand-in is the real item of the same weapon type, hand and role
+    /// nearest in item level (the same-named item when one exists within 5
+    /// levels); its Wowhead id is in the row, and the full table is in
+    /// `docs/design/balance/2026-09-28-as167-weapon-speed.md`.
+    #[test]
+    fn every_weapon_declares_its_classic_speed() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        // (sim item, Classic speed, Wowhead item id of the Classic stand-in)
+        let table: [(ItemId, f32, u32); 20] = [
+            (ItemId::ArcaniteReaper, 3.8, 12784),
+            (ItemId::FrostbiteBlade, 2.8, 12940),
+            (ItemId::SerpentFangDagger, 1.7, 12590),
+            (ItemId::HammerOfTheRighteous, 2.7, 11923),
+            (ItemId::CrescentStaff, 3.2, 944),
+            (ItemId::Witchblade, 1.6, 13964),
+            (ItemId::WandOfShadows, 1.8, 13396),
+            (ItemId::StaffOfDominance, 1.6, 18483),
+            (ItemId::AshwoodBow, 2.4, 18323),
+            (ItemId::SniperScope, 2.9, 18388),
+            (ItemId::BloodlordsBattleaxe, 3.2, 19354),
+            (ItemId::StormbladeEdge, 2.5, 18832),
+            (ItemId::FangOfTheViper, 1.6, 18805),
+            (ItemId::MaceOfTheRedeemer, 2.7, 17105),
+            (ItemId::RunestaffOfElements, 2.9, 18842),
+            (ItemId::ClawOfChromaggus, 1.5, 19347),
+            (ItemId::AzuresongMageblade, 2.4, 17103),
+            (ItemId::WandOfTheInvoker, 1.7, 19130),
+            (ItemId::EaglestrikeBow, 2.9, 18713),
+            (ItemId::DeadeyeCrossbow, 3.1, 21459),
+        ];
+        for (id, speed, classic_id) in table {
+            let item = item_defs.get(&id).expect("shipped");
+            assert!(
+                item.is_weapon,
+                "{id:?} is in the weapon table but is not a weapon"
+            );
+            assert_eq!(
+                item.weapon_speed, speed,
+                "{id:?} must swing at its Classic stand-in's speed (Wowhead item {classic_id})"
+            );
+        }
+
+        let shipped: std::collections::BTreeSet<String> = item_defs
+            .definitions
+            .iter()
+            .filter(|(_, item)| item.is_weapon)
+            .map(|(id, _)| format!("{id:?}"))
+            .collect();
+        let named: std::collections::BTreeSet<String> =
+            table.iter().map(|row| format!("{:?}", row.0)).collect();
+        assert_eq!(
+            shipped, named,
+            "every shipped weapon has a Classic speed in this table, and nothing else does"
+        );
+    }
+
+    /// A two-hander deals more weapon DPS than the one-hander it displaces, by
+    /// Classic's own two-hander premium at that tier: the ratio of the Classic
+    /// stand-ins' tooltip DPS. That premium is what buys back the off-hand the
+    /// two-hander gives up. Weapon DPS here is `mid damage / speed`.
+    #[test]
+    fn two_handers_carry_the_classic_premium_over_the_one_hander_they_displace() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let dps = |id: ItemId| {
+            let item = item_defs.get(&id).expect("shipped");
+            (item.attack_damage_min + item.attack_damage_max) / 2.0 / item.weapon_speed
+        };
+        // (two-hander, the one-hander it displaces, Classic 2H DPS, Classic 1H DPS)
+        let table = [
+            // Arcanite Reaper (12784) / Dal'Rend's Sacred Charge (12940)
+            (ItemId::ArcaniteReaper, ItemId::FrostbiteBlade, 53.82, 41.43),
+            // Elemental Mage Staff (944) / Witchblade (13964)
+            (ItemId::CrescentStaff, ItemId::Witchblade, 57.50, 40.63),
+            // Draconic Avenger (19354) / Brutality Blade (18832)
+            (
+                ItemId::BloodlordsBattleaxe,
+                ItemId::StormbladeEdge,
+                68.13,
+                51.60,
+            ),
+            // Staff of Dominance (18842) / Claw of Chromaggus (19347)
+            (
+                ItemId::RunestaffOfElements,
+                ItemId::ClawOfChromaggus,
+                57.07,
+                42.33,
+            ),
+        ];
+        for (two_hander, one_hander, classic_2h, classic_1h) in table {
+            let premium = classic_2h / classic_1h;
+            let ratio = dps(two_hander) / dps(one_hander);
+            assert!(
+                (ratio - premium).abs() < 1e-3,
+                "{two_hander:?} DPS {:.3} is {ratio:.4}x {one_hander:?}'s {:.3}; Classic's premium is {premium:.4}",
+                dps(two_hander),
+                dps(one_hander)
+            );
+        }
+
+        let shipped: std::collections::BTreeSet<String> = item_defs
+            .definitions
+            .iter()
+            .filter(|(_, item)| item.held() == Some(HeldSlot::TwoHand))
+            .map(|(id, _)| format!("{id:?}"))
+            .collect();
+        let named: std::collections::BTreeSet<String> =
+            table.iter().map(|row| format!("{:?}", row.0)).collect();
+        assert_eq!(
+            shipped, named,
+            "every shipped two-hander has its Classic premium in this table"
+        );
+    }
+
     /// Every shipped proc must be priceable, able to fire, and unable to
     /// stack on itself. `all_items_within_budget` above already charges the
     /// proc's expected value, so the two together are the whole check: this
@@ -3560,7 +3683,7 @@ mod tests {
     #[test]
     fn budget_rejects_a_proc_that_is_over_budget_on_its_own() {
         use super::super::components::AuraType;
-        use super::super::proc_trinkets::{ProcConfig, ProcTrigger};
+        use super::super::proc_trinkets::{ProcConfig, ProcRate, ProcTrigger};
 
         let mut item = budget_test_item(ItemSlotType::Trinket, 58);
         assert!(
@@ -3570,7 +3693,7 @@ mod tests {
 
         item.proc = Some(ProcConfig {
             trigger: ProcTrigger::MeleeHit,
-            chance: 0.15,
+            rate: ProcRate::PerMinute(9.0),
             effect: AuraType::AttackPowerIncrease,
             magnitude: 100.0,
             duration: 10.0,
@@ -3586,12 +3709,12 @@ mod tests {
     #[test]
     fn budget_accepts_the_same_proc_once_its_cooldown_prices_it_in() {
         use super::super::components::AuraType;
-        use super::super::proc_trinkets::{ProcConfig, ProcTrigger};
+        use super::super::proc_trinkets::{ProcConfig, ProcRate, ProcTrigger};
 
         let mut item = budget_test_item(ItemSlotType::Trinket, 58);
         item.proc = Some(ProcConfig {
             trigger: ProcTrigger::MeleeHit,
-            chance: 0.15,
+            rate: ProcRate::PerMinute(9.0),
             effect: AuraType::AttackPowerIncrease,
             magnitude: 100.0,
             duration: 10.0,

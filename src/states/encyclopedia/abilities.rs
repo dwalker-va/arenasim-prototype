@@ -200,12 +200,10 @@ pub fn mechanics_text(ability: AbilityType, config: &AbilityConfig) -> String {
     let mut text = build_ability_description(ability, config, &stats);
     if let Some(aura) = &config.applies_aura {
         let mut sentence = build_aura_description(aura);
-        // A proc-chance ability applies its aura only some of the time; saying
+        // A proc-rate ability applies its aura only some of the time; saying
         // so is the difference between Crippling Poison and a guaranteed slow.
-        if let Some(chance) = config.application_chance {
-            if chance < 1.0 {
-                sentence = format!("{:.0}% chance: {}", chance * 100.0, sentence);
-            }
+        if let Some(ppm) = config.procs_per_minute {
+            sentence = format!("{} times per minute of swinging: {}", ppm, sentence);
         }
         if !text.is_empty() {
             text.push(' ');
@@ -671,11 +669,8 @@ fn stat_rows(config: &AbilityConfig) -> Vec<(String, String)> {
             format!("{:.0} sec", config.lockout_duration),
         ));
     }
-    if let Some(chance) = config.application_chance {
-        rows.push((
-            "Application chance".to_string(),
-            format!("{:.0}%", chance * 100.0),
-        ));
+    if let Some(ppm) = config.procs_per_minute {
+        rows.push(("Procs per minute".to_string(), format!("{}", ppm)));
     }
     if let Some(speed) = config.projectile_speed {
         rows.push((

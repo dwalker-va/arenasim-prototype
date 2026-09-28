@@ -167,10 +167,7 @@ fn stat_rows(stats: &ClassBaseStats) -> Vec<(String, String)> {
     }
     rows.push((
         "Attack damage".to_string(),
-        format!(
-            "{:.0} per swing · {:.1}/sec",
-            stats.attack_damage, stats.attack_speed
-        ),
+        format!("{:.0} per swing, before a weapon", stats.attack_damage),
     ));
     if stats.attack_power != 0.0 {
         rows.push((

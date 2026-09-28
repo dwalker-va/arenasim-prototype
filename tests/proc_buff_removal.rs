@@ -23,14 +23,14 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::effects::process_dispels;
 use arenasim::states::play_match::equipment::ItemId;
-use arenasim::states::play_match::proc_trinkets::{ProcConfig, ProcTrigger};
+use arenasim::states::play_match::proc_trinkets::{ProcConfig, ProcRate, ProcTrigger};
 use arenasim::CharacterClass;
 
 /// Dragonspine Trophy's buff, from the constructor the proc hook uses.
 fn dragonspine_buff() -> Aura {
     ProcConfig {
         trigger: ProcTrigger::MeleeHit,
-        chance: 0.15,
+        rate: ProcRate::PerMinute(9.0),
         effect: AuraType::AttackPowerIncrease,
         magnitude: 55.0,
         duration: 10.0,

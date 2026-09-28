@@ -78,10 +78,18 @@ fn seeded_2v2_matches_its_recorded_identity() {
     // 4 AP to 11 AP + 3% crit. Took this cell to Some(1) @ 40.69955s from
     // Some(2) @ 49.38275s. The 1v1 pin below did not move. Paired sweep:
     // `docs/design/balance/2026-09-27-as115-two-hander-budget.md`.
+    //
+    // Re-recorded for AS-167, weapon speed from item data. Took this cell to
+    // Some(1) @ 45.966137s from Some(1) @ 40.69955s. The first line that
+    // differs from `main` @ 17cb9f0 is the two Priests' opening Wand Shots
+    // into each other's shields, 10 -> 13 absorbed: the Staff of Dominance now
+    // fires every 1.6s for the same DPS, so each shot hits harder, and every
+    // shield after it runs down at a different point. Paired sweep:
+    // `docs/design/balance/2026-09-28-as167-weapon-speed.md`.
     assert_pinned(
         &result,
         Some(1),
-        1_109_576_791,
+        1_110_957_395,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }
@@ -101,10 +109,17 @@ fn seeded_1v1_matches_its_recorded_identity() {
     // earlier hits had already removed. So a passing pin here is not evidence
     // that a change did nothing; AS-87 carries its non-vacuity in a paired
     // control sweep instead.
+    //
+    // Re-recorded for AS-167, weapon speed from item data. Took this cell to
+    // Some(2) @ 15.983261s from Some(1) @ 17.549904s. The first line that
+    // differs from `main` @ 17cb9f0 is the Mage's first Wand Shot, 7 -> 9: the
+    // Wand of Shadows now fires every 1.8s for the same DPS, so each shot hits
+    // harder. The Warrior's first swing follows (a 30-damage crit becomes a
+    // 122-damage one — the Arcanite Reaper's 3.8s swing at its two-hander DPS).
     assert_pinned(
         &result,
-        Some(1),
-        1_099_720_244,
+        Some(2),
+        1_098_890_096,
         "1v1 Mage vs Warrior @99001",
     );
 }
