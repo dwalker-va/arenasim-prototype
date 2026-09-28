@@ -27,12 +27,17 @@ pub struct FloatingCombatText {
     pub is_crit: bool,
 }
 
-/// A combatant's translation at the START of the latest sim tick — the other
-/// end of the segment its HUD anchor is interpolated along
-/// (`rendering::hud::hud_anchor_translation`). Graphical-only: recorded in
-/// `FixedFirst` by `record_previous_sim_translation`, never read by the sim.
+/// The segment an entity the sim moves is drawn along between ticks
+/// (`rendering::interpolation`). Graphical-only; the sim never reads it.
 #[derive(Component, Clone, Copy, Debug)]
-pub struct PreviousSimTranslation(pub Vec3);
+pub struct RenderInterpolation {
+    /// Translation at the start of the latest sim tick.
+    pub previous: Vec3,
+    /// Translation the latest sim tick left — the sim's own value.
+    pub current: Vec3,
+    /// What this frame drew, while the interpolated value is in `Transform`.
+    pub drawn: Option<Vec3>,
+}
 
 /// Where on the victim a shared impact plays.
 ///

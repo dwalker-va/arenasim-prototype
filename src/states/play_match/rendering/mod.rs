@@ -11,6 +11,7 @@ pub mod combat_log;
 pub mod effects;
 pub mod emoji;
 pub mod hud;
+pub mod interpolation;
 pub mod overlays;
 pub mod team_frames;
 
@@ -19,6 +20,7 @@ pub use combat_log::*;
 pub use effects::*;
 pub use emoji::*;
 pub use hud::*;
+pub use interpolation::*;
 pub use overlays::*;
 pub use team_frames::*;
 

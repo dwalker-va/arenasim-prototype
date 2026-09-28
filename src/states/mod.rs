@@ -2,8 +2,10 @@
 //!
 //! Defines the core game states and transitions between them.
 
+use bevy::app::RunFixedMainLoopSystem;
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
+use bevy::transform::TransformSystem;
+use bevy_egui::{egui, EguiContexts, EguiPostUpdateSet};
 
 pub mod ability_text;
 pub mod animation_sandbox;
@@ -1070,18 +1072,42 @@ impl Plugin for StatesPlugin {
                 .after(play_match::watch_kill_target_calls)
                 .run_if(in_state(GameState::PlayMatch)),
         )
-        // The health bar block's anchor is interpolated between the last two
-        // sim ticks; this records the earlier end. `FixedFirst` runs once per
-        // tick BEFORE that tick moves anyone, so it cannot see a half-moved
-        // world and needs no phase constraint. Writes only a component the
-        // sim never reads.
+        // Render interpolation (`play_match::rendering::interpolation`): every
+        // unit and missile is DRAWN between its last two sim ticks. The ends
+        // of the segment are recorded around each tick — `FixedFirst` before
+        // the tick moves anyone, `FixedLast` after — the interpolated
+        // translation goes into `Transform` once the fixed loop is done, and
+        // the sim's own value goes back before the next fixed loop starts, so
+        // nothing in `FixedUpdate` ever sees a drawn position. Writes only a
+        // component the sim never reads.
         .add_systems(
             FixedFirst,
-            play_match::record_previous_sim_translation.run_if(in_state(GameState::PlayMatch)),
+            play_match::begin_render_interpolation_tick.run_if(in_state(GameState::PlayMatch)),
         )
-        // UI rendering systems
         .add_systems(
-            Update,
+            FixedLast,
+            play_match::end_render_interpolation_tick.run_if(in_state(GameState::PlayMatch)),
+        )
+        .add_systems(
+            RunFixedMainLoop,
+            (
+                play_match::restore_sim_translation
+                    .in_set(RunFixedMainLoopSystem::BeforeFixedMainLoop),
+                play_match::apply_render_interpolation
+                    .in_set(RunFixedMainLoopSystem::AfterFixedMainLoop),
+            )
+                .run_if(in_state(GameState::PlayMatch)),
+        )
+        // UI rendering systems.
+        //
+        // In `PostUpdate`, after transform propagation and before egui ends
+        // its pass: the health bars, speech bubbles and floating combat text
+        // are projected from this frame's FINAL `GlobalTransform`s — the unit
+        // as drawn and the camera as it renders. From `Update` the camera's
+        // `GlobalTransform` is last frame's. The whole chain moves together so
+        // the egui paint order between these screens is unchanged.
+        .add_systems(
+            PostUpdate,
             // Chained: egui systems are serialized on EguiContexts anyway,
             // and render_team_frames must run AFTER render_combat_panel —
             // it anchors to available_rect(), which only reflects panels
@@ -1110,6 +1136,8 @@ impl Plugin for StatesPlugin {
                 play_match::render_speech_bubbles,
             )
                 .chain()
+                .after(TransformSystem::TransformPropagate)
+                .before(EguiPostUpdateSet::EndPass)
                 .run_if(in_state(GameState::PlayMatch)),
         )
         // Floating combat text renders in the sandbox too (not just matches):
@@ -1119,9 +1147,13 @@ impl Plugin for StatesPlugin {
         // team frames / combat log / speech bubbles from the sandbox — not
         // this. `update_floating_combat_text` already runs under
         // `in_combat_scene`; this widens the egui draw to match.
+        // Same `PostUpdate` slot as the HUD above, for the same camera.
         .add_systems(
-            Update,
-            play_match::render_floating_combat_text.run_if(in_combat_scene),
+            PostUpdate,
+            play_match::render_floating_combat_text
+                .after(TransformSystem::TransformPropagate)
+                .before(EguiPostUpdateSet::EndPass)
+                .run_if(in_combat_scene),
         )
         // Selection ring follow & cleanup — runs after combat resolution
         // so the ring tracks post-movement positions on the same frame
