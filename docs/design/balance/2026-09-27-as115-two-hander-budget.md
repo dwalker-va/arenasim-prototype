@@ -74,7 +74,13 @@ Each two-hander spends what its pair spends but keeps its own mix, so the
 choice is real rather than cosmetic:
 
 - **A melee two-hander spends on offense.** The pair spends part of the same
-  points on a shield's health and gets armor free.
+  points on a shield's health and gets armor free. It is priced against
+  sword and shield, not a dual-wield pair. Every dual-wield pair spends less:
+  Frostbite + Serpent Fang is 19.5 points, and a Rogue's two Serpent Fangs are
+  24.0. A dual-wield pair also recovers value in its second weapon's damage,
+  which is a free stat. Sword and shield is the pair a Warrior, Paladin or
+  Shaman actually gives up for an axe two-hander. A Rogue cannot wield a
+  two-hander at all.
 - **A staff buys more spell power and a smaller mana pool than its pair.**
 
 Weapon damage and speed are unchanged. Two-handers still carry no weapon-DPS
@@ -178,9 +184,10 @@ by budget and leaves the stat mix to be a choice.
   17 of 27 cells moved, all of them with a Warrior; the README says why the
   18th Warrior cell did not.
 - **Seed-pinned movement probes whose comp has a Warrior** (`tests/movement_probes.rs`)
-  were re-pinned from their own scanners. Four had gone vacuous: the Mage
-  occlusion seeds 9 and 77 (now 31 and 30), and the completion-fizzle seeds
-  9 and 26 (now 23 and 31). Medic-chase seed 9 kept its short occluded windows,
+  were re-pinned from their own scanners. Three had gone vacuous: the Mage
+  occlusion seeds 9 and 77 (now 31 and 30), and completion-fizzle seed 26.
+  Fizzle seed 9 still clears its floor, but fell from 47 fizzles to 1, so the
+  pair was re-pinned to 23 and 31. Medic-chase seed 9 kept its short occluded windows,
   but its first visible heal slid to 21s; it is now 14. The chase bound itself
   holds on all 30 scanned seeds on both binaries.
 - **Every balance sweep with a Warrior in it that was recorded before this

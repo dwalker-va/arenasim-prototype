@@ -1214,8 +1214,8 @@ pub fn validate_unique_equipped(loadout: &Loadout, items: &ItemDefinitions) -> R
 // ============================================================================
 
 use super::constants::{
-    held_budget_multiplier, slot_budget_multiplier, BUDGET_PER_ILVL, BUDGET_TOLERANCE, WEIGHT_ATTACK_POWER,
-    WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
+    held_budget_multiplier, slot_budget_multiplier, BUDGET_PER_ILVL, BUDGET_TOLERANCE,
+    WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
     WEIGHT_MOVEMENT_SPEED, WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
 };
 
@@ -3443,7 +3443,8 @@ mod tests {
 
     /// No shipped one-hander spends more than a one-hander's 0.42 — with no
     /// tolerance, so the one-handers that predate the split were not merely
-    /// let through by it. Walks every one-hander and names how many it saw.
+    /// let through by it. Walks every shipped one-hander; the non-empty check
+    /// only guards against walking none.
     #[test]
     fn no_shipped_one_hander_exceeds_the_one_hand_multiplier() {
         let item_defs = load_item_definitions().expect("items.ron must load");
@@ -3475,10 +3476,26 @@ mod tests {
         let item_defs = load_item_definitions().expect("items.ron must load");
         let usage = |id: ItemId| calculate_budget_usage(item_defs.get(&id).expect("shipped"));
         let table = [
-            (ItemId::ArcaniteReaper, ItemId::FrostbiteBlade, ItemId::WallOfTheDeadShield),
-            (ItemId::CrescentStaff, ItemId::Witchblade, ItemId::TomeOfKnowledge),
-            (ItemId::BloodlordsBattleaxe, ItemId::StormbladeEdge, ItemId::BulwarkOfTheGuardian),
-            (ItemId::RunestaffOfElements, ItemId::ClawOfChromaggus, ItemId::GrimoireOfShadows),
+            (
+                ItemId::ArcaniteReaper,
+                ItemId::FrostbiteBlade,
+                ItemId::WallOfTheDeadShield,
+            ),
+            (
+                ItemId::CrescentStaff,
+                ItemId::Witchblade,
+                ItemId::TomeOfKnowledge,
+            ),
+            (
+                ItemId::BloodlordsBattleaxe,
+                ItemId::StormbladeEdge,
+                ItemId::BulwarkOfTheGuardian,
+            ),
+            (
+                ItemId::RunestaffOfElements,
+                ItemId::ClawOfChromaggus,
+                ItemId::GrimoireOfShadows,
+            ),
         ];
         for (two_hander, one_hander, off_hand) in table {
             let pair = usage(one_hander) + usage(off_hand);
@@ -3496,7 +3513,10 @@ mod tests {
             .map(|(id, _)| *id)
             .collect();
         let priced: std::collections::HashSet<ItemId> = table.iter().map(|row| row.0).collect();
-        assert_eq!(shipped, priced, "every shipped two-hander has a pair in this table");
+        assert_eq!(
+            shipped, priced,
+            "every shipped two-hander has a pair in this table"
+        );
     }
 
     /// Every shipped proc must be priceable, able to fire, and unable to

@@ -348,8 +348,8 @@ pub fn held_budget_multiplier(held: HeldSlot) -> f32 {
 ///
 /// The hands are the exception the kind cannot answer — a `MainHand` item may
 /// be two-handed — so an item is priced through
-/// `ItemConfig::budget_multiplier`, which asks [`held_budget_multiplier`] for
-/// hand items. The hand arms here give the kind's one-handed answer.
+/// `equipment::item_budget_multiplier`, which asks [`held_budget_multiplier`]
+/// for hand items. The hand arms here give the kind's one-handed answer.
 pub fn slot_budget_multiplier(slot: ItemSlotType) -> f32 {
     match slot {
         ItemSlotType::Head => 1.0,
