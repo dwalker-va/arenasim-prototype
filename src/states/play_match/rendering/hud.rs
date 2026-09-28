@@ -73,8 +73,10 @@ pub fn record_previous_sim_translation(
 /// +2.19px, -0.14px. That frame-rate back-and-forth is what read as fuzzy
 /// text. Interpolated, the anchor advances a proportional share every frame.
 ///
-/// Rounding to pixels would not help: epaint already snaps text to physical
-/// pixels (`TessellationOptions::round_text_to_pixels`).
+/// The projected anchor is then snapped to whole physical pixels before
+/// anything is drawn from it (`nameplate_origin`) — interpolation makes it
+/// land on a new sub-pixel phase every frame, and the block's pieces must not
+/// each round that phase their own way.
 pub fn hud_anchor_translation(
     current: Vec3,
     previous: Option<&PreviousSimTranslation>,
@@ -84,6 +86,43 @@ pub fn hud_anchor_translation(
         Some(previous) => previous.0.lerp(current, overstep_fraction.clamp(0.0, 1.0)),
         None => current,
     }
+}
+
+/// The health bar's top-left corner — the origin every piece of the block
+/// (bar, cast/channel bar, status labels) is laid out from — snapped to whole
+/// PHYSICAL pixels.
+///
+/// epaint rounds each shape to physical pixels on its own: a text shape's
+/// origin, a rect's two corners. A status label is nine text shapes (eight
+/// black outline copies and the white text), so with the origin on a
+/// fractional pixel each copy rounds a different way — the outline came out
+/// one physical pixel thicker on some sides than others, and which sides
+/// changed with the phase. The interpolated anchor lands on a new phase every
+/// frame, so the letters visibly changed shape frame to frame: on a 2x
+/// display a walking STEALTH label took 12 distinct pixel layouts, each side's
+/// outline 1 or 2 physical pixels and the text a pixel either way against the
+/// bar (`tests/hud_anchor_match_flow.rs`).
+/// On a whole-pixel origin every offset the block adds rounds the same way
+/// every frame, so the block moves as one rigid, pixel-identical image.
+pub fn nameplate_origin(
+    screen_pos: Vec2,
+    bar_size: egui::Vec2,
+    pixels_per_point: f32,
+) -> egui::Pos2 {
+    use egui::emath::GuiRounding;
+    egui::pos2(
+        screen_pos.x - bar_size.x / 2.0,
+        screen_pos.y - bar_size.y / 2.0,
+    )
+    .round_to_pixels(pixels_per_point)
+}
+
+/// Offset of each status label outline copy from the text: `ui_scale` points
+/// rounded to a whole number of physical pixels, and never less than one.
+/// A fractional offset would round to one pixel on one side of the text and
+/// two on the other.
+fn status_outline_offset(ui_scale: f32, pixels_per_point: f32) -> f32 {
+    (ui_scale * pixels_per_point).round().max(1.0) / pixels_per_point
 }
 
 // ==============================================================================
@@ -342,6 +381,7 @@ pub fn render_health_bars(
     let pulse_intensity = LOW_HP_GLOW_BASE + LOW_HP_GLOW_PULSE * (0.5 + 0.5 * pulse_phase.sin());
 
     let overstep_fraction = fixed_time.overstep_fraction();
+    let pixels_per_point = ctx.pixels_per_point();
 
     egui::Area::new(egui::Id::new("health_bars"))
         .fixed_pos(egui::pos2(0.0, 0.0))
@@ -374,9 +414,10 @@ pub fn render_health_bars(
                     // Health bar dimensions (scaled by zoom)
                     let bar_width = 50.0 * ui_scale;
                     let bar_height = 6.0 * ui_scale;
-                    let bar_pos = egui::pos2(
-                        screen_pos.x - bar_width / 2.0,
-                        screen_pos.y - bar_height / 2.0,
+                    let bar_pos = nameplate_origin(
+                        screen_pos,
+                        egui::vec2(bar_width, bar_height),
+                        pixels_per_point,
                     );
 
                     // Status indicators above health bar
@@ -401,6 +442,7 @@ pub fn render_health_bars(
                             "STEALTH",
                             status_color,
                             ui_scale,
+                            pixels_per_point,
                         );
                     }
 
@@ -419,6 +461,7 @@ pub fn render_health_bars(
                                 &stun_text,
                                 status_color,
                                 ui_scale,
+                                pixels_per_point,
                             );
                         }
 
@@ -435,6 +478,7 @@ pub fn render_health_bars(
                                 &root_text,
                                 status_color,
                                 ui_scale,
+                                pixels_per_point,
                             );
                         }
 
@@ -459,6 +503,7 @@ pub fn render_health_bars(
                                 &fear_text,
                                 status_color,
                                 ui_scale,
+                                pixels_per_point,
                             );
                         }
 
@@ -477,6 +522,7 @@ pub fn render_health_bars(
                                 &poly_text,
                                 status_color,
                                 ui_scale,
+                                pixels_per_point,
                             );
                         }
 
@@ -495,6 +541,7 @@ pub fn render_health_bars(
                                 &silence_text,
                                 status_color,
                                 ui_scale,
+                                pixels_per_point,
                             );
                         }
 
@@ -513,6 +560,7 @@ pub fn render_health_bars(
                                 &br_text,
                                 status_color,
                                 ui_scale,
+                                pixels_per_point,
                             );
                         }
                     }
@@ -853,7 +901,12 @@ pub fn render_health_bars(
         });
 }
 
-/// Helper to render a status label above the health bar with outline
+/// Helper to render a status label above the health bar with outline.
+///
+/// `bar_pos` is on a whole physical pixel (`nameplate_origin`); the label's
+/// origin and its outline offsets are snapped too, so all nine copies are
+/// whole-pixel translates of one another and rasterise identically every frame.
+#[allow(clippy::too_many_arguments)]
 fn render_status_label(
     ui: &mut egui::Ui,
     bar_pos: &egui::Pos2,
@@ -862,7 +915,10 @@ fn render_status_label(
     text: &str,
     color: egui::Color32,
     ui_scale: f32,
+    pixels_per_point: f32,
 ) {
+    use egui::emath::GuiRounding;
+
     let font = egui::FontId::monospace(9.0 * ui_scale);
 
     // Create galley for measuring size
@@ -870,10 +926,11 @@ fn render_status_label(
     let center_pos = egui::pos2(
         bar_pos.x + (bar_width - galley.size().x) / 2.0,
         bar_pos.y + *status_offset,
-    );
+    )
+    .round_to_pixels(pixels_per_point);
 
     // Draw black outline/stroke for visibility
-    let outline_offset = 1.0 * ui_scale;
+    let outline_offset = status_outline_offset(ui_scale, pixels_per_point);
     for dx in [-outline_offset, 0.0, outline_offset] {
         for dy in [-outline_offset, 0.0, outline_offset] {
             if dx != 0.0 || dy != 0.0 {
