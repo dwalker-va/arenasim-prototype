@@ -12,7 +12,11 @@ Where they sprang: of the sprung traps decided on a NAMED enemy (the trace's
 +miss) is the decided-victim vs springer match rate. `unseen` counts sprung
 traps thrown for an enemy the Hunter could not see, which carry no aim.
 `healer` counts the traps that sprang on a healer, with the mean seconds it
-was held.
+was held; `on` sums the trapping Hunter's decisions, across those traps,
+still targeting the frozen healer while another enemy was alive to fight —
+ticks spent holding fire on its own trap's victim. A trap that springs
+mid-frame costs a tick or two before target acquisition sees the aura; a
+Hunter pinned to its victim costs hundreds.
 """
 import csv, statistics, sys
 from collections import Counter, defaultdict
@@ -53,6 +57,8 @@ def summarise(traps, matches, comp):
         "unsprung": c["unsprung"],
         "healer": len(on_healer),
         "healer_s": sum(held),
+        "on": sum(int(r["hunter_on_victim_held"]) for r in on_healer
+                  if r.get("hunter_on_victim_held") not in ("", None)),
     }
 
 
@@ -62,7 +68,8 @@ def fmt(s):
             f"zero {s['zero']:2d} first {first} hit {s['hit']:3d} miss {s['miss']:3d} "
             f"unseen {s['unseen']:3d} "
             f"rem {s['removed']:3d} brk {s['broke']:3d} full {s['ran_out']:3d} uns {s['unsprung']:2d} "
-            f"healer {s['healer']:3d} ({s['healer_s'] / s['healer'] if s['healer'] else 0:4.1f}s)")
+            f"healer {s['healer']:3d} ({s['healer_s'] / s['healer'] if s['healer'] else 0:4.1f}s) "
+            f"on {s['on']:4d}")
 
 
 def main(argv):

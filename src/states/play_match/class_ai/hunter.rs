@@ -15,7 +15,6 @@
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
-use std::collections::BTreeSet;
 
 use super::super::arena_bounds::ArenaBounds;
 use super::super::utils::log_ability_use;
@@ -57,6 +56,7 @@ pub fn decide_hunter_action(
     decision_trace: &mut DecisionTrace,
 ) -> bool {
     let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
+    let now = decision_trace.current_sim_time;
 
     let nearest_dist = nearest_distance.unwrap_or(40.0);
 
@@ -248,6 +248,7 @@ pub fn decide_hunter_action(
             combatant,
             my_pos,
             ctx,
+            now,
             &mut builder,
         ) {
             builder.finish();
@@ -291,6 +292,7 @@ pub fn decide_hunter_action(
             combatant,
             my_pos,
             ctx,
+            now,
             &mut builder,
         ) {
             builder.finish();
@@ -555,7 +557,6 @@ pub fn decide_hunter_action(
         combatant.team,
         my_pos,
         target_entity,
-        &focused,
     ) {
         match fallback {
             // Two-way CC guard (R8/R9): never throw Freezing Trap where the
@@ -719,7 +720,6 @@ fn fallback_trap(
     my_team: u8,
     my_pos: Vec3,
     kill_target: Entity,
-    focused: &BTreeSet<Entity>,
 ) -> Option<Result<FallbackThrow, &'static str>> {
     let candidate = ctx.enemy_healer().unwrap_or(kill_target);
     let candidate_pos = ctx
@@ -738,7 +738,7 @@ fn fallback_trap(
     else {
         return Some(Err(TRAP_HELD_NO_SPRINGER));
     };
-    if !super::hunter_dip::trap_victim_worth_it(ctx, abilities, entity, victim, focused) {
+    if !super::hunter_dip::trap_victim_worth_it(ctx, abilities, entity, victim) {
         return Some(Err(TRAP_HELD_FREEABLE));
     }
     if super::hunter_dip::teammate_would_break_it(ctx, entity, Some(kill_target), victim) {
@@ -757,8 +757,10 @@ fn fallback_trap(
 /// (off cooldown, affordable) — otherwise silent, so the closing-range trace is
 /// unchanged. Thrown at the healer's led position only when it would catch the
 /// healer cleanly ([`pressure_trap_landing`](super::hunter_dip::pressure_trap_landing));
-/// a held throw is traced with why. On a throw at the Hunter's own kill
-/// target, the Hunter moves its target to the melee.
+/// a held throw is traced with why. A throw places a target hold on the
+/// Hunter ([`pressure_trap_hold`](super::hunter_dip::pressure_trap_hold)):
+/// target acquisition moves it off the healer and onto the melee, a
+/// configured kill target notwithstanding.
 fn try_pressure_trap(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -767,6 +769,7 @@ fn try_pressure_trap(
     combatant: &mut Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
+    now: f32,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::FreezingTrap;
@@ -781,25 +784,20 @@ fn try_pressure_trap(
     {
         return false;
     }
-    let healer = match super::hunter_dip::pressure_trap_healer(
-        ctx,
-        abilities,
-        entity,
-        combatant.team,
-        combatant.target,
-    ) {
-        None => return false,
-        Some(Err(note)) => {
-            builder.reject(
-                ability,
-                RejectionReason::PreconditionUnmet {
-                    note: note.to_string(),
-                },
-            );
-            return false;
-        }
-        Some(Ok(healer)) => healer,
-    };
+    let healer =
+        match super::hunter_dip::pressure_trap_healer(ctx, abilities, entity, combatant.team) {
+            None => return false,
+            Some(Err(note)) => {
+                builder.reject(
+                    ability,
+                    RejectionReason::PreconditionUnmet {
+                        note: note.to_string(),
+                    },
+                );
+                return false;
+            }
+            Some(Ok(healer)) => healer,
+        };
     let landing = match super::hunter_dip::pressure_trap_landing(
         ctx,
         abilities,
@@ -833,7 +831,9 @@ fn try_pressure_trap(
     ) {
         return false;
     }
-    combatant.target = super::hunter_dip::pressure_trap_retarget(combatant.target, healer, melee);
+    combatant.trap_retarget = Some(super::hunter_dip::pressure_trap_hold(
+        my_pos, landing, healer, melee, now,
+    ));
     true
 }
 
@@ -910,6 +910,10 @@ fn sting_due(target: Entity, target_info: &super::CombatantInfo, ctx: &CombatCon
 /// time, one not closing never arrives, and one held in hard CC past the cast
 /// cannot act. The cast time is read from `AbilityDefinitions`, with the
 /// Hunter's own haste auras applied.
+///
+/// An enemy the Hunter cannot see ([`CombatContext::enemy_hidden`]) counts as
+/// one that could stop it: a stealthed Rogue's distance and heading are
+/// unknown until it opens, and it opens in melee range.
 pub fn aimed_shot_has_time(
     abilities: &AbilityDefinitions,
     entity: Entity,
@@ -917,6 +921,9 @@ pub fn aimed_shot_has_time(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
 ) -> bool {
+    if ctx.enemy_hidden() {
+        return false;
+    }
     let cast = calculate_cast_time(
         abilities.get_unchecked(&AbilityType::AimedShot).cast_time,
         auras,
@@ -1506,7 +1513,6 @@ fn try_serpent_sting(
         .ability_cooldowns
         .contains_key(&AbilityType::FreezingTrap)
         && !ctx.has_friendly_dots_on_target(target_entity);
-    let focused = super::hunter_dip::trap_focus(ctx, entity, combatant.target);
     let fallback = fallback_trap(
         ctx,
         abilities,
@@ -1514,20 +1520,14 @@ fn try_serpent_sting(
         combatant.team,
         my_pos,
         target_entity,
-        &focused,
     )
     .and_then(|f| f.ok());
     // The healer the trap is held for while a melee could come onto the
     // Hunter ([`try_pressure_trap`]): a sting on it would make it untrappable
     // at the moment that trap is thrown.
     let pressure_victim = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos).is_some()
-        && super::hunter_dip::pressure_trap_healer(
-            ctx,
-            abilities,
-            entity,
-            combatant.team,
-            combatant.target,
-        ) == Some(Ok(target_entity));
+        && super::hunter_dip::pressure_trap_healer(ctx, abilities, entity, combatant.team)
+            == Some(Ok(target_entity));
     if trap_poised && (fallback.is_some_and(|f| f.victim == Some(target_entity)) || pressure_victim)
     {
         builder.reject(

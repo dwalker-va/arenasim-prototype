@@ -94,7 +94,7 @@ pub fn trap_system(
                 triggered_by = Some((
                     target_entity,
                     target_combatant.team,
-                    combat_log_id_for(&target_combatant, pet_query.get(target_entity).ok()),
+                    combat_log_id_for(target_combatant, pet_query.get(target_entity).ok()),
                 ));
                 break; // First enemy in range triggers it
             }

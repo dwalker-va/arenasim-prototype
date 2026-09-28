@@ -22,7 +22,7 @@ use bevy::prelude::*;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::{
-    ActiveAuras, Combatant, DRCategory, KitePosture, MovementDirective, MovementGoal,
+    ActiveAuras, Combatant, DRCategory, KitePosture, MovementDirective, MovementGoal, TrapRetarget,
 };
 use crate::states::play_match::decision_trace::{
     DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture,
@@ -132,21 +132,19 @@ pub fn trap_focus(
 ///   second dispeller stands behind it — a Warlock's Felhunter, a second healer
 ///   — the Hunter still takes the healer and lets that dispeller spend itself
 ///   undoing it. That is the intended counter being PLAYED.
-/// - Anyone else is worth it when no living teammate of theirs could free it
-///   ([`ally_freers`](super::ally_freers), the engine's own removal rules) —
-///   a trapped Felhunter included, which nobody can free —
-/// - **or when every such teammate is one the Hunter's team is killing**
-///   (`focused`). Freeing it then costs the focused dispeller a GCD it needed
-///   for its own survival: the trap is a trade, not a spent GCD.
+/// - Anyone else is worth it only when it would stay trapped
+///   ([`trap_would_stick`]) — a trapped Felhunter included, which nobody can
+///   free.
 ///
 /// Otherwise the trap would be lifted for nothing — AS-68 measured the median
-/// removal at 0.28s — and is held.
+/// removal at 0.28s — and is held. That holds even when the only teammate who
+/// could free it is one the Hunter's team is killing: a focused Priest still
+/// dispels its partner within a GCD or two, so such a trap buys nothing.
 pub fn trap_victim_worth_it(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
     owner: Entity,
     victim: Entity,
-    focused: &std::collections::BTreeSet<Entity>,
 ) -> bool {
     let Some(info) = ctx.combatants.get(&victim) else {
         return false;
@@ -154,24 +152,25 @@ pub fn trap_victim_worth_it(
     if !info.is_pet && info.class.is_healer() {
         return true;
     }
-    trap_would_stick(ctx, abilities, owner, victim, focused)
+    trap_would_stick(ctx, abilities, owner, victim)
 }
 
 /// Would a Freezing Trap on `victim` stay on it? True when no living teammate
 /// of `victim` could free it ([`ally_freers`](super::ally_freers), the engine's
-/// own removal rules), or every one that could is one the Hunter's team is
-/// killing (`focused`).
+/// own removal rules).
+///
+/// A Paladin's own Divine Shield is not asked: the bubble lifts a trap only
+/// when the Paladin's AI chooses to spend a 5-minute cooldown on it (a teammate
+/// low, or itself), and a trap that draws the bubble has spent the Paladin's
+/// one emergency button — a trade the Hunter takes.
 pub fn trap_would_stick(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
     owner: Entity,
     victim: Entity,
-    focused: &std::collections::BTreeSet<Entity>,
 ) -> bool {
     let aura = crate::states::play_match::traps::freezing_trap_aura(owner);
-    super::ally_freers(ctx, abilities, victim, &aura)
-        .iter()
-        .all(|freer| focused.contains(freer))
+    super::ally_freers(ctx, abilities, victim, &aura).is_empty()
 }
 
 /// The enemy healer to Freezing Trap while a melee is on the Hunter — the
@@ -185,11 +184,16 @@ pub fn trap_would_stick(
 ///   friendly DoT to break it on its first tick);
 /// - **would not be freed** ([`trap_would_stick`]) — a Rogue or Warrior
 ///   partner cannot free it, a Felhunter or a second healer can;
-/// - is not a unit a teammate of the Hunter's is killing ([`team_focus`]):
+/// - is not the target of a teammate who is killing it ([`team_focus`]):
 ///   every damage source holds fire on a trapped enemy, so trapping it would
-///   idle that teammate for the trap's duration. The Hunter's OWN kill target
-///   does not hold it: the Hunter moves its target to the melee on it when it
-///   throws ([`pressure_trap_retarget`]).
+///   idle that teammate for the trap's duration. A partner **healer** does not
+///   hold it, although its occasional Mind Blast or wand shot can break the
+///   trap ([`teammate_would_break_it`] counts healers, for the lane throw): a
+///   healer's target is wherever acquisition left it, usually the enemy
+///   healer, so counting it would hold this trap in nearly every Hunter +
+///   healer team — measured in the AS-125 findings doc. The Hunter's OWN
+///   target does not hold it either: the Hunter moves off the healer when it
+///   throws ([`TrapRetarget`]).
 ///
 /// `None` when no enemy healer is in view; otherwise the first eligible
 /// healer, or why the last one considered was passed over.
@@ -198,10 +202,7 @@ pub fn pressure_trap_healer(
     abilities: &AbilityDefinitions,
     entity: Entity,
     my_team: u8,
-    own_target: Option<Entity>,
 ) -> Option<Result<Entity, &'static str>> {
-    let focused = trap_focus(ctx, entity, own_target);
-    let team = team_focus(ctx, entity);
     let mut verdict = None;
     for healer in ctx
         .alive_enemies()
@@ -210,9 +211,9 @@ pub fn pressure_trap_healer(
     {
         let result = if !dip_target_eligible(ctx, my_team, healer.entity) {
             Err(PRESSURE_TRAP_INELIGIBLE)
-        } else if team.contains(&healer.entity) {
+        } else if team_focus(ctx, entity).contains(&healer.entity) {
             Err(PRESSURE_TRAP_TEAM_ATTACKING)
-        } else if !trap_would_stick(ctx, abilities, entity, healer.entity, &focused) {
+        } else if !trap_would_stick(ctx, abilities, entity, healer.entity) {
             Err(PRESSURE_TRAP_FREEABLE)
         } else {
             Ok(healer.entity)
@@ -254,19 +255,25 @@ pub fn pressure_trap_landing(
     Ok(landing)
 }
 
-/// The Hunter's kill target after a pressure trap on `healer`: when the Hunter
-/// was killing the healer, it moves to the melee on it (`melee`) — every shot
-/// holds fire on a trapped enemy, so staying on the healer would idle the
-/// Hunter for the trap's duration. Otherwise the target is unchanged.
-pub fn pressure_trap_retarget(
-    own_target: Option<Entity>,
+/// The target hold a pressure trap on `healer` places on the Hunter, handed
+/// to target acquisition (`acquire_targets`): while it lasts the Hunter's
+/// target is `melee`, never `healer` — every shot holds fire on a trapped
+/// enemy, so staying on the healer would idle the Hunter for the trap's
+/// duration, and a configured kill target re-forced onto the healer would do
+/// exactly that. It lasts until `healer` is dead, or until the trap was
+/// predicted to have sprung ([`trap_spring_deadline`]) and `healer` carries no
+/// Freezing Trap of this Hunter's.
+pub fn pressure_trap_hold(
+    my_pos: Vec3,
+    landing: Vec3,
     healer: Entity,
     melee: Entity,
-) -> Option<Entity> {
-    if own_target == Some(healer) {
-        Some(melee)
-    } else {
-        own_target
+    now: f32,
+) -> TrapRetarget {
+    TrapRetarget {
+        healer,
+        melee,
+        spring_by: now + trap_spring_deadline(my_pos, landing),
     }
 }
 
@@ -296,7 +303,7 @@ pub fn trap_setup_healer(
     if !ready {
         return None;
     }
-    pressure_trap_healer(ctx, abilities, entity, combatant.team, combatant.target)?.ok()
+    pressure_trap_healer(ctx, abilities, entity, combatant.team)?.ok()
 }
 
 /// How close to the healer the Hunter repositions to trap it: the trap's
@@ -387,6 +394,28 @@ pub const TRAP_SPRING_WINDOW: f32 = 3.0;
 /// Sampling step of [`predicted_trap_springer`]'s extrapolation, in seconds.
 const SPRING_PREDICTION_STEP: f32 = 0.05;
 
+/// Seconds from a throw at `my_pos` until the trap landing at `landing` arms:
+/// its launch travel (none for a drop inside `TRAP_LAUNCH_MIN_RANGE`), then
+/// `TRAP_ARM_DELAY`. Planar.
+pub fn trap_armed_after(my_pos: Vec3, landing: Vec3) -> f32 {
+    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+    let throw = flat(my_pos).distance(flat(landing));
+    let travel = if throw < TRAP_LAUNCH_MIN_RANGE {
+        0.0
+    } else {
+        throw / TRAP_LAUNCH_SPEED
+    };
+    travel + TRAP_ARM_DELAY
+}
+
+/// Seconds from a throw until the last moment [`predicted_trap_springer`]
+/// looks at: the trap arms ([`trap_armed_after`]), then
+/// [`TRAP_SPRING_WINDOW`]. A trap not sprung by then was not sprung by the
+/// enemy it was decided on.
+pub fn trap_spring_deadline(my_pos: Vec3, landing: Vec3) -> f32 {
+    trap_armed_after(my_pos, landing) + TRAP_SPRING_WINDOW
+}
+
 /// The enemy that would spring a trap thrown from `my_pos` to land at
 /// `landing`, or `None` when no enemy is predicted to reach it in time.
 ///
@@ -411,14 +440,8 @@ pub fn predicted_trap_springer(
     landing: Vec3,
 ) -> Option<Entity> {
     let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
-    let (landing, my_pos) = (flat(landing), flat(my_pos));
-    let throw = my_pos.distance(landing);
-    let travel = if throw < TRAP_LAUNCH_MIN_RANGE {
-        0.0
-    } else {
-        throw / TRAP_LAUNCH_SPEED
-    };
-    let armed = travel + TRAP_ARM_DELAY;
+    let armed = trap_armed_after(my_pos, landing);
+    let landing = flat(landing);
 
     let mut best: Option<(f32, f32, Entity)> = None;
     for enemy in ctx
@@ -463,24 +486,29 @@ pub fn predicted_trap_springer(
 
 /// Would the Hunter's own team break a Freezing Trap on `victim`? The trap
 /// breaks on any damage, and a teammate does not hold fire for it: true when a
-/// living non-pet teammate targets `victim`, or when `victim` is the Hunter's
-/// own kill target (`own_target`) and the Hunter has a living teammate at all
-/// — the team converges on it. Healers count: a wand or a Mind Blast breaks it
-/// as surely as a Mortal Strike. Alone, the Hunter and its pet hold fire on a
-/// trapped target, so in 1v1 this is always false.
+/// living teammate targets `victim` ([`teammate_targets`]), or when `victim` is
+/// the Hunter's own kill target (`own_target`) and the Hunter has a living
+/// teammate at all — the team converges on it. Alone, the Hunter and its pet
+/// hold fire on a trapped target, so in 1v1 this is always false.
 pub fn teammate_would_break_it(
     ctx: &CombatContext,
     entity: Entity,
     own_target: Option<Entity>,
     victim: Entity,
 ) -> bool {
-    let teammates: Vec<_> = ctx
+    let has_teammate = ctx
         .alive_allies()
         .into_iter()
-        .filter(|a| a.entity != entity)
-        .collect();
-    !teammates.is_empty()
-        && (own_target == Some(victim) || teammates.iter().any(|a| a.target == Some(victim)))
+        .any(|a| a.entity != entity && !a.is_pet);
+    teammate_targets(ctx, entity, victim) || (has_teammate && own_target == Some(victim))
+}
+
+/// Does a living non-pet teammate of the Hunter's target `victim`? Healers
+/// count: a wand or a Mind Blast breaks a trap as surely as a Mortal Strike.
+pub fn teammate_targets(ctx: &CombatContext, entity: Entity, victim: Entity) -> bool {
+    ctx.alive_allies()
+        .into_iter()
+        .any(|a| a.entity != entity && !a.is_pet && a.target == Some(victim))
 }
 
 /// Could a trap thrown into open ground be sprung by an enemy the Hunter
@@ -525,7 +553,7 @@ pub fn dip_target_candidate(
         .filter(|e| !focused.contains(&e.entity))
         .filter(|e| dip_target_eligible(ctx, my_team, e.entity))
         .filter(|e| my_pos.distance(e.position) <= reach)
-        .filter(|e| trap_victim_worth_it(ctx, abilities, owner, e.entity, focused))
+        .filter(|e| trap_victim_worth_it(ctx, abilities, owner, e.entity))
         .min_by(|a, b| {
             // Healers first (`!is_healer` is false=0 for healers, sorts first),
             // then nearest.

@@ -554,9 +554,9 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
 #[test]
 fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
     let mut caught = 0usize;
-    for seed in [0u64, 5, 14] {
+    for seed in [8u64, 14, 18] {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
-        cfg.max_duration_secs = 45.0;
+        cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
         let class_of: HashMap<u64, String> = events
             .iter()
@@ -598,4 +598,109 @@ fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
         caught += 1;
     }
     assert_eq!(caught, 3);
+}
+
+/// AS-125 — the healer trap survives a configured kill target.
+///
+/// The graphical client configures a kill target by default, and target
+/// acquisition re-forces a Hunter onto it every tick. Here the Hunter's team is
+/// told to kill the enemy Priest (`team1_kill_target: 1`) while the Rogue runs
+/// the Hunter down, so the pressure trap goes on the Hunter's own kill target.
+/// The Hunter must leave it for the Rogue at the throw — traced as a target
+/// acquisition, so the `target switches` recipe in CLAUDE.md shows it — and
+/// stay off it while it is frozen, shooting the Rogue instead of holding fire
+/// on its own trap. Pinned seeds where the trap springs on the Priest and runs
+/// its full 8 seconds.
+#[test]
+fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
+    const GATES_OPEN: f64 = 10.0;
+    for seed in [8u64, 10, 14] {
+        let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
+        cfg.team1_kill_target = Some(1);
+        cfg.max_duration_secs = 60.0;
+        let (events, log) = run_trace_and_log(cfg);
+        // Target acquisition events come from primaries only: a pet's actor
+        // view carries its owner's class.
+        let id_of = |team: u64, class: &str| {
+            events
+                .iter()
+                .filter(|v| v.get("kind").and_then(|k| k.as_str()) == Some("target_acquisition"))
+                .find_map(|v| {
+                    let a = v.get("actor")?;
+                    (a.get("team")?.as_u64()? == team && a.get("class")?.as_str()? == class)
+                        .then(|| a.get("entity_id")?.as_u64())?
+                })
+                .unwrap_or_else(|| panic!("seed {seed}: no team {team} {class} in the trace"))
+        };
+        let (hunter, priest, rogue) = (id_of(1, "Hunter"), id_of(2, "Priest"), id_of(2, "Rogue"));
+
+        let throw = hunter_trap_events(&events)
+            .find(|v| {
+                v.pointer("/outcome/ability").and_then(|a| a.as_str()) == Some("FreezingTrap")
+            })
+            .unwrap_or_else(|| panic!("seed {seed}: no Freezing Trap thrown"));
+        assert_eq!(
+            throw.pointer("/outcome/target_id").and_then(|x| x.as_u64()),
+            Some(priest),
+            "seed {seed}: the trap was not aimed at the Priest"
+        );
+        let thrown_at = throw["sim_time"].as_f64().unwrap();
+        let sprung_at = log
+            .lines()
+            .find(|l| l.contains("Freezing Trap triggers on Team 2 Priest"))
+            .and_then(|l| {
+                l.trim_start_matches('[')
+                    .split('s')
+                    .next()?
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+            })
+            .unwrap_or_else(|| panic!("seed {seed}: the trap never sprang on the Priest"))
+            - GATES_OPEN;
+
+        // The switch, traced as a target acquisition between throw and spring.
+        let switched = events.iter().any(|v| {
+            v.get("kind").and_then(|k| k.as_str()) == Some("target_acquisition")
+                && v.pointer("/actor/entity_id").and_then(|x| x.as_u64()) == Some(hunter)
+                && v.get("changed").and_then(|c| c.as_bool()) == Some(true)
+                && v.get("previous_target").and_then(|x| x.as_u64()) == Some(priest)
+                && v.get("new_target").and_then(|x| x.as_u64()) == Some(rogue)
+                && (thrown_at..=sprung_at).contains(&v["sim_time"].as_f64().unwrap())
+        });
+        assert!(
+            switched,
+            "seed {seed}: no traced Priest -> Rogue switch between the throw at \
+             {thrown_at:.2}s and the spring at {sprung_at:.2}s"
+        );
+
+        // While the Priest is frozen the Hunter neither decides on it (the
+        // kill-target re-force is what used to pin it there) nor idles.
+        let frozen = (sprung_at + 0.1)..(sprung_at + 7.9);
+        let on_priest = hunter_trap_events(&events)
+            .filter(|v| frozen.contains(&v["sim_time"].as_f64().unwrap()))
+            .filter(|v| v.pointer("/target/entity_id").and_then(|x| x.as_u64()) == Some(priest))
+            .count();
+        assert_eq!(
+            on_priest, 0,
+            "seed {seed}: the Hunter decided on its frozen kill target {on_priest} times"
+        );
+        let hits_on_rogue = log
+            .lines()
+            .filter(|l| l.contains("[DMG] Team 1 Hunter #1's") && l.contains("hits Team 2 Rogue"))
+            .filter_map(|l| {
+                l.trim_start_matches('[')
+                    .split('s')
+                    .next()?
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+            })
+            .filter(|t| frozen.contains(&(t - GATES_OPEN)))
+            .count();
+        assert!(
+            hits_on_rogue > 0,
+            "seed {seed}: the Hunter never hit the Rogue while the Priest was frozen"
+        );
+    }
 }

@@ -163,6 +163,10 @@ pub fn acquire_targets(
         .filter(|(_, _, _, _, _, _, _, is_pet)| !is_pet)
         .collect();
 
+    // The name a Hunter's own Freezing Trap aura carries, from the one
+    // definition `trap_system` applies.
+    let freezing_trap = super::traps::freezing_trap_aura(Entity::PLACEHOLDER).ability_name;
+
     // For each combatant, ensure they have a valid target
     for (entity, mut combatant, transform, _) in combatants.iter_mut() {
         if !combatant.is_alive() {
@@ -311,6 +315,70 @@ pub fn acquire_targets(
                         combatant.target = Some(*kt_entity);
                     }
                 }
+            }
+        }
+
+        // ===== Hunter: off the enemy its own Freezing Trap holds =====
+        // A Hunter holds fire on an enemy its own Freezing Trap has frozen (the
+        // trap breaks on any damage), so staying on it idles the Hunter for the
+        // trap's duration. It fights someone else instead: while its trap
+        // holds its target, and — for a trap thrown at the enemy healer under
+        // melee pressure (`TrapRetarget`) — from the throw, before the trap
+        // has sprung, preferring the melee on it. Applied after the kill-target
+        // re-force so a configured kill target cannot pull it back, and here
+        // rather than in the Hunter's AI so the switch is traced as a target
+        // acquisition like any other. Only a Hunter owns a Freezing Trap, so
+        // for every other class this block is inert.
+        let own_trap_on = |target: Entity| {
+            active_auras_map.get(&target).is_some_and(|auras| {
+                auras
+                    .iter()
+                    .any(|a| a.ability_name == freezing_trap && a.caster == Some(entity))
+            })
+        };
+        if let Some(hold) = combatant.trap_retarget {
+            let healer_alive = enemy_combatants.iter().any(|(e, ..)| *e == hold.healer);
+            if !healer_alive
+                || (decision_trace.current_sim_time > hold.spring_by && !own_trap_on(hold.healer))
+            {
+                combatant.trap_retarget = None;
+            }
+        }
+        let held = combatant.trap_retarget;
+        if let Some(avoid) = combatant
+            .target
+            .filter(|t| held.is_some_and(|h| h.healer == *t) || own_trap_on(*t))
+        {
+            let my_pos = transform.translation;
+            let fightable = |(e, _, stealthed, enemy_ss, _, _, immune, _): &&(
+                Entity,
+                Vec3,
+                bool,
+                bool,
+                match_config::CharacterClass,
+                f32,
+                bool,
+                bool,
+            )| {
+                *e != avoid && !own_trap_on(*e) && can_see(*stealthed, *enemy_ss) && !immune
+            };
+            let melee = held.and_then(|h| {
+                enemy_combatants
+                    .iter()
+                    .filter(fightable)
+                    .find(|(e, ..)| *e == h.melee)
+            });
+            let nearest = || {
+                enemy_combatants
+                    .iter()
+                    .filter(fightable)
+                    .filter(|(.., is_pet)| !is_pet)
+                    .min_by(|(_, a, ..), (_, b, ..)| {
+                        my_pos.distance(*a).total_cmp(&my_pos.distance(*b))
+                    })
+            };
+            if let Some((next, ..)) = melee.or_else(nearest) {
+                combatant.target = Some(*next);
             }
         }
 

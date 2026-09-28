@@ -833,7 +833,9 @@ jq -c 'select(.outcome.ability == "FreezingTrap") | {t: .sim_time, aimed_at: .ou
 
 # Why a Freezing Trap on the enemy healer was held while a melee was on the
 # Hunter (`hunter::try_pressure_trap`) — out of throw range, would not spring
-# it cleanly, a teammate killing it, a teammate of its would free it:
+# it cleanly, a teammate killing it, a teammate of its would free it. (A throw
+# moves the Hunter off that healer onto the melee, kill target or not; the
+# target-switch recipe above shows it.)
 jq -r 'select(.actor.class == "Hunter") | .candidates[]? | select(.ability == "FreezingTrap") | .reason.PreconditionUnmet.note // empty' $T | grep '^healer trap' | sort | uniq -c
 
 # Pet decisions grouped by owner
