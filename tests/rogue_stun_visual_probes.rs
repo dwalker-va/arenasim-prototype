@@ -52,7 +52,7 @@ impl Harness {
         Harness { app }
     }
 
-    /// A Rogue with a main-hand dagger socket, mirroring `class_weapon_loadout`.
+    /// A Rogue with a main-hand dagger socket, as `held_weapon_models` draws it.
     fn spawn_rogue(&mut self) -> Entity {
         let unit = self
             .app
@@ -516,7 +516,7 @@ fn crescents_expire_without_leaking() {
 
 #[test]
 fn a_caster_with_no_socket_still_gets_its_flourish() {
-    // The Mage has no `WeaponSocket` at all (`class_weapon_loadout`), so the
+    // This Mage has no `WeaponSocket` at all (none is spawned here), so the
     // stroke half of the router is unreachable for it. That must not suppress
     // the flourish — the bug the router restructure fixed.
     let mut h = Harness::new();

@@ -1374,9 +1374,9 @@ pub struct VisualBody {
 }
 
 /// Which weapon model a [`WeaponSocket`] holds. Decides the glTF asset, the
-/// mount pose, and the swing arc. Class-keyed for v1 (see the attack-animations
-/// plan KTD6); an equipment-keyed lookup can replace the mapping later without
-/// touching the animation layer.
+/// mount pose, and the swing arc. Chosen from the equipped item's weapon type
+/// by `weapon_model` in `play_match/mod.rs`, where the items drawn with a
+/// stand-in silhouette are named.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WeaponKind {
     TwoHandAxe,
