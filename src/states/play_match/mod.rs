@@ -1176,8 +1176,14 @@ fn weapon_model(item: &equipment::ItemConfig) -> WeaponModel {
 /// caster shows its wand and a Hunter its bow rather than the one-hander in
 /// their main-hand socket — and falls back to the main-hand item when the live
 /// socket holds nothing drawable (a caster with no wand still visibly holds its
-/// dagger). The OFF hand draws the off-hand item. An empty or undrawn socket
-/// draws nothing: a Rogue with no off-hand weapon holds one dagger.
+/// dagger). The OFF hand draws the off-hand item, by the rule the sim arms it
+/// with (`Combatant::apply_equipment`): an off-hand WEAPON is a second swing
+/// only for a class whose live socket is the main hand, so a Hunter — whose
+/// live socket is its bow — draws no off-hand weapon at all rather than a
+/// dagger that never swings. An off-hand item that is not a weapon (a shield)
+/// is carried, not swung, and draws for whoever may equip it. An empty or
+/// undrawn socket draws nothing: a Rogue with no off-hand weapon holds one
+/// dagger.
 ///
 /// [`CharacterClass::weapon_slot`]: match_config::CharacterClass::weapon_slot
 fn held_weapon_models(
@@ -1185,14 +1191,12 @@ fn held_weapon_models(
     loadout: &Loadout,
     item_defs: &ItemDefinitions,
 ) -> Vec<(WeaponKind, WeaponHand)> {
-    let drawn = |slot: equipment::ItemSlot| {
-        loadout
-            .get(&slot)
-            .and_then(|id| item_defs.get(id))
-            .and_then(|item| weapon_model(item).kind())
-    };
+    let item = |slot: equipment::ItemSlot| loadout.get(&slot).and_then(|id| item_defs.get(id));
+    let drawn = |slot| item(slot).and_then(|item| weapon_model(item).kind());
     let main = drawn(class.weapon_slot()).or_else(|| drawn(equipment::ItemSlot::MainHand));
-    let off = drawn(equipment::ItemSlot::OffHand);
+    let off = item(equipment::ItemSlot::OffHand)
+        .filter(|item| !item.is_weapon || class.weapon_slot() == equipment::ItemSlot::MainHand)
+        .and_then(|item| weapon_model(item).kind());
     main.map(|kind| (kind, WeaponHand::Main))
         .into_iter()
         .chain(off.map(|kind| (kind, WeaponHand::Off)))
@@ -1769,9 +1773,7 @@ mod view_scale_tests {
 mod held_weapon_tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
-    use equipment::{
-        load_default_loadouts, load_item_definitions, ItemId, ItemSlot, ItemSlotType,
-    };
+    use equipment::{load_default_loadouts, load_item_definitions, ItemId, ItemSlot, ItemSlotType};
     use match_config::CharacterClass as C;
     use std::collections::BTreeSet;
 
@@ -1800,8 +1802,17 @@ mod held_weapon_tests {
     /// `spawn_combatant`, and reads every weapon it holds back as the model
     /// asset it loaded and the side of the body its world pose sits on.
     fn held(class: C, loadout: &[(ItemSlot, ItemId)]) -> Vec<(&'static str, Side)> {
+        spawn_held(class, loadout).0
+    }
+
+    /// [`held`], plus whether the spawned combatant's sim swings its off hand.
+    /// Refuses a loadout the equipment picker could not produce, so every case
+    /// here is one a player can build.
+    fn spawn_held(class: C, loadout: &[(ItemSlot, ItemId)]) -> (Vec<(&'static str, Side)>, bool) {
         let item_defs = items();
         let loadout: Loadout = loadout.iter().copied().collect();
+        equipment::validate_class_restrictions(class, &loadout, &item_defs)
+            .expect("a loadout the picker offers");
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -1864,7 +1875,11 @@ mod held_weapon_tests {
             })
             .collect();
         out.sort();
-        out
+        let dual_wielding = world
+            .get::<Combatant>(unit)
+            .expect("the spawned combatant")
+            .is_dual_wielding();
+        (out, dual_wielding)
     }
 
     fn default_loadout(class: C) -> Vec<(ItemSlot, ItemId)> {
@@ -1905,6 +1920,25 @@ mod held_weapon_tests {
         assert_eq!(held(C::Rogue, &loadout), vec![(DAGGER, MainHand)]);
     }
 
+    /// A Rogue's off hand draws what it holds: a held tome is not drawn, a
+    /// one-handed mace is.
+    #[test]
+    fn a_rogue_off_hand_draws_what_it_holds() {
+        let tome = [
+            (ItemSlot::MainHand, ItemId::SerpentFangDagger),
+            (ItemSlot::OffHand, ItemId::TomeOfKnowledge),
+        ];
+        assert_eq!(held(C::Rogue, &tome), vec![(DAGGER, MainHand)]);
+        let mace = [
+            (ItemSlot::MainHand, ItemId::SerpentFangDagger),
+            (ItemSlot::OffHand, ItemId::HammerOfTheRighteous),
+        ];
+        assert_eq!(
+            held(C::Rogue, &mace),
+            vec![(DAGGER, MainHand), (MACE, OffHand)]
+        );
+    }
+
     /// A two-hander and a dual-wield are different silhouettes on the same class.
     #[test]
     fn a_two_hander_and_a_dual_wield_look_different() {
@@ -1918,6 +1952,47 @@ mod held_weapon_tests {
             held(C::Warrior, &dual),
             vec![(DAGGER, OffHand), (MACE, MainHand)]
         );
+    }
+
+    /// A Hunter's live socket is its bow, so the sim never swings its off hand
+    /// and the model draws no off-hand weapon: a one-hander there is bow only,
+    /// not a static dagger in the left hand.
+    #[test]
+    fn a_hunter_draws_no_off_hand_weapon() {
+        let loadout = [
+            (ItemSlot::MainHand, ItemId::FrostbiteBlade),
+            (ItemSlot::OffHand, ItemId::SerpentFangDagger),
+            (ItemSlot::Ranged, ItemId::DeadeyeCrossbow),
+        ];
+        assert_eq!(
+            spawn_held(C::Hunter, &loadout),
+            (vec![(BOW, MainHand)], false)
+        );
+    }
+
+    /// Every off-hand item the picker offers every class is drawn exactly when
+    /// the sim uses it: an off-hand WEAPON draws iff the combatant swings it,
+    /// and a non-weapon (shield, frill) draws iff it has a model.
+    #[test]
+    fn every_off_hand_option_draws_as_the_sim_uses_it() {
+        let item_defs = items();
+        // Both outcomes must occur for an off-hand weapon, or the loop proved
+        // one side of the rule only.
+        let mut weapon_outcomes = BTreeSet::new();
+        for class in C::all() {
+            for (id, item) in item_defs.items_for_slot(ItemSlot::OffHand, *class) {
+                let (models, dual_wielding) = spawn_held(*class, &[(ItemSlot::OffHand, id)]);
+                let drawn = models.iter().any(|(_, side)| *side == OffHand);
+                let expected = if item.is_weapon {
+                    weapon_outcomes.insert(dual_wielding);
+                    dual_wielding
+                } else {
+                    weapon_model(item).kind().is_some()
+                };
+                assert_eq!(drawn, expected, "{class:?} with {id:?} in the off hand");
+            }
+        }
+        assert_eq!(weapon_outcomes, BTreeSet::from([false, true]));
     }
 
     /// A shield follows the item, not the class: a Warrior can carry one.

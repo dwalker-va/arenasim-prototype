@@ -55,8 +55,8 @@ impl Harness {
         Harness { app }
     }
 
-    /// A Paladin WITH a main-hand mace socket, exactly as `class_weapon_loadout`
-    /// gives it — so "no stroke" is proven to be a choice, not an accident of
+    /// A Paladin WITH a main-hand mace socket, as `held_weapon_models` draws its
+    /// default mace — so "no stroke" is proven to be a choice, not an accident of
     /// the Paladin having nothing to swing.
     fn spawn_paladin(&mut self) -> Entity {
         let unit = self

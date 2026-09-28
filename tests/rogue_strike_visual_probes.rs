@@ -74,7 +74,7 @@ impl Harness {
     }
 
     /// A Rogue with a main-hand dagger socket under a visual body, mirroring
-    /// the unit -> body -> socket hierarchy `class_weapon_loadout` builds.
+    /// the unit -> body -> socket hierarchy `spawn_combatant` builds.
     fn spawn_rogue(&mut self) -> Entity {
         let unit = self
             .app

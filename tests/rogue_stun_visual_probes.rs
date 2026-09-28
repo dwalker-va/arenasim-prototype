@@ -52,7 +52,7 @@ impl Harness {
         Harness { app }
     }
 
-    /// A Rogue with a main-hand dagger socket, mirroring `class_weapon_loadout`.
+    /// A Rogue with a main-hand dagger socket, as `held_weapon_models` draws it.
     fn spawn_rogue(&mut self) -> Entity {
         let unit = self
             .app
