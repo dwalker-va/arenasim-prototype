@@ -103,7 +103,7 @@ to `0.0` in `class_ai/shaman.rs` (`TotemElement::Air`, `0.12` -> `0.0`). The
 roll still happens, so the RNG draw order is unchanged. The results are
 `2026-09-28-as167_windfury_off_{before_17cb9f0,after}.csv`.
 
-## `2026-09-27-as125-hunter-directional.jsonl` and `-hunter-1v1.jsonl`
+## `2026-09-27-as125-hunter-directional.jsonl`, `-directional-kt0.jsonl` and `-hunter-1v1.jsonl`
 
 Behind `2026-09-27-as125-freezing-trap-dispeller.md` (card AS-125). The
 DIRECTIONAL tier for a Hunter change, on the default map (`BasicArena`; the
@@ -117,22 +117,36 @@ scripts/gen_sweep.py --full 2 --exclude-double-healer \
 scripts/gen_sweep.py --full 1 --affects Hunter --control-cells 8 --n 50
 ```
 
+`-directional-kt0.jsonl` is the 2v2 file with `team1_kill_target` and
+`team2_kill_target` set to 0 on every line — the graphical client's default,
+under which the Hunter's healer trap has to survive a kill-target re-force.
+
+The three attribution arms are patches against the branch that
+`git apply` cleanly: `2026-09-27-as125-arm-trade-trap.patch` (the trade trap
+back), `-arm-trap-setup-off.patch` (`movement.ron`'s Hunter `trap_setup` at
+0.0) and `-arm-opener-ignores-hidden.patch` (Aimed Shot may open while an
+enemy is hidden).
+
 `2026-09-27-as125-by-enemy.py <before.csv> <after.csv>` turns either pair of
 result CSVs into the per-enemy-comp table (Hunter-side win rate, flips, McNemar
 z per enemy comp), because a pooled bucket hides comps that move in opposite
 directions.
 
 Beside them, the trap-mechanism instrument the findings doc's per-trap tables
-come from: `2026-09-27-as125-trapmech.py <binary> <outdir> <jobs> [seeds]
-[comps]` runs 27 trap-relevant comps traced — every melee + healer shape the
+come from: `2026-09-27-as125-trapmech.py [--kill-target N[,M]] <binary> <outdir> <jobs>
+[seeds] [comps]` runs 27 trap-relevant comps traced — every melee + healer shape the
 healer trap reaches, in both slot orders the directional sweep fields for
 Rogue + Priest — pairs every Freezing Trap's intended victim (trace
 `target_id`, empty for a throw decided on an enemy the Hunter could not see)
-with whom it sprang on, how it ended and how long its victim was held (match
-log), and records each match's winner and first throw;
+with whom it sprang on, how it ended (a Divine Shield that lifts it counts as a
+removal) and how long its victim was held (match log), how many decisions the
+Hunter still aimed at a victim it held fire on, and records each match's
+winner and first throw;
 `2026-09-27-as125-trapsumm.py <before_outdir> [<after_outdir>]` tabulates them
 per comp, including the decided-victim vs springer match rate and the traps
-that caught a healer. Each match runs in its own directory
+that caught a healer. The committed `2026-09-27-as125_trap_{events,matches}.csv`
+are the four runs' `traps.csv` / `matches.csv` stacked, with `arm` and
+`kill_target` columns in front. Each match runs in its own directory
 with a link to the measured binary's own `assets/`, because single-match
 traces are stamped to the second and would collide in parallel. The binary
 must sit in a checkout (a `Cargo.toml` above it): a binary that classifies as

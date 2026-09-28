@@ -1,0 +1,14 @@
+diff --git a/src/states/play_match/class_ai/hunter.rs b/src/states/play_match/class_ai/hunter.rs
+index 4f2af1b..015ecc3 100644
+--- a/src/states/play_match/class_ai/hunter.rs
++++ b/src/states/play_match/class_ai/hunter.rs
+@@ -921,9 +921,6 @@ pub fn aimed_shot_has_time(
+     auras: Option<&ActiveAuras>,
+     ctx: &CombatContext,
+ ) -> bool {
+-    if ctx.enemy_hidden() {
+-        return false;
+-    }
+     let cast = calculate_cast_time(
+         abilities.get_unchecked(&AbilityType::AimedShot).cast_time,
+         auras,

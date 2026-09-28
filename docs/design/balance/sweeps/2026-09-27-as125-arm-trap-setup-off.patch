@@ -1,0 +1,13 @@
+diff --git a/assets/config/movement.ron b/assets/config/movement.ron
+index a669ba8..d53b047 100644
+--- a/assets/config/movement.ron
++++ b/assets/config/movement.ron
+@@ -161,7 +161,7 @@
+             los_seek: 1.0,          // Nudge toward a sighted angle when occluded in shot range — kept below flee (6.0) so escape still dominates; obstacle maps only
+             cover_pull: 0.0,        // bonus per threat a step is occluded from (kiters flee, they don't hide; obstacle maps only)
+         healer_leash: 4.0,      // pull back toward own healer once BEYOND heal range; zero inside, so it never opposes flee where fleeing is right. Below flee (6.0) deliberately: escaping still wins, this only bends the escape back toward support.
+-            trap_setup: 3.0,        // while Freezing Trap is ready and an enemy healer would be caught cleanly, pull toward it once BEYOND throw range (the trap's range less its trigger radius); zero inside, absent on cooldown. Below flee (6.0): the kite and the Disengage leap still carry the Hunter away from the melee, bent toward the healer.
++            trap_setup: 0.0,        // while Freezing Trap is ready and an enemy healer would be caught cleanly, pull toward it once BEYOND throw range (the trap's range less its trigger radius); zero inside, absent on cooldown. Below flee (6.0): the kite and the Disengage leap still carry the Hunter away from the melee, bent toward the healer.
+         ),
+         range_band_min: 8.0,       // HUNTER_DEAD_ZONE — can't shoot inside this
+         range_band_max: 34.0,      // ~AUTO_SHOT_RANGE — only pull in near the shot-range edge
