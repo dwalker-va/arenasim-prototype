@@ -125,7 +125,6 @@ fn spawn_socket(app: &mut App, owner: Entity, body: Entity, kind: WeaponKind) ->
                 rest: Transform::from_xyz(0.62, 0.55, 0.05),
                 release_t: None,
                 aim: Vec3::ZERO,
-                winds_up_next: true,
                 yaw_local: 0.0,
                 prev_owner_yaw: 0.0,
                 windup_s: 0.0,
@@ -147,6 +146,7 @@ fn swing(app: &mut App, attacker: Entity, target: Entity, kind: AutoAttackKind, 
         target,
         kind,
         is_crit,
+        hand: WeaponHand::Main,
     });
 }
 

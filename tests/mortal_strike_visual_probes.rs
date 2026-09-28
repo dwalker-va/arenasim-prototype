@@ -81,7 +81,6 @@ fn spawn_warrior(app: &mut App) -> (Entity, Entity) {
                 rest: Transform::IDENTITY,
                 release_t: None,
                 aim: Vec3::ZERO,
-                winds_up_next: true,
                 yaw_local: 0.0,
                 prev_owner_yaw: 0.0,
                 windup_s: 0.0,
@@ -217,6 +216,7 @@ fn an_ordinary_auto_clears_a_signature_style() {
         target,
         kind: AutoAttackKind::Melee,
         is_crit: false,
+        hand: WeaponHand::Main,
     });
     app.update();
 
@@ -248,6 +248,7 @@ fn a_same_tick_auto_does_not_downgrade_the_signature() {
         target,
         kind: AutoAttackKind::Melee,
         is_crit: false,
+        hand: WeaponHand::Main,
     });
     app.world_mut().spawn(InstantAbilityFired {
         caster: attacker,

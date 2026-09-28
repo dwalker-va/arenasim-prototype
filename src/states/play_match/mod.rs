@@ -1352,9 +1352,6 @@ pub(crate) fn spawn_combatant(
                     // Arena center: weapons face the enemy side of the map
                     // until target acquisition takes over after gates open.
                     aim: Vec3::ZERO,
-                    // The shield never swings; every other main hand starts as
-                    // the next swinger. The consumer alternates dagger pairs.
-                    winds_up_next: hand == WeaponHand::Main && kind != WeaponKind::Shield,
                     yaw_local: center_yaw,
                     prev_owner_yaw: 0.0,
                     windup_s: 0.0,
