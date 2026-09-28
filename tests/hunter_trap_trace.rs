@@ -56,7 +56,8 @@ fn a_placed_freezing_trap_records_the_enemy_it_was_aimed_at() {
     // Trap: the dip cast and opportunistic off-target drop on a healer (both
     // double-healer and single-healer), and the peel on a melee. A comp is only
     // useful here if it actually throws one, which the non-vacuity floor below
-    // enforces.
+    // enforces. None fields a Rogue: a lane trap thrown for a stealthed enemy
+    // cannot name it, and records no aim by design (pinned separately below).
     let comps: [(&[&str], &[&str], u64); 3] = [
         (&["Hunter", "Priest"], &["Priest", "Paladin"], 0),
         (&["Hunter", "Priest"], &["Warrior", "Priest"], 4),
@@ -326,8 +327,7 @@ fn a_one_v_one_trap_is_thrown_at_whoever_nobody_can_free() {
             }
             let aims: Vec<String> = hunter_trap_events(&events)
                 .filter(|v| {
-                    v.pointer("/outcome/ability").and_then(|a| a.as_str())
-                        == Some("FreezingTrap")
+                    v.pointer("/outcome/ability").and_then(|a| a.as_str()) == Some("FreezingTrap")
                 })
                 .map(|v| {
                     let id = v
@@ -362,7 +362,10 @@ fn a_one_v_one_trap_is_thrown_at_whoever_nobody_can_free() {
             );
             thrown += aims.len();
         }
-        assert!(thrown >= 3, "Hunter vs {enemy}: only {thrown} traps across 3 seeds");
+        assert!(
+            thrown >= 3,
+            "Hunter vs {enemy}: only {thrown} traps across 3 seeds"
+        );
     }
 }
 
@@ -444,5 +447,99 @@ fn no_trap_lands_beyond_its_range() {
         seen.len() >= 8 && kinds.contains("Freezing"),
         "only {} thrown traps observed ({kinds:?}) — the range probe went vacuous",
         seen.len()
+    );
+}
+
+/// AS-125 — a lane trap springs on the enemy it was decided on.
+///
+/// Hunter+Priest vs Warlock+Rogue: the lane throws come late, once the Priest
+/// and the Warlock are dead, and each is decided on the Rogue running the lane
+/// at the Hunter — never on the Felhunter nearest the landing, which then
+/// despawned with its Warlock while the Rogue sprang the trap. Pinned: every
+/// throw names the Rogue and springs on it.
+///
+/// Hunter+Priest vs Rogue+Warrior: at gates-open the Rogue is in stealth, the
+/// lane throw is decided on it without seeing it (nobody on its team could free
+/// it), so the trace records no aim — and it springs on the Rogue.
+#[test]
+fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
+    let class_of = |events: &[serde_json::Value]| {
+        let mut class_of: HashMap<u64, String> = HashMap::new();
+        for v in events {
+            if let Some(id) = v.pointer("/actor/entity_id").and_then(|x| x.as_u64()) {
+                let name = v
+                    .get("pet_type")
+                    .or_else(|| v.pointer("/actor/class"))
+                    .and_then(|x| x.as_str())
+                    .unwrap_or_default();
+                class_of.insert(id, name.to_string());
+            }
+        }
+        class_of
+    };
+    let throws = |events: &[serde_json::Value]| -> Vec<Option<u64>> {
+        hunter_trap_events(events)
+            .filter(|v| {
+                v.pointer("/outcome/ability").and_then(|a| a.as_str()) == Some("FreezingTrap")
+            })
+            .map(|v| v.pointer("/outcome/target_id").and_then(|x| x.as_u64()))
+            .collect()
+    };
+    let sprung_on = |log: &str| -> Vec<String> {
+        log.lines()
+            .filter_map(|l| l.split("Freezing Trap triggers on ").nth(1))
+            .map(|rest| rest.split(" —").next().unwrap_or_default().to_string())
+            .collect()
+    };
+
+    let mut named = 0usize;
+    for seed in [14u64, 16] {
+        let mut cfg = config(&["Hunter", "Priest"], &["Warlock", "Rogue"], seed);
+        cfg.max_duration_secs = 60.0;
+        let (events, log) = run_trace_and_log(cfg);
+        let classes = class_of(&events);
+        let aims: Vec<String> = throws(&events)
+            .into_iter()
+            .map(|id| {
+                id.and_then(|id| classes.get(&id).cloned())
+                    .unwrap_or_default()
+            })
+            .collect();
+        let sprung = sprung_on(&log);
+        assert!(
+            aims.iter().all(|a| a == "Rogue"),
+            "seed {seed}: lane trap decided on {aims:?}, not the Rogue"
+        );
+        assert_eq!(
+            sprung.len(),
+            aims.len(),
+            "seed {seed}: {} thrown, {} sprung: {sprung:?}",
+            aims.len(),
+            sprung.len()
+        );
+        assert!(
+            sprung.iter().all(|v| v.contains(" Rogue #")),
+            "seed {seed}: a trap decided on the Rogue sprang on {sprung:?}"
+        );
+        named += aims.len();
+    }
+    assert!(
+        named >= 2,
+        "only {named} lane traps across the pinned seeds"
+    );
+
+    let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Warrior"], 0);
+    cfg.max_duration_secs = 30.0;
+    let (events, log) = run_trace_and_log(cfg);
+    let aims = throws(&events);
+    assert_eq!(
+        aims,
+        vec![None],
+        "the opening lane trap against a stealthed Rogue records no aim"
+    );
+    let sprung = sprung_on(&log);
+    assert!(
+        sprung.len() == 1 && sprung[0].contains(" Rogue #"),
+        "the opening lane trap sprang on {sprung:?}, not the Rogue"
     );
 }

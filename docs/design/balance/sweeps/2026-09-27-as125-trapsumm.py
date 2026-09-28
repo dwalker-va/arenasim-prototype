@@ -3,9 +3,14 @@
 
 usage: trapsumm.py <before_outdir> [<after_outdir>]
 Per comp: matches, Hunter-side wins, traps thrown per match, matches with no
-trap at all, median first throw (s after the gates), where the traps sprang
-(on the intended victim / someone else), and how they ended (removed by an
-enemy dispel / broken by damage / ran the full duration / never sprung).
+trap at all, median first throw (s after the gates), where the traps sprang,
+and how they ended (removed by an enemy dispel / broken by damage / ran the
+full duration / never sprung).
+
+Where they sprang: of the sprung traps decided on a NAMED enemy (the trace's
+`target_id`), `hit` sprang on that enemy and `miss` on someone else — hit/(hit
++miss) is the decided-victim vs springer match rate. `unseen` counts sprung
+traps thrown for an enemy the Hunter could not see, which carry no aim.
 """
 import csv, statistics, sys
 from collections import Counter, defaultdict
@@ -24,7 +29,9 @@ def load(d):
 def summarise(traps, matches, comp):
     ms, ts = matches[comp], traps[comp]
     c = Counter(r["fate"] for r in ts)
-    hit = sum(1 for r in ts if r["fate"] != "unsprung" and r["sprung_class"] == r["intended_class"])
+    sprung = [r for r in ts if r["fate"] != "unsprung"]
+    named = [r for r in sprung if r["intended_class"]]
+    hit = sum(1 for r in named if r["sprung_class"] == r["intended_class"])
     firsts = [float(m["first_cast_after_gates"]) for m in ms if m["first_cast_after_gates"]]
     return {
         "n": len(ms),
@@ -34,7 +41,8 @@ def summarise(traps, matches, comp):
         "zero": sum(1 for m in ms if m["casts"] == "0"),
         "first": statistics.median(firsts) if firsts else None,
         "hit": hit,
-        "miss": sum(1 for r in ts if r["fate"] != "unsprung") - hit,
+        "miss": len(named) - hit,
+        "unseen": len(sprung) - len(named),
         "removed": c["removed"], "broke": c["broke"], "ran_out": c["ran_out"],
         "unsprung": c["unsprung"],
     }
@@ -44,6 +52,7 @@ def fmt(s):
     first = f"{s['first']:5.1f}" if s["first"] is not None else "    -"
     return (f"win {s['win']:2d}/{s['n']:<2d} traps {s['traps']:3d} ({s['per_match']:.2f}/m) "
             f"zero {s['zero']:2d} first {first} hit {s['hit']:3d} miss {s['miss']:3d} "
+            f"unseen {s['unseen']:3d} "
             f"rem {s['removed']:3d} brk {s['broke']:3d} full {s['ran_out']:3d} uns {s['unsprung']:2d}")
 
 

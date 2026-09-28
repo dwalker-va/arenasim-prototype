@@ -1421,14 +1421,23 @@ fn a_trap_is_worth_throwing_where_nobody_but_the_focus_frees_it() {
 
     use CharacterClass::*;
     // The dispeller is the target; the DPS it would free is not...
-    assert_eq!(worth(&[(a, Priest), (b, Warrior)], false, &[b]), [true, false]);
+    assert_eq!(
+        worth(&[(a, Priest), (b, Warrior)], false, &[b]),
+        [true, false]
+    );
     // ...until the dispeller is the one being killed: freeing the Warrior
     // then costs the focused Priest its GCD.
-    assert_eq!(worth(&[(a, Priest), (b, Warrior)], false, &[a]), [true, true]);
+    assert_eq!(
+        worth(&[(a, Priest), (b, Warrior)], false, &[a]),
+        [true, true]
+    );
     // Nobody on the team can free anybody: both are fair game.
     assert_eq!(worth(&[(a, Rogue), (b, Warrior)], false, &[]), [true, true]);
     // The Shaman frees nobody (Purge strips enemy buffs), so its DPS is fair.
-    assert_eq!(worth(&[(a, Shaman), (b, Warrior)], false, &[]), [true, true]);
+    assert_eq!(
+        worth(&[(a, Shaman), (b, Warrior)], false, &[]),
+        [true, true]
+    );
     // Warlock + healer: two dispellers. The healer stays the target; the
     // Warlock is freed by the Felhunter even while the Priest is focused; the
     // Felhunter itself nobody can free.
@@ -1492,4 +1501,140 @@ fn an_unseen_victim_is_answered_by_the_dispeller_in_view() {
         ..e(2, Priest)
     };
     assert!(!freed(&[hidden(1, Rogue), dead_priest]));
+}
+
+/// A lane trap is decided on the enemy that would SPRING it — the first inside
+/// its radius once it has armed — not on whoever stands nearest the landing
+/// when it is thrown. The throw here flies 15yd (0.75s) and arms 1.5s later.
+#[test]
+fn a_lane_trap_is_decided_on_whoever_reaches_it_after_it_arms() {
+    use arenasim::states::play_match::class_ai::hunter_dip::predicted_trap_springer;
+
+    let hunter = Entity::from_raw(0);
+    let landing = Vec3::new(0.0, 0.0, 15.0);
+    let at = |e: u32, class: CharacterClass, pos: Vec3, vel: Vec3, target: Option<Entity>| {
+        CombatantInfo {
+            position: pos,
+            velocity: vel,
+            target,
+            ..info(Entity::from_raw(e), 2, class)
+        }
+    };
+    let springer = |enemies: Vec<CombatantInfo>| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        for e in enemies {
+            snap.combatants.insert(e.entity, e);
+        }
+        let ctx = snap.context_for(hunter);
+        predicted_trap_springer(&ctx, 1, Vec3::ZERO, landing)
+    };
+    let toward_hunter = Vec3::new(0.0, 0.0, -7.0);
+
+    // The Warlock + Rogue case: a Felhunter stands nearest the landing, just
+    // outside the radius, while the Rogue runs the lane at the Hunter. The
+    // Rogue springs it.
+    let felhunter = CombatantInfo {
+        position: Vec3::new(8.0, 0.0, 15.0),
+        ..pet_info(Entity::from_raw(1), 2, CharacterClass::Warlock)
+    };
+    let rogue = at(
+        2,
+        CharacterClass::Rogue,
+        Vec3::new(0.0, 0.0, 40.0),
+        toward_hunter,
+        Some(hunter),
+    );
+    assert_eq!(
+        springer(vec![felhunter.clone(), rogue.clone()]),
+        Some(rogue.entity)
+    );
+    // Alone, the Felhunter never reaches it: nobody is predicted.
+    assert_eq!(springer(vec![felhunter]), None);
+
+    // An enemy already inside the radius and planted springs it as it arms.
+    let planted = at(3, CharacterClass::Warrior, landing, Vec3::ZERO, None);
+    assert_eq!(springer(vec![planted.clone()]), Some(planted.entity));
+
+    // An enemy that crosses the landing before it arms and runs on (chasing a
+    // unit far behind the Hunter) is gone by the time it could spring.
+    let through = at(
+        4,
+        CharacterClass::Warrior,
+        Vec3::new(0.0, 0.0, 20.0),
+        toward_hunter,
+        Some(hunter),
+    );
+    let mut far_ally = info(Entity::from_raw(5), 1, CharacterClass::Priest);
+    far_ally.position = Vec3::new(0.0, 0.0, -60.0);
+    let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+    snap.combatants.insert(far_ally.entity, far_ally.clone());
+    snap.combatants.insert(
+        through.entity,
+        CombatantInfo {
+            target: Some(far_ally.entity),
+            ..through
+        },
+    );
+    let ctx = snap.context_for(hunter);
+    assert_eq!(predicted_trap_springer(&ctx, 1, Vec3::ZERO, landing), None);
+
+    // A caster closing on the Hunter stops at its casting range, short of the
+    // landing; a melee from the same spot runs through it.
+    let priest = at(
+        6,
+        CharacterClass::Priest,
+        Vec3::new(0.0, 0.0, 50.0),
+        toward_hunter,
+        Some(hunter),
+    );
+    assert_eq!(springer(vec![priest]), None);
+    let warrior = at(
+        7,
+        CharacterClass::Warrior,
+        Vec3::new(0.0, 0.0, 40.0),
+        toward_hunter,
+        Some(hunter),
+    );
+    assert_eq!(springer(vec![warrior.clone()]), Some(warrior.entity));
+}
+
+/// The trap breaks on any damage, so a lane trap is never decided on an enemy
+/// the Hunter's own team is attacking: a teammate's target, or the Hunter's
+/// kill target once it has a teammate to converge on it. Alone, the Hunter and
+/// its pet hold fire on a trapped target, so the 1v1 peel on the kill target
+/// stands.
+#[test]
+fn a_lane_trap_is_not_thrown_onto_the_enemy_the_team_is_hitting() {
+    use arenasim::states::play_match::class_ai::hunter_dip::teammate_would_break_it;
+
+    let hunter = Entity::from_raw(0);
+    let (victim, other) = (Entity::from_raw(1), Entity::from_raw(2));
+    let breaks = |ally_target: Option<Option<Entity>>, own_target: Option<Entity>| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        snap.combatants
+            .insert(victim, info(victim, 2, CharacterClass::Warrior));
+        snap.combatants
+            .insert(other, info(other, 2, CharacterClass::Priest));
+        if let Some(target) = ally_target {
+            let ally = Entity::from_raw(3);
+            snap.combatants.insert(
+                ally,
+                CombatantInfo {
+                    target,
+                    ..info(ally, 1, CharacterClass::Priest)
+                },
+            );
+        }
+        let ctx = snap.context_for(hunter);
+        teammate_would_break_it(&ctx, hunter, own_target, victim)
+    };
+
+    // 1v1 (no teammate): the peel on the Hunter's own kill target stands.
+    assert!(!breaks(None, Some(victim)));
+    // With a teammate, the kill target is off-limits...
+    assert!(breaks(Some(None), Some(victim)));
+    // ...and so is anyone a teammate is hitting, healers included...
+    assert!(breaks(Some(Some(victim)), Some(other)));
+    // ...but not an enemy nobody on the team is attacking.
+    assert!(!breaks(Some(Some(other)), Some(other)));
 }

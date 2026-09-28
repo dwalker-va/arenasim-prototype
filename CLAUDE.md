@@ -824,8 +824,9 @@ jq -c 'select(.kind == "target_acquisition" and .changed)' $T
 # alone cannot say who the Hunter meant to catch. The chosen event carries the
 # intended victim in `target_id`; pair it with the `[TRAP] ... triggers on ...`
 # line in the .txt log to see whether the trap caught who it was aimed at.
-# (The Frost Trap dropped at the Hunter's own feet aims at nobody: target_id
-# is absent there.) Measured answer: `docs/design/balance/
+# (The Frost Trap dropped at the Hunter's own feet aims at nobody, and a lane
+# Freezing Trap thrown for a stealthed enemy cannot name it: target_id is
+# absent there.) Measured answer: `docs/design/balance/
 # 2026-09-18-as68-freezing-trap-diagnosis.md`.
 jq -c 'select(.outcome.ability == "FreezingTrap") | {t: .sim_time, aimed_at: .outcome.target_id}' $T
 

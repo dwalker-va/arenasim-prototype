@@ -33,7 +33,7 @@ use super::cast_guard::{pre_cast_ok, PreCastOpts};
 use super::healer_postures::start_movement_event_with_target;
 use super::CombatContext;
 use crate::states::play_match::constants::{
-    TRAP_ARM_DELAY, TRAP_LAUNCH_SPEED, TRAP_TRIGGER_RADIUS,
+    TRAP_ARM_DELAY, TRAP_LAUNCH_MIN_RANGE, TRAP_LAUNCH_SPEED, TRAP_TRIGGER_RADIUS,
 };
 
 /// How close the Hunter walks to the enemy healer before dropping the trap. A
@@ -159,22 +159,110 @@ pub fn trap_victim_worth_it(
         .all(|freer| focused.contains(freer))
 }
 
-/// The enemy a trap landing at `landing` would catch: a trap springs on the
-/// FIRST enemy inside its trigger radius, so its likeliest victim is the
-/// living enemy — pets included — nearest the landing. Only enemies the Hunter
-/// can see are candidates; [`unseen_victim_would_be_freed`] answers for the
-/// rest.
-pub fn expected_trap_victim(ctx: &CombatContext, my_team: u8, landing: Vec3) -> Option<Entity> {
-    ctx.combatants
+/// How long after a lane trap ARMS its victim must be predicted to reach it.
+/// Motion is extrapolated from this frame's heading, and every unit re-decides
+/// its path each tick, so a prediction further out is guesswork: a trap nobody
+/// is predicted to reach within the window catches whoever wanders in later,
+/// which is a decision nobody made.
+pub const TRAP_SPRING_WINDOW: f32 = 3.0;
+
+/// Sampling step of [`predicted_trap_springer`]'s extrapolation, in seconds.
+const SPRING_PREDICTION_STEP: f32 = 0.05;
+
+/// The enemy that would spring a trap thrown from `my_pos` to land at
+/// `landing`, or `None` when no enemy is predicted to reach it in time.
+///
+/// A trap springs on the FIRST enemy inside its trigger radius once it has
+/// ARMED (launch travel, then `TRAP_ARM_DELAY`), so the victim is not whoever
+/// stands nearest the landing now but whoever is inside the radius first after
+/// arming. Each visible living enemy, pets included, is extrapolated along its
+/// estimated [`velocity`](super::CombatantInfo::velocity) (zero while casting),
+/// stopping at its preferred range of its own target when it is heading toward
+/// it — a pursuer does not run through the unit it is chasing, and a caster
+/// stops at casting range. The springer is the
+/// one inside the radius earliest in `[armed, armed + TRAP_SPRING_WINDOW]`
+/// (ties: nearest the landing, then entity order). An enemy that crosses the
+/// landing before it arms and runs on is not a springer.
+///
+/// Only enemies the Hunter can see are candidates;
+/// [`unseen_victim_would_be_freed`] answers for the rest.
+pub fn predicted_trap_springer(
+    ctx: &CombatContext,
+    my_team: u8,
+    my_pos: Vec3,
+    landing: Vec3,
+) -> Option<Entity> {
+    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+    let (landing, my_pos) = (flat(landing), flat(my_pos));
+    let throw = my_pos.distance(landing);
+    let travel = if throw < TRAP_LAUNCH_MIN_RANGE {
+        0.0
+    } else {
+        throw / TRAP_LAUNCH_SPEED
+    };
+    let armed = travel + TRAP_ARM_DELAY;
+
+    let mut best: Option<(f32, f32, Entity)> = None;
+    for enemy in ctx
+        .combatants
         .values()
         .filter(|e| e.team != my_team && e.is_alive)
-        .min_by(|a, b| {
-            a.position
-                .distance(landing)
-                .partial_cmp(&b.position.distance(landing))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|e| e.entity)
+    {
+        let start = flat(enemy.position);
+        let velocity = flat(enemy.velocity);
+        let speed = velocity.length();
+        let heading = velocity.normalize_or_zero();
+        // A pursuer stops at its preferred range of its target, as pursuit in
+        // `move_to_target` does: the closest approach along its heading, less
+        // that range. Heading away (a kiter), or with no target in view, it
+        // keeps going.
+        let stop = match enemy.pet_type {
+            Some(pet_type) => pet_type.preferred_range(),
+            None => enemy.class.preferred_range(),
+        };
+        let reach = enemy
+            .target
+            .and_then(|t| ctx.combatants.get(&t))
+            .map(|t| (flat(t.position) - start).dot(heading))
+            .filter(|along| *along > 0.0)
+            .map_or(f32::INFINITY, |along| (along - stop).max(0.0));
+        let steps = (TRAP_SPRING_WINDOW / SPRING_PREDICTION_STEP).round() as usize;
+        let first_inside = (0..=steps)
+            .map(|i| armed + i as f32 * SPRING_PREDICTION_STEP)
+            .find(|t| {
+                let at = start + heading * (speed * t).min(reach);
+                at.distance(landing) <= TRAP_TRIGGER_RADIUS
+            });
+        if let Some(t) = first_inside {
+            let key = (t, start.distance(landing), enemy.entity);
+            if best.is_none_or(|b| (key.0, key.1) < (b.0, b.1)) {
+                best = Some(key);
+            }
+        }
+    }
+    best.map(|(_, _, e)| e)
+}
+
+/// Would the Hunter's own team break a Freezing Trap on `victim`? The trap
+/// breaks on any damage, and a teammate does not hold fire for it: true when a
+/// living non-pet teammate targets `victim`, or when `victim` is the Hunter's
+/// own kill target (`own_target`) and the Hunter has a living teammate at all
+/// — the team converges on it. Healers count: a wand or a Mind Blast breaks it
+/// as surely as a Mortal Strike. Alone, the Hunter and its pet hold fire on a
+/// trapped target, so in 1v1 this is always false.
+pub fn teammate_would_break_it(
+    ctx: &CombatContext,
+    entity: Entity,
+    own_target: Option<Entity>,
+    victim: Entity,
+) -> bool {
+    let teammates: Vec<_> = ctx
+        .alive_allies()
+        .into_iter()
+        .filter(|a| a.entity != entity)
+        .collect();
+    !teammates.is_empty()
+        && (own_target == Some(victim) || teammates.iter().any(|a| a.target == Some(victim)))
 }
 
 /// Could a trap thrown into open ground be sprung by an enemy the Hunter
