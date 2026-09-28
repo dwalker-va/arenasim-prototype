@@ -1107,47 +1107,96 @@ fn walk_phase_seed(xz: Vec2) -> f32 {
     (xz.x * 7.314 + xz.y * 11.927).rem_euclid(std::f32::consts::TAU)
 }
 
-/// Class-default weapon set for v1 (plan KTD6): hardcoded per class, positioned
-/// so the deferred equipment-keyed lookup can replace this one match without
-/// touching the animation layer. Classes not listed hold nothing (the wand
-/// casters) — their auto-attack swing signals no-op against zero sockets.
+/// How a weapon-socket item is drawn.
 ///
-/// The `Shaman => Mace` arm is a deliberate STOPGAP. Now that the Shaman's
-/// auto-attack derives from its main-hand mace it swings in melee, and without
-/// a socket it would swing empty hands. The right fix is to key this table off
-/// the equipped item rather than the class — which is exactly what AS-124,
-/// AS-128's Card C and AS-132 (cluster C) exist to do. This arm goes away with
-/// them, and AS-132 should note that it lives only on this branch: on `main`
-/// four classes (Mage, Priest, Warlock, Shaman) have no entry here at all.
-fn class_weapon_loadout(
-    class: match_config::CharacterClass,
-) -> &'static [(WeaponKind, WeaponHand)] {
-    // Exhaustive since the caster wands landed — every class holds something,
-    // so there is no `_` arm left and a NEW class is a compile error here
-    // rather than a combatant that silently swings empty hands.
-    use match_config::CharacterClass as C;
-    match class {
-        C::Warrior => &[(WeaponKind::TwoHandAxe, WeaponHand::Main)],
-        C::Rogue => &[
-            (WeaponKind::Dagger, WeaponHand::Main),
-            (WeaponKind::Dagger, WeaponHand::Off),
-        ],
-        C::Hunter => &[(WeaponKind::Bow, WeaponHand::Main)],
-        C::Paladin => &[
-            (WeaponKind::Mace, WeaponHand::Main),
-            (WeaponKind::Shield, WeaponHand::Off),
-        ],
-        C::Shaman => &[(WeaponKind::Mace, WeaponHand::Main)],
-        // The three casters that actually fire a wand: `apply_equipment`
-        // derives `AutoAttackKind::Wand` for each of them from the item in
-        // their Ranged socket, and `weapon_slot()` sends all three there.
-        //
-        // The Shaman is deliberately NOT here even though its wand school is
-        // mapped (`wand_attack::wand_school`): since AS-138 it swings the mace
-        // above and its Ranged socket holds a relic, so a wand in its hand
-        // would be a prop it never uses.
-        C::Mage | C::Priest | C::Warlock => &[(WeaponKind::Wand, WeaponHand::Main)],
+/// The art is six silhouettes ([`WeaponKind`]) and the item set spans sixteen
+/// [`WeaponType`]s, so the mapping cannot be one-to-one. Rather than approximate
+/// quietly, every item says which of three things it gets: its own model, a
+/// STAND-IN silhouette from the same grip family (a one-handed sword draws the
+/// dagger, a staff draws the two-hand axe, a crossbow draws the bow), or
+/// nothing at all. `the_proxied_and_undrawn_items_are_named` pins which shipped
+/// items land in the last two, so a new item cannot join either silently.
+///
+/// [`WeaponType`]: equipment::WeaponType
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum WeaponModel {
+    /// The item's own silhouette.
+    Exact(WeaponKind),
+    /// No model of its own: drawn with the nearest one of the same grip, so
+    /// the swing arc and the one-/two-hand read are right even though the
+    /// shape is not. Adding the missing art turns the arm into [`Self::Exact`].
+    Proxy(WeaponKind),
+    /// Held but not drawn: a relic is not carried in the hand, and a held
+    /// tome or orb has no art.
+    NotDrawn,
+}
+
+impl WeaponModel {
+    fn kind(self) -> Option<WeaponKind> {
+        match self {
+            WeaponModel::Exact(kind) | WeaponModel::Proxy(kind) => Some(kind),
+            WeaponModel::NotDrawn => None,
+        }
     }
+}
+
+/// The model an item is drawn with. Wildcard-free over [`WeaponType`], so a
+/// new weapon type is a compile error here until it answers.
+///
+/// [`WeaponType`]: equipment::WeaponType
+fn weapon_model(item: &equipment::ItemConfig) -> WeaponModel {
+    use equipment::WeaponType as W;
+    use WeaponKind as K;
+    use WeaponModel::{Exact, NotDrawn, Proxy};
+    let two_handed = item.held() == Some(equipment::HeldSlot::TwoHand);
+    match (item.weapon_type, two_handed) {
+        (W::Axe, true) => Exact(K::TwoHandAxe),
+        (W::Mace, false) => Exact(K::Mace),
+        (W::Dagger, _) => Exact(K::Dagger),
+        (W::Bow, _) => Exact(K::Bow),
+        (W::Wand, _) => Exact(K::Wand),
+        (W::Shield, _) => Exact(K::Shield),
+        // Two-handers without art share the two-hand axe's grip and chop.
+        (W::Mace | W::Sword, true) | (W::Staff | W::Polearm, _) => Proxy(K::TwoHandAxe),
+        // One-handed chopping heads share the mace's.
+        (W::Axe, false) => Proxy(K::Mace),
+        // One-handed blades share the dagger's.
+        (W::Sword, false) | (W::Fist, _) => Proxy(K::Dagger),
+        // Every ranged physical weapon is loosed like the bow, which also
+        // keeps the Auto Shot draw keyed on `WeaponKind::Bow` working.
+        (W::Gun | W::Crossbow | W::Thrown, _) => Proxy(K::Bow),
+        (W::OffhandFrill | W::Relic | W::None, _) => NotDrawn,
+    }
+}
+
+/// The weapon models a combatant holds, read off its equipped loadout.
+///
+/// One model per hand. The MAIN hand draws the weapon the auto-attack fires
+/// from — the class's live socket ([`CharacterClass::weapon_slot`]), so a
+/// caster shows its wand and a Hunter its bow rather than the one-hander in
+/// their main-hand socket — and falls back to the main-hand item when the live
+/// socket holds nothing drawable (a caster with no wand still visibly holds its
+/// dagger). The OFF hand draws the off-hand item. An empty or undrawn socket
+/// draws nothing: a Rogue with no off-hand weapon holds one dagger.
+///
+/// [`CharacterClass::weapon_slot`]: match_config::CharacterClass::weapon_slot
+fn held_weapon_models(
+    class: match_config::CharacterClass,
+    loadout: &Loadout,
+    item_defs: &ItemDefinitions,
+) -> Vec<(WeaponKind, WeaponHand)> {
+    let drawn = |slot: equipment::ItemSlot| {
+        loadout
+            .get(&slot)
+            .and_then(|id| item_defs.get(id))
+            .and_then(|item| weapon_model(item).kind())
+    };
+    let main = drawn(class.weapon_slot()).or_else(|| drawn(equipment::ItemSlot::MainHand));
+    let off = drawn(equipment::ItemSlot::OffHand);
+    main.map(|kind| (kind, WeaponHand::Main))
+        .into_iter()
+        .chain(off.map(|kind| (kind, WeaponHand::Off)))
+        .collect()
 }
 
 /// Asset path for each weapon model (all CC0 — see assets/models/weapons/LICENSE.md).
@@ -1325,8 +1374,8 @@ pub(crate) fn spawn_combatant(
         ))
         .id();
     commands.entity(entity).add_child(body);
-    // Class-default weapon set (plan KTD6): each held item is a WeaponSocket
-    // child of the VisualBody, so walk bob / death sink / victory bounce and
+    // The equipped weapons (`held_weapon_models`): each held item is a
+    // WeaponSocket child of the VisualBody, so walk bob / death sink / victory bounce and
     // match-exit despawn all carry the weapons for free. Graphical-only —
     // headless has its own mesh-free spawn path and never runs this fn.
     // Weapons start aimed at arena center (toward the enemy gates), so they
@@ -1336,7 +1385,7 @@ pub(crate) fn spawn_combatant(
     } else {
         0.0
     };
-    for &(kind, hand) in class_weapon_loadout(class) {
+    for (kind, hand) in held_weapon_models(class, equipment_loadout, item_defs) {
         let rest = weapon_mount(kind, hand);
         let socket = commands
             .spawn((
@@ -1709,5 +1758,250 @@ mod view_scale_tests {
             corner_sum: 14.0,
         };
         assert_eq!(arena_view_scale(&tiny), 1.0);
+    }
+}
+
+// ============================================================================
+// Held weapon models
+// ============================================================================
+
+#[cfg(test)]
+mod held_weapon_tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use equipment::{
+        load_default_loadouts, load_item_definitions, ItemId, ItemSlot, ItemSlotType,
+    };
+    use match_config::CharacterClass as C;
+    use std::collections::BTreeSet;
+
+    const AXE: &str = "models/weapons/axe_2handed.gltf";
+    const DAGGER: &str = "models/weapons/dagger.gltf";
+    const BOW: &str = "models/weapons/bow_wooden.glb";
+    const MACE: &str = "models/weapons/hammer_double.glb";
+    const SHIELD: &str = "models/weapons/shield_round.gltf";
+    const WAND: &str = "models/weapons/wand_rod.gltf";
+
+    /// Which side of the body a weapon's WORLD position sits on. The unit
+    /// spawns at the origin facing +Z at identity rotation, so the main hand
+    /// is at +x and the off hand at -x.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord)]
+    enum Side {
+        MainHand,
+        OffHand,
+    }
+    use Side::{MainHand, OffHand};
+
+    fn items() -> ItemDefinitions {
+        load_item_definitions().expect("items.ron loads")
+    }
+
+    /// Spawns `class` wearing `loadout` through the match's own
+    /// `spawn_combatant`, and reads every weapon it holds back as the model
+    /// asset it loaded and the side of the body its world pose sits on.
+    fn held(class: C, loadout: &[(ItemSlot, ItemId)]) -> Vec<(&'static str, Side)> {
+        let item_defs = items();
+        let loadout: Loadout = loadout.iter().copied().collect();
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            TransformPlugin,
+        ));
+        app.init_asset::<Mesh>();
+        app.init_asset::<StandardMaterial>();
+        app.init_asset::<Scene>();
+        app.insert_resource(item_defs);
+        let unit = app
+            .world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut meshes: ResMut<Assets<Mesh>>,
+                      mut materials: ResMut<Assets<StandardMaterial>>,
+                      assets: Res<AssetServer>,
+                      item_defs: Res<ItemDefinitions>| {
+                    spawn_combatant(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &assets,
+                        1,
+                        0,
+                        class,
+                        Vec3::ZERO,
+                        0,
+                        match_config::RogueOpener::default(),
+                        match_config::RoguePoison::default(),
+                        Vec::new(),
+                        match_config::WarriorShout::default(),
+                        match_config::MageArmor::default(),
+                        match_config::PaladinAura::default(),
+                        &loadout,
+                        &item_defs,
+                    )
+                    .0
+                },
+            )
+            .expect("spawn system runs");
+        app.update();
+
+        let world = app.world_mut();
+        let models = [AXE, DAGGER, BOW, MACE, SHIELD, WAND];
+        let mut query = world.query::<(&WeaponSocket, &SceneRoot, &GlobalTransform)>();
+        let assets = world.resource::<AssetServer>().clone();
+        let mut out: Vec<(&'static str, Side)> = query
+            .iter(world)
+            .filter(|(socket, ..)| socket.owner == unit)
+            .map(|(_, scene, global)| {
+                let path = assets.get_path(scene.0.id()).expect("a loaded model path");
+                let model = models
+                    .into_iter()
+                    .find(|m| path.path().to_str() == Some(*m))
+                    .unwrap_or_else(|| panic!("unexpected weapon asset {path}"));
+                let x = global.translation().x;
+                assert!(x.abs() > 0.3, "{model} sits on neither side (x = {x})");
+                (model, if x > 0.0 { MainHand } else { OffHand })
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    fn default_loadout(class: C) -> Vec<(ItemSlot, ItemId)> {
+        let item_defs = items();
+        let defaults = load_default_loadouts(&item_defs).expect("loadouts.ron loads");
+        resolve_equipped_loadout(class, &defaults, &Loadout::new(), &item_defs)
+            .into_iter()
+            .collect()
+    }
+
+    /// Every class's DEFAULT loadout is drawn with its own models — no stand-in
+    /// is needed for anything a match ships with by default.
+    #[test]
+    fn every_default_loadout_draws_what_it_holds() {
+        for (class, expected) in [
+            (C::Warrior, vec![(AXE, MainHand)]),
+            (C::Rogue, vec![(DAGGER, MainHand), (DAGGER, OffHand)]),
+            (C::Hunter, vec![(BOW, MainHand)]),
+            (C::Paladin, vec![(MACE, MainHand), (SHIELD, OffHand)]),
+            // The Shaman's off hand is a tome and its ranged socket a totem:
+            // neither is drawn.
+            (C::Shaman, vec![(MACE, MainHand)]),
+            // The casters fire a wand from the ranged socket; that, not the
+            // dagger in their main-hand socket, is what they hold up.
+            (C::Mage, vec![(WAND, MainHand)]),
+            (C::Priest, vec![(WAND, MainHand)]),
+            (C::Warlock, vec![(WAND, MainHand)]),
+        ] {
+            assert_eq!(held(class, &default_loadout(class)), expected, "{class:?}");
+        }
+    }
+
+    /// A Rogue with no off-hand weapon holds ONE dagger — the second dagger the
+    /// class table used to draw regardless is gone.
+    #[test]
+    fn a_single_wielding_rogue_holds_one_dagger() {
+        let loadout = [(ItemSlot::MainHand, ItemId::SerpentFangDagger)];
+        assert_eq!(held(C::Rogue, &loadout), vec![(DAGGER, MainHand)]);
+    }
+
+    /// A two-hander and a dual-wield are different silhouettes on the same class.
+    #[test]
+    fn a_two_hander_and_a_dual_wield_look_different() {
+        let two_hander = [(ItemSlot::MainHand, ItemId::ArcaniteReaper)];
+        let dual = [
+            (ItemSlot::MainHand, ItemId::HammerOfTheRighteous),
+            (ItemSlot::OffHand, ItemId::SerpentFangDagger),
+        ];
+        assert_eq!(held(C::Warrior, &two_hander), vec![(AXE, MainHand)]);
+        assert_eq!(
+            held(C::Warrior, &dual),
+            vec![(DAGGER, OffHand), (MACE, MainHand)]
+        );
+    }
+
+    /// A shield follows the item, not the class: a Warrior can carry one.
+    #[test]
+    fn a_shield_is_drawn_for_whoever_equips_it() {
+        let loadout = [
+            (ItemSlot::MainHand, ItemId::HammerOfTheRighteous),
+            (ItemSlot::OffHand, ItemId::WallOfTheDeadShield),
+        ];
+        assert_eq!(
+            held(C::Warrior, &loadout),
+            vec![(MACE, MainHand), (SHIELD, OffHand)]
+        );
+    }
+
+    /// A caster with no wand still visibly holds the weapon in its main hand.
+    #[test]
+    fn a_caster_without_a_wand_holds_its_main_hand_weapon() {
+        let loadout = [
+            (ItemSlot::MainHand, ItemId::Witchblade),
+            (ItemSlot::OffHand, ItemId::TomeOfKnowledge),
+        ];
+        assert_eq!(held(C::Mage, &loadout), vec![(DAGGER, MainHand)]);
+    }
+
+    /// Stand-ins are drawn in the right hand with the right grip family.
+    #[test]
+    fn proxied_items_draw_their_stand_in() {
+        let crossbow = [(ItemSlot::Ranged, ItemId::DeadeyeCrossbow)];
+        assert_eq!(held(C::Hunter, &crossbow), vec![(BOW, MainHand)]);
+        let staff = [(ItemSlot::MainHand, ItemId::CrescentStaff)];
+        assert_eq!(held(C::Warrior, &staff), vec![(AXE, MainHand)]);
+        let sword = [(ItemSlot::MainHand, ItemId::FrostbiteBlade)];
+        assert_eq!(held(C::Rogue, &sword), vec![(DAGGER, MainHand)]);
+    }
+
+    /// Names every shipped weapon-socket item that is NOT drawn with its own
+    /// model, as an exact set: a new item without art must be added here on
+    /// purpose, so the gap between the item set and the models stays visible.
+    #[test]
+    fn the_proxied_and_undrawn_items_are_named() {
+        let item_defs = items();
+        let mut proxied = BTreeSet::new();
+        let mut undrawn = BTreeSet::new();
+        let mut exact = 0;
+        for (id, item) in item_defs.iter() {
+            if item.held().is_none() && item.slot != ItemSlotType::Ranged {
+                continue;
+            }
+            match weapon_model(item) {
+                WeaponModel::Exact(_) => exact += 1,
+                WeaponModel::Proxy(_) => {
+                    proxied.insert(id.as_str());
+                }
+                WeaponModel::NotDrawn => {
+                    undrawn.insert(id.as_str());
+                }
+            }
+        }
+        assert_eq!(
+            proxied,
+            BTreeSet::from([
+                "AzuresongMageblade",
+                "CrescentStaff",
+                "DeadeyeCrossbow",
+                "FrostbiteBlade",
+                "RunestaffOfElements",
+                "SniperScope",
+                "StormbladeEdge",
+            ])
+        );
+        assert_eq!(
+            undrawn,
+            BTreeSet::from([
+                "GrimoireOfShadows",
+                "LibramOfGrace",
+                "LibramOfHope",
+                "LibramOfTruth",
+                "TomeOfKnowledge",
+                "TotemOfLife",
+                "TotemOfRage",
+                "TotemOfRebirth",
+            ])
+        );
+        assert!(exact > 0, "guard: the exact set must not be empty");
     }
 }

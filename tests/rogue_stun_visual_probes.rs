@@ -516,7 +516,7 @@ fn crescents_expire_without_leaking() {
 
 #[test]
 fn a_caster_with_no_socket_still_gets_its_flourish() {
-    // The Mage has no `WeaponSocket` at all (`class_weapon_loadout`), so the
+    // This Mage has no `WeaponSocket` at all (none is spawned here), so the
     // stroke half of the router is unreachable for it. That must not suppress
     // the flourish — the bug the router restructure fixed.
     let mut h = Harness::new();
