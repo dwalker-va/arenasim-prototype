@@ -450,7 +450,8 @@ any ring fits either ring socket, and the same item may not occupy both
 
 2. **Check the item level budget** before finalizing stats:
    - Effective budget = `item_level × 0.75 × slot_multiplier`
-   - Slot multipliers: Head/Chest = 1.0, Legs = 0.875, Shoulders/Hands/Feet = 0.75, Waist = 0.625, Wrists = 0.5, accessories/weapons = 0.5625
+   - Slot multipliers: Head/Chest = 1.0, Legs = 0.875, Shoulders/Hands/Feet = 0.75, Waist = 0.625, Wrists = 0.5, Neck/Back/Ring/Trinket/Ranged = 0.5625
+   - Hand items are priced by how they are HELD (`held_budget_multiplier`): two-hander = 1.0, one-hander = 0.42, off-hand (shield/frill) = 0.5625. However the hands are filled they draw about one full slot (0.42 + 0.5625 = 0.9825). A shipped two-hander is priced at exactly what the one-hander + off-hand pair it displaces spends, not its cap — `two_handers_are_priced_at_the_pair_they_displace` pins each one to its pair, and a new two-hander must be added there
    - Stat costs: max_health/max_mana = 1.0/pt, attack_power/spell_power = 1.5/pt, crit_chance = 300.0/pt (0.01 = 3.0), movement_speed = 30.0/pt (0.1 = 3.0), resistances = 0.4/pt, mana_regen = 5.0/pt
    - **Free stats** (excluded from budget): `armor`, `attack_damage_min`, `attack_damage_max`, `attack_speed`
    - Budget usage = sum of (stat_value × weight) across all non-free stats

@@ -827,6 +827,9 @@
         // MELEE WEAPONS
         // ====================================================================
 
+        // A two-hander is priced at what the one-hander + off-hand pair it
+        // displaces spends (Frostbite Blade + Wall of the Dead, 25.5), not at its full-slot cap (45.0): the
+        // same points, spent on offense where the pair spends them on a shield.
         ArcaniteReaper: (
             name: "Arcanite Reaper",
             item_level: 60,
@@ -838,7 +841,8 @@
             attack_damage_min: 14.0,
             attack_damage_max: 18.0,
             attack_speed: 0.9,
-            attack_power: 4.0,
+            attack_power: 11.0,
+            crit_chance: 0.03,
         ),
 
         FrostbiteBlade: (
@@ -882,6 +886,9 @@
             spell_power: 6.0,
         ),
 
+        // A two-hander is priced at what the one-hander + off-hand pair it
+        // displaces spends (Witchblade + Tome of Knowledge, 32.5), not at its full-slot cap (43.5): more spell
+        // power and a smaller pool than the pair, at the same price.
         CrescentStaff: (
             name: "Crescent Staff",
             item_level: 58,
@@ -893,8 +900,8 @@
             attack_damage_min: 6.0,
             attack_damage_max: 10.0,
             attack_speed: 0.7,
-            spell_power: 10.0,
-            max_mana: 9.0,
+            spell_power: 15.0,
+            max_mana: 10.0,
         ),
 
         // --------------------------------------------------------------------
@@ -907,12 +914,11 @@
         // off-hand. The dagger-plus-tome loadout was unrepresentable, and the
         // staff-versus-one-hander choice was no choice at all.
         //
-        // Deliberately spent UNDER budget: Witchblade takes 13.5 of an ilvl-58
-        // main hand's 24.5 points. `slot_budget_multiplier` gives a two-hander
-        // the same budget as a one-hander, so a full-budget one-hander plus a
-        // 19-point off-hand would leave the staves permanently dominated. These
-        // narrow that gap rather than closing it — the staves already sit at
-        // 97-98% of their own budget and cannot be raised to meet it.
+        // Spent under budget: Witchblade takes 13.5 of an ilvl-58 one-hander's
+        // 18.3 points (`ONE_HAND_BUDGET_MULTIPLIER`, 0.42). Each staff is
+        // priced at exactly what its one-hander + off-hand pair spends
+        // (`two_handers_are_priced_at_the_pair_they_displace`), so raising a
+        // one-hander here must move its staff's price with it.
         //
         // The weapon damage here is INERT for the classes these are meant for:
         // `apply_equipment` replaces attack damage from ONE socket, the one
@@ -1829,6 +1835,9 @@
         // TIER 1: MELEE WEAPONS
         // ====================================================================
 
+        // A two-hander is priced at what the one-hander + off-hand pair it
+        // displaces spends (Stormblade Edge + Bulwark of the Guardian, 39.0), not at its full-slot cap (56.25): the
+        // same points, spent on offense where the pair spends them on a shield.
         BloodlordsBattleaxe: (
             name: "Bloodlord's Battleaxe",
             item_level: 75,
@@ -1841,8 +1850,8 @@
             attack_damage_min: 18.0,
             attack_damage_max: 24.0,
             attack_speed: 0.9,
-            attack_power: 8.0,
-            crit_chance: 0.02,
+            attack_power: 16.0,
+            crit_chance: 0.05,
         ),
 
         StormbladeEdge: (
@@ -1890,6 +1899,9 @@
             max_health: 4.0,
         ),
 
+        // A two-hander is priced at what the one-hander + off-hand pair it
+        // displaces spends (Claw of Chromaggus + Grimoire of Shadows, 47.0), not at its full-slot cap (54.75): more
+        // spell power and a smaller pool than the pair, at the same price.
         RunestaffOfElements: (
             name: "Runestaff of Elements",
             item_level: 73,
@@ -1902,8 +1914,8 @@
             attack_damage_min: 8.0,
             attack_damage_max: 14.0,
             attack_speed: 0.7,
-            spell_power: 12.0,
-            max_mana: 12.0,
+            spell_power: 20.0,
+            max_mana: 17.0,
         ),
 
         // --------------------------------------------------------------------

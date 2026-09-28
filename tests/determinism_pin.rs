@@ -73,10 +73,15 @@ fn seeded_2v2_matches_its_recorded_identity() {
     // that outcome. A single seed's winner is not a balance claim — see
     // `docs/design/balance/2026-09-13-frost-armor-one-debuff-findings.md` and
     // `docs/design/balance/2026-09-14-caster-onehander-findings.md`.
+    //
+    // Re-recorded for AS-115, the Warrior's Arcanite Reaper re-priced from
+    // 4 AP to 11 AP + 3% crit. Took this cell to Some(1) @ 40.69955s from
+    // Some(2) @ 49.38275s. The 1v1 pin below did not move. Paired sweep:
+    // `docs/design/balance/2026-09-27-as115-two-hander-budget.md`.
     assert_pinned(
         &result,
-        Some(2),
-        1_111_853_040,
+        Some(1),
+        1_109_576_791,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }
