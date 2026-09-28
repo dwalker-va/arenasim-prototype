@@ -979,8 +979,11 @@ impl Plugin for StatesPlugin {
                 play_match::cleanup_ice_blocks,      // Despawn when aura breaks
                 play_match::spawn_slow_zone_visuals, // Cyan disc on slow zones
                 play_match::update_slow_zone_visuals, // Pulse + fade out
-                play_match::spawn_totem_visuals,     // Element-colored pillar on new totems
-                play_match::update_totem_visuals,    // Pulse + fade out
+                // Totems: carved post + orbiting ribbons + top flame; a
+                // detached rig that plays its death once the totem is gone
+                play_match::spawn_totem_visuals,
+                play_match::update_totem_visuals,
+                play_match::cleanup_totem_visuals,
             )
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
