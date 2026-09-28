@@ -9,8 +9,10 @@ enemy healer; the Hunter positions for that trap only while it is ready; in
 the opener Aimed Shot goes before Serpent Sting when it has time to finish.
 The Warlock cells, the Rogue + healer cells and the no-healer cells are
 reported whichever way they move. Win rate is reported, not tuned.
-**Arms:** before = `061dfa5` (main); after = this branch (release binary
-sha1 `5629306a`). Same JSONL both arms.
+**Arms:** before = `061dfa5`; after = this branch on `4c4689c` (release
+binary sha1 `7f115684`). Main's commits between the two are visual only: the
+after arm's 1v1 and 2v2 rows are byte-identical built on either base. Same
+JSONL both arms.
 **Raw rows:** `2026-09-27-as125_{1v1,2v2}_base_061dfa5.csv` and
 `..._after.csv` (one row per match, from
 `sweeps/2026-09-27-as125-hunter-{1v1,directional}.jsonl`);
