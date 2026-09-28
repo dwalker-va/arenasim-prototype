@@ -125,8 +125,13 @@ directions.
 Beside them, the trap-mechanism instrument the findings doc's per-trap tables
 come from: `2026-09-27-as125-trapmech.py <binary> <outdir> <jobs> [seeds]`
 runs 17 trap-relevant comps traced, pairs every Freezing Trap's intended victim
-(trace `target_id`) with whom it sprang on and how it ended (match log), and
-records each match's winner and first throw; `2026-09-27-as125-trapsumm.py
-<before_outdir> [<after_outdir>]` tabulates them per comp. Each match runs in
-its own directory with a link to the measured binary's own `assets/`, because
-single-match traces are stamped to the second and would collide in parallel.
+(trace `target_id`, empty for a throw decided on an enemy the Hunter could not
+see) with whom it sprang on and how it ended (match log), and records each
+match's winner and first throw; `2026-09-27-as125-trapsumm.py
+<before_outdir> [<after_outdir>]` tabulates them per comp, including the
+decided-victim vs springer match rate. Each match runs in its own directory
+with a link to the measured binary's own `assets/`, because single-match
+traces are stamped to the second and would collide in parallel. The binary
+must sit in a checkout (a `Cargo.toml` above it): a binary that classifies as
+installed writes its traces to the per-user data directory instead, where
+they collide and the victim column comes back empty.
