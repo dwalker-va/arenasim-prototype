@@ -47,11 +47,32 @@ by someone who was not there.
 
 | File | Captured | Notes |
 |---|---|---|
-| `legacy_behaviour_2026-09-27_immolate_rng.txt` | 2026-09-27 | **Current.** After Immolate's apply burst stopped drawing from `game_rng` (card AS-154). Captured against a FRESH run of `main` @ `a2f483a` — see the note under the table. |
+| `legacy_behaviour_2026-09-28_two_hander_budget.txt` | 2026-09-28 | **Current.** After the Warrior's Arcanite Reaper was re-priced at its displaced pair (card AS-115). Captured against a FRESH run of `main` @ `4c4689c`, which reproduced the 09-27 file exactly. |
+| `legacy_behaviour_2026-09-27_immolate_rng.txt` | 2026-09-27 | After Immolate's apply burst stopped drawing from `game_rng` (card AS-154). Captured against a FRESH run of `main` @ `a2f483a` — see the note under the table. |
 | `legacy_behaviour_2026-09-13_frost_armor_chill.txt` | 2026-09-13 | After the Frost Armor chill became one compound debuff (card AS-54). Captured against a FRESH run of `main` @ `3c61185` rather than against the file below — see the note under the table. |
 | `legacy_behaviour_2026-08-02_backlash_ids.txt` | 2026-08-02 | After the `[BACKLASH]` log-id fix. Verified reproducible: two independent runs agreed on all 27 cells. |
 | `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | After moving the simulation to `FixedUpdate`. Verified reproducible when captured. |
 | `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | Pre-fixed-timestep. Also verified reproducible when captured. |
+
+### 2026-09-28 — the Arcanite Reaper re-priced (AS-115)
+
+Two-handers are now priced at what the one-hander + off-hand pair they displace
+spends. The only one any default loadout wears is the Warrior's Arcanite Reaper,
+which went from 4 attack power to 11 attack power + 3% crit. Its weapon damage
+and speed did not change.
+
+**17 of 27 cells moved, and every one of them has a Warrior in it.** The nine
+`pet_comp` cells (`Hunter,Shaman` vs `Rogue,Priest`) are byte-identical, log SHA
+included. That is a positive attribution: no Warrior means no Reaper, so there
+is nothing for the change to reach.
+
+The 18th Warrior cell, `TwinPillars healer_v_healer 4`, is byte-identical, and
+its log says why. The Warrior dies at 27s. Its one Mortal Strike logs no damage,
+and its other hits — auto-attacks, Heroic Strike, Rend — do not scale with
+attack power. None of its crit rolls lands in the 3% window the new crit opens.
+
+The balance side is a paired directional sweep, not these cells:
+`docs/design/balance/2026-09-27-as115-two-hander-budget.md`.
 
 ### 2026-09-27 — Immolate's burst leaves the sim RNG (AS-154)
 

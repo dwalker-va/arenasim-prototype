@@ -4447,6 +4447,12 @@ mod u9_seek_reset {
     /// began / 4.37s longest stall, and 42 survived the merge at 336 / 11 / 2 /
     /// 3.08s. The seek + cast-recovery machinery still fires; only the seed
     /// moved.
+    ///
+    /// Re-pinned for AS-115, which re-priced the enemy Warrior's two-hander
+    /// (4 AP -> 11 AP + 3% crit). Seed 9 fell to ZERO cast-start blocks; 42
+    /// held at 336 / 11 / 2 / 3.08s. 9 is replaced by 31 from a re-scan: 902
+    /// cast-start blocks / 67 seeks / 45 casts landed after occlusion began /
+    /// 4.30s longest stall.
     fn assert_mage_repositions_and_casts(seed: u64) {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
@@ -4484,8 +4490,8 @@ mod u9_seek_reset {
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_9() {
-        assert_mage_repositions_and_casts(9);
+    fn mage_repositions_and_casts_despite_occlusion_seed_31() {
+        assert_mage_repositions_and_casts(31);
     }
 
     #[test]
@@ -4502,24 +4508,28 @@ mod u9_seek_reset {
     /// from `scan_mage_occlusion_seeds` on a tree carrying the caster
     /// main-hands, which took the previous pin's cast-start blocks to 0 — the
     /// vacuity floor doing its job, not a stall regression.
+    ///
+    /// AS-115's re-priced Warrior two-hander took 77 to 0 in turn. Re-pinned
+    /// to 30 from a re-scan: 400 cast-start blocks, 59 seeks, longest run
+    /// 2.60s.
     #[test]
-    fn mage_recovers_to_cast_within_bound_seed_77() {
+    fn mage_recovers_to_cast_within_bound_seed_30() {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            77,
+            30,
             "TwinPillars",
         );
         let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
         assert!(
             blocked.len() >= 3,
-            "seed 77 must exercise occlusion, got {}",
+            "seed 30 must exercise occlusion, got {}",
             blocked.len()
         );
         let span = max_contiguous_block_span(&lines);
         assert!(
             span <= 10.0,
-            "seed 77: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
+            "seed 30: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
             span
         );
     }
@@ -4531,11 +4541,12 @@ mod u9_seek_reset {
         // Seed re-pinned to 13 (seed 27 dropped below the occlusion floor once
         // tangent steering let the Mage round pillars cleanly), then to 77 for
         // AS-87's caster main-hands — 77 carries 8 SeekLos decisions with a
-        // los_seek term against seed 13's 0.
+        // los_seek term against seed 13's 0. Then to 30 for AS-115's re-priced
+        // Warrior two-hander, which took 77 to 0; 30 carries 5.
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            77,
+            30,
             "TwinPillars",
         );
         let seek_with_term = lines
@@ -5268,7 +5279,10 @@ mod los_probes {
         // comp puts a Mage against a Warrior, so it sits in both blast radii.
         // 9 and 26 are chosen from a scan of the MERGED tree: 47 and 30 fizzles
         // against 12 and 15 Frostbolt impacts. See `scan_fizzle_seeds`.
-        for seed in [9u64, 26u64] {
+        // AS-115's re-priced Warrior two-hander then took 26 to zero fizzles
+        // and 9 to one. Re-pinned to 23 and 31 from a re-scan: 49 and 45
+        // fizzles against 8 and 12 Frostbolt impacts.
+        for seed in [23u64, 31u64] {
             let log = pillared_log(seed);
 
             let fizzles = log
@@ -6287,8 +6301,21 @@ mod medic_chase {
     // Observed after AS-87:
     //   seed 8: 587 distress frames, 5.20s longest window, heal at 4.00s, 0 lost.
     //   seed 9: 412 distress frames, 1.98s longest window, heal at 4.12s, 0 lost.
+    //
+    // Re-pinned for AS-115, which re-priced BOTH Warriors' two-hander (4 AP ->
+    // 11 AP + 3% crit). Seed 9's longest window stayed short (2.17s) but its
+    // first visible heal slid to 21.22s. The same 30-seed scan on both binaries
+    // says the chase itself did not slow. The longest occluded window stays
+    // under the 8s bound on every seed, and its maximum falls (5.20s -> 4.68s).
+    // A visible heal already missed the 10s ceiling on 2 of 30 seeds on `main`
+    // (12, 26), and misses it on 4 now (2, 3, 9, 23). That heal-visibility
+    // clause is the one a harder-hitting enemy Warrior can mask.
+    //
+    // Observed after AS-115:
+    //   seed 8:  363 distress frames, 2.37s longest window, no visible heal, 0 lost.
+    //   seed 14: 353 distress frames, 4.68s longest window, heal at 5.22s, 0 lost.
     const MEDIC_SEED_A: u64 = 8;
-    const MEDIC_SEED_B: u64 = 9;
+    const MEDIC_SEED_B: u64 = 14;
 
     #[test]
     fn medic_bounds_distressed_ally_seed_a() {

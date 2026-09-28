@@ -61,3 +61,21 @@ docs/design/balance/sweeps/2026-09-20-as104-slot-symmetry.py diag.csv swap.csv
 - `-slot-swap` — every ordered pair of 25 distinct 2v2 teams, 5 seeds. Closed
   under swapping the sides, so comp strength cancels across each pair; the
   script checks that closure rather than assuming it.
+
+## `2026-09-27-as115-warrior.jsonl`, `2026-09-27-as115-staff-arm.jsonl`
+
+Behind `2026-09-27-as115-two-hander-budget.md` (card AS-115). Two directional
+2v2 sweeps, 10 seeds per cell:
+
+- `-warrior` — 3,090 configs, run once on `main` and once on the change. It was
+  generated with
+  `scripts/gen_sweep.py --full 2 --exclude-double-healer --affects Warrior --control-cells 8 --n 10`.
+- `-staff-arm` — 5,520 configs, both arms on ONE binary. This is the staff
+  arm: every Mage, Priest and Warlock carries a `team{1,2}_equipment` override
+  of `MainHand: CrescentStaff`. The pair arm is the same file without the two
+  `*_equipment` keys. It is also exactly the output of
+  `scripts/gen_sweep.py --full 2 --exclude-double-healer --affects Mage,Priest,Warlock --control-cells 8 --n 10`.
+
+Analyse each pair of CSVs with `scripts/paired_sweep.py ... --tier directional`.
+Get the per-class tables with `2026-09-27-as115-slices.py` (`--by partner` for
+the Warrior sweep, `--by holder` for the staff sweep).

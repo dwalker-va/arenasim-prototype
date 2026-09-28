@@ -1214,7 +1214,7 @@ pub fn validate_unique_equipped(loadout: &Loadout, items: &ItemDefinitions) -> R
 // ============================================================================
 
 use super::constants::{
-    slot_budget_multiplier, BUDGET_PER_ILVL, BUDGET_TOLERANCE, WEIGHT_ATTACK_POWER,
+    held_budget_multiplier, slot_budget_multiplier, BUDGET_PER_ILVL, BUDGET_TOLERANCE, WEIGHT_ATTACK_POWER,
     WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
     WEIGHT_MOVEMENT_SPEED, WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
 };
@@ -1243,9 +1243,16 @@ pub fn calculate_budget_usage(item: &ItemConfig) -> f32 {
         + item.proc.as_ref().map_or(0.0, |p| p.budget_cost())
 }
 
-/// Calculate the effective budget cap for an item based on its level and slot.
+/// The budget multiplier an item is priced at: how it is held for a hand item
+/// (a two-hander draws a full slot, a one-hander 0.42), its slot kind otherwise.
+pub fn item_budget_multiplier(item: &ItemConfig) -> f32 {
+    item.held()
+        .map_or_else(|| slot_budget_multiplier(item.slot), held_budget_multiplier)
+}
+
+/// Calculate the effective budget cap for an item based on its level and how it is worn.
 pub fn calculate_effective_budget(item: &ItemConfig) -> f32 {
-    item.item_level as f32 * BUDGET_PER_ILVL * slot_budget_multiplier(item.slot)
+    item.item_level as f32 * BUDGET_PER_ILVL * item_budget_multiplier(item)
 }
 
 /// Validate that an item's stat budget usage does not exceed its effective budget
@@ -3432,6 +3439,64 @@ mod tests {
             violations.len(),
             violations.join("\n")
         );
+    }
+
+    /// No shipped one-hander spends more than a one-hander's 0.42 — with no
+    /// tolerance, so the one-handers that predate the split were not merely
+    /// let through by it. Walks every one-hander and names how many it saw.
+    #[test]
+    fn no_shipped_one_hander_exceeds_the_one_hand_multiplier() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let mut over = Vec::new();
+        let mut checked = 0;
+        for (item_id, item) in &item_defs.definitions {
+            if item.held() != Some(HeldSlot::OneHand) {
+                continue;
+            }
+            checked += 1;
+            let cap = item.item_level as f32 * BUDGET_PER_ILVL * 0.42;
+            let usage = calculate_budget_usage(item);
+            if usage > cap {
+                over.push(format!("{item_id:?}: {usage:.2} > {cap:.2}"));
+            }
+        }
+        assert!(over.is_empty(), "{}", over.join("\n"));
+        assert!(checked > 0, "no one-hander ships, so this checked nothing");
+    }
+
+    /// Each shipped two-hander spends exactly what the one-hander + off-hand
+    /// pair it displaces spends — the pair a player of that role would hold
+    /// instead, at the same tier. NOT its cap: a two-hander is a full slot,
+    /// and every one of these sits below it, so the headroom is named here
+    /// rather than left as an invitation to spend it. A new two-hander must
+    /// be added to this table with its pair, which is the point.
+    #[test]
+    fn two_handers_are_priced_at_the_pair_they_displace() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let usage = |id: ItemId| calculate_budget_usage(item_defs.get(&id).expect("shipped"));
+        let table = [
+            (ItemId::ArcaniteReaper, ItemId::FrostbiteBlade, ItemId::WallOfTheDeadShield),
+            (ItemId::CrescentStaff, ItemId::Witchblade, ItemId::TomeOfKnowledge),
+            (ItemId::BloodlordsBattleaxe, ItemId::StormbladeEdge, ItemId::BulwarkOfTheGuardian),
+            (ItemId::RunestaffOfElements, ItemId::ClawOfChromaggus, ItemId::GrimoireOfShadows),
+        ];
+        for (two_hander, one_hander, off_hand) in table {
+            let pair = usage(one_hander) + usage(off_hand);
+            assert!(
+                (usage(two_hander) - pair).abs() < 1e-3,
+                "{two_hander:?} spends {:.2}, its pair {one_hander:?} + {off_hand:?} {pair:.2}",
+                usage(two_hander)
+            );
+        }
+
+        let shipped: std::collections::HashSet<ItemId> = item_defs
+            .definitions
+            .iter()
+            .filter(|(_, item)| item.held() == Some(HeldSlot::TwoHand))
+            .map(|(id, _)| *id)
+            .collect();
+        let priced: std::collections::HashSet<ItemId> = table.iter().map(|row| row.0).collect();
+        assert_eq!(shipped, priced, "every shipped two-hander has a pair in this table");
     }
 
     /// Every shipped proc must be priceable, able to fire, and unable to

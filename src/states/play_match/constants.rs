@@ -272,7 +272,7 @@ pub const DR_MULTIPLIERS: [f32; 4] = [1.0, 0.5, 0.25, 0.0];
 // Item Budget Validation
 // ============================================================================
 
-use super::equipment::ItemSlotType;
+use super::equipment::{HeldSlot, ItemSlotType};
 
 /// Budget points granted per item level. Effective budget = item_level * BUDGET_PER_ILVL * slot_multiplier.
 /// Calibrated against the current item pool (ilvl 54-60 range).
@@ -312,12 +312,44 @@ pub const WEIGHT_MOVEMENT_SPEED: f32 = 30.0;
 /// Lower than core stats since resist gear trades stat efficiency for specialized protection.
 pub const WEIGHT_RESISTANCE: f32 = 0.4;
 
+/// Budget multiplier of a TWO-HANDED weapon: one full-budget slot, the same as
+/// a Head or Chest. A two-hander fills both hands, so it draws what the hands
+/// draw between them.
+pub const TWO_HAND_BUDGET_MULTIPLIER: f32 = 1.0;
+
+/// Budget multiplier of a ONE-HANDED weapon, in either hand. Classic's own
+/// one-hander ratio: with [`OFF_HAND_BUDGET_MULTIPLIER`] it sums to 0.9825,
+/// so a one-hander plus an off-hand item draws one full slot — what a
+/// [`TWO_HAND_BUDGET_MULTIPLIER`] weapon draws on its own. Dual wield draws
+/// 0.84 and is paid back in the second weapon's damage, a free stat.
+pub const ONE_HAND_BUDGET_MULTIPLIER: f32 = 0.42;
+
+/// Budget multiplier of an off-hand-only item — a shield or a held frill.
+pub const OFF_HAND_BUDGET_MULTIPLIER: f32 = 0.5625;
+
+/// Budget multiplier of a hand item, keyed on how it is HELD rather than on
+/// its slot kind: a `MainHand` item is a one-hander or a two-hander, and the
+/// two are priced a full slot apart. Wildcard-free, so a new [`HeldSlot`] has
+/// to be priced before it compiles.
+pub fn held_budget_multiplier(held: HeldSlot) -> f32 {
+    match held {
+        HeldSlot::TwoHand => TWO_HAND_BUDGET_MULTIPLIER,
+        HeldSlot::OneHand => ONE_HAND_BUDGET_MULTIPLIER,
+        HeldSlot::OffHandOnly => OFF_HAND_BUDGET_MULTIPLIER,
+    }
+}
+
 /// Returns the WoW Classic-accurate slot budget multiplier for the given item
 /// slot kind. Higher multiplier = more stat budget available. Head/Chest get the
 /// full budget, while accessories like rings and trinkets get roughly half.
 ///
 /// Keyed on the item's slot KIND, not on a socket: both ring sockets hold the
 /// same kind of item, so a ring's budget cannot depend on which finger it lands on.
+///
+/// The hands are the exception the kind cannot answer — a `MainHand` item may
+/// be two-handed — so an item is priced through
+/// `ItemConfig::budget_multiplier`, which asks [`held_budget_multiplier`] for
+/// hand items. The hand arms here give the kind's one-handed answer.
 pub fn slot_budget_multiplier(slot: ItemSlotType) -> f32 {
     match slot {
         ItemSlotType::Head => 1.0,
@@ -332,8 +364,8 @@ pub fn slot_budget_multiplier(slot: ItemSlotType) -> f32 {
         ItemSlotType::Back => 0.5625,
         ItemSlotType::Ring => 0.5625,
         ItemSlotType::Trinket => 0.5625,
-        ItemSlotType::MainHand => 0.5625,
-        ItemSlotType::OffHand => 0.5625,
+        ItemSlotType::MainHand => ONE_HAND_BUDGET_MULTIPLIER,
+        ItemSlotType::OffHand => OFF_HAND_BUDGET_MULTIPLIER,
         ItemSlotType::Ranged => 0.5625,
     }
 }
@@ -381,9 +413,31 @@ mod tests {
         assert_eq!(slot_budget_multiplier(ItemSlotType::Back), 0.5625);
         assert_eq!(slot_budget_multiplier(ItemSlotType::Ring), 0.5625);
         assert_eq!(slot_budget_multiplier(ItemSlotType::Trinket), 0.5625);
-        assert_eq!(slot_budget_multiplier(ItemSlotType::MainHand), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::MainHand), 0.42);
         assert_eq!(slot_budget_multiplier(ItemSlotType::OffHand), 0.5625);
         assert_eq!(slot_budget_multiplier(ItemSlotType::Ranged), 0.5625);
+    }
+
+    #[test]
+    fn test_held_budget_multiplier_all_values() {
+        assert_eq!(held_budget_multiplier(HeldSlot::TwoHand), 1.0);
+        assert_eq!(held_budget_multiplier(HeldSlot::OneHand), 0.42);
+        assert_eq!(held_budget_multiplier(HeldSlot::OffHandOnly), 0.5625);
+    }
+
+    /// What the three hand numbers MEAN: however the hands are filled, they
+    /// draw one full slot. A two-hander is priced at exactly one; a one-hander
+    /// plus an off-hand item at Classic's 0.9825, within 2% of it.
+    #[test]
+    fn a_two_hander_draws_what_a_one_hander_and_off_hand_draw_together() {
+        let pair = held_budget_multiplier(HeldSlot::OneHand)
+            + held_budget_multiplier(HeldSlot::OffHandOnly);
+        let two_hand = held_budget_multiplier(HeldSlot::TwoHand);
+        assert_eq!(two_hand, slot_budget_multiplier(ItemSlotType::Chest));
+        assert!(
+            (pair - two_hand).abs() / two_hand < 0.02,
+            "one-hander + off-hand draws {pair}, a two-hander {two_hand}"
+        );
     }
 
     #[test]
