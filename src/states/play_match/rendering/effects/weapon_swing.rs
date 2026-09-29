@@ -18,17 +18,97 @@ use bevy::prelude::*;
 // aim yaw toward the target. Registered ONLY in `StatesPlugin::build` — never
 // in `systems.rs` — so headless never runs any of this.
 
-/// Seconds of the release stroke (windup -> impact sweep).
+// The REFERENCE stroke: seconds of release (windup -> impact sweep), impact
+// hold, and follow-through. Every signature style's timing is tuned as a
+// multiple of these, and the wand's flick is this shape compressed. An
+// ordinary auto-attack does NOT play them — it scales with the swinging hand's
+// weapon (`weapon_stroke_profile`, below).
 const SWING_RELEASE_SECS: f32 = 0.12;
-/// Seconds held at full extension so the impact registers before easing back.
 const SWING_IMPACT_HOLD_SECS: f32 = 0.05;
-/// Seconds of follow-through easing back to rest after the impact hold.
 const SWING_FOLLOW_SECS: f32 = 0.25;
-/// Fraction of the attack interval spent winding up, clamped to sane bounds
-/// so fast daggers still telegraph and slow 2H axes don't hover forever.
-const SWING_WINDUP_FRACTION: f32 = 0.30;
+
+// Auto-attack stroke timing, scaled off the swinging hand's effective interval
+// so a 3.8s two-hander swings heavy and deliberate and a 1.7s dagger quick.
+// Each phase is `clamp(interval * FRACTION, MIN_SECS, MAX_SECS)`. Signed off in
+// the AS-148 pre-implementation bench ("Swing cadence bench"), which plays
+// every shipped weapon speed side by side at real time.
+//
+// The RELEASE is capped hard because the target's flinch and impact spark fire
+// when the sim lands the hit, which is the moment the release STARTS: the
+// release length is how far the flinch runs ahead of the blade. The weight a
+// slow weapon earns goes into the windup, hold and follow-through instead.
+//
+// At 1.7s the stroke is 0.40s (the fixed stroke it replaces was 0.42s); at
+// 3.8s it is 0.83s after a 0.95s windup. Every shipped speed fits its
+// windup + stroke inside its interval (`every_shipped_speed_fits_its_interval`).
+/// Windup: anticipation read live off the hand's attack timer.
+const SWING_WINDUP_FRACTION: f32 = 0.25;
 const SWING_WINDUP_MIN_SECS: f32 = 0.15;
-const SWING_WINDUP_MAX_SECS: f32 = 0.60;
+const SWING_WINDUP_MAX_SECS: f32 = 0.95;
+/// Release: the sweep from the windup pose through to full extension.
+const SWING_RELEASE_FRACTION: f32 = 0.045;
+const SWING_RELEASE_MIN_SECS: f32 = 0.10;
+const SWING_RELEASE_MAX_SECS: f32 = 0.16;
+/// Impact hold: seconds at full extension so the impact registers.
+const SWING_IMPACT_HOLD_FRACTION: f32 = 0.025;
+const SWING_IMPACT_HOLD_MIN_SECS: f32 = 0.04;
+const SWING_IMPACT_HOLD_MAX_SECS: f32 = 0.10;
+/// Follow-through: easing back to rest after the hold.
+const SWING_FOLLOW_FRACTION: f32 = 0.15;
+const SWING_FOLLOW_MIN_SECS: f32 = 0.22;
+const SWING_FOLLOW_MAX_SECS: f32 = 0.60;
+
+/// One phase's duration at this interval. A degenerate interval (zero,
+/// negative, NaN) takes the phase's floor, never NaN.
+// `!(x > 0.0)` is deliberate: NaN must fall into the guard.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
+fn phase_secs(interval: f32, fraction: f32, min: f32, max: f32) -> f32 {
+    if !(interval > 0.0) {
+        return min;
+    }
+    (interval * fraction).clamp(min, max)
+}
+
+/// Seconds of windup anticipation for a hand swinging at `interval`.
+fn windup_secs(interval: f32) -> f32 {
+    phase_secs(
+        interval,
+        SWING_WINDUP_FRACTION,
+        SWING_WINDUP_MIN_SECS,
+        SWING_WINDUP_MAX_SECS,
+    )
+}
+
+/// The auto-attack stroke for a weapon swinging at `interval` seconds — the
+/// hand's EFFECTIVE interval, so an attack-speed slow lengthens it too.
+///
+/// A function of the interval alone, never of the class or the weapon kind:
+/// any weapon at a given speed swings with the same timing, which is what lets
+/// a new class's melee reuse it unchanged. The one kind that opts out is the
+/// wand (see [`stroke_profile`]).
+pub(crate) fn weapon_stroke_profile(interval: f32) -> SwingProfile {
+    SwingProfile {
+        release_secs: phase_secs(
+            interval,
+            SWING_RELEASE_FRACTION,
+            SWING_RELEASE_MIN_SECS,
+            SWING_RELEASE_MAX_SECS,
+        ),
+        impact_hold_secs: phase_secs(
+            interval,
+            SWING_IMPACT_HOLD_FRACTION,
+            SWING_IMPACT_HOLD_MIN_SECS,
+            SWING_IMPACT_HOLD_MAX_SECS,
+        ),
+        follow_secs: phase_secs(
+            interval,
+            SWING_FOLLOW_FRACTION,
+            SWING_FOLLOW_MIN_SECS,
+            SWING_FOLLOW_MAX_SECS,
+        ),
+        ..SwingStyle::Auto.profile()
+    }
+}
 
 // ------------------------------------------------------------------------
 // Named swing styles
@@ -59,8 +139,14 @@ pub(crate) struct SwingProfile {
 
 impl SwingProfile {
     /// Total stroke duration — release sweep, impact hold, follow-through.
-    fn total(&self) -> f32 {
+    pub(crate) fn total(&self) -> f32 {
         self.release_secs + self.impact_hold_secs + self.follow_secs
+    }
+
+    /// Seconds from the start of the stroke to full extension — see
+    /// [`SwingStyle::impact_at`].
+    pub(crate) fn impact_at(&self) -> f32 {
+        self.release_secs
     }
 }
 
@@ -181,6 +267,10 @@ pub fn swing_plane_tilt(style: SwingStyle) -> Option<f32> {
 impl SwingStyle {
     /// Total duration of this style's release stroke, for effects that must
     /// run exactly as long as the blade is moving (the Mortal Strike trail).
+    ///
+    /// For a SIGNATURE style. `Auto` answers with the reference stroke, which
+    /// no auto-attack plays: an auto's stroke depends on the weapon swinging
+    /// it, so ask [`weapon_stroke_profile`] (as Heroic Strike does).
     pub fn stroke_secs(self) -> f32 {
         self.profile().total()
     }
@@ -379,7 +469,7 @@ const MORTAL_STRIKE_RELEASE: f32 = 1.35;
 // UNSPECTACULAR: barely off the sagittal plane, small travel, and fast. It has
 // to read as a quick jab, because everything distinctive about Cheap Shot lives
 // in the crescent flare rather than in the swing. Total here is ~0.63s against
-// the auto's 0.42s and Mortal Strike's ~0.84s.
+// the 0.42s reference stroke and Mortal Strike's ~0.84s.
 const CHEAP_SHOT_RELEASE_MUL: f32 = 1.25;
 const CHEAP_SHOT_HOLD_MUL: f32 = 1.6;
 const CHEAP_SHOT_FOLLOW_MUL: f32 = 1.6;
@@ -573,10 +663,10 @@ const KICK_DRIVE: f32 = -0.50;
 ///   `timer` approaches `interval`, holding at -1 while an overdue attack
 ///   waits (out of range / no LoS).
 /// * `s > 0` — release: sweeps from `release_from` (the windup depth at the
-///   moment the hit landed, `<= 0`) THROUGH to full extension at 1 over
-///   `SWING_RELEASE_SECS` — the pull-back powers the strike instead of being
-///   discarded — holds at 1 for `SWING_IMPACT_HOLD_SECS` so the impact
-///   registers, then decays to 0 over `SWING_FOLLOW_SECS`.
+///   moment the hit landed, `<= 0`) THROUGH to full extension at 1 over the
+///   profile's release — the pull-back powers the strike instead of being
+///   discarded — holds at 1 for its impact hold so the impact registers, then
+///   decays to 0 over its follow-through.
 /// * `s == 0` — at rest.
 ///
 /// Pure so the timing behavior is unit-testable without Bevy (see tests at the
@@ -615,7 +705,7 @@ fn swings(kind: WeaponKind) -> bool {
 /// The sim clock a socket in `hand` follows: its hand's swing timer and that
 /// hand's effective interval. `None` for an off hand with no weapon armed in
 /// it — the sim swings nothing there, so there is nothing to telegraph.
-fn hand_clock(
+pub(crate) fn hand_clock(
     combatant: &Combatant,
     auras: Option<&ActiveAuras>,
     hand: WeaponHand,
@@ -677,26 +767,31 @@ fn swing_param_timed(
     0.0
 }
 
-/// The stroke timing a socket of this KIND plays, for this style.
+/// The stroke timing a socket of this KIND plays, for this style, when its
+/// hand swings at `interval` seconds.
 ///
 /// A signature stroke belongs to the ABILITY, not to whatever is being held —
 /// `swing_pose_arc` already ignores `WeaponKind` for the named arcs, and this
 /// mirrors that on the timing axis: every style but `Auto` is returned
-/// untouched. The one per-kind timing in the game is the wand's, whose client
-/// source is a flick rather than a swing; scaling all three phases by the same
-/// factor keeps the stroke's SHAPE and only changes how long it takes, so the
-/// wand still eases in, holds and follows through like everything else.
+/// untouched, whatever the weapon or its speed.
 ///
-/// Returns the style's own profile unchanged for every kind but
-/// [`WeaponKind::Wand`], which is what keeps every existing swing identical.
+/// An auto-attack scales with its weapon ([`weapon_stroke_profile`]) — every
+/// kind but the wand, whose client source is a fixed-length flick rather than
+/// a swing. The wand compresses the reference stroke to [`WAND_FLICK_SECS`];
+/// scaling all three phases by the same factor keeps the stroke's SHAPE and
+/// only changes how long it takes, so the wand still eases in, holds and
+/// follows through like everything else.
 // `!(total > 0.0)` is deliberate, exactly as in `swing_param_timed` above: a
 // NaN total must fall into the guard, not slip past a `<=` that is false for
 // NaN.
 #[allow(clippy::neg_cmp_op_on_partial_ord)]
-fn auto_profile_for_kind(style: SwingStyle, kind: WeaponKind) -> SwingProfile {
+fn stroke_profile(style: SwingStyle, kind: WeaponKind, interval: f32) -> SwingProfile {
     let profile = style.profile();
-    if style != SwingStyle::Auto || kind != WeaponKind::Wand {
+    if style != SwingStyle::Auto {
         return profile;
+    }
+    if kind != WeaponKind::Wand {
+        return weapon_stroke_profile(interval);
     }
     let total = profile.total();
     if !(total > 0.0) {
@@ -918,8 +1013,17 @@ pub fn consume_swing_signals(
     signals: Query<(Entity, &AutoAttackSwing)>,
     mut sockets: Query<&mut WeaponSocket>,
     positions: Query<&Transform, With<Combatant>>,
+    clocks: Query<(&Combatant, Option<&ActiveAuras>)>,
 ) {
     for (signal_entity, signal) in signals.iter() {
+        // The swinging hand's interval, read once at the hit so the stroke's
+        // timing is fixed for its whole length — a slow landing mid-stroke
+        // lengthens the NEXT swing, never this one.
+        let stroke_interval = clocks
+            .get(signal.attacker)
+            .ok()
+            .and_then(|(combatant, auras)| hand_clock(combatant, auras, signal.hand))
+            .map_or(0.0, |(_, interval)| interval);
         let target_pos = positions.get(signal.target).map(|t| t.translation).ok();
         let mut loosed_arrow = false;
         for mut socket in sockets.iter_mut() {
@@ -937,6 +1041,7 @@ pub fn consume_swing_signals(
                 continue;
             }
             socket.release_t = Some(0.0);
+            socket.stroke_interval = stroke_interval;
             // An ordinary auto is never a styled stroke. Clears any signature
             // style still set from a stroke that has not expired yet, so a
             // Mortal Strike's timing can never bleed into the next swing.
@@ -1032,9 +1137,9 @@ pub fn animate_weapon_swings(
             *visibility = wanted;
         }
 
-        // The active stroke's timing and arc. `Auto` reproduces the original
-        // consts and the sagittal chop exactly, for every kind but the wand.
-        let profile = auto_profile_for_kind(socket.swing_style, socket.kind);
+        // The active stroke's timing and arc: a signature style's own, or an
+        // auto-attack's scaled off the interval its hand swung at.
+        let profile = stroke_profile(socket.swing_style, socket.kind, socket.stroke_interval);
 
         // Advance / expire the release stroke. `windup_s` is frozen during
         // the stroke — it is the sweep's starting pose — and zeroed at expiry
@@ -1104,8 +1209,7 @@ pub fn animate_weapon_swings(
             if let Some((reach, min_reach)) = band {
                 if target_dist <= reach && target_dist >= min_reach {
                     interval = hand_interval;
-                    windup_window = (interval * SWING_WINDUP_FRACTION)
-                        .clamp(SWING_WINDUP_MIN_SECS, SWING_WINDUP_MAX_SECS);
+                    windup_window = windup_secs(interval);
                 }
             }
         }
@@ -1555,34 +1659,58 @@ mod swing_tests {
     }
 
     #[test]
-    fn only_the_wand_rescales_the_auto_stroke() {
-        // Fail-first guard on the one per-kind timing in the game: if this
-        // ever applies to another kind, every auto-attack in that class
-        // silently changes speed.
-        let auto = SwingStyle::Auto.profile();
-        for kind in [
-            WeaponKind::TwoHandAxe,
-            WeaponKind::Dagger,
-            WeaponKind::Bow,
-            WeaponKind::Mace,
-            WeaponKind::Shield,
-        ] {
-            let p = auto_profile_for_kind(SwingStyle::Auto, kind);
-            assert_eq!(p.release_secs, auto.release_secs, "{kind:?}");
-            assert_eq!(p.impact_hold_secs, auto.impact_hold_secs, "{kind:?}");
-            assert_eq!(p.follow_secs, auto.follow_secs, "{kind:?}");
+    fn every_kind_but_the_wand_scales_the_auto_stroke_with_its_weapon() {
+        // Fail-first guard on the one per-kind timing exception: every other
+        // kind's auto stroke is the weapon-speed profile, whatever it is.
+        for interval in [1.5, 2.4, 3.8] {
+            let scaled = weapon_stroke_profile(interval);
+            for kind in [
+                WeaponKind::TwoHandAxe,
+                WeaponKind::Dagger,
+                WeaponKind::Bow,
+                WeaponKind::Mace,
+                WeaponKind::Shield,
+            ] {
+                let p = stroke_profile(SwingStyle::Auto, kind, interval);
+                assert_eq!(
+                    p.release_secs, scaled.release_secs,
+                    "{kind:?} at {interval}"
+                );
+                assert_eq!(
+                    p.impact_hold_secs, scaled.impact_hold_secs,
+                    "{kind:?} at {interval}"
+                );
+                assert_eq!(p.follow_secs, scaled.follow_secs, "{kind:?} at {interval}");
+                assert!(matches!(p.arc, SwingArc::Sagittal));
+            }
         }
-        let wand = auto_profile_for_kind(SwingStyle::Auto, WeaponKind::Wand);
-        assert!((wand.total() - WAND_FLICK_SECS).abs() < 1e-5);
-        assert!(wand.total() < auto.total());
-        // The SHAPE is preserved: the same phase proportions, just quicker.
-        assert!((wand.release_secs / wand.total() - auto.release_secs / auto.total()).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_wand_flick_ignores_the_wand_speed() {
+        // The flick is the client's fixed-length `AttackThrown`, compressed
+        // from the reference stroke; the wand's speed never stretches it.
+        let reference = SwingStyle::Auto.profile();
+        for interval in [0.0, 1.6, 1.8, 3.8] {
+            let wand = stroke_profile(SwingStyle::Auto, WeaponKind::Wand, interval);
+            assert!(
+                (wand.total() - WAND_FLICK_SECS).abs() < 1e-5,
+                "at {interval}"
+            );
+            // The SHAPE is preserved: the same phase proportions, just quicker.
+            assert!(
+                (wand.release_secs / wand.total() - reference.release_secs / reference.total())
+                    .abs()
+                    < 1e-5
+            );
+        }
     }
 
     #[test]
     fn a_signature_stroke_ignores_the_weapon_being_held() {
-        // A styled stroke belongs to the ability, so holding a wand must not
-        // rescale it — the same rule `swing_pose_arc` follows for the arc.
+        // A styled stroke belongs to the ability, so neither the weapon's kind
+        // nor its speed may rescale it — the same rule `swing_pose_arc`
+        // follows for the arc.
         for style in [
             SwingStyle::MortalStrike,
             SwingStyle::CheapShot,
@@ -1590,8 +1718,114 @@ mod swing_tests {
             SwingStyle::HammerOfJustice,
         ] {
             let direct = style.profile();
-            let via = auto_profile_for_kind(style, WeaponKind::Wand);
-            assert_eq!(direct.total(), via.total(), "{style:?}");
+            for kind in [WeaponKind::Wand, WeaponKind::TwoHandAxe, WeaponKind::Dagger] {
+                for interval in [0.0, 1.7, 3.8] {
+                    let via = stroke_profile(style, kind, interval);
+                    assert_eq!(direct.total(), via.total(), "{style:?} {kind:?} {interval}");
+                    assert_eq!(direct.release_secs, via.release_secs, "{style:?}");
+                }
+            }
+        }
+    }
+
+    /// The signed-off timings at each representative shipped speed:
+    /// `(interval, windup, release, hold, follow)`. The AS-148 bench's table,
+    /// pinned so a const edit that moves one is a visible, deliberate change.
+    const SIGNED_OFF: [(f32, f32, f32, f32, f32); 6] = [
+        (1.5, 0.375, 0.10, 0.04, 0.225),     // Claw of Chromaggus (dagger)
+        (1.7, 0.425, 0.10, 0.0425, 0.255),   // Serpent Fang Dagger (Rogue)
+        (2.4, 0.60, 0.108, 0.06, 0.36),      // Ashwood Bow (Hunter)
+        (2.7, 0.675, 0.1215, 0.0675, 0.405), // Hammer of the Righteous (Paladin)
+        (2.9, 0.725, 0.1305, 0.0725, 0.435), // Runestaff of Elements (staff)
+        (3.8, 0.95, 0.16, 0.095, 0.57),      // Arcanite Reaper (Warrior)
+    ];
+
+    #[test]
+    fn the_stroke_scales_with_the_weapon_as_signed_off() {
+        for (interval, windup, release, hold, follow) in SIGNED_OFF {
+            let p = weapon_stroke_profile(interval);
+            let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+            assert!(close(windup_secs(interval), windup), "windup at {interval}");
+            assert!(
+                close(p.release_secs, release),
+                "release at {interval}: {}",
+                p.release_secs
+            );
+            assert!(
+                close(p.impact_hold_secs, hold),
+                "hold at {interval}: {}",
+                p.impact_hold_secs
+            );
+            assert!(
+                close(p.follow_secs, follow),
+                "follow at {interval}: {}",
+                p.follow_secs
+            );
+        }
+    }
+
+    #[test]
+    fn a_dagger_keeps_the_stroke_it_had_and_a_two_hander_doubles_it() {
+        // The fixed stroke this replaces was tuned against daggers; they keep
+        // it (within a few hundredths) while the slowest weapon gets a
+        // deliberate swing roughly twice as long.
+        let reference = SwingStyle::Auto.profile().total();
+        let dagger = weapon_stroke_profile(1.7).total();
+        let reaper = weapon_stroke_profile(3.8).total();
+        assert!(
+            (dagger - reference).abs() < 0.03,
+            "dagger {dagger} vs {reference}"
+        );
+        assert!(reaper > 1.8 * dagger, "reaper {reaper} vs dagger {dagger}");
+    }
+
+    #[test]
+    fn a_slower_weapon_never_swings_faster() {
+        let mut last = weapon_stroke_profile(0.5);
+        let mut last_windup = windup_secs(0.5);
+        for i in 1..=80 {
+            let interval = 0.5 + i as f32 * 0.05;
+            let p = weapon_stroke_profile(interval);
+            assert!(p.release_secs >= last.release_secs, "release at {interval}");
+            assert!(
+                p.impact_hold_secs >= last.impact_hold_secs,
+                "hold at {interval}"
+            );
+            assert!(p.follow_secs >= last.follow_secs, "follow at {interval}");
+            assert!(windup_secs(interval) >= last_windup, "windup at {interval}");
+            last = p;
+            last_windup = windup_secs(interval);
+        }
+    }
+
+    #[test]
+    fn every_shipped_speed_fits_its_interval() {
+        // Windup + stroke inside the interval, so a stroke is never still
+        // playing when the next windup should begin.
+        for (interval, ..) in SIGNED_OFF {
+            let used = windup_secs(interval) + weapon_stroke_profile(interval).total();
+            assert!(used < interval, "{used}s of motion in a {interval}s swing");
+        }
+    }
+
+    #[test]
+    fn the_release_never_outruns_the_flinch_by_much() {
+        // The flinch fires when the hit lands, which is when the release
+        // starts, so the release is the flinch's lead over the blade.
+        for interval in [0.5_f32, 1.7, 3.8, 10.0, 100.0] {
+            assert!(weapon_stroke_profile(interval).release_secs <= SWING_RELEASE_MAX_SECS);
+        }
+        assert!(SWING_RELEASE_MAX_SECS <= 0.16);
+    }
+
+    #[test]
+    fn a_degenerate_interval_takes_the_floor_not_nan() {
+        for bad in [0.0_f32, -1.0, f32::NAN] {
+            let p = weapon_stroke_profile(bad);
+            assert_eq!(p.release_secs, SWING_RELEASE_MIN_SECS);
+            assert_eq!(p.impact_hold_secs, SWING_IMPACT_HOLD_MIN_SECS);
+            assert_eq!(p.follow_secs, SWING_FOLLOW_MIN_SECS);
+            assert_eq!(windup_secs(bad), SWING_WINDUP_MIN_SECS);
         }
     }
 

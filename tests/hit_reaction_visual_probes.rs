@@ -129,6 +129,7 @@ fn spawn_socket(app: &mut App, owner: Entity, body: Entity, kind: WeaponKind) ->
                 prev_owner_yaw: 0.0,
                 windup_s: 0.0,
                 swing_style: SwingStyle::Auto,
+                stroke_interval: 0.0,
                 last_s: 0.0,
             },
             Transform::from_xyz(0.62, 0.55, 0.05),

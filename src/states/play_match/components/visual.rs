@@ -1459,6 +1459,12 @@ pub struct WeaponSocket {
     /// to `Auto` when that stroke expires. Selects both the timing profile and
     /// the arc SHAPE in `animate_weapon_swings`.
     pub swing_style: SwingStyle,
+    /// The swinging hand's effective attack interval, captured when the
+    /// current auto-attack stroke began. An auto's stroke timing scales with
+    /// it (`weapon_stroke_profile`); freezing it at the hit keeps a slow that
+    /// lands mid-stroke from re-timing the stroke already playing. Ignored by
+    /// signature styles, whose timing belongs to the ability.
+    pub stroke_interval: f32,
     /// The swing parameter this socket last rendered at, published by
     /// `animate_weapon_swings` for `animate_body_lean` to consume.
     ///

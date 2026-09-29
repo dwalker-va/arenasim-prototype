@@ -68,20 +68,23 @@ pub const WAND_TRAIL_LEN: f32 = 0.9;
 pub const WAND_FLICK_DEG: f32 = 25.0;
 
 /// Total duration of one flick, in seconds — release, hold and follow-through
-/// together. Well under an ordinary swing's 0.42 s: a wrist snap, not a chop.
+/// together. Fixed, whatever the wand's speed, and under the quickest melee
+/// stroke (0.36 s, the floor of `weapon_swing.rs`'s scaled auto stroke): a
+/// wrist snap, not a chop.
 pub const WAND_FLICK_SECS: f32 = 0.25;
 
 /// The two shape invariants, checked at COMPILE time rather than in a test,
 /// because both are claims about the constants themselves and a compile error
 /// stops a drift at the edit that causes it.
 ///
-/// * The flick is quicker than an ordinary swing. The client's contrast is
-///   `AttackThrown` against a chop, and the shipped auto profile totals
-///   0.12 + 0.05 + 0.25 = 0.42 s (`weapon_swing.rs`).
+/// * The flick is quicker than any melee swing. The client's contrast is
+///   `AttackThrown` against a chop, and the weapon-scaled auto stroke never
+///   runs shorter than its phase floors, 0.10 + 0.04 + 0.22 = 0.36 s
+///   (`weapon_swing.rs`).
 /// * The trail reads as a BAND, not a ball (house amendment). A trail no
 ///   longer than the core is wide is a sprite with extra steps.
 const _: () = {
-    assert!(WAND_FLICK_SECS < 0.42);
+    assert!(WAND_FLICK_SECS < 0.36);
     assert!(WAND_TRAIL_LEN > WAND_CORE_RADIUS * 4.0);
 };
 
