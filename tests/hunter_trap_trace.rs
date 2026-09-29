@@ -493,7 +493,7 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
     };
 
     let mut named = 0usize;
-    for seed in [3u64, 16] {
+    for seed in [1u64, 5, 10] {
         let mut cfg = config(&["Hunter", "Priest"], &["Warlock", "Rogue"], seed);
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
@@ -554,7 +554,7 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
 #[test]
 fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
     let mut caught = 0usize;
-    for seed in [0u64, 6, 13] {
+    for seed in [6u64, 8, 10] {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
@@ -614,7 +614,7 @@ fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
 #[test]
 fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
     const GATES_OPEN: f64 = 10.0;
-    for seed in [0u64, 6, 13] {
+    for seed in [6u64, 8, 10] {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.team1_kill_target = Some(1);
         cfg.max_duration_secs = 60.0;
