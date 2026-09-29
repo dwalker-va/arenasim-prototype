@@ -1610,6 +1610,10 @@ pub fn sustain_staged_units(
     for entity in stage.caster.into_iter().chain(stage.dummy) {
         if let Ok((mut combatant, dr)) = combatants.get_mut(entity) {
             combatant.current_health = combatant.max_health;
+            // Full for every resource, rage included — unlike a match, where
+            // rage starts empty (`Combatant::pre_combat_resource`). The sandbox
+            // previews a kit, not a rage economy, so a Warrior's rage abilities
+            // stay castable on every pass.
             combatant.current_mana = combatant.max_mana;
             // Diminishing returns escalate per CC application and the reset
             // timer re-arms each time — a looping CC entry (Polymorph, Fear)

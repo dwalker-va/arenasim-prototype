@@ -47,13 +47,44 @@ by someone who was not there.
 
 | File | Captured | Notes |
 |---|---|---|
-| `legacy_behaviour_2026-09-28_weapon_speed.txt` | 2026-09-28 | **Current.** After every weapon took its swing speed from a named Classic item (card AS-167). Captured against a FRESH run of `main` @ `17cb9f0`, which reproduced the two-hander-budget file exactly. |
+| `legacy_behaviour_2026-09-28_starting_rage.txt` | 2026-09-28 | **Current.** After Warriors began entering the gates at 0 rage instead of 100 (card AS-172). Captured against a FRESH run of `main` @ `d5f21c1`, which reproduced the weapon-speed file exactly. |
+| `legacy_behaviour_2026-09-28_weapon_speed.txt` | 2026-09-28 | After every weapon took its swing speed from a named Classic item (card AS-167). Captured against a FRESH run of `main` @ `17cb9f0`, which reproduced the two-hander-budget file exactly. |
 | `legacy_behaviour_2026-09-28_two_hander_budget.txt` | 2026-09-28 | After the Warrior's Arcanite Reaper was re-priced at its displaced pair (card AS-115). Captured against a FRESH run of `main` @ `4c4689c`, which reproduced the 09-27 file exactly. |
 | `legacy_behaviour_2026-09-27_immolate_rng.txt` | 2026-09-27 | After Immolate's apply burst stopped drawing from `game_rng` (card AS-154). Captured against a FRESH run of `main` @ `a2f483a` — see the note under the table. |
 | `legacy_behaviour_2026-09-13_frost_armor_chill.txt` | 2026-09-13 | After the Frost Armor chill became one compound debuff (card AS-54). Captured against a FRESH run of `main` @ `3c61185` rather than against the file below — see the note under the table. |
 | `legacy_behaviour_2026-08-02_backlash_ids.txt` | 2026-08-02 | After the `[BACKLASH]` log-id fix. Verified reproducible: two independent runs agreed on all 27 cells. |
 | `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | After moving the simulation to `FixedUpdate`. Verified reproducible when captured. |
 | `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | Pre-fixed-timestep. Also verified reproducible when captured. |
+
+### 2026-09-28 — Warriors start at 0 rage (AS-172)
+
+Rage lives in `current_mana`, so the countdown's every-frame refill and
+`apply_equipment`'s pool reset both handed every Warrior a full 100-rage bar
+at the gates. Both now hold rage at 0 and mana and energy full.
+
+**14 of 27 cells moved, and every one of them has a Warrior in it.** The nine
+`pet_comp` cells (`Hunter,Shaman` vs `Rogue,Priest`) are byte-identical, log
+SHA included: no rage user, nothing for the change to reach. Three moved
+cells flipped winner (`BasicArena ranged_v_melee 4`, `TwinPillars
+healer_v_healer` 1 and 4).
+
+The attribution is positive in every moved cell: the FIRST event line that
+differs is the Warrior's first rage spend that only the free starting bar
+could pay for — a queued Heroic Strike becoming a plain Auto Attack (nine
+cells), or a Pummel (three `TwinPillars healer_v_healer` cells and
+`PillaredArena healer_v_healer 4`) or Mortal Strike (`PillaredArena
+healer_v_healer 1`) that the empty bar cannot afford at that moment.
+
+The four Warrior cells that did NOT move — `ranged_v_melee` 1 and 7 on
+BasicArena, 1 and 4 on PillaredArena — are the ones where the Frostbolted
+Warrior dies (29s in `BasicArena 1`) without ever reaching the Heroic Strike
+threshold (cost + reserve) in either arm, and every spend it did make —
+Charge, Rend, Berserker Rage, Mortal Strike — was affordable from rage it had
+earned by then. A traced run of `BasicArena 1` on the new binary shows Rend at
+49 rage and Mortal Strike at 40, the same decisions at the same ticks.
+
+No balance sweep was run for this card: it is a bug fix, and its balance
+measurement is deferred to the milestone sweep.
 
 ### 2026-09-28 — weapon speed from item data (AS-167)
 

@@ -86,10 +86,17 @@ fn seeded_2v2_matches_its_recorded_identity() {
     // fires every 1.6s for the same DPS, so each shot hits harder, and every
     // shield after it runs down at a different point. Paired sweep:
     // `docs/design/balance/2026-09-28-as167-weapon-speed.md`.
+    //
+    // Re-recorded for AS-172, Warriors entering the gates at 0 rage instead of
+    // 100. Took this cell to Some(1) @ 45.616142s from Some(1) @ 45.966137s.
+    // The first line that differs from `main` @ d5f21c1 is the Warrior's first
+    // swing on the Mage: a queued Heroic Strike crit (184) becomes a plain
+    // Auto Attack crit (122), because the rage that paid for it was the free
+    // starting bar.
     assert_pinned(
         &result,
         Some(1),
-        1_110_957_395,
+        1_110_865_646,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }
@@ -116,10 +123,19 @@ fn seeded_1v1_matches_its_recorded_identity() {
     // Wand of Shadows now fires every 1.8s for the same DPS, so each shot hits
     // harder. The Warrior's first swing follows (a 30-damage crit becomes a
     // 122-damage one — the Arcanite Reaper's 3.8s swing at its two-hander DPS).
+    //
+    // Re-recorded for AS-172, Warriors entering the gates at 0 rage instead of
+    // 100. Took this cell to Some(1) @ 17.549904s from Some(2) @ 15.983261s.
+    // The first line that differs from `main` @ d5f21c1 is the Warrior's
+    // killing blow: a Heroic Strike (72) the starting bar paid for becomes an
+    // Auto Attack (61), the Mage survives it and wins. That the Mage's kill
+    // lands on the same bits as before AS-167 is the overkill blindness noted
+    // above, not a revert: the log's Frostbolt and Wand Shot damage still
+    // carry AS-167's numbers.
     assert_pinned(
         &result,
-        Some(2),
-        1_098_890_096,
+        Some(1),
+        1_099_720_244,
         "1v1 Mage vs Warrior @99001",
     );
 }

@@ -284,7 +284,8 @@ For deeper context, see these focused references:
 ## Key Concepts
 
 ### Combat Flow
-1. **Pre-match** (10s countdown): Combatants can buff, mana restored each frame
+1. **Pre-match** (10s countdown): Combatants can buff; mana and energy held full
+   each frame, rage held at 0 (Warriors enter the gates with an empty bar)
 2. **Gates open**: Combat begins, AI takes over
 3. **Combat loop**: Target acquisition → ability decisions → casting → damage/healing.
    **Mana is charged only when a completed cast actually LANDS** (WoW-faithful):
