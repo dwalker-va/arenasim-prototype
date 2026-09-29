@@ -621,7 +621,6 @@ impl CombatLog {
         output_path: Option<&str>,
     ) -> std::io::Result<String> {
         use std::fs::{self, File};
-        use std::io::Write;
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let filename = if let Some(path) = output_path {
@@ -648,7 +647,16 @@ impl CombatLog {
         };
 
         let mut file = File::create(&filename)?;
+        self.write_report(match_metadata, &mut file)?;
+        Ok(filename)
+    }
 
+    /// Write the match report — the text `save_to_file` saves — to `file`.
+    pub fn write_report(
+        &self,
+        match_metadata: &MatchMetadata,
+        file: &mut impl std::io::Write,
+    ) -> std::io::Result<()> {
         // Write header
         writeln!(file, "{}", "=".repeat(80))?;
         writeln!(file, "ARENA MATCH REPORT")?;
@@ -684,14 +692,14 @@ impl CombatLog {
         writeln!(file, "TEAM 1 COMPOSITION")?;
         writeln!(file, "{}", "-".repeat(80))?;
         for (i, combatant) in match_metadata.team1.iter().enumerate() {
-            write_combatant_block(&mut file, i + 1, combatant)?;
+            write_combatant_block(file, i + 1, combatant)?;
         }
         writeln!(file)?;
 
         writeln!(file, "TEAM 2 COMPOSITION")?;
         writeln!(file, "{}", "-".repeat(80))?;
         for (i, combatant) in match_metadata.team2.iter().enumerate() {
-            write_combatant_block(&mut file, i + 1, combatant)?;
+            write_combatant_block(file, i + 1, combatant)?;
         }
         writeln!(file)?;
 
@@ -748,12 +756,12 @@ impl CombatLog {
         writeln!(file, "END OF REPORT")?;
         writeln!(file, "{}", "=".repeat(80))?;
 
-        Ok(filename)
+        Ok(())
     }
 }
 
 /// Match metadata for saving combat logs
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MatchMetadata {
     pub arena_name: String,
     pub winner: Option<u8>,
@@ -766,12 +774,10 @@ pub struct MatchMetadata {
 
 /// Write a single combatant's stat block (HP/mana, position, damage, mitigation) to the report.
 fn write_combatant_block(
-    file: &mut std::fs::File,
+    file: &mut impl std::io::Write,
     slot_number: usize,
     combatant: &CombatantMetadata,
 ) -> std::io::Result<()> {
-    use std::io::Write;
-
     writeln!(
         file,
         "  Slot {}: {} (HP: {:.0}/{:.0}, Mana: {:.0}/{:.0})",

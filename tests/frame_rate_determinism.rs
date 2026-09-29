@@ -24,6 +24,17 @@
 //! any ticks one schedule ran past the other must be the frozen final state.
 //! The always-on test also asserts the schedules DO disagree on the
 //! celebration's length, so that tail check is never vacuous.
+//!
+//! ## What the player reads, not just the state
+//!
+//! Identical state can still be LISTED differently. The Results screen and the
+//! saved match report are built by `check_match_end` from a query, and
+//! graphical-only components (a hit flinch, a charge trail) move combatants
+//! between archetypes on the frame clock, so query order depended on the
+//! display: the same seed read "Priest, Warrior" on one screen and "Warrior,
+//! Priest" on another, every number identical. So each run also captures the
+//! Results rows IN ORDER and the report's full text at the deciding tick, and
+//! both must match across schedules and list every team in slot order.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -36,8 +47,8 @@ use bevy::time::TimeUpdateStrategy;
 use arenasim::combat::log::CombatLog;
 use arenasim::combat::CombatPlugin;
 use arenasim::states::play_match::components::{
-    ActiveAuras, CastingState, ChannelingState, Combatant, MatchCountdown, Pet, Projectile, Trap,
-    TrapLaunchProjectile, VictoryCelebration,
+    ActiveAuras, CastingState, ChannelingState, Combatant, MatchCountdown, MatchResults, Pet,
+    Projectile, Trap, TrapLaunchProjectile, VictoryCelebration,
 };
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::play_match::{
@@ -137,6 +148,11 @@ struct Ticks {
     log_seen: usize,
     /// Running hash of every combat-log entry, in order.
     log_hash: u64,
+    /// The Results screen's rows, IN the order the screen lists them, and the
+    /// saved match report's full text — both taken the tick the match was
+    /// decided, which is when `check_match_end` builds and saves them.
+    results: Option<String>,
+    report: Option<String>,
 }
 
 struct Fnv(u64);
@@ -294,15 +310,19 @@ fn record_tick(
         .collect();
     objects.sort();
 
-    // Fold new combat-log entries into the running hash (the log only grows).
+    // Fold this tick's new combat-log entries into the running hash (the log
+    // only grows) — as a SET per tick: see `canonical_report`.
     let mut log_hash = Fnv(ticks.log_hash);
     if ticks.log_seen == 0 {
         log_hash = Fnv::new();
     }
-    for entry in &log.entries[ticks.log_seen..] {
-        log_hash.f32(entry.timestamp);
-        log_hash.str(&format!("{:?}", entry.event_type));
-        log_hash.str(&entry.message);
+    let mut new_entries: Vec<String> = log.entries[ticks.log_seen..]
+        .iter()
+        .map(|e| format!("{} {:?} {}", e.timestamp.to_bits(), e.event_type, e.message))
+        .collect();
+    new_entries.sort();
+    for entry in &new_entries {
+        log_hash.str(entry);
     }
     ticks.log_seen = log.entries.len();
     ticks.log_hash = log_hash.0;
@@ -322,9 +342,93 @@ fn record_tick(
     h.bytes(&ticks.log_hash.to_le_bytes());
     ticks.hashes.push(h.0);
 
-    if celebration.is_some() && ticks.decided_at.is_none() {
-        ticks.decided_at = Some(ticks.hashes.len());
+    if let Some(celebration) = celebration {
+        if ticks.decided_at.is_none() {
+            ticks.decided_at = Some(ticks.hashes.len());
+            ticks.results = Some(results_rows(&celebration.match_results));
+            let mut report = Vec::new();
+            log.write_report(&celebration.match_metadata, &mut report)
+                .unwrap();
+            ticks.report = Some(String::from_utf8(report).unwrap());
+        }
     }
+}
+
+/// The saved report, with the combat-log entries of any one instant sorted.
+///
+/// Everything else — header, compositions, every entry's content and its
+/// timestamp — is compared exactly. What this forgives is only the ORDER of
+/// entries that share a timestamp: those are logged by sim loops that iterate
+/// in ECS query order, and graphical-only components move combatants between
+/// archetypes on the frame clock, so two combatants acting in the same tick
+/// can be logged in either order (Warrior+Priest v Hunter+Mage, seed 7, on
+/// irregular frames). That is AS-175, a separate card.
+fn canonical_report(report: &str) -> String {
+    // An entry is its "[ t.ttS] ..." line plus the indented position lines
+    // under it.
+    let mut out: Vec<String> = Vec::new();
+    let mut instant: Option<String> = None;
+    let mut group: Vec<String> = Vec::new();
+    let flush = |group: &mut Vec<String>, out: &mut Vec<String>| {
+        group.sort();
+        out.append(group);
+    };
+    for line in report.lines() {
+        let stamp = line
+            .strip_prefix('[')
+            .and_then(|l| l.split_once(']'))
+            .map(|(t, _)| t.to_string());
+        match stamp {
+            Some(t) => {
+                if instant.as_ref() != Some(&t) {
+                    flush(&mut group, &mut out);
+                    instant = Some(t);
+                }
+                group.push(line.to_string());
+            }
+            None if line.starts_with("    ") && !group.is_empty() => {
+                let last = group.last_mut().unwrap();
+                last.push('\n');
+                last.push_str(line);
+            }
+            None => {
+                flush(&mut group, &mut out);
+                instant = None;
+                out.push(line.to_string());
+            }
+        }
+    }
+    flush(&mut group, &mut out);
+    out.join("\n")
+}
+
+/// The Results screen's content, row by row in its own order. Deliberately
+/// NOT sorted: the order is what a player sees, and what must not depend on
+/// the display.
+fn results_rows(results: &MatchResults) -> String {
+    let mut out = format!(
+        "winner {:?} duration {}\n",
+        results.winner, results.duration_secs
+    );
+    for (team, rows) in [
+        (1, &results.team1_combatants),
+        (2, &results.team2_combatants),
+    ] {
+        for row in rows {
+            out += &format!(
+                "team {team} slot {} {:?} dealt {} taken {} healed {} survived {}\n",
+                row.slot,
+                row.class,
+                row.damage_dealt,
+                row.damage_taken,
+                row.healing_done,
+                row.survived
+            );
+        }
+    }
+    let links: BTreeMap<_, _> = results.pet_damage_links.iter().collect();
+    out += &format!("pet links {links:?}\n");
+    out
 }
 
 /// Run `cfg` to the Results screen under one frame schedule.
@@ -360,6 +464,28 @@ fn assert_same_sim(cfg: &str, a_label: &str, a: &Ticks, b_label: &str, b: &Ticks
         "{cfg}: decided at tick {:?} under {a_label}, {:?} under {b_label}",
         a.decided_at, b.decided_at
     );
+    assert_eq!(
+        a.results, b.results,
+        "{cfg}: the Results screen differs between {a_label} and {b_label}"
+    );
+    let (a_report, b_report) = (
+        canonical_report(a.report.as_deref().expect("report")),
+        canonical_report(b.report.as_deref().expect("report")),
+    );
+    if a_report != b_report {
+        let (a_text, b_text) = (a_report.as_str(), b_report.as_str());
+        let line = a_text
+            .lines()
+            .zip(b_text.lines())
+            .position(|(x, y)| x != y)
+            .unwrap_or(0);
+        panic!(
+            "{cfg}: the saved match report differs between {a_label} and {b_label} at line {}:\n  {}\n  {}",
+            line + 1,
+            a_text.lines().nth(line).unwrap_or(""),
+            b_text.lines().nth(line).unwrap_or(""),
+        );
+    }
     let common = a.hashes.len().min(b.hashes.len());
     if let Some(tick) = (0..common).find(|&i| a.hashes[i] != b.hashes[i]) {
         panic!(
@@ -388,6 +514,47 @@ fn assert_frame_rate_independent(cfg: &str, schedules: Vec<(String, Ticks)>) {
     for (label, ticks) in &schedules[1..] {
         assert_same_sim(cfg, base_label, base, label, ticks);
     }
+    for (label, ticks) in &schedules {
+        assert_listed_in_slot_order(cfg, label, ticks);
+    }
+}
+
+/// The Results rows and the saved report list each team in slot order.
+///
+/// Agreement between two schedules is not enough on its own: ECS query order
+/// is whatever the archetype history left, which can coincide at two frame
+/// rates and still be wrong — and differ at a third. The order is pinned to
+/// (team, slot), the one order nothing on the frame clock can move.
+fn assert_listed_in_slot_order(cfg: &str, label: &str, ticks: &Ticks) {
+    let results = ticks.results.as_deref().expect("results");
+    let report = ticks.report.as_deref().expect("report");
+    let mut listed: Vec<(u32, u32, String)> = Vec::new();
+    for line in results.lines().filter(|l| l.starts_with("team ")) {
+        let words: Vec<&str> = line.split(' ').collect();
+        listed.push((
+            words[1].parse().unwrap(),
+            words[3].parse().unwrap(),
+            words[4].to_string(),
+        ));
+    }
+    let mut sorted = listed.clone();
+    sorted.sort();
+    assert_eq!(
+        listed, sorted,
+        "{cfg}: under {label} the Results rows are not in (team, slot) order:\n{results}"
+    );
+    // The report numbers its combatants 1..n within each team, in the same
+    // order as the Results rows.
+    let report_classes: Vec<&str> = report
+        .lines()
+        .filter_map(|l| l.trim_start().strip_prefix("Slot "))
+        .map(|l| l.split(' ').nth(1).unwrap())
+        .collect();
+    let results_classes: Vec<&str> = listed.iter().map(|(_, _, c)| c.as_str()).collect();
+    assert_eq!(
+        report_classes, results_classes,
+        "{cfg}: under {label} the saved report lists combatants in a different order"
+    );
 }
 
 fn displays(cfg: &str) -> Vec<(String, Ticks)> {
@@ -418,6 +585,36 @@ fn same_seed_same_sim_at_every_display_rate() {
     assert_frame_rate_independent(FOUND_ON, schedules);
 }
 
+/// A match whose combatants change archetype on the frame clock (hit flinches,
+/// a Charge trail), so its query order at the deciding tick is not slot order.
+/// This is where the listing bug was found: built in query order, one display
+/// showed "Warrior, Priest" and a 25Hz one "Priest, Warrior", with every
+/// number identical. The current sim plays this seed differently, and query
+/// order now puts the Priest first at every schedule here. That is exactly the
+/// case where agreement between schedules proves nothing, and why
+/// `assert_listed_in_slot_order` checks the order itself.
+const QUERY_ORDER_SENSITIVE: &str = r#"{"team1":["Warrior","Priest"],"team2":["Hunter","Mage"],"map":"TwinPillars","random_seed":7}"#;
+
+#[test]
+fn results_and_report_do_not_depend_on_the_display_rate() {
+    let schedules = vec![
+        (
+            "16667us frames".to_string(),
+            run(QUERY_ORDER_SENSITIVE, fixed_rate(16_667)),
+        ),
+        (
+            "40000us frames".to_string(),
+            run(QUERY_ORDER_SENSITIVE, fixed_rate(40_000)),
+        ),
+    ];
+    // Non-vacuity: both teams listed more than one combatant, so an order
+    // existed to get wrong.
+    let results = schedules[0].1.results.as_deref().expect("results");
+    assert_eq!(results.matches("team 1 slot").count(), 2, "{results}");
+    assert_eq!(results.matches("team 2 slot").count(), 2, "{results}");
+    assert_frame_rate_independent(QUERY_ORDER_SENSITIVE, schedules);
+}
+
 /// The wider sweep: more matchups, maps and seeds, and the frame schedules a
 /// player can actually produce — 25Hz, and irregular frames under pause,
 /// fast-forward and slow-motion. Minutes of simulation, so opt-in:
@@ -430,7 +627,7 @@ fn sweep_matchups_and_schedules() {
         r#"{"team1":["Warrior"],"team2":["Hunter"],"map":"BasicArena","random_seed":3}"#,
         r#"{"team1":["Rogue"],"team2":["Mage"],"map":"BasicArena","random_seed":42}"#,
         r#"{"team1":["Warlock"],"team2":["Priest"],"map":"TwinPillars","random_seed":5}"#,
-        r#"{"team1":["Warrior","Priest"],"team2":["Hunter","Mage"],"map":"TwinPillars","random_seed":7}"#,
+        QUERY_ORDER_SENSITIVE,
         r#"{"team1":["Warlock","Rogue"],"team2":["Hunter","Paladin"],"map":"PillaredArena","random_seed":3}"#,
         r#"{"team1":["Rogue","Shaman"],"team2":["Warlock","Priest"],"map":"PillaredArena","random_seed":13}"#,
         r#"{"team1":["Warrior","Priest","Mage"],"team2":["Hunter","Warlock","Shaman"],"map":"TwinPillars","random_seed":21}"#,
