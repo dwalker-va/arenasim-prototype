@@ -26,9 +26,10 @@ use arenasim::states::play_match::components::{
     Celebrating, Combatant, Pet, VictoryCelebration, VisualBody,
 };
 use arenasim::states::play_match::equipment::EquipmentPlugin;
+use arenasim::states::play_match::map_geometry::MOVER_RADIUS;
 use arenasim::states::play_match::{
-    AbilityConfigPlugin, GameRng, MapConfigPlugin, MovementConfigPlugin, CONVERGE_RING_RADIUS,
-    PET_HEEL_DISTANCE,
+    AbilityConfigPlugin, CelebrationMarch, GameRng, MapConfigPlugin, MovementConfigPlugin,
+    CONVERGE_SPACING, PET_HEEL_DISTANCE,
 };
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::HeadlessMatchConfig;
@@ -93,6 +94,9 @@ struct Seen {
     pet_to_owner_at_end: Vec<f32>,
     /// The highest any winner's body rose above its rest height.
     max_bounce: f32,
+    /// Each winner's planned spot, and whether it had settled, on the last
+    /// tick.
+    marches_at_end: Vec<(u8, CelebrationMarch)>,
 }
 
 fn winners(
@@ -124,6 +128,7 @@ fn watch_tick(
         Option<&Pet>,
         Has<Celebrating>,
     )>,
+    marches: Query<(&Combatant, &CelebrationMarch)>,
 ) {
     if celebration.is_none() || *state.get() != GameState::PlayMatch {
         return;
@@ -152,6 +157,10 @@ fn watch_tick(
         seen.pet_to_owner_at_decision = pets.clone();
     }
     seen.pet_to_owner_at_end = pets;
+    let mut marches: Vec<(u8, CelebrationMarch)> =
+        marches.iter().map(|(c, m)| (c.slot, *m)).collect();
+    marches.sort_by_key(|(slot, _)| *slot);
+    seen.marches_at_end = marches;
 }
 
 fn watch_frame(
@@ -207,10 +216,9 @@ fn winners_far_apart_run_together_and_bounce() {
     );
     // Non-vacuity: they really did finish far apart.
     assert!(before > 10.0, "winners finished only {before:.1}yd apart");
-    // They meet side by side: CONVERGE_RING_RADIUS either side of the
-    // meeting point, give or take the last partial step.
+    // They meet side by side, CONVERGE_SPACING apart.
     assert!(
-        (after - 2.0 * CONVERGE_RING_RADIUS).abs() < 0.5,
+        (after - CONVERGE_SPACING).abs() < 0.05,
         "winners {before:.1}yd apart at the decision ended {after:.1}yd apart"
     );
     assert!(seen.max_bounce > 0.3, "no bounce: {}", seen.max_bounce);
@@ -235,6 +243,43 @@ fn a_lone_winner_bounces_where_it_stands() {
         seen.pet_to_owner_at_end[0] <= PET_HEEL_DISTANCE + 0.01,
         "pet ended {:.2}yd from its owner",
         seen.pet_to_owner_at_end[0]
+    );
+}
+
+/// Three winners who finish the match on the same side of the arena would, if
+/// each simply stopped on the side it came from, share a spot. Every winner
+/// gets a distinct spot, reaches it, and stands clear of the others.
+fn assert_three_stand_apart(cfg: &str) {
+    let seen = run(cfg);
+    assert_eq!(seen.at_decision.len(), 3, "{cfg}: {:?}", seen.at_decision);
+    assert_eq!(seen.marches_at_end.len(), 3);
+    for (slot, march) in &seen.marches_at_end {
+        let (_, at) = seen.at_end.iter().find(|(s, _)| s == slot).unwrap();
+        let off = Vec2::new(at.x - march.goal.x, at.z - march.goal.z).length();
+        assert!(
+            march.settled && off < 0.05,
+            "{cfg}: slot {slot} ended {off:.2}yd from its spot (settled {})",
+            march.settled
+        );
+    }
+    for (i, (_, a)) in seen.at_end.iter().enumerate() {
+        for (_, b) in &seen.at_end[i + 1..] {
+            let d = Vec2::new(a.x - b.x, a.z - b.z).length();
+            eprintln!("{cfg}: pair {d:.2}yd apart");
+            assert!(d >= 2.0 * MOVER_RADIUS, "{cfg}: two winners {d:.2}yd apart");
+        }
+    }
+}
+
+#[test]
+fn three_winners_each_reach_their_own_spot() {
+    // Found with the Rogue stopping 0.22yd from the Priest...
+    assert_three_stand_apart(
+        r#"{"team1":["Rogue","Priest","Paladin"],"team2":["Hunter","Shaman","Warlock"],"map":"BasicArena","random_seed":1}"#,
+    );
+    // ...and, on the pillared Nagrand map, 0.67yd.
+    assert_three_stand_apart(
+        r#"{"team1":["Hunter","Mage","Priest"],"team2":["Warrior","Rogue","Shaman"],"map":"PillaredArena","random_seed":4}"#,
     );
 }
 
