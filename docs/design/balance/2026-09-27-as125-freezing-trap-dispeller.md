@@ -12,14 +12,13 @@ that trap only while it is ready; in the opener Aimed Shot goes before Serpent
 Sting when it has time to finish. The Warlock cells, the Rogue + healer cells
 and the no-healer cells are reported whichever way they move. Win rate is
 reported, not tuned.
-**Arms:** before = `main` at `d5f21c1` (Classic weapon speeds); after = this
-branch on it (release binary sha1 `9f606cad`). Same JSONL both arms. Main's
-later commits — Warriors entering the gates at 0 rage among them — are not in
-either arm, so the Warrior rows are as of `d5f21c1`. Three attribution
+**Arms:** before = `main` at `c79d8cc` (Classic weapon speeds, Warriors enter
+the gates at 0 rage); after = this branch on it (release binary sha1
+`3ab7b02e`). Same JSONL both arms. Three attribution
 arms are the after binary with one piece taken out, each committed as a patch
 beside the sweeps: `…-arm-trade-trap.patch`, `…-arm-trap-setup-off.patch`,
 `…-arm-opener-ignores-hidden.patch`.
-**Raw rows:** `2026-09-27-as125_{1v1,2v2,2v2_kt0}_{base_d5f21c1,after}.csv`
+**Raw rows:** `2026-09-27-as125_{1v1,2v2,2v2_kt0}_{base_c79d8cc,after}.csv`
 (one row per match, from `sweeps/2026-09-27-as125-hunter-{1v1,directional,directional-kt0}.jsonl`);
 `2026-09-27-as125_2v2_arm_{trade_trap,trap_setup_off}.csv`;
 `2026-09-27-as125_2v2{,_kt0}_rogue_arm_opener_ignores_hidden.csv` (the Rogue
@@ -141,13 +140,13 @@ directional sweep fields it).
 
 | | no kill target: before | after | kill targets at 0: before | after |
 |---|---|---|---|---|
-| traps thrown | 507 | 332 | 419 | 331 |
-| **sprung on the enemy the throw was decided on** | **114 of 459 named** | **207 of 219 named, + 40 unseen** | **87 of 349** | **195 of 204, + 40 unseen** |
-| **sprung on a healer** | **31** (126s held in all) | **153** (1,041s) | **48** (247s) | **157** (1,114s) |
-| removed by an enemy dispel or Divine Shield | 290 (0 by the bubble) | 31 (3) | 242 (15) | 27 (17) |
-| broken by damage | 6 | 9 | 2 | 1 |
-| ran the full duration | 163 | 219 | 105 | 216 |
-| never sprung | 48 | 73 | 70 | 87 |
+| traps thrown | 507 | 331 | 420 | 330 |
+| **sprung on the enemy the throw was decided on** | **114 of 459 named** | **209 of 221 named, + 40 unseen** | **88 of 350** | **194 of 202, + 40 unseen** |
+| **sprung on a healer** | **31** (126s held in all) | **155** (1,062s) | **48** (247s) | **156** (1,106s) |
+| removed by an enemy dispel or Divine Shield | 290 (0 by the bubble) | 32 (4) | 242 (15) | 24 (17) |
+| broken by damage | 6 | 9 | 3 | 1 |
+| ran the full duration | 163 | 220 | 105 | 217 |
+| never sprung | 48 | 70 | 70 | 88 |
 
 **The Hunter fights the melee while its trap holds the healer, kill target
 or not.** With the Hunter's team told to kill the enemy healer
@@ -166,9 +165,9 @@ built and measured on this set, with no kill target, on the branch at
 `4c4689c` (an earlier main): healer traps fell from 158 to 39 and Hunter-side
 wins from 237 to 217 of 540 (`H+Pri vs Warrior+Priest` 20 → 2 traps, `H+Pal
 vs Rogue+Priest` and `Pal+H vs Rogue+Priest` 25 and 18 → 0). What the
-exception costs here: a partner Priest's Mind Blast broke **1 of the 153**
+exception costs here: a partner Priest's Mind Blast broke **1 of the 155**
 healer traps with no kill target (`H+Pri vs Rogue+Paladin` seed 14) and
-**0 of the 157** with kill targets at 0.
+**0 of the 156** with kill targets at 0.
 
 **The Hunter breaks its own trap.** 8 of the 9 broken traps with no kill
 target were broken by the Hunter's own Aimed Shot, begun on a Rogue before a
@@ -193,13 +192,13 @@ seconds it was held (8.0s is the full trap). Hunter-side wins of 20.
 | H+Pri vs Mage+Priest | 0.00 | 20 | - | - | 0 | 0.00 | 20 | - | - | 0 | 0 → 0 |
 | H+Pri vs Warlock+Priest | 0.00 | 20 | - | - | 0 | 0.00 | 20 | - | - | 0 | 5 → 5 |
 | H+Pri vs Warlock+Paladin | 0.00 | 20 | - | - | 0 | 0.00 | 20 | - | - | 0 | 3 → 3 |
-| H+Pri vs Paladin+Warrior | 1.00 | 0 | 20/20 | 0/0/20/0 | 0 | 0.90 | 2 | 7/7 | 0/0/7/11 | 7 (6.9s) | 0 → 0 |
+| H+Pri vs Paladin+Warrior | 1.00 | 0 | 20/20 | 0/0/20/0 | 0 | 0.85 | 3 | 9/9 | 1/0/8/8 | 9 (7.6s) | 0 → 0 |
 | H+Pri vs Rogue+Warrior | 1.00 | 0 | 0/20 | 0/0/20/0 | 0 | 1.00 | 0 | 0/0 +20u | 0/0/20/0 | 0 | 20 → 20 |
 | H+Pri vs Priest+Paladin | 1.05 | 0 | 21/21 | 16/1/4/0 | 21 (2.2s) | 1.00 | 0 | 19/20 | 20/0/0/0 | 20 (0.8s) | 20 → 20 |
 | H+Pri vs Warlock+Rogue | 1.90 | 0 | 18/38 | 20/5/13/0 | 0 | 0.50 | 10 | 10/10 | 0/6/4/0 | 0 | 20 → 10 |
 | H+Pri vs Shaman+Rogue | 1.35 | 0 | 4/24 | 0/0/24/3 | 0 | 1.70 | 0 | 12/13 +20u | 0/1/32/1 | 10 (8.0s) | 0 → 2 |
-| H+War vs Rogue+Priest | 1.00 | 0 | 0/20 | 20/0/0/0 | 0 | 0.00 | 20 | - | - | 0 | 6 → 19 |
-| H+Pri+War vs Mage+Priest+Rogue | 1.00 | 0 | 0/20 | 20/0/0/0 | 0 | 0.00 | 20 | - | - | 0 | 6 → 1 |
+| H+War vs Rogue+Priest | 1.00 | 0 | 0/20 | 20/0/0/0 | 0 | 0.00 | 20 | - | - | 0 | 2 → 19 |
+| H+Pri+War vs Mage+Priest+Rogue | 1.00 | 0 | 0/20 | 20/0/0/0 | 0 | 0.00 | 20 | - | - | 0 | 5 → 1 |
 | H+Pri+War vs Warlock+Priest+Rogue | 1.00 | 0 | 0/20 | 20/0/0/0 | 0 | 0.05 | 19 | 1/1 | 0/0/1/0 | 1 (8.0s) | 4 → 3 |
 | H+Pri vs Rogue+Paladin | 1.05 | 0 | 0/20 | 20/0/0/1 | 0 | 1.30 | 0 | 14/21 | 8/1/12/5 | 14 (6.1s) | 0 → 5 |
 | H+Pri vs Warrior+Shaman | 0.95 | 1 | - | 0/0/0/19 | 0 | 1.25 | 0 | 16/16 | 0/0/16/9 | 16 (7.8s) | 20 → 16 |
@@ -231,17 +230,17 @@ seconds it was held (8.0s is the full trap). Hunter-side wins of 20.
 | H+Pri vs Warlock+Rogue | 1.05 | 0 | 1/21 | 20/0/1/0 | 0 | 0.00 | 20 | - | - | 0 | 11 → 0 |
 | H+Pri vs Shaman+Rogue | 1.00 | 0 | 0/20 | 0/0/20/0 | 0 | 1.00 | 0 | 0/0 +20u | 0/0/20/0 | 0 | 3 → 0 |
 | H+War vs Rogue+Priest | 1.00 | 0 | 0/20 | 20/0/0/0 | 0 | 0.00 | 20 | - | - | 0 | 20 → 4 |
-| H+Pri+War vs Mage+Priest+Rogue | 0.00 | 20 | - | - | 0 | 0.45 | 11 | 4/7 | 3/0/4/2 | 4 (8.0s) | 16 → 17 |
-| H+Pri+War vs Warlock+Priest+Rogue | 0.00 | 20 | - | - | 0 | 0.00 | 20 | - | - | 0 | 19 → 19 |
+| H+Pri+War vs Mage+Priest+Rogue | 0.00 | 20 | - | - | 0 | 0.40 | 12 | 2/4 | 0/0/4/4 | 2 (8.0s) | 14 → 13 |
+| H+Pri+War vs Warlock+Priest+Rogue | 0.05 | 19 | 1/1 | 0/1/0/0 | 0 | 0.00 | 20 | - | - | 0 | 18 → 18 |
 | H+Pri vs Rogue+Paladin | 1.05 | 0 | 1/21 | 20/0/1/0 | 1 (8.0s) | 0.90 | 2 | 10/12 | 3/1/8/6 | 10 (5.8s) | 20 → 16 |
 | H+Pri vs Warrior+Shaman | 0.65 | 7 | - | 0/0/0/13 | 0 | 1.00 | 0 | 8/8 | 0/0/8/12 | 8 (8.0s) | 17 → 20 |
-| H+War vs Warrior+Priest | 0.00 | 20 | - | - | 0 | 1.00 | 0 | 9/9 | 0/0/9/11 | 9 (8.0s) | 0 → 19 |
+| H+War vs Warrior+Priest | 0.00 | 20 | - | - | 0 | 1.00 | 0 | 10/10 | 0/0/10/10 | 10 (8.0s) | 0 → 19 |
 | H+Mage vs Rogue+Priest | 1.25 | 0 | 0/20 | 20/0/0/5 | 0 | 0.00 | 20 | - | - | 0 | 20 → 3 |
 | H+Wlk vs Rogue+Priest | 1.00 | 0 | 0/20 | 20/0/0/0 | 0 | 0.00 | 20 | - | - | 0 | 20 → 8 |
 | H+Rogue vs Rogue+Priest | 1.00 | 0 | 0/20 | 20/0/0/0 | 0 | 0.05 | 19 | 1/1 | 0/0/1/0 | 1 (8.0s) | 20 → 20 |
 | H+Pal vs Rogue+Priest | 1.25 | 0 | 1/21 | 20/0/1/4 | 1 (8.0s) | 1.00 | 0 | 19/19 | 0/0/19/1 | 19 (8.0s) | 20 → 17 |
 | Pri+H vs Rogue+Priest | 1.00 | 0 | 0/20 | 20/0/0/0 | 0 | 1.00 | 0 | 9/10 | 0/0/10/10 | 9 (8.0s) | 20 → 17 |
-| War+H vs Rogue+Priest | 1.10 | 0 | 0/20 | 20/0/0/2 | 0 | 1.00 | 1 | 18/18 | 0/0/18/2 | 18 (8.0s) | 15 → 14 |
+| War+H vs Rogue+Priest | 1.10 | 0 | 0/20 | 20/0/0/2 | 0 | 1.00 | 1 | 18/18 | 0/0/18/2 | 18 (8.0s) | 19 → 14 |
 | Pal+H vs Rogue+Priest | 1.60 | 0 | 11/31 | 20/0/11/1 | 11 (8.0s) | 0.55 | 12 | 10/10 | 0/0/10/1 | 10 (8.0s) | 20 → 20 |
 | H vs Warrior | 1.00 | 0 | 20/20 | 0/0/20/0 | 0 | 1.00 | 0 | 20/20 | 0/0/20/0 | 0 | 20 → 20 |
 | H vs Rogue | 0.00 | 20 | - | - | 0 | 0.00 | 20 | - | - | 0 | 7 → 7 |
@@ -257,7 +256,7 @@ target). Four comps throw no trap, for reasons the rule states:
   is killing the healer") and its bleeds make the Priest untrappable ("cannot
   be trapped now"). While the Rogue is in stealth the Hunter begins no Aimed
   Shot, and the Rogue opens on the Hunter with Cheap Shot while the Warrior
-  works on the Priest. 6 → 19 wins with no kill target; 20 → 4 with the kill
+  works on the Priest. 2 → 19 wins with no kill target; 20 → 4 with the kill
   target on the Rogue.
 - **`H+Mage vs Rogue+Priest`:** the Mage is killing the Priest ("a teammate is
   killing the healer"). **`H+Wlk`:** the Warlock's DoTs make it untrappable.
@@ -265,7 +264,7 @@ target). Four comps throw no trap, for reasons the rule states:
   the Priest, never the Hunter — the pressure the rule waits for never comes
   (with kill targets at 0 it does, and the trap catches the Priest).
 
-**What the held opener costs: the reveal.** At `d5f21c1` the gates-open lane
+**What the held opener costs: the reveal.** At `c79d8cc` the gates-open lane
 trap sprang on the stealthed Rogue and **revealed** it; the Priest dispelled
 it within a second, but the Rogue had lost its opener. That throw is held now
 (its victim would just be dispelled), and the Rogue opens from stealth. It
@@ -286,8 +285,8 @@ other, by design (20 of the 31 removals with no kill target). **`Hunter vs
 Priest`** throws at 1.0s every match and the Priest, closing on the Hunter,
 stops short of the landing.
 
-**Paladins.** Divine Shield lifted 3 of the 40 traps that sprang on a Paladin
-with no kill target, and 17 of 56 with kill targets at 0 (at `d5f21c1`, 0 of
+**Paladins.** Divine Shield lifted 4 of the 42 traps that sprang on a Paladin
+with no kill target, and 17 of 56 with kill targets at 0 (at `c79d8cc`, 0 of
 21 and 15 of 31). The trap is not held for it: the bubble lifts a trap only
 when the Paladin's AI spends its 5-minute cooldown on it, and a trap that
 draws it has spent the Paladin's one emergency button.
@@ -318,7 +317,7 @@ NON-VACUITY: 1105/1150 ended by elimination; 284 moved in winner or duration
 **Hunter vs Priest loses 14 of 100**, all as the side-swapped pair of the
 same seven seeds. Traced at seed 7: both arms throw the opening trap and a
 Concussive Shot, and the first decision that differs is the opener — Aimed
-Shot where `d5f21c1` cast Serpent Sting; the Hunter dies at 34s of the log
+Shot where `c79d8cc` cast Serpent Sting; the Hunter dies at 34s of the log
 instead of killing the Priest at 45s. The **Hunter mirror** goes from
 21/20/9 (team 1 / team 2 / draw) to 3/8/39: both Hunters open with the same
 Aimed Shot and race to simultaneous deaths, which count as draws. A 1v1 has
@@ -329,18 +328,18 @@ one enemy, so its kill target is that enemy either way.
 ```
 no kill target
 CONTROL: 80/80 matches with no affected class on either side are IDENTICAL
-  ALL reachable  n=3010  49.1% -> 49.8%  +0.6pt  flips 566 (+285/-266)  z=0.77 ns  resolves >=1.6pt
-  CLEAN          n=1260  34.0% -> 36.1%  +2.1pt  flips 211 (+115/-89)   z=1.75 ns
-  AGAINST        n=1260  64.6% -> 63.8%  -0.8pt  flips 218 (+102/-112)  ns
-  MIRRORED       n=490   48.2% -> 48.8%  +0.6pt  flips 137 (+68/-65)    ns
-NON-VACUITY: 3080/3090 ended by elimination; 2096 moved in winner or duration
+  ALL reachable  n=3010  49.3% -> 49.6%  +0.3pt  flips 573 (+284/-274)  z=0.38 ns  resolves >=1.6pt
+  CLEAN          n=1260  34.0% -> 36.1%  +2.1pt  flips 210 (+115/-88)   z=1.82 ns
+  AGAINST        n=1260  64.9% -> 63.7%  -1.3pt  flips 218 (+99/-115)   z=1.03 ns
+  MIRRORED       n=490   48.6% -> 48.4%  -0.2pt  flips 145 (+70/-71)    ns
+NON-VACUITY: 3080/3090 ended by elimination; 2091 moved in winner or duration
 
 kill targets at slot 0
 CONTROL: 80/80 matches with no affected class on either side are IDENTICAL
-  ALL reachable  n=3010  49.9% -> 49.7%  -0.2pt  flips 499 (+240/-245)  z=0.18 ns  resolves >=1.5pt
-  CLEAN          n=1260  52.7% -> 52.7%  +0.0pt  flips 199 (+97/-97)    ns
-  AGAINST        n=1260  47.6% -> 47.0%  -0.6pt  flips 198 (+95/-103)   ns
-  MIRRORED       n=490   48.6% -> 49.2%  +0.6pt  flips 102 (+48/-45)    ns
+  ALL reachable  n=3010  49.9% -> 49.7%  -0.2pt  flips 498 (+239/-245)  z=0.23 ns  resolves >=1.5pt
+  CLEAN          n=1260  53.0% -> 52.5%  -0.5pt  flips 199 (+94/-100)   ns
+  AGAINST        n=1260  47.4% -> 47.1%  -0.2pt  flips 199 (+98/-101)   ns
+  MIRRORED       n=490   48.6% -> 49.2%  +0.6pt  flips 100 (+47/-44)    ns
 NON-VACUITY: 3049/3090 ended by elimination; 2196 moved in winner or duration
 ```
 
@@ -354,41 +353,43 @@ Hunter in the second slot with every partner except the Shaman.
 
 | enemy comp | healer | Rogue | n | no kill target: before | after | flips +/- | z | kill targets at 0: before | after | flips +/- | z |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| **Priest+Rogue** | Priest | yes | 140 | 37.9% | 30.0% | +33/-44 | -1.3 | 98.6% | **70.0%** | +2/-42 | -6.0 |
-| **Rogue+Warlock** | - | yes | 140 | 98.6% | **70.0%** | +2/-42 | -6.0 | 95.7% | **66.4%** | +6/-47 | -5.6 |
-| **Paladin+Rogue** | Paladin | yes | 140 | 9.3% | **26.4%** | +35/-11 | +3.5 | 52.1% | **20.7%** | +7/-51 | -5.8 |
+| **Priest+Rogue** | Priest | yes | 140 | 37.9% | 30.0% | +33/-44 | -1.3 | 100.0% | **70.0%** | +0/-42 | -6.5 |
+| **Rogue+Warlock** | - | yes | 140 | 97.1% | **70.0%** | +4/-42 | -5.6 | 95.7% | **66.4%** | +6/-47 | -5.6 |
+| **Paladin+Rogue** | Paladin | yes | 140 | 6.4% | **26.4%** | +35/-7 | +4.3 | 55.0% | **20.7%** | +7/-55 | -6.1 |
 | Rogue+Shaman | Shaman | yes | 140 | 47.1% | 50.7% | +8/-3 | +1.5 | 98.6% | 100.0% | +2/-0 | +1.4 |
 | Mage+Rogue | - | yes | 140 | 77.1% | 75.0% | +0/-3 | -1.7 | 78.6% | 80.7% | +8/-5 | +0.8 |
 | Rogue+Warrior | - | yes | 140 | 100.0% | 100.0% | 0 | 0 | 97.1% | 97.1% | 0 | 0 |
-| Priest+Warlock | Priest |  | 140 | 27.1% | 23.6% | +0/-5 | -2.2 | 20.7% | 42.1% | +37/-7 | +4.5 |
-| Mage+Warrior | - |  | 140 | 23.6% | 15.7% | +14/-25 | -1.8 | 37.9% | 41.4% | +5/-0 | +2.2 |
-| Warlock+Warrior | - |  | 140 | 69.3% | 68.6% | +6/-7 | -0.3 | 50.0% | 75.0% | +41/-6 | +5.1 |
-| Paladin+Warrior | Paladin |  | 140 | 10.0% | 9.3% | +11/-12 | -0.2 | 23.6% | 28.6% | +11/-4 | +1.8 |
+| Priest+Warlock | Priest |  | 140 | 25.7% | 22.1% | +0/-5 | -2.2 | 20.7% | 42.1% | +37/-7 | +4.5 |
+| Mage+Warrior | - |  | 140 | 23.6% | 16.4% | +15/-25 | -1.6 | 37.9% | 41.4% | +5/-0 | +2.2 |
+| Warlock+Warrior | - |  | 140 | 70.0% | 67.9% | +4/-7 | -0.9 | 51.4% | 76.4% | +40/-5 | +5.2 |
+| Paladin+Warrior | Paladin |  | 140 | 10.0% | 10.0% | +12/-12 | 0 | 24.3% | 28.6% | +11/-5 | +1.5 |
 | Mage+Priest | Priest |  | 140 | 15.7% | 15.7% | +2/-2 | 0 | 12.1% | 10.0% | +4/-7 | -0.9 |
 | Mage+Shaman | Shaman |  | 140 | 5.7% | 5.7% | +2/-2 | 0 | 5.7% | 5.7% | 0 | 0 |
-| Mage+Warlock | - |  | 140 | 22.9% | 24.3% | +6/-4 | +0.6 | 26.4% | 37.1% | +23/-8 | +2.7 |
+| Mage+Warlock | - |  | 140 | 21.4% | 22.9% | +6/-4 | +0.6 | 26.4% | 35.0% | +20/-8 | +2.3 |
 | Mage+Paladin | Paladin |  | 140 | 0.7% | 1.4% | +1/-0 | +1.0 | 20.0% | 29.3% | +21/-8 | +2.4 |
 | Paladin+Warlock | Paladin |  | 140 | 3.6% | 8.6% | +8/-1 | +2.3 | 27.9% | 29.3% | +2/-0 | +1.4 |
-| Shaman+Warlock | Shaman |  | 140 | 2.9% | 10.0% | +12/-2 | +2.7 | 39.3% | 38.6% | +0/-1 | -1.0 |
-| **Shaman+Warrior** | Shaman |  | 140 | 41.4% | **58.6%** | +45/-21 | +3.0 | 87.1% | 94.3% | +12/-2 | +2.7 |
-| **Priest+Warrior** | Priest |  | 140 | 29.3% | **55.7%** | +44/-7 | +5.2 | 69.3% | 80.0% | +17/-2 | +3.4 |
-| **all 18** | | | 2520 | 34.6% | 36.1% | +229/-191 | +1.9 | 52.3% | 52.6% | +198/-190 | +0.4 |
+| Shaman+Warlock | Shaman |  | 140 | 4.3% | 11.4% | +12/-2 | +2.7 | 37.9% | 35.7% | +0/-3 | -1.7 |
+| **Shaman+Warrior** | Shaman |  | 140 | 41.4% | **57.9%** | +44/-21 | +2.9 | 87.1% | 94.3% | +12/-2 | +2.7 |
+| **Priest+Warrior** | Priest |  | 140 | 30.7% | **58.6%** | +46/-7 | +5.4 | 69.3% | 80.7% | +18/-2 | +3.6 |
+| **all 18** | | | 2520 | 34.4% | 36.2% | +232/-187 | +2.2 | 52.5% | 52.4% | +193/-196 | -0.2 |
 
-**The losses, plainly.** Against a Rogue with a dispeller the Hunter loses
-the reveal: `Priest+Rogue` 37.9% → 30.0% with no kill target and 98.6% →
-70.0% with it; `Rogue+Warlock` 98.6% → 70.0% and 95.7% → 66.4% (with no kill
-target, partly the Hunter's own Aimed Shot breaking its trap on the Rogue);
-`Paladin+Rogue` gains 17.1pt with no kill target and loses 31.4pt with it.
-With the kill target on the Rogue these are the largest losses in the sweep,
-and the graphical client plays with a kill target by default. 1v1 Hunter vs
-Priest: 100% → 86%.
+**The losses, plainly — accepted for now.** Against a Rogue with a dispeller
+the Hunter loses the reveal: `Priest+Rogue` 37.9% → 30.0% with no kill target
+and **100% → 70.0%** with it; `Rogue+Warlock` 97.1% → 70.0% and **95.7% →
+66.4%** (with no kill target, partly the Hunter's own Aimed Shot breaking its
+trap on the Rogue); `Paladin+Rogue` gains 20.0pt with no kill target and
+**loses 34.3pt** with it (55.0% → 20.7%). With the kill target on the Rogue
+these are the largest losses in the sweep, and the graphical client plays with
+a kill target by default. The user has accepted them for now: AS-166 (Hunter
+Flare) is the answer, to be sized against these kill-target figures. 1v1
+Hunter vs Priest: 100% → 86%.
 
-**The gains.** The melee + healer comps: `Priest+Warrior` +26.4pt,
-`Shaman+Warrior` +17.2pt, `Paladin+Rogue` +17.1pt with no kill target; with
+**The gains.** The melee + healer comps: `Priest+Warrior` +27.9pt,
+`Shaman+Warrior` +16.5pt, `Paladin+Rogue` +20.0pt with no kill target; with
 kill targets at 0 the Warlock comps gain (`Priest+Warlock` +21.4pt,
-`Warlock+Warrior` +25.0pt, `Mage+Warlock` +10.7pt).
+`Warlock+Warrior` +25.0pt, `Mage+Warlock` +8.6pt).
 
-**The no-healer comps.** `Mage+Warrior` -7.9pt with no kill target and +3.5pt
+**The no-healer comps.** `Mage+Warrior` -7.2pt with no kill target and +3.5pt
 with it; the others within noise.
 
 **Warlock cells, explicitly.** 1v1 Hunter vs Warlock: 59.0% → 58.0% (one
@@ -410,19 +411,21 @@ it back; no kill target). Removing it:
 |---|---|---|---|
 | Priest+Rogue | 16.4% | 30.0% | +24/-5 |
 | Paladin+Rogue | 23.6% | 26.4% | +8/-4 |
-| Paladin+Warrior, Mage+Priest, Mage+Paladin, Priest+Warrior | | | +12/-12 |
+| Priest+Warrior | 62.9% | 58.6% | +2/-8 |
+| Paladin+Warrior, Mage+Priest, Mage+Paladin | | | +10/-7 |
 | the other 12 | | | identical |
 
 Against Rogue + healer the trade trap caught the Rogue and was dispelled
-within a GCD or two, so dropping it gains.
+within a GCD or two, so dropping it gains; against `Priest+Warrior` it cost
+4.3pt.
 
 **The positioning** (`trap_setup: 0.0`, no kite pull and no Disengage bend —
 `…-arm-trap-setup-off.patch`; no kill target):
 
 | enemy comp | setup off | setup on | flips +/- |
 |---|---|---|---|
-| Shaman+Warrior | 46.4% | 58.6% | +25/-8 |
-| Priest+Rogue, Paladin+Rogue, Priest+Warrior, Paladin+Warrior | | | +19/-22 |
+| Shaman+Warrior | 43.6% | 57.9% | +26/-6 |
+| Priest+Rogue, Paladin+Rogue, Priest+Warrior, Paladin+Warrior | | | +20/-21 |
 | the other 13 | | | identical |
 
 **No Aimed Shot while an enemy is hidden** (`…-arm-opener-ignores-hidden.patch`
@@ -432,7 +435,7 @@ stealthed Rogue is Kicked as it opens; the rule is worth:
 
 | enemy comp | no kill target: Aimed Shot allowed | held | flips +/- | kill targets at 0: allowed | held | flips +/- |
 |---|---|---|---|---|---|---|
-| Priest+Rogue | 7.9% | 30.0% | +40/-9 | 52.1% | 70.0% | +40/-15 |
+| Priest+Rogue | 7.9% | 30.0% | +40/-9 | 50.7% | 70.0% | +40/-13 |
 | Paladin+Rogue | 20.0% | 26.4% | +16/-7 | 20.0% | 20.7% | +9/-8 |
 | Rogue+Warlock | 67.1% | 70.0% | +4/-0 | 51.4% | 66.4% | +24/-3 |
 | Mage+Rogue | 82.1% | 75.0% | +2/-12 | 84.3% | 80.7% | +2/-7 |
@@ -455,7 +458,8 @@ without kill targets.
 - **An opener counter to stealth, on purpose.** The measured value of the old
   gates-open throw was the reveal — `Priest+Rogue`, `Rogue+Warlock`,
   `Paladin+Rogue`, and far more so under the graphical client's default kill
-  target. AS-166 (Hunter Flare) is that decision.
+  target. AS-166 (Hunter Flare) is that decision, sized against the
+  kill-target figures above.
 - **The opener against a lone Priest.** Aimed Shot first costs Hunter vs
   Priest 14 of 100 on Classic weapon speeds.
 - **The Paladin AI never cleanses a trapped Warrior.** The removal predicate

@@ -24,9 +24,9 @@ before,,hp_v_warp,4,19.48,Priest,False,Team 2 Priest #2,Priest,1.5,ran_out,,,8.0
 before,,hp_v_warp,7,19.48,Priest,False,Team 2 Priest #2,Priest,1.5,ran_out,,,8.0,8.0,5,0
 before,,hp_v_palwar,0,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,3,0
 before,,hp_v_palwar,1,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,2,0
-before,,hp_v_palwar,2,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,3,0
+before,,hp_v_palwar,2,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,4,0
 before,,hp_v_palwar,3,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,4,0
-before,,hp_v_palwar,4,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,3,0
+before,,hp_v_palwar,4,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,4,0
 before,,hp_v_palwar,5,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,4,0
 before,,hp_v_palwar,6,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,2,0
 before,,hp_v_palwar,7,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,2,0
@@ -35,11 +35,11 @@ before,,hp_v_palwar,9,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out
 before,,hp_v_palwar,10,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,2,0
 before,,hp_v_palwar,11,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,4,0
 before,,hp_v_palwar,12,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,4,0
-before,,hp_v_palwar,13,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,4,0
+before,,hp_v_palwar,13,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,2,0
 before,,hp_v_palwar,14,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,4,0
 before,,hp_v_palwar,15,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,3,0
 before,,hp_v_palwar,16,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,3,0
-before,,hp_v_palwar,17,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,3,0
+before,,hp_v_palwar,17,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,4,0
 before,,hp_v_palwar,18,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,4,0
 before,,hp_v_palwar,19,16.45,Warrior,False,Team 2 Warrior #2,Warrior,2.37,ran_out,,,8.0,8.0,4,0
 before,,hp_v_rogwar,0,9.98,Warrior,True,Team 2 Rogue #1,Rogue,4.9,ran_out,,,8.0,8.0,4,
@@ -667,6 +667,7 @@ before,0,hw_v_rogp,16,9.98,Priest,True,Team 2 Rogue #1,Rogue,4.92,removed,[ 16.9
 before,0,hw_v_rogp,17,9.98,Priest,True,Team 2 Rogue #1,Rogue,4.92,removed,[ 15.45s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,0.55,8.0,0.55,0,
 before,0,hw_v_rogp,18,9.98,Priest,True,Team 2 Rogue #1,Rogue,4.92,removed,[ 15.45s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,0.55,8.0,0.55,0,
 before,0,hw_v_rogp,19,9.98,Priest,True,Team 2 Rogue #1,Rogue,4.92,removed,[ 16.97s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,2.07,8.0,2.07,0,
+before,0,hpw_v_wpr,5,44.23,Rogue,True,Team 2 Rogue #3,Rogue,2.0,broke,,,8.0,1.79,0,0
 before,0,hp_v_rogpal,0,9.98,Paladin,True,Team 2 Rogue #1,Rogue,4.9,removed,[ 14.92s] [BUFF] [CLEANSE] Freezing Trap removed from Team 2 Rogue #1,0.04,8.0,0.04,0,
 before,0,hp_v_rogpal,1,9.98,Paladin,True,Team 2 Rogue #1,Rogue,4.9,removed,[ 14.92s] [BUFF] [CLEANSE] Freezing Trap removed from Team 2 Rogue #1,0.04,8.0,0.04,0,
 before,0,hp_v_rogpal,2,9.98,Paladin,True,Team 2 Rogue #1,Rogue,4.9,removed,[ 15.45s] [BUFF] [CLEANSE] Freezing Trap removed from Team 2 Rogue #1,0.57,8.0,0.57,0,
@@ -812,11 +813,10 @@ before,0,ph_v_rogp,17,9.98,Priest,True,Team 2 Rogue #1,Rogue,4.95,removed,[ 14.9
 before,0,ph_v_rogp,18,9.98,Priest,True,Team 2 Rogue #1,Rogue,4.95,removed,[ 14.97s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,0.04,8.0,0.04,0,
 before,0,ph_v_rogp,19,9.98,Priest,True,Team 2 Rogue #1,Rogue,4.95,removed,[ 14.97s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,0.04,8.0,0.04,0,
 before,0,wh_v_rogp,0,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 16.97s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,1.97,8.0,1.97,0,
+before,0,wh_v_rogp,0,35.03,Priest,True,,,,unsprung,,,,,,
 before,0,wh_v_rogp,1,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 16.97s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,1.97,8.0,1.97,0,
-before,0,wh_v_rogp,1,35.55,Priest,True,,,,unsprung,,,,,,
 before,0,wh_v_rogp,2,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 15.45s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,0.45,8.0,0.45,0,
 before,0,wh_v_rogp,3,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 15.45s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,0.45,8.0,0.45,0,
-before,0,wh_v_rogp,3,35.82,Priest,True,,,,unsprung,,,,,,
 before,0,wh_v_rogp,4,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 16.97s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,1.97,8.0,1.97,0,
 before,0,wh_v_rogp,5,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 15.45s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,0.45,8.0,0.45,0,
 before,0,wh_v_rogp,6,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 16.97s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,1.97,8.0,1.97,0,
@@ -830,6 +830,7 @@ before,0,wh_v_rogp,13,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 15.4
 before,0,wh_v_rogp,14,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 15.45s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,0.45,8.0,0.45,0,
 before,0,wh_v_rogp,15,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 16.97s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,1.97,8.0,1.97,0,
 before,0,wh_v_rogp,16,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 16.97s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,1.97,8.0,1.97,0,
+before,0,wh_v_rogp,16,37.28,Priest,True,,,,unsprung,,,,,,
 before,0,wh_v_rogp,17,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 15.45s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,0.45,8.0,0.45,0,
 before,0,wh_v_rogp,18,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 15.45s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,0.45,8.0,0.45,0,
 before,0,wh_v_rogp,19,9.98,Priest,True,Team 2 Rogue #1,Rogue,5.02,removed,[ 16.97s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #1,1.97,8.0,1.97,0,
@@ -962,24 +963,23 @@ after,,hp_v_warp,16,14.93,Priest,False,Team 2 Priest #2,Priest,2.9,ran_out,,,8.0
 after,,hp_v_warp,17,14.93,Priest,False,Team 2 Priest #2,Priest,2.9,ran_out,,,8.0,8.0,4,0
 after,,hp_v_warp,18,14.93,Priest,False,Team 2 Priest #2,Priest,2.9,ran_out,,,8.0,8.0,4,0
 after,,hp_v_warp,19,14.93,Priest,False,Team 2 Priest #2,Priest,2.9,ran_out,,,8.0,8.0,4,0
-after,,hp_v_palwar,0,36.02,Paladin,True,Team 2 Paladin #1,Paladin,2.7,ran_out,,,8.0,8.0,0,0
-after,,hp_v_palwar,1,37.43,Paladin,True,,,,unsprung,,,,,,
-after,,hp_v_palwar,3,37.52,Paladin,True,Team 2 Paladin #1,Paladin,2.71,ran_out,,,8.0,8.0,0,0
-after,,hp_v_palwar,5,37.6,Paladin,True,,,,unsprung,,,,,,
-after,,hp_v_palwar,6,24.38,Paladin,True,,,,unsprung,,,,,,
-after,,hp_v_palwar,7,37.7,Paladin,True,,,,unsprung,,,,,,
-after,,hp_v_palwar,8,37.63,Paladin,True,,,,unsprung,,,,,,
-after,,hp_v_palwar,9,37.7,Paladin,True,,,,unsprung,,,,,,
-after,,hp_v_palwar,10,24.18,Paladin,True,Team 2 Paladin #1,Paladin,2.74,ran_out,,,8.0,8.0,2,0
-after,,hp_v_palwar,11,37.68,Paladin,True,,,,unsprung,,,,,,
-after,,hp_v_palwar,12,35.6,Paladin,True,,,,unsprung,,,,,,
-after,,hp_v_palwar,13,37.62,Paladin,True,,,,unsprung,,,,,,
-after,,hp_v_palwar,14,37.6,Paladin,True,,,,unsprung,,,,,,
-after,,hp_v_palwar,15,35.93,Paladin,True,Team 2 Paladin #1,Paladin,2.74,ran_out,,,8.0,8.0,0,0
-after,,hp_v_palwar,16,37.57,Paladin,True,,,,unsprung,,,,,,
-after,,hp_v_palwar,17,37.07,Paladin,True,Team 2 Paladin #1,Paladin,3.4,ran_out,,,8.0,8.0,4,0
-after,,hp_v_palwar,18,37.65,Paladin,True,Team 2 Paladin #1,Paladin,2.73,ran_out,,,8.0,8.0,0,0
-after,,hp_v_palwar,19,37.43,Paladin,True,Team 2 Paladin #1,Paladin,18.12,ran_out,,,,,,
+after,,hp_v_palwar,0,33.52,Paladin,True,,,,unsprung,,,,,,
+after,,hp_v_palwar,3,31.53,Paladin,True,Team 2 Paladin #1,Paladin,2.74,ran_out,,,8.0,8.0,3,0
+after,,hp_v_palwar,4,31.47,Paladin,True,Team 2 Paladin #1,Paladin,2.71,ran_out,,,8.0,8.0,3,0
+after,,hp_v_palwar,5,36.72,Paladin,True,Team 2 Paladin #1,Paladin,2.73,ran_out,,,8.0,8.0,0,0
+after,,hp_v_palwar,6,27.42,Paladin,True,,,,unsprung,,,,,,
+after,,hp_v_palwar,7,27.42,Paladin,True,,,,unsprung,,,,,,
+after,,hp_v_palwar,8,27.42,Paladin,True,,,,unsprung,,,,,,
+after,,hp_v_palwar,9,36.72,Paladin,True,,,,unsprung,,,,,,
+after,,hp_v_palwar,10,27.42,Paladin,True,,,,unsprung,,,,,,
+after,,hp_v_palwar,11,31.53,Paladin,True,Team 2 Paladin #1,Paladin,2.74,ran_out,,,8.0,8.0,3,0
+after,,hp_v_palwar,12,31.53,Paladin,True,Team 2 Paladin #1,Paladin,2.72,ran_out,,,8.0,8.0,3,0
+after,,hp_v_palwar,14,37.9,Paladin,True,Team 2 Paladin #1,Paladin,2.73,ran_out,,,8.0,8.0,0,0
+after,,hp_v_palwar,15,31.53,Paladin,True,Team 2 Paladin #1,Paladin,2.74,removed,[ 38.52s] [BUFF] Team 2 Paladin #1's Divine Shield removes 2 debuffs,4.25,8.0,4.25,2,0
+after,,hp_v_palwar,16,35.47,Paladin,True,Team 2 Paladin #1,Paladin,2.73,ran_out,,,8.0,8.0,0,0
+after,,hp_v_palwar,17,32.22,Paladin,True,Team 2 Paladin #1,Paladin,2.91,ran_out,,,8.0,8.0,3,0
+after,,hp_v_palwar,18,37.63,Paladin,True,,,,unsprung,,,,,,
+after,,hp_v_palwar,19,37.82,Paladin,True,,,,unsprung,,,,,,
 after,,hp_v_rogwar,0,10.98,,False,Team 2 Rogue #1,Rogue,3.92,ran_out,,,8.0,8.0,4,
 after,,hp_v_rogwar,1,10.98,,False,Team 2 Rogue #1,Rogue,3.92,ran_out,,,8.0,8.0,4,
 after,,hp_v_rogwar,2,10.98,,False,Team 2 Rogue #1,Rogue,3.92,ran_out,,,8.0,8.0,4,
@@ -1389,14 +1389,13 @@ after,0,hp_v_shrog,16,10.97,,False,Team 2 Rogue #2,Rogue,3.93,ran_out,,,8.0,8.0,
 after,0,hp_v_shrog,17,10.97,,False,Team 2 Rogue #2,Rogue,3.93,ran_out,,,8.0,8.0,3,
 after,0,hp_v_shrog,18,10.97,,False,Team 2 Rogue #2,Rogue,3.93,ran_out,,,8.0,8.0,3,
 after,0,hp_v_shrog,19,10.97,,False,Team 2 Rogue #2,Rogue,3.93,ran_out,,,8.0,8.0,3,
-after,0,hpw_v_mpr,0,26.98,Priest,False,Team 2 Priest #2,Priest,2.35,ran_out,,,8.0,8.0,0,0
-after,0,hpw_v_mpr,2,20.18,Priest,False,Team 2 Priest #2,Priest,2.22,ran_out,,,8.0,8.0,5,0
-after,0,hpw_v_mpr,3,21.7,Priest,False,Team 2 Rogue #3,Rogue,2.38,removed,[ 24.85s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #3,0.77,8.0,0.77,0,
-after,0,hpw_v_mpr,7,20.18,Priest,False,Team 2 Rogue #3,Rogue,17.0,removed,[ 42.42s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #3,5.24,8.0,5.24,0,
-after,0,hpw_v_mpr,10,20.18,Priest,False,Team 2 Priest #2,Priest,2.74,ran_out,,,8.0,8.0,5,0
-after,0,hpw_v_mpr,11,20.18,Priest,False,,,,unsprung,,,,,,
-after,0,hpw_v_mpr,13,20.18,Priest,False,Team 2 Rogue #3,Rogue,2.27,removed,[ 24.85s] [BUFF] [DISPEL] Freezing Trap removed from Team 2 Rogue #3,2.4,8.0,2.4,1,
-after,0,hpw_v_mpr,15,20.18,Priest,False,Team 2 Priest #2,Priest,12.42,ran_out,,,8.0,8.0,3,1
+after,0,hpw_v_mpr,0,26.37,Priest,False,Team 2 Priest #2,Priest,2.28,ran_out,,,8.0,8.0,0,0
+after,0,hpw_v_mpr,2,20.18,Priest,False,,,,unsprung,,,,,,
+after,0,hpw_v_mpr,5,21.7,Priest,False,,,,unsprung,,,,,,
+after,0,hpw_v_mpr,7,20.18,Priest,False,Team 2 Priest #2,Priest,2.39,ran_out,,,8.0,8.0,4,0
+after,0,hpw_v_mpr,10,20.18,Priest,False,Team 2 Rogue #3,Rogue,16.72,ran_out,,,8.0,8.0,0,
+after,0,hpw_v_mpr,12,20.18,Priest,False,,,,unsprung,,,,,,
+after,0,hpw_v_mpr,14,25.73,Priest,False,Team 2 Rogue #3,Rogue,13.84,ran_out,,,8.0,8.0,0,
 after,0,hpw_v_mpr,16,20.18,Priest,False,,,,unsprung,,,,,,
 after,0,hp_v_rogpal,1,27.97,Paladin,False,Team 2 Paladin #2,Paladin,1.5,ran_out,,,8.0,8.0,1,0
 after,0,hp_v_rogpal,2,29.48,Paladin,False,Team 2 Paladin #2,Paladin,2.59,removed,[ 35.50s] [BUFF] Team 2 Paladin #2's Divine Shield removes 2 debuffs,3.43,8.0,3.43,2,0
@@ -1442,7 +1441,7 @@ after,0,hw_v_warp,2,14.93,Priest,False,Team 2 Priest #2,Priest,28.65,ran_out,,,8
 after,0,hw_v_warp,3,14.93,Priest,False,Team 2 Priest #2,Priest,27.22,ran_out,,,8.0,8.0,0,0
 after,0,hw_v_warp,4,14.93,Priest,False,Team 2 Priest #2,Priest,2.9,ran_out,,,8.0,8.0,4,0
 after,0,hw_v_warp,5,14.93,Priest,False,Team 2 Priest #2,Priest,29.12,ran_out,,,8.0,8.0,0,0
-after,0,hw_v_warp,6,14.93,Priest,False,,,,unsprung,,,,,,
+after,0,hw_v_warp,6,14.93,Priest,False,Team 2 Priest #2,Priest,28.67,ran_out,,,8.0,8.0,0,0
 after,0,hw_v_warp,7,14.93,Priest,False,,,,unsprung,,,,,,
 after,0,hw_v_warp,8,14.93,Priest,False,,,,unsprung,,,,,,
 after,0,hw_v_warp,9,14.93,Priest,False,Team 2 Priest #2,Priest,2.9,ran_out,,,8.0,8.0,4,0
@@ -1450,7 +1449,7 @@ after,0,hw_v_warp,10,14.93,Priest,False,,,,unsprung,,,,,,
 after,0,hw_v_warp,11,14.93,Priest,False,,,,unsprung,,,,,,
 after,0,hw_v_warp,12,14.93,Priest,False,,,,unsprung,,,,,,
 after,0,hw_v_warp,13,14.93,Priest,False,,,,unsprung,,,,,,
-after,0,hw_v_warp,14,14.93,Priest,False,Team 2 Priest #2,Priest,27.35,ran_out,,,8.0,8.0,0,0
+after,0,hw_v_warp,14,14.93,Priest,False,Team 2 Priest #2,Priest,30.17,ran_out,,,8.0,8.0,0,0
 after,0,hw_v_warp,15,14.93,Priest,False,,,,unsprung,,,,,,
 after,0,hw_v_warp,16,14.93,Priest,False,Team 2 Priest #2,Priest,27.35,ran_out,,,8.0,8.0,0,0
 after,0,hw_v_warp,17,14.93,Priest,False,Team 2 Priest #2,Priest,2.9,ran_out,,,8.0,8.0,4,0
