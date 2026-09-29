@@ -886,9 +886,11 @@ fn max_armor_type(class: CharacterClass) -> &'static [ArmorType] {
 pub enum Proficiency {
     /// Never equippable by this class.
     Untrained,
-    /// Only the one-handed form. Applies to the three types Classic splits
-    /// (axe, mace, sword); for every other type it is indistinguishable from
-    /// [`Proficiency::Trained`], since those types have a single form.
+    /// Only the one-handed form. Classic splits three types into one- and
+    /// two-handed skills (axe, mace, sword); for a type with a single form it
+    /// still refuses a two-handed item of that type, which is how a class with
+    /// no two-handed skill at all (the Rogue) stays out of one whatever the
+    /// item data says.
     OneHandedOnly,
     /// Equippable in either form.
     Trained,
@@ -901,7 +903,12 @@ pub enum Proficiency {
 /// and nothing else; a Paladin never touches a dagger or a staff; a Hunter
 /// never a mace or a shield; a Shaman never a sword. Held-in-off-hand items
 /// (`OffhandFrill`) require no proficiency in Classic and are open to every
-/// class, as is an item carrying no weapon type at all.
+/// class but the Rogue, which this game keeps out of them by design; an item
+/// carrying no weapon type at all is open to everyone.
+///
+/// Classic is the default reference for every row; where the game departs
+/// from it the row says so. The whole table, as the equip predicates actually
+/// apply it per hand, is pinned by `equip_matrix_is_pinned`.
 ///
 /// `Relic` is the row that is about a SOCKET rather than a skill: a Libram or a
 /// Totem needs no training, but only a Paladin and a Shaman have a ranged
@@ -972,15 +979,20 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             W::OffhandFrill | W::None => Trained,
         },
         // Daggers, fist weapons, one-handed maces and swords, all three
-        // ranged physical types. No two-handers at all, no axes (those came
+        // ranged physical types. No two-handers at all — so every melee row is
+        // one-handed-only, daggers and fists included — no axes (those came
         // with the Burning Crusade), no shields.
         CharacterClass::Rogue => match weapon {
-            W::Dagger | W::Fist | W::Bow | W::Gun | W::Crossbow | W::Thrown => Trained,
-            W::Mace | W::Sword => OneHandedOnly,
+            W::Bow | W::Gun | W::Crossbow | W::Thrown => Trained,
+            W::Dagger | W::Fist | W::Mace | W::Sword => OneHandedOnly,
             W::Axe | W::Staff | W::Polearm | W::Wand | W::Shield => Untrained,
             // No relic socket — this class's ranged socket takes a real weapon.
             W::Relic => Untrained,
-            W::OffhandFrill | W::None => Trained,
+            // A deliberate departure from Classic, which let every class hold
+            // a tome or an orb: a Rogue's off hand is a second weapon, and a
+            // held frill there does not read as a Rogue (user ruling, AS-169).
+            W::OffhandFrill => Untrained,
+            W::None => Trained,
         },
         // Axes and maces in both forms, daggers, staves, fist weapons,
         // shields. Never a sword, never a ranged weapon.
@@ -2103,7 +2115,8 @@ mod tests {
         assert_eq!(weapon_proficiency(C::Rogue, W::Axe), Untrained);
         assert_eq!(weapon_proficiency(C::Rogue, W::Sword), OneHandedOnly);
         assert_eq!(weapon_proficiency(C::Rogue, W::Mace), OneHandedOnly);
-        assert_eq!(weapon_proficiency(C::Rogue, W::Dagger), Trained);
+        assert_eq!(weapon_proficiency(C::Rogue, W::Dagger), OneHandedOnly);
+        assert_eq!(weapon_proficiency(C::Rogue, W::Fist), OneHandedOnly);
 
         // Shamans: no sword, ever.
         assert_eq!(weapon_proficiency(C::Shaman, W::Sword), Untrained);
@@ -2125,10 +2138,258 @@ mod tests {
             );
         }
 
-        // A held-in-off-hand item is not a weapon and needs no proficiency.
+        // A held-in-off-hand item is not a weapon and needs no proficiency in
+        // Classic — every class may hold one there, and here every class but
+        // the Rogue (AS-169 ruling). An item with no weapon type is open to all.
         for class in CharacterClass::all() {
-            assert_eq!(weapon_proficiency(*class, W::OffhandFrill), Trained);
+            let frill = if *class == C::Rogue {
+                Untrained
+            } else {
+                Trained
+            };
+            assert_eq!(weapon_proficiency(*class, W::OffhandFrill), frill);
             assert_eq!(weapon_proficiency(*class, W::None), Trained);
+        }
+    }
+
+    // ---- the equip matrix (AS-169) ----
+
+    /// How an item of a weapon socket is held — the item-side half of a hand
+    /// question, read off the item exactly as [`ItemConfig::sockets`] reads it.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Form {
+        OneHand,
+        TwoHand,
+        OffHandOnly,
+        Ranged,
+    }
+
+    impl Form {
+        fn of(item: &ItemConfig) -> Option<Form> {
+            match (item.held(), item.slot) {
+                (Some(HeldSlot::OneHand), _) => Some(Form::OneHand),
+                (Some(HeldSlot::TwoHand), _) => Some(Form::TwoHand),
+                (Some(HeldSlot::OffHandOnly), _) => Some(Form::OffHandOnly),
+                (None, ItemSlotType::Ranged) => Some(Form::Ranged),
+                (None, _) => None,
+            }
+        }
+
+        fn label(&self) -> &'static str {
+            match self {
+                Form::OneHand => "one-hand",
+                Form::TwoHand => "two-hand",
+                Form::OffHandOnly => "off-hand",
+                Form::Ranged => "ranged",
+            }
+        }
+
+        /// A fixture item of this form and type, open to every class — so the
+        /// only gates it meets are the rules under test.
+        fn item(&self, weapon: WeaponType) -> ItemConfig {
+            let slot = match self {
+                Form::OneHand | Form::TwoHand => ItemSlotType::MainHand,
+                Form::OffHandOnly => ItemSlotType::OffHand,
+                Form::Ranged => ItemSlotType::Ranged,
+            };
+            let mut item = weapon_item("Fixture", slot, 10.0, 20.0, 2.0);
+            item.weapon_type = weapon;
+            item.two_handed = *self == Form::TwoHand;
+            item
+        }
+    }
+
+    /// The forms a weapon type exists in — Classic's, where no two-handed
+    /// dagger or fist weapon, and no one-handed staff or polearm, was ever
+    /// made. Wildcard-free: a new [`WeaponType`] must say how it is held
+    /// before `equip_matrix_is_pinned` compiles.
+    fn authorable_forms(weapon: WeaponType) -> &'static [Form] {
+        use WeaponType as W;
+        match weapon {
+            W::Sword | W::Mace | W::Axe => &[Form::OneHand, Form::TwoHand],
+            W::Dagger | W::Fist => &[Form::OneHand],
+            W::Staff | W::Polearm => &[Form::TwoHand],
+            W::Bow | W::Gun | W::Crossbow | W::Wand | W::Thrown | W::Relic => &[Form::Ranged],
+            W::Shield | W::OffhandFrill => &[Form::OffHandOnly],
+            // Not a weapon: `weapon_slot_items_declare_a_weapon_type` keeps it
+            // out of every weapon socket.
+            W::None => &[],
+        }
+    }
+
+    /// Every armor type. Wildcard-free for the same reason as
+    /// [`authorable_forms`].
+    fn all_armor_types() -> [ArmorType; 5] {
+        match ArmorType::None {
+            ArmorType::Cloth
+            | ArmorType::Leather
+            | ArmorType::Mail
+            | ArmorType::Plate
+            | ArmorType::None => {}
+        }
+        [
+            ArmorType::Cloth,
+            ArmorType::Leather,
+            ArmorType::Mail,
+            ArmorType::Plate,
+            ArmorType::None,
+        ]
+    }
+
+    /// Who may hold what, where: the whole equip matrix, one row per
+    /// (socket, form, weapon type) and per armor type, each naming exactly the
+    /// classes that pass. WoW Classic's class weapon skills, dual wield and
+    /// armor proficiencies, with the game's departures marked.
+    const EQUIP_MATRIX: &str = "\
+MainHand one-hand Sword        Warrior Mage Rogue Warlock Paladin Hunter
+OffHand  one-hand Sword        Warrior Rogue Hunter
+MainHand two-hand Sword        Warrior Paladin Hunter
+MainHand one-hand Mace         Warrior Rogue Priest Paladin Shaman
+OffHand  one-hand Mace         Warrior Rogue
+MainHand two-hand Mace         Warrior Paladin Shaman
+MainHand one-hand Axe          Warrior Paladin Hunter Shaman
+OffHand  one-hand Axe          Warrior Hunter
+MainHand two-hand Axe          Warrior Paladin Hunter Shaman
+MainHand one-hand Dagger       Warrior Mage Rogue Priest Warlock Hunter Shaman
+OffHand  one-hand Dagger       Warrior Rogue Hunter
+MainHand two-hand Staff        Warrior Mage Priest Warlock Hunter Shaman
+MainHand two-hand Polearm      Warrior Paladin Hunter
+MainHand one-hand Fist         Warrior Rogue Hunter Shaman
+OffHand  one-hand Fist         Warrior Rogue Hunter
+Ranged   ranged   Bow          Warrior Rogue Hunter
+Ranged   ranged   Gun          Warrior Rogue Hunter
+Ranged   ranged   Crossbow     Warrior Rogue Hunter
+Ranged   ranged   Wand         Mage Priest Warlock
+Ranged   ranged   Thrown       Warrior Rogue Hunter
+OffHand  off-hand Shield       Warrior Paladin Shaman
+OffHand  off-hand OffhandFrill Warrior Mage Priest Warlock Paladin Hunter Shaman
+Ranged   ranged   Relic        Paladin Shaman
+armor             Cloth        Warrior Mage Rogue Priest Warlock Paladin Hunter Shaman
+armor             Leather      Warrior Rogue Paladin Hunter Shaman
+armor             Mail         Warrior Paladin Hunter Shaman
+armor             Plate        Warrior Paladin
+armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter Shaman
+";
+
+    /// The equip matrix, computed from the real predicate every surface uses
+    /// ([`can_equip_in_socket`] — the picker, `loadouts.ron` validation,
+    /// headless overrides and the resolver) and compared as a whole against
+    /// [`EQUIP_MATRIX`].
+    ///
+    /// Set equality per row, never a floor: a class that gains a hand it
+    /// should not, or loses one it should keep, changes a row. A new
+    /// [`CharacterClass`] (the Druid) lands in, or is missing from, every row
+    /// it has an answer for, so it cannot join without a decision per weapon
+    /// type and per hand; a new [`WeaponType`] fails to compile in
+    /// [`authorable_forms`] first. Departures from Classic in the table:
+    /// the Rogue holds no off-hand frill (a user ruling, AS-169).
+    #[test]
+    fn equip_matrix_is_pinned() {
+        let classes_passing = |socket: ItemSlot, item: &ItemConfig| -> String {
+            CharacterClass::all()
+                .iter()
+                .filter(|c| can_equip_in_socket(**c, socket, item))
+                .map(|c| c.name())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+
+        let mut actual = String::new();
+        for weapon in WeaponType::all() {
+            for form in authorable_forms(*weapon) {
+                let item = form.item(*weapon);
+                assert_eq!(Form::of(&item), Some(*form), "fixture for {weapon:?}");
+                for socket in item.sockets() {
+                    actual.push_str(&format!(
+                        "{:<8} {:<8} {:<12} {}\n",
+                        format!("{socket:?}"),
+                        form.label(),
+                        format!("{weapon:?}"),
+                        classes_passing(*socket, &item)
+                    ));
+                }
+            }
+        }
+        for armor in all_armor_types() {
+            let item = armor_item("Fixture", ItemSlotType::Chest, armor);
+            actual.push_str(&format!(
+                "{:<8} {:<8} {:<12} {}\n",
+                "armor",
+                "",
+                format!("{armor:?}"),
+                classes_passing(ItemSlot::Chest, &item)
+            ));
+        }
+
+        let expected: Vec<&str> = EQUIP_MATRIX.lines().collect();
+        let actual: Vec<&str> = actual.lines().collect();
+        let differing: Vec<String> = expected
+            .iter()
+            .zip(actual.iter())
+            .filter(|(e, a)| e != a)
+            .map(|(e, a)| format!("  expected: {e}\n    actual: {a}"))
+            .collect();
+        assert!(
+            differing.is_empty() && expected.len() == actual.len(),
+            "the equip matrix changed — decide each row, then update EQUIP_MATRIX:\n{}\n\
+             ({} expected rows, {} actual)\n\nactual matrix:\n{}",
+            differing.join("\n"),
+            expected.len(),
+            actual.len(),
+            actual.join("\n")
+        );
+    }
+
+    /// Every shipped weapon-socket item is held in a form its type exists in,
+    /// so [`EQUIP_MATRIX`] covers every item that can actually be equipped —
+    /// a two-handed dagger, say, would be a row the matrix never decided.
+    #[test]
+    fn shipped_weapons_are_held_in_a_form_their_type_exists_in() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let mut checked = 0;
+        for (id, item) in items.iter() {
+            if !item.slot.is_weapon_slot() {
+                continue;
+            }
+            let form = Form::of(item).unwrap_or_else(|| panic!("{id:?} has no form"));
+            assert!(
+                authorable_forms(item.weapon_type).contains(&form),
+                "{id:?} is a {} {:?}, a form that type does not come in",
+                form.label(),
+                item.weapon_type
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "items.ron carries no weapon-socket items");
+    }
+
+    /// The card's headline case, against the shipped items: neither tome may
+    /// sit in a Rogue's off hand, in the picker or anywhere else, while every
+    /// other class keeps them.
+    #[test]
+    fn a_rogue_holds_no_tome() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let tomes: Vec<_> = items
+            .iter()
+            .filter(|(_, item)| item.weapon_type == WeaponType::OffhandFrill)
+            .map(|(id, _)| *id)
+            .collect();
+        assert!(
+            tomes.contains(&ItemId::TomeOfKnowledge) && tomes.contains(&ItemId::GrimoireOfShadows),
+            "the shipped frills moved: {tomes:?}"
+        );
+        for id in &tomes {
+            let item = items.get(id).expect("listed above");
+            assert!(!can_equip(CharacterClass::Rogue, item), "{id:?} on a Rogue");
+            assert!(!items
+                .items_for_slot(ItemSlot::OffHand, CharacterClass::Rogue)
+                .iter()
+                .any(|(offered, _)| offered == id));
+            assert!(can_equip_in_socket(
+                CharacterClass::Mage,
+                ItemSlot::OffHand,
+                item
+            ));
         }
     }
 

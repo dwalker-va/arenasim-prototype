@@ -1920,15 +1920,12 @@ mod held_weapon_tests {
         assert_eq!(held(C::Rogue, &loadout), vec![(DAGGER, MainHand)]);
     }
 
-    /// A Rogue's off hand draws what it holds: a held tome is not drawn, a
-    /// one-handed mace is.
+    /// A Rogue's off hand draws what it holds: a one-handed mace there is a
+    /// mace in the left hand. (A held tome there is not a loadout a Rogue can
+    /// build — AS-169 — and the default casters' tomes, which are not drawn,
+    /// are covered by the default-loadout case above.)
     #[test]
     fn a_rogue_off_hand_draws_what_it_holds() {
-        let tome = [
-            (ItemSlot::MainHand, ItemId::SerpentFangDagger),
-            (ItemSlot::OffHand, ItemId::TomeOfKnowledge),
-        ];
-        assert_eq!(held(C::Rogue, &tome), vec![(DAGGER, MainHand)]);
         let mace = [
             (ItemSlot::MainHand, ItemId::SerpentFangDagger),
             (ItemSlot::OffHand, ItemId::HammerOfTheRighteous),
