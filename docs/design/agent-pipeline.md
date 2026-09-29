@@ -2,8 +2,10 @@
 
 Status: **v1 shipped 2026-09-05** (board + orchestrator protocol + Engineer role);
 **Tester stage shipped** (card AS-1); **Release Manager stage shipped** (card AS-2);
-**`human_review` column shipped 2026-09-10** (card AS-39); **board moved off the
-claude.ai artifact onto a local MCP daemon** (card AS-153).
+**board moved off the claude.ai artifact onto a local MCP daemon** (card AS-153);
+**milestone flow from v0.7** (card AS-174): cards land on `main`, the orchestrator
+merges each Tester-approved PR, and the user reviews once per milestone, on a
+review page the board builds, instead of card by card.
 
 A lightweight kanban board drives autonomous agent sessions on the dev machine.
 The board is the **source of truth for workflow state**; PRs are the source of
@@ -18,8 +20,11 @@ truth for code. GitHub issues are not used.
     `dispatch-board` `http` server. Every session — orchestrator, PM — talks to
     the same process through the `mcp__dispatch-board__*` tools.
   - `/` — the web UI: the six columns plus the archived toggle, drag between
-    columns, the card drawer, answering a question, the attach-PR dialog. It is
-    the artifact page ported, refreshing live as other writers change the board.
+    columns, the card drawer, answering a question, the attach-PR dialog, a
+    milestone filter and a New milestone button. It is the artifact page
+    ported, refreshing live as other writers change the board.
+  - `/milestones/<name>` — a milestone's **review page** (see *The milestone
+    loop*).
     Its tab icon is the game's own (`packaging/icon.svg` and PNGs, served in
     place from the checkout).
   - an event feed, which `dist/cli.js wait` blocks on (see *Waking the
@@ -77,7 +82,7 @@ the protocol reads as it always has:
 
 ```json
 { "id": "AS-1", "title": "...", "body": "<spec>",
-  "column": "backlog | needs_input | in_progress | review | human_review | done | archived",
+  "column": "backlog | needs_input | in_progress | review | merged | done | archived",
   "role": "engineer | tester | release-manager | pm",
   "priority": "P1 | P2 | P3",
   "links": [{"label": "PR #154 (prerequisite)", "url": "..."}],   (references only)
@@ -86,6 +91,14 @@ the protocol reads as it always has:
   "question": {"text": "...", "answer": "..."} | null,
   "agent": {"status": "working | done", "started": "ISO", "finished": "ISO", "name": "Engineer-AS-1"} | null,
   "released": "v0.2.0" | absent (release tag; set by the orchestrator when a release bundles the card),
+  "milestone": "0.7" | null | absent, "iteration": 1 | 2 | ...,
+  "area": "combat | visuals | ai | ui | tooling" | null,
+  "summary": "<what changed, in a player's words>", "human_testing": "<the PR's steps, one per line>",
+  "sweep": {"status": "done-on-card | deferred-to-milestone | none", "summary": "..."} | null,
+  "gaps": "<what the card knowingly leaves out>",
+  "rulings": [{"t": "ISO", "by": "user", "text": "...", "numbers": {"z": 5.2}}],   (append-only: record_ruling)
+  "merge_sha": "<merge commit>", "merged_at": "ISO",                                 (set by mark_merged only)
+  "source": {"milestone": "0.7", "key": "card:AS-7", "card": "AS-7"},                (a review-feedback card's origin)
   "activity": [{"t": "ISO", "by": "board | claude | orchestrator | engineer | tester | release-manager | pm | user", "msg": "..."}],
   "created": "ISO", "updated": "ISO" }
 ```
@@ -96,8 +109,10 @@ Stored as four tables:
 |---|---|
 | `cards` | one row per card: the document above minus `activity`, its `version`, and `column`/`role` as indexed generated columns. Every write bumps `version` by one. |
 | `activity` | one row per activity entry, **append-only** (triggers refuse UPDATE and DELETE). |
-| `events` | one row per write — `cursor` (monotonic), `t`, `actor`, `kind` (`created`, `moved`, `edited`, `answered`, `claimed`, `claim_released`, `claim_finished`, `activity`, `body_appended`, `deleted`), `card`, `data`. The wake-up feed. |
-| `meta` | `next_id` and the id prefix — id allocation is the daemon's, so no caller keeps `nextId`. |
+| `events` | one row per write — `cursor` (monotonic), `t`, `actor`, `kind` (`created`, `moved`, `edited`, `answered`, `claimed`, `claim_released`, `claim_finished`, `activity`, `body_appended`, `deleted`, `ruling`, `merged`, `milestone_created`, `milestone_updated`, `milestone_sweep`, `milestone_closed`, `review_submitted`, `migrated`), `card`, `data` (a milestone's name in `data.milestone`). The wake-up feed. |
+| `meta` | `next_id` and the id prefix — id allocation is the daemon's, so no caller keeps `nextId` — the board id, and `schema` (2; the daemon refuses any other until `migrate` has run). |
+| `milestones` | one row per milestone: `name`, `status` (`open`, `in_review`, `released`), `created`, `released_at`, `tag`, `release_url`, `review_sha`, `sweep`, `submissions`, `first_id`/`end_id` (the card ids issued while it was open), and its own `version`. |
+| `review_items` | one row per review-page checklist tick or feedback comment, keyed by milestone and item, each with its own `version`. |
 
 `agent.name` is new: `claim_card` records the spawned agent's name there, so
 the live-claim audit joins claims to live agents mechanically.
@@ -124,7 +139,7 @@ immediate subject — because further into those entries a PR is usually a
 reference (a merge order, a sibling card). One distinct `N` across a card's
 hand-offs gives `pr`; none gives `null`; several give `null` and are listed as
 ambiguous in the import report. The report also lists, by id, every non-pm
-card left with `pr: null` while still in flight (`review`, `human_review`, or
+card left with `pr: null` while still in flight (`review`, `merged`, or
 `done` without `released`) — those need a hand-set `pr` before the Tester or
 the release can use them — and every hand-off entry that names more than one
 PR, where the first was taken. Link labels are never read — "PR #206 (the authority
@@ -135,9 +150,20 @@ re-import of an export) keeps them. Archived cards
 from the artifact era keep their legacy shapes (a bare-string `agent`, a
 missing `priority`); `export` returns them exactly as imported.
 
+**Migrating an AS-153 board (schema 1) to milestones (schema 2)** is
+`dist/cli.js migrate`, with the daemon stopped: a full copy of the database
+first (restoring it is the rollback), then, in one transaction, the milestone
+tables, every `human_review` card moved to `merged` on no milestone with no
+merge recorded (one activity line each; the orchestrator merges the PR if it
+is still open and records it with `mark_merged`), one `migrated` event, and
+`schema: 2`. Nothing else changes — the board id and every event cursor
+survive, so a running monitor just reconnects. The daemon refuses to serve a
+schema 1 database, and importing a schema 1 export applies the same move.
+
 **Reading it costs little.** `list_cards` returns **summaries** — id, title,
-column, role, priority, agent, pr, worktree, links, updated, released, version — never a
-body or activity, and leaves `archived` out unless asked. `get_card` is the
+column, role, priority, agent, pr, worktree, links, updated, released,
+milestone, iteration, area, version — never a body or activity, and leaves
+`archived` out unless asked; `milestone` and `iteration` filter it. `get_card` is the
 one call that returns a body, and `activity_limit` trims its log. That is the
 context fix: the artifact put ~15k tokens of page into the orchestrator on
 every read.
@@ -149,9 +175,9 @@ every read.
 | `backlog` | written, not started | none |
 | `needs_input` | agent blocked on the user; `question.text` holds the question | answering on the board moves the card back to `in_progress` with `agent: null` |
 | `in_progress` | an agent should be / is working it | orchestrator spawns the card's role agent when `agent == null` |
-| `review` | PR open, awaiting the **Tester's** verification | orchestrator spawns the Tester on entry; APPROVE → `human_review`, REJECT → back to `in_progress` with findings |
-| `human_review` | Tester-approved, PR open, awaiting the user's eyeball and/or merge | **none** — both exits are the user's gesture (see The eyeball loop) |
-| `done` | **merged** — the PR is in `main` and the work is finished | bundled into the next release (see Release flow) |
+| `review` | PR open, awaiting the **Tester's** verification | orchestrator spawns the Tester on entry; APPROVE → the orchestrator merges the PR and `mark_merged` moves the card to `merged`; REJECT → back to `in_progress` with findings |
+| `merged` | Tester-approved **and merged to `main`**, awaiting its milestone's review | none per card — the milestone review is the user's gesture (see The milestone loop) |
+| `done` | merged, and its milestone **closed** (the user approved it) | bundled into the next release (see Release flow) |
 | `archived` | shipped in a release (or was that release's trigger card); `released` holds the tag | none — terminal |
 
 **The `agent` field is the dedup guard, and the daemon enforces it.** Any
@@ -180,13 +206,51 @@ for a `role: "pm"` card, so `agent: null` on one is a *resting state*, not a
 spawn request, and stays `null` for the card's whole life. Step 2 skips pm
 cards by role, and `claim_card` refuses them outright as a backstop.
 
-#### The eyeball loop (`human_review`)
+#### The milestone loop
 
-A Tester APPROVE means "no machine objects", not "finished". The user still reads
-the PR, and eyeball feedback routinely sends a card back: AS-10 (PR #125) went six
-rounds — three Tester REJECTs and **two user bounces**. `human_review` is the home
-for that state, so approved-but-open work stops parking in `done` beside genuinely
-shipped work, indistinguishable from it.
+Work is planned, merged and reviewed in **milestones** ("0.7"): a release's
+worth of cards, reviewed by the user once instead of card by card. Per-card
+human review was the bottleneck, and per-card balance sweeps forced every
+core-combat card to run serially.
+
+- **`main` is the integration branch.** Each card lands there as soon as it is
+  tested; release **tags** are the stable points the outside world relies on,
+  so `main` may hold half of a milestone. Keep it green (the default `cargo
+  test` passes) whatever else it holds. Feature or version branches only when
+  two milestones run at once and ship independently.
+- **The Tester still gates every card**, exactly as before. On APPROVE the
+  **orchestrator merges the PR itself** and records it with `mark_merged`,
+  which moves the card to `merged` with its `merge_sha`. Engineers and Testers
+  still never merge.
+- **Sequencing is the orchestrator's job**: dependencies, overlapping files,
+  and sim changes that would invalidate each other's measurements.
+- **Sweeps are deferred to one milestone sweep.** A card runs a balance sweep
+  only when the sweep is needed to *decide* what to build (research — AS-125's
+  trap behaviour), never to confirm a plain fix (AS-172, Warriors starting at 0
+  rage). The card records where its sweep went in `sweep` (`done-on-card`,
+  `deferred-to-milestone`, `none`); cheap correctness checks (byte-identity
+  controls, pinned-gate re-records, small seeded spot checks) still happen per
+  card. The milestone sweep's result goes on the milestone
+  (`set_milestone_sweep`) and may itself produce feedback cards.
+- **The review page** (`/milestones/<name>`, the same payload as
+  `get_milestone`) builds itself from each card's structured fields, so the
+  orchestrator never writes it by hand: *What changed* (each finished card's
+  `summary`, grouped by `area`, with its card and PR), *What to check* (every
+  line of every finished card's `human_testing` as one checklist, grouped by
+  area for one sitting on one build, naming the `review_sha` or tag it applies
+  to), *Your decisions* (every `ruling`, dated, with its numbers), *Balance*
+  (the milestone sweep, and which cards deferred to it), *Known gaps and
+  follow-ups* (each card's `gaps`, and every card filed while the milestone was
+  open), and *Feedback*. Ticks and comments persist.
+- **Feedback is the next iteration.** A comment box sits on every change, every
+  checklist step and the milestone as a whole. Submitting the review files
+  each comment as a backlog card on the same milestone at its source's
+  `iteration` + 1 (`source` links it back, with the source's PR as a reference)
+  and records one `review_submitted` event — with no cards when the user had no
+  feedback, which is the approval.
+- **The release** is cut from `main` after the user approves the milestone:
+  `close_milestone` moves every merged card to `done`, and the Release Manager
+  bundles them (see Release flow).
 
 **The PR says what to look at.** Every PR ends with a `**Human testing:**` line saying
 what a human has to check and why a machine could not — `screencapture` and `osascript`
@@ -196,41 +260,33 @@ whether an impact feels right, whether a joke lands). It is the *inverse* of the
 Proof/Testing section: that one lists what passed, this one lists what was never
 verified. "Nothing needs human testing" is written out rather than omitted, so a
 genuinely empty eyeball pass is distinguishable from an author who never considered one.
-The Engineer writes it; the Tester verifies the claim before APPROVE. The card's
-`worktree` (in its drawer, with a copy button) is where to look: `cd` there and
-`cargo run --release`.
+The Engineer writes it; the Tester verifies the claim before APPROVE; the orchestrator
+copies it into the card's `human_testing`, one step per line, which is how it reaches
+the review checklist. An explicit "Nothing needs human testing" is copied as written:
+the page lists that card as having nothing to check, never as a checkbox — and a
+merged card with no `human_testing` at all is flagged as missing its steps. The user tests the milestone from one build of `main` (the
+`review_sha`), not from each card's worktree.
 
-From `human_review` there are exactly **two exits, and both are the user's
-gesture**. No automation runs on the column:
+**User decisions are rulings.** When the user decides something about a card —
+in the orchestrator session, on a Needs Input answer, in review feedback — the
+orchestrator records it with `record_ruling` (the text, and the numbers it turned
+on), not as a body section or an activity line: rulings are what *Your decisions*
+lists, and they are append-only.
 
-- **Merged** → `done`. Merging is the pipeline's one human gate; no role merges.
-- **Eyeball feedback** → `in_progress`, with the findings appended to the card
-  `body` under a dated heading (`## User findings`, the counterpart of the
-  Tester's `## Tester findings`) and `agent: null`, so step 2 spawns a fresh
-  Engineer on the **same PR branch**.
-
-The feedback exit is *mechanically identical to a Tester REJECT* — same body
-append, same claim reset, same respawn onto the same PR — and differs only in who
-wrote the findings. That symmetry is why the column needs no new machinery.
-
-**Why a separate column, and not "leave approved cards in `review`".** Step 3
-spawns a Tester for any `review` card with a `pr` whose `agent` is `null`
-**or** `agent.status == "done"` — and the APPROVE path sets exactly
-`agent.status: "done"`. An approved card left in `review` would therefore be
-respawned on every wake, forever. Keeping the approved-but-unmerged state in its
-own column leaves that dedup guard untouched.
-
-**Board behaviour:** the PR gate AS-4 added for `review` also covers
-`human_review`, and the daemon enforces it for every writer: a non-pm card
-cannot enter either column without its own PR — `pr`, a pull-request URL (a
-`move_card` may set it in its own `patch`) — and a card already there cannot
-have it cleared. Reference `links` never satisfy the gate. In the web UI,
-dragging a card with no `pr` there opens the attach-PR dialog, which sets
-`pr`; `role: "pm"` cards remain exempt. A card's face shows its own PR apart
-from its references, and, while it is in `in_progress`, `review` or
-`human_review`, its worktree with a copy button (the drawer shows the full
-path). Cards in `human_review`
-render an "awaiting your merge" tag.
+**Board behaviour:** two columns keep their meaning for every writer, the web
+UI's drag included. A card enters `merged` only through `mark_merged` (a plain
+move is refused unless the card's merge is already recorded), and a work card on
+an unreleased milestone reaches `done` only through `close_milestone` (pm cards,
+and cards on no milestone or a released one, move freely). The PR gate AS-4 added
+covers `review` and `merged`, and the daemon enforces it for every writer: a non-pm card cannot enter either column
+without its own PR — `pr`, a pull-request URL (a `move_card` may set it in its
+own `patch`) — and a card already there cannot have it cleared. Reference `links`
+never satisfy the gate. In the web UI, dragging a card with no `pr` there opens the
+attach-PR dialog, which sets `pr`; `role: "pm"` cards remain exempt. A card's face
+shows its own PR apart from its references, its milestone and iteration, and, while
+it is in `in_progress`, `review` or `merged`, its worktree with a copy button. A
+merged card shows its merge commit, or "merge not recorded". The drawer edits a
+card's milestone, area, summary and human-testing steps, and records rulings.
 
 #### Scoping cards (`role: "pm"`)
 
@@ -244,7 +300,7 @@ code and spawns no agent: the work happens in an interactive PM session the
 | `in_progress` | a PM session is actively refining the card with the user | **none** — the orchestrator never spawns for a pm card (step 2) |
 | `needs_input` | the PM session has written its draft card specs to `.claude/pm-outbox/<card-id>.md` and is waiting on the user's agreement; `question.text` points at that file and says what is being asked | answering on the board returns the card to `in_progress` with `agent: null` — for a pm card that means "keep refining", not "respawn" |
 | `review` | **skipped by design** — the user's agreement to the drafts *is* the review, and it happens inside the PM session | none |
-| `human_review` | **skipped by design** — a pm card carries no PR and has nothing to merge, so there is no eyeball-and-merge state for it to sit in | none |
+| `merged` | **skipped by design** — a pm card carries no PR and has nothing to merge | none |
 | `done` | the derived cards are filed on the board **and** the user agreed to them — *not* the work-card meaning of "merged" | excluded from release bundles, but stamped and archived alongside one (see Release flow) |
 | `archived` | unchanged — terminal | none |
 
@@ -258,14 +314,14 @@ implements this — the return to `in_progress` with `agent: null` is exactly
 is spawned to meet it. Agreement on the *first* draft is explicitly not
 expected; the bounce is the normal path, not a failure. The final hop is
 `in_progress` → `done` **directly**: a pm card never passes through `review` or
-`human_review`, because neither of the things those columns wait on — a Tester
+`merged`, because neither of the things those columns wait on — a Tester
 verdict, a merge — exists for a card that ships no code.
 
-**Review and Human Review are skipped, not policed.** There is no Tester for card
+**Review and Merged are skipped, not policed.** There is no Tester for card
 text, and no PR to merge. A pm card misfiled into either column is already inert —
-step 3 spawns a Tester only for a card carrying its own `pr`, `human_review`
-has no automation at all, `claim_card` refuses pm cards, and the PR gate on
-both columns exempts them (AS-4). This documents a property the pipeline already
+step 3 spawns a Tester only for a card carrying its own `pr`, `merged`
+has no automation, `mark_merged` and `claim_card` refuse pm cards, and the PR
+gate on both columns exempts them (AS-4). This documents a property the pipeline already
 has; nothing new enforces it.
 
 **Done means *filed*, not *written* — and not *merged*.** A scoping card is done
@@ -367,7 +423,7 @@ limits.) Therefore, before arming the monitor, `list_cards(column:
   mid-run): the same `release_claim`. The review-entry rule (step 3 below)
   then respawns the Tester, since the card's `pr` is still set.
 
-The sweep touches nothing else. `human_review` and `done` cards are past their
+The sweep touches nothing else. `merged` and `done` cards are past their
 agent work (no role runs on either); `needs_input` cards already carry
 `agent: null` by protocol; and `archived`
 cards are terminal with no automation — step 6 closes the trigger card's claim
@@ -449,10 +505,15 @@ versioned write passes the `version` of the card as you last read it — from
    write the board accordingly:
    - `READY_FOR_REVIEW` → one `move_card(id, "review", patch: {pr: {url:
      <PR>}, worktree: <WORKTREE>, agent: {...agent, status: "done", finished:
-     <now>}}, activity: <the SUMMARY>, by: "engineer")`. PR, tree, column and
-     claim change in the same write, so no interrupted turn can leave one
+     <now>}, human_testing: <the PR's **Human testing:** steps, one per line>,
+     summary: <what changed, in a player's words>, area: <combat | visuals |
+     ai | ui | tooling>, sweep: <where the card's sweep went>}, activity: <the
+     SUMMARY>, by: "engineer")`. PR, tree, column, claim and the review-page
+     fields change in the same write, so no interrupted turn can leave one
      without the others. `links` is untouched: the card's own PR is not a
-     reference. (Step 3 then spawns the Tester on this same pass.)
+     reference. FOLLOWUPS become backlog cards (`create_card`, on no milestone
+     unless the user puts them on one). (Step 3 then spawns the Tester on this
+     same pass.)
    - `NEEDS_INPUT` → `move_card(id, "needs_input", patch: {question: {text:
      QUESTION}, agent: null, worktree: <WORKTREE, when the report has one>},
      activity: …)`.
@@ -460,15 +521,17 @@ versioned write passes the `version` of the card as you last read it — from
      the question text (same claim reset).
 5. On a Tester's completion notification, parse its `VERDICT:` report and
    write the board accordingly:
-   - `APPROVE` → one `move_card(id, "human_review", patch: {agent:
-     {...agent, status: "done", finished: <now>}}, activity: <the FINDINGS
-     note>, by: "tester")`. The card now waits on the **user**, who either merges the PR — the pipeline's
-     one human gate, which the Engineer and Tester contracts both forbid them
-     from passing — or bounces it back to `in_progress` with eyeball feedback.
-     Both exits are user gestures and the orchestrator runs nothing on the
-     column (see The eyeball loop). It is `agent.status: "done"` that makes the
-     separate column necessary: an approved card left in `review` would match
-     step 3's spawn condition and be handed back to a Tester on every wake.
+   - `APPROVE` → merge the PR (`gh pr merge <n> --merge`; the repo keeps merge
+     commits), read its merge commit (`gh pr view <n> --json mergeCommit`), then
+     one `mark_merged(id, pr: {url}, merge_sha, expected_version, activity:
+     <the FINDINGS note>, by: "tester")`: the card moves to `merged` and the
+     Tester's claim closes in the same write, so an approved card never sits in
+     `review` where step 3 would hand it back to a Tester. The Engineer and
+     Tester contracts still forbid *them* from merging. If the PR no longer
+     merges cleanly (`main` moved under it), do not merge: `move_card(id,
+     "in_progress", append: {heading: "Merge conflict — <date>", text: "PR #N no
+     longer merges into main: rebase onto main, resolve, re-run the gates"})`,
+     and step 2 respawns an Engineer on the same branch.
    - `REJECT` → one `move_card(id, "in_progress", append: {heading: "Tester
      findings — <date>", text: <the FINDINGS verbatim>}, activity: …, by:
      "tester")`. The findings (the next Engineer's spec addendum) and the move
@@ -503,8 +566,38 @@ versioned write passes the `version` of the card as you last read it — from
      the raw report as the question text, naming the run; a user-requested run
      surfaces it to the user the same way. Never guess whether the release
      happened; the bundled Done cards stay in `done` untouched.
-7. Cards the *user* must see promptly (needs_input) warrant a mention in the
+7. On a `review_submitted` event (the user submitted a milestone review):
+   its `data.cards` are the new feedback cards, already in `backlog` on the
+   milestone at the next iteration — sequence them into `in_progress` like any
+   other work. An empty `data.cards` is the user approving the milestone: close
+   it and release it (see *Running a milestone*).
+8. Cards the *user* must see promptly (needs_input) warrant a mention in the
    orchestrator session's next visible message.
+
+**Running a milestone.** Milestone writes are versioned like card writes (the
+milestone's own `version`; `get_milestone` / `list_milestones` return it).
+
+1. **Plan.** `create_milestone(name)` when the user scopes a release; file its
+   cards with `milestone` (or set it with `update_card`). Cards are iteration 1.
+2. **Build.** The wake steps above, card by card: each lands on `main` through
+   `mark_merged` and waits in `merged`. Sequence the cards; defer sweeps.
+3. **Sweep.** Once every card is merged, run the milestone sweep if any card
+   deferred to it (`balance.deferred` in `get_milestone`) and record it with
+   `set_milestone_sweep(summary, link: <the committed doc or CSV>)`.
+4. **Hand it to the user.** `update_milestone(status: "in_review", review_sha:
+   <origin/main HEAD>)` — the build the checklist applies to — and give the user
+   the review page, `http://127.0.0.1:7453/milestones/<name>`. Do not restate
+   its contents: the page is the review.
+5. **Iterate.** Each submission with feedback files the next iteration's cards
+   (step 7 above); they go through the same pipeline and land in `merged`, and
+   the review page shows them. Repeat 3-5 on the new work until a submission
+   comes back empty, or the user says the milestone is done.
+6. **Close and release.** `close_milestone(name, expected_version)` moves every
+   merged card to `done` in one write (refused while any card on the milestone is
+   unfinished — finish it, or move it to the next milestone) and returns the
+   cards for the release bundle; spawn the Release Manager with them (Release
+   flow). On `RELEASED`, archive the bundle as usual and record the release on
+   the milestone: `update_milestone(tag, release_url)`.
 
 **Live-claim audit — every wake, not just startup.** Steps 2a and 3a claim
 before spawning, so a turn interrupted between the two leaves `agent: working`
@@ -658,7 +751,7 @@ other costs a result you believed.
   down: the user tells the orchestrator ("AS-25 scoping is done"), which reads
   the file and files the cards itself.
 - **Engineer** — `.claude/agents/engineer.md`. Isolated worktree → PR, whose description
-  states what a human must check (see The eyeball loop). Reports
+  states what a human must check (see The milestone loop). Reports
   `READY_FOR_REVIEW / NEEDS_INPUT / FAILED` in a fixed format.
 - **Tester** — `.claude/agents/tester.md`. Verification only: no Edit/Write
   tools by definition. Checks out the card's PR branch in its own isolated
@@ -668,11 +761,11 @@ other costs a result you believed.
   an independent review of the diff (correctness, repo conventions,
   byte-identity constraints, missing registrations) plus a check that the PR's
   human-testing statement is present and true. Reports a machine-parsed
-  `VERDICT: APPROVE | REJECT` with a PR URL and FINDINGS; the orchestrator moves
-  the card to Human Review on APPROVE — where the user merges it or bounces it
-  back with eyeball feedback — or straight back to In Progress (findings appended
-  to the spec, `agent: null`) on REJECT. Never fixes the Engineer's work, never
-  pushes.
+  `VERDICT: APPROVE | REJECT` with a PR URL and FINDINGS; on APPROVE the
+  orchestrator merges the PR and marks the card merged, where it waits for the
+  milestone review; on REJECT the card goes straight back to In Progress
+  (findings appended to the spec, `agent: null`). Never fixes the Engineer's
+  work, never merges, never pushes.
 - **Release Manager** — `.claude/agents/release-manager.md`. Bundles the Done
   cards the orchestrator hands it into a tagged GitHub release: verifies each
   listed PR is merged to the `origin/main` HEAD it will tag, drafts
@@ -688,11 +781,14 @@ other costs a result you believed.
 
 ## Release flow
 
-Releases are on-demand, not automatic — Done cards accumulate until someone asks.
+A release is cut from `main` when the user approves a milestone: closing it
+moves its cards to Done (see *Running a milestone*), and Done cards are what a
+release bundles.
 
-**Requesting a release.** Either the user asks the orchestrator directly, or a
-card with `role: "release-manager"` is dragged to In Progress (the normal step-2
-spawn path then fires). Both routes converge on the same spawn.
+**Requesting a release.** Either the user asks the orchestrator directly (the
+normal end of a milestone), or a card with `role: "release-manager"` is dragged
+to In Progress (the normal step-2 spawn path then fires). Both routes converge
+on the same spawn.
 
 **What the orchestrator passes.** The Release Manager cannot read the board, so
 the orchestrator assembles the bundle from board state and puts it in the spawn
@@ -720,14 +816,13 @@ with a card id on every bullet and a `## Pipeline & tooling` section listing
 twelve of them because that separation was not stated anywhere; it now is, in
 the agent's contract (items 1 and 2).
 
-**The bundle is correct by construction.** `done` means *merged*: Tester-approved
-work whose PR is still open waits in `human_review`, which the rule never
-collects. So every work card the bundle picks up already has its PR in `main`,
-and the Release Manager's merged-and-ancestor check is a genuine safety net that
-should never fire — rather than the expected failure mode it was when `done` also
-held approved-but-unmerged cards and a single straggler could block a whole
-bundle. If the check ever does fire, a card reached `done` ahead of its merge:
-fix that card (or merge its PR), never release around it.
+**The bundle is correct by construction.** A work card reaches `done` only
+through `close_milestone`, which moves `merged` cards — each merged by the
+orchestrator and recorded by `mark_merged` — so every work card the bundle picks
+up already has its PR in `main` (the list `close_milestone` returns is the same
+set). The Release Manager's merged-and-ancestor check is a genuine safety net
+that should never fire. If it ever does, a card reached `done` ahead of its
+merge: fix that card (or merge its PR), never release around it.
 
 **What the agent does** (`.claude/agents/release-manager.md` is authoritative):
 verifies each listed PR is `MERGED` and its merge commit is an ancestor of the
@@ -742,11 +837,10 @@ triggers `.github/workflows/release.yaml`, whose idempotent create step reuses
 the agent's release (notes survive) and attaches the platform binaries — the
 release is public for a few minutes before its assets land, which is expected.
 Any unmerged PR, tag collision, or empty bundle is a NEEDS_INPUT, never a
-silent drop. The merged-and-ancestor check guards the pipeline's one human gate
-from the far side: merging is the **user's** step (no role merges), but work
-still awaiting that merge sits in `human_review` and is never bundled — so an
-unmerged PR in a bundle means a card reached `done` early, not that it is
-simply waiting its turn. The agent's NEEDS_INPUT naming it is the prompt to
+silent drop. The merged-and-ancestor check guards the merge from the far side:
+merging is the **orchestrator's** step (no worker role merges), and a card is
+bundled only after its milestone closed — so an unmerged PR in a bundle means a
+card reached `done` early, not that it is simply waiting its turn. The agent's NEEDS_INPUT naming it is the prompt to
 correct the board (or merge the PR) and re-request the release.
 
 **Post-release board archival — orchestrator, not agent.** On a `RELEASED`

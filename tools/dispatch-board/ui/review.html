@@ -1,0 +1,340 @@
+<!doctype html>
+<!-- A milestone's review page, served by tools/dispatch-board at /milestones/<name>.
+     Everything on it is assembled by the daemon (GET /api/milestones/<name>)
+     from the cards' structured fields; the page only draws it and records the
+     user's ticks, comments and submission. -->
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Milestone Review</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"><style>
+.page{max-width:980px;margin:0 auto;padding:0 20px 48px}
+.hdr{padding-left:0;padding-right:0;flex-wrap:wrap}
+.hdr a.back{color:var(--c-progress);text-decoration:none;font-size:13px}
+.meta{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+.status{font:600 11px "IBM Plex Sans",sans-serif;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
+.status.open{color:var(--c-progress);border-color:var(--c-progress)}
+.status.in_review{color:var(--c-merged);border-color:var(--c-merged)}
+.status.released{color:var(--c-done);border-color:var(--c-done)}
+section{margin-top:26px}
+section>h2{font:700 15px "Barlow Semi Condensed",sans-serif;letter-spacing:.08em;text-transform:uppercase;margin:0 0 4px;color:var(--ink)}
+section>.lead{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+.group{margin-top:12px}
+.group>h3{font:600 12px "Barlow Semi Condensed",sans-serif;text-transform:uppercase;letter-spacing:.07em;color:var(--c-merged);margin:0 0 6px}
+.item{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px}
+.item .top{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.item .cid a,.item a.pr,a.cid{font:500 12px "IBM Plex Mono",monospace;color:var(--c-progress);text-decoration:none}
+.item .ttl{font-weight:500}
+.item .sum{margin-top:4px;white-space:pre-wrap}
+.item .sum.none{color:var(--muted);font-style:italic}
+.muted{color:var(--muted)}
+.mono{font:400 12px "IBM Plex Mono",monospace}
+.step{display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-top:1px solid var(--line)}
+.step:first-of-type{border-top:none}
+.step input[type=checkbox]{margin-top:4px;width:16px;height:16px;flex:none;accent-color:var(--c-merged)}
+.step .txt{flex:1;min-width:0}
+.step.done .txt>.said{color:var(--muted);text-decoration:line-through}
+.step .who{font:400 11px "IBM Plex Mono",monospace;color:var(--muted)}
+.linkbtn{border:none;background:none;color:var(--c-progress);padding:0;font-size:12px}
+.fb{margin-top:6px}
+.fb textarea{width:100%;min-height:58px;font:inherit;font-size:13px;color:var(--ink);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:7px 9px;resize:vertical}
+.fb .fbst{font:400 11px "IBM Plex Mono",monospace;color:var(--muted)}
+.conflict{margin-top:6px;border:1px solid var(--p1);border-radius:6px;padding:8px 10px;font-size:12.5px;background:var(--surface2)}
+.progress{font:500 12px "IBM Plex Mono",monospace;color:var(--muted)}
+.applies{border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--surface2);font-size:13px;margin-bottom:8px}
+.warn{color:var(--c-input);font-size:12.5px;margin-top:8px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{text-align:left;font:600 11px "IBM Plex Sans",sans-serif;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+td.when{white-space:nowrap;font:400 12px "IBM Plex Mono",monospace;color:var(--muted)}
+.tablewrap{overflow-x:auto}
+ul.plain{list-style:none;margin:0;padding:0}
+ul.plain li{padding:5px 0;border-top:1px solid var(--line);font-size:13px}
+ul.plain li:first-child{border-top:none}
+.submitbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+@media (max-width:640px){.page{padding:0 16px 40px}}
+</style></head><body><div class="page" id="app"></div><script>
+(function(){
+"use strict";
+// The review page's rules:
+//  - Every section is drawn from the daemon's payload; nothing here is typed by hand.
+//  - A tick is one versioned write per step; a comment is one versioned draft
+//    per item, saved as the user types. A draft is never overwritten silently:
+//    a draft changed in another window stops the save and asks.
+//  - Submitting names the version of every comment it submits, so a comment
+//    changed elsewhere refuses the submission instead of filing a stale one.
+var NAME = decodeURIComponent(location.pathname.replace(/\/+$/, "").split("/").pop());
+var AREA_LABEL = {combat: "Combat", visuals: "Visuals", ai: "AI", ui: "UI", tooling: "Tooling"};
+var data = null, connected = false, statusMsg = "connecting…", confirmSubmit = false, submitting = false;
+var local = {};   // key -> {text, version, dirty, conflict?}: comments typed here and not yet saved
+var open = {};    // key -> true: a comment box the user opened
+var timers = {};
+var app = document.getElementById("app");
+
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function fmt(t){
+  try{ var s=String(t); if(/^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d)?$/.test(s)) s+="Z";
+    var d=new Date(s); if(isNaN(d)) return t; return d.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); }
+  catch(e){ return t; }
+}
+function day(t){ try{ var d=new Date(String(t)+"Z"); return isNaN(d) ? t : d.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}); }catch(e){ return t; } }
+function api(method, path, body){
+  var opts = {method: method, headers: {}};
+  if(body !== undefined){ opts.headers["content-type"] = "application/json"; opts.body = JSON.stringify(body); }
+  return fetch(path, opts).then(function(r){ return r.json().catch(function(){ return {}; }).then(function(b){ return {status: r.status, body: b}; }); });
+}
+function base(){ return "/api/milestones/" + encodeURIComponent(NAME); }
+function released(){ return data && data.milestone.status === "released"; }
+function cardLink(id){ return "<a class=\"cid\" href=\"/?card=" + encodeURIComponent(id) + "&m=" + encodeURIComponent(NAME) + "\">" + esc(id) + "</a>"; }
+function prLink(c){ return c.pr && c.pr.url ? " <a class=\"pr\" href=\"" + esc(c.pr.url) + "\" target=\"_blank\" rel=\"noopener\">PR #" + esc(c.pr.number) + "</a>" : ""; }
+function itemVersion(key){ return (data.feedback.versions || {})[key] || 0; }
+function serverDraft(key){ var d = data.feedback.drafts[key]; return d ? d.text : ""; }
+function draftText(key){ return local[key] && local[key].dirty ? local[key].text : serverDraft(key); }
+
+var loading = false, again = false;
+function load(){
+  if(loading){ again = true; return; }
+  loading = true;
+  api("GET", base()).then(function(r){
+    loading = false;
+    if(r.status === 404){ data = null; statusMsg = "no milestone " + NAME; render(); return; }
+    if(r.status !== 200) throw new Error("HTTP " + r.status);
+    data = r.body;
+    // A saved comment follows the server; one being typed keeps the user's text.
+    Object.keys(local).forEach(function(k){ if(!local[k].dirty && !local[k].conflict) delete local[k]; });
+    render();
+    if(again){ again = false; load(); }
+  }).catch(function(){ loading = false; statusMsg = "daemon unreachable — retrying"; render(); });
+}
+
+// ---- comments
+
+var rendered = {};   // the comment keys the last render drew a box for
+function commentBox(key, label){
+  rendered[key] = true;
+  if(released()) return serverDraft(key) ? "<div class=\"fb muted\">Comment: " + esc(serverDraft(key)) + "</div>" : "";
+  var text = draftText(key), l = local[key];
+  if(!text && !open[key] && !(l && l.conflict)) return "<button class=\"linkbtn\" data-open=\"" + esc(key) + "\">+ comment</button>";
+  var st = l && l.dirty ? "unsaved…" : (text ? "saved — becomes a card when you submit the review" : "");
+  var conflict = l && l.conflict
+    ? "<div class=\"conflict\">Changed in another window: <em>" + esc(l.conflict.draft || "(empty)") + "</em>"
+      + "<div class=\"dactions\" style=\"margin-top:6px\"><button class=\"btn\" data-keep=\"" + esc(key) + "\">Keep mine</button><button class=\"btn\" data-theirs=\"" + esc(key) + "\">Use theirs</button></div></div>"
+    : "";
+  return "<div class=\"fb\"><textarea data-key=\"" + esc(key) + "\" aria-label=\"" + esc(label) + "\" placeholder=\"What should change? Each comment becomes a card in the next iteration.\">" + esc(text) + "</textarea>"
+    + "<div class=\"fbst\">" + st + "</div>" + conflict + "</div>";
+}
+function onType(key, text){
+  var l = local[key] || {version: itemVersion(key)};
+  l.text = text; l.dirty = true; local[key] = l;
+  clearTimeout(timers[key]);
+  timers[key] = setTimeout(function(){ save(key); }, 600);
+}
+var saving = {};
+function save(key){
+  var l = local[key];
+  if(!l || !l.dirty || l.conflict) return Promise.resolve(true);
+  if(saving[key]) return saving[key];
+  var sent = l.text;
+  saving[key] = api("POST", base() + "/feedback", {key: key, text: sent, expected_version: l.version}).then(function(r){
+    delete saving[key];
+    if(r.status === 200){
+      l.version = r.body.version;
+      data.feedback.versions[key] = r.body.version;
+      if(sent) data.feedback.drafts[key] = {text: sent, version: r.body.version}; else delete data.feedback.drafts[key];
+      if(l.text === sent) l.dirty = false; else return save(key);
+      statusMsg = "comment saved"; render(); return true;
+    }
+    if(r.status === 409 && r.body.current){ l.conflict = r.body.current; statusMsg = "a comment changed in another window"; render(); return false; }
+    statusMsg = (r.body && r.body.message) || ("save failed (HTTP " + r.status + ")"); render(); return false;
+  }, function(){ delete saving[key]; statusMsg = "daemon unreachable — comment not saved"; render(); return false; });
+  return saving[key];
+}
+function flushAll(){
+  var keys = Object.keys(local).filter(function(k){ return local[k].dirty; });
+  keys.forEach(function(k){ clearTimeout(timers[k]); });
+  return Promise.all(keys.map(save)).then(function(r){ return r.every(Boolean); });
+}
+
+// ---- sections
+
+function whatChanged(){
+  var out = "";
+  if(!data.what_changed.length) out += "<p class=\"muted\">No card on this milestone is merged yet.</p>";
+  data.what_changed.forEach(function(g){
+    out += "<div class=\"group\"><h3>" + esc(g.area ? AREA_LABEL[g.area] || g.area : "No area set") + "</h3>";
+    g.cards.forEach(function(c){
+      out += "<div class=\"item\" data-card=\"" + esc(c.id) + "\"><div class=\"top\">" + cardLink(c.id) + prLink(c)
+        + (c.iteration > 1 ? " <span class=\"chip\">iteration " + esc(c.iteration) + "</span>" : "")
+        + " <span class=\"ttl\">" + esc(c.title) + "</span></div>"
+        + (c.summary ? "<div class=\"sum\">" + esc(c.summary) + "</div>" : "<div class=\"sum none\">No summary recorded.</div>")
+        + commentBox("card:" + c.id, "Comment on " + c.id) + "</div>";
+    });
+    out += "</div>";
+  });
+  if(data.in_flight.length){
+    out += "<div class=\"group\"><h3>Still in flight</h3><ul class=\"plain\">"
+      + data.in_flight.map(function(c){ return "<li>" + cardLink(c.id) + " " + esc(c.title) + " <span class=\"muted\">— " + esc(c.column.replace("_"," ")) + (c.iteration > 1 ? ", iteration " + esc(c.iteration) : "") + "</span></li>"; }).join("")
+      + "</ul></div>";
+  }
+  return "<section id=\"changed\"><h2>What changed</h2><p class=\"lead\">Every merged card, by area, in its own words.</p>" + out + "</section>";
+}
+
+function whatToCheck(){
+  var cl = data.checklist, a = cl.applies_to, total = 0, done = 0;
+  var applies = a.tag ? "Release <span class=\"mono\">" + esc(a.tag) + "</span>"
+    : a.review_sha ? "Build main at <span class=\"mono\">" + esc(String(a.review_sha).slice(0,10)) + "</span>"
+    : a.newest_merge ? "main at or after <span class=\"mono\">" + esc(String(a.newest_merge.sha).slice(0,10)) + "</span> (the newest merge, " + esc(a.newest_merge.card) + ") — no review build pinned yet"
+    : "No merge recorded yet";
+  var out = "<div class=\"applies\">Applies to: " + applies + "</div>";
+  cl.groups.forEach(function(g){
+    out += "<div class=\"group\"><h3>" + esc(g.area ? AREA_LABEL[g.area] || g.area : "No area set") + "</h3>";
+    g.cards.forEach(function(c){
+      out += "<div class=\"item\"><div class=\"top\">" + cardLink(c.id) + " <span class=\"ttl\">" + esc(c.title) + "</span></div>";
+      c.steps.forEach(function(s){
+        total++; if(s.checked) done++;
+        out += "<div class=\"step" + (s.checked ? " done" : "") + "\"><input type=\"checkbox\" data-check=\"" + esc(s.key) + "\"" + (s.checked ? " checked" : "") + (released() ? " disabled" : "") + " aria-label=\"" + esc(s.text) + "\">"
+          + "<div class=\"txt\"><div class=\"said\">" + esc(s.text) + "</div>"
+          + (s.checked ? "<div class=\"who\">checked " + esc(fmt(s.checked_at)) + "</div>" : "")
+          + commentBox(s.key, "Comment on this step") + "</div></div>";
+      });
+      out += "</div>";
+    });
+    out += "</div>";
+  });
+  if(!total) out += "<p class=\"muted\">No human-testing steps recorded on this milestone's merged cards.</p>";
+  if(cl.nothing_to_check.length) out += "<p class=\"muted\" style=\"font-size:12.5px\">Nothing to check (stated on the card): " + cl.nothing_to_check.map(function(c){ return cardLink(c.id); }).join(", ") + "</p>";
+  if(cl.without_steps.length) out += "<div class=\"warn\">No human-testing steps recorded: " + cl.without_steps.map(function(c){ return cardLink(c.id); }).join(", ") + "</div>";
+  return "<section id=\"check\"><h2>What to check</h2><p class=\"lead\">One build, one sitting. <span class=\"progress\" id=\"progress\">" + done + " / " + total + " checked</span></p>" + out + "</section>";
+}
+
+function decisions(){
+  if(!data.decisions.length) return "<section id=\"decisions\"><h2>Your decisions</h2><p class=\"muted\">No rulings recorded on this milestone's cards.</p></section>";
+  var rows = data.decisions.map(function(d){
+    var nums = d.numbers ? Object.keys(d.numbers).map(function(k){ return esc(k) + ": <span class=\"mono\">" + esc(d.numbers[k]) + "</span>"; }).join("<br>") : "";
+    return "<tr><td class=\"when\">" + esc(day(d.t)) + "</td><td>" + cardLink(d.card) + "</td><td>" + esc(d.text) + "</td><td>" + nums + "</td></tr>";
+  }).join("");
+  return "<section id=\"decisions\"><h2>Your decisions</h2><p class=\"lead\">Every ruling made on this milestone's cards, oldest first.</p>"
+    + "<div class=\"tablewrap\"><table><thead><tr><th>Date</th><th>Card</th><th>Decision</th><th>Numbers</th></tr></thead><tbody>" + rows + "</tbody></table></div></section>";
+}
+
+function balance(){
+  var b = data.balance, out = "";
+  if(b.sweep){
+    var link = b.sweep.link ? (/^https?:\/\//.test(b.sweep.link) ? " <a href=\"" + esc(b.sweep.link) + "\" target=\"_blank\" rel=\"noopener\">" + esc(b.sweep.link) + "</a>" : " <span class=\"mono\">" + esc(b.sweep.link) + "</span>") : "";
+    out += "<div class=\"item\"><div>" + esc(b.sweep.summary) + "</div><div class=\"muted\" style=\"font-size:12px;margin-top:4px\">" + esc(day(b.sweep.t)) + link + "</div></div>";
+  } else out += "<p class=\"muted\">The milestone sweep has not been recorded yet.</p>";
+  function list(title, cs){
+    if(!cs.length) return "";
+    return "<div class=\"group\"><h3>" + title + "</h3><ul class=\"plain\">" + cs.map(function(c){ return "<li>" + cardLink(c.id) + " " + esc(c.title) + (c.note ? " <span class=\"muted\">— " + esc(c.note) + "</span>" : "") + "</li>"; }).join("") + "</ul></div>";
+  }
+  out += list("Deferred to this sweep", b.deferred) + list("Swept on the card", b.on_card) + list("Sweep not stated", b.unstated);
+  return "<section id=\"balance\"><h2>Balance</h2>" + out + "</section>";
+}
+
+function gaps(){
+  var g = data.gaps, out = "";
+  if(g.stated.length) out += "<div class=\"group\"><h3>Stated gaps</h3>" + g.stated.map(function(c){ return "<div class=\"item\"><div class=\"top\">" + cardLink(c.id) + " <span class=\"ttl\">" + esc(c.title) + "</span></div><div class=\"sum\">" + esc(c.gaps) + "</div></div>"; }).join("") + "</div>";
+  if(g.followups.length) out += "<div class=\"group\"><h3>Filed while this milestone was open</h3><ul class=\"plain\">" + g.followups.map(function(c){ return "<li>" + cardLink(c.id) + " " + esc(c.title) + " <span class=\"muted\">— " + esc(String(c.column).replace("_"," ")) + (c.milestone ? ", milestone " + esc(c.milestone) : "") + "</span></li>"; }).join("") + "</ul></div>";
+  if(!out) out = "<p class=\"muted\">No gaps stated and no cards filed while this milestone was open.</p>";
+  return "<section id=\"gaps\"><h2>Known gaps and follow-ups</h2>" + out + "</section>";
+}
+
+function feedback(){
+  var out = "<div class=\"item\"><div class=\"ttl\">The milestone as a whole</div>" + commentBox("milestone", "Comment on the milestone") + "</div>";
+  // Comments whose item has left the page (a step reworded, a card moved off
+  // the milestone) stay visible, so they can still be read and cleared.
+  var orphans = Object.keys(data.feedback.drafts).filter(function(k){ return !rendered[k]; });
+  if(orphans.length){
+    out += "<div class=\"group\"><h3>Comments on items no longer on this page</h3>";
+    orphans.forEach(function(k){ out += "<div class=\"item\"><div class=\"muted mono\">" + esc(k) + "</div>" + commentBox(k, "Comment " + k) + "</div>"; });
+    out += "</div>";
+  }
+  var n = Object.keys(data.feedback.drafts).length + Object.keys(local).filter(function(k){ return local[k].dirty && local[k].text.trim() && !data.feedback.drafts[k]; }).length;
+  if(!released()){
+    out += "<div class=\"submitbar\"><button class=\"btn primary\" id=\"submit\"" + (submitting ? " disabled" : "") + ">"
+      + (confirmSubmit ? "Confirm: file " + n + " card" + (n === 1 ? "" : "s") : "Submit review") + "</button>"
+      + (confirmSubmit ? "<button class=\"btn\" id=\"submitcancel\">Cancel</button>" : "")
+      + "<span class=\"muted\" style=\"font-size:12.5px\">" + (n ? n + " comment" + (n === 1 ? "" : "s") + " → " + n + " iteration card" + (n === 1 ? "" : "s") + " on " + esc(NAME) : "No comments: submitting records that you have no feedback.") + "</span></div>";
+  }
+  var subs = data.feedback.submissions || [];
+  if(subs.length){
+    out += "<div class=\"group\"><h3>Submitted</h3><ul class=\"plain\">" + subs.map(function(s){
+      return "<li><span class=\"mono muted\">" + esc(fmt(s.t)) + "</span> — " + (s.cards.length ? s.cards.map(cardLink).join(", ") : "no feedback") + "</li>";
+    }).join("") + "</ul></div>";
+  }
+  return "<section id=\"feedback\"><h2>Feedback</h2><p class=\"lead\">Comment on anything above, or here on the whole milestone. Submitting turns each comment into a card on " + esc(NAME) + ", one iteration after the work it is about.</p>" + out + "</section>";
+}
+
+function render(){
+  // Keep the caret where the user is typing across a redraw.
+  var ae = document.activeElement, focus = ae && ae.dataset && ae.dataset.key ? {key: ae.dataset.key, s: ae.selectionStart, e: ae.selectionEnd} : null;
+  rendered = {};
+  var head = "<div class=\"hdr\"><h1>ArenaSim <span class=\"ax\">Dispatch</span></h1><span class=\"sub\">Milestone " + esc(NAME) + " review</span>"
+    + "<span class=\"spacer\"></span><span class=\"stat\">" + esc(statusMsg) + "</span><a class=\"back\" href=\"/?m=" + encodeURIComponent(NAME) + "\">← Board</a></div>";
+  if(!data){ app.innerHTML = head; return; }
+  var m = data.milestone;
+  var meta = "<p class=\"meta\"><span class=\"status " + esc(m.status) + "\">" + esc(m.status.replace("_"," ")) + "</span> · opened " + esc(day(m.created))
+    + (m.released_at ? " · released " + esc(day(m.released_at)) : "")
+    + (m.release_url ? " · <a href=\"" + esc(m.release_url) + "\" target=\"_blank\" rel=\"noopener\">release notes</a>" : "") + "</p>";
+  app.innerHTML = head + meta + whatChanged() + whatToCheck() + decisions() + balance() + gaps() + feedback();
+  if(focus){
+    app.querySelectorAll("textarea[data-key]").forEach(function(t){
+      if(t.dataset.key === focus.key){ t.focus(); try{ t.setSelectionRange(focus.s, focus.e); }catch(e){} }
+    });
+  }
+  wire();
+}
+
+function wire(){
+  app.querySelectorAll("[data-open]").forEach(function(b){
+    b.onclick = function(){ open[b.dataset.open] = true; render();
+      app.querySelectorAll("textarea[data-key]").forEach(function(t){ if(t.dataset.key === b.dataset.open) t.focus(); }); };
+  });
+  app.querySelectorAll("textarea[data-key]").forEach(function(t){
+    t.oninput = function(){ onType(t.dataset.key, t.value); };
+    t.onblur = function(){ clearTimeout(timers[t.dataset.key]); save(t.dataset.key); };
+  });
+  app.querySelectorAll("[data-keep]").forEach(function(b){
+    b.onclick = function(){ var l = local[b.dataset.keep]; l.version = l.conflict.version; delete l.conflict; l.dirty = true; save(b.dataset.keep); };
+  });
+  app.querySelectorAll("[data-theirs]").forEach(function(b){
+    b.onclick = function(){ delete local[b.dataset.theirs]; load(); };
+  });
+  app.querySelectorAll("input[data-check]").forEach(function(cb){
+    cb.onchange = function(){
+      var key = cb.dataset.check;
+      api("POST", base() + "/check", {key: key, checked: cb.checked, expected_version: itemVersion(key)}).then(function(r){
+        statusMsg = r.status === 200 ? (cb.checked ? "checked" : "unchecked") : r.status === 409 ? "changed in another window — reloaded" : ((r.body && r.body.message) || "tick not saved");
+        load();
+      });
+    };
+  });
+  var sb = document.getElementById("submit");
+  if(sb) sb.onclick = function(){
+    if(!confirmSubmit){ confirmSubmit = true; render(); return; }
+    confirmSubmit = false; submitting = true; statusMsg = "submitting…"; render();
+    flushAll().then(function(ok){
+      if(!ok){ submitting = false; statusMsg = "a comment could not be saved — not submitted"; render(); return; }
+      var expected = {};
+      Object.keys(data.feedback.drafts).forEach(function(k){ expected[k] = data.feedback.drafts[k].version; });
+      return api("POST", base() + "/submit", {expected: expected}).then(function(r){
+        submitting = false;
+        if(r.status === 200){
+          var ids = r.body.cards.map(function(c){ return c.id; });
+          statusMsg = ids.length ? "submitted — filed " + ids.join(", ") : "submitted — no feedback";
+          open = {}; local = {};
+        } else statusMsg = r.status === 409 ? "comments changed elsewhere — reloaded; review and submit again" : ((r.body && r.body.message) || "submit failed");
+        load();
+      });
+    });
+  };
+  var sc = document.getElementById("submitcancel");
+  if(sc) sc.onclick = function(){ confirmSubmit = false; render(); };
+}
+
+var pending = null;
+function scheduleLoad(){ if(pending) return; pending = setTimeout(function(){ pending = null; load(); }, 120); }
+var es = new EventSource("/api/stream");
+es.onopen = function(){ connected = true; if(/connecting|unreachable/.test(statusMsg)) statusMsg = "connected"; load(); };
+es.onmessage = function(){ scheduleLoad(); };
+es.onerror = function(){ connected = false; statusMsg = "daemon unreachable — retrying"; render(); };
+render();
+load();
+})();
+</script></body></html>

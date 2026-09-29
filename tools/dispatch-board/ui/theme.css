@@ -1,0 +1,66 @@
+/* ArenaSim Dispatch: the colour tokens (light, dark, and the explicit theme
+   overrides) and the components every page shares. Served at /theme.css to
+   the board (ui/board.html) and the milestone review page (ui/review.html). */
+:root{
+  color-scheme:light dark;
+  --ground:#ECEFF1;--surface:#FBFCFD;--surface2:#F1F3F5;--ink:#1B222B;--muted:#5B6673;
+  --line:#D5DBE1;--accent:#8A6A2F;--accent-ink:#6E5322;--btn-primary-ink:#FFFFFF;
+  --c-backlog:#5B6673;--c-input:#A87409;--c-progress:#2F6FA8;--c-review:#7B5EA7;--c-merged:#2F7D8A;--c-done:#3E7A4E;
+  --p1:#B04030;--p2:#C08A1E;--p3:#9AA4AE;
+  --chip-eng:#E3EDF6;--chip-eng-ink:#2F6FA8;--chip-else:#EEE9F6;--chip-else-ink:#7B5EA7;
+  --shadow:0 1px 2px rgba(20,26,33,.08),0 4px 14px rgba(20,26,33,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#131619;--surface:#1C2126;--surface2:#181D21;--ink:#E7EAED;--muted:#97A1AC;
+    --line:#30383F;--accent:#C9A45C;--accent-ink:#C9A45C;--btn-primary-ink:#1B1508;
+    --c-backlog:#8B96A1;--c-input:#D9A93C;--c-progress:#5E9AD0;--c-review:#A98FD6;--c-merged:#6FB6C4;--c-done:#6FAE7E;
+    --p1:#D06A5B;--p2:#D8A83E;--p3:#6B7681;
+    --chip-eng:#24333F;--chip-eng-ink:#8FBBE0;--chip-else:#2E2939;--chip-else-ink:#BFA9E6;
+    --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#131619;--surface:#1C2126;--surface2:#181D21;--ink:#E7EAED;--muted:#97A1AC;
+  --line:#30383F;--accent:#C9A45C;--accent-ink:#C9A45C;--btn-primary-ink:#1B1508;
+  --c-backlog:#8B96A1;--c-input:#D9A93C;--c-progress:#5E9AD0;--c-review:#A98FD6;--c-merged:#6FB6C4;--c-done:#6FAE7E;
+  --p1:#D06A5B;--p2:#D8A83E;--p3:#6B7681;
+  --chip-eng:#24333F;--chip-eng-ink:#8FBBE0;--chip-else:#2E2939;--chip-else-ink:#BFA9E6;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);
+}
+*{box-sizing:border-box}
+html{background:var(--ground)}
+body{margin:0;background:var(--ground);color:var(--ink);font:14px/1.5 "IBM Plex Sans",system-ui,-apple-system,sans-serif}
+img{max-width:100%}
+[hidden]{display:none!important}
+button{font:inherit;cursor:pointer}
+button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--c-progress);outline-offset:1px}
+.hdr{display:flex;align-items:baseline;gap:14px;padding:16px 20px 10px}
+.hdr h1{font:700 22px/1 "Barlow Semi Condensed",system-ui,sans-serif;letter-spacing:.02em;margin:0;color:var(--ink)}
+.hdr h1 .ax{color:var(--accent-ink)}
+.hdr .sub{color:var(--muted);font-size:12.5px}
+.hdr .spacer{flex:1}
+.stat{color:var(--muted);font:400 12px "IBM Plex Mono",monospace}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:7px;padding:7px 13px;font-weight:500}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--btn-primary-ink);font-weight:600}
+.btn.danger{color:var(--p1);border-color:var(--p1)}
+.btn:disabled{opacity:.45;cursor:default}
+.robanner{margin:0 20px 8px;padding:8px 12px;border:1px solid var(--line);border-radius:7px;background:var(--surface2);color:var(--muted);font-size:12.5px}
+.chip{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:99px;background:var(--chip-else);color:var(--chip-else-ink)}
+.chip.engineer{background:var(--chip-eng);color:var(--chip-eng-ink)}
+.tag{font:500 11px "IBM Plex Mono",monospace;color:var(--muted)}
+.tag.q{color:var(--c-input)}
+.tag.agent{color:var(--c-progress)}
+.tag a{color:var(--c-progress);text-decoration:none}
+.tag a:hover{text-decoration:underline}
+.tag.rel{color:var(--c-done)}
+.tag.hum{color:var(--c-merged)}
+.empty{color:var(--muted);font-size:12px;padding:6px 4px;font-style:italic}
+.mrow{display:flex;flex-direction:column;gap:4px;margin-top:12px}
+.mrow label{font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.mrow input,.mrow textarea,.mrow select{font:inherit;color:var(--ink);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+.mrow textarea{min-height:110px;resize:vertical;font-size:13px}
+.tworow{display:flex;gap:10px}.tworow .mrow{flex:1}
+.dactions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.tag.own a{font-weight:600}

@@ -199,10 +199,10 @@ test("a claim never ends silently: every patch or move that changes agent writes
 
 // ---------------------------------------------------------------- column rules
 
-test("PR gate: a non-pm card without its own pr is refused into review and human_review", (t) => {
+test("PR gate: a non-pm card without its own pr is refused into review and merged", (t) => {
   const { board } = tempBoard(t);
   for (const role of ["engineer", "tester", "release-manager"]) {
-    for (const to of ["review", "human_review"]) {
+    for (const to of ["review", "merged"]) {
       const c = seed(board, { role, column: "in_progress" });
       refused(() => board.moveCard(c.id, to, c.version, { actor: "board" }), "gate_refused");
       assert.equal(board.getCard(c.id).column, "in_progress");
@@ -214,8 +214,9 @@ test("PR gate: a pm card is admitted; a pr in the move's own patch satisfies it"
   const { board } = tempBoard(t);
   const pm = seed(board, { role: "pm", column: "in_progress" });
   assert.equal(board.moveCard(pm.id, "review", pm.version, { actor: "board" }).column, "review");
+  // A pm card has nothing to merge: merged is mark_merged's alone, for every role.
   const pm2 = seed(board, { role: "pm" });
-  assert.equal(board.moveCard(pm2.id, "human_review", pm2.version, { actor: "board" }).column, "human_review");
+  refused(() => board.moveCard(pm2.id, "merged", pm2.version, { actor: "board" }), "invalid");
 
   const eng = seed(board, { column: "in_progress" });
   const moved = board.moveCard(eng.id, "review", eng.version, { actor: "orchestrator", patch: { pr: { url: "https://github.com/x/y/pull/9" } } });

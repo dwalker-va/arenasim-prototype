@@ -8,12 +8,13 @@
  *   head                           print {"cursor", "board"}: where to arm a wait from
  *   import <state.json|board.html> load a board state into an EMPTY db
  *   export [--out FILE]            write the full state as JSON
+ *   migrate [--backup FILE]        bring a schema 1 db to schema 2 (daemon stopped)
  *
  * Common flags: --db PATH (default: main checkout's .dispatch/board.db, or
  * $DISPATCH_BOARD_DB), --port N (default 7453, or $DISPATCH_BOARD_PORT).
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { Board, extractStateFromHtml } from "./board.js";
+import { Board, BoardError, extractStateFromHtml } from "./board.js";
 import { defaultDbPath, defaultPort, liveDaemon } from "./paths.js";
 import { startDaemon } from "./server.js";
 
@@ -73,7 +74,13 @@ async function cmdServe(a: Args): Promise<void> {
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
-  await ready;
+  try {
+    await ready;
+  } catch (e) {
+    // An unmigrated database is an operator step, not a crash: say which.
+    if (e instanceof BoardError) die(`${e.code}: ${e.message}`);
+    throw e;
+  }
 }
 
 /**
@@ -196,6 +203,22 @@ function cmdImport(a: Args): void {
   }
 }
 
+/**
+ * Bring the database to this build's schema, with the daemon stopped. Writes
+ * a full backup copy first (the rollback: restore that file) and prints a
+ * JSON report naming every card it moved.
+ */
+async function cmdMigrate(a: Args): Promise<void> {
+  const db = flag(a, "db") ?? defaultDbPath();
+  const live = liveDaemon(db);
+  if (live) die(`a daemon (pid ${live.pid}) owns ${db}; stop it before migrating`);
+  try {
+    out({ migrated: await Board.migrate(db, { backup: flag(a, "backup"), actor: flag(a, "actor") }), db });
+  } catch (e) {
+    die(String((e as Error).message ?? e));
+  }
+}
+
 function cmdExport(a: Args): void {
   const db = flag(a, "db") ?? defaultDbPath();
   const board = new Board(db, { readonly: true });
@@ -220,6 +243,9 @@ const HELP = `usage: node dist/cli.js <command>
   head                          print {"cursor", "board"}: where to arm a wait from
   import <state.json|page.html> load a board state into an EMPTY db (daemon stopped)
   export [--out FILE]           write the full board state as JSON
+  migrate [--backup FILE]       bring a schema 1 db (the human_review board) to schema 2,
+                                daemon stopped; backs the whole db up to FILE first
+                                (default: <db>.schema1-<time>.bak) — restoring it is the rollback
 
   --db PATH    board database (default: <main checkout>/.dispatch/board.db, or $DISPATCH_BOARD_DB)
   --port N     daemon port (default 7453, or $DISPATCH_BOARD_PORT)
@@ -238,6 +264,8 @@ async function main(): Promise<void> {
       return cmdImport(a);
     case "export":
       return cmdExport(a);
+    case "migrate":
+      return cmdMigrate(a);
     case "help":
     case "--help":
     case "-h":

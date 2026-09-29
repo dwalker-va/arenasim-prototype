@@ -21,15 +21,16 @@ import { spawnSync } from "node:child_process";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const { packagingIconDir } = await import("../../dist/paths.js");
-const { realBoardPage } = await import("../helpers.mjs");
+const { realBoardPage, realBoardExport } = await import("../helpers.mjs");
 
 // What the package resolves from its real place, handed to every copy explicitly.
 const ENV = {
   ...process.env,
   DISPATCH_BOARD_PACKAGING_DIR: packagingIconDir(),
   ...(realBoardPage() ? { DISPATCH_BOARD_FIXTURE: realBoardPage() } : {}),
+  ...(realBoardExport() ? { DISPATCH_BOARD_EXPORT_FIXTURE: realBoardExport() } : {}),
 };
-const SUITES = ["board", "race", "daemon", "roundtrip", "ui", "prwork"];
+const SUITES = ["board", "race", "daemon", "roundtrip", "ui", "prwork", "milestone", "migration", "review"];
 
 /** A copy of the package's dist/ui/test under .mutants/<name>/, optionally with one edit applied. */
 function copyTo(name) {
@@ -80,9 +81,9 @@ const MUTANTS = [
     find: 'return !GATED_COLUMNS.includes(to) || doc.role === "pm" || hasPr(doc);',
     replace: "return true;",
     mustFail: [
-      "PR gate: a non-pm card without its own pr is refused into review and human_review",
+      "PR gate: a non-pm card without its own pr is refused into review and merged",
       "MCP: the PR gate refuses an engineer card without its own pr and admits a pm card",
-      "PR gate: reference links alone never admit a card to review or human_review",
+      "PR gate: reference links alone never admit a card to review or merged",
     ],
   },
   {
@@ -193,9 +194,206 @@ const MUTANTS = [
   {
     name: "signal-handler-ordering",
     file: "dist/cli.js",
-    find: 'process.on("SIGINT", stop);\n    process.on("SIGTERM", stop);\n    await ready;',
-    replace: 'await ready;\n    process.on("SIGINT", stop);\n    process.on("SIGTERM", stop);',
+    // The handlers moved to after the whole try/catch around `await ready`.
+    find: 'process.on("SIGINT", stop);\n    process.on("SIGTERM", stop);\n    try {\n        await ready;\n    }\n    catch (e) {\n        // An unmigrated database is an operator step, not a crash: say which.\n        if (e instanceof BoardError)\n            die(`${e.code}: ${e.message}`);\n        throw e;\n    }',
+    replace: 'try {\n        await ready;\n    }\n    catch (e) {\n        // An unmigrated database is an operator step, not a crash: say which.\n        if (e instanceof BoardError)\n            die(`${e.code}: ${e.message}`);\n        throw e;\n    }\n    process.on("SIGINT", stop);\n    process.on("SIGTERM", stop);',
     mustFail: ["shutdown: a SIGTERM the instant the daemon says it is serving is handled gracefully"],
+  },
+  // ---- AS-174: milestones, the Merged column, the review, the migration.
+  {
+    // A new daemon must never serve cards in a column it does not know.
+    name: "needs-migration-guard",
+    file: "dist/board.js",
+    find: "if (!opts.allowOld) {",
+    replace: "if (false) {",
+    mustFail: ["a schema 1 database is refused by this build until migrated"],
+  },
+  {
+    name: "migrate-moves-human-review",
+    file: "dist/board.js",
+    find: 'doc.column = "merged";\n                    doc.updated = t;',
+    replace: "doc.updated = t;",
+    mustFail: ["migrate: human_review cards become merged cards on no milestone"],
+  },
+  {
+    name: "import-moves-human-review",
+    file: "dist/board.js",
+    find: 'if (fromReview)\n                    Object.assign(doc, { column: "merged", updated: now() });',
+    replace: "",
+    mustFail: ["schema 2 import: refuses a card naming a milestone the state lacks, and a schema 1 human_review card arrives merged"],
+  },
+  {
+    name: "export-carries-milestones",
+    file: "dist/board.js",
+    find: "if (this.schema < 2)",
+    replace: "if (true)",
+    mustFail: ["schema 2 round trip: milestones, their ticks, drafts and submissions"],
+  },
+  {
+    // The close is versioned: a stale one must move nothing (round 2).
+    name: "close-milestone-version",
+    file: "dist/board.js",
+    find: "const { m, doc } = this.loadMilestone(name, expectedVersion);\n            if (doc.status === \"released\")\n                throw new BoardError(\"invalid\", `milestone ${name} is already released`",
+    replace: "const { m, doc } = this.loadMilestone(name, this.milestoneRow(name).version);\n            if (doc.status === \"released\")\n                throw new BoardError(\"invalid\", `milestone ${name} is already released`",
+    mustFail: [
+      "close_milestone: a stale expected_version is refused and changes nothing",
+      "MCP: the orchestrator's milestone flow, create to close",
+    ],
+  },
+  {
+    name: "merged-only-via-mark-merged",
+    file: "dist/board.js",
+    find: 'if (to === "merged" && from !== "merged" && doc.merge_sha == null) {',
+    replace: "if (false) {",
+    mustFail: ["move rules: merged is reached only through mark_merged"],
+  },
+  {
+    name: "milestone-done-only-by-close",
+    file: "dist/board.js",
+    find: 'if (s !== null && s !== "released") {',
+    replace: "if (false) {",
+    mustFail: ["move rules: merged is reached only through mark_merged"],
+  },
+  {
+    name: "nothing-to-check-is-no-step",
+    file: "dist/board.js",
+    find: "if (NOTHING_TO_CHECK.test(line))",
+    replace: "if (false)",
+    mustFail: [
+      "checklist steps: one per line",
+      "review payload: assembled from the cards' structured fields",
+    ],
+  },
+  {
+    name: "nothing-to-check-is-no-gap",
+    file: "dist/board.js",
+    find: "&& !saysNothingToCheck(c.human_testing))",
+    replace: ")",
+    mustFail: ["review payload: assembled from the cards' structured fields"],
+  },
+  {
+    name: "close-refuses-unfinished",
+    file: "dist/board.js",
+    find: "if (unfinished.length) {",
+    replace: "if (false) {",
+    mustFail: ["close_milestone: refused while a card is unfinished"],
+  },
+  {
+    name: "mark-merged-from-review-only",
+    file: "dist/board.js",
+    find: 'if (from !== "review" && !(from === "merged" && doc.merge_sha == null)) {',
+    replace: "if (false) {",
+    mustFail: ["mark_merged: only from review (or a merged card with no merge recorded)"],
+  },
+  {
+    name: "mark-merged-closes-claim",
+    file: "dist/board.js",
+    find: 'if (isObj(stored) && stored.status === "working")',
+    replace: "if (false)",
+    mustFail: ["mark_merged: review -> merged with pr, merge sha and the Tester claim closed"],
+  },
+  {
+    name: "released-takes-no-cards",
+    file: "dist/board.js",
+    find: 'if (JSON.parse(r.doc).status === "released")',
+    replace: "if (false)",
+    mustFail: ["attach: a released milestone takes no new cards"],
+  },
+  {
+    name: "attach-checked-on-patch",
+    file: "dist/board.js",
+    // An empty statement, not nothing: the guard is the body of an `if`.
+    find: "this.checkAttach(patch.milestone);",
+    replace: ";",
+    mustFail: ["attach: a released milestone takes no new cards"],
+  },
+  {
+    name: "iteration-defaults-to-1",
+    file: "dist/board.js",
+    find: "if (doc.milestone != null && doc.iteration == null)",
+    replace: "if (false)",
+    mustFail: ["attach: a card joins an existing, unreleased milestone at iteration 1"],
+  },
+  {
+    name: "review-item-version",
+    file: "dist/board.js",
+    find: "if (have !== expected) {",
+    replace: "if (false) {",
+    mustFail: [
+      "ticks: versioned per step, persisted, never a board event",
+      "review page: a comment changed in another window is not overwritten",
+    ],
+  },
+  {
+    name: "tick-only-on-a-step",
+    file: "dist/board.js",
+    find: "if (!this.reviewKeys(name).check.has(key))",
+    replace: "if (false)",
+    mustFail: ["ticks: versioned per step, persisted, never a board event"],
+  },
+  {
+    // Ticks must never wake the orchestrator.
+    name: "ticks-not-feed-events",
+    file: "dist/board.js",
+    find: "this.openForReview(name);\n            if (!this.reviewKeys(name).check.has(key))",
+    replace: 'this.openForReview(name);\n            this.recordEvent(actor, "review_checked", null, { milestone: name });\n            if (!this.reviewKeys(name).check.has(key))',
+    mustFail: [
+      "ticks: versioned per step, persisted, never a board event",
+      "wake-up: the new event kinds reach `wait` in the existing line shape",
+    ],
+  },
+  {
+    name: "submit-refuses-stale",
+    file: "dist/board.js",
+    find: "if (stale.length) {",
+    replace: "if (false) {",
+    mustFail: ["submit: a comment changed or added since the user read it refuses the whole submission"],
+  },
+  {
+    name: "submit-iteration-plus-one",
+    file: "dist/board.js",
+    find: "? src.iteration : 1) + 1",
+    replace: "? src.iteration : 1) + 0",
+    mustFail: ["submit: each comment becomes a card on the milestone at its source's iteration + 1"],
+  },
+  {
+    name: "followups-are-the-open-window",
+    file: "dist/board.js",
+    find: "idNum(r.id) >= firstId && idNum(r.id) < endId",
+    replace: "true",
+    mustFail: [
+      "review payload: assembled from the cards' structured fields",
+      "close_milestone: refused while a card is unfinished",
+    ],
+  },
+  {
+    name: "review-page-tick-version",
+    file: "ui/review.html",
+    find: "expected_version: itemVersion(key)",
+    replace: "expected_version: 0",
+    mustFail: ["review page: ticks persist, a comment saves as it is typed"],
+  },
+  {
+    name: "review-page-submits-what-it-saw",
+    file: "ui/review.html",
+    find: "expected[k] = data.feedback.drafts[k].version;",
+    replace: "",
+    mustFail: ["review page: ticks persist, a comment saves as it is typed"],
+  },
+  {
+    // A conflicting draft is shown, never silently written over.
+    name: "review-page-asks-on-conflict",
+    file: "ui/review.html",
+    find: "if(r.status === 409 && r.body.current){ l.conflict = r.body.current;",
+    replace: "if(r.status === 409 && r.body.current){ l.version = r.body.current.version; return save(key);",
+    mustFail: ["review page: a comment changed in another window is not overwritten"],
+  },
+  {
+    name: "drawer-sends-milestone",
+    file: "ui/board.html",
+    find: 'if(e.milestone !== undefined){ patch.milestone = e.milestone || null; changed.push("milestone"); }',
+    replace: "",
+    mustFail: ["board page: the milestone filter, the Merged column, a card's milestone fields"],
   },
 ];
 
