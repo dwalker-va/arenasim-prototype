@@ -15,6 +15,7 @@
 //! registered in `states/mod.rs` only, so headless stays byte-identical.
 
 use super::mortal_strike::{spawn_weapon_trail, WeaponTrailStyle};
+use super::weapon_swing::{hand_clock, weapon_stroke_profile};
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::components::*;
 use bevy::prelude::*;
@@ -66,16 +67,26 @@ pub fn spawn_heroic_strike_flourish(
     mut materials: ResMut<Assets<StandardMaterial>>,
     swings: Query<&AutoAttackSwing, With<HeroicStrikeSwing>>,
     positions: Query<&Transform, With<Combatant>>,
+    clocks: Query<(&Combatant, Option<&ActiveAuras>)>,
 ) {
     for swing in swings.iter() {
-        let stroke = SwingStyle::Auto;
+        // The empowered blow rides the ordinary auto stroke, which scales with
+        // the weapon swinging it — read the same hand interval
+        // `consume_swing_signals` freezes for that stroke, so the trail and
+        // the landing stay in step with the blade.
+        let interval = clocks
+            .get(swing.attacker)
+            .ok()
+            .and_then(|(combatant, auras)| hand_clock(combatant, auras, swing.hand))
+            .map_or(0.0, |(_, interval)| interval);
+        let stroke = weapon_stroke_profile(interval);
         spawn_weapon_trail(
             &mut commands,
             &mut meshes,
             &mut materials,
             swing.attacker,
             heroic_strike_trail(),
-            stroke.stroke_secs(),
+            stroke.total(),
         );
         let from = match (positions.get(swing.target), positions.get(swing.attacker)) {
             (Ok(v), Ok(a)) => (a.translation - v.translation).normalize_or_zero(),
