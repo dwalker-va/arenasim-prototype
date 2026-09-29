@@ -1,5 +1,5 @@
 diff --git a/src/states/play_match/class_ai/hunter.rs b/src/states/play_match/class_ai/hunter.rs
-index 4f2af1b..015ecc3 100644
+index 3479f5a..ca968fa 100644
 --- a/src/states/play_match/class_ai/hunter.rs
 +++ b/src/states/play_match/class_ai/hunter.rs
 @@ -921,9 +921,6 @@ pub fn aimed_shot_has_time(
@@ -12,3 +12,12 @@ index 4f2af1b..015ecc3 100644
      let cast = calculate_cast_time(
          abilities.get_unchecked(&AbilityType::AimedShot).cast_time,
          auras,
+@@ -1294,7 +1291,7 @@ fn try_aimed_shot(
+     // A 2.5s cast is not begun while an enemy is hidden: a stealthed Rogue
+     // opens in melee range and Kicks it. The same question the opener asks
+     // ([`aimed_shot_has_time`]), asked wherever Aimed Shot is in the rotation.
+-    if ctx.enemy_hidden() {
++    if false {
+         builder.reject(
+             ability,
+             RejectionReason::PreconditionUnmet {

@@ -331,7 +331,7 @@ Mage+Hunter_vs_Rogue+Warlock,Mage+Hunter,Rogue+Warlock,8,team2,kill,19.25
 Mage+Hunter_vs_Rogue+Warlock,Mage+Hunter,Rogue+Warlock,9,team1,kill,21.22
 Mage+Hunter_vs_Rogue+Paladin,Mage+Hunter,Rogue+Paladin,0,team2,kill,47.20
 Mage+Hunter_vs_Rogue+Paladin,Mage+Hunter,Rogue+Paladin,1,team2,kill,39.75
-Mage+Hunter_vs_Rogue+Paladin,Mage+Hunter,Rogue+Paladin,2,team2,kill,49.77
+Mage+Hunter_vs_Rogue+Paladin,Mage+Hunter,Rogue+Paladin,2,team2,kill,65.82
 Mage+Hunter_vs_Rogue+Paladin,Mage+Hunter,Rogue+Paladin,3,team2,kill,49.17
 Mage+Hunter_vs_Rogue+Paladin,Mage+Hunter,Rogue+Paladin,4,team2,kill,75.48
 Mage+Hunter_vs_Rogue+Paladin,Mage+Hunter,Rogue+Paladin,5,team2,kill,39.75
@@ -561,7 +561,7 @@ Rogue+Paladin_vs_Warrior+Shaman,Rogue+Paladin,Warrior+Shaman,8,team2,kill,65.78
 Rogue+Paladin_vs_Warrior+Shaman,Rogue+Paladin,Warrior+Shaman,9,team2,kill,64.68
 Rogue+Paladin_vs_Mage+Hunter,Rogue+Paladin,Mage+Hunter,0,team1,kill,47.20
 Rogue+Paladin_vs_Mage+Hunter,Rogue+Paladin,Mage+Hunter,1,team1,kill,39.75
-Rogue+Paladin_vs_Mage+Hunter,Rogue+Paladin,Mage+Hunter,2,team1,kill,49.77
+Rogue+Paladin_vs_Mage+Hunter,Rogue+Paladin,Mage+Hunter,2,team1,kill,65.82
 Rogue+Paladin_vs_Mage+Hunter,Rogue+Paladin,Mage+Hunter,3,team1,kill,49.17
 Rogue+Paladin_vs_Mage+Hunter,Rogue+Paladin,Mage+Hunter,4,team1,kill,75.48
 Rogue+Paladin_vs_Mage+Hunter,Rogue+Paladin,Mage+Hunter,5,team1,kill,39.75
@@ -612,8 +612,8 @@ Rogue+Paladin_vs_Paladin+Hunter,Rogue+Paladin,Paladin+Hunter,9,team1,kill,56.98
 Rogue+Paladin_vs_Hunter+Shaman,Rogue+Paladin,Hunter+Shaman,0,team1,kill,52.75
 Rogue+Paladin_vs_Hunter+Shaman,Rogue+Paladin,Hunter+Shaman,1,team1,kill,46.10
 Rogue+Paladin_vs_Hunter+Shaman,Rogue+Paladin,Hunter+Shaman,2,team1,kill,39.82
-Rogue+Paladin_vs_Hunter+Shaman,Rogue+Paladin,Hunter+Shaman,3,team1,kill,75.45
-Rogue+Paladin_vs_Hunter+Shaman,Rogue+Paladin,Hunter+Shaman,4,team1,kill,73.92
+Rogue+Paladin_vs_Hunter+Shaman,Rogue+Paladin,Hunter+Shaman,3,team1,kill,88.00
+Rogue+Paladin_vs_Hunter+Shaman,Rogue+Paladin,Hunter+Shaman,4,team1,kill,74.95
 Rogue+Paladin_vs_Hunter+Shaman,Rogue+Paladin,Hunter+Shaman,5,team1,kill,90.05
 Rogue+Paladin_vs_Hunter+Shaman,Rogue+Paladin,Hunter+Shaman,6,team2,kill,101.42
 Rogue+Paladin_vs_Hunter+Shaman,Rogue+Paladin,Hunter+Shaman,7,team1,kill,68.85
@@ -1051,7 +1051,7 @@ Warlock+Hunter_vs_Mage+Rogue,Warlock+Hunter,Mage+Rogue,8,team1,kill,24.57
 Warlock+Hunter_vs_Mage+Rogue,Warlock+Hunter,Mage+Rogue,9,team1,kill,19.08
 Warlock+Hunter_vs_Rogue+Priest,Warlock+Hunter,Rogue+Priest,0,team2,kill,33.42
 Warlock+Hunter_vs_Rogue+Priest,Warlock+Hunter,Rogue+Priest,1,team2,kill,37.68
-Warlock+Hunter_vs_Rogue+Priest,Warlock+Hunter,Rogue+Priest,2,team2,kill,43.75
+Warlock+Hunter_vs_Rogue+Priest,Warlock+Hunter,Rogue+Priest,2,team2,kill,42.98
 Warlock+Hunter_vs_Rogue+Priest,Warlock+Hunter,Rogue+Priest,3,team2,kill,59.10
 Warlock+Hunter_vs_Rogue+Priest,Warlock+Hunter,Rogue+Priest,4,team2,kill,30.08
 Warlock+Hunter_vs_Rogue+Priest,Warlock+Hunter,Rogue+Priest,5,team2,kill,63.78
@@ -1222,8 +1222,8 @@ Hunter+Shaman_vs_Rogue+Warlock,Hunter+Shaman,Rogue+Warlock,9,team1,kill,30.12
 Hunter+Shaman_vs_Rogue+Paladin,Hunter+Shaman,Rogue+Paladin,0,team2,kill,49.77
 Hunter+Shaman_vs_Rogue+Paladin,Hunter+Shaman,Rogue+Paladin,1,team2,kill,46.10
 Hunter+Shaman_vs_Rogue+Paladin,Hunter+Shaman,Rogue+Paladin,2,team2,kill,39.82
-Hunter+Shaman_vs_Rogue+Paladin,Hunter+Shaman,Rogue+Paladin,3,team2,kill,75.45
-Hunter+Shaman_vs_Rogue+Paladin,Hunter+Shaman,Rogue+Paladin,4,team2,kill,73.47
+Hunter+Shaman_vs_Rogue+Paladin,Hunter+Shaman,Rogue+Paladin,3,team2,kill,88.00
+Hunter+Shaman_vs_Rogue+Paladin,Hunter+Shaman,Rogue+Paladin,4,team2,kill,74.95
 Hunter+Shaman_vs_Rogue+Paladin,Hunter+Shaman,Rogue+Paladin,5,team2,kill,90.89
 Hunter+Shaman_vs_Rogue+Paladin,Hunter+Shaman,Rogue+Paladin,6,team1,kill,101.42
 Hunter+Shaman_vs_Rogue+Paladin,Hunter+Shaman,Rogue+Paladin,7,team2,kill,68.85

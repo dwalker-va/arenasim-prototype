@@ -124,7 +124,7 @@ under which the Hunter's healer trap has to survive a kill-target re-force.
 The three attribution arms are patches against the branch that
 `git apply` cleanly: `2026-09-27-as125-arm-trade-trap.patch` (the trade trap
 back), `-arm-trap-setup-off.patch` (`movement.ron`'s Hunter `trap_setup` at
-0.0) and `-arm-opener-ignores-hidden.patch` (Aimed Shot may open while an
+0.0) and `-arm-opener-ignores-hidden.patch` (Aimed Shot may begin while an
 enemy is hidden).
 
 `2026-09-27-as125-by-enemy.py <before.csv> <after.csv>` turns either pair of
