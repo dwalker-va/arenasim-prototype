@@ -50,10 +50,9 @@ against 1.5-1.8s, a bow every 2.5s against 2.4-2.9s).
   not each weapon's old rate.** The old rates were 10 x each weapon's retired
   sim swing rate. A sword-and-board Warrior on Frostbite Blade drops from 11
   to 9, and a Warrior on Serpent Fang from 15 to 9. Keeping every weapon's
-  old rate would mean storing those retired speeds as per-weapon rage data.
-  Classic's own model, rage from damage dealt, would instead tie rage to
-  weapon DPS. That choice is the user's to make; this ships the
-  weapon-independent rule.
+  old rate would mean storing those retired speeds as per-weapon rage data,
+  which would put the retired speeds back into the sim. So rage per second is
+  weapon-independent, and that is the rule as ruled.
 - **Per-swing procs keep a flat chance per hit** (below).
 - **Heroic Strike is uncapped** (the user's ruling). It adds
   `0.5 x attack_damage`, which is now a 3.8s two-hander's per-swing damage:
