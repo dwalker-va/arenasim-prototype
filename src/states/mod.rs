@@ -94,6 +94,40 @@ fn in_combat_scene(state: Res<State<GameState>>) -> bool {
     )
 }
 
+/// Run condition for the combat SIM's resolution layer: the combat scenes,
+/// except a match that has been decided.
+///
+/// Once `check_match_end` inserts [`VictoryCelebration`] the match is over and
+/// nothing in the sim may advance. The celebration is presentation: it counts
+/// its five seconds on the FRAME clock, so it lasts a different number of sim
+/// ticks at 60Hz than at 120Hz, and anything still stepping during it —
+/// survivors walking, aura timers, regen, fear wander drawing from `GameRng` —
+/// ended the same seed in a different state on a different display (AS-170).
+/// Many sim systems carried their own celebration early-return; this stops all
+/// of them at once, including any added later. The Animation Sandbox inserts
+/// the same resource to preview the winner bounce, so it is exempt: the gate
+/// is about a decided MATCH, not the resource. Headless never registers these
+/// conditions, so no baseline moves.
+fn combat_sim_runs(
+    state: Res<State<GameState>>,
+    celebration: Option<Res<play_match::VictoryCelebration>>,
+) -> bool {
+    match state.get() {
+        GameState::PlayMatch => celebration.is_none(),
+        GameState::AnimationSandbox => true,
+        _ => false,
+    }
+}
+
+/// Run condition for the combat SIM's decision layer (AI and match clock):
+/// a match that has not been decided. See [`combat_sim_runs`].
+fn match_sim_runs(
+    state: Res<State<GameState>>,
+    celebration: Option<Res<play_match::VictoryCelebration>>,
+) -> bool {
+    *state.get() == GameState::PlayMatch && celebration.is_none()
+}
+
 /// Plugin for managing game states and transitions
 pub struct StatesPlugin;
 
@@ -265,9 +299,10 @@ impl Plugin for StatesPlugin {
         // These are shared between graphical and headless modes
         configure_combat_system_ordering(app);
         // Resolution runs in both combat scenes; the AI and match clock only in
-        // a real match. One registration, so no system's `SystemTypeSet` becomes
-        // ambiguous and the `spawn_projectile_visuals` ordering below stays legal.
-        add_core_combat_systems(app, in_combat_scene, in_state(GameState::PlayMatch));
+        // a real match; neither once that match is decided. One registration,
+        // so no system's `SystemTypeSet` becomes ambiguous and the
+        // `spawn_projectile_visuals` ordering below stays legal.
+        add_core_combat_systems(app, combat_sim_runs, match_sim_runs);
 
         // SCHEDULES: the sim runs in `FixedUpdate`, visuals in `Update`.
         //
@@ -364,6 +399,21 @@ impl Plugin for StatesPlugin {
             FixedUpdate,
             play_match::check_match_end
                 .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_state(GameState::PlayMatch)),
+        )
+        // The victory choreography: the only thing that moves a combatant once
+        // the match is decided and the sim is frozen. On the sim clock, so it
+        // plays out the same at any display rate (`play_match::celebration`).
+        .add_systems(
+            FixedUpdate,
+            play_match::plan_celebration
+                .after(play_match::check_match_end)
+                .run_if(in_state(GameState::PlayMatch)),
+        )
+        .add_systems(
+            FixedUpdate,
+            play_match::step_celebration
+                .after(play_match::plan_celebration)
                 .run_if(in_state(GameState::PlayMatch)),
         )
         // Weapon-swing signal consumption is graphical-only but must run IN

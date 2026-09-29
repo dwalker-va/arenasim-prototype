@@ -6,6 +6,7 @@
 //! - Match end detection
 //! - Victory celebration and transition to Results
 
+use super::celebration::CelebrationChoreography;
 use super::components::*;
 use super::match_config::MatchConfig;
 use super::utils::{combatant_id, pet_combatant_id};
@@ -250,6 +251,17 @@ pub fn check_match_end(
         let mut team1_metadata = Vec::new();
         let mut team2_metadata = Vec::new();
 
+        // Every listing below is built in (team, slot) order, never ECS query
+        // order. Graphical-only components (a hit flinch, a charge trail) are
+        // inserted and removed on combatants on the FRAME clock, which moves
+        // them between archetypes, so query order depends on the display's
+        // frame rate — and the Results rows and the saved report would swap
+        // with it (AS-170).
+        let mut pets_in_order: Vec<_> = pets.iter().collect();
+        pets_in_order.sort_by_key(|(c, _)| (c.team, c.slot));
+        let mut combatants_in_order: Vec<_> = combatants.iter().collect();
+        combatants_in_order.sort_by_key(|(_, c, _)| (c.team, c.slot));
+
         // Roll pet damage_dealt into the owner so the post-match DMG stat reflects
         // the team's full output. Without this, a Warlock's Felhunter auto-attacks
         // (or a Hunter's pet) leave a gap between the owner's DMG and the enemy's
@@ -262,7 +274,7 @@ pub fn check_match_end(
         // per-ability breakdown (which reads the CombatLog by source string).
         let mut pet_damage_links: std::collections::HashMap<String, (String, String)> =
             std::collections::HashMap::new();
-        for (pet_combatant, pet) in pets.iter() {
+        for &(pet_combatant, pet) in &pets_in_order {
             *pet_damage_by_owner.entry(pet.owner).or_insert(0.0) += pet_combatant.damage_dealt;
             if let Ok((_, owner, _)) = combatants.get(pet.owner) {
                 let pet_name = pet.pet_type.name();
@@ -272,7 +284,7 @@ pub fn check_match_end(
             }
         }
 
-        for (entity, combatant, transform) in combatants.iter() {
+        for &(entity, combatant, transform) in &combatants_in_order {
             let pet_credit = pet_damage_by_owner.get(&entity).copied().unwrap_or(0.0);
             let damage_dealt = combatant.damage_dealt + pet_credit;
 
@@ -390,6 +402,8 @@ pub fn check_match_end(
                 team2_combatants: team2_stats,
                 pet_damage_links,
             },
+            match_metadata,
+            choreography: CelebrationChoreography::ConvergeAndBounce,
         });
 
         info!("Victory celebration started! {} seconds", 5.0);

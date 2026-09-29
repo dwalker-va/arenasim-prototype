@@ -259,6 +259,10 @@ pub struct VictoryCelebration {
     pub time_remaining: f32,
     /// Stored match results to pass to Results scene
     pub match_results: MatchResults,
+    /// The metadata the match report was saved with (`CombatLog::save_to_file`).
+    pub match_metadata: crate::combat::log::MatchMetadata,
+    /// What the winners do while it runs (`play_match::celebration`).
+    pub choreography: super::super::celebration::CelebrationChoreography,
 }
 
 /// Resource containing the final results of a match.
