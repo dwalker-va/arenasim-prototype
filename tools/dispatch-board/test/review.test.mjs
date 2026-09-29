@@ -64,6 +64,15 @@ test("MCP: the orchestrator's milestone flow, create to close, with refusals as 
   const summaries = (await call(client, "list_cards", { milestone: "0.7" })).value;
   assert.deepEqual(summaries.map((c) => [c.id, c.milestone, c.iteration, c.area]), [[a.id, "0.7", 1, "combat"], [b.id, "0.7", 1, "visuals"]]);
 
+  // A stale close is a tool error that changes nothing.
+  const head = (await (await fetch(`${d.base}/api/health`)).json()).head;
+  const staleClose = await call(client, "close_milestone", { name: "0.7", expected_version: ms.version - 1, ...orch });
+  assert.equal(staleClose.ok, false);
+  assert.equal(staleClose.value.error, "stale_version");
+  assert.deepEqual((await call(client, "list_cards", { milestone: "0.7" })).value.map((c) => c.column), ["merged", "merged"], "no card moved merged -> done");
+  assert.equal((await call(client, "get_milestone", { name: "0.7" })).value.milestone.status, "in_review", "the milestone was not released");
+  assert.deepEqual((await call(client, "events_since", { cursor: head })).value.events, [], "no moved or milestone_closed event");
+
   const closed = await call(client, "close_milestone", { name: "0.7", expected_version: ms.version, tag: "v0.7.0", ...orch });
   assert.ok(closed.ok, JSON.stringify(closed.value));
   assert.deepEqual(closed.value.cards.map((c) => [c.id, c.summary]), [[a.id, "Warriors start at 0 rage"], [b.id, "Traps glow"]]);

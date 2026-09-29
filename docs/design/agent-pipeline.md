@@ -262,7 +262,9 @@ verified. "Nothing needs human testing" is written out rather than omitted, so a
 genuinely empty eyeball pass is distinguishable from an author who never considered one.
 The Engineer writes it; the Tester verifies the claim before APPROVE; the orchestrator
 copies it into the card's `human_testing`, one step per line, which is how it reaches
-the review checklist. The user tests the milestone from one build of `main` (the
+the review checklist. An explicit "Nothing needs human testing" is copied as written:
+the page lists that card as having nothing to check, never as a checkbox — and a
+merged card with no `human_testing` at all is flagged as missing its steps. The user tests the milestone from one build of `main` (the
 `review_sha`), not from each card's worktree.
 
 **User decisions are rulings.** When the user decides something about a card —
@@ -271,8 +273,12 @@ orchestrator records it with `record_ruling` (the text, and the numbers it turne
 on), not as a body section or an activity line: rulings are what *Your decisions*
 lists, and they are append-only.
 
-**Board behaviour:** the PR gate AS-4 added covers `review` and `merged`, and the
-daemon enforces it for every writer: a non-pm card cannot enter either column
+**Board behaviour:** two columns keep their meaning for every writer, the web
+UI's drag included. A card enters `merged` only through `mark_merged` (a plain
+move is refused unless the card's merge is already recorded), and a work card on
+an unreleased milestone reaches `done` only through `close_milestone` (pm cards,
+and cards on no milestone or a released one, move freely). The PR gate AS-4 added
+covers `review` and `merged`, and the daemon enforces it for every writer: a non-pm card cannot enter either column
 without its own PR — `pr`, a pull-request URL (a `move_card` may set it in its
 own `patch`) — and a card already there cannot have it cleared. Reference `links`
 never satisfy the gate. In the web UI, dragging a card with no `pr` there opens the

@@ -198,6 +198,7 @@ function whatToCheck(){
     out += "</div>";
   });
   if(!total) out += "<p class=\"muted\">No human-testing steps recorded on this milestone's merged cards.</p>";
+  if(cl.nothing_to_check.length) out += "<p class=\"muted\" style=\"font-size:12.5px\">Nothing to check (stated on the card): " + cl.nothing_to_check.map(function(c){ return cardLink(c.id); }).join(", ") + "</p>";
   if(cl.without_steps.length) out += "<div class=\"warn\">No human-testing steps recorded: " + cl.without_steps.map(function(c){ return cardLink(c.id); }).join(", ") + "</div>";
   return "<section id=\"check\"><h2>What to check</h2><p class=\"lead\">One build, one sitting. <span class=\"progress\" id=\"progress\">" + done + " / " + total + " checked</span></p>" + out + "</section>";
 }

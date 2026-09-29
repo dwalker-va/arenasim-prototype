@@ -4,7 +4,7 @@
 // here; test/review.test.mjs covers the same flow over the daemon and pages.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BoardError, checklistSteps } from "../dist/board.js";
+import { BoardError, checklistSteps, saysNothingToCheck } from "../dist/board.js";
 import { tempBoard } from "./helpers.mjs";
 
 const PR = (n) => ({ url: `https://github.com/o/r/pull/${n}` });
@@ -153,9 +153,10 @@ test("mark_merged: only from review (or a merged card with no merge recorded), o
 
 test("mark_merged: a merged card with no merge recorded (a migrated human_review card) gets it recorded", (t) => {
   const { board } = tempBoard(t);
-  let c = board.createCard({ title: "legacy approved", role: "engineer" }, o);
-  c = board.moveCard(c.id, "merged", c.version, { ...o, patch: { pr: PR(8) } });
-  assert.equal(c.merge_sha, undefined);
+  const legacy = { id: "AS-1", title: "legacy approved", body: "", column: "human_review", role: "engineer", priority: "P2", links: [], pr: PR(8), worktree: null, question: null, agent: null, created: "c", updated: "u", activity: [] };
+  board.importState({ schema: 1, nextId: 2, cards: [legacy] }, { actor: "import" });
+  const c = board.getCard("AS-1");
+  assert.deepEqual([c.column, c.merge_sha], ["merged", undefined]);
   const m = board.markMerged(c.id, { pr: PR(8), merge_sha: SHA("c") }, c.version, o);
   assert.deepEqual([m.column, m.merge_sha], ["merged", SHA("c")]);
 });
@@ -221,6 +222,12 @@ test("close_milestone: refused while a card is unfinished; then every merged car
 // ---------------------------------------------------------------- the review payload
 
 test("checklist steps: one per line, the PR lead-in and list markers stripped, keyed by their own text", () => {
+  for (const nothing of ["Nothing needs human testing.", "**Human testing:** Nothing needs human testing beyond this page.", "- nothing needs any human testing: docs only"]) {
+    assert.deepEqual(checklistSteps("AS-7", nothing), [], `"${nothing}" is a statement, not a step`);
+    assert.equal(saysNothingToCheck(nothing), true);
+  }
+  assert.deepEqual(checklistSteps("AS-7", "Nothing needs human testing. Check the tooltip anyway.").map((s) => s.text), ["Nothing needs human testing. Check the tooltip anyway."], "a second sentence is a step");
+  assert.equal(saysNothingToCheck("- Watch the glow"), false);
   const steps = checklistSteps("AS-7", "**Human testing:** Watch a trap spring on the healer.\n\n- Check the ice reads cleanly.\n2. Nothing else.\n- Check the ice reads cleanly.");
   assert.deepEqual(steps.map((s) => s.text), ["Watch a trap spring on the healer.", "Check the ice reads cleanly.", "Nothing else."]);
   assert.ok(steps.every((s) => /^AS-7:[0-9a-f]{10}$/.test(s.key)));
@@ -249,11 +256,11 @@ test("review payload: assembled from the cards' structured fields, section by se
 
   const steps = p.checklist.groups.flatMap((g) => g.cards.flatMap((c) => c.steps.map((s) => [c.id, s.text, s.checked, s.version])));
   assert.deepEqual(steps, [
-    [cmb.id, "Nothing needs human testing.", false, 0],
     [vis.id, "Watch the glow", false, 0],
     [vis.id, "Check dark mode", false, 0],
   ]);
   assert.deepEqual(p.checklist.without_steps.map((c) => c.id), [bare.id], "a merged card with no steps is named, not silently absent");
+  assert.deepEqual(p.checklist.nothing_to_check.map((c) => c.id), [cmb.id], "an explicit nothing is an answer, not a gap");
   assert.deepEqual(p.checklist.applies_to.newest_merge.card, bare.id);
   assert.equal(p.checklist.applies_to.review_sha, null);
 
@@ -436,4 +443,51 @@ test("schema 2 import: refuses a card naming a milestone the state lacks, and a 
   assert.deepEqual([c.column, c.merge_sha, c.milestone, c.activity.at(-1).by], ["merged", undefined, undefined, "migrate"]);
   assert.equal(board.getCard("AS-2").column, "done");
   assert.equal(board.markMerged("AS-1", { pr: PR(5), merge_sha: SHA("d") }, c.version, o).merge_sha, SHA("d"));
+});
+
+test("close_milestone: a stale expected_version is refused and changes nothing — no card moves, nothing is released, no event", (t) => {
+  const { board } = tempBoard(t);
+  board.createMilestone("0.7", o);
+  const a = merged(board, { milestone: "0.7" }, 1);
+  const b = merged(board, { milestone: "0.7" }, 2);
+  const m = board.updateMilestone("0.7", { status: "in_review" }, 1, o);
+  const head = board.head();
+  const err = refused(() => board.closeMilestone("0.7", m.version - 1, o), "stale_version");
+  assert.equal(err.current.version, m.version, "the refusal carries the milestone as it is now");
+  assert.deepEqual([a.id, b.id].map((id) => [board.getCard(id).column, board.getCard(id).version]), [["merged", a.version], ["merged", b.version]]);
+  const now = board.getMilestone("0.7").milestone;
+  assert.deepEqual([now.status, now.released_at, now.version], ["in_review", undefined, m.version]);
+  assert.equal(board.head(), head, "no moved or milestone_closed event was recorded");
+  assert.equal(board.closeMilestone("0.7", m.version, o).milestone.status, "released", "the current version still closes it");
+});
+
+test("move rules: merged is reached only through mark_merged, and a milestone's work card reaches done only by closing it", (t) => {
+  const { board } = tempBoard(t);
+  board.createMilestone("0.7", o);
+  // merged: no plain move or new card gets there without a recorded merge...
+  const r = inReview(board, {}, 4);
+  refused(() => board.moveCard(r.id, "merged", r.version, o), "invalid", /only through mark_merged/);
+  refused(() => board.createCard({ title: "x", role: "engineer", column: "merged", pr: PR(5) }, o), "invalid", /only through mark_merged/);
+  assert.equal(board.getCard(r.id).column, "review");
+  // ...but a card whose merge is recorded may be moved back into it.
+  const m = board.markMerged(r.id, { pr: PR(4), merge_sha: SHA("e") }, r.version, o);
+  const out = board.moveCard(m.id, "needs_input", m.version, o);
+  assert.equal(board.moveCard(out.id, "merged", out.version, o).column, "merged");
+
+  // done: a work card on an open milestone waits for close_milestone...
+  const w = merged(board, { milestone: "0.7" }, 6);
+  refused(() => board.moveCard(w.id, "done", w.version, o), "invalid", /close_milestone/);
+  refused(() => board.createCard({ title: "x", role: "engineer", column: "done", milestone: "0.7" }, o), "invalid", /close_milestone/);
+  assert.equal(board.getCard(w.id).column, "merged");
+  // ...while a pm card on it, and a card on no milestone, finish on their own.
+  let pm = board.createCard({ title: "scoping", role: "pm", milestone: "0.7" }, o);
+  pm = board.moveCard(pm.id, "in_progress", pm.version, o);
+  assert.equal(board.moveCard(pm.id, "done", pm.version, o).column, "done");
+  let loose = board.createCard({ title: "loose", role: "engineer" }, o);
+  assert.equal(board.moveCard(loose.id, "done", loose.version, o).column, "done");
+  // Once the milestone is released its cards move freely again.
+  board.closeMilestone("0.7", board.getMilestone("0.7").milestone.version, o);
+  const done = board.getCard(w.id);
+  const back = board.moveCard(done.id, "archived", done.version, o);
+  assert.equal(board.moveCard(back.id, "done", back.version, o).column, "done");
 });

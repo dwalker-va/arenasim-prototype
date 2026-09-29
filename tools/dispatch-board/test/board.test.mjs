@@ -214,8 +214,9 @@ test("PR gate: a pm card is admitted; a pr in the move's own patch satisfies it"
   const { board } = tempBoard(t);
   const pm = seed(board, { role: "pm", column: "in_progress" });
   assert.equal(board.moveCard(pm.id, "review", pm.version, { actor: "board" }).column, "review");
+  // A pm card has nothing to merge: merged is mark_merged's alone, for every role.
   const pm2 = seed(board, { role: "pm" });
-  assert.equal(board.moveCard(pm2.id, "merged", pm2.version, { actor: "board" }).column, "merged");
+  refused(() => board.moveCard(pm2.id, "merged", pm2.version, { actor: "board" }), "invalid");
 
   const eng = seed(board, { column: "in_progress" });
   const moved = board.moveCard(eng.id, "review", eng.version, { actor: "orchestrator", patch: { pr: { url: "https://github.com/x/y/pull/9" } } });

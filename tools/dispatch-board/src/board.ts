@@ -580,22 +580,73 @@ function withSection(body: unknown, heading: string, text: string): string {
  * and a REWORDED step comes back unticked — it is a new thing to check.
  */
 export function checklistSteps(cardId: string, text: unknown): { key: string; text: string }[] {
-  if (typeof text !== "string") return [];
   const seen = new Set<string>();
   const out: { key: string; text: string }[] = [];
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw
-      .replace(/^\s*\*\*Human testing:\*\*\s*/i, "")
-      .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
-      .replace(/^\[[ xX]\]\s+/, "")
-      .trim();
-    if (!line) continue;
+  for (const line of stepLines(text)) {
+    if (NOTHING_TO_CHECK.test(line)) continue;
     const key = `${cardId}:${createHash("sha1").update(line).digest("hex").slice(0, 10)}`;
     if (seen.has(key)) continue; // the same step twice is one thing to check
     seen.add(key);
     out.push({ key, text: line });
   }
   return out;
+}
+
+/**
+ * The PR convention's explicit "nothing to check" — "Nothing needs human
+ * testing." with at most a qualifying clause, one sentence. It is a statement,
+ * not a step: it never becomes a checkbox, and the review page says the card
+ * has nothing to check rather than warning that its steps are missing.
+ */
+const NOTHING_TO_CHECK = /^nothing (?:else )?needs? (?:any )?human testing\b[^.]*\.?$/i;
+
+/** A human-testing text's lines, with the PR's `**Human testing:**` lead-in and list markers stripped. */
+function stepLines(text: unknown): string[] {
+  if (typeof text !== "string") return [];
+  return text
+    .split(/\r?\n/)
+    .map((raw) =>
+      raw
+        .replace(/^\s*\*\*Human testing:\*\*\s*/i, "")
+        .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
+        .replace(/^\[[ xX]\]\s+/, "")
+        .trim(),
+    )
+    .filter(Boolean);
+}
+
+/** A card whose human testing says, explicitly, that there is nothing to check. */
+export function saysNothingToCheck(text: unknown): boolean {
+  return stepLines(text).some((l) => NOTHING_TO_CHECK.test(l));
+}
+
+/**
+ * The two columns a plain move may not reach, so each keeps its meaning for
+ * every writer (the web UI's drag included):
+ *  - `merged` means merged to main, which only `mark_merged` records. A move
+ *    may put back a card whose merge is already recorded, never one without.
+ *  - a work card on an unreleased milestone reaches `done` only when
+ *    `close_milestone` closes that milestone — `done` is the milestone's
+ *    approval, not the card's. (pm cards finish on their own; a card on a
+ *    released milestone, or on none, moves freely.)
+ * Returns why the move is refused, or null.
+ */
+function milestoneMoveRefusal(
+  doc: Record<string, unknown>,
+  from: string,
+  to: string,
+  status: (name: string) => string | null,
+): string | null {
+  if (to === "merged" && from !== "merged" && doc.merge_sha == null) {
+    return "a card enters merged only through mark_merged, which records its merge on main";
+  }
+  if (to === "done" && from !== "done" && doc.role !== "pm" && typeof doc.milestone === "string") {
+    const s = status(doc.milestone);
+    if (s !== null && s !== "released") {
+      return `it is on milestone ${doc.milestone}, whose cards reach done only when close_milestone closes it`;
+    }
+  }
+  return null;
 }
 
 /** The AS-4 PR gate: a non-pm card enters review/merged only with its own PR. */
@@ -854,6 +905,12 @@ export class Board extends EventEmitter {
     if ((JSON.parse(r.doc) as Milestone).status === "released") invalid(`milestone ${String(name)} is released; its card list is closed`);
   }
 
+  /** A milestone's status, or null when there is no such milestone. */
+  private milestoneStatus(name: string): string | null {
+    const r = this.db.prepare("SELECT doc FROM milestones WHERE name = ?").get(name) as { doc: string } | undefined;
+    return r ? String((JSON.parse(r.doc) as Milestone).status) : null;
+  }
+
   /** A card's milestone fields after a patch: a card that gains a milestone and has no iteration is iteration 1. */
   private applyMilestonePatch(doc: Record<string, unknown>, patch: Record<string, unknown>): void {
     if ("milestone" in patch && patch.milestone !== doc.milestone) this.checkAttach(patch.milestone);
@@ -1021,6 +1078,8 @@ export class Board extends EventEmitter {
       if (!gateAllows(doc, column)) {
         throw new BoardError("gate_refused", `a non-pm card needs its own PR (pr) to enter ${column}`);
       }
+      const why = milestoneMoveRefusal(doc, "", column, (name) => this.milestoneStatus(name));
+      if (why) invalid(`a new card cannot be filed there: ${why}`);
       return this.insertCard(doc, meta.by ?? actor, actor, "Created");
     });
   }
@@ -1099,6 +1158,8 @@ export class Board extends EventEmitter {
           this.current(id),
         );
       }
+      const why = milestoneMoveRefusal(doc, from, to, (name) => this.milestoneStatus(name));
+      if (why) throw new BoardError("invalid", `${id}: ${why}`, this.current(id));
       doc.column = to;
       if (to === "in_progress") doc.agent = null;
       const claimNote = claimChangeNote(stored, { agent: doc.agent ?? null });
@@ -1699,7 +1760,13 @@ export class Board extends EventEmitter {
           newest_merge: newest ? { sha: newest.merge_sha, card: newest.id, at: newest.merged_at } : null,
         },
         groups: checkGroups,
-        without_steps: finished.filter((c) => c.role !== "pm" && !checklistSteps(String(c.id), c.human_testing).length).map((c) => pick(c, ["id", "title"])),
+        // No steps and no statement is a gap; an explicit "nothing needs human testing" is an answer.
+        without_steps: finished
+          .filter((c) => c.role !== "pm" && !checklistSteps(String(c.id), c.human_testing).length && !saysNothingToCheck(c.human_testing))
+          .map((c) => pick(c, ["id", "title"])),
+        nothing_to_check: finished
+          .filter((c) => !checklistSteps(String(c.id), c.human_testing).length && saysNothingToCheck(c.human_testing))
+          .map((c) => pick(c, ["id", "title"])),
       },
       // Oldest first; rulings in the same second keep card order, then recording order (a stable sort).
       decisions: cards

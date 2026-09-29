@@ -32,6 +32,9 @@ awaiting the release) and the archive.
   summary and link), and `submissions`. `released` is reached only by
   `close_milestone`, which moves every one of its merged cards to done in the
   same write, is refused while any of its cards is unfinished, and is final.
+- **Move rules**, for every writer: a card enters `merged` only through
+  `mark_merged` (a plain move needs its merge already recorded), and a work card
+  on an unreleased milestone reaches `done` only through `close_milestone`.
 - **Card fields:** `milestone` and `iteration` (1 for planned work, 2+ for review
   feedback; a card given a milestone defaults to 1), `area` (combat, visuals,
   ai, ui, tooling), `summary` (what changed, in a player's words),
@@ -43,7 +46,8 @@ awaiting the release) and the archive.
 - **The review page** is assembled by the daemon (`get_milestone` is the same
   payload) from those fields alone: *What changed* (finished cards by area),
   *What to check* (every step of every finished card's `human_testing`, as one
-  checklist, with the build it applies to), *Your decisions* (every ruling),
+  checklist, with the build it applies to; an explicit "Nothing needs human
+  testing" is listed as nothing to check, not as a step), *Your decisions* (every ruling),
   *Balance* (the milestone sweep; which cards deferred to it), *Known gaps and
   follow-ups* (stated gaps; the cards filed while it was open, by id range),
   and *Feedback*.

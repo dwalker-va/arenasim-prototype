@@ -230,6 +230,48 @@ const MUTANTS = [
     mustFail: ["schema 2 round trip: milestones, their ticks, drafts and submissions"],
   },
   {
+    // The close is versioned: a stale one must move nothing (round 2).
+    name: "close-milestone-version",
+    file: "dist/board.js",
+    find: "const { m, doc } = this.loadMilestone(name, expectedVersion);\n            if (doc.status === \"released\")\n                throw new BoardError(\"invalid\", `milestone ${name} is already released`",
+    replace: "const { m, doc } = this.loadMilestone(name, this.milestoneRow(name).version);\n            if (doc.status === \"released\")\n                throw new BoardError(\"invalid\", `milestone ${name} is already released`",
+    mustFail: [
+      "close_milestone: a stale expected_version is refused and changes nothing",
+      "MCP: the orchestrator's milestone flow, create to close",
+    ],
+  },
+  {
+    name: "merged-only-via-mark-merged",
+    file: "dist/board.js",
+    find: 'if (to === "merged" && from !== "merged" && doc.merge_sha == null) {',
+    replace: "if (false) {",
+    mustFail: ["move rules: merged is reached only through mark_merged"],
+  },
+  {
+    name: "milestone-done-only-by-close",
+    file: "dist/board.js",
+    find: 'if (s !== null && s !== "released") {',
+    replace: "if (false) {",
+    mustFail: ["move rules: merged is reached only through mark_merged"],
+  },
+  {
+    name: "nothing-to-check-is-no-step",
+    file: "dist/board.js",
+    find: "if (NOTHING_TO_CHECK.test(line))",
+    replace: "if (false)",
+    mustFail: [
+      "checklist steps: one per line",
+      "review payload: assembled from the cards' structured fields",
+    ],
+  },
+  {
+    name: "nothing-to-check-is-no-gap",
+    file: "dist/board.js",
+    find: "&& !saysNothingToCheck(c.human_testing))",
+    replace: ")",
+    mustFail: ["review payload: assembled from the cards' structured fields"],
+  },
+  {
     name: "close-refuses-unfinished",
     file: "dist/board.js",
     find: "if (unfinished.length) {",

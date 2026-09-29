@@ -38,10 +38,11 @@ test("PR gate: reference links alone never admit a card to review or merged", (t
     const c = inProgress(board, { links: refs });
     refused(() => board.moveCard(c.id, to, c.version, { actor: "o" }), "gate_refused");
     refused(() => board.moveCard(c.id, to, c.version, { actor: "o", patch: { links: [...refs, ...refs] } }), "gate_refused");
-    const moved = board.moveCard(c.id, to, c.version, { actor: "o", patch: { pr: PR(7) } });
-    assert.deepEqual(moved.pr, { number: 7, url: "https://github.com/o/r/pull/7" });
-    assert.deepEqual(moved.links, refs, "the card's own PR is not a reference link");
   }
+  const c = inProgress(board, { links: refs });
+  const moved = board.moveCard(c.id, "review", c.version, { actor: "o", patch: { pr: PR(7) } });
+  assert.deepEqual(moved.pr, { number: 7, url: "https://github.com/o/r/pull/7" });
+  assert.deepEqual(moved.links, refs, "the card's own PR is not a reference link");
   refused(() => board.createCard({ title: "x", role: "engineer", column: "review", links: refs }, { actor: "o" }), "gate_refused");
   const pm = board.createCard({ title: "p", role: "pm" }, { actor: "o" });
   assert.equal(board.moveCard(pm.id, "review", pm.version, { actor: "o" }).column, "review", "pm cards stay exempt");

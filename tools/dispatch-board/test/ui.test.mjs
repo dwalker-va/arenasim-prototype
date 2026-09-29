@@ -93,7 +93,7 @@ async function reviewCard(client) {
 async function foreignWrite(client, c) {
   const a = await call(client, "append_to_body", { id: c.id, heading: "Tester findings", text: "1. broken", actor: "orchestrator" });
   assert.ok(a.ok, JSON.stringify(a.value));
-  const m = await call(client, "move_card", { id: c.id, column: "merged", expected_version: a.value.version, actor: "orchestrator" });
+  const m = await call(client, "move_card", { id: c.id, column: "needs_input", expected_version: a.value.version, actor: "orchestrator" });
   assert.ok(m.ok, JSON.stringify(m.value));
   return m.value;
 }
@@ -111,7 +111,7 @@ test("drawer: a foreign write seen before editing survives a one-field save", as
   await page.refresh(after.version);
   // Untouched fields show what the card is NOW, not what the drawer opened on.
   assert.match(page.value("d-body"), /Tester findings/);
-  assert.equal(page.value("d-col"), "merged");
+  assert.equal(page.value("d-col"), "needs_input");
 
   page.set("d-pri", "P1");
   await page.save();
@@ -119,7 +119,7 @@ test("drawer: a foreign write seen before editing survives a one-field save", as
   const now = await getCard(client, c.id);
   assert.equal(now.priority, "P1", page.status());
   assert.match(now.body, /Tester findings/, "the save reverted the foreign body append");
-  assert.equal(now.column, "merged", "the save reverted the foreign move");
+  assert.equal(now.column, "needs_input", "the save reverted the foreign move");
   assert.equal(now.activity.at(-1).msg, "Edited priority", "the save sent more than the one changed field");
 });
 
@@ -172,7 +172,7 @@ for (const [shape, body] of [
 // a field back to what it was BEFORE the conflict is a real change against vN.
 for (const [what, field, from, mine, foreign, restore] of [
   ["priority", "d-pri", "P2", "P1", { priority: "P3" }, "P2"],
-  ["column", "d-col", "review", "done", "merged", "review"],
+  ["column", "d-col", "review", "done", "needs_input", "review"],
 ]) {
   test(`drawer: after Keep, setting ${what} back to its pre-conflict value is sent`, async (t) => {
     const d = await spawnDaemon(t);
@@ -198,7 +198,7 @@ for (const [what, field, from, mine, foreign, restore] of [
       assert.equal(now.activity.at(-1).msg, "Edited priority");
     } else {
       assert.equal(now.column, "review", `the set-back move was dropped (${page.status()})`);
-      assert.match(now.activity.at(-1).msg, /^Moved: merged → review$/);
+      assert.match(now.activity.at(-1).msg, /^Moved: needs_input → review$/);
     }
   });
 }
@@ -237,7 +237,7 @@ test("drawer: an edit that a foreign write overtakes is refused, not written ove
   // The typed edits are kept; the fields the user did not touch are current.
   assert.equal(page.value("d-body"), "original spec, edited by the user");
   assert.equal(page.value("d-pri"), "P1");
-  assert.equal(page.value("d-col"), "merged");
+  assert.equal(page.value("d-col"), "needs_input");
   assert.ok(page.doc.getElementById("d-rebase"), "no changed-elsewhere notice on a dirty drawer");
 
   await page.save();
@@ -253,7 +253,7 @@ test("drawer: an edit that a foreign write overtakes is refused, not written ove
   now = await getCard(client, c.id);
   assert.equal(now.body, "original spec, edited by the user");
   assert.equal(now.priority, "P1");
-  assert.equal(now.column, "merged", "the rebased save must still leave the foreign move alone");
+  assert.equal(now.column, "needs_input", "the rebased save must still leave the foreign move alone");
 });
 
 test("drawer: discarding stale edits shows the card as it is now; a later save sends only new edits", async (t) => {
@@ -272,7 +272,7 @@ test("drawer: discarding stale edits shows the card as it is now; a later save s
   page.set("d-pri", "P3");
   await page.save();
   const now = await getCard(client, c.id);
-  assert.deepEqual([now.priority, now.column], ["P3", "merged"]);
+  assert.deepEqual([now.priority, now.column], ["P3", "needs_input"]);
   assert.match(now.body, /Tester findings/);
 });
 
@@ -290,7 +290,7 @@ test("drawer: a foreign write the page has not seen yet refuses the save", async
   const now = await getCard(client, c.id);
   assert.equal(now.priority, "P2");
   assert.match(now.body, /Tester findings/);
-  assert.equal(now.column, "merged");
+  assert.equal(now.column, "needs_input");
 });
 
 test("drawer: a working claim is released only by the explicit, logged gesture", async (t) => {

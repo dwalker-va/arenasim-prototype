@@ -227,6 +227,8 @@ function moveCard(id, col, why, patch, expected, from){
   from = from || c.column;
   if(from === col) return;
   if(expected === undefined) expected = c.version;
+  // The board refuses these too; say why here instead of opening the PR dialog first.
+  if(col === "merged" && !c.merge_sha){ statusMsg = "Merged is recorded by the orchestrator when it merges the PR (mark_merged)"; render(); return; }
   var withLinks = patch && patch.pr ? Object.assign({}, c, {pr: patch.pr}) : c;
   if(gated(withLinks, col)){ pending = {id: id, column: col, patch: patch || {}, why: why, expected: expected, from: from}; render(); return; }
   var body = {column: col, expected_version: expected, activity: (why || "Moved") + ": " + from + " → " + col};
