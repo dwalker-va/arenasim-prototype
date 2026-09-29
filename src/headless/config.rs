@@ -767,7 +767,7 @@ mod tests {
         let config: HeadlessMatchConfig = serde_json::from_str(json).expect("parses");
         let err = config.validate().expect_err("a Mage may not wield an axe");
         assert!(
-            err.contains("proficiency") && err.contains("Axe"),
+            err.contains("Mage cannot use two-handed axes"),
             "error must name the failing gate: {}",
             err
         );
@@ -796,7 +796,7 @@ mod tests {
         let config: HeadlessMatchConfig = serde_json::from_str(json).expect("parses");
         let err = config.validate().expect_err("a Mage may not wield an axe");
         assert!(
-            err.contains("proficiency") && err.contains("Axe"),
+            err.contains("Mage cannot use two-handed axes"),
             "error must name the failing gate, not the item name: {}",
             err
         );

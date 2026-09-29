@@ -401,6 +401,29 @@ pub enum WeaponType {
 }
 
 impl WeaponType {
+    /// The type as a player reads it, in the plural — "daggers", "items held
+    /// in the off hand" — for sentences such as "Rogue cannot use daggers".
+    pub fn plural_name(&self) -> &'static str {
+        match self {
+            WeaponType::Sword => "swords",
+            WeaponType::Mace => "maces",
+            WeaponType::Axe => "axes",
+            WeaponType::Dagger => "daggers",
+            WeaponType::Staff => "staves",
+            WeaponType::Polearm => "polearms",
+            WeaponType::Fist => "fist weapons",
+            WeaponType::Bow => "bows",
+            WeaponType::Gun => "guns",
+            WeaponType::Crossbow => "crossbows",
+            WeaponType::Wand => "wands",
+            WeaponType::Thrown => "thrown weapons",
+            WeaponType::Shield => "shields",
+            WeaponType::OffhandFrill => "items held in the off hand",
+            WeaponType::Relic => "relics",
+            WeaponType::None => "this item",
+        }
+    }
+
     /// Every weapon type, in declaration order. Pinned complete by
     /// `weapon_type_all_lists_every_variant`.
     pub fn all() -> &'static [WeaponType] {
@@ -903,8 +926,8 @@ pub enum Proficiency {
 /// and nothing else; a Paladin never touches a dagger or a staff; a Hunter
 /// never a mace or a shield; a Shaman never a sword. Held-in-off-hand items
 /// (`OffhandFrill`) require no proficiency in Classic and are open to every
-/// class but the Rogue, which this game keeps out of them by design; an item
-/// carrying no weapon type at all is open to everyone.
+/// class; this game keeps the melee classes — Warrior, Rogue, Hunter — out of
+/// them by design. An item carrying no weapon type at all is open to everyone.
 ///
 /// Classic is the default reference for every row; where the game departs
 /// from it the row says so. The whole table, as the equip predicates actually
@@ -942,7 +965,9 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             W::Wand => Untrained,
             // No relic socket — this class's ranged socket takes a real weapon.
             W::Relic => Untrained,
-            W::OffhandFrill | W::None => Trained,
+            // Classic allowed it; this game does not — see the Rogue row.
+            W::OffhandFrill => Untrained,
+            W::None => Trained,
         },
         // Axes, maces, swords (both forms), polearms, shields. No dagger, no
         // staff, no ranged weapon of any kind.
@@ -976,7 +1001,9 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             W::Mace | W::Wand | W::Shield => Untrained,
             // No relic socket — this class's ranged socket takes a real weapon.
             W::Relic => Untrained,
-            W::OffhandFrill | W::None => Trained,
+            // Classic allowed it; this game does not — see the Rogue row.
+            W::OffhandFrill => Untrained,
+            W::None => Trained,
         },
         // Daggers, fist weapons, one-handed maces and swords, all three
         // ranged physical types. No two-handers at all — so every melee row is
@@ -989,8 +1016,8 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             // No relic socket — this class's ranged socket takes a real weapon.
             W::Relic => Untrained,
             // A deliberate departure from Classic, which let every class hold
-            // a tome or an orb: a Rogue's off hand is a second weapon, and a
-            // held frill there does not read as a Rogue (user ruling, AS-169).
+            // a tome or an orb: on a melee class (Rogue, Warrior, Hunter) a
+            // held frill does not read as the class (user ruling, AS-169).
             W::OffhandFrill => Untrained,
             W::None => Trained,
         },
@@ -1099,10 +1126,10 @@ pub fn equip_rejection(class: CharacterClass, item: &ItemConfig) -> Option<Strin
     // Check weapon proficiency
     if item.slot.is_weapon_slot() && !can_wield(class, item.weapon_type, item.two_handed) {
         return Some(format!(
-            "{} has no proficiency with {}{:?}",
+            "{} cannot use {}{}",
             class.name(),
             if item.two_handed { "two-handed " } else { "" },
-            item.weapon_type
+            item.weapon_type.plural_name()
         ));
     }
 
@@ -2140,9 +2167,10 @@ mod tests {
 
         // A held-in-off-hand item is not a weapon and needs no proficiency in
         // Classic — every class may hold one there, and here every class but
-        // the Rogue (AS-169 ruling). An item with no weapon type is open to all.
+        // the melee three (AS-169 ruling). An item with no weapon type is open
+        // to all.
         for class in CharacterClass::all() {
-            let frill = if *class == C::Rogue {
+            let frill = if matches!(class, C::Rogue | C::Warrior | C::Hunter) {
                 Untrained
             } else {
                 Trained
@@ -2262,7 +2290,7 @@ Ranged   ranged   Crossbow     Warrior Rogue Hunter
 Ranged   ranged   Wand         Mage Priest Warlock
 Ranged   ranged   Thrown       Warrior Rogue Hunter
 OffHand  off-hand Shield       Warrior Paladin Shaman
-OffHand  off-hand OffhandFrill Warrior Mage Priest Warlock Paladin Hunter Shaman
+OffHand  off-hand OffhandFrill Mage Priest Warlock Paladin Shaman
 Ranged   ranged   Relic        Paladin Shaman
 armor             Cloth        Warrior Mage Rogue Priest Warlock Paladin Hunter Shaman
 armor             Leather      Warrior Rogue Paladin Hunter Shaman
@@ -2282,7 +2310,9 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     /// it has an answer for, so it cannot join without a decision per weapon
     /// type and per hand; a new [`WeaponType`] fails to compile in
     /// [`authorable_forms`] first. Departures from Classic in the table:
-    /// the Rogue holds no off-hand frill (a user ruling, AS-169).
+    /// no melee class (Warrior, Rogue, Hunter) holds an off-hand frill (a user
+    /// ruling, AS-169). The Hunter's off-hand one-hander rows are Classic and
+    /// deliberate: it may hold one there, though the sim does not swing it yet.
     #[test]
     fn equip_matrix_is_pinned() {
         let classes_passing = |socket: ItemSlot, item: &ItemConfig| -> String {
@@ -2364,10 +2394,11 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     }
 
     /// The card's headline case, against the shipped items: neither tome may
-    /// sit in a Rogue's off hand, in the picker or anywhere else, while every
-    /// other class keeps them.
+    /// sit in a melee class's off hand, in the picker or anywhere else, while
+    /// the Paladin and the casters keep them — and the refusal says so in the
+    /// words a player would use.
     #[test]
-    fn a_rogue_holds_no_tome() {
+    fn no_melee_class_holds_a_tome() {
         let items = load_item_definitions().expect("items.ron must load");
         let tomes: Vec<_> = items
             .iter()
@@ -2378,18 +2409,31 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             tomes.contains(&ItemId::TomeOfKnowledge) && tomes.contains(&ItemId::GrimoireOfShadows),
             "the shipped frills moved: {tomes:?}"
         );
+        use CharacterClass as C;
         for id in &tomes {
             let item = items.get(id).expect("listed above");
-            assert!(!can_equip(CharacterClass::Rogue, item), "{id:?} on a Rogue");
-            assert!(!items
-                .items_for_slot(ItemSlot::OffHand, CharacterClass::Rogue)
-                .iter()
-                .any(|(offered, _)| offered == id));
-            assert!(can_equip_in_socket(
-                CharacterClass::Mage,
-                ItemSlot::OffHand,
-                item
-            ));
+            for class in [C::Rogue, C::Warrior, C::Hunter] {
+                assert!(!can_equip(class, item), "{id:?} on a {class:?}");
+                assert!(
+                    !items
+                        .items_for_slot(ItemSlot::OffHand, class)
+                        .iter()
+                        .any(|(offered, _)| offered == id),
+                    "the {class:?} off-hand picker offers {id:?}"
+                );
+                assert_eq!(
+                    socket_rejection(class, ItemSlot::OffHand, item).as_deref(),
+                    Some(
+                        format!("{} cannot use items held in the off hand", class.name()).as_str()
+                    )
+                );
+            }
+            for class in [C::Paladin, C::Shaman, C::Mage, C::Priest, C::Warlock] {
+                assert!(
+                    can_equip_in_socket(class, ItemSlot::OffHand, item),
+                    "{id:?} off a {class:?}"
+                );
+            }
         }
     }
 
