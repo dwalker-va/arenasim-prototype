@@ -249,7 +249,7 @@ fn a_lone_winner_bounces_where_it_stands() {
 /// Three winners who finish the match on the same side of the arena would, if
 /// each simply stopped on the side it came from, share a spot. Every winner
 /// gets a distinct spot, reaches it, and stands clear of the others.
-fn assert_three_stand_apart(cfg: &str) {
+fn assert_three_stand_apart(cfg: &str) -> Seen {
     let seen = run(cfg);
     assert_eq!(seen.at_decision.len(), 3, "{cfg}: {:?}", seen.at_decision);
     assert_eq!(seen.marches_at_end.len(), 3);
@@ -269,6 +269,7 @@ fn assert_three_stand_apart(cfg: &str) {
             assert!(d >= 2.0 * MOVER_RADIUS, "{cfg}: two winners {d:.2}yd apart");
         }
     }
+    seen
 }
 
 #[test]
@@ -280,6 +281,32 @@ fn three_winners_each_reach_their_own_spot() {
     // ...and, on the pillared Nagrand map, 0.67yd.
     assert_three_stand_apart(
         r#"{"team1":["Hunter","Mage","Priest"],"team2":["Warrior","Rogue","Shaman"],"map":"PillaredArena","random_seed":4}"#,
+    );
+}
+
+/// A 3v3 on TwinPillars whose winners' ring slot lands inside a pillar: the
+/// slot moves to clear ground, and every winner still reaches its spot.
+#[test]
+fn a_ring_slot_inside_a_pillar_moves_in_a_real_match() {
+    let seen = assert_three_stand_apart(
+        r#"{"team1":["Warrior","Mage","Priest"],"team2":["Warlock","Paladin","Rogue"],"map":"TwinPillars","random_seed":4}"#,
+    );
+    // An unmoved slot sits exactly on the ring round the meeting point
+    // (`face`); a moved one does not.
+    let ring = CONVERGE_SPACING / (2.0 * (std::f32::consts::PI / 3.0).sin());
+    let moved = seen
+        .marches_at_end
+        .iter()
+        .filter(|(_, m)| {
+            let off = Vec2::new(m.goal.x - m.face.x, m.goal.z - m.face.z).length();
+            (off - ring).abs() > 0.01
+        })
+        .count();
+    eprintln!("{moved} of 3 slots moved off the ring");
+    assert!(
+        moved >= 1,
+        "no slot needed moving: {:?}",
+        seen.marches_at_end
     );
 }
 
