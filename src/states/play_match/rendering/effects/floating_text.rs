@@ -1,6 +1,8 @@
 use crate::states::play_match::components::*;
+use crate::states::play_match::rendering::whole_physical_pixels;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
+use egui::emath::GuiRounding;
 
 // ==============================================================================
 // Floating Combat Text Systems
@@ -44,6 +46,15 @@ pub fn render_floating_combat_text(
         return;
     };
 
+    // Every copy of a number (eight outline copies and the fill) is placed on
+    // whole physical pixels: the anchor snapped, the outline offsets rounded.
+    // epaint rounds each text shape's origin on its own, so with a fractional
+    // anchor or offset the copies round different ways and the outline
+    // changes thickness from side to side and frame to frame as the number
+    // rises.
+    let pixels_per_point = ctx.pixels_per_point();
+    let px = |points: f32| whole_physical_pixels(points, pixels_per_point);
+
     egui::Area::new(egui::Id::new("floating_combat_text"))
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
@@ -57,6 +68,8 @@ pub fn render_floating_combat_text(
                 if let Ok(screen_pos) =
                     camera.world_to_viewport(camera_transform, fct.world_position)
                 {
+                    let screen_pos =
+                        egui::pos2(screen_pos.x, screen_pos.y).round_to_pixels(pixels_per_point);
                     // Calculate alpha based on remaining lifetime
                     // Fade out in the last 0.5 seconds
                     let alpha = if fct.lifetime < 0.5 {
@@ -110,6 +123,7 @@ pub fn render_floating_combat_text(
                             (-1.5, 1.5),
                             (1.5, 1.5),
                         ] {
+                            let (dx, dy) = (px(dx), px(dy));
                             ui.painter().text(
                                 egui::pos2(number_x + dx, screen_pos.y + dy),
                                 egui::Align2::CENTER_CENTER,
@@ -138,6 +152,7 @@ pub fn render_floating_combat_text(
                             (-1.0, 1.0),
                             (1.0, 1.0),
                         ] {
+                            let (dx, dy) = (px(dx), px(dy));
                             ui.painter().text(
                                 egui::pos2(label_x + dx, screen_pos.y + 2.0 + dy),
                                 egui::Align2::CENTER_CENTER,
@@ -175,6 +190,7 @@ pub fn render_floating_combat_text(
                             (-1.5, 1.5),
                             (1.5, 1.5),
                         ] {
+                            let (dx, dy) = (px(dx), px(dy));
                             ui.painter().text(
                                 egui::pos2(screen_pos.x + dx, screen_pos.y + dy),
                                 egui::Align2::CENTER_CENTER,

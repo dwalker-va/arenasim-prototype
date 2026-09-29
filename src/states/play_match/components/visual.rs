@@ -27,6 +27,18 @@ pub struct FloatingCombatText {
     pub is_crit: bool,
 }
 
+/// The segment an entity the sim moves is drawn along between ticks
+/// (`rendering::interpolation`). Graphical-only; the sim never reads it.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct RenderInterpolation {
+    /// Translation at the start of the latest sim tick.
+    pub previous: Vec3,
+    /// Translation the latest sim tick left — the sim's own value.
+    pub current: Vec3,
+    /// What this frame drew, while the interpolated value is in `Transform`.
+    pub drawn: Option<Vec3>,
+}
+
 /// Where on the victim a shared impact plays.
 ///
 /// The Classic client attaches the Hunter shots' impact to chest attachment 34 and

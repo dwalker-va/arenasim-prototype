@@ -2,6 +2,7 @@ use crate::states::play_match::banter::vocab;
 use crate::states::play_match::components::*;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
+use egui::emath::GuiRounding;
 
 // ==============================================================================
 // Speech Bubble Systems
@@ -11,7 +12,7 @@ use bevy_egui::{egui, EguiContexts};
 pub fn render_speech_bubbles(
     mut contexts: EguiContexts,
     speech_bubbles: Query<&SpeechBubble>,
-    combatants: Query<&Transform, With<Combatant>>,
+    combatants: Query<&GlobalTransform, With<Combatant>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     class_icons: Res<crate::states::configure_match_ui::ClassIcons>,
     spell_icons: Res<SpellIcons>,
@@ -27,16 +28,16 @@ pub fn render_speech_bubbles(
     };
 
     for bubble in speech_bubbles.iter() {
-        // Get owner's position
+        // Above the owner's head, where the owner is drawn this frame.
         let Ok(owner_transform) = combatants.get(bubble.owner) else {
             continue;
         };
-
-        // Position above the combatant's head
-        let bubble_world_pos = owner_transform.translation + Vec3::new(0.0, 4.0, 0.0);
-
-        // Project to screen space
-        let Ok(screen_pos) = camera.world_to_viewport(camera_transform, bubble_world_pos) else {
+        let Some(screen_pos) = crate::states::play_match::rendering::hud_screen_anchor(
+            camera,
+            camera_transform,
+            owner_transform,
+            4.0,
+        ) else {
             continue;
         };
 
@@ -68,10 +69,14 @@ pub fn render_speech_bubbles(
         // Tight padding around content
         let padding = egui::vec2(12.0, 6.0);
         let bubble_size = egui::vec2(content_w, content_h) + padding * 2.0;
+        // On a whole physical pixel, so the bubble and its text move as one
+        // image instead of each shape rounding a new sub-pixel phase its own
+        // way every frame (`nameplate_origin` has the full story).
         let bubble_pos = egui::pos2(
             screen_pos.x - bubble_size.x / 2.0,
             screen_pos.y - bubble_size.y / 2.0,
-        );
+        )
+        .round_to_pixels(ctx.pixels_per_point());
 
         let rect = egui::Rect::from_min_size(bubble_pos, bubble_size);
 

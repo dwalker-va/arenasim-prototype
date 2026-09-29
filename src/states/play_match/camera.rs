@@ -246,7 +246,10 @@ pub fn update_camera_position(
         camera_controller.manual_target += rotated_movement;
     }
 
-    // Determine the desired look-at point based on camera mode
+    // Determine the desired look-at point based on camera mode. Read in
+    // `Update`, combatant `Transform`s hold the positions units are DRAWN at
+    // this frame (`rendering::interpolation`), so the camera follows exactly
+    // what the scene shows.
     let desired_target = match camera_controller.mode {
         CameraMode::FollowCenter => follow_center_target(&combatants),
         CameraMode::FollowCombatant(target_entity) => {
