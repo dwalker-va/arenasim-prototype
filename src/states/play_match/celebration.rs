@@ -640,21 +640,42 @@ mod tests {
         assert_spaced(&marches);
     }
 
-    /// Winners meeting at the arena's edge: a slot that would fall outside the
-    /// walls moves back inside.
+    /// Winners meeting against the arena wall: a ring slot that would fall
+    /// outside it moves back inside.
     #[test]
     fn a_spot_outside_the_arena_moves_inside() {
         let geometry = arena(Vec::new());
-        // The wall runs at x = 60; the meeting point is 0.5yd inside it.
-        let winners = [Vec3::new(59.5, 1.0, -10.0), Vec3::new(59.5, 1.0, 10.0)];
-        let three = [winners[0], winners[1], Vec3::new(20.0, 1.0, 0.0)];
-        for set in [&winners[..], &three[..]] {
-            let marches = plan(set, &geometry);
-            for march in &marches {
-                assert!(geometry.bounds.contains(march.goal), "{:?}", march.goal);
-            }
-            assert_spaced(&marches);
+        // Three winners facing the wall at x = 60, so the ring round their
+        // meeting point pokes through it.
+        let winners = [
+            Vec3::new(59.5, 1.0, -10.0),
+            Vec3::new(59.5, 1.0, 10.0),
+            Vec3::new(59.9, 1.0, 0.0),
+        ];
+        // Non-vacuity: with no walls at all, at least one slot is outside
+        // this arena — so the plan below has something to move.
+        let unwalled = ActiveMapGeometry {
+            bounds: ArenaBounds::Octagon {
+                half_x: 1000.0,
+                half_z: 1000.0,
+                corner_sum: 2000.0,
+            },
+            ..arena(Vec::new())
+        };
+        let meet = winners.iter().copied().sum::<Vec3>() / 3.0;
+        let from: Vec<Vec2> = winners.iter().map(|p| flat(*p)).collect();
+        let unmoved = ring_spots(flat(meet), &from, &unwalled, meet.y);
+        assert!(
+            unmoved
+                .iter()
+                .any(|s| !geometry.bounds.contains(Vec3::new(s.x, 1.0, s.y))),
+            "no unmoved slot is outside the wall: {unmoved:?}"
+        );
+        let marches = plan(&winners, &geometry);
+        for march in &marches {
+            assert!(geometry.bounds.contains(march.goal), "{:?}", march.goal);
         }
+        assert_spaced(&marches);
     }
 
     /// When the team's centroid is inside a pillar, the others come to the
