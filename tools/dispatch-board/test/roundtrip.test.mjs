@@ -8,23 +8,28 @@
 // Equality is ORDERED: JSON.stringify of both sides must match, so key order
 // and card order survive too, not just deep equality. Import migrates a card
 // with no `pr` / `worktree` by appending them (test/prwork.test.mjs covers
-// the derivation), so the expected export is the input plus those two keys.
+// the derivation), and a schema 1 state comes back as schema 2 (asSchema2:
+// no milestones, human_review cards merged — test/milestone.test.mjs covers
+// that), so the expected export is the input plus exactly those changes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { BoardError, extractStateFromHtml } from "../dist/board.js";
-import { tempBoard, tempDir, realBoardPage, CLI } from "./helpers.mjs";
+import { tempBoard, tempDir, realBoardPage, asSchema2, CLI } from "./helpers.mjs";
 
 const act = (t, by, msg) => ({ t, by, msg });
 
 /** The input as an export returns it: every card gains pr/worktree if it lacked them. */
-function migrated(state, pr = {}) {
-  return {
-    ...state,
-    cards: state.cards.map((c) => ({ ...c, ...("pr" in c ? {} : { pr: pr[c.id] ?? null }), ...("worktree" in c ? {} : { worktree: null }) })),
-  };
+function migrated(state, output, pr = {}) {
+  return asSchema2(
+    {
+      ...state,
+      cards: state.cards.map((c) => ({ ...c, ...("pr" in c ? {} : { pr: pr[c.id] ?? null }), ...("worktree" in c ? {} : { worktree: null }) })),
+    },
+    output,
+  );
 }
 
 export const SYNTHETIC = {
@@ -67,7 +72,8 @@ test("round trip: synthetic state with every legacy shape exports exactly as imp
   const { board } = tempBoard(t);
   const r = board.importState(structuredClone(SYNTHETIC), { actor: "import" });
   assert.deepEqual([r.cards, r.activity, r.nextId], [5, 5, 12]);
-  assert.equal(JSON.stringify(board.exportState()), JSON.stringify(migrated(SYNTHETIC)));
+  const out = board.exportState();
+  assert.equal(JSON.stringify(out), JSON.stringify(migrated(SYNTHETIC, out)));
 });
 
 test("import refuses a non-empty database", (t) => {
@@ -115,7 +121,7 @@ test("round trip: the REAL saved board page, via the CLI import/export", (t) => 
   const report = JSON.parse(imp.stdout).imported.migration;
   const derived = Object.fromEntries(output.cards.map((c) => [c.id, c.pr]));
   assert.equal(Object.values(derived).filter(Boolean).length, report.pr_derived);
-  assert.equal(JSON.stringify(output), JSON.stringify(migrated(input, derived)), "import -> export must equal the input plus pr/worktree, key order included");
+  assert.equal(JSON.stringify(output), JSON.stringify(migrated(input, output, derived)), "import -> export must equal the input plus pr/worktree (as schema 2), key order included");
 
   const again = spawnSync(process.execPath, [CLI, "import", page, "--db", tmp.db], { encoding: "utf8" });
   assert.notEqual(again.status, 0, "a second import into the now non-empty db is refused");

@@ -4,6 +4,7 @@
  *   /mcp          MCP over Streamable HTTP (stateless: a fresh server per
  *                 request, so a daemon restart never strands a client session)
  *   /             the web UI (ui/board.html)
+ *   /milestones/<name>  a milestone's review page (ui/review.html)
  *   /api/...      the UI's JSON API (every write is actor "board"; the UI
  *                 never sets `agent` — its one claim gesture is an explicit,
  *                 logged Release claim)
@@ -24,7 +25,7 @@ import { liveDaemon, lockPath, packagingIconDir } from "./paths.js";
 /** Actor tag for every write made through the web UI — a user gesture. */
 export const UI_ACTOR = "board";
 
-const UI_FIELDS = [...SUMMARY_FIELDS, "question", "created"];
+const UI_FIELDS = [...SUMMARY_FIELDS, "question", "created", "merge_sha"];
 
 /** Tab-icon routes -> the game's own icon files, relative to `packaging/`. */
 const ICONS: Record<string, [file: string, type: string]> = {
@@ -42,8 +43,17 @@ export function uiPage(): string {
 }
 
 function uiHtmlPath(): string {
-  // dist/server.js -> ../ui/board.html
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "ui", "board.html");
+  return uiFile("board.html");
+}
+
+/** A file of the web UI: dist/server.js -> ../ui/<name>. */
+function uiFile(name: string): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "ui", name);
+}
+
+/** A milestone's review page. It reads its milestone from its own URL. */
+export function reviewPage(): string {
+  return readFileSync(uiFile("review.html"), "utf8");
 }
 
 class HttpError extends Error {
@@ -186,6 +196,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       return;
     }
 
+    if (req.method === "GET" && path === "/theme.css") {
+      send(res, 200, readFileSync(uiFile("theme.css"), "utf8"), "text/css; charset=utf-8");
+      return;
+    }
+
+    if (req.method === "GET" && /^\/milestones\/[^/]+$/.test(path)) {
+      send(res, 200, reviewPage(), "text/html; charset=utf-8");
+      return;
+    }
+
     if (req.method === "GET" && Object.hasOwn(ICONS, path)) {
       // Read per request, so a regenerated icon shows up without a restart.
       // A missing file is a 404 for the icon alone; the page never depends on it.
@@ -207,7 +227,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     }
 
     if (req.method === "GET" && path === "/api/board") {
-      send(res, 200, { head: board.head(), cards: board.listCards({ include_archived: true, fields: UI_FIELDS }) });
+      send(res, 200, { head: board.head(), cards: board.listCards({ include_archived: true, fields: UI_FIELDS }), milestones: board.listMilestones() });
       return;
     }
 
@@ -236,18 +256,33 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
       res.write(`data: ${JSON.stringify({ head: board.head() })}\n\n`);
       const onEvent = (ev: BoardEvent) => res.write(`data: ${JSON.stringify({ head: ev.cursor, kind: ev.kind, card: ev.card })}\n\n`);
+      // Review ticks and drafts are not board events (nothing acts on them),
+      // but an open page still refreshes on them.
+      const onNudge = (n: { milestone: string; key: string }) => res.write(`data: ${JSON.stringify({ nudge: n })}\n\n`);
       const ping = setInterval(() => res.write(": ping\n\n"), 25000);
       board.on("event", onEvent);
+      board.on("nudge", onNudge);
       res.on("close", () => {
         clearInterval(ping);
         board.off("event", onEvent);
+        board.off("nudge", onNudge);
       });
       return;
     }
 
-    const cardMatch = /^\/api\/cards\/([^/]+)(?:\/(move|update|answer|delete|release))?$/.exec(path);
+    const cardMatch = /^\/api\/cards\/([^/]+)(?:\/(move|update|answer|delete|release|ruling))?$/.exec(path);
     if (req.method === "GET" && cardMatch && !cardMatch[2]) {
       send(res, 200, board.getCard(decodeURIComponent(cardMatch[1])));
+      return;
+    }
+
+    if (req.method === "GET" && path === "/api/milestones") {
+      send(res, 200, { milestones: board.listMilestones() });
+      return;
+    }
+    const msMatch = /^\/api\/milestones\/([^/]+)(?:\/(check|feedback|submit))?$/.exec(path);
+    if (req.method === "GET" && msMatch && !msMatch[2]) {
+      send(res, 200, board.getMilestone(decodeURIComponent(msMatch[1])));
       return;
     }
 
@@ -262,6 +297,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       if (path === "/api/cards") {
         send(res, 200, board.createCard(b as any, meta));
         return;
+      }
+      if (path === "/api/milestones") {
+        send(res, 200, board.createMilestone(b.name, meta));
+        return;
+      }
+      if (msMatch && msMatch[2]) {
+        const name = decodeURIComponent(msMatch[1]);
+        switch (msMatch[2]) {
+          case "check":
+            send(res, 200, board.setReviewCheck(name, b.key, b.checked, b.expected_version, meta));
+            return;
+          case "feedback":
+            send(res, 200, board.saveReviewDraft(name, b.key, b.text, b.expected_version, meta));
+            return;
+          case "submit":
+            send(res, 200, board.submitReview(name, b.expected ?? {}, meta));
+            return;
+        }
       }
       if (cardMatch && cardMatch[2]) {
         const id = decodeURIComponent(cardMatch[1]);
@@ -283,6 +336,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           case "delete":
             board.deleteCard(id, b.expected_version, meta);
             send(res, 200, { ok: true });
+            return;
+          case "ruling":
+            // An append, like the drawer's other appends: numbers are the orchestrator's (MCP).
+            send(res, 200, board.recordRuling(id, { text: b.text }, meta));
             return;
           case "release": {
             // The user clearing a claim they judge stale (no orchestrator to

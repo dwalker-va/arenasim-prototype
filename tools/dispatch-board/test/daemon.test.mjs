@@ -7,30 +7,16 @@ import { request } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { lockPath, packagingIconDir } from "../dist/paths.js";
-import { spawnDaemon, mcpClient, call, post, tempDir, CLI, PKG } from "./helpers.mjs";
-
-/** Run `cli.js wait ...` and resolve with its stdout lines and exit code. */
-function runWait(args) {
-  const child = spawn(process.execPath, [CLI, "wait", ...args], { stdio: ["ignore", "pipe", "pipe"] });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (d) => (stdout += d));
-  child.stderr.on("data", (d) => (stderr += d));
-  const done = new Promise((resolve) =>
-    child.on("exit", (code) => resolve({ code, lines: stdout.split("\n").filter(Boolean).map((l) => JSON.parse(l)), stderr })),
-  );
-  return { child, done, stdoutSoFar: () => stdout };
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+import { spawnDaemon, mcpClient, call, post, tempDir, runWait, sleep, CLI, PKG } from "./helpers.mjs";
 
 test("MCP: tools are served and list_cards returns summaries only", async (t) => {
   const d = await spawnDaemon(t);
   const client = await mcpClient(t, d.base);
   const names = (await client.listTools()).tools.map((x) => x.name).sort();
   assert.deepEqual(names, [
-    "answer_question", "append_activity", "append_to_body", "claim_card", "create_card", "events_since",
-    "finish_claim", "get_card", "list_cards", "move_card", "release_claim", "update_card",
+    "answer_question", "append_activity", "append_to_body", "claim_card", "close_milestone", "create_card", "create_milestone",
+    "events_since", "finish_claim", "get_card", "get_milestone", "list_cards", "list_milestones", "mark_merged", "move_card",
+    "record_ruling", "release_claim", "set_milestone_sweep", "update_card", "update_milestone",
   ]);
   const created = await call(client, "create_card", { title: "via mcp", body: "long spec", role: "engineer", actor: "pm-test" });
   assert.ok(created.ok);
@@ -68,7 +54,7 @@ test("MCP: the PR gate refuses an engineer card without its own pr and admits a 
   const d = await spawnDaemon(t);
   const client = await mcpClient(t, d.base);
   const eng = (await call(client, "create_card", { title: "e", role: "engineer", actor: "o" })).value;
-  const refused = await call(client, "move_card", { id: eng.id, column: "human_review", expected_version: eng.version, actor: "o" });
+  const refused = await call(client, "move_card", { id: eng.id, column: "merged", expected_version: eng.version, actor: "o" });
   assert.equal(refused.value.error, "gate_refused");
   const pm = (await call(client, "create_card", { title: "p", role: "pm", actor: "o" })).value;
   assert.ok((await call(client, "move_card", { id: pm.id, column: "review", expected_version: pm.version, actor: "o" })).ok);

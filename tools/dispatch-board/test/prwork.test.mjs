@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { BoardError, derivePr, extractStateFromHtml } from "../dist/board.js";
-import { tempBoard, tempDir, realBoardPage, spawnDaemon, mcpClient, call, CLI } from "./helpers.mjs";
+import { tempBoard, tempDir, realBoardPage, spawnDaemon, mcpClient, call, asSchema2, CLI } from "./helpers.mjs";
 
 const PR = (n) => ({ url: `https://github.com/o/r/pull/${n}` });
 const act = (t, by, msg) => ({ t, by, msg });
@@ -31,10 +31,10 @@ function inProgress(board, extra = {}) {
 
 // ---------------------------------------------------------------- the gate
 
-test("PR gate: reference links alone never admit a card to review or human_review", (t) => {
+test("PR gate: reference links alone never admit a card to review or merged", (t) => {
   const { board } = tempBoard(t);
   const refs = [{ label: "PR #154 (prerequisite)", url: "https://github.com/o/r/pull/154" }];
-  for (const to of ["review", "human_review"]) {
+  for (const to of ["review", "merged"]) {
     const c = inProgress(board, { links: refs });
     refused(() => board.moveCard(c.id, to, c.version, { actor: "o" }), "gate_refused");
     refused(() => board.moveCard(c.id, to, c.version, { actor: "o", patch: { links: [...refs, ...refs] } }), "gate_refused");
@@ -178,9 +178,9 @@ test("migration: import adds pr and worktree; a state that already carries them 
     ],
   };
   const r = board.importState(structuredClone(state), { actor: "import" });
-  assert.deepEqual(r.migration, { pr_derived: 1, pr_null: 1, pr_kept: 1, ambiguous: [], constructed_url: [], live_without_pr: [], multi_pr_handoffs: [] });
+  assert.deepEqual(r.migration, { pr_derived: 1, pr_null: 1, pr_kept: 1, ambiguous: [], constructed_url: [], live_without_pr: [], multi_pr_handoffs: [], human_review_to_merged: [] });
   const out = board.exportState();
-  const expected = structuredClone(state);
+  const expected = asSchema2(structuredClone(state), out);
   expected.cards[0].pr = { number: 5, url: "https://github.com/o/r/pull/5" };
   expected.cards[0].worktree = null;
   expected.cards[1].pr = null;
@@ -211,7 +211,7 @@ test("migration over the REAL saved board: every card gets pr and worktree, and 
   const exp = spawnSync(process.execPath, [CLI, "export", "--db", tmp.db], { encoding: "utf8", maxBuffer: 1 << 28 });
   const output = JSON.parse(exp.stdout);
   const stripped = { ...output, cards: output.cards.map(({ pr, worktree, ...rest }) => rest) };
-  assert.equal(JSON.stringify(stripped), JSON.stringify(input), "migration changed something besides adding pr/worktree");
+  assert.equal(JSON.stringify(stripped), JSON.stringify(asSchema2(input, output)), "migration changed something besides adding pr/worktree (and the schema 2 shape)");
   for (const c of output.cards) {
     assert.equal(c.worktree, null);
     if (c.pr !== null) assert.match(c.pr.url, new RegExp(`/pull/${c.pr.number}$`));

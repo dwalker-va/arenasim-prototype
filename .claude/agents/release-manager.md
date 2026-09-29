@@ -26,12 +26,12 @@ after the release — and the trigger card too, when the run was card-triggered 
    `git merge-base --is-ancestor <mergeCommit> origin/main`). A bundled work card whose
    PR is not merged (open, closed-unmerged, or missing a PR link entirely) blocks the
    release: report NEEDS_INPUT naming the card — never silently drop it from the bundle,
-   and never release around it on your own judgment. Merging is the **user's** step in
-   this pipeline (no role merges), and approved-but-unmerged work waits in the board's
-   `human_review` column, which is never bundled — so every card you are handed should
-   already be merged and this check should never fire. If it does, the card reached
-   Done ahead of its merge; your NEEDS_INPUT naming it is the prompt for the user to
-   merge it (or fix the board) and re-request the release. Every card in a well-formed
+   and never release around it on your own judgment. Merging is the **orchestrator's**
+   step in this pipeline (after the Tester's APPROVE; no worker role merges), and a card
+   reaches Done only when its milestone closes, after its merge was recorded — so every
+   card you are handed should already be merged and this check should never fire. If it
+   does, the card reached Done ahead of its merge; your NEEDS_INPUT naming it is the
+   prompt to merge it (or fix the board) and re-request the release. Every card in a well-formed
    bundle is a work card with a
    PR — release-manager trigger cards and `role: "pm"` scoping cards produce no PR and
    the orchestrator stamps and archives them alongside the release instead of bundling

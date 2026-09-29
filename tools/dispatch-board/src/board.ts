@@ -26,8 +26,8 @@
  */
 import Database from "better-sqlite3";
 import { EventEmitter } from "node:events";
-import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 export const COLUMNS = [
@@ -35,7 +35,7 @@ export const COLUMNS = [
   "needs_input",
   "in_progress",
   "review",
-  "human_review",
+  "merged",
   "done",
   "archived",
 ] as const;
@@ -43,7 +43,24 @@ export type Column = (typeof COLUMNS)[number];
 export const ROLES = ["engineer", "tester", "release-manager", "pm"] as const;
 export type Role = (typeof ROLES)[number];
 /** Columns a non-pm card may not enter without its own PR, `pr` (the AS-4 gate). */
-export const GATED_COLUMNS: readonly string[] = ["review", "human_review"];
+export const GATED_COLUMNS: readonly string[] = ["review", "merged"];
+/** What a card changed, for the milestone review's WHAT CHANGED grouping. */
+export const AREAS = ["combat", "visuals", "ai", "ui", "tooling"] as const;
+/** Where a card's balance sweep happened: on the card, in the milestone sweep, or nowhere. */
+export const SWEEP_STATUSES = ["done-on-card", "deferred-to-milestone", "none"] as const;
+export const MILESTONE_STATUSES = ["open", "in_review", "released"] as const;
+/** The milestone columns a card is finished in: its work is on main. */
+const FINISHED_COLUMNS: readonly string[] = ["merged", "done", "archived"];
+
+/**
+ * The database layout this build reads and writes. 1 is the AS-153 board
+ * (with a `human_review` column); 2 adds milestones and the `merged` column.
+ * A writable open of an older database is refused until `migrate` has run.
+ */
+export const SCHEMA_VERSION = 2;
+/** The one activity line a human_review card gains when it becomes a merged card (import or migrate). */
+export const HUMAN_REVIEW_MIGRATION_NOTE =
+  "Migrated human_review → merged (schema 2): Tester-approved before milestones existed, merge not recorded — mark_merged records it";
 
 /** A reference: a prerequisite PR, the PR where a finding was made, a workshop page. */
 export interface Link {
@@ -82,6 +99,20 @@ export type Card = Record<string, unknown> & {
   activity?: ActivityEntry[];
 };
 
+/** A user decision recorded on a card: dated, with the numbers it turned on. */
+export interface Ruling {
+  t: string;
+  by: string;
+  text: string;
+  numbers?: Record<string, number | string>;
+}
+/** A milestone as the protocol sees it; `version` rides along like a card's. */
+export type Milestone = Record<string, unknown> & {
+  name: string;
+  status: (typeof MILESTONE_STATUSES)[number];
+  created: string;
+};
+
 export type ErrorCode =
   | "not_found"
   | "stale_version"
@@ -89,7 +120,8 @@ export type ErrorCode =
   | "gate_refused"
   | "invalid"
   | "not_empty"
-  | "cursor_ahead";
+  | "cursor_ahead"
+  | "needs_migration";
 
 export class BoardError extends Error {
   constructor(
@@ -97,12 +129,14 @@ export class BoardError extends Error {
     message: string,
     /** The card as it is NOW, for refusals a caller must re-read to recover from. */
     public card?: Card,
+    /** The milestone (or review item) as it is now, for a refused milestone write. */
+    public current?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "BoardError";
   }
   toJSON() {
-    return { error: this.code, message: this.message, card: this.card };
+    return { error: this.code, message: this.message, card: this.card, ...(this.current ? { current: this.current } : {}) };
   }
 }
 
@@ -119,9 +153,16 @@ export const SUMMARY_FIELDS = [
   "links",
   "updated",
   "released",
+  "milestone",
+  "iteration",
+  "area",
 ] as const;
 
-/** Patchable through update_card / move_card. `column` is move_card's alone. */
+/**
+ * Patchable through update_card / move_card. `column` is move_card's alone;
+ * `rulings` grow only through record_ruling, and `merge_sha` is set only by
+ * mark_merged, so neither can be rewritten by a patch.
+ */
 const PATCHABLE = new Set([
   "title",
   "body",
@@ -133,6 +174,13 @@ const PATCHABLE = new Set([
   "question",
   "agent",
   "released",
+  "milestone",
+  "iteration",
+  "area",
+  "summary",
+  "human_testing",
+  "sweep",
+  "gaps",
 ]);
 
 /** Pull the `<script id="state">` JSON out of a saved artifact board page. */
@@ -181,7 +229,35 @@ CREATE TABLE IF NOT EXISTS events (
   card_id TEXT,
   data    TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS milestones (
+  name    TEXT NOT NULL UNIQUE,
+  version INTEGER NOT NULL DEFAULT 1,
+  doc     TEXT NOT NULL CHECK (json_valid(doc))
+);
+CREATE TABLE IF NOT EXISTS review_items (
+  milestone  TEXT NOT NULL REFERENCES milestones(name),
+  key        TEXT NOT NULL,
+  version    INTEGER NOT NULL DEFAULT 1,
+  checked_at TEXT,
+  checked_by TEXT,
+  draft      TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (milestone, key)
+);
 `;
+
+interface MilestoneRow {
+  name: string;
+  version: number;
+  doc: string;
+}
+/** One checklist tick and/or feedback draft on a milestone's review page. */
+export interface ReviewItem {
+  key: string;
+  version: number;
+  checked_at: string | null;
+  checked_by: string | null;
+  draft: string;
+}
 
 interface CardRow {
   id: string;
@@ -234,6 +310,58 @@ function checkWorktree(v: unknown): string | null {
   return v as string;
 }
 
+/** A milestone name: "0.7", "v0.8-hotfix" — short, URL-safe, starts alphanumeric. */
+export const MILESTONE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+
+function checkMilestoneName(v: unknown): string {
+  if (typeof v !== "string" || !MILESTONE_NAME.test(v)) invalid("milestone name must be 1-32 of [A-Za-z0-9._-], starting alphanumeric (e.g. 0.7)");
+  return v as string;
+}
+
+/** A commit id as git abbreviates or prints it. */
+function checkSha(v: unknown, what: string): string {
+  if (typeof v !== "string" || !/^[0-9a-f]{7,40}$/i.test(v)) invalid(`${what} must be a commit sha (7-40 hex digits)`);
+  return (v as string).toLowerCase();
+}
+
+function checkText(v: unknown, what: string, opts: { nullable?: boolean; nonEmpty?: boolean; singleLine?: boolean } = {}): string | null {
+  if (v === null && opts.nullable) return null;
+  if (typeof v !== "string") invalid(`${what} must be a string${opts.nullable ? " or null" : ""}`);
+  if (opts.nonEmpty && !(v as string).trim()) invalid(`${what} must not be empty`);
+  if (opts.singleLine && /[\r\n]/.test(v as string)) invalid(`${what} must be one line`);
+  return v as string;
+}
+
+function checkUrl(v: unknown, what: string): string {
+  if (typeof v !== "string" || !/^https?:\/\/\S+$/.test(v)) invalid(`${what} must be an http(s) URL`);
+  return v as string;
+}
+
+/** A ruling's numbers: {label: value}, each a finite number or a short string ("+36pt", "z=5.2"). */
+function checkNumbers(v: unknown): Record<string, number | string> | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!isObj(v)) invalid("numbers must be an object of {label: number | string}");
+  const entries = Object.entries(v as Record<string, unknown>);
+  if (entries.length > 20) invalid("numbers holds at most 20 entries");
+  for (const [k, x] of entries) {
+    if (!k.trim()) invalid("numbers labels must be non-empty");
+    const ok = (typeof x === "number" && Number.isFinite(x)) || (typeof x === "string" && x.trim() !== "" && x.length <= 80);
+    if (!ok) invalid(`numbers.${k} must be a finite number or a non-empty string`);
+  }
+  return entries.length ? (v as Record<string, number | string>) : undefined;
+}
+
+function checkSweep(v: unknown): { status: string; summary?: string } | null {
+  if (v === null) return null;
+  if (!isObj(v) || !(SWEEP_STATUSES as readonly unknown[]).includes(v.status)) {
+    invalid(`sweep must be null or {status: ${SWEEP_STATUSES.join(" | ")}, summary?}`);
+  }
+  const keys = Object.keys(v as object).filter((k) => k !== "status" && k !== "summary");
+  if (keys.length) invalid(`sweep has unknown field(s): ${keys.join(", ")}`);
+  if ((v as Record<string, unknown>).summary !== undefined) checkText((v as Record<string, unknown>).summary, "sweep.summary", { singleLine: true });
+  return v as { status: string; summary?: string };
+}
+
 /** Validate a patch; returns it with `pr` normalised to {number, url}. */
 function checkPatch(patch: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...patch };
@@ -281,8 +409,33 @@ function checkPatch(patch: Record<string, unknown>): Record<string, unknown> {
       case "worktree":
         checkWorktree(v);
         break;
+      case "milestone":
+        // Existence (and not-released) is checked inside the write, against the table.
+        if (v !== null) checkMilestoneName(v);
+        break;
+      case "iteration":
+        if (v !== null && !(Number.isInteger(v) && (v as number) >= 1)) invalid("iteration must be null or an integer >= 1");
+        break;
+      case "area":
+        if (v !== null && !(AREAS as readonly unknown[]).includes(v)) invalid(`area must be null or one of ${AREAS.join(", ")}`);
+        break;
+      case "summary":
+      case "human_testing":
+      case "gaps":
+        checkText(v, k, { nullable: true });
+        break;
+      case "sweep":
+        checkSweep(v);
+        break;
     }
   }
+  return out;
+}
+
+/** The named fields of `o` that it has, in the order named. */
+function pick(o: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of keys) if (k in o) out[k] = o[k];
   return out;
 }
 
@@ -420,7 +573,32 @@ function withSection(body: unknown, heading: string, text: string): string {
   return b ? `${b}\n\n${section}` : section;
 }
 
-/** The AS-4 PR gate: a non-pm card enters review/human_review only with its own PR. */
+/**
+ * A card's human-testing text as checklist steps: one per non-empty line,
+ * with the PR's `**Human testing:**` lead-in and list markers stripped. Each
+ * step's key hashes its own text, so a tick stays on the step it was given to
+ * and a REWORDED step comes back unticked — it is a new thing to check.
+ */
+export function checklistSteps(cardId: string, text: unknown): { key: string; text: string }[] {
+  if (typeof text !== "string") return [];
+  const seen = new Set<string>();
+  const out: { key: string; text: string }[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw
+      .replace(/^\s*\*\*Human testing:\*\*\s*/i, "")
+      .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
+      .replace(/^\[[ xX]\]\s+/, "")
+      .trim();
+    if (!line) continue;
+    const key = `${cardId}:${createHash("sha1").update(line).digest("hex").slice(0, 10)}`;
+    if (seen.has(key)) continue; // the same step twice is one thing to check
+    seen.add(key);
+    out.push({ key, text: line });
+  }
+  return out;
+}
+
+/** The AS-4 PR gate: a non-pm card enters review/merged only with its own PR. */
 function gateAllows(doc: Record<string, unknown>, to: string): boolean {
   return !GATED_COLUMNS.includes(to) || doc.role === "pm" || hasPr(doc);
 }
@@ -450,6 +628,9 @@ export interface ListOptions {
   /** Summary fields to return; `["*"]` returns every field except activity. */
   fields?: string[];
   include_archived?: boolean;
+  /** Only cards on this milestone; null for cards on none. */
+  milestone?: string | null;
+  iteration?: number;
 }
 
 export interface WriteMeta {
@@ -458,22 +639,57 @@ export interface WriteMeta {
   by?: string;
 }
 
+/** The schema a database is at: null for a brand-new (empty) file. Reads only. */
+function storedSchema(db: Database.Database): number | null {
+  const hasMeta = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'").get();
+  if (!hasMeta) return null;
+  const r = db.prepare("SELECT value FROM meta WHERE key = 'schema'").get() as { value: string } | undefined;
+  return r ? Number(r.value) : null;
+}
+
 export class Board extends EventEmitter {
   readonly db: Database.Database;
+  /** The layout of the database this Board opened (SCHEMA_VERSION once migrated). */
+  readonly schema: number;
 
-  constructor(readonly path: string, opts: { readonly?: boolean } = {}) {
+  /**
+   * `readonly`: the export path — reads any schema, writes nothing.
+   * `allowOld`: open an older schema WITHOUT touching it (migrate's own open);
+   * every other writable open of an older database is refused, so a new
+   * daemon can never serve cards in a column it does not know.
+   */
+  constructor(readonly path: string, opts: { readonly?: boolean; allowOld?: boolean } = {}) {
     super();
     if (!opts.readonly && path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new Database(path, { readonly: !!opts.readonly, fileMustExist: !!opts.readonly });
     this.db.pragma("busy_timeout = 10000");
-    if (!opts.readonly) {
-      this.db.pragma("journal_mode = WAL");
-      this.db.pragma("foreign_keys = ON");
-      this.db.exec(SCHEMA);
-      this.db
-        .prepare("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', '1'), ('next_id', '1'), ('id_prefix', 'AS-'), ('board_id', ?)")
-        .run(randomUUID());
+    const stored = storedSchema(this.db);
+    if (stored !== null && stored > SCHEMA_VERSION) {
+      this.db.close();
+      throw new BoardError("needs_migration", `${path} is at schema ${stored}, newer than this build (${SCHEMA_VERSION}): run the build that wrote it`);
     }
+    if (opts.readonly) {
+      this.schema = stored ?? SCHEMA_VERSION;
+      return;
+    }
+    if (stored !== null && stored < SCHEMA_VERSION) {
+      if (!opts.allowOld) {
+        this.db.close();
+        throw new BoardError(
+          "needs_migration",
+          `${path} is at schema ${stored}; this build needs ${SCHEMA_VERSION}. Stop the daemon, back it up (dist/cli.js export), then run dist/cli.js migrate.`,
+        );
+      }
+      this.schema = stored;
+      return;
+    }
+    this.db.pragma("journal_mode = WAL");
+    this.db.pragma("foreign_keys = ON");
+    this.db.exec(SCHEMA);
+    this.db
+      .prepare("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', ?), ('next_id', '1'), ('id_prefix', 'AS-'), ('board_id', ?)")
+      .run(String(SCHEMA_VERSION), randomUUID());
+    this.schema = SCHEMA_VERSION;
   }
 
   close(): void {
@@ -593,6 +809,58 @@ export class Board extends EventEmitter {
     return { r, doc: JSON.parse(r.doc) };
   }
 
+  private milestoneRow(name: string): MilestoneRow {
+    const r = this.db.prepare("SELECT name, version, doc FROM milestones WHERE name = ?").get(name) as MilestoneRow | undefined;
+    if (!r) throw new BoardError("not_found", `no milestone ${name}`);
+    return r;
+  }
+
+  private milestoneOf(r: MilestoneRow): Milestone {
+    return Object.assign(JSON.parse(r.doc) as Milestone, { version: r.version });
+  }
+
+  /** Load a milestone for a versioned write, refusing a stale expected_version up front. */
+  private loadMilestone(name: string, expected: number): { m: MilestoneRow; doc: Record<string, unknown> } {
+    const m = this.milestoneRow(name);
+    if (m.version !== expected) {
+      throw new BoardError(
+        "stale_version",
+        `milestone ${name} is at version ${m.version}, not ${expected}: it changed since you read it. Re-read and re-apply.`,
+        undefined,
+        this.milestoneOf(m),
+      );
+    }
+    return { m, doc: JSON.parse(m.doc) };
+  }
+
+  private commitMilestone(name: string, fromVersion: number, doc: Record<string, unknown>): void {
+    doc.updated = now();
+    const info = this.db
+      .prepare("UPDATE milestones SET doc = ?, version = version + 1 WHERE name = ? AND version = ?")
+      .run(JSON.stringify(doc), name, fromVersion);
+    if (info.changes !== 1) {
+      throw new BoardError("stale_version", `milestone ${name} changed underneath this write; re-read it`, undefined, this.milestoneOf(this.milestoneRow(name)));
+    }
+  }
+
+  /**
+   * A card may be put on a milestone only if the milestone exists and is not
+   * released: a released milestone's card list is what its release shipped.
+   */
+  private checkAttach(name: unknown): void {
+    if (name === null || name === undefined) return;
+    const r = this.db.prepare("SELECT doc FROM milestones WHERE name = ?").get(name) as { doc: string } | undefined;
+    if (!r) invalid(`no milestone ${String(name)}: create it first (create_milestone)`);
+    if ((JSON.parse(r.doc) as Milestone).status === "released") invalid(`milestone ${String(name)} is released; its card list is closed`);
+  }
+
+  /** A card's milestone fields after a patch: a card that gains a milestone and has no iteration is iteration 1. */
+  private applyMilestonePatch(doc: Record<string, unknown>, patch: Record<string, unknown>): void {
+    if ("milestone" in patch && patch.milestone !== doc.milestone) this.checkAttach(patch.milestone);
+    Object.assign(doc, patch);
+    if (doc.milestone != null && doc.iteration == null) doc.iteration = 1;
+  }
+
   private summary(r: CardRow, fields?: string[]): Record<string, unknown> {
     const doc = JSON.parse(r.doc) as Record<string, unknown>;
     const out: Record<string, unknown> = {};
@@ -625,6 +893,17 @@ export class Board extends EventEmitter {
     if (opts.role) {
       where.push("role = ?");
       args.push(opts.role);
+    }
+    if (opts.milestone === null) {
+      where.push("json_extract(doc, '$.milestone') IS NULL");
+    } else if (opts.milestone !== undefined) {
+      where.push("json_extract(doc, '$.milestone') = ?");
+      args.push(checkMilestoneName(opts.milestone));
+    }
+    if (opts.iteration !== undefined) {
+      if (!Number.isInteger(opts.iteration)) invalid("iteration must be an integer");
+      where.push("json_extract(doc, '$.iteration') = ?");
+      args.push(opts.iteration);
     }
     const rows = this.db
       .prepare(`SELECT id, version, doc FROM cards WHERE ${where.join(" AND ")} ORDER BY rowid`)
@@ -691,11 +970,24 @@ export class Board extends EventEmitter {
       links?: Link[];
       pr?: unknown;
       worktree?: string | null;
+      milestone?: string | null;
+      iteration?: number | null;
+      area?: string | null;
+      summary?: string | null;
+      human_testing?: string | null;
+      sweep?: unknown;
+      gaps?: string | null;
     },
     meta: WriteMeta,
   ): Card {
     const actor = checkActor(meta.actor);
     const column = checkColumn(input.column ?? "backlog");
+    // The milestone fields ride along only when given, so a card filed
+    // without them keeps the same shape as every card before milestones.
+    const extra: Record<string, unknown> = {};
+    for (const k of ["milestone", "iteration", "area", "summary", "human_testing", "sweep", "gaps"] as const) {
+      if (input[k] !== undefined) extra[k] = input[k];
+    }
     const checked = checkPatch({
       title: input.title,
       body: input.body ?? "",
@@ -704,15 +996,13 @@ export class Board extends EventEmitter {
       links: input.links ?? [],
       pr: input.pr ?? null,
       worktree: input.worktree ?? null,
+      ...extra,
     });
     return this.write(() => {
-      const prefix = this.meta("id_prefix");
-      let n = Number(this.meta("next_id"));
-      while (this.db.prepare("SELECT 1 FROM cards WHERE id = ?").get(`${prefix}${n}`)) n++;
-      const id = `${prefix}${n}`;
+      this.checkAttach(extra.milestone);
+      if (extra.milestone != null && extra.iteration == null) extra.iteration = 1;
       const t = now();
       const doc: Record<string, unknown> = {
-        id,
         title: input.title,
         body: input.body ?? "",
         column,
@@ -726,16 +1016,31 @@ export class Board extends EventEmitter {
         activity: null,
         created: t,
         updated: t,
+        ...extra,
       };
       if (!gateAllows(doc, column)) {
         throw new BoardError("gate_refused", `a non-pm card needs its own PR (pr) to enter ${column}`);
       }
-      this.db.prepare("INSERT INTO cards(id, doc) VALUES (?, ?)").run(id, JSON.stringify(doc));
-      this.db.prepare("UPDATE meta SET value = ? WHERE key = 'next_id'").run(String(n + 1));
-      this.appendActivityRow(id, { t, by: meta.by ?? actor, msg: "Created" });
-      this.recordEvent(actor, "created", id, { column, title: input.title });
-      return this.getCard(id);
+      return this.insertCard(doc, meta.by ?? actor, actor, "Created");
     });
+  }
+
+  /** Allocate the next id to `doc` and insert it (inside a write). */
+  private insertCard(doc: Record<string, unknown>, by: string, actor: string, msg: string): Card {
+    const prefix = this.meta("id_prefix");
+    let n = Number(this.meta("next_id"));
+    while (this.db.prepare("SELECT 1 FROM cards WHERE id = ?").get(`${prefix}${n}`)) n++;
+    const id = `${prefix}${n}`;
+    doc = { id, ...doc };
+    this.db.prepare("INSERT INTO cards(id, doc) VALUES (?, ?)").run(id, JSON.stringify(doc));
+    this.db.prepare("UPDATE meta SET value = ? WHERE key = 'next_id'").run(String(n + 1));
+    this.appendActivityRow(id, { t: String(doc.created), by, msg });
+    this.recordEvent(actor, "created", id, {
+      column: doc.column,
+      title: doc.title,
+      ...(doc.milestone != null ? { milestone: doc.milestone, iteration: doc.iteration } : {}),
+    });
+    return this.getCard(id);
   }
 
   updateCard(
@@ -753,7 +1058,7 @@ export class Board extends EventEmitter {
       const { r, doc } = this.loadExpecting(id, expectedVersion);
       checkAgentTransition(id, doc.agent, patch, () => this.current(id));
       const claimNote = claimChangeNote(doc.agent, patch);
-      Object.assign(doc, patch);
+      this.applyMilestonePatch(doc, patch);
       if (GATED_COLUMNS.includes(doc.column as string) && !gateAllows(doc, doc.column as string)) {
         throw new BoardError("gate_refused", `${id} is in ${String(doc.column)}: a non-pm card there must keep its own PR (pr)`, this.current(id));
       }
@@ -785,7 +1090,7 @@ export class Board extends EventEmitter {
       const from = doc.column as string;
       checkAgentTransition(id, doc.agent, patch, () => this.current(id));
       const stored = doc.agent;
-      Object.assign(doc, patch);
+      this.applyMilestonePatch(doc, patch);
       if (append) doc.body = withSection(doc.body, append.heading, append.text);
       if (!gateAllows(doc, to)) {
         throw new BoardError(
@@ -930,17 +1235,512 @@ export class Board extends EventEmitter {
     });
   }
 
-  // ---------------------------------------------------------------- import / export
-
-  isEmpty(): boolean {
-    const n = (this.db.prepare("SELECT (SELECT count(*) FROM cards) + (SELECT count(*) FROM activity) AS n").get() as { n: number }).n;
-    return n === 0;
+  /**
+   * Record a user decision on a card: dated, with the numbers it turned on.
+   * Rulings are append-only — like activity, and unlike the body sections
+   * they used to live in — so the milestone review can list them verbatim.
+   * An append, so `expected_version` is optional (as for append_to_body).
+   */
+  recordRuling(
+    id: string,
+    input: { text: string; numbers?: Record<string, number | string> },
+    meta: WriteMeta & { expected_version?: number },
+  ): Card {
+    const actor = checkActor(meta.actor);
+    const text = checkText(input.text, "text", { nonEmpty: true }) as string;
+    const numbers = checkNumbers(input.numbers);
+    if (meta.expected_version !== undefined) checkVersion(meta.expected_version);
+    return this.write(() => {
+      const { r, doc } = this.loadExpecting(id, meta.expected_version);
+      const ruling: Ruling = { t: now(), by: meta.by ?? actor, text, ...(numbers ? { numbers } : {}) };
+      doc.rulings = [...(Array.isArray(doc.rulings) ? doc.rulings : []), ruling];
+      this.commitDoc(id, r.version, doc);
+      this.appendActivityRow(id, { t: ruling.t, by: ruling.by, msg: `Ruling recorded: ${text}` });
+      this.recordEvent(actor, "ruling", id, { ...(doc.milestone != null ? { milestone: doc.milestone } : {}) });
+      return this.getCard(id, { activity_limit: 5 });
+    });
   }
 
   /**
-   * Load a board state (`{schema: 1, nextId, cards}`) into an EMPTY database,
-   * preserving ids, card order, every field (legacy shapes included),
-   * activity and timestamps exactly. Refuses a non-empty database.
+   * A Tester-approved card whose PR the orchestrator has merged: review ->
+   * merged, recording the PR and its merge commit, and closing out a working
+   * (Tester) claim — one write. A card already in merged with no merge
+   * recorded (a migrated human_review card) may have it recorded here too.
+   */
+  markMerged(
+    id: string,
+    input: { pr: unknown; merge_sha: unknown },
+    expectedVersion: number,
+    meta: WriteMeta & { activity?: string },
+  ): Card {
+    const actor = checkActor(meta.actor);
+    const pr = checkPr(input.pr ?? null);
+    if (!pr) invalid("pr is required: the card's own pull request, {url}");
+    const sha = checkSha(input.merge_sha, "merge_sha");
+    checkVersion(expectedVersion);
+    return this.write(() => {
+      const { r, doc } = this.loadExpecting(id, expectedVersion);
+      const from = doc.column as string;
+      if (from !== "review" && !(from === "merged" && doc.merge_sha == null)) {
+        const why = from === "merged" ? `its merge is already recorded (${String(doc.merge_sha)})` : `it is in ${from}`;
+        throw new BoardError("invalid", `${id} cannot be marked merged: ${why}. Only a review card (or a merged card with no merge recorded) can.`, this.current(id));
+      }
+      if (isObj(doc.pr) && doc.pr.number !== pr.number) {
+        throw new BoardError("invalid", `${id}'s own PR is #${String(doc.pr.number)}, not #${pr.number}`, this.current(id));
+      }
+      if (doc.role === "pm") throw new BoardError("invalid", `${id} is a pm card: it has no PR to merge`, this.current(id));
+      const stored = doc.agent;
+      doc.pr = pr;
+      doc.merge_sha = sha;
+      doc.merged_at = now();
+      doc.column = "merged";
+      if (isObj(stored) && stored.status === "working") doc.agent = { ...stored, status: "done", finished: now() };
+      const claimNote = claimChangeNote(stored, { agent: doc.agent ?? null });
+      this.commitDoc(id, r.version, doc);
+      const by = meta.by ?? actor;
+      if (meta.activity) this.appendActivityRow(id, { t: now(), by, msg: meta.activity });
+      this.appendActivityRow(id, { t: now(), by, msg: `Merged: PR #${pr.number} at ${sha.slice(0, 10)}` });
+      if (claimNote) this.appendActivityRow(id, { t: now(), by, msg: claimNote });
+      this.recordEvent(actor, "merged", id, {
+        from,
+        to: "merged",
+        pr: pr.number,
+        merge_sha: sha,
+        ...(doc.milestone != null ? { milestone: doc.milestone } : {}),
+      });
+      return this.getCard(id, { activity_limit: 5 });
+    });
+  }
+
+  // ---------------------------------------------------------------- milestones
+
+  listMilestones(): Record<string, unknown>[] {
+    const rows = this.db.prepare("SELECT name, version, doc FROM milestones ORDER BY rowid").all() as MilestoneRow[];
+    const counts = this.db
+      .prepare(
+        "SELECT json_extract(doc, '$.milestone') AS m, col, count(*) AS n FROM cards WHERE deleted_at IS NULL AND json_extract(doc, '$.milestone') IS NOT NULL GROUP BY m, col",
+      )
+      .all() as { m: string; col: string; n: number }[];
+    return rows.map((r) => {
+      const m = this.milestoneOf(r);
+      const cards: Record<string, number> = {};
+      for (const c of counts) if (c.m === r.name) cards[c.col] = c.n;
+      return { name: m.name, status: m.status, created: m.created, released_at: m.released_at ?? null, tag: m.tag ?? null, version: r.version, cards };
+    });
+  }
+
+  createMilestone(name: string, meta: WriteMeta): Milestone {
+    const actor = checkActor(meta.actor);
+    checkMilestoneName(name);
+    return this.write(() => {
+      if (this.db.prepare("SELECT 1 FROM milestones WHERE name = ?").get(name)) invalid(`milestone ${name} already exists`);
+      const t = now();
+      // Card ids are allocated in order, so the ids issued while the milestone
+      // is open (from first_id, up to end_id once it closes) are exactly the
+      // cards filed during it — the review's follow-ups — with no clock involved.
+      const doc = { name, status: "open", created: t, updated: t, first_id: Number(this.meta("next_id")), sweep: null, submissions: [] };
+      this.db.prepare("INSERT INTO milestones(name, doc) VALUES (?, ?)").run(name, JSON.stringify(doc));
+      this.recordEvent(actor, "milestone_created", null, { milestone: name });
+      return this.milestoneOf(this.milestoneRow(name));
+    });
+  }
+
+  /**
+   * Status open <-> in_review, the tag and release URL, and the SHA the review
+   * checklist applies to. `released` is reached only through close_milestone,
+   * and is terminal.
+   */
+  updateMilestone(name: string, patch: Record<string, unknown>, expectedVersion: number, meta: WriteMeta): Milestone {
+    const actor = checkActor(meta.actor);
+    if (!isObj(patch) || !Object.keys(patch).length) invalid("patch must be a non-empty object");
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      switch (k) {
+        case "status":
+          if (v !== "open" && v !== "in_review") invalid("status may be set to open or in_review; released is close_milestone's");
+          out.status = v;
+          break;
+        case "tag":
+          out.tag = v === null ? null : checkText(v, "tag", { nonEmpty: true, singleLine: true });
+          break;
+        case "release_url":
+          out.release_url = v === null ? null : checkUrl(v, "release_url");
+          break;
+        case "review_sha":
+          out.review_sha = v === null ? null : checkSha(v, "review_sha");
+          break;
+        default:
+          invalid(`milestone field '${k}' is not patchable (patchable: status, tag, release_url, review_sha)`);
+      }
+    }
+    checkVersion(expectedVersion);
+    return this.write(() => {
+      const { m, doc } = this.loadMilestone(name, expectedVersion);
+      if (doc.status === "released" && "status" in out) {
+        throw new BoardError("invalid", `milestone ${name} is released; its status is final`, undefined, this.milestoneOf(m));
+      }
+      Object.assign(doc, out);
+      this.commitMilestone(name, m.version, doc);
+      this.recordEvent(actor, "milestone_updated", null, { milestone: name, fields: Object.keys(out) });
+      return this.milestoneOf(this.milestoneRow(name));
+    });
+  }
+
+  /** The milestone sweep's result: one summary line and a link to the committed doc/CSV. */
+  setMilestoneSweep(name: string, input: { summary: unknown; link?: unknown }, expectedVersion: number, meta: WriteMeta): Milestone {
+    const actor = checkActor(meta.actor);
+    const summary = checkText(input.summary, "summary", { nonEmpty: true }) as string;
+    const link = input.link === undefined || input.link === null ? null : (checkText(input.link, "link", { nonEmpty: true, singleLine: true }) as string);
+    checkVersion(expectedVersion);
+    return this.write(() => {
+      const { m, doc } = this.loadMilestone(name, expectedVersion);
+      doc.sweep = { summary, link, t: now(), by: meta.by ?? actor };
+      this.commitMilestone(name, m.version, doc);
+      this.recordEvent(actor, "milestone_sweep", null, { milestone: name });
+      return this.milestoneOf(this.milestoneRow(name));
+    });
+  }
+
+  /**
+   * Close a milestone the user has approved: every one of its merged cards
+   * moves to done, and the milestone becomes released — one write. Refused
+   * while any of its cards is unfinished (move those to another milestone, or
+   * finish them, first). Returns the done cards the release will bundle.
+   */
+  closeMilestone(
+    name: string,
+    expectedVersion: number,
+    meta: WriteMeta & { tag?: string; release_url?: string },
+  ): { milestone: Milestone; cards: Record<string, unknown>[] } {
+    const actor = checkActor(meta.actor);
+    const tag = meta.tag === undefined ? undefined : (checkText(meta.tag, "tag", { nonEmpty: true, singleLine: true }) as string);
+    const releaseUrl = meta.release_url === undefined ? undefined : checkUrl(meta.release_url, "release_url");
+    checkVersion(expectedVersion);
+    return this.write(() => {
+      const { m, doc } = this.loadMilestone(name, expectedVersion);
+      if (doc.status === "released") throw new BoardError("invalid", `milestone ${name} is already released`, undefined, this.milestoneOf(m));
+      const rows = this.milestoneCardRows(name);
+      const unfinished = rows.map((r) => JSON.parse(r.doc) as Record<string, unknown>).filter((c) => !FINISHED_COLUMNS.includes(c.column as string));
+      if (unfinished.length) {
+        throw new BoardError(
+          "invalid",
+          `milestone ${name} has unfinished cards: ${unfinished.map((c) => `${String(c.id)} (${String(c.column)})`).join(", ")} — finish them or move them to another milestone first`,
+          undefined,
+          this.milestoneOf(m),
+        );
+      }
+      const by = meta.by ?? actor;
+      const moved: string[] = [];
+      for (const r of rows) {
+        const c = JSON.parse(r.doc) as Record<string, unknown>;
+        if (c.column !== "merged") continue;
+        c.column = "done";
+        this.commitDoc(r.id, r.version, c);
+        this.appendActivityRow(r.id, { t: now(), by, msg: `Milestone ${name} closed: merged → done` });
+        this.recordEvent(actor, "moved", r.id, { from: "merged", to: "done", milestone: name });
+        moved.push(r.id);
+      }
+      doc.status = "released";
+      doc.released_at = now();
+      doc.end_id = Number(this.meta("next_id"));
+      if (tag !== undefined) doc.tag = tag;
+      if (releaseUrl !== undefined) doc.release_url = releaseUrl;
+      this.commitMilestone(name, m.version, doc);
+      this.recordEvent(actor, "milestone_closed", null, { milestone: name, cards: moved });
+      const cards = this.milestoneCardRows(name)
+        .map((r) => JSON.parse(r.doc) as Record<string, unknown>)
+        .filter((c) => c.column === "done" && !c.released)
+        .map((c) => pick(c, ["id", "title", "role", "pr", "merge_sha", "summary", "area", "iteration"]));
+      return { milestone: this.milestoneOf(this.milestoneRow(name)), cards };
+    });
+  }
+
+  private milestoneCardRows(name: string): CardRow[] {
+    return this.db
+      .prepare("SELECT id, version, doc FROM cards WHERE deleted_at IS NULL AND json_extract(doc, '$.milestone') = ? ORDER BY rowid")
+      .all(name) as CardRow[];
+  }
+
+  private reviewItems(name: string): Map<string, ReviewItem> {
+    const rows = this.db
+      .prepare("SELECT key, version, checked_at, checked_by, draft FROM review_items WHERE milestone = ? ORDER BY rowid")
+      .all(name) as ReviewItem[];
+    return new Map(rows.map((r) => [r.key, r]));
+  }
+
+  /**
+   * What a review page may tick or comment on, right now: the milestone as a
+   * whole, each of its cards, and each current checklist step of a finished
+   * card. A key outside this set is refused, so a tick cannot land on a step
+   * that has since been reworded away.
+   */
+  private reviewKeys(name: string): { comment: Set<string>; check: Map<string, { card: Record<string, unknown>; text: string }> } {
+    const comment = new Set(["milestone"]);
+    const check = new Map<string, { card: Record<string, unknown>; text: string }>();
+    for (const r of this.milestoneCardRows(name)) {
+      const c = JSON.parse(r.doc) as Record<string, unknown>;
+      comment.add(`card:${r.id}`);
+      if (!FINISHED_COLUMNS.includes(c.column as string)) continue;
+      for (const s of checklistSteps(r.id, c.human_testing)) {
+        check.set(`check:${s.key}`, { card: c, text: s.text });
+        comment.add(`check:${s.key}`);
+      }
+    }
+    return { comment, check };
+  }
+
+  /** Write one review item under its own version; creates it at version 1 when expected is 0. */
+  private writeReviewItem(name: string, key: string, expected: number, set: Partial<ReviewItem>): ReviewItem {
+    const cur = this.reviewItems(name).get(key);
+    const have = cur?.version ?? 0;
+    if (have !== expected) {
+      throw new BoardError(
+        "stale_version",
+        `review item ${key} on milestone ${name} is at version ${have}, not ${expected}: it changed elsewhere (another window?)`,
+        undefined,
+        cur ? { ...cur } : { key, version: 0, checked_at: null, checked_by: null, draft: "" },
+      );
+    }
+    const next: ReviewItem = { key, version: have + 1, checked_at: null, checked_by: null, draft: "", ...(cur ?? {}), ...set };
+    next.version = have + 1;
+    if (cur) {
+      const info = this.db
+        .prepare("UPDATE review_items SET version = ?, checked_at = ?, checked_by = ?, draft = ? WHERE milestone = ? AND key = ? AND version = ?")
+        .run(next.version, next.checked_at, next.checked_by, next.draft, name, key, have);
+      if (info.changes !== 1) throw new BoardError("stale_version", `review item ${key} changed underneath this write`);
+    } else {
+      this.db
+        .prepare("INSERT INTO review_items(milestone, key, version, checked_at, checked_by, draft) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(name, key, next.version, next.checked_at, next.checked_by, next.draft);
+    }
+    return next;
+  }
+
+  private openForReview(name: string): Record<string, unknown> {
+    const doc = JSON.parse(this.milestoneRow(name).doc) as Record<string, unknown>;
+    if (doc.status === "released") invalid(`milestone ${name} is released; its review is closed`);
+    return doc;
+  }
+
+  /**
+   * Tick or untick one checklist step. Ticks are the user's working state,
+   * not board events: nothing acts on them, and the orchestrator's wait would
+   * otherwise wake for every box. Open pages still refresh (a `nudge`).
+   */
+  setReviewCheck(name: string, key: string, checked: boolean, expectedVersion: number, meta: WriteMeta): ReviewItem {
+    const actor = checkActor(meta.actor);
+    if (typeof checked !== "boolean") invalid("checked must be true or false");
+    if (!Number.isInteger(expectedVersion)) invalid("expected_version is required: the item's version as you read it (0 for an item never written)");
+    const out = this.write(() => {
+      this.openForReview(name);
+      if (!this.reviewKeys(name).check.has(key)) invalid(`${key} is not a current checklist step of milestone ${name}`);
+      return this.writeReviewItem(name, key, expectedVersion, checked ? { checked_at: now(), checked_by: meta.by ?? actor } : { checked_at: null, checked_by: null });
+    });
+    this.emit("nudge", { milestone: name, key });
+    return out;
+  }
+
+  /** Save one feedback draft (the milestone, a card, or a checklist step). Not a board event either — submitting is. */
+  saveReviewDraft(name: string, key: string, text: string, expectedVersion: number, meta: WriteMeta): ReviewItem {
+    checkActor(meta.actor);
+    checkText(text, "text");
+    if (text.length > 20000) invalid("feedback is at most 20000 characters");
+    if (!Number.isInteger(expectedVersion)) invalid("expected_version is required: the item's version as you read it (0 for an item never written)");
+    const out = this.write(() => {
+      this.openForReview(name);
+      // A comment whose step has since been reworded away can still be cleared.
+      const clearing = text === "" && this.reviewItems(name).has(key);
+      if (!clearing && !this.reviewKeys(name).comment.has(key)) invalid(`${key} is not a review item of milestone ${name}`);
+      return this.writeReviewItem(name, key, expectedVersion, { draft: text });
+    });
+    this.emit("nudge", { milestone: name, key });
+    return out;
+  }
+
+  /**
+   * Submit the review: every non-empty feedback draft becomes a new card on
+   * the same milestone at its source's iteration + 1, linked back to the item
+   * it came from; the drafts are cleared; one `review_submitted` event names
+   * the new cards (none, when the user had no feedback). `expected` is the
+   * version of every draft the user is submitting, as they saw it — a draft
+   * changed or added elsewhere refuses the whole submission.
+   */
+  submitReview(name: string, expected: Record<string, number>, meta: WriteMeta): { milestone: Milestone; cards: Card[] } {
+    const actor = checkActor(meta.actor);
+    if (!isObj(expected) || !Object.values(expected).every((v) => Number.isInteger(v))) {
+      invalid("expected must map each submitted draft's key to the version you read");
+    }
+    return this.write(() => {
+      const m = this.milestoneRow(name);
+      const doc = this.openForReview(name);
+      const items = this.reviewItems(name);
+      const drafts = [...items.values()].filter((i) => i.draft.trim());
+      const stale = [
+        ...drafts.filter((d) => expected[d.key] !== d.version).map((d) => d.key),
+        ...Object.entries(expected)
+          .filter(([k, v]) => (items.get(k)?.version ?? 0) !== v)
+          .map(([k]) => k),
+      ];
+      if (stale.length) {
+        throw new BoardError(
+          "stale_version",
+          `feedback changed since you read it: ${[...new Set(stale)].join(", ")} — reload the review page and submit again`,
+          undefined,
+          { drafts: Object.fromEntries(drafts.map((d) => [d.key, { text: d.draft, version: d.version }])) },
+        );
+      }
+      const { check } = this.reviewKeys(name);
+      const cardsOn = this.milestoneCardRows(name).map((r) => JSON.parse(r.doc) as Record<string, unknown>);
+      const top = Math.max(1, ...cardsOn.map((c) => (Number.isInteger(c.iteration) ? (c.iteration as number) : 1)));
+      const by = meta.by ?? actor;
+      const t = now();
+      const created: Card[] = [];
+      for (const d of drafts) {
+        // A step reworded since its comment was written still names its card in its key.
+        const step = check.get(d.key);
+        const srcId = d.key === "milestone" ? null : d.key.split(":")[1];
+        const src = srcId ? cardsOn.find((c) => c.id === srcId) : undefined;
+        if (d.key !== "milestone" && !src) invalid(`${d.key} no longer names an item on milestone ${name}: clear that comment and submit again`);
+        const iteration = src ? (Number.isInteger(src.iteration) ? (src.iteration as number) : 1) + 1 : top + 1;
+        const what = src ? `${String(src.id)}: ${String(src.title)}` : `milestone ${name}`;
+        const first = d.draft.trim().split(/\r?\n/)[0];
+        const title = `Review feedback on ${src ? String(src.id) : `milestone ${name}`}: ${first.length > 80 ? `${first.slice(0, 79)}…` : first}`;
+        const body =
+          `User feedback from the milestone ${name} review (${t.slice(0, 10)}), on ${what}` +
+          (step ? `, checklist step "${step.text}"` : "") +
+          `:\n\n${d.draft.trim()}\n`;
+        const srcPr = src && isObj(src.pr) && typeof src.pr.url === "string" ? [{ label: `${String(src.id)} PR #${String(src.pr.number)} (feedback source)`, url: src.pr.url }] : [];
+        const card = this.insertCard(
+          {
+            title,
+            body,
+            column: "backlog",
+            role: "engineer",
+            priority: "P2",
+            links: srcPr,
+            pr: null,
+            worktree: null,
+            question: null,
+            agent: null,
+            activity: null,
+            created: t,
+            updated: t,
+            milestone: name,
+            iteration,
+            source: { milestone: name, key: d.key, card: srcId },
+          },
+          by,
+          actor,
+          `Filed from the milestone ${name} review: feedback on ${src ? String(src.id) : "the milestone"}`,
+        );
+        created.push(card);
+        if (src) {
+          const sr = this.row(String(src.id));
+          this.commitDoc(sr.id, sr.version, JSON.parse(sr.doc));
+          this.appendActivityRow(sr.id, { t, by, msg: `Milestone ${name} review feedback filed as ${card.id} (iteration ${iteration})` });
+        }
+        this.writeReviewItem(name, d.key, d.version, { draft: "" });
+      }
+      doc.submissions = [...(Array.isArray(doc.submissions) ? doc.submissions : []), { t, by, cards: created.map((c) => c.id) }];
+      this.commitMilestone(name, m.version, doc);
+      this.recordEvent(actor, "review_submitted", null, { milestone: name, cards: created.map((c) => c.id) });
+      return { milestone: this.milestoneOf(this.milestoneRow(name)), cards: created };
+    });
+  }
+
+  /**
+   * The milestone review page's whole payload, assembled from the cards'
+   * structured fields — nothing on it is hand-written for the page.
+   */
+  getMilestone(name: string): Record<string, unknown> {
+    const m = this.milestoneOf(this.milestoneRow(name));
+    const cards = this.milestoneCardRows(name).map((r) => Object.assign(JSON.parse(r.doc) as Record<string, unknown>, { version: r.version }));
+    const items = this.reviewItems(name);
+    const finished = cards.filter((c) => FINISHED_COLUMNS.includes(c.column as string));
+    const brief = (c: Record<string, unknown>) =>
+      pick(c, ["id", "title", "column", "role", "pr", "merge_sha", "merged_at", "summary", "area", "iteration", "worktree", "source", "version"]);
+    const areaOrder = [...AREAS, null];
+    const byArea = (list: Record<string, unknown>[]) =>
+      areaOrder
+        .map((area) => ({ area, cards: list.filter((c) => (area === null ? !(AREAS as readonly unknown[]).includes(c.area) : c.area === area)) }))
+        .filter((g) => g.cards.length);
+
+    const checkGroups = byArea(finished.filter((c) => checklistSteps(String(c.id), c.human_testing).length)).map((g) => ({
+      area: g.area,
+      cards: g.cards.map((c) => ({
+        id: c.id,
+        title: c.title,
+        steps: checklistSteps(String(c.id), c.human_testing).map((s) => {
+          const it = items.get(`check:${s.key}`);
+          return { key: `check:${s.key}`, text: s.text, checked: !!it?.checked_at, checked_at: it?.checked_at ?? null, checked_by: it?.checked_by ?? null, version: it?.version ?? 0 };
+        }),
+      })),
+    }));
+    const merged = finished.filter((c) => typeof c.merge_sha === "string" && typeof c.merged_at === "string");
+    // Timestamps are to the second; of two merges in one second the later-filed card wins.
+    const newest = merged.reduce<Record<string, unknown> | null>((best, c) => (!best || String(c.merged_at) >= String(best.merged_at) ? c : best), null);
+    const idNum = (id: unknown) => Number(/(\d+)$/.exec(String(id))?.[1] ?? NaN);
+    const firstId = Number.isInteger(m.first_id) ? (m.first_id as number) : Infinity;
+    const endId = Number.isInteger(m.end_id) ? (m.end_id as number) : Infinity;
+    const followups = (this.db.prepare("SELECT id, version, doc FROM cards WHERE deleted_at IS NULL ORDER BY rowid").all() as CardRow[])
+      .filter((r) => idNum(r.id) >= firstId && idNum(r.id) < endId)
+      .map((r) => JSON.parse(r.doc) as Record<string, unknown>)
+      .filter((c) => c.milestone !== name)
+      .map((c) => pick(c, ["id", "title", "column", "role", "milestone", "created"]));
+
+    return {
+      milestone: m,
+      what_changed: byArea(finished).map((g) => ({ area: g.area, cards: g.cards.map(brief) })),
+      in_flight: cards.filter((c) => !FINISHED_COLUMNS.includes(c.column as string)).map(brief),
+      checklist: {
+        applies_to: {
+          tag: m.tag ?? null,
+          review_sha: m.review_sha ?? null,
+          newest_merge: newest ? { sha: newest.merge_sha, card: newest.id, at: newest.merged_at } : null,
+        },
+        groups: checkGroups,
+        without_steps: finished.filter((c) => c.role !== "pm" && !checklistSteps(String(c.id), c.human_testing).length).map((c) => pick(c, ["id", "title"])),
+      },
+      // Oldest first; rulings in the same second keep card order, then recording order (a stable sort).
+      decisions: cards
+        .flatMap((c) => (Array.isArray(c.rulings) ? (c.rulings as Ruling[]) : []).map((r) => ({ card: c.id, title: c.title, ...r })))
+        .sort((a, b) => a.t.localeCompare(b.t)),
+      balance: {
+        sweep: m.sweep ?? null,
+        deferred: cards.filter((c) => isObj(c.sweep) && c.sweep.status === "deferred-to-milestone").map((c) => ({ ...pick(c, ["id", "title"]), note: (c.sweep as { summary?: string }).summary ?? null })),
+        on_card: cards.filter((c) => isObj(c.sweep) && c.sweep.status === "done-on-card").map((c) => ({ ...pick(c, ["id", "title"]), note: (c.sweep as { summary?: string }).summary ?? null })),
+        unstated: finished.filter((c) => c.role !== "pm" && !isObj(c.sweep)).map((c) => pick(c, ["id", "title"])),
+      },
+      gaps: {
+        stated: cards.filter((c) => typeof c.gaps === "string" && c.gaps.trim()).map((c) => ({ id: c.id, title: c.title, gaps: c.gaps })),
+        followups,
+      },
+      feedback: {
+        drafts: Object.fromEntries([...items.values()].filter((i) => i.draft).map((i) => [i.key, { text: i.draft, version: i.version }])),
+        versions: Object.fromEntries([...items.values()].map((i) => [i.key, i.version])),
+        submissions: m.submissions ?? [],
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------- import / export
+
+  isEmpty(): boolean {
+    const n = (this.db.prepare("SELECT (SELECT count(*) FROM cards) + (SELECT count(*) FROM activity) + (SELECT count(*) FROM milestones) AS n").get() as { n: number }).n;
+    return n === 0;
+  }
+
+
+  /**
+   * Load a board state into an EMPTY database, preserving ids, card order,
+   * every field (legacy shapes included), activity and timestamps exactly.
+   * Refuses a non-empty database.
+   *
+   * `{schema: 2, nextId, cards, milestones}` is this build's own export.
+   * `{schema: 1, nextId, cards}` — an AS-153 export or the artifact's state —
+   * is migrated on the way in: each card gains `pr` and `worktree` (see
+   * derivePr), and a `human_review` card becomes a `merged` one, exactly as
+   * `migrate` does it to a database.
    */
   importState(
     state: unknown,
@@ -949,22 +1749,40 @@ export class Board extends EventEmitter {
     cards: number;
     activity: number;
     nextId: number;
+    milestones: number;
     migration: {
       pr_derived: number;
       pr_null: number;
       pr_kept: number;
       ambiguous: { id: string; candidates: number[] }[];
       constructed_url: string[];
-      /** Non-pm cards still in flight (review, human_review, unreleased done) left with no pr: act on these. */
+      /** Non-pm cards still in flight (review, merged/human_review, unreleased done) left with no pr: act on these. */
       live_without_pr: string[];
       multi_pr_handoffs: { id: string; t: string; numbers: number[] }[];
+      /** human_review cards now in merged with no merge recorded: mark_merged each once its PR is merged. */
+      human_review_to_merged: string[];
     };
   } {
     const actor = checkActor(meta.actor);
     if (!isObj(state)) invalid("state must be an object");
-    if (state.schema !== 1) invalid(`unsupported schema ${String(state.schema)} (expected 1)`);
+    if (state.schema !== 1 && state.schema !== 2) invalid(`unsupported schema ${String(state.schema)} (expected 1 or 2)`);
+    const legacy = state.schema === 1;
     if (!Number.isInteger(state.nextId)) invalid("nextId must be an integer");
     if (!Array.isArray(state.cards)) invalid("cards must be an array");
+    const milestones = legacy ? [] : state.milestones;
+    if (!Array.isArray(milestones)) invalid("a schema 2 state carries milestones: an array");
+    const names = new Set<string>();
+    (milestones as unknown[]).forEach((m, i) => {
+      if (!isObj(m)) invalid(`milestones[${i}] is not an object`);
+      checkMilestoneName(m.name);
+      if (names.has(m.name as string)) invalid(`duplicate milestone ${String(m.name)}`);
+      names.add(m.name as string);
+      if (!(MILESTONE_STATUSES as readonly unknown[]).includes(m.status)) invalid(`milestone ${String(m.name)}: status must be one of ${MILESTONE_STATUSES.join(", ")}`);
+      if (!Array.isArray(m.review)) invalid(`milestone ${String(m.name)}: review must be an array`);
+      (m.review as unknown[]).forEach((it, j) => {
+        if (!isObj(it) || typeof it.key !== "string" || typeof it.draft !== "string") invalid(`milestone ${String(m.name)}.review[${j}] must be {key, checked_at, checked_by, draft}`);
+      });
+    });
     const cards = state.cards as unknown[];
     const seen = new Set<string>();
     let prefix: string | null = null;
@@ -987,7 +1805,8 @@ export class Board extends EventEmitter {
         }
       }
       if ("worktree" in c) checkWorktree(c.worktree);
-      checkColumn(c.column);
+      if (!(legacy && c.column === "human_review")) checkColumn(c.column);
+      if (c.milestone != null && !names.has(c.milestone as string)) invalid(`${String(c.id)}: milestone ${String(c.milestone)} is not in the state's milestones`);
       if (!Array.isArray(c.activity)) invalid(`${String(c.id)}: activity must be an array`);
       (c.activity as unknown[]).forEach((a, j) => {
         if (!isObj(a) || Object.keys(a).join(",") !== "t,by,msg" || ![a.t, a.by, a.msg].every((x) => typeof x === "string")) {
@@ -1010,35 +1829,57 @@ export class Board extends EventEmitter {
       live_without_pr: (cards as Record<string, unknown>[])
         .filter((c) => {
           const pr = "pr" in c ? c.pr : derived.pr[String(c.id)];
-          const live = c.column === "review" || c.column === "human_review" || (c.column === "done" && !c.released);
+          const live = c.column === "review" || c.column === "human_review" || c.column === "merged" || (c.column === "done" && !c.released);
           return live && c.role !== "pm" && pr == null;
         })
         .map((c) => String(c.id)),
       multi_pr_handoffs: derived.multi,
+      human_review_to_merged: (cards as Record<string, unknown>[]).filter((c) => legacy && c.column === "human_review").map((c) => String(c.id)),
     };
     return this.write(() => {
       if (!this.isEmpty()) throw new BoardError("not_empty", "import only loads into an EMPTY database; this one already has cards");
+      for (const m of milestones as Record<string, unknown>[]) {
+        const { review, ...doc } = m;
+        this.db.prepare("INSERT INTO milestones(name, doc) VALUES (?, ?)").run(m.name, JSON.stringify(doc));
+        for (const it of review as ReviewItem[]) {
+          this.db
+            .prepare("INSERT INTO review_items(milestone, key, checked_at, checked_by, draft) VALUES (?, ?, ?, ?, ?)")
+            .run(m.name, it.key, it.checked_at ?? null, it.checked_by ?? null, it.draft);
+        }
+      }
       let acts = 0;
       const ins = this.db.prepare("INSERT INTO cards(id, doc) VALUES (?, ?)");
       for (const c of cards as Record<string, unknown>[]) {
         const doc: Record<string, unknown> = { ...c, activity: null };
         if (!("pr" in c)) doc.pr = derived.pr[String(c.id)];
         if (!("worktree" in c)) doc.worktree = null;
+        const fromReview = legacy && c.column === "human_review";
+        if (fromReview) Object.assign(doc, { column: "merged", updated: now() });
         ins.run(c.id, JSON.stringify(doc));
         for (const a of c.activity as ActivityEntry[]) {
           this.appendActivityRow(c.id as string, a);
           acts++;
         }
+        if (fromReview) {
+          this.appendActivityRow(c.id as string, { t: now(), by: "migrate", msg: HUMAN_REVIEW_MIGRATION_NOTE });
+          acts++;
+        }
       }
       this.db.prepare("UPDATE meta SET value = ? WHERE key = 'next_id'").run(String(state.nextId));
       if (prefix !== null) this.db.prepare("UPDATE meta SET value = ? WHERE key = 'id_prefix'").run(prefix);
-      this.recordEvent(actor, "imported", null, { cards: cards.length, activity: acts });
-      return { cards: cards.length, activity: acts, nextId: state.nextId as number, migration };
+      this.recordEvent(actor, "imported", null, { cards: cards.length, activity: acts, milestones: (milestones as unknown[]).length });
+      return { cards: cards.length, activity: acts, nextId: state.nextId as number, milestones: (milestones as unknown[]).length, migration };
     });
   }
 
-  /** The full state, in the artifact's `{schema: 1, nextId, cards}` shape. The backup and rollback path. */
-  exportState(): { schema: 1; nextId: number; cards: Card[] } {
+  /**
+   * The full state: the backup and restore path. A schema 2 board exports
+   * `{schema: 2, nextId, cards, milestones}` (each milestone with its review
+   * ticks and drafts); a database not yet migrated exports exactly the
+   * `{schema: 1, nextId, cards}` it always did, so the pre-cutover backup is
+   * the same file whichever build writes it.
+   */
+  exportState(): { schema: number; nextId: number; cards: Card[]; milestones?: Record<string, unknown>[] } {
     const rows = this.db
       .prepare("SELECT id, version, doc FROM cards WHERE deleted_at IS NULL ORDER BY rowid")
       .all() as CardRow[];
@@ -1047,6 +1888,63 @@ export class Board extends EventEmitter {
       if ("activity" in doc) doc.activity = this.activity(r.id);
       return doc;
     });
-    return { schema: 1, nextId: Number(this.meta("next_id")), cards };
+    const nextId = Number(this.meta("next_id"));
+    if (this.schema < 2) return { schema: this.schema, nextId, cards };
+    const milestones = (this.db.prepare("SELECT name, version, doc FROM milestones ORDER BY rowid").all() as MilestoneRow[]).map((r) => ({
+      ...(JSON.parse(r.doc) as Record<string, unknown>),
+      review: [...this.reviewItems(r.name).values()].map(({ key, checked_at, checked_by, draft }) => ({ key, checked_at, checked_by, draft })),
+    }));
+    return { schema: 2, nextId, cards, milestones };
+  }
+
+  /**
+   * Bring a schema 1 database to schema 2, in place, with the daemon
+   * stopped. First a consistent copy of the whole file is written to
+   * `backup` (SQLite's online backup) — restoring that file IS the rollback,
+   * board id and event cursors included. Then, in one transaction: the
+   * milestone tables are created, every `human_review` card becomes a
+   * `merged` card with no milestone and no merge recorded (Tester-approved,
+   * so the new flow's next step is the orchestrator's merge and mark_merged),
+   * each gains one activity line, one `migrated` event is recorded, and the
+   * schema is set to 2. Every other card, activity row and event is left
+   * byte-for-byte as it was. Running it on a schema 2 database does nothing.
+   */
+  static async migrate(
+    path: string,
+    opts: { backup?: string; actor?: string } = {},
+  ): Promise<{ from: number; to: number; backup: string | null; human_review_to_merged: string[]; cards: number }> {
+    const b = new Board(path, { allowOld: true });
+    try {
+      const from = b.schema;
+      const cards = (b.db.prepare("SELECT count(*) AS n FROM cards").get() as { n: number }).n;
+      if (from === SCHEMA_VERSION) return { from, to: SCHEMA_VERSION, backup: null, human_review_to_merged: [], cards };
+      const backup = opts.backup ?? `${path}.schema${from}-${now().replace(/:/g, "")}.bak`;
+      if (existsSync(backup)) invalid(`backup file ${backup} already exists; name another with --backup`);
+      await b.db.backup(backup);
+      b.db.pragma("journal_mode = WAL");
+      b.db.pragma("foreign_keys = ON");
+      const actor = opts.actor ?? "migrate";
+      const moved = b.write(() => {
+        if (storedSchema(b.db) !== from) throw new BoardError("needs_migration", `${path} changed schema during the migration; re-run it`);
+        b.db.exec(SCHEMA);
+        const rows = b.db.prepare("SELECT id, version, doc FROM cards WHERE col = 'human_review' ORDER BY rowid").all() as CardRow[];
+        const t = now();
+        for (const r of rows) {
+          const doc = JSON.parse(r.doc) as Record<string, unknown>;
+          doc.column = "merged";
+          doc.updated = t;
+          const info = b.db.prepare("UPDATE cards SET doc = ?, version = version + 1 WHERE id = ? AND version = ?").run(JSON.stringify(doc), r.id, r.version);
+          if (info.changes !== 1) throw new BoardError("stale_version", `${r.id} changed during the migration; re-run it`);
+          b.appendActivityRow(r.id, { t, by: actor, msg: HUMAN_REVIEW_MIGRATION_NOTE });
+        }
+        b.db.prepare("UPDATE meta SET value = ? WHERE key = 'schema'").run(String(SCHEMA_VERSION));
+        const ids = rows.map((r) => r.id);
+        b.recordEvent(actor, "migrated", null, { from, to: SCHEMA_VERSION, human_review_to_merged: ids });
+        return ids;
+      });
+      return { from, to: SCHEMA_VERSION, backup, human_review_to_merged: moved, cards };
+    } finally {
+      b.close();
+    }
   }
 }

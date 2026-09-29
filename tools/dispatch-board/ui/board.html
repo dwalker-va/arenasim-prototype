@@ -2,53 +2,7 @@
 <!-- ArenaSim Dispatch, served by tools/dispatch-board (node dist/cli.js serve).
      Ported from the claude.ai artifact: same look and gestures, persistence
      swapped for the local daemon's versioned JSON API. -->
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ArenaSim Dispatch</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png"><link id="fonts" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"><style id="css">
-:root{
-  color-scheme:light dark;
-  --ground:#ECEFF1;--surface:#FBFCFD;--surface2:#F1F3F5;--ink:#1B222B;--muted:#5B6673;
-  --line:#D5DBE1;--accent:#8A6A2F;--accent-ink:#6E5322;--btn-primary-ink:#FFFFFF;
-  --c-backlog:#5B6673;--c-input:#A87409;--c-progress:#2F6FA8;--c-review:#7B5EA7;--c-human:#2F7D8A;--c-done:#3E7A4E;
-  --p1:#B04030;--p2:#C08A1E;--p3:#9AA4AE;
-  --chip-eng:#E3EDF6;--chip-eng-ink:#2F6FA8;--chip-else:#EEE9F6;--chip-else-ink:#7B5EA7;
-  --shadow:0 1px 2px rgba(20,26,33,.08),0 4px 14px rgba(20,26,33,.06);
-}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --ground:#131619;--surface:#1C2126;--surface2:#181D21;--ink:#E7EAED;--muted:#97A1AC;
-    --line:#30383F;--accent:#C9A45C;--accent-ink:#C9A45C;--btn-primary-ink:#1B1508;
-    --c-backlog:#8B96A1;--c-input:#D9A93C;--c-progress:#5E9AD0;--c-review:#A98FD6;--c-human:#6FB6C4;--c-done:#6FAE7E;
-    --p1:#D06A5B;--p2:#D8A83E;--p3:#6B7681;
-    --chip-eng:#24333F;--chip-eng-ink:#8FBBE0;--chip-else:#2E2939;--chip-else-ink:#BFA9E6;
-    --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);
-  }
-}
-:root[data-theme="dark"]{
-  --ground:#131619;--surface:#1C2126;--surface2:#181D21;--ink:#E7EAED;--muted:#97A1AC;
-  --line:#30383F;--accent:#C9A45C;--accent-ink:#C9A45C;--btn-primary-ink:#1B1508;
-  --c-backlog:#8B96A1;--c-input:#D9A93C;--c-progress:#5E9AD0;--c-review:#A98FD6;--c-human:#6FB6C4;--c-done:#6FAE7E;
-  --p1:#D06A5B;--p2:#D8A83E;--p3:#6B7681;
-  --chip-eng:#24333F;--chip-eng-ink:#8FBBE0;--chip-else:#2E2939;--chip-else-ink:#BFA9E6;
-  --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);
-}
-*{box-sizing:border-box}
-html{background:var(--ground)}
-body{margin:0;background:var(--ground);color:var(--ink);font:14px/1.5 "IBM Plex Sans",system-ui,-apple-system,sans-serif}
-img{max-width:100%}
-[hidden]{display:none!important}
-button{font:inherit;cursor:pointer}
-button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--c-progress);outline-offset:1px}
-.hdr{display:flex;align-items:baseline;gap:14px;padding:16px 20px 10px}
-.hdr h1{font:700 22px/1 "Barlow Semi Condensed",system-ui,sans-serif;letter-spacing:.02em;margin:0;color:var(--ink)}
-.hdr h1 .ax{color:var(--accent-ink)}
-.hdr .sub{color:var(--muted);font-size:12.5px}
-.hdr .spacer{flex:1}
-.stat{color:var(--muted);font:400 12px "IBM Plex Mono",monospace}
-.btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:7px;padding:7px 13px;font-weight:500}
-.btn:hover{border-color:var(--muted)}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--btn-primary-ink);font-weight:600}
-.btn.danger{color:var(--p1);border-color:var(--p1)}
-.btn:disabled{opacity:.45;cursor:default}
-.robanner{margin:0 20px 8px;padding:8px 12px;border:1px solid var(--line);border-radius:7px;background:var(--surface2);color:var(--muted);font-size:12.5px}
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ArenaSim Dispatch</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png"><link rel="stylesheet" href="/theme.css"><link id="fonts" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"><style id="css">
 .boardwrap{overflow-x:auto;padding:6px 20px 24px}
 .board{display:grid;grid-template-columns:repeat(6,minmax(216px,1fr));gap:12px;min-width:1344px;align-items:stretch}
 .col{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:10px;min-height:120px;display:flex;flex-direction:column}
@@ -61,7 +15,7 @@ button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focu
 .col[data-col="needs_input"] .nm{color:var(--c-input)}
 .col[data-col="in_progress"] .nm{color:var(--c-progress)}
 .col[data-col="review"] .nm{color:var(--c-review)}
-.col[data-col="human_review"] .nm{color:var(--c-human)}
+.col[data-col="merged"] .nm{color:var(--c-merged)}
 .col[data-col="done"] .nm{color:var(--c-done)}
 .col[data-col="archived"]{border-style:dashed}
 .col[data-col="archived"] .nm{color:var(--muted)}
@@ -75,27 +29,11 @@ button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focu
 .card .pri{margin-left:auto;font:500 10.5px "IBM Plex Mono",monospace;color:var(--muted)}
 .card .ttl{font-weight:500;margin:3px 0 6px;line-height:1.35}
 .card .foot{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.chip{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:99px;background:var(--chip-else);color:var(--chip-else-ink)}
-.chip.engineer{background:var(--chip-eng);color:var(--chip-eng-ink)}
-.tag{font:500 11px "IBM Plex Mono",monospace;color:var(--muted)}
-.tag.q{color:var(--c-input)}
-.tag.agent{color:var(--c-progress)}
-.tag a{color:var(--c-progress);text-decoration:none}
-.tag a:hover{text-decoration:underline}
-.tag.rel{color:var(--c-done)}
-.tag.hum{color:var(--c-human)}
-.empty{color:var(--muted);font-size:12px;padding:6px 4px;font-style:italic}
 .overlay{position:fixed;inset:0;background:rgba(10,14,18,.45);display:flex;justify-content:flex-end;z-index:20}
 .overlay.center{justify-content:center;align-items:flex-start;padding-top:9vh}
 .drawer{width:min(430px,94vw);height:100%;overflow-y:auto;background:var(--surface);border-left:1px solid var(--line);padding:18px 20px 30px}
 .modal{width:min(480px,94vw);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;height:fit-content;box-shadow:var(--shadow)}
 .drawer h2,.modal h2{font:600 17px "Barlow Semi Condensed",sans-serif;margin:0 0 2px;letter-spacing:.03em}
-.mrow{display:flex;flex-direction:column;gap:4px;margin-top:12px}
-.mrow label{font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
-.mrow input,.mrow textarea,.mrow select{font:inherit;color:var(--ink);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
-.mrow textarea{min-height:110px;resize:vertical;font-size:13px}
-.tworow{display:flex;gap:10px}.tworow .mrow{flex:1}
-.dactions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
 .qbox{margin-top:14px;border:1px solid var(--c-input);border-radius:8px;padding:10px 12px;background:var(--surface2)}
 .qbox .qt{font-weight:600;color:var(--c-input);font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
 .stale{margin-top:12px;border:1px solid var(--p1);border-radius:8px;padding:10px 12px;background:var(--surface2);font-size:12.5px}
@@ -110,7 +48,6 @@ button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focu
 .links h3,.ownpr h3{font:600 12px "Barlow Semi Condensed",sans-serif;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 2px}
 .ownpr{margin-top:12px}
 .ownpr a{color:var(--c-progress);font-size:13px;font-weight:600;text-decoration:none}
-.tag.own a{font-weight:600}
 .wt{display:flex;gap:6px;align-items:center;margin-top:6px;font:400 11px "IBM Plex Mono",monospace;color:var(--muted);min-width:0}
 .wt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .wt button,.wtcopy{border:1px solid var(--line);background:var(--surface2);color:var(--muted);border-radius:5px;padding:0 6px;font:500 10.5px "IBM Plex Sans",sans-serif;flex:none}
@@ -121,6 +58,19 @@ button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focu
 .links a{color:var(--c-progress);font-size:13px;text-decoration:none}
 .links a:hover{text-decoration:underline}
 .spec{white-space:pre-wrap;font-size:13px;color:var(--ink);background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:4px}
+.tag.ms{color:var(--c-merged);font-weight:500}
+.msbar{display:flex;gap:8px;align-items:center}
+.msbar select{font:inherit;font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:6px 8px}
+a.btn{text-decoration:none;display:inline-block}
+.dsec{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}
+.dsec h3{font:600 12px "Barlow Semi Condensed",sans-serif;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0}
+.mrow textarea.short{min-height:64px}
+.ruling{padding:5px 0;border-top:1px solid var(--line);font-size:12.5px}
+.ruling .at{font:400 11px "IBM Plex Mono",monospace;color:var(--muted)}
+.ruling .nums{font:400 11.5px "IBM Plex Mono",monospace;color:var(--muted)}
+.rulerow{display:flex;gap:8px;margin-top:6px}
+.rulerow input{flex:1;min-width:0;font:inherit;font-size:13px;color:var(--ink);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+.kv{font-size:12.5px;color:var(--muted);margin-top:6px}
 .closex{position:sticky;top:0;float:right;border:none;background:none;color:var(--muted);font-size:20px;line-height:1;padding:2px 6px}
 @media (prefers-reduced-motion: no-preference){.card{transition:box-shadow .12s}.card:hover{box-shadow:0 2px 6px rgba(20,26,33,.16),0 8px 20px rgba(20,26,33,.10)}}
 </style></head><body><div id="app"></div><script id="code">
@@ -149,16 +99,23 @@ var COLUMNS = [
   {key:"needs_input", label:"Needs Input", hint:"blocked on you"},
   {key:"in_progress", label:"In Progress", hint:"spawns an agent"},
   {key:"review", label:"Review", hint:"awaiting verification"},
-  {key:"human_review", label:"Human Review", hint:"your eyeball + merge"},
-  {key:"done", label:"Done", hint:"merged"}
+  {key:"merged", label:"Merged", hint:"awaiting milestone review"},
+  {key:"done", label:"Done", hint:"milestone reviewed"}
 ];
 var ARCHIVED = {key:"archived", label:"Archived", hint:"released"};
 var ROLES = ["engineer","tester","release-manager","pm"];
-var GATED = ["review","human_review"];
+var GATED = ["review","merged"];
+var AREAS = ["combat","visuals","ai","ui","tooling"];
 // Drawer field -> its input. The drawer's edits are these inputs, diffed against `rendered`.
-var DRAWER = {title: "d-title", body: "d-body", column: "d-col", role: "d-role", priority: "d-pri"};
+var DRAWER = {title: "d-title", body: "d-body", column: "d-col", role: "d-role", priority: "d-pri",
+              milestone: "d-ms", area: "d-area", summary: "d-summary", human_testing: "d-ht"};
 
-var state = {cards: []};
+var state = {cards: [], milestones: []};
+// The milestone filter: "" shows every card, NO_MS the cards on none, else one milestone's. Kept in the URL (?m=).
+var NO_MS = "-";
+var params = new URLSearchParams(location.search);
+var msFilter = params.get("m") || "";
+var showNewMs = false;
 var full = {};            // id -> full card (body + activity), fetched when its drawer opens
 var connected = false, loadedOnce = false;
 var openCardId = null, showNew = false, confirmDelete = false, statusMsg = "connecting…", showArchived = false;
@@ -183,7 +140,7 @@ var PR_URL = /*@PR_URL*/null;
 function hasPr(c){ return !!(c.pr && typeof c.pr.url === "string" && PR_URL.test(c.pr.url)); }
 function gated(c, col){ return GATED.indexOf(col) >= 0 && c.role !== "pm" && !hasPr(c); }
 // The worktree is shown where the user might test the card: while it is live.
-var WT_COLUMNS = ["in_progress","review","human_review"];
+var WT_COLUMNS = ["in_progress","review","merged"];
 function copyText(text){
   function fallback(){
     var ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
@@ -193,9 +150,21 @@ function copyText(text){
   if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function(){ done(true); }, function(){ done(fallback()); });
   else done(fallback());
 }
+function str(v){ return v == null ? "" : String(v); }
 function snapshot(c){
-  return {id: c.id, version: c.version, title: c.title == null ? "" : String(c.title), body: c.body == null ? "" : String(c.body),
-          column: c.column, role: c.role == null ? "" : String(c.role), priority: c.priority == null ? "" : String(c.priority)};
+  return {id: c.id, version: c.version, title: str(c.title), body: str(c.body),
+          column: c.column, role: str(c.role), priority: str(c.priority),
+          milestone: str(c.milestone), area: str(c.area), summary: str(c.summary), human_testing: str(c.human_testing)};
+}
+function milestone(name){ for(var i=0;i<state.milestones.length;i++) if(state.milestones[i].name===name) return state.milestones[i]; return null; }
+function inFilter(c){ return !msFilter || (msFilter === NO_MS ? c.milestone == null : c.milestone === msFilter); }
+function setFilter(v){
+  msFilter = v;
+  var q = new URLSearchParams(location.search);
+  if(v) q.set("m", v); else q.delete("m");
+  if(!params.get("card")) q.delete("card");
+  var qs = q.toString();
+  try{ history.replaceState(null, "", location.pathname + (qs ? "?" + qs : "")); }catch(e){}
 }
 // The user's edits: drawer fields whose value (from `values`, input id ->
 // value) differs from what the drawer last rendered into them.
@@ -229,7 +198,7 @@ function load(){
   api("GET", "/api/board").then(function(r){
     loading = false;
     if(r.status !== 200) throw new Error("HTTP " + r.status);
-    state.cards = r.body.cards; loadedOnce = true;
+    state.cards = r.body.cards; state.milestones = r.body.milestones || []; loadedOnce = true;
     if(openCardId && card(openCardId) && full[openCardId] && full[openCardId].version !== card(openCardId).version) fetchFull(openCardId);
     render();
     if(reload){ reload = false; load(); }
@@ -269,7 +238,8 @@ function moveCard(id, col, why, patch, expected, from){
 function cardHtml(c){
   var tags = "";
   if(c.column === "needs_input" && c.question && c.question.text) tags += "<span class=\"tag q\">? waiting on answer</span>";
-  if(c.column === "human_review") tags += "<span class=\"tag hum\">awaiting your merge</span>";
+  if(c.milestone) tags += "<span class=\"tag ms\">" + esc(c.milestone) + (c.iteration > 1 ? " · it " + esc(c.iteration) : "") + "</span>";
+  if(c.column === "merged") tags += "<span class=\"tag hum\">" + (c.merge_sha ? "merged " + esc(String(c.merge_sha).slice(0,7)) : "merge not recorded") + "</span>";
   if(c.agent && c.agent.status === "working") tags += "<span class=\"tag agent\">agent working since " + esc(fmt(c.agent.started)) + "</span>";
   if(c.released) tags += "<span class=\"tag rel\">released " + esc(c.released) + "</span>";
   if(hasPr(c)) tags += "<span class=\"tag own\"><a href=\"" + esc(c.pr.url) + "\" target=\"_blank\" rel=\"noopener\">PR #" + esc(c.pr.number) + "</a></span>";
@@ -302,7 +272,35 @@ function drawerHtml(s, edits){
   }
   var links = "";
   for(var i=0;i<(c.links||[]).length;i++) links += "<a href=\"" + esc(c.links[i].url) + "\" target=\"_blank\" rel=\"noopener\">" + esc(c.links[i].label) + "</a>";
-  var ownPr = hasPr(c) ? "<div class=\"ownpr\"><h3>Pull request</h3><a href=\"" + esc(c.pr.url) + "\" target=\"_blank\" rel=\"noopener\">PR #" + esc(c.pr.number) + "</a></div>" : "";
+  var ownPr = hasPr(c) ? "<div class=\"ownpr\"><h3>Pull request</h3><a href=\"" + esc(c.pr.url) + "\" target=\"_blank\" rel=\"noopener\">PR #" + esc(c.pr.number) + "</a>"
+    + (c.merge_sha ? " <span class=\"stat\">merged at " + esc(String(c.merge_sha).slice(0,10)) + "</span>" : (c.column === "merged" ? " <span class=\"stat\">merge not recorded</span>" : "")) + "</div>" : "";
+  // The milestone fields: what the milestone review page is assembled from.
+  var msOpts = "<option value=\"\"" + (c.milestone ? "" : " selected") + ">none</option>", known = false;
+  state.milestones.forEach(function(m){
+    var cur = c.milestone === m.name; if(cur) known = true;
+    if(m.status === "released" && !cur) return;   // a released milestone takes no new cards
+    msOpts += "<option value=\"" + esc(m.name) + "\"" + (cur ? " selected" : "") + ">" + esc(m.name) + (m.status === "released" ? " (released)" : "") + "</option>";
+  });
+  if(c.milestone && !known) msOpts += "<option value=\"" + esc(c.milestone) + "\" selected>" + esc(c.milestone) + "</option>";
+  var areaOpts = "<option value=\"\"" + (c.area ? "" : " selected") + ">—</option>";
+  AREAS.concat(c.area && AREAS.indexOf(c.area) < 0 ? [c.area] : []).forEach(function(a){ areaOpts += "<option" + (c.area === a ? " selected" : "") + ">" + esc(a) + "</option>"; });
+  var rulings = (c.rulings || []).map(function(r){
+    var nums = r.numbers ? Object.keys(r.numbers).map(function(k){ return esc(k) + " " + esc(r.numbers[k]); }).join(" · ") : "";
+    return "<div class=\"ruling\"><span class=\"at\">" + esc(fmt(r.t)) + " · " + esc(r.by) + "</span><div>" + esc(r.text) + "</div>" + (nums ? "<div class=\"nums\">" + nums + "</div>" : "") + "</div>";
+  }).join("");
+  var kv = "";
+  if(c.milestone) kv += "<div class=\"kv\">Iteration " + esc(c.iteration || 1) + "</div>";
+  if(c.sweep) kv += "<div class=\"kv\">Sweep: " + esc(c.sweep.status) + (c.sweep.summary ? " — " + esc(c.sweep.summary) : "") + "</div>";
+  if(c.gaps) kv += "<div class=\"kv\">Stated gaps: " + esc(c.gaps) + "</div>";
+  var msSec = "<div class=\"dsec\"><h3>Milestone</h3>"
+    + "<div class=\"tworow\"><div class=\"mrow\"><label for=\"d-ms\">Milestone</label><select id=\"d-ms\" " + (ro?"disabled":"") + ">" + msOpts + "</select></div>"
+    + "<div class=\"mrow\"><label for=\"d-area\">Area</label><select id=\"d-area\" " + (ro?"disabled":"") + ">" + areaOpts + "</select></div></div>"
+    + "<div class=\"mrow\"><label for=\"d-summary\">Summary (what changed)</label><textarea class=\"short\" id=\"d-summary\" " + (ro?"disabled":"") + ">" + esc(c.summary) + "</textarea></div>"
+    + "<div class=\"mrow\"><label for=\"d-ht\">Human testing (one step per line)</label><textarea class=\"short\" id=\"d-ht\" " + (ro?"disabled":"") + ">" + esc(c.human_testing) + "</textarea></div>"
+    + kv
+    + "<div class=\"mrow\"><label for=\"d-ruling\">Rulings</label>" + (rulings || "<div class=\"kv\">none recorded</div>")
+    + "<div class=\"rulerow\"><input id=\"d-ruling\" placeholder=\"Record a decision (dated, append-only)\" " + (ro?"disabled":"") + "><button class=\"btn\" id=\"d-rulingbtn\" " + (ro?"disabled":"") + ">Record</button></div></div>"
+    + "</div>";
   // Live card: the path to cd into, with a copy button. Done/archived: kept
   // for the record, de-emphasised (the tree has probably been cleaned up).
   var wt = "";
@@ -345,7 +343,7 @@ function drawerHtml(s, edits){
   }
   return "<div class=\"overlay\" id=\"ovl\"><div class=\"drawer\" data-id=\"" + esc(c.id) + "\" role=\"dialog\" aria-label=\"Card detail\">"
     + "<button class=\"closex\" id=\"d-close\" aria-label=\"Close\">×</button>"
-    + "<div class=\"cid\" style=\"font:500 11px 'IBM Plex Mono',monospace;color:var(--muted)\">" + esc(c.id) + " · created " + esc(fmt(c.created)) + " · v" + esc(c.version) + "</div>"
+    + "<div class=\"cid\" style=\"font:500 11px 'IBM Plex Mono',monospace;color:var(--muted)\">" + esc(c.id) + " · created " + esc(fmt(c.created)) + " · v" + esc(c.version) + (c.source ? " · review feedback on " + esc(c.source.card || "milestone " + c.source.milestone) : "") + "</div>"
     + stale + claim + wt
     + "<div class=\"mrow\"><label for=\"d-title\">Title</label><input id=\"d-title\" value=\"" + esc(c.title) + "\" " + (ro?"disabled":"") + "></div>"
     + "<div class=\"tworow\">"
@@ -356,6 +354,7 @@ function drawerHtml(s, edits){
     + "<div class=\"mrow\"><label for=\"d-body\">Spec</label><textarea id=\"d-body\" " + (ro?"disabled":"") + ">" + esc(c.body) + "</textarea></div>"
     + q
     + ownPr
+    + msSec
     + (links ? "<div class=\"links\"><h3>References</h3>" + links + "</div>" : "")
     + "<div class=\"dactions\">"
     + "<button class=\"btn primary\" id=\"d-save\" " + (ro?"disabled":"") + ">Save changes</button>"
@@ -373,13 +372,25 @@ function modalHtml(){
     + "<div class=\"tworow\">"
     + "<div class=\"mrow\"><label for=\"n-role\">Role</label><select id=\"n-role\"><option>engineer</option><option>tester</option><option>release-manager</option></select></div>"
     + "<div class=\"mrow\"><label for=\"n-pri\">Priority</label><select id=\"n-pri\"><option>P1</option><option selected>P2</option><option>P3</option></select></div>"
+    + "<div class=\"mrow\"><label for=\"n-ms\">Milestone</label><select id=\"n-ms\"><option value=\"\">none</option>"
+    + state.milestones.filter(function(m){ return m.status !== "released"; }).map(function(m){ return "<option" + (msFilter === m.name ? " selected" : "") + ">" + esc(m.name) + "</option>"; }).join("")
+    + "</select></div>"
     + "</div>"
     + "<div class=\"dactions\"><button class=\"btn primary\" id=\"n-create\">Add to Backlog</button><button class=\"btn\" id=\"n-cancel\">Cancel</button></div>"
     + "</div></div>";
 }
 
+function msModalHtml(){
+  return "<div class=\"overlay center\" id=\"ovl\"><div class=\"modal\" role=\"dialog\" aria-label=\"New milestone\">"
+    + "<h2>New milestone</h2>"
+    + "<div class=\"stat\">A release's worth of cards, reviewed together once they are merged.</div>"
+    + "<div class=\"mrow\"><label for=\"nm-name\">Name</label><input id=\"nm-name\" placeholder=\"0.7\"></div>"
+    + "<div class=\"dactions\"><button class=\"btn primary\" id=\"nm-create\">Create milestone</button><button class=\"btn\" id=\"nm-cancel\">Cancel</button></div>"
+    + "</div></div>";
+}
+
 function prModalHtml(c, col){
-  var label = col === "human_review" ? "Human Review" : "Review";
+  var label = col === "merged" ? "Merged" : "Review";
   return "<div class=\"overlay center\" id=\"provl\" data-id=\"" + esc(c.id) + "\"><div class=\"modal\" role=\"dialog\" aria-label=\"PR required\">"
     + "<h2>" + esc(c.id) + " needs its own PR to enter " + label + "</h2>"
     + "<div class=\"stat\">The pull request that implements this card. Reference links do not count.</div>"
@@ -391,10 +402,11 @@ function prModalHtml(c, col){
 // Live refreshes re-render the page; keep what the user is typing. Values
 // are restored only into the SAME overlay they were typed in (same card's
 // drawer, the new-card modal, the same card's PR dialog).
-var FIELDS = {drawer: ["d-title","d-body","d-col","d-role","d-pri","d-answer"], create: ["n-title","n-body","n-role","n-pri"], pr: ["pr-url"]};
+var FIELDS = {drawer: ["d-title","d-body","d-col","d-role","d-pri","d-ms","d-area","d-summary","d-ht","d-answer","d-ruling"],
+              create: ["n-title","n-body","n-role","n-pri","n-ms"], pr: ["pr-url"], ms: ["nm-name"]};
 function overlayKeys(){
   var dr = document.querySelector(".drawer[data-id]"), pr = document.getElementById("provl");
-  return {drawer: dr ? dr.dataset.id : null, create: !!document.getElementById("n-title"), pr: pr ? pr.dataset.id : null};
+  return {drawer: dr ? dr.dataset.id : null, create: !!document.getElementById("n-title"), pr: pr ? pr.dataset.id : null, ms: !!document.getElementById("nm-name")};
 }
 function captureDraft(){
   var d = {keys: overlayKeys(), values: {}, focus: null};
@@ -407,7 +419,7 @@ function captureDraft(){
 // edited. Every other drawer field shows the card as it is now.
 function restoreDraft(d, keepDrawer){
   var now = overlayKeys();
-  var same = {drawer: d.keys.drawer && d.keys.drawer === now.drawer, create: d.keys.create && now.create, pr: d.keys.pr && d.keys.pr === now.pr};
+  var same = {drawer: d.keys.drawer && d.keys.drawer === now.drawer, create: d.keys.create && now.create, pr: d.keys.pr && d.keys.pr === now.pr, ms: d.keys.ms && now.ms};
   Object.keys(FIELDS).forEach(function(k){
     if(!same[k]) return;
     FIELDS[k].forEach(function(f){
@@ -429,29 +441,41 @@ function render(){
   if(!openCardId) base = null;
   else if(full[openCardId] && (!base || base.id !== openCardId || discardDraft || !Object.keys(edits).length)) base = snapshot(full[openCardId]);
   discardDraft = false;
-  var keepDrawer = Object.keys(edits).map(function(k){ return DRAWER[k]; }).concat(["d-answer"]);
-  var archivedCards = state.cards.filter(function(c){ return c.column === "archived"; });
+  var keepDrawer = Object.keys(edits).map(function(k){ return DRAWER[k]; }).concat(["d-answer","d-ruling"]);
+  var shown = state.cards.filter(inFilter);
+  var archivedCards = shown.filter(function(c){ return c.column === "archived"; });
   var visCols = COLUMNS.slice();
   if(showArchived && archivedCards.length) visCols.push(ARCHIVED);
   var cols = "";
   for(var i=0;i<visCols.length;i++){
     var col = visCols[i];
-    var cs = state.cards.filter(function(c){ return c.column === col.key; });
+    var cs = shown.filter(function(c){ return c.column === col.key; });
     var inner = cs.map(cardHtml).join("") || "<div class=\"empty\">" + (loadedOnce ? "empty" : "…") + "</div>";
     cols += "<div class=\"col\" data-col=\"" + col.key + "\">"
       + "<div class=\"colhead\"><span class=\"nm\">" + col.label + "</span><span class=\"ct\">" + cs.length + "</span><span class=\"hint\">" + col.hint + "</span></div>"
       + "<div class=\"cards\">" + inner + "</div></div>";
   }
+  var msel = "<option value=\"\"" + (msFilter ? "" : " selected") + ">All cards</option>"
+    + "<option value=\"" + NO_MS + "\"" + (msFilter === NO_MS ? " selected" : "") + ">No milestone</option>";
+  state.milestones.forEach(function(m){
+    msel += "<option value=\"" + esc(m.name) + "\"" + (msFilter === m.name ? " selected" : "") + ">Milestone " + esc(m.name) + " (" + esc(m.status.replace("_"," ")) + ")</option>";
+  });
+  if(msFilter && msFilter !== NO_MS && !milestone(msFilter)) msel += "<option value=\"" + esc(msFilter) + "\" selected>Milestone " + esc(msFilter) + " (unknown)</option>";
+  var reviewLink = msFilter && milestone(msFilter)
+    ? "<a class=\"btn\" id=\"reviewlink\" href=\"/milestones/" + encodeURIComponent(msFilter) + "\">Review " + esc(msFilter) + " →</a>" : "";
   app.innerHTML =
     "<div class=\"hdr\"><h1>ArenaSim <span class=\"ax\">Dispatch</span></h1>"
-    + "<span class=\"sub\">" + state.cards.length + " cards · drag to In&nbsp;Progress to put an agent on it</span>"
+    + "<span class=\"sub\">" + shown.length + " cards · drag to In&nbsp;Progress to put an agent on it</span>"
     + "<span class=\"spacer\"></span><span class=\"stat\">" + esc(statusMsg) + "</span>"
+    + "<span class=\"msbar\"><select id=\"msel\" aria-label=\"Milestone filter\">" + msel + "</select>" + reviewLink
+    + "<button class=\"btn\" id=\"newms\" " + (connected?"":"disabled") + ">New milestone</button></span>"
     + (archivedCards.length ? "<button class=\"btn\" id=\"archbtn\">" + (showArchived ? "Hide archived" : "Archived (" + archivedCards.length + ")") + "</button>" : "")
     + "<button class=\"btn primary\" id=\"newbtn\" " + (connected?"":"disabled") + ">New card</button></div>"
     + (!connected && loadedOnce ? "<div class=\"robanner\">The board daemon is unreachable — changes can't be saved until it is back. Retrying…</div>" : "")
     + "<div class=\"boardwrap\"><div class=\"board\" style=\"grid-template-columns:repeat(" + visCols.length + ",minmax(216px,1fr));min-width:" + (visCols.length*224) + "px\">" + cols + "</div></div>"
     + (openCardId && card(openCardId) ? drawerHtml({id: openCardId}, edits) : "")
     + (showNew ? modalHtml() : "")
+    + (showNewMs ? msModalHtml() : "")
     + (pending && card(pending.id) ? prModalHtml(card(pending.id), pending.column) : "");
   restoreDraft(keep, keepDrawer);
   // Remember what the drawer now shows in every field the user has not
@@ -466,11 +490,35 @@ function render(){
   wire();
 }
 function openDrawer(id){ openCardId = id; base = null; confirmDelete = false; confirmRelease = false; fetchFull(id); render(); }
-function closeAll(){ openCardId = null; showNew = false; confirmDelete = false; confirmRelease = false; pending = null; base = null; }
+function closeAll(){ if(params.get("card")){ params.delete("card"); setFilter(msFilter); } openCardId = null; showNew = false; showNewMs = false; confirmDelete = false; confirmRelease = false; pending = null; base = null; }
 
 function wire(){
   var newbtn = document.getElementById("newbtn");
   if(newbtn) newbtn.onclick = function(){ showNew = true; render(); var t=document.getElementById("n-title"); if(t) t.focus(); };
+  var msel = document.getElementById("msel");
+  if(msel) msel.onchange = function(){ setFilter(msel.value); render(); };
+  var newms = document.getElementById("newms");
+  if(newms) newms.onclick = function(){ showNewMs = true; render(); var t=document.getElementById("nm-name"); if(t) t.focus(); };
+  var nmcreate = document.getElementById("nm-create");
+  if(nmcreate) nmcreate.onclick = function(){
+    var n = document.getElementById("nm-name").value.trim();
+    if(!n) return;
+    api("POST", "/api/milestones", {name: n}).then(function(r){
+      if(afterWrite(r, r.status === 200 ? "created milestone " + n : "")){ showNewMs = false; setFilter(n); }
+      render();
+    });
+  };
+  var nmcancel = document.getElementById("nm-cancel");
+  if(nmcancel) nmcancel.onclick = function(){ showNewMs = false; render(); };
+  var drul = document.getElementById("d-rulingbtn");
+  if(drul) drul.onclick = function(){
+    var c = full[openCardId], el = document.getElementById("d-ruling"); if(!c || !el) return;
+    var text = el.value.trim(); if(!text) return;
+    api("POST", "/api/cards/" + encodeURIComponent(c.id) + "/ruling", {text: text}).then(function(r){
+      if(afterWrite(r, "ruling recorded on " + c.id)){ var e2 = document.getElementById("d-ruling"); if(e2) e2.value = ""; }
+      fetchFull(c.id);
+    });
+  };
   var archbtn = document.getElementById("archbtn");
   if(archbtn) archbtn.onclick = function(){ showArchived = !showArchived; render(); };
   var provl = document.getElementById("provl");
@@ -549,6 +597,10 @@ function wire(){
     if(e.body !== undefined){ patch.body = e.body; changed.push("spec"); }
     if(e.role !== undefined){ patch.role = e.role; changed.push("role"); }
     if(e.priority !== undefined && e.priority){ patch.priority = e.priority; changed.push("priority"); }
+    if(e.milestone !== undefined){ patch.milestone = e.milestone || null; changed.push("milestone"); }
+    if(e.area !== undefined){ patch.area = e.area || null; changed.push("area"); }
+    if(e.summary !== undefined){ patch.summary = e.summary; changed.push("summary"); }
+    if(e.human_testing !== undefined){ patch.human_testing = e.human_testing; changed.push("human testing"); }
     var id = c.id, expected = base.version, req;
     if(e.column !== undefined){
       var why = changed.length ? "Edited " + changed.join(", ") + "; moved" : "Moved";
@@ -595,10 +647,12 @@ function wire(){
   if(ncreate) ncreate.onclick = function(){
     var t = document.getElementById("n-title").value.trim();
     if(!t) return;
-    api("POST", "/api/cards", {
+    var nb = {
       title: t, body: document.getElementById("n-body").value,
       role: document.getElementById("n-role").value, priority: document.getElementById("n-pri").value
-    }).then(function(r){
+    };
+    var nms = document.getElementById("n-ms").value; if(nms) nb.milestone = nms;
+    api("POST", "/api/cards", nb).then(function(r){
       if(afterWrite(r, r.status === 200 ? "created " + r.body.id : "")){ showNew = false; }
       render();
     });
@@ -608,7 +662,7 @@ function wire(){
 }
 
 document.addEventListener("keydown", function(e){
-  if(e.key === "Escape" && (openCardId || showNew || pending)){ closeAll(); render(); }
+  if(e.key === "Escape" && (openCardId || showNew || showNewMs || pending)){ closeAll(); render(); }
 });
 
 // Live refresh: the daemon nudges this page on every board event, whoever wrote it.
@@ -618,6 +672,8 @@ var es = new EventSource("/api/stream");
 es.onopen = function(){ connected = true; if(statusMsg === "connecting…" || /unreachable/.test(statusMsg)) statusMsg = "connected"; load(); };
 es.onmessage = function(){ scheduleLoad(); };
 es.onerror = function(){ connected = false; statusMsg = "daemon unreachable — retrying"; render(); };
+// A link to one card (the review page's card ids): open its drawer.
+if(params.get("card")) openDrawer(params.get("card"));
 render();
 load();
 })();
