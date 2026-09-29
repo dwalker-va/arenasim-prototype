@@ -502,6 +502,9 @@ pub(super) fn escape_tick(
         // A healer does not leash to itself.
         healer_point: None,
         healer_leash_range: 0.0,
+        // A healer throws no trap.
+        trap_setup_point: None,
+        trap_setup_range: 0.0,
         // No kill target tracked during an escape — repulsion, not LoS-seek,
         // drives the direction (and los_seek is 0.0 for healers regardless).
         los_target: None,
@@ -779,6 +782,9 @@ pub(super) fn healer_pressured_tick_shared(
         // A healer does not leash to itself.
         healer_point: None,
         healer_leash_range: 0.0,
+        // A healer throws no trap.
+        trap_setup_point: None,
+        trap_setup_range: 0.0,
         los_target,
     };
     // Deny posture: prefer a step that breaks attacker LoS (cover_pull),

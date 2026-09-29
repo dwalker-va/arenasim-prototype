@@ -1315,3 +1315,583 @@ fn team_hp_advantage_zero_when_self_absent() {
         0.0
     );
 }
+
+// ============================================================================
+// Freezing Trap — who can free its victim (AS-125)
+// ============================================================================
+
+/// Who can lift a Freezing Trap off a teammate, asked of EVERY class and of
+/// the Felhunter through the engine's own removal rules (`can_free_ally`), and
+/// asserted as named sets. The Hunter's trap AI holds a trap whose victim an
+/// enemy could free, so this table is what decides where traps go: a class
+/// joining the non-pet row without anyone deciding it should would silently
+/// stop every Hunter trapping its teammates.
+///
+/// The pet row is the AS-129 seam: today only the Felhunter reaches a pet, so
+/// a trapped Felhunter is freed by nobody (it cannot act while trapped). Make
+/// the healers' dispels reach pets and this row, not the Hunter AI, changes.
+#[test]
+fn who_can_free_a_freezing_trap() {
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::can_free_ally;
+    use arenasim::states::play_match::traps::freezing_trap_aura;
+
+    let defs = AbilityDefinitions::default();
+    let hunter = Entity::from_raw(99);
+    let aura = freezing_trap_aura(hunter);
+    let victim = info(Entity::from_raw(1), 2, CharacterClass::Warrior);
+    let pet_victim = pet_info(Entity::from_raw(2), 2, CharacterClass::Warlock);
+
+    let freers_of = |victim: &CombatantInfo| {
+        let mut freers: Vec<String> = CharacterClass::all()
+            .iter()
+            .map(|class| info(Entity::from_raw(10), 2, *class))
+            .chain(std::iter::once(pet_info(
+                Entity::from_raw(11),
+                2,
+                CharacterClass::Warlock,
+            )))
+            .filter(|freer| can_free_ally(&defs, freer, victim, &aura))
+            .map(|freer| match freer.pet_type {
+                Some(pet) => pet.name().to_string(),
+                None => freer.class.name().to_string(),
+            })
+            .collect();
+        freers.sort();
+        freers
+    };
+
+    assert_eq!(
+        freers_of(&victim),
+        vec!["Felhunter", "Paladin", "Priest"],
+        "who frees a trapped teammate"
+    );
+    assert_eq!(
+        freers_of(&pet_victim),
+        vec!["Felhunter"],
+        "who frees a trapped pet"
+    );
+
+    // Nobody frees themselves, and nobody frees an ENEMY.
+    let priest = info(Entity::from_raw(1), 2, CharacterClass::Priest);
+    assert!(!can_free_ally(&defs, &priest, &priest, &aura));
+    let enemy_priest = info(Entity::from_raw(3), 1, CharacterClass::Priest);
+    assert!(!can_free_ally(&defs, &enemy_priest, &victim, &aura));
+}
+
+/// The Hunter's "is this trap worth throwing" rule, over the team shapes the
+/// AS-125 rulings name. A healer — the dispeller the trap is FOR — is always
+/// worth one, including beside a Felhunter that could devour it (the intended
+/// counter is left to play out). Anyone else is worth one only when no
+/// teammate of its could free it — a trapped Felhunter included — however
+/// hard the Hunter's team is pressing the teammate that would.
+#[test]
+fn a_trap_is_worth_throwing_where_nobody_frees_it() {
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::hunter_dip::trap_victim_worth_it;
+
+    let defs = AbilityDefinitions::default();
+    let hunter = Entity::from_raw(0);
+    let (a, b, felhunter) = (
+        Entity::from_raw(1),
+        Entity::from_raw(2),
+        Entity::from_raw(3),
+    );
+
+    // Worth-it for `a`, `b` and (when fielded) the Felhunter, in that order.
+    let worth = |team: &[(Entity, CharacterClass)], with_felhunter: bool| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        for (e, class) in team {
+            snap.combatants.insert(*e, info(*e, 2, *class));
+        }
+        if with_felhunter {
+            snap.combatants
+                .insert(felhunter, pet_info(felhunter, 2, CharacterClass::Warlock));
+        }
+        let ctx = snap.context_for(hunter);
+        team.iter()
+            .map(|(e, _)| *e)
+            .chain(with_felhunter.then_some(felhunter))
+            .map(|e| trap_victim_worth_it(&ctx, &defs, hunter, e))
+            .collect::<Vec<_>>()
+    };
+
+    use CharacterClass::*;
+    // The dispeller is the target; the DPS it would free is not — whoever the
+    // Hunter's team is killing, since a focused Priest still dispels it.
+    assert_eq!(worth(&[(a, Priest), (b, Warrior)], false), [true, false]);
+    // Nobody on the team can free anybody: both are fair game.
+    assert_eq!(worth(&[(a, Rogue), (b, Warrior)], false), [true, true]);
+    // The Shaman frees nobody (Purge strips enemy buffs), so its DPS is fair.
+    assert_eq!(worth(&[(a, Shaman), (b, Warrior)], false), [true, true]);
+    // Warlock + healer: two dispellers. The healer stays the target; the
+    // Warlock is freed by the Felhunter (and the Priest); the Felhunter itself
+    // nobody can free.
+    assert_eq!(
+        worth(&[(a, Priest), (b, Warlock)], true),
+        [true, false, true]
+    );
+    // Warlock + Rogue: the Felhunter frees both, so neither is worth a trap —
+    // but a trapped Felhunter stays trapped.
+    assert_eq!(
+        worth(&[(a, Rogue), (b, Warlock)], true),
+        [false, false, true]
+    );
+    // 1v1 Warlock: the Felhunter is fair game, its Warlock is not.
+    assert_eq!(worth(&[(b, Warlock)], true), [false, true]);
+}
+
+/// A trap thrown into open ground can be sprung by an enemy the Hunter cannot
+/// see, so while an enemy is hidden the question is asked of the visible
+/// dispeller alone: at gates-open the enemy Rogue is stealthed and absent from
+/// the Hunter's view, yet a lone visible Priest frees whoever walks into a
+/// lane trap. With nothing hidden, the question does not arise.
+#[test]
+fn an_unseen_victim_is_answered_by_the_dispeller_in_view() {
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::hunter_dip::unseen_victim_would_be_freed;
+
+    let defs = AbilityDefinitions::default();
+    let hunter = Entity::from_raw(0);
+    let freed = |enemies: &[CombatantInfo]| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        for e in enemies {
+            snap.combatants.insert(e.entity, *e);
+        }
+        unseen_victim_would_be_freed(&snap.context_for(hunter), &defs, hunter, 1)
+    };
+    let e = |i: u32, class: CharacterClass| info(Entity::from_raw(i), 2, class);
+    let hidden = |i: u32, class: CharacterClass| CombatantInfo {
+        stealthed: true,
+        ..e(i, class)
+    };
+
+    use CharacterClass::*;
+    assert!(
+        freed(&[hidden(1, Rogue), e(2, Priest)]),
+        "a stealthed Rogue beside a visible Priest"
+    );
+    assert!(freed(&[hidden(1, Rogue), e(2, Paladin)]));
+    assert!(freed(&[
+        hidden(1, Rogue),
+        e(2, Warlock),
+        pet_info(Entity::from_raw(3), 2, Warlock)
+    ]));
+    assert!(!freed(&[hidden(1, Rogue), e(2, Warrior)]));
+    assert!(!freed(&[hidden(1, Rogue), e(2, Shaman)]));
+    // Nothing hidden: the expected victim is in view and answers for itself.
+    assert!(!freed(&[e(1, Rogue), e(2, Priest)]));
+    // A dead dispeller frees nobody.
+    let dead_priest = CombatantInfo {
+        is_alive: false,
+        ..e(2, Priest)
+    };
+    assert!(!freed(&[hidden(1, Rogue), dead_priest]));
+}
+
+/// A lane trap is decided on the enemy that would SPRING it — the first inside
+/// its radius once it has armed — not on whoever stands nearest the landing
+/// when it is thrown. The throw here flies 15yd (0.75s) and arms 1.5s later.
+#[test]
+fn a_lane_trap_is_decided_on_whoever_reaches_it_after_it_arms() {
+    use arenasim::states::play_match::class_ai::hunter_dip::predicted_trap_springer;
+
+    let hunter = Entity::from_raw(0);
+    let landing = Vec3::new(0.0, 0.0, 15.0);
+    let at = |e: u32, class: CharacterClass, pos: Vec3, vel: Vec3, target: Option<Entity>| {
+        CombatantInfo {
+            position: pos,
+            velocity: vel,
+            target,
+            ..info(Entity::from_raw(e), 2, class)
+        }
+    };
+    let springer = |enemies: Vec<CombatantInfo>| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        for e in enemies {
+            snap.combatants.insert(e.entity, e);
+        }
+        let ctx = snap.context_for(hunter);
+        predicted_trap_springer(&ctx, 1, Vec3::ZERO, landing)
+    };
+    let toward_hunter = Vec3::new(0.0, 0.0, -7.0);
+
+    // The Warlock + Rogue case: a Felhunter stands nearest the landing, just
+    // outside the radius, while the Rogue runs the lane at the Hunter. The
+    // Rogue springs it.
+    let felhunter = CombatantInfo {
+        position: Vec3::new(8.0, 0.0, 15.0),
+        ..pet_info(Entity::from_raw(1), 2, CharacterClass::Warlock)
+    };
+    let rogue = at(
+        2,
+        CharacterClass::Rogue,
+        Vec3::new(0.0, 0.0, 40.0),
+        toward_hunter,
+        Some(hunter),
+    );
+    assert_eq!(springer(vec![felhunter, rogue]), Some(rogue.entity));
+    // Alone, the Felhunter never reaches it: nobody is predicted.
+    assert_eq!(springer(vec![felhunter]), None);
+
+    // An enemy already inside the radius and planted springs it as it arms.
+    let planted = at(3, CharacterClass::Warrior, landing, Vec3::ZERO, None);
+    assert_eq!(springer(vec![planted]), Some(planted.entity));
+
+    // An enemy that crosses the landing before it arms and runs on (chasing a
+    // unit far behind the Hunter) is gone by the time it could spring.
+    let through = at(
+        4,
+        CharacterClass::Warrior,
+        Vec3::new(0.0, 0.0, 20.0),
+        toward_hunter,
+        Some(hunter),
+    );
+    let mut far_ally = info(Entity::from_raw(5), 1, CharacterClass::Priest);
+    far_ally.position = Vec3::new(0.0, 0.0, -60.0);
+    let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+    snap.combatants.insert(far_ally.entity, far_ally);
+    snap.combatants.insert(
+        through.entity,
+        CombatantInfo {
+            target: Some(far_ally.entity),
+            ..through
+        },
+    );
+    let ctx = snap.context_for(hunter);
+    assert_eq!(predicted_trap_springer(&ctx, 1, Vec3::ZERO, landing), None);
+
+    // A caster closing on the Hunter stops at its casting range, short of the
+    // landing; a melee from the same spot runs through it.
+    let priest = at(
+        6,
+        CharacterClass::Priest,
+        Vec3::new(0.0, 0.0, 50.0),
+        toward_hunter,
+        Some(hunter),
+    );
+    assert_eq!(springer(vec![priest]), None);
+    let warrior = at(
+        7,
+        CharacterClass::Warrior,
+        Vec3::new(0.0, 0.0, 40.0),
+        toward_hunter,
+        Some(hunter),
+    );
+    assert_eq!(springer(vec![warrior]), Some(warrior.entity));
+}
+
+/// The trap breaks on any damage, so a lane trap is never decided on an enemy
+/// the Hunter's own team is attacking: a teammate's target, or the Hunter's
+/// kill target once it has a teammate to converge on it. Alone, the Hunter and
+/// its pet hold fire on a trapped target, so the 1v1 peel on the kill target
+/// stands.
+#[test]
+fn a_lane_trap_is_not_thrown_onto_the_enemy_the_team_is_hitting() {
+    use arenasim::states::play_match::class_ai::hunter_dip::teammate_would_break_it;
+
+    let hunter = Entity::from_raw(0);
+    let (victim, other) = (Entity::from_raw(1), Entity::from_raw(2));
+    let breaks = |ally_target: Option<Option<Entity>>, own_target: Option<Entity>| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        snap.combatants
+            .insert(victim, info(victim, 2, CharacterClass::Warrior));
+        snap.combatants
+            .insert(other, info(other, 2, CharacterClass::Priest));
+        if let Some(target) = ally_target {
+            let ally = Entity::from_raw(3);
+            snap.combatants.insert(
+                ally,
+                CombatantInfo {
+                    target,
+                    ..info(ally, 1, CharacterClass::Priest)
+                },
+            );
+        }
+        let ctx = snap.context_for(hunter);
+        teammate_would_break_it(&ctx, hunter, own_target, victim)
+    };
+
+    // 1v1 (no teammate): the peel on the Hunter's own kill target stands.
+    assert!(!breaks(None, Some(victim)));
+    // With a teammate, the kill target is off-limits...
+    assert!(breaks(Some(None), Some(victim)));
+    // ...and so is anyone a teammate is hitting, healers included...
+    assert!(breaks(Some(Some(victim)), Some(other)));
+    // ...but not an enemy nobody on the team is attacking.
+    assert!(!breaks(Some(Some(other)), Some(other)));
+}
+
+/// The "trap the dispeller" ruling under pressure: with a melee on the Hunter,
+/// the Freezing Trap goes on the enemy HEALER — when nothing would free it
+/// and no DPS teammate of the Hunter's is killing it (a trapped enemy is one
+/// every damage source holds fire on, so trapping a partner's target idles
+/// that partner). Two targets do not hold it: a partner HEALER's — a healer's
+/// target is wherever acquisition left it, usually the enemy healer, and
+/// counting it would hold the trap in nearly every Hunter + healer team — and
+/// the Hunter's own, which it leaves when it throws (target acquisition,
+/// pinned in `tests/hunter_trap_trace.rs`).
+#[test]
+fn a_pressured_hunter_traps_the_healer_nobody_else_is_killing() {
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::hunter_dip::{
+        pressure_trap_healer, PRESSURE_TRAP_FREEABLE, PRESSURE_TRAP_INELIGIBLE,
+        PRESSURE_TRAP_TEAM_ATTACKING,
+    };
+
+    let defs = AbilityDefinitions::default();
+    let hunter = Entity::from_raw(0);
+    let (healer, partner, felhunter, teammate) = (
+        Entity::from_raw(1),
+        Entity::from_raw(2),
+        Entity::from_raw(3),
+        Entity::from_raw(4),
+    );
+    use CharacterClass::*;
+    let verdict = |healer_class: CharacterClass,
+                   partner_class: CharacterClass,
+                   with_felhunter: bool,
+                   ally: Option<(CharacterClass, Option<Entity>)>,
+                   own_target: Option<Entity>,
+                   dotted: bool| {
+        let mut snap = snapshot_for(hunter, 1, Hunter);
+        snap.combatants.insert(
+            hunter,
+            CombatantInfo {
+                target: own_target,
+                ..snap.combatants[&hunter]
+            },
+        );
+        snap.combatants
+            .insert(healer, info(healer, 2, healer_class));
+        snap.combatants
+            .insert(partner, info(partner, 2, partner_class));
+        if with_felhunter {
+            snap.combatants
+                .insert(felhunter, pet_info(felhunter, 2, Warlock));
+        }
+        if let Some((class, target)) = ally {
+            snap.combatants.insert(
+                teammate,
+                CombatantInfo {
+                    target,
+                    ..info(teammate, 1, class)
+                },
+            );
+        }
+        if dotted {
+            snap.active_auras.insert(
+                healer,
+                vec![Aura {
+                    tick_interval: 3.0,
+                    ..aura_with(AuraType::DamageOverTime, Some(hunter), 0.0)
+                }],
+            );
+        }
+        let ctx = snap.context_for(hunter);
+        pressure_trap_healer(&ctx, &defs, hunter, 1)
+    };
+
+    // Rogue + Priest, the Hunter killing the Priest, and its own Priest's
+    // target the Priest too: a partner healer does not hold it — trap the
+    // Priest.
+    assert_eq!(
+        verdict(
+            Priest,
+            Rogue,
+            false,
+            Some((Priest, Some(healer))),
+            Some(healer),
+            false
+        ),
+        Some(Ok(healer))
+    );
+    // Its Warrior partner is killing the Priest: held.
+    assert_eq!(
+        verdict(
+            Priest,
+            Rogue,
+            false,
+            Some((Warrior, Some(healer))),
+            Some(partner),
+            false
+        ),
+        Some(Err(PRESSURE_TRAP_TEAM_ATTACKING))
+    );
+    // The partner is on the Rogue instead: trap the Priest.
+    assert_eq!(
+        verdict(
+            Priest,
+            Rogue,
+            false,
+            Some((Warrior, Some(partner))),
+            Some(partner),
+            false
+        ),
+        Some(Ok(healer))
+    );
+    // A Felhunter would devour it off the Priest: held.
+    assert_eq!(
+        verdict(Priest, Warlock, true, None, Some(partner), false),
+        Some(Err(PRESSURE_TRAP_FREEABLE))
+    );
+    // A friendly DoT would break it on the first tick: held.
+    assert_eq!(
+        verdict(Priest, Rogue, false, None, Some(healer), true),
+        Some(Err(PRESSURE_TRAP_INELIGIBLE))
+    );
+    // Paladin + Warrior, Shaman + Warrior: nothing frees either healer.
+    assert_eq!(
+        verdict(Paladin, Warrior, false, None, Some(partner), false),
+        Some(Ok(healer))
+    );
+    assert_eq!(
+        verdict(Shaman, Warrior, false, None, Some(partner), false),
+        Some(Ok(healer))
+    );
+    // No healer at all: nothing to decide.
+    assert_eq!(
+        verdict(Mage, Warrior, false, None, Some(partner), false),
+        None
+    );
+}
+
+/// Where the pressure trap lands: on the healer's led position, only within
+/// the trap's configured range, and only when the healer is the enemy that
+/// would spring it — nobody else near the landing.
+#[test]
+fn a_pressure_trap_lands_only_where_it_catches_the_healer_cleanly() {
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::hunter_dip::{
+        pressure_trap_landing, PRESSURE_TRAP_NOT_CLEAN, PRESSURE_TRAP_OUT_OF_RANGE,
+    };
+
+    let defs = AbilityDefinitions::default();
+    let range = defs.get_unchecked(&AbilityType::FreezingTrap).range;
+    let hunter = Entity::from_raw(0);
+    let (healer, rogue) = (Entity::from_raw(1), Entity::from_raw(2));
+    let landing = |healer_at: Vec3, rogue_at: Vec3| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        snap.combatants.insert(
+            healer,
+            CombatantInfo {
+                position: healer_at,
+                ..info(healer, 2, CharacterClass::Priest)
+            },
+        );
+        snap.combatants.insert(
+            rogue,
+            CombatantInfo {
+                position: rogue_at,
+                target: Some(hunter),
+                ..info(rogue, 2, CharacterClass::Rogue)
+            },
+        );
+        pressure_trap_landing(&snap.context_for(hunter), &defs, 1, Vec3::ZERO, healer)
+    };
+    let on_hunter = Vec3::new(2.0, 0.0, 0.0);
+
+    // A planted Priest 20yd off, the Rogue on the Hunter: dropped on it.
+    let at = Vec3::new(0.0, 0.0, 20.0);
+    assert_eq!(landing(at, on_hunter), Ok(at));
+    // Beyond the configured range: held, not pulled in.
+    assert_eq!(
+        landing(Vec3::new(0.0, 0.0, range + 1.0), on_hunter),
+        Err(PRESSURE_TRAP_OUT_OF_RANGE)
+    );
+    // The Rogue beside the Priest would spring it first: held.
+    assert_eq!(
+        landing(at, Vec3::new(2.0, 0.0, 20.0)),
+        Err(PRESSURE_TRAP_NOT_CLEAN)
+    );
+}
+
+/// Disengage folds in the trap setup the way the kite does: straight away
+/// from the melee, bent toward the enemy healer only when the straight leap
+/// would land beyond throw range of it, and never so far that it stops
+/// carrying the Hunter away from the melee.
+#[test]
+fn disengage_bends_toward_the_healer_only_when_the_leap_would_lose_it() {
+    use arenasim::states::play_match::class_ai::hunter_dip::trap_setup_disengage;
+
+    let away = Vec3::new(-1.0, 0.0, 0.0);
+    let bend = |healer: Vec3, trap_setup: f32| {
+        trap_setup_disengage(away, Vec3::ZERO, 15.0, healer, 25.0, 6.0, trap_setup)
+    };
+
+    // The straight leap keeps the healer within 25yd: unchanged.
+    assert_eq!(bend(Vec3::new(-10.0, 0.0, 10.0), 3.0), away);
+    // It would carry the Hunter out of range: bent toward +Z, still away.
+    let bent = bend(Vec3::new(10.0, 0.0, 30.0), 3.0);
+    assert!(bent.x < 0.0 && bent.z > 0.1, "bent {bent:?}");
+    assert!((bent.length() - 1.0).abs() < 1e-4);
+    // Zero weight: unchanged.
+    assert_eq!(bend(Vec3::new(10.0, 0.0, 30.0), 0.0), away);
+    // The healer directly behind the melee: the bend cannot reverse the leap.
+    let behind = bend(Vec3::new(40.0, 0.0, 0.0), 3.0);
+    assert!(behind.dot(away) > 0.0, "still away, got {behind:?}");
+}
+
+/// Aimed Shot goes before a due Serpent Sting only when it can finish: no
+/// enemy that could stop the 2.5s cast — an interrupt within its own reach, a
+/// melee closing to melee range, or an enemy the Hunter cannot see — gets
+/// there first.
+#[test]
+fn aimed_shot_waits_for_the_time_to_finish_it() {
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::hunter::aimed_shot_has_time;
+
+    let defs = AbilityDefinitions::default();
+    let hunter = Entity::from_raw(0);
+    let has_time = |enemies: Vec<CombatantInfo>, auras: Vec<(Entity, Aura)>| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        for e in enemies {
+            snap.combatants.insert(e.entity, e);
+        }
+        for (e, a) in auras {
+            snap.active_auras.insert(e, vec![a]);
+        }
+        aimed_shot_has_time(&defs, hunter, Vec3::ZERO, None, &snap.context_for(hunter))
+    };
+    let at = |i: u32, class: CharacterClass, z: f32, vz: f32| CombatantInfo {
+        position: Vec3::new(0.0, 0.0, z),
+        velocity: Vec3::new(0.0, 0.0, vz),
+        ..info(Entity::from_raw(i), 2, class)
+    };
+    use CharacterClass::*;
+
+    // Nobody who could stop it: a Priest and a Mage at 25yd.
+    assert!(has_time(
+        vec![at(1, Priest, 25.0, -7.0), at(2, Mage, 25.0, 0.0)],
+        vec![]
+    ));
+    // A Warrior 30yd off, running in at 7yd/s: 3.9s to melee range.
+    assert!(has_time(vec![at(1, Warrior, 30.0, -7.0)], vec![]));
+    // The same Warrior 15yd off: 1.8s — it arrives mid-cast.
+    assert!(!has_time(vec![at(1, Warrior, 15.0, -7.0)], vec![]));
+    // A Rogue 15yd off walking away never arrives.
+    assert!(has_time(vec![at(1, Rogue, 15.0, 7.0)], vec![]));
+    // A Felhunter inside Spell Lock's 30yd needs no time at all...
+    let felhunter = CombatantInfo {
+        position: Vec3::new(0.0, 0.0, 25.0),
+        ..pet_info(Entity::from_raw(3), 2, Warlock)
+    };
+    assert!(!has_time(vec![felhunter], vec![]));
+    // ...unless it is held in hard CC past the cast.
+    let trapped = Aura {
+        duration: 6.0,
+        ..aura_with(AuraType::Incapacitate, Some(hunter), 0.0)
+    };
+    assert!(has_time(vec![felhunter], vec![(felhunter.entity, trapped)]));
+    // A Rogue the Hunter cannot see counts as one that could stop it: the
+    // Priest beside it is harmless, but the opener waits.
+    let stealthed_rogue = CombatantInfo {
+        stealthed: true,
+        ..at(4, Rogue, 60.0, 0.0)
+    };
+    assert!(!has_time(
+        vec![at(1, Priest, 25.0, 0.0), stealthed_rogue],
+        vec![]
+    ));
+}

@@ -20,7 +20,8 @@ use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementCo
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::components::{
-    ActiveAuras, AuraType, DRTracker, Pet, PetType, Totem, TotemElement,
+    ActiveAuras, AuraType, DRTracker, Pet, PetType, Totem, TotemElement, TrapLaunchProjectile,
+    TrapType,
 };
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
@@ -92,6 +93,23 @@ pub struct ObservedTotem {
     pub duration_remaining: f32,
 }
 
+/// A read-only snapshot of one Hunter trap IN FLIGHT on a frame: a trap thrown
+/// beyond `TRAP_LAUNCH_MIN_RANGE`, from where the Hunter stood to where it
+/// will land. A closer trap is dropped as a `Trap` directly and never flies.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObservedTrapLaunch {
+    /// The in-flight projectile entity — one per throw, so a probe can tell a
+    /// new throw from the same one seen on a later frame.
+    pub entity: Entity,
+    /// The Hunter who threw it.
+    pub owner: Entity,
+    pub trap_type: TrapType,
+    /// Where the Hunter stood when it threw (y is height; compare on x/z).
+    pub origin: Vec3,
+    /// Where the trap will land (post arena-clamp).
+    pub landing: Vec3,
+}
+
 /// One frame's observation, passed to the observer callback of
 /// [`run_headless_match_observed`] after each `app.update()`.
 #[derive(Debug, Clone, PartialEq)]
@@ -107,6 +125,8 @@ pub struct FrameObservation {
     /// All live Shaman totems this frame, sorted by entity id (deterministic).
     /// Empty in matches without a Shaman.
     pub totems: Vec<ObservedTotem>,
+    /// Every Hunter trap in flight this frame, sorted by entity id.
+    pub trap_launches: Vec<ObservedTrapLaunch>,
 }
 
 /// Result of a completed headless match
@@ -911,7 +931,18 @@ fn observe_frame(world: &World) -> FrameObservation {
 
     let mut combatants = BTreeMap::new();
     let mut totems: Vec<(Entity, ObservedTotem)> = Vec::new();
+    let mut trap_launches: Vec<ObservedTrapLaunch> = Vec::new();
     for entity_ref in world.iter_entities() {
+        if let Some(launch) = entity_ref.get::<TrapLaunchProjectile>() {
+            trap_launches.push(ObservedTrapLaunch {
+                entity: entity_ref.id(),
+                owner: launch.owner,
+                trap_type: launch.trap_type,
+                origin: launch.origin,
+                landing: launch.landing_position,
+            });
+            continue;
+        }
         // Totems are not Combatants — observe them on a parallel list.
         if let (Some(totem), Some(transform)) =
             (entity_ref.get::<Totem>(), entity_ref.get::<Transform>())
@@ -960,12 +991,14 @@ fn observe_frame(world: &World) -> FrameObservation {
     // Sort by entity id for deterministic iteration order in probes.
     totems.sort_by_key(|(e, _)| *e);
     let totems = totems.into_iter().map(|(_, t)| t).collect();
+    trap_launches.sort_by_key(|t| t.entity);
 
     FrameObservation {
         sim_time,
         gates_open,
         combatants,
         totems,
+        trap_launches,
     }
 }
 

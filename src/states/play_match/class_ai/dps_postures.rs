@@ -23,7 +23,8 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, mask_and_los_bitmask, score_directions, RangeBand, ScorerInputs,
+    compass_directions_16, mask_and_los_bitmask, score_directions, trap_setup_term, RangeBand,
+    ScorerInputs,
 };
 use crate::states::play_match::components::{
     AuraType, Combatant, DpsPosture, KitePosture, MatchCountdown, MovementDirective, MovementGoal,
@@ -184,7 +185,7 @@ pub fn melee_within(ctx: &CombatContext, me: Entity, my_pos: Vec3, radius: f32) 
 /// A class whose melee damage warrants kiting (Warrior, Rogue). Deliberately
 /// narrower than `CharacterClass::is_melee()`, which also counts the Paladin —
 /// the Paladin's melee is not a kiting pressure threat here.
-fn is_kite_threat(class: CharacterClass) -> bool {
+pub(super) fn is_kite_threat(class: CharacterClass) -> bool {
     matches!(class, CharacterClass::Warrior | CharacterClass::Rogue)
 }
 
@@ -415,10 +416,24 @@ fn los_seek_term(chosen: Vec2, inputs: &ScorerInputs, weight: f32) -> f32 {
     }
 }
 
+/// Where a ready Freezing Trap would be thrown, for the Hunter's KITE
+/// `trap_setup` term: the enemy healer's position and the range beyond which
+/// the kite bends back toward it. `None` (the Mage, or the Hunter while its
+/// trap is on cooldown or no healer would be caught cleanly) leaves movement
+/// exactly as it was.
+#[derive(Clone, Copy, Debug)]
+pub struct TrapSetup {
+    /// The enemy healer's position.
+    pub healer: Vec3,
+    /// Distance from the healer beyond which the kite bends toward it.
+    pub range: f32,
+}
+
 /// Build the kiter's `ScorerInputs` for one scoring pass — shared by the KITE
 /// orbit and the ENGAGE seek-LoS repositioning so both see identical
 /// threat / range-band / `los_target` wiring. The caller supplies the committed
-/// direction (`None` outside the anti-zigzag window, which disables the term).
+/// direction (`None` outside the anti-zigzag window, which disables the term),
+/// and the trap setup (KITE only — repositioning under melee pressure).
 fn build_kiter_inputs(
     ctx: &CombatContext,
     entity: Entity,
@@ -427,6 +442,7 @@ fn build_kiter_inputs(
     config: &DpsMovementConfig,
     heal_range: f32,
     committed_direction: Option<Vec2>,
+    trap_setup: Option<TrapSetup>,
 ) -> ScorerInputs {
     let self_team = self_team(ctx, entity);
     // A stealthed Rogue is not in `ctx.combatants`, so the kiter cannot flee
@@ -494,6 +510,8 @@ fn build_kiter_inputs(
         // The healer's own cast range is the leash length: beyond it the kiter
         // is simply unhealable.
         healer_leash_range: heal_range,
+        trap_setup_point: trap_setup.map(|t| t.healer),
+        trap_setup_range: trap_setup.map_or(0.0, |t| t.range),
     }
 }
 
@@ -523,6 +541,9 @@ pub fn evaluate_dps_posture(
     entry_trigger: bool,
     sustain: bool,
     wand_gate: Option<WandPullGate>,
+    // Hunter only: the healer a ready Freezing Trap would catch, which bends
+    // the KITE toward throw range of it. `None` leaves movement unchanged.
+    trap_setup: Option<TrapSetup>,
     now: f32,
     decision_trace: &mut DecisionTrace,
 ) {
@@ -674,6 +695,7 @@ pub fn evaluate_dps_posture(
             config,
             heal_range,
             committed_direction,
+            None,
         );
         let chosen = score_directions(&compass_directions_16(), &inputs, &config.weights);
         if chosen != Vec2::ZERO {
@@ -738,6 +760,7 @@ pub fn evaluate_dps_posture(
         config,
         heal_range,
         committed_direction,
+        trap_setup,
     );
     let chosen = score_directions(&compass_directions_16(), &inputs, &config.weights);
     if chosen == Vec2::ZERO {
@@ -786,6 +809,12 @@ pub fn evaluate_dps_posture(
                 "los_seek",
                 los_seek_term(chosen, &inputs, config.weights.los_seek),
             );
+            if inputs.trap_setup_point.is_some() {
+                builder.scorer_term(
+                    "trap_setup",
+                    trap_setup_term(chosen, &inputs, config.weights.trap_setup),
+                );
+            }
             builder.finish();
         }
     }

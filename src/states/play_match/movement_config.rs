@@ -80,6 +80,12 @@ pub struct MovementWeights {
     /// disables. Kiters only — a healer does not leash to itself.
     #[serde(default)]
     pub healer_leash: f32,
+    /// Pull toward the enemy healer a ready Freezing Trap would be thrown at,
+    /// once BEYOND throw range of it. Zero inside it, and absent entirely
+    /// while the trap is on cooldown or no healer would be caught cleanly.
+    /// `0.0` disables. Hunter only — the one kiter with a trap.
+    #[serde(default)]
+    pub trap_setup: f32,
 }
 
 impl Default for MovementWeights {
@@ -99,6 +105,7 @@ impl Default for MovementWeights {
             los_seek: 0.0,
             cover_pull: 0.0,
             healer_leash: 0.0,
+            trap_setup: 0.0,
         }
     }
 }
@@ -429,6 +436,7 @@ impl Default for DpsMovementConfig {
                 los_seek: 0.0,
                 cover_pull: 0.0,
                 healer_leash: 0.0,
+                trap_setup: 0.0,
             },
             range_band_min: 8.0,  // SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE
             range_band_max: 30.0, // within AUTO_SHOT_RANGE

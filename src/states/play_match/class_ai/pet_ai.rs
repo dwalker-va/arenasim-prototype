@@ -671,11 +671,15 @@ fn try_devour_magic(
         return false;
     }
 
+    // What Devour takes, and whom: the one classification the Hunter's trap AI
+    // also asks (`ally_removal`), so the cast and that question cannot drift.
+    let removal = super::ally_removal(ability).expect("Devour Magic frees allies");
+
     let my_team = combatant.team;
     let mut best_target: Option<(Entity, Vec3)> = None;
 
     for (ally_entity, info) in ctx.combatants.iter() {
-        if info.team != my_team || !info.is_alive {
+        if info.team != my_team || !info.is_alive || (info.is_pet && !removal.reaches_pets) {
             continue;
         }
         let distance = my_pos.distance(info.position);
@@ -685,7 +689,7 @@ fn try_devour_magic(
         let has_dispellable = ctx
             .active_auras
             .get(ally_entity)
-            .map(|auras| auras.iter().any(|a| a.can_be_dispelled()))
+            .map(|auras| auras.iter().any(|a| removal.scope.takes(a)))
             .unwrap_or(false);
         if !has_dispellable {
             continue;
@@ -729,7 +733,7 @@ fn try_devour_magic(
         log_prefix: "[DEVOUR]",
         caster_class: CharacterClass::Warlock,
         heal_on_success: Some((entity, heal_amount)),
-        scope: DispelScope::Magic,
+        scope: removal.scope,
     });
 
     true
@@ -834,7 +838,7 @@ pub(crate) fn execute_masters_call(
         log_prefix: "[MASTERS_CALL]",
         caster_class: CharacterClass::Hunter,
         heal_on_success: None,
-        scope: DispelScope::Impairments(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
+        scope: DispelScope::Impairments(super::MASTERS_CALL_IMPAIRMENTS.to_vec()),
     });
 
     commands.spawn((

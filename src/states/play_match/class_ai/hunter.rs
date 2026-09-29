@@ -5,9 +5,13 @@
 //! kiting, trap placement, and pet coordination.
 //!
 //! ## Range Zone Priorities
-//! - **Dead zone (<8 yards)**: Disengage > Frost Trap at feet > Kite
-//! - **Closing (8-20 yards)**: Concussive Shot > Frost Trap > Kite + Arcane Shot
-//! - **Safe (20-40 yards)**: Concussive Shot > Serpent Sting > Freezing Trap > Aimed Shot > Arcane Shot
+//! - **Dead zone (<8 yards)**: Disengage > Freezing Trap on the enemy healer >
+//!   Frost Trap at feet > Kite
+//! - **Closing (8-20 yards)**: Freezing Trap on the enemy healer > Concussive
+//!   Shot > Frost Trap > Kite + Arcane Shot
+//! - **Safe (20-40 yards)**: Concussive Shot > Aimed Shot (in the opener, when
+//!   no enemy can stop the cast before it finishes) > Serpent Sting > Freezing
+//!   Trap > Aimed Shot > Arcane Shot
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
@@ -26,6 +30,7 @@ use crate::states::play_match::constants::*;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, TargetView,
 };
+use crate::states::play_match::movement_config::MovementWeights;
 
 /// Hold Concussive Shot while the target's existing slow has more than this many
 /// seconds left; refresh only inside this window before expiry so the new slow
@@ -45,9 +50,13 @@ pub fn decide_hunter_action(
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
     dip_plan: HunterDipPlan,
+    // The Hunter's KITE weights (`movement.ron`), so Disengage bends toward a
+    // trap on the enemy healer exactly as the kite does.
+    weights: &MovementWeights,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
     let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
+    let now = decision_trace.current_sim_time;
 
     let nearest_dist = nearest_distance.unwrap_or(40.0);
 
@@ -105,19 +114,23 @@ pub fn decide_hunter_action(
             // Lead a moving target into its path; drop directly on a planted one.
             let landing =
                 super::hunter_dip::trap_lead_landing(ctx, target, my_pos).unwrap_or(my_pos);
-            if try_place_trap_at(
-                commands,
-                combat_log,
-                abilities,
-                entity,
-                combatant,
-                my_pos,
-                landing,
-                Some(target),
-                TrapType::Freezing,
-                &ctx.bounds,
-                &mut builder,
-            ) {
+            // Same clean-landing rule as every other placement: a lead that
+            // carries the landing onto another enemy waits for the next tick.
+            if victim_springs_it(ctx, combatant.team, target, landing)
+                && try_place_trap_at(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    landing,
+                    Some(target),
+                    TrapType::Freezing,
+                    &ctx.bounds,
+                    &mut builder,
+                )
+            {
                 builder.finish();
                 commands.entity(entity).try_insert(completed_state);
                 emit_dip_complete(decision_trace, ctx, target, my_pos);
@@ -157,8 +170,6 @@ pub fn decide_hunter_action(
                     },
                 );
             } else {
-                builder.choose(disengage, None, true);
-
                 let away_dir = if let Some((enemy_entity, _)) = nearest_enemy {
                     if let Some(enemy_info) = ctx.combatants.get(&enemy_entity) {
                         (my_pos - enemy_info.position).normalize_or_zero()
@@ -178,6 +189,31 @@ pub fn decide_hunter_action(
                 } else {
                     Vec3::new(away_dir.x, 0.0, away_dir.z).normalize_or_zero()
                 };
+                // While Freezing Trap is ready and an enemy healer would be
+                // caught cleanly, a leap that would carry the Hunter out of
+                // throw range of it bends toward it. The trace names that
+                // healer as the Disengage's target when the leap bent.
+                let setup = super::hunter_dip::trap_setup_healer(
+                    abilities, entity, combatant, my_pos, auras, ctx,
+                )
+                .and_then(|h| ctx.combatants.get(&h).map(|i| (h, i.position)));
+                let bent = setup.map(|(_, healer_pos)| {
+                    super::hunter_dip::trap_setup_disengage(
+                        direction,
+                        my_pos,
+                        DISENGAGE_DISTANCE,
+                        healer_pos,
+                        super::hunter_dip::trap_setup_range(abilities),
+                        weights.flee,
+                        weights.trap_setup,
+                    )
+                });
+                let bent_toward = setup
+                    .zip(bent)
+                    .filter(|(_, b)| b.distance(direction) > 1e-4)
+                    .map(|((healer, _), _)| healer);
+                let direction = bent.unwrap_or(direction);
+                builder.choose(disengage, bent_toward, true);
 
                 commands.entity(entity).try_insert(DisengagingState {
                     direction,
@@ -202,7 +238,24 @@ pub fn decide_hunter_action(
             }
         }
 
-        // Priority 2: Frost Trap at feet
+        // Priority 2: Freezing Trap on the enemy healer — the melee is on us,
+        // so this is the moment its healer is worth freezing.
+        if try_pressure_trap(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            ctx,
+            now,
+            &mut builder,
+        ) {
+            builder.finish();
+            return true;
+        }
+
+        // Priority 3: Frost Trap at feet
         if try_place_trap_at(
             commands,
             combat_log,
@@ -220,7 +273,7 @@ pub fn decide_hunter_action(
             return true;
         }
 
-        // Priority 3: no ability this tick — the ENGAGE/KITE posture machine
+        // Priority 4: no ability this tick — the ENGAGE/KITE posture machine
         // owns the flee movement now (proximity-gated KITE).
         builder.finish();
         return false;
@@ -228,6 +281,24 @@ pub fn decide_hunter_action(
 
     // === CLOSING RANGE (8-20 yards) — Kite + instants ===
     if nearest_dist < 20.0 {
+        // Freezing Trap on the enemy healer first: the melee closing on us is
+        // the moment its healer is worth freezing, and the healer's clean
+        // landing does not wait.
+        if try_pressure_trap(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            ctx,
+            now,
+            &mut builder,
+        ) {
+            builder.finish();
+            return true;
+        }
+
         let conc_max = abilities
             .get(&AbilityType::ConcussiveShot)
             .map_or(35.0, |d| d.range);
@@ -371,6 +442,34 @@ pub fn decide_hunter_action(
         }
     }
 
+    // The opener — before the Hunter's first Aimed Shot or Serpent Sting —
+    // starts Aimed Shot ahead of a due sting when it has time: a 2.5s cast
+    // plants the Hunter, so it goes first only if no enemy can interrupt it
+    // or close to melee before it finishes ([`aimed_shot_has_time`]). The
+    // sting follows on the next GCD. After the opener a due sting keeps its
+    // place below: re-applying it (after a Devour Magic, say) is not delayed.
+    if !combatant.hunter_opened
+        && distance_to_target >= 20.0
+        && sting_due(target_entity, target_info, ctx)
+        && aimed_shot_has_time(abilities, entity, my_pos, auras, ctx)
+        && try_aimed_shot(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            target_entity,
+            target_info,
+            auras,
+            ctx,
+            &mut builder,
+        )
+    {
+        builder.finish();
+        return true;
+    }
+
     // Sting sits ABOVE Freezing Trap so the trap guard below always sees an
     // already-applied sting at placement time (closes the trap-placed-first,
     // stung-second ordering hole for the single-target case — plan KTD 3).
@@ -392,19 +491,23 @@ pub fn decide_hunter_action(
     }
 
     // Freezing Trap. Preferred use is CC on the OFF-target enemy healer (the
-    // one the team is NOT killing) — but a placed trap triggers on the first
-    // enemy in radius, so we aim at the healer's POSITION (not the midpoint) and
-    // HOLD unless the healer itself will trigger it: it must be in throw range
-    // and no other enemy may be within the trigger radius of the landing. When
-    // it can't land cleanly, we hold the trap for the dip rather than feed it to
-    // the chaser. With no off-target healer (e.g. 1v1, or the healer IS the kill
-    // target) we fall back to the legacy peel: trap the candidate at the
-    // midpoint so the Hunter keeps its melee-peel in healer-less matchups.
+    // one the team is NOT killing, and the dispeller who would otherwise free
+    // any other victim) — but a placed trap triggers on the first enemy in
+    // radius, so we aim at the off-target's POSITION (not the midpoint) and
+    // HOLD unless it will trigger it itself: it must be in throw range and no
+    // other enemy may be within the trigger radius of the landing. When it
+    // can't land cleanly, we hold the trap for the dip rather than feed it to
+    // the chaser. With no off-target (e.g. 1v1, or the healer IS the kill
+    // target and nobody else is worth a trap) the fallback throws the trap into
+    // the lane toward the trap candidate, where the enemy runs — when the enemy
+    // predicted to spring it is worth trapping (`fallback_trap`).
+    let focused = super::hunter_dip::trap_focus(ctx, entity, combatant.target);
     let off_target = super::hunter_dip::opportunistic_off_target(
         ctx,
+        abilities,
         entity,
         combatant.team,
-        combatant.target,
+        &focused,
         my_pos,
     );
     if let Some((healer, healer_pos)) = off_target {
@@ -416,12 +519,7 @@ pub fn decide_hunter_action(
             super::hunter_dip::trap_lead_landing(ctx, healer, my_pos).unwrap_or(healer_pos);
         // No other living enemy close enough to the landing to beat the target
         // to the trigger.
-        let healer_triggers = !ctx.combatants.values().any(|other| {
-            other.team != combatant.team
-                && other.is_alive
-                && other.entity != healer
-                && other.position.distance(landing) <= TRAP_TRIGGER_RADIUS
-        });
+        let healer_triggers = victim_springs_it(ctx, combatant.team, healer, landing);
         if plant_close && healer_triggers {
             // Two-way CC guard (R8/R9): a friendly DoT on the healer pops the
             // incap on the first tick — skip (only when the trap is castable).
@@ -452,44 +550,68 @@ pub fn decide_hunter_action(
             }
         }
         // else: HOLD — the dip will walk us into range to land it on the healer.
-    } else {
-        let trap_target = freezing_trap_candidate(ctx, target_entity);
-        if let Some(trap_target_info) = ctx
-            .combatants
-            .get(&trap_target)
-            .filter(|info| info.is_alive)
-        {
-            // Two-way CC guard (R8/R9): never aim Freezing Trap at a target the
-            // team has DoT'd — the first tick breaks the incapacitate
+    } else if let Some(fallback) = fallback_trap(
+        ctx,
+        abilities,
+        entity,
+        combatant.team,
+        my_pos,
+        target_entity,
+    ) {
+        match fallback {
+            // Two-way CC guard (R8/R9): never throw Freezing Trap where the
+            // enemy predicted to spring it carries a friendly DoT — the lane
+            // points at the candidate, but the victim is who gets frozen, and
+            // the first tick breaks the incapacitate
             // (break_on_damage: 0.0). Reactive and binary: skip this tick, no
             // fallthrough to a second candidate. Only traced when the trap is
             // otherwise castable — while it's on cooldown, fall through so the
             // trace records OnCooldown instead of masking it as the DoT guard.
-            if ctx.has_friendly_dots_on_target(trap_target)
+            Ok(FallbackThrow {
+                victim: Some(victim),
+                ..
+            }) if ctx.has_friendly_dots_on_target(victim)
                 && !combatant
                     .ability_cooldowns
-                    .contains_key(&AbilityType::FreezingTrap)
+                    .contains_key(&AbilityType::FreezingTrap) =>
             {
                 builder.reject(
                     AbilityType::FreezingTrap,
                     RejectionReason::FriendlyBreakableCC,
                 );
-            } else if try_place_trap_at(
-                commands,
-                combat_log,
-                abilities,
-                entity,
-                combatant,
-                my_pos,
-                (my_pos + trap_target_info.position) / 2.0,
-                Some(trap_target),
-                TrapType::Freezing,
-                &ctx.bounds,
-                &mut builder,
-            ) {
-                builder.finish();
-                return true;
             }
+            Ok(FallbackThrow { lane, victim, .. }) => {
+                if try_place_trap_at(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    lane,
+                    victim,
+                    TrapType::Freezing,
+                    &ctx.bounds,
+                    &mut builder,
+                ) {
+                    builder.finish();
+                    return true;
+                }
+            }
+            Err(note) => match combatant.ability_cooldowns.get(&AbilityType::FreezingTrap) {
+                Some(remaining) => builder.reject(
+                    AbilityType::FreezingTrap,
+                    RejectionReason::OnCooldown {
+                        remaining: *remaining,
+                    },
+                ),
+                None => builder.reject(
+                    AbilityType::FreezingTrap,
+                    RejectionReason::PreconditionUnmet {
+                        note: note.to_string(),
+                    },
+                ),
+            },
         }
     }
 
@@ -547,13 +669,203 @@ pub fn decide_hunter_action(
 // Helper Functions
 // ==============================================================================
 
-/// The entity Freezing Trap wants: the enemy healer, falling back to the kill
-/// target. Single source of truth shared by trap placement and the sting's
-/// trap-candidate reservation — if these drifted apart, the sting would
-/// silently re-open the trap-suppression hole the reservation closes.
-fn freezing_trap_candidate(ctx: &CombatContext, fallback: Entity) -> Entity {
-    ctx.enemy_healer().unwrap_or(fallback)
+/// A fallback Freezing Trap to throw: the `lane` landing (the midpoint toward
+/// the enemy healer, falling back to the kill target — where the enemy runs),
+/// and the `victim` predicted to spring it there, which is who the throw was
+/// decided on and so whom the trace records it as aimed at. `None` when it was
+/// decided on an enemy the Hunter cannot see, which it cannot name.
+#[derive(Clone, Copy, Debug)]
+struct FallbackThrow {
+    lane: Vec3,
+    victim: Option<Entity>,
 }
+
+/// The fallback Freezing Trap, when there is no off-target to CC — a
+/// [`FallbackThrow`], or why the trap is HELD; `None` when the candidate is
+/// dead.
+///
+/// The lane throw aims at no one, so it is decided on the enemy that would
+/// spring it.
+///
+/// While an enemy is **hidden**, that is the unseen enemy: at gates-open a
+/// stealthed Rogue runs the lane, and at `061dfa5` it sprang every one of the
+/// 140 opening lane traps thrown with a Rogue in stealth. The throw holds when
+/// a visible enemy could free it
+/// ([`unseen_victim_would_be_freed`](super::hunter_dip::unseen_victim_would_be_freed)
+/// — AS-68's opener was this fallback feeding the Rogue to its own Priest),
+/// and otherwise goes, with no aim to record.
+///
+/// With everyone in view it is decided on the enemy predicted to spring it
+/// ([`predicted_trap_springer`](super::hunter_dip::predicted_trap_springer):
+/// whoever is inside the trigger radius first once the trap has armed), and
+/// holds when:
+///
+/// - no enemy is predicted to reach the landing within
+///   [`TRAP_SPRING_WINDOW`](super::hunter_dip::TRAP_SPRING_WINDOW) of it
+///   arming — the trap would catch whoever wanders in later, unchosen;
+/// - the springer's own team would free it
+///   ([`trap_victim_worth_it`](super::hunter_dip::trap_victim_worth_it));
+/// - the Hunter's own team would break it
+///   ([`teammate_would_break_it`](super::hunter_dip::teammate_would_break_it)):
+///   the kill target in a fight with a teammate, whose damage pops it at once.
+///
+/// Single source of truth shared by trap placement and the sting's
+/// reservation of the trap's victim — if these drifted apart, the sting would
+/// either re-open the trap-suppression hole the reservation closes or be
+/// reserved for a trap that never comes.
+fn fallback_trap(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    my_team: u8,
+    my_pos: Vec3,
+    kill_target: Entity,
+) -> Option<Result<FallbackThrow, &'static str>> {
+    let candidate = ctx.enemy_healer().unwrap_or(kill_target);
+    let candidate_pos = ctx
+        .combatants
+        .get(&candidate)
+        .filter(|info| info.is_alive)?
+        .position;
+    let lane = (my_pos + candidate_pos) / 2.0;
+    if ctx.enemy_hidden() {
+        if super::hunter_dip::unseen_victim_would_be_freed(ctx, abilities, entity, my_team) {
+            return Some(Err(TRAP_HELD_UNSEEN));
+        }
+        return Some(Ok(FallbackThrow { lane, victim: None }));
+    }
+    let Some(victim) = super::hunter_dip::predicted_trap_springer(ctx, my_team, my_pos, lane)
+    else {
+        return Some(Err(TRAP_HELD_NO_SPRINGER));
+    };
+    if !super::hunter_dip::trap_victim_worth_it(ctx, abilities, entity, victim) {
+        return Some(Err(TRAP_HELD_FREEABLE));
+    }
+    if super::hunter_dip::teammate_would_break_it(ctx, entity, Some(kill_target), victim) {
+        return Some(Err(TRAP_HELD_TEAM_BREAKS));
+    }
+    Some(Ok(FallbackThrow {
+        lane,
+        victim: Some(victim),
+    }))
+}
+
+/// Freezing Trap on the enemy healer while a melee is on the Hunter
+/// ([`pressure_trap_healer`](super::hunter_dip::pressure_trap_healer)): the
+/// dispeller trap played at the moment the melee commits. Considered only
+/// while a melee kite-threat is inside the closing band and the trap is ready
+/// (off cooldown, affordable) — otherwise silent, so the closing-range trace is
+/// unchanged. Thrown at the healer's led position only when it would catch the
+/// healer cleanly ([`pressure_trap_landing`](super::hunter_dip::pressure_trap_landing));
+/// a held throw is traced with why. A throw places a target hold on the
+/// Hunter ([`pressure_trap_hold`](super::hunter_dip::pressure_trap_hold)):
+/// target acquisition moves it off the healer and onto the melee, a
+/// configured kill target notwithstanding.
+fn try_pressure_trap(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    now: f32,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::FreezingTrap;
+    // The closing band: the same 20yd the rotation's range blocks switch on.
+    let Some((melee, _)) = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)
+        .filter(|(_, pos)| pos.distance(my_pos) < 20.0)
+    else {
+        return false;
+    };
+    let def = abilities.get_unchecked(&ability);
+    if combatant.ability_cooldowns.contains_key(&ability) || combatant.current_mana < def.mana_cost
+    {
+        return false;
+    }
+    let healer =
+        match super::hunter_dip::pressure_trap_healer(ctx, abilities, entity, combatant.team) {
+            None => return false,
+            Some(Err(note)) => {
+                builder.reject(
+                    ability,
+                    RejectionReason::PreconditionUnmet {
+                        note: note.to_string(),
+                    },
+                );
+                return false;
+            }
+            Some(Ok(healer)) => healer,
+        };
+    let landing = match super::hunter_dip::pressure_trap_landing(
+        ctx,
+        abilities,
+        combatant.team,
+        my_pos,
+        healer,
+    ) {
+        Ok(landing) => landing,
+        Err(note) => {
+            builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: note.to_string(),
+                },
+            );
+            return false;
+        }
+    };
+    if !try_place_trap_at(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        landing,
+        Some(healer),
+        TrapType::Freezing,
+        &ctx.bounds,
+        builder,
+    ) {
+        return false;
+    }
+    combatant.trap_retarget = Some(super::hunter_dip::pressure_trap_hold(
+        my_pos, landing, healer, melee, now,
+    ));
+    true
+}
+
+/// Is `victim` the only living enemy close enough to `landing` to spring a
+/// trap there? A trap springs on the FIRST enemy inside its radius, whoever it
+/// was aimed at, so both AIMED Freezing Trap placements — the off-target drop
+/// and the dip cast — ask this before they throw. (The fallback's lane throw
+/// aims at nobody in particular; it is gated on `fallback_trap` instead.)
+fn victim_springs_it(ctx: &CombatContext, my_team: u8, victim: Entity, landing: Vec3) -> bool {
+    !ctx.combatants.values().any(|other| {
+        other.team != my_team
+            && other.is_alive
+            && other.entity != victim
+            && other.position.distance(landing) <= TRAP_TRIGGER_RADIUS
+    })
+}
+
+/// Trace note for a fallback Freezing Trap held because the enemy it would
+/// catch has a teammate who would free it ([`fallback_trap`]).
+pub const TRAP_HELD_FREEABLE: &str = "trap held: a teammate would free the enemy it would catch";
+
+/// Trace note for a fallback Freezing Trap held because an enemy the Hunter
+/// cannot see could spring it and be freed ([`fallback_trap`]).
+pub const TRAP_HELD_UNSEEN: &str = "trap held: an unseen enemy could spring it and be freed";
+
+/// Trace note for a fallback Freezing Trap held because no enemy is predicted
+/// to reach the landing soon after it arms ([`fallback_trap`]).
+pub const TRAP_HELD_NO_SPRINGER: &str = "trap held: no enemy is heading into the lane";
+
+/// Trace note for a fallback Freezing Trap held because the enemy it would
+/// catch is one the Hunter's own team is attacking ([`fallback_trap`]).
+pub const TRAP_HELD_TEAM_BREAKS: &str = "trap held: the team is attacking the enemy it would catch";
 
 fn find_nearest_enemy(
     self_entity: Entity,
@@ -573,6 +885,79 @@ fn find_nearest_enemy(
     }
     let distance = nearest.map(|(_, d)| d);
     (nearest, distance)
+}
+
+/// Is Serpent Sting due on `target`: it carries no sting of ours, and is not a
+/// rage user the sting would feed ([`try_serpent_sting`]'s own two checks).
+fn sting_due(target: Entity, target_info: &super::CombatantInfo, ctx: &CombatContext) -> bool {
+    let stung = ctx.active_auras.get(&target).is_some_and(|auras| {
+        auras
+            .iter()
+            .any(|a| a.effect_type == AuraType::DamageOverTime && a.ability_name == "Serpent Sting")
+    });
+    !stung && !target_info.class.gains_rage_from_damage()
+}
+
+/// Would an Aimed Shot begun now finish before an enemy can stop it? A cast
+/// plants the Hunter for its full cast time, and it is lost to an interrupt,
+/// or finishes with a melee already inside the dead zone of a Hunter who
+/// could not kite it. Each visible enemy, pets included, that could stop it
+/// has a reach — its own kit's interrupt range
+/// ([`interrupt_reach`](super::interrupt_reach): Spell Lock and Wind Shear at
+/// range, Kick and Pummel in melee), or the Hunter's dead zone for a melee
+/// kite-threat. Its time to come within that reach is the gap over its closing
+/// speed (its velocity toward the Hunter); one already within reach leaves no
+/// time, one not closing never arrives, and one held in hard CC past the cast
+/// cannot act. The cast time is read from `AbilityDefinitions`, with the
+/// Hunter's own haste auras applied.
+///
+/// An enemy the Hunter cannot see ([`CombatContext::enemy_hidden`]) counts as
+/// one that could stop it: a stealthed Rogue's distance and heading are
+/// unknown until it opens, and it opens in melee range.
+pub fn aimed_shot_has_time(
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+) -> bool {
+    if ctx.enemy_hidden() {
+        return false;
+    }
+    let cast = calculate_cast_time(
+        abilities.get_unchecked(&AbilityType::AimedShot).cast_time,
+        auras,
+    );
+    let my_team = ctx.combatants.get(&entity).map_or(u8::MAX, |i| i.team);
+    ctx.combatants
+        .values()
+        .filter(|e| e.team != my_team && e.is_alive)
+        .all(|e| {
+            let melee = (!e.is_pet && super::dps_postures::is_kite_threat(e.class))
+                .then_some(HUNTER_DEAD_ZONE);
+            let Some(reach) = super::interrupt_reach(abilities, e)
+                .into_iter()
+                .chain(melee)
+                .reduce(f32::max)
+            else {
+                return true;
+            };
+            let held = ctx.active_auras.get(&e.entity).is_some_and(|auras| {
+                auras
+                    .iter()
+                    .any(|a| super::is_hard_cc(a.effect_type) && a.duration >= cast)
+            });
+            if held {
+                return true;
+            }
+            let to_me = Vec3::new(my_pos.x - e.position.x, 0.0, my_pos.z - e.position.z);
+            let gap = to_me.length() - reach;
+            if gap <= 0.0 {
+                return false;
+            }
+            let closing = Vec3::new(e.velocity.x, 0.0, e.velocity.z).dot(to_me.normalize_or_zero());
+            closing <= 0.0 || gap / closing > cast
+        })
 }
 
 /// Remaining duration of the longest active `MovementSpeedSlow` on `target`,
@@ -732,16 +1117,39 @@ fn try_place_trap_at(
         return false;
     }
 
+    // Clamp to octagonal arena bounds (midpoint can land outside corners)
+    let position = crate::states::play_match::combat_core::clamp_to_arena(bounds, position);
+
+    // The trap's configured `range` is a real limit on where it lands. Traps
+    // are PLACED AT RANGE on purpose — the later-expansion Trap Launcher
+    // model, not Classic's drop-at-feet, which left traps underpowered — so do
+    // not "restore" a feet-only drop here. A landing beyond range is REFUSED,
+    // not pulled in: the placement was chosen for where it lands (a lane, a
+    // lead on a victim), and a clamped landing is a different decision nobody
+    // made. The caller holds and asks again next tick, closer. Measured on the
+    // clamped landing, planar, exactly as `spawn_trap` measures its throw.
+    let distance =
+        Vec3::new(my_pos.x, 0.0, my_pos.z).distance(Vec3::new(position.x, 0.0, position.z));
+    if distance > def.range {
+        builder.reject(
+            ability,
+            RejectionReason::OutOfRange {
+                distance,
+                max: def.range,
+            },
+        );
+        return false;
+    }
+
     // Trace the INTENDED victim, not just the ability. A trap is placed at a
     // POSITION and springs on whoever reaches it first, so the entity the
     // Hunter aimed at is not recoverable from the outcome — without this the
     // trace cannot answer "did the trap catch who it was aimed at?", which is
     // the question every trap-targeting diagnosis starts from. `None` for the
-    // Frost Trap dropped at the Hunter's own feet, which aims at nobody.
+    // Frost Trap dropped at the Hunter's own feet, which aims at nobody, and
+    // for a lane Freezing Trap thrown for an enemy the Hunter cannot see.
     builder.choose(ability, intended, true);
 
-    // Clamp to octagonal arena bounds (midpoint can land outside corners)
-    let position = crate::states::play_match::combat_core::clamp_to_arena(bounds, position);
     spawn_trap(
         commands,
         entity,
@@ -862,6 +1270,9 @@ fn try_concussive_shot(
 }
 
 /// Try Aimed Shot (2.5s cast time ranged ability).
+/// Trace note: Aimed Shot held because an enemy is hidden ([`try_aimed_shot`]).
+pub const AIMED_SHOT_HELD_HIDDEN: &str = "an unseen enemy could interrupt the cast";
+
 fn try_aimed_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -879,6 +1290,19 @@ fn try_aimed_shot(
     let Some(def) = abilities.get(&ability) else {
         return false;
     };
+
+    // A 2.5s cast is not begun while an enemy is hidden: a stealthed Rogue
+    // opens in melee range and Kicks it. The same question the opener asks
+    // ([`aimed_shot_has_time`]), asked wherever Aimed Shot is in the rotation.
+    if ctx.enemy_hidden() {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: AIMED_SHOT_HELD_HIDDEN.to_string(),
+            },
+        );
+        return false;
+    }
 
     let opts = PreCastOpts {
         check_friendly_cc: true,
@@ -911,6 +1335,7 @@ fn try_aimed_shot(
     }
 
     builder.choose(ability, Some(target_entity), false);
+    combatant.hunter_opened = true;
 
     let cast_time = calculate_cast_time(def.cast_time, auras);
     commands
@@ -1091,11 +1516,11 @@ fn try_serpent_sting(
         return false;
     }
 
-    // Trap-candidate reservation: don't sting the Freezing Trap candidate while
-    // the trap is poised to fire at it — a ticking sting would suppress the
-    // trap permanently via the friendly-DoT guard (the kill target is often the
-    // enemy healer, which is exactly who the trap wants). Once the trap is on
-    // cooldown the sting resumes freely. "Poised" requires the candidate to be
+    // Trap-victim reservation: don't sting the enemy the fallback Freezing Trap
+    // would catch while the trap is poised to fire at it — a ticking sting
+    // would suppress the trap permanently via the friendly-DoT guard, which
+    // asks the same question of the same victim. Once the trap is on cooldown
+    // the sting resumes freely. "Poised" requires the target to be
     // free of OTHER friendly DoTs too: if a teammate's Corruption already
     // blocks the trap, reserving the sting as well would deadlock both
     // abilities for the rest of the match. (Mana isn't checked — the sting
@@ -1104,11 +1529,27 @@ fn try_serpent_sting(
         .ability_cooldowns
         .contains_key(&AbilityType::FreezingTrap)
         && !ctx.has_friendly_dots_on_target(target_entity);
-    if trap_poised && freezing_trap_candidate(ctx, target_entity) == target_entity {
+    let fallback = fallback_trap(
+        ctx,
+        abilities,
+        entity,
+        combatant.team,
+        my_pos,
+        target_entity,
+    )
+    .and_then(|f| f.ok());
+    // The healer the trap is held for while a melee could come onto the
+    // Hunter ([`try_pressure_trap`]): a sting on it would make it untrappable
+    // at the moment that trap is thrown.
+    let pressure_victim = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos).is_some()
+        && super::hunter_dip::pressure_trap_healer(ctx, abilities, entity, combatant.team)
+            == Some(Ok(target_entity));
+    if trap_poised && (fallback.is_some_and(|f| f.victim == Some(target_entity)) || pressure_victim)
+    {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
-                note: "trap candidate reserved for Freezing Trap".to_string(),
+                note: "trap victim reserved for Freezing Trap".to_string(),
             },
         );
         return false;
@@ -1166,6 +1607,7 @@ fn try_serpent_sting(
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
+    combatant.hunter_opened = true;
 
     log_ability_use(
         combat_log,

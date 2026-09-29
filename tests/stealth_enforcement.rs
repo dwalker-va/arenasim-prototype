@@ -503,6 +503,10 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     &ctx,
                     &mut instant_attacks,
                     HunterDipPlan::default(),
+                    &arenasim::states::play_match::movement_config::load_movement_config()
+                        .expect("assets/config/movement.ron must load")
+                        .hunter
+                        .weights,
                     &mut trace,
                 );
             }

@@ -163,6 +163,10 @@ pub fn acquire_targets(
         .filter(|(_, _, _, _, _, _, _, is_pet)| !is_pet)
         .collect();
 
+    // The name a Hunter's own Freezing Trap aura carries, from the one
+    // definition `trap_system` applies.
+    let freezing_trap = super::traps::freezing_trap_aura(Entity::PLACEHOLDER).ability_name;
+
     // For each combatant, ensure they have a valid target
     for (entity, mut combatant, transform, _) in combatants.iter_mut() {
         if !combatant.is_alive() {
@@ -311,6 +315,80 @@ pub fn acquire_targets(
                         combatant.target = Some(*kt_entity);
                     }
                 }
+            }
+        }
+
+        // ===== Hunter: off the enemy healer its own Freezing Trap is for =====
+        // A Hunter holds fire on an enemy its own Freezing Trap has frozen (the
+        // trap breaks on any damage), so staying on a healer it trapped under
+        // melee pressure would idle it for the trap's duration. It fights the
+        // melee instead (`TrapRetarget`), from the throw — before the trap has
+        // sprung — and while the trap holds that healer, however late it
+        // sprang. Applied after the kill-target re-force so a configured kill
+        // target cannot pull it back, and here rather than in the Hunter's AI
+        // so the switch is traced as a target acquisition like any other.
+        // Scoped to healers: a trapped non-healer kill target (a stealthed
+        // Rogue caught by the opening lane trap) keeps the Hunter on it, since
+        // the Hunter's team converges on it the moment the trap ends. Only a
+        // Hunter owns a Freezing Trap, so for every other class this block is
+        // inert.
+        let own_trap_on = |target: Entity| {
+            active_auras_map.get(&target).is_some_and(|auras| {
+                auras
+                    .iter()
+                    .any(|a| a.ability_name == freezing_trap && a.caster == Some(entity))
+            })
+        };
+        if let Some(hold) = combatant.trap_retarget {
+            let healer_alive = enemy_combatants.iter().any(|(e, ..)| *e == hold.healer);
+            if !healer_alive
+                || (decision_trace.current_sim_time > hold.spring_by && !own_trap_on(hold.healer))
+            {
+                combatant.trap_retarget = None;
+            }
+        }
+        let held = combatant.trap_retarget;
+        let is_healer = |target: Entity| {
+            enemy_combatants
+                .iter()
+                .any(|(e, _, _, _, class, _, _, is_pet)| {
+                    *e == target && !is_pet && class.is_healer()
+                })
+        };
+        if let Some(avoid) = combatant
+            .target
+            .filter(|t| held.is_some_and(|h| h.healer == *t) || (own_trap_on(*t) && is_healer(*t)))
+        {
+            let my_pos = transform.translation;
+            let fightable = |(e, _, stealthed, enemy_ss, _, _, immune, _): &&(
+                Entity,
+                Vec3,
+                bool,
+                bool,
+                match_config::CharacterClass,
+                f32,
+                bool,
+                bool,
+            )| {
+                *e != avoid && !own_trap_on(*e) && can_see(*stealthed, *enemy_ss) && !immune
+            };
+            let melee = held.and_then(|h| {
+                enemy_combatants
+                    .iter()
+                    .filter(fightable)
+                    .find(|(e, ..)| *e == h.melee)
+            });
+            let nearest = || {
+                enemy_combatants
+                    .iter()
+                    .filter(fightable)
+                    .filter(|(.., is_pet)| !is_pet)
+                    .min_by(|(_, a, ..), (_, b, ..)| {
+                        my_pos.distance(*a).total_cmp(&my_pos.distance(*b))
+                    })
+            };
+            if let Some((next, ..)) = melee.or_else(nearest) {
+                combatant.target = Some(*next);
             }
         }
 
@@ -935,6 +1013,8 @@ pub fn decide_abilities(
                             entry,
                             sustain,
                             wand_gate,
+                            // The Mage has no trap.
+                            None,
                             time.elapsed_secs(),
                             &mut decision_trace,
                         );
@@ -1210,6 +1290,17 @@ pub fn decide_abilities(
                                 my_pos,
                                 cfg.kite_sustain_radius,
                             );
+                            // While Freezing Trap is ready and an enemy healer
+                            // would be caught cleanly, the kite bends to keep
+                            // it within throw range; on cooldown, unchanged.
+                            let trap_setup = class_ai::hunter_dip::trap_setup(
+                                &abilities,
+                                entity,
+                                &combatant,
+                                my_pos,
+                                auras.as_deref(),
+                                &ctx,
+                            );
                             class_ai::dps_postures::evaluate_dps_posture(
                                 &mut commands,
                                 entity,
@@ -1225,6 +1316,7 @@ pub fn decide_abilities(
                                 // No wand gate: the Hunter has no wand and shoots,
                                 // it doesn't fall back to a wand when OOM.
                                 None,
+                                trap_setup,
                                 time.elapsed_secs(),
                                 &mut decision_trace,
                             );
@@ -1243,6 +1335,7 @@ pub fn decide_abilities(
                     &ctx,
                     &mut instant_attacks,
                     dip_plan,
+                    &movement_config.hunter.weights,
                     &mut decision_trace,
                 )
             }

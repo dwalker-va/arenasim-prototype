@@ -1,0 +1,20 @@
+diff --git a/src/states/play_match/class_ai/hunter_dip.rs b/src/states/play_match/class_ai/hunter_dip.rs
+index 4cf3b8e..3f4812e 100644
+--- a/src/states/play_match/class_ai/hunter_dip.rs
++++ b/src/states/play_match/class_ai/hunter_dip.rs
+@@ -152,6 +152,15 @@ pub fn trap_victim_worth_it(
+     if !info.is_pet && info.class.is_healer() {
+         return true;
+     }
++    let own_target = ctx.combatants.get(&owner).and_then(|i| i.target);
++    let focused = trap_focus(ctx, owner, own_target);
++    let aura = crate::states::play_match::traps::freezing_trap_aura(owner);
++    if super::ally_freers(ctx, abilities, victim, &aura)
++        .iter()
++        .all(|f| focused.contains(f))
++    {
++        return true;
++    }
+     trap_would_stick(ctx, abilities, owner, victim)
+ }
+ 

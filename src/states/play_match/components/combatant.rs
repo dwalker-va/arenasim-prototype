@@ -291,6 +291,21 @@ pub struct ShadowSightOrbConsuming {
 // Combat Components
 // ============================================================================
 
+/// A Hunter's hold on its own target while its Freezing Trap is out for the
+/// enemy `healer`, from the throw — before the trap has sprung and the healer
+/// carries its aura: target acquisition keeps the Hunter on `melee` (or, with
+/// it gone, the nearest other enemy) instead of the healer — a configured kill
+/// target included — until the healer is dead, or `spring_by` (sim seconds)
+/// has passed and the healer carries none of this Hunter's Freezing Traps.
+/// Once sprung, the aura itself keeps the Hunter off it. Set by
+/// `hunter_dip::pressure_trap_hold`, read and cleared by `acquire_targets`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TrapRetarget {
+    pub healer: Entity,
+    pub melee: Entity,
+    pub spring_by: f32,
+}
+
 /// Core combatant component containing all combat state and stats.
 #[derive(Component, Clone)]
 pub struct Combatant {
@@ -410,6 +425,13 @@ pub struct Combatant {
     pub mage_armor: MageArmor,
     /// Paladin-specific: which aura to apply (Devotion Aura, Shadow Resistance Aura, or Concentration Aura)
     pub paladin_aura: PaladinAura,
+    /// Hunter-specific: whether the opener is over — set by the Hunter's
+    /// first Aimed Shot or Serpent Sting. In the opener, Aimed Shot goes
+    /// before the sting when it has time to finish.
+    pub hunter_opened: bool,
+    /// Hunter-specific: the target hold of a Freezing Trap thrown at the enemy
+    /// healer under melee pressure ([`TrapRetarget`]).
+    pub trap_retarget: Option<TrapRetarget>,
     /// Equipped proc trinkets and their live internal cooldowns, in socket
     /// order. Filled by [`Combatant::apply_equipment`].
     ///
@@ -584,6 +606,8 @@ impl Combatant {
             warrior_shout: WarriorShout::default(),
             mage_armor: MageArmor::default(),
             paladin_aura: PaladinAura::default(),
+            hunter_opened: false,
+            trap_retarget: None,
             proc_trinkets: Vec::new(),
         }
     }

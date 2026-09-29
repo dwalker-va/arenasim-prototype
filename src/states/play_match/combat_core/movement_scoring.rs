@@ -180,6 +180,40 @@ pub struct ScorerInputs {
     /// you shoot). `None` disables the term (no kill target, or a scorer that
     /// does not seek LoS).
     pub los_target: Option<Vec3>,
+    /// Position of the enemy healer a ready Freezing Trap would be thrown at,
+    /// for the `trap_setup` term (Hunter). `None` disables it — no clean
+    /// victim, the trap on cooldown, or a scorer that has no trap.
+    pub trap_setup_point: Option<Vec3>,
+    /// Distance beyond which `trap_setup` starts pulling toward
+    /// `trap_setup_point` — the throw range with room for the lead.
+    pub trap_setup_range: f32,
+}
+
+/// Yards past `trap_setup_range` over which the `trap_setup` pull ramps to its
+/// full weight.
+const TRAP_SETUP_RAMP: f32 = 5.0;
+
+/// The `trap_setup` term for one candidate: a pull toward
+/// `trap_setup_point` once the candidate's lookahead step would sit beyond
+/// `trap_setup_range` of it, ramping to the full weight over
+/// [`TRAP_SETUP_RAMP`] yards. Exactly zero within range, so it only bends a
+/// kite whose escape would carry the Hunter out of throw range of the healer.
+/// Shared by the scorer and the trace so the traced value is the scored one.
+pub fn trap_setup_term(candidate: Vec2, inputs: &ScorerInputs, weight: f32) -> f32 {
+    let Some(healer) = inputs.trap_setup_point else {
+        return 0.0;
+    };
+    if weight <= 0.0 {
+        return 0.0;
+    }
+    let next = inputs.my_pos + Vec3::new(candidate.x, 0.0, candidate.y) * inputs.lookahead;
+    let to_healer = xz(healer) - xz(next);
+    let overshoot = to_healer.length() - inputs.trap_setup_range;
+    if overshoot <= 0.0 || to_healer.length() <= f32::EPSILON {
+        return 0.0;
+    }
+    let ramp = (overshoot / TRAP_SETUP_RAMP).min(1.0);
+    weight * candidate.dot(to_healer.normalize()) * ramp
 }
 
 fn xz(v: Vec3) -> Vec2 {
@@ -270,6 +304,8 @@ pub fn score_direction(candidate: Vec2, inputs: &ScorerInputs, weights: &Movemen
             score += weights.healer_leash * candidate.dot(to_healer.normalize()) * ramp;
         }
     }
+
+    score += trap_setup_term(candidate, inputs, weights.trap_setup);
 
     let corner_closeness = inputs.bounds.edge_closeness(next.x, next.z);
     if corner_closeness > 0.0 {
@@ -594,6 +630,76 @@ mod tests {
     /// THE LEASH IS INERT INSIDE HEAL RANGE. This is the property that lets it
     /// coexist with `flee`: in the region where fleeing is simply correct, the
     /// term contributes exactly nothing, so it cannot blunt an escape.
+    /// THE TRAP SETUP IS INERT WITHIN THROW RANGE, and absent without a
+    /// healer to set up on: it can only bend a kite whose escape would carry
+    /// the Hunter out of range of the healer, never fight the escape inside it.
+    #[test]
+    fn trap_setup_does_nothing_within_range_or_without_a_healer() {
+        let weights = MovementWeights {
+            trap_setup: 3.0,
+            ..MovementWeights::default()
+        };
+        let dirs = compass_directions_16();
+        let mut inputs = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, 0.0),
+            lookahead: 2.0,
+            threats: vec![Vec3::new(5.0, 1.0, 0.0)],
+            trap_setup_range: 25.0,
+            ..Default::default()
+        };
+        let without = score_directions(&dirs, &inputs, &weights);
+        // Healer 10yd away — every step stays within 25yd of it.
+        inputs.trap_setup_point = Some(Vec3::new(0.0, 0.0, 10.0));
+        for &d in &dirs {
+            assert_eq!(trap_setup_term(d, &inputs, weights.trap_setup), 0.0);
+        }
+        assert_eq!(score_directions(&dirs, &inputs, &weights), without);
+        // Beyond range, but no weight: still nothing.
+        inputs.trap_setup_point = Some(Vec3::new(0.0, 0.0, 60.0));
+        for &d in &dirs {
+            assert_eq!(trap_setup_term(d, &inputs, 0.0), 0.0);
+        }
+    }
+
+    /// Beyond throw range the pull bends a flee toward the healer without
+    /// reversing it: with `flee` above `trap_setup`, the chosen direction
+    /// still leads away from the chaser, and now toward the healer's side.
+    #[test]
+    fn trap_setup_bends_a_flee_toward_the_healer() {
+        let weights = MovementWeights {
+            threat_repulsion: 0.0,
+            formation_pull: 0.0,
+            corner_penalty: 0.0,
+            wand_pull: 0.0,
+            burn_pull: 0.0,
+            range_band: 0.0,
+            flee: 6.0,
+            commitment_bonus: 0.0,
+            los_seek: 0.0,
+            cover_pull: 0.0,
+            healer_leash: 0.0,
+            trap_setup: 3.0,
+        };
+        let dirs = compass_directions_16();
+        // Chaser at +X; healer 40yd off on +Z — well beyond a 25yd setup range.
+        let mut inputs = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, 0.0),
+            lookahead: 2.0,
+            nearest_threat: Some(Vec3::new(3.0, 1.0, 0.0)),
+            trap_setup_range: 25.0,
+            ..Default::default()
+        };
+        let straight = score_directions(&dirs, &inputs, &weights);
+        assert!(
+            straight.x < -0.99,
+            "no healer: flee straight away, got {straight:?}"
+        );
+        inputs.trap_setup_point = Some(Vec3::new(0.0, 0.0, 40.0));
+        let bent = score_directions(&dirs, &inputs, &weights);
+        assert!(bent.x < 0.0, "still away from the chaser, got {bent:?}");
+        assert!(bent.y > 0.1, "bent toward the healer (+Z), got {bent:?}");
+    }
+
     #[test]
     fn healer_leash_does_nothing_inside_heal_range() {
         let weights = MovementWeights {
@@ -664,6 +770,7 @@ mod tests {
             los_seek: 0.0,
             cover_pull: 0.0,
             healer_leash: 0.0,
+            trap_setup: 0.0,
         };
         let dirs = compass_directions_16();
         let ideal_away = dirs[8]; // ~(-1, 0): exactly away from a +X threat
@@ -1020,6 +1127,7 @@ mod tests {
             los_seek: 0.0,
             cover_pull: 0.0,
             healer_leash: 0.0,
+            trap_setup: 0.0,
         };
         let dirs = compass_directions_16();
         // Near the +X/+Z corner (|x|+|z| = 48, just inside ARENA_CORNER_SUM),
@@ -1126,6 +1234,7 @@ mod tests {
             los_seek: 0.0,
             cover_pull: 0.0,
             healer_leash: 0.0,
+            trap_setup: 0.0,
         }
     }
 
