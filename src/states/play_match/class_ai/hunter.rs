@@ -1270,6 +1270,9 @@ fn try_concussive_shot(
 }
 
 /// Try Aimed Shot (2.5s cast time ranged ability).
+/// Trace note: Aimed Shot held because an enemy is hidden ([`try_aimed_shot`]).
+pub const AIMED_SHOT_HELD_HIDDEN: &str = "an unseen enemy could interrupt the cast";
+
 fn try_aimed_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -1287,6 +1290,19 @@ fn try_aimed_shot(
     let Some(def) = abilities.get(&ability) else {
         return false;
     };
+
+    // A 2.5s cast is not begun while an enemy is hidden: a stealthed Rogue
+    // opens in melee range and Kicks it. The same question the opener asks
+    // ([`aimed_shot_has_time`]), asked wherever Aimed Shot is in the rotation.
+    if ctx.enemy_hidden() {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: AIMED_SHOT_HELD_HIDDEN.to_string(),
+            },
+        );
+        return false;
+    }
 
     let opts = PreCastOpts {
         check_friendly_cc: true,

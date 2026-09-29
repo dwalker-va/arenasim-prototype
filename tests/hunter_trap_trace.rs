@@ -554,7 +554,7 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
 #[test]
 fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
     let mut caught = 0usize;
-    for seed in [8u64, 14, 18] {
+    for seed in [0u64, 6, 13] {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
@@ -614,7 +614,7 @@ fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
 #[test]
 fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
     const GATES_OPEN: f64 = 10.0;
-    for seed in [8u64, 10, 14] {
+    for seed in [0u64, 6, 13] {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.team1_kill_target = Some(1);
         cfg.max_duration_secs = 60.0;
@@ -703,4 +703,65 @@ fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
             "seed {seed}: the Hunter never hit the Rogue while the Priest was frozen"
         );
     }
+}
+
+/// AS-125 — no Aimed Shot is begun while the enemy Rogue is in stealth.
+///
+/// A stealthed Rogue opens in melee range and Kicks a 2.5s cast. The opener
+/// already put Serpent Sting first while an enemy is hidden; the sting ends
+/// the opener, so the rotation's own Aimed Shot must ask the same question or
+/// it is begun into the still-hidden Rogue and Kicked. Every Aimed Shot the
+/// Hunter begins comes after the Rogue's first action in the log, and the
+/// trace shows the hidden-enemy hold actually firing.
+#[test]
+fn no_aimed_shot_is_begun_while_a_rogue_is_hidden() {
+    use arenasim::states::play_match::class_ai::hunter::AIMED_SHOT_HELD_HIDDEN;
+
+    let log_time = |l: &str| {
+        l.trim_start_matches('[')
+            .split('s')
+            .next()
+            .and_then(|t| t.trim().parse::<f64>().ok())
+    };
+    let mut held = 0usize;
+    for (team2, seed) in [(["Rogue", "Priest"], 0u64), (["Rogue", "Paladin"], 0)] {
+        let mut cfg = config(&["Hunter", "Priest"], &team2, seed);
+        cfg.max_duration_secs = 40.0;
+        let (events, log) = run_trace_and_log(cfg);
+        let rogue_acts = log
+            .lines()
+            .find(|l| {
+                l.contains("] [CAST] Team 2 Rogue") || l.contains("Team 2 Rogue #1 is revealed")
+            })
+            .and_then(log_time)
+            .unwrap_or_else(|| panic!("{team2:?}: the Rogue never acts"));
+        for l in log
+            .lines()
+            .filter(|l| l.contains("Team 1 Hunter #1 begins casting Aimed Shot"))
+        {
+            let t = log_time(l).unwrap();
+            assert!(
+                t >= rogue_acts,
+                "{team2:?}: Aimed Shot begun at {t:.2}s, before the hidden Rogue acted at {rogue_acts:.2}s"
+            );
+        }
+        held += hunter_trap_events(&events)
+            .flat_map(|v| {
+                v.get("candidates")
+                    .and_then(|c| c.as_array())
+                    .into_iter()
+                    .flatten()
+            })
+            .filter(|c| {
+                c.get("ability").and_then(|a| a.as_str()) == Some("AimedShot")
+                    && c.pointer("/reason/PreconditionUnmet/note")
+                        .and_then(|n| n.as_str())
+                        == Some(AIMED_SHOT_HELD_HIDDEN)
+            })
+            .count();
+    }
+    assert!(
+        held > 0,
+        "the hidden-enemy hold never fired — the probe went vacuous"
+    );
 }

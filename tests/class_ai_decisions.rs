@@ -1530,16 +1530,13 @@ fn a_lane_trap_is_decided_on_whoever_reaches_it_after_it_arms() {
         toward_hunter,
         Some(hunter),
     );
-    assert_eq!(
-        springer(vec![felhunter.clone(), rogue.clone()]),
-        Some(rogue.entity)
-    );
+    assert_eq!(springer(vec![felhunter, rogue]), Some(rogue.entity));
     // Alone, the Felhunter never reaches it: nobody is predicted.
     assert_eq!(springer(vec![felhunter]), None);
 
     // An enemy already inside the radius and planted springs it as it arms.
     let planted = at(3, CharacterClass::Warrior, landing, Vec3::ZERO, None);
-    assert_eq!(springer(vec![planted.clone()]), Some(planted.entity));
+    assert_eq!(springer(vec![planted]), Some(planted.entity));
 
     // An enemy that crosses the landing before it arms and runs on (chasing a
     // unit far behind the Hunter) is gone by the time it could spring.
@@ -1553,7 +1550,7 @@ fn a_lane_trap_is_decided_on_whoever_reaches_it_after_it_arms() {
     let mut far_ally = info(Entity::from_raw(5), 1, CharacterClass::Priest);
     far_ally.position = Vec3::new(0.0, 0.0, -60.0);
     let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
-    snap.combatants.insert(far_ally.entity, far_ally.clone());
+    snap.combatants.insert(far_ally.entity, far_ally);
     snap.combatants.insert(
         through.entity,
         CombatantInfo {
@@ -1581,7 +1578,7 @@ fn a_lane_trap_is_decided_on_whoever_reaches_it_after_it_arms() {
         toward_hunter,
         Some(hunter),
     );
-    assert_eq!(springer(vec![warrior.clone()]), Some(warrior.entity));
+    assert_eq!(springer(vec![warrior]), Some(warrior.entity));
 }
 
 /// The trap breaks on any damage, so a lane trap is never decided on an enemy
@@ -1880,16 +1877,13 @@ fn aimed_shot_waits_for_the_time_to_finish_it() {
         position: Vec3::new(0.0, 0.0, 25.0),
         ..pet_info(Entity::from_raw(3), 2, Warlock)
     };
-    assert!(!has_time(vec![felhunter.clone()], vec![]));
+    assert!(!has_time(vec![felhunter], vec![]));
     // ...unless it is held in hard CC past the cast.
     let trapped = Aura {
         duration: 6.0,
         ..aura_with(AuraType::Incapacitate, Some(hunter), 0.0)
     };
-    assert!(has_time(
-        vec![felhunter.clone()],
-        vec![(felhunter.entity, trapped)]
-    ));
+    assert!(has_time(vec![felhunter], vec![(felhunter.entity, trapped)]));
     // A Rogue the Hunter cannot see counts as one that could stop it: the
     // Priest beside it is harmless, but the opener waits.
     let stealthed_rogue = CombatantInfo {

@@ -318,17 +318,20 @@ pub fn acquire_targets(
             }
         }
 
-        // ===== Hunter: off the enemy its own Freezing Trap holds =====
+        // ===== Hunter: off the enemy healer its own Freezing Trap is for =====
         // A Hunter holds fire on an enemy its own Freezing Trap has frozen (the
-        // trap breaks on any damage), so staying on it idles the Hunter for the
-        // trap's duration. It fights someone else instead: while its trap
-        // holds its target, and — for a trap thrown at the enemy healer under
-        // melee pressure (`TrapRetarget`) — from the throw, before the trap
-        // has sprung, preferring the melee on it. Applied after the kill-target
-        // re-force so a configured kill target cannot pull it back, and here
-        // rather than in the Hunter's AI so the switch is traced as a target
-        // acquisition like any other. Only a Hunter owns a Freezing Trap, so
-        // for every other class this block is inert.
+        // trap breaks on any damage), so staying on a healer it trapped under
+        // melee pressure would idle it for the trap's duration. It fights the
+        // melee instead (`TrapRetarget`), from the throw — before the trap has
+        // sprung — and while the trap holds that healer, however late it
+        // sprang. Applied after the kill-target re-force so a configured kill
+        // target cannot pull it back, and here rather than in the Hunter's AI
+        // so the switch is traced as a target acquisition like any other.
+        // Scoped to healers: a trapped non-healer kill target (a stealthed
+        // Rogue caught by the opening lane trap) keeps the Hunter on it, since
+        // the Hunter's team converges on it the moment the trap ends. Only a
+        // Hunter owns a Freezing Trap, so for every other class this block is
+        // inert.
         let own_trap_on = |target: Entity| {
             active_auras_map.get(&target).is_some_and(|auras| {
                 auras
@@ -345,9 +348,16 @@ pub fn acquire_targets(
             }
         }
         let held = combatant.trap_retarget;
+        let is_healer = |target: Entity| {
+            enemy_combatants
+                .iter()
+                .any(|(e, _, _, _, class, _, _, is_pet)| {
+                    *e == target && !is_pet && class.is_healer()
+                })
+        };
         if let Some(avoid) = combatant
             .target
-            .filter(|t| held.is_some_and(|h| h.healer == *t) || own_trap_on(*t))
+            .filter(|t| held.is_some_and(|h| h.healer == *t) || (own_trap_on(*t) && is_healer(*t)))
         {
             let my_pos = transform.translation;
             let fightable = |(e, _, stealthed, enemy_ss, _, _, immune, _): &&(
