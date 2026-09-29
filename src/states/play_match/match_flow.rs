@@ -6,6 +6,7 @@
 //! - Match end detection
 //! - Victory celebration and transition to Results
 
+use super::celebration::CelebrationChoreography;
 use super::components::*;
 use super::match_config::MatchConfig;
 use super::utils::{combatant_id, pet_combatant_id};
@@ -402,6 +403,7 @@ pub fn check_match_end(
                 pet_damage_links,
             },
             match_metadata,
+            choreography: CelebrationChoreography::ConvergeAndBounce,
         });
 
         info!("Victory celebration started! {} seconds", 5.0);

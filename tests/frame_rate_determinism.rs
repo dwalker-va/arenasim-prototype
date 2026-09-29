@@ -21,7 +21,11 @@
 //! different state at different frame rates (AS-170).
 //!
 //! So the comparison is: every tick both schedules ran must match exactly, and
-//! any ticks one schedule ran past the other must be the frozen final state.
+//! any ticks one schedule ran past the other must leave the sim state frozen.
+//! Positions are hashed apart from the rest of the state, because one thing
+//! does move after the decision: the victory choreography walks the winners
+//! together (`play_match::celebration`). It runs on the sim clock, so their
+//! positions must still match tick for tick wherever both schedules ran.
 //! The always-on test also asserts the schedules DO disagree on the
 //! celebration's length, so that tail check is never vacuous.
 //!
@@ -140,8 +144,13 @@ fn boot(cfg_json: &str) -> App {
 /// What one run saw, tick by tick, while the match was on screen.
 #[derive(Resource, Default)]
 struct Ticks {
-    /// Sim-state hash after every `PlayMatch` tick.
+    /// Sim-state hash after every `PlayMatch` tick — everything but where the
+    /// combatants stand.
     hashes: Vec<u64>,
+    /// Where every combatant stands and faces, after every `PlayMatch` tick.
+    /// Kept apart from `hashes` because the victory choreography moves the
+    /// winners after the sim has frozen.
+    poses: Vec<u64>,
     /// The first tick the victory celebration was running.
     decided_at: Option<usize>,
     /// Combat-log entries already folded into `log_hash`.
@@ -211,11 +220,10 @@ fn record_tick(
         .collect();
     let name = |e: Option<Entity>| format!("{:?}", e.map(|e| names.get(&e)));
 
-    let mut rows: Vec<(u64, u64)> = combatants
+    let mut rows: Vec<(u64, u64, u64)> = combatants
         .iter()
         .map(|(_, c, t, pet, auras, casting, channeling)| {
-            let mut h = Fnv::new();
-            h.str(&format!("{:?}", (c.team, c.slot, pet.is_some(), c.class)));
+            let mut pose = Fnv::new();
             for v in [
                 t.translation.x,
                 t.translation.y,
@@ -224,6 +232,12 @@ fn record_tick(
                 t.rotation.y,
                 t.rotation.z,
                 t.rotation.w,
+            ] {
+                pose.f32(v);
+            }
+            let mut h = Fnv::new();
+            h.str(&format!("{:?}", (c.team, c.slot, pet.is_some(), c.class)));
+            for v in [
                 c.current_health,
                 c.max_health,
                 c.current_mana,
@@ -290,6 +304,7 @@ fn record_tick(
             (
                 (c.team as u64) << 32 | (c.slot as u64) << 1 | pet.is_some() as u64,
                 h.0,
+                pose.0,
             )
         })
         .collect();
@@ -328,9 +343,12 @@ fn record_tick(
     ticks.log_hash = log_hash.0;
 
     let mut h = Fnv::new();
-    for (key, row) in rows {
+    let mut poses = Fnv::new();
+    for (key, row, pose) in rows {
         h.bytes(&key.to_le_bytes());
         h.bytes(&row.to_le_bytes());
+        poses.bytes(&key.to_le_bytes());
+        poses.bytes(&pose.to_le_bytes());
     }
     for o in objects {
         for v in o {
@@ -341,6 +359,7 @@ fn record_tick(
     h.f32(log.match_time);
     h.bytes(&ticks.log_hash.to_le_bytes());
     ticks.hashes.push(h.0);
+    ticks.poses.push(poses.0);
 
     if let Some(celebration) = celebration {
         if ticks.decided_at.is_none() {
@@ -490,6 +509,14 @@ fn assert_same_sim(cfg: &str, a_label: &str, a: &Ticks, b_label: &str, b: &Ticks
     if let Some(tick) = (0..common).find(|&i| a.hashes[i] != b.hashes[i]) {
         panic!(
             "{cfg}: sim state differs at tick {} (decided at {decided}) between {a_label} and {b_label}",
+            tick + 1
+        );
+    }
+    // Positions too, through the celebration: the victory choreography runs on
+    // the sim clock, so the winners walk the same path at any display rate.
+    if let Some(tick) = (0..common).find(|&i| a.poses[i] != b.poses[i]) {
+        panic!(
+            "{cfg}: combatant positions differ at tick {} (decided at {decided}) between {a_label} and {b_label}",
             tick + 1
         );
     }

@@ -1025,6 +1025,7 @@ fn start_entry(
                             pet_damage_links: Default::default(),
                         },
                         match_metadata: Default::default(),
+                        choreography: Default::default(),
                     });
                 }
                 // Both of these are driven from `position_caster`, which owns
