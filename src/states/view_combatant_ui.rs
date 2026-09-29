@@ -139,9 +139,10 @@ struct EquipmentBonuses {
     arcane_resistance: f32,
     nature_resistance: f32,
     holy_resistance: f32,
-    /// If a primary weapon is equipped, its attack speed replaces the base.
-    /// None means no weapon replacement (use base attack speed).
-    weapon_attack_speed: Option<f32>,
+    /// The live weapon socket's weapon speed, in seconds per swing — the
+    /// value `apply_equipment` gives the combatant. None means no weapon in
+    /// that socket, and so no auto-attack.
+    weapon_speed: Option<f32>,
 }
 
 impl EquipmentBonuses {
@@ -166,9 +167,9 @@ impl EquipmentBonuses {
                 bonuses.arcane_resistance += item.arcane_resistance;
                 bonuses.nature_resistance += item.nature_resistance;
                 bonuses.holy_resistance += item.holy_resistance;
-                // Track weapon attack speed replacement for primary slot
-                if *slot == primary_weapon_slot && item.is_weapon && item.attack_speed > 0.0 {
-                    bonuses.weapon_attack_speed = Some(item.attack_speed);
+                // The live socket's weapon sets the swing speed
+                if *slot == primary_weapon_slot && item.is_weapon && item.weapon_speed > 0.0 {
+                    bonuses.weapon_speed = Some(item.weapon_speed);
                 }
             }
         }
@@ -1147,52 +1148,19 @@ fn render_stats_panel(
                     ui.end_row();
                 }
 
-                // Attack speed: show weapon replacement if a weapon overrides it
-                if let Some(weapon_speed) = equip.weapon_attack_speed {
-                    ui.label(
-                        egui::RichText::new("Attack Speed:")
-                            .size(14.0)
-                            .color(label_color),
-                    );
-                    let speed_text = format!("{:.1}/s", weapon_speed);
-                    let speed_color = if (weapon_speed - stats.attack_speed).abs() > 0.01 {
-                        green
-                    } else {
-                        neutral
-                    };
-                    let speed_response = ui.label(
-                        egui::RichText::new(&speed_text)
-                            .size(14.0)
-                            .color(speed_color),
-                    );
-                    if (weapon_speed - stats.attack_speed).abs() > 0.01 && speed_response.hovered()
-                    {
-                        egui::show_tooltip_at_pointer(
-                            ui.ctx(),
-                            ui.layer_id(),
-                            ui.id().with("speed_tooltip"),
-                            |ui| {
-                                ui.label(format!(
-                                    "{:.1} base → {:.1} from weapon",
-                                    stats.attack_speed, weapon_speed
-                                ));
-                            },
-                        );
-                    }
-                    ui.end_row();
-                } else {
-                    stat_row_float(
-                        ui,
-                        "Attack Speed:",
-                        stats.attack_speed,
-                        0.0,
-                        "/s",
-                        neutral,
-                        green,
-                        red,
-                        label_color,
-                    );
-                }
+                // Weapon speed: seconds per swing, straight from the weapon in
+                // the live socket — there is no class speed to compare it to.
+                ui.label(
+                    egui::RichText::new("Weapon Speed:")
+                        .size(14.0)
+                        .color(label_color),
+                );
+                let speed_text = match equip.weapon_speed {
+                    Some(speed) => format!("{:.2}s", speed),
+                    None => "No weapon".to_string(),
+                };
+                ui.label(egui::RichText::new(speed_text).size(14.0).color(neutral));
+                ui.end_row();
 
                 stat_row_float(
                     ui,

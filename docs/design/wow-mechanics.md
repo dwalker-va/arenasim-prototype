@@ -25,7 +25,22 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
 - Disabled while casting
 - Melee: Within MELEE_RANGE (2.5 units)
 - Ranged: Mage/Priest use "Wand Shots" at 40 unit range
-- Attack speed varies by class
+- **Every swing's speed comes from the weapon.** `ItemConfig::weapon_speed` is
+  seconds per swing, the Classic tooltip's "Speed", copied from a named real
+  Classic item for every weapon — main hand, off hand, two-hander, bow,
+  crossbow and wand (AS-167; the stand-in table is
+  `docs/design/balance/2026-09-28-as167-weapon-speed.md`). There is no
+  per-class speed. A combatant built without equipment swings at
+  `UNARMED_WEAPON_SPEED` (2.0s, Classic's unarmed speed); an equipped one whose
+  live socket is empty does not auto-attack at all.
+- **A two-hander carries Classic's weapon-DPS premium** over the one-hander it
+  displaces (1.30-1.42x, per tier, from the Classic items' own DPS) — the
+  damage that buys back the off hand it gives up.
+- **Per-swing procs stay a flat chance per hit**, as Classic rolled them
+  (Windfury Totem "each hit has a 20% chance", Crippling Poison "each strike
+  has a 30% chance"): Crippling Poison, Windfury Totem and `MeleeHit` proc
+  trinkets roll their chance on every landed swing, so a slower weapon procs
+  less often per second but each proc is a slower weapon's bigger hit.
 
 ### Dual Wield
 - **Who can**: Warrior, Rogue, Hunter — Classic's list, in
@@ -67,16 +82,15 @@ twin of it.
 This is a deliberate simplification, and the reason is how the buff was played
 rather than how it was coded:
 
-- In Classic/TBC, Windfury Totem applies a temporary **weapon enchant** while it
+- In Classic, Windfury Totem applies a temporary **weapon enchant** while it
   is active — it occupies a weapon's enchant slot.
 - A Rogue keeps a **poison** in the off hand, which consumes exactly the slot
   the Windfury enchant would otherwise land in. That *forces* Windfury onto the
   main hand.
-- Players wanted it there anyway. Windfury was a **proc-per-minute** system, so
-  its procs were a fixed budget, and spending that budget on the main hand — the
-  weapon with the higher top-end damage — was strictly more efficient than
-  sometimes rolling it on the smaller off-hand weapon. The single-poison
-  arrangement got value out of the off hand at the same time.
+- Players wanted it there anyway. Each hit has a flat 20% chance of an extra
+  attack (Wowhead spell 8512), and that extra attack is a swing of the weapon
+  that procced, so a proc is worth more on the main hand's bigger hit. The
+  single-poison arrangement got value out of the off hand at the same time.
 
 So main-hand-only is the realistic *outcome* of how the buff was actually used.
 We model that outcome directly rather than modelling the enchant slot that
@@ -96,7 +110,10 @@ produces it.
 
 ### Rage (Warrior)
 - Max: 100
-- Generates on damage dealt and received
+- Generates on damage dealt and received. A landed swing pays
+  `RAGE_PER_WEAPON_SECOND` (9) per second of its weapon's speed — 34.2 for a
+  3.8s two-hander — so a slow weapon earns the same rage per second as a fast
+  one; an off-hand swing pays half its own weapon's share.
 - Decays over time out of combat
 - No passive regeneration
 

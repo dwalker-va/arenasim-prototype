@@ -140,8 +140,7 @@ fn the_rider_is_what_slows_the_swing() {
         "the chill must stretch the swing interval ({chilled} vs {freed})"
     );
     assert_eq!(
-        freed,
-        1.0 / combatant.attack_speed,
+        freed, combatant.weapon_speed,
         "after the dispel the attacker swings at its base cadence"
     );
 }

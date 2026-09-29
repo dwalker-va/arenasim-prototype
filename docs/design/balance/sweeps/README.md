@@ -79,3 +79,26 @@ Behind `2026-09-27-as115-two-hander-budget.md` (card AS-115). Two directional
 Analyse each pair of CSVs with `scripts/paired_sweep.py ... --tier directional`.
 Get the per-class tables with `2026-09-27-as115-slices.py` (`--by partner` for
 the Warrior sweep, `--by holder` for the staff sweep).
+
+## `2026-09-28-as167-weapon-speed.jsonl`
+
+Behind `2026-09-28-as167-weapon-speed.md` (card AS-167). 6,250 configs: the
+whole 2v2 matrix without double healers, 10 seeds per cell, run once on
+`main` @ `17cb9f0` and once on the change. It was generated with
+`scripts/gen_sweep.py --full 2 --exclude-double-healer --n 10`, with no
+`--affects`, because every class wields a weapon whose speed moved and no cell
+is out of reach. For the same reason there is no control group, and
+`scripts/paired_sweep.py` has nothing to put in one. Get the run-wide
+non-vacuity and the per-class tables with `2026-09-28-as167-slices.py
+before.csv after.csv`. `2026-09-28-as167-swings.py <logs>` counts swings
+landed per hand from match logs (the doc's non-vacuity table, over every 60th
+line of this file).
+
+## `2026-09-28-as167-warrior-shaman-cells.jsonl`
+
+Behind the Windfury knockout in `2026-09-28-as167-weapon-speed.md`: the 36
+Warrior+Shaman cells of `2026-09-28-as167-weapon-speed.jsonl`, 10 seeds each
+(360 configs). Each arm's binary was built with Windfury Totem's magnitude set
+to `0.0` in `class_ai/shaman.rs` (`TotemElement::Air`, `0.12` -> `0.0`). The
+roll still happens, so the RNG draw order is unchanged. The results are
+`2026-09-28-as167_windfury_off_{before_17cb9f0,after}.csv`.

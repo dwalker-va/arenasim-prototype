@@ -782,12 +782,20 @@ fn different_seeds_produce_different_matches() {
 /// can only have dealt it by re-targeting once its call stopped resolving.
 ///
 /// Covers the plan's AE5 (`docs/plans/2026-08-06-001-feat-in-match-kill-call-and-banter-plan.md`).
+///
+/// Seed re-pinned for AS-167 (weapon speed from item data), from 424242 to
+/// 424244: at 424242 team 2 now wins at 29s of combat before the called Priest
+/// dies, so the fallback is never exercised. The first line that differs from
+/// `main` @ 17cb9f0 is the two Priests' opening Wand Shots into each other's
+/// shields, 10 -> 13 absorbed (the Staff of Dominance fires every 1.6s for the
+/// same DPS). Of 424242..=424247, 424244 is the first where the called Priest
+/// still dies.
 #[test]
 fn a_call_survives_its_target_s_death_and_the_team_retargets() {
     let mut config = create_config(
         vec!["Mage", "Priest"],
         vec!["Warrior", "Priest"],
-        Some(424242),
+        Some(424244),
     );
     config.max_duration_secs = 300.0;
     // Call the enemy Priest (slot 1); the Warrior in slot 0 is never called.
@@ -795,16 +803,19 @@ fn a_call_survives_its_target_s_death_and_the_team_retargets() {
 
     let result = run_headless_match_with(config, true, None).expect("match runs");
 
-    let called = &result.team2_combatants[1];
-    let never_called = &result.team2_combatants[0];
-    assert_eq!(
-        called.class_name, "Priest",
-        "fixture: slot 1 is the called Priest"
-    );
-    assert_eq!(
-        never_called.class_name, "Warrior",
-        "fixture: slot 0 is never called"
-    );
+    // By class, not by index: `team2_combatants` comes out in ECS query
+    // order, which follows each entity's archetype at match end rather than
+    // its slot. The two classes on team 2 are distinct, so each name is one
+    // combatant.
+    let by_class = |name: &str| {
+        result
+            .team2_combatants
+            .iter()
+            .find(|c| c.class_name == name)
+            .unwrap_or_else(|| panic!("fixture: team 2 fields a {name}"))
+    };
+    let called = by_class("Priest");
+    let never_called = by_class("Warrior");
 
     assert!(
         !called.survived,

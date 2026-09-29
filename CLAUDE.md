@@ -453,7 +453,12 @@ any ring fits either ring socket, and the same item may not occupy both
    - Slot multipliers: Head/Chest = 1.0, Legs = 0.875, Shoulders/Hands/Feet = 0.75, Waist = 0.625, Wrists = 0.5, Neck/Back/Ring/Trinket/Ranged = 0.5625
    - Hand items are priced by how they are HELD (`held_budget_multiplier`): two-hander = 1.0, one-hander = 0.42, off-hand (shield/frill) = 0.5625. However the hands are filled they draw about one full slot (0.42 + 0.5625 = 0.9825). A shipped two-hander is priced at exactly what the one-hander + off-hand pair it displaces spends, not its cap — `two_handers_are_priced_at_the_pair_they_displace` pins each one to its pair, and a new two-hander must be added there
    - Stat costs: max_health/max_mana = 1.0/pt, attack_power/spell_power = 1.5/pt, crit_chance = 300.0/pt (0.01 = 3.0), movement_speed = 30.0/pt (0.1 = 3.0), resistances = 0.4/pt, mana_regen = 5.0/pt
-   - **Free stats** (excluded from budget): `armor`, `attack_damage_min`, `attack_damage_max`, `attack_speed`
+   - **Free stats** (excluded from budget): `armor`, `attack_damage_min`, `attack_damage_max`, `weapon_speed`
+   - **A weapon's `weapon_speed` is seconds per swing — the Classic tooltip's "Speed"**, taken from a
+     named real Classic item (same weapon type, hand and role, nearest item level). The item is the only
+     source of a hand's swing speed; `every_weapon_declares_its_classic_speed` names every weapon, so a new
+     one fails `cargo test` until it has a speed and a row there. A two-hander's weapon DPS carries Classic's
+     premium over the one-hander it displaces (`two_handers_carry_the_classic_premium_over_the_one_hander_they_displace`)
    - Budget usage = sum of (stat_value × weight) across all non-free stats
    - Items may exceed the budget by up to 5% tolerance
 
@@ -473,7 +478,10 @@ any ring fits either ring socket, and the same item may not occupy both
      or a wand); `SpellCast` is a completed cast with a cast time that LANDED —
      the point mana is charged, so a fizzled or interrupted cast procs nothing,
      and neither does an instant or a channel; `Heal` is the healing subset of
-     `SpellCast`.
+     `SpellCast`. A `MeleeHit` chance is rolled per landed hit, whatever the
+     weapon's speed, so a slow weapon's fewer swings proc less often per
+     second. That is Classic's shape for Windfury and poisons; the sim's proc
+     trinkets have no Classic counterpart, so none is rated per minute.
    - **Per-trinket ICD, no global lock.** A proc cannot fire again while its own
      buff is up (`internal_cooldown >= duration` is validated), and two
      DIFFERENT trinkets can be live at once. A proc buff coexists with a

@@ -367,15 +367,12 @@ fn item_stat_rows(item: &ItemConfig) -> Vec<(String, String)> {
                 item.attack_damage_min, item.attack_damage_max
             ),
         ));
-        if item.attack_speed > 0.0 {
-            rows.push((
-                "Attack speed".to_string(),
-                format!("{:.1}/s", item.attack_speed),
-            ));
+        if item.weapon_speed > 0.0 {
+            rows.push(("Speed".to_string(), format!("{:.2}", item.weapon_speed)));
             let mid = (item.attack_damage_min + item.attack_damage_max) / 2.0;
             rows.push((
                 "Damage per second".to_string(),
-                format!("{:.1}", mid * item.attack_speed),
+                format!("{:.1}", mid / item.weapon_speed),
             ));
         }
     }
@@ -439,8 +436,8 @@ pub fn item_stat_parts(item: &ItemConfig) -> Vec<String> {
                 item.attack_damage_min, item.attack_damage_max
             ));
         }
-        if item.attack_speed > 0.0 {
-            parts.push(format!("{:.1} Speed", item.attack_speed));
+        if item.weapon_speed > 0.0 {
+            parts.push(format!("Speed {:.2}", item.weapon_speed));
         }
     }
 

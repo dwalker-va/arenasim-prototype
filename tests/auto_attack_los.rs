@@ -63,7 +63,7 @@ fn harness_app(obstacles: Vec<ObstacleVolume>) -> App {
 fn spawn_combatant(app: &mut App, class: CharacterClass, pos: Vec3) -> Entity {
     let mut combatant = Combatant::new(1, 0, class);
     // Speed up swings so the ~1s window covers several attack intervals.
-    combatant.attack_speed = 5.0;
+    combatant.weapon_speed = 0.2;
     app.world_mut()
         .spawn((Transform::from_translation(pos), combatant))
         .id()

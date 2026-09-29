@@ -1,0 +1,29 @@
+# behaviour baseline  ai_profile=Legacy
+# map comp seed winner duration log_sha256
+BasicArena     healer_v_healer  1    Team_1   48.32s     6ff24b23b9d49d21
+BasicArena     healer_v_healer  4    Team_1   49.75s     032a4cb4327b8a28
+BasicArena     healer_v_healer  7    Team_2   54.73s     eef92434116fa741
+BasicArena     ranged_v_melee   1    Team_1   53.52s     ab2731b5682d7522
+BasicArena     ranged_v_melee   4    Team_1   84.82s     869d9ec4a60c5dcf
+BasicArena     ranged_v_melee   7    Team_1   61.87s     a8bdef784e8bc5d2
+BasicArena     pet_comp         1    Team_2   54.92s     31a149186a1a6019
+BasicArena     pet_comp         4    Team_2   66.25s     adde80cb94b117e0
+BasicArena     pet_comp         7    Team_2   71.30s     b92acba23598ea6f
+TwinPillars    healer_v_healer  1    Team_1   42.13s     024abb49cec0728d
+TwinPillars    healer_v_healer  4    Team_2   77.17s     9e9eb4ecff7882ae
+TwinPillars    healer_v_healer  7    Team_1   49.93s     8a95ec3836d16852
+TwinPillars    ranged_v_melee   1    Team_2   57.43s     9a1e15a252fa8cda
+TwinPillars    ranged_v_melee   4    Team_2   58.75s     cb89baa16c134fee
+TwinPillars    ranged_v_melee   7    Team_2   55.92s     f03011b1932f9508
+TwinPillars    pet_comp         1    Team_2   63.60s     42e8f19d514d5aaa
+TwinPillars    pet_comp         4    Team_2   56.77s     e0dbfd4a50d1c229
+TwinPillars    pet_comp         7    Team_2   59.07s     5d42303a69da1dcb
+PillaredArena  healer_v_healer  1    Team_1   52.07s     34ac6f4ec5134299
+PillaredArena  healer_v_healer  4    Team_1   63.67s     9c5b5a476e98b8a7
+PillaredArena  healer_v_healer  7    Team_1   48.58s     2b9d844818d2a465
+PillaredArena  ranged_v_melee   1    Team_1   62.95s     19dffa033f25d3fd
+PillaredArena  ranged_v_melee   4    Team_1   68.48s     20e7ff0590515112
+PillaredArena  ranged_v_melee   7    Team_1   70.25s     e763799bde78a4d4
+PillaredArena  pet_comp         1    Team_2   60.68s     50e9568ca65b31cf
+PillaredArena  pet_comp         4    Team_2   59.78s     0114353d7f26cec9
+PillaredArena  pet_comp         7    Team_2   62.40s     b3d27d67fd43c8ed

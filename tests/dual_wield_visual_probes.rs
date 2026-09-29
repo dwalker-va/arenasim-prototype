@@ -97,10 +97,10 @@ fn spawn_rogue(app: &mut App, armed: bool) -> Rogue {
     let mut combatant = Combatant::new(0, 0, CharacterClass::Rogue);
     // Out of the opener: a stealthed Rogue never telegraphs a swing.
     combatant.stealthed = false;
-    combatant.attack_speed = 1.0;
+    combatant.weapon_speed = 1.0;
     if armed {
         combatant.offhand_damage = 10.0;
-        combatant.offhand_speed = 2.0;
+        combatant.offhand_weapon_speed = 0.5;
     }
     combatant.target = Some(victim);
     let unit = app
@@ -231,7 +231,7 @@ fn same_tick_swings_strike_with_both_daggers() {
 fn the_off_hand_winds_up_on_its_own_timer() {
     let mut app = harness();
     let rogue = spawn_rogue(&mut app, true);
-    // Off-hand interval is 1/2.0 = 0.5s; the main hand's is 1.0s.
+    // Off-hand interval is 0.5s; the main hand's is 1.0s.
     set_timers(&mut app, rogue.unit, 0.0, 0.49);
     let (main, off) = max_poses(&mut app, &rogue);
     assert!(off > MOVED, "the off-hand dagger must wind up: {off} rad");

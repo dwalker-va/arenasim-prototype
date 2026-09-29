@@ -422,7 +422,7 @@ fn the_sim_marks_only_the_swing_that_carries_the_bonus() {
         ))
         .id();
     let mut warrior = Combatant::new(1, 0, CharacterClass::Warrior);
-    warrior.attack_speed = 5.0;
+    warrior.weapon_speed = 0.2;
     warrior.target = Some(target);
     warrior.next_attack_bonus_damage = warrior.attack_damage * 0.5;
     let warrior = app

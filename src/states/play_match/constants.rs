@@ -124,6 +124,33 @@ pub const ARENA_CORNER_SUM: f32 = 48.88;
 pub const FCT_HEIGHT: f32 = 4.0;
 
 // ============================================================================
+// Weapon Speed
+// ============================================================================
+
+/// Seconds between swings for a combatant whose speed no weapon has set —
+/// Classic's unarmed swing speed.
+///
+/// Every weapon's speed comes from its item (`ItemConfig::weapon_speed`, the
+/// Classic tooltip's "Speed"), set by `Combatant::apply_equipment`. This is the
+/// value a combatant carries BEFORE that runs. It is not a way to fight
+/// unarmed: an equipped combatant whose live weapon socket is empty gets
+/// `AutoAttackKind::None` and never auto-attacks at all, so the only
+/// combatants that swing at this speed are ones built without equipment
+/// (unit tests, the animation sandbox).
+pub const UNARMED_WEAPON_SPEED: f32 = 2.0;
+
+/// Rage a Warrior's landed swing generates per second of its weapon's speed.
+///
+/// Rage per swing scales with the weapon's speed, so a slow weapon's fewer,
+/// bigger swings pay the same rage per second as a fast weapon's many small
+/// ones: rage per second is the same for every weapon. 9.0 is the
+/// Arcanite Reaper's pre-AS-167 income (10 rage per swing at 0.9 swings per
+/// second), so the default Warrior's rage per second did not move when its
+/// axe went from 1.1s to Classic's 3.8s. Read from the weapon's BASE speed:
+/// an attack-speed slow means fewer swings, so less rage, as before.
+pub const RAGE_PER_WEAPON_SECOND: f32 = 9.0;
+
+// ============================================================================
 // Dual Wield
 // ============================================================================
 

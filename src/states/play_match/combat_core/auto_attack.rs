@@ -5,6 +5,7 @@ use super::super::ability_config::AbilityDefinitions;
 use super::super::components::*;
 use super::super::constants::{
     CRIT_DAMAGE_MULTIPLIER, DUAL_WIELD_MISS_CHANCE, OFFHAND_DAMAGE_MULTIPLIER,
+    RAGE_PER_WEAPON_SECOND,
 };
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::has_line_of_sight;
@@ -22,7 +23,7 @@ use bevy_egui::egui;
 /// Auto-attack system: Process attacks based on attack speed timers.
 ///
 /// Each combatant has an attack timer that counts up. When it reaches
-/// the attack interval (1.0 / attack_speed), they check if they're in
+/// the attack interval (its weapon's speed), they check if they're in
 /// range and attack their target.
 ///
 /// **Range Check**: Only melee attacks for now, must be within MELEE_RANGE.
@@ -356,10 +357,10 @@ pub fn combat_auto_attack(
                                 // totem is a temporary WEAPON ENCHANT, and a
                                 // Rogue spends its off-hand enchant slot on a
                                 // poison — so the buff lands on the main hand.
-                                // That was also the efficient play: Windfury
-                                // was proc-per-minute, so a fixed budget of
-                                // procs was worth more on the weapon with the
-                                // higher top end. Main-hand-only is the
+                                // That was also the efficient play: a flat
+                                // chance per hit buys an extra swing of the
+                                // weapon that procced, which is worth more on
+                                // the bigger main-hand hit. Main-hand-only is the
                                 // realistic outcome of the enchant-slot
                                 // interaction, so we model the outcome and skip
                                 // the slot. See docs/design/wow-mechanics.md.
@@ -445,9 +446,11 @@ pub fn combat_auto_attack(
                                     );
                                 }
 
-                                // Warriors generate Rage from auto-attacks
+                                // Warriors generate Rage from auto-attacks, in
+                                // proportion to the weapon's speed — see
+                                // `RAGE_PER_WEAPON_SECOND`.
                                 if combatant.resource_type == ResourceType::Rage {
-                                    let rage_gain = 10.0; // Gain 10 rage per auto-attack
+                                    let rage_gain = RAGE_PER_WEAPON_SECOND * combatant.weapon_speed;
                                     combatant.current_mana = (combatant.current_mana + rage_gain)
                                         .min(combatant.max_mana);
                                 }
@@ -490,11 +493,13 @@ pub fn combat_auto_attack(
 
                                 // Rage tracks the damage a swing deals, and an
                                 // off-hand swing deals a fraction of one — so
-                                // it pays the same fraction of the flat
+                                // it pays the same fraction of its weapon's
                                 // per-swing rage. Full rate would let a second
                                 // weapon double a Warrior's rage income.
                                 if combatant.resource_type == ResourceType::Rage {
-                                    let rage_gain = 10.0 * OFFHAND_DAMAGE_MULTIPLIER;
+                                    let rage_gain = RAGE_PER_WEAPON_SECOND
+                                        * combatant.offhand_weapon_speed
+                                        * OFFHAND_DAMAGE_MULTIPLIER;
                                     combatant.current_mana = (combatant.current_mana + rage_gain)
                                         .min(combatant.max_mana);
                                 }
@@ -997,7 +1002,7 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
     }
 }
 
-/// Effective auto-attack interval for a combatant: base `1.0 / attack_speed`,
+/// Effective auto-attack interval for a combatant: its weapon's speed,
 /// stretched by each `AttackSpeedSlow` aura (magnitude clamped at 0.75 to
 /// prevent division by near-zero).
 ///
@@ -1006,27 +1011,30 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
 /// never drift from the sim's real cadence. Pure — safe to call from graphical
 /// systems without touching sim state.
 pub fn effective_attack_interval(combatant: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
-    swing_interval(combatant.attack_speed, auras)
+    swing_interval(combatant.weapon_speed, auras)
 }
 
 /// The same, for the OFF hand, off its own weapon's speed.
 ///
 /// Only meaningful while [`Combatant::is_dual_wielding`] — that predicate is
-/// what guarantees the speed is non-zero, so the reciprocal below is safe.
+/// what guarantees there is an off-hand weapon, and so a non-zero speed.
 pub fn effective_offhand_interval(combatant: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
-    swing_interval(combatant.offhand_speed, auras)
+    swing_interval(combatant.offhand_weapon_speed, auras)
 }
 
 /// One swing interval from one weapon speed.
 ///
+/// `weapon_speed` is already an interval — seconds per swing, the Classic
+/// tooltip's "Speed" — so an unslowed swing takes exactly that long.
+///
 /// The two hands share this rather than each spelling out the arithmetic,
 /// **and the operation order below is load-bearing**: it multiplies the
-/// reciprocal by each slow in turn. Folding the slows together first and
+/// interval by each slow in turn. Folding the slows together first and
 /// multiplying once is algebraically the same and is NOT the same in `f32`,
 /// which would shift the main hand's interval by an ULP and, through the
 /// timer comparison, potentially every match in the project's baselines.
-fn swing_interval(speed: f32, auras: Option<&ActiveAuras>) -> f32 {
-    let mut attack_interval = 1.0 / speed;
+fn swing_interval(weapon_speed: f32, auras: Option<&ActiveAuras>) -> f32 {
+    let mut attack_interval = weapon_speed;
     if let Some(auras) = auras {
         for aura in auras.auras.iter() {
             if aura.effect_type == AuraType::AttackSpeedSlow {

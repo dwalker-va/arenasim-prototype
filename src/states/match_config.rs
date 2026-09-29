@@ -362,7 +362,7 @@ impl CharacterClass {
     }
 
     /// Which equipment socket holds this class's primary weapon — the one whose
-    /// `attack_damage` / `attack_speed` REPLACE the class base stats in
+    /// `attack_damage` / `weapon_speed` REPLACE the class base stats in
     /// `Combatant::apply_equipment`.
     ///
     /// Deliberately NOT [`Self::is_melee`], which answers a different question:

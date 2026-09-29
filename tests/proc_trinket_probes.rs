@@ -106,12 +106,22 @@ fn without_the_trinket_the_warrior_carries_only_battle_shout() {
 /// each fired at some point in the match. `Whetstone of Fury` is the only
 /// source of `CritChanceIncrease` a Warrior has, so its presence is
 /// unambiguous.
+///
+/// Seed re-pinned for AS-167 (weapon speed from item data), from 770_141 to
+/// 770_142. The Warrior's Arcanite Reaper now swings every 3.8s, not every
+/// 1.11s, so it lands about a third as many swings. Each swing still rolls a
+/// flat 15% / 10%, so there are fewer proc chances per fight, and at 770_141
+/// Dragonspine never fired. The first line that differs from `main` @ 17cb9f0
+/// is the Priest's opening Wand Shot, 8 -> 10 (the Staff of Dominance fires
+/// every 1.6s for the same DPS). Of 770_141..=770_160, 770_142 is the first
+/// where both trinkets fire with overlapping buffs (Dragonspine at 23.8s,
+/// Whetstone at 31.5s).
 #[test]
 fn two_different_proc_trinkets_are_live_at_the_same_time() {
     let cfg = config(
         "Warrior",
         "Priest",
-        770_141,
+        770_142,
         &[
             ("Trinket1", "DragonspineTrophy"),
             ("Trinket2", "WhetstoneOfFury"),
@@ -164,6 +174,14 @@ fn two_different_proc_trinkets_are_live_at_the_same_time() {
 /// Warrior the 1v1 is over in about twenty seconds, which is few enough casts
 /// that a 12% proc genuinely misses on some seeds — the probe would then be
 /// pinning the seed rather than the wiring.
+///
+/// The Priest half's seed was re-pinned for AS-167 (weapon speed from item
+/// data), from 770_143 to 770_144. At 770_143 the Warrior's 3.8s Arcanite
+/// Reaper now kills the Priest in 17.6s of combat, after ONE landed heal, so
+/// the 20% Reliquary proc had one chance; the first line that differs from
+/// `main` @ 17cb9f0 is the Priest's opening Wand Shot, 8 -> 10 (the Staff of
+/// Dominance fires every 1.6s for the same DPS). A scan of 770_143..=770_162
+/// picked 770_144: eight landed heals over a 36s fight, one proc.
 #[test]
 fn the_cast_and_heal_triggers_both_fire() {
     let caster = peak_concurrent(
@@ -185,7 +203,7 @@ fn the_cast_and_heal_triggers_both_fire() {
         config(
             "Priest",
             "Warrior",
-            770_143,
+            770_144,
             &[("Trinket2", "ReliquaryOfRenewal")],
         ),
         AuraType::ManaRegenIncrease,
@@ -279,10 +297,17 @@ fn a_proc_buff_is_logged_under_the_trinket_s_name() {
 /// Counted, not assumed: the logs are required to hold at least 50 of the
 /// Hunter's Auto Shots, and at Dragonspine's 15% a trigger that DID fire on
 /// shots would stay silent across 50 of them with probability 0.85^50 < 0.1%.
+///
+/// Six seeds, not five, since AS-167 (weapon speed from item data): the five
+/// seeds `770_150..770_155` fell from 57 Auto Shots to 48, because two of
+/// those fights got shorter — the first line that differs from `main` @
+/// 17cb9f0 is the Hunter's opening Auto Shot, 65 -> 62 absorbed, the Ashwood
+/// Bow's 2.4s shot at the bow's unchanged DPS. The sixth seed brings the count
+/// back to 62.
 #[test]
 fn a_ranged_auto_attack_does_not_fire_a_melee_proc() {
     let mut shots = 0;
-    for seed in 770_150..770_155 {
+    for seed in 770_150..770_156 {
         let log = logged_match(config(
             "Hunter",
             "Priest",

@@ -47,12 +47,42 @@ by someone who was not there.
 
 | File | Captured | Notes |
 |---|---|---|
-| `legacy_behaviour_2026-09-28_two_hander_budget.txt` | 2026-09-28 | **Current.** After the Warrior's Arcanite Reaper was re-priced at its displaced pair (card AS-115). Captured against a FRESH run of `main` @ `4c4689c`, which reproduced the 09-27 file exactly. |
+| `legacy_behaviour_2026-09-28_weapon_speed.txt` | 2026-09-28 | **Current.** After every weapon took its swing speed from a named Classic item (card AS-167). Captured against a FRESH run of `main` @ `17cb9f0`, which reproduced the two-hander-budget file exactly. |
+| `legacy_behaviour_2026-09-28_two_hander_budget.txt` | 2026-09-28 | After the Warrior's Arcanite Reaper was re-priced at its displaced pair (card AS-115). Captured against a FRESH run of `main` @ `4c4689c`, which reproduced the 09-27 file exactly. |
 | `legacy_behaviour_2026-09-27_immolate_rng.txt` | 2026-09-27 | After Immolate's apply burst stopped drawing from `game_rng` (card AS-154). Captured against a FRESH run of `main` @ `a2f483a` — see the note under the table. |
 | `legacy_behaviour_2026-09-13_frost_armor_chill.txt` | 2026-09-13 | After the Frost Armor chill became one compound debuff (card AS-54). Captured against a FRESH run of `main` @ `3c61185` rather than against the file below — see the note under the table. |
 | `legacy_behaviour_2026-08-02_backlash_ids.txt` | 2026-08-02 | After the `[BACKLASH]` log-id fix. Verified reproducible: two independent runs agreed on all 27 cells. |
 | `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | After moving the simulation to `FixedUpdate`. Verified reproducible when captured. |
 | `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | Pre-fixed-timestep. Also verified reproducible when captured. |
+
+### 2026-09-28 — weapon speed from item data (AS-167)
+
+Every weapon now swings at the exact speed of a named real Classic item, with
+its per-swing damage scaled so its weapon DPS holds (two-handers gained
+Classic's two-hander premium), and Warrior rage per swing scales with the
+weapon's speed.
+
+**All 27 cells moved, and the change predicts that.** Every comp here has a
+weapon in a live socket on both sides — a wand, a bow, a two-hander or a
+mace — so no cell is out of reach. Four flipped winner (`BasicArena
+healer_v_healer 1`, `BasicArena ranged_v_melee 4`, `TwinPillars
+ranged_v_melee 1`, `PillaredArena healer_v_healer 7`).
+
+The attribution is positive, cell by cell: re-running all 27 on both binaries,
+the FIRST line that differs in every log is a ranged auto-attack's per-shot
+damage. A slower wand fires fewer, bigger shots at the same DPS, and the
+Ashwood Bow's 2.4s shot is slightly smaller than its old 2.5s one:
+
+- `healer_v_healer` on BasicArena and PillaredArena: the Priests' opening Wand
+  Shots into each other's shields, 10 -> 13 absorbed;
+- `healer_v_healer` on TwinPillars: the Warlock's Wand Shot into the Warrior's
+  shield, 7 -> 9 absorbed;
+- `ranged_v_melee`: a Priest's (BasicArena, PillaredArena) or the Mage's
+  (TwinPillars) Wand Shot;
+- `pet_comp`: the Hunter's Auto Shot, 32 -> 31 absorbed.
+
+The balance side is a paired directional sweep, not these cells:
+`docs/design/balance/2026-09-28-as167-weapon-speed.md`.
 
 ### 2026-09-28 — the Arcanite Reaper re-priced (AS-115)
 
