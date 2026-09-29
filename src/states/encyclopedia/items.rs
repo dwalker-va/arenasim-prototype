@@ -132,7 +132,7 @@ pub fn item_subtitle(item: &ItemConfig) -> String {
     if item.armor_type != ArmorType::None {
         parts.push(format!("{:?}", item.armor_type));
     } else if item.weapon_type != WeaponType::None {
-        parts.push(format!("{:?}", item.weapon_type));
+        parts.push(item.weapon_type.name().to_string());
     }
     parts.join(" · ")
 }
@@ -570,6 +570,17 @@ mod tests {
                 id
             );
         }
+    }
+
+    /// The subtitle names a weapon type the way a player reads it, never as
+    /// the Rust variant ("OffhandFrill", "Fist").
+    #[test]
+    fn subtitle_names_the_weapon_type_for_a_player() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let tome = items
+            .get(&ItemId::TomeOfKnowledge)
+            .expect("the Tome of Knowledge ships");
+        assert_eq!(item_subtitle(tome), "Off Hand · Held in off hand");
     }
 
     /// Every shipped proc renders a sentence naming its trigger, its chance,
