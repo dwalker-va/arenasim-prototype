@@ -59,8 +59,8 @@ by someone who was not there.
 
 Every weapon now swings at the exact speed of a named real Classic item, with
 its per-swing damage scaled so its weapon DPS holds (two-handers gained
-Classic's two-hander premium). Rage per swing scales with the weapon's speed,
-and the per-swing procs are rated per minute.
+Classic's two-hander premium), and Warrior rage per swing scales with the
+weapon's speed.
 
 **All 27 cells moved, and the change predicts that.** Every comp here has a
 weapon in a live socket on both sides — a wand, a bow, a two-hander or a
@@ -70,11 +70,16 @@ ranged_v_melee 1`, `PillaredArena healer_v_healer 7`).
 
 The attribution is positive, cell by cell: re-running all 27 on both binaries,
 the FIRST line that differs in every log is a ranged auto-attack's per-shot
-damage — a Wand Shot (the Priests' opening shots into each other's shields,
-10 -> 13 absorbed, in every `healer_v_healer` cell; a Priest or Mage wand in
-every `ranged_v_melee` cell) or the Hunter's Auto Shot (32 -> 31 absorbed in
-every `pet_comp` cell). A slower wand fires fewer, bigger shots at the same
-DPS; the Ashwood Bow's 2.4s shot is slightly smaller than its old 2.5s one.
+damage. A slower wand fires fewer, bigger shots at the same DPS, and the
+Ashwood Bow's 2.4s shot is slightly smaller than its old 2.5s one:
+
+- `healer_v_healer` on BasicArena and PillaredArena: the Priests' opening Wand
+  Shots into each other's shields, 10 -> 13 absorbed;
+- `healer_v_healer` on TwinPillars: the Warlock's Wand Shot into the Warrior's
+  shield, 7 -> 9 absorbed;
+- `ranged_v_melee`: a Priest's (BasicArena, PillaredArena) or the Mage's
+  (TwinPillars) Wand Shot;
+- `pet_comp`: the Hunter's Auto Shot, 32 -> 31 absorbed.
 
 The balance side is a paired directional sweep, not these cells:
 `docs/design/balance/2026-09-28-as167-weapon-speed.md`.

@@ -53,8 +53,8 @@ pub fn totem_description(ability: AbilityType) -> Option<String> {
             format!("heals nearby allies for {:.0} health every second", mag)
         }
         AuraType::WindfuryBuff => format!(
-            "gives nearby melee allies {} extra attacks per minute of swinging",
-            mag
+            "gives nearby melee allies a {:.0}% chance for an extra attack",
+            mag * 100.0
         ),
         _ => return None,
     };
@@ -522,10 +522,9 @@ mod tests {
         ] {
             let desc = totem_description(ability).expect("totem has a generated description");
             let (aura, mag) = totem_buff_spec(ability).unwrap();
-            // Windfury is a per-minute rate, shown as written; the rest are
-            // flat whole numbers.
+            // Windfury is a proc chance shown as a percent; the rest are flat.
             let shown = match aura {
-                AuraType::WindfuryBuff => format!("{}", mag),
+                AuraType::WindfuryBuff => format!("{:.0}", mag * 100.0),
                 _ => format!("{:.0}", mag),
             };
             assert!(

@@ -427,10 +427,8 @@
             lockout_duration: 4.0,
         ),
 
-        // Rogue weapon poison (passive). Not cast — each landed swing rolls
-        // `procs_per_minute`, converted from that hand's weapon speed, to
-        // apply/refresh the slow debuff. 30 is the pre-AS-167 per-swing 0.5
-        // read at one swing a second, the old sim's reference melee speed. The slow is a
+        // Rogue weapon poison (passive). Not cast — auto-attacks roll
+        // `application_chance` to apply/refresh the slow debuff. The slow is a
         // POISON (dispel_type: Poison) so Dispel Magic can't remove it, only a
         // cleanse. magnitude 0.3 = 70% slow; refreshed in place (no DR).
         CripplingPoison: (
@@ -441,7 +439,7 @@
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
-            procs_per_minute: Some(30.0),
+            application_chance: Some(0.5),
             applies_aura: Some((
                 aura_type: MovementSpeedSlow,
                 duration: 8.0,

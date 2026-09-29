@@ -773,7 +773,7 @@
             attack_power: 4.0,
             proc: Some((
                 trigger: MeleeHit,
-                rate: PerMinute(9.0),
+                chance: 0.15,
                 effect: AttackPowerIncrease,
                 magnitude: 55.0,
                 duration: 10.0,
@@ -789,7 +789,7 @@
             max_health: 12.0,
             proc: Some((
                 trigger: MeleeHit,
-                rate: PerMinute(6.0),
+                chance: 0.10,
                 effect: CritChanceIncrease,
                 magnitude: 0.10,
                 duration: 8.0,
@@ -805,7 +805,7 @@
             spell_power: 3.0,
             proc: Some((
                 trigger: SpellCast,
-                rate: Chance(0.12),
+                chance: 0.12,
                 effect: SpellPowerIncrease,
                 magnitude: 55.0,
                 duration: 12.0,
@@ -821,7 +821,7 @@
             max_mana: 4.0,
             proc: Some((
                 trigger: Heal,
-                rate: Chance(0.20),
+                chance: 0.20,
                 effect: ManaRegenIncrease,
                 magnitude: 12.0,
                 duration: 10.0,

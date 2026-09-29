@@ -65,7 +65,7 @@ def main(argv=None):
         print(f"median duration {arm}: {durs[len(durs) // 2]:.1f}s")
     print()
 
-    def rows_for(cls, enemy_filter=None):
+    def rows_for(cls, enemy_filter=None, own_filter=None):
         rows = []
         for key, rb in before.items():
             ra = after[key]
@@ -73,14 +73,23 @@ def main(argv=None):
             on1, on2 = cls in t1, cls in t2
             if on1 == on2:
                 continue
-            side, enemy = ("team1", t2) if on1 else ("team2", t1)
+            side, own, enemy = ("team1", t1, t2) if on1 else ("team2", t2, t1)
             if enemy_filter is not None and enemy_filter(enemy) is False:
+                continue
+            if own_filter is not None and own_filter(own) is False:
                 continue
             rows.append((rb["winner"] == side, ra["winner"] == side))
         return rows
 
     for cls in CLASSES:
         print(slice_line(cls, rows_for(cls)))
+
+    # The Warrior by partner: a Shaman partner's Windfury Totem rolls on the
+    # Warrior's swings, so it is split out from the rest.
+    print()
+    print(slice_line("Warrior + Shaman", rows_for("Warrior", own_filter=lambda own: "Shaman" in own)))
+    print(slice_line("Warrior, no Shaman partner",
+                     rows_for("Warrior", own_filter=lambda own: "Shaman" not in own)))
 
     # The Warrior is the one class whose weapon DPS rose (the two-hander
     # premium) and whose Heroic Strike grew with its swing, so every other

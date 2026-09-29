@@ -10,7 +10,6 @@ use super::super::constants::{
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::has_line_of_sight;
 use super::super::match_config;
-use super::super::proc_trinkets::per_swing_chance;
 use super::super::utils::{combat_log_id, get_next_fct_offset};
 use super::super::{AUTO_SHOT_RANGE, FCT_HEIGHT, HUNTER_DEAD_ZONE, MELEE_RANGE, WAND_RANGE};
 use super::damage::{
@@ -126,10 +125,9 @@ pub fn combat_auto_attack(
             .collect();
 
     // Weapon-poison proc table: Rogues coated with Crippling Poison and the
-    // poison's procs-per-minute from the ability config. Each landed swing
-    // converts it to a chance from that hand's weapon speed; a successful roll
-    // applies/refreshes the Crippling slow on the target.
-    let crippling_ppm: std::collections::HashMap<Entity, f32> = combatants
+    // per-swing application chance from the ability config. A successful roll on
+    // a landed swing applies/refreshes the Crippling slow on the target.
+    let crippling_chance: std::collections::HashMap<Entity, f32> = combatants
         .iter()
         .filter_map(|(entity, _, combatant, _, _, _)| {
             if combatant.class == match_config::CharacterClass::Rogue
@@ -137,8 +135,8 @@ pub fn combat_auto_attack(
             {
                 abilities
                     .get(&AbilityType::CripplingPoison)
-                    .and_then(|def| def.procs_per_minute)
-                    .map(|ppm| (entity, ppm))
+                    .and_then(|def| def.application_chance)
+                    .map(|chance| (entity, chance))
             } else {
                 None
             }
@@ -200,15 +198,13 @@ pub fn combat_auto_attack(
         .collect();
 
     // Collect attacks that will happen this frame (attacker, target, damage,
-    // Heroic Strike bonus, crit, the hand that swung, that hand's weapon
-    // speed — what a per-minute proc on the landed swing converts by)
+    // Heroic Strike bonus, crit, the hand that swung)
     let mut attacks = Vec::new();
-    // Attackers whose MELEE swing LANDED this frame, with the swinging
-    // weapon's speed, in the order the swings landed. A `Vec`, not a set: each
-    // landed swing is its own proc-trinket event, and the order is the RNG
-    // draw order, so it has to be the order the sim produced rather than
-    // whatever a hash gives back.
-    let mut melee_proc_hits: Vec<(Entity, f32)> = Vec::new();
+    // Attackers whose MELEE swing LANDED this frame, in the order the swings
+    // landed. A `Vec`, not a set: each landed swing is its own proc-trinket
+    // event, and the order is the RNG draw order, so it has to be the order
+    // the sim produced rather than whatever a hash gives back.
+    let mut melee_proc_hits: Vec<Entity> = Vec::new();
 
     // Track damage per target for batching floating combat text.
     // BTreeMap (not HashMap) so iteration order is deterministic by Entity —
@@ -350,11 +346,9 @@ pub fn combat_auto_attack(
                                 let base_damage =
                                     combatant.attack_damage + combatant.next_attack_bonus_damage;
                                 // Windfury Totem: a MELEE attacker carrying its own WindfuryBuff
-                                // aura has a chance for one bonus swing — the aura's
-                                // magnitude is procs per minute, converted from this
-                                // hand's weapon speed.
+                                // aura has a chance (= aura magnitude) for one bonus swing.
                                 // Gated to melee SWINGS (R14/AE3) — see
-                                // `windfury_procs_per_minute`.
+                                // `windfury_bonus_chance`.
                                 // Captured here because `auras` is borrowed again below.
                                 //
                                 // MAIN HAND ONLY — this roll sits in the
@@ -371,8 +365,7 @@ pub fn combat_auto_attack(
                                 // interaction, so we model the outcome and skip
                                 // the slot. See docs/design/wow-mechanics.md.
                                 let windfury_chance =
-                                    windfury_procs_per_minute(attacker_kind, auras.as_deref())
-                                        .map(|ppm| per_swing_chance(ppm, combatant.weapon_speed));
+                                    windfury_bonus_chance(attacker_kind, auras.as_deref());
                                 let is_crit =
                                     roll_crit(combatant.crit_chance + crit_bonus, &mut game_rng);
                                 let crit_damage = if is_crit {
@@ -391,7 +384,6 @@ pub fn combat_auto_attack(
                                     has_bonus,
                                     is_crit,
                                     WeaponHand::Main,
-                                    combatant.weapon_speed,
                                 ));
 
                                 // Windfury Totem proc: a successful roll pushes a duplicate
@@ -425,7 +417,6 @@ pub fn combat_auto_attack(
                                             false,
                                             wf_is_crit,
                                             WeaponHand::Main,
-                                            combatant.weapon_speed,
                                         ));
 
                                         // Signature Windfury VFX: a wind funnel swirls up
@@ -498,7 +489,6 @@ pub fn combat_auto_attack(
                                     false,
                                     is_crit,
                                     WeaponHand::Off,
-                                    combatant.offhand_weapon_speed,
                                 ));
 
                                 // Rage tracks the damage a swing deals, and an
@@ -568,8 +558,7 @@ pub fn combat_auto_attack(
         }
     }
 
-    for (attacker_entity, target_entity, damage, has_bonus, is_crit, hand, weapon_speed) in attacks
-    {
+    for (attacker_entity, target_entity, damage, has_bonus, is_crit, hand) in attacks {
         // If any attack to this target crits, mark the FCT as crit
         crit_per_target
             .entry(target_entity)
@@ -650,17 +639,15 @@ pub fn combat_auto_attack(
                 // Frost Armor gate twenty lines up.
                 if let Some(&(_, _, _, _, attacker_kind)) = combatant_info.get(&attacker_entity) {
                     if attacker_kind == AutoAttackKind::Melee {
-                        melee_proc_hits.push((attacker_entity, weapon_speed));
+                        melee_proc_hits.push(attacker_entity);
                     }
                 }
 
                 // Crippling Poison proc: a coated Rogue's landed swing has a
-                // chance, from the poison's per-minute rate and the swinging
-                // hand's weapon speed, to apply/refresh the slow. Refreshed in
-                // place so it never diminishes (poisons sidestep the slow DR
-                // category).
-                if let Some(&ppm) = crippling_ppm.get(&attacker_entity) {
-                    if game_rng.random_f32() < per_swing_chance(ppm, weapon_speed) {
+                // chance to apply/refresh the slow. Refreshed in place so it
+                // never diminishes (poisons sidestep the slow DR category).
+                if let Some(&chance) = crippling_chance.get(&attacker_entity) {
+                    if game_rng.random_f32() < chance {
                         let fresh = apply_or_refresh_crippling(
                             &mut commands,
                             &abilities,
@@ -802,7 +789,7 @@ pub fn combat_auto_attack(
     // `proc_trinkets` is empty for every combatant not wearing one, and the
     // guard below returns BEFORE `roll_procs` — so a match in which nobody
     // wears a proc trinket draws no RNG here and stays bit-identical.
-    for (attacker_entity, weapon_speed) in melee_proc_hits {
+    for attacker_entity in melee_proc_hits {
         let Ok((_, _, mut attacker, _, _, _)) = combatants.get_mut(attacker_entity) else {
             continue;
         };
@@ -812,7 +799,6 @@ pub fn combat_auto_attack(
         let granted = super::super::proc_trinkets::roll_procs(
             &mut attacker.proc_trinkets,
             &[super::super::proc_trinkets::ProcTrigger::MeleeHit],
-            Some(weapon_speed),
             &mut game_rng,
         );
         for aura in granted {
@@ -1076,13 +1062,12 @@ fn auto_attack_name(has_bonus: bool, kind: AutoAttackKind) -> &'static str {
     }
 }
 
-/// Windfury Totem bonus-swing RATE for this attacker, in procs per minute (the
-/// caller converts it per swing with `per_swing_chance`). Returns `Some(magnitude)`
+/// Windfury Totem bonus-swing chance for this attacker. Returns `Some(magnitude)`
 /// ONLY when the attacker is melee and carries a `WindfuryBuff` aura (R14/AE3):
 /// the totem may pulse the buff onto every ally in radius, but the proc is inert
 /// for ranged/caster allies who are wanding or auto-shooting. Returns `None`
 /// (no bonus swing) for a ranged attacker even if it carries the buff.
-pub(crate) fn windfury_procs_per_minute(
+pub(crate) fn windfury_bonus_chance(
     attacker_kind: AutoAttackKind,
     auras: Option<&ActiveAuras>,
 ) -> Option<f32> {
@@ -1163,7 +1148,7 @@ mod windfury_gate_tests {
 
         // The melee swing converts the buff into a bonus-swing chance.
         assert_eq!(
-            windfury_procs_per_minute(AutoAttackKind::Melee, Some(&buffed)),
+            windfury_bonus_chance(AutoAttackKind::Melee, Some(&buffed)),
             Some(0.2),
             "a melee weapon swing carrying the Windfury buff must get the bonus-swing chance"
         );
@@ -1176,7 +1161,7 @@ mod windfury_gate_tests {
             AutoAttackKind::None,
         ] {
             assert_eq!(
-                windfury_procs_per_minute(kind, Some(&buffed)),
+                windfury_bonus_chance(kind, Some(&buffed)),
                 None,
                 "{kind:?} must get NO Windfury bonus swing even while carrying the totem buff"
             );
@@ -1189,9 +1174,9 @@ mod windfury_gate_tests {
     fn windfury_bonus_none_without_buff() {
         let empty = ActiveAuras { auras: vec![] };
         assert_eq!(
-            windfury_procs_per_minute(AutoAttackKind::Melee, Some(&empty)),
+            windfury_bonus_chance(AutoAttackKind::Melee, Some(&empty)),
             None
         );
-        assert_eq!(windfury_procs_per_minute(AutoAttackKind::Melee, None), None);
+        assert_eq!(windfury_bonus_chance(AutoAttackKind::Melee, None), None);
     }
 }

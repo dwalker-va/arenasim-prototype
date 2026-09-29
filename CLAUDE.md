@@ -467,8 +467,7 @@ any ring fits either ring socket, and the same item may not occupy both
    ```ron
    proc: Some((
        trigger: MeleeHit,         // MeleeHit | SpellCast | Heal
-       rate: PerMinute(9.0),      // MeleeHit: procs per minute of swinging;
-                                  // SpellCast/Heal: Chance(0.12), per event in (0.0, 1.0]
+       chance: 0.15,              // per qualifying event, in (0.0, 1.0]
        effect: AttackPowerIncrease,
        magnitude: 55.0,           // in the effect aura's own units
        duration: 10.0,
@@ -479,17 +478,17 @@ any ring fits either ring socket, and the same item may not occupy both
      or a wand); `SpellCast` is a completed cast with a cast time that LANDED —
      the point mana is charged, so a fizzled or interrupted cast procs nothing,
      and neither does an instant or a channel; `Heal` is the healing subset of
-     `SpellCast`. A `MeleeHit` proc is rated `PerMinute` and a cast proc
-     `Chance` (validated): each landed swing rolls `ppm * weapon_speed / 60`
-     (`proc_trinkets::per_swing_chance`), so the rate does not depend on the
-     weapon.
+     `SpellCast`. A `MeleeHit` chance is rolled per landed hit, whatever the
+     weapon's speed, so a slow weapon's fewer swings proc less often per
+     second. That is Classic's shape for Windfury and poisons; the sim's proc
+     trinkets have no Classic counterpart, so none is rated per minute.
    - **Per-trinket ICD, no global lock.** A proc cannot fire again while its own
      buff is up (`internal_cooldown >= duration` is validated), and two
      DIFFERENT trinkets can be live at once. A proc buff coexists with a
      same-stat buff from an ability (Battle Shout and a Dragonspine proc stack).
    - **Pricing.** The proc is charged to the budget at
      `stat_weight × magnitude × duration / (duration + internal_cooldown)` — the
-     ICD's LONG-RUN uptime bound. `rate` does not enter the price. It is not a
+     ICD's LONG-RUN uptime bound. `chance` does not enter the price. It is not a
      ceiling over a short life: a trinket starts ready, so a life shorter than
      one cycle runs above it (Dragonspine realises 23% against its 18.2% bound in
      a 43s arena life — `realised_uptime_against_the_long_run_bound` in

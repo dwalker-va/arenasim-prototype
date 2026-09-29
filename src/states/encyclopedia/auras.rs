@@ -1418,7 +1418,7 @@ fn magnitude_row_for(mechanic: AuraType, m: f32) -> Option<(String, String)> {
         AuraType::CastTimeIncrease => row("Cast time increased by", pct(m)),
         AuraType::DamageTakenReduction => row("Damage taken reduced by", pct(m)),
         AuraType::CritChanceIncrease => row("Critical strike", format!("+{}", pct(m))),
-        AuraType::WindfuryBuff => row("Extra attacks per minute", format!("{}", m)),
+        AuraType::WindfuryBuff => row("Extra-attack chance", pct(m)),
         AuraType::DamageOverTime => row("Damage per tick", format!("{:.0}", m)),
         AuraType::HealingOverTime => row("Healing per tick", format!("{:.0}", m)),
         AuraType::Absorb => row("Absorbs", format!("{:.0} damage", m)),

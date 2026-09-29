@@ -554,7 +554,6 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
 mod tests {
     use super::*;
     use crate::states::play_match::equipment::load_item_definitions;
-    use crate::states::play_match::proc_trinkets::ProcRate;
 
     #[test]
     fn every_item_has_a_subtitle_and_is_usable_by_someone() {
@@ -573,7 +572,7 @@ mod tests {
         }
     }
 
-    /// Every shipped proc renders a sentence naming its trigger, its rate,
+    /// Every shipped proc renders a sentence naming its trigger, its chance,
     /// its magnitude, its duration and its internal cooldown. The item page's
     /// snapshot pins where that sentence SITS; this pins what it says, for
     /// every trinket, including the ones AS-61 adds.
@@ -586,10 +585,7 @@ mod tests {
             checked += 1;
             let text = proc_description(proc);
             for needle in [
-                match proc.rate {
-                    ProcRate::Chance(chance) => format!("{:.0}%", chance * 100.0),
-                    ProcRate::PerMinute(ppm) => format!("{} per minute", ppm),
-                },
+                format!("{:.0}%", proc.chance * 100.0),
                 format!("{:.0}s", proc.duration),
                 format!("{:.0}s", proc.internal_cooldown),
             ] {

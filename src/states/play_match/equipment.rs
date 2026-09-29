@@ -3683,7 +3683,7 @@ mod tests {
     #[test]
     fn budget_rejects_a_proc_that_is_over_budget_on_its_own() {
         use super::super::components::AuraType;
-        use super::super::proc_trinkets::{ProcConfig, ProcRate, ProcTrigger};
+        use super::super::proc_trinkets::{ProcConfig, ProcTrigger};
 
         let mut item = budget_test_item(ItemSlotType::Trinket, 58);
         assert!(
@@ -3693,7 +3693,7 @@ mod tests {
 
         item.proc = Some(ProcConfig {
             trigger: ProcTrigger::MeleeHit,
-            rate: ProcRate::PerMinute(9.0),
+            chance: 0.15,
             effect: AuraType::AttackPowerIncrease,
             magnitude: 100.0,
             duration: 10.0,
@@ -3709,12 +3709,12 @@ mod tests {
     #[test]
     fn budget_accepts_the_same_proc_once_its_cooldown_prices_it_in() {
         use super::super::components::AuraType;
-        use super::super::proc_trinkets::{ProcConfig, ProcRate, ProcTrigger};
+        use super::super::proc_trinkets::{ProcConfig, ProcTrigger};
 
         let mut item = budget_test_item(ItemSlotType::Trinket, 58);
         item.proc = Some(ProcConfig {
             trigger: ProcTrigger::MeleeHit,
-            rate: ProcRate::PerMinute(9.0),
+            chance: 0.15,
             effect: AuraType::AttackPowerIncrease,
             magnitude: 100.0,
             duration: 10.0,

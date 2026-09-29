@@ -38,23 +38,12 @@
 //! runs ABOVE its price, and the price is exact only for a life long enough to
 //! average that out.
 //!
-//! A corollary: **in the long run `rate` is a feel knob, not a power knob.**
+//! A corollary: **in the long run `chance` is a feel knob, not a power knob.**
 //! Two trinkets with the same effect, duration and ICD cost the same whether
 //! they proc at 5% or 50%, because the ICD — not the trigger rate — is what
 //! bounds sustained uptime. Over a short life that stops being true: a higher
-//! rate lands the free first proc sooner, and the price does not see that
+//! chance lands the free first proc sooner, and the price does not see that
 //! either.
-//!
-//! ## Melee procs are counted per minute, not per swing
-//!
-//! A `MeleeHit` proc declares a [`ProcRate::PerMinute`]: how many times a
-//! minute of swinging it gets to fire, whatever the weapon. Each landed swing
-//! converts it with [`per_swing_chance`] — Classic's own procs-per-minute
-//! formula — so a slow two-hander's fewer swings each carry a bigger chance
-//! and a fast dagger's many swings a smaller one, and swapping weapons does
-//! not quietly change how often the trinket fires. A cast has no swing speed
-//! to convert, so `SpellCast` and `Heal` keep a plain [`ProcRate::Chance`] per
-//! event. [`validate_proc`] holds each trigger to its unit.
 //!
 //! ## Determinism
 //!
@@ -170,40 +159,13 @@ proc_triggers! {
 // CONFIG
 // ============================================================================
 
-/// How often a proc gets its chance to fire, in the unit its trigger counts in.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum ProcRate {
-    /// Probability per qualifying event, in `(0.0, 1.0]`. The unit for a
-    /// completed cast or heal, which has no swing speed to scale by.
-    Chance(f32),
-    /// Procs per minute of swinging, converted per landed swing by
-    /// [`per_swing_chance`] from that swing's weapon speed. The unit for a
-    /// melee hit, so the rate does not depend on which weapon is swinging.
-    PerMinute(f32),
-}
-
-/// The chance a single landed swing fires a proc rated at `procs_per_minute`,
-/// from the swinging weapon's speed in seconds: Classic's procs-per-minute
-/// formula, `ppm * speed / 60`.
-///
-/// A swing every `speed` seconds is `60 / speed` swings a minute, so this
-/// chance per swing lands `procs_per_minute` procs a minute on any weapon —
-/// until the chance reaches 1.0, where it is clamped: a weapon too slow to
-/// reach the rate even proccing on every swing procs on every swing.
-/// Shared by every per-swing proc in the sim (proc trinkets, Crippling
-/// Poison, Windfury Totem), so all three convert the same way.
-pub fn per_swing_chance(procs_per_minute: f32, weapon_speed: f32) -> f32 {
-    (procs_per_minute * weapon_speed / 60.0).min(1.0)
-}
-
 /// A trinket's proc, as declared in `items.ron` under `proc:`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcConfig {
     /// What combat event gives this trinket its chance to fire.
     pub trigger: ProcTrigger,
-    /// How often it fires — per minute for `MeleeHit`, per event otherwise
-    /// (see [`ProcRate`]; [`validate_proc`] enforces the pairing).
-    pub rate: ProcRate,
+    /// Probability per qualifying event, in `(0.0, 1.0]`.
+    pub chance: f32,
     /// The buff the proc grants its wearer. Restricted to the stat auras
     /// [`proc_effect_budget_weight`] can price; anything else is rejected at
     /// load.
@@ -358,31 +320,11 @@ pub fn validate_proc(item_name: &str, proc: &ProcConfig) -> Result<(), String> {
             item_name, proc.effect
         ));
     }
-    match (proc.trigger, proc.rate) {
-        (ProcTrigger::MeleeHit, ProcRate::PerMinute(ppm)) => {
-            if !(ppm > 0.0 && ppm.is_finite()) {
-                return Err(format!(
-                    "{}: proc rate {} per minute must be positive",
-                    item_name, ppm
-                ));
-            }
-        }
-        (ProcTrigger::SpellCast | ProcTrigger::Heal, ProcRate::Chance(chance)) => {
-            if !(chance > 0.0 && chance <= 1.0) {
-                return Err(format!(
-                    "{}: proc chance {} is outside (0.0, 1.0]",
-                    item_name, chance
-                ));
-            }
-        }
-        (trigger, rate) => {
-            return Err(format!(
-                "{}: a {:?} proc cannot be rated {:?} — a melee hit is rated \
-                 PerMinute (its chance scales with the weapon's speed), a cast \
-                 or heal is rated Chance per event",
-                item_name, trigger, rate
-            ));
-        }
+    if !(proc.chance > 0.0 && proc.chance <= 1.0) {
+        return Err(format!(
+            "{}: proc chance {} is outside (0.0, 1.0]",
+            item_name, proc.chance
+        ));
     }
     if proc.duration <= 0.0 {
         return Err(format!(
@@ -454,15 +396,9 @@ pub fn tick_proc_cooldowns(slots: &mut [ProcSlot], dt: f32) {
 /// `Loadout` is a `BTreeMap`, so `apply_equipment` builds the slots in
 /// `ItemSlot` order). A firing slot goes straight onto its own cooldown; nothing
 /// here consults any other slot, which is the no-global-lock rule.
-///
-/// `weapon_speed` is the speed, in seconds, of the weapon whose swing fired
-/// the event — `Some` for a melee hit, which converts a
-/// [`ProcRate::PerMinute`] through [`per_swing_chance`], and `None` for a
-/// cast, which has no swing.
 pub fn roll_procs(
     slots: &mut [ProcSlot],
     fired: &[ProcTrigger],
-    weapon_speed: Option<f32>,
     game_rng: &mut GameRng,
 ) -> Vec<Aura> {
     if slots.is_empty() {
@@ -473,17 +409,7 @@ pub fn roll_procs(
         if slot.remaining_icd > 0.0 || !fired.contains(&slot.config.trigger) {
             continue;
         }
-        let chance = match (slot.config.rate, weapon_speed) {
-            (ProcRate::Chance(chance), _) => chance,
-            (ProcRate::PerMinute(ppm), Some(speed)) => per_swing_chance(ppm, speed),
-            // `validate_proc` rates only a MeleeHit per minute, and every
-            // MeleeHit event carries its swing's speed.
-            (ProcRate::PerMinute(_), None) => {
-                debug_assert!(false, "a per-minute proc rolled for an event with no swing");
-                continue;
-            }
-        };
-        if game_rng.random_f32() < chance {
+        if game_rng.random_f32() < slot.config.chance {
             slot.remaining_icd = slot.config.internal_cooldown;
             granted.push(slot.config.aura(slot.item, &slot.name));
         }
@@ -503,14 +429,10 @@ pub fn proc_description(proc: &ProcConfig) -> String {
         ProcTrigger::SpellCast => "on a completed spell cast",
         ProcTrigger::Heal => "on a completed heal",
     };
-    let rate = match proc.rate {
-        ProcRate::Chance(chance) => format!("{:.0}%", chance * 100.0),
-        ProcRate::PerMinute(ppm) => format!("{} per minute", ppm),
-    };
     format!(
-        "Chance {} ({}) to gain {} for {:.0}s. Cannot occur more than once every {:.0}s.",
+        "Chance {} ({:.0}%) to gain {} for {:.0}s. Cannot occur more than once every {:.0}s.",
         event,
-        rate,
+        proc.chance * 100.0,
         proc_effect_phrase(proc),
         proc.duration,
         proc.internal_cooldown,
@@ -539,7 +461,7 @@ mod tests {
     fn cfg(effect: AuraType, magnitude: f32, duration: f32, icd: f32) -> ProcConfig {
         ProcConfig {
             trigger: ProcTrigger::MeleeHit,
-            rate: ProcRate::PerMinute(9.0),
+            chance: 0.15,
             effect,
             magnitude,
             duration,
@@ -577,16 +499,16 @@ mod tests {
     }
 
     #[test]
-    fn rate_does_not_change_the_price() {
+    fn chance_does_not_change_the_price() {
         // Stated in the module docs: the ICD bounds LONG-RUN uptime, so in the
         // long run the trigger rate is a feel knob and the price ignores it.
         // That is a claim about the price, not about an arena life — over a
         // life shorter than one cycle a higher chance lands the free first
         // proc sooner, which is the module docs' caveat and not this test's.
         let mut cheap = cfg(AuraType::SpellPowerIncrease, 50.0, 12.0, 50.0);
-        cheap.rate = ProcRate::PerMinute(0.5);
+        cheap.chance = 0.01;
         let mut certain = cheap.clone();
-        certain.rate = ProcRate::PerMinute(600.0);
+        certain.chance = 1.0;
         assert_eq!(cheap.budget_cost(), certain.budget_cost());
     }
 
@@ -655,51 +577,17 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_out_of_range_rates_and_non_positive_numbers() {
-        let mut zero_rate = cfg(AuraType::AttackPowerIncrease, 20.0, 10.0, 30.0);
-        zero_rate.rate = ProcRate::PerMinute(0.0);
-        assert!(validate_proc("x", &zero_rate).is_err());
+    fn validate_rejects_out_of_range_chance_and_non_positive_numbers() {
+        let mut zero_chance = cfg(AuraType::AttackPowerIncrease, 20.0, 10.0, 30.0);
+        zero_chance.chance = 0.0;
+        assert!(validate_proc("x", &zero_chance).is_err());
 
-        let mut cast = cfg(AuraType::SpellPowerIncrease, 20.0, 10.0, 30.0);
-        cast.trigger = ProcTrigger::SpellCast;
-        cast.rate = ProcRate::Chance(0.0);
-        assert!(validate_proc("x", &cast).is_err());
-        cast.rate = ProcRate::Chance(1.5);
-        assert!(validate_proc("x", &cast).is_err());
-        cast.rate = ProcRate::Chance(1.0);
-        assert!(validate_proc("x", &cast).is_ok());
+        let mut over_chance = cfg(AuraType::AttackPowerIncrease, 20.0, 10.0, 30.0);
+        over_chance.chance = 1.5;
+        assert!(validate_proc("x", &over_chance).is_err());
 
         assert!(validate_proc("x", &cfg(AuraType::AttackPowerIncrease, 0.0, 10.0, 30.0)).is_err());
         assert!(validate_proc("x", &cfg(AuraType::AttackPowerIncrease, 20.0, 0.0, 30.0)).is_err());
-    }
-
-    // ---- the per-minute rate ----
-
-    /// A per-minute rate fires the same number of times a minute on any
-    /// weapon: the per-swing chance times the swings a minute is the rate.
-    #[test]
-    fn a_per_minute_rate_is_weapon_independent_until_it_clamps() {
-        for speed in [1.5_f32, 1.7, 2.7, 3.8] {
-            let per_minute = per_swing_chance(9.0, speed) * 60.0 / speed;
-            assert!((per_minute - 9.0).abs() < 1e-4, "{speed}s: {per_minute}");
-        }
-        // A slow weapon's bigger chance per swing, a fast weapon's smaller one.
-        assert!(per_swing_chance(9.0, 3.8) > per_swing_chance(9.0, 1.7));
-        // Clamped: 30 per minute on a 3.8s weapon would need a 190% swing.
-        assert_eq!(per_swing_chance(30.0, 3.8), 1.0);
-    }
-
-    #[test]
-    fn validate_holds_each_trigger_to_its_unit() {
-        let mut melee_by_chance = cfg(AuraType::AttackPowerIncrease, 20.0, 10.0, 30.0);
-        melee_by_chance.rate = ProcRate::Chance(0.15);
-        let err = validate_proc("x", &melee_by_chance).unwrap_err();
-        assert!(err.contains("cannot be rated"), "{err}");
-
-        let mut cast_per_minute = cfg(AuraType::SpellPowerIncrease, 20.0, 10.0, 30.0);
-        cast_per_minute.trigger = ProcTrigger::SpellCast;
-        let err = validate_proc("x", &cast_per_minute).unwrap_err();
-        assert!(err.contains("cannot be rated"), "{err}");
     }
 
     // ---- the roll ----
@@ -711,7 +599,7 @@ mod tests {
             name: format!("{:?}", item),
             config: ProcConfig {
                 trigger,
-                rate: ProcRate::Chance(1.0),
+                chance: 1.0,
                 effect: AuraType::AttackPowerIncrease,
                 magnitude: 30.0,
                 duration: 10.0,
@@ -727,7 +615,7 @@ mod tests {
         // trinket must leave the shared RNG stream untouched.
         let before = GameRng::from_seed(7).random_f32();
         let mut rng = GameRng::from_seed(7);
-        let granted = roll_procs(&mut [], &[ProcTrigger::MeleeHit], Some(2.0), &mut rng);
+        let granted = roll_procs(&mut [], &[ProcTrigger::MeleeHit], &mut rng);
         assert!(granted.is_empty());
         assert_eq!(
             rng.random_f32(),
@@ -740,7 +628,7 @@ mod tests {
     fn a_ready_proc_fires_and_goes_on_its_own_cooldown() {
         let mut rng = GameRng::from_seed(1);
         let mut slots = vec![certain(ProcTrigger::MeleeHit, ItemId::MarkOfTheChampion)];
-        let granted = roll_procs(&mut slots, &[ProcTrigger::MeleeHit], Some(2.0), &mut rng);
+        let granted = roll_procs(&mut slots, &[ProcTrigger::MeleeHit], &mut rng);
         assert_eq!(granted.len(), 1);
         assert_eq!(granted[0].effect_type, AuraType::AttackPowerIncrease);
         assert_eq!(slots[0].remaining_icd, 40.0);
@@ -750,15 +638,15 @@ mod tests {
     fn a_proc_on_cooldown_does_not_fire_and_the_cooldown_ticks_to_ready() {
         let mut rng = GameRng::from_seed(1);
         let mut slots = vec![certain(ProcTrigger::MeleeHit, ItemId::MarkOfTheChampion)];
-        roll_procs(&mut slots, &[ProcTrigger::MeleeHit], Some(2.0), &mut rng);
-        assert!(roll_procs(&mut slots, &[ProcTrigger::MeleeHit], Some(2.0), &mut rng).is_empty());
+        roll_procs(&mut slots, &[ProcTrigger::MeleeHit], &mut rng);
+        assert!(roll_procs(&mut slots, &[ProcTrigger::MeleeHit], &mut rng).is_empty());
 
         tick_proc_cooldowns(&mut slots, 39.9);
-        assert!(roll_procs(&mut slots, &[ProcTrigger::MeleeHit], Some(2.0), &mut rng).is_empty());
+        assert!(roll_procs(&mut slots, &[ProcTrigger::MeleeHit], &mut rng).is_empty());
         tick_proc_cooldowns(&mut slots, 0.2);
         assert_eq!(slots[0].remaining_icd, 0.0, "cooldown clamps at zero");
         assert_eq!(
-            roll_procs(&mut slots, &[ProcTrigger::MeleeHit], Some(2.0), &mut rng).len(),
+            roll_procs(&mut slots, &[ProcTrigger::MeleeHit], &mut rng).len(),
             1
         );
     }
@@ -768,7 +656,7 @@ mod tests {
         let expected = GameRng::from_seed(3).random_f32();
         let mut rng = GameRng::from_seed(3);
         let mut slots = vec![certain(ProcTrigger::Heal, ItemId::MarkOfTheChampion)];
-        assert!(roll_procs(&mut slots, &[ProcTrigger::MeleeHit], Some(2.0), &mut rng).is_empty());
+        assert!(roll_procs(&mut slots, &[ProcTrigger::MeleeHit], &mut rng).is_empty());
         assert_eq!(
             rng.random_f32(),
             expected,
@@ -785,7 +673,7 @@ mod tests {
             certain(ProcTrigger::MeleeHit, ItemId::MarkOfTheChampion),
             certain(ProcTrigger::MeleeHit, ItemId::EssenceOfEternalLife),
         ];
-        let granted = roll_procs(&mut slots, &[ProcTrigger::MeleeHit], Some(2.0), &mut rng);
+        let granted = roll_procs(&mut slots, &[ProcTrigger::MeleeHit], &mut rng);
         assert_eq!(granted.len(), 2, "one proc suppressed the other");
         assert!(slots.iter().all(|s| s.remaining_icd == 40.0));
     }
@@ -800,7 +688,6 @@ mod tests {
         let granted = roll_procs(
             &mut slots,
             &[ProcTrigger::SpellCast, ProcTrigger::Heal],
-            None,
             &mut rng,
         );
         assert_eq!(granted.len(), 2);

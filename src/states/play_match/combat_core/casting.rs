@@ -986,7 +986,6 @@ pub fn process_casting(
         let granted = super::super::proc_trinkets::roll_procs(
             &mut caster.proc_trinkets,
             fired,
-            None,
             &mut game_rng,
         );
         for aura in granted {

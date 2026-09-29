@@ -3,8 +3,8 @@
 Card AS-167. Every weapon now takes its swing speed from its item, and that
 speed is a real Classic item's. Weapon DPS holds for every one-hander, wand
 and bow. Two-handers gain Classic's two-hander premium. Warrior rage per swing
-and the per-swing procs are rescaled so that slower swings do not quietly
-change them.
+scales with the weapon's speed. Per-swing procs keep a flat chance per hit, as
+Classic rolled them.
 
 ## Where it stood
 
@@ -46,7 +46,15 @@ against 1.5-1.8s, a bow every 2.5s against 2.4-2.9s).
   swings a second), so the default Warrior's rage per second did not move:
   34.2 rage every 3.8s. An off-hand swing pays half of its own weapon's share.
   An attack-speed slow still costs rage, because it means fewer swings.
-- **Per-swing procs are rated per minute** (below).
+  **Rage per second is therefore the same for every weapon, 9 a second, and
+  not each weapon's old rate.** The old rates were 10 x each weapon's retired
+  sim swing rate. A sword-and-board Warrior on Frostbite Blade drops from 11
+  to 9, and a Warrior on Serpent Fang from 15 to 9. Keeping every weapon's
+  old rate would mean storing those retired speeds as per-weapon rage data.
+  Classic's own model, rage from damage dealt, would instead tie rage to
+  weapon DPS. That choice is the user's to make; this ships the
+  weapon-independent rule.
+- **Per-swing procs keep a flat chance per hit** (below).
 - **Heroic Strike is uncapped** (the user's ruling). It adds
   `0.5 x attack_damage`, which is now a 3.8s two-hander's per-swing damage:
   about +33 on the Arcanite Reaper against +8 before.
@@ -148,30 +156,40 @@ is part of why its tooltip number runs higher. Rule 2 keeps today's sim wand
 DPS whatever the Classic figure, so this corrects a stated fact and moves no
 number.
 
-## Per-swing procs are rated per minute
+## Per-swing procs keep a flat chance per hit
 
-Nothing in the sim ruled on this, so it is the pipeline's default and the user
-can overrule it. Three effects rolled a flat chance on every landed swing.
-Left per-swing, a 3.8s weapon would proc about a third as often as it did at
-1.11s. Each now declares procs per minute and converts on every landed swing
-with Classic's PPM formula, `ppm x weapon speed / 60`, clamped at 1.0
-(`proc_trinkets::per_swing_chance`). The conversion keeps each effect's old
-rate at 1 swing a second, the old sim's reference melee speed (the class base
-Warrior speed and both caster maces): PPM = old chance x 60.
+Three effects roll a chance on every landed melee swing, and all three stay a
+FLAT chance per hit. That is how Classic rolled them:
 
-| Effect | Old | New | Per swing now |
+- **Windfury Totem** (Wowhead spell 8512): "Each hit has a 20% chance of
+  granting the attacker 1 extra attack". The sim keeps its own 12% magnitude.
+- **Crippling Poison** (Wowhead spell 3408): "Each strike has a 30% chance of
+  poisoning the enemy". The sim keeps its own 50%.
+- **`MeleeHit` proc trinkets.** Dragonspine Trophy and Whetstone of Fury have
+  no Classic counterpart (Wowhead's Classic database has neither), so there is
+  no Classic proc form to copy. They stay flat per hit (15% and 10%), the same
+  shape as the other two.
+
+A flat chance per hit means a slower weapon procs less often per second, and
+each Windfury proc is one of its bigger swings. So Windfury's share of damage
+does not depend on the weapon: its bonus damage per second is 12% of the
+weapon's swing DPS at any speed.
+
+| Effect | Per hit | Procs a minute of swinging, before | after |
 |---|---|---|---|
-| Crippling Poison (Rogue) | 50% a swing | 30 per minute | 85% on the 1.7s dagger, each hand |
-| Windfury Totem (main hand only) | 12% a swing | 7.2 per minute | 46% on a 3.8s two-hander, 20% on a 1.7s dagger, 32% on a 2.7s mace |
-| Dragonspine Trophy (`MeleeHit`) | 15% a hit | 9 per minute | 57% on a 3.8s two-hander |
-| Whetstone of Fury (`MeleeHit`) | 10% a hit | 6 per minute | 38% on a 3.8s two-hander |
+| Crippling Poison, Rogue, each hand | 50% | 45 (0.67s dagger) | 17.6 (1.7s dagger) |
+| Windfury, Warrior main hand | 12% | 6.5 (1.11s) | 1.9 (3.8s two-hander) |
+| Windfury, Rogue main hand | 12% | 10.8 (0.67s) | 4.2 (1.7s dagger) |
+| Windfury, Paladin/Shaman mace | 12% | 7.2 (1.0s) | 2.7 (2.7s mace) |
+| Dragonspine Trophy, on the Warrior | 15% | 8.1 (1.11s) | 2.4 (3.8s) |
+| Whetstone of Fury, on the Warrior | 10% | 5.4 (1.11s) | 1.6 (3.8s) |
 
-A `MeleeHit` trinket must now be rated `PerMinute`, and a `SpellCast` or
-`Heal` trinket `Chance`. `validate_proc` enforces the pairing, because a cast
-has no swing speed to convert. The price is unchanged: a proc is priced at its
-ICD's long-run uptime, which ignores the rate. For the Rogue, 30 a minute is
-fewer procs than its old 45 a minute per hand (50% at 1.5 swings a second).
-The 8s slow was already near full uptime at either rate.
+These figures are swings attempted. The dual-wield miss removes 19% of the
+Rogue's before the poison can roll. The 8s Crippling slow is refreshed well
+inside its duration at either rate. A proc trinket is priced at its ICD's
+long-run uptime, which ignores the chance. Its first proc now comes later in a
+fight, and a short fight may see none. `two_different_proc_trinkets_are_live_at_the_same_time`
+was re-pinned for exactly that (see its doc).
 
 ## Every consumer of the swing interval
 
@@ -181,9 +199,9 @@ The 8s slow was already near full uptime at either rate.
 | Off-hand swing timer | `effective_offhand_interval` | `offhand_weapon_speed`, same slows |
 | Swing wind-up animation, per hand | `rendering/effects/weapon_swing.rs` | the same two functions, so the stroke tracks the sim |
 | Warrior rage per swing | `combat_auto_attack` | `RAGE_PER_WEAPON_SECOND x` base speed; off hand x 0.5 |
-| Windfury bonus swing | `windfury_procs_per_minute` -> `per_swing_chance` | main-hand base speed |
-| `MeleeHit` proc trinkets | `roll_procs(.., Some(speed), ..)` | the landing hand's base speed |
-| Crippling Poison | `combat_auto_attack` apply loop | the landing hand's base speed |
+| Windfury bonus swing | `windfury_bonus_chance` | flat chance per main-hand hit; speed sets how many hits |
+| `MeleeHit` proc trinkets | `roll_procs` | flat chance per landed melee hit |
+| Crippling Poison | `combat_auto_attack` apply loop | flat chance per landed hit, either hand |
 | Heroic Strike | `warrior.rs`, `0.5 x attack_damage` | per-swing damage, so it grows with a slower weapon (uncapped, by ruling) |
 | Frost Armor chill | on a landed melee swing | no roll; fewer swings re-apply it less often |
 | Pets | `Combatant::new_pet` | their own speeds (0.83s / 0.77s), unchanged |
@@ -214,11 +232,11 @@ class's own change and everyone else's.
 
 ### Non-vacuity
 
-- **Matches ended by a kill:** 6,224 of 6,250 before and 6,225 after.
-  **Distinct durations:** 2,553 and 2,498.
-- **Movement:** the winner or the duration moved in 5,728 matches, and the
-  winner flipped in 1,246 (19.9%). The median duration went from 31.7s to
-  31.0s.
+- **Matches ended by a kill:** 6,224 of 6,250 before and 6,220 after.
+  **Distinct durations:** 2,553 and 2,477.
+- **Movement:** the winner or the duration moved in 5,733 matches, and the
+  winner flipped in 1,248 (20.0%). The median duration went from 31.7s to
+  30.9s.
 - **Swings landed, per hand.** These counts come from 105 logged matches,
   every 60th line of the sweep JSONL (`awk 'NR%60==1'`), each run with
   `--headless --output` on both binaries and counted by
@@ -228,19 +246,19 @@ class's own change and everyone else's.
 | Swing | per combat-second, before | after | predicted from speed alone |
 |---|---|---|---|
 | Warrior main hand (Auto Attack + Heroic Strike) | 0.444 | 0.153 | 0.130 (1.11s -> 3.8s) |
-| Rogue main hand | 0.467 | 0.195 | 0.183 (0.67s -> 1.7s) |
-| Rogue off hand | 0.471 | 0.195 | 0.183 |
+| Rogue main hand | 0.467 | 0.189 | 0.183 (0.67s -> 1.7s) |
+| Rogue off hand | 0.471 | 0.194 | 0.183 |
 | Paladin mace | 0.184 | 0.084 | 0.068 (1.0s -> 2.7s) |
-| Hunter Auto Shot | 0.216 | 0.234 | 0.225 (2.5s -> 2.4s) |
+| Hunter Auto Shot | 0.216 | 0.233 | 0.225 (2.5s -> 2.4s) |
 | Mage wand | 0.162 | 0.113 | 0.126 (1.43s -> 1.8s) |
-| Priest wand | 0.312 | 0.246 | 0.244 (1.25s -> 1.6s) |
-| Warlock wand | 0.348 | 0.281 | 0.276 (1.43s -> 1.8s) |
+| Priest wand | 0.312 | 0.245 | 0.244 (1.25s -> 1.6s) |
+| Warlock wand | 0.348 | 0.278 | 0.276 (1.43s -> 1.8s) |
 
   Every hand moved by about its speed ratio. Both of the Rogue's hands still
-  land, at the same rate, since both hold the same dagger. The Shaman's mace
-  landed too rarely to rate (24 and 15 swings), because it seldom melees.
-- **Heroic Strike** landed for 21.4 a hit before and 79.1 after, and went from
-  22% to 34% of the Warrior's melee damage (Mortal Strike: 51% -> 42%).
+  land. The Shaman's mace landed too rarely to rate (24 and 13 swings),
+  because it seldom melees.
+- **Heroic Strike** landed for 21.4 a hit before and 82.2 after, and went from
+  22% to 36% of the Warrior's melee damage (Mortal Strike: 51% -> 41%).
 
 ### Per class, each class's own side
 
@@ -249,43 +267,54 @@ side's. The half-width is the 95% resolution the flips bought on the delta.
 
 | Class | n | before | after | delta | flips | z |
 |---|---|---|---|---|---|---|
-| **Warrior** (two-hander) | 2520 | 37.9% | 46.6% | **+8.7pt** (+/-1.8) | +381/-161 | +9.45 |
-| Rogue (dagger main/off hand) | 2520 | 46.6% | 45.9% | -0.8pt (+/-1.7) | +220/-239 | -0.89 |
-| Hunter (bow) | 2520 | 38.9% | 34.2% | -4.8pt (+/-1.5) | +127/-247 | -6.21 |
-| Mage (wand) | 2520 | 67.5% | 63.8% | -3.7pt (+/-1.6) | +176/-269 | -4.41 |
-| Priest (wand) | 2000 | 55.7% | 55.7% | +0.0pt (+/-2.1) | +227/-227 | 0.00 |
-| Warlock (wand) | 2520 | 38.3% | 37.5% | -0.8pt (+/-1.8) | +246/-265 | -0.84 |
-| Paladin (mace) | 2000 | 67.0% | 66.3% | -0.6pt (+/-2.0) | +198/-210 | -0.59 |
-| Shaman (mace) | 2000 | 52.4% | 54.1% | +1.7pt (+/-1.9) | +209/-175 | +1.74 |
+| **Warrior** (two-hander) | 2520 | 37.9% | 46.8% | **+9.0pt** (+/-1.8) | +383/-157 | +9.73 |
+| Rogue (dagger main/off hand) | 2520 | 46.6% | 45.5% | -1.2pt (+/-1.7) | +216/-245 | -1.35 |
+| Hunter (bow) | 2520 | 38.9% | 34.6% | -4.4pt (+/-1.5) | +128/-238 | -5.75 |
+| Mage (wand) | 2520 | 67.5% | 63.9% | -3.6pt (+/-1.6) | +178/-269 | -4.30 |
+| Priest (wand) | 2000 | 55.7% | 55.6% | -0.1pt (+/-2.1) | +231/-232 | -0.05 |
+| Warlock (wand) | 2520 | 38.3% | 37.4% | -0.8pt (+/-1.8) | +247/-268 | -0.93 |
+| Paladin (mace) | 2000 | 67.0% | 66.6% | -0.3pt (+/-2.0) | +199/-206 | -0.35 |
+| Shaman (mace) | 2000 | 52.4% | 53.2% | +0.8pt (+/-1.9) | +201/-184 | +0.87 |
 
-**The Warrior's two-hander is the change that moved the matrix.** It is the
-only weapon whose DPS rose: +19% from Classic's premium, plus a Heroic Strike
-that now adds half of a 3.8s swing. Its rage per second is unchanged. It gains
-+8.7pt (z=9.5). Split every other class by whether it faced a Warrior, and the
-losses are almost all against one:
+**The Warrior's two-hander moved the matrix.** It is the only weapon whose DPS
+rose: +19% from Classic's premium, plus a Heroic Strike that now adds half of a
+3.8s swing. Its rage per second is unchanged. It gains +9.0pt (z=9.7).
+
+| Warrior slice | n | delta | flips | z |
+|---|---|---|---|---|
+| with a Shaman partner | 360 | **+16.4pt** (+/-4.6) | +65/-6 | +7.00 |
+| without one | 2160 | +7.7pt (+/-2.0) | +318/-151 | +7.71 |
+
+Windfury does not explain the Shaman-partner gap, and it has been checked. In
+40 seeds of Warrior+Shaman vs Rogue+Priest, Windfury's bonus swings are 3.4% of
+the Warrior's melee damage before and 7.0% after (12 procs against 6). That is
+about 200 damage over 40 matches, far short of a 16-point gap. The gap is real
+at this n and its cause is not identified here. It is a follow-up.
+
+Split every other class by whether it faced a Warrior, and the losses are
+almost all against one:
 
 | Class | vs an enemy Warrior | vs no Warrior |
 |---|---|---|
-| Rogue | -6.5pt (z=-4.0, n=840) | +2.1pt (z=+2.2, n=1680) |
-| Hunter | -11.8pt (z=-7.8) | -1.2pt (z=-1.5) |
-| Mage | -8.9pt (z=-6.2) | -1.1pt (z=-1.0) |
-| Priest | -6.8pt (z=-3.4, n=600) | +2.9pt (z=+2.3, n=1400) |
-| Warlock | -5.5pt (z=-3.1) | +1.6pt (z=+1.6) |
-| Paladin | -9.0pt (z=-4.6) | +3.0pt (z=+2.6) |
-| Shaman | -5.3pt (z=-2.6) | +4.7pt (z=+4.3) |
+| Rogue | -7.4pt (z=-4.6, n=840) | +2.0pt (z=+2.0, n=1680) |
+| Hunter | -11.5pt (z=-7.7) | -0.8pt (z=-0.9) |
+| Mage | -8.9pt (z=-6.2) | -1.0pt (z=-0.9) |
+| Priest | -6.5pt (z=-3.2, n=600) | +2.7pt (z=+2.1, n=1400) |
+| Warlock | -5.7pt (z=-3.2) | +1.6pt (z=+1.6) |
+| Paladin | -9.0pt (z=-4.6) | +3.4pt (z=+2.9) |
+| Shaman | -7.0pt (z=-3.4) | +4.2pt (z=+3.9) |
 
-Away from a Warrior the other weapons' cadence change, which keeps their DPS,
-nets out small. The largest are the maces and healers (+2 to +5pt), and the
-Hunter and Mage move by -1pt, which this run cannot tell from zero. The
-Hunter's and Mage's headline losses are the Warrior's gain seen from the other
-side, not their own weapons.
+Away from a Warrior, the other weapons' cadence change, which keeps their DPS,
+nets out small: the maces and healers gain +2 to +4pt, and the Hunter and Mage
+cannot be told from zero. Their headline losses are the Warrior's gain seen
+from the other side, not their own weapons.
 
-Heroic Strike was left uncapped, per the ruling. Nothing here shows it breaks
+Heroic Strike was left uncapped, per the ruling. Nothing here shows it breaking
 a rule: rage per second did not move, and the gain is a stronger Warrior rather
-than a degenerate one. But it is the largest single term in the Warrior's gain
+than a degenerate one. It is, though, the largest term in the Warrior's gain
 that is not Classic's own weapon number, and this sweep does not separate it
-from the premium. Separating the two needs a capped-Heroic-Strike arm (a
-follow-up, not done here). Nothing here was tuned to parity.
+from the premium. That needs a capped-Heroic-Strike arm, which is a follow-up
+and was not done here. Nothing here was tuned to parity.
 
 ### TeamPlan mechanism (`camp_sweep`)
 
@@ -295,12 +324,30 @@ Priest for 15.1s before contact and 10.2s after. TeamPlan wins 11/12, against
 9/12 for Legacy. Those figures are in the band CLAUDE.md records for the
 shipped solve.
 
-Two single-seed outliers turned up while re-pinning the TeamPlan probes, and
-both are recorded in case they are the start of something. Both are opt-in
-TeamPlan behaviour, neither is in a probe's pinned set, and both probes pass.
-Nagrand heal line, seed 11: 47% blocked, against 27% on `main`, with the other
-eleven seeds at 4-29%. Anti-statue, seed 16: 0.37 u/s under pressure, against
-1.98 on `main`, with the twenty-seed median up (1.58 -> 1.86 u/s).
+**A pinned probe failed at its seed, and was re-pinned.**
+`teamplan_healer_keeps_its_heal_line_on_nagrand` pinned seeds 7, 11 and 12
+under a 35% ceiling on blocked heal-line frames. Seed 11 came in at 47%, and
+the probe was re-pinned to 2 (17%). The scan from both builds, blocked share
+over seeds 1-12:
+
+```text
+main   25 26 14 13 23  4 30 16 16  4 27  4   (median 16%)
+AS-167 25 17  4 10 19 15 12  4 29  4 47 17   (median 16%)
+```
+
+Seed 11 is the only seed in the 40-55% pathology band. The rest of the
+distribution sits where `main`'s does, and seed 11's occlusion is normal (26.3s
+over 3,384 paired frames, against 33.2s on `main`). Seed 11 is still pinned in
+`teamplan_healer_buys_occlusion_on_nagrand`, and that probe passes there. I
+read it as one seed's trajectory, not a regression in the solve.
+
+**One out-of-set outlier.** The anti-statue scan found seed 16 at 0.37 u/s
+under pressure, against 1.98 on `main`. That is in the statue band, but seed 16
+is not in the probe's set. The 20-seed median rose, 1.58 -> 1.86 u/s.
+
+**The medic chase still holds its bound.** Across the 30-seed scan the longest
+occluded-from-a-dying-ally window stays under the 8s bound. Its maximum rose
+from 4.68s to 6.73s (seed 6, which is not pinned).
 
 ## Baselines this invalidates
 

@@ -176,13 +176,11 @@ pub struct AbilityConfig {
     /// Aura to apply on hit/cast (if any)
     #[serde(default)]
     pub applies_aura: Option<AuraEffect>,
-    /// Procs per minute of swinging, for an on-hit effect like a weapon
-    /// poison. Each landed swing converts it to a chance from that swing's
-    /// weapon speed (`proc_trinkets::per_swing_chance`), so the rate does not
-    /// depend on the weapon. `None` for everything else (the effect applies
-    /// deterministically).
+    /// On-hit application chance (0.0–1.0) for proc-style effects like weapon
+    /// poisons. `None` for everything else (the effect applies deterministically).
+    /// Crippling Poison sets this so its slow procs probabilistically per swing.
     #[serde(default)]
-    pub procs_per_minute: Option<f32>,
+    pub application_chance: Option<f32>,
     /// Projectile travel speed in units/second (None = instant effect)
     #[serde(default)]
     pub projectile_speed: Option<f32>,
@@ -662,7 +660,7 @@ mod tests {
             healing_base_max: 0.0,
             healing_coefficient: 0.0,
             applies_aura: None,
-            procs_per_minute: None,
+            application_chance: None,
             projectile_speed: None,
             projectile_visuals: None,
             spell_school: SpellSchool::None,

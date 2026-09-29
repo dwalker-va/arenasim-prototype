@@ -611,14 +611,11 @@ pub fn totem_buff_spec(ability: AbilityType) -> Option<(AuraType, f32)> {
 /// from the real totem). Pure; no behavior change.
 pub fn totem_spec(element: TotemElement) -> (AbilityType, AuraType, f32, SpellSchool) {
     match element {
-        // Windfury Totem — empowers melee allies' auto-attacks, in extra
-        // attacks per minute of swinging (converted per swing from the
-        // weapon's speed). 7.2 is the pre-AS-167 per-swing 0.12 read at one
-        // swing a second, the old sim's reference melee speed.
+        // Windfury Totem — empowers melee allies' auto-attacks (proc chance 0..1).
         TotemElement::Air => (
             AbilityType::AirTotem,
             AuraType::WindfuryBuff,
-            7.2,
+            0.12,
             SpellSchool::Nature,
         ),
         // Healing Stream Totem — periodic ally heal (per-tick amount).

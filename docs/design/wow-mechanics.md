@@ -36,12 +36,11 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
 - **A two-hander carries Classic's weapon-DPS premium** over the one-hander it
   displaces (1.30-1.42x, per tier, from the Classic items' own DPS) — the
   damage that buys back the off hand it gives up.
-- **Per-swing procs are rated per minute.** Proc trinkets on `MeleeHit`,
-  Crippling Poison and Windfury Totem each declare procs per minute; a landed
-  swing converts that to a chance with Classic's PPM formula
-  (`proc_trinkets::per_swing_chance`, `ppm * speed / 60`, clamped at 1.0), so
-  a slow weapon's fewer swings each proc more often and the rate does not
-  depend on the weapon.
+- **Per-swing procs stay a flat chance per hit**, as Classic rolled them
+  (Windfury Totem "each hit has a 20% chance", Crippling Poison "each strike
+  has a 30% chance"): Crippling Poison, Windfury Totem and `MeleeHit` proc
+  trinkets roll their chance on every landed swing, so a slower weapon procs
+  less often per second but each proc is a slower weapon's bigger hit.
 
 ### Dual Wield
 - **Who can**: Warrior, Rogue, Hunter — Classic's list, in
