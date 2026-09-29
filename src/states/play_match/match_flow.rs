@@ -17,7 +17,8 @@ use bevy::prelude::*;
 ///
 /// During countdown:
 /// - Tick down the timer
-/// - Restore all combatants' mana to full (no penalty for buffing)
+/// - Hold every resource at its pre-combat level: mana/energy full (no
+///   penalty for buffing), rage empty
 /// - Open gates when countdown reaches zero
 pub fn update_countdown(
     time: Res<Time>,
@@ -32,10 +33,11 @@ pub fn update_countdown(
     let dt = time.delta_secs();
     countdown.time_remaining -= dt;
 
-    // Restore all combatants' mana to full during countdown (every frame)
-    // This ensures no penalty for pre-match buffing
+    // Hold every combatant's resource at its pre-combat level during the
+    // countdown (every frame): mana and energy full, so pre-match buffing costs
+    // nothing, and rage empty, so a Warrior enters the gates at 0.
     for mut combatant in combatants.iter_mut() {
-        combatant.current_mana = combatant.max_mana;
+        combatant.current_mana = combatant.pre_combat_resource();
     }
 
     // Check if countdown finished

@@ -110,6 +110,8 @@ produces it.
 
 ### Rage (Warrior)
 - Max: 100
+- Starts every match at 0: the pre-match countdown holds rage empty while it
+  holds mana and energy full (`Combatant::pre_combat_resource`)
 - Generates on damage dealt and received. A landed swing pays
   `RAGE_PER_WEAPON_SECOND` (9) per second of its weapon's speed — 34.2 for a
   3.8s two-hander — so a slow weapon earns the same rage per second as a fast

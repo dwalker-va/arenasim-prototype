@@ -35,6 +35,15 @@ impl ResourceType {
             ResourceType::Rage => "Rage",
         }
     }
+
+    /// Whether this resource enters combat full (Mana, Energy) or empty
+    /// (Rage, which is only ever earned in combat — Classic/TBC).
+    pub const fn starts_full(self) -> bool {
+        match self {
+            ResourceType::Mana | ResourceType::Energy => true,
+            ResourceType::Rage => false,
+        }
+    }
 }
 
 /// The base, pre-equipment stat block for a class.
@@ -877,9 +886,20 @@ impl Combatant {
             }
         }
 
-        // Reset current pools to new maximums
+        // Reset current pools to their pre-combat levels under the new maximums
         self.current_health = self.max_health;
-        self.current_mana = self.max_mana;
+        self.current_mana = self.pre_combat_resource();
+    }
+
+    /// The resource level a combatant holds before the gates open: a full bar
+    /// for Mana and Energy, an empty one for Rage. Keyed on `resource_type`,
+    /// never on class, so every rage user inherits it.
+    pub fn pre_combat_resource(&self) -> f32 {
+        if self.resource_type.starts_full() {
+            self.max_mana
+        } else {
+            0.0
+        }
     }
 }
 
@@ -1171,6 +1191,27 @@ mod tests {
                 "{class:?} movement_speed"
             );
             assert_eq!(c.armor, base.armor, "{class:?} armor");
+        }
+    }
+
+    /// A class spawns at the same resource level the countdown and
+    /// `apply_equipment` hold it at, so no path can disagree with the table:
+    /// a full bar for Mana and Energy, an empty one for Rage.
+    #[test]
+    fn starting_resource_is_the_pre_combat_level() {
+        for &class in match_config::CharacterClass::all() {
+            let c = Combatant::new(1, 0, class);
+            assert_eq!(
+                c.current_mana,
+                c.pre_combat_resource(),
+                "{class:?} starting_resource"
+            );
+            let expected = if c.resource_type == ResourceType::Rage {
+                0.0
+            } else {
+                c.max_mana
+            };
+            assert_eq!(c.pre_combat_resource(), expected, "{class:?}");
         }
     }
 

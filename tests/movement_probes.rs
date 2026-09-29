@@ -5388,7 +5388,13 @@ mod los_probes {
         // Mage's first Wand Shot, 7 -> 9 (the Wand of Shadows fires every 1.8s
         // for the same DPS). Re-pinned to 36 and 24 from a re-scan: 36 and 35
         // fizzles against 16 and 16 Frostbolt impacts.
-        for seed in [36u64, 24u64] {
+        // AS-172 (Warriors enter the gates at 0 rage, not 100) took 36 to zero
+        // fizzles; the first line that differs from `main` @ d5f21c1 in this
+        // comp is the Warrior's first swing on the Mage, where a Heroic Strike
+        // the free starting bar paid for becomes a plain Auto Attack. 24 still
+        // holds (27 fizzles, 17 impacts). 36 re-pinned to 1 from a re-scan:
+        // 35 fizzles against 16 Frostbolt impacts.
+        for seed in [1u64, 24u64] {
             let log = pillared_log(seed);
 
             let fizzles = log
@@ -5696,7 +5702,16 @@ mod chase_los {
     // 1.8s for the same DPS). Seed 1 still holds (3.6s total occlusion, 1.35s
     // longest window, team-1 win at 41.9s). Seed 13 from a re-scan: team-1
     // elimination at 103.0s, 52.4s total occlusion, 6.07s longest window.
-    const SEED_A: u64 = 1;
+    //
+    // Re-pinned for AS-172, Warriors entering the gates at 0 rage (1 -> 2).
+    // At seed 1 the Mage now catches the lone Shaman with 0.0s occlusion, so
+    // the pillar-hug the bound exists for never happens. The first line that
+    // differs from `main` @ d5f21c1 in this comp is the Warrior's first
+    // swing, a Heroic Strike the free starting bar paid for becoming a plain
+    // Auto Attack. Seed 13 still holds (18.4s total occlusion, 6.70s longest
+    // window). Seed 2 from a re-scan: team-1 elimination at 89.5s, 42.7s
+    // total occlusion, 5.55s longest window.
+    const SEED_A: u64 = 2;
     const SEED_B: u64 = 13;
 }
 
@@ -6044,7 +6059,17 @@ mod juke_chase {
     // under them, rather than taken from any one branch's pick. That is the
     // only way this pin survives: three cards in a row re-picked it from their
     // own base, and no two of those picks agreed.
-    const JUKE_SEED_B: u64 = 38;
+    //
+    // Re-pinned for AS-172, Warriors entering the gates at 0 rage (38 -> 56).
+    // At seed 38 the dance no longer starts (0.0s occlusion, 684 lone
+    // samples); the first line that differs from `main` @ d5f21c1 in this
+    // comp is the Warrior's first swing, a Heroic Strike the free starting
+    // bar paid for becoming a plain Auto Attack. Seed 56 from a re-scan
+    // carries the same long-dance character: 34.7s total occlusion, 11
+    // fizzle-length windows, 3747 lone samples, team-1 win at 81.5s — the
+    // same 11 windows the bound of 16 was set around, so it is unchanged.
+    // Seed 10 (A) still holds, at 15 windows against its bound of 15.
+    const JUKE_SEED_B: u64 = 56;
 }
 
 // ---------------------------------------------------------------------------
@@ -6443,8 +6468,20 @@ mod medic_chase {
     // Observed after AS-167:
     //   seed 22: 362 distress frames, 2.98s longest window, heal at 7.82s, 0 lost.
     //   seed 10: 370 distress frames, 3.63s longest window, heal at 7.72s, 0 lost.
-    const MEDIC_SEED_A: u64 = 22;
-    const MEDIC_SEED_B: u64 = 10;
+    //
+    // Re-pinned for AS-172, Warriors entering the gates at 0 rage (22/10 ->
+    // 3/9). Both went to 0 distress frames. The first line that differs from
+    // `main` @ d5f21c1 at both is team 2's Warrior's first swing on team 1's
+    // Warrior, a Heroic Strike the free starting bar paid for becoming a plain
+    // Auto Attack, and the trajectories part from there. The chase bound holds across the 30-seed re-scan:
+    // the longest occluded window is under 8s on every seed (maximum 5.53s,
+    // seed 9, down from 6.73s).
+    //
+    // Observed after AS-172:
+    //   seed 3: 271 distress frames, 3.37s longest window, heal at 5.08s, 0 lost.
+    //   seed 9: 422 distress frames, 5.53s longest window, heal at 8.80s, 0 lost.
+    const MEDIC_SEED_A: u64 = 3;
+    const MEDIC_SEED_B: u64 = 9;
 
     #[test]
     fn medic_bounds_distressed_ally_seed_a() {

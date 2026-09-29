@@ -1774,6 +1774,28 @@ mod tests {
         assert_eq!(combatant.current_health, combatant.max_health);
     }
 
+    /// Equipping refills mana and energy to their new maximums but never
+    /// hands a rage user a full bar: rage is only earned in combat.
+    #[test]
+    fn apply_equipment_resets_resource_to_its_pre_combat_level() {
+        let items = make_item_defs(vec![(
+            ItemId::LionheartHelm,
+            armor_item("Helm", ItemSlotType::Head, ArmorType::Plate),
+        )]);
+        let mut loadout = Loadout::new();
+        loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
+        for &class in CharacterClass::all() {
+            let mut combatant = super::super::components::combatant::Combatant::new(1, 0, class);
+            combatant.current_mana = combatant.max_mana / 2.0;
+            combatant.apply_equipment(&loadout, &items);
+            let expected = match combatant.resource_type {
+                super::super::components::combatant::ResourceType::Rage => 0.0,
+                _ => combatant.max_mana,
+            };
+            assert_eq!(combatant.current_mana, expected, "{class:?}");
+        }
+    }
+
     #[test]
     fn apply_equipment_empty_loadout_unchanged() {
         let items = make_item_defs(vec![]);
