@@ -143,7 +143,7 @@ pub const UNARMED_WEAPON_SPEED: f32 = 2.0;
 ///
 /// Rage per swing scales with the weapon's speed, so a slow weapon's fewer,
 /// bigger swings pay the same rage per second as a fast weapon's many small
-/// ones — Classic's shape, where rage comes from damage dealt. 9.0 is the
+/// ones: rage per second is the same for every weapon. 9.0 is the
 /// Arcanite Reaper's pre-AS-167 income (10 rage per swing at 0.9 swings per
 /// second), so the default Warrior's rage per second did not move when its
 /// axe went from 1.1s to Classic's 3.8s. Read from the weapon's BASE speed:

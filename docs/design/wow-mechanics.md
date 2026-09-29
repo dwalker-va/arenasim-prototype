@@ -82,16 +82,15 @@ twin of it.
 This is a deliberate simplification, and the reason is how the buff was played
 rather than how it was coded:
 
-- In Classic/TBC, Windfury Totem applies a temporary **weapon enchant** while it
+- In Classic, Windfury Totem applies a temporary **weapon enchant** while it
   is active — it occupies a weapon's enchant slot.
 - A Rogue keeps a **poison** in the off hand, which consumes exactly the slot
   the Windfury enchant would otherwise land in. That *forces* Windfury onto the
   main hand.
-- Players wanted it there anyway. Windfury was a **proc-per-minute** system, so
-  its procs were a fixed budget, and spending that budget on the main hand — the
-  weapon with the higher top-end damage — was strictly more efficient than
-  sometimes rolling it on the smaller off-hand weapon. The single-poison
-  arrangement got value out of the off hand at the same time.
+- Players wanted it there anyway. Each hit has a flat 20% chance of an extra
+  attack (Wowhead spell 8512), and that extra attack is a swing of the weapon
+  that procced, so a proc is worth more on the main hand's bigger hit. The
+  single-poison arrangement got value out of the off hand at the same time.
 
 So main-hand-only is the realistic *outcome* of how the buff was actually used.
 We model that outcome directly rather than modelling the enchant slot that

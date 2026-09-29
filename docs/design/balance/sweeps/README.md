@@ -93,3 +93,12 @@ non-vacuity and the per-class tables with `2026-09-28-as167-slices.py
 before.csv after.csv`. `2026-09-28-as167-swings.py <logs>` counts swings
 landed per hand from match logs (the doc's non-vacuity table, over every 60th
 line of this file).
+
+## `2026-09-28-as167-warrior-shaman-cells.jsonl`
+
+Behind the Windfury knockout in `2026-09-28-as167-weapon-speed.md`: the 36
+Warrior+Shaman cells of `2026-09-28-as167-weapon-speed.jsonl`, 10 seeds each
+(360 configs). Each arm's binary was built with Windfury Totem's magnitude set
+to `0.0` in `class_ai/shaman.rs` (`TotemElement::Air`, `0.12` -> `0.0`). The
+roll still happens, so the RNG draw order is unchanged. The results are
+`2026-09-28-as167_windfury_off_{before_17cb9f0,after}.csv`.

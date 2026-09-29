@@ -284,11 +284,26 @@ rose: +19% from Classic's premium, plus a Heroic Strike that now adds half of a
 | with a Shaman partner | 360 | **+16.4pt** (+/-4.6) | +65/-6 | +7.00 |
 | without one | 2160 | +7.7pt (+/-2.0) | +318/-151 | +7.71 |
 
-Windfury does not explain the Shaman-partner gap, and it has been checked. In
-40 seeds of Warrior+Shaman vs Rogue+Priest, Windfury's bonus swings are 3.4% of
-the Warrior's melee damage before and 7.0% after (12 procs against 6). That is
-about 200 damage over 40 matches, far short of a 16-point gap. The gap is real
-at this n and its cause is not identified here. It is a follow-up.
+**Windfury explains about 3.6 of the 8.7 points** by which the Shaman-partner
+slice outruns the rest. The check is a Windfury knockout over the same 36
+Warrior+Shaman cells x 10 seeds. Both builds were run with the totem's
+magnitude set to 0.0, a one-line change at `class_ai/shaman.rs`'s `TotemElement::Air`
+spec that leaves the RNG draw order alone, since the roll still happens:
+
+| Warrior + Shaman, n=360 | main -> this branch | flips | z |
+|---|---|---|---|
+| Windfury on (the sweep) | +16.4pt | +65/-6 | +7.00 |
+| Windfury off in both arms | +12.8pt | +59/-13 | +5.42 |
+
+Turning Windfury off costs this branch -3.1pt (+0/-11, z=-3.3) and moves `main`
+by +0.6pt (+9/-7). Windfury is worth more on a 3.8s two-hander because each
+flat-chance proc is one of its bigger swings: the Arcanite Reaper's swing
+averages 65 now, against 16 before. The other ~5pt of the gap is not identified here;
+it is a follow-up. The knockout's inputs and CSVs are committed:
+`sweeps/2026-09-28-as167-warrior-shaman-cells.jsonl`,
+`2026-09-28-as167_windfury_off_before_17cb9f0.csv` and
+`2026-09-28-as167_windfury_off_after.csv`. The Windfury-on half of the
+comparison is the matching rows of the main sweep's CSVs.
 
 Split every other class by whether it faced a Warrior, and the losses are
 almost all against one:
