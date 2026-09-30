@@ -1,5 +1,5 @@
 //! Full class-vs-class matchup matrix runner (every `CharacterClass::all()`
-//! pairing — 8×8 today, scales automatically as classes are added).
+//! pairing — 9×9 today, scales automatically as classes are added).
 //!
 //! Runs every (team1_class, team2_class) pair N times via the existing
 //! `run_headless_match_with` entry point, accumulates per-cell win/loss/draw
@@ -504,5 +504,6 @@ fn short(c: CharacterClass) -> &'static str {
         CharacterClass::Paladin => "Pal",
         CharacterClass::Hunter => "Hun",
         CharacterClass::Shaman => "Sha",
+        CharacterClass::Druid => "Dru",
     }
 }

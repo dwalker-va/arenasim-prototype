@@ -184,7 +184,13 @@ pub fn classify_pre_cast_failure(
                 have: caster.current_mana,
                 need: def.mana_cost,
             },
-            _ => RejectionReason::InsufficientMana {
+            CharacterClass::Mage
+            | CharacterClass::Priest
+            | CharacterClass::Warlock
+            | CharacterClass::Paladin
+            | CharacterClass::Hunter
+            | CharacterClass::Shaman
+            | CharacterClass::Druid => RejectionReason::InsufficientMana {
                 have: caster.current_mana,
                 need: def.mana_cost,
             },

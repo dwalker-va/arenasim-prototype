@@ -37,6 +37,10 @@ pub struct AbilityDispatchExtras<'w, 's> {
     /// see its own traps that have not sprung yet.
     traps: Query<'w, 's, (&'static Trap, &'static Transform)>,
     trap_launches: Query<'w, 's, &'static TrapLaunchProjectile>,
+    /// Arena dampening — read for its `time_since_gates`, the clock the
+    /// Druid's mana governor paces against. `Option` for the same reason as
+    /// `ai_profile`.
+    dampening: Option<Res<'w, ArenaDampening>>,
 }
 
 pub fn acquire_targets(
@@ -1195,12 +1199,12 @@ pub fn decide_abilities(
             // Totem query snapshot above.
             match_config::CharacterClass::Shaman => {
                 let durations = totem_durations.get(&entity).copied().unwrap_or([0.0; 4]);
-                let mut plan = class_ai::shaman::ShamanMovementPlan::default();
+                let mut plan = class_ai::caster_healer_posture::CasterHealerPlan::default();
                 if countdown.gates_opened {
                     if let Ok((healer_posture, _mage, directive, _reset)) =
                         posture_movement.get_mut(entity)
                     {
-                        plan = class_ai::shaman::evaluate_shaman_posture(
+                        plan = class_ai::caster_healer_posture::evaluate_caster_healer_posture(
                             &mut commands,
                             entity,
                             &combatant,
@@ -1209,6 +1213,7 @@ pub fn decide_abilities(
                             healer_posture.map(bevy::prelude::Mut::into_inner),
                             directive,
                             &movement_config,
+                            &movement_config.shaman,
                             time.elapsed_secs(),
                             &mut decision_trace,
                         );
@@ -1226,6 +1231,49 @@ pub fn decide_abilities(
                     &durations,
                     &plan,
                     &movement_config,
+                    &mut decision_trace,
+                )
+            }
+            // Druid: the Shaman's caster-healer posture machine on its own
+            // `druid:` block, then a rotation of instants. The posture's
+            // ESCAPE deferral is not threaded into the rotation — every heal
+            // the Druid has is an instant, so there is nothing to defer.
+            match_config::CharacterClass::Druid => {
+                if countdown.gates_opened {
+                    if let Ok((healer_posture, _mage, directive, _reset)) =
+                        posture_movement.get_mut(entity)
+                    {
+                        class_ai::caster_healer_posture::evaluate_caster_healer_posture(
+                            &mut commands,
+                            entity,
+                            &combatant,
+                            my_pos,
+                            &ctx,
+                            healer_posture.map(bevy::prelude::Mut::into_inner),
+                            directive,
+                            &movement_config,
+                            &movement_config.druid,
+                            time.elapsed_secs(),
+                            &mut decision_trace,
+                        );
+                    }
+                }
+                let time_since_gates = extras
+                    .dampening
+                    .as_ref()
+                    .map_or(0.0, |d| d.time_since_gates);
+                class_ai::druid::decide_druid_action(
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    auras.as_deref(),
+                    &ctx,
+                    &movement_config,
+                    countdown.gates_opened,
+                    time_since_gates,
                     &mut decision_trace,
                 )
             }
@@ -1729,12 +1777,18 @@ pub fn check_interrupts(
             continue;
         }
 
-        // Only Warriors, Rogues, and Shamans have interrupts
-        if combatant.class != match_config::CharacterClass::Warrior
-            && combatant.class != match_config::CharacterClass::Rogue
-            && combatant.class != match_config::CharacterClass::Shaman
-        {
-            continue;
+        // Only Warriors, Rogues, and Shamans have interrupts. Exhaustive, so a
+        // new class has to say whether it interrupts.
+        match combatant.class {
+            match_config::CharacterClass::Warrior
+            | match_config::CharacterClass::Rogue
+            | match_config::CharacterClass::Shaman => {}
+            match_config::CharacterClass::Mage
+            | match_config::CharacterClass::Priest
+            | match_config::CharacterClass::Warlock
+            | match_config::CharacterClass::Paladin
+            | match_config::CharacterClass::Hunter
+            | match_config::CharacterClass::Druid => continue,
         }
 
         // Pick the interrupt target. Warriors/Rogues interrupt their current kill
@@ -1850,7 +1904,12 @@ pub fn check_interrupts(
                 AbilityType::Kick
             }
             match_config::CharacterClass::Shaman => AbilityType::WindShear,
-            _ => continue,
+            match_config::CharacterClass::Mage
+            | match_config::CharacterClass::Priest
+            | match_config::CharacterClass::Warlock
+            | match_config::CharacterClass::Paladin
+            | match_config::CharacterClass::Hunter
+            | match_config::CharacterClass::Druid => continue,
         };
 
         let ability_def = abilities.get_unchecked(&interrupt_ability);

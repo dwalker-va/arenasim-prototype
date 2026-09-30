@@ -70,6 +70,7 @@ const BAND_TYPES: &[AuraType] = &[
     AuraType::SpellPowerIncrease,
     AuraType::HealingOverTime,
     AuraType::WindfuryBuff,
+    AuraType::ArmorIncrease,
 ];
 
 fn names(types: impl IntoIterator<Item = AuraType>) -> BTreeSet<String> {
@@ -223,6 +224,8 @@ fn aura(effect_type: AuraType, name: &str, school: Option<SpellSchool>) -> Aura 
         dispel_type: DispelType::Auto,
         compound: None,
         source_item: None,
+        stacks: None,
+        bloom: None,
     }
 }
 

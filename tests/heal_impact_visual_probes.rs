@@ -853,6 +853,8 @@ fn totem_hot_aura(caster: Entity) -> Aura {
         dispel_type: DispelType::Auto,
         compound: None,
         source_item: None,
+        stacks: None,
+        bloom: None,
     }
 }
 

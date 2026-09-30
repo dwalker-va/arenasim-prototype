@@ -15,8 +15,10 @@
 //! live in this module and are used by all class AI files.
 
 pub mod cast_guard;
+pub mod caster_healer_posture;
 pub mod combat_snapshot;
 pub mod dps_postures;
+pub mod druid;
 pub(crate) mod healer_postures;
 pub mod hunter;
 pub mod hunter_dip;
@@ -818,6 +820,7 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::LockoutDurationReduction
         | AuraType::FrostArmorBuff
         | AuraType::SpellResistanceBuff
+        | AuraType::ArmorIncrease
         | AuraType::FearImmunity => 0,
     }
 }
@@ -857,6 +860,7 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         AuraType::MaxManaIncrease => 30,
         AuraType::ManaRegenIncrease => 25,
         AuraType::SpellResistanceBuff => 20,
+        AuraType::ArmorIncrease => 20,
         AuraType::FrostArmorBuff => 20,
         AuraType::MaxHealthIncrease => 15, // cheap re-buff (PW:Fortitude) — not worth a GCD to strip
         AuraType::LockoutDurationReduction => 15,
@@ -933,6 +937,7 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::DamageTakenReduction
         | AuraType::DamageImmunity
         | AuraType::SpellResistanceBuff
+        | AuraType::ArmorIncrease
         | AuraType::AttackPowerReduction
         | AuraType::CritChanceIncrease
         | AuraType::ManaRegenIncrease

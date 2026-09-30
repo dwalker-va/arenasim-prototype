@@ -128,7 +128,8 @@ pub fn wand_school(class: CharacterClass) -> SpellSchool {
         CharacterClass::Warrior
         | CharacterClass::Rogue
         | CharacterClass::Paladin
-        | CharacterClass::Hunter => SpellSchool::Frost,
+        | CharacterClass::Hunter
+        | CharacterClass::Druid => SpellSchool::Frost,
     }
 }
 

@@ -136,8 +136,9 @@ class CompetitivePredicateTests(unittest.TestCase):
         self.assertTrue(ct.is_competitive(["Warrior", "Priest", "Paladin"], 3))
         self.assertFalse(ct.is_competitive(["Priest", "Paladin", "Shaman"], 3))
 
-    def test_all_three_healer_classes_count(self):
-        self.assertEqual(ct.HEALERS, {"Priest", "Paladin", "Shaman"})
+    def test_all_four_healer_classes_count(self):
+        self.assertEqual(ct.HEALERS, {"Priest", "Paladin", "Shaman", "Druid"})
+        self.assertFalse(ct.is_competitive(["Druid", "Priest"], 2))
 
     def test_competitive_rows_needs_both_teams_competitive(self):
         r = rows(

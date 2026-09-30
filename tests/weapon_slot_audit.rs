@@ -381,8 +381,8 @@ fn the_rogue_is_the_only_class_that_dual_wields_by_default() {
         single_wielders += 1;
     }
     assert_eq!(
-        single_wielders, 7,
-        "expected the other seven classes to be checked"
+        single_wielders, 8,
+        "expected the other eight classes to be checked"
     );
 }
 
@@ -449,6 +449,14 @@ const EXPECTED_AUTO_ATTACK: &[(CharacterClass, AutoAttackKind, &str)] = &[
         CharacterClass::Warlock,
         AutoAttackKind::Wand,
         "WandOfShadows in Ranged; the MainHand caster one-hander is a stat stick",
+    ),
+    (
+        CharacterClass::Druid,
+        AutoAttackKind::Melee,
+        "CrescentStaff, a two-hander in MainHand. Its Ranged socket is an IDOL \
+         socket holding IdolOfHealth, and weapon_proficiency(Druid) declares \
+         every ranged weapon and the Wand Untrained — the staff swing is its \
+         only auto-attack",
     ),
 ];
 

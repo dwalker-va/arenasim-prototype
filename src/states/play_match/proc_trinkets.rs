@@ -238,6 +238,8 @@ impl ProcConfig {
             dispel_type: DispelType::Physical,
             compound: None,
             source_item: Some(item),
+            stacks: None,
+            bloom: None,
         }
     }
 }
@@ -296,6 +298,9 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
         // Reveals stealthed enemies and reveals the holder. A visibility swap,
         // not a quantity — there is no magnitude to multiply.
         AuraType::ShadowSight => None,
+        // Armor is a FREE stat in the item budget, so there is no weight to
+        // price an armor proc by.
+        AuraType::ArmorIncrease => None,
         // Markers and bookkeeping auras carry no magnitude to price.
         AuraType::WeakenedSoul
         | AuraType::FrostArmorBuff

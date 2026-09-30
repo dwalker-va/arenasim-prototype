@@ -360,6 +360,12 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
                 aura.magnitude, aura.duration
             )
         }
+        AuraType::ArmorIncrease => {
+            format!(
+                "Increases armor by {:.0} for {:.0} sec.",
+                aura.magnitude, aura.duration
+            )
+        }
         AuraType::AttackPowerReduction => {
             format!(
                 "Reduces attack power by {:.0} for {:.0} sec.",

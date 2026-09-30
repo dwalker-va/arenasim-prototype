@@ -1228,6 +1228,8 @@ fn cast_hammer_of_justice(
             dispel_type: DispelType::Auto,
             compound: None,
             source_item: None,
+            stacks: None,
+            bloom: None,
         };
         same_frame_cc_queue.push((target_entity, hoj_aura.clone()));
         commands.spawn(AuraPending {

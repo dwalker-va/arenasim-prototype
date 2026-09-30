@@ -2,7 +2,7 @@
 #
 # Mage 2v2 Matrix Sweep
 #
-# Runs N matches per matchup for Mage+Priest vs each-class+Priest (6 matchups)
+# Runs N matches per matchup for Mage+Priest vs each-class+Priest (8 matchups)
 # and aggregates winrates into a CSV byte-compatible with the 1v1 matrix output
 # from src/headless/matrix.rs:217.
 #
@@ -49,7 +49,7 @@ while [[ $# -gt 0 ]]; do
             cat <<'USAGE'
 Mage 2v2 Matrix Sweep
 
-Runs N matches per matchup for Mage+Priest vs each-class+Priest (6 matchups)
+Runs N matches per matchup for Mage+Priest vs each-class+Priest (8 matchups)
 and aggregates winrates into a CSV byte-compatible with the 1v1 matrix output.
 
 Usage:
@@ -99,7 +99,7 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 
 # Mage+Priest vs each opposing class + Priest (mirror healer partner)
 HEALER="Priest"
-OPPONENTS=("Warrior" "Rogue" "Priest" "Warlock" "Paladin" "Hunter" "Shaman")
+OPPONENTS=("Warrior" "Rogue" "Priest" "Warlock" "Paladin" "Hunter" "Shaman" "Druid")
 
 # Write CSV header
 echo "team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs" > "$OUT_CSV"

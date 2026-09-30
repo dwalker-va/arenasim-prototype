@@ -5,6 +5,7 @@ use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityDefinitions;
 use super::super::components::*;
 use super::super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
+use super::super::effects::BloomPending;
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::has_line_of_sight;
 use super::super::match_config;
@@ -381,6 +382,11 @@ pub fn process_casting(
                 is_crit_damage,
                 is_crit_heal,
                 caster.spell_power,
+                // Effective spell power (base + aura bonuses), the same figure
+                // the heal above scaled with — what an aura this cast applies
+                // scales with too. `caster.spell_power` beside it stays the
+                // base figure the dispel backlash has always snapshotted.
+                caster.spell_power + sp_bonus,
                 def.mana_cost,
             ));
 
@@ -427,6 +433,7 @@ pub fn process_casting(
         is_crit_damage,
         is_crit_heal,
         caster_spell_power,
+        caster_effective_spell_power,
         mana_cost,
     ) in completed_casts
     {
@@ -772,7 +779,7 @@ pub fn process_casting(
 
             // Check for healing reduction auras
             let pre_reduction_healing = healing;
-            if let Some(auras) = target_auras {
+            if let Some(auras) = target_auras.as_deref() {
                 for aura in &auras.auras {
                     if aura.effect_type == AuraType::HealingReduction {
                         // Magnitude is a multiplier (e.g., 0.65 = 35% reduction)
@@ -792,6 +799,34 @@ pub fn process_casting(
 
             // Arena dampening: time-ramped reduction of all healing
             healing = dampening.apply(healing);
+
+            // A heal that consumes an aura (Swiftmend eats Rejuvenation) takes
+            // it as it lands. The AI only casts it at a target that carries
+            // one; a consumed aura that blooms would bloom here, since it has
+            // ended — none does today.
+            if let Some(consumed) = def.consumes_aura {
+                let consumed_name = &abilities.get_unchecked(&consumed).name;
+                if let Some(auras) = target_auras.as_deref_mut() {
+                    if let Some(index) = auras
+                        .auras
+                        .iter()
+                        .position(|a| &a.ability_name == consumed_name)
+                    {
+                        let eaten = auras.remove_debuff_at(index);
+                        target.reverse_stat_mutation(&eaten);
+                        if let Some(bloom) = BloomPending::for_ending(target_entity, &eaten) {
+                            commands.spawn(bloom);
+                        }
+                        combat_log.log(
+                            CombatLogEventType::Buff,
+                            format!(
+                                "{}'s {} consumes {} on {}",
+                                caster_id, def.name, eaten.ability_name, target_id
+                            ),
+                        );
+                    }
+                }
+            }
 
             // Apply healing (don't overheal)
             let actual_healing = healing.min(target.max_health - target.current_health);
@@ -862,9 +897,15 @@ pub fn process_casting(
 
         // Apply aura if applicable (store for later application)
         if let Some(aura) = def.applies_aura.as_ref() {
-            if let Some(mut aura_pending) =
-                AuraPending::from_ability(target_entity, caster_entity, def)
-            {
+            // Scaled: an aura whose RON sets `magnitude_coefficient` (or a
+            // bloom `heal_coefficient`) grows with the caster's spell power.
+            // Exact for every aura that sets neither (`x + sp * 0.0` is `x`).
+            if let Some(mut aura_pending) = AuraPending::from_ability_scaled(
+                target_entity,
+                caster_entity,
+                def,
+                caster_effective_spell_power,
+            ) {
                 // For abilities with a dispel-backlash config (e.g., Unstable Affliction),
                 // snapshot the backlash damage from the caster's spell power at cast
                 // completion. SP doesn't change mid-cast in this codebase, so this is

@@ -263,6 +263,8 @@ fn attack_speed_slow(magnitude: f32) -> Aura {
         dispel_type: DispelType::Auto,
         compound: None,
         source_item: None,
+        stacks: None,
+        bloom: None,
     }
 }
 

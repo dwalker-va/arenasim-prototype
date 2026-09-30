@@ -40,6 +40,7 @@ pub use super::team_plan::update_team_plans;
 // Effect processing (instant ability effects)
 pub use super::effects::process_backlash;
 pub use super::effects::process_berserker_rage;
+pub use super::effects::process_blooms;
 pub use super::effects::process_dispels;
 pub use super::effects::process_divine_shield;
 pub use super::effects::process_holy_shock_damage;
@@ -208,6 +209,11 @@ pub fn add_core_combat_systems<M, N>(
             // process_dispels spawns) and in the same Phase 1 chain so backlash
             // damage + Silence land on the same frame as the dispel.
             process_backlash,
+            // Lands the blooms `process_hot_ticks` (an aura's last frame) and
+            // `process_dispels` (a removal) spawned this frame — the one heal
+            // site for a bloom. AFTER both, so a bloom lands on the frame its
+            // aura ended.
+            process_blooms,
             process_holy_shock_heals,
             process_holy_shock_damage,
             process_mana_burn,

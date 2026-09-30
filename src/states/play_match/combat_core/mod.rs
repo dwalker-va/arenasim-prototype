@@ -205,6 +205,8 @@ mod tests {
             dispel_type: DispelType::Auto,
             compound: None,
             source_item: None,
+            stacks: None,
+            bloom: None,
         }
     }
 
@@ -595,6 +597,8 @@ mod tests {
                 dispel_type: DispelType::Auto,
                 compound: None,
                 source_item: None,
+                stacks: None,
+                bloom: None,
             }],
         };
 
@@ -656,6 +660,8 @@ mod tests {
                 dispel_type: DispelType::Auto,
                 compound: None,
                 source_item: None,
+                stacks: None,
+                bloom: None,
             }],
         };
 
@@ -751,6 +757,8 @@ mod tests {
                 dispel_type: DispelType::Auto,
                 compound: None,
                 source_item: None,
+                stacks: None,
+                bloom: None,
             }],
         };
         assert!(!has_absorb_shield(Some(&auras)));
@@ -787,6 +795,8 @@ mod tests {
                 dispel_type: DispelType::Auto,
                 compound: None,
                 source_item: None,
+                stacks: None,
+                bloom: None,
             }],
         };
         assert!(has_weakened_soul(Some(&auras)));
@@ -939,6 +949,8 @@ mod tests {
             dispel_type: DispelType::Auto,
             compound: None,
             source_item: None,
+            stacks: None,
+            bloom: None,
         }
     }
 

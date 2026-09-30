@@ -180,5 +180,27 @@
             OffHand: TomeOfKnowledge,
             Ranged: TotemOfLife,
         },
+
+        // ====================================================================
+        // DRUID — Caster leather (Cenarion), a two-handed staff, an Idol.
+        // No wand: Druids cannot use one, so the staff is its only swing.
+        // ====================================================================
+        Druid: {
+            Head: CenarionHelm,
+            Shoulders: CenarionSpaulders,
+            Chest: CenarionVestments,
+            Wrists: CenarionBracers,
+            Hands: CenarionGloves,
+            Waist: CenarionBelt,
+            Legs: CenarionLeggings,
+            Feet: CenarionBoots,
+            Back: CloakOfConcentration,
+            Neck: AmuletOfResilience,
+            Ring1: SignetOfFocus,
+            Ring2: RingOfProtection,
+            Trinket1: EssenceOfEternalLife,
+            MainHand: CrescentStaff,
+            Ranged: IdolOfHealth,
+        },
     }
 )

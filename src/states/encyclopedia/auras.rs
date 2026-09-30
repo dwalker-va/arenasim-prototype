@@ -541,9 +541,13 @@ fn ron_entry(ability: AbilityType, abilities: &AbilityDefinitions) -> Option<Nam
         source: AuraSource::Ability(ability),
         art: AuraArt::FromSource,
         sample: pending.aura,
-        // `AbilityConfig::applies_aura` is a single `Option`, so a RON-defined
-        // ability applies exactly one effect and can never be a compound.
-        riders: Vec::new(),
+        // A RON-defined aura is a single effect unless it is the FACE of a
+        // compound (Mark of the Wild); then its riders come from the same
+        // constructor `apply_pending_auras` pulls them in with.
+        riders: effect
+            .compound
+            .map(crate::states::play_match::combat_core::compound_riders)
+            .unwrap_or_default(),
         persistence: Persistence::Seconds(effect.duration),
         magnitude_coefficient: effect.magnitude_coefficient,
         description: build_aura_description(effect),

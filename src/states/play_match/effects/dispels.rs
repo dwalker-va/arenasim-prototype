@@ -11,6 +11,7 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::effects::backlash::{
     BacklashPending, DISPEL_BACKLASH_SILENCE_DURATION,
 };
+use crate::states::play_match::effects::bloom::BloomPending;
 use crate::states::play_match::utils::combat_log_id_for;
 
 /// Process pending dispels from Dispel Magic, Cleanse, Devour Magic, Purge or
@@ -42,7 +43,7 @@ pub fn process_dispels(
 
     for (pending_entity, pending) in pending_dispels.iter() {
         // Get target's auras
-        if let Ok((combatant, mut active_auras)) = combatants.get_mut(pending.target) {
+        if let Ok((mut combatant, mut active_auras)) = combatants.get_mut(pending.target) {
             // Find all dispellable aura indices (SmallVec avoids heap allocation for typical aura counts)
             let dispellable_indices: SmallVec<[usize; 8]> = active_auras
                 .auras
@@ -72,6 +73,18 @@ pub fn process_dispels(
                 // nothing about WHICH debuff is rolled — only how much of it
                 // actually leaves.
                 let removed_aura = active_auras.remove_debuff_at(idx_to_remove);
+
+                // A buff that raised a stat when it landed gives it back when
+                // it is taken, exactly as it does when it runs out — a purged
+                // Mark of the Wild takes its health with it.
+                combatant.reverse_stat_mutation(&removed_aura);
+
+                // A blooming aura blooms when it is taken, not only when it
+                // runs out (TBC Lifebloom): the bearer is healed, whoever
+                // removed it.
+                if let Some(bloom) = BloomPending::for_ending(pending.target, &removed_aura) {
+                    commands.spawn(bloom);
+                }
 
                 // Log the dispel using the provided log prefix
                 let target_id = combat_log_id_for(&combatant, pet_query.get(pending.target).ok());

@@ -30,7 +30,14 @@ pub(crate) fn dispel_burst_colors(class: CharacterClass) -> (Color, LinearRgba) 
             Color::srgba(0.3, 0.6, 1.0, 0.5),
             LinearRgba::new(1.2, 2.0, 3.0, 1.0),
         ),
-        _ => (
+        // No removal of their own today, so these never draw a burst; the
+        // neutral white answers for them rather than a wildcard, so a class
+        // that gains a dispel has to be given its color here.
+        CharacterClass::Warrior
+        | CharacterClass::Mage
+        | CharacterClass::Rogue
+        | CharacterClass::Warlock
+        | CharacterClass::Druid => (
             Color::srgba(0.9, 0.9, 1.0, 0.5),
             LinearRgba::new(2.0, 2.0, 2.5, 1.0),
         ),

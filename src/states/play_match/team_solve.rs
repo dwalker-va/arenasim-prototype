@@ -887,8 +887,8 @@ fn heal_school(
     use crate::states::match_config::CharacterClass as C;
     match class {
         C::Priest | C::Paladin => Some(SpellSchool::Holy),
-        C::Shaman => Some(SpellSchool::Nature),
-        _ => None,
+        C::Shaman | C::Druid => Some(SpellSchool::Nature),
+        C::Warrior | C::Mage | C::Rogue | C::Warlock | C::Hunter => None,
     }
 }
 

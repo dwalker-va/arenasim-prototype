@@ -923,7 +923,63 @@ pub const FROST_ARMOR_PROC_DURATION: f32 = 5.0;
 pub fn compound_riders(compound: CompoundDebuff) -> Vec<Aura> {
     match compound {
         CompoundDebuff::FrostArmorChill => vec![frost_armor_attack_speed_aura()],
+        CompoundDebuff::MarkOfTheWild => mark_of_the_wild_riders(),
     }
+}
+
+/// Mark of the Wild's armor bonus — one of its riders.
+pub const MARK_OF_THE_WILD_ARMOR: f32 = 150.0;
+/// Mark of the Wild's resistance to each school of magic — one rider per school.
+pub const MARK_OF_THE_WILD_RESISTANCE: f32 = 10.0;
+/// The schools Mark of the Wild resists: every school with a resistance (Holy
+/// has none, in Classic or here).
+pub const MARK_OF_THE_WILD_RESISTED_SCHOOLS: [SpellSchool; 5] = [
+    SpellSchool::Arcane,
+    SpellSchool::Fire,
+    SpellSchool::Frost,
+    SpellSchool::Nature,
+    SpellSchool::Shadow,
+];
+
+/// Mark of the Wild's RIDERS: its armor and its resistances. The face — the
+/// maximum-health buff — is the aura `abilities.ron` describes; these come
+/// with it when it lands, at its duration, and leave with it. Classic's
+/// "armor, all attributes and all resistances", with the attributes read as
+/// the health they buy here.
+///
+/// Each rider is written as its own literal so `tests/aura_catalog_audit.rs`
+/// can read its name and mechanic from the source.
+pub fn mark_of_the_wild_riders() -> Vec<Aura> {
+    let armor = Aura {
+        effect_type: AuraType::ArmorIncrease,
+        duration: 600.0, // overwritten with the face's on landing
+        magnitude: MARK_OF_THE_WILD_ARMOR,
+        break_on_damage_threshold: -1.0,
+        ability_name: "Mark of the Wild".to_string(),
+        spell_school: Some(SpellSchool::Nature),
+        dispel_type: DispelType::Auto,
+        compound: Some(CompoundDebuff::MarkOfTheWild),
+        ..Default::default()
+    };
+    let resistance = |school: SpellSchool| Aura {
+        effect_type: AuraType::SpellResistanceBuff,
+        duration: 600.0, // overwritten with the face's on landing
+        magnitude: MARK_OF_THE_WILD_RESISTANCE,
+        break_on_damage_threshold: -1.0,
+        ability_name: "Mark of the Wild".to_string(),
+        // The school a resistance buff resists — read by the damage step.
+        spell_school: Some(school),
+        dispel_type: DispelType::Auto,
+        compound: Some(CompoundDebuff::MarkOfTheWild),
+        ..Default::default()
+    };
+    std::iter::once(armor)
+        .chain(
+            MARK_OF_THE_WILD_RESISTED_SCHOOLS
+                .iter()
+                .map(|&s| resistance(s)),
+        )
+        .collect()
 }
 
 /// The Frost Armor chill: ONE debuff, two effects.
@@ -973,6 +1029,8 @@ pub fn frost_armor_movement_slow_aura() -> Aura {
         dispel_type: DispelType::Auto,
         compound: Some(CompoundDebuff::FrostArmorChill),
         source_item: None,
+        stacks: None,
+        bloom: None,
     }
 }
 
@@ -999,6 +1057,8 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
         dispel_type: DispelType::Auto,
         compound: Some(CompoundDebuff::FrostArmorChill),
         source_item: None,
+        stacks: None,
+        bloom: None,
     }
 }
 

@@ -323,7 +323,7 @@ fn menu_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
 /// per class, using the shared UI class palette. Asset-free (no textures to
 /// plumb into the snapshot harness).
 fn paint_class_accent_row(ui: &mut egui::Ui) {
-    const CLASSES: [CharacterClass; 8] = [
+    const CLASSES: [CharacterClass; 9] = [
         CharacterClass::Warrior,
         CharacterClass::Rogue,
         CharacterClass::Priest,
@@ -332,6 +332,7 @@ fn paint_class_accent_row(ui: &mut egui::Ui) {
         CharacterClass::Paladin,
         CharacterClass::Hunter,
         CharacterClass::Shaman,
+        CharacterClass::Druid,
     ];
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 14.0), egui::Sense::hover());

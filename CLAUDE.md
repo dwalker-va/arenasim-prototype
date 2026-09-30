@@ -418,7 +418,38 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
    cargo run --release -- --headless /tmp/test.json
    ```
 
-**Available aura types**: `Absorb`, `Root`, `Stun`, `Fear`, `MovementSpeedSlow`, `HealingReduction`, `DamageOverTime`, `MaxHealthIncrease`, `MaxManaIncrease`, `SpellLockout`
+**Available aura types**: `Absorb`, `Root`, `Stun`, `Fear`, `MovementSpeedSlow`, `HealingReduction`, `DamageOverTime`, `HealingOverTime`, `MaxHealthIncrease`, `MaxManaIncrease`, `ArmorIncrease`, `SpellLockout` (the full list is `AuraType::ALL`)
+
+**Stacking, refreshing and blooming auras** — three opt-in fields on an
+`applies_aura` block, all general (the Druid's kit is their first user):
+- `stacking: Some((max_stacks: N))` makes the aura STACKING (`AuraStacks` in
+  `components/auras.rs`). It is keyed by its SOURCE ability rather than its type,
+  so it coexists with a same-type aura from anywhere else (Rejuvenation beside a
+  Healing Stream pulse); and when that source applies it again,
+  `apply_pending_auras` REFRESHES it — duration back to full, per-stack numbers
+  re-snapshot, tick cadence kept — and adds a stack up to `N`, instead of refusing
+  the recast the way a one-per-type buff is refused. `max_stacks: 1` is
+  refresh-only. A periodic tick is `magnitude` PER STACK (`Aura::tick_amount`,
+  exact for every non-stacking aura). Logged as `<target>'s <aura> refreshed (N stacks)`.
+- `bloom: Some((heal_base: B, heal_coefficient: C))` makes the aura BLOOM: when it
+  ENDS — runs out, or is dispelled or purged — it lands a direct heal of
+  `(B + spell power × C) × stacks` on its bearer (TBC Lifebloom). A refresh does
+  not bloom it, and neither does its bearer dying. Both endings spawn a
+  `BloomPending`; `effects/bloom.rs` `process_blooms` is the one heal site, and
+  applies healing reduction and `ArenaDampening`. Logged as `<caster>'s <aura>
+  blooms on <target> for N`.
+- `compound: Some(<CompoundDebuff>)` makes the aura the FACE of a compound (one
+  aura to the player, several effects, removed as one — the Frost Armor chill's
+  mechanism). Its riders come from `combat_core::compound_riders`. Mark of the Wild
+  is the first compound BUFF: a purge that takes it takes all of it, and a purged
+  or expired `MaxHealthIncrease` gives its health back either way
+  (`Combatant::reverse_stat_mutation`).
+
+`process_casting` applies every aura it lands through
+`AuraPending::from_ability_scaled`, so an instant routed through a zero-length
+`CastingState` (the Druid's heals, Frost Shock) may set `magnitude_coefficient`;
+add it to `SP_SCALED_AURA_WIRED`. A heal may also `consumes_aura: Some(<Ability>)`
+— Swiftmend eats the target's Rejuvenation as it lands.
 
 **Tip**: Use the Wowhead MCP to look up accurate WoW Classic values:
 ```
@@ -767,7 +798,7 @@ null result means nothing without it.
 
 **The control fields every class the change cannot reach, on both sides.**
 `gen_sweep.py` builds it that way and refuses a `--control-cells` below the
-fewest cells that can (4 for a one-class 2v2 change, 7 for 1v1; the default 8
+fewest cells that can (4 for a one-class 2v2 change, 8 for 1v1; the default 8
 clears both; `0` drops the control with a warning). `paired_sweep.py` prints
 which classes the control fields per side, and a class the sweep fields in an
 unaffected team but the control never does is a `CONTROL BLIND SPOT` — the

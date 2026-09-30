@@ -58,6 +58,8 @@ fn make_totem_aura(
         dispel_type: DispelType::Auto,
         compound: None,
         source_item: None,
+        stacks: None,
+        bloom: None,
     }
 }
 

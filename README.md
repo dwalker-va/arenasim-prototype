@@ -31,7 +31,7 @@ echo '{"team1":["Warrior","Priest"],"team2":["Mage","Paladin"]}' > /tmp/match.js
 cargo run --release -- --headless /tmp/match.json
 # → match_logs/match_<timestamp>.txt
 
-# Full 8×8 class matchup matrix, 100 runs per cell
+# Full 9×9 class matchup matrix, 100 runs per cell
 cargo run --release -- --matrix 100
 # → match_logs/matrix_<timestamp>.{csv,md}
 
@@ -41,13 +41,13 @@ cargo test
 
 ## Combat Model
 
-- **8 classes** — Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter, Shaman
+- **9 classes** — Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter, Shaman, Druid
 - **~70 abilities** defined in data (`assets/config/abilities.ron`), no recompile to retune
 - **Resources** — Mana, Rage (generated from damage dealt and taken), Energy
 - **Crowd control** with **diminishing returns** — per-category DR ladder to immunity,
   with a reset timer, so stun/fear/root chains behave like the real thing
-- **Auras** — buffs, debuffs, DoTs, absorb shields, movement impairment, spell lockout,
-  break-on-damage thresholds
+- **Auras** — buffs, debuffs, DoTs, heals over time that stack and bloom, absorb shields,
+  movement impairment, spell lockout, break-on-damage thresholds
 - **Spell schools & resistances** — Physical, Fire, Frost, Shadow, Arcane, Holy, Nature
 - **Cast times, channels, interrupts, dispels, and purges**
 - **Line of sight** — obstacle-aware casting, healing, and auto-attacks, including
@@ -140,7 +140,7 @@ Options, Keybindings, the Encyclopedia, and the Animation Sandbox.
 | Mode | Flag | Use |
 |---|---|---|
 | Single match | `--headless <config.json>` | Verify one change end to end |
-| Matchup matrix | `--matrix N` | All 8×8 class pairings, N runs each → winrate CSV + Markdown heatmap |
+| Matchup matrix | `--matrix N` | All 9×9 class pairings, N runs each → winrate CSV + Markdown heatmap |
 | Parallel batch | `--batch <configs.jsonl> --out <csv>` | The fast path: thousands of arbitrary 2v2/3v3/strategy-variant matches across all cores |
 
 Useful extras: `--seed-base` (reproducible matrices), `--matrix-map PillaredArena` (run every

@@ -53,7 +53,7 @@ pub struct Args {
     #[arg(long)]
     pub max_duration: Option<f32>,
 
-    /// Run all 7×7 class matchups N times each, emit a winrate heatmap
+    /// Run every class-vs-class matchup (9×9 today) N times each, emit a winrate heatmap
     /// (CSV + Markdown) to match_logs/matrix_<timestamp>.{csv,md}.
     /// Per-match `.txt` logs are suppressed unless --save-logs is also passed.
     #[arg(long, value_name = "N")]
@@ -107,7 +107,7 @@ pub struct Args {
     pub replay: Option<std::path::PathBuf>,
 
     /// In matrix mode, also write each individual match's `.txt` log file.
-    /// Off by default to avoid 49 × N files in match_logs/.
+    /// Off by default to avoid 81 × N files in match_logs/.
     #[arg(long)]
     pub save_logs: bool,
 

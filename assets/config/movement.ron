@@ -112,6 +112,26 @@
         directive_refresh_margin: 0.25, // refresh the standing walk below this remaining TTL
         healing_heavy_hp: 0.6,          // team-HP parity gate (Shaman has no dip; kept for consistency)
     ),
+    // Druid: the same caster-healer machine as the Shaman (no dip), tuned as a
+    // pure backline healer. Every heal is an instant at 40yd, so it has no
+    // reason to drift forward, and no wand to pull toward. Stated in full: a
+    // missing field would fall back to the Shaman's defaults.
+    druid: (
+        weights: (
+            threat_repulsion: 3.0,    // the Priest's value — a pure healer flees like one
+            formation_pull: 2.0,      // the Priest's backline pull
+            corner_penalty: 6.0,
+            wand_pull: 0.0,           // no wand
+            burn_pull: 0.0,           // no Mana Burn
+            commitment_bonus: 1.5,
+            los_seek: 0.0,            // healers deny sight, they don't seek it
+            cover_pull: 1.5,          // same deny posture as the Priest/Shaman; BELOW threat_repulsion
+        ),
+        formation_shift_threshold: 3.0,
+        formation_deadzone: 1.5,
+        directive_refresh_margin: 0.25,
+        healing_heavy_hp: 0.6,
+    ),
     // Melee target-swap (bucket A offensive-punish): swap off a kited kill
     // target onto a softer in-melee enemy instead of chasing forever.
     melee: (

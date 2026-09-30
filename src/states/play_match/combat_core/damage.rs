@@ -79,10 +79,21 @@ pub fn apply_damage_with_absorb(
     let mut remaining_damage = damage;
     let mut total_absorbed = 0.0;
 
-    // Apply armor reduction for Physical damage
-    if spell_school == SpellSchool::Physical && target.armor > 0.0 {
+    // Apply armor reduction for Physical damage. Equipment armor plus any
+    // `ArmorIncrease` aura (Mark of the Wild) — exactly `target.armor` when
+    // there is none, since the bonus sum starts at 0.0.
+    let armor = target.armor
+        + active_auras.as_ref().map_or(0.0, |auras| {
+            auras
+                .auras
+                .iter()
+                .filter(|a| a.effect_type == AuraType::ArmorIncrease)
+                .map(|a| a.magnitude)
+                .sum::<f32>()
+        });
+    if spell_school == SpellSchool::Physical && armor > 0.0 {
         let pre_armor = remaining_damage;
-        let reduction = target.armor / (target.armor + 5500.0);
+        let reduction = armor / (armor + 5500.0);
         remaining_damage *= 1.0 - reduction;
         target.damage_mitigated_by_armor += pre_armor - remaining_damage;
     }
@@ -398,6 +409,8 @@ fn apply_interrupt_lockout(
             dispel_type: DispelType::Auto,
             compound: None,
             source_item: None,
+            stacks: None,
+            bloom: None,
         },
     });
 
