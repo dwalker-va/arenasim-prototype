@@ -23,8 +23,9 @@ use crate::states::play_match::movement_config::{MovementConfig, SharedMovementC
 
 use super::cast_guard::{pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
-    compound_pressure_trigger, escape_tick, escape_window_from, healer_pressured_tick_shared,
-    medic_chase_override, medic_chase_tick, start_movement_event, start_movement_event_with_target,
+    ally_walk_tick, compound_pressure_trigger, dispel_chase_override, escape_tick,
+    escape_window_from, healer_pressured_tick_shared, medic_chase_override, medic_chase_tick,
+    start_movement_event, start_movement_event_with_target,
 };
 use super::paladin::{
     dip_target_candidate, hoj_target_eligible, rotation_hoj_allowed, HojPlan, PaladinMovementPlan,
@@ -228,10 +229,39 @@ pub fn evaluate_paladin_posture(
             decision_trace,
             ctx,
         );
+    } else if let Some(ally) = dispel_chase_override(
+        abilities,
+        entity,
+        my_pos,
+        combatant.current_mana,
+        next,
+        ctx,
+        AbilityType::PaladinCleanse,
+    ) {
+        // Dispel walk (AS-180): a teammate held in urgent crowd control Cleanse
+        // removes stands beyond Cleanse's range — walk until the rotation's
+        // urgent Cleanse reaches it. Non-critical heals defer meanwhile, exactly
+        // as during a dip: a Flash of Light roots the Paladin for its whole cast,
+        // and back-to-back casts would hold it out of range while the trap runs.
+        ally_walk_tick(
+            commands,
+            entity,
+            my_pos,
+            ally,
+            state,
+            directive,
+            shared,
+            now,
+            decision_trace,
+            ctx,
+            MovementTrigger::DispelChase,
+        );
+        plan.cast_defer = Some(shared.urgency_hp_threshold);
     } else {
         if state.medic_target.is_some() {
-            // Sight regained (or the ally recovered / died): drop the chase walk
-            // so FREE hands movement back to legacy pursuit / PRESSURED re-scores.
+            // Sight regained / ally in Cleanse range (or the ally recovered,
+            // was freed, or died): drop the walk so FREE hands movement back to
+            // legacy pursuit / PRESSURED re-scores.
             commands.entity(entity).remove::<MovementDirective>();
             state.medic_target = None;
         }

@@ -121,6 +121,7 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
     "KiteExit",
     "SeekLos",
     "MeleeReset",
+    "DispelChase",
 ];
 
 /// One reference matchup: team configs + seed + label for error messages.

@@ -13,6 +13,8 @@
 
 use bevy::prelude::*;
 
+use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::combat_core::{
     compass_directions_16, mask_and_los_bitmask, score_directions, AnchorConstraint, ScorerInputs,
 };
@@ -336,12 +338,8 @@ pub(super) fn medic_chase_target<'c>(
 // ---------------------------------------------------------------------------
 
 /// Whether the medic chase should override the normal movement tick this frame:
-/// current posture FREE or PRESSURED (never DIP — its own teammate-HP abort
-/// composes, handing control back so the medic picks up the next decision — nor
-/// the committed ESCAPE window), the healer not itself hard-CC'd (a CC'd healer
-/// can't move, and the directive would be stale on release; `is_ccd` includes
-/// Root, which blocks movement too), and a dying occluded teammate exists.
-/// Returns that ally.
+/// the walk is allowed ([`ally_walk_allowed`]) and a dying occluded teammate
+/// exists. Returns that ally.
 pub(super) fn medic_chase_override<'c>(
     entity: Entity,
     my_pos: Vec3,
@@ -349,8 +347,42 @@ pub(super) fn medic_chase_override<'c>(
     ctx: &'c CombatContext,
     shared: &SharedMovementConfig,
 ) -> Option<&'c CombatantInfo> {
-    if !matches!(next, Posture::Free | Posture::Pressured) || ctx.is_ccd(entity) {
+    if !ally_walk_allowed(entity, next, ctx) {
         return None;
+    }
+    medic_chase_target(entity, my_pos, ctx, shared)
+}
+
+/// Whether the Paladin's dispel walk should override the normal movement tick
+/// this frame: the walk is allowed ([`ally_walk_allowed`]) and a teammate held
+/// in urgent crowd control `dispel` removes stands beyond its range
+/// ([`dispel_chase_target`](super::dispel_chase_target)). Returns that ally.
+/// The medic chase outranks it: a dying ally the healer cannot see comes first.
+pub(super) fn dispel_chase_override<'c>(
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    my_pos: Vec3,
+    current_mana: f32,
+    next: Posture,
+    ctx: &'c CombatContext,
+    dispel: AbilityType,
+) -> Option<&'c CombatantInfo> {
+    if !ally_walk_allowed(entity, next, ctx) {
+        return None;
+    }
+    let ally = super::dispel_chase_target(ctx, abilities, entity, my_pos, current_mana, dispel)?;
+    ctx.combatants.get(&ally)
+}
+
+/// Whether a healer may take a direct walk to a teammate this frame: current
+/// posture FREE or PRESSURED (never DIP — its own teammate-HP abort composes,
+/// handing control back so the walk picks up the next decision — nor the
+/// committed ESCAPE window), and the healer not itself hard-CC'd (a CC'd healer
+/// can't move, and the directive would be stale on release; `is_ccd` includes
+/// Root, which blocks movement too).
+fn ally_walk_allowed(entity: Entity, next: Posture, ctx: &CombatContext) -> bool {
+    if !matches!(next, Posture::Free | Posture::Pressured) || ctx.is_ccd(entity) {
+        return false;
     }
     // RETIRED under `TeamPlan` IN PRESSURED ONLY — the sole posture the solve
     // runs in, so the only place the subsumption argument holds. A review
@@ -371,10 +403,10 @@ pub(super) fn medic_chase_override<'c>(
     // was occlusion 22% -> 20%, so it did still fire, just never decisively).
     // Leaving it live would mean two positioning authorities under one profile,
     // which is exactly the hand-arbitration step 4 exists to remove.
-    if ctx.ai_profile.is_team_plan() && next == Posture::Pressured {
-        return None;
-    }
-    medic_chase_target(entity, my_pos, ctx, shared)
+    //
+    // The Paladin's dispel walk inherits the same retirement: under `TeamPlan`
+    // PRESSURED the solve is the one positioning authority.
+    !(ctx.ai_profile.is_team_plan() && next == Posture::Pressured)
 }
 
 /// Issue/refresh the medic-chase directive toward `ally`'s live position and
@@ -397,6 +429,40 @@ pub(super) fn medic_chase_tick(
     decision_trace: &mut DecisionTrace,
     ctx: &CombatContext,
 ) {
+    ally_walk_tick(
+        commands,
+        entity,
+        my_pos,
+        ally,
+        state,
+        directive,
+        shared,
+        now,
+        decision_trace,
+        ctx,
+        MovementTrigger::SeekLos,
+    );
+}
+
+/// Issue/refresh a direct walk toward `ally`'s live position, traced under
+/// `trigger`: the one walk both the medic chase (`SeekLos`) and the Paladin's
+/// dispel walk (`DispelChase`) run. `state.medic_target` marks EITHER walk as
+/// live — its release (drop the directive, hand movement back to the posture)
+/// is the same for both.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn ally_walk_tick(
+    commands: &mut Commands,
+    entity: Entity,
+    my_pos: Vec3,
+    ally: &CombatantInfo,
+    state: &mut HealerPosture,
+    directive: Option<&MovementDirective>,
+    shared: &SharedMovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+    ctx: &CombatContext,
+    trigger: MovementTrigger,
+) {
     let recommit = state.medic_target != Some(ally.entity)
         || directive.is_none_or(|d| now >= d.committed_until || now >= d.expires);
     if !recommit {
@@ -417,11 +483,7 @@ pub(super) fn medic_chase_tick(
     if let Some(mut builder) =
         start_movement_event_with_target(decision_trace, ctx, ally.entity, my_pos)
     {
-        builder.direction_change(
-            state.posture.into(),
-            MovementTrigger::SeekLos,
-            MovementGoalKind::Point,
-        );
+        builder.direction_change(state.posture.into(), trigger, MovementGoalKind::Point);
         builder.finish();
     }
 }

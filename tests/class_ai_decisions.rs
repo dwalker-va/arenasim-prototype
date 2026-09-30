@@ -1381,6 +1381,96 @@ fn who_can_free_a_freezing_trap() {
     assert!(!can_free_ally(&defs, &enemy_priest, &victim, &aura));
 }
 
+// ============================================================================
+// Dispel walk — who a healer walks to so its dispel can reach (AS-180)
+// ============================================================================
+
+/// Where the Paladin walks to free a trapped teammate, asked of
+/// `dispel_chase_target` over the cases that decide it. The walk exists because
+/// the rotation's urgent Cleanse only scans allies in Cleanse's 30yd range: a
+/// Warrior trapped 63yd away (measured, `H+Pri vs Paladin+Warrior` seed 1 on the
+/// pre-AS-125 main) sat out its full 8s while the Paladin hard-cast Flash of
+/// Light at range.
+#[test]
+fn a_paladin_walks_to_a_teammate_it_can_only_free_from_closer() {
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::dispel_chase_target;
+    use arenasim::states::play_match::traps::freezing_trap_aura;
+
+    let defs = AbilityDefinitions::default();
+    let cleanse = AbilityType::PaladinCleanse;
+    let range = defs.get(&cleanse).unwrap().range;
+    let paladin = Entity::from_raw(1);
+    let (warrior, rogue) = (Entity::from_raw(2), Entity::from_raw(3));
+    let hunter = Entity::from_raw(9);
+
+    // Paladin at the origin; teammates on the x axis at the given distances,
+    // each carrying the given auras.
+    let walk = |allies: &[(Entity, f32, Vec<Aura>)], mana: f32| {
+        let mut snap = snapshot_for(paladin, 2, CharacterClass::Paladin);
+        for (e, x, auras) in allies {
+            let mut a = info(*e, 2, CharacterClass::Warrior);
+            a.position = Vec3::new(*x, 0.0, 0.0);
+            snap.combatants.insert(*e, a);
+            snap.active_auras.insert(*e, auras.clone());
+        }
+        let ctx = snap.context_for(paladin);
+        dispel_chase_target(&ctx, &defs, paladin, Vec3::ZERO, mana, cleanse)
+    };
+    let trap = || vec![freezing_trap_aura(hunter)];
+    let far = range + 10.0;
+
+    // Trapped beyond range: walk to it.
+    assert_eq!(walk(&[(warrior, far, trap())], 100.0), Some(warrior));
+    // Trapped within range: the rotation's Cleanse reaches it — no walk.
+    assert_eq!(walk(&[(warrior, range - 1.0, trap())], 100.0), None);
+    // Nothing urgent to free: a snare (20) and a Crippling Poison (50) are
+    // below the urgent bar, so they are never worth the walk.
+    let snare = aura_with(AuraType::MovementSpeedSlow, Some(hunter), 0.0);
+    let mut crippling = aura_with(AuraType::MovementSpeedSlow, Some(hunter), 0.0);
+    crippling.dispel_type = DispelType::Poison;
+    assert_eq!(walk(&[(warrior, far, vec![snare])], 100.0), None);
+    assert_eq!(walk(&[(warrior, far, vec![crippling])], 100.0), None);
+    // A crowd control Cleanse cannot remove (a Stun) is not walked to either.
+    let stun = aura_with(AuraType::Stun, Some(hunter), 0.0);
+    assert_eq!(walk(&[(warrior, far, vec![stun])], 100.0), None);
+    // Cannot afford the Cleanse on arrival: stay.
+    let cost = defs.get(&cleanse).unwrap().mana_cost;
+    assert_eq!(walk(&[(warrior, far, trap())], cost - 1.0), None);
+    // One trapped teammate in range, another beyond: free the near one first.
+    assert_eq!(
+        walk(
+            &[(warrior, range - 1.0, trap()), (rogue, far, trap())],
+            100.0
+        ),
+        None
+    );
+    // Two beyond range: the nearer one.
+    assert_eq!(
+        walk(
+            &[(warrior, far + 20.0, trap()), (rogue, far, trap())],
+            100.0
+        ),
+        Some(rogue)
+    );
+    // The Paladin never walks to itself, trapped or not.
+    let mut snap = snapshot_for(paladin, 2, CharacterClass::Paladin);
+    snap.active_auras.insert(paladin, trap());
+    let ctx = snap.context_for(paladin);
+    assert_eq!(
+        dispel_chase_target(
+            &ctx,
+            &defs,
+            paladin,
+            Vec3::new(far, 0.0, 0.0),
+            100.0,
+            cleanse
+        ),
+        None
+    );
+}
+
 /// The Hunter's "is this trap worth throwing" rule, over the team shapes the
 /// AS-125 rulings name. A healer — the dispeller the trap is FOR — is always
 /// worth one, including beside a Felhunter that could devour it (the intended
