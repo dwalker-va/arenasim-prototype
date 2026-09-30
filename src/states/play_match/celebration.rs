@@ -302,13 +302,7 @@ pub fn step_celebration(
         };
         let owner_pos = owner.translation;
         let step = combatant.base_movement_speed * dt;
-        walk_toward(
-            &mut transform,
-            owner_pos,
-            step,
-            PET_HEEL_DISTANCE,
-            geometry,
-        );
+        walk_toward(&mut transform, owner_pos, step, PET_HEEL_DISTANCE, geometry);
     }
 }
 

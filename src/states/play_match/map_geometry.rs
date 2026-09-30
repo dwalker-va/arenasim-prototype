@@ -766,6 +766,8 @@ fn footprint_sweep_entry(
 ///   the nearest blocking obstacle on the side that makes better progress toward
 ///   the goal, so the mover travels at full speed along a path that clears the
 ///   obstacle and resumes direct pursuit once the line opens up.
+/// - `Some(Vec2::ZERO)` — hold: the goal is inside a prism's footprint and the
+///   mover is already within a body radius of the nearest point it can stand on.
 ///
 /// Purely geometric and deterministic (plain `f32`, obstacles walked in slice
 /// order, deterministic side tie-break). The [`resolve_movement`] collision
@@ -821,7 +823,30 @@ pub fn steer_toward_goal(
             sides,
             rotation,
             ..
-        } => steer_around_prism(center_xz, circumradius, sides, rotation, from, goal),
+        } => {
+            let Some(hull) = PrismHull::new(center_xz, circumradius, sides, rotation) else {
+                // Degenerate prism (rejected by config validation).
+                return Some(to_goal.normalize());
+            };
+            // A goal inside the footprint (a spot no one can stand on) cannot be
+            // reached: head for its nearest point on the shell instead, straight
+            // there once it is in sight, and hold within a body radius of it.
+            // Rounding toward the unreachable point itself parks the mover on
+            // the vertex nearest it and steps it back and forth across that
+            // vertex every tick; walking all the way to the shell point does the
+            // same across the shell point, since the caller's step is capped by
+            // the distance to the goal, not to where it can stand.
+            let reachable = hull.push_out(goal);
+            if reachable == goal {
+                steer_around_prism(&hull, from, goal)
+            } else if from.distance(reachable) <= MOVER_RADIUS {
+                Vec2::ZERO
+            } else if footprint_sweep_entry(&obstacles[idx], from, reachable, mover_y).is_none() {
+                (reachable - from).normalize()
+            } else {
+                steer_around_prism(&hull, from, reachable)
+            }
+        }
     })
 }
 
@@ -928,28 +953,9 @@ fn steer_around_box(min: Vec3, max: Vec3, from: Vec2, goal: Vec2, mover_y: f32) 
 /// place (AS-181). Path length has the opposite sign: a step along one side's
 /// path shortens that side by the full step and the other by at most as much,
 /// so the side first taken keeps winning and the choice needs no stored state.
-fn steer_around_prism(
-    center: Vec2,
-    circumradius: f32,
-    sides: u32,
-    rotation: f32,
-    from: Vec2,
-    goal: Vec2,
-) -> Vec2 {
+fn steer_around_prism(hull: &PrismHull, from: Vec2, goal: Vec2) -> Vec2 {
     let goal_dir = (goal - from).normalize_or_zero();
-    if sides < 3 {
-        // Degenerate prism (rejected by config validation): nothing to round.
-        return goal_dir;
-    }
-    let skin = prism_apothem(circumradius, sides) + MOVER_RADIUS;
-    let hull = PrismHull {
-        center,
-        skin,
-        // Circumradius of the polygon whose edges sit at `skin`.
-        inflated_circumradius: skin / (std::f32::consts::PI / sides as f32).cos(),
-        sides,
-        rotation,
-    };
+    let (center, skin, sides, rotation) = (hull.center, hull.skin, hull.sides, hull.rotation);
 
     // Already within the collision skin (a hugging chase): no external tangents
     // exist, so peel off perpendicular to the center direction, on the side
@@ -990,6 +996,23 @@ struct PrismHull {
 }
 
 impl PrismHull {
+    /// `None` for a degenerate prism (`sides < 3`, rejected by config
+    /// validation), which has no hull to round.
+    fn new(center: Vec2, circumradius: f32, sides: u32, rotation: f32) -> Option<Self> {
+        if sides < 3 {
+            return None;
+        }
+        let skin = prism_apothem(circumradius, sides) + MOVER_RADIUS;
+        Some(Self {
+            center,
+            skin,
+            // Circumradius of the polygon whose edges sit at `skin`.
+            inflated_circumradius: skin / (std::f32::consts::PI / sides as f32).cos(),
+            sides,
+            rotation,
+        })
+    }
+
     fn vertex(&self, i: u32) -> Vec2 {
         self.center + prism_vertex(i, self.sides, self.rotation, self.inflated_circumradius)
     }
@@ -1043,9 +1066,9 @@ impl PrismHull {
     /// `from` at tangent vertex `start` and walking vertex indices by `step`
     /// (`-1` round the left side, `+1` round the right). The walk stops at the
     /// first vertex whose next edge faces `goal` — the goal's own tangent
-    /// vertex on this side — and goes straight from there.
+    /// vertex on this side — and goes straight from there. `goal` is outside
+    /// the footprint (see [`Self::push_out`]); the walk is capped at one lap.
     fn wrap_length(&self, from: Vec2, goal: Vec2, start: u32, step: i32) -> f32 {
-        let goal = self.push_out(goal);
         let rel_goal = goal - self.center;
         let mut k = start;
         let mut length = from.distance(self.vertex(k));
@@ -1068,7 +1091,13 @@ impl PrismHull {
 
     /// Whether the left way round is no longer than the right — left on an
     /// exact tie, within [`STEER_TIE_EPS`].
-    fn left_is_shorter(&self, from: Vec2, goal: Vec2, left: (u32, Vec2), right: (u32, Vec2)) -> bool {
+    fn left_is_shorter(
+        &self,
+        from: Vec2,
+        goal: Vec2,
+        left: (u32, Vec2),
+        right: (u32, Vec2),
+    ) -> bool {
         let l = self.wrap_length(from, goal, left.0, -1);
         let r = self.wrap_length(from, goal, right.0, 1);
         l <= r + STEER_TIE_EPS
@@ -1917,6 +1946,60 @@ mod tests {
             }
         }
         assert_eq!(cases, 80);
+    }
+
+    /// A goal inside a prism's footprint cannot be reached. The mover walks to
+    /// the nearest point it can stand on and holds a body radius short of it —
+    /// from all round the pillar, never stepping back and forth. Measured in a
+    /// TeamPlan match: a Point walk to such a goal parked a mover on the vertex
+    /// nearest it, where the shorter way round flipped every tick.
+    #[test]
+    fn steer_toward_a_goal_inside_a_prism_holds_at_the_nearest_shell_point() {
+        let pillar = ObstacleVolume::Prism {
+            center_xz: Vec2::ZERO,
+            circumradius: 6.0,
+            sides: 8,
+            rotation: 22.5_f32.to_radians(),
+            base_y: 0.0,
+            height: 5.0,
+        };
+        let step: f32 = 7.0 / 60.0;
+        // The goal from the match, relative to its pillar: 0.05yd inside the
+        // shell of a diagonal face, near that face's corner.
+        let goal = Vec2::new(4.630_82, -3.848_33);
+        assert!(position_blocked(&[pillar], Vec3::new(goal.x, 1.0, goal.y)));
+        for start in 0..16 {
+            let mut pos = Vec2::from_angle(start as f32 * std::f32::consts::TAU / 16.0) * 12.0;
+            let (mut prev, mut reversals, mut held) = (Vec2::ZERO, 0, 0);
+            for _ in 0..600 {
+                let dir = steer_toward_goal(&[pillar], pos, goal, 1.0)
+                    .unwrap_or_else(|| (goal - pos).normalize());
+                let desired = pos + dir * step.min(pos.distance(goal));
+                let next = resolve_movement(
+                    &[pillar],
+                    Vec3::new(pos.x, 1.0, pos.y),
+                    Vec3::new(desired.x, 1.0, desired.y),
+                );
+                let moved = Vec2::new(next.x, next.z) - pos;
+                if moved.dot(prev) < 0.0 {
+                    reversals += 1;
+                }
+                if moved == Vec2::ZERO {
+                    held += 1;
+                } else {
+                    prev = moved;
+                }
+                pos = Vec2::new(next.x, next.z);
+            }
+            assert_eq!(reversals, 0, "from start {start}: stepped back and forth");
+            assert!(held > 0, "from start {start}: never came to rest, at {pos}");
+            // At rest within a body radius (plus a step) of the goal's shell point.
+            assert!(
+                pos.distance(goal) < MOVER_RADIUS + step + 0.1,
+                "from start {start}: rested {:.2}yd from the goal",
+                pos.distance(goal)
+            );
+        }
     }
 
     /// Inside the skin (a hugging chase) the prism peels off on the shorter way

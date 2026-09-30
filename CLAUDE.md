@@ -661,7 +661,11 @@ flipped sides every tick and jittered in place (AS-181). The prism therefore
 scores the taut-path length round each side, which shortens by the full step on
 the side being walked. A new obstacle shape needs a score with that property,
 and a flush-against-the-face step-loop test (`steer_flush_against_a_prism_face_commits_to_one_side`)
-to prove it. The helper's first line is
+to prove it. A goal INSIDE a prism's footprint (a spot no one can stand on) is
+steered to its nearest shell point and held a body radius short of it — the
+helper returns `Some(Vec2::ZERO)`, which every caller treats as "don't move";
+rounding toward the unreachable point itself parked the mover on the nearest
+vertex and flipped it across that vertex every tick. The helper's first line is
 `if obstacles.is_empty() { return None }` and each caller falls back to its exact
 legacy direct-normalize on `None`, so **BasicArena stays byte-identical**. This
 makes competent pursuers (melee and Mage) round pillars cleanly; a documented
