@@ -1123,13 +1123,13 @@ impl Plugin for StatesPlugin {
                 .run_if(in_state(GameState::PlayMatch)),
         )
         // Render interpolation (`play_match::rendering::interpolation`): every
-        // unit and missile is DRAWN between its last two sim ticks. The ends
-        // of the segment are recorded around each tick — `FixedFirst` before
-        // the tick moves anyone, `FixedLast` after — the interpolated
-        // translation goes into `Transform` once the fixed loop is done, and
-        // the sim's own value goes back before the next fixed loop starts, so
-        // nothing in `FixedUpdate` ever sees a drawn position. Writes only a
-        // component the sim never reads.
+        // unit and missile is DRAWN between its last two sim ticks, position
+        // and facing. The ends of the segment are recorded around each tick —
+        // `FixedFirst` before the tick moves anyone, `FixedLast` after — the
+        // interpolated pose goes into `Transform` once the fixed loop is done,
+        // and the sim's own translation and rotation go back before the next
+        // fixed loop starts, so nothing in `FixedUpdate` ever sees a drawn
+        // pose. Writes only a component the sim never reads.
         .add_systems(
             FixedFirst,
             play_match::begin_render_interpolation_tick.run_if(in_state(GameState::PlayMatch)),
@@ -1141,8 +1141,7 @@ impl Plugin for StatesPlugin {
         .add_systems(
             RunFixedMainLoop,
             (
-                play_match::restore_sim_translation
-                    .in_set(RunFixedMainLoopSystem::BeforeFixedMainLoop),
+                play_match::restore_sim_pose.in_set(RunFixedMainLoopSystem::BeforeFixedMainLoop),
                 play_match::apply_render_interpolation
                     .in_set(RunFixedMainLoopSystem::AfterFixedMainLoop),
             )

@@ -24,7 +24,7 @@
 //! Now one interpolated render position (`rendering::interpolation`) is what
 //! the model, the camera and the HUD all read, and the HUD is placed after
 //! transform propagation from this frame's final `GlobalTransform`s. The
-//! tests pin all three parts:
+//! tests pin all four parts:
 //!
 //! 1. the drawn unit advances every frame by its speed times the FRAME's
 //!    duration — never zero, never a whole tick — while the sim, at every
@@ -36,7 +36,15 @@
 //!    to physical pixels on its own, so with a fractional origin the copies
 //!    round different ways as the unit walks and the letters change shape.
 //!
-//! 3. drawing the HUD after propagation never outruns egui's font atlas: on
+//! 3. the drawn FACING turns every frame too, by the tick's turn times the
+//!    frame's share of a tick, and a facing snap is drawn at the new facing
+//!    rather than swung through — while the sim, at every tick, still sees
+//!    exactly the rotation its previous tick left. Measured before the fix, at
+//!    120Hz over the first minute of the Warrior-Hunter match below: a turning
+//!    unit drew the same facing as the frame before on 184 of 486 frames and
+//!    a whole tick's turn on the rest, the weapons in its hands with it;
+//!
+//! 4. drawing the HUD after propagation never outruns egui's font atlas: on
 //!    every frame egui re-uploads its managed texture (new glyphs), the new
 //!    image's `AssetEvent::Added` is flushed in that same frame, before the
 //!    render world extracts it. When it was not, that frame rendered with no
@@ -48,6 +56,7 @@
 //! later tests add a `Window` COMPONENT, never an OS window. Visual-only
 //! systems never touch the sim, so the match is the seeded one.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use bevy::asset::AssetPlugin;
@@ -58,7 +67,7 @@ use bevy::window::{PrimaryWindow, WindowResolution};
 use bevy_egui::{egui, EguiContext};
 
 use arenasim::combat::CombatPlugin;
-use arenasim::states::play_match::components::{ArenaCamera, Combatant};
+use arenasim::states::play_match::components::{ArenaCamera, Combatant, Pet};
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::play_match::{
     hud_screen_anchor, nameplate_origin, AbilityConfigPlugin, GameRng, MapConfigPlugin,
@@ -89,7 +98,11 @@ fn frames_for(frame: Duration) -> usize {
 }
 
 fn boot(frame: Duration) -> App {
-    let cfg: HeadlessMatchConfig = serde_json::from_str(MATCH).unwrap();
+    boot_match(MATCH, frame)
+}
+
+fn boot_match(cfg: &str, frame: Duration) -> App {
+    let cfg: HeadlessMatchConfig = serde_json::from_str(cfg).unwrap();
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_plugins(AssetPlugin::default())
@@ -239,6 +252,197 @@ fn drawn_unit_advances_every_frame_while_the_sim_keeps_its_own_positions() {
             steady_frames >= 150,
             "{hz:.0}Hz: only {steady_frames} frames caught the stealthed Rogue walking \
              steadily — the seed no longer exercises the approach"
+        );
+    }
+}
+
+/// A match whose units turn all the time: the Warrior chasing, the Hunter
+/// kiting, the pet running at its target, with every kind of facing snap
+/// (reversals, compass-direction commits) in between.
+const TURNING_MATCH: &str =
+    r#"{"team1":["Warrior"],"team2":["Hunter"],"map":"BasicArena","random_seed":11}"#;
+/// Sim time to run: through the opening chase and the first kites.
+const TURNING_SECS: f32 = 40.0;
+/// A tick's turn counts as a steady turn when it is at least this long
+/// (radians)...
+const TURNING: f32 = 5e-4;
+/// ...and differs from the tick before by no more than this fraction of it.
+const STEADY_TURN: f32 = 0.02;
+/// Larger than any continuous turn in one tick: the interpolation's own
+/// facing-snap threshold (`MAX_TICK_TURN`, 45 degrees).
+const SNAP: f32 = std::f32::consts::FRAC_PI_4;
+
+/// A unit, named by what the sim calls it rather than by `Entity`.
+type Unit = (u8, u8, bool);
+
+/// Heading about the vertical axis. Every facing the sim sets is a pure yaw.
+fn yaw(q: Quat) -> f32 {
+    q.to_euler(EulerRot::YXZ).0
+}
+
+/// `b - a` as the shorter signed angle.
+fn turn(a: f32, b: f32) -> f32 {
+    let d = (b - a).rem_euclid(std::f32::consts::TAU);
+    if d > std::f32::consts::PI {
+        d - std::f32::consts::TAU
+    } else {
+        d
+    }
+}
+
+#[derive(Resource, Default)]
+struct Turns {
+    /// Every unit's sim facing after every tick.
+    ticks: Vec<BTreeMap<Unit, Quat>>,
+    /// Ticks at which the sim saw a facing other than the one its previous
+    /// tick left: (tick, unit, left, saw).
+    sim_saw_drawn: Vec<(usize, Unit, Quat, Quat)>,
+    /// Per rendered frame: how many ticks had run, and every unit's facing as
+    /// drawn.
+    frames: Vec<(usize, BTreeMap<Unit, Quat>)>,
+}
+
+fn facings<'a>(
+    units: impl Iterator<Item = (&'a Combatant, Option<&'a Pet>, Quat)>,
+) -> BTreeMap<Unit, Quat> {
+    units
+        .filter(|(c, ..)| c.is_alive())
+        .map(|(c, pet, q)| ((c.team, c.slot, pet.is_some()), q))
+        .collect()
+}
+
+fn observe_turn_start(
+    mut turns: ResMut<Turns>,
+    units: Query<(&Combatant, Option<&Pet>, &Transform)>,
+) {
+    let now = facings(units.iter().map(|(c, p, t)| (c, p, t.rotation)));
+    let tick = turns.ticks.len();
+    let Some(last) = turns.ticks.last() else {
+        return;
+    };
+    let leaks: Vec<_> = now
+        .iter()
+        .filter_map(|(u, q)| {
+            let left = *last.get(u)?;
+            (*q != left).then_some((tick, *u, left, *q))
+        })
+        .collect();
+    turns.sim_saw_drawn.extend(leaks);
+}
+
+fn observe_turn_end(
+    mut turns: ResMut<Turns>,
+    units: Query<(&Combatant, Option<&Pet>, &Transform)>,
+) {
+    let now = facings(units.iter().map(|(c, p, t)| (c, p, t.rotation)));
+    turns.ticks.push(now);
+}
+
+/// After propagation: the facing every model renders at this frame.
+fn observe_drawn_facing(
+    mut turns: ResMut<Turns>,
+    units: Query<(&Combatant, Option<&Pet>, &GlobalTransform)>,
+) {
+    let now = facings(
+        units
+            .iter()
+            .map(|(c, p, gt)| (c, p, gt.compute_transform().rotation)),
+    );
+    let ticks = turns.ticks.len();
+    turns.frames.push((ticks, now));
+}
+
+#[test]
+fn drawn_facing_turns_every_frame_while_the_sim_keeps_its_own_rotations() {
+    for frame in FRAME_RATES {
+        let mut app = boot_match(TURNING_MATCH, frame);
+        app.init_resource::<Turns>()
+            .add_systems(FixedPreUpdate, observe_turn_start)
+            .add_systems(FixedPostUpdate, observe_turn_end)
+            .add_systems(Last, observe_drawn_facing);
+        for _ in 0..(TURNING_SECS / frame.as_secs_f32()) as usize {
+            app.update();
+        }
+        let tick_secs = app
+            .world()
+            .resource::<Time<Fixed>>()
+            .timestep()
+            .as_secs_f32();
+        let turns = std::mem::take(&mut *app.world_mut().resource_mut::<Turns>());
+        let frame_secs = frame.as_secs_f32();
+        let hz = 1.0 / frame_secs;
+
+        // The sim is authoritative: every tick starts from exactly the facing
+        // the tick before it left, however the frames in between drew it.
+        if let Some((tick, unit, left, saw)) = turns.sim_saw_drawn.first() {
+            panic!(
+                "{hz:.0}Hz: the sim started {} unit-ticks from a facing its previous tick did \
+                 not leave — the render interpolation leaked into the sim. First: tick {tick}, \
+                 {unit:?} was left at {left:?} and the next tick saw {saw:?}",
+                turns.sim_saw_drawn.len()
+            );
+        }
+
+        let (mut steady, mut snaps) = (0, 0);
+        for pair in turns.frames.windows(2) {
+            let ((k0, a0), (k1, a1)) = (&pair[0], &pair[1]);
+            let (k0, k1) = (*k0, *k1);
+            if k1 < 3 || k1 - k0 > 1 {
+                continue;
+            }
+            let p = &turns.ticks[k1 - 3..k1];
+            for (unit, drawn) in a1 {
+                let (Some(q0), Some(q1), Some(q2), Some(before)) =
+                    (p[0].get(unit), p[1].get(unit), p[2].get(unit), a0.get(unit))
+                else {
+                    continue;
+                };
+                let (d1, d2) = (turn(yaw(*q0), yaw(*q1)), turn(yaw(*q1), yaw(*q2)));
+
+                // A facing snap is drawn at the new facing, not swung
+                // through the angles in between.
+                if d2.abs() > SNAP {
+                    snaps += 1;
+                    // (Compared as headings: `angle_between` is an `acos`,
+                    // which turns the last-ULP noise of decomposing a
+                    // `GlobalTransform` into a tenth of a degree.)
+                    let short = turn(yaw(*drawn), yaw(*q2));
+                    assert!(
+                        short.abs() < 1e-4,
+                        "{hz:.0}Hz, frame after tick {k1}: {unit:?} snapped {:.0} degrees \
+                         in one tick and was drawn {:.1} degrees short of its new facing — \
+                         the snap is being swung through",
+                        d2.to_degrees(),
+                        short.to_degrees()
+                    );
+                    continue;
+                }
+
+                if d2.abs() < TURNING || (d2 - d1).abs() > STEADY_TURN * d2.abs() {
+                    continue;
+                }
+                steady += 1;
+                let expected = d2 * (frame_secs / tick_secs);
+                let actual = turn(yaw(*before), yaw(*drawn));
+                assert!(
+                    (actual - expected).abs() <= 0.05 * expected.abs(),
+                    "{hz:.0}Hz, frame after tick {k1}: {unit:?} was drawn turning {:.4} \
+                     degrees, expected {:.4} ({:.0}% of a tick's turn for {:.0}% of a \
+                     tick's time) — the facing is stepping with the sim instead of turning \
+                     smoothly",
+                    actual.to_degrees(),
+                    expected.to_degrees(),
+                    100.0 * actual / d2,
+                    100.0 * frame_secs / tick_secs,
+                );
+            }
+        }
+        // At 60Hz: 1103 steady-turn frames and 6 snaps; proportionally more
+        // at the faster rates.
+        assert!(
+            steady >= 500 && snaps >= 3,
+            "{hz:.0}Hz: {steady} frames caught a unit turning steadily and {snaps} caught a \
+             facing snap — the seed no longer exercises turning"
         );
     }
 }
