@@ -2031,9 +2031,10 @@ mod tests {
         assert!(!combatant.is_dual_wielding());
     }
 
-    /// A Hunter's live weapon socket is the RANGED one — its main hand does
-    /// not swing, so its off hand has nothing to swing alongside and arms no
-    /// second swing however legal the item is.
+    /// A Hunter's live weapon socket is the RANGED one, and its off hand
+    /// accompanies its MELEE main hand: with no main-hand weapon, the off hand
+    /// has nothing to swing alongside and arms no second swing however legal
+    /// the item is.
     #[test]
     fn apply_equipment_arms_no_second_swing_for_a_ranged_primary_socket() {
         let items = make_item_defs(vec![(
@@ -2054,6 +2055,91 @@ mod tests {
 
         assert_eq!(combatant.offhand_damage, 0.0);
         assert!(!combatant.is_dual_wielding());
+    }
+
+    /// A Hunter swings its hand weapons in melee beside its bow (AS-171): the
+    /// main-hand weapon fills the melee swing and the off-hand weapon the
+    /// second swing, while the bow keeps `attack_damage` / `weapon_speed` —
+    /// the live socket's numbers.
+    #[test]
+    fn apply_equipment_arms_a_hunters_melee_swings_beside_its_bow() {
+        let items = make_item_defs(vec![
+            (
+                ItemId::FrostbiteBlade,
+                weapon_item("Main", ItemSlotType::MainHand, 30.0, 50.0, 2.0),
+            ),
+            (
+                ItemId::SerpentFangDagger,
+                weapon_item("Off", ItemSlotType::MainHand, 10.0, 30.0, 1.5),
+            ),
+            (ItemId::AshwoodBow, {
+                let mut bow = weapon_item("Bow", ItemSlotType::Ranged, 20.0, 40.0, 3.0);
+                bow.weapon_type = WeaponType::Bow;
+                bow
+            }),
+        ]);
+        let mut combatant =
+            super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Hunter);
+
+        let mut loadout = Loadout::new();
+        loadout.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
+        loadout.insert(ItemSlot::OffHand, ItemId::SerpentFangDagger);
+        loadout.insert(ItemSlot::Ranged, ItemId::AshwoodBow);
+        combatant.apply_equipment(&loadout, &items);
+
+        // The bow: the live socket.
+        assert_eq!(
+            combatant.auto_attack_kind,
+            super::super::components::combatant::AutoAttackKind::Shot
+        );
+        assert_eq!(combatant.attack_damage, 30.0);
+        assert_eq!(combatant.weapon_speed, 3.0);
+        // The melee main hand: average damage, its own speed.
+        assert!(combatant.has_melee_main_hand());
+        assert_eq!(combatant.melee_damage, 40.0);
+        assert_eq!(combatant.melee_weapon_speed, 2.0);
+        // The off hand: half its average (literal, as above), its own speed.
+        assert!(combatant.is_dual_wielding());
+        assert_eq!(combatant.offhand_damage, 10.0);
+        assert_eq!(combatant.offhand_weapon_speed, 1.5);
+    }
+
+    /// Only the Hunter melees beside a ranged socket. A caster's main-hand
+    /// dagger stays a stat stick — it fights with its wand — and a main-hand
+    /// class's main hand is its live socket, never a second melee swing.
+    #[test]
+    fn apply_equipment_arms_no_melee_main_hand_for_anyone_else() {
+        let items = make_item_defs(vec![
+            (
+                ItemId::FrostbiteBlade,
+                weapon_item("Main", ItemSlotType::MainHand, 30.0, 50.0, 2.0),
+            ),
+            (
+                ItemId::SerpentFangDagger,
+                weapon_item("Off", ItemSlotType::MainHand, 10.0, 30.0, 1.5),
+            ),
+        ]);
+        for class in CharacterClass::all() {
+            if class.melee_beside_ranged() {
+                continue;
+            }
+            let mut combatant =
+                super::super::components::combatant::Combatant::new(1, 0, *class);
+            let mut loadout = Loadout::new();
+            loadout.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
+            loadout.insert(ItemSlot::OffHand, ItemId::SerpentFangDagger);
+            combatant.apply_equipment(&loadout, &items);
+            assert!(!combatant.has_melee_main_hand(), "{class:?}");
+            assert_eq!(combatant.melee_damage, 0.0, "{class:?}");
+        }
+        assert_eq!(
+            CharacterClass::all()
+                .iter()
+                .filter(|c| c.melee_beside_ranged())
+                .collect::<Vec<_>>(),
+            vec![&CharacterClass::Hunter],
+            "the Hunter is the one class that melees beside a ranged socket"
+        );
     }
 
     // ---- resolve_loadout tests ----

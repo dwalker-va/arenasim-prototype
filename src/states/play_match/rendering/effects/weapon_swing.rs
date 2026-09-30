@@ -696,24 +696,69 @@ fn swing_param(
     )
 }
 
+/// The weapon set a landed auto-attack of this kind was struck with: a melee
+/// swing is the hand weapons', a Shot or wand shot the ranged weapon's.
+pub(crate) fn swing_set(kind: AutoAttackKind) -> WeaponSet {
+    match kind {
+        AutoAttackKind::Melee => WeaponSet::Melee,
+        AutoAttackKind::Shot | AutoAttackKind::Wand | AutoAttackKind::None => WeaponSet::Ranged,
+    }
+}
+
+/// How close a melee weapon's target must be for its windup to telegraph: a
+/// little past `MELEE_RANGE`, so the raise starts as the target closes.
+fn melee_windup_reach() -> f32 {
+    crate::states::play_match::MELEE_RANGE + 1.5
+}
+
+/// The weapon set a two-set owner (a Hunter carrying melee weapons beside its
+/// bow) should have out with its target `target_dist` away, or `None` to keep
+/// whichever it has.
+///
+/// Melee weapons within [`melee_windup_reach`] — the band where the melee
+/// swing winds up and fires — and the bow at or beyond `HUNTER_DEAD_ZONE`,
+/// where Auto Shot can fire. Between the two is the dead zone, where neither
+/// attack fires, and there the set does not change: that gap is the swap's
+/// hysteresis, so a target hovering at either edge cannot strobe it. No target
+/// (`f32::INFINITY`) is the bow.
+pub(crate) fn weapon_set_out(target_dist: f32) -> Option<WeaponSet> {
+    if target_dist <= melee_windup_reach() {
+        Some(WeaponSet::Melee)
+    } else if target_dist >= crate::states::play_match::HUNTER_DEAD_ZONE {
+        Some(WeaponSet::Ranged)
+    } else {
+        None
+    }
+}
+
 /// Whether a weapon of this kind swings at all. The shield is held, never
 /// swung: it neither telegraphs nor strikes.
 fn swings(kind: WeaponKind) -> bool {
     kind != WeaponKind::Shield
 }
 
-/// The sim clock a socket in `hand` follows: its hand's swing timer and that
-/// hand's effective interval. `None` for an off hand with no weapon armed in
-/// it — the sim swings nothing there, so there is nothing to telegraph.
+/// The sim clock a socket in `hand` of weapon set `set` follows: its hand's
+/// swing timer and that hand's effective interval. `None` for an off hand with
+/// no weapon armed in it — the sim swings nothing there, so there is nothing
+/// to telegraph.
+///
+/// A Hunter holding a melee main hand has TWO main-hand clocks — the bow's
+/// (`attack_timer`) and the melee weapon's (`melee_timer`) — and `set` picks
+/// between them. Every other combatant has one, and `set` changes nothing.
 pub(crate) fn hand_clock(
     combatant: &Combatant,
     auras: Option<&ActiveAuras>,
     hand: WeaponHand,
+    set: WeaponSet,
 ) -> Option<(f32, f32)> {
     use crate::states::play_match::combat_core::{
-        effective_attack_interval, effective_offhand_interval,
+        effective_attack_interval, effective_melee_interval, effective_offhand_interval,
     };
     match hand {
+        WeaponHand::Main if set == WeaponSet::Melee && combatant.has_melee_main_hand() => Some((
+            combatant.melee_timer,
+            effective_melee_interval(combatant, auras),
+        )),
         WeaponHand::Main => Some((
             combatant.attack_timer,
             effective_attack_interval(combatant, auras),
@@ -1022,7 +1067,9 @@ pub fn consume_swing_signals(
         let stroke_interval = clocks
             .get(signal.attacker)
             .ok()
-            .and_then(|(combatant, auras)| hand_clock(combatant, auras, signal.hand))
+            .and_then(|(combatant, auras)| {
+                hand_clock(combatant, auras, signal.hand, swing_set(signal.kind))
+            })
             .map_or(0.0, |(_, interval)| interval);
         let target_pos = positions.get(signal.target).map(|t| t.translation).ok();
         let mut loosed_arrow = false;
@@ -1036,8 +1083,13 @@ pub fn consume_swing_signals(
             // The weapon in the hand that swung strikes, and only that one:
             // each hand has its own sim timer, so a dual-wielder's daggers
             // strike when their own swings land — together when the timers
-            // coincide, apart when the weapons' speeds differ.
-            if socket.hand != signal.hand || !swings(socket.kind) {
+            // coincide, apart when the weapons' speeds differ. A Hunter holds
+            // a bow AND a melee weapon in its main hand, so the set must match
+            // too: a Shot looses the bow, a melee swing swings the blade.
+            if socket.hand != signal.hand
+                || WeaponSet::of(socket.kind) != swing_set(signal.kind)
+                || !swings(socket.kind)
+            {
                 continue;
             }
             socket.release_t = Some(0.0);
@@ -1094,7 +1146,12 @@ pub fn consume_swing_signals(
 /// auras, positions) and never writes any of it.
 pub fn animate_weapon_swings(
     time: Res<Time>,
-    mut sockets: Query<(&mut WeaponSocket, &mut Transform, &mut Visibility)>,
+    mut sockets: Query<(
+        &mut WeaponSocket,
+        &mut Transform,
+        &mut Visibility,
+        Option<&mut WeaponSetSwap>,
+    )>,
     owners: Query<
         (
             &Combatant,
@@ -1108,14 +1165,42 @@ pub fn animate_weapon_swings(
     >,
 ) {
     use crate::states::play_match::utils::is_incapacitated;
-    use crate::states::play_match::{AUTO_SHOT_RANGE, HUNTER_DEAD_ZONE, MELEE_RANGE};
+    use crate::states::play_match::{AUTO_SHOT_RANGE, HUNTER_DEAD_ZONE};
 
     let dt = time.delta_secs();
-    for (mut socket, mut transform, mut visibility) in sockets.iter_mut() {
+    for (mut socket, mut transform, mut visibility, swap) in sockets.iter_mut() {
         let Ok((combatant, owner_tf, auras, casting, channeling, polymorphed_marker)) =
             owners.get(socket.owner)
         else {
             continue;
+        };
+
+        // Track the live target's position whenever one exists — weapons face
+        // their target during the approach too, not just once in reach.
+        let mut target_dist = f32::INFINITY;
+        if combatant.is_alive() {
+            if let Some(target) = combatant.target {
+                if let Ok((target_combatant, target_tf, _, _, _, _)) = owners.get(target) {
+                    if target_combatant.is_alive() {
+                        socket.aim = target_tf.translation;
+                        target_dist = owner_tf.translation.distance(target_tf.translation);
+                    }
+                }
+            }
+        }
+
+        // A Hunter carrying melee weapons beside its bow shows one set at a
+        // time (`WeaponSetSwap` has the rule): latch the set it has out from
+        // how far its target is, before anything below reads whether this
+        // socket is drawn.
+        let stowed = match swap {
+            Some(mut swap) => {
+                if let Some(out) = weapon_set_out(target_dist) {
+                    swap.out = out;
+                }
+                !swap.shown()
+            }
+            None => false,
         };
 
         // A polymorphed victim's body swaps to the sheep form — a sheep
@@ -1128,7 +1213,7 @@ pub fn animate_weapon_swings(
         // ticks out naturally, but the marker (and thus this hide) flips
         // back the same frame the body is restored.
         let polymorphed = polymorphed_marker.is_some();
-        let wanted = if polymorphed {
+        let wanted = if polymorphed || stowed {
             Visibility::Hidden
         } else {
             Visibility::Inherited
@@ -1157,20 +1242,6 @@ pub fn animate_weapon_swings(
             }
         }
 
-        // Track the live target's position whenever one exists — weapons face
-        // their target during the approach too, not just once in reach.
-        let mut target_dist = f32::INFINITY;
-        if combatant.is_alive() {
-            if let Some(target) = combatant.target {
-                if let Ok((target_combatant, target_tf, _, _, _, _)) = owners.get(target) {
-                    if target_combatant.is_alive() {
-                        socket.aim = target_tf.translation;
-                        target_dist = owner_tf.translation.distance(target_tf.translation);
-                    }
-                }
-            }
-        }
-
         // Windup eligibility: cosmetic-grade approximation of "an attack is
         // coming" — the RELEASE never depends on this (it keys off the sim's
         // landed-hit marker), so a wrong guess here costs at most a windup
@@ -1183,9 +1254,10 @@ pub fn animate_weapon_swings(
         // The hand's OWN clock: an off-hand weapon telegraphs off the off-hand
         // timer, and only while the owner actually dual-wields — a class that
         // draws a second dagger it has no weapon equipped for never swings it.
-        let clock = hand_clock(combatant, auras, socket.hand);
+        let clock = hand_clock(combatant, auras, socket.hand, WeaponSet::of(socket.kind));
         let (timer, hand_interval) = clock.unwrap_or((0.0, 0.0));
         if clock.is_some()
+            && !stowed
             && swings(socket.kind)
             && socket.release_t.is_none()
             && combatant.is_alive()
@@ -1204,7 +1276,7 @@ pub fn animate_weapon_swings(
                 // rest"; the release stroke is unaffected, since it keys off
                 // the sim's landed-hit marker.
                 WeaponKind::Wand => None,
-                _ => Some((MELEE_RANGE + 1.5, 0.0)),
+                _ => Some((melee_windup_reach(), 0.0)),
             };
             if let Some((reach, min_reach)) = band {
                 if target_dist <= reach && target_dist >= min_reach {
@@ -1318,14 +1390,15 @@ pub fn animate_weapon_swings(
 /// touched — they carry no sockets — so `apply_pet_mesh_tilt` keeps their
 /// rotation uncontested.
 pub fn animate_body_lean(
-    sockets: Query<&WeaponSocket>,
+    sockets: Query<(&WeaponSocket, Option<&WeaponSetSwap>)>,
     owners: Query<(&Children, Option<&DeathAnimation>), With<Combatant>>,
     mut bodies: Query<&mut Transform, With<VisualBody>>,
 ) {
-    for socket in sockets.iter() {
+    for (socket, swap) in sockets.iter() {
         // One body, one lean: the main hand owns it. An off-hand dagger would
-        // otherwise fight its twin for the same transform.
-        if socket.hand != WeaponHand::Main {
+        // otherwise fight its twin for the same transform — and so would a
+        // Hunter's stowed set, which is a second main-hand socket.
+        if socket.hand != WeaponHand::Main || swap.is_some_and(|swap| !swap.shown()) {
             continue;
         }
         let Ok((children, dying)) = owners.get(socket.owner) else {

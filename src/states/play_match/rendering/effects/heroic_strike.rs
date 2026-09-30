@@ -15,7 +15,7 @@
 //! registered in `states/mod.rs` only, so headless stays byte-identical.
 
 use super::mortal_strike::{spawn_weapon_trail, WeaponTrailStyle};
-use super::weapon_swing::{hand_clock, weapon_stroke_profile};
+use super::weapon_swing::{hand_clock, swing_set, weapon_stroke_profile};
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::components::*;
 use bevy::prelude::*;
@@ -77,7 +77,9 @@ pub fn spawn_heroic_strike_flourish(
         let interval = clocks
             .get(swing.attacker)
             .ok()
-            .and_then(|(combatant, auras)| hand_clock(combatant, auras, swing.hand))
+            .and_then(|(combatant, auras)| {
+                hand_clock(combatant, auras, swing.hand, swing_set(swing.kind))
+            })
             .map_or(0.0, |(_, interval)| interval);
         let stroke = weapon_stroke_profile(interval);
         spawn_weapon_trail(

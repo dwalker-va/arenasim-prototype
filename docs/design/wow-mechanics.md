@@ -25,6 +25,21 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
 - Disabled while casting
 - Melee: Within MELEE_RANGE (2.5 units)
 - Ranged: Mage/Priest use "Wand Shots" at 40 unit range
+- **The Hunter has two auto-attacks on separate timers**, as in Classic: Auto
+  Shot from its bow at `HUNTER_DEAD_ZONE`..`AUTO_SHOT_RANGE` (8-35yd), and a
+  melee auto-attack from its main-hand weapon (and off-hand weapon, when it
+  dual wields) within `MELEE_RANGE`. Between the two lies the dead zone, where
+  it does neither. The bow keeps `attack_timer`; the melee main hand has its own
+  `melee_timer` (`Combatant::melee_damage` / `melee_weapon_speed`), so closing to
+  melee right after a shot swings at once rather than waiting out the bow's
+  interval, and every timer keeps building out of range, like any other swing.
+  A Hunter with no main-hand weapon does nothing in melee — the sim has no
+  unarmed swing — and the default Hunter loadout carries none. The melee swing
+  is a melee swing everywhere: it procs `MeleeHit` trinkets, draws Frost Armor's
+  chill and can take a Windfury bonus swing; Auto Shot does none of those.
+  The model shows one set at a time: the hand weapons once its target closes to
+  melee reach, the bow once the target is back at the Auto Shot minimum, and in
+  the dead zone between, whichever it had (`WeaponSetSwap`).
 - **Every swing's speed comes from the weapon.** `ItemConfig::weapon_speed` is
   seconds per swing, the Classic tooltip's "Speed", copied from a named real
   Classic item for every weapon — main hand, off hand, two-hander, bow,
@@ -62,15 +77,16 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   its 5% baseline). This is the sim's only miss roll; a single-wielding
   attacker never rolls it, which is what keeps every pre-existing match
   byte-identical.
-- **A Hunter's off hand arms no swing.** Its live weapon socket is the Ranged
-  one, so its main hand does not swing and the off hand has nothing to swing
-  alongside. It may still hold a weapon for the stats.
+- **A Hunter's off hand swings beside its melee main hand** (see Auto-Attacks),
+  in melee range only. With no main-hand weapon it arms no swing — the off hand
+  accompanies the main hand — and may still hold a weapon for the stats. The
+  miss roll is charged to the melee swings only, never to Auto Shot.
 - **The Rogue dual wields by default**, and is the only class that does: a
   second Serpent Fang Dagger in its off hand, with the power it is worth
   measured rather than assumed (AS-122 —
   `docs/design/balance/2026-09-18-as122-rogue-offhand-findings.md`). The Warrior
-  holds a two-hander and the Hunter's live socket is the Ranged one, so for
-  those two dual wield stays a build a player opts into.
+  holds a two-hander and the default Hunter holds only its bow, so for those two
+  dual wield stays a build a player opts into.
 
 ### Windfury Totem procs on the main hand only
 

@@ -1174,21 +1174,26 @@ fn weapon_model(item: &equipment::ItemConfig) -> WeaponModel {
 
 /// The weapon models a combatant holds, read off its equipped loadout.
 ///
-/// One model per hand. The MAIN hand draws the weapon the auto-attack fires
-/// from — the class's live socket ([`CharacterClass::weapon_slot`]), so a
-/// caster shows its wand and a Hunter its bow rather than the one-hander in
-/// their main-hand socket — and falls back to the main-hand item when the live
-/// socket holds nothing drawable (a caster with no wand still visibly holds its
-/// dagger). The OFF hand draws the off-hand item, by the rule the sim arms it
-/// with (`Combatant::apply_equipment`): an off-hand WEAPON is a second swing
-/// only for a class whose live socket is the main hand, so a Hunter — whose
-/// live socket is its bow — draws no off-hand weapon at all rather than a
-/// dagger that never swings. An off-hand item that is not a weapon (a shield)
-/// is carried, not swung, and draws for whoever may equip it. An empty or
-/// undrawn socket draws nothing: a Rogue with no off-hand weapon holds one
+/// The MAIN hand draws the weapon the auto-attack fires from — the class's
+/// live socket ([`CharacterClass::weapon_slot`]), so a caster shows its wand
+/// rather than the one-hander in its main-hand socket — and falls back to the
+/// main-hand item when the live socket holds nothing drawable (a caster with no
+/// wand still visibly holds its dagger). A class that also swings its hand
+/// weapons beside a ranged live socket
+/// ([`CharacterClass::melee_beside_ranged`] — the Hunter) draws its main-hand
+/// weapon as well, as a second main-hand model: the bow and the melee weapon
+/// are two sets, and [`held_weapon_sets_swap`] says the owner shows one at a
+/// time. The OFF hand draws the off-hand item, by the rule the sim arms it with
+/// (`Combatant::apply_equipment`): an off-hand WEAPON is a second swing for a
+/// class whose live socket is the main hand, and for a Hunter holding a
+/// main-hand weapon — so a Hunter with a bow and only an off-hand dagger draws
+/// no dagger that never swings. An off-hand item that is not a weapon (a
+/// shield) is carried, not swung, and draws for whoever may equip it. An empty
+/// or undrawn socket draws nothing: a Rogue with no off-hand weapon holds one
 /// dagger.
 ///
 /// [`CharacterClass::weapon_slot`]: match_config::CharacterClass::weapon_slot
+/// [`CharacterClass::melee_beside_ranged`]: match_config::CharacterClass::melee_beside_ranged
 fn held_weapon_models(
     class: match_config::CharacterClass,
     loadout: &Loadout,
@@ -1196,14 +1201,40 @@ fn held_weapon_models(
 ) -> Vec<(WeaponKind, WeaponHand)> {
     let item = |slot: equipment::ItemSlot| loadout.get(&slot).and_then(|id| item_defs.get(id));
     let drawn = |slot| item(slot).and_then(|item| weapon_model(item).kind());
-    let main = drawn(class.weapon_slot()).or_else(|| drawn(equipment::ItemSlot::MainHand));
+    let live = drawn(class.weapon_slot());
+    let main = live.or_else(|| drawn(equipment::ItemSlot::MainHand));
+    // A Hunter's melee main hand, beside a drawn bow. (With no bow, `main`
+    // already fell back to it.)
+    let melee_main_weapon =
+        item(equipment::ItemSlot::MainHand).is_some_and(|item| item.is_weapon);
+    let melee_main = (class.melee_beside_ranged() && live.is_some() && melee_main_weapon)
+        .then(|| drawn(equipment::ItemSlot::MainHand))
+        .flatten();
     let off = item(equipment::ItemSlot::OffHand)
-        .filter(|item| !item.is_weapon || class.weapon_slot() == equipment::ItemSlot::MainHand)
+        .filter(|item| {
+            !item.is_weapon
+                || class.weapon_slot() == equipment::ItemSlot::MainHand
+                || (class.melee_beside_ranged() && melee_main_weapon)
+        })
         .and_then(|item| weapon_model(item).kind());
     main.map(|kind| (kind, WeaponHand::Main))
         .into_iter()
+        .chain(melee_main.map(|kind| (kind, WeaponHand::Main)))
         .chain(off.map(|kind| (kind, WeaponHand::Off)))
         .collect()
+}
+
+/// Whether a combatant holding `models` carries two weapon SETS — a bow and
+/// melee weapons — and so shows one at a time (see [`WeaponSetSwap`]). True
+/// exactly when both a ranged and a melee model sit in the main hand, which
+/// [`held_weapon_models`] produces only for a Hunter with both.
+fn held_weapon_sets_swap(models: &[(WeaponKind, WeaponHand)]) -> bool {
+    let in_main = |set| {
+        models
+            .iter()
+            .any(|&(kind, hand)| hand == WeaponHand::Main && WeaponSet::of(kind) == set)
+    };
+    in_main(WeaponSet::Ranged) && in_main(WeaponSet::Melee)
 }
 
 /// Asset path for each weapon model (all CC0 — see assets/models/weapons/LICENSE.md).
@@ -1392,7 +1423,9 @@ pub(crate) fn spawn_combatant(
     } else {
         0.0
     };
-    for (kind, hand) in held_weapon_models(class, equipment_loadout, item_defs) {
+    let held = held_weapon_models(class, equipment_loadout, item_defs);
+    let swaps = held_weapon_sets_swap(&held);
+    for (kind, hand) in held {
         let rest = weapon_mount(kind, hand);
         let socket = commands
             .spawn((
@@ -1418,6 +1451,17 @@ pub(crate) fn spawn_combatant(
                 rest,
             ))
             .id();
+        if swaps {
+            // Two sets, one out at a time — the bow until a target closes to
+            // melee reach (`animate_weapon_swings` keeps it current).
+            let swap = WeaponSetSwap::new(WeaponSet::of(kind));
+            let visibility = if swap.shown() {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            commands.entity(socket).insert((swap, visibility));
+        }
         commands.entity(body).add_child(socket);
     }
     if let Some(buff) = weapon_poison_buff {
@@ -1813,6 +1857,64 @@ mod held_weapon_tests {
     /// Refuses a loadout the equipment picker could not produce, so every case
     /// here is one a player can build.
     fn spawn_held(class: C, loadout: &[(ItemSlot, ItemId)]) -> (Vec<(&'static str, Side)>, bool) {
+        let (mut app, unit) = spawn_unit(class, loadout);
+        let world = app.world_mut();
+        let mut query = world.query::<(&WeaponSocket, &SceneRoot, &GlobalTransform)>();
+        let assets = world.resource::<AssetServer>().clone();
+        let mut out: Vec<(&'static str, Side)> = query
+            .iter(world)
+            .filter(|(socket, ..)| socket.owner == unit)
+            .map(|(_, scene, global)| {
+                let model = model_of(&assets, scene);
+                let x = global.translation().x;
+                assert!(x.abs() > 0.3, "{model} sits on neither side (x = {x})");
+                (model, if x > 0.0 { MainHand } else { OffHand })
+            })
+            .collect();
+        out.sort();
+        let dual_wielding = world
+            .get::<Combatant>(unit)
+            .expect("the spawned combatant")
+            .is_dual_wielding();
+        (out, dual_wielding)
+    }
+
+    /// The model asset a socket's scene was loaded from.
+    fn model_of(assets: &AssetServer, scene: &SceneRoot) -> &'static str {
+        let models = [AXE, DAGGER, BOW, MACE, SHIELD, WAND];
+        let path = assets.get_path(scene.0.id()).expect("a loaded model path");
+        models
+            .into_iter()
+            .find(|m| path.path().to_str() == Some(*m))
+            .unwrap_or_else(|| panic!("unexpected weapon asset {path}"))
+    }
+
+    /// Each weapon a spawned combatant holds, with the set it belongs to
+    /// (`None` for a socket that is always shown) and the visibility it
+    /// spawned with.
+    fn spawn_sets(
+        class: C,
+        loadout: &[(ItemSlot, ItemId)],
+    ) -> Vec<(&'static str, Option<WeaponSet>, Visibility)> {
+        let (mut app, unit) = spawn_unit(class, loadout);
+        let world = app.world_mut();
+        let mut query =
+            world.query::<(&WeaponSocket, &SceneRoot, Option<&WeaponSetSwap>, &Visibility)>();
+        let assets = world.resource::<AssetServer>().clone();
+        let mut out: Vec<_> = query
+            .iter(world)
+            .filter(|(socket, ..)| socket.owner == unit)
+            .map(|(_, scene, swap, visibility)| {
+                (model_of(&assets, scene), swap.map(|s| s.set), *visibility)
+            })
+            .collect();
+        out.sort_by_key(|(model, set, _)| (*model, format!("{set:?}")));
+        out
+    }
+
+    /// Spawns `class` wearing `loadout` through the match's own
+    /// `spawn_combatant`, in an app that has run one update.
+    fn spawn_unit(class: C, loadout: &[(ItemSlot, ItemId)]) -> (App, Entity) {
         let item_defs = items();
         let loadout: Loadout = loadout.iter().copied().collect();
         equipment::validate_class_restrictions(class, &loadout, &item_defs)
@@ -1859,31 +1961,7 @@ mod held_weapon_tests {
             )
             .expect("spawn system runs");
         app.update();
-
-        let world = app.world_mut();
-        let models = [AXE, DAGGER, BOW, MACE, SHIELD, WAND];
-        let mut query = world.query::<(&WeaponSocket, &SceneRoot, &GlobalTransform)>();
-        let assets = world.resource::<AssetServer>().clone();
-        let mut out: Vec<(&'static str, Side)> = query
-            .iter(world)
-            .filter(|(socket, ..)| socket.owner == unit)
-            .map(|(_, scene, global)| {
-                let path = assets.get_path(scene.0.id()).expect("a loaded model path");
-                let model = models
-                    .into_iter()
-                    .find(|m| path.path().to_str() == Some(*m))
-                    .unwrap_or_else(|| panic!("unexpected weapon asset {path}"));
-                let x = global.translation().x;
-                assert!(x.abs() > 0.3, "{model} sits on neither side (x = {x})");
-                (model, if x > 0.0 { MainHand } else { OffHand })
-            })
-            .collect();
-        out.sort();
-        let dual_wielding = world
-            .get::<Combatant>(unit)
-            .expect("the spawned combatant")
-            .is_dual_wielding();
-        (out, dual_wielding)
+        (app, unit)
     }
 
     fn default_loadout(class: C) -> Vec<(ItemSlot, ItemId)> {
@@ -1955,11 +2033,11 @@ mod held_weapon_tests {
         );
     }
 
-    /// A Hunter's live socket is its bow, so the sim never swings its off hand
-    /// and the model draws no off-hand weapon: a one-hander there is bow only,
-    /// not a static dagger in the left hand.
+    /// A Hunter swings its hand weapons in melee beside its bow (AS-171), so it
+    /// draws all three: the bow and the main-hand blade in its right hand and
+    /// the off-hand dagger in its left — and the sim swings that off hand.
     #[test]
-    fn a_hunter_draws_no_off_hand_weapon() {
+    fn a_hunter_draws_its_melee_weapons_beside_its_bow() {
         let loadout = [
             (ItemSlot::MainHand, ItemId::FrostbiteBlade),
             (ItemSlot::OffHand, ItemId::SerpentFangDagger),
@@ -1967,8 +2045,70 @@ mod held_weapon_tests {
         ];
         assert_eq!(
             spawn_held(C::Hunter, &loadout),
+            (
+                vec![(BOW, MainHand), (DAGGER, MainHand), (DAGGER, OffHand)],
+                true
+            )
+        );
+    }
+
+    /// The off hand accompanies the main hand: a Hunter with a bow and only an
+    /// off-hand weapon swings nothing there, so it draws the bow alone rather
+    /// than a dagger that never swings.
+    #[test]
+    fn a_hunter_with_only_an_off_hand_weapon_draws_the_bow_alone() {
+        let loadout = [
+            (ItemSlot::OffHand, ItemId::SerpentFangDagger),
+            (ItemSlot::Ranged, ItemId::DeadeyeCrossbow),
+        ];
+        assert_eq!(
+            spawn_held(C::Hunter, &loadout),
             (vec![(BOW, MainHand)], false)
         );
+    }
+
+    /// A Hunter carrying both sets shows one at a time: every socket joins its
+    /// set, and it spawns with the bow out and the hand weapons stowed.
+    #[test]
+    fn a_hunter_with_both_sets_spawns_with_the_bow_out() {
+        let loadout = [
+            (ItemSlot::MainHand, ItemId::FrostbiteBlade),
+            (ItemSlot::OffHand, ItemId::SerpentFangDagger),
+            (ItemSlot::Ranged, ItemId::AshwoodBow),
+        ];
+        assert_eq!(
+            spawn_sets(C::Hunter, &loadout),
+            vec![
+                (BOW, Some(WeaponSet::Ranged), Visibility::Inherited),
+                (DAGGER, Some(WeaponSet::Melee), Visibility::Hidden),
+                (DAGGER, Some(WeaponSet::Melee), Visibility::Hidden),
+            ]
+        );
+    }
+
+    /// Only a combatant with two sets swaps. A bow-only Hunter, a Hunter with
+    /// a blade and no bow, and a dual-wielding Rogue keep every weapon out.
+    #[test]
+    fn a_single_set_never_swaps() {
+        let cases: [(C, &[(ItemSlot, ItemId)]); 3] = [
+            (C::Hunter, &[(ItemSlot::Ranged, ItemId::AshwoodBow)]),
+            (C::Hunter, &[(ItemSlot::MainHand, ItemId::FrostbiteBlade)]),
+            (
+                C::Rogue,
+                &[
+                    (ItemSlot::MainHand, ItemId::SerpentFangDagger),
+                    (ItemSlot::OffHand, ItemId::HammerOfTheRighteous),
+                ],
+            ),
+        ];
+        for (class, loadout) in cases {
+            let sets = spawn_sets(class, loadout);
+            assert!(!sets.is_empty(), "{class:?} draws something");
+            for (model, set, visibility) in sets {
+                assert_eq!(set, None, "{class:?}'s {model} joined a swap set");
+                assert_ne!(visibility, Visibility::Hidden, "{class:?}'s {model} is hidden");
+            }
+        }
     }
 
     /// Every off-hand item the picker offers every class is drawn exactly when

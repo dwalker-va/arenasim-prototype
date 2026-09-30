@@ -369,6 +369,24 @@ pub struct Combatant {
     pub offhand_weapon_speed: f32,
     /// Timer tracking time until the next off-hand swing.
     pub offhand_timer: f32,
+    /// Damage per swing of the MELEE main hand of a combatant whose live
+    /// socket is ranged ([`CharacterClass::melee_beside_ranged`] — the Hunter):
+    /// the weapon it swings inside `MELEE_RANGE`, while `attack_damage` /
+    /// `weapon_speed` / `attack_timer` stay the bow's.
+    ///
+    /// `0.0` means "no melee main hand", and that is the gate every path
+    /// reads ([`Self::has_melee_main_hand`]): no swing, no timer tick, no RNG.
+    /// Zero for every class whose live socket IS its main hand — that hand is
+    /// already `attack_damage`. Set by [`Self::apply_equipment`] and nothing
+    /// else.
+    ///
+    /// [`CharacterClass::melee_beside_ranged`]: match_config::CharacterClass::melee_beside_ranged
+    pub melee_damage: f32,
+    /// Seconds between swings of that melee main hand — its own weapon's
+    /// speed, on its own clock, separate from the ranged swing timer.
+    pub melee_weapon_speed: f32,
+    /// Timer tracking time until the next melee main-hand swing.
+    pub melee_timer: f32,
     /// Attack Power - scales physical damage abilities and auto-attacks
     pub attack_power: f32,
     /// Spell Power - scales magical damage and healing abilities
@@ -594,6 +612,9 @@ impl Combatant {
             offhand_damage: 0.0,
             offhand_weapon_speed: 0.0,
             offhand_timer: 0.0,
+            melee_damage: 0.0,
+            melee_weapon_speed: 0.0,
+            melee_timer: 0.0,
             attack_power,
             spell_power,
             crit_chance,
@@ -713,6 +734,13 @@ impl Combatant {
         self.offhand_damage > 0.0 && self.offhand_weapon_speed > 0.0
     }
 
+    /// Whether a ranged-socket combatant (the Hunter) has a melee main hand
+    /// to swing inside `MELEE_RANGE`. The ONE gate for that swing, demanding
+    /// a non-zero speed for the same reason [`Self::is_dual_wielding`] does.
+    pub fn has_melee_main_hand(&self) -> bool {
+        self.melee_damage > 0.0 && self.melee_weapon_speed > 0.0
+    }
+
     /// Check if this combatant is alive (health > 0 and not marked dead).
     pub fn is_alive(&self) -> bool {
         self.current_health > 0.0 && !self.is_dead
@@ -805,6 +833,12 @@ impl Combatant {
             self.offhand_damage,
             self.offhand_weapon_speed
         );
+        debug_assert!(
+            (self.melee_damage > 0.0) == (self.melee_weapon_speed > 0.0),
+            "Combatant melee main hand is half-armed: damage {}, speed {}",
+            self.melee_damage,
+            self.melee_weapon_speed
+        );
     }
 
     /// Calculate damage for an ability based on character stats.
@@ -868,15 +902,24 @@ impl Combatant {
     ///   own timer at [`OFFHAND_DAMAGE_MULTIPLIER`](super::super::constants::OFFHAND_DAMAGE_MULTIPLIER)
     ///   of its listed damage. `attack_damage` / `weapon_speed` are untouched:
     ///   those describe the MAIN hand.
+    /// - Main Hand WEAPON, for a class whose live socket is ranged but which
+    ///   also fights in melee ([`CharacterClass::melee_beside_ranged`] — the
+    ///   Hunter): fills `melee_damage` / `melee_weapon_speed` — a melee swing
+    ///   on its own timer inside `MELEE_RANGE`, beside the bow's Auto Shot.
+    ///   The Off Hand WEAPON then arms a second swing exactly as it does for a
+    ///   main-hand class, but only alongside a melee main hand: the off hand
+    ///   accompanies the main hand.
     /// - Off Hand non-weapons (shields, held frills): only ADD their stats, as
-    ///   before. So does an off-hand weapon on a class that shoots from the
-    ///   ranged socket — a Hunter's main hand does not swing, so its off hand
-    ///   has nothing to swing alongside.
+    ///   before. So does an off-hand weapon on a caster, which shoots from the
+    ///   ranged socket and never swings a hand weapon.
+    ///
+    /// [`CharacterClass::melee_beside_ranged`]: match_config::CharacterClass::melee_beside_ranged
     /// - After all items: reset current_health and current_mana to their new maximums.
     pub fn apply_equipment(&mut self, loadout: &Loadout, items: &ItemDefinitions) {
         // The socket holding this class's primary weapon. NOT `is_melee()`:
         // that answers attack RANGE, not which socket is live.
         let primary_weapon_slot = self.class.weapon_slot();
+        let melee_beside_ranged = self.class.melee_beside_ranged();
 
         // The live socket decides what the auto-attack IS. Start from "no
         // weapon" — an empty or relic-filled live socket must end here, and
@@ -933,19 +976,36 @@ impl Combatant {
                 self.attack_damage = avg_damage;
                 self.weapon_speed = item.weapon_speed;
             }
+            // A Hunter's main-hand weapon: its melee swing, beside the bow.
+            // Its live socket is the ranged one, so the branch above left this
+            // item's damage and speed alone.
+            if item.is_weapon && *slot == ItemSlot::MainHand && melee_beside_ranged {
+                let avg_damage = (item.attack_damage_min + item.attack_damage_max) / 2.0;
+                self.melee_damage = avg_damage;
+                self.melee_weapon_speed = item.weapon_speed;
+            }
             // A WEAPON in the off hand is a second swing, but only for a class
-            // that swings its main hand at all: the off hand accompanies the
-            // main hand, and a Hunter's live socket is the ranged one. Shields
+            // that swings a main hand at all: its live socket is the main hand,
+            // or it is a Hunter, which swings its main hand in melee. Shields
             // and held frills are `is_weapon: false` and fall through to
             // stats-only, exactly as before.
             if item.is_weapon
                 && *slot == ItemSlot::OffHand
-                && primary_weapon_slot == ItemSlot::MainHand
+                && (primary_weapon_slot == ItemSlot::MainHand || melee_beside_ranged)
             {
                 let avg_damage = (item.attack_damage_min + item.attack_damage_max) / 2.0;
                 self.offhand_damage = avg_damage * OFFHAND_DAMAGE_MULTIPLIER;
                 self.offhand_weapon_speed = item.weapon_speed;
             }
+        }
+
+        // The off hand accompanies the main hand. A main-hand class's empty
+        // main hand already leaves it no auto-attack at all (its live kind is
+        // `None`); a Hunter with no melee main hand has its bow, so its off
+        // hand is disarmed here instead.
+        if melee_beside_ranged && !self.has_melee_main_hand() {
+            self.offhand_damage = 0.0;
+            self.offhand_weapon_speed = 0.0;
         }
 
         // Reset current pools to their pre-combat levels under the new maximums
