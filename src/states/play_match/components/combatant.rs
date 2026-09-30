@@ -1183,6 +1183,24 @@ pub struct BerserkerRagePending {
     pub caster_class: match_config::CharacterClass,
 }
 
+/// Which way a pending shapeshift goes — see [`ShapeshiftPending`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shift {
+    /// Into Travel Form: break every root and snare, then take the form.
+    IntoTravelForm,
+    /// Back out of the form. Free, and on no global cooldown.
+    Out,
+}
+
+/// Pending Druid shapeshift, processed by `effects::process_travel_form`.
+/// Uses the deferred pending pattern (like BerserkerRagePending) because the
+/// Druid AI has immutable aura access, and the shift must remove auras.
+#[derive(Component)]
+pub struct ShapeshiftPending {
+    pub caster: Entity,
+    pub shift: Shift,
+}
+
 /// Pending Mana Burn to be processed (Priest Mana Burn).
 /// Spawned at cast completion in `combat_core/casting.rs`; consumed by
 /// `effects/mana_burn.rs::process_mana_burn`, which destroys mana on the

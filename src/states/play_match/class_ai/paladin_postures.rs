@@ -279,6 +279,8 @@ pub fn evaluate_paladin_posture(
                     decision_trace,
                     transitioned,
                     prev,
+                    MovementTrigger::EscapeWindowOpen,
+                    shared.danger_radius,
                 );
                 plan.cast_defer = Some(shared.urgency_hp_threshold);
             }

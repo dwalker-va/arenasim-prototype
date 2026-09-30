@@ -514,7 +514,9 @@ impl HealImpact {
             | AuraType::WeaponPoison
             | AuraType::SpellPowerIncrease
             | AuraType::WindfuryBuff
-            | AuraType::FearImmunity => None,
+            | AuraType::FearImmunity
+            | AuraType::Cyclone
+            | AuraType::TravelForm => None,
         }
     }
 }
@@ -968,6 +970,10 @@ impl AuraApplyRoute {
             | AuraType::SpellPowerIncrease
             | AuraType::HealingOverTime
             | AuraType::WindfuryBuff => AuraApplyRoute::Band,
+
+            // The Druid's Cyclone and Travel Form have no bespoke treatment
+            // yet (AS-160 scopes them), so the family cue draws them.
+            AuraType::Cyclone | AuraType::TravelForm => AuraApplyRoute::Band,
 
             AuraType::Root | AuraType::Stun => AuraApplyRoute::Owned(AuraApplyOwner::HardCc),
             AuraType::Fear => AuraApplyRoute::Owned(AuraApplyOwner::FearShroud),

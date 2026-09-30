@@ -16,6 +16,7 @@ pub mod dispels;
 pub mod divine_shield;
 pub mod holy_shock;
 pub mod mana_burn;
+pub mod travel_form;
 
 pub use backlash::*;
 pub use berserker_rage::process_berserker_rage;
@@ -24,3 +25,4 @@ pub use dispels::process_dispels;
 pub use divine_shield::process_divine_shield;
 pub use holy_shock::{process_holy_shock_damage, process_holy_shock_heals};
 pub use mana_burn::process_mana_burn;
+pub use travel_form::process_travel_form;

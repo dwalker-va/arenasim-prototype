@@ -322,12 +322,13 @@ pub fn slow_zone_system(
 
             let distance = zone_pos.distance(target_transform.translation);
             if distance <= zone.radius {
-                // Skip immune targets (Divine Shield)
+                // Skip immune targets (Divine Shield, Cyclone)
                 if let Some(ref auras) = active_auras {
-                    if auras
-                        .auras
-                        .iter()
-                        .any(|a| a.effect_type == AuraType::DamageImmunity)
+                    if auras.is_cycloned()
+                        || auras
+                            .auras
+                            .iter()
+                            .any(|a| a.effect_type == AuraType::DamageImmunity)
                     {
                         continue;
                     }

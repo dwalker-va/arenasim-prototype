@@ -1450,6 +1450,7 @@ fn dr_category_name(category: DRCategory) -> &'static str {
         DRCategory::Silence => "Silences",
         DRCategory::KidneyShotStun => "Kidney Shot (its own bucket)",
         DRCategory::Horror => "Horror (separate from Fear)",
+        DRCategory::Cyclone => "Cyclone (its own bucket)",
     }
 }
 
@@ -1879,6 +1880,7 @@ mod tests {
                 "Boar Charge [Physical]",
                 "Cheap Shot [Physical]",
                 "Concussive Shot [Physical]",
+                "Cyclone [Magic]",
                 "Demoralizing Shout [—]",
                 "Hammer of Justice [Magic]",
                 "Kick [—]",
@@ -1911,6 +1913,8 @@ mod tests {
                 "Crippling Poison (weapon coating)",
                 "Divine Shield",
                 "Shadow Sight",
+                // A shapeshift: no dispel or purge takes it; the Druid ends it.
+                "Travel Form",
                 "Weakened Soul",
             ]
             .map(String::from),

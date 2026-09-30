@@ -2019,10 +2019,10 @@ mod tests {
     /// which the sandbox's own (now retired) hostile list nonetheless sent to
     /// the caster, putting Curse of Weakness over the Warlock's own head.
     ///
-    /// The exceptions are the two self buffs that are UNPURGEABLE by design, so
+    /// The exceptions are the self buffs that are UNPURGEABLE by design, so
     /// the beneficial list cannot vouch for them: `DamageImmunity` (Divine
-    /// Shield) and `FearImmunity` (Berserker Rage — a physical enrage, not
-    /// magic). Anything else appearing here is a debuff previewing on the wrong
+    /// Shield), `FearImmunity` (Berserker Rage — a physical enrage, not
+    /// magic) and `TravelForm` (a shapeshift, not a spell on the Druid). Anything else appearing here is a debuff previewing on the wrong
     /// unit, and adding to this list is how that gets waved through.
     #[test]
     fn an_entry_previews_on_the_caster_only_for_a_beneficial_aura() {
@@ -2048,7 +2048,7 @@ mod tests {
             };
             let unpurgeable_self_buff = matches!(
                 applied.aura_type,
-                AuraType::DamageImmunity | AuraType::FearImmunity
+                AuraType::DamageImmunity | AuraType::FearImmunity | AuraType::TravelForm
             );
             assert!(
                 sample.can_be_purged() || unpurgeable_self_buff,

@@ -127,6 +127,7 @@ pub fn reflect_instant_cc_in_snapshot(
                 | AuraType::Root
                 | AuraType::Polymorph
                 | AuraType::Incapacitate
+                | AuraType::Cyclone
         ),
         "reflect_instant_cc_in_snapshot called with non-CC aura type {:?}",
         aura.effect_type
@@ -142,6 +143,14 @@ pub fn reflect_instant_cc_in_snapshot(
         })
         .unwrap_or(false);
     if has_damage_immunity {
+        return;
+    }
+
+    // Cyclone blocks every aura, Travel Form blocks Polymorph — mirror that.
+    if active_auras_map
+        .get(&target)
+        .is_some_and(|auras| aura_immunity_source(auras, aura).is_some())
+    {
         return;
     }
 
@@ -189,6 +198,26 @@ pub fn reflect_instant_cc_in_snapshot(
         }
     }
     entry.push(aura_to_add);
+}
+
+/// Why the holder of `auras` is immune to a new `aura`, or `None` when it is
+/// not — the Cyclone and Travel Form immunities, shared by
+/// [`apply_pending_auras`] and its same-frame snapshot mirror
+/// [`reflect_instant_cc_in_snapshot`] so the two cannot disagree:
+/// - a CYCLONED holder is immune to every new aura (TBC: nothing reaches a
+///   cycloned target, friendly or hostile);
+/// - a holder in TRAVEL FORM is immune to Polymorph (a shapeshifted Druid
+///   cannot be polymorphed).
+pub fn aura_immunity_source(auras: &[Aura], aura: &Aura) -> Option<&'static str> {
+    if auras.iter().any(|a| a.effect_type == AuraType::Cyclone) {
+        return Some("Cyclone");
+    }
+    if aura.effect_type == AuraType::Polymorph
+        && auras.iter().any(|a| a.effect_type == AuraType::TravelForm)
+    {
+        return Some("Travel Form");
+    }
+    None
 }
 
 /// Apply pending auras to targets.
@@ -274,6 +303,7 @@ pub fn apply_pending_auras(
                 | AuraType::Root
                 | AuraType::Polymorph
                 | AuraType::Incapacitate
+                | AuraType::Cyclone
         );
         let is_unstoppable = charging_query.get(pending.target).is_ok()
             || disengaging_query.get(pending.target).is_ok();
@@ -307,6 +337,7 @@ pub fn apply_pending_auras(
                 AuraType::Root => "Root",
                 AuraType::Polymorph => "Polymorph",
                 AuraType::Incapacitate => "Incapacitate",
+                AuraType::Cyclone => "Cyclone",
                 _ => "CC",
             };
             combat_log.log(
@@ -355,6 +386,47 @@ pub fn apply_pending_auras(
                 },
                 PlayMatchEntity,
             ));
+
+            commands.entity(pending_entity).despawn();
+            continue;
+        }
+
+        // Cyclone and Travel Form immunities. A cycloned target is immune to
+        // EVERY new aura, hostile or friendly — nothing reaches it while it
+        // spins (TBC), which is the aura half of its damage-and-healing
+        // immunity (the other half is at the top of `apply_damage_with_absorb`
+        // and `apply_healing`). A shifted Druid is immune to Polymorph.
+        let immunity = active_auras
+            .as_ref()
+            .and_then(|auras| aura_immunity_source(&auras.auras, &pending.aura));
+        if let Some(source) = immunity {
+            let text_position = target_transform.translation + Vec3::new(0.0, 2.5, 0.0);
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target)
+            {
+                get_next_fct_offset(&mut fct_state)
+            } else {
+                (0.0, 0.0)
+            };
+
+            commands.spawn((
+                FloatingCombatText {
+                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
+                    text: "Immune".to_string(),
+                    color: egui::Color32::YELLOW,
+                    lifetime: 1.5,
+                    vertical_offset: offset_y,
+                    is_crit: false,
+                },
+                PlayMatchEntity,
+            ));
+
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!(
+                    "{} IMMUNE on {} ({})",
+                    pending.aura.ability_name, target_id, source,
+                ),
+            );
 
             commands.entity(pending_entity).despawn();
             continue;
@@ -802,12 +874,16 @@ pub fn apply_pending_auras(
         // same-type non-stacking check, which the FACE already answers for the
         // whole debuff (the Frost Armor proc refuses to fire at all while any
         // member of the chill is still up).
+        //  - the rider inherits the face's CASTER, so a damage rider (the
+        //    Entangling Roots DoT) is attributed to whoever cast the debuff.
         let riders = aura_to_add.compound.map(|compound| {
             let face_duration = aura_to_add.duration;
+            let face_caster = aura_to_add.caster;
             super::combat_core::compound_riders(compound)
                 .into_iter()
                 .map(move |mut rider| {
                     rider.duration = face_duration;
+                    rider.caster = face_caster;
                     rider
                 })
         });
@@ -914,10 +990,23 @@ pub fn process_aura_breaks(
             }
         }
 
-        // Remove broken auras (in reverse order to preserve indices)
-        for &index in auras_to_remove.iter().rev() {
-            active_auras.auras.remove(index);
-        }
+        // Remove broken auras, each as the whole DEBUFF: a broken Entangling
+        // Roots takes its damage rider with it (see `CompoundDebuff`). No
+        // other compound's face breaks on damage, so for every other aura
+        // this removes exactly the broken ones, order preserved.
+        let broken_compounds: Vec<CompoundDebuff> = auras_to_remove
+            .iter()
+            .filter_map(|&index| active_auras.auras[index].compound)
+            .collect();
+        let mut index = 0;
+        active_auras.auras.retain(|aura| {
+            let broken = auras_to_remove.contains(&index)
+                || aura
+                    .compound
+                    .is_some_and(|compound| broken_compounds.contains(&compound));
+            index += 1;
+            !broken
+        });
 
         // Clear damage taken component
         commands.entity(entity).remove::<DamageTakenThisFrame>();

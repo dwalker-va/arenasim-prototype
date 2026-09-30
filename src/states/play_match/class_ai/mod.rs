@@ -368,6 +368,7 @@ impl<'a> CombatContext<'a> {
             || self.has_aura(AuraType::Fear)
             || self.has_aura(AuraType::Polymorph)
             || self.has_aura(AuraType::Incapacitate)
+            || self.has_aura(AuraType::Cyclone)
     }
 
     /// Check if an entity is currently under hard CC — see [`is_hard_cc`] for
@@ -406,7 +407,11 @@ impl<'a> CombatContext<'a> {
             auras.iter().any(|a| {
                 matches!(
                     a.effect_type,
-                    AuraType::Stun | AuraType::Fear | AuraType::Polymorph | AuraType::Incapacitate
+                    AuraType::Stun
+                        | AuraType::Fear
+                        | AuraType::Polymorph
+                        | AuraType::Incapacitate
+                        | AuraType::Cyclone
                 )
             })
         })
@@ -552,7 +557,10 @@ impl<'a> CombatContext<'a> {
                 .filter(|a| {
                     matches!(
                         a.effect_type,
-                        AuraType::Root | AuraType::Stun | AuraType::Incapacitate
+                        AuraType::Root
+                            | AuraType::Stun
+                            | AuraType::Incapacitate
+                            | AuraType::Cyclone
                     )
                 })
                 .map(|a| a.duration)
@@ -814,7 +822,10 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         // Undispellable debuffs. `is_magic_dispellable` already rejects these,
         // so they never reach this function; grading them keeps "make it
         // dispellable" a two-place decision instead of a silent promotion.
+        // Cyclone is the one crowd control here that is undispellable by RULE
+        // (TBC) rather than by removal class — see `is_magic_dispellable`.
         AuraType::Stun
+        | AuraType::Cyclone
         | AuraType::SpellSchoolLockout
         | AuraType::HealingReduction
         | AuraType::AttackPowerReduction
@@ -843,7 +854,8 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::FrostArmorBuff
         | AuraType::SpellResistanceBuff
         | AuraType::ArmorIncrease
-        | AuraType::FearImmunity => 0,
+        | AuraType::FearImmunity
+        | AuraType::TravelForm => 0,
     }
 }
 
@@ -890,8 +902,8 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         // ---- Graded 0 deliberately: not purge candidates. ----
         // Beneficial but unpurgeable by design (see [`Aura::can_be_purged`]):
         // Divine Shield and Berserker Rage's fear immunity are cooldowns, not
-        // buffs to strip.
-        AuraType::DamageImmunity | AuraType::FearImmunity => 0,
+        // buffs to strip; Travel Form is a shapeshift, not a buff at all.
+        AuraType::DamageImmunity | AuraType::FearImmunity | AuraType::TravelForm => 0,
 
         // Mechanical markers, not buffs.
         AuraType::ShadowSight | AuraType::WeaponPoison | AuraType::WeakenedSoul => 0,
@@ -904,6 +916,7 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         | AuraType::Fear
         | AuraType::Polymorph
         | AuraType::Incapacitate
+        | AuraType::Cyclone
         | AuraType::Silence
         | AuraType::SpellSchoolLockout
         | AuraType::DamageOverTime
@@ -939,7 +952,8 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::Fear
         | AuraType::Root
         | AuraType::Polymorph
-        | AuraType::Incapacitate => true,
+        | AuraType::Incapacitate
+        | AuraType::Cyclone => true,
 
         // Everything else: impairments, buffs, debuffs, damage and healing
         // effects. None of them stop a target acting, so none of them make a
@@ -971,7 +985,8 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::SpellPowerIncrease
         | AuraType::HealingOverTime
         | AuraType::WindfuryBuff
-        | AuraType::FearImmunity => false,
+        | AuraType::FearImmunity
+        | AuraType::TravelForm => false,
     }
 }
 

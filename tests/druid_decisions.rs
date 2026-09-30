@@ -132,6 +132,7 @@ fn decide(scene: Scene) -> Option<(AbilityType, &'static str)> {
         Some(&self_auras),
         &ctx,
         &movement,
+        false,
         true,
         30.0,
         &mut trace,

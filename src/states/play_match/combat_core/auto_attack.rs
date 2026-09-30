@@ -235,6 +235,11 @@ pub fn combat_auto_attack(
             continue;
         }
 
+        // A Druid in Travel Form has no weapon to swing.
+        if auras.as_deref().is_some_and(ActiveAuras::is_shapeshifted) {
+            continue;
+        }
+
         // WoW Mechanic: Cannot auto-attack while casting
         if casting_state.is_some() {
             continue;
@@ -977,7 +982,35 @@ pub fn compound_riders(compound: CompoundDebuff) -> Vec<Aura> {
     match compound {
         CompoundDebuff::FrostArmorChill => vec![frost_armor_attack_speed_aura()],
         CompoundDebuff::MarkOfTheWild => mark_of_the_wild_riders(),
+        CompoundDebuff::EntanglingRoots => entangling_roots_riders(),
     }
+}
+
+/// Entangling Roots' damage per tick — its rider's `magnitude`.
+pub const ENTANGLING_ROOTS_TICK_DAMAGE: f32 = 3.0;
+/// Seconds between Entangling Roots' damage ticks.
+pub const ENTANGLING_ROOTS_TICK_INTERVAL: f32 = 3.0;
+
+/// Entangling Roots' RIDER: the small Nature damage over time (Classic: "roots
+/// the target in place and causes Nature damage over time"). The face — the
+/// root — is the aura `abilities.ron` describes; this lands with it, carries
+/// its caster for the damage attribution, and ends with it however the root
+/// ends. Its own ticks count toward the root's damage break like any other
+/// damage.
+pub fn entangling_roots_riders() -> Vec<Aura> {
+    vec![Aura {
+        effect_type: AuraType::DamageOverTime,
+        duration: 8.0, // overwritten with the face's on landing
+        magnitude: ENTANGLING_ROOTS_TICK_DAMAGE,
+        break_on_damage_threshold: -1.0,
+        tick_interval: ENTANGLING_ROOTS_TICK_INTERVAL,
+        time_until_next_tick: ENTANGLING_ROOTS_TICK_INTERVAL,
+        ability_name: "Entangling Roots".to_string(),
+        spell_school: Some(SpellSchool::Nature),
+        dispel_type: DispelType::Auto,
+        compound: Some(CompoundDebuff::EntanglingRoots),
+        ..Default::default()
+    }]
 }
 
 /// Mark of the Wild's armor bonus — one of its riders.
@@ -1228,6 +1261,10 @@ fn apply_or_refresh_crippling(
     let def = abilities.get_unchecked(&AbilityType::CripplingPoison);
     let refresh_to = def.applies_aura.as_ref().map(|a| a.duration).unwrap_or(8.0);
     if let Some(auras) = target_auras {
+        // Nothing reaches a cycloned target, a poison included.
+        if auras.is_cycloned() {
+            return false;
+        }
         if let Some(existing) = auras.auras.iter_mut().find(|a| {
             a.effect_type == AuraType::MovementSpeedSlow && a.ability_name == "Crippling Poison"
         }) {

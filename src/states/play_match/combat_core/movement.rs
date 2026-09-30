@@ -32,6 +32,25 @@ fn resolve_and_clamp(
     clamp_to_arena(bounds, resolve_movement(volumes, from, to))
 }
 
+/// A mover's effective speed: `base` times every `MovementSpeedSlow` on it and
+/// the Druid's Travel Form, in aura order. The one derivation every movement
+/// branch uses, so a camper, a directive walk and a pursuit all feel a slow —
+/// and a shifted Druid's speed — the same way.
+pub fn effective_movement_speed(base: f32, auras: Option<&ActiveAuras>) -> f32 {
+    let mut movement_speed = base;
+    if let Some(auras) = auras {
+        for aura in &auras.auras {
+            if matches!(
+                aura.effect_type,
+                AuraType::MovementSpeedSlow | AuraType::TravelForm
+            ) {
+                movement_speed *= aura.magnitude;
+            }
+        }
+    }
+    movement_speed
+}
+
 pub fn move_to_target(
     countdown: Res<MatchCountdown>,
     time: Res<Time>,
@@ -152,7 +171,7 @@ pub fn move_to_target(
             let rooted_or_stunned = auras.auras.iter().any(|a| {
                 matches!(
                     a.effect_type,
-                    AuraType::Root | AuraType::Stun | AuraType::Incapacitate
+                    AuraType::Root | AuraType::Stun | AuraType::Incapacitate | AuraType::Cyclone
                 )
             });
             let fear_dir = auras
@@ -395,14 +414,7 @@ pub fn move_to_target(
                 .unwrap_or_else(|| Vec2::new(to_spot.x, to_spot.z).normalize_or_zero());
                 // Same speed derivation as every other branch: base speed times
                 // MovementSpeedSlow, or a camper would ignore Frost Trap.
-                let mut movement_speed = combatant.base_movement_speed;
-                if let Some(auras) = auras {
-                    for aura in &auras.auras {
-                        if aura.effect_type == AuraType::MovementSpeedSlow {
-                            movement_speed *= aura.magnitude;
-                        }
-                    }
-                }
+                let movement_speed = effective_movement_speed(combatant.base_movement_speed, auras);
                 let step = Vec3::new(dir.x, 0.0, dir.y) * movement_speed * dt;
                 transform.translation = resolve_and_clamp(
                     &map_geometry.bounds,
@@ -431,14 +443,7 @@ pub fn move_to_target(
         // Entities without the component fall through to normal pursuit.
         if let Some(directive) = movement_directive {
             // Effective movement speed: base × MovementSpeedSlow multipliers.
-            let mut movement_speed = combatant.base_movement_speed;
-            if let Some(auras) = auras {
-                for aura in &auras.auras {
-                    if aura.effect_type == AuraType::MovementSpeedSlow {
-                        movement_speed *= aura.magnitude;
-                    }
-                }
-            }
+            let movement_speed = effective_movement_speed(combatant.base_movement_speed, auras);
             let mut move_distance = movement_speed * dt;
 
             let direction = match directive.goal {
@@ -524,14 +529,8 @@ pub fn move_to_target(
                                 .normalize_or_zero()
                         });
                         if direction != Vec3::ZERO {
-                            let mut movement_speed = combatant.base_movement_speed;
-                            if let Some(auras) = auras {
-                                for aura in &auras.auras {
-                                    if aura.effect_type == AuraType::MovementSpeedSlow {
-                                        movement_speed *= aura.magnitude;
-                                    }
-                                }
-                            }
+                            let movement_speed =
+                                effective_movement_speed(combatant.base_movement_speed, auras);
                             let move_distance = movement_speed * dt;
                             // Slide off obstacles, then clamp to arena bounds
                             let from = transform.translation;
@@ -577,14 +576,8 @@ pub fn move_to_target(
 
                 if direction != Vec3::ZERO {
                     // Calculate effective movement speed
-                    let mut movement_speed = combatant.base_movement_speed;
-                    if let Some(auras) = auras {
-                        for aura in &auras.auras {
-                            if aura.effect_type == AuraType::MovementSpeedSlow {
-                                movement_speed *= aura.magnitude;
-                            }
-                        }
-                    }
+                    let movement_speed =
+                        effective_movement_speed(combatant.base_movement_speed, auras);
 
                     // Move towards destination (slide off obstacles, then clamp to arena)
                     let move_distance = movement_speed * dt;
@@ -654,14 +647,7 @@ pub fn move_to_target(
 
             if direction != Vec3::ZERO {
                 // Calculate effective movement speed (base * aura modifiers)
-                let mut movement_speed = combatant.base_movement_speed;
-                if let Some(auras) = auras {
-                    for aura in &auras.auras {
-                        if aura.effect_type == AuraType::MovementSpeedSlow {
-                            movement_speed *= aura.magnitude;
-                        }
-                    }
-                }
+                let movement_speed = effective_movement_speed(combatant.base_movement_speed, auras);
 
                 // Move towards target (slide off obstacles, then clamp to arena)
                 let move_distance = movement_speed * dt;

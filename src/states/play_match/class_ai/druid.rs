@@ -18,13 +18,23 @@
 //!    bloom managed on purpose (see [`lifebloom_decision`]). A threat that is
 //!    only closing gets the Rejuvenation, not the stack: rolling three stacks
 //!    on an ally nobody is hitting yet is mana spent on overheal.
-//! 7. Rejuvenation on any other injured ally.
-//! 8. Moonfire on the kill target.
+//! 7. Control, when an ally needs a peel or the kill needs its healer gone
+//!    (see [`DruidTurn::try_control`]): Cyclone, then Entangling Roots.
+//! 8. Rejuvenation on any other injured ally.
+//! 9. Moonfire on the kill target.
 //!
-//! Steps 5-8 answer to the MANA GOVERNOR ([`mana_reserve`]): proactive heals
-//! and damage are paid for only out of mana above a reserve that shrinks as
-//! the match heads into dampening. The emergency steps (2, 3) never ask it,
-//! and neither does a focused ally who has dropped below [`DRUID_URGENT_HP`].
+//! Between the emergency steps and Innervate sits the ESCAPE SHIFT: Travel
+//! Form when a threat is on the Druid and it is rooted or slowed, or when a
+//! melee is beating on it (see [`shift_trigger`]). The shift breaks the
+//! impairment and the posture machine runs; while shifted the Druid casts
+//! nothing, and it shifts back — free, no global cooldown — once no melee is
+//! on it AND someone needs healing ([`should_leave_form`]).
+//!
+//! Steps 5-9 answer to the MANA GOVERNOR ([`mana_reserve`]): proactive heals,
+//! control and damage are paid for only out of mana above a reserve that
+//! shrinks as the match heads into dampening. The emergency steps (2, 3), the
+//! shift and a peel for a dying ally never ask it, and neither does a focused
+//! ally who has dropped below [`DRUID_URGENT_HP`].
 //!
 //! Movement is the shared caster-healer posture machine
 //! (`caster_healer_posture`) on the `druid:` block of `movement.ron`.
@@ -78,6 +88,61 @@ pub const GOVERNOR_RESERVE_AT_GATES: f32 = 0.5;
 /// reaches 50% (it starts at `DAMPENING_START_SECS` and ramps to 100% over
 /// `DAMPENING_RAMP_SECS`). Mana saved past it buys heals worth half as much.
 pub const GOVERNOR_HORIZON_SECS: f32 = DAMPENING_START_SECS + DAMPENING_RAMP_SECS * 0.5;
+/// A melee attacking the Druid while it is below this HP fraction is reason
+/// enough to shift and open distance, rooted or not.
+pub const DRUID_SHIFT_OPEN_HP: f32 = 0.6;
+/// Cyclone the enemy healer once the kill target is below this HP fraction:
+/// six seconds of no heals is worth the most when the kill is close.
+pub const DRUID_CYCLONE_KILL_HP: f32 = 0.4;
+
+/// Why the Druid shifts into Travel Form, when it should.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShiftReason {
+    /// Rooted or slowed with a threat on it: the shift breaks the impairment.
+    BreakImpairment,
+    /// A melee is beating on a hurt Druid: the shift opens distance.
+    OpenDistance,
+}
+
+/// The escape-shift rule, pure so it can be tested on its own. Only while
+/// PRESSURED (`pressured`: a visible threat is on the Druid or closing on it):
+/// - rooted or slowed → break it;
+/// - a melee attacking it (`melee_on_me`) while it is below
+///   [`DRUID_SHIFT_OPEN_HP`] → open distance.
+///
+/// A slow from a caster who is holding range is not PRESSURED, and so is
+/// shrugged off rather than shifted out of.
+pub fn shift_trigger(
+    pressured: bool,
+    impaired: bool,
+    melee_on_me: bool,
+    self_health_pct: f32,
+) -> Option<ShiftReason> {
+    if !pressured {
+        return None;
+    }
+    if impaired {
+        return Some(ShiftReason::BreakImpairment);
+    }
+    if melee_on_me && self_health_pct < DRUID_SHIFT_OPEN_HP {
+        return Some(ShiftReason::OpenDistance);
+    }
+    None
+}
+
+/// Whether a shifted Druid leaves Travel Form: once it is SAFE AND healing is
+/// NEEDED (an ally in heal range below [`DRUID_TOP_UP_HP`]).
+///
+/// SAFE means no melee enemy or pet within striking reach (`melee_near`
+/// false) — the thing the form outruns. A caster hitting the Druid from range
+/// does not keep it shifted, and neither does a melee trailing a few yards
+/// behind: the form buys nothing against a spell, every second spent in it is
+/// a second of no healing, and the heals are instants, so the Druid can shift
+/// out, heal and shift again before a chaser closes. Safe but nobody hurt, it
+/// stays shifted — the form is faster, and there is nothing to cast.
+pub fn should_leave_form(melee_near: bool, healing_needed: bool) -> bool {
+    !melee_near && healing_needed
+}
 
 /// The mana the governor holds back `time_since_gates` seconds into the fight:
 /// [`GOVERNOR_RESERVE_AT_GATES`] of the pool at the gates, falling linearly to
@@ -234,10 +299,34 @@ pub fn decide_druid_action(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     movement: &MovementConfig,
+    pressured: bool,
     gates_opened: bool,
     time_since_gates: f32,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
+    // Shifted: nothing is cast in Travel Form, so the only decision is
+    // whether to leave it. Leaving is free and on no global cooldown, so it
+    // is decided before the GCD gate. It is not an ability decision — the
+    // posture machine traces the ESCAPE it ends, and the log says it.
+    if auras.is_some_and(ActiveAuras::is_shapeshifted) {
+        let healing_needed = ctx.alive_allies().into_iter().any(|a| {
+            a.health_pct() < DRUID_TOP_UP_HP
+                && my_pos.distance(a.position) <= movement.shared.heal_range
+        });
+        let melee_near = ctx
+            .visible_enemies_within(entity, my_pos, MELEE_RANGE + DRUID_ATTACK_RANGE_SLACK)
+            .iter()
+            .any(|e| e.class.is_melee() || e.is_pet);
+        if gates_opened && should_leave_form(melee_near, healing_needed) {
+            commands.spawn(ShapeshiftPending {
+                caster: entity,
+                shift: Shift::Out,
+            });
+            return true;
+        }
+        return false;
+    }
+
     if combatant.global_cooldown > 0.0 {
         return false;
     }
@@ -258,6 +347,7 @@ pub fn decide_druid_action(
             ctx,
             heal_range: movement.shared.heal_range,
             threat_radius: movement.shared.threat_intent_radius,
+            pressured,
             time_since_gates,
             builder: &mut builder,
         };
@@ -279,6 +369,8 @@ struct DruidTurn<'a, 'b, 'w, 's, 'c> {
     ctx: &'a CombatContext<'c>,
     heal_range: f32,
     threat_radius: f32,
+    /// The posture machine's PRESSURED trigger this tick.
+    pressured: bool,
     time_since_gates: f32,
     builder: &'a mut DecisionEventBuilder<'b>,
 }
@@ -312,6 +404,11 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         } else {
             self.builder
                 .reject(AbilityType::Swiftmend, RejectionReason::NoValidTarget);
+        }
+
+        // The escape shift.
+        if self.try_travel_form(combatant) {
+            return true;
         }
 
         // 4. Self-Innervate when the pool runs low.
@@ -384,7 +481,12 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 .reject(AbilityType::Lifebloom, RejectionReason::NoValidTarget);
         }
 
-        // 7. Rejuvenation on anyone else who is hurt and has none.
+        // 7. Control: a peel for the focused ally, or the enemy healer.
+        if self.try_control(combatant, focus.map(|(e, _, hp, _)| (e, hp))) {
+            return true;
+        }
+
+        // 8. Rejuvenation on anyone else who is hurt and has none.
         let focus_entity = focus.map(|(e, _, _, _)| e);
         let top_up = self
             .ctx
@@ -408,8 +510,205 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             }
         }
 
-        // 8. Moonfire on the kill target, when it is not already burning.
+        // 9. Moonfire on the kill target, when it is not already burning.
         self.try_moonfire(combatant)
+    }
+
+    /// Travel Form, when [`shift_trigger`] says so. An instant: the mana and
+    /// the global cooldown are paid here, and `effects::process_travel_form`
+    /// breaks the roots and snares and puts the form on next frame.
+    fn try_travel_form(&mut self, combatant: &mut Combatant) -> bool {
+        let ability = AbilityType::TravelForm;
+        let impaired = self.auras.is_some_and(|auras| {
+            auras
+                .auras
+                .iter()
+                .any(|a| matches!(a.effect_type, AuraType::Root | AuraType::MovementSpeedSlow))
+        });
+        let melee_on_me = self.ctx.enemies_targeting(self.entity).iter().any(|e| {
+            (e.class.is_melee() || e.is_pet)
+                && e.position.distance(self.my_pos) <= MELEE_RANGE + DRUID_ATTACK_RANGE_SLACK
+        });
+        let self_hp = combatant.current_health / combatant.max_health;
+        if shift_trigger(self.pressured, impaired, melee_on_me, self_hp).is_none() {
+            self.builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: "no threat to escape: not pressured, or free and healthy".to_string(),
+                },
+            );
+            return false;
+        }
+        let def = self.abilities.get_unchecked(&ability);
+        let opts = PreCastOpts::default();
+        if !pre_cast_ok(
+            ability,
+            def,
+            combatant,
+            self.my_pos,
+            self.auras,
+            None,
+            self.ctx,
+            opts,
+        ) {
+            self.builder.reject(
+                ability,
+                classify_pre_cast_failure(
+                    ability,
+                    def,
+                    combatant,
+                    self.my_pos,
+                    self.auras,
+                    None,
+                    self.ctx,
+                    opts,
+                ),
+            );
+            return false;
+        }
+        self.builder.choose(ability, Some(self.entity), true);
+        combatant.current_mana -= def.mana_cost;
+        combatant.global_cooldown = GCD;
+        self.log_use(combatant, &def.name, self.entity, "casts");
+        self.commands.spawn(ShapeshiftPending {
+            caster: self.entity,
+            shift: Shift::IntoTravelForm,
+        });
+        true
+    }
+
+    /// Crowd control, in priority order:
+    /// 1. **Cyclone as a peel** — the focused ally is below [`DRUID_URGENT_HP`]
+    ///    and a visible enemy is attacking it: cyclone the attacker. Never
+    ///    governed: an ally is dying.
+    /// 2. **Cyclone on the enemy healer** — the kill target is below
+    ///    [`DRUID_CYCLONE_KILL_HP`]: six seconds with no heals on it.
+    /// 3. **Entangling Roots** — a melee enemy attacking the Druid or the
+    ///    focused ally (or closing on either) is pinned.
+    ///
+    /// The kill target is never cycloned or rooted: a Cyclone would make it
+    /// immune to the team's damage, and the team's damage would break a root.
+    /// A target already under hard crowd control, or immune to the bucket by
+    /// diminishing returns, is passed over.
+    fn try_control(&mut self, combatant: &mut Combatant, focus: Option<(Entity, f32)>) -> bool {
+        let kill_target = combatant.target;
+        let usable = |turn: &Self, e: &CombatantInfo, category: DRCategory| {
+            e.is_alive
+                && Some(e.entity) != kill_target
+                && !turn.ctx.is_ccd(e.entity)
+                && !turn.ctx.is_dr_immune(e.entity, category)
+        };
+        // Enemies attacking `ally` from within their reach, nearest first.
+        let attackers_of = |turn: &Self, ally: Entity| -> Vec<(Entity, Vec3)> {
+            let Some(ally_pos) = turn.ctx.combatants.get(&ally).map(|a| a.position) else {
+                return Vec::new();
+            };
+            let mut attackers: Vec<&CombatantInfo> = turn
+                .ctx
+                .enemies_targeting(ally)
+                .into_iter()
+                .filter(|e| {
+                    let reach = match e.pet_type {
+                        Some(pet) => pet.preferred_range(),
+                        None => e.class.preferred_range(),
+                    } + DRUID_ATTACK_RANGE_SLACK;
+                    e.position.distance(ally_pos) <= reach
+                })
+                .collect();
+            attackers.sort_by(|a, b| {
+                turn.my_pos
+                    .distance(a.position)
+                    .partial_cmp(&turn.my_pos.distance(b.position))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            attackers
+                .into_iter()
+                .map(|e| (e.entity, e.position))
+                .collect()
+        };
+
+        // 1. Cyclone to peel for a dying focus.
+        let peel = focus
+            .filter(|&(_, hp)| hp < DRUID_URGENT_HP)
+            .and_then(|(ally, _)| {
+                attackers_of(self, ally).into_iter().find(|(e, _)| {
+                    self.ctx
+                        .combatants
+                        .get(e)
+                        .is_some_and(|info| !info.is_pet && usable(self, info, DRCategory::Cyclone))
+                })
+            });
+        if let Some((enemy, enemy_pos)) = peel {
+            if self.cast(combatant, AbilityType::Cyclone, enemy, enemy_pos) {
+                return true;
+            }
+        }
+
+        // 2. Cyclone the enemy healer when the kill is close.
+        let kill_close = kill_target
+            .and_then(|t| self.ctx.combatants.get(&t))
+            .is_some_and(|t| t.is_alive && t.health_pct() < DRUID_CYCLONE_KILL_HP);
+        let healer = self
+            .ctx
+            .enemy_healer()
+            .and_then(|h| self.ctx.combatants.get(&h))
+            .filter(|h| usable(self, h, DRCategory::Cyclone))
+            .map(|h| (h.entity, h.position));
+        match healer {
+            Some((healer, healer_pos)) if kill_close => {
+                if self.governed_cast(combatant, AbilityType::Cyclone, healer, healer_pos, false) {
+                    return true;
+                }
+            }
+            _ if peel.is_none() => {
+                self.builder.reject(
+                    AbilityType::Cyclone,
+                    RejectionReason::PreconditionUnmet {
+                        note: "no dying ally to peel for, and no enemy healer to cyclone \
+                               while the kill is close"
+                            .to_string(),
+                    },
+                );
+            }
+            _ => {}
+        }
+
+        // 3. Entangling Roots on a melee on the Druid or on its focus.
+        let mut guarded = vec![self.entity];
+        if let Some((ally, _)) = focus {
+            guarded.push(ally);
+        }
+        let melee_threat = guarded.into_iter().find_map(|ally| {
+            let ally_pos = self.ctx.combatants.get(&ally)?.position;
+            self.ctx
+                .enemies_targeting(ally)
+                .into_iter()
+                .filter(|e| {
+                    (e.class.is_melee() || e.is_pet)
+                        && e.position.distance(ally_pos) <= self.threat_radius
+                        && usable(self, e, DRCategory::Roots)
+                })
+                .min_by(|a, b| {
+                    a.position
+                        .distance(ally_pos)
+                        .partial_cmp(&b.position.distance(ally_pos))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|e| (e.entity, e.position))
+        });
+        let Some((enemy, enemy_pos)) = melee_threat else {
+            self.builder
+                .reject(AbilityType::EntanglingRoots, RejectionReason::NoValidTarget);
+            return false;
+        };
+        let urgent = focus.is_some_and(|(_, hp)| hp < DRUID_URGENT_HP);
+        self.governed_cast(
+            combatant,
+            AbilityType::EntanglingRoots,
+            enemy,
+            enemy_pos,
+            urgent,
+        )
     }
 
     /// Mark of the Wild on the first ally (self included, pets excluded) who
@@ -534,14 +833,17 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         target_pos: Vec3,
     ) -> bool {
         let def = self.abilities.get_unchecked(&ability);
-        let opts = if ability == AbilityType::Moonfire {
-            PreCastOpts {
+        let opts = match ability {
+            AbilityType::Moonfire => PreCastOpts {
                 check_friendly_cc: true,
                 check_target_immune: true,
                 ..Default::default()
-            }
-        } else {
-            PreCastOpts::default()
+            },
+            AbilityType::EntanglingRoots | AbilityType::Cyclone => PreCastOpts {
+                check_target_immune: true,
+                ..Default::default()
+            },
+            _ => PreCastOpts::default(),
         };
         let target = Some((target, target_pos));
         if pre_cast_ok(
@@ -657,6 +959,38 @@ mod tests {
             lifebloom_decision(Some(&lifebloom(3, 1.0)), 0.5, true),
             LifebloomDecision::LetBloom,
             "hurt: let the bloom land rather than refresh it away"
+        );
+    }
+
+    #[test]
+    fn the_shift_answers_a_threat_only() {
+        // Not pressured: a slow from a caster holding range is shrugged off.
+        assert_eq!(shift_trigger(false, true, true, 0.1), None);
+        // Pressured and impaired: break it.
+        assert_eq!(
+            shift_trigger(true, true, false, 1.0),
+            Some(ShiftReason::BreakImpairment)
+        );
+        // Pressured, free, a melee on a hurt Druid: open distance.
+        assert_eq!(
+            shift_trigger(true, false, true, DRUID_SHIFT_OPEN_HP - 0.01),
+            Some(ShiftReason::OpenDistance)
+        );
+        // ...but not on a healthy one, and not with no melee on it.
+        assert_eq!(shift_trigger(true, false, true, DRUID_SHIFT_OPEN_HP), None);
+        assert_eq!(shift_trigger(true, false, false, 0.1), None);
+    }
+
+    #[test]
+    fn the_druid_leaves_the_form_only_when_safe_and_needed() {
+        assert!(should_leave_form(false, true));
+        assert!(
+            !should_leave_form(true, true),
+            "a melee in reach keeps it shifted"
+        );
+        assert!(
+            !should_leave_form(false, false),
+            "nobody to heal: stay fast"
         );
     }
 

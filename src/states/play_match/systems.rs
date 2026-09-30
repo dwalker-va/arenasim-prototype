@@ -46,6 +46,7 @@ pub use super::effects::process_divine_shield;
 pub use super::effects::process_holy_shock_damage;
 pub use super::effects::process_holy_shock_heals;
 pub use super::effects::process_mana_burn;
+pub use super::effects::process_travel_form;
 
 // === Phase 2: Combat and Movement ===
 pub use super::auras::process_aura_breaks;
@@ -207,6 +208,7 @@ pub fn add_core_combat_systems<M, N>(
             totem_pulse_system, // Totem dedup + buff pulse on allies (after slow_zone_system)
             process_divine_shield, // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
             process_berserker_rage, // Must run BEFORE apply_pending_auras so FearImmunity blocks queued Fears
+            process_travel_form, // Must run BEFORE apply_pending_auras so a shifted Druid meets a queued Polymorph immune
             apply_pending_auras,
             process_dispels,
             // Must run AFTER process_dispels (consumes BacklashPending events that

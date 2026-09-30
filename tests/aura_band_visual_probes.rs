@@ -71,6 +71,10 @@ const BAND_TYPES: &[AuraType] = &[
     AuraType::HealingOverTime,
     AuraType::WindfuryBuff,
     AuraType::ArmorIncrease,
+    // The Druid's Cyclone and Travel Form, until AS-160 gives them treatments
+    // of their own.
+    AuraType::Cyclone,
+    AuraType::TravelForm,
 ];
 
 fn names(types: impl IntoIterator<Item = AuraType>) -> BTreeSet<String> {

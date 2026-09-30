@@ -344,6 +344,22 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
                 aura.duration
             )
         }
+        AuraType::Cyclone => {
+            format!(
+                "Sweeps the target up for {:.0} sec: it cannot act, and nothing can damage or \
+                 heal it. Never breaks on damage and cannot be dispelled.",
+                aura.duration
+            )
+        }
+        AuraType::TravelForm => {
+            let speed_pct = ((aura.magnitude - 1.0) * 100.0).round() as i32;
+            format!(
+                "Shifts into Travel Form: removes all roots and snares and increases movement \
+                 speed by {}%. Immune to Polymorph and unable to cast while shifted. Leaving the \
+                 form is free.",
+                speed_pct
+            )
+        }
         AuraType::Incapacitate => {
             if aura.break_on_damage > 0.0 {
                 format!(

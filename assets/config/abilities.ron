@@ -1503,5 +1503,73 @@
             )),
             spell_school: Nature,
         ),
+
+        // Entangling Roots: a cast root (Classic: 1.5s, 30 yd, Nature) that
+        // breaks once enough damage lands on it, and a small Nature DoT. The
+        // DoT is a RIDER of one compound debuff, so it ends when the root does
+        // — broken, dispelled, shifted out of or run out. Rides the Root DR
+        // bucket with Frost Nova and Web. Rider: combat_core::
+        // entangling_roots_riders.
+        EntanglingRoots: (
+            name: "Entangling Roots",
+            class: Druid,
+            icon: "icons/abilities/spell_nature_stranglevines.jpg",
+            // The damage rider is not in the numeric fields, so it is stated here.
+            description: "Roots the target in place for 8 sec and deals 3 Nature damage every 3 sec. Breaks after 80 damage.",
+            cast_time: 1.5,
+            range: 30.0,
+            mana_cost: 40.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: Root,
+                duration: 8.0,
+                magnitude: 1.0,
+                break_on_damage: 80.0,  // Same as Frost Nova
+                compound: Some(EntanglingRoots),
+            )),
+            spell_school: Nature,
+        ),
+
+        // Cyclone (TBC): a cast incapacitate. The target cannot act, and is
+        // immune to damage AND healing while it spins. It never breaks on
+        // damage, no dispel takes it, and it diminishes on its own DR bucket.
+        Cyclone: (
+            name: "Cyclone",
+            class: Druid,
+            icon: "icons/abilities/spell_nature_earthbind.jpg",
+            cast_time: 1.5,
+            range: 20.0,
+            mana_cost: 45.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: Cyclone,
+                duration: 6.0,
+                magnitude: 1.0,
+                break_on_damage: -1.0, // never breaks on damage
+            )),
+            spell_school: Nature,
+        ),
+
+        // Travel Form: the escape shift. Shifting removes every root and snare
+        // on the Druid, speeds it up by 40%, makes it immune to Polymorph, and
+        // blocks all casting until it shifts back. The form lasts until the
+        // Druid leaves it (the duration is only a ceiling); leaving is free and
+        // costs no global cooldown. It changes neither the resource pool nor
+        // the kit. Effect: effects::travel_form.
+        TravelForm: (
+            name: "Travel Form",
+            class: Druid,
+            icon: "icons/abilities/ability_druid_travelform.jpg",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: TravelForm,
+                duration: 600.0,
+                magnitude: 1.4,  // movement speed multiplier
+            )),
+            spell_school: Nature,
+        ),
     }
 )

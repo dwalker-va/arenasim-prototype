@@ -174,7 +174,8 @@ pub fn get_next_fct_offset(state: &mut FloatingTextState) -> (f32, f32) {
 }
 
 /// Whether an aura type is an incapacitating CC (prevents all actions).
-/// Root does NOT count — it only prevents movement.
+/// Root does NOT count — it only prevents movement. Cyclone does: it is full
+/// loss of control.
 pub fn is_incapacitating(aura_type: &super::components::AuraType) -> bool {
     matches!(
         aura_type,
@@ -182,6 +183,7 @@ pub fn is_incapacitating(aura_type: &super::components::AuraType) -> bool {
             | super::components::AuraType::Fear
             | super::components::AuraType::Polymorph
             | super::components::AuraType::Incapacitate
+            | super::components::AuraType::Cyclone
     )
 }
 

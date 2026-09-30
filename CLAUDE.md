@@ -651,6 +651,14 @@ asks `ally_reach`, so it ends exactly where the cast becomes possible. Purge
 goes through `pre_cast_ok` and was always sight-gated. A no-op on
 obstacle-free maps (BasicArena stays byte-identical).
 
+**Travel Form escape (Druid)** — no RON knob. A shifted Druid is in ESCAPE for
+as long as it stays shifted (`evaluate_caster_healer_posture`'s `shifted`
+argument; the Shaman passes `false`): it runs from every visible threat inside
+`threat_intent_radius` and re-scores each `commit_window`, traced as
+`ShiftEscape` on entry and `CommitExpired` after. The shift and the shift out
+are the Druid AI's (`class_ai/druid.rs` — `shift_trigger`, `should_leave_form`);
+rules in `docs/design/wow-mechanics.md` (Travel Form).
+
 **Tangent steering (goal-directed pillar rounding)** — `map_geometry::steer_toward_goal`
 (pure, unit-tested; no RON knob). When a mover with a DESTINATION has the
 straight line to it blocked by an obstacle, it aims at the obstacle's TANGENT

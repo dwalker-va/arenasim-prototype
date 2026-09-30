@@ -142,6 +142,13 @@ pub fn totem_pulse_system(
             if totem_pos.distance(ally_transform.translation) > radius {
                 continue;
             }
+            // Nothing reaches a cycloned ally, a totem's pulse included.
+            if active_auras
+                .as_ref()
+                .is_some_and(|auras| auras.is_cycloned())
+            {
+                continue;
+            }
 
             if let Some(mut auras) = active_auras {
                 // Refresh the existing totem buff (match on type + stable name)
