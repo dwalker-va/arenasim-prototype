@@ -439,7 +439,6 @@ pub fn predicted_trap_springer(
     my_pos: Vec3,
     landing: Vec3,
 ) -> Option<Entity> {
-    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
     let armed = trap_armed_after(my_pos, landing);
     let landing = flat(landing);
 
@@ -449,33 +448,8 @@ pub fn predicted_trap_springer(
         .values()
         .filter(|e| e.team != my_team && e.is_alive)
     {
-        let start = flat(enemy.position);
-        let velocity = flat(enemy.velocity);
-        let speed = velocity.length();
-        let heading = velocity.normalize_or_zero();
-        // A pursuer stops at its preferred range of its target, as pursuit in
-        // `move_to_target` does: the closest approach along its heading, less
-        // that range. Heading away (a kiter), or with no target in view, it
-        // keeps going.
-        let stop = match enemy.pet_type {
-            Some(pet_type) => pet_type.preferred_range(),
-            None => enemy.class.preferred_range(),
-        };
-        let reach = enemy
-            .target
-            .and_then(|t| ctx.combatants.get(&t))
-            .map(|t| (flat(t.position) - start).dot(heading))
-            .filter(|along| *along > 0.0)
-            .map_or(f32::INFINITY, |along| (along - stop).max(0.0));
-        let steps = (TRAP_SPRING_WINDOW / SPRING_PREDICTION_STEP).round() as usize;
-        let first_inside = (0..=steps)
-            .map(|i| armed + i as f32 * SPRING_PREDICTION_STEP)
-            .find(|t| {
-                let at = start + heading * (speed * t).min(reach);
-                at.distance(landing) <= TRAP_TRIGGER_RADIUS
-            });
-        if let Some(t) = first_inside {
-            let key = (t, start.distance(landing), enemy.entity);
+        if let Some(t) = first_inside(ctx, enemy, landing, armed, TRAP_SPRING_WINDOW) {
+            let key = (t, flat(enemy.position).distance(landing), enemy.entity);
             if best.is_none_or(|b| (key.0, key.1) < (b.0, b.1)) {
                 best = Some(key);
             }
@@ -483,6 +457,86 @@ pub fn predicted_trap_springer(
     }
     best.map(|(_, _, e)| e)
 }
+
+fn flat(v: Vec3) -> Vec3 {
+    Vec3::new(v.x, 0.0, v.z)
+}
+
+/// The first moment in `[from, from + window]` (seconds from now, sampled at
+/// `SPRING_PREDICTION_STEP`) at which `enemy`, extrapolated along its
+/// estimated [`velocity`](super::CombatantInfo::velocity), is inside the
+/// trigger radius of a trap at `landing` (planar). A pursuer stops at its
+/// preferred range of its own target, as pursuit in `move_to_target` does: the
+/// closest approach along its heading, less that range. Heading away (a
+/// kiter), or with no target in view, it keeps going.
+fn first_inside(
+    ctx: &CombatContext,
+    enemy: &super::CombatantInfo,
+    landing: Vec3,
+    from: f32,
+    window: f32,
+) -> Option<f32> {
+    let start = flat(enemy.position);
+    let velocity = flat(enemy.velocity);
+    let speed = velocity.length();
+    let heading = velocity.normalize_or_zero();
+    let stop = match enemy.pet_type {
+        Some(pet_type) => pet_type.preferred_range(),
+        None => enemy.class.preferred_range(),
+    };
+    let reach = enemy
+        .target
+        .and_then(|t| ctx.combatants.get(&t))
+        .map(|t| (flat(t.position) - start).dot(heading))
+        .filter(|along| *along > 0.0)
+        .map_or(f32::INFINITY, |along| (along - stop).max(0.0));
+    let steps = (window / SPRING_PREDICTION_STEP).round() as usize;
+    (0..=steps)
+        .map(|i| from + i as f32 * SPRING_PREDICTION_STEP)
+        .find(|t| {
+            let at = start + heading * (speed * t).min(reach);
+            at.distance(landing) <= TRAP_TRIGGER_RADIUS
+        })
+}
+
+/// One of the Hunter's own Freezing Traps still waiting to spring — in flight
+/// or on the ground — as the ability AI sees it: where it lands and how many
+/// seconds until it arms (`0.0` once armed). Built each frame from the live
+/// `Trap` / `TrapLaunchProjectile` entities, so it is never stale.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LiveTrap {
+    pub position: Vec3,
+    pub armed_in: f32,
+}
+
+/// Would one of the Hunter's own live Freezing Traps catch `target` before
+/// damage the Hunter starts now lands on it, `lands_after` seconds from now?
+/// The trap breaks on any damage, so that damage would free the enemy it just
+/// froze: an Aimed Shot begun as the enemy runs into the trap lands a moment
+/// after it springs. True when `target`, extrapolated as
+/// [`predicted_trap_springer`] extrapolates a lane throw's springer, is inside
+/// a trap's trigger radius at some moment between the trap arming and the
+/// damage landing. Damage that lands before a trap arms cannot break it.
+/// (An enemy the trap already holds is the `pre_cast_ok` friendly-CC guard's.)
+pub fn own_trap_catches_first(
+    ctx: &CombatContext,
+    own_traps: &[LiveTrap],
+    target: Entity,
+    lands_after: f32,
+) -> bool {
+    let Some(enemy) = ctx.combatants.get(&target).filter(|e| e.is_alive) else {
+        return false;
+    };
+    own_traps.iter().any(|trap| {
+        let from = trap.armed_in.max(0.0);
+        lands_after > from
+            && first_inside(ctx, enemy, flat(trap.position), from, lands_after - from).is_some()
+    })
+}
+
+/// Trace note: a damaging shot held because the Hunter's own Freezing Trap
+/// would catch its target before it lands ([`own_trap_catches_first`]).
+pub const OWN_TRAP_WOULD_BREAK: &str = "own Freezing Trap would catch the target before it lands";
 
 /// Would the Hunter's own team break a Freezing Trap on `victim`? The trap
 /// breaks on any damage, and a teammate does not hold fire for it: true when a

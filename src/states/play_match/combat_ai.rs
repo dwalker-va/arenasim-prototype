@@ -9,6 +9,7 @@ use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
 use super::class_ai;
 use super::components::*;
+use super::constants::{TRAP_ARM_DELAY, TRAP_LAUNCH_SPEED};
 use super::match_config;
 use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset, log_ability_use};
 use crate::combat::log::CombatLog;
@@ -32,6 +33,10 @@ pub struct AbilityDispatchExtras<'w, 's> {
     /// Which AI implementation this match runs under. `Option` so a scene that
     /// never inserted it falls back to `Legacy` rather than panicking.
     ai_profile: Option<Res<'w, super::ai_profile::AiProfiles>>,
+    /// Freezing Traps on the ground and in flight, so a Hunter's damage AI can
+    /// see its own traps that have not sprung yet.
+    traps: Query<'w, 's, (&'static Trap, &'static Transform)>,
+    trap_launches: Query<'w, 's, &'static TrapLaunchProjectile>,
 }
 
 pub fn acquire_targets(
@@ -785,6 +790,35 @@ pub fn decide_abilities(
         }
     }
 
+    // Per-Hunter list of its own Freezing Traps that have not sprung — landed
+    // (arming or armed) or still in flight — with the seconds until each arms.
+    let mut own_freezing_traps: std::collections::BTreeMap<
+        Entity,
+        Vec<class_ai::hunter_dip::LiveTrap>,
+    > = std::collections::BTreeMap::new();
+    for (trap, transform) in extras.traps.iter() {
+        if trap.trap_type == TrapType::Freezing && !trap.triggered {
+            own_freezing_traps.entry(trap.owner).or_default().push(
+                class_ai::hunter_dip::LiveTrap {
+                    position: transform.translation,
+                    armed_in: trap.arm_timer.max(0.0),
+                },
+            );
+        }
+    }
+    for launch in extras.trap_launches.iter() {
+        if launch.trap_type == TrapType::Freezing {
+            let flight =
+                (launch.total_distance - launch.distance_traveled).max(0.0) / TRAP_LAUNCH_SPEED;
+            own_freezing_traps.entry(launch.owner).or_default().push(
+                class_ai::hunter_dip::LiveTrap {
+                    position: launch.landing_position,
+                    armed_in: flight + TRAP_ARM_DELAY,
+                },
+            );
+        }
+    }
+
     // CombatantInfo is a per-frame snapshot. Mutations to Combatant components
     // during class AI dispatch are not reflected in other entities' views.
     // Safe because each entity is dispatched at most once per frame.
@@ -1336,6 +1370,9 @@ pub fn decide_abilities(
                     &mut instant_attacks,
                     dip_plan,
                     &movement_config.hunter.weights,
+                    own_freezing_traps
+                        .get(&entity)
+                        .map_or(&[][..], Vec::as_slice),
                     &mut decision_trace,
                 )
             }

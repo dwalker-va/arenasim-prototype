@@ -544,6 +544,73 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
     );
 }
 
+/// AS-179 — the Hunter's own shot does not break its own trap.
+///
+/// Hunter+Priest vs Warlock+Rogue: once the Priest and the Warlock are dead the
+/// lane trap goes on the Rogue, the Hunter's own target — allowed, because a
+/// Hunter alone holds fire on a trapped enemy. But an Aimed Shot begun as the
+/// Rogue ran the lane used to land just after the trap sprang and break it
+/// (seeds 3, 8 and 11: the trap broke from the Hunter's own Aimed Shot 1.6-2.5s
+/// in). The Hunter now holds a shot that would land after its own trap catches
+/// the target. Pinned: in each seed the trap springs on the Rogue, is never
+/// broken, and the trace shows the hold firing.
+#[test]
+fn the_hunters_own_shot_does_not_break_its_trap() {
+    use arenasim::states::play_match::class_ai::hunter_dip::OWN_TRAP_WOULD_BREAK;
+
+    for seed in [3u64, 8, 11] {
+        let mut cfg = config(&["Hunter", "Priest"], &["Warlock", "Rogue"], seed);
+        cfg.max_duration_secs = 60.0;
+        let (events, log) = run_trace_and_log(cfg);
+        let sprung = log
+            .lines()
+            .filter(|l| l.contains("Freezing Trap triggers on Team 2 Rogue"))
+            .count();
+        assert!(sprung >= 1, "seed {seed}: no trap sprang on the Rogue");
+        let broke: Vec<&str> = log
+            .lines()
+            .filter(|l| l.contains("Freezing Trap broke from damage"))
+            .collect();
+        assert!(broke.is_empty(), "seed {seed}: the trap broke: {broke:?}");
+        let held = hunter_trap_events(&events)
+            .flat_map(|v| v["candidates"].as_array().cloned().unwrap_or_default())
+            .filter(|c| {
+                c.pointer("/reason/PreconditionUnmet/note")
+                    .and_then(|n| n.as_str())
+                    == Some(OWN_TRAP_WOULD_BREAK)
+            })
+            .count();
+        assert!(
+            held > 0,
+            "seed {seed}: the own-trap hold never fired, so the pass says nothing"
+        );
+    }
+}
+
+/// AS-179 — against a lone Priest the opener is Serpent Sting, and the Hunter
+/// wins.
+///
+/// Nothing a Priest does can stop an Aimed Shot, so there is time for both
+/// and the sting goes first: it ticks a GCD longer, and the Priest spends its
+/// early GCDs dispelling it rather than Mind Blasting the Hunter.
+/// With Aimed Shot first the Hunter lost these seeds (3, 7 and 13 of the 7 in
+/// 50 it lost).
+#[test]
+fn against_a_lone_priest_the_opener_is_serpent_sting() {
+    for seed in [3u64, 7, 13] {
+        let (events, log) = run_trace_and_log(config(&["Hunter"], &["Priest"], seed));
+        let opener = hunter_trap_events(&events)
+            .filter_map(|v| v.pointer("/outcome/ability").and_then(|a| a.as_str()))
+            .find(|a| *a == "AimedShot" || *a == "SerpentSting");
+        assert_eq!(opener, Some("SerpentSting"), "seed {seed}");
+        assert!(
+            log.lines()
+                .any(|l| l.contains("Team 2 Priest #1 has been eliminated")),
+            "seed {seed}: the Hunter did not kill the Priest"
+        );
+    }
+}
+
 /// AS-125 — with the Rogue on the Hunter, the trap goes on the enemy Priest.
 ///
 /// Hunter+Priest vs Rogue+Priest: the Hunter is killing the Priest when the
