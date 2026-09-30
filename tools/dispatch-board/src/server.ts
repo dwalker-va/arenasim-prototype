@@ -270,7 +270,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       return;
     }
 
-    const cardMatch = /^\/api\/cards\/([^/]+)(?:\/(move|update|answer|delete|release|ruling))?$/.exec(path);
+    const cardMatch = /^\/api\/cards\/([^/]+)(?:\/(move|update|answer|delete|release|ruling|cancel))?$/.exec(path);
     if (req.method === "GET" && cardMatch && !cardMatch[2]) {
       send(res, 200, board.getCard(decodeURIComponent(cardMatch[1])));
       return;
@@ -340,6 +340,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           case "ruling":
             // An append, like the drawer's other appends: numbers are the orchestrator's (MCP).
             send(res, 200, board.recordRuling(id, { text: b.text }, meta));
+            return;
+          case "cancel":
+            send(res, 200, board.cancelCard(id, b.reason, b.expected_version, meta));
             return;
           case "release": {
             // The user clearing a claim they judge stale (no orchestrator to

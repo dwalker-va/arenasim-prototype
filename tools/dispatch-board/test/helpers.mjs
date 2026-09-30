@@ -36,7 +36,8 @@ export function tempBoard(t) {
  */
 export function seed(board, { role = "engineer", column = "backlog", pr = null, agent } = {}) {
   let c = board.createCard({ title: "t", body: "b", role, pr }, { actor: "seed" });
-  if (column !== "backlog") c = board.moveCard(c.id, column, c.version, { actor: "seed" });
+  // Archived means shipped: a card gets there with its release tag.
+  if (column !== "backlog") c = board.moveCard(c.id, column, c.version, { actor: "seed", ...(column === "archived" ? { patch: { released: "v0.0.1" } } : {}) });
   if (agent === "working" || agent === "done") c = board.claimCard(c.id, "Seeded-Agent", { actor: "seed" });
   if (agent === "done") c = board.finishClaim(c.id, { actor: "seed" });
   return c;

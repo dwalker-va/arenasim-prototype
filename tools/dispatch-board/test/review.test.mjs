@@ -292,3 +292,71 @@ test("board page: the milestone filter, the Merged column, a card's milestone fi
   await until("the milestone", async () => (await call(client, "list_milestones", {})).value.some((m) => m.name === "0.8"));
   await until("the filter to follow it", () => doc.getElementById("msel").value === "0.8");
 });
+
+/** Drop card `id` on column `col` as a browser drag would: the page reads the id from dataTransfer. */
+function drop(pg, id, col) {
+  const ev = new pg.dom.window.Event("drop", { bubbles: true, cancelable: true });
+  ev.dataTransfer = { getData: () => id };
+  pg.doc.querySelector(`.col[data-col="${col}"]`).dispatchEvent(ev);
+}
+
+test("board page: a drag into Merged or Archived is refused with the reason, and nothing is written", async (t) => {
+  const d = await spawnDaemon(t);
+  const client = await mcpClient(t, d.base);
+  // One card with no PR (the attach-PR dialog must not open first), one in review with its PR.
+  let bare = (await call(client, "create_card", { title: "no pr", role: "engineer", ...orch })).value;
+  bare = (await call(client, "move_card", { id: bare.id, column: "in_progress", expected_version: bare.version, ...orch })).value;
+  const rev = (await call(client, "create_card", { title: "in review", role: "engineer", column: "review", pr: PR(3), ...orch })).value;
+  const pg = await openDom(t, d.base, uiPage(), "/", (doc) => doc.querySelector(".card"));
+
+  for (const c of [bare, rev]) {
+    drop(pg, c.id, "merged");
+    assert.equal(pg.status(), "Merged is recorded by the orchestrator when it merges the PR (mark_merged)");
+    assert.equal(pg.doc.getElementById("pr-url"), null, "the attach-PR dialog opened for a move the board refuses anyway");
+  }
+  // Archived shows only once something is in it: a shipped card puts it on the page.
+  let shipped = (await call(client, "create_card", { title: "shipped", role: "engineer", ...orch })).value;
+  shipped = (await call(client, "move_card", { id: shipped.id, column: "archived", expected_version: shipped.version, patch: { released: "v0.6.0" }, ...orch })).value;
+  pg.nudge();
+  await until("the archived toggle", () => pg.doc.getElementById("archbtn"));
+  pg.doc.getElementById("archbtn").click();
+  drop(pg, bare.id, "archived");
+  assert.match(pg.status(), /^Archived is where a release puts shipped cards — to retire a card that will not ship, open it and use Cancel card$/);
+  await sleep(150);
+  for (const c of [bare, rev]) {
+    const now = (await call(client, "get_card", { id: c.id })).value;
+    assert.deepEqual([now.column, now.version], [c.column, c.version], "a refused drag wrote to the board");
+  }
+});
+
+test("board page: Cancel card retires a card from the drawer, and the review page lists it as cancelled", async (t) => {
+  const d = await spawnDaemon(t);
+  d.t = t;
+  const { client } = await milestoneWithCards(d);
+  const c = (await call(client, "create_card", { title: "dropped idea", role: "engineer", milestone: "0.7", ...orch })).value;
+  const pg = await openDom(t, d.base, uiPage(), "/?m=0.7", (doc) => doc.querySelector(`.card[data-id="${c.id}"]`));
+  const { doc } = pg;
+  doc.querySelector(`.card[data-id="${c.id}"]`).click();
+  await until("the drawer's Cancel", () => doc.getElementById("d-cancelbtn"));
+  assert.equal([...doc.getElementById("d-col").options].some((o) => o.value === "archived"), false, "the column picker offers Archived for a live card");
+  doc.getElementById("d-cancelbtn").click(); // no reason yet: asks for one
+  assert.equal(pg.status(), "say why the card will not ship");
+  doc.getElementById("d-cancel").value = "superseded by AS-190";
+  doc.getElementById("d-cancelbtn").click(); // first click asks
+  assert.equal(doc.getElementById("d-cancelbtn").textContent, "Confirm: cancel card");
+  assert.equal(doc.getElementById("d-cancel").value, "superseded by AS-190", "the reason survived the confirm redraw");
+  assert.equal((await call(client, "get_card", { id: c.id })).value.column, "backlog");
+  doc.getElementById("d-cancelbtn").click();
+  await until("the cancel", () => /cancelled/.test(pg.status()));
+  const now = (await call(client, "get_card", { id: c.id })).value;
+  assert.deepEqual([now.column, now.cancelled.reason, now.cancelled.by], ["archived", "superseded by AS-190", "board"]);
+  await until("the archived toggle", () => doc.getElementById("archbtn"));
+  doc.getElementById("archbtn").click();
+  await until("the cancelled tag", () => /cancelled/.test(doc.querySelector(`.card[data-id="${c.id}"]`)?.textContent ?? ""));
+
+  const rv = await openDom(t, d.base, reviewPage(), "/milestones/0.7", (doc2) => doc2.querySelector("#changed"));
+  assert.match(rv.doc.getElementById("cancelled").textContent, new RegExp(`Cancelled — not shipped[\\s\\S]*${c.id} dropped idea — superseded by AS-190`));
+  const work = [...rv.doc.querySelectorAll("#changed .group:not(#cancelled)")].map((g) => g.textContent).join("\n");
+  assert.match(work, /Warriors start at 0 rage/);
+  assert.doesNotMatch(work, /dropped idea/, "the cancelled card is listed with the work");
+});

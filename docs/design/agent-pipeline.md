@@ -91,6 +91,7 @@ the protocol reads as it always has:
   "question": {"text": "...", "answer": "..."} | null,
   "agent": {"status": "working | done", "started": "ISO", "finished": "ISO", "name": "Engineer-AS-1"} | null,
   "released": "v0.2.0" | absent (release tag; set by the orchestrator when a release bundles the card),
+  "cancelled": {"t": "ISO", "by": "user", "reason": "superseded by AS-190"} | absent (set by cancel_card only),
   "milestone": "0.7" | null | absent, "iteration": 1 | 2 | ...,
   "area": "combat | visuals | ai | ui | tooling" | null,
   "summary": "<what changed, in a player's words>", "human_testing": "<the PR's steps, one per line>",
@@ -109,7 +110,7 @@ Stored as four tables:
 |---|---|
 | `cards` | one row per card: the document above minus `activity`, its `version`, and `column`/`role` as indexed generated columns. Every write bumps `version` by one. |
 | `activity` | one row per activity entry, **append-only** (triggers refuse UPDATE and DELETE). |
-| `events` | one row per write — `cursor` (monotonic), `t`, `actor`, `kind` (`created`, `moved`, `edited`, `answered`, `claimed`, `claim_released`, `claim_finished`, `activity`, `body_appended`, `deleted`, `ruling`, `merged`, `milestone_created`, `milestone_updated`, `milestone_sweep`, `milestone_closed`, `review_submitted`, `migrated`), `card`, `data` (a milestone's name in `data.milestone`). The wake-up feed. |
+| `events` | one row per write — `cursor` (monotonic), `t`, `actor`, `kind` (`created`, `moved`, `edited`, `answered`, `claimed`, `claim_released`, `claim_finished`, `activity`, `body_appended`, `deleted`, `ruling`, `merged`, `cancelled`, `milestone_created`, `milestone_updated`, `milestone_sweep`, `milestone_closed`, `review_submitted`, `migrated`), `card`, `data` (a milestone's name in `data.milestone`). The wake-up feed. |
 | `meta` | `next_id` and the id prefix — id allocation is the daemon's, so no caller keeps `nextId` — the board id, and `schema` (2; the daemon refuses any other until `migrate` has run). |
 | `milestones` | one row per milestone: `name`, `status` (`open`, `in_review`, `released`), `created`, `released_at`, `tag`, `release_url`, `review_sha`, `sweep`, `submissions`, `first_id`/`end_id` (the card ids issued while it was open), and its own `version`. |
 | `review_items` | one row per review-page checklist tick or feedback comment, keyed by milestone and item, each with its own `version`. |
@@ -162,7 +163,7 @@ schema 1 database, and importing a schema 1 export applies the same move.
 
 **Reading it costs little.** `list_cards` returns **summaries** — id, title,
 column, role, priority, agent, pr, worktree, links, updated, released,
-milestone, iteration, area, version — never a body or activity, and leaves
+cancelled, milestone, iteration, area, version — never a body or activity, and leaves
 `archived` out unless asked; `milestone` and `iteration` filter it. `get_card` is the
 one call that returns a body, and `activity_limit` trims its log. That is the
 context fix: the artifact put ~15k tokens of page into the orchestrator on
@@ -178,7 +179,20 @@ every read.
 | `review` | PR open, awaiting the **Tester's** verification | orchestrator spawns the Tester on entry; APPROVE → the orchestrator merges the PR and `mark_merged` moves the card to `merged`; REJECT → back to `in_progress` with findings |
 | `merged` | Tester-approved **and merged to `main`**, awaiting its milestone's review | none per card — the milestone review is the user's gesture (see The milestone loop) |
 | `done` | merged, and its milestone **closed** (the user approved it) | bundled into the next release (see Release flow) |
-| `archived` | shipped in a release (or was that release's trigger card); `released` holds the tag | none — terminal |
+| `archived` | shipped in a release (or was that release's trigger card), `released` holding the tag — **or** cancelled: retired with `cancel_card`, never shipped, `cancelled` holding why | none — terminal |
+
+**Retiring a card that will not ship.** When the user drops a card, or it is
+superseded, `cancel_card(id, reason)` — the drawer's *Cancel card* — moves it to
+`archived` carrying `cancelled` instead of a release tag. It never reads as
+shipped: the milestone review lists it under *Cancelled — not shipped* and
+nowhere else, `close_milestone` neither waits on it nor returns it, and no
+release bundles it. It is terminal; to take the work up again, file a new card.
+The daemon refuses it for a card whose merge is recorded (that work is on `main`
+and ships with its milestone) or that carries a release tag, and for a card
+under a working claim — stop the agent and `release_claim` first. If the card
+has an open PR, the orchestrator closes it (`gh pr close`); the card keeps `pr`
+as its record. Prefer cancelling to deleting: a deleted card leaves the board
+and its milestone's review with no trace of why.
 
 **The `agent` field is the dedup guard, and the daemon enforces it.** Any
 gesture that moves a card *into* `in_progress` (drag, edit, question answered —
@@ -236,7 +250,7 @@ core-combat card to run serially.
   `get_milestone`) builds itself from each card's structured fields, so the
   orchestrator never writes it by hand: *What changed* (each finished card's
   `summary`, grouped by `area`, with its card and PR), *What to check* (every
-  line of every finished card's `human_testing` as one checklist, grouped by
+  line of every finished, uncancelled card's `human_testing` as one checklist, grouped by
   area for one sitting on one build, naming the `review_sha` or tag it applies
   to), *Your decisions* (every `ruling`, dated, with its numbers), *Balance*
   (the milestone sweep, and which cards deferred to it), *Known gaps and
@@ -260,6 +274,8 @@ whether an impact feels right, whether a joke lands). It is the *inverse* of the
 Proof/Testing section: that one lists what passed, this one lists what was never
 verified. "Nothing needs human testing" is written out rather than omitted, so a
 genuinely empty eyeball pass is distinguishable from an author who never considered one.
+A qualifying clause may say why ("— headless-only change"), but one that still asks for
+something ("…, but watch the glow") makes the line a step, never a nothing-to-check.
 The Engineer writes it; the Tester verifies the claim before APPROVE; the orchestrator
 copies it into the card's `human_testing`, one step per line, which is how it reaches
 the review checklist. An explicit "Nothing needs human testing" is copied as written:
@@ -275,9 +291,14 @@ lists, and they are append-only.
 
 **Board behaviour:** two columns keep their meaning for every writer, the web
 UI's drag included. A card enters `merged` only through `mark_merged` (a plain
-move is refused unless the card's merge is already recorded), and a work card on
+move is refused unless the card's merge is already recorded); a work card on
 an unreleased milestone reaches `done` only through `close_milestone` (pm cards,
-and cards on no milestone or a released one, move freely). The PR gate AS-4 added
+and cards on no milestone or a released one, move freely), and a work card
+already in `done` cannot be put on an unreleased milestone, where that
+milestone's release would list it without its review (to finish a card off its
+milestone, move it to `done` with `milestone: null` in the move's patch); and a
+card enters `archived` only with its release tag (`released`), or through
+`cancel_card`. The PR gate AS-4 added
 covers `review` and `merged`, and the daemon enforces it for every writer: a non-pm card cannot enter either column
 without its own PR — `pr`, a pull-request URL (a `move_card` may set it in its
 own `patch`) — and a card already there cannot have it cleared. Reference `links`
@@ -526,7 +547,9 @@ versioned write passes the `version` of the card as you last read it — from
      one `mark_merged(id, pr: {url}, merge_sha, expected_version, activity:
      <the FINDINGS note>, by: "tester")`: the card moves to `merged` and the
      Tester's claim closes in the same write, so an approved card never sits in
-     `review` where step 3 would hand it back to a Tester. The Engineer and
+     `review` where step 3 would hand it back to a Tester. A card on no
+     milestone has no review to wait for: move it `merged` → `done` in the same
+     wake, so the next release bundles it. The Engineer and
      Tester contracts still forbid *them* from merging. If the PR no longer
      merges cleanly (`main` moved under it), do not merge: `move_card(id,
      "in_progress", append: {heading: "Merge conflict — <date>", text: "PR #N no
