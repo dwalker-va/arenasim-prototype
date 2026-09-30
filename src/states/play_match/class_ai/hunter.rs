@@ -1361,14 +1361,7 @@ pub(crate) fn spawn_trap(
     } else {
         commands.spawn((
             Transform::from_translation(landing),
-            Trap {
-                trap_type,
-                owner_team,
-                owner,
-                arm_timer: TRAP_ARM_DELAY,
-                trigger_radius: TRAP_TRIGGER_RADIUS,
-                triggered: false,
-            },
+            Trap::placed(trap_type, owner_team, owner),
             PlayMatchEntity,
         ));
     }

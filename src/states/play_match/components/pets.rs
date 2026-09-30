@@ -125,7 +125,8 @@ impl TrapType {
 }
 
 /// Component for Hunter traps placed on the ground.
-/// Traps have an arming delay, then trigger on enemy proximity.
+/// Traps have an arming delay, then trigger on enemy proximity, and expire
+/// unsprung after `TRAP_LIFETIME` — whether or not their Hunter still lives.
 #[derive(Component)]
 pub struct Trap {
     /// Which type of trap this is
@@ -140,6 +141,25 @@ pub struct Trap {
     pub trigger_radius: f32,
     /// Whether this trap has been triggered (pending despawn)
     pub triggered: bool,
+    /// Seconds left before the trap expires unsprung. Counts down from
+    /// landing, through the arming delay; at 0 the trap is removed.
+    pub lifetime_remaining: f32,
+}
+
+impl Trap {
+    /// A trap as it lands: unarmed for `TRAP_ARM_DELAY`, with the standard
+    /// trigger radius and the full `TRAP_LIFETIME` ahead of it.
+    pub fn placed(trap_type: TrapType, owner_team: u8, owner: Entity) -> Self {
+        Self {
+            trap_type,
+            owner_team,
+            owner,
+            arm_timer: crate::states::play_match::constants::TRAP_ARM_DELAY,
+            trigger_radius: crate::states::play_match::constants::TRAP_TRIGGER_RADIUS,
+            triggered: false,
+            lifetime_remaining: crate::states::play_match::constants::TRAP_LIFETIME,
+        }
+    }
 }
 
 /// A trap that has been lobbed and is traveling through the air to its landing position.

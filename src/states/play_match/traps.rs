@@ -43,6 +43,7 @@ pub fn freezing_trap_aura(owner: Entity) -> Aura {
 }
 
 /// Single system handling the full trap lifecycle:
+/// 0. Decrement lifetime_remaining, expire (log + despawn) the trap at 0
 /// 1. Decrement arm_timer, consider armed when timer hits 0
 /// 2. For armed traps: check proximity against enemy combatants and pets
 /// 3. On trigger: apply effect (Incapacitate or spawn SlowZone), despawn trap
@@ -65,6 +66,27 @@ pub fn trap_system(
     for (trap_entity, mut trap, trap_transform) in traps.iter_mut() {
         // Skip already triggered traps
         if trap.triggered {
+            continue;
+        }
+
+        // Phase 0: Lifetime. A trap exists for `TRAP_LIFETIME` from landing and
+        // then expires unsprung. Its Hunter's death does not end it (Classic:
+        // see `TRAP_LIFETIME`), so this timer is the only thing that does.
+        trap.lifetime_remaining -= dt;
+        if trap.lifetime_remaining <= 0.0 {
+            let owner_name = combatants
+                .get(trap.owner)
+                .map(|(_, c, _)| combat_log_id_for(c, pet_query.get(trap.owner).ok()))
+                .unwrap_or_else(|_| format!("Team {}", trap.owner_team));
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!(
+                    "[TRAP] {}'s {} expires unsprung",
+                    owner_name,
+                    trap.trap_type.name()
+                ),
+            );
+            commands.entity(trap_entity).despawn();
             continue;
         }
 
@@ -383,14 +405,7 @@ pub fn move_trap_launch_projectiles(
             // Arrived — spawn Trap at landing position, despawn projectile
             commands.spawn((
                 Transform::from_translation(proj.landing_position),
-                Trap {
-                    trap_type: proj.trap_type,
-                    owner_team: proj.owner_team,
-                    owner: proj.owner,
-                    arm_timer: TRAP_ARM_DELAY,
-                    trigger_radius: TRAP_TRIGGER_RADIUS,
-                    triggered: false,
-                },
+                Trap::placed(proj.trap_type, proj.owner_team, proj.owner),
                 PlayMatchEntity,
             ));
             let trap_name = proj.trap_type.name();

@@ -226,6 +226,16 @@ pub const TRAP_ARM_DELAY: f32 = 1.5;
 /// Radius around an armed trap that triggers it when an enemy enters.
 pub const TRAP_TRIGGER_RADIUS: f32 = 5.0;
 
+/// How long a placed trap exists before it expires unsprung, in seconds,
+/// counted from the moment it lands (arming delay included).
+///
+/// Classic's rule, from the Freezing Trap (1499) and Frost Trap (13809)
+/// tooltips: "Trap will exist for 1 min." The trap is NOT tied to its Hunter's
+/// life: in the Classic server (cmangos-classic `Unit::SetDeathState`) death
+/// unsummons totems but leaves the unit's game objects, traps included, to run
+/// out their own timer, so a dead Hunter's trap still springs.
+pub const TRAP_LIFETIME: f32 = 60.0;
+
 /// Duration (seconds) of the Weakened Soul marker Power Word: Shield leaves on
 /// the ally it shields, during which that ally cannot be shielded again.
 ///
