@@ -404,17 +404,16 @@ impl Plugin for StatesPlugin {
         // The victory choreography: the only thing that moves a combatant once
         // the match is decided and the sim is frozen. On the sim clock, so it
         // plays out the same at any display rate (`play_match::celebration`).
+        // `distributive_run_if` gives each system its own copy of the gate,
+        // exactly as two separately registered systems would have.
         .add_systems(
             FixedUpdate,
-            play_match::plan_celebration
-                .after(play_match::check_match_end)
-                .run_if(in_state(GameState::PlayMatch)),
-        )
-        .add_systems(
-            FixedUpdate,
-            play_match::step_celebration
-                .after(play_match::plan_celebration)
-                .run_if(in_state(GameState::PlayMatch)),
+            (
+                play_match::plan_celebration.after(play_match::check_match_end),
+                play_match::step_celebration,
+            )
+                .chain()
+                .distributive_run_if(in_state(GameState::PlayMatch)),
         )
         // Weapon-swing signal consumption is graphical-only but must run IN
         // the sim schedule (same rationale as `spawn_projectile_visuals`

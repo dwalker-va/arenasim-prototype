@@ -24,8 +24,9 @@
 mod common;
 
 use common::source_audit::{
-    add_systems_blocks, expanded_param_types, find_fn_body, load_sources, pub_fn_signatures,
-    rel_display, repo_path, states_plugin_build, SourceFile, SystemParamBundles, TypeAliases,
+    add_systems_blocks, blank_comments_and_strings, expanded_param_types, find_fn_body,
+    load_sources, pub_fn_signatures, rel_display, repo_path, states_plugin_build, SourceFile,
+    SystemParamBundles, TypeAliases,
 };
 use regex::Regex;
 use std::collections::BTreeSet;
@@ -52,28 +53,50 @@ const ALLOWLIST: &[(&str, &str)] = &[
     ),
 ];
 
+/// A candidate system: its name, and where it is defined.
+type Candidate = (String, PathBuf, usize);
+
 #[test]
 fn audit_combat_system_registration() {
     let core_registered =
         extract_registered_in_function(SYSTEMS_FILE_REL, "add_core_combat_systems")
-            .expect("failed to extract core-registered set from systems.rs");
+            .unwrap_or_else(|e| panic!("reading add_core_combat_systems: {e}"));
     let graphical_registered = extract_registered_in_states_plugin_build()
-        .expect("failed to extract graphical-registered set from states/mod.rs");
+        .unwrap_or_else(|e| panic!("reading StatesPlugin::build: {e}"));
     let candidates =
         walk_play_match_fns().expect("failed to walk play_match for candidate pub fn items");
 
-    let allowlist: BTreeSet<&str> = ALLOWLIST.iter().map(|(name, _)| *name).collect();
-
-    let mut violations: Vec<(String, PathBuf, usize)> = Vec::new();
-    for (name, path, line) in &candidates {
-        if core_registered.contains(name.as_str())
-            || graphical_registered.contains(name.as_str())
-            || allowlist.contains(name.as_str())
-        {
-            continue;
-        }
-        violations.push((name.clone(), path.clone(), *line));
+    // Every set the verdict rests on actually read something: a named member
+    // of each, not a size floor. A reader that silently came back empty would
+    // otherwise pass (no candidates) or fail for the wrong reason.
+    let candidate_names: BTreeSet<&str> = candidates.iter().map(|(n, ..)| n.as_str()).collect();
+    for (set, label, member) in [
+        (&candidate_names, "candidates", "decide_abilities"),
+        (&candidate_names, "candidates", "plan_celebration"),
+    ] {
+        assert!(set.contains(member), "{label} must include `{member}`");
     }
+    for (set, label, member) in [
+        (
+            &core_registered,
+            "add_core_combat_systems",
+            "decide_abilities",
+        ),
+        (
+            &graphical_registered,
+            "StatesPlugin::build",
+            "plan_celebration",
+        ),
+        (
+            &graphical_registered,
+            "StatesPlugin::build",
+            "step_celebration",
+        ),
+    ] {
+        assert!(set.contains(member), "{label} must register `{member}`");
+    }
+
+    let violations = unregistered(&candidates, &[&core_registered, &graphical_registered]);
 
     if !violations.is_empty() {
         let mut msg = String::new();
@@ -99,108 +122,196 @@ fn audit_combat_system_registration() {
     }
 }
 
+/// The candidates no registered set and no ALLOWLIST entry accounts for.
+fn unregistered<'a>(
+    candidates: &'a [Candidate],
+    registered: &[&BTreeSet<String>],
+) -> Vec<&'a Candidate> {
+    let allowlist: BTreeSet<&str> = ALLOWLIST.iter().map(|(name, _)| *name).collect();
+    candidates
+        .iter()
+        .filter(|(name, ..)| {
+            !allowlist.contains(name.as_str()) && !registered.iter().any(|set| set.contains(name))
+        })
+        .collect()
+}
+
 // ---- registered-set extraction ----
 
 fn extract_registered_in_function(
     rel_path: &str,
     fn_name: &str,
-) -> std::io::Result<BTreeSet<String>> {
+) -> Result<BTreeSet<String>, String> {
     let file = read_one(rel_path)?;
     let body = find_fn_body(&file.code, fn_name).unwrap_or_default();
-    Ok(collect_registered_identifiers(&body, &file.code))
+    collect_registered_identifiers(&body, &file.code)
 }
 
-fn extract_registered_in_states_plugin_build() -> std::io::Result<BTreeSet<String>> {
+fn extract_registered_in_states_plugin_build() -> Result<BTreeSet<String>, String> {
     let file = read_one(STATES_MOD_FILE_REL)?;
     let build = states_plugin_build(&file.code).unwrap_or_default();
-    Ok(collect_registered_identifiers(&build, &file.code))
+    collect_registered_identifiers(&build, &file.code)
 }
 
-fn read_one(rel_path: &str) -> std::io::Result<SourceFile> {
-    SourceFile::read(&repo_path(rel_path))
+fn read_one(rel_path: &str) -> Result<SourceFile, String> {
+    SourceFile::read(&repo_path(rel_path)).map_err(|e| format!("{rel_path}: {e}"))
 }
 
-const SCHEDULE_AND_KEYWORDS: &[&str] = &[
-    "chain",
-    "in_set",
-    "after",
-    "before",
-    "run_if",
-    "in_state",
-    "apply_deferred",
-    "OnEnter",
-    "OnExit",
-    "Update",
-    "FixedUpdate",
-    "Startup",
-    "PreUpdate",
-    "PostUpdate",
-    "PreStartup",
-    "PostStartup",
-    "GameState",
-    "Schedule",
-    "self",
-    "app",
-    "let",
-    "if",
-    "else",
-    "match",
-    "for",
-    "while",
-    "loop",
-    "return",
-    "fn",
-    "use",
-    "mut",
-    "ref",
-    "true",
-    "false",
-    "Some",
-    "None",
-    "Ok",
-    "Err",
-];
-
-/// Within a function body, scan every `.add_systems(...)` call and extract
-/// every snake_case identifier registered. Handles three patterns:
-///   1. `.add_systems(SCHEDULE, single_system)` — one system
-///   2. `.add_systems(SCHEDULE, (a, b, c).chain())` — tuple of systems
-///   3. `.add_systems(SCHEDULE, (a, b.after(x), c).chain())` — chained methods
+/// Every system the `.add_systems(…)` calls inside `body` register.
 ///
-/// The line-based extraction is permissive (catches identifiers from anywhere
-/// inside the call), filtered by an exclude list of Rust idioms.
-fn collect_registered_identifiers(body: &str, file: &str) -> BTreeSet<String> {
-    let mut registered: BTreeSet<String> = BTreeSet::new();
-
-    let line_re = Regex::new(r"(?m)^\s*(?:[\w:]+::)?([a-z_][a-z0-9_]*)\s*[,.\(]").unwrap();
-    // Single-system shortcut: SCHEDULE, IDENT (e.g. OnEnter(...), play_match::setup_play_match)
-    // Operates on the captured block (without the leading .add_systems prefix).
-    let single_re =
-        Regex::new(r"(?m)^\s*[\w:]+(?:\([^)]*\))?\s*,\s*(?:[\w:]+::)?([a-z_][a-z0-9_]*)").unwrap();
-
+/// Each call is PARSED rather than scanned line by line: its second argument
+/// is read as a system expression, so a registration is found however it is
+/// laid out — one line or many, a bare path or a tuple, tuples nested in
+/// tuples, any `.chain()` / `.after(…)` / `.run_if(…)` suffix. Only the
+/// systems themselves count: a name that appears as an ARGUMENT to one of
+/// those methods is an ordering edge or a run condition, not a registration.
+///
+/// A call whose shape the parser does not know is an error, never a skip —
+/// the audit fails loudly on code it cannot read instead of guessing at it.
+fn collect_registered_identifiers(body: &str, file: &str) -> Result<BTreeSet<String>, String> {
+    let mut registered = BTreeSet::new();
     for block in add_systems_blocks(body, file) {
-        for cap in single_re.captures_iter(&block.text) {
-            let token = cap[1].split("::").last().unwrap_or("").to_string();
-            if !SCHEDULE_AND_KEYWORDS.contains(&token.as_str())
-                && !token.is_empty()
-                && token
-                    .chars()
-                    .next()
-                    .map(|c| c.is_ascii_lowercase())
-                    .unwrap_or(false)
-            {
-                registered.insert(token);
-            }
+        registered.extend(registered_by_call(&block.text)?);
+    }
+    Ok(registered)
+}
+
+/// The systems one `.add_systems(SCHEDULE, SYSTEMS)` call registers, given the
+/// text between its parentheses.
+fn registered_by_call(call: &str) -> Result<Vec<String>, String> {
+    let code = blank_comments_and_strings(call);
+    let args = split_top_level(&code);
+    let [_schedule, systems] = args.as_slice() else {
+        return Err(format!(
+            "expected `.add_systems(SCHEDULE, SYSTEMS)`, found {} argument(s) in:\n{call}",
+            args.len()
+        ));
+    };
+    let mut out = Vec::new();
+    parse_system_expr(systems, &mut out).map_err(|e| format!("{e} in:\n{call}"))?;
+    Ok(out)
+}
+
+/// A system expression is a path (`sys`, `module::sys`, `sys::<T>`) or a
+/// parenthesised tuple of system expressions, followed by any chain of method
+/// calls. A path's last segment is the registered name.
+fn parse_system_expr(expr: &str, out: &mut Vec<String>) -> Result<(), String> {
+    let expr = expr.trim();
+    let rest = if expr.starts_with('(') {
+        let close = matching_close(expr, 0).ok_or_else(|| format!("unbalanced tuple `{expr}`"))?;
+        for member in split_top_level(&expr[1..close]) {
+            parse_system_expr(&member, out)?;
         }
-        for cap in line_re.captures_iter(&block.text) {
-            let token = cap[1].to_string();
-            if SCHEDULE_AND_KEYWORDS.contains(&token.as_str()) {
-                continue;
+        &expr[close + 1..]
+    } else {
+        let (name, rest) =
+            parse_path(expr).ok_or_else(|| format!("unrecognised system expression `{expr}`"))?;
+        out.push(name.to_string());
+        rest
+    };
+    skip_method_chain(rest).ok_or_else(|| format!("unrecognised suffix `{}`", rest.trim()))
+}
+
+/// `ident(::ident)*`, optionally ending in a turbofish. Returns the last
+/// identifier and the text after the path.
+fn parse_path(text: &str) -> Option<(&str, &str)> {
+    let (mut name, mut rest) = parse_ident(text)?;
+    while let Some(after) = rest.trim_start().strip_prefix("::") {
+        let after = after.trim_start();
+        if after.starts_with('<') {
+            rest = &after[matching_close(after, 0)? + 1..];
+            break;
+        }
+        (name, rest) = parse_ident(after)?;
+    }
+    Some((name, rest))
+}
+
+fn parse_ident(text: &str) -> Option<(&str, &str)> {
+    let text = text.trim_start();
+    let first = text.chars().next()?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return None;
+    }
+    let end = text
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(text.len());
+    Some((&text[..end], &text[end..]))
+}
+
+/// Consume `(.method[::<…>](…))*` through to the end of `text`; `None` if
+/// anything else is left.
+fn skip_method_chain(mut text: &str) -> Option<()> {
+    loop {
+        text = text.trim_start();
+        if text.is_empty() {
+            return Some(());
+        }
+        let (_, rest) = parse_ident(text.strip_prefix('.')?)?;
+        let mut rest = rest.trim_start();
+        if let Some(turbofish) = rest.strip_prefix("::") {
+            let turbofish = turbofish.trim_start();
+            if !turbofish.starts_with('<') {
+                return None;
             }
-            registered.insert(token);
+            rest = turbofish[matching_close(turbofish, 0)? + 1..].trim_start();
+        }
+        if !rest.starts_with('(') {
+            return None;
+        }
+        text = &rest[matching_close(rest, 0)? + 1..];
+    }
+}
+
+/// Index of the delimiter closing the one at `open` (`(`, `[`, `{` or `<`).
+/// Brackets nest; angle brackets count only inside an angle-bracketed span, so
+/// a `>` in an argument (`a > b`, `->`) never closes anything.
+fn matching_close(text: &str, open: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let angled = bytes[open] == b'<';
+    let mut depth = 0usize;
+    for (i, &b) in bytes.iter().enumerate().skip(open) {
+        match b {
+            b'(' | b'[' | b'{' => depth += 1,
+            b'<' if angled => depth += 1,
+            b')' | b']' | b'}' => depth = depth.checked_sub(1)?,
+            b'>' if angled => depth = depth.checked_sub(1)?,
+            _ => {}
+        }
+        if depth == 0 {
+            return Some(i);
         }
     }
-    registered
+    None
+}
+
+/// Split on the commas outside every bracket and turbofish; empty pieces (a
+/// trailing comma) are dropped.
+fn split_top_level(text: &str) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let mut pieces = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' | b'[' | b'{' => i = matching_close(text, i).unwrap_or(bytes.len()),
+            b'<' if text[..i].trim_end().ends_with("::") => {
+                i = matching_close(text, i).unwrap_or(bytes.len())
+            }
+            b',' => {
+                pieces.push(&text[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    pieces.push(&text[start.min(bytes.len())..]);
+    pieces
+        .into_iter()
+        .filter(|p| !p.trim().is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 // ---- candidate scan ----
@@ -238,7 +349,7 @@ const SYSTEM_PARAM_TOKENS: &[&str] = &[
 
 /// Walk play_match for `pub fn` items with system signatures.
 /// Returns Vec of (name, file_path, line_number).
-fn walk_play_match_fns() -> std::io::Result<Vec<(String, PathBuf, usize)>> {
+fn walk_play_match_fns() -> std::io::Result<Vec<Candidate>> {
     let sys_param_re = Regex::new(&SYSTEM_PARAM_TOKENS.join("|")).unwrap();
 
     let files = load_sources(&[PLAY_MATCH_REL])?;
@@ -307,5 +418,125 @@ fn the_param_detector_reads_hostile_spellings() {
             !sys_param_re.is_match(&expanded),
             "`{params}` is a helper argument, not a system parameter"
         );
+    }
+}
+
+// ---- the registration reader, pinned ----
+
+/// Two systems registered as a tuple written on ONE line — the shape the old
+/// line-by-line reader could not see.
+const ONE_LINE_TUPLE: &str = "app.add_systems(FixedUpdate, (plan_celebration, play_match::step_celebration).chain().run_if(in_state(GameState::PlayMatch)));";
+
+fn registered_in(body: &str) -> BTreeSet<String> {
+    collect_registered_identifiers(body, "").unwrap_or_else(|e| panic!("{e}"))
+}
+
+fn names<'a>(items: impl IntoIterator<Item = &'a str>) -> BTreeSet<String> {
+    items.into_iter().map(str::to_string).collect()
+}
+
+fn fixture_candidates(names: &[&str]) -> Vec<Candidate> {
+    names
+        .iter()
+        .map(|n| (n.to_string(), PathBuf::from("fixture.rs"), 1))
+        .collect()
+}
+
+fn unregistered_names(candidates: &[Candidate], body: &str) -> Vec<String> {
+    unregistered(candidates, &[&registered_in(body)])
+        .into_iter()
+        .map(|(name, ..)| name.clone())
+        .collect()
+}
+
+#[test]
+fn a_one_line_tuple_registers_every_member() {
+    assert_eq!(
+        registered_in(ONE_LINE_TUPLE),
+        names(["plan_celebration", "step_celebration"])
+    );
+    let candidates = fixture_candidates(&["plan_celebration", "step_celebration"]);
+    assert_eq!(
+        unregistered_names(&candidates, ONE_LINE_TUPLE),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_system_removed_from_a_one_line_tuple_is_named() {
+    let removed = ONE_LINE_TUPLE.replace(", play_match::step_celebration", "");
+    assert_ne!(
+        removed, ONE_LINE_TUPLE,
+        "the fixture edit must remove something"
+    );
+
+    let candidates = fixture_candidates(&["plan_celebration", "step_celebration"]);
+    assert_eq!(
+        unregistered_names(&candidates, &removed),
+        vec!["step_celebration".to_string()]
+    );
+}
+
+/// Every layout the reader must see through, and the one thing it must not
+/// count: a name that appears only as an ordering edge or a run condition.
+#[test]
+fn every_registration_shape_is_read_and_nothing_else_is() {
+    let body = r#"
+        app.add_systems(Startup, setup_scene)
+            .add_systems(
+                OnEnter(GameState::PlayMatch),
+                (
+                    spawn_a, // a trailing comment, with a comma
+                    (nested_b, nested_c.after(spawn_a)).chain(),
+                    load_icons::<ClassIcons, SpellIcons>.run_if(|f: Res<Flag>| f.0 > 1),
+                    ApplyDeferred,
+                )
+                    .chain()
+                    .in_set(Phase::One)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            .add_systems(
+                Update,
+                play_match::single
+                    .after(
+                        ordering_only,
+                    )
+                    .run_if(condition_only),
+            );
+    "#;
+    assert_eq!(
+        registered_in(body),
+        names([
+            "setup_scene",
+            "spawn_a",
+            "nested_b",
+            "nested_c",
+            "load_icons",
+            "ApplyDeferred",
+            "single",
+        ])
+    );
+
+    // An ordering edge names a system; it does not register one.
+    let candidates = fixture_candidates(&["single", "ordering_only", "condition_only"]);
+    assert_eq!(
+        unregistered_names(&candidates, body),
+        vec!["ordering_only".to_string(), "condition_only".to_string()]
+    );
+}
+
+/// A registration the reader does not understand stops the audit, naming the
+/// call, rather than being skipped.
+#[test]
+fn an_unreadable_registration_is_an_error() {
+    for body in [
+        "app.add_systems(Update, IntoSystem::into_system(foo));",
+        "app.add_systems(Update, move || foo());",
+        "app.add_systems(Update);",
+        "app.add_systems(Update, (a, b).chain() + c);",
+    ] {
+        let err = collect_registered_identifiers(body, "")
+            .expect_err(&format!("`{body}` must not be read as a registration"));
+        assert!(err.contains("add_systems") || err.contains("in:"), "{err}");
     }
 }
