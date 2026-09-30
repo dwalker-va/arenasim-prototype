@@ -251,8 +251,8 @@ fn a_bloom_is_dampened_like_every_heal() {
 
 #[test]
 fn a_bloom_is_cut_by_healing_reduction() {
-    // A bloom is a direct heal, so Mortal Strike cuts it — the ordinary tick
-    // that fires on the same last frame is a HoT tick and does not take it.
+    // Mortal Strike cuts all healing received: the bloom, and the ordinary
+    // tick that fires on the same last frame.
     let mut world = world(1.0);
     let (druid, ally) = druid_and_ally(&mut world);
     let mut aura = cast(AbilityType::Lifebloom, ally, druid, 100.0).aura;
@@ -274,7 +274,7 @@ fn a_bloom_is_cut_by_healing_reduction() {
     let before = health(&world, ally);
     world.run_system_once(process_hot_ticks).unwrap();
     world.run_system_once(process_blooms).unwrap();
-    assert_eq!(health(&world, ally) - before, tick + per_stack * 0.5);
+    assert_eq!(health(&world, ally) - before, (tick + per_stack) * 0.5);
 }
 
 #[test]

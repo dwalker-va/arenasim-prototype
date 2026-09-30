@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use smallvec::SmallVec;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
+use crate::states::play_match::combat_core::apply_healing;
 use crate::states::play_match::components::*;
 use crate::states::play_match::effects::backlash::{
     BacklashPending, DISPEL_BACKLASH_SILENCE_DURATION,
@@ -32,6 +33,7 @@ pub fn process_dispels(
     // disjoint from the mutable query, satisfying Bevy's borrow checker.
     teams_no_auras: Query<&Combatant, Without<ActiveAuras>>,
     mut game_rng: ResMut<GameRng>,
+    dampening: Res<ArenaDampening>,
 ) {
     // Deferred heals to apply after aura processing (avoids borrow conflicts)
     let mut deferred_heals: Vec<(Entity, f32)> = Vec::new();
@@ -146,13 +148,18 @@ pub fn process_dispels(
 
     // Apply deferred heals (Devour Magic self-heal)
     for (heal_entity, heal_amount) in deferred_heals {
-        if let Ok((mut heal_combatant, _)) = combatants.get_mut(heal_entity) {
+        if let Ok((mut heal_combatant, heal_auras)) = combatants.get_mut(heal_entity) {
             if !heal_combatant.is_alive() {
                 continue;
             }
-            let old_hp = heal_combatant.current_health;
-            heal_combatant.current_health = (old_hp + heal_amount).min(heal_combatant.max_health);
-            let actual_heal = heal_combatant.current_health - old_hp;
+            let actual_heal = apply_healing(
+                &mut commands,
+                heal_entity,
+                &mut heal_combatant,
+                Some(&heal_auras),
+                &dampening,
+                heal_amount,
+            );
             if actual_heal > 0.0 {
                 // Devour Magic is a Felhunter (pet) self-heal — resolve pet-aware.
                 let healer_id = combat_log_id_for(&heal_combatant, pet_query.get(heal_entity).ok());

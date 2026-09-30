@@ -9,6 +9,7 @@
 //!
 //! Note: Instant effect processing (Holy Shock, Dispels) moved to effects/ module.
 
+use super::combat_core::apply_healing;
 use super::components::*;
 use super::effects::BloomPending;
 use super::match_config;
@@ -1330,7 +1331,8 @@ pub fn process_hot_ticks(
     ) in hot_healing_to_apply
     {
         // Get target combatant (the bearer of the HoT)
-        let Ok((_, mut target, _, _)) = combatants_with_auras.get_mut(target_entity) else {
+        let Ok((_, mut target, _, target_auras)) = combatants_with_auras.get_mut(target_entity)
+        else {
             continue;
         };
 
@@ -1342,14 +1344,17 @@ pub fn process_hot_ticks(
         // HoT onto every ally in radius, pets included.
         let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
 
-        // Arena dampening: time-ramped reduction of all healing (HoT ticks and
-        // Healing Stream Totem pulses included — free sustain must dampen too)
-        let healing = dampening.apply(healing);
-
-        // Apply healing (don't overheal); credit the caster's healing_done with the
-        // effective (non-overheal) amount, mirroring the casting.rs heal idiom.
-        let actual_healing = healing.min(target.max_health - target.current_health);
-        target.current_health = (target.current_health + healing).min(target.max_health);
+        // Healing reduction and arena dampening cut a tick like any heal (Healing
+        // Stream Totem pulses included — free sustain must dampen too). Credit
+        // the caster's healing_done with the effective (non-overheal) amount.
+        let actual_healing = apply_healing(
+            &mut commands,
+            target_entity,
+            &mut target,
+            Some(&target_auras),
+            &dampening,
+            healing,
+        );
 
         caster_healing_updates.push((caster_entity, actual_healing));
 

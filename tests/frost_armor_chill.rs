@@ -33,6 +33,7 @@ fn harness() -> App {
     app.add_plugins(MinimalPlugins);
     app.insert_resource(CombatLog::default());
     app.insert_resource(GameRng::from_seed(7));
+    app.insert_resource(ArenaDampening::default());
     app.add_systems(Update, process_dispels);
     app
 }
