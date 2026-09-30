@@ -13,17 +13,16 @@ without seeing the Rogue, no Flare is cast where nothing is hidden, and with
 the Rogue the kill target the Freezing Trap goes on its partner. Win rate is
 reported per enemy comp, sized against AS-125's accepted kill-target losses,
 not tuned.
-**Arms:** before = `main` at `020abda`; after = this branch on it. Same JSONL
-both arms. Rebased onto `148d6d1` (AS-161's Druid, AS-178) and re-proved
-there: the 880-match mechanism set is byte-identical to the `020abda` runs on
-both arms, so the base did not move under these cells. One attribution arm, the after binary with Flare costing no mana
+**Arms:** before = `main` at `f7a7339` (after AS-161's Druid and AS-183's
+heal helper), a fresh build; after = this branch on it. Same JSONL both arms. One attribution arm, the after binary with Flare costing no mana
 (`sweeps/2026-09-29-as166-arm-free-flare.patch`, a config-only change).
-**Raw rows:** `2026-09-29-as166_{1v1,2v2,2v2_kt0}_{base_020abda,after}.csv`
+**Raw rows:** `2026-09-29-as166_{1v1,2v2,2v2_kt0}_{base_f7a7339,after}.csv`
 (one row per match, from `sweeps/2026-09-29-as166-{1v1,directional,directional-kt0}.jsonl`);
 `2026-09-29-as166_2v2{,_kt0}_arm_free_flare.csv` (the Rogue cells only);
-`2026-09-29-as166_mech{,_sweepmix}_{base_020abda,after}.csv` (one row per
+`2026-09-29-as166_mech{,_sweepmix}_{base_f7a7339,after}.csv` (one row per
 match: Flares, reveals, the Rogue's opener, trap springs — `sweeps/2026-09-29-as166-flaremech.py`,
-summarised by `…-flaresumm.py`).
+summarised by `…-flaresumm.py`); `2026-09-29-as166_druid_control_{base_f7a7339,after}.csv`
+(Hunter against the Druid, `sweeps/2026-09-29-as166-druid-control.jsonl`).
 
 ## What the Hunter does now
 
@@ -94,7 +93,7 @@ found — but no Rogue AI routes around anything yet (follow-ups).
 
 Timing, from the mechanism set: the first Flare lands a median 4.98s after the
 gates (4.52-8.02s), and the reveal comes a median **1.77s** before the opener
-would have landed at `020abda` (0.41-1.93s).
+would have landed at the base (0.41-1.93s).
 
 Per enemy comp, mechanism set (Hunter wins of the n; openers and trap springs
 before → after):
@@ -104,21 +103,21 @@ before → after):
 | Priest+Rogue | at 0 | 70 | 70 → 0 | 1.00 | 70/70 | 0 → 0 | 12 → 22 | 30 → 65 |
 | Paladin+Rogue | at 0 | 70 | 70 → 0 | 1.00 | 70/70 | 4 → 2 | 33 → 39 | 49 → 41 |
 | Rogue+Warlock | at 0 | 70 | 70 → 0 | 1.00 | 70/70 | 0 → 0 | 0 → 0 | 48 → 65 |
-| Rogue+Shaman | at 0 | 70 | 0 → 0 | 1.00 | 70/70 | **70 → 0** | **2 → 20** | 42 → 63 |
+| Rogue+Shaman | at 0 | 70 | 0 → 0 | 1.00 | 70/70 | **70 → 0** | **2 → 19** | 42 → 63 |
 | Mage+Rogue | at 0 | 70 | 0 → 0 | 1.00 | 70/70 | **70 → 0** | 0 → 0 | 26 → 45 |
 | Rogue+Warrior | at 0 | 70 | 0 → 0 | 1.00 | 70/70 | 0 → 0 | 70 → 0 | 59 → 70 |
 | Priest+Rogue | none | 70 | 70 → 0 | 1.00 | 70/70 | 2 → 4 | 19 → 27 | 30 → 24 |
 | Paladin+Rogue | none | 70 | 70 → 0 | 1.00 | 70/70 | 10 → 16 | 37 → 43 | 36 → 21 |
 | Rogue+Warlock | none | 70 | 70 → 0 | 1.00 | 70/70 | 2 → 4 | 0 → 3 | 58 → 61 |
-| Rogue+Shaman | none | 70 | 0 → 0 | 0.00 | - | 75 → 75 | 14 → 14 | 44 → 44 |
+| Rogue+Shaman | none | 70 | 0 → 0 | 0.00 | - | 76 → 76 | 12 → 12 | 45 → 45 |
 | Mage+Rogue | none | 70 | 0 → 0 | 0.14 | 10/10 | 73 → 73 | 0 → 0 | 60 → 60 |
 | Rogue+Warrior | none | 70 | 0 → 0 | 0.29 | 20/20 | 50 → 50 | 20 → 20 | 69 → 69 |
 | Rogue (1v1) | - | 40 | 40 → 0 | 1.00 | 40/40 | 0 → 40 | - | 14 → 40 |
 
 **The trap goes on the partner.** With the Rogue the kill target and no
 dispeller behind it (Rogue+Shaman, Mage+Rogue), the opening lane trap caught
-the stealthed Rogue every match at `020abda` and the team broke it as it
-converged; now none springs on the Rogue, and against Rogue+Shaman 20 spring on
+the stealthed Rogue every match at the base and the team broke it as it
+converged; now none springs on the Rogue, and against Rogue+Shaman 19 spring on
 the Shaman (`flare_reveals_the_kill_target_rogue_and_the_trap_takes_its_partner`
 pins three seeds of the user's Warrior+Hunter vs Rogue+Shaman case). Against
 Rogue+Warrior the base lane trap sprang on the Warrior running the lane
@@ -138,19 +137,19 @@ the slices carry the significance). Next to it, AS-125's before → after at
 | enemy comp | no kill target: before | after | flips | kill targets at 0: before | after | flips | AS-125 at 0 |
 |---|---|---|---|---|---|---|---|
 | **Priest+Rogue** | 30.0% | 35.7% | +44/-36 | 70.0% | **92.1%** | +42/-11 | 100 → 70.0 |
-| **Rogue+Warlock** | 68.6% | **95.7%** | +41/-3 | 67.1% | **91.4%** | +42/-8 | 95.7 → 66.4 |
+| **Rogue+Warlock** | 68.6% | **96.4%** | +41/-2 | 67.1% | **91.4%** | +42/-8 | 95.7 → 66.4 |
 | **Paladin+Rogue** | 26.4% | **12.9%** | +17/-36 | 20.7% | 26.4% | +16/-8 | 55.0 → 20.7 |
-| Rogue+Shaman | 50.7% | 48.6% | +12/-15 | 100.0% | 98.6% | +0/-2 | 98.6 → 100 |
+| Rogue+Shaman | 49.3% | 52.1% | +14/-10 | 100.0% | 98.6% | +0/-2 | 98.6 → 100 |
 | Mage+Rogue | 75.0% | 75.0% | 0 | 80.7% | 79.3% | +0/-2 | 78.6 → 80.7 |
 | **Rogue+Warrior** | 100.0% | **86.4%** | +0/-19 | 97.1% | 97.1% | +4/-4 | 97.1 → 97.1 |
-| all Hunter cells (non-mirror) | 51.1% | 51.6% | +114/-109 | 66.5% | **72.9%** | +104/-35 | |
+| all Hunter cells (non-mirror) | 50.9% | 52.1% | +116/-103 | 66.5% | **72.9%** | +104/-35 | |
 
 ```
 no kill target
 CONTROL: 80/80 matches with no affected class on either side are IDENTICAL
-  ALL reachable  n=1270  50.6% -> 50.9%  +0.3pt  flips 227 (+115/-111)  z=0.20 ns  resolves >=2.4pt
-  CLEAN          n=540   51.3% -> 52.2%  +0.9pt  flips 112 (+58/-53)    z=0.38 ns
-  AGAINST        n=540   49.1% -> 48.7%  -0.4pt  flips 114 (+56/-58)    z=0.09 ns
+  ALL reachable  n=1270  50.6% -> 50.9%  +0.3pt  flips 223 (+113/-109)  z=0.20 ns  resolves >=2.4pt
+  CLEAN          n=540   51.1% -> 52.8%  +1.7pt  flips 110 (+59/-50)    z=0.77 ns
+  AGAINST        n=540   49.3% -> 48.1%  -1.1pt  flips 112 (+53/-59)    z=0.47 ns
 NON-VACUITY: 1346/1350 ended by elimination; 676 moved in winner or duration
 
 kill targets at slot 0
@@ -176,7 +175,7 @@ fall:**
 
 - **Rogue+Warrior 100% → 86.4%**, eighteen of the nineteen flips in
   Warrior+Hunter against it, both sides (Hunter+Shaman the other). Seed 0 of
-  Warrior+Hunter vs Warrior+Rogue, read from both logs: at `020abda` the
+  Warrior+Hunter vs Warrior+Rogue, read from both logs: at the base the
   Hunter's Frost Trap revealed the Rogue at 16.47s; now the Flare reveals it
   at 14.97s, the Rogue's next act is a Kidney Shot on the Hunter's Warrior
   (6s, 15.63s) while the enemy Warrior works on it, and the Frost Trap goes out
@@ -185,12 +184,16 @@ fall:**
 - **Paladin+Rogue 26.4% → 12.9%.** Not attributed. In the one seed read (the mechanism
   set's Hunter+Mage vs Rogue+Paladin, seed 1, kill targets at 0) the Rogue is revealed at 15.00s, the
   Spider's Web lands on it at 15.23s and the Paladin cleanses it at once; the
-  Rogue dies at 34.85s against 24.03s at `020abda`. The mana arm moves this row
+  Rogue dies at 34.85s against 24.03s at the base. The mana arm moves this row
   +6.4pt with no kill target, so the cost is part of it and not all.
 
 Every other Hunter cell is untouched: the no-Rogue sample (300 matches per
 kill-target setting) and the controls are byte-identical in winner and
 duration, 380/380 each — nothing is hidden there, so no Flare is ever cast.
+The Druid is not a stealth class, so it joins the controls: Hunter against
+the Druid, 160 matches (four pairings, both sides, with and without kill
+targets, 1v1 included), byte-identical, every one ended by a kill, 105
+distinct durations.
 
 ### 1v1 — 750 matches, n=50 per cell
 
@@ -212,12 +215,12 @@ The attribution arm is the after binary with Flare free, on the Rogue cells:
 
 | | no kill target | kill targets at 0 |
 |---|---|---|
-| Hunter side, Flare at 50 mana → free | 59.0% → 63.0% (+33/-0) | 80.8% → 81.8% (+11/-3) |
+| Hunter side, Flare at 50 mana → free | 59.8% → 63.3% (+30/-0) | 80.8% → 81.8% (+11/-3) |
 | Priest+Rogue | 35.7% → 50.0% (+20/-0) | 92.1% → 95.7% (+5/-0) |
 | Paladin+Rogue | 12.9% → 19.3% (+9/-0) | 26.4% → 26.4% |
 | Rogue+Warrior | 86.4% → 86.4% | 97.1% → 98.6% (+2/-0) |
 
-The cost is real — four points with no kill target, most of it against
+The cost is real — three and a half points with no kill target, most of it against
 Priest+Rogue — but it is not what sinks Rogue+Warrior or Paladin+Rogue. Flare
 keeps its Classic cost here; the milestone sweep is where to weigh it.
 

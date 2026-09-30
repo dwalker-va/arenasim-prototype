@@ -102,7 +102,7 @@ def analyse(cfg, log):
 
 
 def main(argv):
-    binary, jsonl, outdir, jobs = os.path.abspath(argv[0]), argv[1], argv[2], int(argv[3])
+    binary, jsonl, outdir, jobs = os.path.abspath(argv[0]), argv[1], os.path.abspath(argv[2]), int(argv[3])
     cfgs = [json.loads(l) for l in open(jsonl) if l.strip()]
     os.makedirs(outdir, exist_ok=True)
     with ThreadPoolExecutor(jobs) as ex:

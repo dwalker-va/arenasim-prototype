@@ -1,0 +1,160 @@
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior"}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior"}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior"}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior"}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior"}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior"}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior"}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior"}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior"}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior"}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Priest"], "team2": ["Druid", "Warrior"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Hunter+Priest_vs_Druid+Warrior_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest"}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest"}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest"}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest"}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest"}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest"}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest"}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest"}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest"}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest"}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid", "Warrior"], "team2": ["Hunter", "Priest"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Druid+Warrior_vs_Hunter+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid"}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid"}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid"}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid"}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid"}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid"}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid"}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid"}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid"}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid"}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warrior", "Hunter"], "team2": ["Mage", "Druid"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Warrior+Hunter_vs_Mage+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter"}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter"}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter"}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter"}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter"}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter"}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter"}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter"}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter"}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter"}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Mage", "Druid"], "team2": ["Warrior", "Hunter"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Mage+Druid_vs_Warrior+Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest"}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest"}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest"}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest"}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest"}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest"}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest"}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest"}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest"}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest"}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter", "Druid"], "team2": ["Warlock", "Priest"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Hunter+Druid_vs_Warlock+Priest_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid"}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid"}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid"}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid"}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid"}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid"}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid"}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid"}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid"}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid"}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Warlock", "Priest"], "team2": ["Hunter", "Druid"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Warlock+Priest_vs_Hunter+Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid"}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid"}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid"}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid"}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid"}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid"}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid"}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid"}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid"}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid"}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Hunter"], "team2": ["Druid"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Hunter_vs_Druid_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter"}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter"}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter"}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter"}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter"}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter"}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter"}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter"}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter"}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter"}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 5, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 6, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 7, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 8, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
+{"team1": ["Druid"], "team2": ["Hunter"], "random_seed": 9, "max_duration_secs": 300.0, "label": "Druid_vs_Hunter_kt0", "team1_kill_target": 0, "team2_kill_target": 0}
