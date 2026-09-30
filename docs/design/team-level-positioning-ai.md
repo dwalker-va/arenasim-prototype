@@ -22,8 +22,13 @@ turned out to be unachievable as stated. The amendments are marked inline:
 | *How to measure a step* | Uniform-profile A/B cannot answer "is this better". Every measurement before 2026-08-04 made that mistake. |
 
 What has actually landed, with numbers, on `Warrior+Priest` vs `Warlock+Priest`
-on Nagrand: occlusion bought per match went from `Legacy`'s **0.0s to 28.1s**,
-which is the robust result — a per-frame measure over thousands of samples. The
+on Nagrand: occlusion bought per match went from `Legacy`'s **0.0s to 19.2s**
+(15.1s before contact, 4.1s after; `tests/camp_sweep.rs` on 2026-09-30, after
+AS-181), which is the robust result — a per-frame measure over thousands of
+samples. It was 28.1s when first measured and 29.6s just before AS-181, whose
+steering fix changed how the Priest rounds its camp pillar: it now takes less
+cover after contact, and at most about 20-45% of the old after-contact figure
+overlapped the Priest pinned against the pillar or vibrating there. The
 win-rate effect is small and not resolved at the sample sizes used here (+3pt at
 n=36); see the correction below before quoting any percentage. `Legacy` is
 byte-identical throughout; everything is gated on `AiProfiles`.
@@ -48,8 +53,10 @@ negative (`Rogue+Priest`, -6pt) is within noise even at n=100.
 
 The n=12 and n=36 numbers previously recorded here (+8pt/-17pt/+3pt/+11pt)
 were all sample noise around these values and are superseded. The per-frame
-mechanism evidence (occlusion 0.0s -> 28.1s, blocked share, blackout length)
-stands unchanged, and is what correctly indicated the direction all along.
+mechanism evidence (occlusion 0.0s -> 28.1s at the time, blocked share,
+blackout length) is what correctly indicated the direction all along. This
+table predates AS-181, which changed how TeamPlan units round Nagrand pillars
+(occlusion now 19.2s, above); it is due a re-measure at the 0.7 milestone sweep.
 
 **That the effect is NOT uniform across comps still holds** — and the n=12
 detour through the Hunter comp led to a real bug (the kiter healer leash). The

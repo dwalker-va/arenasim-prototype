@@ -2208,6 +2208,61 @@ mod directive_executor {
             "the chase ended {off:.2}yd from its target (reach {reach}), at {end}"
         );
     }
+
+    /// A Point walk to a spot INSIDE the pillar's footprint — a point no one
+    /// can stand on, which TeamPlan and Legacy formation walks do produce.
+    /// The mover walks to the nearest ground it can reach and stands still
+    /// there, instead of stepping back and forth across the pillar corner
+    /// nearest the spot. The spot is the one measured in a TeamPlan match
+    /// (0.05yd inside the shell of a diagonal face, near its corner).
+    #[test]
+    fn point_walk_to_a_spot_inside_a_nagrand_pillar_stands_still_beside_it() {
+        use arenasim::states::play_match::map_geometry::{position_blocked, MOVER_RADIUS};
+        let (geometry, center, _) = nagrand();
+        let mut app = executor_app();
+        let point = Vec3::new(center.x + 4.630_82, 1.0, center.y - 3.848_33);
+        assert!(
+            position_blocked(&geometry.volumes, point),
+            "test setup: the spot is inside the pillar"
+        );
+        app.insert_resource(geometry);
+        let start = Vec3::new(center.x + 12.0, 1.0, center.y + 3.0);
+        let (entity, speed) = spawn_combatant(&mut app, start);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(MovementDirective {
+                goal: MovementGoal::Point(point),
+                expires: 100.0,
+                committed_until: 100.0,
+            });
+
+        let path = track(&mut app, entity, 300);
+        let mut backtracks = 0;
+        let mut last = Vec2::ZERO;
+        for w in path.windows(2) {
+            let step = Vec2::new(w[1].x - w[0].x, w[1].z - w[0].z);
+            if step == Vec2::ZERO {
+                continue;
+            }
+            if step.dot(last) < 0.0 {
+                backtracks += 1;
+            }
+            last = step;
+        }
+        assert_eq!(backtracks, 0, "the walk stepped back on itself");
+        // Standing still for the last second, a body radius (plus a step)
+        // from the spot.
+        let rest = path[path.len() - 61];
+        assert!(
+            path[path.len() - 60..].iter().all(|p| *p == rest),
+            "still moving at the end of the walk"
+        );
+        let off = Vec2::new(rest.x - point.x, rest.z - point.z).length();
+        assert!(
+            off <= MOVER_RADIUS + speed / 60.0 + 0.1,
+            "stood {off:.2}yd from the spot, at {rest}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

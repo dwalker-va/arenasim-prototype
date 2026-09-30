@@ -2008,10 +2008,20 @@ mod tests {
     fn steer_from_inside_prism_skin_peels_the_shorter_way() {
         let pillar = octagon(0.0, 0.0, 2.5);
         let shell = prism_apothem(2.5, 8) + MOVER_RADIUS;
-        // Inside the skin on the -x side, 0.3yd toward +z of the center line;
-        // goal straight behind on the center line, so it leans toward -z.
-        let from = Vec2::new(-shell + 0.05, 0.3);
-        let goal = Vec2::new(shell + 2.0, 0.0);
+        // Inside the skin on the -x side, 0.1yd toward +z of the center line;
+        // the goal just behind the pillar, 0.2yd toward -z. The +z way round
+        // is ~0.1yd the shorter, while the heading to the goal leans -z.
+        let from = Vec2::new(-shell + 0.05, 0.1);
+        let goal = Vec2::new(4.0, -0.2);
+        assert!(
+            prism_half_planes_contain(from, shell, 8, 0.0, false),
+            "test setup: the mover is inside the skin"
+        );
+        // Non-vacuity: the heading-alignment rule this replaced peels -z here.
+        let dn = (-from).normalize();
+        let perp = Vec2::new(-dn.y, dn.x);
+        assert!(perp.y > 0.0 && (goal - from).normalize().dot(perp) < 0.0);
+
         let dir = steer_toward_goal(&[pillar], from, goal, 1.0).expect("path is blocked");
         assert!(
             (dir.length() - 1.0).abs() < 1e-4,
@@ -2019,7 +2029,7 @@ mod tests {
         );
         assert!(
             dir.y > 0.9,
-            "the +z way round is shorter from +0.3z; peel +z, got {dir:?}"
+            "the +z way round is shorter; peel +z, got {dir:?}"
         );
     }
 

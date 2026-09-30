@@ -256,14 +256,21 @@ For deeper context, see these focused references:
   2026-08-04 amendments before building any of it — the design's shape held up
   but several specifics were wrong in ways only measurement exposed, and step 4's
   retirement goal is not achievable as written. Steps 2, 3 and the healer half of
-  4 have shipped: Nagrand occlusion `Legacy` 0.0s -> `TeamPlan` 28.1s (the robust
-  result — per-frame, thousands of samples). The DPS half was reverted:
+  4 have shipped: Nagrand occlusion `Legacy` 0.0s -> `TeamPlan` 19.2s per match
+  (15.1s before contact, 4.1s after; `tests/camp_sweep.rs`, 2026-09-30, after
+  AS-181's steering fix — the robust result, per-frame, thousands of samples).
+  The earlier 28.1s (29.6s just before AS-181) is superseded: the fix changed
+  the Priest's path round its camp pillar, and after contact it now takes less
+  cover. At most about 20-45% of the old after-contact figure overlapped the
+  Priest pinned against the pillar or vibrating there. The DPS half was reverted:
   constraint satisfaction cannot express a kiter's distance-maximisation.
   `Legacy` is byte-identical throughout.
   **Definitive n=100 head-to-head** (2026-08-06, CSV in `docs/design/balance/`):
   the healer solve + kiter leash is worth +36pt to Warlock+Priest (z=5.2), +14pt
   to Hunter+Priest (z=2.2), +10pt to Warrior+Priest (z=1.8), -6pt (noise) to
-  Rogue+Priest. **Sample-size warning stands:** every earlier n=12 win-rate figure
+  Rogue+Priest. Those figures predate AS-181, which changed how TeamPlan units
+  round Nagrand pillars; they are due a re-measure at the 0.7 milestone sweep.
+  **Sample-size warning stands:** every earlier n=12 win-rate figure
   was noise around these values. Prefer per-frame mechanism metrics
   (`tests/camp_sweep.rs`); for win rate use `scripts/headtohead_sweep.py`
   (~100 matches/cell via the parallel `--batch` runner, Wilson CIs, z-tests).
