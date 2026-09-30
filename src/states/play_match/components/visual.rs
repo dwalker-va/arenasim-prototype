@@ -35,8 +35,13 @@ pub struct RenderInterpolation {
     pub previous: Vec3,
     /// Translation the latest sim tick left — the sim's own value.
     pub current: Vec3,
-    /// What this frame drew, while the interpolated value is in `Transform`.
-    pub drawn: Option<Vec3>,
+    /// Facing at the start of the latest sim tick.
+    pub previous_rotation: Quat,
+    /// Facing the latest sim tick left — the sim's own value.
+    pub current_rotation: Quat,
+    /// What this frame drew (translation, rotation), while the interpolated
+    /// values are in `Transform`.
+    pub drawn: Option<(Vec3, Quat)>,
 }
 
 /// Where on the victim a shared impact plays.
