@@ -1,0 +1,11 @@
+--- a/assets/config/abilities.ron
++++ b/assets/config/abilities.ron
+@@ -1018,7 +1018,7 @@
+             icon: "icons/abilities/spell_fire_flare.jpg",
+             cast_time: 0.0,
+             range: 30.0,  // Placement range
+-            mana_cost: 50.0,
++            mana_cost: 0.0,
+             cooldown: 15.0,
+             spell_school: None,
+             description: "Fires a flare that burns where it lands for 30 seconds. A stealthed enemy inside its 10-yard light is exposed.",
