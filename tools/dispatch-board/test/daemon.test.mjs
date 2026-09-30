@@ -14,7 +14,7 @@ test("MCP: tools are served and list_cards returns summaries only", async (t) =>
   const client = await mcpClient(t, d.base);
   const names = (await client.listTools()).tools.map((x) => x.name).sort();
   assert.deepEqual(names, [
-    "answer_question", "append_activity", "append_to_body", "claim_card", "close_milestone", "create_card", "create_milestone",
+    "answer_question", "append_activity", "append_to_body", "cancel_card", "claim_card", "close_milestone", "create_card", "create_milestone",
     "events_since", "finish_claim", "get_card", "get_milestone", "list_cards", "list_milestones", "mark_merged", "move_card",
     "record_ruling", "release_claim", "set_milestone_sweep", "update_card", "update_milestone",
   ]);

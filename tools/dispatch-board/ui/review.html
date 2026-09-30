@@ -172,6 +172,12 @@ function whatChanged(){
       + data.in_flight.map(function(c){ return "<li>" + cardLink(c.id) + " " + esc(c.title) + " <span class=\"muted\">— " + esc(c.column.replace("_"," ")) + (c.iteration > 1 ? ", iteration " + esc(c.iteration) : "") + "</span></li>"; }).join("")
       + "</ul></div>";
   }
+  // Cards retired with cancel_card: on the milestone, but they ship nothing.
+  if(data.cancelled && data.cancelled.length){
+    out += "<div class=\"group\" id=\"cancelled\"><h3>Cancelled — not shipped</h3><ul class=\"plain\">"
+      + data.cancelled.map(function(c){ return "<li>" + cardLink(c.id) + " " + esc(c.title) + (c.reason ? " <span class=\"muted\">— " + esc(c.reason) + "</span>" : "") + "</li>"; }).join("")
+      + "</ul></div>";
+  }
   return "<section id=\"changed\"><h2>What changed</h2><p class=\"lead\">Every merged card, by area, in its own words.</p>" + out + "</section>";
 }
 

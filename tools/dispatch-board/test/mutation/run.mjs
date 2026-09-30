@@ -257,7 +257,7 @@ const MUTANTS = [
   {
     name: "nothing-to-check-is-no-step",
     file: "dist/board.js",
-    find: "if (NOTHING_TO_CHECK.test(line))",
+    find: "if (isNothingToCheck(line))",
     replace: "if (false)",
     mustFail: [
       "checklist steps: one per line",
@@ -394,6 +394,101 @@ const MUTANTS = [
     find: 'if(e.milestone !== undefined){ patch.milestone = e.milestone || null; changed.push("milestone"); }',
     replace: "",
     mustFail: ["board page: the milestone filter, the Merged column, a card's milestone fields"],
+  },
+  // ---- AS-182: board hygiene.
+  {
+    // A done card joining an open milestone would ship in its release without close_milestone.
+    name: "done-card-no-milestone-attach",
+    file: "dist/board.js",
+    find: 'if (changed && column === "done" && doc.role !== "pm" && typeof doc.milestone === "string") {',
+    replace: "if (false) {",
+    mustFail: ["attach: a done card cannot join an unreleased milestone"],
+  },
+  {
+    // "Nothing needs human testing, but watch the glow." must not swallow the step.
+    name: "nothing-to-check-keeps-instructions",
+    file: "dist/board.js",
+    find: "return m !== null && !STILL_A_STEP.test(m[1]);",
+    replace: "return m !== null;",
+    mustFail: ["checklist steps: a nothing-to-check line that still asks for something stays a step"],
+  },
+  {
+    name: "archived-needs-release-tag",
+    file: "dist/board.js",
+    find: 'if (to === "archived" && from !== "archived" && doc.released == null) {',
+    replace: "if (false) {",
+    mustFail: ["archive: a plain move enters archived only with its release tag"],
+  },
+  {
+    name: "cancelled-is-terminal",
+    file: "dist/board.js",
+    find: "if (doc.cancelled != null && to !== from) {",
+    replace: "if (false) {",
+    mustFail: ["cancel_card: retires a card as cancelled"],
+  },
+  {
+    name: "cancelled-takes-no-release",
+    file: "dist/board.js",
+    find: 'if ("released" in patch && doc.cancelled != null)',
+    replace: "if (false)",
+    mustFail: ["cancel_card: retires a card as cancelled"],
+  },
+  {
+    name: "cancel-refuses-merged-work",
+    file: "dist/board.js",
+    find: ": doc.merge_sha != null",
+    replace: ": false",
+    mustFail: ["cancel_card: refused for work on main or released, and under a working claim"],
+  },
+  {
+    name: "cancel-refuses-working-claim",
+    file: "dist/board.js",
+    find: 'if (isObj(doc.agent) && doc.agent.status === "working") {',
+    replace: "if (false) {",
+    mustFail: ["cancel_card: refused for work on main or released, and under a working claim"],
+  },
+  {
+    // The review payload's sections read as work; a cancelled card is in none of them.
+    name: "review-excludes-cancelled",
+    file: "dist/board.js",
+    find: "const live = cards.filter((c) => c.cancelled == null);",
+    replace: "const live = cards;",
+    mustFail: ["review payload: a cancelled card is listed as cancelled and in no section that reads as work"],
+  },
+  {
+    name: "cancelled-steps-not-tickable",
+    file: "dist/board.js",
+    find: "return FINISHED_COLUMNS.includes(c.column) && c.cancelled == null;",
+    replace: "return FINISHED_COLUMNS.includes(c.column);",
+    mustFail: ["review payload: a cancelled card is listed as cancelled and in no section that reads as work"],
+  },
+  {
+    name: "milestone-counts-cancelled-apart",
+    file: "dist/board.js",
+    find: "CASE WHEN json_extract(doc, '$.cancelled') IS NOT NULL THEN 'cancelled' ELSE col END AS bucket",
+    replace: "col AS bucket",
+    mustFail: ["review payload: a cancelled card is listed as cancelled and in no section that reads as work"],
+  },
+  {
+    name: "ui-refuses-drag-into-merged",
+    file: "ui/board.html",
+    find: 'if(col === "merged" && !c.merge_sha){ statusMsg = "Merged is recorded by the orchestrator when it merges the PR (mark_merged)"; render(); return; }',
+    replace: "",
+    mustFail: ["board page: a drag into Merged or Archived is refused with the reason, and nothing is written"],
+  },
+  {
+    name: "ui-refuses-drag-into-archived",
+    file: "ui/board.html",
+    find: 'if(col === "archived" && !c.released){',
+    replace: "if(false){",
+    mustFail: ["board page: a drag into Merged or Archived is refused with the reason, and nothing is written"],
+  },
+  {
+    name: "review-page-lists-cancelled",
+    file: "ui/review.html",
+    find: "if(data.cancelled && data.cancelled.length){",
+    replace: "if(false){",
+    mustFail: ["board page: Cancel card retires a card from the drawer, and the review page lists it as cancelled"],
   },
 ];
 

@@ -488,6 +488,130 @@ test("move rules: merged is reached only through mark_merged, and a milestone's 
   // Once the milestone is released its cards move freely again.
   board.closeMilestone("0.7", board.getMilestone("0.7").milestone.version, o);
   const done = board.getCard(w.id);
-  const back = board.moveCard(done.id, "archived", done.version, o);
+  const back = board.moveCard(done.id, "archived", done.version, { ...o, patch: { released: "v0.7.0" } });
   assert.equal(board.moveCard(back.id, "done", back.version, o).column, "done");
+});
+
+test("attach: a done card cannot join an unreleased milestone; detach-then-finish still works", (t) => {
+  const { board } = tempBoard(t);
+  board.createMilestone("0.7", o);
+  let loose = board.createCard({ title: "finished on its own", role: "engineer" }, o);
+  loose = board.moveCard(loose.id, "done", loose.version, o);
+  // By patch, and by a done -> done move carrying the patch: close_milestone never moved it there.
+  refused(() => board.updateCard(loose.id, { milestone: "0.7" }, loose.version, o), "invalid", /is done, so it cannot join milestone 0\.7/);
+  refused(() => board.moveCard(loose.id, "done", loose.version, { ...o, patch: { milestone: "0.7" } }), "invalid", /cannot join milestone 0\.7/);
+  assert.deepEqual([board.getCard(loose.id).milestone, board.getCard(loose.id).version], [undefined, loose.version], "a refused attach writes nothing");
+  assert.equal(board.getMilestone("0.7").what_changed.length, 0);
+  // A pm card may sit done on an open milestone, but may not become work there.
+  let pm = board.createCard({ title: "scoping", role: "pm", milestone: "0.7" }, o);
+  pm = board.moveCard(pm.id, "done", pm.version, o);
+  refused(() => board.updateCard(pm.id, { role: "engineer" }, pm.version, o), "invalid", /is done/);
+  // Detach then finish: a merged card leaves the milestone and reaches done in one move.
+  const w = merged(board, { milestone: "0.7" }, 5);
+  const fin = board.moveCard(w.id, "done", w.version, { ...o, patch: { milestone: null } });
+  assert.deepEqual([fin.column, fin.milestone], ["done", null]);
+  // Out of done, a card joins like any other — and then waits for the close.
+  const back = board.moveCard(loose.id, "backlog", loose.version, o);
+  assert.equal(board.updateCard(back.id, { milestone: "0.7" }, back.version, o).milestone, "0.7");
+});
+
+test("checklist steps: a nothing-to-check line that still asks for something stays a step", (t) => {
+  for (const step of [
+    "Nothing needs human testing, but watch the glow.",
+    "Nothing needs human testing; check dark mode",
+    "**Human testing:** Nothing needs human testing except the tooltip wording.",
+    "- Nothing needs human testing beyond a look at the trap colour",
+  ]) {
+    assert.deepEqual(checklistSteps("AS-7", step).length, 1, `"${step}" asks for something: it is a step`);
+    assert.equal(saysNothingToCheck(step), false, `"${step}" is not a statement that there is nothing to check`);
+  }
+  for (const nothing of ["Nothing needs human testing — headless-only change.", "Nothing needs human testing: docs only", "Nothing needs human testing beyond this page."]) {
+    assert.deepEqual(checklistSteps("AS-7", nothing), [], `"${nothing}" is a statement`);
+  }
+  const { board } = tempBoard(t);
+  board.createMilestone("0.7", o);
+  const c = merged(board, { milestone: "0.7", human_testing: "Nothing needs human testing, but watch the glow." }, 1);
+  const p = board.getMilestone("0.7");
+  assert.deepEqual(p.checklist.groups.flatMap((g) => g.cards.flatMap((x) => x.steps.map((s) => [x.id, s.text]))), [[c.id, "Nothing needs human testing, but watch the glow."]]);
+  assert.deepEqual(p.checklist.nothing_to_check, [], "the step was swallowed as nothing-to-check");
+});
+
+// ---------------------------------------------------------------- cancelled cards
+
+test("archive: a plain move enters archived only with its release tag; cancel_card is the other way in", (t) => {
+  const { board } = tempBoard(t);
+  const c = board.createCard({ title: "x", role: "engineer" }, o);
+  refused(() => board.moveCard(c.id, "archived", c.version, o), "invalid", /archived means shipped/);
+  refused(() => board.createCard({ title: "y", role: "engineer", column: "archived" }, o), "invalid", /archived means shipped/);
+  assert.equal(board.getCard(c.id).column, "backlog");
+  const shipped = board.moveCard(c.id, "archived", c.version, { ...o, patch: { released: "v0.6.0" } });
+  assert.deepEqual([shipped.column, shipped.released], ["archived", "v0.6.0"]);
+});
+
+test("cancel_card: retires a card as cancelled — archived, never shipped, and terminal", (t) => {
+  const { board } = tempBoard(t);
+  board.createMilestone("0.7", o);
+  let c = board.createCard({ title: "dropped", role: "engineer", milestone: "0.7" }, o);
+  c = board.moveCard(c.id, "in_progress", c.version, o);
+  refused(() => board.cancelCard(c.id, "superseded", c.version - 1, o), "stale_version");
+  refused(() => board.cancelCard(c.id, " ", c.version, o), "invalid");
+  const head = board.head();
+  const x = board.cancelCard(c.id, "superseded by AS-190", c.version, { ...o, by: "user" });
+  assert.deepEqual([x.column, x.cancelled.reason, x.cancelled.by, x.released, x.version], ["archived", "superseded by AS-190", "user", undefined, c.version + 1]);
+  assert.match(x.cancelled.t, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$/);
+  assert.equal(x.activity.at(-1).msg, "Cancelled (was in_progress): superseded by AS-190");
+  assert.deepEqual(events(board, head).map((e) => [e.kind, e.card, e.data]), [["cancelled", c.id, { from: "in_progress", to: "archived", milestone: "0.7" }]]);
+  assert.equal(board.listCards({ column: "archived" })[0].cancelled.reason, "superseded by AS-190", "the summary says it was cancelled");
+  // Terminal: no move takes it out, no release is recorded on it, no second cancel.
+  for (const col of ["backlog", "in_progress", "done"]) refused(() => board.moveCard(c.id, col, x.version, o), "invalid", /cancelled card stays archived/);
+  refused(() => board.updateCard(c.id, { released: "v0.7.0" }, x.version, o), "invalid", /no release to record/);
+  refused(() => board.cancelCard(c.id, "again", x.version, o), "invalid", /already cancelled/);
+  refused(() => board.updateCard(c.id, { cancelled: null }, x.version, o), "invalid", /not patchable/);
+  assert.equal(board.getCard(c.id).version, x.version);
+});
+
+test("cancel_card: refused for work on main or released, and under a working claim", (t) => {
+  const { board } = tempBoard(t);
+  const m = merged(board, {}, 1);
+  refused(() => board.cancelCard(m.id, "no", m.version, o), "invalid", /its work is on main/);
+  const shipped = board.moveCard(m.id, "archived", m.version, { ...o, patch: { released: "v0.6.0" } });
+  refused(() => board.cancelCard(m.id, "no", shipped.version, o), "invalid", /shipped in v0\.6\.0/);
+  let w = board.createCard({ title: "claimed", role: "engineer" }, o);
+  w = board.moveCard(w.id, "in_progress", w.version, o);
+  w = board.claimCard(w.id, "Engineer-AS-2", o);
+  refused(() => board.cancelCard(w.id, "no", w.version, o), "claim_refused", /Engineer-AS-2/);
+  w = board.releaseClaim(w.id, o);
+  assert.equal(board.cancelCard(w.id, "dropped", w.version, o).column, "archived");
+  // A card retired by a plain move before cancel_card existed can be marked cancelled after the fact.
+  const legacy = { id: "AS-9", title: "retired by drag", body: "", column: "archived", role: "engineer", priority: "P2", links: [], pr: null, worktree: null, question: null, agent: null, created: "c", updated: "u", activity: [] };
+  const { board: b2 } = tempBoard(t);
+  b2.importState({ schema: 2, nextId: 10, cards: [legacy], milestones: [] }, { actor: "import" });
+  const l = b2.getCard("AS-9");
+  assert.equal(b2.cancelCard(l.id, "never shipped", l.version, o).cancelled.reason, "never shipped");
+});
+
+test("review payload: a cancelled card is listed as cancelled and in no section that reads as work; close_milestone neither waits on it nor lists it", (t) => {
+  const { board } = tempBoard(t);
+  board.createMilestone("0.7", o);
+  const a = merged(board, { milestone: "0.7", area: "combat", summary: "A", human_testing: "- Check A" }, 1);
+  let b = board.createCard({ title: "dropped", role: "engineer", milestone: "0.7", area: "ui", summary: "B", human_testing: "- Check B", sweep: { status: "deferred-to-milestone" }, gaps: "B gap" }, o);
+  b = board.cancelCard(b.id, "superseded", b.version, o);
+  board.recordRuling(b.id, { text: "Drop it" }, { ...o, by: "user" });
+
+  const p = board.getMilestone("0.7");
+  assert.deepEqual(p.what_changed.flatMap((g) => g.cards.map((c) => c.id)), [a.id], "a cancelled card reads as a change");
+  assert.deepEqual(p.in_flight, []);
+  assert.deepEqual(p.cancelled.map((c) => [c.id, c.reason]), [[b.id, "superseded"]]);
+  assert.deepEqual(p.checklist.groups.flatMap((g) => g.cards.map((c) => c.id)), [a.id]);
+  assert.deepEqual([p.checklist.without_steps, p.checklist.nothing_to_check], [[], []]);
+  assert.deepEqual([p.balance.deferred, p.balance.unstated.map((c) => c.id)], [[], [a.id]]);
+  assert.deepEqual(p.gaps.stated, []);
+  assert.deepEqual(p.decisions.map((d) => d.text), ["Drop it"], "the decision to drop it is still a decision");
+  assert.deepEqual(board.listMilestones()[0].cards, { merged: 1, cancelled: 1 }, "counted as cancelled, never as archived");
+  const bStep = `check:${checklistSteps(b.id, "- Check B")[0].key}`;
+  refused(() => board.setReviewCheck("0.7", bStep, true, 0, { actor: "board" }), "invalid", /not a current checklist step/);
+
+  const r = board.closeMilestone("0.7", board.getMilestone("0.7").milestone.version, o);
+  assert.deepEqual(r.cards.map((c) => c.id), [a.id], "close_milestone lists a cancelled card for the release");
+  assert.deepEqual([board.getCard(b.id).column, board.getCard(b.id).cancelled.reason], ["archived", "superseded"]);
 });

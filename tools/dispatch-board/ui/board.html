@@ -71,6 +71,7 @@ a.btn{text-decoration:none;display:inline-block}
 .rulerow{display:flex;gap:8px;margin-top:6px}
 .rulerow input{flex:1;min-width:0;font:inherit;font-size:13px;color:var(--ink);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
 .kv{font-size:12.5px;color:var(--muted);margin-top:6px}
+.tag.cxl{color:var(--p1);font-weight:500}
 .closex{position:sticky;top:0;float:right;border:none;background:none;color:var(--muted);font-size:20px;line-height:1;padding:2px 6px}
 @media (prefers-reduced-motion: no-preference){.card{transition:box-shadow .12s}.card:hover{box-shadow:0 2px 6px rgba(20,26,33,.16),0 8px 20px rgba(20,26,33,.10)}}
 </style></head><body><div id="app"></div><script id="code">
@@ -102,7 +103,7 @@ var COLUMNS = [
   {key:"merged", label:"Merged", hint:"awaiting milestone review"},
   {key:"done", label:"Done", hint:"milestone reviewed"}
 ];
-var ARCHIVED = {key:"archived", label:"Archived", hint:"released"};
+var ARCHIVED = {key:"archived", label:"Archived", hint:"released or cancelled"};
 var ROLES = ["engineer","tester","release-manager","pm"];
 var GATED = ["review","merged"];
 var AREAS = ["combat","visuals","ai","ui","tooling"];
@@ -121,7 +122,7 @@ var connected = false, loadedOnce = false;
 var openCardId = null, showNew = false, confirmDelete = false, statusMsg = "connecting…", showArchived = false;
 var pending = null;       // {id, column, patch, why, expected}: a gated move waiting on the PR-link dialog
 var base = null;          // the open drawer's card as its edits are based on: {id, version, title, body, column, role, priority}
-var confirmRelease = false, discardDraft = false;
+var confirmRelease = false, confirmCancel = false, discardDraft = false;
 var rendered = {}, renderedFor = null;   // input id -> the value the drawer last rendered into it, for card `renderedFor`
 var app = document.getElementById("app");
 
@@ -229,6 +230,7 @@ function moveCard(id, col, why, patch, expected, from){
   if(expected === undefined) expected = c.version;
   // The board refuses these too; say why here instead of opening the PR dialog first.
   if(col === "merged" && !c.merge_sha){ statusMsg = "Merged is recorded by the orchestrator when it merges the PR (mark_merged)"; render(); return; }
+  if(col === "archived" && !c.released){ statusMsg = "Archived is where a release puts shipped cards — to retire a card that will not ship, open it and use Cancel card"; render(); return; }
   var withLinks = patch && patch.pr ? Object.assign({}, c, {pr: patch.pr}) : c;
   if(gated(withLinks, col)){ pending = {id: id, column: col, patch: patch || {}, why: why, expected: expected, from: from}; render(); return; }
   var body = {column: col, expected_version: expected, activity: (why || "Moved") + ": " + from + " → " + col};
@@ -244,6 +246,7 @@ function cardHtml(c){
   if(c.column === "merged") tags += "<span class=\"tag hum\">" + (c.merge_sha ? "merged " + esc(String(c.merge_sha).slice(0,7)) : "merge not recorded") + "</span>";
   if(c.agent && c.agent.status === "working") tags += "<span class=\"tag agent\">agent working since " + esc(fmt(c.agent.started)) + "</span>";
   if(c.released) tags += "<span class=\"tag rel\">released " + esc(c.released) + "</span>";
+  if(c.cancelled) tags += "<span class=\"tag cxl\">cancelled</span>";
   if(hasPr(c)) tags += "<span class=\"tag own\"><a href=\"" + esc(c.pr.url) + "\" target=\"_blank\" rel=\"noopener\">PR #" + esc(c.pr.number) + "</a></span>";
   for(var i=0;i<(c.links||[]).length;i++){
     tags += "<span class=\"tag\"><a href=\"" + esc(c.links[i].url) + "\" target=\"_blank\" rel=\"noopener\">" + esc(c.links[i].label) + "</a></span>";
@@ -319,7 +322,8 @@ function drawerHtml(s, edits){
   }
   var colOpts = "", roleOpts = "", priOpts = "";
   for(var k=0;k<COLUMNS.length;k++) colOpts += "<option value=\"" + COLUMNS[k].key + "\"" + (c.column===COLUMNS[k].key?" selected":"") + ">" + COLUMNS[k].label + "</option>";
-  colOpts += "<option value=\"archived\"" + (c.column==="archived"?" selected":"") + ">Archived</option>";
+  // Archived is reached by a release (or Cancel card), never picked here.
+  if(c.column === "archived") colOpts += "<option value=\"archived\" selected>Archived</option>";
   for(var r=0;r<ROLES.length;r++) roleOpts += "<option" + (c.role===ROLES[r]?" selected":"") + ">" + ROLES[r] + "</option>";
   var pris = ["P1","P2","P3"]; if(c.priority && pris.indexOf(c.priority) < 0) pris.push(c.priority);
   if(!c.priority) priOpts += "<option value=\"\" selected>—</option>";   // legacy card with no priority: show it unset, don't invent one
@@ -338,6 +342,15 @@ function drawerHtml(s, edits){
       + "<div class=\"dactions\"><button class=\"btn primary\" id=\"d-rebase\" " + (ro?"disabled":"") + ">Keep my edits on v" + esc(c.version) + "</button>"
       + "<button class=\"btn\" id=\"d-discard\">Discard my edits</button></div></div>";
   }
+  // A card that will not ship is retired as cancelled — archived, never as released.
+  var cancelled = "", retire = "";
+  if(c.cancelled){
+    cancelled = "<div class=\"stale\" id=\"d-cancelled\"><div class=\"qt\">Cancelled</div><div>" + esc(fmt(c.cancelled.t)) + " · " + esc(c.cancelled.by) + " — " + esc(c.cancelled.reason) + "</div>"
+      + "<div class=\"kv\">Archived without shipping. Cancelled is final: file a new card to take the work up again.</div></div>";
+  } else if(!c.released && !c.merge_sha){
+    retire = "<div class=\"dsec\"><h3>Cancel</h3><div class=\"kv\">For a card that will not ship. It is archived as cancelled, never as released, and stays there.</div>"
+      + "<div class=\"rulerow\"><input id=\"d-cancel\" placeholder=\"Why it will not ship\" " + (ro?"disabled":"") + "><button class=\"btn danger\" id=\"d-cancelbtn\" " + (ro?"disabled":"") + ">" + (confirmCancel ? "Confirm: cancel card" : "Cancel card") + "</button></div></div>";
+  }
   var claim = "";
   if(c.agent && c.agent.status === "working"){
     claim = "<div class=\"claim\"><span>" + esc(c.agent.name || "an agent") + " working since " + esc(fmt(c.agent.started)) + "</span>"
@@ -346,7 +359,7 @@ function drawerHtml(s, edits){
   return "<div class=\"overlay\" id=\"ovl\"><div class=\"drawer\" data-id=\"" + esc(c.id) + "\" role=\"dialog\" aria-label=\"Card detail\">"
     + "<button class=\"closex\" id=\"d-close\" aria-label=\"Close\">×</button>"
     + "<div class=\"cid\" style=\"font:500 11px 'IBM Plex Mono',monospace;color:var(--muted)\">" + esc(c.id) + " · created " + esc(fmt(c.created)) + " · v" + esc(c.version) + (c.source ? " · review feedback on " + esc(c.source.card || "milestone " + c.source.milestone) : "") + "</div>"
-    + stale + claim + wt
+    + stale + cancelled + claim + wt
     + "<div class=\"mrow\"><label for=\"d-title\">Title</label><input id=\"d-title\" value=\"" + esc(c.title) + "\" " + (ro?"disabled":"") + "></div>"
     + "<div class=\"tworow\">"
     + "<div class=\"mrow\"><label for=\"d-col\">Column</label><select id=\"d-col\" " + (ro?"disabled":"") + ">" + colOpts + "</select></div>"
@@ -358,6 +371,7 @@ function drawerHtml(s, edits){
     + ownPr
     + msSec
     + (links ? "<div class=\"links\"><h3>References</h3>" + links + "</div>" : "")
+    + retire
     + "<div class=\"dactions\">"
     + "<button class=\"btn primary\" id=\"d-save\" " + (ro?"disabled":"") + ">Save changes</button>"
     + "<button class=\"btn danger\" id=\"d-delete\" " + (ro?"disabled":"") + ">" + (confirmDelete?"Confirm delete":"Delete card") + "</button>"
@@ -404,7 +418,7 @@ function prModalHtml(c, col){
 // Live refreshes re-render the page; keep what the user is typing. Values
 // are restored only into the SAME overlay they were typed in (same card's
 // drawer, the new-card modal, the same card's PR dialog).
-var FIELDS = {drawer: ["d-title","d-body","d-col","d-role","d-pri","d-ms","d-area","d-summary","d-ht","d-answer","d-ruling"],
+var FIELDS = {drawer: ["d-title","d-body","d-col","d-role","d-pri","d-ms","d-area","d-summary","d-ht","d-answer","d-ruling","d-cancel"],
               create: ["n-title","n-body","n-role","n-pri","n-ms"], pr: ["pr-url"], ms: ["nm-name"]};
 function overlayKeys(){
   var dr = document.querySelector(".drawer[data-id]"), pr = document.getElementById("provl");
@@ -443,7 +457,7 @@ function render(){
   if(!openCardId) base = null;
   else if(full[openCardId] && (!base || base.id !== openCardId || discardDraft || !Object.keys(edits).length)) base = snapshot(full[openCardId]);
   discardDraft = false;
-  var keepDrawer = Object.keys(edits).map(function(k){ return DRAWER[k]; }).concat(["d-answer","d-ruling"]);
+  var keepDrawer = Object.keys(edits).map(function(k){ return DRAWER[k]; }).concat(["d-answer","d-ruling","d-cancel"]);
   var shown = state.cards.filter(inFilter);
   var archivedCards = shown.filter(function(c){ return c.column === "archived"; });
   var visCols = COLUMNS.slice();
@@ -491,8 +505,8 @@ function render(){
   }
   wire();
 }
-function openDrawer(id){ openCardId = id; base = null; confirmDelete = false; confirmRelease = false; fetchFull(id); render(); }
-function closeAll(){ if(params.get("card")){ params.delete("card"); setFilter(msFilter); } openCardId = null; showNew = false; showNewMs = false; confirmDelete = false; confirmRelease = false; pending = null; base = null; }
+function openDrawer(id){ openCardId = id; base = null; confirmDelete = false; confirmRelease = false; confirmCancel = false; fetchFull(id); render(); }
+function closeAll(){ if(params.get("card")){ params.delete("card"); setFilter(msFilter); } openCardId = null; showNew = false; showNewMs = false; confirmDelete = false; confirmRelease = false; confirmCancel = false; pending = null; base = null; }
 
 function wire(){
   var newbtn = document.getElementById("newbtn");
@@ -587,6 +601,18 @@ function wire(){
     confirmRelease = false;
     api("POST", "/api/cards/" + encodeURIComponent(c.id) + "/release", {expected_version: c.version}).then(function(r){
       afterWrite(r, "claim released on " + c.id); fetchFull(c.id);
+    });
+  };
+  var dcx = document.getElementById("d-cancelbtn");
+  if(dcx) dcx.onclick = function(){
+    var c = full[openCardId], el = document.getElementById("d-cancel"); if(!c || !el) return;
+    var reason = el.value.trim();
+    if(!reason){ statusMsg = "say why the card will not ship"; render(); return; }
+    if(!confirmCancel){ confirmCancel = true; render(); return; }
+    confirmCancel = false;
+    api("POST", "/api/cards/" + encodeURIComponent(c.id) + "/cancel", {reason: reason, expected_version: c.version}).then(function(r){
+      if(afterWrite(r, "cancelled " + c.id)){ closeAll(); } else { fetchFull(c.id); }
+      render();
     });
   };
   var dsave = document.getElementById("d-save");

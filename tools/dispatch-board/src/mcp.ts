@@ -106,7 +106,7 @@ export function buildMcpServer(board: Board): McpServer {
     "list_cards",
     {
       description:
-        "Card SUMMARIES (id, title, column, role, priority, agent, pr, worktree, links, updated, released, milestone, iteration, area, version) — never bodies or activity. " +
+        "Card SUMMARIES (id, title, column, role, priority, agent, pr, worktree, links, updated, released, cancelled, milestone, iteration, area, version) — never bodies or activity. " +
         "Archived cards are excluded unless you ask for column 'archived' or include_archived. `fields` picks other doc fields (e.g. [\"question\"]); [\"*\"] returns every field except activity. " +
         "`milestone` filters to one milestone's cards (null: cards on none); `iteration` to one feedback round.",
       inputSchema: {
@@ -168,7 +168,7 @@ export function buildMcpServer(board: Board): McpServer {
     "move_card",
     {
       description:
-        "Move a card to a column, atomically with an optional patch, body append and activity line — all one write. Enforces the column rules: a non-pm card needs its own PR (`pr`, already set or in this move's patch; `links` are references and never count) to enter review or merged (use mark_merged to record a merge); entering in_progress sets agent: null. `append` adds `## <heading>` + text to the body in the same write (a Tester REJECT: findings + the move back to in_progress).",
+        "Move a card to a column, atomically with an optional patch, body append and activity line — all one write. Enforces the column rules: a non-pm card needs its own PR (`pr`, already set or in this move's patch; `links` are references and never count) to enter review or merged (use mark_merged to record a merge); entering in_progress sets agent: null; archived means shipped, so a move enters it only with `released: <tag>` (retire a card that will not ship with cancel_card). `append` adds `## <heading>` + text to the body in the same write (a Tester REJECT: findings + the move back to in_progress).",
       inputSchema: {
         id,
         column,
@@ -184,6 +184,22 @@ export function buildMcpServer(board: Board): McpServer {
       run(() =>
         board.moveCard(a.id, a.column, a.expected_version, { actor: a.actor, by: a.by, activity: a.activity, patch: a.patch, append: a.append }),
       ),
+  );
+
+  server.registerTool(
+    "cancel_card",
+    {
+      description:
+        "Retire a card that will not ship (the user dropped it, or it was superseded): it moves to archived carrying cancelled {t, by, reason} instead of a release tag, so the milestone review lists it as cancelled — never as shipped — and no release bundles it. Terminal. Refused for a card with a recorded merge (its work is on main) or a release tag, and for a card under a working claim (stop the agent and release_claim first). An archived card with neither tag nor cancellation may be cancelled too.",
+      inputSchema: {
+        id,
+        reason: z.string().min(1).describe("One line: why it will not ship, e.g. \"superseded by AS-190\""),
+        expected_version: expectedVersion,
+        actor,
+        by,
+      },
+    },
+    async (a) => run(() => board.cancelCard(a.id, a.reason, a.expected_version, { actor: a.actor, by: a.by })),
   );
 
   server.registerTool(
@@ -259,7 +275,7 @@ export function buildMcpServer(board: Board): McpServer {
     "events_since",
     {
       description:
-        "Board events (created, moved, edited, answered, claimed, claim_released, claim_finished, activity, body_appended, deleted, ruling, merged, milestone_created, milestone_updated, milestone_sweep, milestone_closed, review_submitted, migrated) after `cursor`, oldest first. Returns the next cursor to pass. ignore_actors drops your own writes. cursor 0 = from the beginning; `head` gives the current cursor without events. A cursor past `head` is refused (cursor_ahead): it belongs to a re-created board — re-read the board and resume from head.",
+        "Board events (created, moved, edited, answered, claimed, claim_released, claim_finished, activity, body_appended, deleted, ruling, merged, cancelled, milestone_created, milestone_updated, milestone_sweep, milestone_closed, review_submitted, migrated) after `cursor`, oldest first. Returns the next cursor to pass. ignore_actors drops your own writes. cursor 0 = from the beginning; `head` gives the current cursor without events. A cursor past `head` is refused (cursor_ahead): it belongs to a re-created board — re-read the board and resume from head.",
       inputSchema: {
         cursor: z.number().int().min(0),
         ignore_actors: z.array(z.string()).optional(),
@@ -332,7 +348,7 @@ export function buildMcpServer(board: Board): McpServer {
     "get_milestone",
     {
       description:
-        "The milestone review payload, as the review page shows it: the milestone; what_changed (finished cards by area, with summary, pr, merge_sha); in_flight; checklist (every finished card's human-testing steps, ticks, and the SHA/tag it applies to); decisions (every ruling); balance (the milestone sweep, deferred and on-card sweeps); gaps (stated gaps, and cards filed while it was open); feedback (drafts and past submissions).",
+        "The milestone review payload, as the review page shows it: the milestone; what_changed (finished cards by area, with summary, pr, merge_sha); in_flight; cancelled (cards retired with cancel_card, with the reason: they ship nothing and appear in no other section); checklist (every finished card's human-testing steps, ticks, and the SHA/tag it applies to); decisions (every ruling); balance (the milestone sweep, deferred and on-card sweeps); gaps (stated gaps, and cards filed while it was open); feedback (drafts and past submissions).",
       inputSchema: { name: milestoneName },
       annotations: { readOnlyHint: true },
     },
@@ -375,7 +391,7 @@ export function buildMcpServer(board: Board): McpServer {
     "close_milestone",
     {
       description:
-        "After the user approves the milestone: every merged card on it moves to done and the milestone becomes released — one write. Refused while any of its cards is unfinished (not merged/done/archived). Returns the done cards (id, title, pr, merge_sha, summary, area, iteration) for the release bundle and notes.",
+        "After the user approves the milestone: every merged card on it moves to done and the milestone becomes released — one write. Refused while any of its cards is unfinished (not merged/done/archived); a cancelled card neither blocks it nor ships. Returns the done cards (id, title, pr, merge_sha, summary, area, iteration) for the release bundle and notes.",
       inputSchema: {
         name: milestoneName,
         expected_version: milestoneVersion,

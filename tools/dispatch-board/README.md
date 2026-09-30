@@ -33,8 +33,20 @@ awaiting the release) and the archive.
   `close_milestone`, which moves every one of its merged cards to done in the
   same write, is refused while any of its cards is unfinished, and is final.
 - **Move rules**, for every writer: a card enters `merged` only through
-  `mark_merged` (a plain move needs its merge already recorded), and a work card
-  on an unreleased milestone reaches `done` only through `close_milestone`.
+  `mark_merged` (a plain move needs its merge already recorded); a work card
+  on an unreleased milestone reaches `done` only through `close_milestone`, and
+  a work card already in `done` cannot join one (detach-then-finish — a move to
+  `done` with `milestone: null` — still works); and `archived` means shipped, so
+  a move enters it only carrying `released: <tag>`.
+- **Cancelling:** `cancel_card(id, reason)` (the drawer's *Cancel card*) retires
+  a card that will not ship. It moves to `archived` with `cancelled: {t, by,
+  reason}` in place of a release tag and stays there. The review page lists it
+  under *Cancelled — not shipped* and in no section that reads as work,
+  `close_milestone` neither waits on it nor returns it, and no release bundles
+  it. Refused for a card with a recorded merge or a release tag, and for one
+  under a working claim. No schema change: `cancelled` is a field of the card
+  document, and an archived card with no tag (retired by a plain move before
+  this) can be cancelled after the fact.
 - **Card fields:** `milestone` and `iteration` (1 for planned work, 2+ for review
   feedback; a card given a milestone defaults to 1), `area` (combat, visuals,
   ai, ui, tooling), `summary` (what changed, in a player's words),
@@ -47,7 +59,8 @@ awaiting the release) and the archive.
   payload) from those fields alone: *What changed* (finished cards by area),
   *What to check* (every step of every finished card's `human_testing`, as one
   checklist, with the build it applies to; an explicit "Nothing needs human
-  testing" is listed as nothing to check, not as a step), *Your decisions* (every ruling),
+  testing" is listed as nothing to check, not as a step — unless its qualifying
+  clause still asks for something, as in "…, but watch the glow"), *Your decisions* (every ruling),
   *Balance* (the milestone sweep; which cards deferred to it), *Known gaps and
   follow-ups* (stated gaps; the cards filed while it was open, by id range),
   and *Feedback*.
@@ -62,7 +75,7 @@ awaiting the release) and the archive.
   the comments, and records one `review_submitted` event naming the new cards —
   none, when there was no feedback. A submission names the version of every
   comment it submits, so one changed meanwhile refuses it.
-- **Events** added: `ruling`, `merged`, `milestone_created`, `milestone_updated`,
+- **Events** added: `ruling`, `merged`, `cancelled`, `milestone_created`, `milestone_updated`,
   `milestone_sweep`, `milestone_closed`, `review_submitted`, `migrated`. Every
   line keeps the `{cursor, t, actor, kind, card, data}` shape; a milestone's
   name is in `data.milestone`.

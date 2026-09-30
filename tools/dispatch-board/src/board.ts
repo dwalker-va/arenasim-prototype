@@ -51,6 +51,10 @@ export const SWEEP_STATUSES = ["done-on-card", "deferred-to-milestone", "none"] 
 export const MILESTONE_STATUSES = ["open", "in_review", "released"] as const;
 /** The milestone columns a card is finished in: its work is on main. */
 const FINISHED_COLUMNS: readonly string[] = ["merged", "done", "archived"];
+/** A card whose work is on main: in a finished column, and not a cancelled one (archived, but never shipped). */
+function isFinished(c: Record<string, unknown>): boolean {
+  return FINISHED_COLUMNS.includes(c.column as string) && c.cancelled == null;
+}
 
 /**
  * The database layout this build reads and writes. 1 is the AS-153 board
@@ -153,6 +157,7 @@ export const SUMMARY_FIELDS = [
   "links",
   "updated",
   "released",
+  "cancelled",
   "milestone",
   "iteration",
   "area",
@@ -583,7 +588,7 @@ export function checklistSteps(cardId: string, text: unknown): { key: string; te
   const seen = new Set<string>();
   const out: { key: string; text: string }[] = [];
   for (const line of stepLines(text)) {
-    if (NOTHING_TO_CHECK.test(line)) continue;
+    if (isNothingToCheck(line)) continue;
     const key = `${cardId}:${createHash("sha1").update(line).digest("hex").slice(0, 10)}`;
     if (seen.has(key)) continue; // the same step twice is one thing to check
     seen.add(key);
@@ -598,7 +603,19 @@ export function checklistSteps(cardId: string, text: unknown): { key: string; te
  * not a step: it never becomes a checkbox, and the review page says the card
  * has nothing to check rather than warning that its steps are missing.
  */
-const NOTHING_TO_CHECK = /^nothing (?:else )?needs? (?:any )?human testing\b[^.]*\.?$/i;
+const NOTHING_TO_CHECK = /^nothing (?:else )?needs? (?:any )?human testing\b([^.]*)\.?$/i;
+/**
+ * A qualifying clause that still asks for something ("…, but watch the
+ * glow", "…; check dark mode") keeps the line a step. The list errs wide on
+ * purpose: a statement read as a step costs one checkbox too many, while a
+ * step read as a statement vanishes from the checklist.
+ */
+const STILL_A_STEP = /\b(?:but|except|however|though|although|unless|yet|still|other than|apart from|besides|watch|check|verify|confirm|look|make sure|ensure|test|try|run|open|see)\b/i;
+
+function isNothingToCheck(line: string): boolean {
+  const m = NOTHING_TO_CHECK.exec(line);
+  return m !== null && !STILL_A_STEP.test(m[1]);
+}
 
 /** A human-testing text's lines, with the PR's `**Human testing:**` lead-in and list markers stripped. */
 function stepLines(text: unknown): string[] {
@@ -617,18 +634,21 @@ function stepLines(text: unknown): string[] {
 
 /** A card whose human testing says, explicitly, that there is nothing to check. */
 export function saysNothingToCheck(text: unknown): boolean {
-  return stepLines(text).some((l) => NOTHING_TO_CHECK.test(l));
+  return stepLines(text).some(isNothingToCheck);
 }
 
 /**
- * The two columns a plain move may not reach, so each keeps its meaning for
- * every writer (the web UI's drag included):
+ * The columns a plain move may not reach, so each keeps its meaning for every
+ * writer (the web UI's drag included):
  *  - `merged` means merged to main, which only `mark_merged` records. A move
  *    may put back a card whose merge is already recorded, never one without.
  *  - a work card on an unreleased milestone reaches `done` only when
  *    `close_milestone` closes that milestone — `done` is the milestone's
  *    approval, not the card's. (pm cards finish on their own; a card on a
  *    released milestone, or on none, moves freely.)
+ *  - `archived` means shipped: a move enters it only carrying its release
+ *    tag (`released`). A card that will not ship is retired by `cancel_card`,
+ *    and stays archived — cancelled is terminal, like a release.
  * Returns why the move is refused, or null.
  */
 function milestoneMoveRefusal(
@@ -637,6 +657,12 @@ function milestoneMoveRefusal(
   to: string,
   status: (name: string) => string | null,
 ): string | null {
+  if (doc.cancelled != null && to !== from) {
+    return "it was cancelled, and a cancelled card stays archived (file a new card to take the work up again)";
+  }
+  if (to === "archived" && from !== "archived" && doc.released == null) {
+    return "archived means shipped: a release archives a card with its tag (released), and cancel_card retires one that will not ship";
+  }
   if (to === "merged" && from !== "merged" && doc.merge_sha == null) {
     return "a card enters merged only through mark_merged, which records its merge on main";
   }
@@ -911,11 +937,27 @@ export class Board extends EventEmitter {
     return r ? String((JSON.parse(r.doc) as Milestone).status) : null;
   }
 
-  /** A card's milestone fields after a patch: a card that gains a milestone and has no iteration is iteration 1. */
-  private applyMilestonePatch(doc: Record<string, unknown>, patch: Record<string, unknown>): void {
+  /**
+   * A card's milestone fields after a patch: a card that gains a milestone and
+   * has no iteration is iteration 1. `column` is where the card will be once
+   * the write lands (a move's target). A done work card may not join an
+   * unreleased milestone: close_milestone never moved it there, yet that
+   * milestone's release would list it. Detaching still works — a move to done
+   * with `milestone: null`.
+   */
+  private applyMilestonePatch(doc: Record<string, unknown>, patch: Record<string, unknown>, column: string): void {
     if ("milestone" in patch && patch.milestone !== doc.milestone) this.checkAttach(patch.milestone);
+    if ("released" in patch && doc.cancelled != null) invalid(`${String(doc.id)} was cancelled: it has no release to record`);
+    const before = { milestone: doc.milestone, role: doc.role };
     Object.assign(doc, patch);
     if (doc.milestone != null && doc.iteration == null) doc.iteration = 1;
+    const changed = doc.milestone !== before.milestone || doc.role !== before.role;
+    if (changed && column === "done" && doc.role !== "pm" && typeof doc.milestone === "string") {
+      const status = this.milestoneStatus(doc.milestone);
+      if (status !== null && status !== "released") {
+        invalid(`${String(doc.id)} is done, so it cannot join milestone ${doc.milestone}: that milestone's cards reach done only when close_milestone closes it (move the card out of done first)`);
+      }
+    }
   }
 
   private summary(r: CardRow, fields?: string[]): Record<string, unknown> {
@@ -1117,7 +1159,7 @@ export class Board extends EventEmitter {
       const { r, doc } = this.loadExpecting(id, expectedVersion);
       checkAgentTransition(id, doc.agent, patch, () => this.current(id));
       const claimNote = claimChangeNote(doc.agent, patch);
-      this.applyMilestonePatch(doc, patch);
+      this.applyMilestonePatch(doc, patch, doc.column as string);
       if (GATED_COLUMNS.includes(doc.column as string) && !gateAllows(doc, doc.column as string)) {
         throw new BoardError("gate_refused", `${id} is in ${String(doc.column)}: a non-pm card there must keep its own PR (pr)`, this.current(id));
       }
@@ -1149,7 +1191,7 @@ export class Board extends EventEmitter {
       const from = doc.column as string;
       checkAgentTransition(id, doc.agent, patch, () => this.current(id));
       const stored = doc.agent;
-      this.applyMilestonePatch(doc, patch);
+      this.applyMilestonePatch(doc, patch, to);
       if (append) doc.body = withSection(doc.body, append.heading, append.text);
       if (!gateAllows(doc, to)) {
         throw new BoardError(
@@ -1282,6 +1324,44 @@ export class Board extends EventEmitter {
     });
   }
 
+  /**
+   * Retire a card that will not ship. It moves to `archived` carrying
+   * `cancelled: {t, by, reason}` in place of a release tag, so neither the
+   * milestone review nor a release can read it as shipped, and it stays there.
+   * Refused for work already on main (a recorded merge, which ships with its
+   * milestone) or released, and for a card an agent is working: stop that
+   * agent and release its claim first. An archived card with no tag (retired
+   * by a plain move before this existed) may be cancelled too.
+   */
+  cancelCard(id: string, reason: string, expectedVersion: number, meta: WriteMeta): Card {
+    const actor = checkActor(meta.actor);
+    const why = checkText(reason, "reason", { nonEmpty: true, singleLine: true }) as string;
+    checkVersion(expectedVersion);
+    return this.write(() => {
+      const { r, doc } = this.loadExpecting(id, expectedVersion);
+      const from = doc.column as string;
+      const refusal =
+        doc.cancelled != null
+          ? "it is already cancelled"
+          : doc.released != null
+            ? `it shipped in ${String(doc.released)}`
+            : doc.merge_sha != null
+              ? `its work is on main (merged at ${String(doc.merge_sha).slice(0, 10)}) and ships with its milestone`
+              : null;
+      if (refusal) throw new BoardError("invalid", `${id} cannot be cancelled: ${refusal}`, this.current(id));
+      if (isObj(doc.agent) && doc.agent.status === "working") {
+        throw new BoardError("claim_refused", `${id} is being worked by ${claimant(doc.agent)}: stop that agent and release its claim before cancelling`, this.current(id));
+      }
+      const by = meta.by ?? actor;
+      doc.cancelled = { t: now(), by, reason: why };
+      doc.column = "archived";
+      this.commitDoc(id, r.version, doc);
+      this.appendActivityRow(id, { t: now(), by, msg: `Cancelled (was ${from}): ${why}` });
+      this.recordEvent(actor, "cancelled", id, { from, to: "archived", ...(doc.milestone != null ? { milestone: doc.milestone } : {}) });
+      return this.getCard(id, { activity_limit: 5 });
+    });
+  }
+
   /** Remove a card from the board (the page's drawer delete). Its activity rows are kept. */
   deleteCard(id: string, expectedVersion: number, meta: WriteMeta): void {
     const actor = checkActor(meta.actor);
@@ -1377,15 +1457,17 @@ export class Board extends EventEmitter {
 
   listMilestones(): Record<string, unknown>[] {
     const rows = this.db.prepare("SELECT name, version, doc FROM milestones ORDER BY rowid").all() as MilestoneRow[];
+    // A cancelled card is counted as cancelled, never as archived (shipped).
     const counts = this.db
       .prepare(
-        "SELECT json_extract(doc, '$.milestone') AS m, col, count(*) AS n FROM cards WHERE deleted_at IS NULL AND json_extract(doc, '$.milestone') IS NOT NULL GROUP BY m, col",
+        "SELECT json_extract(doc, '$.milestone') AS m, CASE WHEN json_extract(doc, '$.cancelled') IS NOT NULL THEN 'cancelled' ELSE col END AS bucket, count(*) AS n " +
+          "FROM cards WHERE deleted_at IS NULL AND json_extract(doc, '$.milestone') IS NOT NULL GROUP BY m, bucket",
       )
-      .all() as { m: string; col: string; n: number }[];
+      .all() as { m: string; bucket: string; n: number }[];
     return rows.map((r) => {
       const m = this.milestoneOf(r);
       const cards: Record<string, number> = {};
-      for (const c of counts) if (c.m === r.name) cards[c.col] = c.n;
+      for (const c of counts) if (c.m === r.name) cards[c.bucket] = c.n;
       return { name: m.name, status: m.status, created: m.created, released_at: m.released_at ?? null, tag: m.tag ?? null, version: r.version, cards };
     });
   }
@@ -1485,7 +1567,7 @@ export class Board extends EventEmitter {
       if (unfinished.length) {
         throw new BoardError(
           "invalid",
-          `milestone ${name} has unfinished cards: ${unfinished.map((c) => `${String(c.id)} (${String(c.column)})`).join(", ")} — finish them or move them to another milestone first`,
+          `milestone ${name} has unfinished cards: ${unfinished.map((c) => `${String(c.id)} (${String(c.column)})`).join(", ")} — finish them, move them to another milestone, or cancel them (cancel_card) first`,
           undefined,
           this.milestoneOf(m),
         );
@@ -1541,7 +1623,7 @@ export class Board extends EventEmitter {
     for (const r of this.milestoneCardRows(name)) {
       const c = JSON.parse(r.doc) as Record<string, unknown>;
       comment.add(`card:${r.id}`);
-      if (!FINISHED_COLUMNS.includes(c.column as string)) continue;
+      if (!isFinished(c)) continue;
       for (const s of checklistSteps(r.id, c.human_testing)) {
         check.set(`check:${s.key}`, { card: c, text: s.text });
         comment.add(`check:${s.key}`);
@@ -1717,7 +1799,10 @@ export class Board extends EventEmitter {
     const m = this.milestoneOf(this.milestoneRow(name));
     const cards = this.milestoneCardRows(name).map((r) => Object.assign(JSON.parse(r.doc) as Record<string, unknown>, { version: r.version }));
     const items = this.reviewItems(name);
-    const finished = cards.filter((c) => FINISHED_COLUMNS.includes(c.column as string));
+    // A cancelled card is on the milestone but ships nothing: it is listed as
+    // cancelled, and in no section that reads as work (changed, checklist, sweeps, gaps).
+    const live = cards.filter((c) => c.cancelled == null);
+    const finished = live.filter(isFinished);
     const brief = (c: Record<string, unknown>) =>
       pick(c, ["id", "title", "column", "role", "pr", "merge_sha", "merged_at", "summary", "area", "iteration", "worktree", "source", "version"]);
     const areaOrder = [...AREAS, null];
@@ -1752,7 +1837,10 @@ export class Board extends EventEmitter {
     return {
       milestone: m,
       what_changed: byArea(finished).map((g) => ({ area: g.area, cards: g.cards.map(brief) })),
-      in_flight: cards.filter((c) => !FINISHED_COLUMNS.includes(c.column as string)).map(brief),
+      in_flight: live.filter((c) => !FINISHED_COLUMNS.includes(c.column as string)).map(brief),
+      cancelled: cards
+        .filter((c) => isObj(c.cancelled))
+        .map((c) => ({ ...pick(c, ["id", "title"]), reason: (c.cancelled as { reason?: string }).reason ?? null, t: (c.cancelled as { t?: string }).t ?? null })),
       checklist: {
         applies_to: {
           tag: m.tag ?? null,
@@ -1774,12 +1862,12 @@ export class Board extends EventEmitter {
         .sort((a, b) => a.t.localeCompare(b.t)),
       balance: {
         sweep: m.sweep ?? null,
-        deferred: cards.filter((c) => isObj(c.sweep) && c.sweep.status === "deferred-to-milestone").map((c) => ({ ...pick(c, ["id", "title"]), note: (c.sweep as { summary?: string }).summary ?? null })),
-        on_card: cards.filter((c) => isObj(c.sweep) && c.sweep.status === "done-on-card").map((c) => ({ ...pick(c, ["id", "title"]), note: (c.sweep as { summary?: string }).summary ?? null })),
+        deferred: live.filter((c) => isObj(c.sweep) && c.sweep.status === "deferred-to-milestone").map((c) => ({ ...pick(c, ["id", "title"]), note: (c.sweep as { summary?: string }).summary ?? null })),
+        on_card: live.filter((c) => isObj(c.sweep) && c.sweep.status === "done-on-card").map((c) => ({ ...pick(c, ["id", "title"]), note: (c.sweep as { summary?: string }).summary ?? null })),
         unstated: finished.filter((c) => c.role !== "pm" && !isObj(c.sweep)).map((c) => pick(c, ["id", "title"])),
       },
       gaps: {
-        stated: cards.filter((c) => typeof c.gaps === "string" && c.gaps.trim()).map((c) => ({ id: c.id, title: c.title, gaps: c.gaps })),
+        stated: live.filter((c) => typeof c.gaps === "string" && c.gaps.trim()).map((c) => ({ id: c.id, title: c.title, gaps: c.gaps })),
         followups,
       },
       feedback: {
