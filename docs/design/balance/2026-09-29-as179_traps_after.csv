@@ -101,14 +101,14 @@ hp_v_prpal,18,47.55,Paladin,False,Team 2 Paladin #2,Paladin,1.5,removed,[ 50.88s
 hp_v_prpal,19,17.98,Paladin,False,,,,unsprung,,,,,,,
 hp_v_prpal,19,46.02,Paladin,False,Team 2 Paladin #2,Paladin,1.5,removed,[ 52.03s] [BUFF] Team 2 Paladin #2's Divine Shield removes 1 debuff,4.51,8.0,4.51,,3,0
 hp_v_wlkrog,1,27.13,Rogue,True,Team 2 Rogue #2,Rogue,2.04,ran_out,,,8.0,8.0,,0,0
-hp_v_wlkrog,3,28.65,Rogue,True,Team 2 Rogue #2,Rogue,2.85,ran_out,,,8.0,8.0,,0,0
-hp_v_wlkrog,5,29.7,Rogue,True,Team 2 Rogue #2,Rogue,2.0,ran_out,,,8.0,8.0,,0,0
-hp_v_wlkrog,8,31.67,Rogue,True,Team 2 Rogue #2,Rogue,2.0,ran_out,,,8.0,8.0,,0,0
+hp_v_wlkrog,3,28.65,Rogue,True,Team 2 Rogue #2,Rogue,2.85,match_ended,,,8.0,7.27,,0,0
+hp_v_wlkrog,5,29.7,Rogue,True,Team 2 Rogue #2,Rogue,2.0,match_ended,,,8.0,7.03,,0,0
+hp_v_wlkrog,8,31.67,Rogue,True,Team 2 Rogue #2,Rogue,2.0,match_ended,,,8.0,5.1,,0,0
 hp_v_wlkrog,10,27.13,Rogue,True,Team 2 Rogue #2,Rogue,2.04,ran_out,,,8.0,8.0,,0,0
 hp_v_wlkrog,11,28.65,Rogue,True,Team 2 Rogue #2,Rogue,2.85,ran_out,,,8.0,8.0,,0,0
-hp_v_wlkrog,14,28.65,Rogue,True,Team 2 Rogue #2,Rogue,2.85,ran_out,,,8.0,8.0,,0,0
-hp_v_wlkrog,17,29.7,Rogue,True,Team 2 Rogue #2,Rogue,2.0,ran_out,,,8.0,8.0,,0,0
-hp_v_wlkrog,18,28.65,Rogue,True,Team 2 Rogue #2,Rogue,2.85,ran_out,,,8.0,8.0,,0,0
+hp_v_wlkrog,14,28.65,Rogue,True,Team 2 Rogue #2,Rogue,2.85,match_ended,,,8.0,3.25,,0,0
+hp_v_wlkrog,17,29.7,Rogue,True,Team 2 Rogue #2,Rogue,2.0,match_ended,,,8.0,4.98,,0,0
+hp_v_wlkrog,18,28.65,Rogue,True,Team 2 Rogue #2,Rogue,2.85,match_ended,,,8.0,7.27,,0,0
 hp_v_wlkrog,19,28.65,Rogue,True,Team 2 Rogue #2,Rogue,2.85,ran_out,,,8.0,8.0,,0,0
 hp_v_shrog,0,10.97,,False,Team 2 Rogue #2,Rogue,3.98,ran_out,,,8.0,8.0,,6,
 hp_v_shrog,1,10.97,,False,Team 2 Rogue #2,Rogue,3.98,ran_out,,,8.0,8.0,,6,
@@ -118,9 +118,9 @@ hp_v_shrog,2,42.23,Shaman,True,Team 2 Rogue #2,Rogue,2.77,broke,,,8.0,1.82,Team 
 hp_v_shrog,3,10.97,,False,Team 2 Rogue #2,Rogue,3.98,ran_out,,,8.0,8.0,,5,
 hp_v_shrog,4,10.97,,False,Team 2 Rogue #2,Rogue,3.98,ran_out,,,8.0,8.0,,6,
 hp_v_shrog,5,10.97,,False,Team 2 Rogue #2,Rogue,3.98,ran_out,,,8.0,8.0,,6,
-hp_v_shrog,5,37.78,Shaman,True,Team 2 Shaman #1,Shaman,2.99,ran_out,,,8.0,8.0,,0,0
+hp_v_shrog,5,37.78,Shaman,True,Team 2 Shaman #1,Shaman,2.99,match_ended,,,8.0,7.76,,0,0
 hp_v_shrog,6,10.97,,False,Team 2 Rogue #2,Rogue,3.98,ran_out,,,8.0,8.0,,6,
-hp_v_shrog,6,41.05,Shaman,True,Team 2 Shaman #1,Shaman,2.98,ran_out,,,8.0,8.0,,0,0
+hp_v_shrog,6,41.05,Shaman,True,Team 2 Shaman #1,Shaman,2.98,match_ended,,,8.0,6.74,,0,0
 hp_v_shrog,7,10.97,,False,Team 2 Rogue #2,Rogue,3.98,ran_out,,,8.0,8.0,,6,
 hp_v_shrog,8,10.97,,False,Team 2 Rogue #2,Rogue,3.98,ran_out,,,8.0,8.0,,6,
 hp_v_shrog,9,10.97,,False,Team 2 Rogue #2,Rogue,3.98,ran_out,,,8.0,8.0,,6,
@@ -330,7 +330,7 @@ h_v_wlk,9,11.02,Felhunter,False,Team 2 Felhunter #1,Felhunter,4.71,ran_out,,,8.0
 h_v_wlk,10,11.02,Felhunter,False,Team 2 Felhunter #1,Felhunter,4.71,ran_out,,,8.0,8.0,,6,0
 h_v_wlk,11,11.02,Felhunter,False,Team 2 Felhunter #1,Felhunter,4.71,ran_out,,,8.0,8.0,,6,0
 h_v_wlk,12,11.02,Felhunter,False,Team 2 Felhunter #1,Felhunter,4.71,ran_out,,,8.0,8.0,,6,0
-h_v_wlk,13,11.02,Felhunter,False,Team 2 Felhunter #1,Felhunter,4.71,ran_out,,,8.0,8.0,,5,0
+h_v_wlk,13,11.02,Felhunter,False,Team 2 Felhunter #1,Felhunter,4.71,match_ended,,,8.0,6.02,,5,0
 h_v_wlk,14,11.02,Felhunter,False,Team 2 Felhunter #1,Felhunter,4.71,ran_out,,,8.0,8.0,,6,0
 h_v_wlk,15,11.02,Felhunter,False,Team 2 Felhunter #1,Felhunter,4.71,ran_out,,,8.0,8.0,,6,0
 h_v_wlk,16,11.02,Felhunter,False,Team 2 Felhunter #1,Felhunter,4.71,ran_out,,,8.0,8.0,,6,0

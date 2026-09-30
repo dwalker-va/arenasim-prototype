@@ -9,7 +9,7 @@ graphical client's default is 0), `--kill-target N,M` team 1's to N and team
 Writes <outdir>/traps.csv (one row per Freezing Trap thrown: its decided
 victim, whom it sprang on, its fate, the incapacitate `duration` applied and
 the seconds the victim was actually `held` — the duration, cut short by a
-removal or a break — `hunter_hits_held`, the trapping Hunter's own damage
+removal, a break or the match ending (fate `match_ended`) — `hunter_hits_held`, the trapping Hunter's own damage
 events while it was held, and `hunter_on_victim_held`, the Hunter's decisions
 in that time still targeting the victim it held fire on while another enemy
 was alive to fight; empty unless the trap sprang on the enemy it was thrown
@@ -110,6 +110,10 @@ def analyse(name, seed, d, log, team1=(), team2=()):
                                (v.get("target") or {}).get("entity_id"),
                                (v.get("target") or {}).get("distance")))
     lines = open(log).read().splitlines()
+    # The match ends at its last timestamped event (the final death): a trap
+    # still running then was cut short by the match, not held for its duration.
+    match_end = max((float(m.group(1)) for m in
+                     (re.match(r"\[\s*([\d.]+)s\]", l) for l in lines) if m), default=1e9)
     winner = next((l.split(":", 1)[1].strip() for l in lines if l.startswith("Winner:")), "")
     # events
     casts, triggers, removals, breaks, applied, bubbles, damage, deaths = (
@@ -155,7 +159,8 @@ def analyse(name, seed, d, log, team1=(), team2=()):
             brk = next((t for t in breaks if t >= trig[0] and t < trig[0] + 8.5), None)
         dur = next((a for t, a in applied if trig and trig[0] <= t < trig[0] + 0.5), None)
         if trig and dur is not None:
-            ends = [dur] + ([rem[0] - trig[0]] if rem else []) + ([brk - trig[0]] if brk else [])
+            ends = ([dur, match_end - trig[0]] + ([rem[0] - trig[0]] if rem else [])
+                    + ([brk - trig[0]] if brk else []))
             held = round(min(ends), 2)
             hits = sum(1 for t, l in damage
                        if trig[0] <= t <= trig[0] + held and f"] {trig[2]}'s " in l)
@@ -195,7 +200,9 @@ def analyse(name, seed, d, log, team1=(), team2=()):
             "sprung_class": (trig[1].split("'s ")[1] if trig and "'s " in trig[1]
                              else trig[1].split()[2]) if trig else "",
             "trigger_delay": round(trig[0] - c, 2) if trig else "",
-            "fate": ("removed" if rem else "broke" if brk else "ran_out") if trig else "unsprung",
+            "fate": ("removed" if rem else "broke" if brk
+                     else "match_ended" if dur is not None and match_end - trig[0] < dur
+                     else "ran_out") if trig else "unsprung",
             "removal": rem[1][:120] if rem else "",
             "removal_delay": round(rem[0] - trig[0], 2) if rem else "",
             "duration": dur if dur is not None else "",

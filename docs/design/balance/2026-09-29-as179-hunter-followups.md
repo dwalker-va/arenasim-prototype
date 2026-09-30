@@ -10,7 +10,9 @@ cell).
 seeded repro (`repro.jsonl`), the no-healer set (`no-healer.jsonl`), the
 no-Hunter control (`no-hunter.jsonl`), and the trap mechanism runner
 (`trapmech.py` — AS-125's runner, plus a `breaker` column naming the damage
-that broke a trap, and assets resolved next to the binary). Rows:
+that broke a trap, a `match_ended` fate with `held` capped at the match's end
+for a trap still running when the match ended, and assets resolved next to
+the binary). Rows:
 `2026-09-29-as179_{repro,no_healer,traps}_{base_8547f7b,after}.csv`.
 
 ## 1. The Hunter's own shot no longer breaks its own trap
@@ -41,7 +43,8 @@ catch the target before it lands`.
 |---|---|---|
 | traps thrown | 331 | 338 |
 | broken by damage | 9 (8 by the Hunter's own Aimed Shot) | 2 (1) |
-| ran the full duration | 220 | 231 |
+| ran the full duration | 215 | 222 |
+| cut short by the match ending | 5 | 9 |
 
 The one left (`H+Pri vs Shaman+Rogue` seed 2) is a healer trap the Rogue
 walked into when its heading at the Aimed Shot's start did not carry it there:
@@ -52,14 +55,29 @@ is a partner Priest's Mind Blast (AS-125's partner-healer exception, as before).
 
 **It does not recover `H+Pri vs Warlock+Rogue`.** AS-125's doc attributes that
 comp's 20 → 10 to these breaks; with every one of its six breaks gone the
-Hunter side wins **10 → 9 of 20**. Seeds 3, 8, 11, 14 and 18 were losses with
-the trap broken and are losses with it running a full 8s: by the time the lane
-trap goes on the Rogue, the fight is a lone Hunter against a Rogue, and a lone
-Hunter holds fire for the whole freeze and resumes as it ends. Seed 19 goes the
-other way — broken early, the Aimed Shot's damage had won it. The comp's loss
-against `c79d8cc` is somewhere else in AS-125 (the held gates-open trap is the
-candidate the AS-125 doc already names), and using the freeze window is a
-separate question (follow-ups).
+Hunter side wins **10 → 9 of 20**. In every one of those six seeds the Warlock
+is dead by 25.8s and the lane trap springs on the Rogue at 31.5s (33.7s in seed
+8), leaving a lone Hunter against a frozen Rogue. What happens next, per seed:
+
+| seed | before (trap broken) | after (trap intact) |
+|---|---|---|
+| 3 | loss | loss — the dead Warlock's DoTs kill the Hunter at 38.77s, Rogue still frozen |
+| 8 | loss | loss — the same, at 38.77s |
+| 14 | loss | loss — the same, at 34.75s |
+| 18 | loss | loss — the same, at 38.77s |
+| 11 | loss | loss — the freeze runs its full 8s with the Hunter holding fire; the Rogue kills it at 46.95s |
+| 19 | win | loss — the same, at 48.47s |
+
+In seeds 3, 8, 14 and 18 the Hunter dies to the Curse of Agony, Immolate,
+Unstable Affliction and Corruption the Warlock left on it. On `8547f7b` those
+four matches end at the same instant from the same Curse of Agony tick, so
+whether the trap broke never mattered. Only seeds 11 and 19 are a Hunter that
+holds fire through the whole freeze and then loses to the Rogue; seed 19 had
+been won by the Aimed Shot damage that broke the trap. So AS-125's attribution
+of this comp's 20 → 10 to the breaks does not hold. The loss against `c79d8cc`
+comes from elsewhere in AS-125: the held gates-open trap is the candidate the
+AS-125 doc already names, and the DoTs left on the Hunter are the proximate
+killer in four of these seeds (follow-ups).
 
 ## 2. Hunter vs Priest: the opener's "has time" rule
 
@@ -131,11 +149,11 @@ does not throw the pressure trap from the dead zone while the Hunter is slowed
 or rooted — at that point Disengage has already failed, so a slowed Hunter
 cannot make room to shoot the melee. Same trap set, seeds 0-19:
 
-| kill targets | healer traps | seconds healers held | Hunter-side wins | matches whose winner changed |
+| kill targets | healer traps (ran the full 8s) | seconds healers held, to match end at most | Hunter-side wins | matches whose winner changed |
 |---|---|---|---|---|
-| none (540) | 161 → 157 | 1,102 → 1,060 | 260 → 260 | 0 |
-| both at slot 0 (540) | 158 → 156 | 1,113 → 1,095 | 357 → 360 | 5 |
-| team 1 on the healer (340, healer comps) | 116 → 116 | 921 → 899 | 115 → 116 | 3 |
+| none (540) | 161 (132) → 157 (127) | 1,100 → 1,059 | 260 → 260 | 0 |
+| both at slot 0 (540) | 158 (133) → 156 (132) | 1,113 → 1,095 | 357 → 360 | 5 |
+| team 1 on the healer (340, healer comps) | 116 (115) → 116 (113) | 921 → 899 | 115 → 116 | 3 |
 
 **Not changed.** The pinned throws are working traps — the three `H+Pri vs
 Rogue+Priest` throws the arm removes each held the Priest the full 8s — and
@@ -159,8 +177,14 @@ Hunter spawns.
 ## Follow-ups
 
 - **Use the freeze window.** A lone Hunter holding fire through its own trap
-  on its only enemy (`H+Pri vs Warlock+Rogue` endgames) could time an Aimed
-  Shot to land as the trap ends, or open distance, instead of idling 8s.
+  on its only enemy (`H+Pri vs Warlock+Rogue` seeds 11 and 19) could time an
+  Aimed Shot to land as the trap ends, or open distance, instead of idling 8s.
+- **The Warlock's DoTs outlive it.** In `H+Pri vs Warlock+Rogue` seeds 3, 8, 14
+  and 18 the Hunter dies to Curse of Agony, Immolate, Unstable Affliction and
+  Corruption ticking 9-13s after the Warlock died. Its Priest was already dead,
+  so nothing dispelled them. Whether the Hunter should self-heal or otherwise
+  answer that (or whether a dead caster's DoTs should keep ticking at all) is
+  its own card.
 - **Is the opener rule still earning its place?** At `8547f7b` it changes no
   Mage+Warrior outcome, and in Warrior+Rogue sting-first scored higher. For
   the milestone sweep.
