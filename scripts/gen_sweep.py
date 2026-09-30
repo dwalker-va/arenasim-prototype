@@ -15,7 +15,7 @@ Examples
 # 1v1: Hunter vs every class, N=100, 300s cap
 gen_sweep.py --t1 Hunter --t2-size 1 --n 100 > /tmp/sweep.jsonl
 
-# Full 7x7 1v1 matrix
+# Full 9x9 1v1 matrix
 gen_sweep.py --t1 '{p}' --t2-size 1 --n 100 > /tmp/matrix.jsonl
 
 # 2v2: Hunter + every partner vs every distinct opposing pair (no double-healer)
@@ -39,7 +39,7 @@ done > /tmp/pet_sweep.jsonl
 
 Notes
 -----
-- `{p}` in --t1 is a wildcard that expands over all 8 classes (skipping any
+- `{p}` in --t1 is a wildcard that expands over all 9 classes (skipping any
   expansion that would duplicate a class already in the template).
 - Opposing teams are distinct-class unordered combinations of --t2-size.
 - The cap defaults to 300s: healer attrition resolves around ~200-240s, so a
@@ -143,7 +143,7 @@ def _cover_table(masks, full):
     """`table[u]` = fewest of these teams that together field every class in `u`.
 
     Exact, by dynamic programming over subsets of the side's universe (at most
-    eight classes, so 256 states). Whatever team covers the lowest missing
+    nine classes, so 512 states). Whatever team covers the lowest missing
     class is in some optimal cover, so only those teams need trying.
     """
     teams = sorted(set(masks))
@@ -161,7 +161,7 @@ def control_floor(cells):
     exact minimum set cover of its universe by the teams it fields, and the
     cells form a full product of the two sides' teams (see `sample_spread`),
     so any team1 cover pairs with any opponent cover: the joint floor is the
-    larger of the two. At the default roster it is 4 for 2v2, 7 for 1v1 and 3
+    larger of the two. At the default roster it is 4 for 2v2, 8 for 1v1 and 3
     for 3v3 with one class affected -- but those are this roster's values, not
     constants; the function is what answers.
     """

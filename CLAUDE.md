@@ -798,7 +798,7 @@ null result means nothing without it.
 
 **The control fields every class the change cannot reach, on both sides.**
 `gen_sweep.py` builds it that way and refuses a `--control-cells` below the
-fewest cells that can (4 for a one-class 2v2 change, 7 for 1v1; the default 8
+fewest cells that can (4 for a one-class 2v2 change, 8 for 1v1; the default 8
 clears both; `0` drops the control with a warning). `paired_sweep.py` prints
 which classes the control fields per side, and a class the sweep fields in an
 unaffected team but the control never does is a `CONTROL BLIND SPOT` — the
