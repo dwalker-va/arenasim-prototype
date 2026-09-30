@@ -15,14 +15,16 @@ use bevy::prelude::*;
 
 use arenasim::combat::log::CombatLog;
 use arenasim::states::play_match::auras::{apply_pending_auras, process_hot_ticks, update_auras};
+use arenasim::states::play_match::combat_core::process_casting;
 use arenasim::states::play_match::combat_core::{
     MARK_OF_THE_WILD_ARMOR, MARK_OF_THE_WILD_RESISTANCE, MARK_OF_THE_WILD_RESISTED_SCHOOLS,
 };
 use arenasim::states::play_match::components::{
-    ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, Combatant, CompoundDebuff,
-    DispelPending, DispelScope, GameRng,
+    ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, CastingState, Combatant,
+    CompoundDebuff, DispelPending, DispelScope, GameRng,
 };
 use arenasim::states::play_match::effects::{process_blooms, process_dispels};
+use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::{AbilityDefinitions, AbilityType};
 use arenasim::CharacterClass;
 
@@ -245,6 +247,120 @@ fn a_bloom_is_dampened_like_every_heal() {
     world.run_system_once(process_hot_ticks).unwrap();
     world.run_system_once(process_blooms).unwrap();
     assert_eq!(health(&world, ally) - before, (per_stack + tick) * 0.5);
+}
+
+#[test]
+fn a_bloom_is_cut_by_healing_reduction() {
+    // A bloom is a direct heal, so Mortal Strike cuts it — the ordinary tick
+    // that fires on the same last frame is a HoT tick and does not take it.
+    let mut world = world(1.0);
+    let (druid, ally) = druid_and_ally(&mut world);
+    let mut aura = cast(AbilityType::Lifebloom, ally, druid, 100.0).aura;
+    aura.duration = 0.5;
+    aura.time_until_next_tick = 5.0;
+    let per_stack = aura.bloom.unwrap();
+    let tick = aura.magnitude;
+    let mortal_wound = Aura {
+        effect_type: AuraType::HealingReduction,
+        duration: 10.0,
+        magnitude: 0.5,
+        ability_name: "Mortal Strike".to_string(),
+        ..Default::default()
+    };
+    world.entity_mut(ally).insert(ActiveAuras {
+        auras: vec![aura, mortal_wound],
+    });
+
+    let before = health(&world, ally);
+    world.run_system_once(process_hot_ticks).unwrap();
+    world.run_system_once(process_blooms).unwrap();
+    assert_eq!(health(&world, ally) - before, tick + per_stack * 0.5);
+}
+
+#[test]
+fn a_landed_swiftmend_consumes_the_targets_rejuvenation() {
+    let mut world = world(1.0 / 60.0);
+    world.insert_resource(AbilityDefinitions::default());
+    world.insert_resource(ActiveMapGeometry {
+        bounds: Default::default(),
+        volumes: Vec::new(),
+        cover_anchors: Vec::new(),
+    });
+    let (druid, ally) = druid_and_ally(&mut world);
+    let rejuv = cast(AbilityType::Rejuvenation, ally, druid, 100.0).aura;
+    world
+        .entity_mut(ally)
+        .insert(ActiveAuras { auras: vec![rejuv] });
+    world.entity_mut(druid).insert(CastingState {
+        ability: AbilityType::Swiftmend,
+        time_remaining: 0.001,
+        target: Some(ally),
+        interrupted: false,
+        interrupted_display_time: 0.0,
+    });
+
+    let before = health(&world, ally);
+    world.run_system_once(process_casting).unwrap();
+
+    assert!(
+        auras_named(&world, ally, "Rejuvenation").is_empty(),
+        "Swiftmend must eat the Rejuvenation it heals with"
+    );
+    assert!(health(&world, ally) > before, "and heal");
+    assert!(log_has(&world, "Swiftmend consumes Rejuvenation on"));
+}
+
+/// Mark of the Wild's resistance riders are `SpellResistanceBuff`s. They are
+/// part of the Mark, not the one-per-type resistance slot, so a Paladin's
+/// Shadow Resistance Aura lands beside them whichever of the two arrives first.
+#[test]
+fn mark_of_the_wild_and_shadow_resistance_aura_land_in_either_order() {
+    for mark_first in [true, false] {
+        let mut world = world(0.0);
+        let (druid, ally) = druid_and_ally(&mut world);
+        let paladin = world
+            .spawn((
+                Combatant::new(1, 2, CharacterClass::Paladin),
+                Transform::default(),
+            ))
+            .id();
+        let defs = AbilityDefinitions::default();
+        let aura_pending = || {
+            AuraPending::from_ability(
+                ally,
+                paladin,
+                defs.get_unchecked(&AbilityType::ShadowResistanceAura),
+            )
+            .unwrap()
+        };
+        if mark_first {
+            land(
+                &mut world,
+                cast(AbilityType::MarkOfTheWild, ally, druid, 0.0),
+            );
+            land(&mut world, aura_pending());
+        } else {
+            land(&mut world, aura_pending());
+            land(
+                &mut world,
+                cast(AbilityType::MarkOfTheWild, ally, druid, 0.0),
+            );
+        }
+        let order = if mark_first {
+            "Mark first"
+        } else {
+            "aura first"
+        };
+        assert_eq!(
+            auras_named(&world, ally, "Shadow Resistance Aura").len(),
+            1,
+            "{order}: the Paladin's aura must land"
+        );
+        assert!(
+            !mark_of_the_wild_effects(&world, ally).is_empty(),
+            "{order}: the Mark must land"
+        );
+    }
 }
 
 #[test]

@@ -907,8 +907,14 @@ impl Aura {
     /// Shout, and must not stop one. Every site asking "does this target
     /// already have the buff" asks it here, so the rule reads the same whichever
     /// of the two arrives first.
+    ///
+    /// Nor does a compound's RIDER: it is one effect of ANOTHER buff, and the
+    /// compound answers for itself through its face. Mark of the Wild's
+    /// resistance riders are `SpellResistanceBuff`s, and one holding the slot
+    /// turned away a Paladin's Shadow Resistance Aura on any ally the Mark
+    /// reached first.
     pub fn holds_type_slot(&self, effect: AuraType) -> bool {
-        self.effect_type == effect && !self.distinct_by_source()
+        self.effect_type == effect && !self.distinct_by_source() && !self.is_compound_rider()
     }
 
     /// Returns true if this aura can be removed by a DISPEL — Dispel Magic,

@@ -76,7 +76,7 @@ fn assert_pre_combat_levels(label: &str, resources: &Resources) {
     }
 }
 
-/// All eight classes across two matches, a Warrior on each side of both.
+/// All nine classes across two matches, a Warrior on each side of both.
 #[test]
 fn gates_open_with_rage_empty_and_mana_and_energy_full() {
     for (team1, team2) in [
@@ -86,7 +86,7 @@ fn gates_open_with_rage_empty_and_mana_and_energy_full() {
         ),
         (
             &["Warrior", "Hunter", "Paladin"][..],
-            &["Warrior", "Shaman", "Rogue"][..],
+            &["Warrior", "Shaman", "Druid"][..],
         ),
     ] {
         let w = watch(team1, team2, 1);
