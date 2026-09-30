@@ -66,11 +66,6 @@ pub struct CelebrationMarch {
     /// beat that by `PROGRESS_EPSILON` — the stall clock.
     pub closest: f32,
     pub stalled_for: f32,
-    /// Which way round the first pillar in its path this winner committed to
-    /// (+1 left of its line to the spot, -1 right, 0 not yet). Tangent
-    /// steering can flip sides from tick to tick when the spot sits straight
-    /// behind a pillar face; the march holds the side it first took.
-    pub side: f32,
 }
 
 impl CelebrationMarch {
@@ -82,7 +77,6 @@ impl CelebrationMarch {
             settled: false,
             closest: f32::INFINITY,
             stalled_for: 0.0,
-            side: 0.0,
         }
     }
 
@@ -313,7 +307,6 @@ pub fn step_celebration(
             owner_pos,
             step,
             PET_HEEL_DISTANCE,
-            None,
             geometry,
         );
     }
@@ -340,14 +333,7 @@ fn advance_march(
     geometry: &ActiveMapGeometry,
 ) {
     if !march.settled {
-        match walk_toward(
-            transform,
-            march.goal,
-            speed * dt,
-            0.0,
-            Some(&mut march.side),
-            geometry,
-        ) {
+        match walk_toward(transform, march.goal, speed * dt, 0.0, geometry) {
             Walk::Arrived | Walk::Blocked => march.settled = true,
             Walk::Moved => {
                 let at = transform.translation;
@@ -386,15 +372,13 @@ enum Walk {
 /// no nearer.
 const BLOCKED_FRACTION: f32 = 0.25;
 
-/// Move one step toward `goal`, stopping `stop_at` short of it. With a
-/// `side`, rounds any pillar on the side first taken (see
-/// [`CelebrationMarch::side`]).
+/// Move one step toward `goal`, stopping `stop_at` short of it, rounding any
+/// pillar in the way as a pursuer does.
 fn walk_toward(
     transform: &mut Transform,
     goal: Vec3,
     step: f32,
     stop_at: f32,
-    mut side: Option<&mut f32>,
     geometry: &ActiveMapGeometry,
 ) -> Walk {
     let from = transform.translation;
@@ -403,77 +387,26 @@ fn walk_toward(
     if remaining <= 1e-3 {
         return Walk::Arrived;
     }
-    // Round any pillar in the way, as a pursuer does — holding one side.
-    let toward = to_goal.normalize_or_zero();
-    let direction = match steer_toward_goal(
+    let direction = steer_toward_goal(
         &geometry.volumes,
         Vec2::new(from.x, from.z),
         Vec2::new(goal.x, goal.z),
         from.y,
-    ) {
-        None => toward,
-        Some(steer) => match side.as_deref_mut() {
-            None => steer,
-            Some(side) => {
-                let lean = toward.perp_dot(steer);
-                if *side == 0.0 && lean.abs() > 1e-4 {
-                    *side = lean.signum();
-                }
-                if lean * *side < 0.0 {
-                    // Mirror across the line to the spot, back onto our side.
-                    2.0 * steer.dot(toward) * toward - steer
-                } else {
-                    steer
-                }
-            }
-        },
-    };
+    )
+    .unwrap_or_else(|| to_goal.normalize_or_zero());
     if direction == Vec2::ZERO {
         return Walk::Blocked;
     }
     let travel = step.min(remaining);
-    let try_step = |direction: Vec2| {
-        let proposed = from + Vec3::new(direction.x, 0.0, direction.y) * travel;
-        let landed = clamp_to_arena(
-            &geometry.bounds,
-            resolve_movement(&geometry.volumes, from, proposed),
-        );
-        let moved = Vec2::new(landed.x - from.x, landed.z - from.z).length();
-        (landed, moved >= BLOCKED_FRACTION * travel)
-    };
-    let (landed, moved) = try_step(direction);
-    let (landed, direction) = if moved {
-        (landed, direction)
-    } else {
-        // Pressed square against a face with the spot straight behind it,
-        // steering offers nothing and the slide has no sideways component.
-        // Step along the face instead: the side that heads more toward the
-        // spot, the left one on an exact tie.
-        let left = Vec2::new(-direction.y, direction.x);
-        let committed = side.as_deref().copied().unwrap_or(0.0);
-        let along = if committed != 0.0 {
-            if toward.perp_dot(left) * committed >= 0.0 {
-                left
-            } else {
-                -left
-            }
-        } else if left.dot(to_goal) >= 0.0 {
-            left
-        } else {
-            -left
-        };
-        match try_step(along) {
-            (landed, true) => {
-                if let Some(side) = side {
-                    if *side == 0.0 {
-                        *side = toward.perp_dot(along).signum();
-                    }
-                }
-                (landed, along)
-            }
-            _ => return Walk::Blocked,
-        }
-    };
+    let proposed = from + Vec3::new(direction.x, 0.0, direction.y) * travel;
+    let landed = clamp_to_arena(
+        &geometry.bounds,
+        resolve_movement(&geometry.volumes, from, proposed),
+    );
+    let moved = Vec2::new(landed.x - from.x, landed.z - from.z).length();
+    if moved < BLOCKED_FRACTION * travel {
+        return Walk::Blocked;
+    }
     transform.translation = landed;
     transform.rotation = Quat::from_rotation_y(direction.x.atan2(direction.y));
     Walk::Moved

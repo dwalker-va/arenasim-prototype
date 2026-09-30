@@ -635,7 +635,8 @@ same range gap and no walk.
 (pure, unit-tested; no RON knob). When a mover with a DESTINATION has the
 straight line to it blocked by an obstacle, it aims at the obstacle's TANGENT
 POINT on the better-progress side (for a cylinder: the external tangent to the
-`radius + MOVER_RADIUS` circle; for a box: the nearer visible silhouette corner)
+`radius + MOVER_RADIUS` circle; for a prism: the tangent vertex of the inflated
+polygon; for a box: the nearer visible silhouette corner)
 instead of pointing at the goal through the obstacle — so it rounds the pillar in
 a clean full-speed arc rather than oozing along the surface. Without it,
 `slide_against` removed only the inward step component, leaving a near-zero
@@ -649,10 +650,18 @@ incl. the `seek_chase_timeout` direct chase), `MovementGoal::Entity` (DIP chases
 normal pursuit-to-target, and pet-follow-to-owner. NOT applied to
 `MovementGoal::Direction` (scorer output — the context-steering mask already
 avoids obstacles), fear/polymorph wander, or Charge/Disengage (scripted dashes).
-Side commitment is emergent, not stored: the better-progress tangent is
-self-reinforcing (once off the center line, that side keeps winning) and a
-`STEER_TIE_EPS` fixed default resolves the only symmetric instant, so it cannot
-flip-flop — no per-frame committed-side state. The helper's first line is
+Side commitment is emergent, not stored — no per-frame committed-side state — but
+only because each shape's side SCORE is chosen to be self-reinforcing (once off
+the center line, that side keeps winning), with a `STEER_TIE_EPS` fixed default
+for the exact-tie instant. A tie-break alone does not buy that: the cylinder
+scores heading alignment, which holds on a curve, but on a prism's flat face
+alignment is anti-reinforcing (a step toward one end tilts the goal toward the
+other), so a mover flush against a Nagrand face with its goal straight behind
+flipped sides every tick and jittered in place (AS-181). The prism therefore
+scores the taut-path length round each side, which shortens by the full step on
+the side being walked. A new obstacle shape needs a score with that property,
+and a flush-against-the-face step-loop test (`steer_flush_against_a_prism_face_commits_to_one_side`)
+to prove it. The helper's first line is
 `if obstacles.is_empty() { return None }` and each caller falls back to its exact
 legacy direct-normalize on `None`, so **BasicArena stays byte-identical**. This
 makes competent pursuers (melee and Mage) round pillars cleanly; a documented

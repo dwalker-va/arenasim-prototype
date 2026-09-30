@@ -638,12 +638,12 @@ fn slide_against(volume: &ObstacleVolume, pos_xz: Vec2, desired_xz: Vec2) -> Vec
     }
 }
 
-/// Tangent-steering angular slack (radians). When the two cylinder tangents make
-/// near-equal progress toward the goal — the goal sits almost directly behind the
-/// obstacle center — the side choice is a coin flip that float noise could flip
-/// frame to frame. Within this band we take the deterministic default (the
-/// `+alpha` / left tangent) so the mover commits to one side instead of jittering
-/// across the center line.
+/// Tangent-steering tie slack: a dot-product difference for the cylinder, a path
+/// length difference (yards) for the prism. When the two sides score near-equal
+/// — the goal sits almost directly behind the obstacle center — the side choice
+/// is a coin flip that float noise could flip frame to frame. Within this band
+/// we take the deterministic default (the `+alpha` / left tangent) so the mover
+/// commits to one side instead of jittering across the center line.
 const STEER_TIE_EPS: f32 = 1e-4;
 
 /// Entry parameter `t ∈ [0,1]` at which a mover's swept disc first penetrates a
@@ -772,13 +772,16 @@ fn footprint_sweep_entry(
 /// resolver remains the final no-clip guarantee downstream; steering merely aims
 /// the step along a clear tangent so the resolver rarely has to bite.
 ///
-/// **Side commitment is emergent, not stored.** The "better progress" tangent is
-/// self-reinforcing: once the mover steps off the center line toward one side,
-/// that side's tangent keeps winning the progress comparison, so the choice holds
-/// without any per-frame committed-side state. The only ambiguous instant — the
-/// goal exactly behind the obstacle center — is resolved by [`STEER_TIE_EPS`] to a
-/// fixed default, so the selection is a stable function of geometry that cannot
-/// flip-flop. (The unit tests simulate the step loop and assert convergence,
+/// **Side commitment is emergent, not stored** — but only because each shape's
+/// side score is chosen to be self-reinforcing: once the mover steps off the
+/// center line toward one side, that side keeps winning, so the choice holds
+/// without any per-frame committed-side state. For a cylinder, heading alignment
+/// has that property. For a prism it does NOT — flush against a flat face,
+/// alignment favours the far end — so the prism scores the path length round
+/// each side instead (see [`steer_around_prism`]). The exact-tie instant — the
+/// goal straight behind the obstacle — is resolved by [`STEER_TIE_EPS`] to a
+/// fixed default. (The unit tests simulate the step loop through
+/// [`resolve_movement`], flush against a face included, and assert convergence,
 /// which would fail on any oscillation.)
 pub fn steer_toward_goal(
     obstacles: &[ObstacleVolume],
@@ -896,8 +899,8 @@ fn steer_around_box(min: Vec3, max: Vec3, from: Vec2, goal: Vec2, mover_y: f32) 
 }
 
 /// Unit direction toward a regular prism's better-progress **tangent vertex** —
-/// the polygon analog of [`steer_around_cylinder`], which it deliberately mirrors
-/// (two candidate tangents, pick by goal alignment, [`STEER_TIE_EPS`] default).
+/// the polygon analog of [`steer_around_cylinder`] (two candidate tangents,
+/// [`STEER_TIE_EPS`] default), except in how it picks between them — below.
 ///
 /// The tangents are the two *angular extremes* of the inflated polygon as seen
 /// from `from`. Because the polygon is convex, the ray through an angular extreme
@@ -914,6 +917,17 @@ fn steer_around_box(min: Vec3, max: Vec3, from: Vec2, goal: Vec2, mover_y: f32) 
 /// perfectly goal-aligned, so it would steer directly into the obstacle. An
 /// axis-aligned box never presents a corner along an approach axis, which is why
 /// the box branch gets away with it.
+///
+/// **The side is the SHORTER WAY ROUND, not the better-aligned heading.** Each
+/// side is scored by the length of the taut path that wraps it — `from` to its
+/// tangent vertex, along the hull, then straight to `goal` — and the shorter one
+/// wins ([`STEER_TIE_EPS`] default, left, on an exact tie). The cylinder's
+/// heading-alignment test does not carry over to a flat face: a mover flush
+/// against one, stepping toward one end, tilts the goal toward the OTHER end,
+/// so alignment picked the opposite side every tick and the mover jittered in
+/// place (AS-181). Path length has the opposite sign: a step along one side's
+/// path shortens that side by the full step and the other by at most as much,
+/// so the side first taken keeps winning and the choice needs no stored state.
 fn steer_around_prism(
     center: Vec2,
     circumradius: f32,
@@ -923,59 +937,141 @@ fn steer_around_prism(
     goal: Vec2,
 ) -> Vec2 {
     let goal_dir = (goal - from).normalize_or_zero();
+    if sides < 3 {
+        // Degenerate prism (rejected by config validation): nothing to round.
+        return goal_dir;
+    }
     let skin = prism_apothem(circumradius, sides) + MOVER_RADIUS;
-    let d = center - from;
-    let dist = d.length();
+    let hull = PrismHull {
+        center,
+        skin,
+        // Circumradius of the polygon whose edges sit at `skin`.
+        inflated_circumradius: skin / (std::f32::consts::PI / sides as f32).cos(),
+        sides,
+        rotation,
+    };
 
     // Already within the collision skin (a hugging chase): no external tangents
-    // exist, so peel off perpendicular to the center direction on whichever side
-    // heads more toward the goal — identical to the cylinder's inside-skin case.
+    // exist, so peel off perpendicular to the center direction, on the side
+    // whose way round is shorter as scored from the nearest point on the shell.
     // Tested exactly (half-planes), not by the inner-bound radius, because the
     // skin distance varies with angle between `skin` and the inflated
     // circumradius.
     if prism_half_planes_contain(from - center, skin, sides, rotation, false) {
+        let d = center - from;
+        let dist = d.length();
         let dn = if dist > 1e-6 { d / dist } else { goal_dir };
         let dn = dn.normalize_or(Vec2::X);
+        // CCW of the center direction: the left tangent's side.
         let perp = Vec2::new(-dn.y, dn.x);
-        let s = if goal_dir.dot(perp) >= 0.0 { 1.0 } else { -1.0 };
-        return perp * s;
+        let shell = hull.push_out(from);
+        let left = hull
+            .tangents(shell)
+            .is_none_or(|(l, r)| hull.left_is_shorter(shell, goal, l, r));
+        return if left { perp } else { -perp };
     }
 
-    // Circumradius of the polygon whose edges sit at `apothem + MOVER_RADIUS`.
-    let inflated_circumradius = if sides < 3 {
-        circumradius + MOVER_RADIUS
-    } else {
-        skin / (std::f32::consts::PI / sides as f32).cos()
-    };
-    let c_dir = if dist > 1e-6 {
-        d / dist
-    } else {
-        return goal_dir;
-    };
+    match hull.tangents(from) {
+        Some((left, right)) if hull.left_is_shorter(from, goal, left, right) => left.1,
+        Some((_, right)) => right.1,
+        None => goal_dir,
+    }
+}
 
-    let mut left: Option<(f32, Vec2)> = None; // greatest signed angle
-    let mut right: Option<(f32, Vec2)> = None; // least signed angle
-    for i in 0..sides {
-        let v = center + prism_vertex(i, sides, rotation, inflated_circumradius);
-        let dir = (v - from).normalize_or_zero();
-        let angle = c_dir.perp_dot(dir).atan2(c_dir.dot(dir));
-        if left.is_none_or(|(a, _)| angle > a) {
-            left = Some((angle, dir));
-        }
-        if right.is_none_or(|(a, _)| angle < a) {
-            right = Some((angle, dir));
-        }
+/// A regular prism's `MOVER_RADIUS`-inflated footprint, as the steering side
+/// choice walks it. See [`steer_around_prism`].
+struct PrismHull {
+    center: Vec2,
+    /// Distance from the center to each inflated edge.
+    skin: f32,
+    inflated_circumradius: f32,
+    sides: u32,
+    rotation: f32,
+}
+
+impl PrismHull {
+    fn vertex(&self, i: u32) -> Vec2 {
+        self.center + prism_vertex(i, self.sides, self.rotation, self.inflated_circumradius)
     }
 
-    let t_left = left.map_or(goal_dir, |(_, dir)| dir);
-    let t_right = right.map_or(goal_dir, |(_, dir)| dir);
-    let dot_l = t_left.dot(goal_dir);
-    let dot_r = t_right.dot(goal_dir);
-    if (dot_l - dot_r).abs() < STEER_TIE_EPS || dot_l >= dot_r {
-        // Goal ~directly behind the prism: deterministic default (left tangent).
-        t_left
-    } else {
-        t_right
+    /// The two tangent vertices seen from `from`, as `(index, unit direction)`:
+    /// the left (greatest signed angle from the center direction, CCW) and the
+    /// right (least). `None` when `from` sits on the center.
+    fn tangents(&self, from: Vec2) -> Option<((u32, Vec2), (u32, Vec2))> {
+        let d = self.center - from;
+        let dist = d.length();
+        if dist <= 1e-6 {
+            return None;
+        }
+        let c_dir = d / dist;
+        let mut left: Option<(f32, u32, Vec2)> = None;
+        let mut right: Option<(f32, u32, Vec2)> = None;
+        for i in 0..self.sides {
+            let dir = (self.vertex(i) - from).normalize_or_zero();
+            let angle = c_dir.perp_dot(dir).atan2(c_dir.dot(dir));
+            if left.is_none_or(|(a, _, _)| angle > a) {
+                left = Some((angle, i, dir));
+            }
+            if right.is_none_or(|(a, _, _)| angle < a) {
+                right = Some((angle, i, dir));
+            }
+        }
+        let (_, li, ld) = left?;
+        let (_, ri, rd) = right?;
+        Some(((li, ld), (ri, rd)))
+    }
+
+    /// `point` if it is outside the footprint, else moved just outside its
+    /// least-penetrated edge — the exit [`slide_against`] takes.
+    fn push_out(&self, point: Vec2) -> Vec2 {
+        let rel = point - self.center;
+        if !prism_half_planes_contain(rel, self.skin, self.sides, self.rotation, false) {
+            return point;
+        }
+        let mut best = (f32::NEG_INFINITY, Vec2::ZERO);
+        for i in 0..self.sides {
+            let n = prism_edge_normal(i, self.sides, self.rotation);
+            let s = rel.dot(n) - self.skin;
+            if s > best.0 {
+                best = (s, n);
+            }
+        }
+        point + best.1 * (PUSH_OUT_EPS - best.0)
+    }
+
+    /// Length of the taut path from `from` round the hull to `goal`, leaving
+    /// `from` at tangent vertex `start` and walking vertex indices by `step`
+    /// (`-1` round the left side, `+1` round the right). The walk stops at the
+    /// first vertex whose next edge faces `goal` — the goal's own tangent
+    /// vertex on this side — and goes straight from there.
+    fn wrap_length(&self, from: Vec2, goal: Vec2, start: u32, step: i32) -> f32 {
+        let goal = self.push_out(goal);
+        let rel_goal = goal - self.center;
+        let mut k = start;
+        let mut length = from.distance(self.vertex(k));
+        for _ in 0..self.sides {
+            // Edge `i` spans vertices `i` and `i + 1`.
+            let (next, edge) = if step > 0 {
+                ((k + 1) % self.sides, k)
+            } else {
+                let next = (k + self.sides - 1) % self.sides;
+                (next, next)
+            };
+            if rel_goal.dot(prism_edge_normal(edge, self.sides, self.rotation)) > self.skin {
+                break;
+            }
+            length += self.vertex(k).distance(self.vertex(next));
+            k = next;
+        }
+        length + self.vertex(k).distance(goal)
+    }
+
+    /// Whether the left way round is no longer than the right — left on an
+    /// exact tie, within [`STEER_TIE_EPS`].
+    fn left_is_shorter(&self, from: Vec2, goal: Vec2, left: (u32, Vec2), right: (u32, Vec2)) -> bool {
+        let l = self.wrap_length(from, goal, left.0, -1);
+        let r = self.wrap_length(from, goal, right.0, 1);
+        l <= r + STEER_TIE_EPS
     }
 }
 
@@ -1736,6 +1832,111 @@ mod tests {
                 1.0
             ),
             None
+        );
+    }
+
+    /// Prism analog of `steer_picks_shorter_side`, from both approaches: the
+    /// goal offset to one side of the line through the center is rounded on
+    /// that side.
+    #[test]
+    fn steer_around_prism_picks_shorter_side() {
+        let pillar = octagon(0.0, 0.0, 2.5);
+        for offset in [3.0_f32, -3.0] {
+            let from = Vec2::new(-20.0, 0.0);
+            let goal = Vec2::new(20.0, offset);
+            let dir = steer_toward_goal(&[pillar], from, goal, 1.0).expect("path is blocked");
+            assert!(
+                dir.y * offset > 0.0,
+                "goal offset {offset} ⇒ round that side, got {dir:?}"
+            );
+        }
+    }
+
+    /// AS-181: a mover flush against a Nagrand pillar's flat face, its goal
+    /// straight behind the pillar, stepping through `steer_toward_goal` and
+    /// `resolve_movement` exactly as `move_to_target` does. Scoring the sides
+    /// by heading alignment flipped them every tick here (a step toward one
+    /// end of the face tilts the goal toward the other), so the mover jittered
+    /// in place; scored by the way round, it commits and arrives. Every face,
+    /// flush and 0.01yd off, with the goal dead behind and just off-line.
+    #[test]
+    fn steer_flush_against_a_prism_face_commits_to_one_side() {
+        let pillar = ObstacleVolume::Prism {
+            center_xz: Vec2::ZERO,
+            circumradius: 6.0,
+            sides: 8,
+            rotation: 22.5_f32.to_radians(),
+            base_y: 0.0,
+            height: 5.0,
+        };
+        let shell = prism_apothem(6.0, 8) + MOVER_RADIUS;
+        let step = 7.0 / 60.0; // run speed at the sim's 60Hz tick
+        let mut cases = 0;
+        for face in 0..8 {
+            let out = Vec2::from_angle(face as f32 * std::f32::consts::FRAC_PI_4);
+            for standoff in [0.0, 0.01] {
+                for skew in [0.0_f32, 1e-3, -1e-3, 0.3, -0.3] {
+                    let mut pos = out * (shell + PUSH_OUT_EPS + standoff);
+                    let behind = Vec2::from_angle(std::f32::consts::PI + skew);
+                    let goal = out.rotate(behind) * (shell + 3.0);
+                    let line = (goal - pos).normalize();
+                    let (mut last, mut flips, mut ticks) = (0.0_f32, 0, 0);
+                    while let Some(dir) = steer_toward_goal(&[pillar], pos, goal, 1.0) {
+                        let desired = pos + dir * step;
+                        let next = resolve_movement(
+                            &[pillar],
+                            Vec3::new(pos.x, 1.0, pos.y),
+                            Vec3::new(desired.x, 1.0, desired.y),
+                        );
+                        let next = Vec2::new(next.x, next.z);
+                        let lateral = line.perp_dot(next - pos);
+                        if lateral.abs() > 1e-4 {
+                            if last != 0.0 && lateral.signum() != last {
+                                flips += 1;
+                            }
+                            last = lateral.signum();
+                        }
+                        pos = next;
+                        ticks += 1;
+                        assert!(
+                            ticks < 600,
+                            "face {face} skew {skew}: never reached sight of the goal \
+                             ({flips} sideways reversals)"
+                        );
+                    }
+                    // One reversal is the path itself: out along the face, then
+                    // back in toward the line once past the pillar's widest point.
+                    assert!(
+                        flips <= 1,
+                        "face {face} standoff {standoff} skew {skew}: {flips} sideways reversals"
+                    );
+                    // A clean arc round half the octagon is ~15yd, ~130 ticks.
+                    assert!(ticks < 200, "face {face} skew {skew}: {ticks} ticks");
+                    cases += 1;
+                }
+            }
+        }
+        assert_eq!(cases, 80);
+    }
+
+    /// Inside the skin (a hugging chase) the prism peels off on the shorter way
+    /// round, not on the side the goal merely leans toward.
+    #[test]
+    fn steer_from_inside_prism_skin_peels_the_shorter_way() {
+        let pillar = octagon(0.0, 0.0, 2.5);
+        let shell = prism_apothem(2.5, 8) + MOVER_RADIUS;
+        // Inside the skin on the -x side, 0.3yd toward +z of the center line;
+        // goal straight behind on the center line, so it leans toward -z.
+        let from = Vec2::new(-shell + 0.05, 0.3);
+        let goal = Vec2::new(shell + 2.0, 0.0);
+        let dir = steer_toward_goal(&[pillar], from, goal, 1.0).expect("path is blocked");
+        assert!(
+            (dir.length() - 1.0).abs() < 1e-4,
+            "unit direction, got {dir:?}"
+        );
+        assert!(
+            dir.y > 0.9,
+            "the +z way round is shorter from +0.3z; peel +z, got {dir:?}"
         );
     }
 
