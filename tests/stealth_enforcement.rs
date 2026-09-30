@@ -47,8 +47,7 @@ use arenasim::states::play_match::{
     apply_pending_auras, flare_system, refresh_stacking_aura, slow_zone_system, trap_system,
     AbilityDefinitions, AbilityType, ArenaDampening, Aura, AuraPending, AuraType, CastingState,
     ChannelingState, Combatant, DRCategory, DRTracker, DispelType, FlareZone, GameRng,
-    HolyShockDamagePending,
-    InstantAbilityFired, MovementConfig, Trap, TrapType,
+    HolyShockDamagePending, InstantAbilityFired, MovementConfig, Trap, TrapType,
 };
 
 /// Ticks per run. A class may spend its first decisions on self-buffs

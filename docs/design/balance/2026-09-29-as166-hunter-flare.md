@@ -14,7 +14,9 @@ the Rogue the kill target the Freezing Trap goes on its partner. Win rate is
 reported per enemy comp, sized against AS-125's accepted kill-target losses,
 not tuned.
 **Arms:** before = `main` at `020abda`; after = this branch on it. Same JSONL
-both arms. One attribution arm, the after binary with Flare costing no mana
+both arms. Rebased onto `148d6d1` (AS-161's Druid, AS-178) and re-proved
+there: the 880-match mechanism set is byte-identical to the `020abda` runs on
+both arms, so the base did not move under these cells. One attribution arm, the after binary with Flare costing no mana
 (`sweeps/2026-09-29-as166-arm-free-flare.patch`, a config-only change).
 **Raw rows:** `2026-09-29-as166_{1v1,2v2,2v2_kt0}_{base_020abda,after}.csv`
 (one row per match, from `sweeps/2026-09-29-as166-{1v1,directional,directional-kt0}.jsonl`);
@@ -234,8 +236,8 @@ keeps its Classic cost here; the milestone sweep is where to weigh it.
   now reaches it unstunned and pins it inside its dead zone for the freeze in
   all but one of 320 seeds scanned, so the probe asserts the Hunter DECIDES
   on the Rogue while the Priest is frozen rather than that a shot lands.
-- The encyclopedia's two ability-index snapshots re-blessed: "70 of 70
-  abilities" → "71 of 71", nothing else.
+- The encyclopedia's two ability-index snapshots re-blessed: the count moves
+  from 76 abilities to 77, nothing else on screen.
 
 ## Follow-ups
 
