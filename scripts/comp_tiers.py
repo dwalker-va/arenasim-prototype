@@ -70,7 +70,7 @@ def legacy_report(path, rows):
         for c, wr in sorted(ct.items(), key=lambda x: -x[1])[-8:]:
             print(f"  {wr:5.1f}  {c}")
 
-HEALERS = {'Priest', 'Paladin', 'Shaman'}
+HEALERS = {'Priest', 'Paladin', 'Shaman', 'Druid'}
 
 def is_competitive(team, size):
     """2v2: at most 1 healer (double-DPS is playable, double-healer is not).

@@ -34,20 +34,20 @@ use serde::Deserialize;
 
 use arenasim::combat::log::CombatLog;
 use arenasim::states::match_config::{CharacterClass, WarriorShout};
+use arenasim::states::play_match::class_ai::caster_healer_posture::CasterHealerPlan;
 use arenasim::states::play_match::class_ai::hunter_dip::HunterDipPlan;
 use arenasim::states::play_match::class_ai::paladin::PaladinMovementPlan;
 use arenasim::states::play_match::class_ai::priest::PriestMovementPlan;
-use arenasim::states::play_match::class_ai::shaman::ShamanMovementPlan;
 use arenasim::states::play_match::class_ai::{
     self, CombatContext, CombatantInfo, QueuedAoeDamage, QueuedInstantAttack,
 };
 use arenasim::states::play_match::decision_trace::{AbilityOutcome, DecisionTrace, EventPayload};
 use arenasim::states::play_match::team_solve;
 use arenasim::states::play_match::{
-    apply_pending_auras, slow_zone_system, trap_system, AbilityDefinitions, AbilityType,
-    ArenaDampening, Aura, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
-    DRCategory, DRTracker, DispelType, GameRng, HolyShockDamagePending, InstantAbilityFired,
-    MovementConfig, Trap, TrapType,
+    apply_pending_auras, refresh_stacking_aura, slow_zone_system, trap_system, AbilityDefinitions,
+    AbilityType, ArenaDampening, Aura, AuraPending, AuraType, CastingState, ChannelingState,
+    Combatant, DRCategory, DRTracker, DispelType, GameRng, HolyShockDamagePending,
+    InstantAbilityFired, MovementConfig, Trap, TrapType,
 };
 
 /// Ticks per run. A class may spend its first decisions on self-buffs
@@ -97,6 +97,8 @@ fn shadow_sight() -> Aura {
         dispel_type: DispelType::Physical,
         compound: None,
         source_item: None,
+        stacks: None,
+        bloom: None,
     }
 }
 
@@ -524,8 +526,24 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     // Every totem already down: the rotation proper, not the
                     // opening totem drops, is what is under test.
                     &[60.0; 4],
-                    &ShamanMovementPlan::default(),
+                    &CasterHealerPlan::default(),
                     &movement,
+                    &mut trace,
+                );
+            }
+            CharacterClass::Druid => {
+                class_ai::druid::decide_druid_action(
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    me,
+                    &mut combatant,
+                    my_pos,
+                    auras,
+                    &ctx,
+                    &movement,
+                    true,
+                    0.0,
                     &mut trace,
                 );
             }
@@ -577,6 +595,19 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                 found
                     .touches
                     .push(tag(&format!("began casting {:?}", cast.ability)));
+            } else if cast.target == Some(me) {
+                // An instant the decider cast on itself lands its aura before
+                // the next decision, as a spawned self-buff does below — the
+                // Druid's heals over time go through a cast, not a pending.
+                // A stacking aura refreshes rather than doubling, as it does
+                // in `apply_pending_auras`.
+                let def = abilities.get_unchecked(&cast.ability);
+                if let Some(p) = AuraPending::from_ability(me, me, def) {
+                    let mine = active_auras.entry(me).or_default();
+                    if refresh_stacking_aura(mine, &p.aura).is_none() {
+                        mine.push(p.aura);
+                    }
+                }
             }
         }
         if let Some(channel) = world.get::<ChannelingState>(me) {
@@ -743,7 +774,7 @@ fn the_guard_drives_every_class_the_enum_has() {
     // The class guard iterates `every_variant`; `CharacterClass::all()` is the
     // hand-kept list the rest of the game iterates. They must agree.
     let derived = every_variant::<CharacterClass>();
-    assert_eq!(derived.len(), 8, "{derived:?}");
+    assert_eq!(derived.len(), 9, "{derived:?}");
     assert_eq!(derived, CharacterClass::all().to_vec());
 }
 
@@ -776,7 +807,8 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | MastersCall | CommandingShout | FrostArmor | MageArmorSpell | MoltenArmor
         | ShadowResistanceAura | ConcentrationAura | LightningBolt | FrostShock
         | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem | EarthTotem
-        | FireTotem => false,
+        | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild
+        | Innervate => false,
     }
 }
 

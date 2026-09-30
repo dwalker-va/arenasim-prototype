@@ -378,6 +378,7 @@ pub(crate) fn class_mesh_color(class: match_config::CharacterClass) -> Color {
         match_config::CharacterClass::Paladin => Color::srgb(0.96, 0.55, 0.73), // Pink (WoW Paladin)
         match_config::CharacterClass::Hunter => Color::srgb(0.67, 0.83, 0.45), // Green (WoW Hunter)
         match_config::CharacterClass::Shaman => Color::srgb(0.0, 0.44, 0.87),  // Blue (WoW Shaman)
+        match_config::CharacterClass::Druid => Color::srgb(1.0, 0.49, 0.04),   // Orange (WoW Druid)
     }
 }
 
@@ -2068,6 +2069,7 @@ mod held_weapon_tests {
             undrawn,
             BTreeSet::from([
                 "GrimoireOfShadows",
+                "IdolOfHealth",
                 "LibramOfGrace",
                 "LibramOfHope",
                 "LibramOfTruth",

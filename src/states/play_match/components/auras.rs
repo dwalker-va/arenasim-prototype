@@ -114,6 +114,11 @@ pub enum AuraType {
     /// Magnitude unused (always 1.0 by convention). Not purgeable (physical
     /// enrage, not magic).
     FearImmunity,
+    /// Increases armor by a flat amount (magnitude = armor bonus). Read at the
+    /// physical-mitigation step alongside the holder's equipment armor, never
+    /// written into the `armor` stat, so removing the aura removes the bonus.
+    /// Used by the Druid's Mark of the Wild.
+    ArmorIncrease,
 }
 
 /// A debuff's REMOVAL CLASS — what kind of thing it is for the purpose of
@@ -164,7 +169,7 @@ pub enum DispelType {
     Disease,
     /// A CURSE — Curse of Agony, Curse of Weakness, Curse of Tongues. Removed
     /// by curse-removal effects, of which the arena has NONE (in WoW the Mage's
-    /// and Druid's Remove Curse; there is no Druid here and the Mage has no
+    /// and Druid's Remove Curse; the Druid here has no Remove Curse and the Mage has no
     /// decurse yet).
     ///
     /// Declared in the RON, never inferred. Curses are Shadow-school and Shadow
@@ -260,7 +265,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 32] = [
+    pub const ALL: [AuraType; 33] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -293,6 +298,7 @@ impl AuraType {
         AuraType::HealingOverTime,
         AuraType::WindfuryBuff,
         AuraType::FearImmunity,
+        AuraType::ArmorIncrease,
     ];
 
     /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
@@ -329,6 +335,7 @@ impl AuraType {
             AuraType::DamageImmunity => "Damage Immunity",
             AuraType::FearImmunity => "Fear Immunity",
             AuraType::MaxHealthIncrease => "Health Buff",
+            AuraType::ArmorIncrease => "Armor Buff",
             AuraType::MaxManaIncrease => "Mana Buff",
             AuraType::AttackPowerIncrease => "Attack Power Buff",
             AuraType::SpellPowerIncrease => "Spell Power Buff",
@@ -405,6 +412,7 @@ impl AuraType {
                 "Breaks fear and blocks new fear effects. Horror effects bypass it."
             }
             AuraType::MaxHealthIncrease => "Raises the holder's maximum health.",
+            AuraType::ArmorIncrease => "Raises the holder's armor, reducing physical damage taken.",
             AuraType::MaxManaIncrease => "Raises the holder's maximum mana.",
             AuraType::AttackPowerIncrease => "Raises the holder's attack power.",
             AuraType::SpellPowerIncrease => "Raises the holder's spell power.",
@@ -539,6 +547,7 @@ impl AuraType {
             | AuraType::LockoutDurationReduction
             | AuraType::FrostArmorBuff
             | AuraType::SpellResistanceBuff
+            | AuraType::ArmorIncrease
             | AuraType::FearImmunity => false,
         }
     }
@@ -603,6 +612,7 @@ impl AuraType {
             | AuraType::LockoutDurationReduction
             | AuraType::FrostArmorBuff
             | AuraType::SpellResistanceBuff
+            | AuraType::ArmorIncrease
             | AuraType::FearImmunity => false,
 
             // Mechanical markers, not effects: clearing these would grant a
@@ -637,13 +647,25 @@ impl AuraType {
 /// Same reason [`DispelType::Curse`] is declared rather than inferred: a
 /// classification rule living inside a display string breaks the moment the
 /// string is edited for display reasons.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+///
+/// A compound may be a BUFF as well: Mark of the Wild is one buff with three
+/// kinds of effect. The name predates it; everything said here about a debuff
+/// holds for a compound buff — one icon, one catalog entry, and a purge that
+/// takes one effect takes them all.
+///
+/// A compound an ABILITY applies is declared on its RON `applies_aura`
+/// (`compound: Some(MarkOfTheWild)`) — the aura the RON describes is the face.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
 pub enum CompoundDebuff {
     /// The chill a Frost Armor proc puts on a melee attacker: a movement slow
     /// AND an attack-speed slow, one debuff named "Frost Armor". Before these
     /// were bound together a dispel lifted whichever half it happened to roll
     /// and left the other standing under the same name.
     FrostArmorChill,
+    /// The Druid's Mark of the Wild: maximum health (the face), armor, and a
+    /// resistance to each school of magic, one buff. A purge that takes it
+    /// takes all of it.
+    MarkOfTheWild,
 }
 
 impl CompoundDebuff {
@@ -655,7 +677,10 @@ impl CompoundDebuff {
     /// exhaustive match is.** What it buys is COVERAGE: the guards below sweep
     /// it, so compound N+1 is checked the moment it is declared here, instead
     /// of a test quietly continuing to check only the one it was written for.
-    pub const ALL: [CompoundDebuff; 1] = [CompoundDebuff::FrostArmorChill];
+    pub const ALL: [CompoundDebuff; 2] = [
+        CompoundDebuff::FrostArmorChill,
+        CompoundDebuff::MarkOfTheWild,
+    ];
 
     /// The effect that REPRESENTS this debuff: the icon the frames draw, the
     /// mechanic badge its catalog entry wears, and the aura a removal
@@ -677,6 +702,7 @@ impl CompoundDebuff {
     pub fn face(self) -> AuraType {
         match self {
             CompoundDebuff::FrostArmorChill => AuraType::MovementSpeedSlow,
+            CompoundDebuff::MarkOfTheWild => AuraType::MaxHealthIncrease,
         }
     }
 }
@@ -757,6 +783,57 @@ pub struct Aura {
     /// than a flag beside it, so "keyed on its source" and "has a source item"
     /// cannot disagree.
     pub source_item: Option<ItemId>,
+    /// The stack count of a STACKING aura — see [`AuraStacks`]. `None` for
+    /// every aura that does not stack or refresh, which is almost all of them.
+    pub stacks: Option<AuraStacks>,
+    /// The heal a BLOOMING aura lands on its bearer when it ends, PER STACK —
+    /// see [`Aura::bloom_heal`]. Snapshotted from the caster's spell power at
+    /// application, like `backlash_damage`. `None` for every aura that does
+    /// not bloom.
+    pub bloom: Option<f32>,
+}
+
+/// How many times a STACKING aura has been applied, and how many it can hold.
+///
+/// A stacking aura is identified by its SOURCE — the ability that applied it —
+/// rather than by its `effect_type`, so it coexists with a same-type aura from
+/// anywhere else (a Druid's Rejuvenation and a Shaman's Healing Stream are both
+/// `HealingOverTime`, and both tick). When its source applies it again,
+/// `apply_pending_auras` does not refuse the new application, as it would for a
+/// one-per-type buff, and does not add a second copy: it REFRESHES the aura
+/// already there — its duration back to full, its per-stack numbers re-snapshot
+/// — and adds one stack, up to `max`.
+///
+/// `max: 1` is a refresh-only aura: recasting it renews it but never deepens it
+/// (Rejuvenation, Innervate, Mark of the Wild). `max: 3` is Lifebloom.
+///
+/// What a stack MEANS is the aura's own business, and the one reader today is
+/// the periodic tick: [`Aura::tick_amount`] is `magnitude` per stack, so three
+/// stacks of a HoT heal three times as hard. A bloom scales the same way
+/// ([`Aura::bloom_heal`]).
+///
+/// Declared on an ability's RON `applies_aura` as `stacking: Some((max_stacks: N))`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AuraStacks {
+    /// Stacks currently applied, `1..=max`.
+    pub count: u8,
+    /// The most stacks the aura can hold.
+    pub max: u8,
+}
+
+impl AuraStacks {
+    /// A freshly applied stacking aura: one stack.
+    pub fn new(max: u8) -> Self {
+        Self { count: 1, max }
+    }
+
+    /// One more application: a stack more, never past `max`.
+    pub fn added(self) -> Self {
+        Self {
+            count: (self.count + 1).min(self.max),
+            max: self.max,
+        }
+    }
 }
 
 impl Aura {
@@ -786,8 +863,38 @@ impl Aura {
     /// point of the second trinket socket is that two different trinkets are
     /// live at once. Keyed on `ability_name` instead, exactly as `Absorb`
     /// already is for the same reason (two different shields coexist).
+    ///
+    /// `true` as well for a STACKING aura ([`AuraStacks`]), for the same
+    /// reason: a Druid's Rejuvenation is not a Shaman's Healing Stream, and a
+    /// target may be healed by both.
     pub fn distinct_by_source(&self) -> bool {
-        self.source_item.is_some()
+        self.source_item.is_some() || self.stacks.is_some()
+    }
+
+    /// Stacks applied: the stack count of a stacking aura, and 1 for every
+    /// other aura.
+    pub fn stack_count(&self) -> u8 {
+        self.stacks.map_or(1, |stacks| stacks.count)
+    }
+
+    /// What one periodic tick deals or heals: `magnitude` per stack.
+    ///
+    /// Exact for a non-stacking aura (`magnitude * 1.0` is `magnitude`), so
+    /// routing every tick through here moves nothing that does not stack.
+    pub fn tick_amount(&self) -> f32 {
+        self.magnitude * f32::from(self.stack_count())
+    }
+
+    /// The heal this aura lands on its bearer when it ends, or `None` when it
+    /// does not bloom.
+    ///
+    /// A BLOOM is a direct heal an aura lands when it ENDS: when it runs out,
+    /// or when a dispel or purge takes it (TBC Lifebloom). It scales with the
+    /// stacks it ends at. Refreshing a blooming aura does not bloom it — the
+    /// aura has not ended — and neither does its bearer dying.
+    pub fn bloom_heal(&self) -> Option<f32> {
+        self.bloom
+            .map(|per_stack| per_stack * f32::from(self.stack_count()))
     }
 
     /// Whether this aura occupies the one-per-TYPE buff slot for `effect` —
@@ -996,7 +1103,8 @@ impl Aura {
             | AuraType::ManaRegenIncrease
             | AuraType::LockoutDurationReduction
             | AuraType::FrostArmorBuff
-            | AuraType::SpellResistanceBuff => true,
+            | AuraType::SpellResistanceBuff
+            | AuraType::ArmorIncrease => true,
 
             // Beneficial, but DELIBERATELY unpurgeable — see the doc above.
             AuraType::DamageImmunity | AuraType::FearImmunity => false,
@@ -1076,6 +1184,52 @@ impl ActiveAuras {
     }
 }
 
+/// Refresh the STACKING aura in `auras` that `fresh` is a new application of —
+/// the one from the same source — and return its stack count afterwards.
+/// `None` when there is no such aura, and `fresh` should land as a new one.
+///
+/// The refresh (see [`AuraStacks`]):
+/// - one stack more, up to the aura's max;
+/// - its duration back to `fresh`'s, and so is every other member of its
+///   compound, which shares its lifetime;
+/// - its caster, per-stack magnitude and per-stack bloom re-snapshot from
+///   `fresh` — the latest application's spell power is the one that counts.
+///   Except the magnitude of an aura that MUTATED a stat when it landed
+///   (`MaxHealthIncrease`, `MaxManaIncrease`): that bonus is already in the
+///   holder's stats, and expiry takes back what the aura carries, so the two
+///   must not drift apart;
+/// - its tick CADENCE is kept: a refreshed heal over time goes on ticking on
+///   the beat it already had.
+///
+/// Shared by `apply_pending_auras`'s two aura stores — the live component,
+/// and the auras accumulating this frame for a target that has none yet.
+pub fn refresh_stacking_aura(auras: &mut [Aura], fresh: &Aura) -> Option<u8> {
+    fresh.stacks?;
+    let index = auras.iter().position(|a| {
+        a.stacks.is_some()
+            && a.effect_type == fresh.effect_type
+            && a.ability_name == fresh.ability_name
+    })?;
+    let existing = &mut auras[index];
+    existing.stacks = existing.stacks.map(AuraStacks::added);
+    existing.duration = fresh.duration;
+    existing.caster = fresh.caster;
+    existing.bloom = fresh.bloom;
+    if !matches!(
+        existing.effect_type,
+        AuraType::MaxHealthIncrease | AuraType::MaxManaIncrease
+    ) {
+        existing.magnitude = fresh.magnitude;
+    }
+    let count = existing.stack_count();
+    if let Some(compound) = existing.compound {
+        for member in auras.iter_mut().filter(|a| a.compound == Some(compound)) {
+            member.duration = fresh.duration;
+        }
+    }
+    Some(count)
+}
+
 // ============================================================================
 // AuraPending Component
 // ============================================================================
@@ -1147,10 +1301,17 @@ impl AuraPending {
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
                 dispel_type,
-                // An ability applies at most one aura, so a RON-defined aura is never
-                // part of a compound debuff. See `CompoundDebuff`.
-                compound: None,
+                // The FACE of a compound, when the RON declares one; its riders
+                // are pulled in by `apply_pending_auras` when the face lands.
+                // See `CompoundDebuff`.
+                compound: aura_effect.compound,
                 source_item: None,
+                stacks: aura_effect
+                    .stacking
+                    .map(|stacking| AuraStacks::new(stacking.max_stacks)),
+                bloom: aura_effect
+                    .bloom
+                    .map(|bloom| bloom.heal_base + spell_power * bloom.heal_coefficient),
             },
         })
     }
@@ -1196,10 +1357,15 @@ impl AuraPending {
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
                 dispel_type,
-                // An ability applies at most one aura, so a RON-defined aura is never
-                // part of a compound debuff. See `CompoundDebuff`.
-                compound: None,
+                // The FACE of a compound, when the RON declares one. See
+                // `CompoundDebuff`.
+                compound: aura_effect.compound,
                 source_item: None,
+                stacks: aura_effect
+                    .stacking
+                    .map(|stacking| AuraStacks::new(stacking.max_stacks)),
+                // This constructor takes no spell power, so a bloom is its base.
+                bloom: aura_effect.bloom.map(|bloom| bloom.heal_base),
             },
         })
     }
@@ -1245,10 +1411,15 @@ impl AuraPending {
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
                 dispel_type,
-                // An ability applies at most one aura, so a RON-defined aura is never
-                // part of a compound debuff. See `CompoundDebuff`.
-                compound: None,
+                // The FACE of a compound, when the RON declares one. See
+                // `CompoundDebuff`.
+                compound: aura_effect.compound,
                 source_item: None,
+                stacks: aura_effect
+                    .stacking
+                    .map(|stacking| AuraStacks::new(stacking.max_stacks)),
+                // This constructor takes no spell power, so a bloom is its base.
+                bloom: aura_effect.bloom.map(|bloom| bloom.heal_base),
             },
         })
     }
@@ -1402,6 +1573,7 @@ impl DRCategory {
             | AuraType::LockoutDurationReduction
             | AuraType::FrostArmorBuff
             | AuraType::SpellResistanceBuff
+            | AuraType::ArmorIncrease
             | AuraType::FearImmunity => None,
 
             // Mechanical markers, not effects. They track state (a spent soul,
@@ -1598,6 +1770,8 @@ mod compound_tests {
             duration: 5.0,
             compound: Some(CompoundDebuff::FrostArmorChill),
             source_item: None,
+            stacks: None,
+            bloom: None,
             ..Default::default()
         }
     }
@@ -1622,6 +1796,17 @@ mod compound_tests {
                     member(AuraType::MovementSpeedSlow),
                     member(AuraType::AttackSpeedSlow),
                 ],
+                // The face as the RON applies it, and the riders the sim pulls
+                // in with it — the real constructor, not a restatement.
+                CompoundDebuff::MarkOfTheWild => std::iter::once(Aura {
+                    effect_type: AuraType::MaxHealthIncrease,
+                    compound: Some(CompoundDebuff::MarkOfTheWild),
+                    ..Default::default()
+                })
+                .chain(crate::states::play_match::combat_core::compound_riders(
+                    CompoundDebuff::MarkOfTheWild,
+                ))
+                .collect(),
             };
             let faces = members.iter().filter(|a| !a.is_compound_rider()).count();
             assert_eq!(
@@ -1805,6 +1990,7 @@ mod tests {
             AuraType::LockoutDurationReduction,
             AuraType::FrostArmorBuff,
             AuraType::SpellResistanceBuff,
+            AuraType::ArmorIncrease,
         ] {
             assert!(
                 aura(ty).can_be_purged(),

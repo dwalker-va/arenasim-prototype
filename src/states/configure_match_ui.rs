@@ -100,6 +100,10 @@ pub fn load_class_icons(
             match_config::CharacterClass::Shaman,
             "icons/classes/shaman.png",
         ),
+        (
+            match_config::CharacterClass::Druid,
+            "icons/classes/druid.png",
+        ),
     ];
 
     // Load handles if not already loaded

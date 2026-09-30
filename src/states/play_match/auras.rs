@@ -10,6 +10,7 @@
 //! Note: Instant effect processing (Holy Shock, Dispels) moved to effects/ module.
 
 use super::components::*;
+use super::effects::BloomPending;
 use super::match_config;
 use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 use crate::combat::log::{CombatLog, CombatLogEventType};
@@ -73,18 +74,7 @@ pub fn update_auras(
         // Reverse MaxHealth/MaxMana stat mutations for expiring auras before removal
         for aura in auras.auras.iter() {
             if aura.duration <= 0.0 {
-                match aura.effect_type {
-                    AuraType::MaxHealthIncrease => {
-                        combatant.max_health -= aura.magnitude;
-                        combatant.current_health =
-                            combatant.current_health.min(combatant.max_health);
-                    }
-                    AuraType::MaxManaIncrease => {
-                        combatant.max_mana -= aura.magnitude;
-                        combatant.current_mana = combatant.current_mana.min(combatant.max_mana);
-                    }
-                    _ => {}
-                }
+                combatant.reverse_stat_mutation(aura);
             }
         }
 
@@ -481,6 +471,36 @@ pub fn apply_pending_auras(
                 | AuraType::HealingOverTime
                 | AuraType::WindfuryBuff
         );
+        // A STACKING aura its source has already applied is REFRESHED, not
+        // refused and not doubled (see `AuraStacks`). Checked before the
+        // one-per-type gate below, which would otherwise turn a recast away.
+        if pending.aura.stacks.is_some() {
+            let refreshed = active_auras
+                .as_mut()
+                .and_then(|auras| refresh_stacking_aura(&mut auras.auras, &pending.aura))
+                .or_else(|| {
+                    new_auras_map
+                        .get_mut(&pending.target)
+                        .and_then(|auras| refresh_stacking_aura(auras, &pending.aura))
+                });
+            if let Some(stacks) = refreshed {
+                let message = if pending.aura.stacks.is_some_and(|s| s.max > 1) {
+                    format!(
+                        "{}'s {} refreshed ({} stack{})",
+                        target_id,
+                        pending.aura.ability_name,
+                        stacks,
+                        if stacks == 1 { "" } else { "s" }
+                    )
+                } else {
+                    format!("{}'s {} refreshed", target_id, pending.aura.ability_name)
+                };
+                combat_log.log(CombatLogEventType::Buff, message);
+                commands.entity(pending_entity).despawn();
+                continue;
+            }
+        }
+
         if is_buff_aura {
             // Most buffs are one-per-TYPE: a second MaxHealthIncrease is
             // refused whether it came from Power Word: Fortitude or Commanding
@@ -556,7 +576,7 @@ pub fn apply_pending_auras(
             // A proc trinket's buff says so in the log, once per buff that
             // actually LANDED. That line is what a sweep counts to report how
             // often procs fired — a decisive-event count, not an assumption.
-            if pending.aura.distinct_by_source() {
+            if pending.aura.source_item.is_some() {
                 combat_log.log(
                     CombatLogEventType::Buff,
                     format!("{} procs {}", target_id, pending.aura.ability_name),
@@ -993,7 +1013,8 @@ pub fn process_dot_ticks(
 
             if normal_tick || final_tick {
                 // Time to apply DoT damage!
-                let damage = aura.magnitude;
+                // Per stack (exact for a non-stacking DoT). See `Aura::tick_amount`.
+                let damage = aura.tick_amount();
 
                 // Get caster info (if still exists)
                 if let Some(caster_entity) = aura.caster {
@@ -1241,6 +1262,15 @@ pub fn process_hot_ticks(
         let target_pos = positions.get(&entity).copied().unwrap_or(Vec3::ZERO);
 
         for aura in active_auras.auras.iter_mut() {
+            // A blooming aura on its last frame owes its bearer a bloom:
+            // `update_auras` removes it later this frame. Any aura may bloom,
+            // not only a heal over time, so this is asked before the filter.
+            if aura.duration - dt <= 0.0 {
+                if let Some(bloom) = BloomPending::for_ending(entity, aura) {
+                    commands.spawn(bloom);
+                }
+            }
+
             if aura.effect_type != AuraType::HealingOverTime {
                 continue;
             }
@@ -1255,7 +1285,8 @@ pub fn process_hot_ticks(
 
             if normal_tick || final_tick {
                 // Time to apply HoT healing!
-                let healing = aura.magnitude;
+                // Per stack (exact for a non-stacking HoT). See `Aura::tick_amount`.
+                let healing = aura.tick_amount();
 
                 // Get caster info (if still exists) for attribution
                 if let Some(caster_entity) = aura.caster {
@@ -1409,6 +1440,8 @@ mod tests {
             dispel_type: DispelType::Auto,
             compound: None,
             source_item: None,
+            stacks: None,
+            bloom: None,
         }
     }
 

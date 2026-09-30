@@ -135,10 +135,11 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         AuraType::DamageImmunity => "aura_absorb".to_string(), // Divine Shield, reuse absorb icon as fallback
         AuraType::Incapacitate => "aura_stun".to_string(),     // Reuse stun icon (frozen in place)
         AuraType::SpellResistanceBuff => "aura_max_health".to_string(), // Resistance buff, reuse buff icon
-        AuraType::AttackPowerReduction => "aura_dot".to_string(),       // Debuff, reuse DoT icon
-        AuraType::CritChanceIncrease => "aura_max_health".to_string(),  // Buff, reuse buff icon
-        AuraType::ManaRegenIncrease => "aura_max_health".to_string(),   // Buff, reuse buff icon
-        AuraType::AttackSpeedSlow => "aura_slow".to_string(),           // Slow debuff
+        AuraType::ArmorIncrease => "aura_max_health".to_string(), // Armor buff, reuse buff icon
+        AuraType::AttackPowerReduction => "aura_dot".to_string(), // Debuff, reuse DoT icon
+        AuraType::CritChanceIncrease => "aura_max_health".to_string(), // Buff, reuse buff icon
+        AuraType::ManaRegenIncrease => "aura_max_health".to_string(), // Buff, reuse buff icon
+        AuraType::AttackSpeedSlow => "aura_slow".to_string(),     // Slow debuff
         AuraType::LockoutDurationReduction => "aura_max_health".to_string(), // Buff, reuse buff icon
         AuraType::FrostArmorBuff => "aura_absorb".to_string(), // Self-buff, reuse absorb icon
         AuraType::Silence => "aura_silence".to_string(),
@@ -176,6 +177,7 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         | AuraType::LockoutDurationReduction
         | AuraType::FrostArmorBuff
         | AuraType::SpellResistanceBuff
+        | AuraType::ArmorIncrease
         | AuraType::WeaponPoison
         | AuraType::SpellPowerIncrease
         | AuraType::HealingOverTime

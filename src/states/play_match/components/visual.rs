@@ -450,6 +450,9 @@ impl HealImpact {
             AbilityType::FlashOfLight => Some(HealImpactKind::FlashOfLight),
             // LHW and Healing Wave are one visual in the client.
             AbilityType::LesserHealingWave => Some(HealImpactKind::HealingWave),
+            // Swiftmend borrows the Nature heal landing until the Druid's own
+            // visuals land (AS-160).
+            AbilityType::Swiftmend => Some(HealImpactKind::HealingWave),
             _ => None,
         }
     }
@@ -495,6 +498,7 @@ impl HealImpact {
             | AuraType::DamageImmunity
             | AuraType::Incapacitate
             | AuraType::SpellResistanceBuff
+            | AuraType::ArmorIncrease
             | AuraType::AttackPowerReduction
             | AuraType::CritChanceIncrease
             | AuraType::ManaRegenIncrease
@@ -950,6 +954,7 @@ impl AuraApplyRoute {
             | AuraType::AttackPowerReduction
             | AuraType::DamageTakenReduction
             | AuraType::SpellResistanceBuff
+            | AuraType::ArmorIncrease
             | AuraType::CritChanceIncrease
             | AuraType::ManaRegenIncrease
             | AuraType::LockoutDurationReduction

@@ -837,6 +837,8 @@ fn try_power_word_shield(
             dispel_type: DispelType::Auto,
             compound: None,
             source_item: None,
+            stacks: None,
+            bloom: None,
         },
     });
 

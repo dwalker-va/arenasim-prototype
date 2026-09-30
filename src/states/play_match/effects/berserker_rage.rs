@@ -69,6 +69,8 @@ pub fn process_berserker_rage(
                 dispel_type: DispelType::Auto,
                 compound: None,
                 source_item: None,
+                stacks: None,
+                bloom: None,
             };
 
             let fears_broken = if let Some(mut active_auras) = active_auras_opt {

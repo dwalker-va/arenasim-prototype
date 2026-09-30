@@ -432,6 +432,113 @@
         ),
 
         // ====================================================================
+        // CASTER LEATHER ARMOR — CENARION (Druid)
+        //
+        // Caster-leather: leather armor (free stat) carrying spell power + mana
+        // like a cloth caster set. The budgeted stats are the Earthfury set's,
+        // piece for piece — same item levels, same slots, same budget — so the
+        // two caster healers differ in armor type, not in stat points. Icons
+        // are the real Tier 1 Cenarion set art (Classic item ids 16828-16836).
+        // ====================================================================
+
+        CenarionHelm: (
+            name: "Cenarion Helm",
+            item_level: 58,
+            icon: "icons/items/inv_helmet_09.jpg",
+            slot: Head,
+            armor_type: Leather,
+            armor: 99.0,
+            max_health: 12.0,
+            max_mana: 16.0,
+            spell_power: 8.0,
+        ),
+
+        CenarionVestments: (
+            name: "Cenarion Vestments",
+            item_level: 58,
+            icon: "icons/items/inv_chest_cloth_06.jpg",
+            slot: Chest,
+            armor_type: Leather,
+            armor: 99.0,
+            max_health: 12.0,
+            max_mana: 16.0,
+            spell_power: 9.0,
+        ),
+
+        CenarionLeggings: (
+            name: "Cenarion Leggings",
+            item_level: 58,
+            icon: "icons/items/inv_pants_06.jpg",
+            slot: Legs,
+            armor_type: Leather,
+            armor: 99.0,
+            max_health: 10.0,
+            max_mana: 14.0,
+            spell_power: 8.0,
+        ),
+
+        CenarionGloves: (
+            name: "Cenarion Gloves",
+            item_level: 56,
+            icon: "icons/items/inv_gauntlets_07.jpg",
+            slot: Hands,
+            armor_type: Leather,
+            armor: 95.0,
+            max_health: 8.0,
+            max_mana: 12.0,
+            spell_power: 6.0,
+        ),
+
+        CenarionBoots: (
+            name: "Cenarion Boots",
+            item_level: 56,
+            icon: "icons/items/inv_boots_08.jpg",
+            slot: Feet,
+            armor_type: Leather,
+            armor: 95.0,
+            max_health: 8.0,
+            max_mana: 10.0,
+            spell_power: 6.0,
+            movement_speed: 0.1,
+        ),
+
+        CenarionBelt: (
+            name: "Cenarion Belt",
+            item_level: 54,
+            icon: "icons/items/inv_belt_06.jpg",
+            slot: Waist,
+            armor_type: Leather,
+            armor: 92.0,
+            max_health: 6.0,
+            max_mana: 10.0,
+            spell_power: 5.0,
+        ),
+
+        CenarionBracers: (
+            name: "Cenarion Bracers",
+            item_level: 54,
+            icon: "icons/items/inv_bracer_03.jpg",
+            slot: Wrists,
+            armor_type: Leather,
+            armor: 92.0,
+            max_health: 5.0,
+            max_mana: 8.0,
+            spell_power: 4.0,
+        ),
+
+        CenarionSpaulders: (
+            name: "Cenarion Spaulders",
+            item_level: 56,
+            icon: "icons/items/inv_shoulder_07.jpg",
+            slot: Shoulders,
+            armor_type: Leather,
+            armor: 95.0,
+            max_health: 8.0,
+            max_mana: 12.0,
+            spell_power: 6.0,
+        ),
+
+        // ====================================================================
         // LEATHER ARMOR (Rogue, Hunter)
         // ====================================================================
 
@@ -1057,6 +1164,18 @@
             allowed_classes: Some([Paladin]),
             attack_power: 6.0,
             max_health: 4.0,
+        ),
+
+        // The Druid's relic: an Idol. Priced like the Totem of Life.
+        IdolOfHealth: (
+            name: "Idol of Health",
+            item_level: 58,
+            icon: "icons/items/inv_relics_idolofhealth.jpg",
+            slot: Ranged,
+            weapon_type: Relic,
+            allowed_classes: Some([Druid]),
+            spell_power: 5.0,
+            max_mana: 3.0,
         ),
 
         TotemOfLife: (

@@ -205,7 +205,7 @@ produces it.
 | Shadow   | Purple      | Warlock, Priest (Mind Blast)     |
 | Arcane   | Pink/Purple | Mage (Polymorph)                 |
 | Holy     | Gold        | Priest, Paladin (heals, Holy Shock, HoJ) |
-| Nature   | Green       | (Future: Druid, Shaman)          |
+| Nature   | Green       | Shaman, Druid                    |
 
 ---
 

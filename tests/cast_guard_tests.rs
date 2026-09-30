@@ -63,6 +63,8 @@ fn make_aura(effect_type: AuraType, ability_name: &str, caster: Option<Entity>) 
         dispel_type: DispelType::Auto,
         compound: None,
         source_item: None,
+        stacks: None,
+        bloom: None,
     }
 }
 

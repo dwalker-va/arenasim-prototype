@@ -434,7 +434,13 @@ pub fn view_combatant_ui(
                 HunterPetType::Bird => PetType::Bird,
             })
         }
-        _ => None,
+        CharacterClass::Warrior
+        | CharacterClass::Mage
+        | CharacterClass::Rogue
+        | CharacterClass::Priest
+        | CharacterClass::Paladin
+        | CharacterClass::Shaman
+        | CharacterClass::Druid => None,
     };
 
     // Compute equipment bonuses for the stats panel

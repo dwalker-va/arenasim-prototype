@@ -185,8 +185,19 @@ pub fn melee_within(ctx: &CombatContext, me: Entity, my_pos: Vec3, radius: f32) 
 /// A class whose melee damage warrants kiting (Warrior, Rogue). Deliberately
 /// narrower than `CharacterClass::is_melee()`, which also counts the Paladin —
 /// the Paladin's melee is not a kiting pressure threat here.
+///
+/// Exhaustive, so a new class has to say whether it is a kiting pressure.
 pub(super) fn is_kite_threat(class: CharacterClass) -> bool {
-    matches!(class, CharacterClass::Warrior | CharacterClass::Rogue)
+    match class {
+        CharacterClass::Warrior | CharacterClass::Rogue => true,
+        CharacterClass::Mage
+        | CharacterClass::Priest
+        | CharacterClass::Warlock
+        | CharacterClass::Paladin
+        | CharacterClass::Hunter
+        | CharacterClass::Shaman
+        | CharacterClass::Druid => false,
+    }
 }
 
 /// Nearest kite-threat melee enemy (Warrior/Rogue) to `my_pos`, if any. The
@@ -356,7 +367,14 @@ pub fn tick_kite_occlusion(
         let cfg = match combatant.class {
             CharacterClass::Mage => &movement_config.mage,
             CharacterClass::Hunter => &movement_config.hunter,
-            _ => continue, // only the two kiter classes carry a bucket
+            // Only the two kiter classes carry a bucket.
+            CharacterClass::Warrior
+            | CharacterClass::Rogue
+            | CharacterClass::Priest
+            | CharacterClass::Warlock
+            | CharacterClass::Paladin
+            | CharacterClass::Shaman
+            | CharacterClass::Druid => continue,
         };
         // While a Hunter Freezing-Trap dip owns movement, the ENGAGE/KITE
         // machine is skipped, so the chase can't fire; freeze the bucket rather

@@ -571,6 +571,16 @@ item_ids! {
     EarthfuryBracers,
     EarthfuryEpaulets,
 
+    // === Caster Leather Armor (Druid) — spell power + mana on leather ===
+    CenarionHelm,
+    CenarionVestments,
+    CenarionLeggings,
+    CenarionGloves,
+    CenarionBoots,
+    CenarionBelt,
+    CenarionBracers,
+    CenarionSpaulders,
+
     // === Leather Armor (Rogue, Hunter) ===
     NightstalkerCowl,
     NightstalkerTunic,
@@ -634,13 +644,14 @@ item_ids! {
     AshwoodBow,
     SniperScope,
 
-    // === Relics (Ranged socket, Paladin/Shaman) ===
+    // === Relics (Ranged socket, Paladin/Shaman/Druid) ===
     LibramOfHope,
     LibramOfGrace,
     LibramOfTruth,
     TotemOfLife,
     TotemOfRebirth,
     TotemOfRage,
+    IdolOfHealth,
 
     // === Off Hand ===
     TomeOfKnowledge,
@@ -909,7 +920,9 @@ fn max_armor_type(class: CharacterClass) -> &'static [ArmorType] {
             ArmorType::Mail,
             ArmorType::None,
         ],
-        CharacterClass::Rogue => &[ArmorType::Cloth, ArmorType::Leather, ArmorType::None],
+        CharacterClass::Rogue | CharacterClass::Druid => {
+            &[ArmorType::Cloth, ArmorType::Leather, ArmorType::None]
+        }
         CharacterClass::Mage | CharacterClass::Priest | CharacterClass::Warlock => {
             &[ArmorType::Cloth, ArmorType::None]
         }
@@ -1059,6 +1072,24 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
             W::Relic => Trained,
             W::OffhandFrill | W::None => Trained,
         },
+        // Daggers, fist weapons, maces in both forms, staves. Never a sword,
+        // an axe, a shield or any ranged weapon — and no wand, which is why
+        // the Druid's only auto-attack is a melee swing.
+        CharacterClass::Druid => match weapon {
+            W::Dagger | W::Fist | W::Mace | W::Staff => Trained,
+            W::Axe
+            | W::Sword
+            | W::Polearm
+            | W::Bow
+            | W::Gun
+            | W::Crossbow
+            | W::Thrown
+            | W::Wand
+            | W::Shield => Untrained,
+            // A Druid's ranged socket is an Idol socket, not a bow socket.
+            W::Relic => Trained,
+            W::OffhandFrill | W::None => Trained,
+        },
         // Daggers, one-handed maces, staves, wands.
         CharacterClass::Priest => match weapon {
             W::Dagger | W::Staff | W::Wand => Trained,
@@ -1189,6 +1220,7 @@ pub fn can_dual_wield(class: CharacterClass) -> bool {
         CharacterClass::Warrior | CharacterClass::Rogue | CharacterClass::Hunter => true,
         CharacterClass::Paladin
         | CharacterClass::Shaman
+        | CharacterClass::Druid
         | CharacterClass::Priest
         | CharacterClass::Mage
         | CharacterClass::Warlock => false,
@@ -2332,17 +2364,17 @@ mod tests {
 MainHand one-hand Sword        Warrior Mage Rogue Warlock Paladin Hunter
 OffHand  one-hand Sword        Warrior Rogue Hunter
 MainHand two-hand Sword        Warrior Paladin Hunter
-MainHand one-hand Mace         Warrior Rogue Priest Paladin Shaman
+MainHand one-hand Mace         Warrior Rogue Priest Paladin Shaman Druid
 OffHand  one-hand Mace         Warrior Rogue
-MainHand two-hand Mace         Warrior Paladin Shaman
+MainHand two-hand Mace         Warrior Paladin Shaman Druid
 MainHand one-hand Axe          Warrior Paladin Hunter Shaman
 OffHand  one-hand Axe          Warrior Hunter
 MainHand two-hand Axe          Warrior Paladin Hunter Shaman
-MainHand one-hand Dagger       Warrior Mage Rogue Priest Warlock Hunter Shaman
+MainHand one-hand Dagger       Warrior Mage Rogue Priest Warlock Hunter Shaman Druid
 OffHand  one-hand Dagger       Warrior Rogue Hunter
-MainHand two-hand Staff        Warrior Mage Priest Warlock Hunter Shaman
+MainHand two-hand Staff        Warrior Mage Priest Warlock Hunter Shaman Druid
 MainHand two-hand Polearm      Warrior Paladin Hunter
-MainHand one-hand Fist         Warrior Rogue Hunter Shaman
+MainHand one-hand Fist         Warrior Rogue Hunter Shaman Druid
 OffHand  one-hand Fist         Warrior Rogue Hunter
 Ranged   ranged   Bow          Warrior Rogue Hunter
 Ranged   ranged   Gun          Warrior Rogue Hunter
@@ -2350,13 +2382,13 @@ Ranged   ranged   Crossbow     Warrior Rogue Hunter
 Ranged   ranged   Wand         Mage Priest Warlock
 Ranged   ranged   Thrown       Warrior Rogue Hunter
 OffHand  off-hand Shield       Warrior Paladin Shaman
-OffHand  off-hand OffhandFrill Mage Priest Warlock Paladin Shaman
-Ranged   ranged   Relic        Paladin Shaman
-armor             Cloth        Warrior Mage Rogue Priest Warlock Paladin Hunter Shaman
-armor             Leather      Warrior Rogue Paladin Hunter Shaman
+OffHand  off-hand OffhandFrill Mage Priest Warlock Paladin Shaman Druid
+Ranged   ranged   Relic        Paladin Shaman Druid
+armor             Cloth        Warrior Mage Rogue Priest Warlock Paladin Hunter Shaman Druid
+armor             Leather      Warrior Rogue Paladin Hunter Shaman Druid
 armor             Mail         Warrior Paladin Hunter Shaman
 armor             Plate        Warrior Paladin
-armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter Shaman
+armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter Shaman Druid
 ";
 
     /// The equip matrix, computed from the real predicate every surface uses
@@ -3211,7 +3243,10 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
 
         // The proficiency table, not the class list, is what shuts the door.
         for class in CharacterClass::all() {
-            let relic_class = matches!(class, CharacterClass::Paladin | CharacterClass::Shaman);
+            let relic_class = matches!(
+                class,
+                CharacterClass::Paladin | CharacterClass::Shaman | CharacterClass::Druid
+            );
             assert_eq!(
                 can_wield(*class, WeaponType::Relic, false),
                 relic_class,

@@ -212,6 +212,23 @@ pub const fn class_base_stats(class: match_config::CharacterClass) -> ClassBaseS
             movement_speed: 5.0,
             armor: NO_ARMOR,
         },
+        // Druid: Medium HP (caster-leather), mana ranged healer, scales with Spell Power (5% crit).
+        // A proactive HoT healer: every heal is instant, so its pool is sized for
+        // pacing rather than for bursts of cast-time heals. No wand — its only
+        // auto-attack is a staff swing.
+        match_config::CharacterClass::Druid => ClassBaseStats {
+            resource_type: ResourceType::Mana,
+            max_health: 260.0,
+            max_resource: 170.0,
+            resource_regen: 0.0,
+            starting_resource: 170.0,
+            attack_damage: 7.0,
+            attack_power: 0.0,
+            spell_power: 42.0,
+            crit_chance: 0.05,
+            movement_speed: 5.0,
+            armor: NO_ARMOR,
+        },
     }
 }
 
@@ -475,6 +492,8 @@ pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
         dispel_type: super::DispelType::Auto,
         compound: None,
         source_item: None,
+        stacks: None,
+        bloom: None,
     }
 }
 
@@ -504,8 +523,9 @@ impl AutoAttackKind {
     pub fn from_class(class: match_config::CharacterClass) -> Self {
         // The old class ladder, verbatim, so a bare combatant that never gets
         // equipment (unit tests, any spawn path that skips `apply_equipment`)
-        // behaves exactly as it did before this change.
-        if class.is_melee() {
+        // behaves exactly as it did before this change. The Druid has no wand
+        // to fall back on: like the melee classes, it swings its weapon.
+        if class.is_melee() || class == match_config::CharacterClass::Druid {
             AutoAttackKind::Melee
         } else if class == match_config::CharacterClass::Hunter {
             AutoAttackKind::Shot
@@ -696,6 +716,24 @@ impl Combatant {
     /// Check if this combatant is alive (health > 0 and not marked dead).
     pub fn is_alive(&self) -> bool {
         self.current_health > 0.0 && !self.is_dead
+    }
+
+    /// Give back the stat an aura raised when it landed, as it leaves — by
+    /// running out or by being taken. `apply_pending_auras` writes a
+    /// `MaxHealthIncrease` / `MaxManaIncrease` into the holder's stats; every
+    /// other aura is read live and needs nothing here.
+    pub fn reverse_stat_mutation(&mut self, aura: &super::Aura) {
+        match aura.effect_type {
+            super::AuraType::MaxHealthIncrease => {
+                self.max_health -= aura.magnitude;
+                self.current_health = self.current_health.min(self.max_health);
+            }
+            super::AuraType::MaxManaIncrease => {
+                self.max_mana -= aura.magnitude;
+                self.current_mana = self.current_mana.min(self.max_mana);
+            }
+            _ => {}
+        }
     }
 
     /// The owner-relative team slot for a pet — the discriminator its combat-log
@@ -1157,7 +1195,16 @@ pub enum DispelScope {
 
 impl DispelScope {
     /// Whether this removal may take `aura`.
+    ///
+    /// Never a compound's RIDER: a compound is taken by its face, and taking
+    /// the face takes the riders with it (`ActiveAuras::remove_debuff_at`). A
+    /// rider that could be rolled on its own would give a compound extra
+    /// chances to be picked — Mark of the Wild's six riders are purgeable
+    /// types — and would make the pick depend on how many effects it has.
     pub fn takes(&self, aura: &super::Aura) -> bool {
+        if aura.is_compound_rider() {
+            return false;
+        }
         match self {
             DispelScope::Magic => aura.can_be_dispelled(),
             DispelScope::MagicOrPoison => aura.can_be_dispelled() || aura.is_cleansable_poison(),
@@ -1340,6 +1387,18 @@ mod tests {
                 160.0,
                 0.0,
                 160.0,
+                7.0,
+                0.0,
+                42.0,
+                0.05,
+                5.0,
+            ),
+            (
+                C::Druid,
+                260.0,
+                170.0,
+                0.0,
+                170.0,
                 7.0,
                 0.0,
                 42.0,

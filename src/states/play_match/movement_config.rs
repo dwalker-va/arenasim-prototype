@@ -258,22 +258,29 @@ impl Default for PaladinMovementConfig {
     }
 }
 
-/// Shaman-specific movement configuration.
+/// Movement configuration for a CASTER HEALER — a ranged healer with no
+/// offensive dip, run by `class_ai::caster_healer_posture`. Two classes use it,
+/// each with its own block: `shaman:` and `druid:`.
 ///
-/// Mirrors [`PriestMovementConfig`] minus the Dip fields — the Shaman has no
-/// Hammer-of-Justice / Psychic-Scream dip. The defaults lean OFFENSIVE versus
-/// the Priest (a ranged caster that pressures rather than a pure backline
-/// healer): weaker `threat_repulsion`/`formation_pull` (less eager to flee /
-/// fall back) and a stronger `wand_pull` (the Shaman repurposes the wand-pull
-/// term as a pull toward Lightning Bolt range of the kill target).
+/// Mirrors [`PriestMovementConfig`] minus the Dip fields — neither class has a
+/// Hammer-of-Justice / Psychic-Scream dip. [`Default`] is the SHAMAN's tuning,
+/// which leans OFFENSIVE versus the Priest (a ranged caster that pressures
+/// rather than a pure backline healer): weaker `threat_repulsion` /
+/// `formation_pull` (less eager to flee / fall back) and a stronger `wand_pull`
+/// (the Shaman repurposes the wand-pull term as a pull toward Lightning Bolt
+/// range of the kill target). The Druid's is [`Self::druid_default`].
+///
+/// A partial `druid:` block inherits its unspecified fields from [`Default`]
+/// (serde fills missing fields from the type's one `Default`), so the shipped
+/// RON states the Druid's block in full.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(default)]
-pub struct ShamanMovementConfig {
+pub struct CasterHealerMovementConfig {
     pub weights: MovementWeights,
     /// FREE: distance (XZ units) the formation point must move before the
     /// directive is re-targeted and a `FormationShift` trace event fires.
     pub formation_shift_threshold: f32,
-    /// FREE deadzone: no Point directive is issued when the Shaman is already
+    /// FREE deadzone: no Point directive is issued when the healer is already
     /// this close to the formation point (prevents micro-shuffling).
     pub formation_deadzone: f32,
     /// FREE: refresh the standing directive when its remaining TTL drops below
@@ -284,7 +291,7 @@ pub struct ShamanMovementConfig {
     pub healing_heavy_hp: f32,
 }
 
-impl Default for ShamanMovementConfig {
+impl Default for CasterHealerMovementConfig {
     fn default() -> Self {
         Self {
             weights: MovementWeights {
@@ -301,6 +308,26 @@ impl Default for ShamanMovementConfig {
             formation_deadzone: 1.5,
             directive_refresh_margin: 0.25,
             healing_heavy_hp: 0.6,
+        }
+    }
+}
+
+impl CasterHealerMovementConfig {
+    /// The Druid's tuning: a pure backline healer, so the Priest's defensive
+    /// weights rather than the Shaman's offensive lean. Every heal it has is an
+    /// instant at 40 yards, so there is nothing to walk forward for — and no
+    /// wand to pull toward (`wand_pull` 0).
+    pub fn druid_default() -> Self {
+        Self {
+            weights: MovementWeights {
+                threat_repulsion: 3.0,
+                formation_pull: 2.0,
+                corner_penalty: 6.0,
+                wand_pull: 0.0, // no wand
+                burn_pull: 0.0, // no Mana Burn
+                ..MovementWeights::default()
+            },
+            ..Self::default()
         }
     }
 }
@@ -456,16 +483,34 @@ impl Default for DpsMovementConfig {
 ///
 /// Loaded from `assets/config/movement.ron` at startup (both modes).
 /// Access via `Res<MovementConfig>` in systems.
-#[derive(Resource, Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Resource, Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MovementConfig {
     pub shared: SharedMovementConfig,
     pub priest: PriestMovementConfig,
     pub paladin: PaladinMovementConfig,
-    pub shaman: ShamanMovementConfig,
+    pub shaman: CasterHealerMovementConfig,
+    pub druid: CasterHealerMovementConfig,
     pub melee: MeleeMovementConfig,
     pub mage: DpsMovementConfig,
     pub hunter: DpsMovementConfig,
+}
+
+/// Written out rather than derived only because the `shaman` and `druid`
+/// blocks share a type and not a default.
+impl Default for MovementConfig {
+    fn default() -> Self {
+        Self {
+            shared: SharedMovementConfig::default(),
+            priest: PriestMovementConfig::default(),
+            paladin: PaladinMovementConfig::default(),
+            shaman: CasterHealerMovementConfig::default(),
+            druid: CasterHealerMovementConfig::druid_default(),
+            melee: MeleeMovementConfig::default(),
+            mage: DpsMovementConfig::default(),
+            hunter: DpsMovementConfig::default(),
+        }
+    }
 }
 
 impl MovementConfig {
@@ -521,6 +566,15 @@ impl MovementConfig {
                 "shaman.directive_refresh_margin",
                 self.shaman.directive_refresh_margin,
             ),
+            (
+                "druid.formation_shift_threshold",
+                self.druid.formation_shift_threshold,
+            ),
+            ("druid.formation_deadzone", self.druid.formation_deadzone),
+            (
+                "druid.directive_refresh_margin",
+                self.druid.directive_refresh_margin,
+            ),
         ];
         for (name, value) in non_negatives {
             if value < 0.0 || !value.is_finite() {
@@ -537,6 +591,7 @@ impl MovementConfig {
             ("paladin.healing_heavy_hp", self.paladin.healing_heavy_hp),
             ("priest.healing_heavy_hp", self.priest.healing_heavy_hp),
             ("shaman.healing_heavy_hp", self.shaman.healing_heavy_hp),
+            ("druid.healing_heavy_hp", self.druid.healing_heavy_hp),
         ];
         for (name, value) in fractions {
             if !(0.0..=1.0).contains(&value) {
@@ -571,19 +626,21 @@ impl MovementConfig {
                 self.priest.directive_refresh_margin, s.directive_ttl
             ));
         }
-        if self.shaman.formation_deadzone >= self.shaman.formation_shift_threshold {
-            issues.push(format!(
-                "shaman.formation_deadzone ({}) must be below shaman.formation_shift_threshold \
-                 ({}) — otherwise the deadzone swallows every formation shift",
-                self.shaman.formation_deadzone, self.shaman.formation_shift_threshold
-            ));
-        }
-        if self.shaman.directive_refresh_margin >= s.directive_ttl {
-            issues.push(format!(
-                "shaman.directive_refresh_margin ({}) must be below shared.directive_ttl ({}) — \
-                 a margin at/above the TTL refreshes the directive every tick",
-                self.shaman.directive_refresh_margin, s.directive_ttl
-            ));
+        for (name, block) in [("shaman", &self.shaman), ("druid", &self.druid)] {
+            if block.formation_deadzone >= block.formation_shift_threshold {
+                issues.push(format!(
+                    "{name}.formation_deadzone ({}) must be below {name}.formation_shift_threshold \
+                     ({}) — otherwise the deadzone swallows every formation shift",
+                    block.formation_deadzone, block.formation_shift_threshold
+                ));
+            }
+            if block.directive_refresh_margin >= s.directive_ttl {
+                issues.push(format!(
+                    "{name}.directive_refresh_margin ({}) must be below shared.directive_ttl ({}) — \
+                     a margin at/above the TTL refreshes the directive every tick",
+                    block.directive_refresh_margin, s.directive_ttl
+                ));
+            }
         }
 
         let m = &self.melee;
@@ -616,6 +673,7 @@ impl MovementConfig {
             ("priest", &self.priest.weights),
             ("paladin", &self.paladin.weights),
             ("shaman", &self.shaman.weights),
+            ("druid", &self.druid.weights),
             ("mage", &self.mage.weights),
             ("hunter", &self.hunter.weights),
         ] {
@@ -792,6 +850,14 @@ mod tests {
             config.shaman.weights.burn_pull, 0.0,
             "Shaman has no Mana Burn — burn_pull must be disabled"
         );
+        assert_eq!(
+            config.druid.weights.burn_pull, 0.0,
+            "Druid has no Mana Burn — burn_pull must be disabled"
+        );
+        assert_eq!(
+            config.druid.weights.wand_pull, 0.0,
+            "Druid has no wand — wand_pull must be disabled"
+        );
         assert!(
             (0.4..=0.8).contains(&config.shared.commit_window),
             "commit_window outside the plan's 0.4-0.8 band: {}",
@@ -917,6 +983,7 @@ mod tests {
             ("priest", &config.priest.weights),
             ("paladin", &config.paladin.weights),
             ("shaman", &config.shaman.weights),
+            ("druid", &config.druid.weights),
         ] {
             assert_eq!(
                 w.los_seek, 0.0,
@@ -965,6 +1032,7 @@ mod tests {
             config.shaman.weights.cover_pull, 1.5,
             "shaman.cover_pull (U8)"
         );
+        assert_eq!(config.druid.weights.cover_pull, 1.5, "druid.cover_pull");
         assert_eq!(
             config.mage.weights.cover_pull, 0.0,
             "mage.cover_pull off (U9)"
@@ -977,6 +1045,7 @@ mod tests {
             ("priest", &config.priest.weights),
             ("paladin", &config.paladin.weights),
             ("shaman", &config.shaman.weights),
+            ("druid", &config.druid.weights),
         ] {
             assert!(
                 w.cover_pull < w.threat_repulsion,

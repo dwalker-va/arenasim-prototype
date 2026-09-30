@@ -54,7 +54,7 @@
 //
 // {cctarget} IS THE ONE TOKEN THAT CAN MAKE AN ENTRY UNSATISFIABLE. It names
 // an enemy who is NOT the called kill target, preferring a healer (Priest /
-// Paladin / Shaman) and otherwise taking the lowest surviving slot. Exclusion
+// Paladin / Shaman / Druid) and otherwise taking the lowest surviving slot. Exclusion
 // is by SLOT, so calling one of two Priests still leaves the other nameable.
 // When the enemy side holds nobody but the kill target the resolver DROPS the
 // entry — the same silence that keeps a two-role exchange out of a 1v1, not a
@@ -284,6 +284,15 @@
         (
             context: Opening,
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
+            target: Class(Druid),
+            beats: [
+                (role: "caller",    text: "{target} {ability:Rejuvenation} {emoji:no}"),
+                (role: "responder", text: "{emoji:skull} {emoji:arrow} {target} {emoji:equals} {emoji:headstone} !"),
+            ],
+        ),
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Class(Rogue),
             beats: [
                 (role: "caller",    text: "{emoji:ninja} {emoji:equals} {emoji:angry}"),
@@ -421,6 +430,17 @@
             target: Any,
             beats: [
                 (role: "caller",    text: "{ability:Lightning Bolt} {emoji:arrow} {target}"),
+                (role: "responder", text: "{emoji:yes}"),
+            ],
+        ),
+        // Druid caller — the plain signature-ability template until the class
+        // has a personality of its own (the fallback rule in the header).
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Druid)), (role: "responder", class: Any) ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{ability:Moonfire} {emoji:arrow} {target}"),
                 (role: "responder", text: "{emoji:yes}"),
             ],
         ),

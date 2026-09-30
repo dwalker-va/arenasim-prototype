@@ -1355,5 +1355,136 @@
             cooldown: 6.0,
             spell_school: Fire,
         ),
+
+        // ============================================================================
+        // DRUID ABILITIES
+        // ============================================================================
+        // A proactive heal-over-time healer: every heal is an instant. Shapes
+        // (cast time, cooldown, duration, school) are Classic plus TBC's
+        // Lifebloom; magnitudes are scaled to this project's numbers.
+
+        // Rejuvenation: instant heal over time. Refreshes on recast (max 1 stack).
+        Rejuvenation: (
+            name: "Rejuvenation",
+            class: Druid,
+            icon: "icons/abilities/spell_nature_rejuvenation.jpg",
+            cast_time: 0.0,
+            range: 40.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: HealingOverTime,
+                duration: 12.0,
+                magnitude: 6.0,              // per 3s tick, + 0.2 x spell power
+                magnitude_coefficient: 0.2,  // ~28 a tick, ~112 over 12s at ~110 SP
+                tick_interval: 3.0,
+                stacking: Some((max_stacks: 1)),
+            )),
+            spell_school: Nature,
+        ),
+
+        // Lifebloom (TBC): instant heal over time that stacks to 3, refreshes on
+        // recast, and BLOOMS for a direct heal per stack when it runs out or is
+        // dispelled or purged.
+        Lifebloom: (
+            name: "Lifebloom",
+            class: Druid,
+            icon: "icons/abilities/inv_misc_herb_felblossom.jpg",
+            cast_time: 0.0,
+            range: 40.0,
+            mana_cost: 22.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: HealingOverTime,
+                duration: 7.0,
+                magnitude: 1.0,              // per 1s tick PER STACK, + 0.04 x spell power
+                magnitude_coefficient: 0.04,
+                tick_interval: 1.0,
+                stacking: Some((max_stacks: 3)),
+                bloom: Some((heal_base: 12.0, heal_coefficient: 0.25)), // per stack
+            )),
+            spell_school: Nature,
+        ),
+
+        // Swiftmend: instant heal on a cooldown that CONSUMES the target's
+        // Rejuvenation — about four of its ticks at once. The emergency button.
+        Swiftmend: (
+            name: "Swiftmend",
+            class: Druid,
+            icon: "icons/abilities/inv_relics_idolofrejuvenation.jpg",
+            cast_time: 0.0,
+            range: 40.0,
+            mana_cost: 20.0,
+            cooldown: 15.0,
+            healing_base_min: 30.0,
+            healing_base_max: 38.0,
+            healing_coefficient: 0.8,
+            consumes_aura: Some(Rejuvenation),
+            spell_school: Nature,
+        ),
+
+        // Moonfire: instant Arcane damage plus a short DoT. The Druid has no wand;
+        // this and a staff swing are its damage.
+        Moonfire: (
+            name: "Moonfire",
+            class: Druid,
+            icon: "icons/abilities/spell_nature_starfall.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            damage_base_min: 9.0,
+            damage_base_max: 12.0,
+            damage_coefficient: 0.15,
+            damage_scales_with: SpellPower,
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 9.0,
+                magnitude: 4.0,              // per 3s tick
+                tick_interval: 3.0,
+            )),
+            spell_school: Arcane,
+        ),
+
+        // Mark of the Wild: pre-match buff — maximum health (this face), plus
+        // armor and a resistance to each school of magic as riders. ONE aura:
+        // a purge that takes it takes all of it. Riders: combat_core::
+        // mark_of_the_wild_riders.
+        MarkOfTheWild: (
+            name: "Mark of the Wild",
+            class: Druid,
+            icon: "icons/abilities/spell_nature_regeneration.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 30.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: MaxHealthIncrease,
+                duration: 600.0,
+                magnitude: 20.0,
+                stacking: Some((max_stacks: 1)),
+                compound: Some(MarkOfTheWild),
+            )),
+            spell_school: Nature,
+        ),
+
+        // Innervate: a large burst of mana regeneration on a long cooldown —
+        // about 160 mana over 20s, once a match.
+        Innervate: (
+            name: "Innervate",
+            class: Druid,
+            icon: "icons/abilities/spell_nature_lightning.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 10.0,
+            cooldown: 360.0,
+            applies_aura: Some((
+                aura_type: ManaRegenIncrease,
+                duration: 20.0,
+                magnitude: 8.0,
+                stacking: Some((max_stacks: 1)),
+            )),
+            spell_school: Nature,
+        ),
     }
 )

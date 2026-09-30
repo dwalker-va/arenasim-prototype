@@ -294,6 +294,7 @@ pub enum CharacterClass {
     Paladin,
     Hunter,
     Shaman,
+    Druid,
 }
 
 impl CharacterClass {
@@ -308,6 +309,7 @@ impl CharacterClass {
             CharacterClass::Paladin,
             CharacterClass::Hunter,
             CharacterClass::Shaman,
+            CharacterClass::Druid,
         ]
     }
 
@@ -322,6 +324,7 @@ impl CharacterClass {
             CharacterClass::Paladin => "Paladin",
             CharacterClass::Hunter => "Hunter",
             CharacterClass::Shaman => "Shaman",
+            CharacterClass::Druid => "Druid",
         }
     }
 
@@ -336,6 +339,7 @@ impl CharacterClass {
             CharacterClass::Paladin => "Holy warrior and healer",
             CharacterClass::Hunter => "Ranged physical DPS with pet",
             CharacterClass::Shaman => "Offensive totem healer",
+            CharacterClass::Druid => "Proactive healer of heals over time",
         }
     }
 
@@ -350,15 +354,30 @@ impl CharacterClass {
             CharacterClass::Paladin => Color::srgb(0.96, 0.55, 0.73), // Pink (WoW Paladin color)
             CharacterClass::Hunter => Color::srgb(0.67, 0.83, 0.45), // Green (WoW Hunter color #ABD473)
             CharacterClass::Shaman => Color::srgb(0.0, 0.44, 0.87), // Blue (WoW Shaman color #0070DE)
+            CharacterClass::Druid => Color::srgb(1.0, 0.49, 0.04), // Orange (WoW Druid color #FF7D0A)
         }
     }
 
-    /// Whether this class attacks in melee range (vs. ranged/wand).
+    /// Whether this class fights in melee range (vs. ranged/wand).
+    ///
+    /// This is POSITIONING, not the weapon: the Shaman and the Druid both swing
+    /// a melee weapon and are still ranged here, because they hold a caster's
+    /// band. The swing itself is `AutoAttackKind`, derived from the equipped
+    /// weapon.
+    ///
+    /// The class predicates below are exhaustive `match`es rather than
+    /// `matches!`, so a new class cannot compile until it answers each one —
+    /// a `matches!` would quietly answer `false` for it.
     pub fn is_melee(&self) -> bool {
-        matches!(
-            self,
-            CharacterClass::Warrior | CharacterClass::Rogue | CharacterClass::Paladin
-        )
+        match self {
+            CharacterClass::Warrior | CharacterClass::Rogue | CharacterClass::Paladin => true,
+            CharacterClass::Mage
+            | CharacterClass::Priest
+            | CharacterClass::Warlock
+            | CharacterClass::Hunter
+            | CharacterClass::Shaman
+            | CharacterClass::Druid => false,
+        }
     }
 
     /// Which equipment socket holds this class's primary weapon — the one whose
@@ -384,7 +403,8 @@ impl CharacterClass {
             CharacterClass::Warrior
             | CharacterClass::Rogue
             | CharacterClass::Paladin
-            | CharacterClass::Shaman => ItemSlot::MainHand,
+            | CharacterClass::Shaman
+            | CharacterClass::Druid => ItemSlot::MainHand,
             CharacterClass::Mage
             | CharacterClass::Priest
             | CharacterClass::Warlock
@@ -394,10 +414,17 @@ impl CharacterClass {
 
     /// Whether this class is primarily a healer (for CC target prioritization).
     pub fn is_healer(&self) -> bool {
-        matches!(
-            self,
-            CharacterClass::Priest | CharacterClass::Paladin | CharacterClass::Shaman
-        )
+        match self {
+            CharacterClass::Priest
+            | CharacterClass::Paladin
+            | CharacterClass::Shaman
+            | CharacterClass::Druid => true,
+            CharacterClass::Warrior
+            | CharacterClass::Mage
+            | CharacterClass::Rogue
+            | CharacterClass::Warlock
+            | CharacterClass::Hunter => false,
+        }
     }
 
     /// Whether this class converts damage taken into rage (see the 15%
@@ -407,20 +434,31 @@ impl CharacterClass {
     /// it). Must stay in sync with the class→ResourceType mapping in
     /// `Combatant::new`.
     pub fn gains_rage_from_damage(&self) -> bool {
-        matches!(self, CharacterClass::Warrior)
+        match self {
+            CharacterClass::Warrior => true,
+            CharacterClass::Mage
+            | CharacterClass::Rogue
+            | CharacterClass::Priest
+            | CharacterClass::Warlock
+            | CharacterClass::Paladin
+            | CharacterClass::Hunter
+            | CharacterClass::Shaman
+            | CharacterClass::Druid => false,
+        }
     }
 
     /// Whether this class uses mana as its resource.
     pub fn uses_mana(&self) -> bool {
-        matches!(
-            self,
+        match self {
             CharacterClass::Mage
-                | CharacterClass::Priest
-                | CharacterClass::Warlock
-                | CharacterClass::Paladin
-                | CharacterClass::Hunter
-                | CharacterClass::Shaman
-        )
+            | CharacterClass::Priest
+            | CharacterClass::Warlock
+            | CharacterClass::Paladin
+            | CharacterClass::Hunter
+            | CharacterClass::Shaman
+            | CharacterClass::Druid => true,
+            CharacterClass::Warrior | CharacterClass::Rogue => false,
+        }
     }
 
     /// Get the preferred combat range for this class.
@@ -448,12 +486,24 @@ impl CharacterClass {
             // Shaman: ranged caster-healer. Lightning Bolt 30, so stay at ~28
             // to use everything without repositioning.
             CharacterClass::Shaman => 28.0,
+            // Druid: ranged caster-healer with no wand. Every heal is an instant
+            // at 40yd and Moonfire reaches 30, so it holds the same ~28 band.
+            CharacterClass::Druid => 28.0,
         }
     }
 
     /// Whether this class has a pet.
     pub fn has_pet(&self) -> bool {
-        matches!(self, CharacterClass::Warlock | CharacterClass::Hunter)
+        match self {
+            CharacterClass::Warlock | CharacterClass::Hunter => true,
+            CharacterClass::Warrior
+            | CharacterClass::Mage
+            | CharacterClass::Rogue
+            | CharacterClass::Priest
+            | CharacterClass::Paladin
+            | CharacterClass::Shaman
+            | CharacterClass::Druid => false,
+        }
     }
 }
 

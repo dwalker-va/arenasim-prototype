@@ -63,8 +63,8 @@ import itertools
 import json
 import sys
 
-CLASSES = ["Warrior", "Mage", "Rogue", "Priest", "Warlock", "Paladin", "Hunter", "Shaman"]
-HEALERS = {"Priest", "Paladin", "Shaman"}
+CLASSES = ["Warrior", "Mage", "Rogue", "Priest", "Warlock", "Paladin", "Hunter", "Shaman", "Druid"]
+HEALERS = {"Priest", "Paladin", "Shaman", "Druid"}
 
 
 # Fields the generator owns. `--extra` overwriting one of these would leave the

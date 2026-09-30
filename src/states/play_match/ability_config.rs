@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::abilities::{AbilityType, ScalingStat, SpellSchool};
-use super::components::{AuraType, DRCategory, DispelType, PetType};
+use super::components::{AuraType, CompoundDebuff, DRCategory, DispelType, PetType};
 use super::match_config::CharacterClass;
 
 /// Default value for break_on_damage: -1.0 means the aura doesn't break on damage.
@@ -84,6 +84,40 @@ pub struct AuraEffect {
     /// See [`DispelType::for_ability`].
     #[serde(default)]
     pub dispel_type: DispelType,
+    /// Makes the aura STACKING: keyed by its source ability instead of its
+    /// type, refreshed rather than refused when that source applies it again,
+    /// and gaining a stack per application up to `max_stacks`. `max_stacks: 1`
+    /// is refresh-only. See [`AuraStacks`](super::components::AuraStacks).
+    #[serde(default)]
+    pub stacking: Option<AuraStackingConfig>,
+    /// Makes the aura BLOOM: a direct heal on its bearer when it ends by
+    /// running out or by being dispelled or purged, per stack. See
+    /// [`Aura::bloom_heal`](super::components::Aura::bloom_heal).
+    #[serde(default)]
+    pub bloom: Option<BloomConfig>,
+    /// Makes this aura the FACE of a compound — one aura to the player, several
+    /// effects underneath, removed as one. The riders come from
+    /// `combat_core::compound_riders`. See
+    /// [`CompoundDebuff`](super::components::CompoundDebuff).
+    #[serde(default)]
+    pub compound: Option<CompoundDebuff>,
+}
+
+/// A stacking aura's config: how many stacks it can hold.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct AuraStackingConfig {
+    /// At least 1. `1` means the aura refreshes on reapplication but never
+    /// deepens.
+    pub max_stacks: u8,
+}
+
+/// A blooming aura's heal, per stack: `heal_base + caster spell power ×
+/// heal_coefficient`, snapshotted when the aura is applied.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct BloomConfig {
+    pub heal_base: f32,
+    #[serde(default)]
+    pub heal_coefficient: f32,
 }
 
 /// Projectile visual configuration.
@@ -171,6 +205,12 @@ pub struct AbilityConfig {
     /// Coefficient for spell power scaling: Healing = Base + (SpellPower * Coefficient)
     #[serde(default)]
     pub healing_coefficient: f32,
+    /// A heal that CONSUMES an aura on its target: the named ability's aura
+    /// must be on the target for the heal to be cast, and the heal removes it
+    /// when it lands (Swiftmend consumes Rejuvenation). The AI checks the
+    /// precondition; `process_casting` performs the removal.
+    #[serde(default)]
+    pub consumes_aura: Option<AbilityType>,
 
     // === Effects ===
     /// Aura to apply on hit/cast (if any)
@@ -449,6 +489,13 @@ impl AbilityDefinitions {
             AbilityType::WaterTotem,
             AbilityType::EarthTotem,
             AbilityType::FireTotem,
+            // Druid abilities
+            AbilityType::Rejuvenation,
+            AbilityType::Lifebloom,
+            AbilityType::Swiftmend,
+            AbilityType::Moonfire,
+            AbilityType::MarkOfTheWild,
+            AbilityType::Innervate,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -490,7 +537,15 @@ impl AbilityDefinitions {
         // `AuraPending::from_ability_scaled`. Reject a non-zero coefficient on
         // any ability whose apply site isn't wired for it — otherwise the RON
         // edit silently no-ops.
-        const SP_SCALED_AURA_WIRED: &[AbilityType] = &[AbilityType::PowerWordShield];
+        //
+        // `process_casting` applies every aura it lands through the scaled
+        // constructor, so any ability the AI routes through a `CastingState`
+        // is wired — that is how the Druid's heals over time are cast.
+        const SP_SCALED_AURA_WIRED: &[AbilityType] = &[
+            AbilityType::PowerWordShield,
+            AbilityType::Rejuvenation,
+            AbilityType::Lifebloom,
+        ];
         for (ability, def) in &self.definitions {
             if let Some(aura) = &def.applies_aura {
                 if aura.magnitude_coefficient != 0.0 && !SP_SCALED_AURA_WIRED.contains(ability) {
@@ -499,6 +554,32 @@ impl AbilityDefinitions {
                          apply site uses AuraPending::from_ability (unscaled). Wire the site \
                          to from_ability_scaled and add it to SP_SCALED_AURA_WIRED.",
                         ability
+                    );
+                }
+            }
+        }
+
+        // A stacking aura holds at least one stack, and a consumed aura must
+        // name an ability that applies one.
+        for (ability, def) in &self.definitions {
+            if let Some(stacking) = def.applies_aura.as_ref().and_then(|a| a.stacking) {
+                if stacking.max_stacks == 0 {
+                    panic!(
+                        "abilities.ron: {:?} declares stacking with max_stacks 0 — a stacking \
+                         aura holds at least one stack",
+                        ability
+                    );
+                }
+            }
+            if let Some(consumed) = def.consumes_aura {
+                if self
+                    .definitions
+                    .get(&consumed)
+                    .is_none_or(|c| c.applies_aura.is_none())
+                {
+                    panic!(
+                        "abilities.ron: {:?} consumes the aura of {:?}, which applies none",
+                        ability, consumed
                     );
                 }
             }
@@ -659,6 +740,7 @@ mod tests {
             healing_base_min: 0.0,
             healing_base_max: 0.0,
             healing_coefficient: 0.0,
+            consumes_aura: None,
             applies_aura: None,
             application_chance: None,
             projectile_speed: None,

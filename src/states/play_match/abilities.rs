@@ -221,6 +221,13 @@ pub enum AbilityType {
     WaterTotem,        // Shaman Healing Stream Totem - periodic ally heal
     EarthTotem,        // Shaman Strength of Earth Totem - ally attack power
     FireTotem,         // Shaman Flametongue Totem - ally spell power
+    // Druid abilities
+    Rejuvenation,  // Druid instant HoT
+    Lifebloom,     // Druid instant HoT, stacks to 3, blooms on expiry or dispel
+    Swiftmend,     // Druid instant heal that consumes the target's Rejuvenation
+    Moonfire,      // Druid instant Arcane damage + DoT
+    MarkOfTheWild, // Druid pre-match buff: health, armor and resistances as one aura
+    Innervate,     // Druid mana regeneration cooldown
 }
 
 impl AbilityType {

@@ -44,11 +44,11 @@ class TemplateTests(unittest.TestCase):
     def test_the_wildcard_expands_over_every_class(self):
         teams = list(gen.expand_t1("{p}"))
         self.assertEqual([t[0] for t in teams], gen.CLASSES)
-        self.assertEqual(len(teams), 8)
+        self.assertEqual(len(teams), 9)  # the nine-class roster
 
     def test_the_wildcard_skips_a_duplicate_of_the_fixed_slot(self):
         teams = list(gen.expand_t1("Hunter+{p}"))
-        self.assertEqual(len(teams), 7)
+        self.assertEqual(len(teams), 8)  # 9 classes - the pinned Hunter
         self.assertNotIn(["Hunter", "Hunter"], teams)
         self.assertIn(["Hunter", "Priest"], teams)
 
@@ -79,13 +79,13 @@ class OpponentEnumerationTests(unittest.TestCase):
 
     def test_size_two_is_every_distinct_unordered_pair(self):
         opps = list(gen.enumerate_opponents(2, False, False))
-        self.assertEqual(len(opps), 28)  # C(8,2)
-        self.assertEqual(len({tuple(sorted(o)) for o in opps}), 28)
+        self.assertEqual(len(opps), 36)  # C(9,2)
+        self.assertEqual(len({tuple(sorted(o)) for o in opps}), 36)
         self.assertTrue(all(len(set(o)) == 2 for o in opps))
 
     def test_excluding_double_healers_drops_the_healer_pairs(self):
         opps = list(gen.enumerate_opponents(2, True, False))
-        self.assertEqual(len(opps), 25)  # 28 - C(3,2)
+        self.assertEqual(len(opps), 30)  # 36 - C(4,2)
         for o in opps:
             self.assertLessEqual(sum(1 for c in o if c in gen.HEALERS), 1)
 
@@ -109,8 +109,8 @@ class OutputTests(GenTestCase):
     def test_one_line_per_matchup_per_seed(self):
         run = self.assertOk(self.gen("--t1", "Hunter", "--t2-size", "1", "--n", "5"))
         cfgs = self.configs(run)
-        self.assertEqual(len(cfgs), 8 * 5)
-        self.assertErrHas(run, "# wrote 40 match configs")
+        self.assertEqual(len(cfgs), 9 * 5)
+        self.assertErrHas(run, "# wrote 45 match configs")
 
     def test_the_reported_count_is_the_real_count(self):
         run = self.assertOk(
@@ -119,7 +119,8 @@ class OutputTests(GenTestCase):
         )
         cfgs = self.configs(run)
         self.assertErrHas(run, "# wrote %d match configs" % len(cfgs))
-        self.assertEqual(len(cfgs), 7 * 25 * 2)
+        # 8 Hunter partners x (C(9,2) - C(4,2) = 30) opponents x 2 seeds
+        self.assertEqual(len(cfgs), 8 * 30 * 2)
 
     def test_every_config_carries_the_fields_the_runner_needs(self):
         run = self.assertOk(self.gen("--t1", "Hunter", "--t2-size", "1", "--n", "1"))
@@ -137,7 +138,7 @@ class OutputTests(GenTestCase):
         seeds = {}
         for cfg in self.configs(run):
             seeds.setdefault(cfg["label"], []).append(cfg["random_seed"])
-        self.assertEqual(len(seeds), 8)
+        self.assertEqual(len(seeds), 9)
         for label, s in seeds.items():
             self.assertEqual(s, [7, 8, 9, 10], "matchup %s drifted off the seed set" % label)
 
@@ -172,7 +173,7 @@ class FullMatrixTests(GenTestCase):
     def test_full_1v1_is_the_whole_square(self):
         run = self.assertOk(self.gen("--full", "1", "--n", "1"))
         cfgs = self.configs(run)
-        self.assertEqual(len(cfgs), 64)  # 8x8, both orderings and mirrors
+        self.assertEqual(len(cfgs), 81)  # 9x9, both orderings and mirrors
         pairs = {(c["team1"][0], c["team2"][0]) for c in cfgs}
         self.assertIn(("Warrior", "Mage"), pairs)
         self.assertIn(("Mage", "Warrior"), pairs)
@@ -180,12 +181,12 @@ class FullMatrixTests(GenTestCase):
 
     def test_full_ignores_t1(self):
         run = self.assertOk(self.gen("--full", "1", "--t1", "Hunter", "--n", "1"))
-        self.assertEqual(len(self.configs(run)), 64)
+        self.assertEqual(len(self.configs(run)), 81)  # 9x9
 
     def test_full_respects_exclude_double_healer(self):
         run = self.assertOk(self.gen("--full", "2", "--n", "1", "--exclude-double-healer"))
         cfgs = self.configs(run)
-        self.assertEqual(len(cfgs), 25 * 25)
+        self.assertEqual(len(cfgs), 30 * 30)  # (C(9,2) - C(4,2))^2
         for c in cfgs:
             for team in (c["team1"], c["team2"]):
                 self.assertLessEqual(sum(1 for x in team if x in gen.HEALERS), 1)
@@ -237,7 +238,7 @@ class DegenerateInputTests(GenTestCase):
 
     def test_a_single_seed_still_generates(self):
         run = self.assertOk(self.gen("--t1", "Hunter", "--t2-size", "1", "--n", "1"))
-        self.assertEqual(len(self.configs(run)), 8)
+        self.assertEqual(len(self.configs(run)), 9)
 
 
 class AffectsTests(GenTestCase):
@@ -283,36 +284,54 @@ class AffectsTests(GenTestCase):
         control = set(c for c in self.cells(run)
                       if "Shaman" not in c[0] and "Shaman" not in c[1])
         self.assertEqual(len(control), 5)
-        self.assertErrHas(run, "kept 225 reachable + 5 control of 625 cells")
+        # 30 teams per side, 900 cells. Shaman-free teams: C(8,2) - C(3,2) =
+        # 25, so 25^2 = 625 unreachable and 900 - 625 = 275 reachable.
+        self.assertErrHas(run, "kept 275 reachable + 5 control of 900 cells")
 
     def test_the_control_spreads_over_both_team_slots(self):
         """A constant stride aliases against the nested enumeration.
 
-        Even spacing over the 400 Shaman-free 2v2 cells returned eight
-        controls sharing two distinct opponents, because the stride was a
-        multiple of the inner loop's length. The digest ordering is what fixes
-        that, and this is the assertion that would have caught it.
+        Even spacing over the Shaman-free 2v2 cells (400 of them on the
+        eight-class roster the defect was found on) returned eight controls
+        sharing two distinct opponents, because the stride was a multiple of
+        the inner loop's length. The digest ordering is what fixes that, and
+        this is the assertion that would have caught it.
+
+        The count is 15 because that is the shortest digest prefix that
+        already fields every class on both sides at --affects Shaman on the
+        nine-class roster (8 unaffected classes; 625 unreachable cells). Below
+        it the coverage repair rewrites the pick, and the list would pin the
+        repair rather than the digest's own spread; at it, the result IS the
+        plain prefix, which ControlCoverageTests pins as preserved.
 
         The selection is pinned member by member rather than by a spread
         floor. A `>=` floor reads as a guard but cannot say which cells were
         chosen, so a reordering that preserved the count while degrading the
-        spread would pass it. Changing the digest or the enumeration is
-        allowed -- it just has to be a deliberate re-bless of this list.
+        spread would pass it. Changing the digest, the enumeration or the
+        roster is allowed -- it just has to be a deliberate re-bless of this
+        list.
         """
         run = self.assertOk(
             self.gen("--full", "2", "--exclude-double-healer", "--n", "1",
-                     "--affects", "Shaman", "--control-cells", "8"))
+                     "--affects", "Shaman", "--control-cells", "15"))
         control = [c for c in self.cells(run)
                    if "Shaman" not in c[0] and "Shaman" not in c[1]]
         self.assertEqual(set(control), {
             (("Warrior", "Mage"), ("Mage", "Warlock")),
+            (("Warrior", "Warlock"), ("Warrior", "Rogue")),
             (("Warrior", "Warlock"), ("Warrior", "Priest")),
             (("Warrior", "Warlock"), ("Rogue", "Hunter")),
+            (("Mage", "Priest"), ("Hunter", "Druid")),
             (("Mage", "Warlock"), ("Warrior", "Mage")),
+            (("Mage", "Warlock"), ("Warrior", "Druid")),
+            (("Mage", "Hunter"), ("Warrior", "Paladin")),
             (("Rogue", "Priest"), ("Warrior", "Priest")),
             (("Rogue", "Warlock"), ("Warlock", "Paladin")),
+            (("Rogue", "Warlock"), ("Warlock", "Hunter")),
+            (("Priest", "Warlock"), ("Rogue", "Druid")),
             (("Priest", "Hunter"), ("Warlock", "Paladin")),
             (("Warlock", "Paladin"), ("Warrior", "Hunter")),
+            (("Hunter", "Druid"), ("Paladin", "Hunter")),
         })
         # Two claims, not one. The set above pins WHICH cells and needs a
         # human to re-bless it; this pins what a control OWES, so it keeps
@@ -336,14 +355,15 @@ class AffectsTests(GenTestCase):
                          self.assertOk(self.gen(*argv)).out)
 
     def test_asking_for_more_control_cells_than_exist_keeps_them_all(self):
-        # 8x8 1v1 cells; 15 hold a Shaman on one side or the other, 49 do not.
+        # 9x9 = 81 1v1 cells; 8x8 = 64 hold no Shaman on either side, so
+        # 81 - 64 = 17 (9 + 9 - 1) do.
         run = self.assertOk(
             self.gen("--t1", "{p}", "--t2-size", "1", "--n", "1",
                      "--affects", "Shaman", "--control-cells", "9999"))
         control = [c for c in self.cells(run)
                    if "Shaman" not in c[0] and "Shaman" not in c[1]]
-        self.assertEqual(len(control), 49)
-        self.assertErrHas(run, "kept 15 reachable + 49 control of 64 cells")
+        self.assertEqual(len(control), 64)
+        self.assertErrHas(run, "kept 17 reachable + 64 control of 81 cells")
 
     def test_dropping_the_control_is_allowed_but_warned_about(self):
         run = self.assertOk(
@@ -357,7 +377,7 @@ class AffectsTests(GenTestCase):
     def test_a_change_that_reaches_nothing_leaves_a_sweep_measuring_nothing(self):
         """Pinned at the function, because no flag combination reaches it yet.
 
-        Every team2 enumeration spans all eight classes, so a class named in
+        Every team2 enumeration spans all nine classes, so a class named in
         --affects always turns up somewhere. The guard is here for the first
         flag that narrows the opponent set: without it the run would emit a
         control-only sweep and read as a clean null.
@@ -367,15 +387,23 @@ class AffectsTests(GenTestCase):
         self.assertEqual((kept, reachable, control), ([], 0, 0))
 
     def test_an_unknown_affected_class_is_rejected(self):
-        run = self.gen("--full", "2", "--n", "1", "--affects", "Druid")
+        run = self.gen("--full", "2", "--n", "1", "--affects", "Monk")
         self.assertIsInstance(run.code, str)
-        self.assertIn("Druid", run.code)
+        self.assertIn("Monk", run.code)
+
+    def test_the_druid_is_a_known_affected_class(self):
+        # Druid-holding teams: 8 partners - 3 fellow healers = 5, so 30 - 25
+        # = 5 per side; 900 - 25^2 = 275 reachable, the same as any healer.
+        run = self.assertOk(
+            self.gen("--full", "2", "--exclude-double-healer", "--n", "1",
+                     "--affects", "Druid"))
+        self.assertErrHas(run, "kept 275 reachable + 8 control of 900 cells")
 
     def test_without_affects_nothing_is_cut(self):
         plain = self.assertOk(
             self.gen("--full", "2", "--exclude-double-healer", "--n", "1"))
-        self.assertEqual(len(self.cells(plain)), 625)
-        self.assertErrHas(plain, "# wrote 625 match configs")
+        self.assertEqual(len(self.cells(plain)), 900)  # 30 x 30
+        self.assertErrHas(plain, "# wrote 900 match configs")
 
 
 def product_cells(team1_set, team2_set):
@@ -454,14 +482,15 @@ class ControlCoverageTests(unittest.TestCase):
     the prefix, and a longer prefix fields everything a shorter one did, so
     coverage there follows from that equality; the equality is checked at
     every count for 16 past K0 and at a stride to the end of the range (each
-    call costs a full digest pass, and the 3v3 matrix has 1,225 unreachable
-    cells per class). Above the whole unreachable set a count keeps every cell.
+    call costs a full digest pass, and the 3v3 matrix has up to 3,136
+    unreachable cells per class: C(8,3)^2 = 56^2). Above the whole unreachable
+    set a count keeps every cell.
     """
 
     @classmethod
     def setUpClass(cls):
         # One sampler call per (shape, class, count), shared by the two tests
-        # that judge it: each call is a full digest pass over up to 1,225 cells.
+        # that judge it: each call is a full digest pass over up to 3,136 cells.
         cls.picks = {}
         for shape, klass, un in cls.each_case():
             below, above = cls.counts(un)
@@ -542,7 +571,7 @@ class ControlCoverageTests(unittest.TestCase):
         # Both branches exercised, by name: the AS-143 case was repaired, and
         # the call test_the_control_spreads_over_both_team_slots pins was not.
         self.assertIn(("--full 2 --exclude-double-healer", "Warlock", 8), repaired)
-        self.assertIn(("--full 2 --exclude-double-healer", "Shaman", 8), preserved)
+        self.assertIn(("--full 2 --exclude-double-healer", "Shaman", 15), preserved)
 
     def test_a_full_matrix_owes_every_class_but_the_affected_one(self):
         """The derived duty, spelled out where the roster is the whole answer."""

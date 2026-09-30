@@ -225,7 +225,8 @@ fn aura_family(t: AuraType) -> AuraFamily {
         | AuraType::SpellPowerIncrease
         | AuraType::HealingOverTime
         | AuraType::WindfuryBuff
-        | AuraType::FearImmunity => AuraFamily::Status,
+        | AuraType::FearImmunity
+        | AuraType::ArmorIncrease => AuraFamily::Status,
     }
 }
 
@@ -261,6 +262,7 @@ const HEAL_MEMBERS: &[AbilityType] = &[
     HolyLight,
     HolyShock,
     LesserHealingWave,
+    Swiftmend,
 ];
 
 fn heal_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
@@ -302,6 +304,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     LightningBolt,
     ManaBurn,
     MindBlast,
+    Moonfire,
     MortalStrike,
     Shadowbolt,
     SinisterStrike,
@@ -339,7 +342,9 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
     }
 }
 
-const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
+/// The Druid's kit lands silently until its visuals are built — each
+/// "AS-160" entry here and below is cleared by AS-160's build cards.
+const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[(Moonfire, "AS-160 (Druid visuals)")];
 
 #[test]
 fn direct_damage_finds_every_member() {
@@ -380,6 +385,7 @@ const DOT_MEMBERS: &[AbilityType] = &[
     Corruption,
     CurseOfAgony,
     Immolate,
+    Moonfire,
     Rend,
     SerpentSting,
     UnstableAffliction,
@@ -405,7 +411,12 @@ fn dot_finds_every_member() {
 
 #[test]
 fn dot_lands_nothing_silently() {
-    assert_judged("DoT", is_dot, dot_state, &[]);
+    assert_judged(
+        "DoT",
+        is_dot,
+        dot_state,
+        &[(Moonfire, "AS-160 (Druid visuals)")],
+    );
 }
 
 /// The router names each state it draws — a pin on the judge, so a wrong
@@ -525,11 +536,15 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     FireTotem,
     FrostArmor,
     IceBarrier,
+    Innervate,
+    Lifebloom,
     MageArmorSpell,
+    MarkOfTheWild,
     MoltenArmor,
     MortalStrike,
     PowerWordFortitude,
     PowerWordShield,
+    Rejuvenation,
     ShadowResistanceAura,
     WaterTotem,
 ];
@@ -590,6 +605,8 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (AirTotem, "AS-134 (aura application — totem pulse)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
+    (Innervate, "AS-160 (Druid visuals)"),
+    (MarkOfTheWild, "AS-160 (Druid visuals)"),
 ];
 
 #[test]

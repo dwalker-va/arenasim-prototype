@@ -37,6 +37,8 @@ pub fn freezing_trap_aura(owner: Entity) -> Aura {
         dispel_type: DispelType::Auto,
         compound: None,
         source_item: None,
+        stacks: None,
+        bloom: None,
     }
 }
 
@@ -282,6 +284,8 @@ pub fn slow_zone_system(
                             dispel_type: DispelType::Auto,
                             compound: None,
                             source_item: None,
+                            stacks: None,
+                            bloom: None,
                         });
                     }
                 } else {
@@ -306,6 +310,8 @@ pub fn slow_zone_system(
                             dispel_type: DispelType::Auto,
                             compound: None,
                             source_item: None,
+                            stacks: None,
+                            bloom: None,
                         }],
                     });
                 }
