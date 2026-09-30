@@ -113,9 +113,13 @@ Disengage's `target_id` when the leap bent.
 
 ### The opener: Aimed Shot before Serpent Sting when it has time
 
-Until the Hunter's first Aimed Shot or Serpent Sting of the match, a due sting
-waits behind Aimed Shot when the cast can finish (`aimed_shot_has_time`): no
-enemy that could stop it reaches it first. Each visible such enemy has a
+*Since AS-179 (`2026-09-29-as179-hunter-followups.md`) the Aimed Shot goes
+first only when the sting's GCD would cost it the window
+(`aimed_shot_before_sting`); the 1v1 Priest loss below is gone.* As built
+here: until the Hunter's first Aimed Shot or Serpent Sting of the match, a
+due sting waits behind Aimed Shot when the cast can finish
+(`aimed_shot_has_time`): no enemy that could stop it reaches it first. Each
+visible such enemy has a
 reach — its own kit's interrupt range (`interrupt_reach`, from
 `abilities.ron`'s `is_interrupt`: Spell Lock and Wind Shear at 30yd, Kick and
 Pummel in melee) or the Hunter's 8yd dead zone for a Warrior or Rogue — and

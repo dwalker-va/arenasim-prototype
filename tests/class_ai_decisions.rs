@@ -1852,7 +1852,14 @@ fn aimed_shot_waits_for_the_time_to_finish_it() {
         for (e, a) in auras {
             snap.active_auras.insert(e, vec![a]);
         }
-        aimed_shot_has_time(&defs, hunter, Vec3::ZERO, None, &snap.context_for(hunter))
+        aimed_shot_has_time(
+            &defs,
+            hunter,
+            Vec3::ZERO,
+            None,
+            &snap.context_for(hunter),
+            0.0,
+        )
     };
     let at = |i: u32, class: CharacterClass, z: f32, vz: f32| CombatantInfo {
         position: Vec3::new(0.0, 0.0, z),
@@ -1894,4 +1901,90 @@ fn aimed_shot_waits_for_the_time_to_finish_it() {
         vec![at(1, Priest, 25.0, 0.0), stealthed_rogue],
         vec![]
     ));
+}
+
+/// AS-179 — the opener puts Aimed Shot ahead of a due Serpent Sting only when
+/// the sting's GCD would cost it the window: it can finish if begun now and
+/// could not if begun after the sting. Against an enemy that cannot stop the
+/// cast at all (a lone Priest) there is time for both, so the sting goes
+/// first — which is what the Hunter vs Priest 1v1 had lost.
+#[test]
+fn aimed_shot_goes_before_the_sting_only_when_the_sting_would_cost_it_the_window() {
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::hunter::aimed_shot_before_sting;
+
+    let defs = AbilityDefinitions::default();
+    let hunter = Entity::from_raw(0);
+    let before_sting = |enemy: CombatantInfo| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        snap.combatants.insert(enemy.entity, enemy);
+        aimed_shot_before_sting(&defs, hunter, Vec3::ZERO, None, &snap.context_for(hunter))
+    };
+    let at = |class: CharacterClass, z: f32, vz: f32| CombatantInfo {
+        position: Vec3::new(0.0, 0.0, z),
+        velocity: Vec3::new(0.0, 0.0, vz),
+        ..info(Entity::from_raw(1), 2, class)
+    };
+    use CharacterClass::*;
+
+    // A Priest walking in cannot stop the cast: time for both, sting first.
+    assert!(!before_sting(at(Priest, 25.0, -7.0)));
+    // A Warrior 30yd off at 7yd/s reaches the dead zone in 3.1s: after a cast
+    // begun now (2.5s), before one begun after the sting's GCD (4.0s).
+    assert!(before_sting(at(Warrior, 30.0, -7.0)));
+    // 45yd off it arrives in 5.3s: time for both, sting first.
+    assert!(!before_sting(at(Warrior, 45.0, -7.0)));
+    // 15yd off it arrives mid-cast either way: no Aimed Shot opener.
+    assert!(!before_sting(at(Warrior, 15.0, -7.0)));
+}
+
+/// AS-179 — the Hunter's own Freezing Trap is not broken by its own shot.
+///
+/// A Rogue 20yd off runs at the Hunter through a trap landing 10yd out, which
+/// arms in 1s: it is inside the trap's radius from 0.83s. An Aimed Shot that
+/// lands 3s from now would land on it frozen; an Arcane Shot landing in 0.5s
+/// lands before the trap has armed and cannot break it. A trap off the Rogue's
+/// line, or a Rogue running the other way, is never sprung by it.
+#[test]
+fn a_shot_that_would_land_after_the_hunters_own_trap_catches_its_target_is_held() {
+    use arenasim::states::play_match::class_ai::hunter_dip::{own_trap_catches_first, LiveTrap};
+
+    let hunter = Entity::from_raw(0);
+    let rogue = Entity::from_raw(1);
+    let catches = |vz: f32, trap: LiveTrap, lands_after: f32| {
+        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+        snap.combatants.insert(
+            rogue,
+            CombatantInfo {
+                position: Vec3::new(0.0, 0.0, 20.0),
+                velocity: Vec3::new(0.0, 0.0, vz),
+                target: Some(hunter),
+                ..info(rogue, 2, CharacterClass::Rogue)
+            },
+        );
+        own_trap_catches_first(&snap.context_for(hunter), &[trap], rogue, lands_after)
+    };
+    let in_lane = LiveTrap {
+        position: Vec3::new(0.0, 0.0, 10.0),
+        armed_in: 1.0,
+    };
+
+    assert!(catches(-6.0, in_lane, 3.0), "Aimed Shot would break it");
+    assert!(!catches(-6.0, in_lane, 0.5), "lands before the trap arms");
+    // Standing on a trap that has not armed yet: a shot landing first is safe.
+    let underfoot = LiveTrap {
+        position: Vec3::new(0.0, 0.0, 18.0),
+        ..in_lane
+    };
+    assert!(!catches(-6.0, underfoot, 0.5), "lands before the trap arms");
+    assert!(catches(-6.0, underfoot, 3.0), "lands after it springs");
+    assert!(!catches(6.0, in_lane, 3.0), "the Rogue runs away from it");
+    let off_line = LiveTrap {
+        position: Vec3::new(20.0, 0.0, 10.0),
+        ..in_lane
+    };
+    assert!(
+        !catches(-6.0, off_line, 3.0),
+        "the trap is off the Rogue's line"
+    );
 }

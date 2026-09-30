@@ -1,0 +1,420 @@
+{"team1": ["Warrior"], "team2": ["Warrior"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warrior_v_Warrior"}
+{"team1": ["Warrior"], "team2": ["Warrior"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warrior_v_Warrior"}
+{"team1": ["Warrior"], "team2": ["Warrior"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warrior_v_Warrior"}
+{"team1": ["Warrior"], "team2": ["Warrior"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warrior_v_Warrior"}
+{"team1": ["Warrior"], "team2": ["Warrior"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warrior_v_Warrior"}
+{"team1": ["Warrior"], "team2": ["Mage"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warrior_v_Mage"}
+{"team1": ["Warrior"], "team2": ["Mage"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warrior_v_Mage"}
+{"team1": ["Warrior"], "team2": ["Mage"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warrior_v_Mage"}
+{"team1": ["Warrior"], "team2": ["Mage"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warrior_v_Mage"}
+{"team1": ["Warrior"], "team2": ["Mage"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warrior_v_Mage"}
+{"team1": ["Warrior"], "team2": ["Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warrior_v_Rogue"}
+{"team1": ["Warrior"], "team2": ["Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warrior_v_Rogue"}
+{"team1": ["Warrior"], "team2": ["Rogue"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warrior_v_Rogue"}
+{"team1": ["Warrior"], "team2": ["Rogue"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warrior_v_Rogue"}
+{"team1": ["Warrior"], "team2": ["Rogue"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warrior_v_Rogue"}
+{"team1": ["Warrior"], "team2": ["Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warrior_v_Priest"}
+{"team1": ["Warrior"], "team2": ["Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warrior_v_Priest"}
+{"team1": ["Warrior"], "team2": ["Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warrior_v_Priest"}
+{"team1": ["Warrior"], "team2": ["Priest"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warrior_v_Priest"}
+{"team1": ["Warrior"], "team2": ["Priest"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warrior_v_Priest"}
+{"team1": ["Warrior"], "team2": ["Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warrior_v_Warlock"}
+{"team1": ["Warrior"], "team2": ["Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warrior_v_Warlock"}
+{"team1": ["Warrior"], "team2": ["Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warrior_v_Warlock"}
+{"team1": ["Warrior"], "team2": ["Warlock"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warrior_v_Warlock"}
+{"team1": ["Warrior"], "team2": ["Warlock"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warrior_v_Warlock"}
+{"team1": ["Warrior"], "team2": ["Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warrior_v_Paladin"}
+{"team1": ["Warrior"], "team2": ["Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warrior_v_Paladin"}
+{"team1": ["Warrior"], "team2": ["Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warrior_v_Paladin"}
+{"team1": ["Warrior"], "team2": ["Paladin"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warrior_v_Paladin"}
+{"team1": ["Warrior"], "team2": ["Paladin"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warrior_v_Paladin"}
+{"team1": ["Warrior"], "team2": ["Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warrior_v_Shaman"}
+{"team1": ["Warrior"], "team2": ["Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warrior_v_Shaman"}
+{"team1": ["Warrior"], "team2": ["Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warrior_v_Shaman"}
+{"team1": ["Warrior"], "team2": ["Shaman"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warrior_v_Shaman"}
+{"team1": ["Warrior"], "team2": ["Shaman"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warrior_v_Shaman"}
+{"team1": ["Mage"], "team2": ["Mage"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Mage_v_Mage"}
+{"team1": ["Mage"], "team2": ["Mage"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Mage_v_Mage"}
+{"team1": ["Mage"], "team2": ["Mage"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Mage_v_Mage"}
+{"team1": ["Mage"], "team2": ["Mage"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Mage_v_Mage"}
+{"team1": ["Mage"], "team2": ["Mage"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Mage_v_Mage"}
+{"team1": ["Mage"], "team2": ["Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Mage_v_Rogue"}
+{"team1": ["Mage"], "team2": ["Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Mage_v_Rogue"}
+{"team1": ["Mage"], "team2": ["Rogue"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Mage_v_Rogue"}
+{"team1": ["Mage"], "team2": ["Rogue"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Mage_v_Rogue"}
+{"team1": ["Mage"], "team2": ["Rogue"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Mage_v_Rogue"}
+{"team1": ["Mage"], "team2": ["Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Mage_v_Priest"}
+{"team1": ["Mage"], "team2": ["Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Mage_v_Priest"}
+{"team1": ["Mage"], "team2": ["Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Mage_v_Priest"}
+{"team1": ["Mage"], "team2": ["Priest"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Mage_v_Priest"}
+{"team1": ["Mage"], "team2": ["Priest"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Mage_v_Priest"}
+{"team1": ["Mage"], "team2": ["Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Mage_v_Warlock"}
+{"team1": ["Mage"], "team2": ["Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Mage_v_Warlock"}
+{"team1": ["Mage"], "team2": ["Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Mage_v_Warlock"}
+{"team1": ["Mage"], "team2": ["Warlock"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Mage_v_Warlock"}
+{"team1": ["Mage"], "team2": ["Warlock"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Mage_v_Warlock"}
+{"team1": ["Mage"], "team2": ["Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Mage_v_Paladin"}
+{"team1": ["Mage"], "team2": ["Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Mage_v_Paladin"}
+{"team1": ["Mage"], "team2": ["Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Mage_v_Paladin"}
+{"team1": ["Mage"], "team2": ["Paladin"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Mage_v_Paladin"}
+{"team1": ["Mage"], "team2": ["Paladin"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Mage_v_Paladin"}
+{"team1": ["Mage"], "team2": ["Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Mage_v_Shaman"}
+{"team1": ["Mage"], "team2": ["Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Mage_v_Shaman"}
+{"team1": ["Mage"], "team2": ["Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Mage_v_Shaman"}
+{"team1": ["Mage"], "team2": ["Shaman"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Mage_v_Shaman"}
+{"team1": ["Mage"], "team2": ["Shaman"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Mage_v_Shaman"}
+{"team1": ["Rogue"], "team2": ["Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Rogue_v_Rogue"}
+{"team1": ["Rogue"], "team2": ["Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Rogue_v_Rogue"}
+{"team1": ["Rogue"], "team2": ["Rogue"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Rogue_v_Rogue"}
+{"team1": ["Rogue"], "team2": ["Rogue"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Rogue_v_Rogue"}
+{"team1": ["Rogue"], "team2": ["Rogue"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Rogue_v_Rogue"}
+{"team1": ["Rogue"], "team2": ["Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Rogue_v_Priest"}
+{"team1": ["Rogue"], "team2": ["Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Rogue_v_Priest"}
+{"team1": ["Rogue"], "team2": ["Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Rogue_v_Priest"}
+{"team1": ["Rogue"], "team2": ["Priest"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Rogue_v_Priest"}
+{"team1": ["Rogue"], "team2": ["Priest"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Rogue_v_Priest"}
+{"team1": ["Rogue"], "team2": ["Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Rogue_v_Warlock"}
+{"team1": ["Rogue"], "team2": ["Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Rogue_v_Warlock"}
+{"team1": ["Rogue"], "team2": ["Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Rogue_v_Warlock"}
+{"team1": ["Rogue"], "team2": ["Warlock"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Rogue_v_Warlock"}
+{"team1": ["Rogue"], "team2": ["Warlock"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Rogue_v_Warlock"}
+{"team1": ["Rogue"], "team2": ["Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Rogue_v_Paladin"}
+{"team1": ["Rogue"], "team2": ["Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Rogue_v_Paladin"}
+{"team1": ["Rogue"], "team2": ["Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Rogue_v_Paladin"}
+{"team1": ["Rogue"], "team2": ["Paladin"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Rogue_v_Paladin"}
+{"team1": ["Rogue"], "team2": ["Paladin"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Rogue_v_Paladin"}
+{"team1": ["Rogue"], "team2": ["Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Rogue_v_Shaman"}
+{"team1": ["Rogue"], "team2": ["Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Rogue_v_Shaman"}
+{"team1": ["Rogue"], "team2": ["Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Rogue_v_Shaman"}
+{"team1": ["Rogue"], "team2": ["Shaman"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Rogue_v_Shaman"}
+{"team1": ["Rogue"], "team2": ["Shaman"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Rogue_v_Shaman"}
+{"team1": ["Priest"], "team2": ["Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Priest_v_Priest"}
+{"team1": ["Priest"], "team2": ["Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Priest_v_Priest"}
+{"team1": ["Priest"], "team2": ["Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Priest_v_Priest"}
+{"team1": ["Priest"], "team2": ["Priest"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Priest_v_Priest"}
+{"team1": ["Priest"], "team2": ["Priest"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Priest_v_Priest"}
+{"team1": ["Priest"], "team2": ["Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Priest_v_Warlock"}
+{"team1": ["Priest"], "team2": ["Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Priest_v_Warlock"}
+{"team1": ["Priest"], "team2": ["Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Priest_v_Warlock"}
+{"team1": ["Priest"], "team2": ["Warlock"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Priest_v_Warlock"}
+{"team1": ["Priest"], "team2": ["Warlock"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Priest_v_Warlock"}
+{"team1": ["Priest"], "team2": ["Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Priest_v_Paladin"}
+{"team1": ["Priest"], "team2": ["Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Priest_v_Paladin"}
+{"team1": ["Priest"], "team2": ["Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Priest_v_Paladin"}
+{"team1": ["Priest"], "team2": ["Paladin"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Priest_v_Paladin"}
+{"team1": ["Priest"], "team2": ["Paladin"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Priest_v_Paladin"}
+{"team1": ["Priest"], "team2": ["Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Priest_v_Shaman"}
+{"team1": ["Priest"], "team2": ["Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Priest_v_Shaman"}
+{"team1": ["Priest"], "team2": ["Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Priest_v_Shaman"}
+{"team1": ["Priest"], "team2": ["Shaman"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Priest_v_Shaman"}
+{"team1": ["Priest"], "team2": ["Shaman"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Priest_v_Shaman"}
+{"team1": ["Warlock"], "team2": ["Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warlock_v_Warlock"}
+{"team1": ["Warlock"], "team2": ["Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warlock_v_Warlock"}
+{"team1": ["Warlock"], "team2": ["Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warlock_v_Warlock"}
+{"team1": ["Warlock"], "team2": ["Warlock"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warlock_v_Warlock"}
+{"team1": ["Warlock"], "team2": ["Warlock"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warlock_v_Warlock"}
+{"team1": ["Warlock"], "team2": ["Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warlock_v_Paladin"}
+{"team1": ["Warlock"], "team2": ["Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warlock_v_Paladin"}
+{"team1": ["Warlock"], "team2": ["Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warlock_v_Paladin"}
+{"team1": ["Warlock"], "team2": ["Paladin"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warlock_v_Paladin"}
+{"team1": ["Warlock"], "team2": ["Paladin"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warlock_v_Paladin"}
+{"team1": ["Warlock"], "team2": ["Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Warlock_v_Shaman"}
+{"team1": ["Warlock"], "team2": ["Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Warlock_v_Shaman"}
+{"team1": ["Warlock"], "team2": ["Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Warlock_v_Shaman"}
+{"team1": ["Warlock"], "team2": ["Shaman"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Warlock_v_Shaman"}
+{"team1": ["Warlock"], "team2": ["Shaman"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Warlock_v_Shaman"}
+{"team1": ["Paladin"], "team2": ["Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Paladin_v_Paladin"}
+{"team1": ["Paladin"], "team2": ["Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Paladin_v_Paladin"}
+{"team1": ["Paladin"], "team2": ["Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Paladin_v_Paladin"}
+{"team1": ["Paladin"], "team2": ["Paladin"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Paladin_v_Paladin"}
+{"team1": ["Paladin"], "team2": ["Paladin"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Paladin_v_Paladin"}
+{"team1": ["Paladin"], "team2": ["Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Paladin_v_Shaman"}
+{"team1": ["Paladin"], "team2": ["Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Paladin_v_Shaman"}
+{"team1": ["Paladin"], "team2": ["Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Paladin_v_Shaman"}
+{"team1": ["Paladin"], "team2": ["Shaman"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Paladin_v_Shaman"}
+{"team1": ["Paladin"], "team2": ["Shaman"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Paladin_v_Shaman"}
+{"team1": ["Shaman"], "team2": ["Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "Shaman_v_Shaman"}
+{"team1": ["Shaman"], "team2": ["Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "Shaman_v_Shaman"}
+{"team1": ["Shaman"], "team2": ["Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "Shaman_v_Shaman"}
+{"team1": ["Shaman"], "team2": ["Shaman"], "random_seed": 3, "max_duration_secs": 300.0, "label": "Shaman_v_Shaman"}
+{"team1": ["Shaman"], "team2": ["Shaman"], "random_seed": 4, "max_duration_secs": 300.0, "label": "Shaman_v_Shaman"}
+{"team1": ["Shaman", "Shaman"], "team2": ["Warrior", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "ShamanShaman_v_WarriorShaman"}
+{"team1": ["Shaman", "Shaman"], "team2": ["Warrior", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "ShamanShaman_v_WarriorShaman"}
+{"team1": ["Shaman", "Shaman"], "team2": ["Warrior", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "ShamanShaman_v_WarriorShaman"}
+{"team1": ["Warrior", "Priest"], "team2": ["Paladin", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorPriest_v_PaladinShaman"}
+{"team1": ["Warrior", "Priest"], "team2": ["Paladin", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorPriest_v_PaladinShaman"}
+{"team1": ["Warrior", "Priest"], "team2": ["Paladin", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorPriest_v_PaladinShaman"}
+{"team1": ["Warrior", "Rogue"], "team2": ["Warrior", "Mage"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorRogue_v_WarriorMage"}
+{"team1": ["Warrior", "Rogue"], "team2": ["Warrior", "Mage"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorRogue_v_WarriorMage"}
+{"team1": ["Warrior", "Rogue"], "team2": ["Warrior", "Mage"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorRogue_v_WarriorMage"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Mage", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RoguePaladin_v_MagePriest"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Mage", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RoguePaladin_v_MagePriest"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Mage", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RoguePaladin_v_MagePriest"}
+{"team1": ["Rogue", "Priest"], "team2": ["Warrior", "Mage"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RoguePriest_v_WarriorMage"}
+{"team1": ["Rogue", "Priest"], "team2": ["Warrior", "Mage"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RoguePriest_v_WarriorMage"}
+{"team1": ["Rogue", "Priest"], "team2": ["Warrior", "Mage"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RoguePriest_v_WarriorMage"}
+{"team1": ["Priest", "Priest"], "team2": ["Paladin", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPriest_v_PaladinPaladin"}
+{"team1": ["Priest", "Priest"], "team2": ["Paladin", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPriest_v_PaladinPaladin"}
+{"team1": ["Priest", "Priest"], "team2": ["Paladin", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestPriest_v_PaladinPaladin"}
+{"team1": ["Paladin", "Paladin"], "team2": ["Mage", "Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PaladinPaladin_v_MageRogue"}
+{"team1": ["Paladin", "Paladin"], "team2": ["Mage", "Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PaladinPaladin_v_MageRogue"}
+{"team1": ["Paladin", "Paladin"], "team2": ["Mage", "Rogue"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PaladinPaladin_v_MageRogue"}
+{"team1": ["Mage", "Mage"], "team2": ["Shaman", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageMage_v_ShamanShaman"}
+{"team1": ["Mage", "Mage"], "team2": ["Shaman", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageMage_v_ShamanShaman"}
+{"team1": ["Mage", "Mage"], "team2": ["Shaman", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MageMage_v_ShamanShaman"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Mage"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPriest_v_MageMage"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Mage"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPriest_v_MageMage"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Mage"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestPriest_v_MageMage"}
+{"team1": ["Mage", "Priest"], "team2": ["Mage", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MagePriest_v_MageWarlock"}
+{"team1": ["Mage", "Priest"], "team2": ["Mage", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MagePriest_v_MageWarlock"}
+{"team1": ["Mage", "Priest"], "team2": ["Mage", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MagePriest_v_MageWarlock"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Rogue", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RogueShaman_v_RogueWarlock"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Rogue", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RogueShaman_v_RogueWarlock"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Rogue", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RogueShaman_v_RogueWarlock"}
+{"team1": ["Warlock", "Paladin"], "team2": ["Warrior", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockPaladin_v_WarriorWarlock"}
+{"team1": ["Warlock", "Paladin"], "team2": ["Warrior", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockPaladin_v_WarriorWarlock"}
+{"team1": ["Warlock", "Paladin"], "team2": ["Warrior", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarlockPaladin_v_WarriorWarlock"}
+{"team1": ["Mage", "Warlock"], "team2": ["Warrior", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageWarlock_v_WarriorPaladin"}
+{"team1": ["Mage", "Warlock"], "team2": ["Warrior", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageWarlock_v_WarriorPaladin"}
+{"team1": ["Mage", "Warlock"], "team2": ["Warrior", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MageWarlock_v_WarriorPaladin"}
+{"team1": ["Priest", "Warlock"], "team2": ["Priest", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestWarlock_v_PriestWarlock"}
+{"team1": ["Priest", "Warlock"], "team2": ["Priest", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestWarlock_v_PriestWarlock"}
+{"team1": ["Priest", "Warlock"], "team2": ["Priest", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestWarlock_v_PriestWarlock"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPriest_v_MageRogue"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPriest_v_MageRogue"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Rogue"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestPriest_v_MageRogue"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Warrior", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_WarriorPaladin"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Warrior", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_WarriorPaladin"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Warrior", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_WarriorPaladin"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Warrior", "Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorShaman_v_WarriorRogue"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Warrior", "Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorShaman_v_WarriorRogue"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Warrior", "Rogue"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorShaman_v_WarriorRogue"}
+{"team1": ["Mage", "Priest"], "team2": ["Warrior", "Warrior"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MagePriest_v_WarriorWarrior"}
+{"team1": ["Mage", "Priest"], "team2": ["Warrior", "Warrior"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MagePriest_v_WarriorWarrior"}
+{"team1": ["Mage", "Priest"], "team2": ["Warrior", "Warrior"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MagePriest_v_WarriorWarrior"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Warrior", "Mage"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockShaman_v_WarriorMage"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Warrior", "Mage"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockShaman_v_WarriorMage"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Warrior", "Mage"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarlockShaman_v_WarriorMage"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Rogue", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockShaman_v_RogueWarlock"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Rogue", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockShaman_v_RogueWarlock"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Rogue", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarlockShaman_v_RogueWarlock"}
+{"team1": ["Warrior", "Priest"], "team2": ["Paladin", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorPriest_v_PaladinShaman"}
+{"team1": ["Warrior", "Priest"], "team2": ["Paladin", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorPriest_v_PaladinShaman"}
+{"team1": ["Warrior", "Priest"], "team2": ["Paladin", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorPriest_v_PaladinShaman"}
+{"team1": ["Warlock", "Warlock"], "team2": ["Warlock", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockWarlock_v_WarlockShaman"}
+{"team1": ["Warlock", "Warlock"], "team2": ["Warlock", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockWarlock_v_WarlockShaman"}
+{"team1": ["Warlock", "Warlock"], "team2": ["Warlock", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarlockWarlock_v_WarlockShaman"}
+{"team1": ["Warrior", "Mage"], "team2": ["Rogue", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorMage_v_RogueShaman"}
+{"team1": ["Warrior", "Mage"], "team2": ["Rogue", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorMage_v_RogueShaman"}
+{"team1": ["Warrior", "Mage"], "team2": ["Rogue", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorMage_v_RogueShaman"}
+{"team1": ["Warlock", "Warlock"], "team2": ["Priest", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockWarlock_v_PriestPriest"}
+{"team1": ["Warlock", "Warlock"], "team2": ["Priest", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockWarlock_v_PriestPriest"}
+{"team1": ["Warlock", "Warlock"], "team2": ["Priest", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarlockWarlock_v_PriestPriest"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Priest", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RogueShaman_v_PriestShaman"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Priest", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RogueShaman_v_PriestShaman"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Priest", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RogueShaman_v_PriestShaman"}
+{"team1": ["Warrior", "Warrior"], "team2": ["Paladin", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorWarrior_v_PaladinShaman"}
+{"team1": ["Warrior", "Warrior"], "team2": ["Paladin", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorWarrior_v_PaladinShaman"}
+{"team1": ["Warrior", "Warrior"], "team2": ["Paladin", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorWarrior_v_PaladinShaman"}
+{"team1": ["Rogue", "Warlock"], "team2": ["Warrior", "Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RogueWarlock_v_WarriorRogue"}
+{"team1": ["Rogue", "Warlock"], "team2": ["Warrior", "Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RogueWarlock_v_WarriorRogue"}
+{"team1": ["Rogue", "Warlock"], "team2": ["Warrior", "Rogue"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RogueWarlock_v_WarriorRogue"}
+{"team1": ["Warrior", "Priest"], "team2": ["Rogue", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorPriest_v_RogueShaman"}
+{"team1": ["Warrior", "Priest"], "team2": ["Rogue", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorPriest_v_RogueShaman"}
+{"team1": ["Warrior", "Priest"], "team2": ["Rogue", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorPriest_v_RogueShaman"}
+{"team1": ["Paladin", "Paladin"], "team2": ["Paladin", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PaladinPaladin_v_PaladinPaladin"}
+{"team1": ["Paladin", "Paladin"], "team2": ["Paladin", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PaladinPaladin_v_PaladinPaladin"}
+{"team1": ["Paladin", "Paladin"], "team2": ["Paladin", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PaladinPaladin_v_PaladinPaladin"}
+{"team1": ["Warrior", "Warrior"], "team2": ["Warlock", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorWarrior_v_WarlockShaman"}
+{"team1": ["Warrior", "Warrior"], "team2": ["Warlock", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorWarrior_v_WarlockShaman"}
+{"team1": ["Warrior", "Warrior"], "team2": ["Warlock", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorWarrior_v_WarlockShaman"}
+{"team1": ["Warrior", "Rogue"], "team2": ["Rogue", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorRogue_v_RoguePaladin"}
+{"team1": ["Warrior", "Rogue"], "team2": ["Rogue", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorRogue_v_RoguePaladin"}
+{"team1": ["Warrior", "Rogue"], "team2": ["Rogue", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorRogue_v_RoguePaladin"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPriest_v_MageRogue"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPriest_v_MageRogue"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Rogue"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestPriest_v_MageRogue"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Mage", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_MageWarlock"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Mage", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_MageWarlock"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Mage", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_MageWarlock"}
+{"team1": ["Mage", "Mage"], "team2": ["Shaman", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageMage_v_ShamanShaman"}
+{"team1": ["Mage", "Mage"], "team2": ["Shaman", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageMage_v_ShamanShaman"}
+{"team1": ["Mage", "Mage"], "team2": ["Shaman", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MageMage_v_ShamanShaman"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Paladin", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_PaladinPaladin"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Paladin", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_PaladinPaladin"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Paladin", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_PaladinPaladin"}
+{"team1": ["Priest", "Paladin"], "team2": ["Warrior", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPaladin_v_WarriorPriest"}
+{"team1": ["Priest", "Paladin"], "team2": ["Warrior", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPaladin_v_WarriorPriest"}
+{"team1": ["Priest", "Paladin"], "team2": ["Warrior", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestPaladin_v_WarriorPriest"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Rogue", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RoguePaladin_v_RoguePaladin"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Rogue", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RoguePaladin_v_RoguePaladin"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Rogue", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RoguePaladin_v_RoguePaladin"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Priest", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_PriestPaladin"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Priest", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_PriestPaladin"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Priest", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_PriestPaladin"}
+{"team1": ["Warrior", "Priest"], "team2": ["Priest", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorPriest_v_PriestWarlock"}
+{"team1": ["Warrior", "Priest"], "team2": ["Priest", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorPriest_v_PriestWarlock"}
+{"team1": ["Warrior", "Priest"], "team2": ["Priest", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorPriest_v_PriestWarlock"}
+{"team1": ["Shaman", "Shaman"], "team2": ["Mage", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "ShamanShaman_v_MageShaman"}
+{"team1": ["Shaman", "Shaman"], "team2": ["Mage", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "ShamanShaman_v_MageShaman"}
+{"team1": ["Shaman", "Shaman"], "team2": ["Mage", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "ShamanShaman_v_MageShaman"}
+{"team1": ["Warlock", "Paladin"], "team2": ["Rogue", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockPaladin_v_RoguePaladin"}
+{"team1": ["Warlock", "Paladin"], "team2": ["Rogue", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockPaladin_v_RoguePaladin"}
+{"team1": ["Warlock", "Paladin"], "team2": ["Rogue", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarlockPaladin_v_RoguePaladin"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Rogue", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockShaman_v_RoguePriest"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Rogue", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockShaman_v_RoguePriest"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Rogue", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarlockShaman_v_RoguePriest"}
+{"team1": ["Priest", "Priest"], "team2": ["Priest", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPriest_v_PriestWarlock"}
+{"team1": ["Priest", "Priest"], "team2": ["Priest", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPriest_v_PriestWarlock"}
+{"team1": ["Priest", "Priest"], "team2": ["Priest", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestPriest_v_PriestWarlock"}
+{"team1": ["Warrior", "Mage"], "team2": ["Rogue", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorMage_v_RoguePriest"}
+{"team1": ["Warrior", "Mage"], "team2": ["Rogue", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorMage_v_RoguePriest"}
+{"team1": ["Warrior", "Mage"], "team2": ["Rogue", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorMage_v_RoguePriest"}
+{"team1": ["Rogue", "Warlock"], "team2": ["Warlock", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RogueWarlock_v_WarlockShaman"}
+{"team1": ["Rogue", "Warlock"], "team2": ["Warlock", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RogueWarlock_v_WarlockShaman"}
+{"team1": ["Rogue", "Warlock"], "team2": ["Warlock", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RogueWarlock_v_WarlockShaman"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Warlock", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RogueShaman_v_WarlockShaman"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Warlock", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RogueShaman_v_WarlockShaman"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Warlock", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RogueShaman_v_WarlockShaman"}
+{"team1": ["Mage", "Paladin"], "team2": ["Warrior", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MagePaladin_v_WarriorPriest"}
+{"team1": ["Mage", "Paladin"], "team2": ["Warrior", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MagePaladin_v_WarriorPriest"}
+{"team1": ["Mage", "Paladin"], "team2": ["Warrior", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MagePaladin_v_WarriorPriest"}
+{"team1": ["Priest", "Warlock"], "team2": ["Shaman", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestWarlock_v_ShamanShaman"}
+{"team1": ["Priest", "Warlock"], "team2": ["Shaman", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestWarlock_v_ShamanShaman"}
+{"team1": ["Priest", "Warlock"], "team2": ["Shaman", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestWarlock_v_ShamanShaman"}
+{"team1": ["Priest", "Shaman"], "team2": ["Warlock", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestShaman_v_WarlockShaman"}
+{"team1": ["Priest", "Shaman"], "team2": ["Warlock", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestShaman_v_WarlockShaman"}
+{"team1": ["Priest", "Shaman"], "team2": ["Warlock", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestShaman_v_WarlockShaman"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Mage", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_MageShaman"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Mage", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_MageShaman"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Mage", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_MageShaman"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Warrior", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockShaman_v_WarriorPriest"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Warrior", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockShaman_v_WarriorPriest"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Warrior", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarlockShaman_v_WarriorPriest"}
+{"team1": ["Warrior", "Rogue"], "team2": ["Warrior", "Warrior"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorRogue_v_WarriorWarrior"}
+{"team1": ["Warrior", "Rogue"], "team2": ["Warrior", "Warrior"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorRogue_v_WarriorWarrior"}
+{"team1": ["Warrior", "Rogue"], "team2": ["Warrior", "Warrior"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorRogue_v_WarriorWarrior"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Shaman", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorShaman_v_ShamanShaman"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Shaman", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorShaman_v_ShamanShaman"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Shaman", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorShaman_v_ShamanShaman"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Warrior", "Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_WarriorRogue"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Warrior", "Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_WarriorRogue"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Warrior", "Rogue"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_WarriorRogue"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Shaman", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RogueShaman_v_ShamanShaman"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Shaman", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RogueShaman_v_ShamanShaman"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Shaman", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RogueShaman_v_ShamanShaman"}
+{"team1": ["Mage", "Mage"], "team2": ["Warrior", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageMage_v_WarriorPriest"}
+{"team1": ["Mage", "Mage"], "team2": ["Warrior", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageMage_v_WarriorPriest"}
+{"team1": ["Mage", "Mage"], "team2": ["Warrior", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MageMage_v_WarriorPriest"}
+{"team1": ["Mage", "Paladin"], "team2": ["Warlock", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MagePaladin_v_WarlockShaman"}
+{"team1": ["Mage", "Paladin"], "team2": ["Warlock", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MagePaladin_v_WarlockShaman"}
+{"team1": ["Mage", "Paladin"], "team2": ["Warlock", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MagePaladin_v_WarlockShaman"}
+{"team1": ["Mage", "Mage"], "team2": ["Warrior", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageMage_v_WarriorWarlock"}
+{"team1": ["Mage", "Mage"], "team2": ["Warrior", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageMage_v_WarriorWarlock"}
+{"team1": ["Mage", "Mage"], "team2": ["Warrior", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MageMage_v_WarriorWarlock"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPriest_v_MagePriest"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPriest_v_MagePriest"}
+{"team1": ["Priest", "Priest"], "team2": ["Mage", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestPriest_v_MagePriest"}
+{"team1": ["Priest", "Paladin"], "team2": ["Priest", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPaladin_v_PriestShaman"}
+{"team1": ["Priest", "Paladin"], "team2": ["Priest", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPaladin_v_PriestShaman"}
+{"team1": ["Priest", "Paladin"], "team2": ["Priest", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestPaladin_v_PriestShaman"}
+{"team1": ["Priest", "Warlock"], "team2": ["Shaman", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestWarlock_v_ShamanShaman"}
+{"team1": ["Priest", "Warlock"], "team2": ["Shaman", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestWarlock_v_ShamanShaman"}
+{"team1": ["Priest", "Warlock"], "team2": ["Shaman", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestWarlock_v_ShamanShaman"}
+{"team1": ["Mage", "Warlock"], "team2": ["Warlock", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageWarlock_v_WarlockShaman"}
+{"team1": ["Mage", "Warlock"], "team2": ["Warlock", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageWarlock_v_WarlockShaman"}
+{"team1": ["Mage", "Warlock"], "team2": ["Warlock", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MageWarlock_v_WarlockShaman"}
+{"team1": ["Priest", "Shaman"], "team2": ["Warrior", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestShaman_v_WarriorPaladin"}
+{"team1": ["Priest", "Shaman"], "team2": ["Warrior", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestShaman_v_WarriorPaladin"}
+{"team1": ["Priest", "Shaman"], "team2": ["Warrior", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestShaman_v_WarriorPaladin"}
+{"team1": ["Priest", "Paladin"], "team2": ["Mage", "Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPaladin_v_MageRogue"}
+{"team1": ["Priest", "Paladin"], "team2": ["Mage", "Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPaladin_v_MageRogue"}
+{"team1": ["Priest", "Paladin"], "team2": ["Mage", "Rogue"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestPaladin_v_MageRogue"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Warrior", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_WarriorPaladin"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Warrior", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_WarriorPaladin"}
+{"team1": ["Warrior", "Warlock"], "team2": ["Warrior", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorWarlock_v_WarriorPaladin"}
+{"team1": ["Warlock", "Warlock"], "team2": ["Paladin", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockWarlock_v_PaladinShaman"}
+{"team1": ["Warlock", "Warlock"], "team2": ["Paladin", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockWarlock_v_PaladinShaman"}
+{"team1": ["Warlock", "Warlock"], "team2": ["Paladin", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarlockWarlock_v_PaladinShaman"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Rogue", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_RogueWarlock"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Rogue", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_RogueWarlock"}
+{"team1": ["Warrior", "Paladin"], "team2": ["Rogue", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorPaladin_v_RogueWarlock"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Priest", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RogueShaman_v_PriestPriest"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Priest", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RogueShaman_v_PriestPriest"}
+{"team1": ["Rogue", "Shaman"], "team2": ["Priest", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RogueShaman_v_PriestPriest"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Mage", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockShaman_v_MagePriest"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Mage", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockShaman_v_MagePriest"}
+{"team1": ["Warlock", "Shaman"], "team2": ["Mage", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarlockShaman_v_MagePriest"}
+{"team1": ["Mage", "Warlock"], "team2": ["Rogue", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageWarlock_v_RoguePaladin"}
+{"team1": ["Mage", "Warlock"], "team2": ["Rogue", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageWarlock_v_RoguePaladin"}
+{"team1": ["Mage", "Warlock"], "team2": ["Rogue", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MageWarlock_v_RoguePaladin"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Shaman", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorShaman_v_ShamanShaman"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Shaman", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorShaman_v_ShamanShaman"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Shaman", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorShaman_v_ShamanShaman"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Warlock", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorShaman_v_WarlockShaman"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Warlock", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorShaman_v_WarlockShaman"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Warlock", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorShaman_v_WarlockShaman"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Warrior", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorShaman_v_WarriorPaladin"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Warrior", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorShaman_v_WarriorPaladin"}
+{"team1": ["Warrior", "Shaman"], "team2": ["Warrior", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorShaman_v_WarriorPaladin"}
+{"team1": ["Priest", "Warlock"], "team2": ["Warlock", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestWarlock_v_WarlockWarlock"}
+{"team1": ["Priest", "Warlock"], "team2": ["Warlock", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestWarlock_v_WarlockWarlock"}
+{"team1": ["Priest", "Warlock"], "team2": ["Warlock", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestWarlock_v_WarlockWarlock"}
+{"team1": ["Priest", "Priest"], "team2": ["Warrior", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPriest_v_WarriorWarlock"}
+{"team1": ["Priest", "Priest"], "team2": ["Warrior", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPriest_v_WarriorWarlock"}
+{"team1": ["Priest", "Priest"], "team2": ["Warrior", "Warlock"], "random_seed": 2, "max_duration_secs": 300.0, "label": "PriestPriest_v_WarriorWarlock"}
+{"team1": ["Mage", "Shaman"], "team2": ["Warrior", "Mage"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageShaman_v_WarriorMage"}
+{"team1": ["Mage", "Shaman"], "team2": ["Warrior", "Mage"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageShaman_v_WarriorMage"}
+{"team1": ["Mage", "Shaman"], "team2": ["Warrior", "Mage"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MageShaman_v_WarriorMage"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Warrior", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RoguePaladin_v_WarriorShaman"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Warrior", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RoguePaladin_v_WarriorShaman"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Warrior", "Shaman"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RoguePaladin_v_WarriorShaman"}
+{"team1": ["Mage", "Mage"], "team2": ["Mage", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageMage_v_MagePaladin"}
+{"team1": ["Mage", "Mage"], "team2": ["Mage", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageMage_v_MagePaladin"}
+{"team1": ["Mage", "Mage"], "team2": ["Mage", "Paladin"], "random_seed": 2, "max_duration_secs": 300.0, "label": "MageMage_v_MagePaladin"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Mage", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RoguePaladin_v_MagePriest"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Mage", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RoguePaladin_v_MagePriest"}
+{"team1": ["Rogue", "Paladin"], "team2": ["Mage", "Priest"], "random_seed": 2, "max_duration_secs": 300.0, "label": "RoguePaladin_v_MagePriest"}
+{"team1": ["Warrior", "Mage"], "team2": ["Warrior", "Warrior"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorMage_v_WarriorWarrior"}
+{"team1": ["Warrior", "Mage"], "team2": ["Warrior", "Warrior"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorMage_v_WarriorWarrior"}
+{"team1": ["Warrior", "Mage"], "team2": ["Warrior", "Warrior"], "random_seed": 2, "max_duration_secs": 300.0, "label": "WarriorMage_v_WarriorWarrior"}
+{"team1": ["Priest", "Warlock", "Warlock"], "team2": ["Mage", "Priest", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestWarlockWarlock_v_MagePriestShaman"}
+{"team1": ["Priest", "Warlock", "Warlock"], "team2": ["Mage", "Priest", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestWarlockWarlock_v_MagePriestShaman"}
+{"team1": ["Warrior", "Rogue", "Priest"], "team2": ["Warrior", "Paladin", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorRoguePriest_v_WarriorPaladinShaman"}
+{"team1": ["Warrior", "Rogue", "Priest"], "team2": ["Warrior", "Paladin", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorRoguePriest_v_WarriorPaladinShaman"}
+{"team1": ["Warlock", "Warlock", "Shaman"], "team2": ["Warrior", "Mage", "Mage"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockWarlockShaman_v_WarriorMageMage"}
+{"team1": ["Warlock", "Warlock", "Shaman"], "team2": ["Warrior", "Mage", "Mage"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockWarlockShaman_v_WarriorMageMage"}
+{"team1": ["Mage", "Rogue", "Shaman"], "team2": ["Warrior", "Mage", "Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageRogueShaman_v_WarriorMageRogue"}
+{"team1": ["Mage", "Rogue", "Shaman"], "team2": ["Warrior", "Mage", "Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageRogueShaman_v_WarriorMageRogue"}
+{"team1": ["Rogue", "Warlock", "Warlock"], "team2": ["Warrior", "Shaman", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "RogueWarlockWarlock_v_WarriorShamanShaman"}
+{"team1": ["Rogue", "Warlock", "Warlock"], "team2": ["Warrior", "Shaman", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "RogueWarlockWarlock_v_WarriorShamanShaman"}
+{"team1": ["Priest", "Priest", "Priest"], "team2": ["Warrior", "Paladin", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPriestPriest_v_WarriorPaladinPaladin"}
+{"team1": ["Priest", "Priest", "Priest"], "team2": ["Warrior", "Paladin", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPriestPriest_v_WarriorPaladinPaladin"}
+{"team1": ["Paladin", "Shaman", "Shaman"], "team2": ["Priest", "Paladin", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PaladinShamanShaman_v_PriestPaladinPaladin"}
+{"team1": ["Paladin", "Shaman", "Shaman"], "team2": ["Priest", "Paladin", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PaladinShamanShaman_v_PriestPaladinPaladin"}
+{"team1": ["Mage", "Priest", "Shaman"], "team2": ["Rogue", "Priest", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MagePriestShaman_v_RoguePriestPriest"}
+{"team1": ["Mage", "Priest", "Shaman"], "team2": ["Rogue", "Priest", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MagePriestShaman_v_RoguePriestPriest"}
+{"team1": ["Warlock", "Paladin", "Shaman"], "team2": ["Mage", "Mage", "Rogue"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockPaladinShaman_v_MageMageRogue"}
+{"team1": ["Warlock", "Paladin", "Shaman"], "team2": ["Mage", "Mage", "Rogue"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockPaladinShaman_v_MageMageRogue"}
+{"team1": ["Warrior", "Warlock", "Warlock"], "team2": ["Mage", "Rogue", "Priest"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorWarlockWarlock_v_MageRoguePriest"}
+{"team1": ["Warrior", "Warlock", "Warlock"], "team2": ["Mage", "Rogue", "Priest"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorWarlockWarlock_v_MageRoguePriest"}
+{"team1": ["Mage", "Rogue", "Paladin"], "team2": ["Paladin", "Paladin", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageRoguePaladin_v_PaladinPaladinPaladin"}
+{"team1": ["Mage", "Rogue", "Paladin"], "team2": ["Paladin", "Paladin", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageRoguePaladin_v_PaladinPaladinPaladin"}
+{"team1": ["Warrior", "Warlock", "Warlock"], "team2": ["Mage", "Rogue", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorWarlockWarlock_v_MageRoguePaladin"}
+{"team1": ["Warrior", "Warlock", "Warlock"], "team2": ["Mage", "Rogue", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorWarlockWarlock_v_MageRoguePaladin"}
+{"team1": ["Warrior", "Warrior", "Warrior"], "team2": ["Mage", "Warlock", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarriorWarriorWarrior_v_MageWarlockWarlock"}
+{"team1": ["Warrior", "Warrior", "Warrior"], "team2": ["Mage", "Warlock", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarriorWarriorWarrior_v_MageWarlockWarlock"}
+{"team1": ["Priest", "Priest", "Paladin"], "team2": ["Mage", "Warlock", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPriestPaladin_v_MageWarlockWarlock"}
+{"team1": ["Priest", "Priest", "Paladin"], "team2": ["Mage", "Warlock", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPriestPaladin_v_MageWarlockWarlock"}
+{"team1": ["Priest", "Priest", "Warlock"], "team2": ["Priest", "Priest", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPriestWarlock_v_PriestPriestWarlock"}
+{"team1": ["Priest", "Priest", "Warlock"], "team2": ["Priest", "Priest", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPriestWarlock_v_PriestPriestWarlock"}
+{"team1": ["Mage", "Mage", "Shaman"], "team2": ["Warrior", "Paladin", "Paladin"], "random_seed": 0, "max_duration_secs": 300.0, "label": "MageMageShaman_v_WarriorPaladinPaladin"}
+{"team1": ["Mage", "Mage", "Shaman"], "team2": ["Warrior", "Paladin", "Paladin"], "random_seed": 1, "max_duration_secs": 300.0, "label": "MageMageShaman_v_WarriorPaladinPaladin"}
+{"team1": ["Warlock", "Warlock", "Shaman"], "team2": ["Rogue", "Priest", "Warlock"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockWarlockShaman_v_RoguePriestWarlock"}
+{"team1": ["Warlock", "Warlock", "Shaman"], "team2": ["Rogue", "Priest", "Warlock"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockWarlockShaman_v_RoguePriestWarlock"}
+{"team1": ["Priest", "Paladin", "Shaman"], "team2": ["Priest", "Priest", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "PriestPaladinShaman_v_PriestPriestShaman"}
+{"team1": ["Priest", "Paladin", "Shaman"], "team2": ["Priest", "Priest", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "PriestPaladinShaman_v_PriestPriestShaman"}
+{"team1": ["Warlock", "Warlock", "Paladin"], "team2": ["Rogue", "Rogue", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockWarlockPaladin_v_RogueRogueShaman"}
+{"team1": ["Warlock", "Warlock", "Paladin"], "team2": ["Rogue", "Rogue", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockWarlockPaladin_v_RogueRogueShaman"}
+{"team1": ["Warlock", "Paladin", "Paladin"], "team2": ["Mage", "Shaman", "Shaman"], "random_seed": 0, "max_duration_secs": 300.0, "label": "WarlockPaladinPaladin_v_MageShamanShaman"}
+{"team1": ["Warlock", "Paladin", "Paladin"], "team2": ["Mage", "Shaman", "Shaman"], "random_seed": 1, "max_duration_secs": 300.0, "label": "WarlockPaladinPaladin_v_MageShamanShaman"}

@@ -1,0 +1,19 @@
+--- a/src/states/play_match/class_ai/hunter.rs
++++ b/src/states/play_match/class_ai/hunter.rs
+@@ -243,7 +243,15 @@
+ 
+         // Priority 2: Freezing Trap on the enemy healer — the melee is on us,
+         // so this is the moment its healer is worth freezing.
+-        if try_pressure_trap(
++        let impaired = auras.is_some_and(|a| {
++            a.auras.iter().any(|aura| {
++                matches!(
++                    aura.effect_type,
++                    AuraType::Root | AuraType::MovementSpeedSlow
++                )
++            })
++        });
++        if !impaired && try_pressure_trap(
+             commands,
+             combat_log,
+             abilities,

@@ -19,7 +19,7 @@ use bevy::prelude::*;
 use super::super::arena_bounds::ArenaBounds;
 use super::super::utils::log_ability_use;
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
-use super::hunter_dip::{emit_dip_complete, HunterDipPlan};
+use super::hunter_dip::{emit_dip_complete, HunterDipPlan, LiveTrap};
 use super::{CombatContext, CombatantInfo};
 use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
@@ -53,6 +53,9 @@ pub fn decide_hunter_action(
     // The Hunter's KITE weights (`movement.ron`), so Disengage bends toward a
     // trap on the enemy healer exactly as the kite does.
     weights: &MovementWeights,
+    // The Hunter's own Freezing Traps not yet sprung, so its damage does not
+    // land on an enemy just after one of them freezes it.
+    own_traps: &[LiveTrap],
     decision_trace: &mut DecisionTrace,
 ) -> bool {
     let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
@@ -373,6 +376,7 @@ pub fn decide_hunter_action(
             ctx,
             instant_attacks,
             auras,
+            own_traps,
             &mut builder,
         ) {
             builder.finish();
@@ -408,6 +412,7 @@ pub fn decide_hunter_action(
             target_info,
             auras,
             ctx,
+            own_traps,
             &mut builder,
         )
     {
@@ -443,15 +448,16 @@ pub fn decide_hunter_action(
     }
 
     // The opener — before the Hunter's first Aimed Shot or Serpent Sting —
-    // starts Aimed Shot ahead of a due sting when it has time: a 2.5s cast
-    // plants the Hunter, so it goes first only if no enemy can interrupt it
-    // or close to melee before it finishes ([`aimed_shot_has_time`]). The
-    // sting follows on the next GCD. After the opener a due sting keeps its
-    // place below: re-applying it (after a Devour Magic, say) is not delayed.
+    // starts Aimed Shot ahead of a due sting only when the sting's GCD would
+    // cost it the window: the cast can finish if begun now but not if begun
+    // after the sting ([`aimed_shot_before_sting`]). With time for both, the
+    // sting goes first and the Aimed Shot follows on the next GCD. After the
+    // opener a due sting keeps its place below: re-applying it (after a Devour
+    // Magic, say) is not delayed.
     if !combatant.hunter_opened
         && distance_to_target >= 20.0
         && sting_due(target_entity, target_info, ctx)
-        && aimed_shot_has_time(abilities, entity, my_pos, auras, ctx)
+        && aimed_shot_before_sting(abilities, entity, my_pos, auras, ctx)
         && try_aimed_shot(
             commands,
             combat_log,
@@ -463,6 +469,7 @@ pub fn decide_hunter_action(
             target_info,
             auras,
             ctx,
+            own_traps,
             &mut builder,
         )
     {
@@ -484,6 +491,7 @@ pub fn decide_hunter_action(
         target_info,
         ctx,
         auras,
+        own_traps,
         &mut builder,
     ) {
         builder.finish();
@@ -627,6 +635,7 @@ pub fn decide_hunter_action(
             target_info,
             auras,
             ctx,
+            own_traps,
             &mut builder,
         ) {
             builder.finish();
@@ -655,6 +664,7 @@ pub fn decide_hunter_action(
         ctx,
         instant_attacks,
         auras,
+        own_traps,
         &mut builder,
     ) {
         builder.finish();
@@ -837,6 +847,29 @@ fn try_pressure_trap(
     true
 }
 
+/// Would a shot at `target` begun now land on it — `before` seconds of cast
+/// (or of ticking, for a DoT) plus its projectile's flight — after one of the
+/// Hunter's own live Freezing Traps has frozen it
+/// ([`own_trap_catches_first`](super::hunter_dip::own_trap_catches_first))?
+/// Its damage would break the trap. Projectile speed as the shot's own
+/// `abilities.ron` entry gives it.
+fn own_trap_breaks(
+    ctx: &CombatContext,
+    own_traps: &[LiveTrap],
+    def: &crate::states::play_match::ability_config::AbilityConfig,
+    my_pos: Vec3,
+    target: &super::CombatantInfo,
+    before: f32,
+) -> bool {
+    if own_traps.is_empty() {
+        return false;
+    }
+    let flight = def
+        .projectile_speed
+        .map_or(0.0, |speed| my_pos.distance(target.position) / speed);
+    super::hunter_dip::own_trap_catches_first(ctx, own_traps, target.entity, before + flight)
+}
+
 /// Is `victim` the only living enemy close enough to `landing` to spring a
 /// trap there? A trap springs on the FIRST enemy inside its radius, whoever it
 /// was aimed at, so both AIMED Freezing Trap placements — the off-target drop
@@ -898,9 +931,28 @@ fn sting_due(target: Entity, target_info: &super::CombatantInfo, ctx: &CombatCon
     !stung && !target_info.class.gains_rage_from_damage()
 }
 
-/// Would an Aimed Shot begun now finish before an enemy can stop it? A cast
-/// plants the Hunter for its full cast time, and it is lost to an interrupt,
-/// or finishes with a melee already inside the dead zone of a Hunter who
+/// Does the opener's Aimed Shot go ahead of a due Serpent Sting? Only when the
+/// sting's GCD would cost it the window: an Aimed Shot begun now finishes
+/// before any enemy can stop it, and one begun after the sting would not
+/// ([`aimed_shot_has_time`]). With time for both, the sting goes first — a DoT
+/// applied a GCD earlier ticks for longer, and against a dispeller it draws a
+/// dispel GCD before the cast rather than after it. With time for neither, the
+/// sting goes first too: an Aimed Shot that cannot finish is not the opener.
+pub fn aimed_shot_before_sting(
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+) -> bool {
+    aimed_shot_has_time(abilities, entity, my_pos, auras, ctx, 0.0)
+        && !aimed_shot_has_time(abilities, entity, my_pos, auras, ctx, GCD)
+}
+
+/// Would an Aimed Shot begun `delay` seconds from now finish before an enemy
+/// can stop it? A cast plants the Hunter for its full cast time, and it is
+/// lost to an interrupt, or finishes with a melee already inside the dead zone
+/// of a Hunter who
 /// could not kite it. Each visible enemy, pets included, that could stop it
 /// has a reach — its own kit's interrupt range
 /// ([`interrupt_reach`](super::interrupt_reach): Spell Lock and Wind Shear at
@@ -909,7 +961,8 @@ fn sting_due(target: Entity, target_info: &super::CombatantInfo, ctx: &CombatCon
 /// speed (its velocity toward the Hunter); one already within reach leaves no
 /// time, one not closing never arrives, and one held in hard CC past the cast
 /// cannot act. The cast time is read from `AbilityDefinitions`, with the
-/// Hunter's own haste auras applied.
+/// Hunter's own haste auras applied, and the enemy must not arrive before
+/// `delay` plus the cast time has passed.
 ///
 /// An enemy the Hunter cannot see ([`CombatContext::enemy_hidden`]) counts as
 /// one that could stop it: a stealthed Rogue's distance and heading are
@@ -920,6 +973,7 @@ pub fn aimed_shot_has_time(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    delay: f32,
 ) -> bool {
     if ctx.enemy_hidden() {
         return false;
@@ -928,6 +982,7 @@ pub fn aimed_shot_has_time(
         abilities.get_unchecked(&AbilityType::AimedShot).cast_time,
         auras,
     );
+    let done = delay + cast;
     let my_team = ctx.combatants.get(&entity).map_or(u8::MAX, |i| i.team);
     ctx.combatants
         .values()
@@ -945,7 +1000,7 @@ pub fn aimed_shot_has_time(
             let held = ctx.active_auras.get(&e.entity).is_some_and(|auras| {
                 auras
                     .iter()
-                    .any(|a| super::is_hard_cc(a.effect_type) && a.duration >= cast)
+                    .any(|a| super::is_hard_cc(a.effect_type) && a.duration >= done)
             });
             if held {
                 return true;
@@ -956,7 +1011,7 @@ pub fn aimed_shot_has_time(
                 return false;
             }
             let closing = Vec3::new(e.velocity.x, 0.0, e.velocity.z).dot(to_me.normalize_or_zero());
-            closing <= 0.0 || gap / closing > cast
+            closing <= 0.0 || gap / closing > done
         })
 }
 
@@ -1284,6 +1339,7 @@ fn try_aimed_shot(
     target_info: &super::CombatantInfo,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    own_traps: &[LiveTrap],
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::AimedShot;
@@ -1334,10 +1390,20 @@ fn try_aimed_shot(
         return false;
     }
 
+    let cast_time = calculate_cast_time(def.cast_time, auras);
+    if own_trap_breaks(ctx, own_traps, def, my_pos, target_info, cast_time) {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: super::hunter_dip::OWN_TRAP_WOULD_BREAK.to_string(),
+            },
+        );
+        return false;
+    }
+
     builder.choose(ability, Some(target_entity), false);
     combatant.hunter_opened = true;
 
-    let cast_time = calculate_cast_time(def.cast_time, auras);
     commands
         .entity(entity)
         .insert(CastingState::new(ability, target_entity, cast_time));
@@ -1373,6 +1439,7 @@ fn try_arcane_shot(
     ctx: &CombatContext,
     _instant_attacks: &mut Vec<super::QueuedInstantAttack>,
     auras: Option<&ActiveAuras>,
+    own_traps: &[LiveTrap],
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::ArcaneShot;
@@ -1406,6 +1473,16 @@ fn try_arcane_shot(
                 ctx,
                 opts,
             ),
+        );
+        return false;
+    }
+
+    if own_trap_breaks(ctx, own_traps, def, my_pos, target_info, 0.0) {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: super::hunter_dip::OWN_TRAP_WOULD_BREAK.to_string(),
+            },
         );
         return false;
     }
@@ -1464,6 +1541,7 @@ fn try_serpent_sting(
     target_info: &super::CombatantInfo,
     ctx: &CombatContext,
     auras: Option<&ActiveAuras>,
+    own_traps: &[LiveTrap],
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::SerpentSting;
@@ -1581,6 +1659,19 @@ fn try_serpent_sting(
                 ctx,
                 opts,
             ),
+        );
+        return false;
+    }
+
+    // The sting deals its damage in ticks for the aura's whole duration, so
+    // any of them could land on a frozen target.
+    let ticking = def.applies_aura.as_ref().map_or(0.0, |a| a.duration);
+    if own_trap_breaks(ctx, own_traps, def, my_pos, target_info, ticking) {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: super::hunter_dip::OWN_TRAP_WOULD_BREAK.to_string(),
+            },
         );
         return false;
     }
