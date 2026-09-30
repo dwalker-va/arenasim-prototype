@@ -26,7 +26,9 @@ use arenasim::combat::log::CombatLog;
 use arenasim::headless::{run_headless_match_observed, FrameObservation, HeadlessMatchConfig};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::auras::apply_pending_auras;
-use arenasim::states::play_match::class_ai::druid::decide_druid_action;
+use arenasim::states::play_match::class_ai::druid::{
+    decide_druid_action, DRUID_MAX_CHASE_SECS, DRUID_MIN_FORM_SECS,
+};
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
 use arenasim::states::play_match::combat_core::{apply_damage_with_absorb, apply_healing};
 use arenasim::states::play_match::components::{
@@ -445,12 +447,21 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
 /// A dying ally in range and a Warrior in the Druid's face. Returns what the
 /// Druid chose, and whether it started a cast or queued a shift.
 fn decide_with_dying_ally(shifted: bool) -> (Option<AbilityType>, bool, bool) {
-    decide_scene(shifted, 1.0)
+    decide_scene(shifted.then_some(FORM_AGE), 1.0, 20.0)
 }
 
-/// The Druid, a Warrior ally at 20% HP ten yards off, and an enemy Warrior
-/// `enemy_distance` yards from the Druid, attacking it.
-fn decide_scene(shifted: bool, enemy_distance: f32) -> (Option<AbilityType>, bool, bool) {
+/// How long the shifted scenes have been shifted: past the minimum dwell, so
+/// the dwell is not what decides them.
+const FORM_AGE: f32 = DRUID_MIN_FORM_SECS + 2.0;
+
+/// The Druid (shifted `form_secs` ago, or unshifted), a Warrior ally at
+/// `ally_hp` of 100 ten yards off, and an enemy Warrior `enemy_distance`
+/// yards from the Druid, attacking it.
+fn decide_scene(
+    form_secs: Option<f32>,
+    enemy_distance: f32,
+    ally_hp: f32,
+) -> (Option<AbilityType>, bool, bool) {
     let mut world = World::new();
     let druid = world.spawn_empty().id();
     let ally = world.spawn_empty().id();
@@ -466,7 +477,7 @@ fn decide_scene(shifted: bool, enemy_distance: f32) -> (Option<AbilityType>, boo
     let mut roster = BTreeMap::new();
     roster.insert(druid, info(druid, 1, CharacterClass::Druid, druid_pos));
     let mut hurt = info(ally, 1, CharacterClass::Warrior, Vec3::new(10.0, 1.0, 0.0));
-    hurt.current_health = 20.0;
+    hurt.current_health = ally_hp;
     roster.insert(ally, hurt);
     let mut warrior = info(
         enemy,
@@ -480,8 +491,10 @@ fn decide_scene(shifted: bool, enemy_distance: f32) -> (Option<AbilityType>, boo
     // Mark of the Wild on both, so the pre-match buff is out of the way.
     let mark = aura_of(AbilityType::MarkOfTheWild, druid, druid);
     let mut self_auras = vec![mark.clone()];
-    if shifted {
-        self_auras.push(aura_of(AbilityType::TravelForm, druid, druid));
+    if let Some(secs) = form_secs {
+        let mut form = aura_of(AbilityType::TravelForm, druid, druid);
+        form.duration -= secs;
+        self_auras.push(form);
     }
     let mut active = BTreeMap::new();
     active.insert(druid, self_auras.clone());
@@ -606,28 +619,49 @@ fn the_pre_cast_guard_refuses_every_druid_ability_while_shifted() {
     }
 }
 
-/// Shifted, with no melee in reach and an ally to heal, the Druid shifts out;
-/// with the melee in its face it does not (the case above).
+/// Shifted long enough, with no chaser inside the danger radius, the Druid
+/// shifts out when it has work — an ally to heal, or an enemy in spell reach
+/// — and not before: not with a chaser near, not on a fresh shift, and not
+/// with nothing to do.
 #[test]
-fn a_safe_shifted_druid_with_healing_to_do_shifts_out() {
-    let (chosen, casting, shifting) = decide_shifted_with_hurt_ally(false);
-    assert_eq!(
-        (chosen, casting),
-        (None, false),
-        "the shift out is not a cast"
+fn a_safe_shifted_druid_with_work_to_do_shifts_out() {
+    let shifts_out = |form_secs: f32, enemy_distance: f32, ally_hp: f32| {
+        let (chosen, casting, shifting) = decide_scene(Some(form_secs), enemy_distance, ally_hp);
+        assert_eq!(
+            (chosen, casting),
+            (None, false),
+            "a shift out is not a cast"
+        );
+        shifting
+    };
+    assert!(
+        shifts_out(FORM_AGE, 25.0, 20.0),
+        "safe, an ally to heal: out"
     );
     assert!(
-        shifting,
-        "safe with a hurt ally: the Druid queues its shift out"
+        shifts_out(FORM_AGE, 25.0, 100.0),
+        "safe, an enemy in reach: out"
     );
     assert!(
-        !decide_shifted_with_hurt_ally(true).2,
-        "a melee in reach keeps the Druid shifted"
+        !shifts_out(FORM_AGE, 5.0, 20.0),
+        "a chaser in striking reach: stay"
     );
-}
-
-fn decide_shifted_with_hurt_ally(melee_in_reach: bool) -> (Option<AbilityType>, bool, bool) {
-    decide_scene(true, if melee_in_reach { 1.0 } else { 25.0 })
+    assert!(
+        !shifts_out(FORM_AGE, 10.0, 20.0),
+        "a chaser inside the danger radius: stay"
+    );
+    assert!(
+        shifts_out(DRUID_MAX_CHASE_SECS + 0.5, 10.0, 20.0),
+        "...until it has run too long without shaking it"
+    );
+    assert!(
+        !shifts_out(0.5, 25.0, 20.0),
+        "a fresh shift is not thrown straight back"
+    );
+    assert!(
+        !shifts_out(FORM_AGE, 45.0, 100.0),
+        "nothing to heal, nothing in reach: stay"
+    );
 }
 
 // ── match probes ────────────────────────────────────────────────────────────
@@ -676,11 +710,31 @@ fn xz(v: Vec3) -> Vec2 {
 /// Cyclones in — fixed seeds, so each probe below has its occurrences.
 const SHIFT_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
     (&["Hunter", "Druid"], &["Hunter", "Shaman"], "BasicArena", 1),
-    (&["Hunter", "Druid"], &["Hunter", "Shaman"], "PillaredArena", 1),
+    (
+        &["Hunter", "Druid"],
+        &["Hunter", "Shaman"],
+        "PillaredArena",
+        1,
+    ),
     (&["Rogue", "Druid"], &["Rogue", "Mage"], "BasicArena", 1),
-    (&["Warrior", "Druid"], &["Mage", "Paladin"], "PillaredArena", 1),
-    (&["Warrior", "Druid"], &["Hunter", "Shaman"], "PillaredArena", 1),
-    (&["Rogue", "Druid"], &["Hunter", "Shaman"], "PillaredArena", 1),
+    (
+        &["Warrior", "Druid"],
+        &["Mage", "Paladin"],
+        "PillaredArena",
+        1,
+    ),
+    (
+        &["Warrior", "Druid"],
+        &["Hunter", "Shaman"],
+        "PillaredArena",
+        1,
+    ),
+    (
+        &["Rogue", "Druid"],
+        &["Hunter", "Shaman"],
+        "PillaredArena",
+        1,
+    ),
     (&["Rogue", "Druid"], &["Rogue", "Priest"], "BasicArena", 1),
     (&["Mage", "Druid"], &["Rogue", "Priest"], "BasicArena", 1),
     (&["Warlock", "Druid"], &["Rogue", "Mage"], "BasicArena", 1),
@@ -689,17 +743,44 @@ const SHIFT_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
 const CYCLONE_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
     (&["Warrior", "Druid"], &["Rogue", "Priest"], "BasicArena", 1),
     (&["Warrior", "Druid"], &["Rogue", "Mage"], "BasicArena", 1),
+    (&["Mage", "Druid"], &["Rogue", "Priest"], "BasicArena", 2),
+    (
+        &["Warlock", "Druid"],
+        &["Warrior", "Priest"],
+        "BasicArena",
+        2,
+    ),
 ];
+
+/// A root, a snare, or a crowd control that stops the unit acting: what a
+/// shifted Druid cannot outrun.
+fn hindered(types: &[AuraType]) -> bool {
+    types.iter().any(|t| {
+        matches!(
+            t,
+            AuraType::Root
+                | AuraType::MovementSpeedSlow
+                | AuraType::Stun
+                | AuraType::Fear
+                | AuraType::Polymorph
+                | AuraType::Incapacitate
+                | AuraType::Cyclone
+        )
+    })
+}
 
 /// How long after a shift the chase is measured.
 const OUTRUN_WINDOW_SECS: f32 = 1.5;
 
 /// A shift out of a root or snare frees the Druid and it pulls away: in the
-/// window after the shift, the gap to the nearest melee or pet chaser GROWS,
-/// and the Druid's path is longer than its unshifted speed could cover.
+/// window after every shift the Druid's path is longer than its unshifted
+/// speed could cover, and in at least three shifts of four the gap to the
+/// nearest melee or pet chaser GROWS. (Not every one: a Druid shifting with
+/// its back to the arena wall can only run along it.)
 #[test]
 fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
     let mut shifts = 0;
+    let mut gained = 0;
     for (t1, t2, map, seed) in SHIFT_MATCHES {
         let played = play(t1, t2, map, *seed);
         let druid_of = |f: &FrameObservation| {
@@ -744,6 +825,11 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
                 })
                 .map(|(e, _)| *e);
             let Some(chaser) = chaser else { continue };
+            // A chaser is a threat on the Druid: inside the danger radius
+            // (12 yd) when it shifts. A pet across the arena is not chasing.
+            if xz(pair[1].combatants[&chaser].position).distance(xz(after.position)) > 12.0 {
+                continue;
+            }
 
             let start = pair[1].sim_time;
             let end_frame = played
@@ -755,24 +841,44 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
                         && f.combatants[&druid]
                             .aura_types
                             .contains(&AuraType::TravelForm)
+                        && !hindered(&f.combatants[&druid].aura_types)
                         && f.combatants[&chaser].alive
                 })
                 .last()
                 .unwrap();
             let elapsed = end_frame.sim_time - start;
             if elapsed < OUTRUN_WINDOW_SECS - 0.05 {
-                continue; // the window was cut short by a death or a shift out
+                // Cut short. A death ends the claim, and so does a new root,
+                // snare or stun — the form cannot outrun those. A shift out
+                // with none of them may not end it.
+                let next = played
+                    .frames
+                    .iter()
+                    .find(|f| f.sim_time > end_frame.sim_time)
+                    .unwrap();
+                let d = &next.combatants[&druid];
+                assert!(
+                    !d.alive || !next.combatants[&chaser].alive || hindered(&d.aura_types),
+                    "{t1:?} v {t2:?} {map} #{seed}: shifted at {start:.2}s with a chaser \
+                     {:.1} yd off, and shifted back out at {:.2}s unhindered",
+                    xz(after.position).distance(xz(pair[1].combatants[&chaser].position)),
+                    next.sim_time
+                );
+                continue;
             }
             let gap = |f: &FrameObservation| {
                 xz(f.combatants[&druid].position).distance(xz(f.combatants[&chaser].position))
             };
-            assert!(
-                gap(end_frame) > gap(&pair[1]),
-                "{t1:?} v {t2:?} {map} #{seed} at {start:.2}s: the gap to the chaser went \
-                 {:.1} -> {:.1}",
-                gap(&pair[1]),
-                gap(end_frame)
-            );
+            if gap(end_frame) > gap(&pair[1]) {
+                gained += 1;
+            } else {
+                eprintln!(
+                    "no ground gained: {t1:?} v {t2:?} {map} #{seed} at {start:.2}s, gap \
+                     {:.1} -> {:.1}",
+                    gap(&pair[1]),
+                    gap(end_frame)
+                );
+            }
             // Path length, frame by frame: a Druid sliding along a wall is
             // still moving at its full shifted speed.
             let travelled: f32 = played
@@ -793,7 +899,16 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
             shifts += 1;
         }
     }
-    eprintln!("{shifts} shifts out of a root or snare, each with a full window");
+    eprintln!(
+        "{shifts} shifts out of a root or snare, each with a full window; ground \
+         gained on the chaser in {gained}"
+    );
+    // The escape can be pinned: a Druid shifting with its back to the arena
+    // wall has nowhere to run but along it. Most shifts must still gain.
+    assert!(
+        gained * 4 >= shifts * 3,
+        "the Druid gained ground on its chaser in only {gained} of {shifts} shifts"
+    );
     assert!(
         shifts >= 6,
         "only {shifts} shifts out of a root or snare with a full window — the seeds moved"
@@ -840,7 +955,9 @@ fn a_cycloned_unit_is_frozen_out_of_the_fight() {
                 );
                 let id = log_id(a.team, a.slot, a.class);
                 let acted = played.log.lines().any(|l| {
-                    log_time(l).is_some_and(|t| t > first.sim_time && t < last.sim_time)
+                    // Log times print to 0.01s; keep a frame clear of each edge.
+                    log_time(l)
+                        .is_some_and(|t| t > first.sim_time + 0.02 && t < last.sim_time - 0.02)
                         && (l.contains(&format!("{id} casts"))
                             || l.contains(&format!("{id} uses"))
                             || l.contains(&format!("{id} begins casting"))
@@ -905,3 +1022,202 @@ fn a_shifted_druid_casts_nothing_in_a_match() {
     );
 }
 
+/// The matches the round-1 review found the Druid idling in the form through,
+/// beside the shift matches.
+const IDLE_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
+    (&["Warlock", "Druid"], &["Rogue", "Shaman"], "BasicArena", 1),
+    (
+        &["Rogue", "Druid"],
+        &["Hunter", "Priest"],
+        "PillaredArena",
+        3,
+    ),
+];
+
+/// How long a Druid that is safe and has work may stay shifted before the
+/// probe calls it idling: the frame its decision lands, and slack for a
+/// global cooldown still running from the shift.
+const LEAVE_SLACK_SECS: f32 = 0.5;
+
+/// The form is neither thrown straight back nor idled in:
+/// - a shift is not reversed inside [`DRUID_MIN_FORM_SECS`] unless the Druid
+///   was rooted again;
+/// - a Druid shifted past the dwell, with no melee or pet enemy within
+///   striking reach (7.5 yd) — nor within the danger radius (12 yd) for its
+///   first [`DRUID_MAX_CHASE_SECS`] — and work to do — an ally within 40 yd below 80%,
+///   or a non-Rogue enemy within Moonfire's 30 yd — is out of the form within
+///   [`LEAVE_SLACK_SECS`].
+///
+/// Measured off the observed world, and conservative where it cannot see
+/// what the Druid sees: a stealthed Rogue counts as a chaser (it may keep the
+/// Druid shifted), and never as an enemy in reach (it cannot give it work).
+#[test]
+fn the_druid_neither_strobes_nor_idles_in_the_form() {
+    let mut windows = 0;
+    let mut safe_checks = 0;
+    for (t1, t2, map, seed) in SHIFT_MATCHES.iter().chain(IDLE_MATCHES) {
+        let played = play(t1, t2, map, *seed);
+        let mut shifted_at: Option<f32> = None;
+        let mut safe_since: Option<f32> = None;
+        for f in &played.frames {
+            let Some((_, d)) = f
+                .combatants
+                .iter()
+                .find(|(_, c)| c.class == CharacterClass::Druid && !c.is_pet && c.team == 1)
+            else {
+                continue;
+            };
+            let rooted = d.aura_types.contains(&AuraType::Root);
+            // Under a CC that stops it acting, it cannot decide to leave.
+            let held = d.aura_types.iter().any(|t| {
+                matches!(
+                    t,
+                    AuraType::Stun
+                        | AuraType::Fear
+                        | AuraType::Polymorph
+                        | AuraType::Incapacitate
+                        | AuraType::Cyclone
+                )
+            });
+            let shifted = d.alive && d.aura_types.contains(&AuraType::TravelForm);
+            match (shifted_at, shifted) {
+                (None, true) => shifted_at = Some(f.sim_time),
+                (Some(at), false) => {
+                    if d.alive {
+                        assert!(
+                            f.sim_time - at >= DRUID_MIN_FORM_SECS || rooted,
+                            "{t1:?} v {t2:?} {map} #{seed}: shifted at {at:.2}s, back out at \
+                             {:.2}s, unrooted",
+                            f.sim_time
+                        );
+                    }
+                    windows += 1;
+                    shifted_at = None;
+                    safe_since = None;
+                    continue;
+                }
+                _ => {}
+            }
+            let Some(at) = shifted_at else { continue };
+            let near = |c: &arenasim::headless::ObservedCombatant, r: f32| {
+                xz(c.position).distance(xz(d.position)) <= r
+            };
+            let chaser_within = |r: f32| {
+                f.combatants.values().any(|c| {
+                    c.team != 1 && c.alive && (c.is_pet || c.class.is_melee()) && near(c, r)
+                })
+            };
+            // Striking reach is MELEE_RANGE (2.5) plus the Druid AI's 5 yd slack.
+            let chaser = chaser_within(7.5)
+                || (chaser_within(12.0) && f.sim_time - at < DRUID_MAX_CHASE_SECS);
+            let heal = f.combatants.values().any(|c| {
+                c.team == 1
+                    && !c.is_pet
+                    && c.alive
+                    && c.current_health < c.max_health * 0.8
+                    && near(c, 40.0)
+            });
+            let reach = f.combatants.values().any(|c| {
+                c.team != 1 && c.alive && c.class != CharacterClass::Rogue && near(c, 30.0)
+            });
+            let safe_with_work = f.sim_time - at >= DRUID_MIN_FORM_SECS
+                && !chaser
+                && !rooted
+                && !held
+                && (heal || reach);
+            if !safe_with_work {
+                safe_since = None;
+                continue;
+            }
+            let since = *safe_since.get_or_insert(f.sim_time);
+            safe_checks += 1;
+            assert!(
+                f.sim_time - since <= LEAVE_SLACK_SECS,
+                "{t1:?} v {t2:?} {map} #{seed}: shifted since {at:.2}s, safe with work since \
+                 {since:.2}s, still shifted at {:.2}s",
+                f.sim_time
+            );
+        }
+    }
+    eprintln!("{windows} Travel Form windows, {safe_checks} safe-with-work frames checked");
+    assert!(
+        windows >= 20,
+        "only {windows} Travel Form windows — the seeds moved"
+    );
+    assert!(
+        safe_checks > 0,
+        "no shifted Druid was ever safe with work — vacuous"
+    );
+}
+
+// ── Cyclone: the direct-push aura sites ────────────────────────────────────
+
+/// A unit next to a Shaman's totem and a Hunter's Frost Trap zone, cycloned
+/// or not, after one pulse of each. Returns its aura types, Cyclone aside.
+fn pushed_auras(cycloned: bool) -> Vec<String> {
+    use arenasim::states::play_match::components::{SlowZone, Totem, TotemElement};
+    use arenasim::states::play_match::totems::totem_pulse_system;
+    use arenasim::states::play_match::traps::slow_zone_system;
+
+    let mut world = world();
+    let mut time = Time::<()>::default();
+    time.advance_by(Duration::from_secs_f32(0.1));
+    world.insert_resource(time);
+    let shaman = unit(&mut world, 1, CharacterClass::Shaman, vec![]);
+    let hunter = unit(&mut world, 2, CharacterClass::Hunter, vec![]);
+    let druid = unit(&mut world, 2, CharacterClass::Druid, vec![]);
+    let mut auras = Vec::new();
+    if cycloned {
+        auras.push(aura_of(AbilityType::Cyclone, Entity::from_raw(0), druid));
+    }
+    // A team-1 unit: the Shaman's ally, the Hunter's enemy.
+    let victim = unit(&mut world, 1, CharacterClass::Warrior, auras);
+    world.spawn((
+        Totem {
+            owner_team: 1,
+            owner: shaman,
+            element: TotemElement::ALL[0],
+            radius: 20.0,
+            duration_remaining: 30.0,
+            aura_type: AuraType::SpellPowerIncrease,
+            magnitude: 10.0,
+            spell_school: SpellSchool::Nature,
+        },
+        Transform::default(),
+    ));
+    world.spawn((
+        SlowZone {
+            owner_team: 2,
+            owner: hunter,
+            radius: 10.0,
+            duration_remaining: 30.0,
+            slow_magnitude: 0.4,
+        },
+        Transform::default(),
+    ));
+    world.run_system_once(totem_pulse_system).unwrap();
+    world.run_system_once(slow_zone_system).unwrap();
+    let mut types = aura_types(&world, victim);
+    types.retain(|t| *t != AuraType::Cyclone);
+    sorted(types)
+}
+
+/// Paired: the totem pulse and the Frost Trap zone push their auras straight
+/// into the vector, past `apply_pending_auras`, and a Cyclone still turns
+/// both away.
+#[test]
+fn a_totem_pulse_and_a_frost_trap_zone_skip_a_cycloned_unit() {
+    assert_eq!(
+        pushed_auras(false),
+        sorted(vec![
+            AuraType::SpellPowerIncrease,
+            AuraType::MovementSpeedSlow
+        ]),
+        "control: both land on an uncycloned unit"
+    );
+    assert!(
+        pushed_auras(true).is_empty(),
+        "{:?} reached a cycloned unit",
+        pushed_auras(true)
+    );
+}

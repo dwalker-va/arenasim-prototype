@@ -196,9 +196,13 @@ produces it.
   form has no timer that matters (600s ceiling); the Druid ends it
 - No second resource pool and no kit swap — an escape shift only
 - AI: the Druid shifts when PRESSURED and rooted or slowed, or when a melee is
-  beating on it below 60% HP; the posture machine then runs it in ESCAPE
-  (`ShiftEscape`). It shifts out once no melee or pet is within striking reach
-  AND an ally in range is below 80% HP
+  beating on it below 60% HP; the posture machine then runs it in ESCAPE from
+  its melee and pet chasers (`ShiftEscape`). It shifts out at once if it is
+  rooted again (a new snare does not: the form still outruns a slowed chaser).
+  Otherwise it shifts out once it has been shifted 3s, no melee or pet is
+  within striking reach (nor within 12 yd, for its first 8s in form), and it
+  has work — an ally in range below 80% HP, or an enemy within Moonfire's
+  range. With nothing to heal and nothing in reach it stays shifted
 
 ### Future: Diminishing Returns
 - Not yet implemented

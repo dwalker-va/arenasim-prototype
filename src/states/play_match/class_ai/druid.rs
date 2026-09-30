@@ -27,8 +27,11 @@
 //! Form when a threat is on the Druid and it is rooted or slowed, or when a
 //! melee is beating on it (see [`shift_trigger`]). The shift breaks the
 //! impairment and the posture machine runs; while shifted the Druid casts
-//! nothing, and it shifts back — free, no global cooldown — once no melee is
-//! on it AND someone needs healing ([`should_leave_form`]).
+//! nothing. It shifts back — free, no global cooldown — once it has been
+//! shifted [`DRUID_MIN_FORM_SECS`], no chaser is within striking reach (nor
+//! within the danger radius, for the first [`DRUID_MAX_CHASE_SECS`]) and it
+//! has work (an ally to heal or an enemy in spell reach), or at once if it
+//! is rooted again ([`should_leave_form`]).
 //!
 //! Steps 5-9 answer to the MANA GOVERNOR ([`mana_reserve`]): proactive heals,
 //! control and damage are paid for only out of mana above a reserve that
@@ -130,18 +133,59 @@ pub fn shift_trigger(
     None
 }
 
-/// Whether a shifted Druid leaves Travel Form: once it is SAFE AND healing is
-/// NEEDED (an ally in heal range below [`DRUID_TOP_UP_HP`]).
+/// The least time a Druid spends in Travel Form before it may leave to cast:
+/// long enough to open real distance at the form's speed, and two global
+/// cooldowns so a shift is never paid for and thrown straight back.
+pub const DRUID_MIN_FORM_SECS: f32 = 3.0;
+/// How long a chaser that cannot close to striking reach may keep the Druid
+/// shifted. Past this the Druid stops running and uses its kit: its heals are
+/// instants, and a chaser that never lands a hit is one it can outpace again
+/// on the next shift.
+pub const DRUID_MAX_CHASE_SECS: f32 = 8.0;
+
+/// What a shifted Druid can see from inside the form, for [`should_leave_form`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FormView {
+    /// Seconds since it shifted.
+    pub in_form_secs: f32,
+    /// Rooted again while shifted.
+    pub rooted: bool,
+    /// A visible melee enemy or pet within the danger radius — a chaser the
+    /// form has not yet shaken off.
+    pub chaser_near: bool,
+    /// A visible melee enemy or pet within striking reach of the Druid.
+    pub chaser_striking: bool,
+    /// An ally in heal range below [`DRUID_TOP_UP_HP`].
+    pub healing_needed: bool,
+    /// A visible enemy within the Druid's spell reach (Moonfire's range):
+    /// something to Moonfire, root or cyclone.
+    pub enemy_in_reach: bool,
+}
+
+/// Whether a shifted Druid leaves Travel Form. Leaving is free and costs no
+/// global cooldown.
+/// - **Rooted again**: it leaves at once, whatever else holds — a rooted form
+///   is no faster than no form, and the rotation re-shifts to break the root
+///   if a threat is still on it. A new SNARE does not: the form still outruns
+///   a slowed chaser, and shifting out and back in under a Mage's Frostbolts
+///   would spend mana and a global cooldown on every bolt.
+/// - Otherwise it leaves once it is **safe** — it has been shifted at least
+///   [`DRUID_MIN_FORM_SECS`], no chaser is within striking reach, and none is
+///   within the danger radius either unless it has run for
+///   [`DRUID_MAX_CHASE_SECS`] without shaking it — **and has work**: an ally
+///   to heal, or an enemy in reach of its spells.
 ///
-/// SAFE means no melee enemy or pet within striking reach (`melee_near`
-/// false) — the thing the form outruns. A caster hitting the Druid from range
-/// does not keep it shifted, and neither does a melee trailing a few yards
-/// behind: the form buys nothing against a spell, every second spent in it is
-/// a second of no healing, and the heals are instants, so the Druid can shift
-/// out, heal and shift again before a chaser closes. Safe but nobody hurt, it
-/// stays shifted — the form is faster, and there is nothing to cast.
-pub fn should_leave_form(melee_near: bool, healing_needed: bool) -> bool {
-    !melee_near && healing_needed
+/// Safe with nothing in reach, it stays shifted: the form is faster and
+/// there is nothing to cast. A caster hitting the Druid from range does not
+/// keep it shifted — the form buys nothing against a spell.
+pub fn should_leave_form(view: FormView) -> bool {
+    if view.rooted {
+        return true;
+    }
+    view.in_form_secs >= DRUID_MIN_FORM_SECS
+        && !view.chaser_striking
+        && (!view.chaser_near || view.in_form_secs >= DRUID_MAX_CHASE_SECS)
+        && (view.healing_needed || view.enemy_in_reach)
 }
 
 /// The mana the governor holds back `time_since_gates` seconds into the fight:
@@ -308,16 +352,44 @@ pub fn decide_druid_action(
     // whether to leave it. Leaving is free and on no global cooldown, so it
     // is decided before the GCD gate. It is not an ability decision — the
     // posture machine traces the ESCAPE it ends, and the log says it.
-    if auras.is_some_and(ActiveAuras::is_shapeshifted) {
-        let healing_needed = ctx.alive_allies().into_iter().any(|a| {
-            a.health_pct() < DRUID_TOP_UP_HP
-                && my_pos.distance(a.position) <= movement.shared.heal_range
-        });
-        let melee_near = ctx
-            .visible_enemies_within(entity, my_pos, MELEE_RANGE + DRUID_ATTACK_RANGE_SLACK)
+    if let Some(form) = auras.and_then(|a| {
+        a.auras
             .iter()
-            .any(|e| e.class.is_melee() || e.is_pet);
-        if gates_opened && should_leave_form(melee_near, healing_needed) {
+            .find(|aura| aura.effect_type == AuraType::TravelForm)
+    }) {
+        let form_duration = abilities
+            .get_unchecked(&AbilityType::TravelForm)
+            .applies_aura
+            .as_ref()
+            .map_or(form.duration, |a| a.duration);
+        let view = FormView {
+            in_form_secs: form_duration - form.duration,
+            rooted: auras.is_some_and(|a| {
+                a.auras
+                    .iter()
+                    .any(|aura| aura.effect_type == AuraType::Root)
+            }),
+            chaser_near: ctx
+                .visible_enemies_within(entity, my_pos, movement.shared.danger_radius)
+                .iter()
+                .any(|e| e.class.is_melee() || e.is_pet),
+            chaser_striking: ctx
+                .visible_enemies_within(entity, my_pos, MELEE_RANGE + DRUID_ATTACK_RANGE_SLACK)
+                .iter()
+                .any(|e| e.class.is_melee() || e.is_pet),
+            healing_needed: ctx.alive_allies().into_iter().any(|a| {
+                a.health_pct() < DRUID_TOP_UP_HP
+                    && my_pos.distance(a.position) <= movement.shared.heal_range
+            }),
+            enemy_in_reach: !ctx
+                .visible_enemies_within(
+                    entity,
+                    my_pos,
+                    abilities.get_unchecked(&AbilityType::Moonfire).range,
+                )
+                .is_empty(),
+        };
+        if gates_opened && should_leave_form(view) {
             commands.spawn(ShapeshiftPending {
                 caster: entity,
                 shift: Shift::Out,
@@ -981,16 +1053,71 @@ mod tests {
         assert_eq!(shift_trigger(true, false, false, 0.1), None);
     }
 
+    fn view() -> FormView {
+        FormView {
+            in_form_secs: DRUID_MIN_FORM_SECS,
+            rooted: false,
+            chaser_near: false,
+            chaser_striking: false,
+            healing_needed: true,
+            enemy_in_reach: false,
+        }
+    }
+
     #[test]
-    fn the_druid_leaves_the_form_only_when_safe_and_needed() {
-        assert!(should_leave_form(false, true));
+    fn the_druid_leaves_the_form_once_safe_with_work_to_do() {
+        assert!(should_leave_form(view()));
+        assert!(should_leave_form(FormView {
+            healing_needed: false,
+            enemy_in_reach: true,
+            ..view()
+        }));
         assert!(
-            !should_leave_form(true, true),
-            "a melee in reach keeps it shifted"
+            !should_leave_form(FormView {
+                in_form_secs: DRUID_MIN_FORM_SECS - 0.1,
+                ..view()
+            }),
+            "a fresh shift is not thrown straight back"
         );
         assert!(
-            !should_leave_form(false, false),
-            "nobody to heal: stay fast"
+            !should_leave_form(FormView {
+                chaser_near: true,
+                ..view()
+            }),
+            "a chaser inside the danger radius keeps it shifted"
+        );
+        assert!(
+            should_leave_form(FormView {
+                chaser_near: true,
+                in_form_secs: DRUID_MAX_CHASE_SECS,
+                ..view()
+            }),
+            "...until it has run too long without shaking it"
+        );
+        assert!(
+            !should_leave_form(FormView {
+                chaser_near: true,
+                chaser_striking: true,
+                in_form_secs: DRUID_MAX_CHASE_SECS,
+                ..view()
+            }),
+            "never with the chaser in striking reach"
+        );
+        assert!(
+            !should_leave_form(FormView {
+                healing_needed: false,
+                ..view()
+            }),
+            "nothing to heal and nothing in reach: stay fast"
+        );
+        assert!(
+            should_leave_form(FormView {
+                in_form_secs: 0.1,
+                chaser_near: true,
+                rooted: true,
+                ..view()
+            }),
+            "rooted again: leave at once, to re-shift"
         );
     }
 

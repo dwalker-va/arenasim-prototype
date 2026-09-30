@@ -180,6 +180,7 @@ pub fn evaluate_caster_healer_posture(
                     MovementTrigger::ShiftEscape
                 },
                 shared.threat_intent_radius,
+                true,
             ),
             Posture::Escape => escape_tick(
                 commands,
@@ -195,6 +196,7 @@ pub fn evaluate_caster_healer_posture(
                 prev,
                 MovementTrigger::EscapeWindowOpen,
                 shared.danger_radius,
+                false,
             ),
             Posture::Pressured => caster_healer_pressured_tick(
                 commands,

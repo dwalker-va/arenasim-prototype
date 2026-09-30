@@ -504,11 +504,13 @@ pub(super) fn ally_walk_tick(
 /// `weights` selects the per-class scorer weights (Priest U7, Paladin U8) —
 /// everything else is class-independent.
 ///
-/// `entry_trigger` and `threat_radius` describe the window: an impairment
-/// window is `EscapeWindowOpen` from the threats inside the danger radius;
-/// the Druid's Travel Form escape (`ShiftEscape`) runs from every threat
-/// inside the intent radius, and re-commits in windows while it stays
-/// shifted — a re-commit (`prev` already ESCAPE) is traced as a direction
+/// `entry_trigger`, `threat_radius` and `chasers_only` describe the window:
+/// an impairment window is `EscapeWindowOpen` from every threat inside the
+/// danger radius; the Druid's Travel Form escape (`ShiftEscape`) runs from
+/// the CHASERS (melee and pets) inside the intent radius — the form outruns
+/// those and buys nothing against a spell, so a ranged enemy must not bend
+/// the run back toward a chaser — and re-commits in windows while it stays
+/// shifted. A re-commit (`prev` already ESCAPE) is traced as a direction
 /// change, not a transition.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn escape_tick(
@@ -525,6 +527,7 @@ pub(super) fn escape_tick(
     prev: Posture,
     entry_trigger: MovementTrigger,
     threat_radius: f32,
+    chasers_only: bool,
 ) {
     if !transitioned {
         // Committed mid-window: keep the directive alive if it somehow died
@@ -552,6 +555,9 @@ pub(super) fn escape_tick(
     // BTreeMap for deterministic scorer input order.
     let mut threat_positions: std::collections::BTreeMap<Entity, Vec3> = Default::default();
     for t in ctx.visible_enemies_within(entity, my_pos, threat_radius) {
+        if chasers_only && !(t.class.is_melee() || t.is_pet) {
+            continue;
+        }
         threat_positions.insert(t.entity, t.position);
     }
 

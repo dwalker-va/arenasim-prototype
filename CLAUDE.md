@@ -653,8 +653,9 @@ obstacle-free maps (BasicArena stays byte-identical).
 
 **Travel Form escape (Druid)** — no RON knob. A shifted Druid is in ESCAPE for
 as long as it stays shifted (`evaluate_caster_healer_posture`'s `shifted`
-argument; the Shaman passes `false`): it runs from every visible threat inside
-`threat_intent_radius` and re-scores each `commit_window`, traced as
+argument; the Shaman passes `false`): it runs from every visible CHASER (melee
+or pet — the form cannot outrun a spell) inside `threat_intent_radius` and
+re-scores each `commit_window`, traced as
 `ShiftEscape` on entry and `CommitExpired` after. The shift and the shift out
 are the Druid AI's (`class_ai/druid.rs` — `shift_trigger`, `should_leave_form`);
 rules in `docs/design/wow-mechanics.md` (Travel Form).
