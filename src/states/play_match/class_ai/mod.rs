@@ -1104,6 +1104,70 @@ pub fn ally_freers(
         .collect()
 }
 
+/// The urgent dispel bar: crowd control worth a healer's GCD ahead of healing,
+/// even under pressure (see [`dispel_priority`]).
+pub const URGENT_DISPEL_PRIORITY: i32 = 90;
+
+/// How urgently a healer's ally dispel wants `aura` gone: [`dispel_priority`],
+/// except that a cleansable poison (e.g. Crippling's 70% slow) is worth a
+/// maintenance cleanse — rated 50 rather than the bare MovementSpeedSlow's 20,
+/// so a healthy Paladin lifts it, but an under-pressure Paladin (urgent-only)
+/// still prioritizes healing over the snare.
+pub fn ally_dispel_priority(aura: &Aura) -> i32 {
+    if aura.is_cleansable_poison() {
+        50
+    } else {
+        dispel_priority(aura.effect_type)
+    }
+}
+
+/// The teammate a healer should WALK to so that `dispel` can free it: the
+/// nearest living non-pet teammate (never the healer itself) holding crowd
+/// control that `dispel` removes at the urgent bar, standing beyond `dispel`'s
+/// range. `None` when such a teammate is already in range (the rotation's
+/// urgent dispel frees it where the healer stands), when there is none, or when
+/// the healer cannot afford the dispel on arrival.
+///
+/// The urgent bar is the same one the rotation's urgent dispel uses, so the
+/// walk is only ever toward a dispel the rotation would cast the moment it
+/// arrives. Nearest first, entity order breaking ties, so it is deterministic.
+pub fn dispel_chase_target(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    my_pos: Vec3,
+    current_mana: f32,
+    dispel: AbilityType,
+) -> Option<Entity> {
+    let def = abilities.get(&dispel)?;
+    let AllyRemoval { scope, .. } = ally_removal(dispel)?;
+    if current_mana < def.mana_cost {
+        return None;
+    }
+    let mut nearest: Option<(f32, Entity)> = None;
+    for ally in ctx.alive_allies() {
+        if ally.entity == entity {
+            continue;
+        }
+        let urgent = ctx.active_auras.get(&ally.entity).is_some_and(|auras| {
+            auras
+                .iter()
+                .any(|a| scope.takes(a) && ally_dispel_priority(a) >= URGENT_DISPEL_PRIORITY)
+        });
+        if !urgent {
+            continue;
+        }
+        let distance = my_pos.distance(ally.position);
+        if distance <= def.range {
+            return None;
+        }
+        if nearest.is_none_or(|(d, e)| (distance, ally.entity) < (d, e)) {
+            nearest = Some((distance, ally.entity));
+        }
+    }
+    nearest.map(|(_, e)| e)
+}
+
 /// Shared dispel logic used by Priest (Dispel Magic) and Paladin (Cleanse).
 ///
 /// Finds the ally with the highest priority dispellable debuff and casts
@@ -1180,6 +1244,10 @@ pub fn try_dispel_ally(
 
     // Find ally with highest priority dispellable debuff
     let mut best_candidate: Option<(Entity, i32)> = None;
+    // The nearest ally that WOULD qualify but stands beyond the dispel's range —
+    // reported as `OutOfRange` when nobody in range qualifies, so a trace tells
+    // "nothing to dispel" apart from "something to dispel, out of reach".
+    let mut nearest_out_of_range: Option<f32> = None;
 
     for (e, info) in ctx.combatants.iter() {
         // Must be alive ally; pets only where this dispel reaches them
@@ -1191,40 +1259,27 @@ pub fn try_dispel_ally(
             continue;
         }
 
-        // Check range
-        if my_pos.distance(info.position) > def.range {
-            continue;
-        }
-
         // Check if ally has any dispellable debuffs
         let Some(ally_auras) = ctx.active_auras.get(e) else {
             continue;
         };
 
         // Find highest priority dispellable debuff on this ally
-        let mut highest_priority = -1;
-        for aura in ally_auras {
-            if !scope.takes(aura) {
-                continue;
-            }
-
-            // Cleansable poisons (e.g. Crippling's 70% slow) are worth a
-            // maintenance cleanse — rate them at 50 rather than the bare
-            // MovementSpeedSlow's 20, so a healthy Paladin lifts them, but an
-            // under-pressure Paladin (urgent-only, min_priority 90) still
-            // prioritizes healing over the snare.
-            let priority = if aura.is_cleansable_poison() {
-                50
-            } else {
-                dispel_priority(aura.effect_type)
-            };
-
-            if priority > highest_priority {
-                highest_priority = priority;
-            }
-        }
+        let highest_priority = ally_auras
+            .iter()
+            .filter(|aura| scope.takes(aura))
+            .map(ally_dispel_priority)
+            .max()
+            .unwrap_or(-1);
 
         if highest_priority < min_priority {
+            continue;
+        }
+
+        // Check range
+        let distance = my_pos.distance(info.position);
+        if distance > def.range {
+            nearest_out_of_range = Some(nearest_out_of_range.map_or(distance, |d| d.min(distance)));
             continue;
         }
 
@@ -1238,7 +1293,14 @@ pub fn try_dispel_ally(
     }
 
     let Some((dispel_target, _)) = best_candidate else {
-        trace.reject(ability_type, RejectionReason::NoValidTarget);
+        let reason = match nearest_out_of_range {
+            Some(distance) => RejectionReason::OutOfRange {
+                distance,
+                max: def.range,
+            },
+            None => RejectionReason::NoValidTarget,
+        };
+        trace.reject(ability_type, reason);
         return false;
     };
 

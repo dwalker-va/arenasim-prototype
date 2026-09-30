@@ -42,11 +42,13 @@ use super::{CombatContext, CombatantInfo};
 /// [`decide_paladin_action`] (mirrors the Priest's `escape_defer` but adds
 /// the Hammer of Justice gate).
 pub struct PaladinMovementPlan {
-    /// `Some(urgency_hp_threshold)` while an ESCAPE window OR a DIP is live:
-    /// the heal ladder defers non-critical movement-locking casts (Flash of
-    /// Light, Holy Light) whose would-be target is ABOVE the threshold —
-    /// casting locks movement, and an undeferred heal mid-dip would stall
-    /// the walk into a budget abort (R8; same rule as the Priest's R7).
+    /// `Some(urgency_hp_threshold)` while an ESCAPE window, a DIP or a dispel
+    /// walk is live: the heal ladder defers non-critical movement-locking casts
+    /// (Flash of Light, Holy Light) whose would-be target is ABOVE the
+    /// threshold — casting locks movement, and an undeferred heal mid-dip would
+    /// stall the walk into a budget abort (R8; same rule as the Priest's R7),
+    /// or mid-dispel-walk would hold the Paladin out of Cleanse range while
+    /// its trapped teammate's CC runs.
     pub cast_defer: Option<f32>,
     /// Hammer of Justice gate for this tick (reservation / dip cast).
     pub hoj: HojPlan,
@@ -200,7 +202,7 @@ pub fn decide_paladin_action(
         my_pos,
         auras,
         ctx,
-        90,
+        super::URGENT_DISPEL_PRIORITY,
         &mut builder,
     ) {
         builder.finish();
@@ -682,7 +684,7 @@ fn try_flash_of_light(
             builder.reject(
                 ability,
                 RejectionReason::PreconditionUnmet {
-                    note: "dip/escape live: non-critical heal deferred".to_string(),
+                    note: "dip/escape/dispel walk live: non-critical heal deferred".to_string(),
                 },
             );
             return false;
@@ -781,7 +783,7 @@ fn try_holy_light(
             builder.reject(
                 ability,
                 RejectionReason::PreconditionUnmet {
-                    note: "dip/escape live: non-critical heal deferred".to_string(),
+                    note: "dip/escape/dispel walk live: non-critical heal deferred".to_string(),
                 },
             );
             return false;

@@ -294,6 +294,12 @@ pub enum MovementTrigger {
     /// and out of melee range fell back toward its healer for a bounded window
     /// instead of face-chasing. Emitted on the activation edge only.
     MeleeReset,
+    /// Healer dispel walk (Paladin): a teammate is held in crowd control the
+    /// healer's dispel removes at the urgent bar, beyond the dispel's range, so
+    /// the healer walks toward it (a `point` goal, the ally in the target view)
+    /// until the rotation's urgent dispel can reach. Emitted within the
+    /// posture (no transition), once per commit window.
+    DispelChase,
 }
 
 /// Shape of the movement goal carried by the directive this decision issued.
