@@ -9,9 +9,9 @@
 //! The two endings are noticed by two different systems: `process_hot_ticks`
 //! sees an aura's last frame, and `process_dispels` sees a removal. Each spawns
 //! a [`BloomPending`] and this system lands every one of them, so there is ONE
-//! heal site for a bloom — one place that applies healing reduction, arena
-//! dampening, the log line and the floating text — rather than two copies that
-//! could disagree. Same shape as `BacklashPending` / `process_backlash`.
+//! heal site for a bloom — one place for the log line and the floating text,
+//! landing through `apply_healing` like every heal — rather than two copies
+//! that could disagree. Same shape as `BacklashPending` / `process_backlash`.
 //!
 //! ## What does not bloom
 //!
@@ -21,7 +21,7 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 
 use crate::combat::log::CombatLog;
-use crate::states::play_match::combat_core::spawn_healing_refused_tell;
+use crate::states::play_match::combat_core::apply_healing;
 use crate::states::play_match::components::*;
 use crate::states::play_match::match_config::CharacterClass;
 use crate::states::play_match::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
@@ -83,23 +83,14 @@ pub fn process_blooms(
         }
         let target_position = target_transform.translation;
 
-        // Healing reduction (Mortal Strike): a bloom is a direct heal.
-        let mut heal = pending.amount;
-        if let Some(auras) = target_auras {
-            for aura in &auras.auras {
-                if aura.effect_type == AuraType::HealingReduction {
-                    heal *= aura.magnitude;
-                }
-            }
-        }
-        spawn_healing_refused_tell(&mut commands, pending.target, pending.amount, heal);
-
-        // Arena dampening applies to every heal, the bloom included.
-        let heal = dampening.apply(heal);
-
-        let before = target.current_health;
-        target.current_health = (target.current_health + heal).min(target.max_health);
-        let actual = target.current_health - before;
+        let actual = apply_healing(
+            &mut commands,
+            pending.target,
+            &mut target,
+            target_auras,
+            &dampening,
+            pending.amount,
+        );
 
         let target_id = combat_log_id_for(&target, pet_query.get(pending.target).ok());
         let self_bloom = pending.caster == Some(pending.target);

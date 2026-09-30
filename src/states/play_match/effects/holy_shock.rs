@@ -9,9 +9,7 @@ use bevy_egui::egui;
 use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
-use crate::states::play_match::combat_core::{
-    apply_damage_with_absorb, roll_crit, spawn_healing_refused_tell,
-};
+use crate::states::play_match::combat_core::{apply_damage_with_absorb, apply_healing, roll_crit};
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use crate::states::play_match::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
@@ -55,30 +53,14 @@ pub fn process_holy_shock_heals(
                 heal_amount *= CRIT_HEALING_MULTIPLIER;
             }
 
-            // Check for healing reduction debuffs (e.g., Mortal Strike)
-            let pre_reduction_healing = heal_amount;
-            if let Some(auras) = target_auras {
-                for aura in &auras.auras {
-                    if aura.effect_type == AuraType::HealingReduction {
-                        // Magnitude is a multiplier (e.g., 0.65 = 35% reduction)
-                        heal_amount *= aura.magnitude;
-                    }
-                }
-            }
-            // Mortal Wounds tell — the third and last reduction site.
-            spawn_healing_refused_tell(
+            let actual_heal = apply_healing(
                 &mut commands,
                 pending.target,
-                pre_reduction_healing,
+                &mut target,
+                target_auras,
+                &dampening,
                 heal_amount,
             );
-
-            // Arena dampening: time-ramped reduction of all healing
-            heal_amount = dampening.apply(heal_amount);
-
-            let old_health = target.current_health;
-            target.current_health = (target.current_health + heal_amount).min(target.max_health);
-            let actual_heal = target.current_health - old_health;
 
             let target_id = combat_log_id_for(&target, pet_query.get(pending.target).ok());
 

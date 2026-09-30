@@ -15,6 +15,7 @@ use super::damage::{
     apply_damage_with_absorb, get_divine_shield_damage_penalty, get_physical_damage_reduction,
     roll_crit,
 };
+use super::healing::apply_healing;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use bevy::prelude::*;
 use bevy_egui::egui;
@@ -120,52 +121,6 @@ pub fn update_stealth_visuals(
                 }
             }
         }
-    }
-}
-
-/// Fraction of a heal that a [`AuraType::HealingReduction`] debuff refused, or
-/// `None` when nothing was cut.
-///
-/// Called at each of the three sites that apply the reduction, to decide
-/// whether to spawn a [`HealingRefused`] cosmetic marker. Returns `None` for a
-/// zero or negative heal (nothing to refuse) and for a reduction too small to
-/// see, so an unafflicted target never spawns a marker and headless never
-/// accumulates them for ordinary healing. Pure — no RNG, no side effects.
-pub fn refused_fraction(before: f32, after: f32) -> Option<f32> {
-    /// Below this the ash would be a handful of invisible motes.
-    const MIN_VISIBLE_REFUSAL: f32 = 0.01;
-    if before <= 0.0 {
-        return None;
-    }
-    let refused = ((before - after) / before).clamp(0.0, 1.0);
-    (refused > MIN_VISIBLE_REFUSAL).then_some(refused)
-}
-
-/// Spawn the Mortal Wounds tell for a heal a `HealingReduction` debuff cut.
-///
-/// **Call this from every healing application site**, immediately after the
-/// reduction loop and BEFORE `ArenaDampening::apply` — the tell belongs to the
-/// debuff, not to dampening, so `before`/`after` must bracket only the aura's
-/// cut. A site that skips it simply shows no tell, which is silent, so this
-/// sits beside the dampening rule in `CLAUDE.md`'s combat-flow notes: a new
-/// heal mechanic needs both.
-///
-/// Byte-neutral: no `game_rng`, spawned in both modes, read only by the
-/// graphical `rendering/effects/mortal_wounds.rs`.
-pub fn spawn_healing_refused_tell(
-    commands: &mut Commands,
-    target: Entity,
-    before: f32,
-    after: f32,
-) {
-    if let Some(refused) = refused_fraction(before, after) {
-        commands.spawn((
-            HealingRefused {
-                target,
-                refused_fraction: refused,
-            },
-            PlayMatchEntity,
-        ));
     }
 }
 
@@ -774,32 +729,6 @@ pub fn process_casting(
         }
         // Handle healing spells
         else if def.is_heal() {
-            // Use pre-calculated healing (already includes stat scaling + crit)
-            let mut healing = ability_healing;
-
-            // Check for healing reduction auras
-            let pre_reduction_healing = healing;
-            if let Some(auras) = target_auras.as_deref() {
-                for aura in &auras.auras {
-                    if aura.effect_type == AuraType::HealingReduction {
-                        // Magnitude is a multiplier (e.g., 0.65 = 35% reduction)
-                        healing *= aura.magnitude;
-                    }
-                }
-            }
-            // Mortal Wounds tell: the debuff has no body treatment, it states
-            // itself by visibly breaking the heal. Before dampening, so the
-            // tell reflects the debuff's cut only.
-            spawn_healing_refused_tell(
-                &mut commands,
-                target_entity,
-                pre_reduction_healing,
-                healing,
-            );
-
-            // Arena dampening: time-ramped reduction of all healing
-            healing = dampening.apply(healing);
-
             // A heal that consumes an aura (Swiftmend eats Rejuvenation) takes
             // it as it lands. The AI only casts it at a target that carries
             // one; a consumed aura that blooms would bloom here, since it has
@@ -828,9 +757,15 @@ pub fn process_casting(
                 }
             }
 
-            // Apply healing (don't overheal)
-            let actual_healing = healing.min(target.max_health - target.current_health);
-            target.current_health = (target.current_health + healing).min(target.max_health);
+            // Use pre-calculated healing (already includes stat scaling + crit)
+            let actual_healing = apply_healing(
+                &mut commands,
+                target_entity,
+                &mut target,
+                target_auras.as_deref(),
+                &dampening,
+                ability_healing,
+            );
 
             // Track healing done for healer (update later to avoid double borrow)
             if is_self_target {
@@ -1464,31 +1399,14 @@ pub fn process_channeling(
         if let Ok((_, caster_transform, mut caster, _, caster_auras)) =
             combatants.get_mut(caster_entity)
         {
-            let mut actual_healing = healing;
-
-            // Check for healing reduction auras
-            let pre_reduction_healing = actual_healing;
-            if let Some(auras) = caster_auras {
-                for aura in &auras.auras {
-                    if aura.effect_type == AuraType::HealingReduction {
-                        actual_healing *= aura.magnitude;
-                    }
-                }
-            }
-            // Mortal Wounds tell — see the heal-a-target path above.
-            spawn_healing_refused_tell(
+            let effective_healing = apply_healing(
                 &mut commands,
                 caster_entity,
-                pre_reduction_healing,
-                actual_healing,
+                &mut caster,
+                caster_auras.as_deref(),
+                &dampening,
+                healing,
             );
-
-            // Arena dampening: time-ramped reduction of all healing
-            actual_healing = dampening.apply(actual_healing);
-
-            // Apply healing
-            let effective_healing = actual_healing.min(caster.max_health - caster.current_health);
-            caster.current_health = (caster.current_health + actual_healing).min(caster.max_health);
             caster.healing_done += effective_healing;
 
             // Spawn floating combat text for healing

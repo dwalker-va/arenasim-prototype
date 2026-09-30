@@ -4,6 +4,7 @@
 
 use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
+use super::combat_core::apply_healing;
 use super::components::*;
 use super::constants::CRIT_DAMAGE_MULTIPLIER;
 use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset, pet_combatant_id};
@@ -335,7 +336,7 @@ pub fn process_projectile_hits(
 
             // Update caster damage dealt (include absorbed damage - caster dealt it)
             {
-                let Ok((_, mut caster, _)) = combatants.get_mut(caster_entity) else {
+                let Ok((_, mut caster, caster_auras)) = combatants.get_mut(caster_entity) else {
                     commands.entity(projectile_entity).despawn();
                     continue;
                 };
@@ -345,11 +346,16 @@ pub fn process_projectile_hits(
                 // damage actually dealt (health removed; absorbed damage isn't
                 // "caused"). Capped at the caster's missing health.
                 if ability == AbilityType::DeathCoil && actual_damage > 0.0 {
-                    // Arena dampening applies to lifesteal like any other healing
-                    let lifesteal = dampening.apply(actual_damage);
-                    let effective = lifesteal.min(caster.max_health - caster.current_health);
-                    caster.current_health =
-                        (caster.current_health + lifesteal).min(caster.max_health);
+                    // Healing reduction and arena dampening cut lifesteal like
+                    // any other healing.
+                    let effective = apply_healing(
+                        &mut commands,
+                        caster_entity,
+                        &mut caster,
+                        caster_auras.as_deref(),
+                        &dampening,
+                        actual_damage,
+                    );
                     caster.healing_done += effective;
                     if effective > 0.0 {
                         combat_log.log_healing(
