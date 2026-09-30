@@ -412,9 +412,11 @@ fn a_paladin_frees_a_warrior_trapped_out_of_range_within_the_walk_time() {
 // End to end: a headless match
 // ============================================================================
 
-/// The walk in a real match. In `Hunter+Priest vs Rogue+Paladin` the Priest's
+/// The walk in a real match. In `Mage+Priest vs Rogue+Paladin` the Priest's
 /// Psychic Scream fears the Rogue away from its Paladin, beyond Cleanse's
-/// range; the Paladin walks and cleanses it. Asserted over seeds rather than
+/// range; the Paladin walks and cleanses it. (No Hunter on the other side: a
+/// Hunter's Flare reveals the Rogue before it reaches the Priest, and the
+/// Scream this probe needs never comes.) Asserted over seeds rather than
 /// pinned to one, with a floor so the probe cannot pass by never walking: at
 /// least one walk (a `DispelChase` run toward an ally, begun beyond range by
 /// construction) must end with a Cleanse on that same ally, which the rotation
@@ -431,7 +433,7 @@ fn a_paladin_walks_to_a_feared_teammate_and_cleanses_it() {
         drop(tmp);
         run_headless_match_with(
             HeadlessMatchConfig {
-                team1: vec!["Hunter".into(), "Priest".into()],
+                team1: vec!["Mage".into(), "Priest".into()],
                 team2: vec!["Rogue".into(), "Paladin".into()],
                 max_duration_secs: 40.0,
                 random_seed: Some(seed),

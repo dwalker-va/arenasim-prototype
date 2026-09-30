@@ -42,6 +42,8 @@ mod traps;
 pub use traps::*;
 mod ice_block;
 pub use ice_block::*;
+mod flare;
+pub use flare::*;
 mod movement_trails;
 pub use movement_trails::*;
 mod affliction;

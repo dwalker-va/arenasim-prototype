@@ -2080,3 +2080,142 @@ fn a_shot_that_would_land_after_the_hunters_own_trap_catches_its_target_is_held(
         "the trap is off the Rogue's line"
     );
 }
+
+/// AS-166 — a configured kill target counts the enemy's non-pets in slot
+/// order, as acquisition resolves it, and is "hidden" only while alive and out
+/// of this unit's view: a team knows whom it was told to kill, not where.
+#[test]
+fn a_hidden_kill_target_is_named_by_slot_from_the_roster() {
+    let hunter = Entity::from_raw(0);
+    let rogue = Entity::from_raw(7);
+    let priest = Entity::from_raw(3);
+    let felhunter = Entity::from_raw(1);
+    let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+    snap.combatants.insert(
+        rogue,
+        CombatantInfo {
+            stealthed: true,
+            slot: 0,
+            ..info(rogue, 2, CharacterClass::Rogue)
+        },
+    );
+    snap.combatants.insert(
+        priest,
+        CombatantInfo {
+            slot: 1,
+            ..info(priest, 2, CharacterClass::Priest)
+        },
+    );
+    snap.combatants
+        .insert(felhunter, pet_info(felhunter, 2, CharacterClass::Warlock));
+    let ctx = snap.context_for(hunter);
+    assert!(ctx.kill_target_hidden(0), "slot 0 is the stealthed Rogue");
+    assert!(!ctx.kill_target_hidden(1), "slot 1 is the Priest, in view");
+    assert!(
+        !ctx.kill_target_hidden(2),
+        "a pet is never a kill-target slot"
+    );
+
+    snap.combatants.get_mut(&rogue).unwrap().stealthed = false;
+    assert!(!snap.context_for(hunter).kill_target_hidden(0), "revealed");
+    snap.combatants.get_mut(&rogue).unwrap().stealthed = true;
+    snap.combatants.get_mut(&rogue).unwrap().is_alive = false;
+    assert!(!snap.context_for(hunter).kill_target_hidden(0), "dead");
+}
+
+/// AS-166 — where and when the Hunter lights a Flare for a Rogue it cannot
+/// see. Nothing to find, nothing lit. The light goes ahead of the ally nearest
+/// the enemy gate (team 2 lines up at +x), toward that gate, and not before a
+/// Rogue running from the gate since the gates opened could be at its edge —
+/// within a GCD of that moment the hold reserves the GCD for it. It is held on
+/// cooldown, and for mana.
+#[test]
+fn a_flare_is_lit_ahead_of_the_ally_nearest_the_enemy_gate_once_the_rogue_could_be_there() {
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::ability_config::AbilityDefinitions;
+    use arenasim::states::play_match::class_ai::hunter::{
+        flare_plan, FlarePlan, FLARE_HELD_TOO_EARLY, FLARE_LEAD,
+    };
+    use arenasim::states::play_match::constants::GCD;
+    use arenasim::states::play_match::decision_trace::RejectionReason;
+    use arenasim::states::play_match::Combatant;
+
+    let defs = AbilityDefinitions::default();
+    let hunter = Entity::from_raw(0);
+    let priest = Entity::from_raw(1);
+    let rogue = Entity::from_raw(2);
+    let hunter_at = Vec3::new(-30.0, 0.0, 0.0);
+    let priest_at = Vec3::new(-15.0, 0.0, 6.0);
+    let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+    snap.combatants.get_mut(&hunter).unwrap().position = hunter_at;
+    snap.combatants.insert(
+        priest,
+        CombatantInfo {
+            position: priest_at,
+            ..info(priest, 1, CharacterClass::Priest)
+        },
+    );
+    let me = Combatant::new(1, 0, CharacterClass::Hunter);
+    let plan = |snap: &CombatSnapshot, me: &Combatant, since_gates: f32| {
+        flare_plan(&defs, me, hunter_at, &snap.context_for(hunter), since_gates)
+    };
+
+    assert!(
+        plan(&snap, &me, 60.0).is_none(),
+        "no hidden enemy, no Flare"
+    );
+
+    snap.combatants.insert(
+        rogue,
+        CombatantInfo {
+            stealthed: true,
+            position: Vec3::new(20.0, 0.0, 0.0),
+            ..info(rogue, 2, CharacterClass::Rogue)
+        },
+    );
+    // Team 2's gate: the default octagon's spawn line, at +x.
+    let gate = Vec3::new(35.0, 0.0, 0.0);
+    let lit = priest_at + (gate - priest_at).normalize() * FLARE_LEAD;
+    // A Rogue at 6yd/s reaches the light's edge at (|gate - lit| - 10) / 6.
+    let edge = (gate.distance(lit) - 10.0) / 6.0;
+    let too_early = |since: f32, reserved: bool| {
+        matches!(
+            plan(&snap, &me, since),
+            Some(FlarePlan::Hold {
+                reason: RejectionReason::PreconditionUnmet { note },
+                reserve,
+            }) if note == FLARE_HELD_TOO_EARLY && reserve == reserved
+        )
+    };
+    assert!(too_early(edge - GCD - 0.1, false), "early: held, GCD free");
+    assert!(
+        too_early(edge - 0.1, true),
+        "within a GCD: held, GCD reserved"
+    );
+    match plan(&snap, &me, edge + 0.1) {
+        Some(FlarePlan::Light(center)) => assert!(
+            center.distance(lit) < 1e-4,
+            "lit at {center}, expected ahead of the Priest at {lit}"
+        ),
+        other => panic!("expected a Flare ahead of the Priest, got {other:?}"),
+    }
+
+    let mut cooling = Combatant::new(1, 0, CharacterClass::Hunter);
+    cooling.ability_cooldowns.insert(AbilityType::Flare, 4.0);
+    assert!(matches!(
+        plan(&snap, &cooling, 60.0),
+        Some(FlarePlan::Hold {
+            reason: RejectionReason::OnCooldown { .. },
+            reserve: false
+        })
+    ));
+    let mut broke = Combatant::new(1, 0, CharacterClass::Hunter);
+    broke.current_mana = 10.0;
+    assert!(matches!(
+        plan(&snap, &broke, 60.0),
+        Some(FlarePlan::Hold {
+            reason: RejectionReason::InsufficientMana { .. },
+            reserve: false
+        })
+    ));
+}

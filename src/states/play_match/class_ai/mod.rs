@@ -285,6 +285,27 @@ impl<'a> CombatContext<'a> {
         self.hidden_enemies > 0
     }
 
+    /// Is the enemy a configured kill target of `index` names alive and
+    /// hidden from this unit? `index` counts the enemy team's non-pet
+    /// combatants in slot order, exactly as target acquisition resolves
+    /// `team1_kill_target` / `team2_kill_target`. Answered from the roster
+    /// like [`enemy_hidden`](Self::enemy_hidden): a team knows whom it was
+    /// told to kill, not where that enemy is.
+    pub fn kill_target_hidden(&self, index: usize) -> bool {
+        let Some(my_team) = self.self_info().map(|i| i.team) else {
+            return false;
+        };
+        let mut primaries: Vec<&CombatantInfo> = self
+            .roster
+            .values()
+            .filter(|info| info.team != my_team && !info.is_pet)
+            .collect();
+        primaries.sort_by_key(|info| info.slot);
+        primaries
+            .get(index)
+            .is_some_and(|info| info.is_alive && !self.combatants.contains_key(&info.entity))
+    }
+
     /// Every living enemy of `team` (pets included) physically within
     /// `radius` of `center`, SEEN OR NOT, in deterministic entity order.
     ///

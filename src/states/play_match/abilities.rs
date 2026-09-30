@@ -199,6 +199,7 @@ pub enum AbilityType {
     Disengage,      // Hunter backward leap (~15 yards, 25s CD, no range req)
     FreezingTrap,   // Hunter trap — incapacitates first enemy (25s CD)
     FrostTrap,      // Hunter trap — creates persistent slow zone (20s CD)
+    Flare,          // Hunter ground-targeted area that exposes stealthed enemies (15s CD)
     // Hunter pet abilities
     SpiderWeb,   // Spider ranged root on target (45s CD)
     BoarCharge,  // Boar gap closer + short stun (45s CD)

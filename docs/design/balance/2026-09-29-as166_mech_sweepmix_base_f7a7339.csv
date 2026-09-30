@@ -1,0 +1,841 @@
+label,seed,kt1,kt2,hunter_team,enemy,flares,flare_reveals,first_flare,first_flare_at,revealed_by,reveal_t,opener,opener_t,opener_on,traps_on_rogue,traps_on_other,winner,duration,hunter_won
+Warrior+Rogue_vs_Warrior+Hunter,0,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,23.05,1
+Warrior+Rogue_vs_Warrior+Hunter,1,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,19.83,1
+Warrior+Rogue_vs_Warrior+Hunter,2,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,20.43,1
+Warrior+Rogue_vs_Warrior+Hunter,3,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,19.9,1
+Warrior+Rogue_vs_Warrior+Hunter,4,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,20.75,1
+Warrior+Rogue_vs_Mage+Hunter,0,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,16.42,1
+Warrior+Rogue_vs_Mage+Hunter,1,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,16.42,1
+Warrior+Rogue_vs_Mage+Hunter,2,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,16.42,1
+Warrior+Rogue_vs_Mage+Hunter,3,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,16.42,1
+Warrior+Rogue_vs_Mage+Hunter,4,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,16.42,1
+Warrior+Rogue_vs_Rogue+Hunter,0,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,20.42,1
+Warrior+Rogue_vs_Rogue+Hunter,1,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,20.43,1
+Warrior+Rogue_vs_Rogue+Hunter,2,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,22.18,1
+Warrior+Rogue_vs_Rogue+Hunter,3,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,20.43,1
+Warrior+Rogue_vs_Rogue+Hunter,4,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,22.18,1
+Warrior+Rogue_vs_Priest+Hunter,0,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,22.93,1
+Warrior+Rogue_vs_Priest+Hunter,1,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,22.82,1
+Warrior+Rogue_vs_Priest+Hunter,2,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,19.58,1
+Warrior+Rogue_vs_Priest+Hunter,3,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,22.82,1
+Warrior+Rogue_vs_Priest+Hunter,4,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,20.67,1
+Warrior+Rogue_vs_Warlock+Hunter,0,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,20.52,1
+Warrior+Rogue_vs_Warlock+Hunter,1,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,21.82,1
+Warrior+Rogue_vs_Warlock+Hunter,2,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,20.52,1
+Warrior+Rogue_vs_Warlock+Hunter,3,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,20.7,1
+Warrior+Rogue_vs_Warlock+Hunter,4,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,20.52,1
+Warrior+Rogue_vs_Paladin+Hunter,0,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,25.35,1
+Warrior+Rogue_vs_Paladin+Hunter,1,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,27.12,1
+Warrior+Rogue_vs_Paladin+Hunter,2,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,24.58,1
+Warrior+Rogue_vs_Paladin+Hunter,3,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,27.15,1
+Warrior+Rogue_vs_Paladin+Hunter,4,,,2,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,25.35,1
+Warrior+Rogue_vs_Hunter+Shaman,0,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 2,16.13,1
+Warrior+Rogue_vs_Hunter+Shaman,1,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 2,16.13,1
+Warrior+Rogue_vs_Hunter+Shaman,2,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 2,15.5,1
+Warrior+Rogue_vs_Hunter+Shaman,3,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 2,14.57,1
+Warrior+Rogue_vs_Hunter+Shaman,4,,,2,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 2,16.03,1
+Warrior+Hunter_vs_Warrior+Rogue,0,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,23.05,1
+Warrior+Hunter_vs_Warrior+Rogue,1,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,19.83,1
+Warrior+Hunter_vs_Warrior+Rogue,2,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,20.43,1
+Warrior+Hunter_vs_Warrior+Rogue,3,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,19.9,1
+Warrior+Hunter_vs_Warrior+Rogue,4,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,20.75,1
+Warrior+Hunter_vs_Mage+Rogue,0,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,27.82,1
+Warrior+Hunter_vs_Mage+Rogue,1,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,29.75,0
+Warrior+Hunter_vs_Mage+Rogue,2,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,29.6,1
+Warrior+Hunter_vs_Mage+Rogue,3,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,29.82,1
+Warrior+Hunter_vs_Mage+Rogue,4,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,27.92,1
+Warrior+Hunter_vs_Rogue+Priest,0,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 2,60.3,0
+Warrior+Hunter_vs_Rogue+Priest,1,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 2,46.95,0
+Warrior+Hunter_vs_Rogue+Priest,2,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,1,Team 2,40.68,0
+Warrior+Hunter_vs_Rogue+Priest,3,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 2,49.37,0
+Warrior+Hunter_vs_Rogue+Priest,4,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 2,61.18,0
+Warrior+Hunter_vs_Rogue+Warlock,0,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.38,Team 1 Warrior #1,0,0,Team 1,19.08,1
+Warrior+Hunter_vs_Rogue+Warlock,1,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.38,Team 1 Warrior #1,0,0,Team 1,21.38,1
+Warrior+Hunter_vs_Rogue+Warlock,2,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.38,Team 1 Warrior #1,0,0,Team 1,17.58,1
+Warrior+Hunter_vs_Rogue+Warlock,3,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.38,Team 1 Warrior #1,0,0,Team 1,21.35,1
+Warrior+Hunter_vs_Rogue+Warlock,4,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.38,Team 1 Warrior #1,0,0,Team 1,19.08,1
+Warrior+Hunter_vs_Rogue+Paladin,0,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.38,Team 1 Warrior #1,0,1,Team 2,69.95,0
+Warrior+Hunter_vs_Rogue+Paladin,1,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.38,Team 1 Warrior #1,0,1,Team 2,69.45,0
+Warrior+Hunter_vs_Rogue+Paladin,2,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.38,Team 1 Warrior #1,0,0,Team 2,41.93,0
+Warrior+Hunter_vs_Rogue+Paladin,3,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.38,Team 1 Warrior #1,0,0,Team 2,74.85,0
+Warrior+Hunter_vs_Rogue+Paladin,4,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.38,Team 1 Warrior #1,0,0,Team 2,74.3,0
+Warrior+Hunter_vs_Rogue+Shaman,0,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,43.43,0
+Warrior+Hunter_vs_Rogue+Shaman,1,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,27.87,1
+Warrior+Hunter_vs_Rogue+Shaman,2,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,29.87,1
+Warrior+Hunter_vs_Rogue+Shaman,3,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,51.87,1
+Warrior+Hunter_vs_Rogue+Shaman,4,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,19.82,1
+Mage+Rogue_vs_Warrior+Hunter,0,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,27.82,1
+Mage+Rogue_vs_Warrior+Hunter,1,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,29.75,0
+Mage+Rogue_vs_Warrior+Hunter,2,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,29.6,1
+Mage+Rogue_vs_Warrior+Hunter,3,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,29.82,1
+Mage+Rogue_vs_Warrior+Hunter,4,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,27.92,1
+Mage+Rogue_vs_Mage+Hunter,0,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,17.8,1
+Mage+Rogue_vs_Mage+Hunter,1,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,17.8,1
+Mage+Rogue_vs_Mage+Hunter,2,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,16.4,1
+Mage+Rogue_vs_Mage+Hunter,3,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,17.8,1
+Mage+Rogue_vs_Mage+Hunter,4,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,20.23,1
+Mage+Rogue_vs_Rogue+Hunter,0,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,29.68,1
+Mage+Rogue_vs_Rogue+Hunter,1,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,25.52,1
+Mage+Rogue_vs_Rogue+Hunter,2,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,21.23,1
+Mage+Rogue_vs_Rogue+Hunter,3,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,26.42,1
+Mage+Rogue_vs_Rogue+Hunter,4,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,25.52,1
+Mage+Rogue_vs_Priest+Hunter,0,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,2,0,Team 2,47.38,1
+Mage+Rogue_vs_Priest+Hunter,1,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,45.42,1
+Mage+Rogue_vs_Priest+Hunter,2,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,52.6,1
+Mage+Rogue_vs_Priest+Hunter,3,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,2,0,Team 1,48.52,0
+Mage+Rogue_vs_Priest+Hunter,4,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,45.7,0
+Mage+Rogue_vs_Warlock+Hunter,0,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,29.3,1
+Mage+Rogue_vs_Warlock+Hunter,1,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,29.28,1
+Mage+Rogue_vs_Warlock+Hunter,2,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,29.28,1
+Mage+Rogue_vs_Warlock+Hunter,3,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,29.75,1
+Mage+Rogue_vs_Warlock+Hunter,4,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,29.75,1
+Mage+Rogue_vs_Paladin+Hunter,0,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,54.67,1
+Mage+Rogue_vs_Paladin+Hunter,1,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,57.58,1
+Mage+Rogue_vs_Paladin+Hunter,2,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,53.25,1
+Mage+Rogue_vs_Paladin+Hunter,3,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,57.58,1
+Mage+Rogue_vs_Paladin+Hunter,4,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,45.8,1
+Mage+Rogue_vs_Hunter+Shaman,0,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.93,,,,1,0,Team 1,23.83,0
+Mage+Rogue_vs_Hunter+Shaman,1,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.93,,,,1,0,Team 1,23.78,0
+Mage+Rogue_vs_Hunter+Shaman,2,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.93,,,,1,0,Team 1,21.43,0
+Mage+Rogue_vs_Hunter+Shaman,3,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.93,,,,1,0,Team 1,23.83,0
+Mage+Rogue_vs_Hunter+Shaman,4,,,2,Mage+Rogue,0,0,,,Freezing Trap,4.93,,,,1,0,Team 1,23.8,0
+Mage+Hunter_vs_Warrior+Rogue,0,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,16.42,1
+Mage+Hunter_vs_Warrior+Rogue,1,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,16.42,1
+Mage+Hunter_vs_Warrior+Rogue,2,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,16.42,1
+Mage+Hunter_vs_Warrior+Rogue,3,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,16.42,1
+Mage+Hunter_vs_Warrior+Rogue,4,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,16.42,1
+Mage+Hunter_vs_Mage+Rogue,0,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,17.8,1
+Mage+Hunter_vs_Mage+Rogue,1,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,17.8,1
+Mage+Hunter_vs_Mage+Rogue,2,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,16.4,1
+Mage+Hunter_vs_Mage+Rogue,3,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,17.8,1
+Mage+Hunter_vs_Mage+Rogue,4,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,20.23,1
+Mage+Hunter_vs_Rogue+Priest,0,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.45,Team 1 Hunter #2,0,0,Team 2,25.33,0
+Mage+Hunter_vs_Rogue+Priest,1,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.45,Team 1 Hunter #2,0,0,Team 2,23.48,0
+Mage+Hunter_vs_Rogue+Priest,2,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.45,Team 1 Hunter #2,0,0,Team 1,26.52,1
+Mage+Hunter_vs_Rogue+Priest,3,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.45,Team 1 Hunter #2,0,0,Team 2,24.67,0
+Mage+Hunter_vs_Rogue+Priest,4,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.45,Team 1 Hunter #2,0,0,Team 2,23.12,0
+Mage+Hunter_vs_Rogue+Warlock,0,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 1 Mage #1,0,0,Team 1,25.32,1
+Mage+Hunter_vs_Rogue+Warlock,1,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 1 Mage #1,0,0,Team 2,28.02,0
+Mage+Hunter_vs_Rogue+Warlock,2,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 1 Mage #1,0,0,Team 1,23.02,1
+Mage+Hunter_vs_Rogue+Warlock,3,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 1 Mage #1,0,0,Team 2,23.67,0
+Mage+Hunter_vs_Rogue+Warlock,4,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 1 Mage #1,0,0,Team 1,18.18,1
+Mage+Hunter_vs_Rogue+Paladin,0,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.63,Team 1 Mage #1,0,0,Team 2,50.87,0
+Mage+Hunter_vs_Rogue+Paladin,1,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.63,Team 1 Mage #1,0,0,Team 2,47.27,0
+Mage+Hunter_vs_Rogue+Paladin,2,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.63,Team 1 Mage #1,0,1,Team 2,46.73,0
+Mage+Hunter_vs_Rogue+Paladin,3,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.63,Team 1 Mage #1,0,0,Team 2,49.43,0
+Mage+Hunter_vs_Rogue+Paladin,4,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.63,Team 1 Mage #1,0,0,Team 2,48.92,0
+Mage+Hunter_vs_Rogue+Shaman,0,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.02,,,,1,0,Team 1,17.33,1
+Mage+Hunter_vs_Rogue+Shaman,1,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.02,,,,1,0,Team 1,17.68,1
+Mage+Hunter_vs_Rogue+Shaman,2,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.02,,,,1,0,Team 1,17.68,1
+Mage+Hunter_vs_Rogue+Shaman,3,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.02,,,,1,0,Team 1,17.68,1
+Mage+Hunter_vs_Rogue+Shaman,4,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.02,,,,1,0,Team 1,17.68,1
+Rogue+Priest_vs_Warrior+Hunter,0,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 1,60.3,0
+Rogue+Priest_vs_Warrior+Hunter,1,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 1,46.95,0
+Rogue+Priest_vs_Warrior+Hunter,2,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,1,Team 1,40.68,0
+Rogue+Priest_vs_Warrior+Hunter,3,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 1,49.37,0
+Rogue+Priest_vs_Warrior+Hunter,4,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 1,61.18,0
+Rogue+Priest_vs_Mage+Hunter,0,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.45,Team 2 Hunter #2,0,0,Team 1,25.33,0
+Rogue+Priest_vs_Mage+Hunter,1,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.45,Team 2 Hunter #2,0,0,Team 1,23.48,0
+Rogue+Priest_vs_Mage+Hunter,2,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.45,Team 2 Hunter #2,0,0,Team 2,26.52,1
+Rogue+Priest_vs_Mage+Hunter,3,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.45,Team 2 Hunter #2,0,0,Team 1,24.67,0
+Rogue+Priest_vs_Mage+Hunter,4,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.45,Team 2 Hunter #2,0,0,Team 1,23.12,0
+Rogue+Priest_vs_Rogue+Hunter,0,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 2 Hunter #2,0,0,Team 1,24.47,0
+Rogue+Priest_vs_Rogue+Hunter,1,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 2 Hunter #2,0,0,Team 1,24.03,0
+Rogue+Priest_vs_Rogue+Hunter,2,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 2 Hunter #2,0,0,Team 1,19.8,0
+Rogue+Priest_vs_Rogue+Hunter,3,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 2 Hunter #2,0,0,Team 1,24.03,0
+Rogue+Priest_vs_Rogue+Hunter,4,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 2 Hunter #2,0,0,Team 1,20.85,0
+Rogue+Priest_vs_Priest+Hunter,0,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.7,Team 2 Priest #1,0,1,Team 2,55.55,1
+Rogue+Priest_vs_Priest+Hunter,1,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.7,Team 2 Priest #1,0,1,Team 2,60.83,1
+Rogue+Priest_vs_Priest+Hunter,2,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.7,Team 2 Priest #1,0,1,Team 1,40.92,0
+Rogue+Priest_vs_Priest+Hunter,3,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.7,Team 2 Priest #1,0,1,Team 1,64.47,0
+Rogue+Priest_vs_Priest+Hunter,4,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.7,Team 2 Priest #1,0,1,Team 2,60.05,1
+Rogue+Priest_vs_Warlock+Hunter,0,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Warlock #1,1,0,Team 2,40.83,1
+Rogue+Priest_vs_Warlock+Hunter,1,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Warlock #1,0,0,Team 2,25.45,1
+Rogue+Priest_vs_Warlock+Hunter,2,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Warlock #1,0,0,Team 2,26.37,1
+Rogue+Priest_vs_Warlock+Hunter,3,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Warlock #1,1,0,Team 1,44.87,0
+Rogue+Priest_vs_Warlock+Hunter,4,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Warlock #1,0,0,Team 2,24.53,1
+Rogue+Priest_vs_Paladin+Hunter,0,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,1,Team 1,70.52,0
+Rogue+Priest_vs_Paladin+Hunter,1,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,1,Team 1,74.54,0
+Rogue+Priest_vs_Paladin+Hunter,2,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,1,Team 2,56.7,1
+Rogue+Priest_vs_Paladin+Hunter,3,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,1,Team 1,75.72,0
+Rogue+Priest_vs_Paladin+Hunter,4,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,1,Team 2,58.47,1
+Rogue+Priest_vs_Hunter+Shaman,0,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.52,Team 2 Hunter #1,0,0,Team 1,43.57,0
+Rogue+Priest_vs_Hunter+Shaman,1,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.52,Team 2 Hunter #1,0,0,Team 1,46.62,0
+Rogue+Priest_vs_Hunter+Shaman,2,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.52,Team 2 Hunter #1,0,1,Team 2,72.82,1
+Rogue+Priest_vs_Hunter+Shaman,3,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.52,Team 2 Hunter #1,0,1,Team 2,79.09,1
+Rogue+Priest_vs_Hunter+Shaman,4,,,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.52,Team 2 Hunter #1,0,0,Team 1,50.3,0
+Rogue+Warlock_vs_Warrior+Hunter,0,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.38,Team 2 Warrior #1,0,0,Team 2,19.08,1
+Rogue+Warlock_vs_Warrior+Hunter,1,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.38,Team 2 Warrior #1,0,0,Team 2,21.38,1
+Rogue+Warlock_vs_Warrior+Hunter,2,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.38,Team 2 Warrior #1,0,0,Team 2,17.58,1
+Rogue+Warlock_vs_Warrior+Hunter,3,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.38,Team 2 Warrior #1,0,0,Team 2,21.35,1
+Rogue+Warlock_vs_Warrior+Hunter,4,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.38,Team 2 Warrior #1,0,0,Team 2,19.08,1
+Rogue+Warlock_vs_Mage+Hunter,0,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 2 Mage #1,0,0,Team 2,25.32,1
+Rogue+Warlock_vs_Mage+Hunter,1,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 2 Mage #1,0,0,Team 1,28.02,0
+Rogue+Warlock_vs_Mage+Hunter,2,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 2 Mage #1,0,0,Team 2,23.02,1
+Rogue+Warlock_vs_Mage+Hunter,3,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 2 Mage #1,0,0,Team 1,23.47,0
+Rogue+Warlock_vs_Mage+Hunter,4,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 2 Mage #1,0,0,Team 2,18.18,1
+Rogue+Warlock_vs_Rogue+Hunter,0,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #2,0,0,Team 1,21.47,0
+Rogue+Warlock_vs_Rogue+Hunter,1,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #2,0,0,Team 2,19.55,1
+Rogue+Warlock_vs_Rogue+Hunter,2,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #2,0,0,Team 1,22.45,0
+Rogue+Warlock_vs_Rogue+Hunter,3,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #2,0,0,Team 2,23.28,1
+Rogue+Warlock_vs_Rogue+Hunter,4,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #2,0,0,Team 1,21.32,0
+Rogue+Warlock_vs_Priest+Hunter,0,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 2 Priest #1,1,0,Team 1,44.07,0
+Rogue+Warlock_vs_Priest+Hunter,1,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 2 Priest #1,1,0,Team 1,38.03,0
+Rogue+Warlock_vs_Priest+Hunter,2,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 2 Priest #1,1,0,Team 1,25.78,0
+Rogue+Warlock_vs_Priest+Hunter,3,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 2 Priest #1,1,0,Team 1,26.27,0
+Rogue+Warlock_vs_Priest+Hunter,4,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 2 Priest #1,1,0,Team 1,38.03,0
+Rogue+Warlock_vs_Warlock+Hunter,0,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 2 Warlock #1,0,0,Team 2,23.05,1
+Rogue+Warlock_vs_Warlock+Hunter,1,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 2 Warlock #1,0,0,Team 2,25.13,1
+Rogue+Warlock_vs_Warlock+Hunter,2,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 2 Warlock #1,0,0,Team 2,22.85,1
+Rogue+Warlock_vs_Warlock+Hunter,3,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 2 Warlock #1,0,0,Team 2,23.02,1
+Rogue+Warlock_vs_Warlock+Hunter,4,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 2 Warlock #1,0,0,Team 2,23.5,1
+Rogue+Warlock_vs_Paladin+Hunter,0,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,0,Team 1,34.87,0
+Rogue+Warlock_vs_Paladin+Hunter,1,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,0,Team 2,47.88,1
+Rogue+Warlock_vs_Paladin+Hunter,2,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,0,Team 2,33.92,1
+Rogue+Warlock_vs_Paladin+Hunter,3,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,0,Team 1,45.47,0
+Rogue+Warlock_vs_Paladin+Hunter,4,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,0,Team 2,34.0,1
+Rogue+Warlock_vs_Hunter+Shaman,0,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.05,Team 2 Hunter #1,0,0,Team 2,30.05,1
+Rogue+Warlock_vs_Hunter+Shaman,1,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.05,Team 2 Hunter #1,0,0,Team 2,30.83,1
+Rogue+Warlock_vs_Hunter+Shaman,2,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.05,Team 2 Hunter #1,0,0,Team 2,28.57,1
+Rogue+Warlock_vs_Hunter+Shaman,3,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.05,Team 2 Hunter #1,0,0,Team 2,28.58,1
+Rogue+Warlock_vs_Hunter+Shaman,4,,,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.05,Team 2 Hunter #1,0,0,Team 2,27.37,1
+Rogue+Paladin_vs_Warrior+Hunter,0,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.38,Team 2 Warrior #1,0,1,Team 1,69.95,0
+Rogue+Paladin_vs_Warrior+Hunter,1,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.38,Team 2 Warrior #1,0,1,Team 1,69.45,0
+Rogue+Paladin_vs_Warrior+Hunter,2,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.38,Team 2 Warrior #1,0,0,Team 1,41.93,0
+Rogue+Paladin_vs_Warrior+Hunter,3,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.38,Team 2 Warrior #1,0,0,Team 1,74.85,0
+Rogue+Paladin_vs_Warrior+Hunter,4,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.38,Team 2 Warrior #1,0,0,Team 1,74.3,0
+Rogue+Paladin_vs_Mage+Hunter,0,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.63,Team 2 Mage #1,0,0,Team 1,50.87,0
+Rogue+Paladin_vs_Mage+Hunter,1,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.63,Team 2 Mage #1,0,0,Team 1,47.27,0
+Rogue+Paladin_vs_Mage+Hunter,2,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.63,Team 2 Mage #1,0,1,Team 1,46.73,0
+Rogue+Paladin_vs_Mage+Hunter,3,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.63,Team 2 Mage #1,0,0,Team 1,49.43,0
+Rogue+Paladin_vs_Mage+Hunter,4,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.63,Team 2 Mage #1,0,0,Team 1,48.92,0
+Rogue+Paladin_vs_Rogue+Hunter,0,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Hunter #2,0,0,Team 2,50.35,1
+Rogue+Paladin_vs_Rogue+Hunter,1,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Hunter #2,0,0,Team 2,56.93,1
+Rogue+Paladin_vs_Rogue+Hunter,2,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Hunter #2,0,1,Team 2,63.62,1
+Rogue+Paladin_vs_Rogue+Hunter,3,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Hunter #2,0,1,Team 2,57.4,1
+Rogue+Paladin_vs_Rogue+Hunter,4,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Hunter #2,0,0,Team 2,49.8,1
+Rogue+Paladin_vs_Priest+Hunter,0,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 2 Priest #1,0,1,Team 1,40.87,0
+Rogue+Paladin_vs_Priest+Hunter,1,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 2 Priest #1,0,0,Team 1,37.3,0
+Rogue+Paladin_vs_Priest+Hunter,2,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 2 Priest #1,0,0,Team 1,29.82,0
+Rogue+Paladin_vs_Priest+Hunter,3,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 2 Priest #1,1,0,Team 1,61.98,0
+Rogue+Paladin_vs_Priest+Hunter,4,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 2 Priest #1,0,0,Team 1,33.95,0
+Rogue+Paladin_vs_Warlock+Hunter,0,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 2 Warlock #1,0,0,Team 1,42.52,0
+Rogue+Paladin_vs_Warlock+Hunter,1,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 2 Warlock #1,0,0,Team 1,41.82,0
+Rogue+Paladin_vs_Warlock+Hunter,2,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 2 Warlock #1,0,1,Team 1,44.1,0
+Rogue+Paladin_vs_Warlock+Hunter,3,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 2 Warlock #1,0,0,Team 1,40.88,0
+Rogue+Paladin_vs_Warlock+Hunter,4,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 2 Warlock #1,0,0,Team 1,40.67,0
+Rogue+Paladin_vs_Paladin+Hunter,0,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,1,Team 1,87.07,0
+Rogue+Paladin_vs_Paladin+Hunter,1,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,1,Team 2,135.39,1
+Rogue+Paladin_vs_Paladin+Hunter,2,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,1,Team 2,96.93,1
+Rogue+Paladin_vs_Paladin+Hunter,3,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,1,Team 2,170.57,1
+Rogue+Paladin_vs_Paladin+Hunter,4,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 2 Paladin #1,0,0,Team 1,72.35,0
+Rogue+Paladin_vs_Hunter+Shaman,0,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,1,Team 2,76.9,1
+Rogue+Paladin_vs_Hunter+Shaman,1,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,2,Team 1,76.52,0
+Rogue+Paladin_vs_Hunter+Shaman,2,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,1,Team 1,58.82,0
+Rogue+Paladin_vs_Hunter+Shaman,3,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,1,0,Team 2,93.56,1
+Rogue+Paladin_vs_Hunter+Shaman,4,,,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,1,Team 1,53.2,0
+Rogue+Hunter_vs_Warrior+Rogue,0,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,20.42,1
+Rogue+Hunter_vs_Warrior+Rogue,1,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,20.43,1
+Rogue+Hunter_vs_Warrior+Rogue,2,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,22.18,1
+Rogue+Hunter_vs_Warrior+Rogue,3,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,20.43,1
+Rogue+Hunter_vs_Warrior+Rogue,4,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,22.18,1
+Rogue+Hunter_vs_Mage+Rogue,0,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,29.68,1
+Rogue+Hunter_vs_Mage+Rogue,1,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,25.52,1
+Rogue+Hunter_vs_Mage+Rogue,2,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,21.23,1
+Rogue+Hunter_vs_Mage+Rogue,3,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,26.42,1
+Rogue+Hunter_vs_Mage+Rogue,4,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,25.52,1
+Rogue+Hunter_vs_Rogue+Priest,0,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 1 Hunter #2,0,0,Team 2,24.47,0
+Rogue+Hunter_vs_Rogue+Priest,1,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 1 Hunter #2,0,0,Team 2,24.03,0
+Rogue+Hunter_vs_Rogue+Priest,2,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 1 Hunter #2,0,0,Team 2,19.8,0
+Rogue+Hunter_vs_Rogue+Priest,3,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 1 Hunter #2,0,0,Team 2,24.03,0
+Rogue+Hunter_vs_Rogue+Priest,4,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 1 Hunter #2,0,0,Team 2,20.85,0
+Rogue+Hunter_vs_Rogue+Warlock,0,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #2,0,0,Team 2,21.47,0
+Rogue+Hunter_vs_Rogue+Warlock,1,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #2,0,0,Team 1,19.55,1
+Rogue+Hunter_vs_Rogue+Warlock,2,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #2,0,0,Team 2,22.45,0
+Rogue+Hunter_vs_Rogue+Warlock,3,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #2,0,0,Team 1,23.28,1
+Rogue+Hunter_vs_Rogue+Warlock,4,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #2,0,0,Team 1,21.32,1
+Rogue+Hunter_vs_Rogue+Paladin,0,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Hunter #2,0,0,Team 1,50.35,1
+Rogue+Hunter_vs_Rogue+Paladin,1,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Hunter #2,0,0,Team 1,56.93,1
+Rogue+Hunter_vs_Rogue+Paladin,2,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Hunter #2,0,1,Team 1,63.62,1
+Rogue+Hunter_vs_Rogue+Paladin,3,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Hunter #2,0,1,Team 1,57.4,1
+Rogue+Hunter_vs_Rogue+Paladin,4,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Hunter #2,0,0,Team 1,49.8,1
+Rogue+Hunter_vs_Rogue+Shaman,0,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,18.02,1
+Rogue+Hunter_vs_Rogue+Shaman,1,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,20.88,1
+Rogue+Hunter_vs_Rogue+Shaman,2,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,18.62,1
+Rogue+Hunter_vs_Rogue+Shaman,3,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,20.53,1
+Rogue+Hunter_vs_Rogue+Shaman,4,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,20.88,1
+Rogue+Shaman_vs_Warrior+Hunter,0,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,43.33,0
+Rogue+Shaman_vs_Warrior+Hunter,1,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,27.87,1
+Rogue+Shaman_vs_Warrior+Hunter,2,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,29.87,1
+Rogue+Shaman_vs_Warrior+Hunter,3,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,51.87,1
+Rogue+Shaman_vs_Warrior+Hunter,4,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,19.82,1
+Rogue+Shaman_vs_Mage+Hunter,0,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.02,,,,1,0,Team 2,17.33,1
+Rogue+Shaman_vs_Mage+Hunter,1,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.02,,,,1,0,Team 2,17.68,1
+Rogue+Shaman_vs_Mage+Hunter,2,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.02,,,,1,0,Team 2,17.68,1
+Rogue+Shaman_vs_Mage+Hunter,3,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.02,,,,1,0,Team 2,17.68,1
+Rogue+Shaman_vs_Mage+Hunter,4,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.02,,,,1,0,Team 2,17.68,1
+Rogue+Shaman_vs_Rogue+Hunter,0,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,18.02,1
+Rogue+Shaman_vs_Rogue+Hunter,1,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,20.88,1
+Rogue+Shaman_vs_Rogue+Hunter,2,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,18.62,1
+Rogue+Shaman_vs_Rogue+Hunter,3,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,20.53,1
+Rogue+Shaman_vs_Rogue+Hunter,4,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,20.88,1
+Rogue+Shaman_vs_Priest+Hunter,0,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 1,57.02,0
+Rogue+Shaman_vs_Priest+Hunter,1,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 2,89.16,1
+Rogue+Shaman_vs_Priest+Hunter,2,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,1,Team 1,59.4,0
+Rogue+Shaman_vs_Priest+Hunter,3,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 1,60.8,0
+Rogue+Shaman_vs_Priest+Hunter,4,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,2,0,Team 2,63.62,1
+Rogue+Shaman_vs_Warlock+Hunter,0,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,37.98,1
+Rogue+Shaman_vs_Warlock+Hunter,1,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,1,Team 1,55.53,0
+Rogue+Shaman_vs_Warlock+Hunter,2,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,61.32,0
+Rogue+Shaman_vs_Warlock+Hunter,3,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,37.23,1
+Rogue+Shaman_vs_Warlock+Hunter,4,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,36.77,1
+Rogue+Shaman_vs_Paladin+Hunter,0,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,71.14,0
+Rogue+Shaman_vs_Paladin+Hunter,1,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,84.87,0
+Rogue+Shaman_vs_Paladin+Hunter,2,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,73.85,0
+Rogue+Shaman_vs_Paladin+Hunter,3,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,71.4,0
+Rogue+Shaman_vs_Paladin+Hunter,4,,,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,77.84,0
+Rogue+Shaman_vs_Hunter+Shaman,0,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,49.3,0
+Rogue+Shaman_vs_Hunter+Shaman,1,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,42.63,0
+Rogue+Shaman_vs_Hunter+Shaman,2,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,1,Team 1,56.47,0
+Rogue+Shaman_vs_Hunter+Shaman,3,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,87.59,1
+Rogue+Shaman_vs_Hunter+Shaman,4,,,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,39.73,0
+Priest+Hunter_vs_Warrior+Rogue,0,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,22.93,1
+Priest+Hunter_vs_Warrior+Rogue,1,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,22.82,1
+Priest+Hunter_vs_Warrior+Rogue,2,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,19.58,1
+Priest+Hunter_vs_Warrior+Rogue,3,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,22.82,1
+Priest+Hunter_vs_Warrior+Rogue,4,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,20.67,1
+Priest+Hunter_vs_Mage+Rogue,0,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,34.17,1
+Priest+Hunter_vs_Mage+Rogue,1,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,2,0,Team 1,51.7,1
+Priest+Hunter_vs_Mage+Rogue,2,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,34.22,1
+Priest+Hunter_vs_Mage+Rogue,3,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,36.03,1
+Priest+Hunter_vs_Mage+Rogue,4,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,45.35,0
+Priest+Hunter_vs_Rogue+Priest,0,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.7,Team 1 Priest #1,0,1,Team 1,55.55,1
+Priest+Hunter_vs_Rogue+Priest,1,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.7,Team 1 Priest #1,0,1,Team 1,60.83,1
+Priest+Hunter_vs_Rogue+Priest,2,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.7,Team 1 Priest #1,0,1,Team 2,40.92,0
+Priest+Hunter_vs_Rogue+Priest,3,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.7,Team 1 Priest #1,0,1,Team 2,64.47,0
+Priest+Hunter_vs_Rogue+Priest,4,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.7,Team 1 Priest #1,0,1,Team 1,60.05,1
+Priest+Hunter_vs_Rogue+Warlock,0,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 1 Priest #1,1,0,Team 2,44.08,0
+Priest+Hunter_vs_Rogue+Warlock,1,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 1 Priest #1,1,0,Team 2,38.03,0
+Priest+Hunter_vs_Rogue+Warlock,2,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 1 Priest #1,1,0,Team 2,25.78,0
+Priest+Hunter_vs_Rogue+Warlock,3,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 1 Priest #1,1,0,Team 2,26.27,0
+Priest+Hunter_vs_Rogue+Warlock,4,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 1 Priest #1,1,0,Team 2,38.03,0
+Priest+Hunter_vs_Rogue+Paladin,0,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 1 Priest #1,0,1,Team 2,40.87,0
+Priest+Hunter_vs_Rogue+Paladin,1,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 1 Priest #1,0,0,Team 2,37.3,0
+Priest+Hunter_vs_Rogue+Paladin,2,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 1 Priest #1,0,0,Team 2,29.82,0
+Priest+Hunter_vs_Rogue+Paladin,3,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 1 Priest #1,1,0,Team 2,61.98,0
+Priest+Hunter_vs_Rogue+Paladin,4,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 1 Priest #1,0,0,Team 2,33.95,0
+Priest+Hunter_vs_Rogue+Shaman,0,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 1,48.33,1
+Priest+Hunter_vs_Rogue+Shaman,1,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 2,54.67,0
+Priest+Hunter_vs_Rogue+Shaman,2,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,2,0,Team 2,75.67,0
+Priest+Hunter_vs_Rogue+Shaman,3,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 2,56.87,0
+Priest+Hunter_vs_Rogue+Shaman,4,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 1,59.62,1
+Warlock+Hunter_vs_Warrior+Rogue,0,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,20.62,1
+Warlock+Hunter_vs_Warrior+Rogue,1,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,20.9,1
+Warlock+Hunter_vs_Warrior+Rogue,2,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,20.6,1
+Warlock+Hunter_vs_Warrior+Rogue,3,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,20.65,1
+Warlock+Hunter_vs_Warrior+Rogue,4,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,20.72,1
+Warlock+Hunter_vs_Mage+Rogue,0,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,29.3,1
+Warlock+Hunter_vs_Mage+Rogue,1,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,29.28,1
+Warlock+Hunter_vs_Mage+Rogue,2,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,29.28,1
+Warlock+Hunter_vs_Mage+Rogue,3,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,29.75,1
+Warlock+Hunter_vs_Mage+Rogue,4,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,29.75,1
+Warlock+Hunter_vs_Rogue+Priest,0,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Warlock #1,1,0,Team 1,40.83,1
+Warlock+Hunter_vs_Rogue+Priest,1,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Warlock #1,0,0,Team 1,25.48,1
+Warlock+Hunter_vs_Rogue+Priest,2,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Warlock #1,0,0,Team 1,26.37,1
+Warlock+Hunter_vs_Rogue+Priest,3,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Warlock #1,1,0,Team 2,44.87,0
+Warlock+Hunter_vs_Rogue+Priest,4,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Warlock #1,0,0,Team 1,25.05,1
+Warlock+Hunter_vs_Rogue+Warlock,0,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 1 Warlock #1,0,0,Team 1,23.05,1
+Warlock+Hunter_vs_Rogue+Warlock,1,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 1 Warlock #1,0,0,Team 1,25.13,1
+Warlock+Hunter_vs_Rogue+Warlock,2,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 1 Warlock #1,0,0,Team 1,23.57,1
+Warlock+Hunter_vs_Rogue+Warlock,3,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 1 Warlock #1,0,0,Team 1,22.93,1
+Warlock+Hunter_vs_Rogue+Warlock,4,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.37,Team 1 Warlock #1,0,0,Team 1,23.5,1
+Warlock+Hunter_vs_Rogue+Paladin,0,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 1 Warlock #1,0,1,Team 2,50.42,0
+Warlock+Hunter_vs_Rogue+Paladin,1,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 1 Warlock #1,0,0,Team 2,41.82,0
+Warlock+Hunter_vs_Rogue+Paladin,2,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 1 Warlock #1,0,0,Team 2,42.62,0
+Warlock+Hunter_vs_Rogue+Paladin,3,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 1 Warlock #1,0,0,Team 2,39.45,0
+Warlock+Hunter_vs_Rogue+Paladin,4,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 1 Warlock #1,0,0,Team 2,40.67,0
+Warlock+Hunter_vs_Rogue+Shaman,0,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,37.05,1
+Warlock+Hunter_vs_Rogue+Shaman,1,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,46.95,0
+Warlock+Hunter_vs_Rogue+Shaman,2,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,48.22,1
+Warlock+Hunter_vs_Rogue+Shaman,3,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,60.07,0
+Warlock+Hunter_vs_Rogue+Shaman,4,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,34.83,1
+Paladin+Hunter_vs_Warrior+Rogue,0,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,25.35,1
+Paladin+Hunter_vs_Warrior+Rogue,1,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,27.12,1
+Paladin+Hunter_vs_Warrior+Rogue,2,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,24.58,1
+Paladin+Hunter_vs_Warrior+Rogue,3,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,27.15,1
+Paladin+Hunter_vs_Warrior+Rogue,4,,,1,Rogue+Warrior,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,25.35,1
+Paladin+Hunter_vs_Mage+Rogue,0,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,54.67,1
+Paladin+Hunter_vs_Mage+Rogue,1,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,57.58,1
+Paladin+Hunter_vs_Mage+Rogue,2,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,53.25,1
+Paladin+Hunter_vs_Mage+Rogue,3,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,57.58,1
+Paladin+Hunter_vs_Mage+Rogue,4,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,45.8,1
+Paladin+Hunter_vs_Rogue+Priest,0,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,1,Team 2,82.94,0
+Paladin+Hunter_vs_Rogue+Priest,1,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,1,Team 2,76.47,0
+Paladin+Hunter_vs_Rogue+Priest,2,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,1,Team 1,54.73,1
+Paladin+Hunter_vs_Rogue+Priest,3,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,1,Team 2,79.77,0
+Paladin+Hunter_vs_Rogue+Priest,4,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,1,Team 1,64.38,1
+Paladin+Hunter_vs_Rogue+Warlock,0,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,0,Team 2,51.47,0
+Paladin+Hunter_vs_Rogue+Warlock,1,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,0,Team 2,49.45,0
+Paladin+Hunter_vs_Rogue+Warlock,2,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,0,Team 1,33.93,1
+Paladin+Hunter_vs_Rogue+Warlock,3,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,0,Team 2,56.72,0
+Paladin+Hunter_vs_Rogue+Warlock,4,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,0,Team 1,34.58,1
+Paladin+Hunter_vs_Rogue+Paladin,0,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,1,Team 2,87.07,0
+Paladin+Hunter_vs_Rogue+Paladin,1,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,1,Team 1,135.39,1
+Paladin+Hunter_vs_Rogue+Paladin,2,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,1,Team 1,96.93,1
+Paladin+Hunter_vs_Rogue+Paladin,3,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,1,Team 1,170.57,1
+Paladin+Hunter_vs_Rogue+Paladin,4,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.0,Team 1 Paladin #1,0,0,Team 2,72.35,0
+Paladin+Hunter_vs_Rogue+Shaman,0,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,71.14,0
+Paladin+Hunter_vs_Rogue+Shaman,1,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,86.89,0
+Paladin+Hunter_vs_Rogue+Shaman,2,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,71.87,0
+Paladin+Hunter_vs_Rogue+Shaman,3,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,71.4,0
+Paladin+Hunter_vs_Rogue+Shaman,4,,,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,77.84,0
+Hunter+Shaman_vs_Warrior+Rogue,0,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 1,15.35,1
+Hunter+Shaman_vs_Warrior+Rogue,1,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 1,13.78,1
+Hunter+Shaman_vs_Warrior+Rogue,2,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 1,16.13,1
+Hunter+Shaman_vs_Warrior+Rogue,3,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 1,14.57,1
+Hunter+Shaman_vs_Warrior+Rogue,4,,,1,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 1,15.35,1
+Hunter+Shaman_vs_Mage+Rogue,0,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.93,,,,1,0,Team 2,21.67,0
+Hunter+Shaman_vs_Mage+Rogue,1,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.93,,,,1,0,Team 2,25.28,0
+Hunter+Shaman_vs_Mage+Rogue,2,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.93,,,,1,0,Team 2,21.53,0
+Hunter+Shaman_vs_Mage+Rogue,3,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.93,,,,1,0,Team 2,21.37,0
+Hunter+Shaman_vs_Mage+Rogue,4,,,1,Mage+Rogue,0,0,,,Freezing Trap,4.93,,,,1,0,Team 2,23.82,0
+Hunter+Shaman_vs_Rogue+Priest,0,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.52,Team 1 Hunter #1,0,0,Team 2,38.97,0
+Hunter+Shaman_vs_Rogue+Priest,1,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.52,Team 1 Hunter #1,0,1,Team 2,44.37,0
+Hunter+Shaman_vs_Rogue+Priest,2,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.52,Team 1 Hunter #1,0,2,Team 1,77.55,1
+Hunter+Shaman_vs_Rogue+Priest,3,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.52,Team 1 Hunter #1,0,1,Team 1,75.79,1
+Hunter+Shaman_vs_Rogue+Priest,4,,,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.52,Team 1 Hunter #1,0,0,Team 2,50.22,0
+Hunter+Shaman_vs_Rogue+Warlock,0,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.05,Team 1 Hunter #1,0,0,Team 1,28.08,1
+Hunter+Shaman_vs_Rogue+Warlock,1,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.05,Team 1 Hunter #1,0,0,Team 1,28.07,1
+Hunter+Shaman_vs_Rogue+Warlock,2,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.05,Team 1 Hunter #1,0,0,Team 1,28.08,1
+Hunter+Shaman_vs_Rogue+Warlock,3,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.05,Team 1 Hunter #1,0,0,Team 1,28.58,1
+Hunter+Shaman_vs_Rogue+Warlock,4,,,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.05,Team 1 Hunter #1,0,0,Team 1,27.37,1
+Hunter+Shaman_vs_Rogue+Paladin,0,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,1,Team 1,77.17,1
+Hunter+Shaman_vs_Rogue+Paladin,1,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,0,Team 2,36.33,0
+Hunter+Shaman_vs_Rogue+Paladin,2,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,1,Team 2,70.17,0
+Hunter+Shaman_vs_Rogue+Paladin,3,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,1,0,Team 1,106.08,1
+Hunter+Shaman_vs_Rogue+Paladin,4,,,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,0,Team 2,33.52,0
+Hunter+Shaman_vs_Rogue+Shaman,0,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,39.53,0
+Hunter+Shaman_vs_Rogue+Shaman,1,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,68.62,0
+Hunter+Shaman_vs_Rogue+Shaman,2,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,41.05,0
+Hunter+Shaman_vs_Rogue+Shaman,3,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,90.01,1
+Hunter+Shaman_vs_Rogue+Shaman,4,,,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,39.73,0
+Warrior+Rogue_vs_Warrior+Hunter,0,0,0,2,Rogue+Warrior,0,0,,,opened,,Cheap Shot,5.4,Team 2 Warrior #1,0,1,Team 2,22.95,1
+Warrior+Rogue_vs_Warrior+Hunter,1,0,0,2,Rogue+Warrior,0,0,,,opened,,Cheap Shot,5.4,Team 2 Warrior #1,0,1,Team 2,25.35,1
+Warrior+Rogue_vs_Warrior+Hunter,2,0,0,2,Rogue+Warrior,0,0,,,opened,,Cheap Shot,5.4,Team 2 Warrior #1,0,1,Team 2,25.35,1
+Warrior+Rogue_vs_Warrior+Hunter,3,0,0,2,Rogue+Warrior,0,0,,,opened,,Cheap Shot,5.4,Team 2 Warrior #1,0,1,Team 2,26.0,1
+Warrior+Rogue_vs_Warrior+Hunter,4,0,0,2,Rogue+Warrior,0,0,,,opened,,Cheap Shot,5.4,Team 2 Warrior #1,0,1,Team 2,21.27,1
+Warrior+Rogue_vs_Mage+Hunter,0,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,16.4,1
+Warrior+Rogue_vs_Mage+Hunter,1,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,16.4,1
+Warrior+Rogue_vs_Mage+Hunter,2,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,16.4,1
+Warrior+Rogue_vs_Mage+Hunter,3,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,16.4,1
+Warrior+Rogue_vs_Mage+Hunter,4,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,16.4,1
+Warrior+Rogue_vs_Rogue+Hunter,0,0,0,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,23.93,0
+Warrior+Rogue_vs_Rogue+Hunter,1,0,0,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,35.03,1
+Warrior+Rogue_vs_Rogue+Hunter,2,0,0,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,36.03,1
+Warrior+Rogue_vs_Rogue+Hunter,3,0,0,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,1,1,Team 2,44.88,1
+Warrior+Rogue_vs_Rogue+Hunter,4,0,0,2,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,36.03,1
+Warrior+Rogue_vs_Priest+Hunter,0,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,23.08,1
+Warrior+Rogue_vs_Priest+Hunter,1,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,22.62,1
+Warrior+Rogue_vs_Priest+Hunter,2,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,21.97,1
+Warrior+Rogue_vs_Priest+Hunter,3,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,23.08,1
+Warrior+Rogue_vs_Priest+Hunter,4,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,23.08,1
+Warrior+Rogue_vs_Warlock+Hunter,0,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,20.52,1
+Warrior+Rogue_vs_Warlock+Hunter,1,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,21.83,1
+Warrior+Rogue_vs_Warlock+Hunter,2,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,20.52,1
+Warrior+Rogue_vs_Warlock+Hunter,3,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,21.53,1
+Warrior+Rogue_vs_Warlock+Hunter,4,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,20.52,1
+Warrior+Rogue_vs_Paladin+Hunter,0,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,24.82,1
+Warrior+Rogue_vs_Paladin+Hunter,1,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,25.35,1
+Warrior+Rogue_vs_Paladin+Hunter,2,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,24.82,1
+Warrior+Rogue_vs_Paladin+Hunter,3,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,25.35,1
+Warrior+Rogue_vs_Paladin+Hunter,4,0,0,2,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,24.82,1
+Warrior+Rogue_vs_Hunter+Shaman,0,0,0,2,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 2,13.52,1
+Warrior+Rogue_vs_Hunter+Shaman,1,0,0,2,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 2,13.52,1
+Warrior+Rogue_vs_Hunter+Shaman,2,0,0,2,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 2,13.52,1
+Warrior+Rogue_vs_Hunter+Shaman,3,0,0,2,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 2,13.5,1
+Warrior+Rogue_vs_Hunter+Shaman,4,0,0,2,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 2,13.52,1
+Warrior+Hunter_vs_Warrior+Rogue,0,0,0,1,Rogue+Warrior,0,0,,,opened,,Cheap Shot,5.4,Team 1 Warrior #1,0,1,Team 1,22.95,1
+Warrior+Hunter_vs_Warrior+Rogue,1,0,0,1,Rogue+Warrior,0,0,,,opened,,Cheap Shot,5.4,Team 1 Warrior #1,0,1,Team 1,25.35,1
+Warrior+Hunter_vs_Warrior+Rogue,2,0,0,1,Rogue+Warrior,0,0,,,opened,,Cheap Shot,5.4,Team 1 Warrior #1,0,1,Team 1,25.35,1
+Warrior+Hunter_vs_Warrior+Rogue,3,0,0,1,Rogue+Warrior,0,0,,,opened,,Cheap Shot,5.4,Team 1 Warrior #1,0,1,Team 1,26.0,1
+Warrior+Hunter_vs_Warrior+Rogue,4,0,0,1,Rogue+Warrior,0,0,,,opened,,Cheap Shot,5.4,Team 1 Warrior #1,0,1,Team 1,21.27,1
+Warrior+Hunter_vs_Mage+Rogue,0,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,27.7,1
+Warrior+Hunter_vs_Mage+Rogue,1,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,29.95,0
+Warrior+Hunter_vs_Mage+Rogue,2,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,29.53,1
+Warrior+Hunter_vs_Mage+Rogue,3,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,29.6,1
+Warrior+Hunter_vs_Mage+Rogue,4,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,27.93,1
+Warrior+Hunter_vs_Rogue+Priest,0,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,1,Team 1,57.9,1
+Warrior+Hunter_vs_Rogue+Priest,1,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,1,Team 1,49.48,1
+Warrior+Hunter_vs_Rogue+Priest,2,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,1,Team 1,49.17,1
+Warrior+Hunter_vs_Rogue+Priest,3,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,1,Team 2,38.75,0
+Warrior+Hunter_vs_Rogue+Priest,4,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,1,Team 1,40.58,1
+Warrior+Hunter_vs_Rogue+Warlock,0,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 1,22.83,1
+Warrior+Hunter_vs_Rogue+Warlock,1,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 1,23.72,1
+Warrior+Hunter_vs_Rogue+Warlock,2,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 1,22.2,1
+Warrior+Hunter_vs_Rogue+Warlock,3,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 1,23.07,1
+Warrior+Hunter_vs_Rogue+Warlock,4,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 1,22.62,1
+Warrior+Hunter_vs_Rogue+Paladin,0,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 2,67.92,0
+Warrior+Hunter_vs_Rogue+Paladin,1,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 2,73.69,0
+Warrior+Hunter_vs_Rogue+Paladin,2,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 1,47.55,1
+Warrior+Hunter_vs_Rogue+Paladin,3,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 2,70.24,0
+Warrior+Hunter_vs_Rogue+Paladin,4,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 1 Warrior #1,0,0,Team 2,80.74,0
+Warrior+Hunter_vs_Rogue+Shaman,0,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,53.92,1
+Warrior+Hunter_vs_Rogue+Shaman,1,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,49.43,1
+Warrior+Hunter_vs_Rogue+Shaman,2,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,44.65,1
+Warrior+Hunter_vs_Rogue+Shaman,3,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,53.8,1
+Warrior+Hunter_vs_Rogue+Shaman,4,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,53.02,1
+Mage+Rogue_vs_Warrior+Hunter,0,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,27.7,1
+Mage+Rogue_vs_Warrior+Hunter,1,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,29.95,0
+Mage+Rogue_vs_Warrior+Hunter,2,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,29.53,1
+Mage+Rogue_vs_Warrior+Hunter,3,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,29.6,1
+Mage+Rogue_vs_Warrior+Hunter,4,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,27.93,1
+Mage+Rogue_vs_Mage+Hunter,0,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,17.78,1
+Mage+Rogue_vs_Mage+Hunter,1,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,17.78,1
+Mage+Rogue_vs_Mage+Hunter,2,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,16.37,1
+Mage+Rogue_vs_Mage+Hunter,3,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,17.78,1
+Mage+Rogue_vs_Mage+Hunter,4,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,20.2,1
+Mage+Rogue_vs_Rogue+Hunter,0,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,23.8,1
+Mage+Rogue_vs_Rogue+Hunter,1,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,24.23,1
+Mage+Rogue_vs_Rogue+Hunter,2,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,25.1,1
+Mage+Rogue_vs_Rogue+Hunter,3,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,24.87,1
+Mage+Rogue_vs_Rogue+Hunter,4,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 2,28.35,1
+Mage+Rogue_vs_Priest+Hunter,0,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,2,0,Team 2,46.62,1
+Mage+Rogue_vs_Priest+Hunter,1,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,38.33,1
+Mage+Rogue_vs_Priest+Hunter,2,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,44.65,1
+Mage+Rogue_vs_Priest+Hunter,3,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,40.03,1
+Mage+Rogue_vs_Priest+Hunter,4,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,42.23,0
+Mage+Rogue_vs_Warlock+Hunter,0,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,24.25,1
+Mage+Rogue_vs_Warlock+Hunter,1,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,20.2,1
+Mage+Rogue_vs_Warlock+Hunter,2,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,22.85,1
+Mage+Rogue_vs_Warlock+Hunter,3,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,20.82,1
+Mage+Rogue_vs_Warlock+Hunter,4,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,20.47,1
+Mage+Rogue_vs_Paladin+Hunter,0,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,31.78,1
+Mage+Rogue_vs_Paladin+Hunter,1,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,52.13,1
+Mage+Rogue_vs_Paladin+Hunter,2,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,45.42,0
+Mage+Rogue_vs_Paladin+Hunter,3,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,48.05,1
+Mage+Rogue_vs_Paladin+Hunter,4,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,2,0,Team 1,67.15,0
+Mage+Rogue_vs_Hunter+Shaman,0,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.88,,,,1,0,Team 1,30.42,0
+Mage+Rogue_vs_Hunter+Shaman,1,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.88,,,,1,0,Team 1,28.52,0
+Mage+Rogue_vs_Hunter+Shaman,2,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.88,,,,1,0,Team 1,29.23,0
+Mage+Rogue_vs_Hunter+Shaman,3,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.88,,,,1,0,Team 1,28.52,0
+Mage+Rogue_vs_Hunter+Shaman,4,0,0,2,Mage+Rogue,0,0,,,Freezing Trap,4.88,,,,1,0,Team 1,29.55,0
+Mage+Hunter_vs_Warrior+Rogue,0,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,16.4,1
+Mage+Hunter_vs_Warrior+Rogue,1,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,16.4,1
+Mage+Hunter_vs_Warrior+Rogue,2,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,16.4,1
+Mage+Hunter_vs_Warrior+Rogue,3,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,16.4,1
+Mage+Hunter_vs_Warrior+Rogue,4,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,16.4,1
+Mage+Hunter_vs_Mage+Rogue,0,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,17.78,1
+Mage+Hunter_vs_Mage+Rogue,1,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,17.78,1
+Mage+Hunter_vs_Mage+Rogue,2,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,16.37,1
+Mage+Hunter_vs_Mage+Rogue,3,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,17.78,1
+Mage+Hunter_vs_Mage+Rogue,4,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,20.2,1
+Mage+Hunter_vs_Rogue+Priest,0,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.63,Team 1 Mage #1,0,1,Team 1,54.32,1
+Mage+Hunter_vs_Rogue+Priest,1,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.63,Team 1 Mage #1,0,1,Team 2,28.03,0
+Mage+Hunter_vs_Rogue+Priest,2,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.63,Team 1 Mage #1,0,1,Team 2,48.55,0
+Mage+Hunter_vs_Rogue+Priest,3,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.63,Team 1 Mage #1,0,1,Team 2,52.33,0
+Mage+Hunter_vs_Rogue+Priest,4,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.63,Team 1 Mage #1,0,1,Team 1,56.73,1
+Mage+Hunter_vs_Rogue+Warlock,0,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 1 Mage #1,0,0,Team 2,31.22,0
+Mage+Hunter_vs_Rogue+Warlock,1,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 1 Mage #1,0,0,Team 2,31.22,0
+Mage+Hunter_vs_Rogue+Warlock,2,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 1 Mage #1,0,0,Team 2,37.47,0
+Mage+Hunter_vs_Rogue+Warlock,3,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 1 Mage #1,0,0,Team 2,31.22,0
+Mage+Hunter_vs_Rogue+Warlock,4,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 1 Mage #1,0,1,Team 2,33.03,0
+Mage+Hunter_vs_Rogue+Paladin,0,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.65,Team 1 Mage #1,0,1,Team 2,40.33,0
+Mage+Hunter_vs_Rogue+Paladin,1,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.65,Team 1 Mage #1,0,1,Team 2,51.4,0
+Mage+Hunter_vs_Rogue+Paladin,2,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.65,Team 1 Mage #1,0,1,Team 2,47.65,0
+Mage+Hunter_vs_Rogue+Paladin,3,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.65,Team 1 Mage #1,0,1,Team 2,62.43,0
+Mage+Hunter_vs_Rogue+Paladin,4,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.65,Team 1 Mage #1,0,1,Team 2,41.77,0
+Mage+Hunter_vs_Rogue+Shaman,0,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,39.85,1
+Mage+Hunter_vs_Rogue+Shaman,1,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,40.17,1
+Mage+Hunter_vs_Rogue+Shaman,2,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,38.87,1
+Mage+Hunter_vs_Rogue+Shaman,3,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,40.17,1
+Mage+Hunter_vs_Rogue+Shaman,4,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,36.18,1
+Rogue+Priest_vs_Warrior+Hunter,0,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,1,Team 2,57.9,1
+Rogue+Priest_vs_Warrior+Hunter,1,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,1,Team 2,49.48,1
+Rogue+Priest_vs_Warrior+Hunter,2,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,1,Team 2,49.17,1
+Rogue+Priest_vs_Warrior+Hunter,3,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,1,Team 1,35.62,0
+Rogue+Priest_vs_Warrior+Hunter,4,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,1,Team 2,40.58,1
+Rogue+Priest_vs_Mage+Hunter,0,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.63,Team 2 Mage #1,0,1,Team 2,62.72,1
+Rogue+Priest_vs_Mage+Hunter,1,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.63,Team 2 Mage #1,0,1,Team 1,28.03,0
+Rogue+Priest_vs_Mage+Hunter,2,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.63,Team 2 Mage #1,0,1,Team 1,48.55,0
+Rogue+Priest_vs_Mage+Hunter,3,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.63,Team 2 Mage #1,0,1,Team 1,52.33,0
+Rogue+Priest_vs_Mage+Hunter,4,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.63,Team 2 Mage #1,0,1,Team 2,56.45,1
+Rogue+Priest_vs_Rogue+Hunter,0,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 2 Hunter #2,0,1,Team 2,41.22,1
+Rogue+Priest_vs_Rogue+Hunter,1,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 2 Hunter #2,0,0,Team 1,48.25,0
+Rogue+Priest_vs_Rogue+Hunter,2,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 2 Hunter #2,0,1,Team 2,60.95,1
+Rogue+Priest_vs_Rogue+Hunter,3,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 2 Hunter #2,0,1,Team 2,58.98,1
+Rogue+Priest_vs_Rogue+Hunter,4,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 2 Hunter #2,0,1,Team 1,61.22,0
+Rogue+Priest_vs_Priest+Hunter,0,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.17,Team 2 Priest #1,0,1,Team 2,47.3,1
+Rogue+Priest_vs_Priest+Hunter,1,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.17,Team 2 Priest #1,0,0,Team 2,59.13,1
+Rogue+Priest_vs_Priest+Hunter,2,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.17,Team 2 Priest #1,0,1,Team 2,56.93,1
+Rogue+Priest_vs_Priest+Hunter,3,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.17,Team 2 Priest #1,0,1,Team 2,61.67,1
+Rogue+Priest_vs_Priest+Hunter,4,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.13,Team 2 Priest #1,1,0,Team 2,61.68,1
+Rogue+Priest_vs_Warlock+Hunter,0,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Warlock #1,0,1,Team 2,51.17,1
+Rogue+Priest_vs_Warlock+Hunter,1,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Warlock #1,0,0,Team 2,62.0,1
+Rogue+Priest_vs_Warlock+Hunter,2,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Warlock #1,0,1,Team 2,73.6,1
+Rogue+Priest_vs_Warlock+Hunter,3,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Warlock #1,0,1,Team 2,47.1,1
+Rogue+Priest_vs_Warlock+Hunter,4,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Warlock #1,0,1,Team 2,53.58,1
+Rogue+Priest_vs_Paladin+Hunter,0,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.37,Team 2 Paladin #1,0,0,Team 2,49.43,1
+Rogue+Priest_vs_Paladin+Hunter,1,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.37,Team 2 Paladin #1,0,0,Team 2,54.27,1
+Rogue+Priest_vs_Paladin+Hunter,2,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.37,Team 2 Paladin #1,0,0,Team 2,49.43,1
+Rogue+Priest_vs_Paladin+Hunter,3,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.37,Team 2 Paladin #1,0,0,Team 2,44.6,1
+Rogue+Priest_vs_Paladin+Hunter,4,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.37,Team 2 Paladin #1,0,0,Team 2,56.8,1
+Rogue+Priest_vs_Hunter+Shaman,0,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.5,Team 2 Hunter #1,0,0,Team 1,27.3,0
+Rogue+Priest_vs_Hunter+Shaman,1,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.5,Team 2 Hunter #1,0,1,Team 1,30.65,0
+Rogue+Priest_vs_Hunter+Shaman,2,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.5,Team 2 Hunter #1,0,0,Team 1,27.35,0
+Rogue+Priest_vs_Hunter+Shaman,3,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.5,Team 2 Hunter #1,0,0,Team 1,28.38,0
+Rogue+Priest_vs_Hunter+Shaman,4,0,0,2,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.5,Team 2 Hunter #1,0,0,Team 1,30.48,0
+Rogue+Warlock_vs_Warrior+Hunter,0,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 2,22.83,1
+Rogue+Warlock_vs_Warrior+Hunter,1,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 2,23.72,1
+Rogue+Warlock_vs_Warrior+Hunter,2,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 2,22.2,1
+Rogue+Warlock_vs_Warrior+Hunter,3,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 2,23.07,1
+Rogue+Warlock_vs_Warrior+Hunter,4,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 2,22.62,1
+Rogue+Warlock_vs_Mage+Hunter,0,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 2 Mage #1,0,1,Team 1,33.92,0
+Rogue+Warlock_vs_Mage+Hunter,1,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 2 Mage #1,0,0,Team 1,32.05,0
+Rogue+Warlock_vs_Mage+Hunter,2,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 2 Mage #1,0,0,Team 1,27.92,0
+Rogue+Warlock_vs_Mage+Hunter,3,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 2 Mage #1,0,0,Team 1,31.5,0
+Rogue+Warlock_vs_Mage+Hunter,4,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,8.52,Team 2 Mage #1,0,0,Team 1,40.1,0
+Rogue+Warlock_vs_Rogue+Hunter,0,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #2,0,0,Team 2,21.97,1
+Rogue+Warlock_vs_Rogue+Hunter,1,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #2,0,0,Team 2,23.82,1
+Rogue+Warlock_vs_Rogue+Hunter,2,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #2,0,0,Team 2,23.42,1
+Rogue+Warlock_vs_Rogue+Hunter,3,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #2,0,0,Team 2,21.97,1
+Rogue+Warlock_vs_Rogue+Hunter,4,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #2,0,0,Team 2,20.72,1
+Rogue+Warlock_vs_Priest+Hunter,0,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,9.82,Team 2 Priest #1,0,0,Team 1,29.92,0
+Rogue+Warlock_vs_Priest+Hunter,1,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,9.82,Team 2 Priest #1,1,0,Team 1,29.82,0
+Rogue+Warlock_vs_Priest+Hunter,2,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,9.82,Team 2 Priest #1,1,0,Team 1,39.22,0
+Rogue+Warlock_vs_Priest+Hunter,3,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,9.82,Team 2 Priest #1,0,0,Team 2,32.8,1
+Rogue+Warlock_vs_Priest+Hunter,4,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,9.82,Team 2 Priest #1,1,0,Team 1,29.82,0
+Rogue+Warlock_vs_Warlock+Hunter,0,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.5,Team 2 Warlock #1,0,1,Team 2,25.08,1
+Rogue+Warlock_vs_Warlock+Hunter,1,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.5,Team 2 Warlock #1,0,0,Team 2,26.2,1
+Rogue+Warlock_vs_Warlock+Hunter,2,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.5,Team 2 Warlock #1,0,0,Team 2,23.0,1
+Rogue+Warlock_vs_Warlock+Hunter,3,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.5,Team 2 Warlock #1,0,0,Team 2,26.28,1
+Rogue+Warlock_vs_Warlock+Hunter,4,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.5,Team 2 Warlock #1,0,0,Team 2,20.6,1
+Rogue+Warlock_vs_Paladin+Hunter,0,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,11.18,Team 2 Paladin #1,0,0,Team 2,37.3,1
+Rogue+Warlock_vs_Paladin+Hunter,1,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,11.18,Team 2 Paladin #1,1,0,Team 2,41.03,1
+Rogue+Warlock_vs_Paladin+Hunter,2,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,11.18,Team 2 Paladin #1,0,0,Team 2,39.28,1
+Rogue+Warlock_vs_Paladin+Hunter,3,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,11.18,Team 2 Paladin #1,0,0,Team 2,37.3,1
+Rogue+Warlock_vs_Paladin+Hunter,4,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,11.18,Team 2 Paladin #1,1,0,Team 2,37.12,1
+Rogue+Warlock_vs_Hunter+Shaman,0,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,0,Team 1,36.87,0
+Rogue+Warlock_vs_Hunter+Shaman,1,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,0,Team 1,76.2,0
+Rogue+Warlock_vs_Hunter+Shaman,2,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,0,Team 1,39.42,0
+Rogue+Warlock_vs_Hunter+Shaman,3,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,0,Team 1,36.83,0
+Rogue+Warlock_vs_Hunter+Shaman,4,0,0,2,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,0,Team 2,27.1,1
+Rogue+Paladin_vs_Warrior+Hunter,0,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 1,67.92,0
+Rogue+Paladin_vs_Warrior+Hunter,1,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 1,73.69,0
+Rogue+Paladin_vs_Warrior+Hunter,2,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 2,47.55,1
+Rogue+Paladin_vs_Warrior+Hunter,3,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 1,70.24,0
+Rogue+Paladin_vs_Warrior+Hunter,4,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,5.37,Team 2 Warrior #1,0,0,Team 1,80.74,0
+Rogue+Paladin_vs_Mage+Hunter,0,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.65,Team 2 Mage #1,0,1,Team 1,40.33,0
+Rogue+Paladin_vs_Mage+Hunter,1,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.65,Team 2 Mage #1,0,1,Team 1,51.4,0
+Rogue+Paladin_vs_Mage+Hunter,2,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.65,Team 2 Mage #1,0,1,Team 1,47.65,0
+Rogue+Paladin_vs_Mage+Hunter,3,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.65,Team 2 Mage #1,0,1,Team 1,62.43,0
+Rogue+Paladin_vs_Mage+Hunter,4,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.65,Team 2 Mage #1,0,1,Team 1,41.77,0
+Rogue+Paladin_vs_Rogue+Hunter,0,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Hunter #2,1,0,Team 1,70.82,0
+Rogue+Paladin_vs_Rogue+Hunter,1,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Hunter #2,0,0,Team 1,88.57,0
+Rogue+Paladin_vs_Rogue+Hunter,2,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Hunter #2,1,0,Team 1,75.87,0
+Rogue+Paladin_vs_Rogue+Hunter,3,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Hunter #2,1,0,Team 1,70.77,0
+Rogue+Paladin_vs_Rogue+Hunter,4,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 2 Hunter #2,1,0,Team 1,38.25,0
+Rogue+Paladin_vs_Priest+Hunter,0,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.53,Team 2 Priest #1,0,1,Team 2,81.64,1
+Rogue+Paladin_vs_Priest+Hunter,1,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.53,Team 2 Priest #1,0,1,Team 1,28.7,0
+Rogue+Paladin_vs_Priest+Hunter,2,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.53,Team 2 Priest #1,0,1,Team 1,50.65,0
+Rogue+Paladin_vs_Priest+Hunter,3,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.53,Team 2 Priest #1,0,1,Team 1,31.33,0
+Rogue+Paladin_vs_Priest+Hunter,4,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.53,Team 2 Priest #1,0,1,Team 1,41.27,0
+Rogue+Paladin_vs_Warlock+Hunter,0,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 2 Warlock #1,0,0,Team 1,75.5,0
+Rogue+Paladin_vs_Warlock+Hunter,1,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 2 Warlock #1,0,0,Team 1,79.04,0
+Rogue+Paladin_vs_Warlock+Hunter,2,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 2 Warlock #1,0,0,Team 1,44.22,0
+Rogue+Paladin_vs_Warlock+Hunter,3,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 2 Warlock #1,0,0,Team 1,75.54,0
+Rogue+Paladin_vs_Warlock+Hunter,4,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 2 Warlock #1,0,0,Team 1,44.53,0
+Rogue+Paladin_vs_Paladin+Hunter,0,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 2 Paladin #1,0,1,Team 2,73.77,1
+Rogue+Paladin_vs_Paladin+Hunter,1,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 2 Paladin #1,0,2,Team 2,85.52,1
+Rogue+Paladin_vs_Paladin+Hunter,2,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 2 Paladin #1,0,1,Team 2,83.39,1
+Rogue+Paladin_vs_Paladin+Hunter,3,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 2 Paladin #1,0,1,Team 2,76.25,1
+Rogue+Paladin_vs_Paladin+Hunter,4,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 2 Paladin #1,1,0,Team 2,96.21,1
+Rogue+Paladin_vs_Hunter+Shaman,0,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,0,Team 1,46.02,0
+Rogue+Paladin_vs_Hunter+Shaman,1,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,0,DRAW,297.92,0
+Rogue+Paladin_vs_Hunter+Shaman,2,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,0,Team 1,56.48,0
+Rogue+Paladin_vs_Hunter+Shaman,3,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,0,Team 1,182.28,0
+Rogue+Paladin_vs_Hunter+Shaman,4,0,0,2,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 2 Hunter #1,0,1,Team 1,59.42,0
+Rogue+Hunter_vs_Warrior+Rogue,0,0,0,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 2,23.93,0
+Rogue+Hunter_vs_Warrior+Rogue,1,0,0,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,35.03,1
+Rogue+Hunter_vs_Warrior+Rogue,2,0,0,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,36.03,1
+Rogue+Hunter_vs_Warrior+Rogue,3,0,0,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,1,1,Team 1,44.88,1
+Rogue+Hunter_vs_Warrior+Rogue,4,0,0,1,Rogue+Warrior,0,0,,,Frost Trap,6.47,,,,0,1,Team 1,36.03,1
+Rogue+Hunter_vs_Mage+Rogue,0,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,23.8,1
+Rogue+Hunter_vs_Mage+Rogue,1,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,24.23,1
+Rogue+Hunter_vs_Mage+Rogue,2,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,25.1,1
+Rogue+Hunter_vs_Mage+Rogue,3,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,24.87,1
+Rogue+Hunter_vs_Mage+Rogue,4,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.87,,,,1,0,Team 1,28.35,1
+Rogue+Hunter_vs_Rogue+Priest,0,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 1 Hunter #2,0,1,Team 1,38.8,1
+Rogue+Hunter_vs_Rogue+Priest,1,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 1 Hunter #2,0,0,Team 2,48.25,0
+Rogue+Hunter_vs_Rogue+Priest,2,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 1 Hunter #2,0,1,Team 1,60.95,1
+Rogue+Hunter_vs_Rogue+Priest,3,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 1 Hunter #2,0,1,Team 1,58.98,1
+Rogue+Hunter_vs_Rogue+Priest,4,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.48,Team 1 Hunter #2,0,1,Team 2,61.22,0
+Rogue+Hunter_vs_Rogue+Warlock,0,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #2,0,0,Team 1,21.97,1
+Rogue+Hunter_vs_Rogue+Warlock,1,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #2,0,0,Team 1,23.82,1
+Rogue+Hunter_vs_Rogue+Warlock,2,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #2,0,0,Team 1,23.42,1
+Rogue+Hunter_vs_Rogue+Warlock,3,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #2,0,0,Team 1,21.97,1
+Rogue+Hunter_vs_Rogue+Warlock,4,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #2,0,0,Team 1,20.72,1
+Rogue+Hunter_vs_Rogue+Paladin,0,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Hunter #2,1,0,Team 2,70.94,0
+Rogue+Hunter_vs_Rogue+Paladin,1,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Hunter #2,0,0,Team 2,87.92,0
+Rogue+Hunter_vs_Rogue+Paladin,2,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Hunter #2,1,0,Team 2,75.87,0
+Rogue+Hunter_vs_Rogue+Paladin,3,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Hunter #2,1,0,Team 2,70.84,0
+Rogue+Hunter_vs_Rogue+Paladin,4,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Hunter #2,1,0,Team 2,37.05,0
+Rogue+Hunter_vs_Rogue+Shaman,0,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,59.13,1
+Rogue+Hunter_vs_Rogue+Shaman,1,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,49.1,1
+Rogue+Hunter_vs_Rogue+Shaman,2,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,59.18,1
+Rogue+Hunter_vs_Rogue+Shaman,3,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,59.13,1
+Rogue+Hunter_vs_Rogue+Shaman,4,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 1,59.33,1
+Rogue+Shaman_vs_Warrior+Hunter,0,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,45.02,1
+Rogue+Shaman_vs_Warrior+Hunter,1,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,52.38,1
+Rogue+Shaman_vs_Warrior+Hunter,2,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,52.25,1
+Rogue+Shaman_vs_Warrior+Hunter,3,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,53.8,1
+Rogue+Shaman_vs_Warrior+Hunter,4,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,1,Team 2,59.28,1
+Rogue+Shaman_vs_Mage+Hunter,0,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,39.85,1
+Rogue+Shaman_vs_Mage+Hunter,1,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,40.17,1
+Rogue+Shaman_vs_Mage+Hunter,2,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,38.87,1
+Rogue+Shaman_vs_Mage+Hunter,3,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,40.17,1
+Rogue+Shaman_vs_Mage+Hunter,4,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,36.18,1
+Rogue+Shaman_vs_Rogue+Hunter,0,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,59.13,1
+Rogue+Shaman_vs_Rogue+Hunter,1,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,49.1,1
+Rogue+Shaman_vs_Rogue+Hunter,2,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,59.18,1
+Rogue+Shaman_vs_Rogue+Hunter,3,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,59.13,1
+Rogue+Shaman_vs_Rogue+Hunter,4,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.92,,,,1,0,Team 2,59.33,1
+Rogue+Shaman_vs_Priest+Hunter,0,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,1,Team 2,59.23,1
+Rogue+Shaman_vs_Priest+Hunter,1,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,1,Team 2,64.28,1
+Rogue+Shaman_vs_Priest+Hunter,2,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 2,46.08,1
+Rogue+Shaman_vs_Priest+Hunter,3,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 2,56.25,1
+Rogue+Shaman_vs_Priest+Hunter,4,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 2,53.25,1
+Rogue+Shaman_vs_Warlock+Hunter,0,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,28.37,1
+Rogue+Shaman_vs_Warlock+Hunter,1,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,27.13,1
+Rogue+Shaman_vs_Warlock+Hunter,2,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,26.62,1
+Rogue+Shaman_vs_Warlock+Hunter,3,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,26.77,1
+Rogue+Shaman_vs_Warlock+Hunter,4,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,27.58,1
+Rogue+Shaman_vs_Paladin+Hunter,0,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,1,Team 2,56.15,1
+Rogue+Shaman_vs_Paladin+Hunter,1,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,40.27,1
+Rogue+Shaman_vs_Paladin+Hunter,2,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,50.67,1
+Rogue+Shaman_vs_Paladin+Hunter,3,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,43.55,1
+Rogue+Shaman_vs_Paladin+Hunter,4,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 2,44.6,1
+Rogue+Shaman_vs_Hunter+Shaman,0,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,30.52,1
+Rogue+Shaman_vs_Hunter+Shaman,1,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,30.52,1
+Rogue+Shaman_vs_Hunter+Shaman,2,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,29.53,1
+Rogue+Shaman_vs_Hunter+Shaman,3,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,29.65,1
+Rogue+Shaman_vs_Hunter+Shaman,4,0,0,2,Rogue+Shaman,0,0,,,Freezing Trap,4.9,,,,1,0,Team 2,31.12,1
+Priest+Hunter_vs_Warrior+Rogue,0,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,23.08,1
+Priest+Hunter_vs_Warrior+Rogue,1,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,22.62,1
+Priest+Hunter_vs_Warrior+Rogue,2,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,21.97,1
+Priest+Hunter_vs_Warrior+Rogue,3,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,23.08,1
+Priest+Hunter_vs_Warrior+Rogue,4,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,23.08,1
+Priest+Hunter_vs_Mage+Rogue,0,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,39.97,1
+Priest+Hunter_vs_Mage+Rogue,1,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,39.18,1
+Priest+Hunter_vs_Mage+Rogue,2,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,37.92,1
+Priest+Hunter_vs_Mage+Rogue,3,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,39.43,1
+Priest+Hunter_vs_Mage+Rogue,4,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,54.5,1
+Priest+Hunter_vs_Rogue+Priest,0,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.17,Team 1 Priest #1,0,1,Team 1,47.3,1
+Priest+Hunter_vs_Rogue+Priest,1,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.17,Team 1 Priest #1,0,0,Team 1,59.13,1
+Priest+Hunter_vs_Rogue+Priest,2,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.17,Team 1 Priest #1,0,1,Team 1,56.93,1
+Priest+Hunter_vs_Rogue+Priest,3,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.17,Team 1 Priest #1,0,1,Team 1,61.97,1
+Priest+Hunter_vs_Rogue+Priest,4,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.13,Team 1 Priest #1,1,0,Team 1,61.68,1
+Priest+Hunter_vs_Rogue+Warlock,0,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,9.82,Team 1 Priest #1,0,0,Team 1,29.82,1
+Priest+Hunter_vs_Rogue+Warlock,1,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,9.82,Team 1 Priest #1,0,1,Team 1,26.65,1
+Priest+Hunter_vs_Rogue+Warlock,2,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,9.82,Team 1 Priest #1,0,0,Team 2,32.92,0
+Priest+Hunter_vs_Rogue+Warlock,3,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,9.82,Team 1 Priest #1,0,1,Team 1,33.65,1
+Priest+Hunter_vs_Rogue+Warlock,4,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,9.82,Team 1 Priest #1,0,1,Team 1,29.9,1
+Priest+Hunter_vs_Rogue+Paladin,0,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.53,Team 1 Priest #1,0,1,Team 1,79.25,1
+Priest+Hunter_vs_Rogue+Paladin,1,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.53,Team 1 Priest #1,0,1,Team 2,28.7,0
+Priest+Hunter_vs_Rogue+Paladin,2,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.53,Team 1 Priest #1,0,1,Team 2,50.65,0
+Priest+Hunter_vs_Rogue+Paladin,3,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.53,Team 1 Priest #1,0,1,Team 2,31.33,0
+Priest+Hunter_vs_Rogue+Paladin,4,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,8.53,Team 1 Priest #1,0,1,Team 2,41.27,0
+Priest+Hunter_vs_Rogue+Shaman,0,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,1,Team 1,56.43,1
+Priest+Hunter_vs_Rogue+Shaman,1,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 1,48.08,1
+Priest+Hunter_vs_Rogue+Shaman,2,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 1,49.55,1
+Priest+Hunter_vs_Rogue+Shaman,3,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 1,61.5,1
+Priest+Hunter_vs_Rogue+Shaman,4,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.95,,,,1,0,Team 1,53.33,1
+Warlock+Hunter_vs_Warrior+Rogue,0,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,20.6,1
+Warlock+Hunter_vs_Warrior+Rogue,1,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,20.87,1
+Warlock+Hunter_vs_Warrior+Rogue,2,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,20.52,1
+Warlock+Hunter_vs_Warrior+Rogue,3,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,20.68,1
+Warlock+Hunter_vs_Warrior+Rogue,4,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,21.6,1
+Warlock+Hunter_vs_Mage+Rogue,0,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,21.57,1
+Warlock+Hunter_vs_Mage+Rogue,1,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,20.2,1
+Warlock+Hunter_vs_Mage+Rogue,2,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,22.85,1
+Warlock+Hunter_vs_Mage+Rogue,3,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,20.3,1
+Warlock+Hunter_vs_Mage+Rogue,4,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,21.25,1
+Warlock+Hunter_vs_Rogue+Priest,0,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Warlock #1,0,1,Team 1,51.17,1
+Warlock+Hunter_vs_Rogue+Priest,1,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Warlock #1,0,0,Team 1,62.0,1
+Warlock+Hunter_vs_Rogue+Priest,2,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Warlock #1,0,1,Team 1,73.6,1
+Warlock+Hunter_vs_Rogue+Priest,3,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Warlock #1,0,1,Team 1,42.18,1
+Warlock+Hunter_vs_Rogue+Priest,4,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.92,Team 1 Warlock #1,0,1,Team 1,53.58,1
+Warlock+Hunter_vs_Rogue+Warlock,0,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.5,Team 1 Warlock #1,0,0,Team 1,23.57,1
+Warlock+Hunter_vs_Rogue+Warlock,1,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.5,Team 1 Warlock #1,0,0,Team 1,26.03,1
+Warlock+Hunter_vs_Rogue+Warlock,2,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.5,Team 1 Warlock #1,0,0,Team 1,23.0,1
+Warlock+Hunter_vs_Rogue+Warlock,3,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.5,Team 1 Warlock #1,0,0,Team 1,26.17,1
+Warlock+Hunter_vs_Rogue+Warlock,4,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,7.5,Team 1 Warlock #1,0,0,Team 1,20.6,1
+Warlock+Hunter_vs_Rogue+Paladin,0,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 1 Warlock #1,0,0,Team 2,76.65,0
+Warlock+Hunter_vs_Rogue+Paladin,1,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 1 Warlock #1,0,0,Team 2,78.74,0
+Warlock+Hunter_vs_Rogue+Paladin,2,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 1 Warlock #1,0,0,Team 2,50.35,0
+Warlock+Hunter_vs_Rogue+Paladin,3,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 1 Warlock #1,0,0,Team 2,47.23,0
+Warlock+Hunter_vs_Rogue+Paladin,4,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.38,Team 1 Warlock #1,0,0,Team 2,44.53,0
+Warlock+Hunter_vs_Rogue+Shaman,0,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,28.15,1
+Warlock+Hunter_vs_Rogue+Shaman,1,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,29.98,1
+Warlock+Hunter_vs_Rogue+Shaman,2,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,42.6,1
+Warlock+Hunter_vs_Rogue+Shaman,3,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,34.4,1
+Warlock+Hunter_vs_Rogue+Shaman,4,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,28.35,1
+Paladin+Hunter_vs_Warrior+Rogue,0,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,24.82,1
+Paladin+Hunter_vs_Warrior+Rogue,1,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,25.35,1
+Paladin+Hunter_vs_Warrior+Rogue,2,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,24.82,1
+Paladin+Hunter_vs_Warrior+Rogue,3,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,25.35,1
+Paladin+Hunter_vs_Warrior+Rogue,4,0,0,1,Rogue+Warrior,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,24.82,1
+Paladin+Hunter_vs_Mage+Rogue,0,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,33.57,1
+Paladin+Hunter_vs_Mage+Rogue,1,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,51.7,1
+Paladin+Hunter_vs_Mage+Rogue,2,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 2,45.42,0
+Paladin+Hunter_vs_Mage+Rogue,3,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,1,0,Team 1,49.15,1
+Paladin+Hunter_vs_Mage+Rogue,4,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.85,,,,2,0,Team 2,67.15,0
+Paladin+Hunter_vs_Rogue+Priest,0,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.37,Team 1 Paladin #1,0,0,Team 1,49.43,1
+Paladin+Hunter_vs_Rogue+Priest,1,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.37,Team 1 Paladin #1,0,0,Team 1,54.27,1
+Paladin+Hunter_vs_Rogue+Priest,2,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.37,Team 1 Paladin #1,0,0,Team 1,49.43,1
+Paladin+Hunter_vs_Rogue+Priest,3,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.37,Team 1 Paladin #1,0,0,Team 1,44.6,1
+Paladin+Hunter_vs_Rogue+Priest,4,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,7.37,Team 1 Paladin #1,0,0,Team 1,56.8,1
+Paladin+Hunter_vs_Rogue+Warlock,0,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,11.18,Team 1 Paladin #1,0,0,Team 1,49.2,1
+Paladin+Hunter_vs_Rogue+Warlock,1,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,11.18,Team 1 Paladin #1,0,0,Team 1,46.78,1
+Paladin+Hunter_vs_Rogue+Warlock,2,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,11.18,Team 1 Paladin #1,0,0,Team 1,36.2,1
+Paladin+Hunter_vs_Rogue+Warlock,3,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,11.18,Team 1 Paladin #1,0,1,Team 1,37.35,1
+Paladin+Hunter_vs_Rogue+Warlock,4,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,11.18,Team 1 Paladin #1,0,1,Team 1,52.52,1
+Paladin+Hunter_vs_Rogue+Paladin,0,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 1 Paladin #1,0,1,Team 1,73.77,1
+Paladin+Hunter_vs_Rogue+Paladin,1,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 1 Paladin #1,0,2,Team 1,85.52,1
+Paladin+Hunter_vs_Rogue+Paladin,2,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 1 Paladin #1,0,1,Team 1,83.39,1
+Paladin+Hunter_vs_Rogue+Paladin,3,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 1 Paladin #1,0,1,Team 1,76.25,1
+Paladin+Hunter_vs_Rogue+Paladin,4,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,7.72,Team 1 Paladin #1,1,0,Team 1,96.21,1
+Paladin+Hunter_vs_Rogue+Shaman,0,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,1,Team 1,56.15,1
+Paladin+Hunter_vs_Rogue+Shaman,1,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,40.27,1
+Paladin+Hunter_vs_Rogue+Shaman,2,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,50.67,1
+Paladin+Hunter_vs_Rogue+Shaman,3,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,43.55,1
+Paladin+Hunter_vs_Rogue+Shaman,4,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,5.0,,,,1,0,Team 1,44.6,1
+Hunter+Shaman_vs_Warrior+Rogue,0,0,0,1,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 1,13.5,1
+Hunter+Shaman_vs_Warrior+Rogue,1,0,0,1,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 1,13.52,1
+Hunter+Shaman_vs_Warrior+Rogue,2,0,0,1,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 1,13.52,1
+Hunter+Shaman_vs_Warrior+Rogue,3,0,0,1,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 1,13.5,1
+Hunter+Shaman_vs_Warrior+Rogue,4,0,0,1,Rogue+Warrior,0,0,,,Frost Trap,6.45,,,,0,1,Team 1,13.52,1
+Hunter+Shaman_vs_Mage+Rogue,0,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.88,,,,1,0,Team 2,21.37,0
+Hunter+Shaman_vs_Mage+Rogue,1,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.88,,,,1,0,Team 2,28.1,0
+Hunter+Shaman_vs_Mage+Rogue,2,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.88,,,,1,0,Team 2,29.22,0
+Hunter+Shaman_vs_Mage+Rogue,3,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.88,,,,1,0,Team 2,21.35,0
+Hunter+Shaman_vs_Mage+Rogue,4,0,0,1,Mage+Rogue,0,0,,,Freezing Trap,4.88,,,,1,0,Team 2,28.1,0
+Hunter+Shaman_vs_Rogue+Priest,0,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.5,Team 1 Hunter #1,0,0,Team 2,29.1,0
+Hunter+Shaman_vs_Rogue+Priest,1,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.5,Team 1 Hunter #1,0,1,Team 2,34.32,0
+Hunter+Shaman_vs_Rogue+Priest,2,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.5,Team 1 Hunter #1,0,0,Team 2,27.73,0
+Hunter+Shaman_vs_Rogue+Priest,3,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.5,Team 1 Hunter #1,0,0,Team 2,28.35,0
+Hunter+Shaman_vs_Rogue+Priest,4,0,0,1,Priest+Rogue,0,0,,,opened,,Cheap Shot,6.5,Team 1 Hunter #1,0,0,Team 2,41.67,0
+Hunter+Shaman_vs_Rogue+Warlock,0,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,0,Team 2,54.97,0
+Hunter+Shaman_vs_Rogue+Warlock,1,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,0,Team 2,76.2,0
+Hunter+Shaman_vs_Rogue+Warlock,2,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,0,Team 2,39.95,0
+Hunter+Shaman_vs_Rogue+Warlock,3,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,0,Team 1,32.72,1
+Hunter+Shaman_vs_Rogue+Warlock,4,0,0,1,Rogue+Warlock,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,0,Team 1,27.1,1
+Hunter+Shaman_vs_Rogue+Paladin,0,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,0,Team 2,57.7,0
+Hunter+Shaman_vs_Rogue+Paladin,1,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,0,Team 1,78.84,1
+Hunter+Shaman_vs_Rogue+Paladin,2,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,0,Team 2,56.48,0
+Hunter+Shaman_vs_Rogue+Paladin,3,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,0,Team 2,182.28,0
+Hunter+Shaman_vs_Rogue+Paladin,4,0,0,1,Paladin+Rogue,0,0,,,opened,,Cheap Shot,6.9,Team 1 Hunter #1,0,1,Team 2,289.99,0
+Hunter+Shaman_vs_Rogue+Shaman,0,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,30.52,1
+Hunter+Shaman_vs_Rogue+Shaman,1,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,30.52,1
+Hunter+Shaman_vs_Rogue+Shaman,2,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,29.53,1
+Hunter+Shaman_vs_Rogue+Shaman,3,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,29.65,1
+Hunter+Shaman_vs_Rogue+Shaman,4,0,0,1,Rogue+Shaman,0,0,,,Freezing Trap,4.9,,,,1,0,Team 1,31.12,1

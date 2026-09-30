@@ -41,6 +41,10 @@ pub struct AbilityDispatchExtras<'w, 's> {
     /// Druid's mana governor paces against. `Option` for the same reason as
     /// `ai_profile`.
     dampening: Option<Res<'w, ArenaDampening>>,
+    /// The match's configured kill targets, so a Hunter knows whether the
+    /// enemy it cannot see is the one its team will converge on. `Option` so
+    /// a scene that never inserted it plays as if none was set.
+    config: Option<Res<'w, match_config::MatchConfig>>,
 }
 
 pub fn acquire_targets(
@@ -1405,6 +1409,10 @@ pub fn decide_abilities(
                         }
                     }
                 }
+                let kill_target_index = extras.config.as_ref().and_then(|c| match combatant.team {
+                    1 => c.team1_kill_target,
+                    _ => c.team2_kill_target,
+                });
                 class_ai::hunter::decide_hunter_action(
                     &mut commands,
                     &mut combat_log,
@@ -1421,6 +1429,7 @@ pub fn decide_abilities(
                     own_freezing_traps
                         .get(&entity)
                         .map_or(&[][..], Vec::as_slice),
+                    kill_target_index,
                     &mut decision_trace,
                 )
             }

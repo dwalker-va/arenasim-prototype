@@ -5,6 +5,8 @@
 //! kiting, trap placement, and pet coordination.
 //!
 //! ## Range Zone Priorities
+//! - **An enemy in stealth, any range**: Flare, ahead of the ally the Rogue
+//!   will reach first, once it could be there (`flare_plan`)
 //! - **Dead zone (<8 yards)**: Disengage > Freezing Trap on the enemy healer >
 //!   Frost Trap at feet > Kite
 //! - **Closing (8-20 yards)**: Freezing Trap on the enemy healer > Concussive
@@ -22,6 +24,7 @@ use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::hunter_dip::{emit_dip_complete, HunterDipPlan, LiveTrap};
 use super::{CombatContext, CombatantInfo};
 use crate::combat::log::CombatLog;
+use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::combat_core::calculate_cast_time;
@@ -56,10 +59,14 @@ pub fn decide_hunter_action(
     // The Hunter's own Freezing Traps not yet sprung, so its damage does not
     // land on an enemy just after one of them freezes it.
     own_traps: &[LiveTrap],
+    // The team's configured kill target (`team{N}_kill_target`), so a trap is
+    // not spent on a hidden enemy the team will converge on once it is seen.
+    kill_target_index: Option<usize>,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
     let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
     let now = decision_trace.current_sim_time;
+    let kill_target_hidden = kill_target_index.is_some_and(|i| ctx.kill_target_hidden(i));
 
     let nearest_dist = nearest_distance.unwrap_or(40.0);
 
@@ -82,20 +89,59 @@ pub fn decide_hunter_action(
         return false;
     }
 
-    let Some(target_entity) = combatant.target else {
+    // Flare first, and before the target check: it is for an enemy the Hunter
+    // cannot see, which in 1v1 against a Rogue is the only enemy there is, so
+    // the Hunter has no target at all. Time-critical — the light has to be
+    // down before the Rogue reaches whoever it is walking to, so a Flare about
+    // to come due keeps the GCD free for itself: a shot begun now would still
+    // be on the GCD when the Rogue reached the light.
+    let flare = flare_plan(abilities, combatant, my_pos, ctx, now);
+    let reserve = matches!(flare, Some(FlarePlan::Hold { reserve: true, .. }));
+    let target = combatant.target.and_then(|t| {
+        ctx.combatants
+            .get(&t)
+            .filter(|i| i.is_alive)
+            .map(|i| (t, i))
+    });
+    let Some((target_entity, target_info)) = target else {
+        if let Some(plan) = flare {
+            if let Some(mut builder) = ctx.start_ability_decision(decision_trace, None, my_pos) {
+                let cast = apply_flare(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    plan,
+                    &mut builder,
+                );
+                builder.finish();
+                return cast;
+            }
+        }
         return false;
     };
-    let Some(target_info) = ctx.combatants.get(&target_entity) else {
-        return false;
-    };
-    if !target_info.is_alive {
-        return false;
-    }
 
     let Some(mut builder) = ctx.start_ability_decision(decision_trace, Some(target_entity), my_pos)
     else {
         return false;
     };
+
+    if let Some(plan) = flare {
+        if apply_flare(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            plan,
+            &mut builder,
+        ) || reserve
+        {
+            builder.finish();
+            return !reserve;
+        }
+    }
 
     if ctx.entity_is_immune(target_entity) {
         builder.finish_no_action(NoActionReason::TargetImmune);
@@ -492,6 +538,7 @@ pub fn decide_hunter_action(
         ctx,
         auras,
         own_traps,
+        kill_target_hidden,
         &mut builder,
     ) {
         builder.finish();
@@ -565,6 +612,7 @@ pub fn decide_hunter_action(
         combatant.team,
         my_pos,
         target_entity,
+        kill_target_hidden,
     ) {
         match fallback {
             // Two-way CC guard (R8/R9): never throw Freezing Trap where the
@@ -699,11 +747,18 @@ struct FallbackThrow {
 ///
 /// While an enemy is **hidden**, that is the unseen enemy: at gates-open a
 /// stealthed Rogue runs the lane, and at `061dfa5` it sprang every one of the
-/// 140 opening lane traps thrown with a Rogue in stealth. The throw holds when
-/// a visible enemy could free it
-/// ([`unseen_victim_would_be_freed`](super::hunter_dip::unseen_victim_would_be_freed)
-/// — AS-68's opener was this fallback feeding the Rogue to its own Priest),
-/// and otherwise goes, with no aim to record.
+/// 140 opening lane traps thrown with a Rogue in stealth. Finding it is
+/// [`flare_plan`]'s job; the trap is thrown for what it holds. It holds:
+///
+/// - when the hidden enemy is the team's **kill target**
+///   (`kill_target_hidden`): the team converges on it the moment it is seen
+///   and breaks the trap, so the trap is kept for its partner, whom the
+///   off-target and pressure traps take once everyone is in view;
+/// - when a visible enemy could free it
+///   ([`unseen_victim_would_be_freed`](super::hunter_dip::unseen_victim_would_be_freed)
+///   — AS-68's opener was this fallback feeding the Rogue to its own Priest).
+///
+/// Otherwise it goes, with no aim to record.
 ///
 /// With everyone in view it is decided on the enemy predicted to spring it
 /// ([`predicted_trap_springer`](super::hunter_dip::predicted_trap_springer):
@@ -730,6 +785,7 @@ fn fallback_trap(
     my_team: u8,
     my_pos: Vec3,
     kill_target: Entity,
+    kill_target_hidden: bool,
 ) -> Option<Result<FallbackThrow, &'static str>> {
     let candidate = ctx.enemy_healer().unwrap_or(kill_target);
     let candidate_pos = ctx
@@ -739,6 +795,9 @@ fn fallback_trap(
         .position;
     let lane = (my_pos + candidate_pos) / 2.0;
     if ctx.enemy_hidden() {
+        if kill_target_hidden {
+            return Some(Err(TRAP_HELD_UNSEEN_KILL_TARGET));
+        }
         if super::hunter_dip::unseen_victim_would_be_freed(ctx, abilities, entity, my_team) {
             return Some(Err(TRAP_HELD_UNSEEN));
         }
@@ -847,6 +906,184 @@ fn try_pressure_trap(
     true
 }
 
+/// How far ahead of the ally it guards, toward the enemy gate, a Flare is
+/// centred. Short of the radius, so that ally stands well inside the light
+/// with room to move, and the light reaches out along the approach so a
+/// Rogue walking in is found yards before it can open.
+pub const FLARE_LEAD: f32 = 5.0;
+
+/// Trace note for a Flare held because a Rogue running flat out from its gate
+/// since the gates opened could not yet have reached the light
+/// ([`flare_plan`]).
+pub const FLARE_HELD_TOO_EARLY: &str = "flare held: the unseen enemy cannot have reached it yet";
+
+/// What [`flare_plan`] decided.
+#[derive(Clone, Debug)]
+pub enum FlarePlan {
+    /// Light the Flare centred here.
+    Light(Vec3),
+    /// Hold it, traced with `reason`. `reserve` when it comes due within a
+    /// GCD: the Hunter then begins nothing else, so the GCD is free the moment
+    /// the light is.
+    Hold {
+        reason: RejectionReason,
+        reserve: bool,
+    },
+}
+
+/// Where the Hunter lights a Flare, or why it holds it — `None` when there is
+/// nothing to look for: no living enemy is hidden from it.
+///
+/// The Hunter cannot see a stealthed Rogue, so the placement is a guess from
+/// what it does know — the enemy team's gate, its own team, and how long the
+/// gates have been open. No roll: a stealthed enemy inside the light is
+/// certainly found, one that walks around it is not, and a Flare that misses
+/// is a guess that was wrong.
+///
+/// - **Where.** The Rogue comes from its gate and opens on one of the Hunter's
+///   team; the one it reaches first is the ally nearest that gate. The light
+///   is centred [`FLARE_LEAD`] yards ahead of that ally, toward the gate, and
+///   must be within Flare's configured range of the Hunter — the nearest such
+///   ally is taken, the Hunter itself always qualifying.
+/// - **When.** Not before a Rogue that left its gate at the gates and ran
+///   straight at base speed could be at the edge of the light: earlier, the
+///   ally it guards is still on the move and the light would be left behind.
+///   The light burns [`FLARE_DURATION`] seconds, far longer than the walk.
+///   Within a GCD of that moment the hold reserves the GCD
+///   ([`FlarePlan::Hold`]), or a shot begun just before would put the light
+///   down after the Rogue had passed.
+///
+/// Only a Rogue stealths, so the unseen enemy's speed is the Rogue's base
+/// speed ([`class_base_stats`]).
+pub fn flare_plan(
+    abilities: &AbilityDefinitions,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    since_gates: f32,
+) -> Option<FlarePlan> {
+    if !ctx.enemy_hidden() {
+        return None;
+    }
+    let ability = AbilityType::Flare;
+    let def = abilities.get(&ability)?;
+    let hold = |reason| FlarePlan::Hold {
+        reason,
+        reserve: false,
+    };
+    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
+        return Some(hold(RejectionReason::OnCooldown {
+            remaining: *remaining,
+        }));
+    }
+    if combatant.current_mana < def.mana_cost {
+        return Some(hold(RejectionReason::InsufficientMana {
+            have: combatant.current_mana,
+            need: def.mana_cost,
+        }));
+    }
+    let spawn_x = ctx.bounds.team_spawn_x();
+    let gate = Vec3::new(
+        if combatant.team == 1 {
+            spawn_x
+        } else {
+            -spawn_x
+        },
+        0.0,
+        0.0,
+    );
+    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+    let center = ctx
+        .alive_allies()
+        .into_iter()
+        .map(|ally| {
+            let at = flat(ally.position);
+            let lit = at + (gate - at).normalize_or_zero() * FLARE_LEAD;
+            (
+                at.distance(gate),
+                crate::states::play_match::combat_core::clamp_to_arena(&ctx.bounds, lit),
+            )
+        })
+        .filter(|(_, lit)| flat(my_pos).distance(*lit) <= def.range)
+        .min_by(|(a, _), (b, _)| a.total_cmp(b))
+        .map(|(_, lit)| lit)?;
+    let speed = class_base_stats(CharacterClass::Rogue).movement_speed;
+    let edge = center.distance(gate) - FLARE_RADIUS;
+    if since_gates * speed < edge {
+        return Some(FlarePlan::Hold {
+            reason: RejectionReason::PreconditionUnmet {
+                note: FLARE_HELD_TOO_EARLY.to_string(),
+            },
+            reserve: (since_gates + GCD) * speed >= edge,
+        });
+    }
+    Some(FlarePlan::Light(center))
+}
+
+/// Act on a [`flare_plan`]: light it (traced as chosen, aimed at no one — the
+/// Hunter cannot see who it is for) or trace why it was held. Returns whether
+/// the Flare was lit.
+fn apply_flare(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    plan: FlarePlan,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::Flare;
+    let center = match plan {
+        FlarePlan::Light(center) => center,
+        FlarePlan::Hold { reason, .. } => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
+    let def = abilities.get_unchecked(&ability);
+    builder.choose(ability, None, true);
+    spawn_flare(commands, entity, combatant.team, center);
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        None,
+        "uses",
+    );
+    combat_log.log(
+        crate::combat::log::CombatLogEventType::CrowdControl,
+        format!(
+            "[FLARE] {}'s Flare lights ({:.0}, {:.0})",
+            crate::states::play_match::utils::combat_log_id_for(combatant, None),
+            center.x,
+            center.z
+        ),
+    );
+    combatant.current_mana -= def.mana_cost;
+    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.global_cooldown = GCD;
+    true
+}
+
+/// Light a Flare at `center` for `owner`. Pure spawn, like [`spawn_trap`], and
+/// `pub(crate)` for the same reason: the Animation Sandbox lights a faithful
+/// one from the same code gameplay uses. The caller owns gating, logging and
+/// costs.
+pub(crate) fn spawn_flare(commands: &mut Commands, owner: Entity, owner_team: u8, center: Vec3) {
+    commands.spawn((
+        Transform::from_translation(Vec3::new(center.x, 0.0, center.z)),
+        FlareZone {
+            owner_team,
+            owner,
+            radius: FLARE_RADIUS,
+            duration_remaining: FLARE_DURATION,
+        },
+        PlayMatchEntity,
+    ));
+}
+
 /// Would a shot at `target` begun now land on it — `before` seconds of cast
 /// (or of ticking, for a DoT) plus its projectile's flight — after one of the
 /// Hunter's own live Freezing Traps has frozen it
@@ -891,6 +1128,12 @@ pub const TRAP_HELD_FREEABLE: &str = "trap held: a teammate would free the enemy
 /// Trace note for a fallback Freezing Trap held because an enemy the Hunter
 /// cannot see could spring it and be freed ([`fallback_trap`]).
 pub const TRAP_HELD_UNSEEN: &str = "trap held: an unseen enemy could spring it and be freed";
+
+/// Trace note for a fallback Freezing Trap held because the enemy the Hunter
+/// cannot see is its team's kill target: Flare finds it, the team breaks a
+/// trap on it, and the trap is kept for its partner ([`fallback_trap`]).
+pub const TRAP_HELD_UNSEEN_KILL_TARGET: &str =
+    "trap held: the unseen enemy is the kill target, Flare finds it";
 
 /// Trace note for a fallback Freezing Trap held because no enemy is predicted
 /// to reach the landing soon after it arms ([`fallback_trap`]).
@@ -1542,6 +1785,7 @@ fn try_serpent_sting(
     ctx: &CombatContext,
     auras: Option<&ActiveAuras>,
     own_traps: &[LiveTrap],
+    kill_target_hidden: bool,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::SerpentSting;
@@ -1614,6 +1858,7 @@ fn try_serpent_sting(
         combatant.team,
         my_pos,
         target_entity,
+        kill_target_hidden,
     )
     .and_then(|f| f.ok());
     // The healer the trap is held for while a melee could come onto the

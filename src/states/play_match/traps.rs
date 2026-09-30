@@ -320,6 +320,48 @@ pub fn slow_zone_system(
     }
 }
 
+/// Flare lifecycle: burn down each `FlareZone`, despawning it when it goes
+/// out, and expose every stealthed enemy standing in it.
+///
+/// An area does not aim, so this reads every combatant, not what the Hunter can
+/// see — the Hunter guessed where to put the light, and whoever is in it is
+/// found. Certain inside the radius, nothing outside it: the uncertainty of a
+/// Flare is entirely where it was placed and which way the Rogue walked.
+pub fn flare_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut combat_log: ResMut<CombatLog>,
+    mut flares: Query<(Entity, &mut FlareZone, &Transform)>,
+    mut combatants: Query<(&mut Combatant, &Transform), Without<FlareZone>>,
+    celebration: Option<Res<VictoryCelebration>>,
+) {
+    if celebration.is_some() {
+        return;
+    }
+
+    let dt = time.delta_secs();
+
+    for (flare_entity, mut flare, flare_transform) in flares.iter_mut() {
+        flare.duration_remaining -= dt;
+        if flare.duration_remaining <= 0.0 {
+            commands.entity(flare_entity).despawn();
+            continue;
+        }
+
+        let center = flare_transform.translation;
+        for (mut target, target_transform) in combatants.iter_mut() {
+            if !target.is_alive() || target.team == flare.owner_team {
+                continue;
+            }
+            // Planar: the flare lies on the ground, a Rogue walks on it.
+            let offset = target_transform.translation - center;
+            if Vec2::new(offset.x, offset.z).length() <= flare.radius {
+                super::combat_core::reveal_stealthed(&mut target, "Flare", &mut combat_log);
+            }
+        }
+    }
+}
+
 /// Move trap launch projectiles along a parabolic arc toward their landing position.
 /// On arrival, spawns a regular Trap entity and despawns the projectile.
 pub fn move_trap_launch_projectiles(

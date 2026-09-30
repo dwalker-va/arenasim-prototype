@@ -467,6 +467,7 @@ impl AbilityDefinitions {
             AbilityType::Disengage,
             AbilityType::FreezingTrap,
             AbilityType::FrostTrap,
+            AbilityType::Flare,
             // Hunter pet abilities
             AbilityType::SpiderWeb,
             AbilityType::BoarCharge,
@@ -934,6 +935,7 @@ mod tests {
                     AbilityType::Disengage,
                     AbilityType::FreezingTrap,
                     AbilityType::FrostTrap,
+                    AbilityType::Flare,
                 ],
             ),
             (

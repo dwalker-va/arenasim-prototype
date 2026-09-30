@@ -245,6 +245,15 @@ pub const FROST_TRAP_ZONE_DURATION: f32 = 10.0;
 /// every tick while the enemy is inside, so the aura itself is short-lived.
 pub const FROST_TRAP_SLOW_MAGNITUDE: f32 = 0.4;
 
+/// Radius of a Hunter's Flare: a stealthed enemy within this distance of the
+/// point is exposed (Classic spell 1543: "within 10 yards of the targeted
+/// area").
+pub const FLARE_RADIUS: f32 = 10.0;
+
+/// How long a Flare burns on the ground, exposing every stealthed enemy that
+/// enters it (Classic spell 1543: 30 sec).
+pub const FLARE_DURATION: f32 = 30.0;
+
 /// Minimum distance from Hunter to target for trap to be "launched" (arc projectile).
 /// Within this range, traps drop instantly at feet.
 pub const TRAP_LAUNCH_MIN_RANGE: f32 = 10.0;

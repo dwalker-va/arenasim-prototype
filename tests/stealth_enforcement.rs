@@ -44,10 +44,10 @@ use arenasim::states::play_match::class_ai::{
 use arenasim::states::play_match::decision_trace::{AbilityOutcome, DecisionTrace, EventPayload};
 use arenasim::states::play_match::team_solve;
 use arenasim::states::play_match::{
-    apply_pending_auras, refresh_stacking_aura, slow_zone_system, trap_system, AbilityDefinitions,
-    AbilityType, ArenaDampening, Aura, AuraPending, AuraType, CastingState, ChannelingState,
-    Combatant, DRCategory, DRTracker, DispelType, GameRng, HolyShockDamagePending,
-    InstantAbilityFired, MovementConfig, Trap, TrapType,
+    apply_pending_auras, flare_system, refresh_stacking_aura, slow_zone_system, trap_system,
+    AbilityDefinitions, AbilityType, ArenaDampening, Aura, AuraPending, AuraType, CastingState,
+    ChannelingState, Combatant, DRCategory, DRTracker, DispelType, FlareZone, GameRng,
+    HolyShockDamagePending, InstantAbilityFired, MovementConfig, Trap, TrapType,
 };
 
 /// Ticks per run. A class may spend its first decisions on self-buffs
@@ -510,6 +510,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                         .hunter
                         .weights,
                     &[],
+                    None,
                     &mut trace,
                 );
             }
@@ -795,7 +796,7 @@ fn the_guard_drives_every_class_the_enum_has() {
 fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
     use AbilityType::*;
     match ability {
-        FrostNova | PsychicScream | DemoralizingShout | FreezingTrap | FrostTrap => true,
+        FrostNova | PsychicScream | DemoralizingShout | FreezingTrap | FrostTrap | Flare => true,
         Frostbolt | FlashHeal | HeroicStrike | Ambush | CheapShot | MindBlast | SinisterStrike
         | Charge | KidneyShot | PowerWordFortitude | Rend | MortalStrike | Pummel
         | BerserkerRage | Kick | CripplingPoison | Corruption | Shadowbolt | Fear | Immolate
@@ -856,6 +857,7 @@ fn drive_area_effect(ability: AbilityType) -> Result<String, String> {
         ),
         AbilityType::FreezingTrap => spring_trap(TrapType::Freezing),
         AbilityType::FrostTrap => spring_trap(TrapType::Frost),
+        AbilityType::Flare => light_flare(Vec3::new(9.0, 0.0, 0.0)),
         other => Err(format!("{other:?} is an area effect with no driver here")),
     }
 }
@@ -924,6 +926,46 @@ fn spring_trap(trap_type: TrapType) -> Result<String, String> {
     }
 }
 
+/// A Flare lit at the origin over a stealthed Rogue standing at `rogue_pos`,
+/// through the real `flare_system`. It lands nothing: the light itself is the
+/// reveal, so the one `[STEALTH]` line is the whole effect.
+fn light_flare(rogue_pos: Vec3) -> Result<String, String> {
+    let (mut world, hunter, rogue) = world_with_rogue(rogue_pos);
+    world.spawn((
+        FlareZone {
+            owner_team: 1,
+            owner: hunter,
+            radius: 10.0,
+            duration_remaining: 30.0,
+        },
+        Transform::default(),
+    ));
+    world.run_system_once(flare_system).unwrap();
+    let revealed = !world.get::<Combatant>(rogue).unwrap().stealthed;
+    let lines = stealth_log(&world);
+    if revealed && lines.len() == 1 {
+        Ok(lines[0].clone())
+    } else {
+        Err(format!("revealed={revealed}, log={lines:?}"))
+    }
+}
+
+/// The light is certain inside its radius and blind outside it — no roll, so
+/// whether a Flare finds the Rogue is decided by where it was lit. Planar: the
+/// flare lies on the ground.
+#[test]
+fn a_flare_finds_exactly_what_stands_in_its_light() {
+    assert_eq!(
+        light_flare(Vec3::new(9.9, 0.0, 0.0)),
+        Ok("[STEALTH] Team 2 Rogue #1 is revealed by Flare".to_string())
+    );
+    assert_eq!(
+        light_flare(Vec3::new(10.1, 0.0, 0.0)),
+        Err("revealed=false, log=[]".to_string())
+    );
+    assert!(light_flare(Vec3::new(6.0, 5.0, 7.9)).is_ok());
+}
+
 #[test]
 fn every_area_effect_reaches_a_stealthed_enemy() {
     use AbilityType::*;
@@ -939,6 +981,7 @@ fn every_area_effect_reaches_a_stealthed_enemy() {
             PsychicScream,
             FreezingTrap,
             FrostTrap,
+            Flare,
             DemoralizingShout
         ]
     );
