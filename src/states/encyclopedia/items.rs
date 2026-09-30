@@ -128,11 +128,16 @@ pub fn search_entries(items: &ItemDefinitions, out: &mut Vec<SearchEntry>) {
 /// `Chest · Plate` — the one-line identity of an item, shared by tiles, search
 /// rows and the detail header.
 pub fn item_subtitle(item: &ItemConfig) -> String {
+    // A frill's type already names its slot, so it stands alone — as in
+    // Classic's tooltip, which prints "Held In Off-hand" where the slot goes.
+    if item.weapon_type == WeaponType::OffhandFrill {
+        return item.weapon_type.name().to_string();
+    }
     let mut parts = vec![item.slot.name().to_string()];
     if item.armor_type != ArmorType::None {
         parts.push(format!("{:?}", item.armor_type));
     } else if item.weapon_type != WeaponType::None {
-        parts.push(format!("{:?}", item.weapon_type));
+        parts.push(item.weapon_type.name().to_string());
     }
     parts.join(" · ")
 }
@@ -570,6 +575,17 @@ mod tests {
                 id
             );
         }
+    }
+
+    /// The subtitle names a weapon type the way a player reads it, never as
+    /// the Rust variant ("OffhandFrill", "Fist").
+    #[test]
+    fn subtitle_names_the_weapon_type_for_a_player() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let tome = items
+            .get(&ItemId::TomeOfKnowledge)
+            .expect("the Tome of Knowledge ships");
+        assert_eq!(item_subtitle(tome), "Held In Off-hand");
     }
 
     /// Every shipped proc renders a sentence naming its trigger, its chance,

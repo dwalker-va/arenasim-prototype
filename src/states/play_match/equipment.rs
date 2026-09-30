@@ -401,6 +401,29 @@ pub enum WeaponType {
 }
 
 impl WeaponType {
+    /// The type as a player reads it, in the singular — "Dagger", "Held In
+    /// Off-hand" — for an item's one-line identity, as Classic's tooltip prints it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            WeaponType::Sword => "Sword",
+            WeaponType::Mace => "Mace",
+            WeaponType::Axe => "Axe",
+            WeaponType::Dagger => "Dagger",
+            WeaponType::Staff => "Staff",
+            WeaponType::Polearm => "Polearm",
+            WeaponType::Fist => "Fist Weapon",
+            WeaponType::Bow => "Bow",
+            WeaponType::Gun => "Gun",
+            WeaponType::Crossbow => "Crossbow",
+            WeaponType::Wand => "Wand",
+            WeaponType::Thrown => "Thrown",
+            WeaponType::Shield => "Shield",
+            WeaponType::OffhandFrill => "Held In Off-hand",
+            WeaponType::Relic => "Relic",
+            WeaponType::None => "Item",
+        }
+    }
+
     /// The type as a player reads it, in the plural — "daggers", "items held
     /// in the off hand" — for sentences such as "Rogue cannot use daggers".
     pub fn plural_name(&self) -> &'static str {
@@ -1024,6 +1047,10 @@ pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficie
         // Axes and maces in both forms, daggers, staves, fist weapons,
         // shields. Never a sword, never a ranged weapon.
         CharacterClass::Shaman => match weapon {
+            // Both forms is a deliberate departure from Classic, where the
+            // two-handed axe and mace came only with the Enhancement talent
+            // "Two-Handed Axes and Maces". The game has no talents, so a Shaman
+            // keeps them outright (user ruling, AS-176).
             W::Axe | W::Mace | W::Dagger | W::Staff | W::Fist | W::Shield => Trained,
             W::Sword | W::Polearm | W::Bow | W::Gun | W::Crossbow | W::Thrown | W::Wand => {
                 Untrained
@@ -1952,15 +1979,17 @@ mod tests {
     }
 
     /// A shield or a held frill is `is_weapon: false` and arms nothing — it is
-    /// still a stat stick, exactly as before.
+    /// still a stat stick, exactly as before. The fixture carries real damage
+    /// and speed, so it is `is_weapon` alone that keeps them from arming a
+    /// swing.
     #[test]
     fn apply_equipment_offhand_frill_arms_no_second_swing() {
-        let items = make_item_defs(vec![(
-            ItemId::TomeOfKnowledge,
-            armor_item("Tome", ItemSlotType::OffHand, ArmorType::None),
-        )]);
+        let mut tome = weapon_item("Tome", ItemSlotType::OffHand, 10.0, 20.0, 2.0);
+        tome.weapon_type = WeaponType::OffhandFrill;
+        tome.is_weapon = false;
+        let items = make_item_defs(vec![(ItemId::TomeOfKnowledge, tome)]);
         let mut combatant =
-            super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
+            super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Paladin);
 
         let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::OffHand, ItemId::TomeOfKnowledge);
@@ -2290,6 +2319,15 @@ mod tests {
     /// (socket, form, weapon type) and per armor type, each naming exactly the
     /// classes that pass. WoW Classic's class weapon skills, dual wield and
     /// armor proficiencies, with the game's departures marked.
+    ///
+    /// Two rows depart from Classic on purpose; a Classic-faithfulness pass
+    /// must not "fix" them:
+    /// - `OffHand off-hand OffhandFrill` has no Warrior, Rogue or Hunter — no
+    ///   melee class holds an off-hand frill (user ruling, AS-169).
+    /// - `MainHand two-hand Mace` and `MainHand two-hand Axe` include the
+    ///   Shaman with no talent — Classic gated them behind the Enhancement
+    ///   talent "Two-Handed Axes and Maces", and the game has no talents
+    ///   (user ruling, AS-176).
     const EQUIP_MATRIX: &str = "\
 MainHand one-hand Sword        Warrior Mage Rogue Warlock Paladin Hunter
 OffHand  one-hand Sword        Warrior Rogue Hunter
@@ -2333,7 +2371,9 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     /// type and per hand; a new [`WeaponType`] fails to compile in
     /// [`authorable_forms`] first. Departures from Classic in the table:
     /// no melee class (Warrior, Rogue, Hunter) holds an off-hand frill (a user
-    /// ruling, AS-169). The Hunter's off-hand one-hander rows are Classic and
+    /// ruling, AS-169), and the Shaman holds two-handed axes and maces without
+    /// Classic's Enhancement talent, since the game has no talents (a user
+    /// ruling, AS-176). The Hunter's off-hand one-hander rows are Classic and
     /// deliberate: it may hold one there, though the sim does not swing it yet.
     #[test]
     fn equip_matrix_is_pinned() {
