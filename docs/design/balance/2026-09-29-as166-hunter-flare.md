@@ -229,6 +229,11 @@ keeps its Classic cost here; the milestone sweep is where to weigh it.
 - `stealth_enforcement.rs`: Flare joins the enemy-area set, driven through the
   real `flare_system`; `a_flare_finds_exactly_what_stands_in_its_light` pins
   the radius edge (in at 9.9yd, out at 10.1yd, planar).
+- `hunter_flare.rs`: through the Hunter's own decider, a Flare due within a
+  GCD holds the GCD (no shot, no cast, no mana) and is lit the frame it comes
+  due; and seeded 1v1 Hunter vs Rogue in both slot orders, where the Hunter
+  has no target and the Flare it lights from that path finds the Rogue before
+  it opens.
 - `class_ai_decisions.rs`: `flare_plan`'s where and when, the GCD reservation,
   cooldown and mana; `kill_target_hidden` by slot, never a pet, alive and out
   of view only.
