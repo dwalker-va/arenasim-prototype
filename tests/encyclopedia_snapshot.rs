@@ -202,6 +202,33 @@ fn encyclopedia_items_mainhand_socket() {
     snapshot("encyclopedia_items_mainhand_socket", state);
 }
 
+/// The Off Hand socket, which holds shields, off-hand weapons and held frills.
+/// A frill's subtitle is its type alone ("Held In Off-hand"), so this is the
+/// view that shows it fitting the tile's one subtitle line.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_items_offhand_socket() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::index(Section::Items)),
+    );
+    let mut filters = ItemFilters::default();
+    filters.selected_slots.insert(ItemSlotType::OffHand);
+    state.item_filters = filters;
+    snapshot("encyclopedia_items_offhand_socket", state);
+}
+
+/// A held frill's detail page — an off-hand item that is not a weapon, so the
+/// header names it by how it is held and the page has no weapon block.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_frill_detail() {
+    snapshot(
+        "encyclopedia_frill_detail",
+        state_at(Topic::Item(ItemId::TomeOfKnowledge)),
+    );
+}
+
 /// A relic's detail page. The weapon block is what a relic must NOT have — it
 /// occupies a weapon socket but has no damage, speed or DPS — so this pins the
 /// page rendering it as the accessory it is.

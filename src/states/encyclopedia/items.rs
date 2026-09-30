@@ -128,6 +128,11 @@ pub fn search_entries(items: &ItemDefinitions, out: &mut Vec<SearchEntry>) {
 /// `Chest · Plate` — the one-line identity of an item, shared by tiles, search
 /// rows and the detail header.
 pub fn item_subtitle(item: &ItemConfig) -> String {
+    // A frill's type already names its slot, so it stands alone — as in
+    // Classic's tooltip, which prints "Held In Off-hand" where the slot goes.
+    if item.weapon_type == WeaponType::OffhandFrill {
+        return item.weapon_type.name().to_string();
+    }
     let mut parts = vec![item.slot.name().to_string()];
     if item.armor_type != ArmorType::None {
         parts.push(format!("{:?}", item.armor_type));
@@ -580,7 +585,7 @@ mod tests {
         let tome = items
             .get(&ItemId::TomeOfKnowledge)
             .expect("the Tome of Knowledge ships");
-        assert_eq!(item_subtitle(tome), "Off Hand · Held in off hand");
+        assert_eq!(item_subtitle(tome), "Held In Off-hand");
     }
 
     /// Every shipped proc renders a sentence naming its trigger, its chance,

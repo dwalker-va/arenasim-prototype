@@ -401,8 +401,8 @@ pub enum WeaponType {
 }
 
 impl WeaponType {
-    /// The type as a player reads it, in the singular — "Dagger", "Held in
-    /// off hand" — for an item's one-line identity, as a tooltip would print it.
+    /// The type as a player reads it, in the singular — "Dagger", "Held In
+    /// Off-hand" — for an item's one-line identity, as Classic's tooltip prints it.
     pub fn name(&self) -> &'static str {
         match self {
             WeaponType::Sword => "Sword",
@@ -418,7 +418,7 @@ impl WeaponType {
             WeaponType::Wand => "Wand",
             WeaponType::Thrown => "Thrown",
             WeaponType::Shield => "Shield",
-            WeaponType::OffhandFrill => "Held in off hand",
+            WeaponType::OffhandFrill => "Held In Off-hand",
             WeaponType::Relic => "Relic",
             WeaponType::None => "Item",
         }
@@ -1979,13 +1979,15 @@ mod tests {
     }
 
     /// A shield or a held frill is `is_weapon: false` and arms nothing — it is
-    /// still a stat stick, exactly as before.
+    /// still a stat stick, exactly as before. The fixture carries real damage
+    /// and speed, so it is `is_weapon` alone that keeps them from arming a
+    /// swing.
     #[test]
     fn apply_equipment_offhand_frill_arms_no_second_swing() {
-        let items = make_item_defs(vec![(
-            ItemId::TomeOfKnowledge,
-            armor_item("Tome", ItemSlotType::OffHand, ArmorType::None),
-        )]);
+        let mut tome = weapon_item("Tome", ItemSlotType::OffHand, 10.0, 20.0, 2.0);
+        tome.weapon_type = WeaponType::OffhandFrill;
+        tome.is_weapon = false;
+        let items = make_item_defs(vec![(ItemId::TomeOfKnowledge, tome)]);
         let mut combatant =
             super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Paladin);
 
