@@ -69,6 +69,9 @@ pub use super::traps::trap_system;
 // === Phase 1 (additional): Slow Zone ===
 pub use super::traps::slow_zone_system;
 
+// === Phase 1 (additional): Flare ===
+pub use super::traps::flare_system;
+
 // === Phase 1 (additional): Totem pulse ===
 pub use super::totems::totem_pulse_system;
 
@@ -200,7 +203,8 @@ pub fn add_core_combat_systems<M, N>(
             process_hot_ticks, // HoT healing — like process_dot_ticks, must run BEFORE update_auras
             update_auras,
             slow_zone_system,       // Zone slow refresh before aura processing
-            totem_pulse_system,     // Totem dedup + buff pulse on allies (after slow_zone_system)
+            flare_system, // Exposes Rogues standing in a Flare before anyone acquires targets
+            totem_pulse_system, // Totem dedup + buff pulse on allies (after slow_zone_system)
             process_divine_shield, // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
             process_berserker_rage, // Must run BEFORE apply_pending_auras so FearImmunity blocks queued Fears
             apply_pending_auras,

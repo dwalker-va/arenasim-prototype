@@ -1031,6 +1031,8 @@ impl Plugin for StatesPlugin {
                 play_match::cleanup_ice_blocks,      // Despawn when aura breaks
                 play_match::spawn_slow_zone_visuals, // Cyan disc on slow zones
                 play_match::update_slow_zone_visuals, // Pulse + fade out
+                play_match::spawn_flare_visuals,     // Lit disc + hanging flare on new Flares
+                play_match::update_flare_visuals,    // Flicker + fade; mote leaves with its flare
                 // Totems: carved post + orbiting ribbons + top flame; a
                 // detached rig that plays its death once the totem is gone
                 play_match::spawn_totem_visuals,

@@ -493,7 +493,7 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
     };
 
     let mut named = 0usize;
-    for seed in [1u64, 5, 10] {
+    for seed in [4u64, 8, 11] {
         let mut cfg = config(&["Hunter", "Priest"], &["Warlock", "Rogue"], seed);
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
@@ -550,15 +550,16 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
 /// lane trap goes on the Rogue, the Hunter's own target — allowed, because a
 /// Hunter alone holds fire on a trapped enemy. But an Aimed Shot begun as the
 /// Rogue ran the lane used to land just after the trap sprang and break it
-/// (seeds 3, 8 and 11: the trap broke from the Hunter's own Aimed Shot 1.6-2.5s
-/// in). The Hunter now holds a shot that would land after its own trap catches
-/// the target. Pinned: in each seed the trap springs on the Rogue, is never
-/// broken, and the trace shows the hold firing.
+/// (seeds 3, 8 and 11 before AS-166's Flare changed how those fights run: the
+/// trap broke from the Hunter's own Aimed Shot 1.6-2.5s in). The Hunter now
+/// holds a shot that would land after its own trap catches the target. Pinned
+/// seeds that reach that ending: in each the trap springs on the Rogue, is
+/// never broken, and the trace shows the hold firing.
 #[test]
 fn the_hunters_own_shot_does_not_break_its_trap() {
     use arenasim::states::play_match::class_ai::hunter_dip::OWN_TRAP_WOULD_BREAK;
 
-    for seed in [3u64, 8, 11] {
+    for seed in [17u64, 58, 61] {
         let mut cfg = config(&["Hunter", "Priest"], &["Warlock", "Rogue"], seed);
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
@@ -614,14 +615,14 @@ fn against_a_lone_priest_the_opener_is_serpent_sting() {
 /// AS-125 — with the Rogue on the Hunter, the trap goes on the enemy Priest.
 ///
 /// Hunter+Priest vs Rogue+Priest: the Hunter is killing the Priest when the
-/// Rogue opens on it. Freezing Trap is thrown at the Priest (the trace names
+/// Rogue closes on it. Freezing Trap is thrown at the Priest (the trace names
 /// it), springs on the Priest, and the Hunter moves its target to the Rogue —
 /// every shot holds fire on a trapped enemy, so staying on the Priest would
 /// idle it. Pinned seeds where the Priest reaches the landing as it arms.
 #[test]
 fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
     let mut caught = 0usize;
-    for seed in [6u64, 8, 10] {
+    for seed in [1u64, 3, 4] {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
@@ -675,13 +676,16 @@ fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
 /// the Hunter down, so the pressure trap goes on the Hunter's own kill target.
 /// The Hunter must leave it for the Rogue at the throw — traced as a target
 /// acquisition, so the `target switches` recipe in CLAUDE.md shows it — and
-/// stay off it while it is frozen, shooting the Rogue instead of holding fire
-/// on its own trap. Pinned seeds where the trap springs on the Priest and runs
-/// its full 8 seconds.
+/// stay off it while it is frozen, deciding on the Rogue instead of holding
+/// fire on its own trap. Whether a shot then lands is the dead zone's call:
+/// since Flare reveals the Rogue before it opens, it reaches the Hunter
+/// unstunned and in nearly every seed pins it inside 8 yards for the whole
+/// freeze (1 seed of 320 scanned has the Hunter shooting it). Pinned seeds
+/// where the trap springs on the Priest.
 #[test]
 fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
     const GATES_OPEN: f64 = 10.0;
-    for seed in [6u64, 8, 10] {
+    for seed in [6u64, 8, 9] {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.team1_kill_target = Some(1);
         cfg.max_duration_secs = 60.0;
@@ -752,22 +756,13 @@ fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
             on_priest, 0,
             "seed {seed}: the Hunter decided on its frozen kill target {on_priest} times"
         );
-        let hits_on_rogue = log
-            .lines()
-            .filter(|l| l.contains("[DMG] Team 1 Hunter #1's") && l.contains("hits Team 2 Rogue"))
-            .filter_map(|l| {
-                l.trim_start_matches('[')
-                    .split('s')
-                    .next()?
-                    .trim()
-                    .parse::<f64>()
-                    .ok()
-            })
-            .filter(|t| frozen.contains(&(t - GATES_OPEN)))
+        let on_rogue = hunter_trap_events(&events)
+            .filter(|v| frozen.contains(&v["sim_time"].as_f64().unwrap()))
+            .filter(|v| v.pointer("/target/entity_id").and_then(|x| x.as_u64()) == Some(rogue))
             .count();
         assert!(
-            hits_on_rogue > 0,
-            "seed {seed}: the Hunter never hit the Rogue while the Priest was frozen"
+            on_rogue > 0,
+            "seed {seed}: the Hunter never decided on the Rogue while the Priest was frozen"
         );
     }
 }
@@ -830,5 +825,63 @@ fn no_aimed_shot_is_begun_while_a_rogue_is_hidden() {
     assert!(
         held > 0,
         "the hidden-enemy hold never fired — the probe went vacuous"
+    );
+}
+
+/// AS-166 — with the Rogue the kill target, Flare finds it and the trap takes
+/// its partner.
+///
+/// The case from the user's review of AS-125: Hunter+Warrior vs
+/// Rogue+Shaman, both kill targets at slot 0 (the graphical client's default),
+/// so the Hunter's team is told to kill the Rogue. Nobody on the Rogue's team
+/// could free a trap on it, so before Flare the opening lane trap caught and
+/// revealed it every seed, and the team broke the trap as it converged. Now
+/// the lane trap is held for an unseen kill target (traced), a Flare lights the
+/// Rogue before it can open, and the trap springs on the Shaman instead.
+#[test]
+fn flare_reveals_the_kill_target_rogue_and_the_trap_takes_its_partner() {
+    use arenasim::states::play_match::class_ai::hunter::TRAP_HELD_UNSEEN_KILL_TARGET;
+
+    let mut held = 0usize;
+    for seed in [0u64, 1, 2] {
+        let mut cfg = config(&["Hunter", "Warrior"], &["Rogue", "Shaman"], seed);
+        cfg.team1_kill_target = Some(0);
+        cfg.team2_kill_target = Some(0);
+        cfg.max_duration_secs = 60.0;
+        let (events, log) = run_trace_and_log(cfg);
+        assert!(
+            log.lines()
+                .any(|l| l.contains("[STEALTH] Team 2 Rogue #1 is revealed by Flare")),
+            "seed {seed}: the Flare did not find the Rogue"
+        );
+        let opened = log.lines().any(|l| {
+            l.contains("[CAST] Team 2 Rogue #1 uses Cheap Shot on")
+                || l.contains("[CAST] Team 2 Rogue #1 uses Ambush on")
+        });
+        assert!(!opened, "seed {seed}: the Rogue opened from stealth");
+        let sprung: Vec<&str> = log
+            .lines()
+            .filter_map(|l| l.split("Freezing Trap triggers on ").nth(1))
+            .collect();
+        assert!(
+            !sprung.iter().any(|v| v.starts_with("Team 2 Rogue")),
+            "seed {seed}: a trap sprang on the kill-target Rogue: {sprung:?}"
+        );
+        assert!(
+            sprung.iter().any(|v| v.starts_with("Team 2 Shaman")),
+            "seed {seed}: no trap sprang on the Shaman: {sprung:?}"
+        );
+        held += hunter_trap_events(&events)
+            .flat_map(|v| v["candidates"].as_array().cloned().unwrap_or_default())
+            .filter(|c| {
+                c.pointer("/reason/PreconditionUnmet/note")
+                    .and_then(|n| n.as_str())
+                    == Some(TRAP_HELD_UNSEEN_KILL_TARGET)
+            })
+            .count();
+    }
+    assert!(
+        held > 0,
+        "the lane trap was never held for an unseen kill target — the probe went vacuous"
     );
 }

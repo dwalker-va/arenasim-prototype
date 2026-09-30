@@ -1007,6 +1007,23 @@
             description: "Launches a trap that arms where it lands. The first enemy to step on it opens a frost zone that slows every enemy inside it for as long as the zone lasts.",
         ),
 
+        // Classic values (spell 1543): instant, 50 mana, 30yd, 15s cooldown,
+        // exposes stealthed enemies within 10yd of the point for 30s. The area
+        // and its duration are engine constants (FLARE_RADIUS /
+        // FLARE_DURATION), not an aura: the flare burns on the ground and
+        // reveals whoever stands in it; it lands nothing on anyone.
+        Flare: (
+            name: "Flare",
+            class: Hunter,
+            icon: "icons/abilities/spell_fire_flare.jpg",
+            cast_time: 0.0,
+            range: 30.0,  // Placement range
+            mana_cost: 50.0,
+            cooldown: 15.0,
+            spell_school: None,
+            description: "Fires a flare that burns where it lands for 30 seconds. A stealthed enemy inside its 10-yard light is exposed.",
+        ),
+
         // ============================================================================
         // HUNTER PET ABILITIES
         // ============================================================================

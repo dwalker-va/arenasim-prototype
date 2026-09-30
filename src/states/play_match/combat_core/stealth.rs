@@ -8,7 +8,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 /// `[STEALTH] <target> is revealed by <source>`. Returns whether it was.
 ///
 /// This is the one place stealth ends because of something done TO the unit,
-/// and exactly two things do it:
+/// and exactly three things do it:
 ///
 /// - **damage that reaches health** — [`super::apply_damage_with_absorb`], the
 ///   funnel every damage source passes through. Damage a shield fully absorbs,
@@ -19,7 +19,9 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 ///   push a slow directly, bypassing the pending pipeline so it never
 ///   diminishes (the Frost Trap zone, Crippling Poison), call this too. An aura
 ///   that is blocked — immune, DR-immune, charging — never lands and reveals
-///   nothing, the same rule as an absorbed hit.
+///   nothing, the same rule as an absorbed hit;
+/// - **a Hunter's Flare** — `traps::flare_system`, for every stealthed enemy
+///   standing in the light. It lands nothing; exposing is its whole effect.
 ///
 /// A Rogue ending its OWN stealth — an opener, an auto-attack, a Kick — is not
 /// a reveal and does not come here.

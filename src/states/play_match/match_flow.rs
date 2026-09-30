@@ -215,6 +215,7 @@ pub fn check_match_end(
     traps: Query<Entity, With<Trap>>,
     trap_projectiles: Query<Entity, With<TrapLaunchProjectile>>,
     slow_zones: Query<Entity, With<SlowZone>>,
+    flares: Query<Entity, With<FlareZone>>,
     ice_blocks: Query<Entity, With<IceBlockVisual>>,
     mut commands: Commands,
 ) {
@@ -362,6 +363,11 @@ pub fn check_match_end(
         // Despawn all active slow zones
         for zone_entity in slow_zones.iter() {
             commands.entity(zone_entity).despawn();
+        }
+
+        // Despawn all burning flares
+        for flare_entity in flares.iter() {
+            commands.entity(flare_entity).despawn();
         }
 
         // Despawn all ice block visuals (aura system frozen during celebration prevents self-cleanup)

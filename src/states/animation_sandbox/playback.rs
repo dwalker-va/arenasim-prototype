@@ -24,7 +24,7 @@ use bevy::prelude::*;
 use super::super::match_config::CharacterClass;
 use super::super::play_match::abilities::AbilityType;
 use super::super::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
-use super::super::play_match::class_ai::hunter::spawn_trap;
+use super::super::play_match::class_ai::hunter::{spawn_flare, spawn_trap};
 use super::super::play_match::class_ai::pet_ai::{
     execute_boar_charge, execute_masters_call, execute_spell_lock, execute_spider_web,
 };
@@ -219,9 +219,8 @@ pub(crate) fn entry_needs_dummy(entry: SandboxEntry, defs: &AbilityDefinitions) 
         SpiderWeb | BoarCharge | SpellLock | DevourMagic => true,
         // The empowered swing needs a victim to swing at.
         HeroicStrike => true,
-        AirTotem | WaterTotem | EarthTotem | FireTotem | FreezingTrap | FrostTrap | MastersCall => {
-            false
-        }
+        AirTotem | WaterTotem | EarthTotem | FireTotem | FreezingTrap | FrostTrap | Flare
+        | MastersCall => false,
         _ => defs.get(&ability).map(entry_targets_dummy).unwrap_or(false),
     }
 }
@@ -241,8 +240,8 @@ fn mechanism_for(ability: AbilityType, config: &AbilityConfig) -> EntryFamily {
         HeroicStrike => EntryFamily::Component,
         // M4 — world-entity drops and pet-dispatched abilities (Hunter pets +
         // the Warlock's Felhunter), all driven by drive_sandbox_pet.
-        AirTotem | WaterTotem | EarthTotem | FireTotem | FreezingTrap | FrostTrap | SpiderWeb
-        | BoarCharge | MastersCall | SpellLock | DevourMagic => EntryFamily::Entity,
+        AirTotem | WaterTotem | EarthTotem | FireTotem | FreezingTrap | FrostTrap | Flare
+        | SpiderWeb | BoarCharge | MastersCall | SpellLock | DevourMagic => EntryFamily::Entity,
         // M1 for the outcome plus a directly-spawned caster cosmetic. Psychic
         // Scream's burst predates the shared marker (bespoke `ScreamBurst`),
         // but its mechanism is the same shape.
@@ -905,6 +904,18 @@ fn start_entity_entry(
     if let Some(trap_type) = trap_type {
         let landing = Vec3::new(-caster_home.x, 0.0, 0.0);
         spawn_trap(commands, caster, info.team, caster_home, landing, trap_type);
+        return true;
+    }
+
+    // Flare — lit on the dummy's staged spot (mirror across origin), from the
+    // same spawn gameplay uses.
+    if ability == Flare {
+        spawn_flare(
+            commands,
+            caster,
+            info.team,
+            Vec3::new(-caster_home.x, 0.0, 0.0),
+        );
         return true;
     }
 

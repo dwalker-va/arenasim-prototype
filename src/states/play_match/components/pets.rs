@@ -175,6 +175,22 @@ pub struct SlowZone {
     pub slow_magnitude: f32,
 }
 
+/// A Hunter's Flare burning on the ground. Every stealthed enemy inside
+/// `radius` while it burns is exposed (`traps::flare_system`) — seen by the
+/// Hunter or not, since an area does not aim. It lands nothing: the reveal is
+/// the whole effect.
+#[derive(Component)]
+pub struct FlareZone {
+    /// Team of the hunter who fired it
+    pub owner_team: u8,
+    /// Entity of the hunter who fired it
+    pub owner: Entity,
+    /// Radius of the lit area
+    pub radius: f32,
+    /// Time remaining before the flare burns out (seconds)
+    pub duration_remaining: f32,
+}
+
 /// Component tracking an active Disengage (Hunter backward leap).
 #[derive(Component)]
 pub struct DisengagingState {

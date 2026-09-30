@@ -747,6 +747,12 @@ const NO_FAMILY: &[(AbilityType, &str)] = &[
          its slow is applied by the zone, not declared in the RON, and a body it slows \
          carries the bind ring (slow_ring.rs)",
     ),
+    (
+        Flare,
+        "a placement — a lit disc the size of its radius with a flare hanging over it \
+         (flare.rs); it lands nothing on anyone. A placeholder: the bespoke Classic \
+         look is its own card",
+    ),
 ];
 
 const FAMILIES: &[fn(AbilityType, &AbilityConfig) -> bool] = &[
