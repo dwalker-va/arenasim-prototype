@@ -192,6 +192,14 @@ produces it.
 - Breaks on damage or ability use
 - Visual: 40% opacity, purple "STEALTH" label
 - Shadow Sight orbs spawn after 90s to counter stealth stalemates
+- A lit enemy Flare is visible to a stealthed Rogue, and it plays around the
+  light (`class_ai/rogue_flare.rs`): it walks round the light when a way to its
+  target stays dark, holds 4yd outside it when none does, and goes in anyway
+  when a teammate (not a pet) falls below half health or the light over its
+  approach is relit. Whether a Flare finds the Rogue is geometry only — where
+  it was lit and which way the Rogue walked — never a roll. Traced as the
+  `FlareSkirt` / `FlareWait` / `FlareCommit` movement triggers, each with a
+  `[FLARE] <Rogue> skirts / holds outside / goes into the Flare` log line.
 
 ---
 
