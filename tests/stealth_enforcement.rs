@@ -905,6 +905,7 @@ fn spring_trap(trap_type: TrapType) -> Result<String, String> {
             arm_timer: 0.0,
             trigger_radius: 3.0,
             triggered: false,
+            lifetime_remaining: 60.0,
         },
         Transform::default(),
     ));
