@@ -177,7 +177,8 @@ fn in_melee_range_both_hands_swing_and_the_bow_is_silent() {
     let log = app.world().resource::<CombatLog>();
     let text: Vec<&str> = log.entries.iter().map(|e| e.message.as_str()).collect();
     assert!(
-        text.iter().any(|m| m.contains("Hunter") && m.contains("'s Auto Attack hits")),
+        text.iter()
+            .any(|m| m.contains("Hunter") && m.contains("'s Auto Attack hits")),
         "the melee swing is logged as an Auto Attack"
     );
     assert!(
@@ -201,9 +202,7 @@ fn the_dead_zone_fires_nothing() {
     assert_eq!(damage_taken(&app, victim), 0.0);
     let c = app.world().get::<Combatant>(hunter).unwrap();
     assert!(
-        c.attack_timer >= BOW_SPEED
-            && c.melee_timer >= MELEE_SPEED
-            && c.offhand_timer >= OFF_SPEED,
+        c.attack_timer >= BOW_SPEED && c.melee_timer >= MELEE_SPEED && c.offhand_timer >= OFF_SPEED,
         "every hand must be overdue for the silence to mean anything: \
          bow {}, melee {}, off {}",
         c.attack_timer,
@@ -263,7 +262,10 @@ fn the_melee_swing_does_not_wait_on_the_bow_timer() {
         assert!(ticks < 10 * TICKS_PER_SEC, "the Hunter never shot");
     }
     let bow_timer = app.world().get::<Combatant>(hunter).unwrap().attack_timer;
-    assert!(bow_timer < 0.1, "the shot reset the bow timer ({bow_timer})");
+    assert!(
+        bow_timer < 0.1,
+        "the shot reset the bow timer ({bow_timer})"
+    );
 
     // Step into melee range.
     app.world_mut()

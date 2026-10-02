@@ -27,7 +27,7 @@ use arenasim::headless::{run_headless_match_observed, FrameObservation, Headless
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::auras::apply_pending_auras;
 use arenasim::states::play_match::class_ai::druid::{
-    decide_druid_action, DRUID_MAX_CHASE_SECS, DRUID_MIN_FORM_SECS,
+    decide_druid_action, DRUID_MAX_CHASE_SECS, DRUID_MIN_FORM_SECS, DRUID_RESHIFT_HOLD_SECS,
 };
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
 use arenasim::states::play_match::combat_core::{apply_damage_with_absorb, apply_healing};
@@ -462,6 +462,19 @@ fn decide_scene(
     enemy_distance: f32,
     ally_hp: f32,
 ) -> (Option<AbilityType>, bool, bool) {
+    let mut combatant = Combatant::new(1, 1, CharacterClass::Druid);
+    decide_scene_with(&mut combatant, form_secs, enemy_distance, ally_hp)
+}
+
+/// [`decide_scene`] for a Druid the caller owns, so two decisions can run in
+/// a row on one Druid (its cooldowns carry over). Its HP fraction is read
+/// from `combatant`.
+fn decide_scene_with(
+    combatant: &mut Combatant,
+    form_secs: Option<f32>,
+    enemy_distance: f32,
+    ally_hp: f32,
+) -> (Option<AbilityType>, bool, bool) {
     let mut world = World::new();
     let druid = world.spawn_empty().id();
     let ally = world.spawn_empty().id();
@@ -472,10 +485,11 @@ fn decide_scene(
     let mut trace = DecisionTrace::default();
 
     let druid_pos = Vec3::new(0.0, 1.0, 0.0);
-    let mut combatant = Combatant::new(1, 1, CharacterClass::Druid);
     combatant.target = Some(enemy);
     let mut roster = BTreeMap::new();
-    roster.insert(druid, info(druid, 1, CharacterClass::Druid, druid_pos));
+    let mut me = info(druid, 1, CharacterClass::Druid, druid_pos);
+    me.current_health = 100.0 * combatant.current_health / combatant.max_health;
+    roster.insert(druid, me);
     let mut hurt = info(ally, 1, CharacterClass::Warrior, Vec3::new(10.0, 1.0, 0.0));
     hurt.current_health = ally_hp;
     roster.insert(ally, hurt);
@@ -520,7 +534,7 @@ fn decide_scene(
         &mut combat_log,
         &abilities,
         druid,
-        &mut combatant,
+        combatant,
         druid_pos,
         Some(&live),
         &ctx,
@@ -661,6 +675,38 @@ fn a_safe_shifted_druid_with_work_to_do_shifts_out() {
     assert!(
         !shifts_out(FORM_AGE, 45.0, 100.0),
         "nothing to heal, nothing in reach: stay"
+    );
+}
+
+/// A Druid that leaves the form of its own accord holds the shift back for
+/// [`DRUID_RESHIFT_HOLD_SECS`]: the melee that closes on it straight after is
+/// not answered with a shift straight back. Paired with a Druid that did not
+/// just leave, which shifts at the same melee.
+#[test]
+fn a_voluntary_leave_holds_the_reshift_back() {
+    // Below the open-distance bar, above the emergency one: the melee in its
+    // face is a reason to shift, and nothing outranks the shift.
+    let hurt_druid = || {
+        let mut c = Combatant::new(1, 1, CharacterClass::Druid);
+        c.current_health = c.max_health * 0.5;
+        c
+    };
+    let mut fresh = hurt_druid();
+    let (chosen, _, _) = decide_scene_with(&mut fresh, None, 1.0, 100.0);
+    assert_eq!(
+        chosen,
+        Some(AbilityType::TravelForm),
+        "control: a hurt Druid with a melee on it shifts"
+    );
+
+    let mut left = hurt_druid();
+    let (_, _, shifting) = decide_scene_with(&mut left, Some(FORM_AGE), 25.0, 100.0);
+    assert!(shifting, "the scene did not build: the Druid did not leave");
+    let (chosen, _, _) = decide_scene_with(&mut left, None, 1.0, 100.0);
+    assert_ne!(
+        chosen,
+        Some(AbilityType::TravelForm),
+        "shifted straight back after leaving of its own accord"
     );
 }
 
@@ -1034,6 +1080,17 @@ const IDLE_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
     ),
 ];
 
+/// How soon after leaving the form unrooted a re-shift counts as the shift
+/// strobe: the leave bought nothing but a mana and global-cooldown bill.
+/// The Druid holds the shift back [`DRUID_RESHIFT_HOLD_SECS`] (1.5s); the
+/// leave and the re-shift each land a frame after their decision, so the
+/// observed gap may fall short of it by float error, never by a frame.
+const REVERSAL_SECS: f32 = DRUID_RESHIFT_HOLD_SECS - 0.5 / 60.0;
+
+/// How long a Druid rooted in the form may stay shifted: the frame it decides
+/// to leave and the frame the leave lands, with a frame of slack.
+const ROOTED_EXIT_SECS: f32 = 0.05;
+
 /// How long a Druid that is safe and has work may stay shifted before the
 /// probe calls it idling: the frame its decision lands, and slack for a
 /// global cooldown still running from the shift.
@@ -1042,11 +1099,17 @@ const LEAVE_SLACK_SECS: f32 = 0.5;
 /// The form is neither thrown straight back nor idled in:
 /// - a shift is not reversed inside [`DRUID_MIN_FORM_SECS`] unless the Druid
 ///   was rooted again;
+/// - a Druid rooted in the form is out of it within [`ROOTED_EXIT_SECS`];
+/// - an unrooted leave is not followed by a re-shift inside
+///   [`REVERSAL_SECS`];
 /// - a Druid shifted past the dwell, with no melee or pet enemy within
 ///   striking reach (7.5 yd) — nor within the danger radius (12 yd) for its
 ///   first [`DRUID_MAX_CHASE_SECS`] — and work to do — an ally within 40 yd below 80%,
 ///   or a non-Rogue enemy within Moonfire's 30 yd — is out of the form within
 ///   [`LEAVE_SLACK_SECS`].
+///
+/// A snared Druid with a melee or pet within 30 yd is never counted safe: it
+/// holds the form rather than leave into a shift straight back.
 ///
 /// Measured off the observed world, and conservative where it cannot see
 /// what the Druid sees: a stealthed Rogue counts as a chaser (it may keep the
@@ -1055,10 +1118,14 @@ const LEAVE_SLACK_SECS: f32 = 0.5;
 fn the_druid_neither_strobes_nor_idles_in_the_form() {
     let mut windows = 0;
     let mut safe_checks = 0;
+    let mut rooted_exits = 0;
     for (t1, t2, map, seed) in SHIFT_MATCHES.iter().chain(IDLE_MATCHES) {
         let played = play(t1, t2, map, *seed);
         let mut shifted_at: Option<f32> = None;
         let mut safe_since: Option<f32> = None;
+        let mut rooted_since: Option<f32> = None;
+        // When it last left the form of its own accord (unrooted).
+        let mut voluntary_leave: Option<f32> = None;
         for f in &played.frames {
             let Some((_, d)) = f
                 .combatants
@@ -1081,7 +1148,17 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
             });
             let shifted = d.alive && d.aura_types.contains(&AuraType::TravelForm);
             match (shifted_at, shifted) {
-                (None, true) => shifted_at = Some(f.sim_time),
+                (None, true) => {
+                    if let Some(left) = voluntary_leave {
+                        assert!(
+                            f.sim_time - left >= REVERSAL_SECS,
+                            "{t1:?} v {t2:?} {map} #{seed}: left the form unrooted at \
+                             {left:.2}s and shifted straight back at {:.2}s",
+                            f.sim_time
+                        );
+                    }
+                    shifted_at = Some(f.sim_time);
+                }
                 (Some(at), false) => {
                     if d.alive {
                         assert!(
@@ -1090,13 +1167,33 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
                              {:.2}s, unrooted",
                             f.sim_time
                         );
+                        if rooted {
+                            rooted_exits += 1;
+                            voluntary_leave = None;
+                        } else {
+                            voluntary_leave = Some(f.sim_time);
+                        }
                     }
                     windows += 1;
                     shifted_at = None;
                     safe_since = None;
+                    rooted_since = None;
                     continue;
                 }
                 _ => {}
+            }
+            // Rooted in the form: out of it on the next frame — a rooted form
+            // is no faster than none, and the rotation re-shifts through it.
+            if shifted && rooted && !held {
+                let since = *rooted_since.get_or_insert(f.sim_time);
+                assert!(
+                    f.sim_time - since <= ROOTED_EXIT_SECS,
+                    "{t1:?} v {t2:?} {map} #{seed}: rooted in the form since {since:.2}s, \
+                     still shifted at {:.2}s",
+                    f.sim_time
+                );
+            } else {
+                rooted_since = None;
             }
             let Some(at) = shifted_at else { continue };
             let near = |c: &arenasim::headless::ObservedCombatant, r: f32| {
@@ -1120,8 +1217,13 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
             let reach = f.combatants.values().any(|c| {
                 c.team != 1 && c.alive && c.class != CharacterClass::Rogue && near(c, 30.0)
             });
+            // Snared with a chaser in the intent radius (30 yd): a leave would
+            // be answered by a re-shift, so the Druid holds the form.
+            let snared = d.aura_types.contains(&AuraType::MovementSpeedSlow);
+            let would_reshift = snared && chaser_within(30.0);
             let safe_with_work = f.sim_time - at >= DRUID_MIN_FORM_SECS
                 && !chaser
+                && !would_reshift
                 && !rooted
                 && !held
                 && (heal || reach);
@@ -1139,7 +1241,14 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
             );
         }
     }
-    eprintln!("{windows} Travel Form windows, {safe_checks} safe-with-work frames checked");
+    eprintln!(
+        "{windows} Travel Form windows, {safe_checks} safe-with-work frames checked, \
+         {rooted_exits} rooted exits"
+    );
+    assert!(
+        rooted_exits >= 2,
+        "only {rooted_exits} rooted-in-form exits — the seeds moved"
+    );
     assert!(
         windows >= 20,
         "only {windows} Travel Form windows — the seeds moved"

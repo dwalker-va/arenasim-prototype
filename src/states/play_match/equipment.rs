@@ -2165,8 +2165,7 @@ mod tests {
             if class.melee_beside_ranged() {
                 continue;
             }
-            let mut combatant =
-                super::super::components::combatant::Combatant::new(1, 0, *class);
+            let mut combatant = super::super::components::combatant::Combatant::new(1, 0, *class);
             let mut loadout = Loadout::new();
             loadout.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
             loadout.insert(ItemSlot::OffHand, ItemId::SerpentFangDagger);

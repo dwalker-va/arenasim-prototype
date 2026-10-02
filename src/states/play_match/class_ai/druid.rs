@@ -101,33 +101,75 @@ pub const DRUID_CYCLONE_KILL_HP: f32 = 0.4;
 /// Why the Druid shifts into Travel Form, when it should.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShiftReason {
-    /// Rooted or slowed with a threat on it: the shift breaks the impairment.
+    /// Rooted, or snared with a melee or pet chasing it: the shift breaks the
+    /// impairment.
     BreakImpairment,
     /// A melee is beating on a hurt Druid: the shift opens distance.
     OpenDistance,
 }
 
+/// What the escape-shift rule reads, for [`shift_trigger`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShiftView {
+    /// The posture machine's PRESSURED trigger: a visible threat is on the
+    /// Druid or closing on it.
+    pub pressured: bool,
+    pub rooted: bool,
+    pub snared: bool,
+    /// A visible melee enemy or pet targeting the Druid within the intent
+    /// radius — the kind of threat a faster Druid can leave behind.
+    pub chaser: bool,
+    /// A visible melee enemy or pet targeting the Druid within striking reach.
+    pub melee_on_me: bool,
+    pub self_health_pct: f32,
+}
+
+impl ShiftView {
+    /// The view of the Druid at `my_pos` with `auras` on it.
+    pub fn of(
+        ctx: &CombatContext,
+        entity: Entity,
+        my_pos: Vec3,
+        auras: Option<&ActiveAuras>,
+        pressured: bool,
+        threat_radius: f32,
+        self_health_pct: f32,
+    ) -> Self {
+        let has =
+            |ty: AuraType| auras.is_some_and(|a| a.auras.iter().any(|aura| aura.effect_type == ty));
+        let chasers = || {
+            ctx.enemies_targeting(entity)
+                .into_iter()
+                .filter(|e| e.class.is_melee() || e.is_pet)
+        };
+        Self {
+            pressured,
+            rooted: has(AuraType::Root),
+            snared: has(AuraType::MovementSpeedSlow),
+            chaser: chasers().any(|e| e.position.distance(my_pos) <= threat_radius),
+            melee_on_me: chasers()
+                .any(|e| e.position.distance(my_pos) <= MELEE_RANGE + DRUID_ATTACK_RANGE_SLACK),
+            self_health_pct,
+        }
+    }
+}
+
 /// The escape-shift rule, pure so it can be tested on its own. Only while
-/// PRESSURED (`pressured`: a visible threat is on the Druid or closing on it):
-/// - rooted or slowed → break it;
-/// - a melee attacking it (`melee_on_me`) while it is below
-///   [`DRUID_SHIFT_OPEN_HP`] → open distance.
-///
-/// A slow from a caster who is holding range is not PRESSURED, and so is
-/// shrugged off rather than shifted out of.
-pub fn shift_trigger(
-    pressured: bool,
-    impaired: bool,
-    melee_on_me: bool,
-    self_health_pct: f32,
-) -> Option<ShiftReason> {
-    if !pressured {
+/// PRESSURED:
+/// - rooted → break it;
+/// - snared WITH a melee or pet chasing it → break it. A snare with no chaser
+///   is shrugged off: the form outruns legs, not spells, so shifting out of a
+///   Frostbolt or Frost Shock from a caster buys nothing;
+/// - a melee attacking it while it is below [`DRUID_SHIFT_OPEN_HP`] → open
+///   distance.
+pub fn shift_trigger(view: ShiftView) -> Option<ShiftReason> {
+    if !view.pressured {
         return None;
     }
-    if impaired {
+    if view.rooted || (view.snared && view.chaser) {
         return Some(ShiftReason::BreakImpairment);
     }
-    if melee_on_me && self_health_pct < DRUID_SHIFT_OPEN_HP {
+    if view.melee_on_me && view.self_health_pct < DRUID_SHIFT_OPEN_HP {
         return Some(ShiftReason::OpenDistance);
     }
     None
@@ -142,6 +184,10 @@ pub const DRUID_MIN_FORM_SECS: f32 = 3.0;
 /// instants, and a chaser that never lands a hit is one it can outpace again
 /// on the next shift.
 pub const DRUID_MAX_CHASE_SECS: f32 = 8.0;
+/// How long a Druid that left the form of its own accord holds the shift back:
+/// one global cooldown, as the cast it left to make would. A chaser that
+/// closes in that window is not answered with a shift straight back.
+pub const DRUID_RESHIFT_HOLD_SECS: f32 = GCD;
 
 /// What a shifted Druid can see from inside the form, for [`should_leave_form`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -160,6 +206,9 @@ pub struct FormView {
     /// A visible enemy within the Druid's spell reach (Moonfire's range):
     /// something to Moonfire, root or cyclone.
     pub enemy_in_reach: bool,
+    /// [`shift_trigger`] would fire for the Druid as it stands: a leave now
+    /// would be answered by a shift straight back.
+    pub would_reshift: bool,
 }
 
 /// Whether a shifted Druid leaves Travel Form. Leaving is free and costs no
@@ -169,11 +218,16 @@ pub struct FormView {
 ///   if a threat is still on it. A new SNARE does not: the form still outruns
 ///   a slowed chaser, and shifting out and back in under a Mage's Frostbolts
 ///   would spend mana and a global cooldown on every bolt.
+/// - **Never into a re-shift**: not with a chaser in striking reach, and not
+///   while [`shift_trigger`] would fire — leaving would buy one frame out of
+///   form for 25 mana and a global cooldown on the shift straight back. And a
+///   Druid that leaves of its own accord holds the shift back for
+///   [`DRUID_RESHIFT_HOLD_SECS`], so a chaser closing just after is not
+///   answered with one either.
 /// - Otherwise it leaves once it is **safe** — it has been shifted at least
-///   [`DRUID_MIN_FORM_SECS`], no chaser is within striking reach, and none is
-///   within the danger radius either unless it has run for
-///   [`DRUID_MAX_CHASE_SECS`] without shaking it — **and has work**: an ally
-///   to heal, or an enemy in reach of its spells.
+///   [`DRUID_MIN_FORM_SECS`], and no chaser is within the danger radius
+///   unless it has run for [`DRUID_MAX_CHASE_SECS`] without shaking it —
+///   **and has work**: an ally to heal, or an enemy in reach of its spells.
 ///
 /// Safe with nothing in reach, it stays shifted: the form is faster and
 /// there is nothing to cast. A caster hitting the Druid from range does not
@@ -182,8 +236,10 @@ pub fn should_leave_form(view: FormView) -> bool {
     if view.rooted {
         return true;
     }
+    if view.chaser_striking || view.would_reshift {
+        return false;
+    }
     view.in_form_secs >= DRUID_MIN_FORM_SECS
-        && !view.chaser_striking
         && (!view.chaser_near || view.in_form_secs >= DRUID_MAX_CHASE_SECS)
         && (view.healing_needed || view.enemy_in_reach)
 }
@@ -388,12 +444,30 @@ pub fn decide_druid_action(
                     abilities.get_unchecked(&AbilityType::Moonfire).range,
                 )
                 .is_empty(),
+            would_reshift: shift_trigger(ShiftView::of(
+                ctx,
+                entity,
+                my_pos,
+                auras,
+                pressured,
+                movement.shared.threat_intent_radius,
+                combatant.current_health / combatant.max_health,
+            ))
+            .is_some(),
         };
         if gates_opened && should_leave_form(view) {
             commands.spawn(ShapeshiftPending {
                 caster: entity,
                 shift: Shift::Out,
             });
+            // Left to cast, so it holds the shift back as a cast's global
+            // cooldown would. A rooted exit holds nothing back: it leaves
+            // to re-shift through the root.
+            if !view.rooted {
+                combatant
+                    .ability_cooldowns
+                    .insert(AbilityType::TravelForm, DRUID_RESHIFT_HOLD_SECS);
+            }
             return true;
         }
         return false;
@@ -591,22 +665,21 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// breaks the roots and snares and puts the form on next frame.
     fn try_travel_form(&mut self, combatant: &mut Combatant) -> bool {
         let ability = AbilityType::TravelForm;
-        let impaired = self.auras.is_some_and(|auras| {
-            auras
-                .auras
-                .iter()
-                .any(|a| matches!(a.effect_type, AuraType::Root | AuraType::MovementSpeedSlow))
-        });
-        let melee_on_me = self.ctx.enemies_targeting(self.entity).iter().any(|e| {
-            (e.class.is_melee() || e.is_pet)
-                && e.position.distance(self.my_pos) <= MELEE_RANGE + DRUID_ATTACK_RANGE_SLACK
-        });
-        let self_hp = combatant.current_health / combatant.max_health;
-        if shift_trigger(self.pressured, impaired, melee_on_me, self_hp).is_none() {
+        let view = ShiftView::of(
+            self.ctx,
+            self.entity,
+            self.my_pos,
+            self.auras,
+            self.pressured,
+            self.threat_radius,
+            combatant.current_health / combatant.max_health,
+        );
+        if shift_trigger(view).is_none() {
             self.builder.reject(
                 ability,
                 RejectionReason::PreconditionUnmet {
-                    note: "no threat to escape: not pressured, or free and healthy".to_string(),
+                    note: "no threat to escape: not pressured, unsnared or unchased, or healthy"
+                        .to_string(),
                 },
             );
             return false;
@@ -1034,23 +1107,79 @@ mod tests {
         );
     }
 
+    fn shift() -> ShiftView {
+        ShiftView {
+            pressured: true,
+            rooted: false,
+            snared: false,
+            chaser: false,
+            melee_on_me: false,
+            self_health_pct: 1.0,
+        }
+    }
+
     #[test]
     fn the_shift_answers_a_threat_only() {
-        // Not pressured: a slow from a caster holding range is shrugged off.
-        assert_eq!(shift_trigger(false, true, true, 0.1), None);
-        // Pressured and impaired: break it.
+        // Not pressured: nothing, rooted or not.
         assert_eq!(
-            shift_trigger(true, true, false, 1.0),
+            shift_trigger(ShiftView {
+                pressured: false,
+                rooted: true,
+                ..shift()
+            }),
+            None
+        );
+        // Pressured and rooted: break it.
+        assert_eq!(
+            shift_trigger(ShiftView {
+                rooted: true,
+                ..shift()
+            }),
             Some(ShiftReason::BreakImpairment)
+        );
+        // Snared with a melee or pet chasing: break it...
+        assert_eq!(
+            shift_trigger(ShiftView {
+                snared: true,
+                chaser: true,
+                ..shift()
+            }),
+            Some(ShiftReason::BreakImpairment)
+        );
+        // ...but a snare with no chaser is shrugged off: the form outruns
+        // legs, not spells.
+        assert_eq!(
+            shift_trigger(ShiftView {
+                snared: true,
+                ..shift()
+            }),
+            None
         );
         // Pressured, free, a melee on a hurt Druid: open distance.
         assert_eq!(
-            shift_trigger(true, false, true, DRUID_SHIFT_OPEN_HP - 0.01),
+            shift_trigger(ShiftView {
+                melee_on_me: true,
+                self_health_pct: DRUID_SHIFT_OPEN_HP - 0.01,
+                ..shift()
+            }),
             Some(ShiftReason::OpenDistance)
         );
         // ...but not on a healthy one, and not with no melee on it.
-        assert_eq!(shift_trigger(true, false, true, DRUID_SHIFT_OPEN_HP), None);
-        assert_eq!(shift_trigger(true, false, false, 0.1), None);
+        assert_eq!(
+            shift_trigger(ShiftView {
+                melee_on_me: true,
+                self_health_pct: DRUID_SHIFT_OPEN_HP,
+                ..shift()
+            }),
+            None
+        );
+        assert_eq!(
+            shift_trigger(ShiftView {
+                self_health_pct: 0.1,
+                ..shift()
+            }),
+            None
+        );
     }
 
     fn view() -> FormView {
@@ -1061,6 +1190,7 @@ mod tests {
             chaser_striking: false,
             healing_needed: true,
             enemy_in_reach: false,
+            would_reshift: false,
         }
     }
 
@@ -1118,6 +1248,13 @@ mod tests {
                 ..view()
             }),
             "rooted again: leave at once, to re-shift"
+        );
+        assert!(
+            !should_leave_form(FormView {
+                would_reshift: true,
+                ..view()
+            }),
+            "never into a shift straight back"
         );
     }
 
