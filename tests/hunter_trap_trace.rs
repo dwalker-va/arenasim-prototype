@@ -685,11 +685,13 @@ fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
 /// what lands is the default Hunter's polearm (AS-195): its melee swing hits
 /// the Rogue in 227 of the 235 seeds of 320 where the trap springs on the
 /// Priest, where before it the Hunter dealt nothing in 243 of 246. Pinned
-/// seeds where the trap springs on the Priest.
+/// seeds where the trap springs on the Priest and the polearm lands on the
+/// Rogue during the freeze (seed 6 was swapped for 1 when the polearm moved
+/// that match off the scenario).
 #[test]
 fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
     const GATES_OPEN: f64 = 10.0;
-    for seed in [1u64, 11, 13] {
+    for seed in [1u64, 8, 9] {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.team1_kill_target = Some(1);
         cfg.max_duration_secs = 60.0;
@@ -767,6 +769,29 @@ fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
         assert!(
             on_rogue > 0,
             "seed {seed}: the Hunter never decided on the Rogue while the Priest was frozen"
+        );
+
+        // ...and its polearm lands on the Rogue while the Priest is frozen: a
+        // melee swing ("Auto Attack"; Auto Shot is the bow) on the log clock.
+        let melee_on_rogue = log
+            .lines()
+            .filter(|l| {
+                l.contains("Team 1 Hunter #1's Auto Attack ")
+                    && (l.contains(" hits Team 2 Rogue") || l.contains(" CRITS Team 2 Rogue"))
+            })
+            .filter_map(|l| {
+                l.trim_start_matches('[')
+                    .split('s')
+                    .next()?
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+            })
+            .filter(|t| frozen.contains(&(t - GATES_OPEN)))
+            .count();
+        assert!(
+            melee_on_rogue > 0,
+            "seed {seed}: no Hunter melee swing landed on the Rogue while the Priest was frozen"
         );
     }
 }

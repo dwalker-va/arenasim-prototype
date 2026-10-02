@@ -288,56 +288,61 @@ fn another_hunters_trap_is_untouched() {
 // The AI holds a Frost Trap that would replace its own Freezing Trap
 // ----------------------------------------------------------------------------
 
-/// Hunter+Shaman v Warrior+Priest, BasicArena, seed 0: at 17.97s the Hunter,
-/// its Freezing Trap still unsprung, used to drop a Frost Trap that — under
-/// the rule — would have taken the Freezing Trap off the ground. It holds it
-/// instead, and the trace says why. Across the whole match no Freezing Trap is
-/// ever replaced by a Frost Trap.
+/// Hunter+Shaman v Rogue+Priest, BasicArena: the Rogue is on the Hunter while
+/// its Freezing Trap still waits to spring, so a Frost Trap dropped then would
+/// take the Freezing Trap off the ground under the one-trap rule. The Hunter
+/// holds it instead, and the trace says why. Across the whole match no
+/// Freezing Trap is ever replaced by a Frost Trap. Pinned seeds where the hold
+/// fires (56, 913 and 149 held decisions); they were re-pinned from
+/// Hunter+Shaman v Warrior+Priest seed 0 when the default Hunter took up its
+/// polearm (AS-195), after which that comp held in none of 240 seeds.
 #[test]
 fn the_hunter_holds_a_frost_trap_that_would_replace_its_freezing_trap() {
-    let dir = tempfile::tempdir().unwrap();
-    let trace_path = dir.path().join("trace.jsonl");
-    let log_path = dir.path().join("match.txt");
-    let cfg = HeadlessMatchConfig {
-        team1: vec!["Hunter".into(), "Shaman".into()],
-        team2: vec!["Warrior".into(), "Priest".into()],
-        max_duration_secs: 180.0,
-        random_seed: Some(0),
-        output_path: Some(log_path.to_string_lossy().into_owned()),
-        ..Default::default()
-    };
-    run_headless_match_with(
-        cfg,
-        false,
-        Some(TraceConfig {
-            output_path: trace_path.clone(),
-        }),
-    )
-    .expect("headless match");
-    let trace = std::fs::read_to_string(&trace_path).unwrap();
+    for seed in [0u64, 6, 14] {
+        let dir = tempfile::tempdir().unwrap();
+        let trace_path = dir.path().join("trace.jsonl");
+        let log_path = dir.path().join("match.txt");
+        let cfg = HeadlessMatchConfig {
+            team1: vec!["Hunter".into(), "Shaman".into()],
+            team2: vec!["Rogue".into(), "Priest".into()],
+            max_duration_secs: 180.0,
+            random_seed: Some(seed),
+            output_path: Some(log_path.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        run_headless_match_with(
+            cfg,
+            false,
+            Some(TraceConfig {
+                output_path: trace_path.clone(),
+            }),
+        )
+        .expect("headless match");
+        let trace = std::fs::read_to_string(&trace_path).unwrap();
 
-    let held = trace
-        .lines()
-        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-        .filter(|v| v["actor"]["class"] == "Hunter")
-        .flat_map(|v| v["candidates"].as_array().cloned().unwrap_or_default())
-        .filter(|c| {
-            c["ability"] == "FrostTrap"
-                && c["reason"]["PreconditionUnmet"]["note"] == FROST_TRAP_HELD_FOR_FREEZING
-        })
-        .count();
-    assert!(
-        held > 0,
-        "the guard never held a Frost Trap: the probe is vacuous"
-    );
+        let held = trace
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| v["actor"]["class"] == "Hunter")
+            .flat_map(|v| v["candidates"].as_array().cloned().unwrap_or_default())
+            .filter(|c| {
+                c["ability"] == "FrostTrap"
+                    && c["reason"]["PreconditionUnmet"]["note"] == FROST_TRAP_HELD_FOR_FREEZING
+            })
+            .count();
+        assert!(
+            held > 0,
+            "seed {seed}: the guard never held a Frost Trap: the probe is vacuous"
+        );
 
-    let log = std::fs::read_to_string(&log_path).unwrap();
-    assert!(
-        log.contains("Frost Trap"),
-        "no Frost Trap in the match: the probe is vacuous"
-    );
-    assert!(
-        !log.contains("Freezing Trap is replaced by its Frost Trap"),
-        "a Frost Trap replaced the Hunter's own Freezing Trap"
-    );
+        let log = std::fs::read_to_string(&log_path).unwrap();
+        assert!(
+            log.contains("Frost Trap"),
+            "seed {seed}: no Frost Trap in the match: the probe is vacuous"
+        );
+        assert!(
+            !log.contains("Freezing Trap is replaced by its Frost Trap"),
+            "seed {seed}: a Frost Trap replaced the Hunter's own Freezing Trap"
+        );
+    }
 }
