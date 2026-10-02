@@ -2160,7 +2160,7 @@ fn try_dispatch_boar_charge(
 
 /// Try to dispatch Master's Call. Prefers Hunter (self) if owner is rooted or
 /// slowed; falls back to scanning allies on the Hunter's team.
-fn try_dispatch_masters_call(
+pub(super) fn try_dispatch_masters_call(
     commands: &mut Commands,
     abilities: &AbilityDefinitions,
     decision_trace: &mut DecisionTrace,
@@ -2249,16 +2249,19 @@ fn try_dispatch_masters_call(
         return false;
     };
 
+    // Range, then line of sight from the bird (`ally_reach`, the gates every
+    // ally-freeing cast passes).
     if let Some(target_info) = ctx.combatants.get(&target) {
-        let dist = pet_pos.distance(target_info.position);
-        if dist > def.range {
-            builder.reject(
-                ability,
-                RejectionReason::OutOfRange {
-                    distance: dist,
-                    max: def.range,
-                },
-            );
+        let reason = match super::ally_reach(ctx, def.range, pet_pos, target_info.position) {
+            super::AllyReach::Reaches => None,
+            super::AllyReach::OutOfRange { distance } => Some(RejectionReason::OutOfRange {
+                distance,
+                max: def.range,
+            }),
+            super::AllyReach::LosBlocked => Some(RejectionReason::LosBlocked),
+        };
+        if let Some(reason) = reason {
+            builder.reject(ability, reason);
             builder.finish();
             return false;
         }

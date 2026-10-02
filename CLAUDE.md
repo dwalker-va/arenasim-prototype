@@ -624,19 +624,32 @@ target view.
 
 **Dispel walk (Paladin)** — `healer_postures::dispel_chase_override`, choosing
 its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse only
-reaches allies within its 30yd range, so a teammate held in urgent crowd
-control that Cleanse removes (`URGENT_DISPEL_PRIORITY`: Freezing Trap,
-Polymorph, the UA silence, Fear) beyond that range would otherwise sit out the
-whole CC. The Paladin walks straight at the nearest such teammate (a
-`MovementGoal::Point`, same walk as the medic chase, which outranks it) until
-the rotation's urgent Cleanse reaches it, deferring non-critical heals as it
-does during a dip. It shares the medic chase's gate (FREE/PRESSURED only, never
-while hard-CC'd, retired under `TeamPlan` PRESSURED), and does not walk while a
-qualifying teammate is already in range or the Paladin cannot afford Cleanse.
-Traced as `DispelChase`; a Cleanse that declines because its only candidate
-stands beyond range is traced `OutOfRange` with the distance, never
-`NoValidTarget`. Wired for the Paladin only: the Priest's Dispel Magic has the
-same range gap and no walk.
+reaches allies within its 30yd range AND in sight, so a teammate held in urgent
+crowd control that Cleanse removes (`URGENT_DISPEL_PRIORITY`: Freezing Trap,
+Polymorph, the UA silence, Fear) beyond that range or behind cover would
+otherwise sit out the whole CC. The Paladin walks straight at the nearest such
+teammate (a `MovementGoal::Point`, tangent-steered round a pillar, same walk as
+the medic chase, which outranks it) until the rotation's urgent Cleanse reaches
+it, deferring non-critical heals as it does during a dip. It shares the medic
+chase's gate (FREE/PRESSURED only, never while hard-CC'd, retired under
+`TeamPlan` PRESSURED), and does not walk while a qualifying teammate is already
+reached or the Paladin cannot afford Cleanse. Traced as `DispelChase`; a
+Cleanse that declines because its only candidates are unreachable is traced
+`LosBlocked` (one in range behind cover) or `OutOfRange` with the distance,
+never `NoValidTarget`. Wired for the Paladin only: the Priest's Dispel Magic has
+the same gap and no walk.
+
+**Ally dispels need sight.** Every cast that frees a teammate — Dispel Magic,
+Cleanse, Devour Magic, Master's Call — picks its teammate with
+`class_ai::ally_reach`: range, then line of sight, the same two gates and order
+`pre_cast_ok` applies to every other targeted cast. An occluded teammate is
+skipped for a reachable one and, if none is reachable, the cast is rejected
+`LosBlocked`. A Hunter-dispatched Master's Call is re-checked by the Bird when
+it executes (`pet_ai::pet_command_rejection`), which asks `has_line_of_sight`
+directly — sight only, since range was the dispatch's check. The dispel walk
+asks `ally_reach`, so it ends exactly where the cast becomes possible. Purge
+goes through `pre_cast_ok` and was always sight-gated. A no-op on
+obstacle-free maps (BasicArena stays byte-identical).
 
 **Tangent steering (goal-directed pillar rounding)** — `map_geometry::steer_toward_goal`
 (pure, unit-tested; no RON knob). When a mover with a DESTINATION has the

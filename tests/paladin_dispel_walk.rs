@@ -24,10 +24,13 @@ use arenasim::states::play_match::class_ai::paladin::{
 };
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
 use arenasim::states::play_match::decision_trace::DecisionTrace;
+use arenasim::states::play_match::map_geometry::{
+    has_line_of_sight, resolve_movement, steer_toward_goal, ObstacleVolume,
+};
 use arenasim::states::play_match::traps::freezing_trap_aura;
 use arenasim::states::play_match::{
     AbilityDefinitions, AbilityType, ActiveAuras, Aura, Combatant, HealerPosture, MovementConfig,
-    MovementDirective, MovementGoal,
+    MovementDirective, MovementGoal, GCD,
 };
 
 fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> CombatantInfo {
@@ -63,6 +66,7 @@ struct Scene {
     roster: BTreeMap<Entity, CombatantInfo>,
     active_auras: BTreeMap<Entity, Vec<Aura>>,
     combatant: Combatant,
+    obstacles: Vec<ObstacleVolume>,
 }
 
 const PALADIN_POS: Vec3 = Vec3::new(0.0, 1.0, 0.0);
@@ -106,6 +110,7 @@ fn scene(distance: f32, warrior_auras: Vec<Aura>) -> Scene {
         roster,
         active_auras,
         combatant,
+        obstacles: Vec::new(),
     }
 }
 
@@ -119,6 +124,7 @@ fn context<'a>(
     paladin: Entity,
     roster: &'a BTreeMap<Entity, CombatantInfo>,
     active_auras: &'a BTreeMap<Entity, Vec<Aura>>,
+    obstacles: &'a [ObstacleVolume],
 ) -> CombatContext<'a> {
     CombatContext::new(
         paladin,
@@ -127,7 +133,7 @@ fn context<'a>(
         active_auras,
         &EMPTY_DR,
         &EMPTY_CD,
-        &[],
+        obstacles,
         Default::default(),
         Default::default(),
     )
@@ -135,7 +141,12 @@ fn context<'a>(
 
 impl Scene {
     fn ctx(&self) -> CombatContext<'_> {
-        context(self.paladin, &self.roster, &self.active_auras)
+        context(
+            self.paladin,
+            &self.roster,
+            &self.active_auras,
+            &self.obstacles,
+        )
     }
 
     /// One posture tick. Returns the plan, the directive it left on the
@@ -189,7 +200,12 @@ impl Scene {
         let mut same_frame_cc = Vec::new();
         let self_auras = ActiveAuras { auras: Vec::new() };
         {
-            let ctx = context(self.paladin, &self.roster, &self.active_auras);
+            let ctx = context(
+                self.paladin,
+                &self.roster,
+                &self.active_auras,
+                &self.obstacles,
+            );
             let mut commands = Commands::new(&mut queue, &self.world);
             decide_paladin_action(
                 &mut commands,
@@ -297,30 +313,32 @@ fn an_untrapped_teammate_draws_no_walk() {
 // The probe: the trapped Warrior is freed within the walk time
 // ============================================================================
 
-/// Paladin + Warrior, the Warrior Freezing-Trapped 15yd beyond Cleanse's range:
-/// the Warrior is freed within the time it takes the Paladin to walk those
-/// 15yd, and never from beyond range.
-///
-/// Steps the real posture tick and the real rotation at 60Hz over the scene,
-/// moving the Paladin along whatever directive the tick left at its base speed
-/// — the straight-line move `move_to_target` makes toward a `Point` goal on an
-/// obstacle-free map. (A trap springing beyond Cleanse's range next to a
-/// Paladin is rare on today's main, because the Hunter's trap AI aims at the
-/// teammates nobody can free; this pins the Paladin's half without waiting on
-/// a seed to produce it.)
-#[test]
-fn a_paladin_frees_a_warrior_trapped_out_of_range_within_the_walk_time() {
+/// Where and when the stepped scene's first Cleanse on the Warrior landed.
+struct Freed {
+    /// Seconds after the first tick.
+    at: f32,
+    /// The Paladin's position when it cast.
+    from: Vec3,
+    /// Every Paladin position stepped through before the cast.
+    path: Vec<Vec3>,
+}
+
+/// Step the real posture tick and the real rotation at 60Hz over the scene for
+/// up to `seconds`, moving the Paladin along whatever `Point` directive the
+/// tick left at its base speed — the move `move_to_target` makes toward a
+/// `Point` goal: tangent-steered around the scene's obstacles
+/// (`steer_toward_goal`, straight at the goal where there are none) and
+/// resolved against them (`resolve_movement`). Returns the first Cleanse on the
+/// Warrior, if one lands.
+fn step_until_cleansed(s: &mut Scene, seconds: f32) -> Option<Freed> {
     const DT: f32 = 1.0 / 60.0;
-    let range = cleanse_range();
-    let gap = 15.0;
-    let mut s = scene(range + gap, trapped());
     let speed = s.combatant.base_movement_speed;
     let abilities = AbilityDefinitions::default();
     let movement = MovementConfig::default();
     let mut pos = PALADIN_POS;
+    let mut path = Vec::new();
 
-    let mut freed_at = None;
-    for tick in 0..(8.0 / DT) as usize {
+    for tick in 0..(seconds / DT) as usize {
         let now = 20.0 + tick as f32 * DT;
         s.roster.get_mut(&s.paladin).unwrap().position = pos;
         s.combatant.global_cooldown = (s.combatant.global_cooldown - DT).max(0.0);
@@ -358,7 +376,7 @@ fn a_paladin_frees_a_warrior_trapped_out_of_range_within_the_walk_time() {
         let self_auras = ActiveAuras { auras: Vec::new() };
         let mut same_frame_cc = Vec::new();
         {
-            let ctx = context(s.paladin, &s.roster, &s.active_auras);
+            let ctx = context(s.paladin, &s.roster, &s.active_auras, &s.obstacles);
             let mut commands = Commands::new(&mut queue, &s.world);
             decide_paladin_action(
                 &mut commands,
@@ -382,21 +400,51 @@ fn a_paladin_frees_a_warrior_trapped_out_of_range_within_the_walk_time() {
                 && v["outcome"]["target_id"].as_u64() == Some(s.warrior.index() as u64)
         });
         if cleansed {
-            freed_at = Some((tick as f32 * DT, pos.distance(s.warrior_pos)));
-            break;
+            return Some(Freed {
+                at: tick as f32 * DT,
+                from: pos,
+                path,
+            });
         }
+        path.push(pos);
 
         if let Some(MovementDirective {
             goal: MovementGoal::Point(p),
             ..
         }) = s.world.get::<MovementDirective>(s.paladin)
         {
-            let step = (*p - pos).normalize_or_zero() * speed * DT;
-            pos += Vec3::new(step.x, 0.0, step.z);
+            let to_goal = *p - pos;
+            let dir = steer_toward_goal(
+                &s.obstacles,
+                Vec2::new(pos.x, pos.z),
+                Vec2::new(p.x, p.z),
+                pos.y,
+            )
+            .map(|d| Vec3::new(d.x, 0.0, d.y))
+            .unwrap_or_else(|| to_goal.normalize_or_zero());
+            let step = dir * speed * DT;
+            pos = resolve_movement(&s.obstacles, pos, pos + Vec3::new(step.x, 0.0, step.z));
         }
     }
+    None
+}
 
-    let (t, distance) = freed_at.expect("the trapped Warrior is freed before the trap ends");
+/// Paladin + Warrior, the Warrior Freezing-Trapped 15yd beyond Cleanse's range:
+/// the Warrior is freed within the time it takes the Paladin to walk those
+/// 15yd, and never from beyond range. (A trap springing beyond Cleanse's range
+/// next to a Paladin is rare on today's main, because the Hunter's trap AI aims
+/// at the teammates nobody can free; this pins the Paladin's half without
+/// waiting on a seed to produce it.)
+#[test]
+fn a_paladin_frees_a_warrior_trapped_out_of_range_within_the_walk_time() {
+    let range = cleanse_range();
+    let gap = 15.0;
+    let mut s = scene(range + gap, trapped());
+    let speed = s.combatant.base_movement_speed;
+
+    let freed = step_until_cleansed(&mut s, 8.0)
+        .expect("the trapped Warrior is freed before the trap ends");
+    let (t, distance) = (freed.at, freed.from.distance(s.warrior_pos));
     let walk = gap / speed;
     assert!(
         distance <= range,
@@ -405,6 +453,126 @@ fn a_paladin_frees_a_warrior_trapped_out_of_range_within_the_walk_time() {
     assert!(
         t <= walk + 0.1,
         "freed after {t:.2}s; the {gap}yd walk takes {walk:.2}s at {speed}yd/s"
+    );
+}
+
+// ============================================================================
+// Line of sight: no Cleanse through a pillar (AS-186)
+// ============================================================================
+
+/// How far down +X the Warrior stands in the line-of-sight scenes: well inside
+/// Cleanse's range, so range never decides them.
+const IN_RANGE: f32 = 20.0;
+
+/// A pillar standing squarely between the Paladin (origin) and a Warrior at
+/// `IN_RANGE` down +X, tall enough to block the eye-height sightline.
+fn pillar_between() -> ObstacleVolume {
+    ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(IN_RANGE / 2.0, 0.0),
+        radius: 3.0,
+        base_y: 0.0,
+        height: 10.0,
+    }
+}
+
+/// The Warrior trapped in Cleanse's range with a pillar between it and the
+/// Paladin — and, with `pillar: false`, the same scene in the open.
+fn pillar_scene(pillar: bool) -> Scene {
+    let mut s = scene(IN_RANGE, trapped());
+    if pillar {
+        s.obstacles.push(pillar_between());
+    }
+    assert!(IN_RANGE < cleanse_range());
+    assert_eq!(
+        has_line_of_sight(&s.obstacles, PALADIN_POS, s.warrior_pos),
+        !pillar,
+        "the scene's sightline is what the test says it is"
+    );
+    s
+}
+
+/// In range but behind a pillar: the rotation refuses the Cleanse and says why
+/// — `LosBlocked`, the reason every other cast gives at cast start.
+#[test]
+fn a_teammate_trapped_behind_a_pillar_is_not_cleansed_through_it() {
+    let mut s = pillar_scene(true);
+    let (cleanse, chosen) = s.decide();
+    assert_eq!(cleanse["status"], "rejected");
+    assert_eq!(cleanse["reason"], "LosBlocked");
+    assert_ne!(
+        chosen.map(|(ability, _)| ability).as_deref(),
+        Some("PaladinCleanse")
+    );
+}
+
+/// ...the same Cleanse, same distance, no pillar: it lands.
+#[test]
+fn the_same_teammate_in_sight_is_cleansed() {
+    let mut s = pillar_scene(false);
+    let (_, chosen) = s.decide();
+    assert_eq!(
+        chosen,
+        Some(("PaladinCleanse".to_string(), Some(s.warrior.index() as u64)))
+    );
+}
+
+/// In range but behind a pillar is out of Cleanse's reach, so the dispel walk
+/// takes the Paladin toward the Warrior — it does not stop at 30yd and wait
+/// there for a Cleanse the sight gate refuses.
+#[test]
+fn a_teammate_trapped_behind_a_pillar_draws_the_paladin_toward_it() {
+    let mut s = pillar_scene(true);
+    let (plan, directive, triggers) = s.posture();
+    let directive = directive.expect("the walk issues a directive");
+    match directive.goal {
+        MovementGoal::Point(p) => assert_eq!(p, s.warrior_pos, "walks at the trapped Warrior"),
+        other => panic!("expected a Point walk at the Warrior, got {other:?}"),
+    }
+    assert_eq!(triggers, vec!["DispelChase".to_string()]);
+    assert!(plan.cast_defer.is_some());
+}
+
+/// The probe: the Paladin, in range of the trapped Warrior but behind a
+/// pillar, rounds the pillar and Cleanses the Warrior once it can see it — never
+/// through the pillar, and from within range.
+#[test]
+fn a_paladin_rounds_a_pillar_to_cleanse_a_trapped_teammate() {
+    let mut s = pillar_scene(true);
+    let range = cleanse_range();
+    let freed = step_until_cleansed(&mut s, 8.0)
+        .expect("the Paladin rounds the pillar and frees the Warrior before the trap ends");
+
+    assert!(
+        has_line_of_sight(&s.obstacles, freed.from, s.warrior_pos),
+        "cleansed through the pillar from {:?}",
+        freed.from
+    );
+    assert!(freed.from.distance(s.warrior_pos) <= range);
+
+    // The walk ends exactly where sight returns: the Paladin walked until it
+    // could see the Warrior, and cast from that spot. (The first sighted tick
+    // is on the path, not the cast tick, when a GCD was running there.)
+    let first_sight = freed
+        .path
+        .iter()
+        .position(|p| has_line_of_sight(&s.obstacles, *p, s.warrior_pos))
+        .unwrap_or(freed.path.len());
+    assert!(
+        first_sight > 0,
+        "had sight from the start — no pillar between"
+    );
+    let sighted_at = freed.path.get(first_sight).copied().unwrap_or(freed.from);
+    assert_eq!(
+        sighted_at, freed.from,
+        "the walk stopped short of sight, or carried on past it"
+    );
+    // ...within one GCD of getting there. The scene's enemy Hunter stands
+    // behind the same pillar and can come into view first, drawing an instant
+    // (Holy Shock) whose GCD delays the Cleanse by up to one.
+    let waited = freed.at - first_sight as f32 / 60.0;
+    assert!(
+        waited <= GCD + 1.0 / 60.0,
+        "cleansed {waited:.2}s after regaining sight"
     );
 }
 
