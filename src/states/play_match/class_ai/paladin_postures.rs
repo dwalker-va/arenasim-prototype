@@ -239,8 +239,8 @@ pub fn evaluate_paladin_posture(
         AbilityType::PaladinCleanse,
     ) {
         // Dispel walk (AS-180): a teammate held in urgent crowd control Cleanse
-        // removes stands beyond Cleanse's range — walk until the rotation's
-        // urgent Cleanse reaches it. Non-critical heals defer meanwhile, exactly
+        // removes is beyond Cleanse's range or out of sight — walk until the
+        // rotation's urgent Cleanse reaches it (in range AND in sight). Non-critical heals defer meanwhile, exactly
         // as during a dip: a Flash of Light roots the Paladin for its whole cast,
         // and back-to-back casts would hold it out of range while the trap runs.
         ally_walk_tick(
@@ -259,7 +259,7 @@ pub fn evaluate_paladin_posture(
         plan.cast_defer = Some(shared.urgency_hp_threshold);
     } else {
         if state.medic_target.is_some() {
-            // Sight regained / ally in Cleanse range (or the ally recovered,
+            // Sight regained / ally in Cleanse reach (or the ally recovered,
             // was freed, or died): drop the walk so FREE hands movement back to
             // legacy pursuit / PRESSURED re-scores.
             commands.entity(entity).remove::<MovementDirective>();

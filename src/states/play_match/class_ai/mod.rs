@@ -45,7 +45,7 @@ use super::components::{
     PetType,
 };
 use super::constants::GCD;
-use super::map_geometry::ObstacleVolume;
+use super::map_geometry::{has_line_of_sight, ObstacleVolume};
 use super::match_config::CharacterClass;
 use super::utils::log_ability_use;
 use super::{is_silenced, is_spell_school_locked};
@@ -1142,12 +1142,46 @@ pub fn ally_dispel_priority(aura: &Aura) -> i32 {
     }
 }
 
+/// Whether an ally-freeing cast of range `range` from `from` reaches a teammate
+/// at `to`.
+///
+/// The two gates every targeted cast passes at cast start (`pre_cast_ok`), in
+/// the same order — range first, then line of sight, so an out-of-range ally is
+/// reported as out of range, never as occluded. Every ally-freeing path asks
+/// this one question: the healers' dispels ([`try_dispel_ally`]), Devour Magic,
+/// Master's Call, and the walk that carries a healer to a teammate it cannot
+/// yet free ([`dispel_chase_target`]) — so the walk ends exactly where the cast
+/// becomes possible. On an obstacle-free map sight always holds and this is the
+/// range check alone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AllyReach {
+    Reaches,
+    OutOfRange { distance: f32 },
+    LosBlocked,
+}
+
+pub fn ally_reach(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> AllyReach {
+    let distance = from.distance(to);
+    if distance > range {
+        AllyReach::OutOfRange { distance }
+    } else if !has_line_of_sight(ctx.obstacles, from, to) {
+        AllyReach::LosBlocked
+    } else {
+        AllyReach::Reaches
+    }
+}
+
 /// The teammate a healer should WALK to so that `dispel` can free it: the
 /// nearest living non-pet teammate (never the healer itself) holding crowd
-/// control that `dispel` removes at the urgent bar, standing beyond `dispel`'s
-/// range. `None` when such a teammate is already in range (the rotation's
-/// urgent dispel frees it where the healer stands), when there is none, or when
-/// the healer cannot afford the dispel on arrival.
+/// control that `dispel` removes at the urgent bar, which `dispel` does not
+/// reach from where the healer stands — beyond its range, or in range but out of
+/// sight ([`ally_reach`]). `None` when such a teammate is already reached (the
+/// rotation's urgent dispel frees it where the healer stands), when there is
+/// none, or when the healer cannot afford the dispel on arrival.
+///
+/// A walk toward a teammate in range but behind cover is the same `Point` walk:
+/// tangent steering rounds the pillar, and the walk ends the moment the
+/// teammate is both in range and in sight.
 ///
 /// The urgent bar is the same one the rotation's urgent dispel uses, so the
 /// walk is only ever toward a dispel the rotation would cast the moment it
@@ -1178,10 +1212,10 @@ pub fn dispel_chase_target(
         if !urgent {
             continue;
         }
-        let distance = my_pos.distance(ally.position);
-        if distance <= def.range {
+        if ally_reach(ctx, def.range, my_pos, ally.position) == AllyReach::Reaches {
             return None;
         }
+        let distance = my_pos.distance(ally.position);
         if nearest.is_none_or(|(d, e)| (distance, ally.entity) < (d, e)) {
             nearest = Some((distance, ally.entity));
         }
@@ -1200,6 +1234,9 @@ pub fn dispel_chase_target(
 ///   Affliction Silence, Fear)
 /// - 50: Include roots and DoTs
 /// - 20: Include slows (not recommended)
+///
+/// Only an ally the dispel reaches is a candidate: in range AND in sight
+/// ([`ally_reach`]), so a healer never dispels a teammate through a pillar.
 ///
 /// Predicate failures emit typed reject events on the dispel ability;
 /// success emits choose.
@@ -1265,10 +1302,12 @@ pub fn try_dispel_ally(
 
     // Find ally with highest priority dispellable debuff
     let mut best_candidate: Option<(Entity, i32)> = None;
-    // The nearest ally that WOULD qualify but stands beyond the dispel's range —
-    // reported as `OutOfRange` when nobody in range qualifies, so a trace tells
-    // "nothing to dispel" apart from "something to dispel, out of reach".
+    // Allies that WOULD qualify but the dispel does not reach — reported when
+    // nobody reachable qualifies, so a trace tells "nothing to dispel" apart
+    // from "something to dispel, out of reach". An occluded ally in range is
+    // reported ahead of a distant one: `LosBlocked` names the nearer miss.
     let mut nearest_out_of_range: Option<f32> = None;
+    let mut los_blocked = false;
 
     for (e, info) in ctx.combatants.iter() {
         // Must be alive ally; pets only where this dispel reaches them
@@ -1297,11 +1336,18 @@ pub fn try_dispel_ally(
             continue;
         }
 
-        // Check range
-        let distance = my_pos.distance(info.position);
-        if distance > def.range {
-            nearest_out_of_range = Some(nearest_out_of_range.map_or(distance, |d| d.min(distance)));
-            continue;
+        // Range, then line of sight — the gates every targeted cast passes.
+        match ally_reach(ctx, def.range, my_pos, info.position) {
+            AllyReach::Reaches => {}
+            AllyReach::OutOfRange { distance } => {
+                nearest_out_of_range =
+                    Some(nearest_out_of_range.map_or(distance, |d| d.min(distance)));
+                continue;
+            }
+            AllyReach::LosBlocked => {
+                los_blocked = true;
+                continue;
+            }
         }
 
         match best_candidate {
@@ -1315,6 +1361,7 @@ pub fn try_dispel_ally(
 
     let Some((dispel_target, _)) = best_candidate else {
         let reason = match nearest_out_of_range {
+            _ if los_blocked => RejectionReason::LosBlocked,
             Some(distance) => RejectionReason::OutOfRange {
                 distance,
                 max: def.range,

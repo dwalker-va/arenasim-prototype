@@ -16,6 +16,7 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionEventBuilder, DecisionTrace, RejectionReason, TargetView,
 };
+use crate::states::play_match::map_geometry::has_line_of_sight;
 
 /// Render a PetType variant into a stable string for pet_decision events.
 fn pet_type_str(pt: PetType) -> &'static str {
@@ -459,6 +460,16 @@ fn pet_command_rejection(
         }
     }
 
+    // Master's Call frees a teammate, and no ally-freeing cast goes through a
+    // pillar: re-check the bird's sight of the recipient, which may have been
+    // lost since the Hunter dispatched it. (Range was the dispatch's check and
+    // is not re-asked here.)
+    if ability == AbilityType::MastersCall
+        && !has_line_of_sight(ctx.obstacles, my_pos, target_info.position)
+    {
+        return Some(RejectionReason::LosBlocked);
+    }
+
     None
 }
 
@@ -677,13 +688,12 @@ fn try_devour_magic(
 
     let my_team = combatant.team;
     let mut best_target: Option<(Entity, Vec3)> = None;
+    // A teammate with something to devour that stands in range but out of
+    // sight — reported as `LosBlocked` when no reachable teammate qualifies.
+    let mut los_blocked = false;
 
     for (ally_entity, info) in ctx.combatants.iter() {
         if info.team != my_team || !info.is_alive || (info.is_pet && !removal.reaches_pets) {
-            continue;
-        }
-        let distance = my_pos.distance(info.position);
-        if distance > def.range {
             continue;
         }
         let has_dispellable = ctx
@@ -693,6 +703,16 @@ fn try_devour_magic(
             .unwrap_or(false);
         if !has_dispellable {
             continue;
+        }
+        // Range, then line of sight (`ally_reach`, the gates every ally dispel
+        // passes).
+        match super::ally_reach(ctx, def.range, my_pos, info.position) {
+            super::AllyReach::Reaches => {}
+            super::AllyReach::OutOfRange { .. } => continue,
+            super::AllyReach::LosBlocked => {
+                los_blocked = true;
+                continue;
+            }
         }
         match best_target {
             None => best_target = Some((*ally_entity, info.position)),
@@ -704,7 +724,12 @@ fn try_devour_magic(
     }
 
     let Some((target_entity, _)) = best_target else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
+        let reason = if los_blocked {
+            RejectionReason::LosBlocked
+        } else {
+            RejectionReason::NoValidTarget
+        };
+        builder.reject(ability, reason);
         return false;
     };
 
@@ -1057,7 +1082,7 @@ fn bird_autonomous_dispatch(
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
-    _my_pos: Vec3,
+    my_pos: Vec3,
     pet: &Pet,
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
@@ -1120,21 +1145,324 @@ fn bird_autonomous_dispatch(
         return;
     };
 
-    // Range check from the bird's position to the cleanse recipient.
+    // Range, then line of sight from the bird to the cleanse recipient
+    // (`ally_reach`, the gates every ally-freeing cast passes).
     if let Some(target_info) = ctx.combatants.get(&target) {
-        let dist = _my_pos.distance(target_info.position);
-        if dist > def.range {
-            builder.reject(
-                ability,
-                RejectionReason::OutOfRange {
-                    distance: dist,
-                    max: def.range,
-                },
-            );
+        let reason = match super::ally_reach(ctx, def.range, my_pos, target_info.position) {
+            super::AllyReach::Reaches => None,
+            super::AllyReach::OutOfRange { distance } => Some(RejectionReason::OutOfRange {
+                distance,
+                max: def.range,
+            }),
+            super::AllyReach::LosBlocked => Some(RejectionReason::LosBlocked),
+        };
+        if let Some(reason) = reason {
+            builder.reject(ability, reason);
             return;
         }
     }
 
     builder.choose(ability, Some(target), true);
     execute_masters_call(commands, combat_log, def, entity, combatant, target);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::states::play_match::class_ai::CombatantInfo;
+    use crate::states::play_match::map_geometry::ObstacleVolume;
+    use crate::states::play_match::traps::freezing_trap_aura;
+    use bevy::ecs::world::CommandQueue;
+    use std::collections::BTreeMap;
+
+    /// Devour Magic frees a trapped teammate it can see, and refuses — traced
+    /// `LosBlocked` — the same teammate at the same distance behind a pillar
+    /// (AS-186: no ally dispel goes through a pillar).
+    #[test]
+    fn devour_magic_needs_sight_of_the_teammate() {
+        let unit = |entity, class, position, is_pet| CombatantInfo {
+            entity,
+            team: 1,
+            slot: 0,
+            class,
+            current_health: 100.0,
+            max_health: 100.0,
+            current_mana: 100.0,
+            max_mana: 100.0,
+            position,
+            velocity: Vec3::ZERO,
+            is_alive: true,
+            stealthed: false,
+            target: None,
+            is_pet,
+            casting_ability: None,
+            pet_type: is_pet.then_some(PetType::Felhunter),
+            pet: None,
+        };
+        let (felhunter, warrior) = (Entity::from_raw(1), Entity::from_raw(2));
+        let (pet_pos, warrior_pos) = (Vec3::new(0.0, 1.0, 0.0), Vec3::new(16.0, 1.0, 0.0));
+        let roster: BTreeMap<_, _> = [
+            (
+                felhunter,
+                unit(felhunter, CharacterClass::Warlock, pet_pos, true),
+            ),
+            (
+                warrior,
+                unit(warrior, CharacterClass::Warrior, warrior_pos, false),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let mut auras = BTreeMap::new();
+        auras.insert(warrior, vec![freezing_trap_aura(Entity::from_raw(9))]);
+        let (dr, cds) = (BTreeMap::new(), BTreeMap::new());
+        let pillar = [ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(8.0, 0.0),
+            radius: 2.0,
+            base_y: 0.0,
+            height: 10.0,
+        }];
+
+        let devour = |obstacles: &[ObstacleVolume]| {
+            let ctx = CombatContext::new(
+                felhunter,
+                1,
+                &roster,
+                &auras,
+                &dr,
+                &cds,
+                obstacles,
+                Default::default(),
+                Default::default(),
+            );
+            let world = World::new();
+            let mut queue = CommandQueue::default();
+            let mut commands = Commands::new(&mut queue, &world);
+            let mut combat_log = CombatLog::default();
+            let mut combatant = Combatant::new(1, 0, CharacterClass::Warlock);
+            let mut trace = DecisionTrace::default();
+            let mut builder = trace.start_pet_decision(
+                ActorView::from_info(&roster[&felhunter]),
+                None,
+                Entity::from_raw(3),
+                "Felhunter",
+            );
+            let cast = try_devour_magic(
+                &mut commands,
+                &mut combat_log,
+                &AbilityDefinitions::default(),
+                felhunter,
+                &mut combatant,
+                pet_pos,
+                &ctx,
+                &mut builder,
+            );
+            builder.finish();
+            let event = serde_json::to_value(&trace.pending_events[0]).unwrap();
+            let candidate = event["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["ability"] == "DevourMagic")
+                .cloned()
+                .unwrap();
+            (cast, candidate)
+        };
+
+        let (cast, candidate) = devour(&[]);
+        assert!(cast, "in sight: Devour Magic frees the Warrior");
+        assert_eq!(candidate["status"], "chosen");
+
+        let (cast, candidate) = devour(&pillar);
+        assert!(!cast, "behind the pillar: no Devour Magic through it");
+        assert_eq!(candidate["status"], "rejected");
+        assert_eq!(candidate["reason"], "LosBlocked");
+    }
+
+    /// Master's Call frees a rooted Hunter its Bird can see, and refuses — traced
+    /// `LosBlocked` — the same Hunter at the same distance behind a pillar, on
+    /// every path that casts it: the Bird's own dispatch
+    /// (`bird_autonomous_dispatch`), the Hunter's dispatch
+    /// (`try_dispatch_masters_call`), and the Bird's authoritative re-check of a
+    /// dispatched command whose sightline closed after it was issued
+    /// (`pet_command_rejection`).
+    #[test]
+    fn masters_call_needs_sight_of_the_teammate() {
+        let unit = |entity, class, position, pet_type: Option<PetType>| CombatantInfo {
+            entity,
+            team: 1,
+            slot: 0,
+            class,
+            current_health: 100.0,
+            max_health: 100.0,
+            current_mana: 100.0,
+            max_mana: 100.0,
+            position,
+            velocity: Vec3::ZERO,
+            is_alive: true,
+            stealthed: false,
+            target: None,
+            is_pet: pet_type.is_some(),
+            casting_ability: None,
+            pet_type,
+            pet: None,
+        };
+        let (bird, hunter) = (Entity::from_raw(1), Entity::from_raw(2));
+        let (bird_pos, hunter_pos) = (Vec3::new(0.0, 1.0, 0.0), Vec3::new(16.0, 1.0, 0.0));
+        let roster: BTreeMap<_, _> = [
+            (
+                bird,
+                unit(bird, CharacterClass::Hunter, bird_pos, Some(PetType::Bird)),
+            ),
+            (
+                hunter,
+                unit(hunter, CharacterClass::Hunter, hunter_pos, None),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let mut root = freezing_trap_aura(Entity::from_raw(9));
+        root.effect_type = AuraType::Root;
+        let mut auras = BTreeMap::new();
+        auras.insert(hunter, vec![root.clone()]);
+        let hunter_auras = ActiveAuras { auras: vec![root] };
+        let (dr, cds) = (BTreeMap::new(), BTreeMap::new());
+        let pillar = [ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(8.0, 0.0),
+            radius: 2.0,
+            base_y: 0.0,
+            height: 10.0,
+        }];
+        let abilities = AbilityDefinitions::default();
+        let def = abilities.get(&AbilityType::MastersCall).unwrap();
+        assert!(
+            hunter_pos.distance(bird_pos) < def.range,
+            "range never decides it"
+        );
+
+        let candidate = |trace: &DecisionTrace| {
+            let event = serde_json::to_value(trace.pending_events.last().unwrap()).unwrap();
+            event["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["ability"] == "MastersCall")
+                .cloned()
+                .unwrap()
+        };
+
+        // The Bird's own dispatch.
+        let autonomous = |obstacles: &[ObstacleVolume]| {
+            let ctx = CombatContext::new(
+                bird,
+                1,
+                &roster,
+                &auras,
+                &dr,
+                &cds,
+                obstacles,
+                Default::default(),
+                Default::default(),
+            );
+            let world = World::new();
+            let mut queue = CommandQueue::default();
+            let mut commands = Commands::new(&mut queue, &world);
+            let mut combat_log = CombatLog::default();
+            let mut combatant = Combatant::new(1, 0, CharacterClass::Hunter);
+            let mut trace = DecisionTrace::default();
+            let mut builder = trace.start_pet_decision(
+                ActorView::from_info(&roster[&bird]),
+                None,
+                hunter,
+                "Bird",
+            );
+            bird_autonomous_dispatch(
+                &mut commands,
+                &mut combat_log,
+                &abilities,
+                bird,
+                &mut combatant,
+                bird_pos,
+                &Pet {
+                    owner: hunter,
+                    pet_type: PetType::Bird,
+                },
+                &ctx,
+                &mut builder,
+            );
+            builder.finish();
+            candidate(&trace)
+        };
+        // The Hunter's dispatch.
+        let dispatched = |obstacles: &[ObstacleVolume]| {
+            let ctx = CombatContext::new(
+                hunter,
+                1,
+                &roster,
+                &auras,
+                &dr,
+                &cds,
+                obstacles,
+                Default::default(),
+                Default::default(),
+            );
+            let world = World::new();
+            let mut queue = CommandQueue::default();
+            let mut commands = Commands::new(&mut queue, &world);
+            let mut trace = DecisionTrace::default();
+            let sent = super::super::hunter::try_dispatch_masters_call(
+                &mut commands,
+                &abilities,
+                &mut trace,
+                hunter,
+                bird,
+                &roster[&bird],
+                &roster[&hunter],
+                Some(&hunter_auras),
+                &ctx,
+            );
+            (sent, candidate(&trace))
+        };
+        // A command dispatched in sight, re-checked once the pillar is between.
+        let recheck = |obstacles: &[ObstacleVolume]| {
+            let ctx = CombatContext::new(
+                bird,
+                1,
+                &roster,
+                &auras,
+                &dr,
+                &cds,
+                obstacles,
+                Default::default(),
+                Default::default(),
+            );
+            let combatant = Combatant::new(1, 0, CharacterClass::Hunter);
+            pet_command_rejection(
+                AbilityType::MastersCall,
+                def,
+                &combatant,
+                bird_pos,
+                hunter,
+                &ctx,
+            )
+        };
+
+        assert_eq!(autonomous(&[])["status"], "chosen", "Bird, in sight");
+        let behind = autonomous(&pillar);
+        assert_eq!(behind["status"], "rejected");
+        assert_eq!(behind["reason"], "LosBlocked", "Bird, behind the pillar");
+
+        let (sent, open) = dispatched(&[]);
+        assert!(sent, "Hunter dispatches it in sight");
+        assert_eq!(open["status"], "chosen");
+        let (sent, behind) = dispatched(&pillar);
+        assert!(!sent, "Hunter holds it behind the pillar");
+        assert_eq!(behind["reason"], "LosBlocked");
+
+        assert!(recheck(&[]).is_none(), "a command in sight executes");
+        assert!(
+            matches!(recheck(&pillar), Some(RejectionReason::LosBlocked)),
+            "a command whose sightline closed is refused"
+        );
+    }
 }

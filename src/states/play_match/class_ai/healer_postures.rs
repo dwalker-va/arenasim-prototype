@@ -355,8 +355,11 @@ pub(super) fn medic_chase_override<'c>(
 
 /// Whether the Paladin's dispel walk should override the normal movement tick
 /// this frame: the walk is allowed ([`ally_walk_allowed`]) and a teammate held
-/// in urgent crowd control `dispel` removes stands beyond its range
+/// in urgent crowd control `dispel` removes is out of its reach — beyond its
+/// range, or in range behind cover
 /// ([`dispel_chase_target`](super::dispel_chase_target)). Returns that ally.
+/// The walk runs until the teammate is in range AND in sight, the two gates
+/// the dispel itself passes, so it never parks where the cast is refused.
 /// The medic chase outranks it: a dying ally the healer cannot see comes first.
 pub(super) fn dispel_chase_override<'c>(
     abilities: &AbilityDefinitions,
@@ -1131,6 +1134,95 @@ mod tests {
         assert_eq!(
             pick_medic_target(&[(e(1), 0.9, false), (e(2), 0.7, true)], 0.5),
             None
+        );
+    }
+
+    /// The dispel walk's own gate (`ally_walk_allowed`), one tick per case: a
+    /// Paladin 15yd beyond Cleanse's range of a Freezing-Trapped Warrior walks
+    /// in FREE and PRESSURED under `Legacy`, and in FREE under `TeamPlan` — and
+    /// never in ESCAPE or DIP, never while it is hard-CC'd itself, and never in
+    /// `TeamPlan` PRESSURED, where the team solve is the one positioning
+    /// authority.
+    #[test]
+    fn the_dispel_walk_runs_only_where_an_ally_walk_is_allowed() {
+        use crate::states::match_config::CharacterClass;
+        use crate::states::play_match::ai_profile::AiProfile;
+        use crate::states::play_match::traps::freezing_trap_aura;
+        use std::collections::BTreeMap;
+
+        let defs = AbilityDefinitions::default();
+        let cleanse = AbilityType::PaladinCleanse;
+        let range = defs.get(&cleanse).unwrap().range;
+        let (paladin, warrior) = (Entity::from_raw(1), Entity::from_raw(2));
+        let unit = |entity, class, position| CombatantInfo {
+            entity,
+            team: 1,
+            slot: 0,
+            class,
+            current_health: 100.0,
+            max_health: 100.0,
+            current_mana: 100.0,
+            max_mana: 100.0,
+            position,
+            velocity: Vec3::ZERO,
+            is_alive: true,
+            stealthed: false,
+            target: None,
+            is_pet: false,
+            casting_ability: None,
+            pet_type: None,
+            pet: None,
+        };
+        let roster: BTreeMap<Entity, CombatantInfo> = [
+            (paladin, unit(paladin, CharacterClass::Paladin, Vec3::ZERO)),
+            (
+                warrior,
+                unit(
+                    warrior,
+                    CharacterClass::Warrior,
+                    Vec3::new(range + 15.0, 0.0, 0.0),
+                ),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let trap = freezing_trap_aura(Entity::from_raw(9));
+        let dr = BTreeMap::new();
+        let cds = BTreeMap::new();
+
+        let walks = |next: Posture, paladin_ccd: bool, profile: AiProfile| {
+            let mut auras = BTreeMap::new();
+            auras.insert(warrior, vec![trap.clone()]);
+            if paladin_ccd {
+                auras.insert(paladin, vec![trap.clone()]);
+            }
+            let ctx = CombatContext::new(
+                paladin,
+                1,
+                &roster,
+                &auras,
+                &dr,
+                &cds,
+                &[],
+                Default::default(),
+                profile,
+            );
+            dispel_chase_override(&defs, paladin, Vec3::ZERO, 100.0, next, &ctx, cleanse)
+                .map(|ally| ally.entity)
+        };
+
+        use AiProfile::{Legacy, TeamPlan};
+        use Posture::{Dip, Escape, Free, Pressured};
+        assert_eq!(walks(Free, false, Legacy), Some(warrior));
+        assert_eq!(walks(Pressured, false, Legacy), Some(warrior));
+        assert_eq!(walks(Free, false, TeamPlan), Some(warrior));
+        assert_eq!(walks(Escape, false, Legacy), None, "never in ESCAPE");
+        assert_eq!(walks(Dip, false, Legacy), None, "never in DIP");
+        assert_eq!(walks(Free, true, Legacy), None, "never while hard-CC'd");
+        assert_eq!(
+            walks(Pressured, false, TeamPlan),
+            None,
+            "retired under TeamPlan PRESSURED"
         );
     }
 }
