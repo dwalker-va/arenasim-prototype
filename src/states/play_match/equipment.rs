@@ -630,6 +630,7 @@ item_ids! {
 
     // === Melee Weapons ===
     ArcaniteReaper,
+    Peacemaker,
     FrostbiteBlade,
     SerpentFangDagger,
     HammerOfTheRighteous,
@@ -2102,6 +2103,47 @@ mod tests {
         assert!(combatant.is_dual_wielding());
         assert_eq!(combatant.offhand_damage, 10.0);
         assert_eq!(combatant.offhand_weapon_speed, 1.5);
+    }
+
+    /// The DEFAULT Hunter fights in melee range (AS-195): its loadout's
+    /// two-handed polearm arms the melee swing beside the bow, and leaves the
+    /// bow's Auto Shot and the off hand exactly as they were.
+    #[test]
+    fn the_default_hunter_swings_its_polearm_beside_its_bow() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+        let loadout = defaults.get(CharacterClass::Hunter).expect("Hunter default");
+        assert_eq!(loadout.get(&ItemSlot::MainHand), Some(&ItemId::Peacemaker));
+        assert_eq!(loadout.get(&ItemSlot::OffHand), None);
+
+        let polearm = items.get(&ItemId::Peacemaker).expect("shipped");
+        assert_eq!(polearm.weapon_type, WeaponType::Polearm);
+        assert_eq!(polearm.held(), Some(HeldSlot::TwoHand));
+        assert_eq!(
+            weapon_proficiency(CharacterClass::Hunter, WeaponType::Polearm),
+            Proficiency::Trained
+        );
+
+        let mut combatant =
+            super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Hunter);
+        combatant.apply_equipment(loadout, &items);
+        let bow = items.get(&ItemId::AshwoodBow).expect("shipped");
+        assert_eq!(
+            combatant.auto_attack_kind,
+            super::super::components::combatant::AutoAttackKind::Shot
+        );
+        assert_eq!(
+            combatant.attack_damage,
+            (bow.attack_damage_min + bow.attack_damage_max) / 2.0
+        );
+        assert_eq!(combatant.weapon_speed, bow.weapon_speed);
+        assert!(combatant.has_melee_main_hand());
+        assert_eq!(
+            combatant.melee_damage,
+            (polearm.attack_damage_min + polearm.attack_damage_max) / 2.0
+        );
+        assert_eq!(combatant.melee_weapon_speed, polearm.weapon_speed);
+        assert!(!combatant.is_dual_wielding());
     }
 
     /// Only the Hunter melees beside a ranged socket. A caster's main-hand
@@ -3988,6 +4030,13 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
                 ItemId::ClawOfChromaggus,
                 ItemId::GrimoireOfShadows,
             ),
+            // A Hunter holds no shield or frill, so the pair a polearm
+            // displaces is the two one-handers it would dual wield.
+            (
+                ItemId::Peacemaker,
+                ItemId::FrostbiteBlade,
+                ItemId::SerpentFangDagger,
+            ),
         ];
         for (two_hander, one_hander, off_hand) in table {
             let pair = usage(one_hander) + usage(off_hand);
@@ -4025,7 +4074,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     fn every_weapon_declares_its_classic_speed() {
         let item_defs = load_item_definitions().expect("items.ron must load");
         // (sim item, Classic speed, Wowhead item id of the Classic stand-in)
-        let table: [(ItemId, f32, u32); 20] = [
+        let table: [(ItemId, f32, u32); 21] = [
             (ItemId::ArcaniteReaper, 3.8, 12784),
             (ItemId::FrostbiteBlade, 2.8, 12940),
             (ItemId::SerpentFangDagger, 1.7, 12590),
@@ -4046,6 +4095,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             (ItemId::WandOfTheInvoker, 1.7, 19130),
             (ItemId::EaglestrikeBow, 2.9, 18713),
             (ItemId::DeadeyeCrossbow, 3.1, 21459),
+            (ItemId::Peacemaker, 3.4, 18725),
         ];
         for (id, speed, classic_id) in table {
             let item = item_defs.get(&id).expect("shipped");
@@ -4104,6 +4154,8 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
                 57.07,
                 42.33,
             ),
+            // Peacemaker (18725) / Dal'Rend's Sacred Charge (12940)
+            (ItemId::Peacemaker, ItemId::FrostbiteBlade, 50.44, 41.43),
         ];
         for (two_hander, one_hander, classic_2h, classic_1h) in table {
             let premium = classic_2h / classic_1h;

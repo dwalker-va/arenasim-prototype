@@ -69,6 +69,7 @@ and `DUAL_WIELD_MISS_CHANCE`.
 | Crescent Staff (ilvl 58) | Witchblade + Tome of Knowledge | 32.5 / 43.5 | SP 10, mana 9 -> **SP 15, mana 10** |
 | Bloodlord's Battleaxe (ilvl 75) | Stormblade Edge + Bulwark of the Guardian | 39.0 / 56.25 | AP 8, crit 2% -> **AP 16, crit 5%** |
 | Runestaff of Elements (ilvl 73) | Claw of Chromaggus + Grimoire of Shadows | 47.0 / 54.75 | SP 12, mana 12 -> **SP 20, mana 17** |
+| Peacemaker (ilvl 59; added by AS-195) | Frostbite Blade + Serpent Fang Dagger (a Hunter holds no shield) | 19.5 / 44.25 | new -> **AP 7, crit 3%** |
 
 Each two-hander spends what its pair spends but keeps its own mix, so the
 choice is real rather than cosmetic:

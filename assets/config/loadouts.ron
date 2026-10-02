@@ -137,7 +137,7 @@
         },
 
         // ====================================================================
-        // HUNTER — Mail armor, bow
+        // HUNTER — Mail armor, bow, and a polearm swung in melee range
         // ====================================================================
         Hunter: {
             Head: BeaststalkerHelm,
@@ -153,6 +153,7 @@
             Ring1: BandOfAccuria,
             Ring2: RingOfProtection,
             Trinket1: MarkOfTheChampion,
+            MainHand: Peacemaker,
             Ranged: AshwoodBow,
         },
 
