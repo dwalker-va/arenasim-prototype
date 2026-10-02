@@ -412,6 +412,31 @@ impl CharacterClass {
         }
     }
 
+    /// Whether this class, whose live weapon socket is the RANGED one, also
+    /// swings its hand weapons when its target is in melee range.
+    ///
+    /// The Hunter: Auto Shot from the bow beyond the dead zone, and a melee
+    /// auto-attack from its main hand (and off hand, when it dual-wields)
+    /// inside `MELEE_RANGE` — each on its own swing timer, as in Classic. The
+    /// casters also have a ranged live socket, but they fall back to their
+    /// wand rather than their staff, so they answer `false`; a class whose
+    /// live socket is the main hand already swings it and answers `false` too.
+    ///
+    /// Exhaustive by design, like [`Self::weapon_slot`].
+    pub fn melee_beside_ranged(&self) -> bool {
+        match self {
+            CharacterClass::Hunter => true,
+            CharacterClass::Warrior
+            | CharacterClass::Rogue
+            | CharacterClass::Paladin
+            | CharacterClass::Shaman
+            | CharacterClass::Druid
+            | CharacterClass::Mage
+            | CharacterClass::Priest
+            | CharacterClass::Warlock => false,
+        }
+    }
+
     /// Whether this class is primarily a healer (for CC target prioritization).
     pub fn is_healer(&self) -> bool {
         match self {

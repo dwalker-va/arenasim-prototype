@@ -1416,8 +1416,10 @@ pub enum WeaponKind {
 /// Which hand a [`WeaponSocket`] occupies, and which hand an
 /// [`AutoAttackSwing`] came from. The sim swings each hand on its own timer
 /// (`attack_timer` / `offhand_timer`), so a dual-wielder's daggers each follow
-/// their own hand's swings rather than taking turns. The Paladin's shield is
-/// held statically.
+/// their own hand's swings rather than taking turns. A Hunter carrying melee
+/// weapons holds two main-hand models — its bow on `attack_timer` and its blade
+/// on `melee_timer` — told apart by their [`WeaponSet`]. The Paladin's shield
+/// is held statically.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WeaponHand {
     Main,
@@ -1485,6 +1487,62 @@ pub struct WeaponSocket {
     pub last_s: f32,
 }
 
+/// Which weapon set a [`WeaponSocket`] belongs to, for a combatant that holds
+/// two — a Hunter carrying melee weapons beside its bow — and so shows only one
+/// set at a time. A socket without this component is always shown.
+///
+/// The rule, applied by `animate_weapon_swings`: the melee weapons come out
+/// when the owner's target comes within melee reach (the melee windup band,
+/// where its melee swing is about to fire), and the bow comes back out once the
+/// target is at or beyond the Auto Shot minimum (`HUNTER_DEAD_ZONE`). Inside the
+/// dead zone between the two the owner keeps whichever set it last had out, so
+/// the swap cannot strobe while a target hovers at either edge. With no target,
+/// the bow is out.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WeaponSetSwap {
+    /// The set this socket belongs to.
+    pub set: WeaponSet,
+    /// The set this socket's owner currently has out. Every socket of one
+    /// owner latches from the same inputs, so their copies agree.
+    pub out: WeaponSet,
+}
+
+impl WeaponSetSwap {
+    /// A socket of `set`, spawned with the bow out.
+    pub fn new(set: WeaponSet) -> Self {
+        Self {
+            set,
+            out: WeaponSet::Ranged,
+        }
+    }
+
+    /// Whether this socket is drawn right now.
+    pub fn shown(&self) -> bool {
+        self.set == self.out
+    }
+}
+
+/// The two weapon sets a [`WeaponSetSwap`] chooses between.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WeaponSet {
+    /// The bow (or gun, crossbow, thrown weapon): Auto Shot.
+    Ranged,
+    /// The hand weapons: the melee auto-attack.
+    Melee,
+}
+
+impl WeaponSet {
+    /// The set a weapon model belongs to.
+    pub fn of(kind: WeaponKind) -> Self {
+        match kind {
+            WeaponKind::Bow | WeaponKind::Wand => WeaponSet::Ranged,
+            WeaponKind::TwoHandAxe | WeaponKind::Dagger | WeaponKind::Mace | WeaponKind::Shield => {
+                WeaponSet::Melee
+            }
+        }
+    }
+}
+
 /// One landed auto-attack, spawned in core at the damage-APPLY site (mirrors
 /// [`FloatingCombatText`] / [`WindfuryTornado`]): a bare marker entity, inert in
 /// headless, consumed and despawned by the graphical swing systems in
@@ -1495,11 +1553,12 @@ pub struct WeaponSocket {
 pub struct AutoAttackSwing {
     pub attacker: Entity,
     pub target: Entity,
-    /// The swing's DERIVED kind, copied from the attacker's
-    /// [`AutoAttackKind`] — the same value that chose the range gate and the
-    /// combat-log name, so a consumer can never disagree with the sim about
-    /// what kind of attack just landed. Replaces an earlier `ranged: bool`,
-    /// which could not tell a wand shot from an arrow.
+    /// The swing's kind — the attacker's derived [`AutoAttackKind`], or
+    /// `Melee` for a Hunter's melee swing beside its bow — the same value that
+    /// chose the range gate and the combat-log name, so a consumer can never
+    /// disagree with the sim about what kind of attack just landed. Replaces
+    /// an earlier `ranged: bool`, which could not tell a wand shot from an
+    /// arrow.
     pub kind: AutoAttackKind,
     /// Whether the landed swing crit. Selects the deeper flinch
     /// (`CombatCritical`) and the bigger impact burst; cosmetic only.
