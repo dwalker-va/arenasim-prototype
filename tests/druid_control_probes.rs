@@ -840,11 +840,51 @@ fn hindered(types: &[AuraType]) -> bool {
 /// How long after a shift the chase is measured.
 const OUTRUN_WINDOW_SECS: f32 = 1.5;
 
+/// How close to a wall or a pillar a shift must start to count as the known
+/// PIN: a Druid with its back to the arena edge or a Nagrand pillar can only
+/// run along it while the chaser cuts the corner (AS-164). The two misses this
+/// probe sees start 2.6 and 4.7 yd from one; a miss farther out than this is
+/// a real outrun failure.
+const WALL_PIN_YARDS: f32 = 6.0;
+
+/// Yards from `pos` to the nearest point a mover cannot stand on in `map` —
+/// outside the arena's walkable region, or inside a pillar's footprint —
+/// marched outward along 64 headings.
+fn wall_distance(map: &str, pos: Vec3) -> f32 {
+    use arenasim::states::match_config::ArenaMap;
+    use arenasim::states::play_match::map_config::load_map_geometry_config;
+    use arenasim::states::play_match::map_geometry::position_blocked;
+    let arena = match map {
+        "BasicArena" => ArenaMap::BasicArena,
+        "PillaredArena" => ArenaMap::PillaredArena,
+        other => panic!("no wall distance for {other}"),
+    };
+    let geometry = load_map_geometry_config()
+        .expect("maps.ron loads")
+        .active_for(arena);
+    (0..64)
+        .map(|i| {
+            let angle = i as f32 * std::f32::consts::TAU / 64.0;
+            let dir = Vec3::new(angle.cos(), 0.0, angle.sin());
+            let mut d = 0.0;
+            while d < 200.0
+                && geometry.bounds.contains(pos + dir * d)
+                && !position_blocked(&geometry.volumes, pos + dir * d)
+            {
+                d += 0.1;
+            }
+            d
+        })
+        .fold(f32::MAX, f32::min)
+}
+
 /// A shift out of a root or snare frees the Druid and it pulls away: in the
 /// window after every shift the Druid's path is longer than its unshifted
-/// speed could cover, and in most shifts the gap to the nearest melee or pet
-/// chaser GROWS. (Not every one: a Druid shifting with its back to the arena
-/// wall can only run along it.)
+/// speed could cover, and the gap to the nearest melee or pet chaser GROWS —
+/// unless the shift starts with the Druid's back to a wall or a pillar (within
+/// [`WALL_PIN_YARDS`]), the known pin AS-164 carries, where it can only run
+/// along the obstacle. Pins aside, a shift that gains no ground fails by
+/// name; a majority must gain overall as a backstop.
 #[test]
 fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
     let mut shifts = 0;
@@ -937,12 +977,24 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
             let gap = |f: &FrameObservation| {
                 xz(f.combatants[&druid].position).distance(xz(f.combatants[&chaser].position))
             };
+            let wall = wall_distance(map, after.position);
             if gap(end_frame) > gap(&pair[1]) {
                 gained += 1;
             } else {
                 eprintln!(
                     "no ground gained: {t1:?} v {t2:?} {map} #{seed} at {start:.2}s, gap \
-                     {:.1} -> {:.1}",
+                     {:.1} -> {:.1}, {wall:.1} yd from a wall or pillar",
+                    gap(&pair[1]),
+                    gap(end_frame)
+                );
+                // The one known miss: a Druid shifting with its back to a wall
+                // or a pillar can only run along it (AS-164). Anywhere else, a
+                // shift that does not gain ground on its chaser is a fault.
+                assert!(
+                    wall <= WALL_PIN_YARDS,
+                    "{t1:?} v {t2:?} {map} #{seed} at {start:.2}s: no ground gained on the \
+                     chaser ({:.1} -> {:.1} yd) {wall:.1} yd from any wall or pillar — in the \
+                     open, not the known wall-pin (within {WALL_PIN_YARDS} yd, AS-164)",
                     gap(&pair[1]),
                     gap(end_frame)
                 );
@@ -971,10 +1023,8 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
         "{shifts} shifts out of a root or snare, each with a full window; ground \
          gained on the chaser in {gained}"
     );
-    // The escape can be pinned: a Druid shifting with its back to the arena
-    // wall has nowhere to run but along it (2 of 10 shifts in this set), so
-    // gap growth is a majority claim. The path-speed claim above holds for
-    // every shift.
+    // Backstop: the named pins aside (2 of 10 shifts in this set), most
+    // shifts must still gain. The path-speed claim above holds for every one.
     assert!(
         gained * 2 > shifts,
         "the Druid gained ground on its chaser in only {gained} of {shifts} shifts"
