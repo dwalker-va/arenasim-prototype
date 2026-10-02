@@ -256,14 +256,21 @@ For deeper context, see these focused references:
   2026-08-04 amendments before building any of it — the design's shape held up
   but several specifics were wrong in ways only measurement exposed, and step 4's
   retirement goal is not achievable as written. Steps 2, 3 and the healer half of
-  4 have shipped: Nagrand occlusion `Legacy` 0.0s -> `TeamPlan` 28.1s (the robust
-  result — per-frame, thousands of samples). The DPS half was reverted:
+  4 have shipped: Nagrand occlusion `Legacy` 0.0s -> `TeamPlan` 19.2s per match
+  (15.1s before contact, 4.1s after; `tests/camp_sweep.rs`, 2026-09-30, after
+  AS-181's steering fix — the robust result, per-frame, thousands of samples).
+  The earlier 28.1s (29.6s just before AS-181) is superseded: the fix changed
+  the Priest's path round its camp pillar, and after contact it now takes less
+  cover. At most about 20-45% of the old after-contact figure overlapped the
+  Priest pinned against the pillar or vibrating there. The DPS half was reverted:
   constraint satisfaction cannot express a kiter's distance-maximisation.
   `Legacy` is byte-identical throughout.
   **Definitive n=100 head-to-head** (2026-08-06, CSV in `docs/design/balance/`):
   the healer solve + kiter leash is worth +36pt to Warlock+Priest (z=5.2), +14pt
   to Hunter+Priest (z=2.2), +10pt to Warrior+Priest (z=1.8), -6pt (noise) to
-  Rogue+Priest. **Sample-size warning stands:** every earlier n=12 win-rate figure
+  Rogue+Priest. Those figures predate AS-181, which changed how TeamPlan units
+  round Nagrand pillars; they are due a re-measure at the 0.7 milestone sweep.
+  **Sample-size warning stands:** every earlier n=12 win-rate figure
   was noise around these values. Prefer per-frame mechanism metrics
   (`tests/camp_sweep.rs`); for win rate use `scripts/headtohead_sweep.py`
   (~100 matches/cell via the parallel `--batch` runner, Wilson CIs, z-tests).
@@ -635,7 +642,8 @@ same range gap and no walk.
 (pure, unit-tested; no RON knob). When a mover with a DESTINATION has the
 straight line to it blocked by an obstacle, it aims at the obstacle's TANGENT
 POINT on the better-progress side (for a cylinder: the external tangent to the
-`radius + MOVER_RADIUS` circle; for a box: the nearer visible silhouette corner)
+`radius + MOVER_RADIUS` circle; for a prism: the tangent vertex of the inflated
+polygon; for a box: the nearer visible silhouette corner)
 instead of pointing at the goal through the obstacle — so it rounds the pillar in
 a clean full-speed arc rather than oozing along the surface. Without it,
 `slide_against` removed only the inward step component, leaving a near-zero
@@ -649,10 +657,22 @@ incl. the `seek_chase_timeout` direct chase), `MovementGoal::Entity` (DIP chases
 normal pursuit-to-target, and pet-follow-to-owner. NOT applied to
 `MovementGoal::Direction` (scorer output — the context-steering mask already
 avoids obstacles), fear/polymorph wander, or Charge/Disengage (scripted dashes).
-Side commitment is emergent, not stored: the better-progress tangent is
-self-reinforcing (once off the center line, that side keeps winning) and a
-`STEER_TIE_EPS` fixed default resolves the only symmetric instant, so it cannot
-flip-flop — no per-frame committed-side state. The helper's first line is
+Side commitment is emergent, not stored — no per-frame committed-side state — but
+only because each shape's side SCORE is chosen to be self-reinforcing (once off
+the center line, that side keeps winning), with a `STEER_TIE_EPS` fixed default
+for the exact-tie instant. A tie-break alone does not buy that: the cylinder
+scores heading alignment, which holds on a curve, but on a prism's flat face
+alignment is anti-reinforcing (a step toward one end tilts the goal toward the
+other), so a mover flush against a Nagrand face with its goal straight behind
+flipped sides every tick and jittered in place (AS-181). The prism therefore
+scores the taut-path length round each side, which shortens by the full step on
+the side being walked. A new obstacle shape needs a score with that property,
+and a flush-against-the-face step-loop test (`steer_flush_against_a_prism_face_commits_to_one_side`)
+to prove it. A goal INSIDE a prism's footprint (a spot no one can stand on) is
+steered to its nearest shell point and held a body radius short of it — the
+helper returns `Some(Vec2::ZERO)`, which every caller treats as "don't move";
+rounding toward the unreachable point itself parked the mover on the nearest
+vertex and flipped it across that vertex every tick. The helper's first line is
 `if obstacles.is_empty() { return None }` and each caller falls back to its exact
 legacy direct-normalize on `None`, so **BasicArena stays byte-identical**. This
 makes competent pursuers (melee and Mage) round pillars cleanly; a documented

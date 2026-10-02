@@ -2069,6 +2069,200 @@ mod directive_executor {
             "entity must hold at the point"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // AS-181 — a mover flush against a Nagrand pillar FACE with its goal
+    // straight behind the pillar rounds it on one side. Tangent steering once
+    // compared the two tangent vertices by heading alignment, which on a flat
+    // face is anti-self-reinforcing: a step toward one end tilts the goal
+    // toward the OTHER end, so the choice flipped every tick and the mover
+    // jittered in place against the face.
+    // -----------------------------------------------------------------------
+
+    /// The real PillaredArena geometry and its pillar at (40, 20): an octagon
+    /// of circumradius 6 turned so a flat face points down each axis. Returns
+    /// the geometry, the pillar centre, and the distance from that centre to a
+    /// flat face's collision shell.
+    fn nagrand() -> (ActiveMapGeometry, Vec2, f32) {
+        use arenasim::states::play_match::map_config::load_map_geometry_config;
+        use arenasim::states::play_match::map_geometry::{prism_apothem, MOVER_RADIUS};
+        use arenasim::ArenaMap;
+        let geometry = load_map_geometry_config()
+            .expect("maps.ron loads")
+            .active_for(ArenaMap::PillaredArena);
+        (
+            geometry,
+            Vec2::new(40.0, 20.0),
+            prism_apothem(6.0, 8) + MOVER_RADIUS,
+        )
+    }
+
+    /// How many times the sideways component of the mover's per-tick step,
+    /// relative to the line `start -> goal`, reverses sign (steps under 1mm
+    /// sideways are ignored).
+    fn side_reversals(track: &[Vec3], start: Vec2, goal: Vec2) -> usize {
+        let line = (goal - start).normalize();
+        let mut last = 0.0_f32;
+        let mut reversals = 0;
+        for w in track.windows(2) {
+            let step = Vec2::new(w[1].x - w[0].x, w[1].z - w[0].z);
+            let lateral = line.perp_dot(step);
+            if lateral.abs() < 1e-3 {
+                continue;
+            }
+            if last != 0.0 && lateral.signum() != last {
+                reversals += 1;
+            }
+            last = lateral.signum();
+        }
+        reversals
+    }
+
+    /// Run `ticks` frames, recording the mover's position before and after each.
+    fn track(app: &mut App, entity: Entity, ticks: usize) -> Vec<Vec3> {
+        let mut out = vec![pos_of(app, entity)];
+        for _ in 0..ticks {
+            app.update();
+            out.push(pos_of(app, entity));
+        }
+        out
+    }
+
+    /// A Point walk (the chase / medic / formation directive) from flush against
+    /// the pillar's -x face, to a spot 3yd past its +x face on the same line.
+    /// The mover commits to one side, rounds the pillar and arrives.
+    #[test]
+    fn point_walk_flush_against_a_nagrand_face_rounds_it_without_flipping() {
+        let (geometry, center, shell) = nagrand();
+        let mut app = executor_app();
+        app.insert_resource(geometry);
+        let start = Vec3::new(center.x - shell - 0.01, 1.0, center.y);
+        let point = Vec3::new(center.x + shell + 3.0, 1.0, center.y);
+        let (entity, _) = spawn_combatant(&mut app, start);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(MovementDirective {
+                goal: MovementGoal::Point(point),
+                expires: 100.0,
+                committed_until: 100.0,
+            });
+
+        // 5s at run speed is several times the ~20yd way round.
+        let path = track(&mut app, entity, 300);
+        let flips = side_reversals(
+            &path,
+            Vec2::new(start.x, start.z),
+            Vec2::new(point.x, point.z),
+        );
+        let end = *path.last().unwrap();
+        let off = Vec2::new(end.x - point.x, end.z - point.z).length();
+        assert!(
+            flips <= 1,
+            "the walk reversed sideways {flips} times against the face"
+        );
+        assert!(
+            off <= DIRECTIVE_POINT_EPSILON + 1e-3,
+            "the walk ended {off:.2}yd short of its point, at {end}"
+        );
+    }
+
+    /// The same setup through normal pursuit: a Warrior chasing a target that
+    /// stands (stunned, so it stays put) straight behind the pillar.
+    #[test]
+    fn pursuit_flush_against_a_nagrand_face_rounds_it_without_flipping() {
+        let (geometry, center, shell) = nagrand();
+        let mut app = executor_app();
+        app.insert_resource(geometry);
+        let start = Vec3::new(center.x - shell - 0.01, 1.0, center.y);
+        let target_pos = Vec3::new(center.x + shell + 3.0, 1.0, center.y);
+        let target = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(target_pos),
+                Combatant::new(2, 0, CharacterClass::Priest),
+                stun_aura(),
+            ))
+            .id();
+        let mut chaser = Combatant::new(1, 0, CharacterClass::Warrior);
+        chaser.target = Some(target);
+        let reach = CharacterClass::Warrior.preferred_range();
+        let entity = app
+            .world_mut()
+            .spawn((Transform::from_translation(start), chaser))
+            .id();
+
+        let path = track(&mut app, entity, 300);
+        let flips = side_reversals(
+            &path,
+            Vec2::new(start.x, start.z),
+            Vec2::new(target_pos.x, target_pos.z),
+        );
+        let end = *path.last().unwrap();
+        let off = Vec2::new(end.x - target_pos.x, end.z - target_pos.z).length();
+        assert!(
+            flips <= 1,
+            "the chase reversed sideways {flips} times against the face"
+        );
+        assert!(
+            off <= reach + 0.1,
+            "the chase ended {off:.2}yd from its target (reach {reach}), at {end}"
+        );
+    }
+
+    /// A Point walk to a spot INSIDE the pillar's footprint — a point no one
+    /// can stand on, which TeamPlan and Legacy formation walks do produce.
+    /// The mover walks to the nearest ground it can reach and stands still
+    /// there, instead of stepping back and forth across the pillar corner
+    /// nearest the spot. The spot is the one measured in a TeamPlan match
+    /// (0.05yd inside the shell of a diagonal face, near its corner).
+    #[test]
+    fn point_walk_to_a_spot_inside_a_nagrand_pillar_stands_still_beside_it() {
+        use arenasim::states::play_match::map_geometry::{position_blocked, MOVER_RADIUS};
+        let (geometry, center, _) = nagrand();
+        let mut app = executor_app();
+        let point = Vec3::new(center.x + 4.630_82, 1.0, center.y - 3.848_33);
+        assert!(
+            position_blocked(&geometry.volumes, point),
+            "test setup: the spot is inside the pillar"
+        );
+        app.insert_resource(geometry);
+        let start = Vec3::new(center.x + 12.0, 1.0, center.y + 3.0);
+        let (entity, speed) = spawn_combatant(&mut app, start);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(MovementDirective {
+                goal: MovementGoal::Point(point),
+                expires: 100.0,
+                committed_until: 100.0,
+            });
+
+        let path = track(&mut app, entity, 300);
+        let mut backtracks = 0;
+        let mut last = Vec2::ZERO;
+        for w in path.windows(2) {
+            let step = Vec2::new(w[1].x - w[0].x, w[1].z - w[0].z);
+            if step == Vec2::ZERO {
+                continue;
+            }
+            if step.dot(last) < 0.0 {
+                backtracks += 1;
+            }
+            last = step;
+        }
+        assert_eq!(backtracks, 0, "the walk stepped back on itself");
+        // Standing still for the last second, a body radius (plus a step)
+        // from the spot.
+        let rest = path[path.len() - 61];
+        assert!(
+            path[path.len() - 60..].iter().all(|p| *p == rest),
+            "still moving at the end of the walk"
+        );
+        let off = Vec2::new(rest.x - point.x, rest.z - point.z).length();
+        assert!(
+            off <= MOVER_RADIUS + speed / 60.0 + 0.1,
+            "stood {off:.2}yd from the spot, at {rest}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
