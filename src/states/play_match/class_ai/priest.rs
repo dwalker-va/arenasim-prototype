@@ -32,8 +32,9 @@ use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
-    compound_pressure_trigger, escape_tick, escape_window_from, healer_pressured_tick_shared,
-    medic_chase_override, medic_chase_tick, start_movement_event, start_movement_event_with_target,
+    ally_walk_tick, compound_pressure_trigger, dispel_chase_override, escape_tick,
+    escape_window_from, healer_pressured_tick_shared, medic_chase_override, medic_chase_tick,
+    start_movement_event, start_movement_event_with_target, HealerDispel,
 };
 
 use super::{CombatContext, CombatantInfo};
@@ -42,8 +43,10 @@ use super::{CombatContext, CombatantInfo};
 /// [`decide_priest_action`] (mirrors the Paladin's `PaladinMovementPlan`):
 /// the escape-defer urgency input plus the Psychic Scream dip gate.
 pub struct PriestMovementPlan {
-    /// `Some(urgency_hp_threshold)` while an ESCAPE window OR a DIP is live:
-    /// the heal ladder defers non-critical movement-locking casts (R7).
+    /// `Some(urgency_hp_threshold)` while an ESCAPE window, a DIP or a dispel
+    /// walk is live: the heal ladder defers non-critical movement-locking casts
+    /// (R7) — a cast mid-walk would hold the Priest out of Dispel Magic's reach
+    /// while its teammate's CC runs.
     pub escape_defer: Option<f32>,
     /// Psychic Scream gate for this tick (no dip / dip cast).
     pub scream_dip: ScreamDipPlan,
@@ -148,7 +151,7 @@ pub fn decide_priest_action(
         my_pos,
         auras,
         ctx,
-        90,
+        super::URGENT_DISPEL_PRIORITY,
         &mut builder,
     ) {
         builder.finish();
@@ -915,7 +918,7 @@ fn try_flash_heal(
             builder.reject(
                 ability,
                 RejectionReason::PreconditionUnmet {
-                    note: "escape window live: non-critical heal deferred".to_string(),
+                    note: "dip/escape/dispel walk live: non-critical heal deferred".to_string(),
                 },
             );
             return false;
@@ -1004,7 +1007,7 @@ fn try_mind_blast(
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
-                note: "escape window live: movement-locking cast deferred".to_string(),
+                note: "dip/escape/dispel walk live: movement-locking cast deferred".to_string(),
             },
         );
         return false;
@@ -1194,7 +1197,7 @@ fn try_mana_burn(
             builder.reject(
                 ability,
                 RejectionReason::PreconditionUnmet {
-                    note: "escape window live: movement-locking cast deferred".to_string(),
+                    note: "dip/escape/dispel walk live: movement-locking cast deferred".to_string(),
                 },
             );
             return false;
@@ -1601,10 +1604,11 @@ fn priest_dip_tick(
 /// Trace emission (R3): posture transitions and committed direction /
 /// formation re-commit changes only — never per-tick.
 ///
-/// Returns `Some(urgency_hp_threshold)` while an ESCAPE window is live — the
-/// caller threads it into `decide_priest_action`, whose heal priority defers
-/// non-critical movement-locking casts for the window (R7 cast-vs-move
-/// urgency; AE1). `None` otherwise.
+/// The plan's `escape_defer` is `Some(urgency_hp_threshold)` while an ESCAPE
+/// window, a DIP or a dispel walk is live — the caller threads it into
+/// `decide_priest_action`, whose heal priority defers non-critical
+/// movement-locking casts meanwhile (R7 cast-vs-move urgency; AE1). `None`
+/// otherwise.
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_priest_posture(
     commands: &mut Commands,
@@ -1748,6 +1752,9 @@ pub fn evaluate_priest_posture(
     }
 
     let mut scream_dip = ScreamDipPlan::Rotation;
+    // Set by a movement that a movement-locking cast would stall: the dispel
+    // walk, or a team-solve walk to a teammate owed a dispel.
+    let mut cast_defer = false;
     // Medic chase (shared) overrides FREE formation / PRESSURED denial when a
     // dying teammate is occluded — walk around cover to regain sight and heal.
     if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
@@ -1763,10 +1770,47 @@ pub fn evaluate_priest_posture(
             decision_trace,
             ctx,
         );
+    } else if let Some(ally) =
+        super::can_cast_dispel(ctx, abilities, entity, AbilityType::DispelMagic)
+            .then(|| {
+                dispel_chase_override(
+                    abilities,
+                    entity,
+                    my_pos,
+                    combatant.current_mana,
+                    next,
+                    ctx,
+                    AbilityType::DispelMagic,
+                )
+            })
+            .flatten()
+    {
+        // Dispel walk (AS-187, the Paladin's AS-180 walk): a teammate held in
+        // urgent crowd control Dispel Magic removes is beyond its range or out
+        // of sight — walk until the rotation's urgent Dispel Magic reaches it.
+        // Not while silenced or Holy-locked: it could not cast on arrival.
+        // Non-critical casts defer meanwhile, exactly as during a dip: a Flash
+        // Heal roots the Priest for its whole cast, and back-to-back casts would
+        // hold it out of reach while its teammate's CC runs.
+        ally_walk_tick(
+            commands,
+            entity,
+            my_pos,
+            ally,
+            state,
+            directive,
+            shared,
+            now,
+            decision_trace,
+            ctx,
+            MovementTrigger::DispelChase,
+        );
+        cast_defer = true;
     } else {
         if state.medic_target.is_some() {
-            // Sight regained (or the ally recovered / died): drop the chase walk
-            // so the normal tick re-anchors.
+            // Sight regained / ally in Dispel Magic's reach (or the ally
+            // recovered, was freed, or died): drop the walk so the normal tick
+            // re-anchors.
             commands.entity(entity).remove::<MovementDirective>();
             state.medic_target = None;
         }
@@ -1784,20 +1828,23 @@ pub fn evaluate_priest_posture(
                 transitioned,
                 prev,
             ),
-            Posture::Pressured => pressured_tick(
-                commands,
-                entity,
-                combatant,
-                my_pos,
-                ctx,
-                state,
-                directive,
-                movement,
-                now,
-                decision_trace,
-                transitioned,
-                prev,
-            ),
+            Posture::Pressured => {
+                cast_defer = pressured_tick(
+                    commands,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    ctx,
+                    state,
+                    directive,
+                    movement,
+                    now,
+                    decision_trace,
+                    transitioned,
+                    prev,
+                );
+            }
             Posture::Dip => {
                 scream_dip = priest_dip_tick(
                     commands,
@@ -1835,9 +1882,10 @@ pub fn evaluate_priest_posture(
         commands.entity(entity).try_insert(*state);
     }
 
-    // Cast-vs-move urgency: a live ESCAPE window OR a DIP defers non-critical
-    // movement-locking casts (an undeferred heal mid-dip would stall the walk).
-    let escape_defer = if matches!(state.posture, Posture::Escape | Posture::Dip) {
+    // Cast-vs-move urgency: a live ESCAPE window, a DIP or a dispel walk defers
+    // non-critical movement-locking casts (an undeferred heal mid-walk would
+    // stall it).
+    let escape_defer = if cast_defer || matches!(state.posture, Posture::Escape | Posture::Dip) {
         Some(shared.urgency_hp_threshold)
     } else {
         None
@@ -1854,9 +1902,12 @@ pub fn evaluate_priest_posture(
 /// Priest's scorer weights, the kill target as the wand-pull source, and no
 /// retreat band (`fallback_range = None` — the Priest scores a repulsion step
 /// every re-evaluation rather than parking at a band like the Paladin).
+/// Returns whether a team-solve walk toward a teammate owed a Dispel Magic
+/// drives the position this tick (`TeamPlan` only).
 #[allow(clippy::too_many_arguments)]
 fn pressured_tick(
     commands: &mut Commands,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -1868,7 +1919,7 @@ fn pressured_tick(
     decision_trace: &mut DecisionTrace,
     transitioned: bool,
     prev: Posture,
-) {
+) -> bool {
     healer_pressured_tick_shared(
         commands,
         entity,
@@ -1880,11 +1931,16 @@ fn pressured_tick(
         &movement.priest.weights,
         combatant.target,
         None,
+        Some(HealerDispel {
+            abilities,
+            ability: AbilityType::DispelMagic,
+            current_mana: combatant.current_mana,
+        }),
         now,
         decision_trace,
         transitioned,
         prev,
-    );
+    )
 }
 
 /// FREE tick: formation-point anchoring (R5). Degenerate case (no living

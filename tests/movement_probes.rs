@@ -1278,7 +1278,10 @@ mod escape_windows {
                         c["ability"] == "FlashHeal"
                             && c["reason"]["PreconditionUnmet"]["note"]
                                 .as_str()
-                                .is_some_and(|n| n.starts_with("escape window"))
+                                // The posture's deferral note ("dip/escape/dispel
+                                // walk live: ..."); the in-window filter is what
+                                // ties it to ESCAPE.
+                                .is_some_and(|n| n.ends_with("non-critical heal deferred"))
                     })
                 })
             })

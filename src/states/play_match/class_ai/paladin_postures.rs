@@ -25,7 +25,7 @@ use super::cast_guard::{pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
     ally_walk_tick, compound_pressure_trigger, dispel_chase_override, escape_tick,
     escape_window_from, healer_pressured_tick_shared, medic_chase_override, medic_chase_tick,
-    start_movement_event, start_movement_event_with_target,
+    start_movement_event, start_movement_event_with_target, HealerDispel,
 };
 use super::paladin::{
     dip_target_candidate, hoj_target_eligible, rotation_hoj_allowed, HojPlan, PaladinMovementPlan,
@@ -282,19 +282,27 @@ pub fn evaluate_paladin_posture(
                 );
                 plan.cast_defer = Some(shared.urgency_hp_threshold);
             }
-            Posture::Pressured => paladin_pressured_tick(
-                commands,
-                entity,
-                my_pos,
-                ctx,
-                state,
-                directive,
-                movement,
-                now,
-                decision_trace,
-                transitioned,
-                prev,
-            ),
+            Posture::Pressured => {
+                if paladin_pressured_tick(
+                    commands,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    ctx,
+                    state,
+                    directive,
+                    movement,
+                    now,
+                    decision_trace,
+                    transitioned,
+                    prev,
+                ) {
+                    // The team solve's dispel walk (`TeamPlan`): defer as for
+                    // the `Legacy` walk above.
+                    plan.cast_defer = Some(shared.urgency_hp_threshold);
+                }
+            }
             Posture::Dip => {
                 plan.cast_defer = Some(shared.urgency_hp_threshold);
                 plan.hoj = paladin_dip_tick(
@@ -421,11 +429,15 @@ pub fn dip_should_abort(
 /// band-holding once every threat is at/beyond the band (stand and heal /
 /// self-peel), constrained to heal range of the sticky anchor ally. Reuses
 /// the Priest's commitment-window + scored-direction machinery with the
-/// Paladin's weights (no formation pull, no wand pull).
+/// Paladin's weights (no formation pull, no wand pull). Returns whether a
+/// team-solve walk toward a teammate owed a Cleanse drives the position this
+/// tick (`TeamPlan` only).
 #[allow(clippy::too_many_arguments)]
 fn paladin_pressured_tick(
     commands: &mut Commands,
+    abilities: &AbilityDefinitions,
     entity: Entity,
+    combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
     state: &mut HealerPosture,
@@ -435,7 +447,7 @@ fn paladin_pressured_tick(
     decision_trace: &mut DecisionTrace,
     transitioned: bool,
     prev: Posture,
-) {
+) -> bool {
     healer_pressured_tick_shared(
         commands,
         entity,
@@ -450,11 +462,16 @@ fn paladin_pressured_tick(
         // Enable the retreat band: gather threats out to fallback_range and
         // park at the band to stand-and-heal instead of face-tanking at melee.
         Some(movement.paladin.fallback_range),
+        Some(HealerDispel {
+            abilities,
+            ability: AbilityType::PaladinCleanse,
+            current_mana: combatant.current_mana,
+        }),
         now,
         decision_trace,
         transitioned,
         prev,
-    );
+    )
 }
 
 /// FREE tick (R8): the Paladin's FREE is the legacy melee pursuit — NO

@@ -93,10 +93,18 @@ fn seeded_2v2_matches_its_recorded_identity() {
     // swing on the Mage: a queued Heroic Strike crit (184) becomes a plain
     // Auto Attack crit (122), because the rage that paid for it was the free
     // starting bar.
+    //
+    // Re-recorded for AS-187, the Priest's dispel walk. Took this cell to
+    // Some(1) @ 47.516113s from Some(1) @ 45.616142s. At 18.50s (log clock) the
+    // team-1 Priest's Psychic Scream fears the Warrior 33yd from its own Priest,
+    // beyond Dispel Magic's 30yd; that Priest now walks toward it (the trace's
+    // only `DispelChase`, at the same tick), and the first line that differs
+    // from `main` @ 0a9a0c0 follows at 20.17s: the team-1 Priest's next Wand
+    // Shot into the walking Priest lands two frames earlier.
     assert_pinned(
         &result,
         Some(1),
-        1_110_865_646,
+        1_111_363_712,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }

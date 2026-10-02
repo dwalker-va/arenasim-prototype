@@ -353,7 +353,7 @@ pub(super) fn medic_chase_override<'c>(
     medic_chase_target(entity, my_pos, ctx, shared)
 }
 
-/// Whether the Paladin's dispel walk should override the normal movement tick
+/// Whether a healer's dispel walk should override the normal movement tick
 /// this frame: the walk is allowed ([`ally_walk_allowed`]) and a teammate held
 /// in urgent crowd control `dispel` removes is out of its reach — beyond its
 /// range, or in range behind cover
@@ -407,8 +407,11 @@ fn ally_walk_allowed(entity: Entity, next: Posture, ctx: &CombatContext) -> bool
     // Leaving it live would mean two positioning authorities under one profile,
     // which is exactly the hand-arbitration step 4 exists to remove.
     //
-    // The Paladin's dispel walk inherits the same retirement: under `TeamPlan`
-    // PRESSURED the solve is the one positioning authority.
+    // The dispel walk (Paladin AS-180, Priest AS-187) inherits the same
+    // retirement: under `TeamPlan` PRESSURED the solve is the one positioning
+    // authority, and it walks to the teammate itself — a teammate owed a dispel
+    // the healer cannot reach is the solve's `DispelGoal`
+    // (`healer_pressured_tick_shared`).
     !(ctx.ai_profile.is_team_plan() && next == Posture::Pressured)
 }
 
@@ -449,7 +452,7 @@ pub(super) fn medic_chase_tick(
 
 /// Issue/refresh a direct walk toward `ally`'s live position, traced under
 /// `trigger`: the one walk both the medic chase (`SeekLos`) and the Paladin's
-/// dispel walk (`DispelChase`) run. `state.medic_target` marks EITHER walk as
+/// healers' dispel walk (`DispelChase`) run. `state.medic_target` marks EITHER walk as
 /// live — its release (drop the directive, hand movement back to the posture)
 /// is the same for both.
 #[allow(clippy::too_many_arguments)]
@@ -610,6 +613,15 @@ pub(super) fn escape_tick(
     }
 }
 
+/// A healer's ally dispel, for the `TeamPlan` solve's dispel goal: which
+/// dispel, the definitions to read its range and cost from, and the mana the
+/// healer has to pay for it.
+pub(super) struct HealerDispel<'a> {
+    pub abilities: &'a AbilityDefinitions,
+    pub ability: AbilityType,
+    pub current_mana: f32,
+}
+
 /// Shared PRESSURED tick (R6/R8): sticky anchor selection, hard-commitment
 /// window, scored retreat direction, directive issuance, and the
 /// transition/direction-change trace events. Extracted verbatim from the
@@ -628,6 +640,15 @@ pub(super) fn escape_tick(
 ///   (or there is no proximate threat at all) a Point directive parks the
 ///   Paladin to stand-and-heal instead of face-tanking at melee. `None`
 ///   (Priest) skips the band-hold and gathers threats out to `danger_radius`.
+/// - `dispel` — the healer's ally dispel (Priest, Paladin), `None` for a healer
+///   without one. Read only under `TeamPlan`, where a teammate it owes an urgent
+///   dispel it cannot reach becomes the solve's [`DispelGoal`](crate::states::play_match::team_solve::DispelGoal):
+///   the PRESSURED healer walks until the dispel reaches, the one positioning
+///   authority doing what the `Legacy` dispel walk does there.
+///
+/// Returns whether that walk drives the position this tick — the caller defers
+/// non-critical casts for it, as for the `Legacy` walk. Always `false` under
+/// `Legacy`.
 ///
 /// Behavior is identical to the two pre-extraction copies on identical inputs
 /// (the U6/U7/U8 posture probes pin this).
@@ -643,11 +664,12 @@ pub(super) fn healer_pressured_tick_shared(
     weights: &MovementWeights,
     wand_kill_target: Option<Entity>,
     fallback_range: Option<f32>,
+    dispel: Option<HealerDispel>,
     now: f32,
     decision_trace: &mut DecisionTrace,
     transitioned: bool,
     prev: Posture,
-) {
+) -> bool {
     let anchor_info = select_sticky_anchor(entity, ctx, state, shared);
 
     // Hard commitment window (R11): re-evaluation happens only once the
@@ -656,7 +678,8 @@ pub(super) fn healer_pressured_tick_shared(
     // the two governors never stack.
     let window_open = directive.is_some_and(|d| now < d.committed_until && now < d.expires);
     if window_open && !transitioned {
-        return;
+        // Still committed — to the dispel walk too, if that is what it is.
+        return state.solve_dispel.is_some();
     }
 
     // Threat set: visible enemies targeting me + any visible enemy inside the
@@ -672,6 +695,24 @@ pub(super) fn healer_pressured_tick_shared(
         threat_positions.insert(t.entity, t.position);
     }
 
+    // TeamPlan: a teammate this healer owes an urgent dispel it cannot reach
+    // (AS-187). The solve walks to it; the band-hold below must not park the
+    // Paladin short of it first.
+    let dispel_goal = if ctx.ai_profile.is_team_plan() {
+        dispel.and_then(|d| {
+            crate::states::play_match::team_solve::dispel_goal(
+                ctx,
+                d.abilities,
+                entity,
+                my_pos,
+                d.current_mana,
+                d.ability,
+            )
+        })
+    } else {
+        None
+    };
+
     // Band-hold (Paladin only): once every threat is at/beyond fallback_range,
     // STOP — a Point directive at the current position parks the Paladin at the
     // band to heal (and self-peel: the reservation is released while
@@ -679,7 +720,7 @@ pub(super) fn healer_pressured_tick_shared(
     // legacy melee pursuit and walk the Paladin straight back into the pressure
     // it just retreated from. Also covers healing-heavy pressure with no
     // proximate threat at all: no aimless wandering, no re-engage.
-    if let Some(band) = fallback_range {
+    if let Some(band) = fallback_range.filter(|_| dispel_goal.is_none()) {
         let nearest = threat_positions
             .values()
             .map(|p| my_pos.distance(*p))
@@ -708,7 +749,8 @@ pub(super) fn healer_pressured_tick_shared(
                     builder.finish();
                 }
             }
-            return;
+            state.solve_dispel = None;
+            return false;
         }
     }
 
@@ -733,7 +775,8 @@ pub(super) fn healer_pressured_tick_shared(
             shared.heal_range,
             threat_radius,
             None,
-        );
+        )
+        .with_dispel_goal(entity, dispel_goal);
         // A healer with no living non-pet partner is not a healer any more:
         // `OccupyCover`'s sight and leash constraints go vacuous and the last
         // unit standing hides forever next to a corpse. It fights at range
@@ -800,7 +843,27 @@ pub(super) fn healer_pressured_tick_shared(
                 builder.finish();
             }
         }
-        return;
+
+        // The dispel walk, traced as the `Legacy` one is: a `DispelChase` with
+        // the teammate in the target view, once per walk (on arming, on a new
+        // teammate, and on re-entering PRESSURED mid-walk) — never per re-solve.
+        let walking_to = dispel_goal.map(|g| g.ally);
+        if let Some(ally) = walking_to {
+            if transitioned || state.solve_dispel != Some(ally) {
+                if let Some(mut builder) =
+                    start_movement_event_with_target(decision_trace, ctx, ally, my_pos)
+                {
+                    builder.direction_change(
+                        TracePosture::Pressured,
+                        MovementTrigger::DispelChase,
+                        MovementGoalKind::Point,
+                    );
+                    builder.finish();
+                }
+            }
+        }
+        state.solve_dispel = walking_to;
+        return walking_to.is_some();
     }
 
     // Wand pull (Priest only) — but never toward an enemy that is itself in the
@@ -859,7 +922,7 @@ pub(super) fn healer_pressured_tick_shared(
 
     let chosen = score_directions(&compass_directions_16(), &inputs, &eff_weights);
     if chosen == Vec2::ZERO {
-        return; // defensive — 16 candidates always yield a direction
+        return false; // defensive — 16 candidates always yield a direction
     }
 
     commands.entity(entity).try_insert(MovementDirective {
@@ -912,6 +975,7 @@ pub(super) fn healer_pressured_tick_shared(
             builder.finish();
         }
     }
+    false
 }
 
 /// Start a `movement_decision` builder for the current actor. `None` only
