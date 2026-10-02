@@ -1,8 +1,9 @@
 //! Paired `Legacy` vs `TeamPlan` sweep for the Nagrand pillar-camp opener.
 //!
 //! Matches are deterministic, so running the same seed under both profiles is a
-//! PAIRED comparison in which the AI is the only variable. `#[ignore]`d because
-//! it runs 24 full matches; it is a measurement tool, not a regression gate.
+//! PAIRED comparison in which the AI is the only variable. The sweep is
+//! `#[ignore]`d because it runs 24 full matches; it is a measurement tool, not a
+//! regression gate. The one default-run test here is the geometry guard.
 //!
 //! # THIS FILE MEASURES MECHANISMS, NOT WIN RATES
 //!
@@ -37,23 +38,59 @@
 //! keyed by `Entity`, and `is_pet` is an explicit field.
 
 use arenasim::headless::{run_headless_match_observed, HeadlessMatchConfig};
+use arenasim::states::play_match::map_config::load_map_geometry_config;
 use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
-use arenasim::CharacterClass;
+use arenasim::{ArenaMap, CharacterClass};
 use bevy::prelude::{Vec2, Vec3};
 
-/// Nagrand's four octagonal pillars (`assets/config/maps.ron`).
+/// The camp pillar `post_ring_dist` is measured from: the one the team-1 camp
+/// holds on Nagrand. `camp_sweep_geometry_is_the_sims` pins it to a real pillar
+/// centre in the loaded geometry.
+const CAMP_PILLAR: Vec2 = Vec2::new(-40.0, -20.0);
+
+/// Nagrand's obstacles, exactly as the sim builds them: the same loader and the
+/// same `active_for` conversion `src/headless/runner.rs` uses to insert
+/// `ActiveMapGeometry`. Never declare a copy here — a local copy is how this
+/// file once measured line of sight against unrotated pillars while the sim
+/// used the 22.5-degree ones in `assets/config/maps.ron` (AS-189).
 fn nagrand() -> Vec<ObstacleVolume> {
-    [(-40.0, -20.0), (-40.0, 20.0), (40.0, -20.0), (40.0, 20.0)]
-        .into_iter()
-        .map(|(x, z)| ObstacleVolume::Prism {
-            center_xz: Vec2::new(x, z),
-            circumradius: 6.0,
-            sides: 8,
-            rotation: 0.0,
-            base_y: 0.0,
-            height: 5.0,
+    load_map_geometry_config()
+        .expect("assets/config/maps.ron must load")
+        .active_for(ArenaMap::PillaredArena)
+        .volumes
+}
+
+/// Guard, in the default `cargo test` run: the geometry this sweep measures
+/// line of sight against IS the geometry the match runs on, and the camp
+/// pillar it measures distance from is one of its pillars. Equality is exact
+/// (`ObstacleVolume: PartialEq`), so a rotation, radius or position drift fails.
+#[test]
+fn camp_sweep_geometry_is_the_sims() {
+    let sim = load_map_geometry_config()
+        .expect("assets/config/maps.ron must load")
+        .active_for(ArenaMap::PillaredArena)
+        .volumes;
+    let measured = nagrand();
+    assert!(
+        !sim.is_empty(),
+        "PillaredArena loaded with no obstacles — the guard below would be vacuous"
+    );
+    assert_eq!(
+        measured, sim,
+        "camp_sweep measures line of sight against geometry that differs from \
+         assets/config/maps.ron's PillaredArena"
+    );
+    let centres: Vec<Vec2> = measured
+        .iter()
+        .filter_map(|v| match *v {
+            ObstacleVolume::Prism { center_xz, .. } => Some(center_xz),
+            _ => None,
         })
-        .collect()
+        .collect();
+    assert!(
+        centres.contains(&CAMP_PILLAR),
+        "CAMP_PILLAR {CAMP_PILLAR:?} is not a PillaredArena pillar centre ({centres:?})"
+    );
 }
 
 struct Cell {
@@ -249,7 +286,7 @@ fn run_comp(t1: &str, t2: &str, seed: u64, team1: &[&str], team2: &[&str]) -> Ce
                 post += 1;
                 post_b += is_blocked as usize;
                 post_occ += denied as usize;
-                ring_sum += p.distance(Vec2::new(-40.0, -20.0));
+                ring_sum += p.distance(CAMP_PILLAR);
             } else {
                 pre += 1;
                 pre_b += is_blocked as usize;
