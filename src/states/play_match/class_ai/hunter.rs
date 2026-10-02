@@ -34,6 +34,7 @@ use crate::states::play_match::decision_trace::{
     ActorView, DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, TargetView,
 };
 use crate::states::play_match::movement_config::MovementWeights;
+use crate::states::play_match::traps::replace_previous_trap;
 
 /// Hold Concussive Shot while the target's existing slow has more than this many
 /// seconds left; refresh only inside this window before expiry so the new slow
@@ -304,20 +305,23 @@ pub fn decide_hunter_action(
             return true;
         }
 
-        // Priority 3: Frost Trap at feet
-        if try_place_trap_at(
-            commands,
-            combat_log,
-            abilities,
-            entity,
-            combatant,
-            my_pos,
-            my_pos,
-            None,
-            TrapType::Frost,
-            &ctx.bounds,
-            &mut builder,
-        ) {
+        // Priority 3: Frost Trap at feet — unless it would replace the
+        // Hunter's own Freezing Trap still waiting to spring.
+        if !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
+            && try_place_trap_at(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                my_pos,
+                None,
+                TrapType::Frost,
+                &ctx.bounds,
+                &mut builder,
+            )
+        {
             builder.finish();
             return true;
         }
@@ -386,19 +390,21 @@ pub fn decide_hunter_action(
             });
         if let Some((frost_anchor_entity, anchor_pos)) = frost_anchor {
             let midpoint = (my_pos + anchor_pos) / 2.0;
-            if try_place_trap_at(
-                commands,
-                combat_log,
-                abilities,
-                entity,
-                combatant,
-                my_pos,
-                midpoint,
-                Some(frost_anchor_entity),
-                TrapType::Frost,
-                &ctx.bounds,
-                &mut builder,
-            ) {
+            if !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
+                && try_place_trap_at(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    midpoint,
+                    Some(frost_anchor_entity),
+                    TrapType::Frost,
+                    &ctx.bounds,
+                    &mut builder,
+                )
+            {
                 builder.finish();
                 return true;
             }
@@ -1121,6 +1127,41 @@ fn victim_springs_it(ctx: &CombatContext, my_team: u8, victim: Entity, landing: 
     })
 }
 
+/// Trace note for a Frost Trap held because throwing it would replace the
+/// Hunter's own Freezing Trap still waiting to spring
+/// ([`frost_trap_held_for_freezing`]).
+pub const FROST_TRAP_HELD_FOR_FREEZING: &str =
+    "frost trap held: it would replace the Hunter's own live Freezing Trap";
+
+/// Should the Frost Trap be held because it would replace one of the Hunter's
+/// own Freezing Traps — on the ground unsprung, or still in flight
+/// (`own_traps`)? Only one trap is active at a time
+/// ([`replace_previous_trap`]), so a Frost Trap thrown now would take the
+/// Freezing Trap off the ground, and the Freezing Trap is the higher-priority
+/// trap everywhere the AI chooses between them (the pressure trap on the enemy
+/// healer is tried before the Frost Trap peel). The reverse is not held: a
+/// Freezing Trap replaces a live Frost Trap.
+///
+/// Traced only while the Frost Trap is off cooldown, so a trap on cooldown
+/// still records `OnCooldown` (the caller falls through to it).
+fn frost_trap_held_for_freezing(
+    own_traps: &[LiveTrap],
+    combatant: &Combatant,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::FrostTrap;
+    if own_traps.is_empty() || combatant.ability_cooldowns.contains_key(&ability) {
+        return false;
+    }
+    builder.reject(
+        ability,
+        RejectionReason::PreconditionUnmet {
+            note: FROST_TRAP_HELD_FOR_FREEZING.to_string(),
+        },
+    );
+    true
+}
+
 /// Trace note for a fallback Freezing Trap held because the enemy it would
 /// catch has a teammate who would free it ([`fallback_trap`]).
 pub const TRAP_HELD_FREEABLE: &str = "trap held: a teammate would free the enemy it would catch";
@@ -1323,10 +1364,14 @@ fn concussive_target(
 /// Attempt to place a trap at a specific position (or at the Hunter's feet).
 /// Spawn a trap at `landing` from `my_pos`: a thrown `TrapLaunchProjectile` when
 /// far enough (`> TRAP_LAUNCH_MIN_RANGE`), else a placed `Trap`. Extracted from
-/// `try_place_trap_at` (pure spawn, behavior-preserving) and made `pub(crate)`
-/// so the Animation Sandbox drops a faithful trap from the SAME code gameplay
-/// uses. The caller owns gating, clamping, logging, and resource costs.
-pub(crate) fn spawn_trap(
+/// `try_place_trap_at` (pure spawn, behavior-preserving) and made public so
+/// the Animation Sandbox drops a faithful trap from the SAME code gameplay
+/// uses, and so `tests/hunter_one_trap.rs` throws through it. The caller owns
+/// gating, clamping, logging, and resource costs.
+///
+/// The new trap REPLACES any trap `owner` already has, on the ground or in
+/// flight ([`replace_previous_trap`] — Classic's one-active-trap rule).
+pub fn spawn_trap(
     commands: &mut Commands,
     owner: Entity,
     owner_team: u8,
@@ -1337,7 +1382,7 @@ pub(crate) fn spawn_trap(
     let landing = Vec3::new(landing.x, 0.0, landing.z);
     let distance = Vec3::new(my_pos.x, 0.0, my_pos.z).distance(landing);
 
-    if distance > TRAP_LAUNCH_MIN_RANGE {
+    let new_trap = if distance > TRAP_LAUNCH_MIN_RANGE {
         let origin = Vec3::new(my_pos.x, 1.5, my_pos.z);
         let direction = (landing - origin).normalize_or_zero();
         let rotation = if direction != Vec3::ZERO {
@@ -1345,26 +1390,31 @@ pub(crate) fn spawn_trap(
         } else {
             Quat::IDENTITY
         };
-        commands.spawn((
-            Transform::from_translation(origin).with_rotation(rotation),
-            TrapLaunchProjectile {
-                trap_type,
-                owner_team,
-                owner,
-                origin,
-                landing_position: landing,
-                total_distance: distance,
-                distance_traveled: 0.0,
-            },
-            PlayMatchEntity,
-        ));
+        commands
+            .spawn((
+                Transform::from_translation(origin).with_rotation(rotation),
+                TrapLaunchProjectile {
+                    trap_type,
+                    owner_team,
+                    owner,
+                    origin,
+                    landing_position: landing,
+                    total_distance: distance,
+                    distance_traveled: 0.0,
+                },
+                PlayMatchEntity,
+            ))
+            .id()
     } else {
-        commands.spawn((
-            Transform::from_translation(landing),
-            Trap::placed(trap_type, owner_team, owner),
-            PlayMatchEntity,
-        ));
-    }
+        commands
+            .spawn((
+                Transform::from_translation(landing),
+                Trap::placed(trap_type, owner_team, owner),
+                PlayMatchEntity,
+            ))
+            .id()
+    };
+    replace_previous_trap(commands, owner, new_trap);
 }
 
 fn try_place_trap_at(

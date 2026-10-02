@@ -42,6 +42,73 @@ pub fn freezing_trap_aura(owner: Entity) -> Aura {
     }
 }
 
+/// Classic's rule, from every Hunter trap's tooltip (Freezing Trap 1499 /
+/// 14310, Frost Trap 13809): "Only one trap can be active at a time." Every
+/// trap is a "Summon Object (slot 1)" spell, and the server despawns whatever
+/// already fills a caster's slot when it summons into it (vmangos
+/// `Spell::EffectSummonObject`), so a new trap REPLACES the previous one — the
+/// cast is never refused — and Freezing and Frost share the one slot.
+///
+/// Queues that replacement for `new_trap`, a trap `owner` has just thrown or
+/// placed: when the command applies, every other trap of `owner`'s — on the
+/// ground, or still in flight as a [`TrapLaunchProjectile`] — is removed and
+/// logged. Keyed on the THROW, not the landing, because the throw is the cast:
+/// the Hunter's newest decision is the trap it has, and an older throw still in
+/// the air can never land on top of it. `spawn_trap` is the one throw site, so
+/// every trap — gameplay's and the Animation Sandbox's — passes through here.
+pub fn replace_previous_trap(commands: &mut Commands, owner: Entity, new_trap: Entity) {
+    commands.queue(move |world: &mut World| {
+        let mut previous: Vec<(Entity, TrapType)> = world
+            .query::<(Entity, &Trap)>()
+            .iter(world)
+            .filter(|(e, t)| *e != new_trap && t.owner == owner && !t.triggered)
+            .map(|(e, t)| (e, t.trap_type))
+            .collect();
+        previous.extend(
+            world
+                .query::<(Entity, &TrapLaunchProjectile)>()
+                .iter(world)
+                .filter(|(e, p)| *e != new_trap && p.owner == owner)
+                .map(|(e, p)| (e, p.trap_type)),
+        );
+        if previous.is_empty() {
+            return;
+        }
+        // One at most while the rule holds; sorted so a violation logs in a
+        // stable order rather than archetype order.
+        previous.sort_by_key(|(e, _)| e.to_bits());
+
+        let new_type = world
+            .get::<Trap>(new_trap)
+            .map(|t| t.trap_type)
+            .or_else(|| {
+                world
+                    .get::<TrapLaunchProjectile>(new_trap)
+                    .map(|p| p.trap_type)
+            });
+        let owner_name = world
+            .get::<Combatant>(owner)
+            .map(|c| combat_log_id_for(c, world.get::<Pet>(owner)))
+            .unwrap_or_else(|| "Hunter".to_string());
+
+        for (entity, old_type) in previous {
+            world.despawn(entity);
+            if let Some(mut log) = world.get_resource_mut::<CombatLog>() {
+                let by = new_type.map_or("a new trap", |t| t.name());
+                log.log(
+                    CombatLogEventType::CrowdControl,
+                    format!(
+                        "[TRAP] {}'s {} is replaced by its {}",
+                        owner_name,
+                        old_type.name(),
+                        by
+                    ),
+                );
+            }
+        }
+    });
+}
+
 /// Single system handling the full trap lifecycle:
 /// 0. Decrement lifetime_remaining, expire (log + despawn) the trap at 0
 /// 1. Decrement arm_timer, consider armed when timer hits 0
