@@ -203,8 +203,8 @@ pub fn add_core_combat_systems<M, N>(
             process_dot_ticks,
             process_hot_ticks, // HoT healing — like process_dot_ticks, must run BEFORE update_auras
             update_auras,
-            slow_zone_system,   // Zone slow refresh before aura processing
-            flare_system,       // Exposes Rogues standing in a Flare before anyone acquires targets
+            slow_zone_system,       // Zone slow refresh before aura processing
+            flare_system, // Exposes Rogues standing in a Flare before anyone acquires targets
             totem_pulse_system, // Totem dedup + buff pulse on allies (after slow_zone_system)
             // The self-applied immunities and shifts, in this order, all BEFORE
             // apply_pending_auras so each immunity meets the CC queued this frame:

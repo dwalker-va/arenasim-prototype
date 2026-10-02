@@ -47,10 +47,7 @@ fn dead_hunter_with_trap(trap_type: TrapType) -> Arena {
     hunter.is_dead = true;
     assert!(!hunter.is_alive());
     let hunter = world
-        .spawn((
-            hunter,
-            Transform::from_translation(Vec3::new(-20.0, 0.0, 0.0)),
-        ))
+        .spawn((hunter, Transform::from_translation(Vec3::new(-20.0, 0.0, 0.0))))
         .id();
     let enemy = world
         .spawn((
@@ -86,10 +83,7 @@ impl Arena {
     }
 
     fn walk_enemy_onto_trap_site(&mut self) {
-        self.world
-            .get_mut::<Transform>(self.enemy)
-            .unwrap()
-            .translation = TRAP_SITE;
+        self.world.get_mut::<Transform>(self.enemy).unwrap().translation = TRAP_SITE;
     }
 
     fn trap_exists(&self) -> bool {
@@ -133,10 +127,7 @@ fn dead_hunters_trap_still_springs(trap_type: TrapType) {
         arena.trap_exists(),
         "{trap_type:?}: the trap is gone 30s after landing, with no enemy near it"
     );
-    assert!(
-        !arena.effect_landed(trap_type),
-        "{trap_type:?}: sprang with no enemy near it"
-    );
+    assert!(!arena.effect_landed(trap_type), "{trap_type:?}: sprang with no enemy near it");
 
     arena.walk_enemy_onto_trap_site();
     arena.run_until(30.0 + TICK);
@@ -145,10 +136,7 @@ fn dead_hunters_trap_still_springs(trap_type: TrapType) {
         arena.effect_landed(trap_type),
         "{trap_type:?}: the dead Hunter's trap did not spring on an enemy standing on it"
     );
-    assert!(
-        !arena.trap_exists(),
-        "{trap_type:?}: a sprung trap was not consumed"
-    );
+    assert!(!arena.trap_exists(), "{trap_type:?}: a sprung trap was not consumed");
     assert_eq!(
         arena.log_lines("triggers on").len(),
         1,
