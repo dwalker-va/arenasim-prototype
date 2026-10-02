@@ -45,6 +45,8 @@ pub struct AbilityDispatchExtras<'w, 's> {
     /// enemy it cannot see is the one its team will converge on. `Option` so
     /// a scene that never inserted it plays as if none was set.
     config: Option<Res<'w, match_config::MatchConfig>>,
+    /// Lit Flares, so a stealthed Rogue can play around the light it sees.
+    flares: Query<'w, 's, (Entity, &'static FlareZone, &'static Transform)>,
 }
 
 pub fn acquire_targets(
@@ -772,6 +774,7 @@ pub fn decide_abilities(
         Option<&mut KitePosture>,
         Option<&MovementDirective>,
         Option<&mut MeleeResetState>,
+        Option<&mut RogueFlareState>,
     )>,
     mut fct_states: Query<&mut FloatingTextState>,
     extras: AbilityDispatchExtras,
@@ -826,6 +829,27 @@ pub fn decide_abilities(
             );
         }
     }
+
+    // Every lit Flare with its owner's team, in entity order, for the stealthed
+    // Rogue's pre-pass. Empty in any match without a Hunter that has lit one.
+    let mut lit_flares: Vec<(Entity, u8, class_ai::rogue_flare::LitFlare)> = extras
+        .flares
+        .iter()
+        .map(|(e, zone, transform)| {
+            (
+                e,
+                zone.owner_team,
+                class_ai::rogue_flare::LitFlare {
+                    center: Vec2::new(transform.translation.x, transform.translation.z),
+                    radius: zone.radius,
+                    remaining: zone.duration_remaining,
+                },
+            )
+        })
+        .collect();
+    lit_flares.sort_by_key(|(e, _, _)| *e);
+    let lit_flares: Vec<(u8, class_ai::rogue_flare::LitFlare)> =
+        lit_flares.into_iter().map(|(_, team, f)| (team, f)).collect();
 
     // CombatantInfo is a per-frame snapshot. Mutations to Combatant components
     // during class AI dispatch are not reflected in other entities' views.
@@ -1022,7 +1046,7 @@ pub fn decide_abilities(
                 // `combatants` query filter, so KITE exit can lag one GCD — an
                 // accepted pilot simplification.
                 if countdown.gates_opened {
-                    if let Ok((_healer, mage_posture, directive, _reset)) =
+                    if let Ok((_healer, mage_posture, directive, _reset, _flare)) =
                         posture_movement.get_mut(entity)
                     {
                         // Mage: aura-gated KITE (a melee enemy it rooted/slowed).
@@ -1092,7 +1116,7 @@ pub fn decide_abilities(
                 // window.
                 let mut plan = class_ai::priest::PriestMovementPlan::default();
                 if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive, _reset)) =
+                    if let Ok((healer_posture, _mage, directive, _reset, _flare)) =
                         posture_movement.get_mut(entity)
                     {
                         plan = class_ai::priest::evaluate_priest_posture(
@@ -1135,7 +1159,8 @@ pub fn decide_abilities(
                 // gates_opened, never for casting/CC'd warriors (query excludes
                 // CastingState; move_to_target ignores the directive under CC).
                 if countdown.gates_opened {
-                    if let Ok((_healer, _mage, directive, reset)) = posture_movement.get_mut(entity)
+                    if let Ok((_healer, _mage, directive, reset, _flare)) =
+                        posture_movement.get_mut(entity)
                     {
                         class_ai::warrior::evaluate_warrior_reset(
                             &mut commands,
@@ -1168,19 +1193,55 @@ pub fn decide_abilities(
                     &mut decision_trace,
                 )
             }
-            match_config::CharacterClass::Rogue => class_ai::rogue::decide_rogue_action(
-                &mut commands,
-                &mut combat_log,
-                &mut game_rng,
-                &abilities,
-                entity,
-                &mut combatant,
-                my_pos,
-                &ctx,
-                &mut instant_attacks,
-                &mut same_frame_cc_queue,
-                &mut decision_trace,
-            ),
+            match_config::CharacterClass::Rogue => {
+                // Flare pre-pass (AS-185): a stealthed Rogue plays around a lit
+                // enemy Flare it can see. Runs before the opener so the walk it
+                // sets is this frame's; gated on gates_opened like the other
+                // movement pre-passes.
+                if countdown.gates_opened {
+                    if let Ok((_healer, _mage, _directive, _reset, flare_state)) =
+                        posture_movement.get_mut(entity)
+                    {
+                        let current = flare_state.as_deref().copied();
+                        let next = class_ai::rogue_flare::evaluate_rogue_flare(
+                            &mut commands,
+                            &mut combat_log,
+                            entity,
+                            &combatant,
+                            my_pos,
+                            &ctx,
+                            &lit_flares,
+                            current,
+                            time.elapsed_secs(),
+                            &mut decision_trace,
+                        );
+                        // Written only when it changed, so an idle Rogue's
+                        // state is never marked changed.
+                        match flare_state {
+                            Some(mut state) => {
+                                state.set_if_neq(next);
+                            }
+                            None if RogueFlareState::needs_insert(None, &next) => {
+                                commands.entity(entity).try_insert(next);
+                            }
+                            None => {}
+                        }
+                    }
+                }
+                class_ai::rogue::decide_rogue_action(
+                    &mut commands,
+                    &mut combat_log,
+                    &mut game_rng,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    &ctx,
+                    &mut instant_attacks,
+                    &mut same_frame_cc_queue,
+                    &mut decision_trace,
+                )
+            }
             match_config::CharacterClass::Warlock => class_ai::warlock::decide_warlock_action(
                 &mut commands,
                 &mut combat_log,
@@ -1205,7 +1266,7 @@ pub fn decide_abilities(
                 let durations = totem_durations.get(&entity).copied().unwrap_or([0.0; 4]);
                 let mut plan = class_ai::caster_healer_posture::CasterHealerPlan::default();
                 if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive, _reset)) =
+                    if let Ok((healer_posture, _mage, directive, _reset, _flare)) =
                         posture_movement.get_mut(entity)
                     {
                         plan = class_ai::caster_healer_posture::evaluate_caster_healer_posture(
@@ -1244,7 +1305,7 @@ pub fn decide_abilities(
             // the Druid has is an instant, so there is nothing to defer.
             match_config::CharacterClass::Druid => {
                 if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive, _reset)) =
+                    if let Ok((healer_posture, _mage, directive, _reset, _flare)) =
                         posture_movement.get_mut(entity)
                     {
                         class_ai::caster_healer_posture::evaluate_caster_healer_posture(
@@ -1294,7 +1355,7 @@ pub fn decide_abilities(
                 // enemy-healer dip; `DipCast` on dip arrival).
                 let mut plan = class_ai::paladin::PaladinMovementPlan::default();
                 if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive, _reset)) =
+                    if let Ok((healer_posture, _mage, directive, _reset, _flare)) =
                         posture_movement.get_mut(entity)
                     {
                         plan = class_ai::paladin::evaluate_paladin_posture(
@@ -1345,7 +1406,7 @@ pub fn decide_abilities(
                 // and KITE runs unchanged.
                 let mut dip_plan = class_ai::hunter_dip::HunterDipPlan::Rotation;
                 if countdown.gates_opened {
-                    if let Ok((_healer, mut kite_posture, directive, _reset)) =
+                    if let Ok((_healer, mut kite_posture, directive, _reset, _flare)) =
                         posture_movement.get_mut(entity)
                     {
                         let cfg = &movement_config.hunter;

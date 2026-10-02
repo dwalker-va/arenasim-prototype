@@ -28,6 +28,7 @@ pub(crate) mod paladin_postures;
 pub mod pet_ai;
 pub mod priest;
 pub mod rogue;
+pub mod rogue_flare;
 pub mod shaman;
 pub mod warlock;
 pub mod warrior;

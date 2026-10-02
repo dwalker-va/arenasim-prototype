@@ -235,6 +235,44 @@ pub struct MeleeResetState {
     pub active: bool,
 }
 
+/// How a stealthed Rogue is playing around a lit enemy Flare
+/// (`class_ai::rogue_flare`). Inserted the first time a Flare touches its way
+/// in; survives directive expiry like the posture states.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FlareApproach {
+    /// No Flare in the way: plain pursuit, no directive.
+    #[default]
+    Clear,
+    /// Walking a way in that stays out of the light.
+    Skirt,
+    /// Every way in is lit: holding outside the light for it to burn out.
+    Wait,
+    /// Going in anyway — waiting would cost more than being found. Latched
+    /// until stealth ends or no Flare is lit.
+    Committed,
+}
+
+/// Per-Rogue state for [`FlareApproach`].
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct RogueFlareState {
+    pub mode: FlareApproach,
+    /// The last mode announced to the combat log and decision trace, so a
+    /// walk that briefly clears and re-blocks is announced once. `Clear` is
+    /// never announced.
+    pub announced: FlareApproach,
+    /// While waiting: the longest remaining burn among the Flares that close
+    /// the way in, as of last frame. A jump means one was relit over it.
+    pub covering_remaining: f32,
+}
+
+impl RogueFlareState {
+    /// Whether a Rogue with no state yet must be given `next`: only when it is
+    /// not the default, so a Rogue that never meets a Flare never carries one.
+    pub fn needs_insert(current: Option<&Self>, next: &Self) -> bool {
+        current.is_none() && *next != Self::default()
+    }
+}
+
 impl KitePosture {
     /// Fresh posture state at sim-time `now` (ENGAGE, no hold).
     pub fn new(now: f32) -> Self {

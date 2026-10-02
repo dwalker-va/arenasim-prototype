@@ -122,6 +122,9 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
     "SeekLos",
     "MeleeReset",
     "DispelChase",
+    "FlareSkirt",
+    "FlareWait",
+    "FlareCommit",
 ];
 
 /// One reference matchup: team configs + seed + label for error messages.

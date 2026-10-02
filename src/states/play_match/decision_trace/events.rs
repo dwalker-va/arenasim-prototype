@@ -300,6 +300,17 @@ pub enum MovementTrigger {
     /// until the rotation's urgent dispel can reach. Emitted within the
     /// posture (no transition), once per commit window.
     DispelChase,
+    /// Stealthed Rogue (AS-185): a lit enemy Flare lies across its way to its
+    /// target and a way round stays out of the light, so it walks that way (a
+    /// `point` goal). Announced once per Flare, not per re-steer.
+    FlareSkirt,
+    /// Stealthed Rogue: every way to its target is lit, so it holds outside
+    /// the light (a `point` goal) for the Flare to burn out.
+    FlareWait,
+    /// Stealthed Rogue: it was holding outside a Flare and goes in anyway —
+    /// a teammate fell below half health, or the Flare was relit over its
+    /// approach (an `entity` goal: plain pursuit of its target).
+    FlareCommit,
 }
 
 /// Shape of the movement goal carried by the directive this decision issued.
