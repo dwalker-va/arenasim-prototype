@@ -613,7 +613,12 @@ fn try_fortitude(
     let mut unbuffed_ally: Option<(Entity, Vec3)> = None;
 
     for (ally_entity, info) in ctx.combatants.iter() {
-        if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
+        // A cycloned ally takes no buff (`CombatContext::is_cycloned`).
+        if info.team != combatant.team
+            || info.current_health <= 0.0
+            || info.is_pet
+            || ctx.is_cycloned(*ally_entity)
+        {
             continue;
         }
         let has_fortitude = ctx
@@ -729,6 +734,10 @@ fn try_power_word_shield(
 
     for (ally_entity, info) in ctx.combatants.iter() {
         if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
+            continue;
+        }
+        // A cycloned ally takes no shield (`CombatContext::is_cycloned`).
+        if ctx.is_cycloned(*ally_entity) {
             continue;
         }
         let ally_auras = ctx.active_auras.get(ally_entity);

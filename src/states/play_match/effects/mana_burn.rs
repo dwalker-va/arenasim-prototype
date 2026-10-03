@@ -27,7 +27,7 @@ pub fn process_mana_burn(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     pending_burns: Query<(Entity, &ManaBurnPending)>,
-    mut combatants: Query<&mut Combatant>,
+    mut combatants: Query<(&mut Combatant, Option<&ActiveAuras>)>,
     pet_query: Query<&Pet>,
     abilities: Res<AbilityDefinitions>,
 ) {
@@ -35,8 +35,30 @@ pub fn process_mana_burn(
     // `SchoolImpact` spawn site, so a RON retune moves the colour with it.
     let school = abilities.get_unchecked(&AbilityType::ManaBurn).spell_school;
     for (pending_entity, pending) in pending_burns.iter() {
-        if let Ok(mut target) = combatants.get_mut(pending.target) {
-            if target.is_alive() && target.resource_type == ResourceType::Mana {
+        if let Ok((mut target, target_auras)) = combatants.get_mut(pending.target) {
+            // Divine Shield and a Cyclone both block Mana Burn (Classic/TBC):
+            // the same immunity the AI declines to cast into
+            // (`class_ai::grants_damage_immunity`), here for a burn whose
+            // target became immune while it was being cast.
+            let immune = target_auras.is_some_and(|auras| {
+                auras.auras.iter().any(|a| {
+                    crate::states::play_match::class_ai::grants_damage_immunity(a.effect_type)
+                })
+            });
+            if immune && target.is_alive() {
+                let target_id = combat_log_id_for(&target, pet_query.get(pending.target).ok());
+                let msg = format!(
+                    "[MANA BURN] {}'s Mana Burn fails: {} is immune",
+                    combatant_id(
+                        pending.caster_team,
+                        pending.caster_slot,
+                        pending.caster_class
+                    ),
+                    target_id,
+                );
+                combat_log.log(CombatLogEventType::Buff, msg.clone());
+                info!("{}", msg);
+            } else if target.is_alive() && target.resource_type == ResourceType::Mana {
                 let burned = target.current_mana.min(pending.amount);
                 target.current_mana -= burned;
 
@@ -197,5 +219,54 @@ mod tests {
 
         let combatant = world.get::<Combatant>(target_entity).unwrap();
         assert!((combatant.current_mana - 150.0).abs() < f32::EPSILON);
+    }
+
+    /// Divine Shield and a Cyclone both block Mana Burn (Classic/TBC): a burn
+    /// that lands on either destroys nothing, while a burn on an unshielded
+    /// mana user beside them still lands.
+    #[test]
+    fn divine_shield_and_cyclone_block_the_burn() {
+        let mut world = new_world();
+        let immune_aura = |effect_type| Aura {
+            effect_type,
+            duration: 5.0,
+            ..Default::default()
+        };
+        let bubbled = world
+            .spawn((
+                Combatant::new(2, 0, CharacterClass::Paladin),
+                ActiveAuras {
+                    auras: vec![immune_aura(AuraType::DamageImmunity)],
+                },
+            ))
+            .id();
+        let cycloned = world
+            .spawn((
+                Combatant::new(2, 1, CharacterClass::Priest),
+                ActiveAuras {
+                    auras: vec![immune_aura(AuraType::Cyclone)],
+                },
+            ))
+            .id();
+        let open = world
+            .spawn(Combatant::new(2, 2, CharacterClass::Priest))
+            .id();
+        for target in [bubbled, cycloned, open] {
+            spawn_burn(&mut world, target, 50.0);
+        }
+
+        world
+            .run_system_once(process_mana_burn)
+            .expect("system ran");
+
+        for target in [bubbled, cycloned] {
+            let c = world.get::<Combatant>(target).unwrap();
+            assert_eq!(
+                c.current_mana, c.max_mana,
+                "an immune target keeps its mana"
+            );
+        }
+        let c = world.get::<Combatant>(open).unwrap();
+        assert!((c.current_mana - (c.max_mana - 50.0)).abs() < f32::EPSILON);
     }
 }

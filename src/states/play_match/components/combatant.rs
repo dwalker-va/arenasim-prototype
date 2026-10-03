@@ -1294,6 +1294,12 @@ pub enum DispelScope {
     /// its type with Battle Shout, but it is not magic, and a purge pinned to
     /// the type must still pass it over.
     Purge(AuraType),
+    /// Shaman Purge pinned to one SOURCE-keyed buff ([`Aura::distinct_by_source`](super::Aura::distinct_by_source)):
+    /// the aura of this type that this ability applied. A source-keyed buff
+    /// is a different buff from a same-type sibling — a Druid's Rejuvenation
+    /// and its Lifebloom are both `HealingOverTime` — so a purge chosen for one
+    /// must not take the other.
+    PurgeSource { effect: AuraType, source: String },
     /// Master's Call: a movement impairment of one of these types, whatever
     /// its removal class — it clears physical harm as well as magic.
     Impairments(Vec<AuraType>),
@@ -1315,6 +1321,9 @@ impl DispelScope {
             DispelScope::Magic => aura.can_be_dispelled(),
             DispelScope::MagicOrPoison => aura.can_be_dispelled() || aura.is_cleansable_poison(),
             DispelScope::Purge(effect) => aura.effect_type == *effect && aura.can_be_purged(),
+            DispelScope::PurgeSource { effect, source } => {
+                aura.effect_type == *effect && aura.ability_name == *source && aura.can_be_purged()
+            }
             DispelScope::Impairments(effects) => effects.contains(&aura.effect_type),
         }
     }

@@ -16,9 +16,12 @@ use bevy::prelude::*;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
 use arenasim::states::play_match::class_ai::{
-    dispel_priority, purge_priority, team_hp_sums, CombatantInfo, PURGE_MIN_PRIORITY,
+    dispel_priority, purge_priority, select_purge, team_hp_sums, CombatantInfo, PURGE_MIN_PRIORITY,
 };
-use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker, DispelType, PetType};
+use arenasim::states::play_match::components::DispelScope;
+use arenasim::states::play_match::{
+    AbilityDefinitions, Aura, AuraType, DRCategory, DRTracker, DispelType, PetType,
+};
 
 // ============================================================================
 // Fixture helpers
@@ -301,36 +304,35 @@ fn purge_priority_returns_zero_for_debuffs_and_unpurgeable() {
 }
 
 // ============================================================================
-// Shaman Purge target selection — mirrors try_purge_enemy's inner pick
+// Shaman Purge target selection — try_purge_enemy's own pick (select_purge)
 // ============================================================================
 
-/// Replicates `try_purge_enemy`'s candidate scan using the SAME production
-/// predicates it uses (`Aura::can_be_purged` + `purge_priority`): among living
-/// non-pet enemies, pick the enemy whose highest-priority purgeable buff is the
-/// most valuable, returning `(enemy, chosen buff)`. `None` when no enemy carries
-/// a purgeable buff (the reject path).
+/// `try_purge_enemy`'s own candidate scan (`select_purge`), floorless and in
+/// range of everyone, returning `(enemy, chosen buff type)`. `None` when no
+/// enemy carries a purgeable buff (the reject path). The first combatant on
+/// `my_team` in the snapshot is the purger.
 fn select_purge_target(snapshot: &CombatSnapshot, my_team: u8) -> Option<(Entity, AuraType)> {
-    let mut best: Option<(Entity, AuraType, i32)> = None;
-    for (e, inf) in snapshot.combatants.iter() {
-        if inf.team == my_team || !inf.is_alive || inf.is_pet {
-            continue;
+    let me = *snapshot
+        .combatants
+        .iter()
+        .find(|(_, info)| info.team == my_team)
+        .expect("the purger")
+        .0;
+    let ctx = snapshot.context_for(me);
+    select_purge(
+        &ctx,
+        &AbilityDefinitions::default(),
+        my_team,
+        Vec3::ZERO,
+        f32::MAX,
+        i32::MIN,
+    )
+    .map(|choice| match choice.scope {
+        DispelScope::Purge(effect) | DispelScope::PurgeSource { effect, .. } => {
+            (choice.target, effect)
         }
-        let Some(auras) = snapshot.active_auras.get(e) else {
-            continue;
-        };
-        for a in auras {
-            if !a.can_be_purged() {
-                continue;
-            }
-            let p = purge_priority(a.effect_type);
-            match best {
-                None => best = Some((*e, a.effect_type, p)),
-                Some((_, _, bp)) if p > bp => best = Some((*e, a.effect_type, p)),
-                _ => {}
-            }
-        }
-    }
-    best.map(|(e, a, _)| (e, a))
+        other => panic!("a purge scoped {other:?}"),
+    })
 }
 
 #[test]
@@ -2218,4 +2220,471 @@ fn a_flare_is_lit_ahead_of_the_ally_nearest_the_enemy_gate_once_the_rogue_could_
             reserve: false
         })
     ));
+}
+
+// ============================================================================
+// Druid counterplay (AS-163): purge by aura instance, interrupt Cyclone,
+// dispellers respect Cyclone, attackers and healers respect its immunity
+// ============================================================================
+
+mod druid_counterplay {
+    use super::*;
+
+    use bevy::ecs::system::RunSystemOnce;
+
+    use arenasim::combat::log::CombatLog;
+    use arenasim::states::match_config::MatchConfig;
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::class_ai::mage::polymorph_refused;
+    use arenasim::states::play_match::class_ai::pet_ai::spell_lock_target;
+    use arenasim::states::play_match::class_ai::{
+        aura_purge_priority, priority_interrupt_target, scan_ally_dispel, InterruptCandidate,
+        PURGE_URGENT_PRIORITY,
+    };
+    use arenasim::states::play_match::components::{
+        ActiveAuras, AuraPending, CastingState, Combatant, InterruptPending, MatchCountdown,
+    };
+    use arenasim::states::play_match::decision_trace::DecisionTrace;
+    use arenasim::states::play_match::movement_config::MovementConfig;
+    use arenasim::states::play_match::systems::{acquire_targets, check_interrupts};
+
+    /// The aura `ability` lands on `target`, exactly as the engine builds it
+    /// from the shipped `abilities.ron`.
+    fn landed(ability: AbilityType, target: Entity, caster: Entity) -> Aura {
+        let defs = AbilityDefinitions::default();
+        AuraPending::from_ability(target, caster, defs.get_unchecked(&ability))
+            .expect("the ability applies an aura")
+            .aura
+    }
+
+    // ---- 1. Purge priority by aura instance ----
+
+    /// Innervate is worth the urgent bar, though its type (ManaRegenIncrease)
+    /// is Mage Armor's 25 and never purged; and the Shaman takes it over every
+    /// other candidate — a Power Word: Shield on another enemy (Absorb, 100)
+    /// and the Druid's own Rejuvenation — with a scope that takes Innervate and
+    /// nothing else.
+    ///
+    /// Mutant killed: drop `purge_priority: Some(110)` from Innervate in
+    /// `abilities.ron` (or the `source_effect` lookup in `aura_purge_priority`):
+    /// Innervate falls back to 25 and the Absorb wins.
+    #[test]
+    fn shaman_purges_innervate_over_the_other_candidates() {
+        let defs = AbilityDefinitions::default();
+        let me = Entity::from_raw(1);
+        let druid = Entity::from_raw(2);
+        let priest = Entity::from_raw(3);
+        let mut snapshot = snapshot_for(me, 1, CharacterClass::Shaman);
+        snapshot
+            .combatants
+            .insert(druid, info(druid, 2, CharacterClass::Druid));
+        snapshot
+            .combatants
+            .insert(priest, info(priest, 2, CharacterClass::Priest));
+        let innervate = landed(AbilityType::Innervate, druid, druid);
+        let rejuvenation = landed(AbilityType::Rejuvenation, druid, druid);
+        snapshot
+            .active_auras
+            .insert(druid, vec![rejuvenation.clone(), innervate.clone()]);
+        snapshot.active_auras.insert(
+            priest,
+            vec![landed(AbilityType::PowerWordShield, priest, priest)],
+        );
+
+        assert_eq!(
+            aura_purge_priority(&innervate, &defs),
+            PURGE_URGENT_PRIORITY
+        );
+        assert_eq!(
+            purge_priority(AuraType::ManaRegenIncrease),
+            25,
+            "the type default"
+        );
+
+        let ctx = snapshot.context_for(me);
+        for bar in [PURGE_MIN_PRIORITY, PURGE_URGENT_PRIORITY] {
+            let choice = select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, bar)
+                .unwrap_or_else(|| panic!("Innervate clears the {bar} bar"));
+            assert_eq!(choice.target, druid);
+            assert!(choice.scope.takes(&innervate));
+            assert!(
+                !choice.scope.takes(&rejuvenation),
+                "the purge chosen for Innervate takes nothing else"
+            );
+        }
+    }
+
+    /// Lifebloom blooms when a purge takes it, which HEALS its bearer, so it is
+    /// worth nothing to a purger: a target carrying only Lifebloom is no purge
+    /// target at all, and beside a Rejuvenation the purge goes to the
+    /// Rejuvenation with a scope that cannot take the Lifebloom.
+    ///
+    /// Mutant killed: drop the `aura.bloom.is_some()` arm of
+    /// `aura_purge_priority` — Lifebloom scores its type's 70 and is chosen.
+    /// Mutant killed: pin every purge to the TYPE alone (`DispelScope::Purge`
+    /// for a source-keyed buff) — the Rejuvenation's scope takes the Lifebloom.
+    #[test]
+    fn shaman_does_not_purge_lifebloom() {
+        let defs = AbilityDefinitions::default();
+        let me = Entity::from_raw(1);
+        let druid = Entity::from_raw(2);
+        let mut snapshot = snapshot_for(me, 1, CharacterClass::Shaman);
+        snapshot
+            .combatants
+            .insert(druid, info(druid, 2, CharacterClass::Druid));
+        let lifebloom = landed(AbilityType::Lifebloom, druid, druid);
+        assert!(
+            lifebloom.can_be_purged(),
+            "Lifebloom is purgeable — the AI declines it"
+        );
+        assert_eq!(aura_purge_priority(&lifebloom, &defs), 0);
+
+        snapshot.active_auras.insert(druid, vec![lifebloom.clone()]);
+        let ctx = snapshot.context_for(me);
+        assert!(
+            select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, PURGE_MIN_PRIORITY).is_none(),
+            "Lifebloom alone is not worth a purge"
+        );
+
+        let rejuvenation = landed(AbilityType::Rejuvenation, druid, druid);
+        snapshot
+            .active_auras
+            .insert(druid, vec![lifebloom.clone(), rejuvenation.clone()]);
+        let ctx = snapshot.context_for(me);
+        let choice = select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, PURGE_MIN_PRIORITY)
+            .expect("the Rejuvenation is a purge");
+        assert_eq!(
+            choice.priority, PURGE_MIN_PRIORITY,
+            "Rejuvenation sits at the floor"
+        );
+        assert!(choice.scope.takes(&rejuvenation));
+        assert!(
+            !choice.scope.takes(&lifebloom),
+            "a purge for Rejuvenation never blooms the Lifebloom beside it"
+        );
+    }
+
+    // ---- 2. Interrupt Cyclone ----
+
+    /// `class` (team 1) stands 2yd from an enemy Mage — its kill target —
+    /// casting Frostbolt, and 2yd from an enemy Druid casting Cyclone at the
+    /// interrupter's teammate. Returns (mage, druid, whom it interrupted).
+    fn interrupted_by(class: CharacterClass) -> (Entity, Entity, Option<Entity>) {
+        let mut world = World::new();
+        world.insert_resource(CombatLog::default());
+        world.insert_resource(AbilityDefinitions::default());
+        let teammate = world
+            .spawn((
+                Combatant::new(1, 1, CharacterClass::Priest),
+                Transform::from_xyz(5.0, 0.0, 0.0),
+            ))
+            .id();
+        let mage = world
+            .spawn((
+                Combatant::new(2, 0, CharacterClass::Mage),
+                Transform::from_xyz(2.0, 0.0, 0.0),
+            ))
+            .id();
+        let druid = world
+            .spawn((
+                Combatant::new(2, 1, CharacterClass::Druid),
+                Transform::from_xyz(0.0, 0.0, 2.0),
+            ))
+            .id();
+        world
+            .entity_mut(mage)
+            .insert(CastingState::new(AbilityType::Frostbolt, teammate, 2.0));
+        world
+            .entity_mut(druid)
+            .insert(CastingState::new(AbilityType::Cyclone, teammate, 1.5));
+        let mut me = Combatant::new(1, 0, class);
+        me.current_mana = me.max_mana.max(100.0);
+        me.max_mana = me.current_mana;
+        me.stealthed = false; // a Rogue opens stealthed, and Kick breaks nothing
+        me.target = Some(mage);
+        world.spawn((me, Transform::from_xyz(0.0, 0.0, 0.0)));
+
+        world.run_system_once(check_interrupts).unwrap();
+        let mut q = world.query::<&InterruptPending>();
+        let target = q.iter(&world).next().map(|p| p.target);
+        (mage, druid, target)
+    }
+
+    /// Kick, Pummel and Wind Shear each take an enemy Druid's Cyclone over the
+    /// kill target's damage cast.
+    ///
+    /// Mutant killed: `is_priority_interrupt` returns `false`, or
+    /// `check_interrupts` ignores `priority_target` — the Warrior and Rogue
+    /// stay on their kill target's Frostbolt, and the Shaman (no healer
+    /// casting) takes the Mage's, which is no farther and first in entity order.
+    #[test]
+    fn each_interrupter_picks_cyclone_over_a_damage_cast() {
+        for class in [
+            CharacterClass::Warrior,
+            CharacterClass::Rogue,
+            CharacterClass::Shaman,
+        ] {
+            let (mage, druid, target) = interrupted_by(class);
+            assert_eq!(
+                target,
+                Some(druid),
+                "{class:?} interrupts the Cyclone, not the Mage ({mage:?})"
+            );
+        }
+    }
+
+    /// Spell Lock takes the Cyclone over a heal (its own usual first pick) and
+    /// over a damage cast seen first.
+    ///
+    /// Mutant killed: drop `priority_interrupt_target` from
+    /// `spell_lock_target` — the heal wins.
+    #[test]
+    fn spell_lock_picks_cyclone_over_a_heal_and_a_damage_cast() {
+        let cast = |raw, ability| InterruptCandidate {
+            entity: Entity::from_raw(raw),
+            ability,
+            distance: 10.0,
+        };
+        let casts = [
+            (cast(2, AbilityType::Frostbolt), false),
+            (cast(3, AbilityType::FlashHeal), true),
+            (cast(4, AbilityType::Cyclone), false),
+        ];
+        assert_eq!(spell_lock_target(&casts), Some(Entity::from_raw(4)));
+        assert_eq!(
+            spell_lock_target(&casts[..2]),
+            Some(Entity::from_raw(3)),
+            "with no Cyclone, the heal is still first"
+        );
+        assert_eq!(
+            priority_interrupt_target([cast(2, AbilityType::Frostbolt)]),
+            None,
+            "a damage cast is no priority interrupt"
+        );
+    }
+
+    // ---- 3. Dispellers respect Cyclone and still clear Roots ----
+
+    /// A healer never spends a dispel on a Cyclone: it is not a candidate at
+    /// any bar, however low — and a cycloned teammate is not a candidate even
+    /// for a debuff underneath the Cyclone, because nothing reaches it.
+    ///
+    /// Mutant killed: make Cyclone magic-dispellable — the first assertion
+    /// fails. Mutant killed: drop the `is_cycloned` skip from
+    /// `scan_ally_dispel` — the Corruption under the Cyclone is chosen.
+    #[test]
+    fn a_healer_never_targets_cyclone_with_a_dispel() {
+        let priest = Entity::from_raw(1);
+        let ally = Entity::from_raw(2);
+        let enemy_druid = Entity::from_raw(3);
+        let mut snapshot = snapshot_for(priest, 1, CharacterClass::Priest);
+        snapshot
+            .combatants
+            .insert(ally, info(ally, 1, CharacterClass::Warrior));
+        snapshot
+            .combatants
+            .insert(enemy_druid, info(enemy_druid, 2, CharacterClass::Druid));
+        let cyclone = landed(AbilityType::Cyclone, ally, enemy_druid);
+        let corruption = landed(AbilityType::Corruption, ally, enemy_druid);
+        // Two layers, each pinned on its own: no dispel's scope takes the
+        // Cyclone (the candidate filter), and no dispel reaches its holder.
+        for scope in [DispelScope::Magic, DispelScope::MagicOrPoison] {
+            assert!(!scope.takes(&cyclone), "{scope:?} never takes a Cyclone");
+        }
+        for dispel in [AbilityType::DispelMagic, AbilityType::PaladinCleanse] {
+            snapshot.active_auras.insert(ally, vec![cyclone.clone()]);
+            let ctx = snapshot.context_for(priest);
+            assert_eq!(
+                scan_ally_dispel(&ctx, dispel, 1, Vec3::ZERO, 40.0, i32::MIN).target,
+                None,
+                "{dispel:?}: a Cyclone is never a dispel candidate"
+            );
+
+            snapshot
+                .active_auras
+                .insert(ally, vec![cyclone.clone(), corruption.clone()]);
+            let ctx = snapshot.context_for(priest);
+            assert_eq!(
+                scan_ally_dispel(&ctx, dispel, 1, Vec3::ZERO, 40.0, 50).target,
+                None,
+                "{dispel:?}: nothing reaches a cycloned teammate"
+            );
+        }
+    }
+
+    /// Entangling Roots — the face of a compound (the root plus its DoT) — is
+    /// cleared in the maintenance band (50) and not in the urgent one (90).
+    ///
+    /// Mutant killed: grade `Root` below 50 in `dispel_priority` — the rooted
+    /// ally is no longer chosen.
+    #[test]
+    fn a_healer_clears_entangling_roots_in_the_maintenance_band() {
+        let priest = Entity::from_raw(1);
+        let ally = Entity::from_raw(2);
+        let enemy_druid = Entity::from_raw(3);
+        let mut snapshot = snapshot_for(priest, 1, CharacterClass::Priest);
+        snapshot
+            .combatants
+            .insert(ally, info(ally, 1, CharacterClass::Warrior));
+        snapshot
+            .combatants
+            .insert(enemy_druid, info(enemy_druid, 2, CharacterClass::Druid));
+        let roots = landed(AbilityType::EntanglingRoots, ally, enemy_druid);
+        assert_eq!(roots.effect_type, AuraType::Root);
+        snapshot.active_auras.insert(ally, vec![roots]);
+        let ctx = snapshot.context_for(priest);
+        for dispel in [AbilityType::DispelMagic, AbilityType::PaladinCleanse] {
+            assert_eq!(
+                scan_ally_dispel(&ctx, dispel, 1, Vec3::ZERO, 40.0, 50).target,
+                Some(ally),
+                "{dispel:?} clears Entangling Roots in the maintenance band"
+            );
+            assert_eq!(
+                scan_ally_dispel(&ctx, dispel, 1, Vec3::ZERO, 40.0, 90).target,
+                None,
+                "{dispel:?}: a root is not urgent"
+            );
+        }
+    }
+
+    // ---- 4. Cyclone counts as immunity ----
+
+    /// A Cyclone is immune exactly as Divine Shield is, through the one
+    /// predicate (`entity_is_immune`).
+    ///
+    /// Mutant killed: drop `Cyclone` from `grants_damage_immunity`.
+    #[test]
+    fn cyclone_counts_as_immunity_like_divine_shield() {
+        let me = Entity::from_raw(1);
+        let cycloned = Entity::from_raw(2);
+        let bubbled = Entity::from_raw(3);
+        let free = Entity::from_raw(4);
+        let mut snapshot = snapshot_for(me, 1, CharacterClass::Warrior);
+        for (e, class) in [
+            (cycloned, CharacterClass::Mage),
+            (bubbled, CharacterClass::Paladin),
+            (free, CharacterClass::Priest),
+        ] {
+            snapshot.combatants.insert(e, info(e, 2, class));
+        }
+        snapshot
+            .active_auras
+            .insert(cycloned, vec![landed(AbilityType::Cyclone, cycloned, me)]);
+        snapshot.active_auras.insert(
+            bubbled,
+            vec![landed(AbilityType::DivineShield, bubbled, bubbled)],
+        );
+        let ctx = snapshot.context_for(me);
+        assert!(ctx.entity_is_immune(cycloned));
+        assert!(ctx.entity_is_immune(bubbled));
+        assert!(!ctx.entity_is_immune(free));
+    }
+
+    /// An attacker switches off a cycloned target: its configured kill target
+    /// (enemy slot 0) is cycloned, so target acquisition drops it for the
+    /// nearest enemy that can be hurt, and does not re-force it.
+    ///
+    /// Mutant killed: `acquire_targets` back to `DamageImmunity` alone — the
+    /// Warrior stays on the cycloned Mage.
+    #[test]
+    fn attackers_switch_off_a_cycloned_target() {
+        let mut world = World::new();
+        world.insert_resource(MatchCountdown {
+            time_remaining: 0.0,
+            gates_opened: true,
+        });
+        world.insert_resource(MatchConfig::default());
+        world.insert_resource(MovementConfig::default());
+        world.insert_resource(DecisionTrace::default());
+
+        let mage = world
+            .spawn((
+                Combatant::new(2, 0, CharacterClass::Mage),
+                Transform::from_xyz(3.0, 0.0, 0.0),
+            ))
+            .id();
+        let priest = world
+            .spawn((
+                Combatant::new(2, 1, CharacterClass::Priest),
+                Transform::from_xyz(20.0, 0.0, 0.0),
+            ))
+            .id();
+        let druid = world
+            .spawn((
+                Combatant::new(1, 1, CharacterClass::Druid),
+                Transform::from_xyz(-5.0, 0.0, 0.0),
+            ))
+            .id();
+        world.entity_mut(mage).insert(ActiveAuras {
+            auras: vec![landed(AbilityType::Cyclone, mage, druid)],
+        });
+        let mut warrior = Combatant::new(1, 0, CharacterClass::Warrior);
+        warrior.target = Some(mage);
+        let warrior = world.spawn((warrior, Transform::default())).id();
+
+        world.run_system_once(acquire_targets).unwrap();
+        assert_eq!(
+            world.get::<Combatant>(warrior).unwrap().target,
+            Some(priest),
+            "the Warrior leaves the cycloned Mage for the Priest"
+        );
+    }
+
+    /// A healer heals the next ally, never a cycloned one: the heal-target pick
+    /// (`lowest_health_ally_below`, and through it `is_team_healthy`) skips it.
+    ///
+    /// Mutant killed: drop the `is_cycloned` filter from
+    /// `lowest_health_ally_below`.
+    #[test]
+    fn a_healer_does_not_heal_a_cycloned_ally() {
+        let healer = Entity::from_raw(1);
+        let cycloned = Entity::from_raw(2);
+        let hurt = Entity::from_raw(3);
+        let enemy_druid = Entity::from_raw(4);
+        let mut snapshot = snapshot_with(&[
+            injured(healer, 1, CharacterClass::Priest, 1.0),
+            injured(cycloned, 1, CharacterClass::Warrior, 0.2),
+            injured(hurt, 1, CharacterClass::Mage, 0.6),
+            injured(enemy_druid, 2, CharacterClass::Druid, 1.0),
+        ]);
+        snapshot.active_auras.insert(
+            cycloned,
+            vec![landed(AbilityType::Cyclone, cycloned, enemy_druid)],
+        );
+        let ctx = snapshot.context_for(healer);
+        assert_eq!(
+            ctx.lowest_health_ally_below(0.9, 40.0, Vec3::ZERO)
+                .map(|a| a.entity),
+            Some(hurt)
+        );
+        assert_eq!(ctx.lowest_health_ally().map(|a| a.entity), Some(hurt));
+        assert!(
+            ctx.is_team_healthy(0.5, Vec3::ZERO),
+            "the 20% ally is in a Cyclone: no heal can help it"
+        );
+    }
+
+    /// The Mage does not cast Polymorph at a Druid in Travel Form (the engine
+    /// refuses it), nor at a cycloned target; it does at a Druid in caster form.
+    ///
+    /// Mutant killed: `polymorph_refused` returns `false` (the Mage's
+    /// `try_polymorph` gate).
+    #[test]
+    fn the_mage_does_not_polymorph_a_shifted_druid() {
+        let mage = Entity::from_raw(1);
+        let druid = Entity::from_raw(2);
+        let mut snapshot = snapshot_for(mage, 1, CharacterClass::Mage);
+        snapshot
+            .combatants
+            .insert(druid, info(druid, 2, CharacterClass::Druid));
+        assert!(!polymorph_refused(&snapshot.context_for(mage), druid));
+        snapshot
+            .active_auras
+            .insert(druid, vec![landed(AbilityType::TravelForm, druid, druid)]);
+        assert!(polymorph_refused(&snapshot.context_for(mage), druid));
+        snapshot
+            .active_auras
+            .insert(druid, vec![landed(AbilityType::Cyclone, druid, druid)]);
+        assert!(polymorph_refused(&snapshot.context_for(mage), druid));
+    }
 }

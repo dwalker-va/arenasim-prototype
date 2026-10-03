@@ -101,6 +101,13 @@ pub struct AuraEffect {
     /// [`CompoundDebuff`](super::components::CompoundDebuff).
     #[serde(default)]
     pub compound: Option<CompoundDebuff>,
+    /// What a purge that strips THIS aura is worth, when it is not what its
+    /// type is worth (`class_ai::purge_priority`). Read per aura instance by
+    /// `class_ai::aura_purge_priority`, so one `ManaRegenIncrease` can be
+    /// Innervate (a healer's answer to a dampened fight) and another Mage Armor
+    /// (a minor re-buff). `None`, the default, leaves the type's value.
+    #[serde(default)]
+    pub purge_priority: Option<i32>,
 }
 
 /// A stacking aura's config: how many stacks it can hold.
@@ -429,6 +436,19 @@ impl AbilityDefinitions {
         self.definitions
             .get(ability)
             .unwrap_or_else(|| panic!("Ability {:?} not found in definitions", ability))
+    }
+
+    /// The aura effect an ABILITY applied `aura` from — the ability whose RON
+    /// `name` the aura carries, when that ability's `applies_aura` is of the
+    /// aura's own type. `None` for an aura no ability applied directly (a totem
+    /// pulse, a proc, a trap) and for a compound's riders, which share their
+    /// face's name but not its type.
+    pub fn source_effect(&self, aura: &super::components::Aura) -> Option<&AuraEffect> {
+        self.definitions
+            .values()
+            .filter(|def| def.name == aura.ability_name)
+            .filter_map(|def| def.applies_aura.as_ref())
+            .find(|effect| effect.aura_type == aura.effect_type)
     }
 
     /// Check if all expected ability types are defined

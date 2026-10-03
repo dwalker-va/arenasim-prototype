@@ -1506,6 +1506,11 @@
                 duration: 20.0,
                 magnitude: 8.0,
                 stacking: Some((max_stacks: 1)),
+                // The most valuable purge in the game: a match's worth of a
+                // healer's mana, against a type (ManaRegenIncrease) whose
+                // default is Mage Armor's minor re-buff. At the urgent purge
+                // bar, so the Shaman strips it ahead of its filler nuke.
+                purge_priority: Some(110),
             )),
             spell_school: Nature,
         ),

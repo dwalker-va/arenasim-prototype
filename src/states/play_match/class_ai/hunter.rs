@@ -2248,7 +2248,12 @@ pub(super) fn try_dispatch_masters_call(
     } else {
         let mut fallback: Option<Entity> = None;
         for (ally_entity, info) in ctx.combatants.iter() {
-            if info.team != hunter_info.team || !info.is_alive || info.is_pet {
+            // Never a cycloned teammate: nothing reaches one.
+            if info.team != hunter_info.team
+                || !info.is_alive
+                || info.is_pet
+                || ctx.is_cycloned(*ally_entity)
+            {
                 continue;
             }
             if let Some(auras) = ctx.active_auras.get(ally_entity) {
