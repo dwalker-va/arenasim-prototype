@@ -6752,10 +6752,13 @@ mod medic_chase {
     //     line of sight, the Warrior chases the kiting Shaman ~45yd away, and
     //     dies to it 4.7s after the Charge, the Priest walking after it at its own
     //     speed and ~20% mana.
-    // The chase bound the probe exists for holds across the 30-seed re-scan:
-    // the longest occluded window is under 8s on every seed, and its maximum
-    // is unchanged (4.67s -> 4.63s). Seeds where a Warrior dies before a
-    // visible heal go 8 -> 10 of 30.
+    // The chase bound the probe exists for still holds across the 30-seed
+    // re-scan, with less headroom. The Priest's longest occluded window is
+    // under 8s on every seed, but its maximum rises from 5.27s (seed 9) to
+    // 6.63s (seed 20), so the headroom falls from ~2.7s to ~1.4s. Seed 20 now
+    // also loses its Warrior twice before a visible heal. Seeds where a
+    // Warrior dies before a visible heal go 7 -> 9 of 30 (`main` @ 16c2a3c
+    // against this change); the two new ones are 3 and 20.
     //
     // Observed after AS-203:
     //   seed 6: 238 distress frames, 2.90s longest window, heal at 5.95s, 0 lost.
