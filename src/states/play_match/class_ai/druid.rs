@@ -1375,6 +1375,7 @@ mod reach_tests {
         let abilities = AbilityDefinitions::default();
         let movement = MovementConfig::default();
         let me = s.units[0];
+        let mut marked = HashSet::new();
         s.run(obstacles, |commands, ctx, combatant, builder| {
             let mut log = CombatLog::default();
             let mut turn = DruidTurn {
@@ -1389,6 +1390,7 @@ mod reach_tests {
                 threat_radius: movement.shared.threat_intent_radius,
                 pressured: false,
                 time_since_gates,
+                marked_this_frame: &mut marked,
                 builder,
             };
             step(&mut turn, combatant)
@@ -1404,12 +1406,15 @@ mod reach_tests {
         turn(s, obstacles, 0.0, |t, c| t.try_mark_of_the_wild(c))
     }
 
-    /// A fresh Rejuvenation, well clear of its refresh window.
-    fn rejuvenation() -> Vec<Aura> {
+    /// A fresh Rejuvenation `by` cast, well clear of its refresh window. A
+    /// Rejuvenation is its caster's own (`StackScope::PerCaster`), so the
+    /// Druid under test must have cast it for its rotation to count it.
+    fn rejuvenation(by: Entity) -> Vec<Aura> {
         vec![Aura {
             effect_type: AuraType::HealingOverTime,
             ability_name: "Rejuvenation".to_string(),
             duration: 12.0,
+            caster: Some(by),
             ..Default::default()
         }]
     }
@@ -1422,7 +1427,7 @@ mod reach_tests {
     fn the_emergency_heal_falls_back_to_a_dying_ally_in_sight() {
         let mut s = scene(0.3, 0.4, &[]);
         let (warrior, mage) = (s.units[1], s.units[2]);
-        s.auras.insert(mage, rejuvenation());
+        s.auras.insert(mage, rejuvenation(s.units[0]));
         assert_eq!(
             outcome(&rotation(&mut s, &[])),
             chose("Rejuvenation", warrior),
@@ -1436,7 +1441,7 @@ mod reach_tests {
 
         let mut s = scene(0.4, 0.3, &[]);
         let mage = s.units[2];
-        s.auras.insert(mage, rejuvenation());
+        s.auras.insert(mage, rejuvenation(s.units[0]));
         assert_eq!(
             outcome(&rotation(&mut s, &pillar())),
             chose("Swiftmend", mage),
@@ -1458,7 +1463,7 @@ mod reach_tests {
             // Both attacked once: the lower one is the focus.
             let mut s = scene(warrior_hp, mage_hp, &[1, 2]);
             for ally in [s.units[1], s.units[2]] {
-                s.auras.insert(ally, rejuvenation());
+                s.auras.insert(ally, rejuvenation(s.units[0]));
             }
             s
         };

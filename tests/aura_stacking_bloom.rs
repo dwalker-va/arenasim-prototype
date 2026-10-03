@@ -746,3 +746,37 @@ fn swiftmend_eats_its_casters_own_rejuvenation() {
         .collect();
     assert_eq!(left, vec![Some(druid_a)], "B's Swiftmend eats B's Rejuvenation");
 }
+
+/// With no Rejuvenation of its own on the target, Swiftmend eats another
+/// Druid's (Classic's Swiftmend consumes any Druid's Rejuvenation).
+#[test]
+fn swiftmend_falls_back_to_another_druids_rejuvenation() {
+    let mut world = world(1.0 / 60.0);
+    world.insert_resource(AbilityDefinitions::default());
+    world.insert_resource(ActiveMapGeometry {
+        bounds: Default::default(),
+        volumes: Vec::new(),
+        cover_anchors: Vec::new(),
+    });
+    let (druid_a, ally) = druid_and_ally(&mut world);
+    let druid_b = second_druid(&mut world);
+    let rejuv_a = cast(AbilityType::Rejuvenation, ally, druid_a, 100.0).aura;
+    world
+        .entity_mut(ally)
+        .insert(ActiveAuras { auras: vec![rejuv_a] });
+    world.entity_mut(druid_b).insert(CastingState {
+        ability: AbilityType::Swiftmend,
+        time_remaining: 0.001,
+        target: Some(ally),
+        interrupted: false,
+        interrupted_display_time: 0.0,
+    });
+    let before = health(&world, ally);
+    world.run_system_once(process_casting).unwrap();
+
+    assert!(
+        auras_named(&world, ally, "Rejuvenation").is_empty(),
+        "B's Swiftmend eats A's Rejuvenation when B has none"
+    );
+    assert!(health(&world, ally) > before);
+}

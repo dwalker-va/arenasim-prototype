@@ -2139,6 +2139,50 @@ mod tests {
         }
     }
 
+    /// A periodic effect is its caster's own; every other stacking aura is
+    /// the target's (Classic's same-buff rule). Pinned per type, because the
+    /// two-Druid tests only exercise heals over time and Mark of the Wild.
+    #[test]
+    fn stack_scope_is_per_caster_for_periodic_effects_and_per_target_otherwise() {
+        assert_eq!(
+            StackScope::for_aura(AuraType::HealingOverTime),
+            StackScope::PerCaster
+        );
+        assert_eq!(
+            StackScope::for_aura(AuraType::DamageOverTime),
+            StackScope::PerCaster
+        );
+        for buff in [
+            AuraType::MaxHealthIncrease,
+            AuraType::ManaRegenIncrease,
+            AuraType::AttackPowerIncrease,
+            AuraType::Absorb,
+        ] {
+            assert_eq!(StackScope::for_aura(buff), StackScope::PerTarget, "{buff:?}");
+        }
+    }
+
+    /// `stack_owner` is the caster for a per-caster stacking aura and `None`
+    /// for a per-target one, so two casters' DoTs are different auras and two
+    /// casters' buffs the same one.
+    #[test]
+    fn same_source_compares_the_caster_only_for_a_per_caster_aura() {
+        let (a, b) = (Entity::from_raw(1), Entity::from_raw(2));
+        // Only the type and the caster vary; the source is the same throughout.
+        let stacked = |effect, caster| Aura {
+            effect_type: effect,
+            caster: Some(caster),
+            stacks: Some(AuraStacks::new(1, StackScope::for_aura(effect))),
+            ..Default::default()
+        };
+        for periodic in [AuraType::HealingOverTime, AuraType::DamageOverTime] {
+            assert!(!stacked(periodic, a).same_source_as(&stacked(periodic, b)));
+            assert!(stacked(periodic, a).same_source_as(&stacked(periodic, a)));
+        }
+        let buff = AuraType::MaxHealthIncrease;
+        assert!(stacked(buff, a).same_source_as(&stacked(buff, b)));
+    }
+
     /// The removal class vetoes a purge before the mechanic is asked: every
     /// buff type that is purgeable as magic is NOT purgeable as a physical
     /// buff (a proc trinket's), nor under any other non-magic class.
