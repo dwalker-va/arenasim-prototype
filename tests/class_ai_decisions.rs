@@ -20,7 +20,8 @@ use arenasim::states::play_match::class_ai::{
 };
 use arenasim::states::play_match::components::DispelScope;
 use arenasim::states::play_match::{
-    AbilityDefinitions, Aura, AuraType, DRCategory, DRTracker, DispelType, PetType,
+    AbilityDefinitions, AbilityType, Aura, AuraPending, AuraType, DRCategory, DRTracker,
+    DispelType, PetType,
 };
 
 // ============================================================================
@@ -362,6 +363,50 @@ fn shaman_purges_enemy_with_dispellable_buff() {
         buff,
         AuraType::Absorb,
         "the defensive Absorb outranks the AttackPower buff"
+    );
+}
+
+/// Two enemy Druids' Rejuvenations on one enemy: the purge `select_purge`
+/// picks is pinned to ONE Druid's instance (`PurgeSource { owner }`), so it
+/// takes the one it ranked and never the other Druid's.
+#[test]
+fn shaman_purge_pins_one_druids_rejuvenation() {
+    let me = Entity::from_raw(1);
+    let enemy = Entity::from_raw(2);
+    let druid_a = Entity::from_raw(3);
+    let druid_b = Entity::from_raw(4);
+
+    let mut snapshot = snapshot_for(me, 1, CharacterClass::Shaman);
+    snapshot
+        .combatants
+        .insert(enemy, info(enemy, 2, CharacterClass::Warrior));
+    let defs = AbilityDefinitions::default();
+    let rejuv = |caster| {
+        AuraPending::from_ability(enemy, caster, defs.get_unchecked(&AbilityType::Rejuvenation))
+            .unwrap()
+            .aura
+    };
+    let (a, b) = (rejuv(druid_a), rejuv(druid_b));
+    snapshot
+        .active_auras
+        .insert(enemy, vec![a.clone(), b.clone()]);
+
+    let ctx = snapshot.context_for(me);
+    let choice = select_purge(&ctx, &defs, 1, Vec3::ZERO, f32::MAX, i32::MIN)
+        .expect("a purgeable Rejuvenation exists");
+    assert_eq!(choice.target, enemy);
+    assert_eq!(
+        choice.scope,
+        DispelScope::PurgeSource {
+            effect: AuraType::HealingOverTime,
+            source: "Rejuvenation".to_string(),
+            owner: Some(druid_a),
+        }
+    );
+    assert!(choice.scope.takes(&a));
+    assert!(
+        !choice.scope.takes(&b),
+        "the purge must not reach the other Druid's Rejuvenation"
     );
 }
 
