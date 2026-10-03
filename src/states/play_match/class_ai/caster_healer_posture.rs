@@ -464,5 +464,8 @@ fn compute_formation_point(
         }
     }
 
-    Some(clamp_to_arena(&ctx.bounds, point))
+    Some(super::healer_postures::standable_formation_point(
+        ctx,
+        clamp_to_arena(&ctx.bounds, point),
+    ))
 }

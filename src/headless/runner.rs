@@ -20,8 +20,8 @@ use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementCo
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::components::{
-    ActiveAuras, AuraType, DRTracker, Pet, PetType, Totem, TotemElement, TrapLaunchProjectile,
-    TrapType,
+    ActiveAuras, AuraType, DRTracker, MovementDirective, MovementGoal, Pet, PetType, Totem,
+    TotemElement, TrapLaunchProjectile, TrapType,
 };
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
@@ -72,6 +72,12 @@ pub struct ObservedCombatant {
     /// Lets probes assert a combatant carries (or does not carry) a totem buff
     /// without `&World` access. Empty when the entity has no `ActiveAuras`.
     pub aura_types: Vec<AuraType>,
+    /// The spot this combatant's live movement directive walks it to, when that
+    /// directive is a `MovementGoal::Point`; `None` for a directional or entity
+    /// goal, or no directive. Lets probes check WHERE the AI sends a unit, not
+    /// only where it ends up — the executor stops short of a spot it cannot
+    /// reach, which hides a bad goal from the position track.
+    pub point_goal: Option<Vec3>,
 }
 
 /// A read-only snapshot of one Shaman totem on a frame. Totems are NOT
@@ -984,6 +990,12 @@ fn observe_frame(world: &World) -> FrameObservation {
                 current_mana: combatant.current_mana,
                 max_mana: combatant.max_mana,
                 aura_types,
+                point_goal: entity_ref
+                    .get::<MovementDirective>()
+                    .and_then(|d| match d.goal {
+                        MovementGoal::Point(p) => Some(p),
+                        _ => None,
+                    }),
             },
         );
     }

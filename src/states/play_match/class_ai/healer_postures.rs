@@ -25,7 +25,7 @@ use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementEventBuilder, MovementGoalKind, MovementTrigger,
     Posture as TracePosture, TargetView,
 };
-use crate::states::play_match::map_geometry::{has_line_of_sight, EYE_HEIGHT};
+use crate::states::play_match::map_geometry::{has_line_of_sight, nearest_standable, EYE_HEIGHT};
 use crate::states::play_match::movement_config::{MovementWeights, SharedMovementConfig};
 use crate::states::play_match::team_solve::DISPEL_REACH_MARGIN;
 
@@ -183,6 +183,27 @@ pub(super) fn escape_window_from<I: IntoIterator<Item = Option<f32>>>(
         return None;
     }
     Some(window)
+}
+
+/// A FREE formation point the healer can actually stand on (AS-190).
+///
+/// The formation point is the ally centroid offset "behind the line" and
+/// clamped into wand range and the arena — arithmetic that takes no account of
+/// cover, so on a pillar map it can land inside a footprint: a goal the
+/// executor only approaches and stalls short of. It is moved out through the
+/// footprint's nearest face at the mover's height. A point outside every
+/// footprint (always, on an obstacle-free map) comes back bit-identical; one no
+/// projection frees is returned as it stands, to the executor's hold.
+///
+/// `TeamPlan` only. `Legacy` keeps the unprojected point, so every recorded
+/// baseline and calibrated probe stays byte-identical; its in-pillar formation
+/// point is AS-203.
+pub fn standable_formation_point(ctx: &CombatContext, point: Vec3) -> Vec3 {
+    if !ctx.ai_profile.is_team_plan() {
+        return point;
+    }
+    nearest_standable(ctx.obstacles, Vec2::new(point.x, point.z), point.y)
+        .map_or(point, |p| Vec3::new(p.x, point.y, p.y))
 }
 
 /// Distance gained over an ESCAPE window: `window × base_speed ×
