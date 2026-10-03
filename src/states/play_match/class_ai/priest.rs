@@ -413,6 +413,7 @@ fn try_psychic_scream(
         commands,
         combat_log,
         scream_def,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -466,6 +467,7 @@ fn fire_psychic_scream(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     scream_def: &AbilityConfig,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -487,9 +489,7 @@ fn fire_psychic_scream(
         PlayMatchEntity,
     ));
     combatant.current_mana -= scream_def.mana_cost;
-    combatant
-        .ability_cooldowns
-        .insert(AbilityType::PsychicScream, scream_def.cooldown);
+    combatant.start_cooldown(AbilityType::PsychicScream, abilities);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -583,6 +583,7 @@ fn try_dip_psychic_scream(
         commands,
         combat_log,
         scream_def,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -1058,7 +1059,7 @@ fn try_mind_blast(
 
     builder.choose(ability, Some(target_entity), false);
 
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
@@ -1325,7 +1326,7 @@ fn try_mana_burn(
 
     builder.choose(ability, Some(target_entity), false);
 
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 

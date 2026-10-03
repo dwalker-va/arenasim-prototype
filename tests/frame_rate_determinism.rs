@@ -61,10 +61,13 @@ use arenasim::states::play_match::{
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::HeadlessMatchConfig;
 
-/// The match AS-170 was found on: it is decided at tick 2653 and its
-/// celebration ends on a different tick at 60Hz than at 120Hz.
+/// A match decided a long way in, whose celebration ends on a different tick
+/// at 60Hz than at 120Hz. AS-170 was found on Warrior v Hunter seed 11
+/// (decided at tick 2653); since the Hunter's traps share one cooldown
+/// (AS-196) that matchup is decided by tick 1802 in every one of seeds 0-49,
+/// so this is the first qualifying seed of a matchup without a Hunter.
 const FOUND_ON: &str =
-    r#"{"team1":["Warrior"],"team2":["Hunter"],"map":"BasicArena","random_seed":11}"#;
+    r#"{"team1":["Warlock"],"team2":["Priest"],"map":"TwinPillars","random_seed":0}"#;
 
 /// A plain 60Hz display, 120Hz, and ~143Hz — never a multiple of the 60Hz
 /// tick, so frames with no tick and frames with one interleave irregularly.

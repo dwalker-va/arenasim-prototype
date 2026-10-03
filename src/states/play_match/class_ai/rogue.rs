@@ -705,9 +705,7 @@ fn try_kidney_shot(
     ));
 
     combatant.current_mana -= def.mana_cost;
-    combatant
-        .ability_cooldowns
-        .insert(kidney_shot, def.cooldown);
+    combatant.start_cooldown(kidney_shot, abilities);
     combatant.global_cooldown = GCD;
 
     let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());

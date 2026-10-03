@@ -746,6 +746,34 @@ impl Combatant {
         self.current_health > 0.0 && !self.is_dead
     }
 
+    /// Put `ability` on its configured `cooldown` — and, when it belongs to a
+    /// [`cooldown_category`](AbilityConfig::cooldown_category), every other
+    /// ability of that category with it (Classic's shared trap cooldown). The ONE place an ability's cooldown starts:
+    /// `tests/cooldown_site_audit.rs` fails on a write to `ability_cooldowns`
+    /// anywhere else, so a category declared in `abilities.ron` cannot be
+    /// silently skipped by one cast path.
+    ///
+    /// A category member already cooling down for longer keeps its time; the
+    /// category never shortens a cooldown.
+    pub fn start_cooldown(
+        &mut self,
+        ability: AbilityType,
+        abilities: &super::super::ability_config::AbilityDefinitions,
+    ) {
+        let def = abilities.get_unchecked(&ability);
+        self.ability_cooldowns.insert(ability, def.cooldown);
+        let Some(category) = def.cooldown_category else {
+            return;
+        };
+        for (other, other_def) in abilities.iter() {
+            if *other == ability || other_def.cooldown_category != Some(category) {
+                continue;
+            }
+            let remaining = self.ability_cooldowns.entry(*other).or_insert(0.0);
+            *remaining = remaining.max(def.cooldown);
+        }
+    }
+
     /// Give back the stat an aura raised when it landed, as it leaves — by
     /// running out or by being taken. `apply_pending_auras` writes a
     /// `MaxHealthIncrease` / `MaxManaIncrease` into the holder's stats; every

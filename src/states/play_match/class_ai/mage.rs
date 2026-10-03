@@ -222,9 +222,7 @@ fn try_ice_barrier(
     builder.choose(ice_barrier, Some(entity), true);
 
     combatant.current_mana -= barrier_def.mana_cost;
-    combatant
-        .ability_cooldowns
-        .insert(ice_barrier, barrier_def.cooldown);
+    combatant.start_cooldown(ice_barrier, abilities);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -495,9 +493,7 @@ fn try_frost_nova(
     ));
 
     combatant.current_mana -= nova_def.mana_cost;
-    combatant
-        .ability_cooldowns
-        .insert(frost_nova, nova_def.cooldown);
+    combatant.start_cooldown(frost_nova, abilities);
     combatant.global_cooldown = GCD;
 
     log_ability_use(

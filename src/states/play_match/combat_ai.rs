@@ -2031,9 +2031,7 @@ pub fn check_interrupts(
         combatant.current_mana -= ability_def.mana_cost;
 
         // Put on cooldown
-        combatant
-            .ability_cooldowns
-            .insert(interrupt_ability, ability_def.cooldown);
+        combatant.start_cooldown(interrupt_ability, &abilities);
 
         // Interrupts do NOT trigger GCD in WoW!
 

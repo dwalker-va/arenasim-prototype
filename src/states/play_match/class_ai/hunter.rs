@@ -271,7 +271,7 @@ pub fn decide_hunter_action(
                 });
 
                 combatant.current_mana -= def.mana_cost;
-                combatant.ability_cooldowns.insert(disengage, def.cooldown);
+                combatant.start_cooldown(disengage, abilities);
                 combatant.global_cooldown = GCD;
 
                 log_ability_use(
@@ -383,7 +383,10 @@ pub fn decide_hunter_action(
         // MELEE (Warrior/Rogue) when one is present — that's the threat worth
         // slowing — rather than the nearest enemy generally (which can be a pet
         // or a stray-closest caster). Falls back to the nearest enemy when no
-        // melee threat exists.
+        // melee threat exists. The traps share one cooldown, so this peel locks
+        // the Freezing Trap out for as long; the pressure trap above was tried
+        // first and could not land cleanly. Keeping the cooldown for it
+        // instead froze more healers but lost more fights (AS-196).
         let frost_anchor =
             super::dps_postures::nearest_melee_threat(ctx, entity, my_pos).or_else(|| {
                 nearest_enemy.and_then(|(e, _)| ctx.combatants.get(&e).map(|i| (e, i.position)))
@@ -1068,7 +1071,7 @@ fn apply_flare(
         ),
     );
     combatant.current_mana -= def.mana_cost;
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
     true
 }
@@ -1141,6 +1144,10 @@ pub const FROST_TRAP_HELD_FOR_FREEZING: &str =
 /// trap everywhere the AI chooses between them (the pressure trap on the enemy
 /// healer is tried before the Frost Trap peel). The reverse is not held: a
 /// Freezing Trap replaces a live Frost Trap.
+///
+/// The traps share one cooldown (`cooldown_category: Trap`), so the hold
+/// only ever meets a Freezing Trap thrown at least that long ago and still
+/// waiting on the ground: inside it the Frost Trap is on cooldown anyway.
 ///
 /// Traced only while the Frost Trap is off cooldown, so a trap on cooldown
 /// still records `OnCooldown` (the caller falls through to it).
@@ -1510,7 +1517,7 @@ fn try_place_trap_at(
     );
 
     combatant.current_mana -= def.mana_cost;
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
 
     true
@@ -1594,7 +1601,7 @@ fn try_concussive_shot(
     ));
 
     combatant.current_mana -= def.mana_cost;
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -1695,7 +1702,7 @@ fn try_aimed_shot(
         .insert(CastingState::new(ability, target_entity, cast_time));
 
     combatant.current_mana -= def.mana_cost;
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -1792,7 +1799,7 @@ fn try_arcane_shot(
     ));
 
     combatant.current_mana -= def.mana_cost;
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
 
     log_ability_use(

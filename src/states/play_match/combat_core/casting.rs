@@ -356,7 +356,7 @@ pub fn process_casting(
     // Track healing_done updates for healers (to apply after processing all casts)
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
     // Track ability cooldowns to apply (caster_entity, ability, cooldown_duration)
-    let mut cooldown_updates: Vec<(Entity, AbilityType, f32)> = Vec::new();
+    let mut cooldown_updates: Vec<(Entity, AbilityType)> = Vec::new();
     // Track casters who should have stealth broken (offensive abilities)
     let mut break_stealth: Vec<Entity> = Vec::new();
     // Mana charged only for casts that actually resolve (land). Collected here
@@ -923,7 +923,7 @@ pub fn process_casting(
 
         // Track cooldown if ability has one
         if def.cooldown > 0.0 {
-            cooldown_updates.push((caster_entity, ability, def.cooldown));
+            cooldown_updates.push((caster_entity, ability));
         }
 
         // Check for death (log if killed by non-damage abilities/auras)
@@ -994,9 +994,9 @@ pub fn process_casting(
     }
 
     // Apply collected ability cooldowns
-    for (caster_entity, ability, cooldown) in cooldown_updates {
+    for (caster_entity, ability) in cooldown_updates {
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
-            caster.ability_cooldowns.insert(ability, cooldown);
+            caster.start_cooldown(ability, &abilities);
         }
     }
 
