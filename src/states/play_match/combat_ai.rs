@@ -894,6 +894,11 @@ pub fn decide_abilities(
     let mut paladin_aura_this_frame: std::collections::HashSet<Entity> =
         std::collections::HashSet::new();
 
+    // Track allies sent a Mark of the Wild THIS FRAME, so a second Druid does
+    // not spend a cast refreshing a Mark that lands next frame
+    let mut marked_this_frame: std::collections::HashSet<Entity> =
+        std::collections::HashSet::new();
+
     // Queue for Frost Nova damage
     let mut frost_nova_damage: Vec<class_ai::QueuedAoeDamage> = Vec::new();
 
@@ -1360,6 +1365,7 @@ pub fn decide_abilities(
                     plan.pressured,
                     countdown.gates_opened,
                     time_since_gates,
+                    &mut marked_this_frame,
                     &mut decision_trace,
                 )
             }

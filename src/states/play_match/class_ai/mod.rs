@@ -1030,6 +1030,7 @@ pub fn select_purge(
                 DispelScope::PurgeSource {
                     effect: aura.effect_type,
                     source: aura.ability_name.clone(),
+                    owner: aura.stack_owner(),
                 }
             } else {
                 DispelScope::Purge(aura.effect_type)

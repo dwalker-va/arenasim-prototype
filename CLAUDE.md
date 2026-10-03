@@ -443,6 +443,17 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
   the recast the way a one-per-type buff is refused. `max_stacks: 1` is
   refresh-only. A periodic tick is `magnitude` PER STACK (`Aura::tick_amount`,
   exact for every non-stacking aura). Logged as `<target>'s <aura> refreshed (N stacks)`.
+  **Whose stack it is follows the aura's KIND** (`StackScope::for_aura`, derived
+  from `aura_type` — no RON knob): a periodic effect (`HealingOverTime`,
+  `DamageOverTime`) is **per caster**, so two Druids each keep, refresh and bloom
+  their own Lifebloom on one ally; anything else is **per target** (Classic's
+  same-buff rule), so a second Druid's Mark of the Wild refreshes the first.
+  `Aura::stack_owner` / `Aura::same_source_as` carry the key, and every lookup
+  of a source-keyed aura goes through them — the refresh, the already-applied
+  gate, and the purge pinned to one buff (`DispelScope::PurgeSource { owner }`).
+  Swiftmend eats its caster's own Rejuvenation first, and the Druid AI reads
+  only its own heals over time. Two Druids marking in one frame never mark the
+  same ally (`marked_this_frame`, the Paladin's `paladin_aura_this_frame` guard).
 - `bloom: Some((heal_base: B, heal_coefficient: C))` makes the aura BLOOM: when it
   ENDS — runs out, or is dispelled or purged — it lands a direct heal of
   `(B + spell power × C) × stacks` on its bearer (TBC Lifebloom). A refresh does

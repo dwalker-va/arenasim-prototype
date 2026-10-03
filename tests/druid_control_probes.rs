@@ -544,6 +544,7 @@ fn decide_scene_with(
         true,
         true,
         60.0,
+        &mut Default::default(),
         &mut trace,
     );
     queue.apply(&mut world);

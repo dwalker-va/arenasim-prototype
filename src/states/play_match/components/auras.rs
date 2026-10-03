@@ -844,6 +844,11 @@ pub struct Aura {
 /// already there — its duration back to full, its per-stack numbers re-snapshot
 /// — and adds one stack, up to `max`.
 ///
+/// Whose application counts as "its source applying it again" is the aura's
+/// [`StackScope`]: the same CASTER for a heal or damage over time, any caster
+/// for a buff. Two Druids each keep their own Lifebloom stack on one ally; a
+/// second Druid's Mark of the Wild refreshes the first's.
+///
 /// `max: 1` is a refresh-only aura: recasting it renews it but never deepens it
 /// (Rejuvenation, Innervate, Mark of the Wild). `max: 3` is Lifebloom.
 ///
@@ -859,19 +864,57 @@ pub struct AuraStacks {
     pub count: u8,
     /// The most stacks the aura can hold.
     pub max: u8,
+    /// Whose stack it is — see [`StackScope`].
+    pub scope: StackScope,
 }
 
 impl AuraStacks {
     /// A freshly applied stacking aura: one stack.
-    pub fn new(max: u8) -> Self {
-        Self { count: 1, max }
+    pub fn new(max: u8, scope: StackScope) -> Self {
+        Self {
+            count: 1,
+            max,
+            scope,
+        }
     }
 
     /// One more application: a stack more, never past `max`.
     pub fn added(self) -> Self {
         Self {
             count: (self.count + 1).min(self.max),
-            max: self.max,
+            ..self
+        }
+    }
+}
+
+/// Whose stack a STACKING aura is: what, besides its source ability, makes two
+/// applications the SAME aura — so that the second refreshes the first — rather
+/// than two auras side by side.
+///
+/// Classic's rule, and a property of the aura's KIND rather than of any one
+/// ability ([`StackScope::for_aura`]):
+/// - a PERIODIC effect — a heal or damage over time — is the caster's own. Two
+///   Druids' Lifeblooms on one ally are two stacks that tick, refresh and bloom
+///   independently;
+/// - anything else is the target's: one Mark of the Wild per ally, whoever
+///   cast it, and a second Druid's Mark refreshes the first rather than
+///   stacking beside it (Classic's same-buff rule).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum StackScope {
+    /// One per caster per target.
+    PerCaster,
+    /// One per target, whoever cast it.
+    #[default]
+    PerTarget,
+}
+
+impl StackScope {
+    /// The scope of a stacking aura of `effect`: per caster for a periodic
+    /// effect, per target for everything else.
+    pub fn for_aura(effect: AuraType) -> Self {
+        match effect {
+            AuraType::HealingOverTime | AuraType::DamageOverTime => StackScope::PerCaster,
+            _ => StackScope::PerTarget,
         }
     }
 }
@@ -909,6 +952,33 @@ impl Aura {
     /// target may be healed by both.
     pub fn distinct_by_source(&self) -> bool {
         self.source_item.is_some() || self.stacks.is_some()
+    }
+
+    /// The caster this aura's identity includes: its caster when it is a
+    /// [`StackScope::PerCaster`] stacking aura, and `None` for every other
+    /// aura, whose identity is its source alone (or its type).
+    ///
+    /// Every site that looks a source-keyed aura up — the refresh, the
+    /// already-applied gate, a purge pinned to one buff — compares this as well
+    /// as the source, so they all agree on which instance is which.
+    pub fn stack_owner(&self) -> Option<Entity> {
+        match self.stacks {
+            Some(AuraStacks {
+                scope: StackScope::PerCaster,
+                ..
+            }) => self.caster,
+            _ => None,
+        }
+    }
+
+    /// Whether `self` and `other` are the same source-keyed aura: the same
+    /// type, from the same source ability and, for a per-caster aura, the same
+    /// caster. What a fresh application of `other` would refresh or be refused
+    /// by.
+    pub fn same_source_as(&self, other: &Aura) -> bool {
+        self.effect_type == other.effect_type
+            && self.ability_name == other.ability_name
+            && self.stack_owner() == other.stack_owner()
     }
 
     /// Stacks applied: the stack count of a stacking aura, and 1 for every
@@ -1289,7 +1359,9 @@ impl ActiveAuras {
 }
 
 /// Refresh the STACKING aura in `auras` that `fresh` is a new application of —
-/// the one from the same source — and return its stack count afterwards.
+/// the one from the same source and, for a [`StackScope::PerCaster`] aura, the
+/// same caster ([`Aura::same_source_as`]) — and return its stack count
+/// afterwards.
 /// `None` when there is no such aura, and `fresh` should land as a new one.
 ///
 /// The refresh (see [`AuraStacks`]):
@@ -1309,11 +1381,9 @@ impl ActiveAuras {
 /// and the auras accumulating this frame for a target that has none yet.
 pub fn refresh_stacking_aura(auras: &mut [Aura], fresh: &Aura) -> Option<u8> {
     fresh.stacks?;
-    let index = auras.iter().position(|a| {
-        a.stacks.is_some()
-            && a.effect_type == fresh.effect_type
-            && a.ability_name == fresh.ability_name
-    })?;
+    let index = auras
+        .iter()
+        .position(|a| a.stacks.is_some() && a.same_source_as(fresh))?;
     let existing = &mut auras[index];
     existing.stacks = existing.stacks.map(AuraStacks::added);
     existing.duration = fresh.duration;
@@ -1412,7 +1482,12 @@ impl AuraPending {
                 source_item: None,
                 stacks: aura_effect
                     .stacking
-                    .map(|stacking| AuraStacks::new(stacking.max_stacks)),
+                    .map(|stacking| {
+                        AuraStacks::new(
+                            stacking.max_stacks,
+                            StackScope::for_aura(aura_effect.aura_type),
+                        )
+                    }),
                 bloom: aura_effect
                     .bloom
                     .map(|bloom| bloom.heal_base + spell_power * bloom.heal_coefficient),
@@ -1467,7 +1542,12 @@ impl AuraPending {
                 source_item: None,
                 stacks: aura_effect
                     .stacking
-                    .map(|stacking| AuraStacks::new(stacking.max_stacks)),
+                    .map(|stacking| {
+                        AuraStacks::new(
+                            stacking.max_stacks,
+                            StackScope::for_aura(aura_effect.aura_type),
+                        )
+                    }),
                 // This constructor takes no spell power, so a bloom is its base.
                 bloom: aura_effect.bloom.map(|bloom| bloom.heal_base),
             },
@@ -1521,7 +1601,12 @@ impl AuraPending {
                 source_item: None,
                 stacks: aura_effect
                     .stacking
-                    .map(|stacking| AuraStacks::new(stacking.max_stacks)),
+                    .map(|stacking| {
+                        AuraStacks::new(
+                            stacking.max_stacks,
+                            StackScope::for_aura(aura_effect.aura_type),
+                        )
+                    }),
                 // This constructor takes no spell power, so a bloom is its base.
                 bloom: aura_effect.bloom.map(|bloom| bloom.heal_base),
             },

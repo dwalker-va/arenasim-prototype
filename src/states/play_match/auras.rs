@@ -591,13 +591,22 @@ pub fn apply_pending_auras(
             //     PROC TRINKET's buff. A trinket granting attack power is not
             //     Battle Shout, and the second trinket socket is only worth
             //     filling if two different trinkets can be live at once.
+            // A per-caster stacking aura (a heal over time) is keyed on its
+            // caster as well, so a second Druid's Lifebloom lands beside the
+            // first's instead of being turned away (`StackScope`).
             let source_keyed =
                 pending.aura.effect_type == AuraType::Absorb || pending.aura.distinct_by_source();
             let buff_key: String = if source_keyed {
-                format!(
-                    "source:{:?}:{}",
-                    pending.aura.effect_type, pending.aura.ability_name
-                )
+                match pending.aura.stack_owner() {
+                    Some(owner) => format!(
+                        "source:{:?}:{}:{:?}",
+                        pending.aura.effect_type, pending.aura.ability_name, owner
+                    ),
+                    None => format!(
+                        "source:{:?}:{}",
+                        pending.aura.effect_type, pending.aura.ability_name
+                    ),
+                }
             } else {
                 format!("type:{:?}", pending.aura.effect_type)
             };
@@ -612,10 +621,7 @@ pub fn apply_pending_auras(
             let already_has_buff_existing = if let Some(ref auras) = active_auras {
                 if source_keyed {
                     // Source-keyed: only the SAME source blocks a reapply.
-                    auras.auras.iter().any(|a| {
-                        a.effect_type == pending.aura.effect_type
-                            && a.ability_name == pending.aura.ability_name
-                    })
+                    auras.auras.iter().any(|a| a.same_source_as(&pending.aura))
                 } else {
                     // Type-keyed: any buff holding the type's slot blocks it —
                     // which a source-keyed one of the same type does not.
@@ -631,10 +637,7 @@ pub fn apply_pending_auras(
             // Also check auras we're accumulating this frame for entities without ActiveAuras
             let already_has_buff_new = if let Some(new_auras) = new_auras_map.get(&pending.target) {
                 if source_keyed {
-                    new_auras.iter().any(|a| {
-                        a.effect_type == pending.aura.effect_type
-                            && a.ability_name == pending.aura.ability_name
-                    })
+                    new_auras.iter().any(|a| a.same_source_as(&pending.aura))
                 } else {
                     new_auras
                         .iter()
