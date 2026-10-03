@@ -30,6 +30,7 @@ pub struct FloatingCombatText {
 /// The segment an entity the sim moves is drawn along between ticks
 /// (`rendering::interpolation`). Graphical-only; the sim never reads it.
 #[derive(Component, Clone, Copy, Debug)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct RenderInterpolation {
     /// Translation at the start of the latest sim tick.
     pub previous: Vec3,
@@ -189,6 +190,7 @@ pub struct LightningBoltStrike {
 /// Component for tracking death fall animation.
 /// When a combatant dies, this component is added to animate them falling over.
 #[derive(Component)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct DeathAnimation {
     /// Animation progress (0.0 = start, 1.0 = complete)
     pub progress: f32,
@@ -233,6 +235,7 @@ pub struct OriginalMesh(pub Handle<Mesh>);
 /// Marker component indicating the combatant is currently polymorphed.
 /// Used to track mesh swapping state.
 #[derive(Component)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct PolymorphedVisual;
 
 /// The body material a polymorph's wool coat displaced, stored on the
@@ -264,6 +267,7 @@ pub struct SheepPart {
 /// both feared and polymorphed (different DR categories), and the sheep look
 /// wins while polymorphed (the fear system carries `Without<PolymorphedVisual>`).
 #[derive(Component)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct FearedVisual;
 
 /// The breathing shadow aura sphere spawned as a child of a feared combatant's
@@ -283,6 +287,7 @@ pub struct FearShroud {
 /// no owner-scoped despawn is needed. Mirrors [`DotDripEmitter`]'s
 /// accumulator/count fields.
 #[derive(Component, Default)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct FearMoteEmitter {
     /// Seconds accumulated toward the next mote spawn.
     pub spawn_accumulator: f32,
@@ -769,6 +774,7 @@ pub struct HealCastBurstMote {
 /// back to identity (and removing itself) the frame no rig remains — an
 /// interrupted Classic heal's body loop stops dead, no failure flourish.
 #[derive(Component)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct HealCastPosture {
     /// Current eased torso pitch, radians (negative = leaning back).
     pub pitch: f32,
@@ -1186,6 +1192,7 @@ pub struct CurseApparitionRig {
 /// detector re-firing every frame. A bit is cleared when its curse leaves the
 /// victim, so a fresh curse fires a fresh apparition.
 #[derive(Component, Default)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct CurseApparitionsFired {
     /// Bitmask over [`CurseKind::bit`].
     pub fired: u8,
@@ -1649,6 +1656,7 @@ pub struct HeroicStrikeSwing;
 /// Graphical-only: spawned by `consume_hit_reactions`, which is registered in
 /// `states/mod.rs` and nowhere else.
 #[derive(Component, Debug, Clone, Copy)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct HitFlinch {
     /// Seconds since the dip started.
     pub elapsed: f32,
@@ -2164,6 +2172,7 @@ pub enum RootStyle {
 /// Composes with [`StunnedVisual`]: Root and Stun are separate DR categories
 /// occupying disjoint space, and both must show at once.
 #[derive(Component)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct RootedVisual {
     pub style: RootStyle,
 }
@@ -2171,6 +2180,7 @@ pub struct RootedVisual {
 /// Marker: this unit is stunned and wearing the overhead whirl. See
 /// [`RootedVisual`] for the ownership rule.
 #[derive(Component)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct StunnedVisual;
 
 /// Which hard-CC treatment a [`CcRig`] carries.
@@ -2346,6 +2356,7 @@ pub struct NovaShard {
 /// that unit's NEXT root, from any source, by up to a full wavefront. Expiring
 /// it after the wave has passed keeps the stranding harmless.
 #[derive(Component)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct NovaFreezeDelay {
     pub secs: f32,
     /// Seconds since insertion; the component is dropped once this passes the
@@ -2505,6 +2516,7 @@ pub struct BoltImpactShard {
 /// alive and carries a routed `MovementSpeedSlow`. Graphical-only: inserted and
 /// removed by `update_slow_treatment`, never read by the sim.
 #[derive(Component, Clone, Copy, Debug)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct SlowTrailEmitter {
     /// Ground point the scuff was last laid to. Distance-paced from here, the
     /// way the charge trail lays its segments.

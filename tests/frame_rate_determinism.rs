@@ -39,11 +39,30 @@
 //! Priest" on another, every number identical. So each run also captures the
 //! Results rows IN ORDER and the report's full text at the deciding tick, and
 //! both must match across schedules and list every team in slot order.
+//!
+//! ## The order combatants are visited in
+//!
+//! The listing bug had a cause that reaches the sim: every sim loop iterates
+//! combatants in ECS query order, which is the order of their table rows, and
+//! a component inserted on or removed from an entity moves it to another table
+//! and reshuffles that order. Done on the frame clock, that made the order —
+//! and with it the order of RNG draws and same-tick log lines — depend on the
+//! display (AS-175). Graphical-only state on a sim entity is therefore
+//! `SparseSet`: it changes the entity's archetype, never its table. Two checks
+//! hold that: each run records the order a combatant query visits them in
+//! after every tick, which must match tick for tick across schedules; and a
+//! watch fails the run outright the moment a combatant changes table anywhere
+//! but inside a fixed tick, naming the component — so a new frame-clock insert
+//! is caught even on a frame where it happens not to reorder anything.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use bevy::app::RunFixedMainLoopSystem;
 use bevy::asset::AssetPlugin;
+use bevy::ecs::archetype::ArchetypeId;
+use bevy::ecs::component::StorageType;
+use bevy::ecs::storage::TableId;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin as BevyStatesPlugin;
 use bevy::time::TimeUpdateStrategy;
@@ -140,7 +159,20 @@ fn boot(cfg_json: &str) -> App {
         .insert_resource(GameRng::from_seed(cfg.random_seed.unwrap()))
         .insert_state(GameState::PlayMatch)
         .init_resource::<Ticks>()
-        .add_systems(FixedPostUpdate, record_tick);
+        .init_resource::<TableWatch>()
+        .add_systems(FixedPostUpdate, record_tick)
+        .add_systems(
+            RunFixedMainLoop,
+            (
+                (|world: &mut World| watch_tables(world, "between frames"))
+                    .in_set(RunFixedMainLoopSystem::BeforeFixedMainLoop),
+                (|world: &mut World| watch_tables(world, ""))
+                    .in_set(RunFixedMainLoopSystem::AfterFixedMainLoop),
+            ),
+        )
+        .add_systems(Last, |world: &mut World| {
+            watch_tables(world, "on the frame clock (Update)")
+        });
     app
 }
 
@@ -154,6 +186,10 @@ struct Ticks {
     /// Kept apart from `hashes` because the victory choreography moves the
     /// winners after the sim has frozen.
     poses: Vec<u64>,
+    /// The order a combatant query visits the combatants in, after every
+    /// `PlayMatch` tick — the order every sim loop that iterates combatants
+    /// sees, and so the order their RNG draws and same-tick log lines fall in.
+    orders: Vec<u64>,
     /// The first tick the victory celebration was running.
     decided_at: Option<usize>,
     /// Combat-log entries already folded into `log_hash`.
@@ -222,6 +258,13 @@ fn record_tick(
         .map(|(e, c, _, pet, ..)| (e, (c.team, c.slot, pet.is_some())))
         .collect();
     let name = |e: Option<Entity>| format!("{:?}", e.map(|e| names.get(&e)));
+
+    // The visiting order, NOT sorted: it is the thing being checked.
+    let mut order = Fnv::new();
+    for (_, c, _, pet, ..) in combatants.iter() {
+        order.bytes(&[c.team, c.slot, pet.is_some() as u8]);
+    }
+    ticks.orders.push(order.0);
 
     let mut rows: Vec<(u64, u64, u64)> = combatants
         .iter()
@@ -329,18 +372,18 @@ fn record_tick(
     objects.sort();
 
     // Fold this tick's new combat-log entries into the running hash (the log
-    // only grows) — as a SET per tick: see `canonical_report`.
+    // only grows), in the order they were logged.
     let mut log_hash = Fnv(ticks.log_hash);
     if ticks.log_seen == 0 {
         log_hash = Fnv::new();
     }
-    let mut new_entries: Vec<String> = log.entries[ticks.log_seen..]
-        .iter()
-        .map(|e| format!("{} {:?} {}", e.timestamp.to_bits(), e.event_type, e.message))
-        .collect();
-    new_entries.sort();
-    for entry in &new_entries {
-        log_hash.str(entry);
+    for e in &log.entries[ticks.log_seen..] {
+        log_hash.str(&format!(
+            "{} {:?} {}",
+            e.timestamp.to_bits(),
+            e.event_type,
+            e.message
+        ));
     }
     ticks.log_seen = log.entries.len();
     ticks.log_hash = log_hash.0;
@@ -376,54 +419,6 @@ fn record_tick(
     }
 }
 
-/// The saved report, with the combat-log entries of any one instant sorted.
-///
-/// Everything else — header, compositions, every entry's content and its
-/// timestamp — is compared exactly. What this forgives is only the ORDER of
-/// entries that share a timestamp: those are logged by sim loops that iterate
-/// in ECS query order, and graphical-only components move combatants between
-/// archetypes on the frame clock, so two combatants acting in the same tick
-/// can be logged in either order (Warrior+Priest v Hunter+Mage, seed 7, on
-/// irregular frames). That is AS-175, a separate card.
-fn canonical_report(report: &str) -> String {
-    // An entry is its "[ t.ttS] ..." line plus the indented position lines
-    // under it.
-    let mut out: Vec<String> = Vec::new();
-    let mut instant: Option<String> = None;
-    let mut group: Vec<String> = Vec::new();
-    let flush = |group: &mut Vec<String>, out: &mut Vec<String>| {
-        group.sort();
-        out.append(group);
-    };
-    for line in report.lines() {
-        let stamp = line
-            .strip_prefix('[')
-            .and_then(|l| l.split_once(']'))
-            .map(|(t, _)| t.to_string());
-        match stamp {
-            Some(t) => {
-                if instant.as_ref() != Some(&t) {
-                    flush(&mut group, &mut out);
-                    instant = Some(t);
-                }
-                group.push(line.to_string());
-            }
-            None if line.starts_with("    ") && !group.is_empty() => {
-                let last = group.last_mut().unwrap();
-                last.push('\n');
-                last.push_str(line);
-            }
-            None => {
-                flush(&mut group, &mut out);
-                instant = None;
-                out.push(line.to_string());
-            }
-        }
-    }
-    flush(&mut group, &mut out);
-    out.join("\n")
-}
-
 /// The Results screen's content, row by row in its own order. Deliberately
 /// NOT sorted: the order is what a player sees, and what must not depend on
 /// the display.
@@ -453,6 +448,88 @@ fn results_rows(results: &MatchResults) -> String {
     out
 }
 
+/// Every combatant's table and archetype as last seen, and every time one
+/// changed table outside a fixed tick.
+#[derive(Resource, Default)]
+struct TableWatch {
+    seen: BTreeMap<Entity, (TableId, ArchetypeId)>,
+    moves: Vec<String>,
+    /// Non-vacuity: combatants compared off the tick, and table changes the
+    /// sim made on it — the watch saw real moves and told them apart.
+    checked_off_tick: usize,
+    moves_on_tick: usize,
+}
+
+/// Compare every combatant's table with where it was last seen, and record it.
+/// Runs at the start of the frame's fixed loop, at its end, and at the end of
+/// the frame: a table change found by the first or last is one made off the
+/// fixed tick (`phase` names where), and fails the run. The end of the fixed
+/// loop (empty `phase`) counts its changes without flagging them: the sim
+/// moving its own entities between tables on the tick is the sim clock, which
+/// every schedule shares. Checked while
+/// the match is undecided — once it is, nothing in the sim iterates again.
+fn watch_tables(world: &mut World, phase: &'static str) {
+    let live = *world.resource::<State<GameState>>().get() == GameState::PlayMatch
+        && !world.contains_resource::<VictoryCelebration>();
+    if !live {
+        world.resource_mut::<TableWatch>().seen.clear();
+        return;
+    }
+    let mut combatants = world.query_filtered::<Entity, With<Combatant>>();
+    let now: BTreeMap<Entity, (TableId, ArchetypeId)> = combatants
+        .iter(world)
+        .map(|e| {
+            let at = world.entities().get(e).expect("a live entity");
+            (e, (at.table_id, at.archetype_id))
+        })
+        .collect();
+    let (mut moves, mut checked, mut on_tick) = (Vec::new(), 0, 0);
+    let watch = world.resource::<TableWatch>();
+    for (e, &(table, archetype)) in &now {
+        let Some(&(was_table, was_archetype)) = watch.seen.get(e) else {
+            continue;
+        };
+        if phase.is_empty() {
+            on_tick += usize::from(table != was_table);
+            continue;
+        }
+        checked += 1;
+        if table != was_table {
+            moves.push(format!(
+                "{e} changed table {phase}: {}",
+                table_component_change(world, was_archetype, archetype)
+            ));
+        }
+    }
+    let mut watch = world.resource_mut::<TableWatch>();
+    watch.moves.extend(moves);
+    watch.checked_off_tick += checked;
+    watch.moves_on_tick += on_tick;
+    watch.seen = now;
+}
+
+/// The table-stored components that differ between two archetypes, by name.
+fn table_component_change(world: &World, from: ArchetypeId, to: ArchetypeId) -> String {
+    let archetypes = world.archetypes();
+    let components = world.components();
+    let table_set = |id: ArchetypeId| -> Vec<String> {
+        archetypes[id]
+            .components()
+            .filter(|&c| {
+                components.get_info(c).map(|i| i.storage_type()) == Some(StorageType::Table)
+            })
+            .map(|c| components.get_name(c).map_or("?".into(), |n| n.to_string()))
+            .collect()
+    };
+    let (before, after) = (table_set(from), table_set(to));
+    let added: Vec<&String> = after.iter().filter(|c| !before.contains(c)).collect();
+    let removed: Vec<&String> = before.iter().filter(|c| !after.contains(c)).collect();
+    format!(
+        "added {added:?}, removed {removed:?} — give a graphical-only component \
+         `#[component(storage = \"SparseSet\")]`"
+    )
+}
+
 /// Run `cfg` to the Results screen under one frame schedule.
 fn run(cfg: &str, frames: impl Iterator<Item = Frame>) -> Ticks {
     let mut app = boot(cfg);
@@ -474,6 +551,21 @@ fn run(cfg: &str, frames: impl Iterator<Item = Frame>) -> Ticks {
             "{cfg} never reached Results within {MAX_SIM_SECS}s"
         );
     }
+    let watch = std::mem::take(&mut *app.world_mut().resource_mut::<TableWatch>());
+    assert!(
+        watch.checked_off_tick > 0 && watch.moves_on_tick > 0,
+        "{cfg}: the table watch is vacuous — {} off-tick comparisons, {} on-tick table changes",
+        watch.checked_off_tick,
+        watch.moves_on_tick
+    );
+    let moves = watch.moves;
+    assert!(
+        moves.is_empty(),
+        "{cfg}: {} combatant table change(s) off the fixed tick — each one reorders the \
+         combatants every sim loop visits, by frame rate:\n{}",
+        moves.len(),
+        moves.join("\n")
+    );
     std::mem::take(&mut *app.world_mut().resource_mut::<Ticks>())
 }
 
@@ -486,16 +578,28 @@ fn assert_same_sim(cfg: &str, a_label: &str, a: &Ticks, b_label: &str, b: &Ticks
         "{cfg}: decided at tick {:?} under {a_label}, {:?} under {b_label}",
         a.decided_at, b.decided_at
     );
+    let common = a.hashes.len().min(b.hashes.len());
+    // Combatant ORDER, tick for tick: every sim loop iterates combatants in
+    // query order, so an order that followed the frame clock would reorder
+    // their RNG draws and same-tick log lines. Checked first, because it is
+    // the cause of the differences the checks below would only show later.
+    if let Some(tick) = (0..common).find(|&i| a.orders[i] != b.orders[i]) {
+        panic!(
+            "{cfg}: combatants are visited in a different order at tick {} (decided at \
+             {decided}) between {a_label} and {b_label} — a component inserted on or removed \
+             from a combatant on the frame clock moved it between tables",
+            tick + 1
+        );
+    }
     assert_eq!(
         a.results, b.results,
         "{cfg}: the Results screen differs between {a_label} and {b_label}"
     );
-    let (a_report, b_report) = (
-        canonical_report(a.report.as_deref().expect("report")),
-        canonical_report(b.report.as_deref().expect("report")),
+    let (a_text, b_text) = (
+        a.report.as_deref().expect("report"),
+        b.report.as_deref().expect("report"),
     );
-    if a_report != b_report {
-        let (a_text, b_text) = (a_report.as_str(), b_report.as_str());
+    if a_text != b_text {
         let line = a_text
             .lines()
             .zip(b_text.lines())
@@ -508,7 +612,6 @@ fn assert_same_sim(cfg: &str, a_label: &str, a: &Ticks, b_label: &str, b: &Ticks
             b_text.lines().nth(line).unwrap_or(""),
         );
     }
-    let common = a.hashes.len().min(b.hashes.len());
     if let Some(tick) = (0..common).find(|&i| a.hashes[i] != b.hashes[i]) {
         panic!(
             "{cfg}: sim state differs at tick {} (decided at {decided}) between {a_label} and {b_label}",

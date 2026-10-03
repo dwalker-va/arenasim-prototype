@@ -169,6 +169,18 @@ commands.spawn((
 // Add mesh, materials, etc.
 ```
 
+### Graphical State on Sim Entities
+
+**Problem**: Query iteration follows table row order, and inserting or removing
+a table-stored component moves an entity to another table. A visual system that
+did so on the frame clock (a hit flinch, a death fall) reordered the combatants
+every sim loop visits by frame rate (AS-175).
+
+**Solution**: Declare such a component `#[component(storage = "SparseSet")]` —
+it changes the entity's archetype, not its table. Enforced by
+`tests/frame_rate_determinism.rs`. See
+`docs/solutions/implementation-patterns/adding-visual-effect-bevy.md` (gotcha 11).
+
 ### Entity Despawn Safety
 
 **Problem**: Entity may be despawned before system runs
