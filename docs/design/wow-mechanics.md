@@ -34,7 +34,8 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   melee right after a shot swings at once rather than waiting out the bow's
   interval, and every timer keeps building out of range, like any other swing.
   A Hunter with no main-hand weapon does nothing in melee — the sim has no
-  unarmed swing — and the default Hunter loadout carries none. The melee swing
+  unarmed swing. The default Hunter carries a two-handed polearm, Peacemaker
+  (AS-195), so a melee that pins it in melee range is struck back. The melee swing
   is a melee swing everywhere: it procs `MeleeHit` trinkets, draws Frost Armor's
   chill and can take a Windfury bonus swing; Auto Shot does none of those.
   The model shows one set at a time: the hand weapons once its target closes to
@@ -85,7 +86,7 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   second Serpent Fang Dagger in its off hand, with the power it is worth
   measured rather than assumed (AS-122 —
   `docs/design/balance/2026-09-18-as122-rogue-offhand-findings.md`). The Warrior
-  holds a two-hander and the default Hunter holds only its bow, so for those two
+  and the default Hunter each hold a two-hander, so for those two
   dual wield stays a build a player opts into.
 
 ### Windfury Totem procs on the main hand only

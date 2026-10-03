@@ -112,6 +112,12 @@ const DECLARED_STAT_STICK_WEAPONS: &[(CharacterClass, ItemSlot, &str)] = &[
 /// exactly one socket, so there is never a question of which weapon "wins".
 /// Such a weapon belongs in `DECLARED_STAT_STICK_WEAPONS` with its reason, so
 /// that carrying two is a decision somebody wrote down rather than drift.
+///
+/// The one class that swings TWO sockets is the exception, and it is checked
+/// rather than exempted: a class that melees beside a ranged live socket
+/// ([`CharacterClass::melee_beside_ranged`] — the Hunter, AS-171) swings its
+/// main-hand weapon inside melee range on its own timer, so that weapon is not
+/// a stat stick. It must actually arm the melee swing in `apply_equipment`.
 #[test]
 fn weapon_slot_matches_the_socket_each_loadout_fills() {
     let items = load_item_definitions().expect("items.ron must load");
@@ -122,6 +128,7 @@ fn weapon_slot_matches_the_socket_each_loadout_fills() {
     let mut audited = 0usize;
     let mut main_hand_classes = 0usize;
     let mut ranged_classes = 0usize;
+    let mut melee_beside_ranged = 0usize;
 
     for class in CharacterClass::all() {
         let loadout = defaults
@@ -150,8 +157,29 @@ fn weapon_slot_matches_the_socket_each_loadout_fills() {
             live
         );
 
+        // A Hunter's main-hand weapon is its melee swing, beside the bow: a
+        // second live socket, so it must arm that swing.
+        let melee_main = class.melee_beside_ranged()
+            && expected == ItemSlot::Ranged
+            && live.contains(&ItemSlot::MainHand);
+        if melee_main {
+            let mut combatant = Combatant::new(1, 0, *class);
+            combatant.apply_equipment(loadout, &items);
+            assert!(
+                combatant.has_melee_main_hand(),
+                "{} melees beside its ranged socket and carries a MainHand \
+                 weapon, but apply_equipment armed no melee swing from it",
+                class.name()
+            );
+            melee_beside_ranged += 1;
+        }
+
         // Every OTHER weapon must be a declared stat stick.
-        for slot in live.iter().filter(|s| **s != expected) {
+        for slot in live
+            .iter()
+            .filter(|s| **s != expected)
+            .filter(|s| !(melee_main && **s == ItemSlot::MainHand))
+        {
             let declared = DECLARED_STAT_STICK_WEAPONS
                 .iter()
                 .find(|(c, s2, _)| c == class && s2 == slot);
@@ -210,6 +238,10 @@ fn weapon_slot_matches_the_socket_each_loadout_fills() {
         "both socket kinds must be exercised, saw {main_hand_classes} MainHand \
          and {ranged_classes} Ranged — a predicate returning one constant would \
          otherwise pass this audit"
+    );
+    assert!(
+        melee_beside_ranged > 0,
+        "no default loadout exercised the melee-beside-ranged main hand"
     );
 }
 

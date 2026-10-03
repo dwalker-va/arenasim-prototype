@@ -95,6 +95,7 @@ Every number here was read from the Wowhead Classic MCP (`lookup_item_by_id`).
 | Wand of the Invoker (wand, 71) | Cold Snap (19130, 70) | 1.7 | 85.29 | 1.43s | 11.9-19.04 | 9.10 |
 | Eaglestrike Bow (bow, 73) | Rhok'delar, Longbow of the Ancient Keepers (18713, 75) | 2.9 | 43.97 | 2.50s | 27.84-37.12 | 11.20 |
 | Deadeye Crossbow (crossbow, 75) | Crossbow of Imminent Doom (21459, 72) | 3.1 | 41.61 | 2.86s | 28.21-36.89 | 10.50 |
+| Peacemaker (polearm, 59; added by AS-195) | Peacemaker (18725, 59) | 3.4 | 50.44 | n/a | 43.65-65.63 | 16.07 |
 
 Weapon DPS is `mid damage / speed`. Classic DPS is the stand-in's tooltip DPS.
 It is used only to compute the two-hander ratios; sim damage is not Classic
@@ -115,6 +116,7 @@ one-hander is the pair AS-115 priced each two-hander against
 | Bloodlord's Battleaxe | Stormblade Edge | 68.13 / 51.60 = **1.32** (ilvl 71 / 70) | 21.78 : 16.50 |
 | Crescent Staff | Witchblade | 57.50 / 40.63 = **1.42** (ilvl 61 / 62) | 19.11 : 13.50 |
 | Runestaff of Elements | Claw of Chromaggus | 57.07 / 42.33 = **1.35** (ilvl 70 / 77) | 23.26 : 17.25 |
+| Peacemaker (AS-195) | Frostbite Blade | 50.44 / 41.43 = **1.22** (ilvl 59 / 63) | 16.07 : 13.20 |
 
 So an axe two-hander deals about 30% more weapon DPS than the sword it
 replaces, and a staff 35-42% more than the caster dagger it replaces. The

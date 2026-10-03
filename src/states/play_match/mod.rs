@@ -1972,14 +1972,15 @@ mod held_weapon_tests {
             .collect()
     }
 
-    /// Every class's DEFAULT loadout is drawn with its own models — no stand-in
-    /// is needed for anything a match ships with by default.
+    /// Every class's DEFAULT loadout is drawn with its own models, save the
+    /// Hunter's polearm, which has no art and takes the two-hand axe's grip
+    /// and chop. The Hunter carries both sets, so it shows one at a time.
     #[test]
     fn every_default_loadout_draws_what_it_holds() {
         for (class, expected) in [
             (C::Warrior, vec![(AXE, MainHand)]),
             (C::Rogue, vec![(DAGGER, MainHand), (DAGGER, OffHand)]),
-            (C::Hunter, vec![(BOW, MainHand)]),
+            (C::Hunter, vec![(AXE, MainHand), (BOW, MainHand)]),
             (C::Paladin, vec![(MACE, MainHand), (SHIELD, OffHand)]),
             // The Shaman's off hand is a tome and its ranged socket a totem:
             // neither is drawn.
@@ -2082,6 +2083,19 @@ mod held_weapon_tests {
                 (BOW, Some(WeaponSet::Ranged), Visibility::Inherited),
                 (DAGGER, Some(WeaponSet::Melee), Visibility::Hidden),
                 (DAGGER, Some(WeaponSet::Melee), Visibility::Hidden),
+            ]
+        );
+    }
+
+    /// The DEFAULT Hunter carries both sets (AS-195): it spawns with the bow
+    /// out and its polearm stowed, and draws the polearm in melee range.
+    #[test]
+    fn the_default_hunter_spawns_with_the_bow_out_and_the_polearm_stowed() {
+        assert_eq!(
+            spawn_sets(C::Hunter, &default_loadout(C::Hunter)),
+            vec![
+                (AXE, Some(WeaponSet::Melee), Visibility::Hidden),
+                (BOW, Some(WeaponSet::Ranged), Visibility::Inherited),
             ]
         );
     }
@@ -2200,6 +2214,7 @@ mod held_weapon_tests {
                 "CrescentStaff",
                 "DeadeyeCrossbow",
                 "FrostbiteBlade",
+                "Peacemaker",
                 "RunestaffOfElements",
                 "SniperScope",
                 "StormbladeEdge",

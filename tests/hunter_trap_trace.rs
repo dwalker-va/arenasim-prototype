@@ -554,12 +554,15 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
 /// trap broke from the Hunter's own Aimed Shot 1.6-2.5s in). The Hunter now
 /// holds a shot that would land after its own trap catches the target. Pinned
 /// seeds that reach that ending: in each the trap springs on the Rogue, is
-/// never broken, and the trace shows the hold firing.
+/// never broken, and the trace shows the hold firing. (Re-pinned from 17, 58
+/// and 61 when the default Hunter took up its polearm, AS-195: no trap that
+/// springs on the Rogue in the first 260 seeds breaks, but the hold fires in
+/// only these three.)
 #[test]
 fn the_hunters_own_shot_does_not_break_its_trap() {
     use arenasim::states::play_match::class_ai::hunter_dip::OWN_TRAP_WOULD_BREAK;
 
-    for seed in [17u64, 58, 61] {
+    for seed in [61u64, 108, 166] {
         let mut cfg = config(&["Hunter", "Priest"], &["Warlock", "Rogue"], seed);
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
@@ -677,15 +680,18 @@ fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
 /// The Hunter must leave it for the Rogue at the throw — traced as a target
 /// acquisition, so the `target switches` recipe in CLAUDE.md shows it — and
 /// stay off it while it is frozen, deciding on the Rogue instead of holding
-/// fire on its own trap. Whether a shot then lands is the dead zone's call:
-/// since Flare reveals the Rogue before it opens, it reaches the Hunter
-/// unstunned and in nearly every seed pins it inside 8 yards for the whole
-/// freeze (1 seed of 320 scanned has the Hunter shooting it). Pinned seeds
-/// where the trap springs on the Priest.
+/// fire on its own trap. Since Flare reveals the Rogue before it opens, it
+/// reaches the Hunter unstunned and pins it inside 8 yards for the freeze, so
+/// what lands is the default Hunter's polearm (AS-195): its melee swing hits
+/// the Rogue in 227 of the 235 seeds of 320 where the trap springs on the
+/// Priest, where before it the Hunter dealt nothing in 243 of 246. Pinned
+/// seeds where the trap springs on the Priest and the polearm lands on the
+/// Rogue during the freeze (seed 6 was swapped for 1 when the polearm moved
+/// that match off the scenario).
 #[test]
 fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
     const GATES_OPEN: f64 = 10.0;
-    for seed in [6u64, 8, 9] {
+    for seed in [1u64, 8, 9] {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.team1_kill_target = Some(1);
         cfg.max_duration_secs = 60.0;
@@ -763,6 +769,29 @@ fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
         assert!(
             on_rogue > 0,
             "seed {seed}: the Hunter never decided on the Rogue while the Priest was frozen"
+        );
+
+        // ...and its polearm lands on the Rogue while the Priest is frozen: a
+        // melee swing ("Auto Attack"; Auto Shot is the bow) on the log clock.
+        let melee_on_rogue = log
+            .lines()
+            .filter(|l| {
+                l.contains("Team 1 Hunter #1's Auto Attack ")
+                    && (l.contains(" hits Team 2 Rogue") || l.contains(" CRITS Team 2 Rogue"))
+            })
+            .filter_map(|l| {
+                l.trim_start_matches('[')
+                    .split('s')
+                    .next()?
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+            })
+            .filter(|t| frozen.contains(&(t - GATES_OPEN)))
+            .count();
+        assert!(
+            melee_on_rogue > 0,
+            "seed {seed}: no Hunter melee swing landed on the Rogue while the Priest was frozen"
         );
     }
 }

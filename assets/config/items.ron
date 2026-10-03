@@ -960,6 +960,29 @@
             crit_chance: 0.03,
         ),
 
+        // The default Hunter's melee weapon, swung inside melee range beside
+        // the bow (AS-171, AS-195). Priced at the pair a Hunter would dual
+        // wield instead (Frostbite Blade + Serpent Fang Dagger, 19.5) — the
+        // Hunter holds no shield or frill — and spends it as that pair does,
+        // attack power and crit. Its weapon DPS is Frostbite Blade's x the
+        // premium of its namesake, Peacemaker 50.44 / Dal'Rend's Sacred
+        // Charge 41.43 = 1.22: a stat-stick polearm, so a smaller premium
+        // than the Reaper's.
+        Peacemaker: (
+            name: "Peacemaker",
+            item_level: 59,
+            icon: "icons/items/inv_spear_07.jpg",
+            slot: MainHand,
+            weapon_type: Polearm,
+            is_weapon: true,
+            two_handed: true,
+            attack_damage_min: 43.65,
+            attack_damage_max: 65.63,
+            weapon_speed: 3.4, // Classic: Peacemaker (18725)
+            attack_power: 7.0,
+            crit_chance: 0.03,
+        ),
+
         FrostbiteBlade: (
             name: "Frostbite Blade",
             item_level: 58,
