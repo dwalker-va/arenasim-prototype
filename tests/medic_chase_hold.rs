@@ -103,6 +103,10 @@ struct Scene {
     combatant: Combatant,
     obstacles: Vec<ObstacleVolume>,
     state: HealerPosture,
+    /// The last tick's cast deferral: the plan's `escape_defer` (Priest,
+    /// Shaman, Druid) or `cast_defer` (Paladin). A heal on a target ABOVE it
+    /// is deferred; one at or below it fires.
+    defer: Option<f32>,
 }
 
 fn scene(class: CharacterClass) -> Scene {
@@ -144,20 +148,21 @@ fn scene(class: CharacterClass) -> Scene {
         combatant,
         obstacles: pillar(),
         state: HealerPosture::new(0.0),
+        defer: None,
     }
 }
 
 impl Scene {
     /// One posture tick of this healer's machine at `now`, against the
     /// directive the previous tick left in the world. Returns the movement
-    /// triggers it traced.
+    /// triggers it traced, and records the plan's cast deferral in `defer`.
     fn tick(&mut self, now: f32) -> Vec<String> {
         let abilities = AbilityDefinitions::default();
         let movement = MovementConfig::default();
         let mut trace = DecisionTrace::default();
         let mut queue = CommandQueue::default();
         let directive = self.world.get::<MovementDirective>(self.healer).copied();
-        {
+        let defer = {
             let ctx = CombatContext::new(
                 self.healer,
                 1,
@@ -186,7 +191,8 @@ impl Scene {
                         &movement,
                         now,
                         &mut trace,
-                    );
+                    )
+                    .escape_defer
                 }
                 CharacterClass::Paladin => {
                     evaluate_paladin_posture(
@@ -202,7 +208,8 @@ impl Scene {
                         &movement,
                         now,
                         &mut trace,
-                    );
+                    )
+                    .cast_defer
                 }
                 CharacterClass::Shaman | CharacterClass::Druid => {
                     let block = if self.class == CharacterClass::Shaman {
@@ -223,11 +230,13 @@ impl Scene {
                         false,
                         now,
                         &mut trace,
-                    );
+                    )
+                    .escape_defer
                 }
                 other => panic!("{other:?} runs no healer posture"),
             }
-        }
+        };
+        self.defer = defer;
         queue.apply(&mut self.world);
         trace
             .pending_events
@@ -365,12 +374,18 @@ fn a_more_injured_teammate_takes_a_held_chase_over_at_once() {
     }
 }
 
-/// The hold is for a teammate still dying. One healed above the urgency line,
-/// or dead, releases the chase at once, mid-window.
+/// The hold is for a teammate still dying: one healed just past the urgency
+/// line, or dead, releases the chase at once, mid-window — and one a hair
+/// below the line keeps it.
 #[test]
 fn a_held_chase_lets_go_at_once_when_its_teammate_recovers_or_dies() {
+    let threshold = MovementConfig::default().shared.urgency_hp_threshold;
     for class in HEALERS {
-        for outcome in ["recovers", "dies"] {
+        for outcome in [
+            "stays just below the line",
+            "recovers just past the line",
+            "dies",
+        ] {
             let mut s = scene(class);
             s.start_chase();
             s.obstacles.clear();
@@ -378,18 +393,63 @@ fn a_held_chase_lets_go_at_once_when_its_teammate_recovers_or_dies() {
             assert!(s.chasing(), "{class:?}: held while the Warrior is dying");
 
             match outcome {
-                "recovers" => s.set_warrior_hp(0.6),
+                "stays just below the line" => s.set_warrior_hp(threshold - 0.01),
+                "recovers just past the line" => s.set_warrior_hp(threshold + 0.01),
                 _ => {
                     s.set_warrior_hp(0.0);
                     s.roster.get_mut(&s.warrior).unwrap().is_alive = false;
                 }
             }
             s.tick(T0 + 0.2);
-            assert_eq!(
-                s.state.medic_target, None,
-                "{class:?}: a teammate who {outcome} releases the chase mid-window"
-            );
+            if outcome == "stays just below the line" {
+                assert!(
+                    s.chasing(),
+                    "{class:?}: a teammate at {} still holds the chase",
+                    threshold - 0.01
+                );
+            } else {
+                assert_eq!(
+                    s.state.medic_target, None,
+                    "{class:?}: a teammate who {outcome} releases the chase mid-window"
+                );
+            }
         }
+    }
+}
+
+/// A hold walks the healer to a teammate it can SEE and who is dying, so the
+/// heal that teammate needs must fire: the hold's cast deferral leaves a heal
+/// on a target at or below the urgency line alone, exactly as a live chase's
+/// does. (It defers only heals on targets above that line.)
+#[test]
+fn a_critical_heal_fires_inside_a_hold() {
+    let threshold = MovementConfig::default().shared.urgency_hp_threshold;
+    for class in HEALERS {
+        let mut s = scene(class);
+        s.start_chase();
+        let chasing_defer = s.defer;
+        assert_eq!(
+            chasing_defer,
+            Some(threshold),
+            "{class:?}: the chase's own deferral"
+        );
+
+        // Inside the window, the dying Warrior in sight: the chase holds.
+        s.obstacles.clear();
+        s.set_warrior_hp(threshold - 0.01);
+        s.tick(T0 + 0.1);
+        assert!(s.chasing(), "{class:?}: the chase holds");
+        let warrior_hp = threshold - 0.01;
+        assert!(
+            s.defer.is_none_or(|t| warrior_hp <= t),
+            "{class:?}: the hold defers a heal on the dying Warrior it is walking to \
+             (defer {:?}, Warrior at {warrior_hp})",
+            s.defer
+        );
+        assert_eq!(
+            s.defer, chasing_defer,
+            "{class:?}: a hold defers as the chase does"
+        );
     }
 }
 
