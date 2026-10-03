@@ -495,8 +495,17 @@ fn watch_tables(world: &mut World, phase: &'static str) {
         }
         checked += 1;
         if table != was_table {
+            let c = world.get::<Combatant>(*e).expect("a combatant");
             moves.push(format!(
-                "{e} changed table {phase}: {}",
+                "team {} slot {} {:?}{} changed table {phase}: {}",
+                c.team,
+                c.slot,
+                c.class,
+                if world.get::<Pet>(*e).is_some() {
+                    " (pet)"
+                } else {
+                    ""
+                },
                 table_component_change(world, was_archetype, archetype)
             ));
         }
@@ -562,9 +571,9 @@ fn run(cfg: &str, frames: impl Iterator<Item = Frame>) -> Ticks {
     assert!(
         moves.is_empty(),
         "{cfg}: {} combatant table change(s) off the fixed tick — each one reorders the \
-         combatants every sim loop visits, by frame rate:\n{}",
+         combatants every sim loop visits, by frame rate. The first:\n{}",
         moves.len(),
-        moves.join("\n")
+        moves[..moves.len().min(8)].join("\n")
     );
     std::mem::take(&mut *app.world_mut().resource_mut::<Ticks>())
 }
