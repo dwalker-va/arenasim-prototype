@@ -294,12 +294,19 @@ pub enum MovementTrigger {
     /// and out of melee range fell back toward its healer for a bounded window
     /// instead of face-chasing. Emitted on the activation edge only.
     MeleeReset,
-    /// Healer dispel walk (Paladin): a teammate is held in crowd control the
-    /// healer's dispel removes at the urgent bar, beyond the dispel's range, so
-    /// the healer walks toward it (a `point` goal, the ally in the target view)
-    /// until the rotation's urgent dispel can reach. Emitted within the
-    /// posture (no transition), once per commit window.
+    /// Healer dispel walk (Paladin, Priest): a teammate is held in crowd
+    /// control the healer's dispel removes at the urgent bar, beyond the
+    /// dispel's range or out of sight, so the healer walks toward it (a `point`
+    /// goal, the ally in the target view) until the rotation's urgent dispel
+    /// can reach. Emitted within the posture (no transition), once per commit
+    /// window.
     DispelChase,
+    /// The `Legacy` dispel walk reached its teammate with the dispel still
+    /// owed (the GCD still running): the healer holds the point it reached (a
+    /// `point` goal, the teammate in the target view) until the dispel lands or
+    /// stops being owed, instead of handing movement back to a posture that can
+    /// step it back out of range. Emitted once, on reaching.
+    DispelHold,
     /// Stealthed Rogue (AS-185): a lit enemy Flare lies across its way to its
     /// target and a way round stays out of the light, so it walks that way (a
     /// `point` goal). Announced once per Flare, not per re-steer.

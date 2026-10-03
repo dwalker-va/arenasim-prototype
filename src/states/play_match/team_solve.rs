@@ -1075,12 +1075,7 @@ pub fn dispel_goal(
     }
     let ally =
         super::class_ai::dispel_chase_target(ctx, abilities, entity, my_pos, current_mana, dispel)?;
-    // `alive_allies` is non-pet teammates only, so a hurt pet never holds it.
-    let someone_else_dying = ctx
-        .alive_allies()
-        .iter()
-        .any(|a| a.entity != entity && a.entity != ally && a.health_pct() < urgency_hp_threshold);
-    if someone_else_dying {
+    if super::class_ai::another_teammate_dying(ctx, entity, ally, urgency_hp_threshold) {
         return None;
     }
     Some(DispelGoal {

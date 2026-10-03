@@ -633,8 +633,14 @@ tangent-steered round a pillar, same walk as the medic chase, which outranks it)
 until the rotation's urgent dispel reaches it, deferring non-critical casts as
 it does during a dip. It shares the medic chase's gate (FREE/PRESSURED only,
 never while hard-CC'd, retired under `TeamPlan` PRESSURED), and does not walk
-while a qualifying teammate is already reached or the healer cannot afford the
-dispel. Traced as `DispelChase`; a dispel that declines because its only
+while a qualifying teammate is already reached, the healer cannot afford the
+dispel, it cannot cast it (silenced or locked out of its school —
+`class_ai::can_cast_dispel`), or ANOTHER living non-pet teammate is below
+`urgency_hp_threshold` (dying first, as under `TeamPlan`; the CC'd teammate's
+own health does not count). Once a walk reaches, the healer HOLDS that point
+until the dispel lands or stops being owed (traced `DispelHold`), so the posture
+cannot step it back out of range while the GCD runs. Traced as
+`DispelChase`; a dispel that declines because its only
 candidates are unreachable is traced `LosBlocked` (one in range behind cover) or
 `OutOfRange` with the distance, never `NoValidTarget`.
 

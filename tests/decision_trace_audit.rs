@@ -122,6 +122,7 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
     "SeekLos",
     "MeleeReset",
     "DispelChase",
+    "DispelHold",
     "FlareSkirt",
     "FlareWait",
     "FlareCommit",

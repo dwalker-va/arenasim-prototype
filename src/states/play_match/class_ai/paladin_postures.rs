@@ -23,9 +23,9 @@ use crate::states::play_match::movement_config::{MovementConfig, SharedMovementC
 
 use super::cast_guard::{pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
-    ally_walk_tick, compound_pressure_trigger, dispel_chase_override, escape_tick,
+    compound_pressure_trigger, dispel_chase_override, dispel_walk_tick, escape_tick,
     escape_window_from, healer_pressured_tick_shared, medic_chase_override, medic_chase_tick,
-    start_movement_event, start_movement_event_with_target, HealerDispel,
+    release_ally_walk, start_movement_event, start_movement_event_with_target, HealerDispel,
 };
 use super::paladin::{
     dip_target_candidate, hoj_target_eligible, rotation_hoj_allowed, HojPlan, PaladinMovementPlan,
@@ -229,7 +229,7 @@ pub fn evaluate_paladin_posture(
             decision_trace,
             ctx,
         );
-    } else if let Some(ally) = dispel_chase_override(
+    } else if let Some(step) = dispel_chase_override(
         abilities,
         entity,
         my_pos,
@@ -237,34 +237,35 @@ pub fn evaluate_paladin_posture(
         next,
         ctx,
         AbilityType::PaladinCleanse,
+        shared,
+        state,
     ) {
         // Dispel walk (AS-180): a teammate held in urgent crowd control Cleanse
         // removes is beyond Cleanse's range or out of sight — walk until the
-        // rotation's urgent Cleanse reaches it (in range AND in sight). Non-critical heals defer meanwhile, exactly
-        // as during a dip: a Flash of Light roots the Paladin for its whole cast,
-        // and back-to-back casts would hold it out of range while the trap runs.
-        ally_walk_tick(
+        // rotation's urgent Cleanse reaches it (in range AND in sight), then
+        // hold there until it lands. Not while silenced or Holy-locked, nor
+        // while another teammate is dying. Non-critical heals defer meanwhile,
+        // exactly as during a dip: a Flash of Light roots the Paladin for its
+        // whole cast, and back-to-back casts would hold it out of range while
+        // the trap runs.
+        dispel_walk_tick(
             commands,
             entity,
             my_pos,
-            ally,
+            step,
             state,
             directive,
             shared,
             now,
             decision_trace,
             ctx,
-            MovementTrigger::DispelChase,
         );
         plan.cast_defer = Some(shared.urgency_hp_threshold);
     } else {
-        if state.medic_target.is_some() {
-            // Sight regained / ally in Cleanse reach (or the ally recovered,
-            // was freed, or died): drop the walk so FREE hands movement back to
-            // legacy pursuit / PRESSURED re-scores.
-            commands.entity(entity).remove::<MovementDirective>();
-            state.medic_target = None;
-        }
+        // Sight regained / ally in Cleanse reach and Cleanse cast (or the ally
+        // recovered, was freed, or died): drop the walk so FREE hands movement
+        // back to legacy pursuit / PRESSURED re-scores.
+        release_ally_walk(commands, entity, state);
         match next {
             Posture::Escape => {
                 escape_tick(

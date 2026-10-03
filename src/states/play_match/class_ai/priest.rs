@@ -32,9 +32,9 @@ use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
-    ally_walk_tick, compound_pressure_trigger, dispel_chase_override, escape_tick,
+    compound_pressure_trigger, dispel_chase_override, dispel_walk_tick, escape_tick,
     escape_window_from, healer_pressured_tick_shared, medic_chase_override, medic_chase_tick,
-    start_movement_event, start_movement_event_with_target, HealerDispel,
+    release_ally_walk, start_movement_event, start_movement_event_with_target, HealerDispel,
 };
 
 use super::{CombatContext, CombatantInfo};
@@ -1770,50 +1770,43 @@ pub fn evaluate_priest_posture(
             decision_trace,
             ctx,
         );
-    } else if let Some(ally) =
-        super::can_cast_dispel(ctx, abilities, entity, AbilityType::DispelMagic)
-            .then(|| {
-                dispel_chase_override(
-                    abilities,
-                    entity,
-                    my_pos,
-                    combatant.current_mana,
-                    next,
-                    ctx,
-                    AbilityType::DispelMagic,
-                )
-            })
-            .flatten()
-    {
+    } else if let Some(step) = dispel_chase_override(
+        abilities,
+        entity,
+        my_pos,
+        combatant.current_mana,
+        next,
+        ctx,
+        AbilityType::DispelMagic,
+        shared,
+        state,
+    ) {
         // Dispel walk (AS-187, the Paladin's AS-180 walk): a teammate held in
         // urgent crowd control Dispel Magic removes is beyond its range or out
-        // of sight — walk until the rotation's urgent Dispel Magic reaches it.
-        // Not while silenced or Holy-locked: it could not cast on arrival.
-        // Non-critical casts defer meanwhile, exactly as during a dip: a Flash
-        // Heal roots the Priest for its whole cast, and back-to-back casts would
-        // hold it out of reach while its teammate's CC runs.
-        ally_walk_tick(
+        // of sight — walk until the rotation's urgent Dispel Magic reaches it,
+        // then hold there until it lands. Not while silenced or Holy-locked,
+        // nor while another teammate is dying. Non-critical casts defer
+        // meanwhile, exactly as during a dip: a Flash Heal roots the Priest for
+        // its whole cast, and back-to-back casts would hold it out of reach
+        // while its teammate's CC runs.
+        dispel_walk_tick(
             commands,
             entity,
             my_pos,
-            ally,
+            step,
             state,
             directive,
             shared,
             now,
             decision_trace,
             ctx,
-            MovementTrigger::DispelChase,
         );
         cast_defer = true;
     } else {
-        if state.medic_target.is_some() {
-            // Sight regained / ally in Dispel Magic's reach (or the ally
-            // recovered, was freed, or died): drop the walk so the normal tick
-            // re-anchors.
-            commands.entity(entity).remove::<MovementDirective>();
-            state.medic_target = None;
-        }
+        // Sight regained / ally in Dispel Magic's reach and dispelled (or the
+        // ally recovered, was freed, or died): drop the walk so the normal
+        // tick re-anchors.
+        release_ally_walk(commands, entity, state);
         match next {
             Posture::Escape => escape_tick(
                 commands,
