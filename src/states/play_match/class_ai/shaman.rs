@@ -29,7 +29,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::movement_config::MovementConfig;
 
 use super::super::utils::{combatant_id, log_ability_use};
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
 use super::caster_healer_posture::CasterHealerPlan;
 use super::CombatContext;
 
@@ -252,7 +252,19 @@ fn try_lesser_healing_wave(
         match ctx.lowest_health_ally_in_reach(hp_threshold, movement.shared.heal_range, my_pos) {
             Ok(info) => info,
             Err(reason) => {
-                builder.reject(ability, reason);
+                builder.reject(
+                    ability,
+                    unreached_reason(
+                        reason,
+                        ability,
+                        def,
+                        combatant,
+                        my_pos,
+                        auras,
+                        ctx,
+                        PreCastOpts::default(),
+                    ),
+                );
                 return false;
             }
         };
@@ -413,11 +425,19 @@ fn try_frost_shock(
 ) -> bool {
     let ability = AbilityType::FrostShock;
     let def = abilities.get_unchecked(&ability);
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        check_target_immune: true,
+        ..Default::default()
+    };
 
     let target_entity = match frost_shock_target(ctx, entity, combatant, my_pos, def.range) {
         Ok(target) => target,
         Err(reason) => {
-            builder.reject(ability, reason);
+            builder.reject(
+                ability,
+                unreached_reason(reason, ability, def, combatant, my_pos, auras, ctx, opts),
+            );
             return false;
         }
     };
@@ -427,11 +447,6 @@ fn try_frost_shock(
     };
     let target_pos = target_info.position;
 
-    let opts = PreCastOpts {
-        check_friendly_cc: true,
-        check_target_immune: true,
-        ..Default::default()
-    };
     if !pre_cast_ok(
         ability,
         def,
@@ -1023,6 +1038,38 @@ mod reach_tests {
         let trace = frost_shock(&mut s, &pillar());
         assert_eq!(outcome(&trace), None, "no Frost Shock through the pillar");
         assert_eq!(candidate(&trace, "FrostShock")["reason"], "LosBlocked");
+    }
+
+    /// A Shaman with Frost Shock on cooldown is refused for the cooldown,
+    /// whether its only attacker is in sight or behind the pillar: sight
+    /// cannot hide the caster's own state.
+    #[test]
+    fn an_occluded_peel_still_reports_frost_shock_on_cooldown() {
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let abilities = AbilityDefinitions::default();
+            let mut s = peel_scene(&[OCCLUDED_ATTACKER]);
+            let me = s.units[0];
+            let trace = s.run(obstacles, |commands, ctx, combatant, builder| {
+                combatant
+                    .ability_cooldowns
+                    .insert(AbilityType::FrostShock, 3.0);
+                try_frost_shock(
+                    commands,
+                    &mut CombatLog::default(),
+                    &abilities,
+                    me,
+                    combatant,
+                    CASTER,
+                    None,
+                    ctx,
+                    builder,
+                )
+            });
+            candidate(&trace, "FrostShock")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("OnCooldown").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
     }
 
     /// Range is unchanged: an attacker beyond Frost Shock's range was never a

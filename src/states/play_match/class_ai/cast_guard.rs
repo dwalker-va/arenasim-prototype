@@ -259,3 +259,33 @@ pub fn classify_pre_cast_failure(
         note: "can_cast_config failed".into(),
     }
 }
+
+/// The reason to trace when a reach-first chooser
+/// ([`super::cast_reach`] / [`super::sight_blocks`]) found no candidate in
+/// reach. The chooser runs before `pre_cast_ok`, so its `LosBlocked` verdict
+/// was reached without asking about the caster. `pre_cast_ok` puts the
+/// caster's own state ahead of sight, so a caster that could not have cast
+/// anyway is reported for that reason: Travel Form, a school lockout, a
+/// silence, a cooldown or a lack of mana. Every other `reason` passes through
+/// untouched. On an obstacle-free map no chooser says `LosBlocked`, so this
+/// changes nothing there.
+#[allow(clippy::too_many_arguments)]
+pub fn unreached_reason(
+    reason: crate::states::play_match::decision_trace::RejectionReason,
+    ability: AbilityType,
+    def: &AbilityConfig,
+    caster: &Combatant,
+    caster_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    opts: PreCastOpts,
+) -> crate::states::play_match::decision_trace::RejectionReason {
+    use crate::states::play_match::decision_trace::RejectionReason;
+    if matches!(reason, RejectionReason::LosBlocked)
+        && !pre_cast_ok(ability, def, caster, caster_pos, auras, None, ctx, opts)
+    {
+        classify_pre_cast_failure(ability, def, caster, caster_pos, auras, None, ctx, opts)
+    } else {
+        reason
+    }
+}

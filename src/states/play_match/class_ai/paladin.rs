@@ -33,7 +33,7 @@ use crate::states::play_match::decision_trace::{
 };
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
 use super::healer_postures::start_movement_event_with_target;
 
 use super::{CombatContext, CombatantInfo};
@@ -675,7 +675,19 @@ fn try_flash_of_light(
     let target_info = match ctx.lowest_health_ally_in_reach(0.9, def.range, my_pos) {
         Ok(info) => info,
         Err(reason) => {
-            builder.reject(ability, reason);
+            builder.reject(
+                ability,
+                unreached_reason(
+                    reason,
+                    ability,
+                    def,
+                    combatant,
+                    my_pos,
+                    auras,
+                    ctx,
+                    PreCastOpts::default(),
+                ),
+            );
             return false;
         }
     };
@@ -780,7 +792,19 @@ fn try_holy_light(
         match ctx.lowest_health_ally_in_reach(SAFE_HEAL_MAX_THRESHOLD, def.range, my_pos) {
             Ok(info) => info,
             Err(reason) => {
-                builder.reject(ability, reason);
+                builder.reject(
+                    ability,
+                    unreached_reason(
+                        reason,
+                        ability,
+                        def,
+                        combatant,
+                        my_pos,
+                        auras,
+                        ctx,
+                        PreCastOpts::default(),
+                    ),
+                );
                 return false;
             }
         };
@@ -1810,5 +1834,41 @@ mod reach_tests {
         let trace = holy_shock_damage(&mut s, &pillar());
         assert_eq!(outcome(&trace), None, "no Holy Shock through the pillar");
         assert_eq!(candidate(&trace, "HolyShock")["reason"], "LosBlocked");
+    }
+
+    /// A silenced Paladin is refused Flash of Light for the silence, whether
+    /// its only hurt ally is in sight or behind the pillar: sight cannot hide
+    /// the caster's own state (AS-204).
+    #[test]
+    fn an_occluded_heal_still_reports_the_paladin_silenced() {
+        let silenced = ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::Silence,
+                ..Default::default()
+            }],
+        };
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let abilities = AbilityDefinitions::default();
+            let mut s = scene(1, 0.3, 1.0);
+            let me = s.units[0];
+            let trace = s.run(obstacles, |commands, ctx, combatant, builder| {
+                try_flash_of_light(
+                    commands,
+                    &mut CombatLog::default(),
+                    &abilities,
+                    me,
+                    combatant,
+                    CASTER,
+                    Some(&silenced),
+                    ctx,
+                    None,
+                    builder,
+                )
+            });
+            candidate(&trace, "FlashOfLight")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("SilencedOrLocked").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
     }
 }

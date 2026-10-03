@@ -30,7 +30,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::movement_config::{MovementConfig, SharedMovementConfig};
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
 use super::healer_postures::{
     compound_pressure_trigger, dispel_chase_override, dispel_walk_tick, escape_tick,
     escape_window_from, healer_pressured_tick_shared, medic_chase_override, medic_chase_tick,
@@ -650,13 +650,23 @@ fn try_fortitude(
     }
 
     let Some((buff_target, target_pos)) = unbuffed_ally else {
+        let reason = if occluded {
+            RejectionReason::LosBlocked
+        } else {
+            RejectionReason::NoValidTarget
+        };
         builder.reject(
             ability,
-            if occluded {
-                RejectionReason::LosBlocked
-            } else {
-                RejectionReason::NoValidTarget
-            },
+            unreached_reason(
+                reason,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                PreCastOpts::default(),
+            ),
         );
         return false;
     };
@@ -799,13 +809,23 @@ fn try_power_word_shield(
     }
 
     let Some((shield_entity, target_pos, _)) = best_candidate else {
+        let reason = if occluded {
+            RejectionReason::LosBlocked
+        } else {
+            RejectionReason::NoValidTarget
+        };
         builder.reject(
             pw_shield,
-            if occluded {
-                RejectionReason::LosBlocked
-            } else {
-                RejectionReason::NoValidTarget
-            },
+            unreached_reason(
+                reason,
+                pw_shield,
+                pw_shield_def,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                PreCastOpts::default(),
+            ),
         );
         return false;
     };
@@ -954,7 +974,19 @@ fn try_flash_heal(
     let target_info = match ctx.lowest_health_ally_in_reach(0.9, def.range, my_pos) {
         Ok(info) => info,
         Err(reason) => {
-            builder.reject(ability, reason);
+            builder.reject(
+                ability,
+                unreached_reason(
+                    reason,
+                    ability,
+                    def,
+                    combatant,
+                    my_pos,
+                    auras,
+                    ctx,
+                    PreCastOpts::default(),
+                ),
+            );
             return false;
         }
     };
@@ -2496,6 +2528,51 @@ mod reach_tests {
         );
         let trace = scream(&mut s, &pillar());
         assert!(screamed(&trace), "the occluded dying Warrior holds nothing");
+    }
+
+    /// A dying ally beyond heal range never held the scream, and still does
+    /// not: range is unchanged.
+    #[test]
+    fn a_dying_ally_beyond_heal_range_does_not_hold_the_scream() {
+        let mut s = ReachScene::new(
+            Priest,
+            &[
+                (1, Mage, Vec3::new(0.0, 1.0, 45.0), 0.3),
+                (2, CharacterClass::Rogue, Vec3::new(2.0, 1.0, 2.0), 1.0),
+            ],
+        );
+        assert!(screamed(&scream(&mut s, &[])));
+    }
+
+    /// An out-of-mana Priest is refused Flash Heal for mana, whether its only
+    /// hurt ally is in sight or behind the pillar: sight cannot hide the
+    /// caster's own state.
+    #[test]
+    fn an_occluded_heal_still_reports_the_priest_out_of_mana() {
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let abilities = AbilityDefinitions::default();
+            let mut s = scene(0.3, 1.0);
+            let me = s.units[0];
+            let trace = s.run(obstacles, |commands, ctx, combatant, builder| {
+                combatant.current_mana = 0.0;
+                try_flash_heal(
+                    commands,
+                    &mut CombatLog::default(),
+                    &abilities,
+                    me,
+                    combatant,
+                    CASTER,
+                    None,
+                    ctx,
+                    None,
+                    builder,
+                )
+            });
+            candidate(&trace, "FlashHeal")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("InsufficientMana").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
     }
 
     /// A dying ally the heal reaches still holds it, pillar or not.

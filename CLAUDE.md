@@ -692,7 +692,9 @@ several candidates filters by reach before it ranks: `class_ai::cast_reach`,
 range then line of sight, the same two gates and order `pre_cast_ok` applies to
 every targeted cast. So an occluded best pick yields to the best one in sight
 instead of being picked and then refused; with none in reach the cast is
-rejected `LosBlocked`. The choosers: the ally dispels (Dispel Magic, Cleanse,
+rejected `LosBlocked` — unless the caster could not have cast anyway, which
+is reported first, in `pre_cast_ok`'s order (`cast_guard::unreached_reason`:
+Travel Form, lockout, silence, cooldown, mana). The choosers: the ally dispels (Dispel Magic, Cleanse,
 Devour Magic, Master's Call), Purge (`select_purge` — the best buff it can
 see), every heal that ranks allies by health (`CombatContext::lowest_health_ally_in_reach`:
 Flash Heal, Flash of Light, Holy Light, the Holy Shock heal, Lesser Healing
