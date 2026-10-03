@@ -1938,6 +1938,35 @@ mod tests {
         assert!(w.sees(end, ally), "parked blind at {end:?}");
     }
 
+    /// The sight fallback waits on an owed dispel like everything else: with a
+    /// nearer teammate hidden behind a pillar from every candidate, the healer
+    /// still takes the nearest spot the dispel reaches, rather than walking at
+    /// the hidden teammate.
+    #[test]
+    fn an_owed_dispel_outranks_the_sight_fallback() {
+        let w = SolveWorld {
+            obstacles: vec![pillar_at(-6.0, 0.0)],
+            ..world(vec![
+                healer(1, 1, 0, 0.0, 0.0),
+                melee(2, 1, 1, 38.0, 0.0),
+                unit(3, 1, 2, -12.0, 0.0),
+            ])
+        }
+        .with_dispel_goal(
+            e(1),
+            Some(DispelGoal {
+                ally: e(2),
+                range: 30.0,
+            }),
+        );
+        assert!(!w.sees(Vec2::ZERO, Vec2::new(-12.0, 0.0)));
+        let spot = solve_healer(&w);
+        assert!(
+            spot.distance(Vec2::new(38.0, 0.0)) <= 30.0 - DISPEL_REACH_MARGIN,
+            "{spot:?} does not reach the teammate owed the dispel"
+        );
+    }
+
     /// Out of the dying teammate's reach, SIGHT is scored before range: a spot
     /// that sees it from a yard beyond reach beats one in range that cannot.
     #[test]
