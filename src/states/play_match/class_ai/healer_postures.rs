@@ -911,6 +911,7 @@ pub(super) fn healer_pressured_tick_shared(
                 d.current_mana,
                 d.ability,
                 shared.urgency_hp_threshold,
+                state.solve_dispel,
             )
         })
     } else {
@@ -980,6 +981,7 @@ pub(super) fn healer_pressured_tick_shared(
             threat_radius,
             None,
         )
+        .with_urgency_hp_threshold(shared.urgency_hp_threshold)
         .with_dispel_goal(entity, dispel_goal);
         // A healer with no living non-pet partner is not a healer any more:
         // `OccupyCover`'s sight and leash constraints go vacuous and the last

@@ -512,7 +512,20 @@ measured.** Assume the three intents that still have no consumer
   one GCD past arrival, then cover and sight are back. It is not owed while
   another teammate is below the urgency threshold: a dying ally comes first,
   `Legacy`'s medic-first order, so the goal can never walk the healer off a
-  heal that matters more.
+  heal that matters more. Once the walk reaches, the goal holds until the
+  dispel lands or stops being owed, so the solve cannot step the healer back
+  out of range while its GCD runs.
+- **`OccupyCover`'s heal range is HARD for a dying teammate (AS-198).** While
+  the healer can heal and a teammate is below `urgency_hp_threshold`, the
+  intent anchors on the most hurt such teammate rather than the nearest, and
+  reaching it — within `heal_range` and in sight — ranks lexicographically
+  above every other constraint. Cover is chosen only among the spots from which
+  the heal still lands. A soft leash cannot hold this: at `W_LEASH` per yard, a
+  covered spot several yards out of heal range undercuts an exposed one inside
+  it, and the healer hides while its teammate dies. Like the castability
+  condition it is temporal — it binds only while someone is dying and the
+  healer can cast — so the measured cover value is untouched the rest of the
+  time.
 
 #### The framing does not fit a kiter, and that is structural
 

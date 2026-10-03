@@ -775,6 +775,65 @@ fn a_pressured_teamplan_priest_rounds_a_wide_pillar_no_candidate_clears() {
     assert!(freed.triggers.iter().any(|t| t == "DispelChase"));
 }
 
+/// The solve's walk HOLDS its reach (AS-198, the `TeamPlan` half of AS-197).
+/// The Warrior trapped 15yd beyond Dispel Magic's range in the open, the enemy
+/// Hunter moved off the line above the reaching spot, and a pillar whose shadow
+/// from the Hunter is a fully satisfying cover spot 34yd from the Warrior —
+/// inside heal range, outside dispel range. The Priest's GCD is still running
+/// when it arrives, so the dispel waits; the Priest must hold reach until it
+/// lands, rather than stepping back to the cover spot the moment the dispel
+/// reaches and walking in again when the goal re-arms.
+#[test]
+fn a_pressured_teamplan_priest_holds_reach_until_the_dispel_lands() {
+    let range = dispel_range();
+    let mut s = scene(range + 15.0, trapped());
+    s.profile = AiProfile::TeamPlan;
+    s.posture = Some(held(Posture::Pressured));
+    s.roster.get_mut(&s.hunter).unwrap().position = Vec3::new(16.0, 1.0, 30.0);
+    s.obstacles.push(ObstacleVolume::Prism {
+        center_xz: Vec2::new(8.0, 8.0),
+        circumradius: 6.0,
+        sides: 8,
+        rotation: 0.0,
+        base_y: 0.0,
+        height: 5.0,
+    });
+    let speed = s.combatant.base_movement_speed;
+    // Busy for a second past the walk: the dispel cannot land on arrival.
+    let busy = (15.0 + 1.0) / speed + 1.0;
+    s.combatant.global_cooldown = busy;
+
+    let freed = step_until_dispelled(&mut s, 10.0).expect("the trapped Warrior is never freed");
+    let reached = freed
+        .path
+        .iter()
+        .position(|p| p.distance(s.warrior_pos) <= range)
+        .expect("the Priest never reached the Warrior");
+    let worst = freed.path[reached..]
+        .iter()
+        .map(|p| p.distance(s.warrior_pos))
+        .fold(0.0f32, f32::max);
+    assert!(
+        worst <= range,
+        "stepped back to {worst:.1}yd from the Warrior while the dispel waited"
+    );
+    assert_eq!(
+        freed
+            .triggers
+            .iter()
+            .filter(|t| *t == "DispelChase")
+            .count(),
+        1,
+        "the walk re-armed: {:?}",
+        freed.triggers
+    );
+    assert!(
+        freed.at <= busy + 2.0 / 60.0,
+        "freed {:.2}s after the GCD came back",
+        freed.at - busy
+    );
+}
+
 /// A DYING teammate outranks the owed dispel (the `Legacy` medic-first order).
 /// The scene adds a second teammate, a Rogue 30yd behind the Priest at 20% HP;
 /// the Warrior is trapped 45yd the other way, beyond Dispel Magic's range, and
