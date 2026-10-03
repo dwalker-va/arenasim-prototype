@@ -195,13 +195,9 @@ pub(super) fn escape_window_from<I: IntoIterator<Item = Option<f32>>>(
 /// footprint (always, on an obstacle-free map) comes back bit-identical; one no
 /// projection frees is returned as it stands, to the executor's hold.
 ///
-/// `TeamPlan` only. `Legacy` keeps the unprojected point, so every recorded
-/// baseline and calibrated probe stays byte-identical; its in-pillar formation
-/// point is AS-203.
+/// Both AI profiles (AS-190 `TeamPlan`, AS-203 `Legacy`): the defect is in
+/// the point's arithmetic, not in either AI's use of it.
 pub fn standable_formation_point(ctx: &CombatContext, point: Vec3) -> Vec3 {
-    if !ctx.ai_profile.is_team_plan() {
-        return point;
-    }
     nearest_standable(ctx.obstacles, Vec2::new(point.x, point.z), point.y)
         .map_or(point, |p| Vec3::new(p.x, point.y, p.y))
 }

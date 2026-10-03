@@ -4745,6 +4745,15 @@ mod u9_seek_reset {
     /// Replaced by 47 and 41 from a re-scan: 47 has 861 cast-start blocks / 74
     /// seeks / 43 casts landed after occlusion began / 4.28s longest stall; 41
     /// has 661 / 34 / 20 / 4.82s.
+    ///
+    /// Re-pinned for AS-203, the `Legacy` healer formation point projected out
+    /// of pillars (47 -> 7). Both Priests here used to be sent to points inside
+    /// a pillar, so the comp's trajectories change from the first projected
+    /// frame; at 47 the Mage is never LosBlocked at cast start. The occlusion
+    /// itself survives: 13 of 80 seeds in `scan_mage_occlusion_seeds` pass every
+    /// condition (27 before). Seed 7 has 792 cast-start blocks / 48 seeks / 33
+    /// casts landed after occlusion began / 3.45s longest stall; 41 holds at
+    /// 463 / 92 / 16 / 3.50s.
     fn assert_mage_repositions_and_casts(seed: u64) {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
@@ -4782,8 +4791,8 @@ mod u9_seek_reset {
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_47() {
-        assert_mage_repositions_and_casts(47);
+    fn mage_repositions_and_casts_despite_occlusion_seed_7() {
+        assert_mage_repositions_and_casts(7);
     }
 
     #[test]
@@ -4810,24 +4819,28 @@ mod u9_seek_reset {
     /// crit (the Wand of Shadows fires every 1.8s for the same DPS). Re-pinned
     /// to 24 from a re-scan: 409 cast-start blocks, 90 seeks, longest run
     /// 1.80s.
+    ///
+    /// AS-203's standable `Legacy` formation point took 24 to 0 (both Priests
+    /// used to stand pressed against a pillar). Re-pinned to 8 from a re-scan:
+    /// 126 cast-start blocks, 80 seeks, longest run 2.05s.
     #[test]
-    fn mage_recovers_to_cast_within_bound_seed_24() {
+    fn mage_recovers_to_cast_within_bound_seed_8() {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            24,
+            8,
             "TwinPillars",
         );
         let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
         assert!(
             blocked.len() >= 3,
-            "seed 24 must exercise occlusion, got {}",
+            "seed 8 must exercise occlusion, got {}",
             blocked.len()
         );
         let span = max_contiguous_block_span(&lines);
         assert!(
             span <= 10.0,
-            "seed 24: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
+            "seed 8: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
             span
         );
     }
@@ -4842,11 +4855,13 @@ mod u9_seek_reset {
         // los_seek term against seed 13's 0. Then to 30 for AS-115's re-priced
         // Warrior two-hander, which took 77 to 0; 30 carries 5. Then to 24 for
         // AS-167's item weapon speeds, which took 30 to 0 (first diff from
-        // main: the Mage's first Wand Shot, 14 -> 18); 24 carries 6.
+        // main: the Mage's first Wand Shot, 14 -> 18); 24 carries 6. Then to
+        // 8 for AS-203's standable `Legacy` formation point, which took 24 to
+        // 0; 8 carries 10.
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            24,
+            8,
             "TwinPillars",
         );
         let seek_with_term = lines
@@ -5600,7 +5615,12 @@ mod los_probes {
         // the free starting bar paid for becomes a plain Auto Attack. 24 still
         // holds (27 fizzles, 17 impacts). 36 re-pinned to 1 from a re-scan:
         // 35 fizzles against 16 Frostbolt impacts.
-        for seed in [1u64, 24u64] {
+        // AS-203 (the `Legacy` healer formation point projected out of
+        // pillars; both Priests here used to stand pressed against one) took
+        // 24 to zero fizzles and 1 to one. Re-pinned to 7 and 18 from a
+        // re-scan: 27 and 20 fizzles against 16 and 14 Frostbolt impacts.
+        // Completion fizzles still occur on 15 of 40 seeds (24 before).
+        for seed in [7u64, 18u64] {
             let log = pillared_log(seed);
 
             let fizzles = log
@@ -5917,8 +5937,20 @@ mod chase_los {
     // Auto Attack. Seed 13 still holds (18.4s total occlusion, 6.70s longest
     // window). Seed 2 from a re-scan: team-1 elimination at 89.5s, 42.7s
     // total occlusion, 5.55s longest window.
-    const SEED_A: u64 = 2;
-    const SEED_B: u64 = 13;
+    //
+    // Re-pinned for AS-203, the `Legacy` healer formation point projected out
+    // of pillars (2/13 -> 23/38). The Mage's Priest used to be sent to a point
+    // inside a pillar and stood pressed against it; with a standable goal its
+    // trajectory changes from its first projected frame, and at 2 and 13 the
+    // Mage now catches the lone Shaman with 0.0s occlusion. The pillar-hug
+    // still happens on its own: 6 of 40 seeds in `scan_seeds` carry 2s or
+    // more of lone-Shaman occlusion (12 of 40 before).
+    //   seed 23: team-1 elimination at 72.5s, 34.6s total occlusion, 5.27s
+    //            longest window.
+    //   seed 38: team-1 elimination at 53.4s, 16.9s total occlusion, 6.92s
+    //            longest window.
+    const SEED_A: u64 = 23;
+    const SEED_B: u64 = 38;
 }
 
 // ---------------------------------------------------------------------------
@@ -6168,6 +6200,9 @@ mod juke_chase {
         // range keeps it at pillar-occluded angles longer, so the geometric
         // occlusion proxy rose (4 -> 10) even though the load-bearing assertions
         // — team-1 elimination win, resolved well before the cap — still hold.
+        //
+        // The seed has moved since (now 46, 10 windows; see `JUKE_SEED_A`);
+        // the bound of 15 is still 1.5x what it observes.
         assert_juke_bounded(JUKE_SEED_A, 15);
     }
 
@@ -6221,7 +6256,10 @@ mod juke_chase {
         // establishes where the real floor is — the headroom exists to absorb
         // trajectory wobble from unrelated changes, not because 15 was tested and
         // failed.
-        assert_juke_bounded(JUKE_SEED_B, 16);
+        //
+        // AS-203 moved B to 54 (10 windows) and its bound to 15 by the same
+        // 1.5x convention; see `JUKE_SEED_B`.
+        assert_juke_bounded(JUKE_SEED_B, 15);
     }
 
     // Pinned by `scan_seeds` (run with `--ignored`): seeds where the enemy
@@ -6257,7 +6295,7 @@ mod juke_chase {
     // A: 2676 lone samples / 28.8s occlusion / 10 fizzle-length windows,
     // against the bound of 15 — the same 10 windows that bound was set around,
     // which is why it is unchanged.
-    const JUKE_SEED_A: u64 = 10;
+    const JUKE_SEED_A: u64 = 46;
     // B: 40.9s total occlusion / 11 fizzle-length windows against the bound of
     // 16 — the long-dance character seed 2 carried before it drifted.
     //
@@ -6275,7 +6313,21 @@ mod juke_chase {
     // fizzle-length windows, 3747 lone samples, team-1 win at 81.5s — the
     // same 11 windows the bound of 16 was set around, so it is unchanged.
     // Seed 10 (A) still holds, at 15 windows against its bound of 15.
-    const JUKE_SEED_B: u64 = 56;
+    //
+    // Re-pinned for AS-203, the `Legacy` healer formation point projected out
+    // of pillars (A 10 -> 46, B 56 -> 54). The Mage's Priest used to be sent
+    // to a point inside a pillar; with a standable goal the comp's trajectories
+    // change from its first projected frame. At 10 the Warrior no longer dies
+    // (team 2 wins at 53.8s) and at 56 the dance never starts (0.0s
+    // occlusion). The dance itself survives the change: 11 of 60 seeds in
+    // `scan_seeds` are candidates (20 of 60 before). Both replacements carry
+    // the long-dance character the bounds were set around:
+    //   seed 46: 31.8s total occlusion, 10 fizzle-length windows, 2960 lone
+    //            samples, team-1 win at 82.7s (bound 15 = 1.5x, unchanged).
+    //   seed 54: 37.5s total occlusion, 10 fizzle-length windows, 3493 lone
+    //            samples, team-1 win at 91.6s (bound 16 -> 15: the same 1.5x
+    //            convention applied to the 10 windows observed here).
+    const JUKE_SEED_B: u64 = 54;
 }
 
 // ---------------------------------------------------------------------------
@@ -6686,7 +6738,32 @@ mod medic_chase {
     // Observed after AS-172:
     //   seed 3: 271 distress frames, 3.37s longest window, heal at 5.08s, 0 lost.
     //   seed 9: 422 distress frames, 5.53s longest window, heal at 8.80s, 0 lost.
-    const MEDIC_SEED_A: u64 = 3;
+    //
+    // Re-pinned for AS-203, the `Legacy` healer formation point projected out
+    // of pillars (A 3 -> 6). The Priest's goal is now a spot it can stand on,
+    // so the match diverges from its first projected frame. At 3 the Warrior
+    // now dies with two occluded-distress windows behind it, and that was
+    // read before re-seeding, not re-seeded away. Neither is a slow chase:
+    //   - the first window closes in 0.53s, the medic walk regaining sight,
+    //     and the Priest's Power Word: Shield lands on the Warrior at once —
+    //     an absorb, which this probe's HP-rise heal detector cannot see;
+    //   - the second opens when the Warrior, at 11% HP, Charges the lone
+    //     Shaman in the middle of the Priest's Flash Heal. The heal fizzles for
+    //     line of sight, the Warrior chases the kiting Shaman ~45yd away, and
+    //     dies to it 4.7s after the Charge, the Priest walking after it at its own
+    //     speed and ~20% mana.
+    // The chase bound the probe exists for still holds across the 30-seed
+    // re-scan, with less headroom. The Priest's longest occluded window is
+    // under 8s on every seed, but its maximum rises from 5.27s (seed 9) to
+    // 6.63s (seed 20), so the headroom falls from ~2.7s to ~1.4s. Seed 20 now
+    // also loses its Warrior twice before a visible heal. Seeds where a
+    // Warrior dies before a visible heal go 7 -> 9 of 30 (`main` @ 16c2a3c
+    // against this change); the two new ones are 3 and 20.
+    //
+    // Observed after AS-203:
+    //   seed 6: 238 distress frames, 2.90s longest window, heal at 5.95s, 0 lost.
+    //   seed 9: 406 distress frames, 5.27s longest window, heal at 7.40s, 0 lost.
+    const MEDIC_SEED_A: u64 = 6;
     const MEDIC_SEED_B: u64 = 9;
 
     #[test]
@@ -6778,7 +6855,15 @@ mod oom_wand {
     // (the Wand of Shadows fires every 1.8s for the same DPS). Seed 24 from
     // `scan_oom_seeds`: Warrior dies at 40.4s, 20 wand hits and 28 Mage
     // damage events through the window. The floors of 4 and 9 are unchanged.
-    const SEED: u64 = 24;
+    //
+    // Re-pinned for AS-203, the `Legacy` healer formation point projected out
+    // of pillars (24 -> 26). The Mage's Priest used to stand pressed against
+    // a pillar; with a standable goal the 2v1 changes shape, and at 24 the
+    // Mage no longer reaches wand range of the lone Shaman. Seed 26 from
+    // `scan_oom_seeds`: Warrior dies at 41.5s, 10 wand hits and 18 Mage damage
+    // events through the window, team-1 win at 70.3s. The floors of 4 and 9
+    // are unchanged.
+    const SEED: u64 = 26;
 
     /// One damage event parsed from the combat log: `(wall_time, is_wand)`.
     struct MageDamage {
