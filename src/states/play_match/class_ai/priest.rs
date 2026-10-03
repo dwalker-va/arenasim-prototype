@@ -30,7 +30,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::movement_config::{MovementConfig, SharedMovementConfig};
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
 use super::healer_postures::{
     compound_pressure_trigger, dispel_chase_override, dispel_walk_tick, escape_tick,
     escape_window_from, healer_pressured_tick_shared, medic_chase_override, medic_chase_tick,
@@ -383,10 +383,12 @@ fn try_psychic_scream(
     // HP threshold, within heal range) must be healed before the peel. The
     // scream is priority 3 — above Flash Heal — so without this gate it would
     // burn a GCD and delay a life-saving heal, breaking the critical-heal-wins
-    // invariant (see `try_flash_heal`). The scream still fires next GCD.
+    // invariant (see `try_flash_heal`). The scream still fires next GCD. Only a
+    // dying ally the heal REACHES (range, then sight) holds it: one behind
+    // cover is the medic walk's to reach, and no heal can land on it yet.
     if ctx
-        .lowest_health_ally_below(shared.urgency_hp_threshold, shared.heal_range, my_pos)
-        .is_some()
+        .lowest_health_ally_in_reach(shared.urgency_hp_threshold, shared.heal_range, my_pos)
+        .is_ok()
     {
         builder.reject(
             scream,
@@ -648,13 +650,23 @@ fn try_fortitude(
     }
 
     let Some((buff_target, target_pos)) = unbuffed_ally else {
+        let reason = if occluded {
+            RejectionReason::LosBlocked
+        } else {
+            RejectionReason::NoValidTarget
+        };
         builder.reject(
             ability,
-            if occluded {
-                RejectionReason::LosBlocked
-            } else {
-                RejectionReason::NoValidTarget
-            },
+            unreached_reason(
+                reason,
+                ability,
+                def,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                PreCastOpts::default(),
+            ),
         );
         return false;
     };
@@ -797,13 +809,23 @@ fn try_power_word_shield(
     }
 
     let Some((shield_entity, target_pos, _)) = best_candidate else {
+        let reason = if occluded {
+            RejectionReason::LosBlocked
+        } else {
+            RejectionReason::NoValidTarget
+        };
         builder.reject(
             pw_shield,
-            if occluded {
-                RejectionReason::LosBlocked
-            } else {
-                RejectionReason::NoValidTarget
-            },
+            unreached_reason(
+                reason,
+                pw_shield,
+                pw_shield_def,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                PreCastOpts::default(),
+            ),
         );
         return false;
     };
@@ -952,7 +974,19 @@ fn try_flash_heal(
     let target_info = match ctx.lowest_health_ally_in_reach(0.9, def.range, my_pos) {
         Ok(info) => info,
         Err(reason) => {
-            builder.reject(ability, reason);
+            builder.reject(
+                ability,
+                unreached_reason(
+                    reason,
+                    ability,
+                    def,
+                    combatant,
+                    my_pos,
+                    auras,
+                    ctx,
+                    PreCastOpts::default(),
+                ),
+            );
             return false;
         }
     };
@@ -2432,5 +2466,177 @@ mod reach_tests {
             candidate(&trace, "PowerWordFortitude")["reason"],
             "LosBlocked"
         );
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-204: the Psychic Scream holds only for a heal that can land
+    // ------------------------------------------------------------------------
+
+    /// [`scene`], plus an enemy Rogue inside the scream's radius.
+    fn screamable(warrior_hp: f32, mage_hp: f32) -> ReachScene {
+        ReachScene::new(
+            Priest,
+            &[
+                (1, Warrior, BEHIND, warrior_hp),
+                (1, Mage, IN_SIGHT, mage_hp),
+                (2, CharacterClass::Rogue, Vec3::new(2.0, 1.0, 2.0), 1.0),
+            ],
+        )
+    }
+
+    /// A pressured Priest's defensive scream.
+    fn scream(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let movement = crate::states::play_match::movement_config::MovementConfig::default();
+        let me = s.units[0];
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_psychic_scream(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                true,
+                &movement.shared,
+                &mut Vec::new(),
+                builder,
+            )
+        })
+    }
+
+    fn screamed(trace: &DecisionTrace) -> bool {
+        outcome(trace).is_some_and(|(ability, _)| ability == "PsychicScream")
+    }
+
+    fn held_for_a_heal(trace: &DecisionTrace) -> bool {
+        candidate(trace, "PsychicScream")["reason"]["PreconditionUnmet"]["note"]
+            == "critical heal pending"
+    }
+
+    /// A dying ally behind the pillar no longer holds the scream: no heal can
+    /// land on it until the medic walk brings it into sight.
+    #[test]
+    fn an_occluded_dying_ally_does_not_hold_the_scream() {
+        let mut s = screamable(0.3, 1.0);
+        let trace = scream(&mut s, &[]);
+        assert!(
+            !screamed(&trace) && held_for_a_heal(&trace),
+            "no pillar: held"
+        );
+        let trace = scream(&mut s, &pillar());
+        assert!(screamed(&trace), "the occluded dying Warrior holds nothing");
+    }
+
+    /// A dying ally beyond heal range never held the scream, and still does
+    /// not: range is unchanged.
+    #[test]
+    fn a_dying_ally_beyond_heal_range_does_not_hold_the_scream() {
+        let mut s = ReachScene::new(
+            Priest,
+            &[
+                (1, Mage, Vec3::new(0.0, 1.0, 45.0), 0.3),
+                (2, CharacterClass::Rogue, Vec3::new(2.0, 1.0, 2.0), 1.0),
+            ],
+        );
+        assert!(screamed(&scream(&mut s, &[])));
+    }
+
+    /// An out-of-mana Priest is refused Flash Heal for mana, whether its only
+    /// hurt ally is in sight or behind the pillar: sight cannot hide the
+    /// caster's own state.
+    #[test]
+    fn an_occluded_heal_still_reports_the_priest_out_of_mana() {
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let abilities = AbilityDefinitions::default();
+            let mut s = scene(0.3, 1.0);
+            let me = s.units[0];
+            let trace = s.run(obstacles, |commands, ctx, combatant, builder| {
+                combatant.current_mana = 0.0;
+                try_flash_heal(
+                    commands,
+                    &mut CombatLog::default(),
+                    &abilities,
+                    me,
+                    combatant,
+                    CASTER,
+                    None,
+                    ctx,
+                    None,
+                    builder,
+                )
+            });
+            candidate(&trace, "FlashHeal")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("InsufficientMana").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
+
+    /// A silenced Priest is refused Power Word: Shield for the silence,
+    /// whether its only candidate is in sight or behind the pillar. (The
+    /// Priest carries Weakened Soul and the Mage sits between 70% and full, so
+    /// only the Warrior is a candidate. Silence, not mana: the shield checks
+    /// mana before it picks.)
+    #[test]
+    fn an_occluded_shield_still_reports_the_priest_silenced() {
+        let silenced = silenced();
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let abilities = AbilityDefinitions::default();
+            let mut s = scene(0.3, 0.8);
+            let me = s.units[0];
+            s.auras.insert(me, vec![weakened_soul()]);
+            let trace = s.run(obstacles, |commands, ctx, combatant, builder| {
+                try_power_word_shield(
+                    commands,
+                    &mut CombatLog::default(),
+                    &abilities,
+                    me,
+                    combatant,
+                    CASTER,
+                    Some(&silenced),
+                    ctx,
+                    &mut HashSet::new(),
+                    builder,
+                )
+            });
+            candidate(&trace, "PowerWordShield")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("SilencedOrLocked").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
+
+    /// An out-of-mana Priest is refused Power Word: Fortitude for mana,
+    /// whether its only unbuffed ally is in sight or behind the pillar.
+    #[test]
+    fn an_occluded_fortitude_still_reports_the_priest_out_of_mana() {
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let mut s = scene(1.0, 1.0);
+            let (me, mage) = (s.units[0], s.units[2]);
+            s.auras.insert(me, vec![fortitude_buff()]);
+            s.auras.insert(mage, vec![fortitude_buff()]);
+            s.prep = Some(|c| c.current_mana = 0.0);
+            candidate(&fortitude(&mut s, obstacles), "PowerWordFortitude")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("InsufficientMana").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
+
+    /// A dying ally the heal reaches still holds it, pillar or not.
+    #[test]
+    fn a_reachable_dying_ally_still_holds_the_scream() {
+        let mut s = screamable(1.0, 0.3);
+        let trace = scream(&mut s, &pillar());
+        assert!(!screamed(&trace) && held_for_a_heal(&trace));
+
+        // A Warrior dying behind the pillar does not lift the hold the Mage
+        // in sight places.
+        let mut s = screamable(0.2, 0.3);
+        let trace = scream(&mut s, &pillar());
+        assert!(!screamed(&trace) && held_for_a_heal(&trace));
     }
 }

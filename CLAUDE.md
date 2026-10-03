@@ -692,16 +692,23 @@ several candidates filters by reach before it ranks: `class_ai::cast_reach`,
 range then line of sight, the same two gates and order `pre_cast_ok` applies to
 every targeted cast. So an occluded best pick yields to the best one in sight
 instead of being picked and then refused; with none in reach the cast is
-rejected `LosBlocked`. The choosers: the ally dispels (Dispel Magic, Cleanse,
+rejected `LosBlocked` — unless the caster could not have cast anyway, which
+is reported first, in `pre_cast_ok`'s order (`cast_guard::unreached_reason`:
+Travel Form, lockout, silence, cooldown, mana). The choosers: the ally dispels (Dispel Magic, Cleanse,
 Devour Magic, Master's Call), Purge (`select_purge` — the best buff it can
 see), every heal that ranks allies by health (`CombatContext::lowest_health_ally_in_reach`:
 Flash Heal, Flash of Light, Holy Light, the Holy Shock heal, Lesser Healing
-Wave, the Druid's emergency heal and top-up Rejuvenation) and Holy Shock damage
-(the first enemy within 20yd in sight). The choosers that rank without a range
-filter — Power Word: Shield, Power Word: Fortitude, Mark of the Wild and the
-Druid's heal focus — drop a candidate only SIGHT keeps them off
-(`class_ai::sight_blocks`) before ranking, so a best pick beyond range is still
-picked and refused as before.
+Wave, the Druid's emergency heal and top-up Rejuvenation), Holy Shock damage
+(the first enemy within 20yd in sight) and the Shaman's Frost Shock peel (the
+nearest attacker in sight). The choosers that rank without a range
+filter — Power Word: Shield, Power Word: Fortitude, Mark of the Wild, the
+Druid's heal focus and its Cyclone and Entangling Roots peels — drop a candidate
+only SIGHT keeps them off (`class_ai::sight_blocks`) before ranking, so a best
+pick beyond range is still picked and refused as before. The Druid's peels
+take an attacker in sight even when the ally they peel for is not: the control
+focus is ranked over every ally. The Priest's defensive Psychic Scream holds for
+a critical heal only when the dying ally is in reach — one behind cover is the
+medic chase's to reach, and no heal can land on it yet.
 The dispel walk asks `cast_reach`, so it ends exactly where the cast becomes
 possible. The pet strikes, Spider Web and Boar Charge, ask
 `pet_ai::pet_strike_reach` (range, Boar Charge's dead zone, sight) on every

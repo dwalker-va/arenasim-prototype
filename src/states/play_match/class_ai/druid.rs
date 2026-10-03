@@ -59,7 +59,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::movement_config::MovementConfig;
 
 use super::super::utils::log_ability_use;
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
 use super::{CombatContext, CombatantInfo};
 
 /// An ally below this HP fraction is dying: Swiftmend, or the Rejuvenation that
@@ -570,6 +570,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 }
             }
         } else if let Err(reason) = dying {
+            let reason = self.unreached(combatant, AbilityType::Swiftmend, reason);
             self.builder.reject(AbilityType::Swiftmend, reason);
         }
 
@@ -768,7 +769,8 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// The kill target is never cycloned or rooted: a Cyclone would make it
     /// immune to the team's damage, and the team's damage would break a root.
     /// A target already under hard crowd control, or immune to the bucket by
-    /// diminishing returns, is passed over.
+    /// diminishing returns, is passed over, and so is a peel pick in range but
+    /// out of sight: the next attacker in sight is taken instead.
     fn try_control(&mut self, combatant: &mut Combatant, focus: Option<(Entity, f32)>) -> bool {
         let kill_target = combatant.target;
         let usable = |turn: &Self, e: &CombatantInfo, category: DRCategory| {
@@ -806,21 +808,41 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 .collect()
         };
 
+        // An enemy a cast of `ability` could reach but for sight
+        // ([`super::sight_blocks`]) is passed over for the next one, so an
+        // occluded peel pick yields to one in sight; a pick beyond range is
+        // still picked and refused, as it always was.
+        let cyclone_range = self.abilities.get_unchecked(&AbilityType::Cyclone).range;
+        let roots_range = self
+            .abilities
+            .get_unchecked(&AbilityType::EntanglingRoots)
+            .range;
+        let mut cyclone_occluded = false;
+        let mut roots_occluded = false;
+
         // 1. Cyclone to peel for a dying focus.
         let peel = focus
             .filter(|&(_, hp)| hp < DRUID_URGENT_HP)
             .and_then(|(ally, _)| {
-                attackers_of(self, ally).into_iter().find(|(e, _)| {
-                    self.ctx
-                        .combatants
-                        .get(e)
-                        .is_some_and(|info| !info.is_pet && usable(self, info, DRCategory::Cyclone))
+                attackers_of(self, ally).into_iter().find(|&(e, pos)| {
+                    let eligible = self.ctx.combatants.get(&e).is_some_and(|info| {
+                        !info.is_pet && usable(self, info, DRCategory::Cyclone)
+                    });
+                    let blocked =
+                        eligible && super::sight_blocks(self.ctx, cyclone_range, self.my_pos, pos);
+                    cyclone_occluded |= blocked;
+                    eligible && !blocked
                 })
             });
         if let Some((enemy, enemy_pos)) = peel {
             if self.cast(combatant, AbilityType::Cyclone, enemy, enemy_pos) {
                 return true;
             }
+        } else if cyclone_occluded {
+            // Never governed: a peel is for a dying ally.
+            let reason =
+                self.unreached(combatant, AbilityType::Cyclone, RejectionReason::LosBlocked);
+            self.builder.reject(AbilityType::Cyclone, reason);
         }
 
         // 2. Cyclone the enemy healer when the kill is close.
@@ -839,7 +861,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                     return true;
                 }
             }
-            _ if peel.is_none() => {
+            _ if peel.is_none() && !cyclone_occluded => {
                 self.builder.reject(
                     AbilityType::Cyclone,
                     RejectionReason::PreconditionUnmet {
@@ -867,6 +889,12 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                         && e.position.distance(ally_pos) <= self.threat_radius
                         && usable(self, e, DRCategory::Roots)
                 })
+                .filter(|e| {
+                    let blocked =
+                        super::sight_blocks(self.ctx, roots_range, self.my_pos, e.position);
+                    roots_occluded |= blocked;
+                    !blocked
+                })
                 .min_by(|a, b| {
                     a.position
                         .distance(ally_pos)
@@ -875,12 +903,22 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 })
                 .map(|e| (e.entity, e.position))
         });
+        let urgent = focus.is_some_and(|(_, hp)| hp < DRUID_URGENT_HP);
         let Some((enemy, enemy_pos)) = melee_threat else {
-            self.builder
-                .reject(AbilityType::EntanglingRoots, RejectionReason::NoValidTarget);
+            let roots = AbilityType::EntanglingRoots;
+            // An occluded pick reports what a cast on it would have met first:
+            // the governor, then the caster's own state, then sight.
+            let reason = if roots_occluded {
+                self.governor_refusal(combatant, roots, urgent)
+                    .unwrap_or_else(|| {
+                        self.unreached(combatant, roots, RejectionReason::LosBlocked)
+                    })
+            } else {
+                RejectionReason::NoValidTarget
+            };
+            self.builder.reject(roots, reason);
             return false;
         };
-        let urgent = focus.is_some_and(|(_, hp)| hp < DRUID_URGENT_HP);
         self.governed_cast(
             combatant,
             AbilityType::EntanglingRoots,
@@ -924,14 +962,12 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             })
             .map(|a| (a.entity, a.position));
         let Some((target, target_pos)) = unbuffed else {
-            self.builder.reject(
-                ability,
-                if occluded {
-                    RejectionReason::LosBlocked
-                } else {
-                    RejectionReason::AlreadyApplied
-                },
-            );
+            let reason = if occluded {
+                self.unreached(combatant, ability, RejectionReason::LosBlocked)
+            } else {
+                RejectionReason::AlreadyApplied
+            };
+            self.builder.reject(ability, reason);
             return false;
         };
         if !self.guard(combatant, ability, target, target_pos) {
@@ -986,17 +1022,65 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         target_pos: Vec3,
         urgent: bool,
     ) -> bool {
-        let cost = self.abilities.get_unchecked(&ability).mana_cost;
-        if !urgent && !governor_allows(combatant, cost, self.time_since_gates) {
-            self.builder.reject(
-                ability,
-                RejectionReason::PreconditionUnmet {
-                    note: "mana governor: holding the reserve for dampening".to_string(),
-                },
-            );
+        if let Some(reason) = self.governor_refusal(combatant, ability, urgent) {
+            self.builder.reject(ability, reason);
             return false;
         }
         self.cast(combatant, ability, target, target_pos)
+    }
+
+    /// The mana governor's refusal of a proactive cast (`urgent` false), if it
+    /// refuses.
+    fn governor_refusal(
+        &self,
+        combatant: &Combatant,
+        ability: AbilityType,
+        urgent: bool,
+    ) -> Option<RejectionReason> {
+        let cost = self.abilities.get_unchecked(&ability).mana_cost;
+        (!urgent && !governor_allows(combatant, cost, self.time_since_gates)).then(|| {
+            RejectionReason::PreconditionUnmet {
+                note: "mana governor: holding the reserve for dampening".to_string(),
+            }
+        })
+    }
+
+    /// [`unreached_reason`] for a Druid pick that found no target in reach:
+    /// a `LosBlocked` verdict yields to the caster's own refusal, with the
+    /// guard's own options.
+    fn unreached(
+        &self,
+        combatant: &Combatant,
+        ability: AbilityType,
+        reason: RejectionReason,
+    ) -> RejectionReason {
+        let def = self.abilities.get_unchecked(&ability);
+        unreached_reason(
+            reason,
+            ability,
+            def,
+            combatant,
+            self.my_pos,
+            self.auras,
+            self.ctx,
+            Self::guard_opts(ability),
+        )
+    }
+
+    /// The opt-in pre-cast guards each Druid cast runs ([`Self::guard`]).
+    fn guard_opts(ability: AbilityType) -> PreCastOpts {
+        match ability {
+            AbilityType::Moonfire => PreCastOpts {
+                check_friendly_cc: true,
+                check_target_immune: true,
+                ..Default::default()
+            },
+            AbilityType::EntanglingRoots | AbilityType::Cyclone => PreCastOpts {
+                check_target_immune: true,
+                ..Default::default()
+            },
+            _ => PreCastOpts::default(),
+        }
     }
 
     /// Cast an instant through a zero-length `CastingState`, so the generic
@@ -1035,18 +1119,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         target_pos: Vec3,
     ) -> bool {
         let def = self.abilities.get_unchecked(&ability);
-        let opts = match ability {
-            AbilityType::Moonfire => PreCastOpts {
-                check_friendly_cc: true,
-                check_target_immune: true,
-                ..Default::default()
-            },
-            AbilityType::EntanglingRoots | AbilityType::Cyclone => PreCastOpts {
-                check_target_immune: true,
-                ..Default::default()
-            },
-            _ => PreCastOpts::default(),
-        };
+        let opts = Self::guard_opts(ability);
         let target = Some((target, target_pos));
         if pre_cast_ok(
             ability,
@@ -1550,5 +1623,260 @@ mod reach_tests {
         let trace = mark(&mut s, &pillar());
         assert_eq!(outcome(&trace), None, "no Mark through the pillar");
         assert_eq!(candidate(&trace, "MarkOfTheWild")["reason"], "LosBlocked");
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-204: the Cyclone and Entangling Roots peels choose among attackers
+    // in sight
+    // ------------------------------------------------------------------------
+
+    /// Nearer to the Druid than [`SIGHTED_ATTACKER`], with the pillar between.
+    const OCCLUDED_ATTACKER: Vec3 = Vec3::new(12.0, 1.0, 0.0);
+    /// Clear of the pillar, and in Cyclone's 20yd range.
+    const SIGHTED_ATTACKER: Vec3 = Vec3::new(12.0, 1.0, 6.0);
+    /// The dying ally both attackers are on, within a Rogue's reach of each.
+    const PEELED_ALLY: Vec3 = Vec3::new(13.0, 1.0, 3.0);
+
+    /// The Druid, an ally Warrior at `ally` (`ally_hp`), and an enemy Rogue at
+    /// each of `at`, every one of them attacking the ally — or the Druid, when
+    /// `ally` is `None`. Units: the Druid, then the Warrior if any, then the
+    /// Rogues in order.
+    fn attacked_scene(ally: Option<(Vec3, f32)>, at: &[Vec3]) -> ReachScene {
+        let mut units: Vec<_> = ally
+            .map(|(p, hp)| (1, Warrior, p, hp))
+            .into_iter()
+            .collect();
+        units.extend(at.iter().map(|&p| (2, Rogue, p, 1.0)));
+        let mut s = ReachScene::new(Druid, &units);
+        let victim = s.units[if ally.is_some() { 1 } else { 0 }];
+        let first = if ally.is_some() { 2 } else { 1 };
+        for rogue in s.units[first..].to_vec() {
+            s.roster.get_mut(&rogue).unwrap().target = Some(victim);
+        }
+        s
+    }
+
+    /// One control step with `focus` (the ally and its HP fraction).
+    fn control(
+        s: &mut ReachScene,
+        obstacles: &[ObstacleVolume],
+        focus: Option<(Entity, f32)>,
+    ) -> DecisionTrace {
+        turn(s, obstacles, 20.0, |t, c| t.try_control(c, focus))
+    }
+
+    /// The Cyclone peel takes the dying ally's nearest attacker; behind the
+    /// pillar it yields to the nearest attacker in sight.
+    #[test]
+    fn the_cyclone_peel_falls_back_to_an_attacker_in_sight() {
+        let mut s = attacked_scene(
+            Some((PEELED_ALLY, 0.3)),
+            &[OCCLUDED_ATTACKER, SIGHTED_ATTACKER],
+        );
+        let (ally, occluded, sighted) = (s.units[1], s.units[2], s.units[3]);
+        let focus = Some((ally, 0.3));
+        assert_eq!(
+            outcome(&control(&mut s, &[], focus)),
+            chose("Cyclone", occluded),
+            "no pillar: the nearest attacker"
+        );
+        assert_eq!(
+            outcome(&control(&mut s, &pillar(), focus)),
+            chose("Cyclone", sighted),
+            "the occluded attacker yields to the one in sight"
+        );
+    }
+
+    /// A nearest attacker in sight is cycloned with the pillar standing; one
+    /// only the pillar hides is refused `LosBlocked`, by Cyclone and Roots both.
+    #[test]
+    fn the_cyclone_peel_lands_in_sight_and_is_refused_behind_the_pillar() {
+        let mut s = attacked_scene(Some((PEELED_ALLY, 0.3)), &[SIGHTED_ATTACKER]);
+        let (ally, sighted) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&control(&mut s, &pillar(), Some((ally, 0.3)))),
+            chose("Cyclone", sighted),
+        );
+
+        let mut s = attacked_scene(Some((PEELED_ALLY, 0.3)), &[OCCLUDED_ATTACKER]);
+        let ally = s.units[1];
+        let trace = control(&mut s, &pillar(), Some((ally, 0.3)));
+        assert_eq!(outcome(&trace), None, "no control through the pillar");
+        assert_eq!(candidate(&trace, "Cyclone")["reason"], "LosBlocked");
+        assert_eq!(candidate(&trace, "EntanglingRoots")["reason"], "LosBlocked");
+    }
+
+    /// Range is unchanged: a nearest attacker beyond Cyclone's range is still
+    /// picked and refused out of range, as it always was — with the pillar
+    /// between them too, since only an attacker in range is dropped for sight.
+    #[test]
+    fn the_cyclone_peel_still_refuses_an_attacker_beyond_range() {
+        for obstacles in [vec![], pillar()] {
+            let mut s = attacked_scene(
+                Some((Vec3::new(24.0, 1.0, 0.0), 0.3)),
+                &[Vec3::new(22.0, 1.0, 0.0)],
+            );
+            let ally = s.units[1];
+            let trace = control(&mut s, &obstacles, Some((ally, 0.3)));
+            assert!(
+                candidate(&trace, "Cyclone")["reason"]
+                    .get("OutOfRange")
+                    .is_some(),
+                "{} obstacle(s): {}",
+                obstacles.len(),
+                candidate(&trace, "Cyclone")
+            );
+        }
+    }
+
+    /// The Roots pick takes the Druid's nearest melee; behind the pillar it
+    /// yields to the nearest one in sight.
+    #[test]
+    fn entangling_roots_falls_back_to_an_attacker_in_sight() {
+        let mut s = attacked_scene(None, &[OCCLUDED_ATTACKER, SIGHTED_ATTACKER]);
+        let (occluded, sighted) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&control(&mut s, &[], None)),
+            chose("EntanglingRoots", occluded),
+            "no pillar: the nearest attacker"
+        );
+        assert_eq!(
+            outcome(&control(&mut s, &pillar(), None)),
+            chose("EntanglingRoots", sighted),
+            "the occluded attacker yields to the one in sight"
+        );
+    }
+
+    /// A nearest melee in sight is rooted with the pillar standing; one only
+    /// the pillar hides is refused `LosBlocked`.
+    #[test]
+    fn entangling_roots_lands_in_sight_and_is_refused_behind_the_pillar() {
+        let mut s = attacked_scene(None, &[BEHIND, SIGHTED_ATTACKER]);
+        let sighted = s.units[2];
+        assert_eq!(
+            outcome(&control(&mut s, &pillar(), None)),
+            chose("EntanglingRoots", sighted),
+        );
+
+        let mut s = attacked_scene(None, &[OCCLUDED_ATTACKER]);
+        let trace = control(&mut s, &pillar(), None);
+        assert_eq!(outcome(&trace), None, "no Roots through the pillar");
+        assert_eq!(candidate(&trace, "EntanglingRoots")["reason"], "LosBlocked");
+    }
+
+    /// Range is unchanged: the focus's nearest melee beyond Roots' range is
+    /// still picked and refused out of range, not passed over for a farther
+    /// one the Druid could reach — with the pillar between the Druid and that
+    /// melee too (the farther one stays clear of it), since only a melee in
+    /// range is dropped for sight.
+    #[test]
+    fn entangling_roots_still_refuses_an_attacker_beyond_range() {
+        for obstacles in [vec![], pillar()] {
+            let mut s = attacked_scene(
+                Some((Vec3::new(35.0, 1.0, 0.0), 1.0)),
+                &[Vec3::new(34.0, 1.0, 0.0), Vec3::new(28.0, 1.0, 10.0)],
+            );
+            let ally = s.units[1];
+            let trace = control(&mut s, &obstacles, Some((ally, 1.0)));
+            assert_eq!(outcome(&trace), None, "{} obstacle(s)", obstacles.len());
+            assert!(
+                candidate(&trace, "EntanglingRoots")["reason"]
+                    .get("OutOfRange")
+                    .is_some(),
+                "{} obstacle(s): {}",
+                obstacles.len(),
+                candidate(&trace, "EntanglingRoots")
+            );
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-204: a pick with nothing in sight still reports the caster's refusal
+    // ------------------------------------------------------------------------
+
+    /// `ability`'s traced reason in one control step by a Druid at 0 mana.
+    fn control_reason_without_mana(
+        s: &mut ReachScene,
+        obstacles: &[ObstacleVolume],
+        focus: Option<(Entity, f32)>,
+        ability: &str,
+    ) -> serde_json::Value {
+        let trace = turn(s, obstacles, 20.0, |t, c| {
+            c.current_mana = 0.0;
+            t.try_control(c, focus)
+        });
+        candidate(&trace, ability)["reason"].clone()
+    }
+
+    /// A Druid out of mana is refused for mana, whether its only peel pick is
+    /// in sight or behind the pillar: sight cannot hide the caster's state.
+    #[test]
+    fn an_occluded_peel_still_reports_the_druid_out_of_mana() {
+        for ability in ["Cyclone", "EntanglingRoots"] {
+            let mut s = attacked_scene(Some((PEELED_ALLY, 0.3)), &[OCCLUDED_ATTACKER]);
+            let focus = Some((s.units[1], 0.3));
+            let open = control_reason_without_mana(&mut s, &[], focus, ability);
+            assert!(open.get("InsufficientMana").is_some(), "{ability}: {open}");
+            let behind = control_reason_without_mana(&mut s, &pillar(), focus, ability);
+            assert_eq!(behind, open, "{ability} behind the pillar");
+        }
+    }
+
+    /// A proactive Roots (no dying ally) behind the pillar meets the mana
+    /// governor first, as a cast on an attacker in sight would.
+    #[test]
+    fn an_occluded_proactive_roots_still_reports_the_governor() {
+        let mut s = attacked_scene(None, &[OCCLUDED_ATTACKER]);
+        let open = control_reason_without_mana(&mut s, &[], None, "EntanglingRoots");
+        assert_eq!(
+            open["PreconditionUnmet"]["note"],
+            "mana governor: holding the reserve for dampening"
+        );
+        let behind = control_reason_without_mana(&mut s, &pillar(), None, "EntanglingRoots");
+        assert_eq!(behind, open);
+    }
+
+    /// A Druid with Swiftmend on cooldown is refused it for the cooldown,
+    /// whether its only dying ally (carrying the Druid's own Rejuvenation to
+    /// consume, so the open map reaches the Swiftmend cast) is in sight or
+    /// behind the pillar.
+    #[test]
+    fn an_occluded_emergency_heal_still_reports_swiftmend_on_cooldown() {
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let mut s = scene(0.3, 1.0, &[]);
+            let warrior = s.units[1];
+            s.auras.insert(warrior, rejuvenation(s.units[0]));
+            s.prep = Some(|c| {
+                c.ability_cooldowns.insert(AbilityType::Swiftmend, 3.0);
+            });
+            candidate(&rotation(&mut s, obstacles), "Swiftmend")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("OnCooldown").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
+
+    /// An out-of-mana Druid is refused Mark of the Wild for mana, whether its
+    /// only unmarked ally is in sight or behind the pillar.
+    #[test]
+    fn an_occluded_mark_still_reports_the_druid_out_of_mana() {
+        let marked = || {
+            vec![Aura {
+                effect_type: AuraType::MaxHealthIncrease,
+                compound: Some(CompoundDebuff::MarkOfTheWild),
+                ..Default::default()
+            }]
+        };
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let mut s = scene(1.0, 1.0, &[]);
+            let (me, mage) = (s.units[0], s.units[2]);
+            s.auras.insert(me, marked());
+            s.auras.insert(mage, marked());
+            s.prep = Some(|c| c.current_mana = 0.0);
+            candidate(&mark(&mut s, obstacles), "MarkOfTheWild")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("InsufficientMana").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
     }
 }

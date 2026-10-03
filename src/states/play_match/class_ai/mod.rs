@@ -1458,10 +1458,11 @@ pub fn ally_dispel_priority(aura: &Aura) -> i32 {
 /// occluded best pick yields to the best one in reach instead of refusing the
 /// cast: the healers' dispels ([`try_dispel_ally`]), Devour Magic, Master's
 /// Call, Purge ([`select_purge`]), every heal that ranks allies by health
-/// ([`CombatContext::lowest_health_ally_in_reach`]), Holy Shock damage, and
+/// ([`CombatContext::lowest_health_ally_in_reach`]) — and the Psychic Scream gate
+/// that holds for one of them — Holy Shock damage, the Frost Shock peel, and
 /// — through [`sight_blocks`] — the choosers that rank without a range
 /// filter (Power Word: Shield and Fortitude, Mark of the Wild, the Druid's heal
-/// focus); and the walk that carries
+/// focus and its Cyclone and Entangling Roots peels); and the walk that carries
 /// a healer to a teammate it cannot yet free ([`dispel_chase_target`]) — so the
 /// walk ends exactly where the cast becomes possible. On an obstacle-free map
 /// sight always holds and this is the range check alone.
@@ -1487,9 +1488,10 @@ pub fn cast_reach(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> Cast
 /// in range, but occluded ([`cast_reach`] says `LosBlocked`).
 ///
 /// For the choosers that rank their candidates without a range filter — Power
-/// Word: Shield, Power Word: Fortitude, Mark of the Wild and the Druid's heal
-/// focus. They drop such a candidate before ranking, so an occluded best pick
-/// yields to the best one in sight, while a best pick beyond range is still
+/// Word: Shield, Power Word: Fortitude, Mark of the Wild, the Druid's heal
+/// focus and its Cyclone and Entangling Roots peel picks. They drop such a
+/// candidate before ranking, so an occluded best pick yields to the best one
+/// in sight, while a best pick beyond range is still
 /// picked and refused exactly as it always was. On an obstacle-free map this is
 /// never true and the choice is unchanged.
 pub fn sight_blocks(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> bool {
@@ -1882,10 +1884,17 @@ pub fn try_purge_enemy(
     min_priority: i32,
     trace: &mut crate::states::play_match::decision_trace::DecisionEventBuilder<'_>,
 ) -> bool {
-    use self::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+    use self::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
 
     let ability = AbilityType::Purge;
     let def = abilities.get_unchecked(&ability);
+    // Offensive cast — no friendly-CC guard.
+    let opts = PreCastOpts {
+        check_friendly_cc: false,
+        check_friendly_dots: false,
+        check_target_immune: true,
+        bypass_silence: false,
+    };
 
     // Value floor: `min_priority` is PURGE_MIN_PRIORITY for the ordinary purge
     // (only high-value defensives and sustain — cheap re-buffs like Fortitude
@@ -1905,19 +1914,16 @@ pub fn try_purge_enemy(
     ) {
         Ok(choice) => choice,
         Err(reason) => {
-            trace.reject(ability, reason);
+            trace.reject(
+                ability,
+                unreached_reason(reason, ability, def, combatant, my_pos, auras, ctx, opts),
+            );
             return false;
         }
     };
 
     // Universal pre-cast guard (lockout / silence / cooldown / mana / range /
-    // target immunity). Offensive cast — no friendly-CC guard.
-    let opts = PreCastOpts {
-        check_friendly_cc: false,
-        check_friendly_dots: false,
-        check_target_immune: true,
-        bypass_silence: false,
-    };
+    // target immunity).
     if !pre_cast_ok(
         ability,
         def,
@@ -2204,6 +2210,9 @@ pub(crate) mod reach_fixture {
         pub roster: BTreeMap<Entity, CombatantInfo>,
         pub auras: BTreeMap<Entity, Vec<Aura>>,
         pub combatant: Combatant,
+        /// Applied to the fresh caster at the start of every [`Self::run`]:
+        /// the caster's own state for a probe (no mana, a cooldown).
+        pub prep: Option<fn(&mut Combatant)>,
         caster: CharacterClass,
     }
 
@@ -2225,6 +2234,7 @@ pub(crate) mod reach_fixture {
                 roster: roster(infos),
                 auras: BTreeMap::new(),
                 combatant: Combatant::new(1, 0, caster),
+                prep: None,
                 caster,
             }
         }
@@ -2247,6 +2257,9 @@ pub(crate) mod reach_fixture {
             let me = self.units[0];
             // Every run starts off the global cooldown and every cooldown.
             self.combatant = Combatant::new(1, 0, self.caster);
+            if let Some(prep) = self.prep {
+                prep(&mut self.combatant);
+            }
             let mut trace = DecisionTrace::default();
             let mut queue = bevy::ecs::world::CommandQueue::default();
             {
@@ -2260,6 +2273,17 @@ pub(crate) mod reach_fixture {
             }
             queue.apply(&mut self.world);
             trace
+        }
+    }
+
+    /// A caster's auras carrying a Silence: a refusal no check ahead of the
+    /// target pick reports (the pick precedes `pre_cast_ok`).
+    pub fn silenced() -> ActiveAuras {
+        ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::Silence,
+                ..Default::default()
+            }],
         }
     }
 
