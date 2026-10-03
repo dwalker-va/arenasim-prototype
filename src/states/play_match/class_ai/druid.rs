@@ -768,7 +768,8 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// The kill target is never cycloned or rooted: a Cyclone would make it
     /// immune to the team's damage, and the team's damage would break a root.
     /// A target already under hard crowd control, or immune to the bucket by
-    /// diminishing returns, is passed over.
+    /// diminishing returns, is passed over, and so is a peel pick in range but
+    /// out of sight: the next attacker in sight is taken instead.
     fn try_control(&mut self, combatant: &mut Combatant, focus: Option<(Entity, f32)>) -> bool {
         let kill_target = combatant.target;
         let usable = |turn: &Self, e: &CombatantInfo, category: DRCategory| {
@@ -806,21 +807,39 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 .collect()
         };
 
+        // An enemy a cast of `ability` could reach but for sight
+        // ([`super::sight_blocks`]) is passed over for the next one, so an
+        // occluded peel pick yields to one in sight; a pick beyond range is
+        // still picked and refused, as it always was.
+        let cyclone_range = self.abilities.get_unchecked(&AbilityType::Cyclone).range;
+        let roots_range = self
+            .abilities
+            .get_unchecked(&AbilityType::EntanglingRoots)
+            .range;
+        let mut cyclone_occluded = false;
+        let mut roots_occluded = false;
+
         // 1. Cyclone to peel for a dying focus.
         let peel = focus
             .filter(|&(_, hp)| hp < DRUID_URGENT_HP)
             .and_then(|(ally, _)| {
-                attackers_of(self, ally).into_iter().find(|(e, _)| {
-                    self.ctx
-                        .combatants
-                        .get(e)
-                        .is_some_and(|info| !info.is_pet && usable(self, info, DRCategory::Cyclone))
+                attackers_of(self, ally).into_iter().find(|&(e, pos)| {
+                    let eligible = self.ctx.combatants.get(&e).is_some_and(|info| {
+                        !info.is_pet && usable(self, info, DRCategory::Cyclone)
+                    });
+                    let blocked =
+                        eligible && super::sight_blocks(self.ctx, cyclone_range, self.my_pos, pos);
+                    cyclone_occluded |= blocked;
+                    eligible && !blocked
                 })
             });
         if let Some((enemy, enemy_pos)) = peel {
             if self.cast(combatant, AbilityType::Cyclone, enemy, enemy_pos) {
                 return true;
             }
+        } else if cyclone_occluded {
+            self.builder
+                .reject(AbilityType::Cyclone, RejectionReason::LosBlocked);
         }
 
         // 2. Cyclone the enemy healer when the kill is close.
@@ -839,7 +858,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                     return true;
                 }
             }
-            _ if peel.is_none() => {
+            _ if peel.is_none() && !cyclone_occluded => {
                 self.builder.reject(
                     AbilityType::Cyclone,
                     RejectionReason::PreconditionUnmet {
@@ -867,6 +886,12 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                         && e.position.distance(ally_pos) <= self.threat_radius
                         && usable(self, e, DRCategory::Roots)
                 })
+                .filter(|e| {
+                    let blocked =
+                        super::sight_blocks(self.ctx, roots_range, self.my_pos, e.position);
+                    roots_occluded |= blocked;
+                    !blocked
+                })
                 .min_by(|a, b| {
                     a.position
                         .distance(ally_pos)
@@ -876,8 +901,14 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 .map(|e| (e.entity, e.position))
         });
         let Some((enemy, enemy_pos)) = melee_threat else {
-            self.builder
-                .reject(AbilityType::EntanglingRoots, RejectionReason::NoValidTarget);
+            self.builder.reject(
+                AbilityType::EntanglingRoots,
+                if roots_occluded {
+                    RejectionReason::LosBlocked
+                } else {
+                    RejectionReason::NoValidTarget
+                },
+            );
             return false;
         };
         let urgent = focus.is_some_and(|(_, hp)| hp < DRUID_URGENT_HP);
@@ -1550,5 +1581,161 @@ mod reach_tests {
         let trace = mark(&mut s, &pillar());
         assert_eq!(outcome(&trace), None, "no Mark through the pillar");
         assert_eq!(candidate(&trace, "MarkOfTheWild")["reason"], "LosBlocked");
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-204: the Cyclone and Entangling Roots peels choose among attackers
+    // in sight
+    // ------------------------------------------------------------------------
+
+    /// Nearer to the Druid than [`SIGHTED_ATTACKER`], with the pillar between.
+    const OCCLUDED_ATTACKER: Vec3 = Vec3::new(12.0, 1.0, 0.0);
+    /// Clear of the pillar, and in Cyclone's 20yd range.
+    const SIGHTED_ATTACKER: Vec3 = Vec3::new(12.0, 1.0, 6.0);
+    /// The dying ally both attackers are on, within a Rogue's reach of each.
+    const PEELED_ALLY: Vec3 = Vec3::new(13.0, 1.0, 3.0);
+
+    /// The Druid, an ally Warrior at `ally` (`ally_hp`), and an enemy Rogue at
+    /// each of `at`, every one of them attacking the ally — or the Druid, when
+    /// `ally` is `None`. Units: the Druid, then the Warrior if any, then the
+    /// Rogues in order.
+    fn attacked_scene(ally: Option<(Vec3, f32)>, at: &[Vec3]) -> ReachScene {
+        let mut units: Vec<_> = ally
+            .map(|(p, hp)| (1, Warrior, p, hp))
+            .into_iter()
+            .collect();
+        units.extend(at.iter().map(|&p| (2, Rogue, p, 1.0)));
+        let mut s = ReachScene::new(Druid, &units);
+        let victim = s.units[if ally.is_some() { 1 } else { 0 }];
+        let first = if ally.is_some() { 2 } else { 1 };
+        for rogue in s.units[first..].to_vec() {
+            s.roster.get_mut(&rogue).unwrap().target = Some(victim);
+        }
+        s
+    }
+
+    /// One control step with `focus` (the ally and its HP fraction).
+    fn control(
+        s: &mut ReachScene,
+        obstacles: &[ObstacleVolume],
+        focus: Option<(Entity, f32)>,
+    ) -> DecisionTrace {
+        turn(s, obstacles, 20.0, |t, c| t.try_control(c, focus))
+    }
+
+    /// The Cyclone peel takes the dying ally's nearest attacker; behind the
+    /// pillar it yields to the nearest attacker in sight.
+    #[test]
+    fn the_cyclone_peel_falls_back_to_an_attacker_in_sight() {
+        let mut s = attacked_scene(
+            Some((PEELED_ALLY, 0.3)),
+            &[OCCLUDED_ATTACKER, SIGHTED_ATTACKER],
+        );
+        let (ally, occluded, sighted) = (s.units[1], s.units[2], s.units[3]);
+        let focus = Some((ally, 0.3));
+        assert_eq!(
+            outcome(&control(&mut s, &[], focus)),
+            chose("Cyclone", occluded),
+            "no pillar: the nearest attacker"
+        );
+        assert_eq!(
+            outcome(&control(&mut s, &pillar(), focus)),
+            chose("Cyclone", sighted),
+            "the occluded attacker yields to the one in sight"
+        );
+    }
+
+    /// A nearest attacker in sight is cycloned with the pillar standing; one
+    /// only the pillar hides is refused `LosBlocked`, by Cyclone and Roots both.
+    #[test]
+    fn the_cyclone_peel_lands_in_sight_and_is_refused_behind_the_pillar() {
+        let mut s = attacked_scene(Some((PEELED_ALLY, 0.3)), &[SIGHTED_ATTACKER]);
+        let (ally, sighted) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&control(&mut s, &pillar(), Some((ally, 0.3)))),
+            chose("Cyclone", sighted),
+        );
+
+        let mut s = attacked_scene(Some((PEELED_ALLY, 0.3)), &[OCCLUDED_ATTACKER]);
+        let ally = s.units[1];
+        let trace = control(&mut s, &pillar(), Some((ally, 0.3)));
+        assert_eq!(outcome(&trace), None, "no control through the pillar");
+        assert_eq!(candidate(&trace, "Cyclone")["reason"], "LosBlocked");
+        assert_eq!(candidate(&trace, "EntanglingRoots")["reason"], "LosBlocked");
+    }
+
+    /// Range is unchanged: a nearest attacker beyond Cyclone's range is still
+    /// picked and refused out of range, as it always was.
+    #[test]
+    fn the_cyclone_peel_still_refuses_an_attacker_beyond_range() {
+        let mut s = attacked_scene(
+            Some((Vec3::new(24.0, 1.0, 0.0), 0.3)),
+            &[Vec3::new(22.0, 1.0, 0.0)],
+        );
+        let ally = s.units[1];
+        let trace = control(&mut s, &[], Some((ally, 0.3)));
+        assert!(
+            candidate(&trace, "Cyclone")["reason"]
+                .get("OutOfRange")
+                .is_some(),
+            "{}",
+            candidate(&trace, "Cyclone")
+        );
+    }
+
+    /// The Roots pick takes the Druid's nearest melee; behind the pillar it
+    /// yields to the nearest one in sight.
+    #[test]
+    fn entangling_roots_falls_back_to_an_attacker_in_sight() {
+        let mut s = attacked_scene(None, &[OCCLUDED_ATTACKER, SIGHTED_ATTACKER]);
+        let (occluded, sighted) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&control(&mut s, &[], None)),
+            chose("EntanglingRoots", occluded),
+            "no pillar: the nearest attacker"
+        );
+        assert_eq!(
+            outcome(&control(&mut s, &pillar(), None)),
+            chose("EntanglingRoots", sighted),
+            "the occluded attacker yields to the one in sight"
+        );
+    }
+
+    /// A nearest melee in sight is rooted with the pillar standing; one only
+    /// the pillar hides is refused `LosBlocked`.
+    #[test]
+    fn entangling_roots_lands_in_sight_and_is_refused_behind_the_pillar() {
+        let mut s = attacked_scene(None, &[BEHIND, SIGHTED_ATTACKER]);
+        let sighted = s.units[2];
+        assert_eq!(
+            outcome(&control(&mut s, &pillar(), None)),
+            chose("EntanglingRoots", sighted),
+        );
+
+        let mut s = attacked_scene(None, &[OCCLUDED_ATTACKER]);
+        let trace = control(&mut s, &pillar(), None);
+        assert_eq!(outcome(&trace), None, "no Roots through the pillar");
+        assert_eq!(candidate(&trace, "EntanglingRoots")["reason"], "LosBlocked");
+    }
+
+    /// Range is unchanged: the focus's nearest melee beyond Roots' range is
+    /// still picked and refused out of range, not passed over for a farther
+    /// one the Druid could reach.
+    #[test]
+    fn entangling_roots_still_refuses_an_attacker_beyond_range() {
+        let mut s = attacked_scene(
+            Some((Vec3::new(35.0, 1.0, 0.0), 1.0)),
+            &[Vec3::new(34.0, 1.0, 0.0), Vec3::new(28.0, 1.0, 3.0)],
+        );
+        let ally = s.units[1];
+        let trace = control(&mut s, &[], Some((ally, 1.0)));
+        assert_eq!(outcome(&trace), None);
+        assert!(
+            candidate(&trace, "EntanglingRoots")["reason"]
+                .get("OutOfRange")
+                .is_some(),
+            "{}",
+            candidate(&trace, "EntanglingRoots")
+        );
     }
 }

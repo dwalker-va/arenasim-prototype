@@ -1458,10 +1458,11 @@ pub fn ally_dispel_priority(aura: &Aura) -> i32 {
 /// occluded best pick yields to the best one in reach instead of refusing the
 /// cast: the healers' dispels ([`try_dispel_ally`]), Devour Magic, Master's
 /// Call, Purge ([`select_purge`]), every heal that ranks allies by health
-/// ([`CombatContext::lowest_health_ally_in_reach`]), Holy Shock damage, and
+/// ([`CombatContext::lowest_health_ally_in_reach`]) — and the Psychic Scream gate
+/// that holds for one of them — Holy Shock damage, the Frost Shock peel, and
 /// — through [`sight_blocks`] — the choosers that rank without a range
 /// filter (Power Word: Shield and Fortitude, Mark of the Wild, the Druid's heal
-/// focus); and the walk that carries
+/// focus and its Cyclone and Entangling Roots peels); and the walk that carries
 /// a healer to a teammate it cannot yet free ([`dispel_chase_target`]) — so the
 /// walk ends exactly where the cast becomes possible. On an obstacle-free map
 /// sight always holds and this is the range check alone.
@@ -1487,9 +1488,10 @@ pub fn cast_reach(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> Cast
 /// in range, but occluded ([`cast_reach`] says `LosBlocked`).
 ///
 /// For the choosers that rank their candidates without a range filter — Power
-/// Word: Shield, Power Word: Fortitude, Mark of the Wild and the Druid's heal
-/// focus. They drop such a candidate before ranking, so an occluded best pick
-/// yields to the best one in sight, while a best pick beyond range is still
+/// Word: Shield, Power Word: Fortitude, Mark of the Wild, the Druid's heal
+/// focus and its Cyclone and Entangling Roots peel picks. They drop such a
+/// candidate before ranking, so an occluded best pick yields to the best one
+/// in sight, while a best pick beyond range is still
 /// picked and refused exactly as it always was. On an obstacle-free map this is
 /// never true and the choice is unchanged.
 pub fn sight_blocks(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> bool {

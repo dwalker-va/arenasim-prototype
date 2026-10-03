@@ -383,10 +383,12 @@ fn try_psychic_scream(
     // HP threshold, within heal range) must be healed before the peel. The
     // scream is priority 3 — above Flash Heal — so without this gate it would
     // burn a GCD and delay a life-saving heal, breaking the critical-heal-wins
-    // invariant (see `try_flash_heal`). The scream still fires next GCD.
+    // invariant (see `try_flash_heal`). The scream still fires next GCD. Only a
+    // dying ally the heal REACHES (range, then sight) holds it: one behind
+    // cover is the medic walk's to reach, and no heal can land on it yet.
     if ctx
-        .lowest_health_ally_below(shared.urgency_hp_threshold, shared.heal_range, my_pos)
-        .is_some()
+        .lowest_health_ally_in_reach(shared.urgency_hp_threshold, shared.heal_range, my_pos)
+        .is_ok()
     {
         builder.reject(
             scream,
@@ -2432,5 +2434,81 @@ mod reach_tests {
             candidate(&trace, "PowerWordFortitude")["reason"],
             "LosBlocked"
         );
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-204: the Psychic Scream holds only for a heal that can land
+    // ------------------------------------------------------------------------
+
+    /// [`scene`], plus an enemy Rogue inside the scream's radius.
+    fn screamable(warrior_hp: f32, mage_hp: f32) -> ReachScene {
+        ReachScene::new(
+            Priest,
+            &[
+                (1, Warrior, BEHIND, warrior_hp),
+                (1, Mage, IN_SIGHT, mage_hp),
+                (2, CharacterClass::Rogue, Vec3::new(2.0, 1.0, 2.0), 1.0),
+            ],
+        )
+    }
+
+    /// A pressured Priest's defensive scream.
+    fn scream(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let movement = crate::states::play_match::movement_config::MovementConfig::default();
+        let me = s.units[0];
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_psychic_scream(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                true,
+                &movement.shared,
+                &mut Vec::new(),
+                builder,
+            )
+        })
+    }
+
+    fn screamed(trace: &DecisionTrace) -> bool {
+        outcome(trace).is_some_and(|(ability, _)| ability == "PsychicScream")
+    }
+
+    fn held_for_a_heal(trace: &DecisionTrace) -> bool {
+        candidate(trace, "PsychicScream")["reason"]["PreconditionUnmet"]["note"]
+            == "critical heal pending"
+    }
+
+    /// A dying ally behind the pillar no longer holds the scream: no heal can
+    /// land on it until the medic walk brings it into sight.
+    #[test]
+    fn an_occluded_dying_ally_does_not_hold_the_scream() {
+        let mut s = screamable(0.3, 1.0);
+        let trace = scream(&mut s, &[]);
+        assert!(
+            !screamed(&trace) && held_for_a_heal(&trace),
+            "no pillar: held"
+        );
+        let trace = scream(&mut s, &pillar());
+        assert!(screamed(&trace), "the occluded dying Warrior holds nothing");
+    }
+
+    /// A dying ally the heal reaches still holds it, pillar or not.
+    #[test]
+    fn a_reachable_dying_ally_still_holds_the_scream() {
+        let mut s = screamable(1.0, 0.3);
+        let trace = scream(&mut s, &pillar());
+        assert!(!screamed(&trace) && held_for_a_heal(&trace));
+
+        // A Warrior dying behind the pillar does not lift the hold the Mage
+        // in sight places.
+        let mut s = screamable(0.2, 0.3);
+        let trace = scream(&mut s, &pillar());
+        assert!(!screamed(&trace) && held_for_a_heal(&trace));
     }
 }

@@ -321,17 +321,21 @@ fn try_lesser_healing_wave(
     true
 }
 
-/// Choose a Frost Shock target: a melee/pet enemy in range that is attacking
-/// the Shaman, or attacking a low-HP ally (a peel) — nearest first; else the
-/// kill target if it's in range. Deterministic (BTree iteration + distance
-/// tie-break by entity), no RNG.
+/// Choose a Frost Shock target: a melee/pet enemy the shock REACHES
+/// ([`super::cast_reach`]: range, then sight) that is attacking the Shaman, or
+/// attacking a low-HP ally (a peel) — nearest first; else the kill target if
+/// it's in range. An occluded peel candidate yields to the nearest one in
+/// sight, rather than being picked and then refused. With nothing to shock the
+/// error is the reason to trace: `LosBlocked` when a peel candidate was in
+/// range and only sight stood in the way, `NoValidTarget` otherwise.
+/// Deterministic (BTree iteration + distance tie-break by entity), no RNG.
 fn frost_shock_target(
     ctx: &CombatContext,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
     range: f32,
-) -> Option<Entity> {
+) -> Result<Entity, RejectionReason> {
     // Allies (excluding self) currently in trouble — peel their attacker.
     let low_allies: BTreeSet<Entity> = ctx
         .alive_allies()
@@ -340,18 +344,29 @@ fn frost_shock_target(
         .map(|a| a.entity)
         .collect();
 
-    // Peel candidate: a proximate melee/pet threat on me or a low-HP ally.
+    // Peel candidate: a proximate melee/pet threat on me or a low-HP ally,
+    // which the shock reaches.
+    let mut occluded = false;
     let peel = ctx
         .combatants
         .iter()
         .filter(|(_, info)| info.team != combatant.team && info.is_alive)
         .filter(|(_, info)| info.is_pet || info.class.is_melee())
         .filter(|(e, info)| {
-            my_pos.distance(info.position) <= range
-                && !ctx.entity_is_immune(**e)
+            !ctx.entity_is_immune(**e)
                 && (info.target == Some(entity)
                     || info.target.is_some_and(|t| low_allies.contains(&t)))
         })
+        .filter(
+            |(_, info)| match super::cast_reach(ctx, range, my_pos, info.position) {
+                super::CastReach::Reaches => true,
+                super::CastReach::OutOfRange { .. } => false,
+                super::CastReach::LosBlocked => {
+                    occluded = true;
+                    false
+                }
+            },
+        )
         .min_by(|(ea, a), (eb, b)| {
             my_pos
                 .distance(a.position)
@@ -360,16 +375,23 @@ fn frost_shock_target(
                 .then(ea.cmp(eb))
         })
         .map(|(e, _)| *e);
-    if peel.is_some() {
-        return peel;
+    if let Some(peel) = peel {
+        return Ok(peel);
     }
 
     // Fallback: the kill target, if alive, in range, and not immune.
-    combatant.target.filter(|t| {
-        ctx.combatants.get(t).is_some_and(|i| {
-            i.is_alive && my_pos.distance(i.position) <= range && !ctx.entity_is_immune(*t)
+    combatant
+        .target
+        .filter(|t| {
+            ctx.combatants.get(t).is_some_and(|i| {
+                i.is_alive && my_pos.distance(i.position) <= range && !ctx.entity_is_immune(*t)
+            })
         })
-    })
+        .ok_or(if occluded {
+            RejectionReason::LosBlocked
+        } else {
+            RejectionReason::NoValidTarget
+        })
 }
 
 /// Try to cast Frost Shock — instant Frost nuke that applies a non-breaking
@@ -392,9 +414,12 @@ fn try_frost_shock(
     let ability = AbilityType::FrostShock;
     let def = abilities.get_unchecked(&ability);
 
-    let Some(target_entity) = frost_shock_target(ctx, entity, combatant, my_pos, def.range) else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
-        return false;
+    let target_entity = match frost_shock_target(ctx, entity, combatant, my_pos, def.range) {
+        Ok(target) => target,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
     };
     let Some(target_info) = ctx.combatants.get(&target_entity) else {
         builder.reject(ability, RejectionReason::NoValidTarget);
@@ -852,7 +877,7 @@ fn try_fire_totem(
 #[cfg(test)]
 mod reach_tests {
     use super::*;
-    use crate::states::match_config::CharacterClass::{Mage, Shaman, Warrior};
+    use crate::states::match_config::CharacterClass::{Mage, Rogue, Shaman, Warrior};
     use crate::states::play_match::class_ai::reach_fixture::*;
     use crate::states::play_match::map_geometry::ObstacleVolume;
 
@@ -923,5 +948,90 @@ mod reach_tests {
             candidate(&trace, "LesserHealingWave")["reason"],
             "LosBlocked"
         );
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-204: the Frost Shock peel chooses among attackers in sight
+    // ------------------------------------------------------------------------
+
+    /// Nearer to the Shaman than [`SIGHTED_ATTACKER`], with the pillar between.
+    const OCCLUDED_ATTACKER: Vec3 = Vec3::new(12.0, 1.0, 0.0);
+    /// Clear of the pillar, and in Frost Shock's 25yd range.
+    const SIGHTED_ATTACKER: Vec3 = Vec3::new(12.0, 1.0, 6.0);
+
+    /// The Shaman and an enemy Rogue at each of `at`, every one of them
+    /// attacking the Shaman. No kill target, so only a peel can be shocked.
+    fn peel_scene(at: &[Vec3]) -> ReachScene {
+        let units: Vec<_> = at.iter().map(|&p| (2, Rogue, p, 1.0)).collect();
+        let mut s = ReachScene::new(Shaman, &units);
+        let me = s.units[0];
+        for rogue in s.units[1..].to_vec() {
+            s.roster.get_mut(&rogue).unwrap().target = Some(me);
+        }
+        s
+    }
+
+    fn frost_shock(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let me = s.units[0];
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_frost_shock(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                builder,
+            )
+        })
+    }
+
+    /// The nearest attacker is shocked; behind the pillar it yields to the
+    /// nearest attacker in sight.
+    #[test]
+    fn the_frost_shock_peel_falls_back_to_an_attacker_in_sight() {
+        let mut s = peel_scene(&[OCCLUDED_ATTACKER, SIGHTED_ATTACKER]);
+        let (occluded, sighted) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&frost_shock(&mut s, &[])),
+            chose("FrostShock", occluded),
+            "no pillar: the nearest attacker"
+        );
+        assert_eq!(
+            outcome(&frost_shock(&mut s, &pillar())),
+            chose("FrostShock", sighted),
+            "the occluded attacker yields to the one in sight"
+        );
+    }
+
+    /// The nearest attacker in sight is shocked with the pillar standing, and
+    /// an attacker only the pillar hides is refused `LosBlocked`.
+    #[test]
+    fn the_frost_shock_peel_lands_in_sight_and_is_refused_behind_the_pillar() {
+        let mut s = peel_scene(&[BEHIND, SIGHTED_ATTACKER]);
+        let sighted = s.units[2];
+        assert_eq!(
+            outcome(&frost_shock(&mut s, &pillar())),
+            chose("FrostShock", sighted),
+            "a nearest attacker in sight is shocked with the pillar standing"
+        );
+
+        let mut s = peel_scene(&[OCCLUDED_ATTACKER]);
+        let trace = frost_shock(&mut s, &pillar());
+        assert_eq!(outcome(&trace), None, "no Frost Shock through the pillar");
+        assert_eq!(candidate(&trace, "FrostShock")["reason"], "LosBlocked");
+    }
+
+    /// Range is unchanged: an attacker beyond Frost Shock's range was never a
+    /// peel candidate, so it is not picked (and refused out of range) now.
+    #[test]
+    fn the_frost_shock_peel_never_picks_an_attacker_beyond_range() {
+        let mut s = peel_scene(&[Vec3::new(0.0, 1.0, 30.0)]);
+        let trace = frost_shock(&mut s, &pillar());
+        assert_eq!(outcome(&trace), None);
+        assert_eq!(candidate(&trace, "FrostShock")["reason"], "NoValidTarget");
     }
 }
