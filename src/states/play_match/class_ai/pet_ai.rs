@@ -441,18 +441,9 @@ fn pet_command_rejection(
     }
 
     if matches!(ability, AbilityType::SpiderWeb | AbilityType::BoarCharge) {
-        let dist = my_pos.distance(target_info.position);
-        if dist > def.range {
-            return Some(RejectionReason::OutOfRange {
-                distance: dist,
-                max: def.range,
-            });
-        }
-        if ability == AbilityType::BoarCharge && dist < super::super::constants::CHARGE_MIN_RANGE {
-            return Some(RejectionReason::WithinDeadZone {
-                distance: dist,
-                min: super::super::constants::CHARGE_MIN_RANGE,
-            });
+        // Re-asked at execution: the sightline may have closed since dispatch.
+        if let Some(reason) = pet_strike_reach(ability, def, my_pos, target_info.position, ctx) {
+            return Some(reason);
         }
         // Friendly-CC guard only applies to abilities that deal damage on
         // landing — Spider Web is a 0-damage Root and can't break a friendly
@@ -473,6 +464,38 @@ fn pet_command_rejection(
         return Some(RejectionReason::LosBlocked);
     }
 
+    None
+}
+
+/// Whether a pet's Spider Web or Boar Charge from `from` reaches an enemy at
+/// `to`: range, then Boar Charge's minimum range, then line of sight — the
+/// gates `pre_cast_ok` applies to every targeted cast, in its order, so an
+/// out-of-range target is reported as out of range, never as occluded. Every
+/// path that casts either asks it: the Hunter's dispatch
+/// (`hunter::dispatch_predicates_for_damaging`), the pet's own dispatch while
+/// the Hunter is casting, and the pet's re-check of a dispatched command
+/// ([`pet_command_rejection`]). On an obstacle-free map sight always holds.
+pub(super) fn pet_strike_reach(
+    ability: AbilityType,
+    def: &crate::states::play_match::ability_config::AbilityConfig,
+    from: Vec3,
+    to: Vec3,
+    ctx: &CombatContext,
+) -> Option<RejectionReason> {
+    let distance = from.distance(to);
+    if distance > def.range {
+        return Some(RejectionReason::OutOfRange {
+            distance,
+            max: def.range,
+        });
+    }
+    let min = super::super::constants::CHARGE_MIN_RANGE;
+    if ability == AbilityType::BoarCharge && distance < min {
+        return Some(RejectionReason::WithinDeadZone { distance, min });
+    }
+    if !has_line_of_sight(ctx.obstacles, from, to) {
+        return Some(RejectionReason::LosBlocked);
+    }
     None
 }
 
@@ -724,12 +747,12 @@ fn try_devour_magic(
         if !has_dispellable {
             continue;
         }
-        // Range, then line of sight (`ally_reach`, the gates every ally dispel
+        // Range, then line of sight (`cast_reach`, the gates every ally dispel
         // passes).
-        match super::ally_reach(ctx, def.range, my_pos, info.position) {
-            super::AllyReach::Reaches => {}
-            super::AllyReach::OutOfRange { .. } => continue,
-            super::AllyReach::LosBlocked => {
+        match super::cast_reach(ctx, def.range, my_pos, info.position) {
+            super::CastReach::Reaches => {}
+            super::CastReach::OutOfRange { .. } => continue,
+            super::CastReach::LosBlocked => {
                 los_blocked = true;
                 continue;
             }
@@ -987,15 +1010,8 @@ fn spider_autonomous_dispatch(
         return;
     }
 
-    let dist = my_pos.distance(target_info.position);
-    if dist > def.range {
-        builder.reject(
-            ability,
-            RejectionReason::OutOfRange {
-                distance: dist,
-                max: def.range,
-            },
-        );
+    if let Some(reason) = pet_strike_reach(ability, def, my_pos, target_info.position, ctx) {
+        builder.reject(ability, reason);
         return;
     }
 
@@ -1069,25 +1085,8 @@ fn boar_autonomous_dispatch(
         return;
     }
 
-    let dist = my_pos.distance(target_info.position);
-    if dist > def.range {
-        builder.reject(
-            ability,
-            RejectionReason::OutOfRange {
-                distance: dist,
-                max: def.range,
-            },
-        );
-        return;
-    }
-    if dist < super::super::constants::CHARGE_MIN_RANGE {
-        builder.reject(
-            ability,
-            RejectionReason::WithinDeadZone {
-                distance: dist,
-                min: super::super::constants::CHARGE_MIN_RANGE,
-            },
-        );
+    if let Some(reason) = pet_strike_reach(ability, def, my_pos, target_info.position, ctx) {
+        builder.reject(ability, reason);
         return;
     }
     if ctx.has_friendly_breakable_cc(target) {
@@ -1173,15 +1172,15 @@ fn bird_autonomous_dispatch(
     };
 
     // Range, then line of sight from the bird to the cleanse recipient
-    // (`ally_reach`, the gates every ally-freeing cast passes).
+    // (`cast_reach`, the gates every ally-freeing cast passes).
     if let Some(target_info) = ctx.combatants.get(&target) {
-        let reason = match super::ally_reach(ctx, def.range, my_pos, target_info.position) {
-            super::AllyReach::Reaches => None,
-            super::AllyReach::OutOfRange { distance } => Some(RejectionReason::OutOfRange {
+        let reason = match super::cast_reach(ctx, def.range, my_pos, target_info.position) {
+            super::CastReach::Reaches => None,
+            super::CastReach::OutOfRange { distance } => Some(RejectionReason::OutOfRange {
                 distance,
                 max: def.range,
             }),
-            super::AllyReach::LosBlocked => Some(RejectionReason::LosBlocked),
+            super::CastReach::LosBlocked => Some(RejectionReason::LosBlocked),
         };
         if let Some(reason) = reason {
             builder.reject(ability, reason);
@@ -1493,5 +1492,207 @@ mod tests {
             matches!(recheck(&pillar), Some(RejectionReason::LosBlocked)),
             "a command whose sightline closed is refused"
         );
+    }
+
+    /// Spider Web and Boar Charge strike an enemy their pet can see, and refuse
+    /// — traced `LosBlocked` — the same enemy at the same distance behind a
+    /// pillar (AS-192), on every path that casts them: the pet's own dispatch
+    /// while its Hunter casts (`spider_autonomous_dispatch` /
+    /// `boar_autonomous_dispatch`), the Hunter's dispatch
+    /// (`try_dispatch_spider_web` / `try_dispatch_boar_charge`), and the pet's
+    /// re-check of a dispatched command whose sightline closed after it was
+    /// issued (`pet_command_rejection`).
+    #[test]
+    fn spider_web_and_boar_charge_need_sight_of_the_target() {
+        for (ability, pet_type) in [
+            (AbilityType::SpiderWeb, PetType::Spider),
+            (AbilityType::BoarCharge, PetType::Boar),
+        ] {
+            let unit = |entity, team, class, position, pet_type: Option<PetType>| CombatantInfo {
+                entity,
+                team,
+                slot: 0,
+                class,
+                current_health: 100.0,
+                max_health: 100.0,
+                current_mana: 100.0,
+                max_mana: 100.0,
+                position,
+                velocity: Vec3::ZERO,
+                is_alive: true,
+                stealthed: false,
+                target: None,
+                is_pet: pet_type.is_some(),
+                casting_ability: None,
+                pet_type,
+                pet: None,
+            };
+            let (pet_entity, hunter, enemy) = (
+                Entity::from_raw(1),
+                Entity::from_raw(2),
+                Entity::from_raw(3),
+            );
+            let pet_pos = Vec3::new(0.0, 1.0, 0.0);
+            let enemy_pos = Vec3::new(16.0, 1.0, 0.0);
+            let mut hunter_info = unit(
+                hunter,
+                1,
+                CharacterClass::Hunter,
+                Vec3::new(-10.0, 1.0, 0.0),
+                None,
+            );
+            hunter_info.target = Some(enemy);
+            let roster: BTreeMap<_, _> = [
+                (
+                    pet_entity,
+                    unit(
+                        pet_entity,
+                        1,
+                        CharacterClass::Hunter,
+                        pet_pos,
+                        Some(pet_type),
+                    ),
+                ),
+                (hunter, hunter_info),
+                (enemy, unit(enemy, 2, CharacterClass::Mage, enemy_pos, None)),
+            ]
+            .into_iter()
+            .collect();
+            let (auras, dr, cds) = (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
+            let pillar = [ObstacleVolume::Cylinder {
+                center_xz: Vec2::new(8.0, 0.0),
+                radius: 2.0,
+                base_y: 0.0,
+                height: 10.0,
+            }];
+            let abilities = AbilityDefinitions::default();
+            let def = abilities.get(&ability).unwrap();
+            let distance = pet_pos.distance(enemy_pos);
+            assert!(
+                distance < def.range
+                    && distance > crate::states::play_match::constants::CHARGE_MIN_RANGE,
+                "{ability:?}: range never decides it"
+            );
+            let name = format!("{ability:?}");
+            let candidate = |trace: &DecisionTrace| {
+                let event = serde_json::to_value(trace.pending_events.last().unwrap()).unwrap();
+                event["candidates"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|c| c["ability"] == name.as_str())
+                    .cloned()
+                    .unwrap()
+            };
+            // A macro, not a closure: the context borrows each call's obstacles.
+            macro_rules! context {
+                ($me:expr, $obstacles:expr) => {
+                    CombatContext::new(
+                        $me,
+                        1,
+                        &roster,
+                        &auras,
+                        &dr,
+                        &cds,
+                        $obstacles,
+                        Default::default(),
+                        Default::default(),
+                    )
+                };
+            }
+
+            // The pet's own dispatch.
+            let autonomous = |obstacles: &[ObstacleVolume]| {
+                let ctx = context!(pet_entity, obstacles);
+                let world = World::new();
+                let mut queue = CommandQueue::default();
+                let mut commands = Commands::new(&mut queue, &world);
+                let mut combat_log = CombatLog::default();
+                let mut combatant = Combatant::new(1, 0, CharacterClass::Hunter);
+                let mut trace = DecisionTrace::default();
+                let mut builder = trace.start_pet_decision(
+                    ActorView::from_info(&roster[&pet_entity]),
+                    None,
+                    hunter,
+                    pet_type.name(),
+                );
+                let pet = Pet {
+                    owner: hunter,
+                    pet_type,
+                };
+                let dispatch = if ability == AbilityType::SpiderWeb {
+                    spider_autonomous_dispatch
+                } else {
+                    boar_autonomous_dispatch
+                };
+                dispatch(
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    pet_entity,
+                    &mut combatant,
+                    pet_pos,
+                    &pet,
+                    &ctx,
+                    &mut builder,
+                );
+                builder.finish();
+                candidate(&trace)
+            };
+            // The Hunter's dispatch.
+            let dispatched = |obstacles: &[ObstacleVolume]| {
+                let ctx = context!(hunter, obstacles);
+                let world = World::new();
+                let mut queue = CommandQueue::default();
+                let mut commands = Commands::new(&mut queue, &world);
+                let mut trace = DecisionTrace::default();
+                let dispatch = if ability == AbilityType::SpiderWeb {
+                    super::super::hunter::try_dispatch_spider_web
+                } else {
+                    super::super::hunter::try_dispatch_boar_charge
+                };
+                let sent = dispatch(
+                    &mut commands,
+                    &abilities,
+                    &mut trace,
+                    hunter,
+                    pet_entity,
+                    &roster[&pet_entity],
+                    enemy,
+                    &ctx,
+                );
+                (sent, candidate(&trace))
+            };
+            // A command dispatched in sight, re-checked once the pillar is between.
+            let recheck = |obstacles: &[ObstacleVolume]| {
+                let ctx = context!(pet_entity, obstacles);
+                let combatant = Combatant::new(1, 0, CharacterClass::Hunter);
+                pet_command_rejection(ability, def, &combatant, pet_pos, enemy, &ctx)
+            };
+
+            assert_eq!(autonomous(&[])["status"], "chosen", "{name}: pet, in sight");
+            let behind = autonomous(&pillar);
+            assert_eq!(behind["status"], "rejected");
+            assert_eq!(
+                behind["reason"], "LosBlocked",
+                "{name}: pet, behind the pillar"
+            );
+
+            let (sent, open) = dispatched(&[]);
+            assert!(sent, "{name}: Hunter dispatches it in sight");
+            assert_eq!(open["status"], "chosen");
+            let (sent, behind) = dispatched(&pillar);
+            assert!(!sent, "{name}: Hunter holds it behind the pillar");
+            assert_eq!(behind["reason"], "LosBlocked");
+
+            assert!(
+                recheck(&[]).is_none(),
+                "{name}: a command in sight executes"
+            );
+            assert!(
+                matches!(recheck(&pillar), Some(RejectionReason::LosBlocked)),
+                "{name}: a command whose sightline closed is refused"
+            );
+        }
     }
 }

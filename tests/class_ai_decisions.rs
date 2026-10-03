@@ -327,6 +327,7 @@ fn select_purge_target(snapshot: &CombatSnapshot, my_team: u8) -> Option<(Entity
         f32::MAX,
         i32::MIN,
     )
+    .ok()
     .map(|choice| match choice.scope {
         DispelScope::Purge(effect) | DispelScope::PurgeSource { effect, .. } => {
             (choice.target, effect)
@@ -2304,7 +2305,7 @@ mod druid_counterplay {
         let ctx = snapshot.context_for(me);
         for bar in [PURGE_MIN_PRIORITY, PURGE_URGENT_PRIORITY] {
             let choice = select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, bar)
-                .unwrap_or_else(|| panic!("Innervate clears the {bar} bar"));
+                .unwrap_or_else(|_| panic!("Innervate clears the {bar} bar"));
             assert_eq!(choice.target, druid);
             assert!(choice.scope.takes(&innervate));
             assert!(
@@ -2342,7 +2343,7 @@ mod druid_counterplay {
         snapshot.active_auras.insert(druid, vec![lifebloom.clone()]);
         let ctx = snapshot.context_for(me);
         assert!(
-            select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, PURGE_MIN_PRIORITY).is_none(),
+            select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, PURGE_MIN_PRIORITY).is_err(),
             "Lifebloom alone is not worth a purge"
         );
 
@@ -2686,5 +2687,92 @@ mod druid_counterplay {
             .active_auras
             .insert(druid, vec![landed(AbilityType::Cyclone, druid, druid)]);
         assert!(polymorph_refused(&snapshot.context_for(mage), druid));
+    }
+}
+
+// ============================================================================
+// Purge picks among the enemies it can SEE (AS-192)
+// ============================================================================
+
+mod purge_reach {
+    use super::*;
+
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::components::AuraPending;
+    use arenasim::states::play_match::decision_trace::RejectionReason;
+    use arenasim::states::play_match::map_geometry::ObstacleVolume;
+
+    fn landed(ability: AbilityType, target: Entity) -> Aura {
+        let defs = AbilityDefinitions::default();
+        AuraPending::from_ability(target, target, defs.get_unchecked(&ability))
+            .expect("the ability applies an aura")
+            .aura
+    }
+
+    /// Reach filters before value ranks. A Priest behind a pillar carries the
+    /// best buff (Power Word: Shield, an Absorb at 100); a Druid in sight
+    /// carries a Rejuvenation at the floor. Without the pillar the Shield is
+    /// the purge; with it the Shaman purges the Rejuvenation it can see rather
+    /// than refusing the cast, and with only the occluded Shield to take the
+    /// pick fails `LosBlocked` — the reason `try_purge_enemy` traces — never
+    /// `NoValidTarget`. Both enemies are in range throughout.
+    #[test]
+    fn purge_falls_back_past_an_occluded_top_pick() {
+        let defs = AbilityDefinitions::default();
+        let me = Entity::from_raw(1);
+        let priest = Entity::from_raw(2);
+        let druid = Entity::from_raw(3);
+        let range = defs.get_unchecked(&AbilityType::Purge).range;
+        let mut snapshot = snapshot_for(me, 1, CharacterClass::Shaman);
+        let mut priest_info = info(priest, 2, CharacterClass::Priest);
+        priest_info.position = Vec3::new(16.0, 1.0, 0.0);
+        let mut druid_info = info(druid, 2, CharacterClass::Druid);
+        druid_info.position = Vec3::new(0.0, 1.0, 16.0);
+        snapshot.combatants.insert(priest, priest_info);
+        snapshot.combatants.insert(druid, druid_info);
+        snapshot
+            .active_auras
+            .insert(priest, vec![landed(AbilityType::PowerWordShield, priest)]);
+        snapshot
+            .active_auras
+            .insert(druid, vec![landed(AbilityType::Rejuvenation, druid)]);
+        let pillar = ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(8.0, 0.0),
+            radius: 2.0,
+            base_y: 0.0,
+            height: 10.0,
+        };
+        let me_pos = Vec3::new(0.0, 1.0, 0.0);
+        let pick = |snapshot: &CombatSnapshot| {
+            select_purge(
+                &snapshot.context_for(me),
+                &defs,
+                1,
+                me_pos,
+                range,
+                PURGE_MIN_PRIORITY,
+            )
+        };
+
+        let open = pick(&snapshot).expect("both in sight: a purge");
+        assert_eq!(
+            open.target, priest,
+            "in sight, the Shield is worth the most"
+        );
+
+        snapshot.obstacles = vec![pillar];
+        let behind = pick(&snapshot).expect("the Druid is still in sight");
+        assert_eq!(
+            behind.target, druid,
+            "the occluded Shield yields to the Rejuvenation in sight"
+        );
+
+        snapshot.active_auras.remove(&druid);
+        assert!(
+            matches!(pick(&snapshot), Err(RejectionReason::LosBlocked)),
+            "only sight stands between the Shaman and the Shield"
+        );
+        snapshot.obstacles.clear();
+        assert_eq!(pick(&snapshot).map(|c| c.target).ok(), Some(priest));
     }
 }

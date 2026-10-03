@@ -871,10 +871,15 @@ fn try_holy_shock_heal(
         return false;
     }
 
-    let Some(target_info) = ctx.lowest_health_ally_below(LOW_HP_THRESHOLD, def.range, my_pos)
-    else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
-        return false;
+    // Reach (range, then sight) filters before health ranks: an occluded
+    // emergency yields to the lowest ally in sight, and no heal lands through a
+    // pillar.
+    let target_info = match ctx.lowest_health_ally_in_reach(LOW_HP_THRESHOLD, def.range, my_pos) {
+        Ok(info) => info,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
     };
     let target_entity = target_info.entity;
 
@@ -1456,5 +1461,155 @@ mod tests {
             !divine_shield_while_cc_should_fire(0.9, f32::INFINITY, 0.0),
             "healthy Paladin, no endangered ally → no fire"
         );
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-192: the Holy Shock heal needs sight of its ally
+    // ------------------------------------------------------------------------
+
+    /// The Holy Shock heal chooses among allies it can SEE. A Warrior at 20%
+    /// behind a pillar and a Mage at 40% in sight, both in range: without the
+    /// pillar the Warrior (lowest) is healed; with it, the Mage in sight is —
+    /// no heal through the pillar, and no refusal while a sighted emergency
+    /// waits. With the Warrior the only emergency, the heal is refused and
+    /// traced `LosBlocked`.
+    #[test]
+    fn holy_shock_heal_needs_sight_of_its_ally() {
+        use crate::states::play_match::decision_trace::ActorView;
+        use crate::states::play_match::map_geometry::ObstacleVolume;
+        use bevy::ecs::world::CommandQueue;
+
+        let unit = |entity, class, position, health| CombatantInfo {
+            entity,
+            team: 1,
+            slot: 0,
+            class,
+            current_health: health,
+            max_health: 100.0,
+            current_mana: 100.0,
+            max_mana: 100.0,
+            position,
+            velocity: Vec3::ZERO,
+            is_alive: true,
+            stealthed: false,
+            target: None,
+            is_pet: false,
+            casting_ability: None,
+            pet_type: None,
+            pet: None,
+        };
+        let (paladin, warrior, mage) = (
+            Entity::from_raw(1),
+            Entity::from_raw(2),
+            Entity::from_raw(3),
+        );
+        let paladin_pos = Vec3::new(0.0, 1.0, 0.0);
+        let roster_with = |mage_health| -> BTreeMap<_, _> {
+            [
+                (
+                    paladin,
+                    unit(paladin, CharacterClass::Paladin, paladin_pos, 100.0),
+                ),
+                (
+                    warrior,
+                    unit(
+                        warrior,
+                        CharacterClass::Warrior,
+                        Vec3::new(16.0, 1.0, 0.0),
+                        20.0,
+                    ),
+                ),
+                (
+                    mage,
+                    unit(
+                        mage,
+                        CharacterClass::Mage,
+                        Vec3::new(0.0, 1.0, 16.0),
+                        mage_health,
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect()
+        };
+        let pillar = [ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(8.0, 0.0),
+            radius: 2.0,
+            base_y: 0.0,
+            height: 10.0,
+        }];
+        let abilities = AbilityDefinitions::default();
+
+        // (healed ally, the HolyShock candidate)
+        let shock = |roster: &BTreeMap<Entity, CombatantInfo>, obstacles: &[ObstacleVolume]| {
+            let (auras, dr, cds) = (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
+            let ctx = CombatContext::new(
+                paladin,
+                1,
+                roster,
+                &auras,
+                &dr,
+                &cds,
+                obstacles,
+                Default::default(),
+                Default::default(),
+            );
+            let mut world = World::new();
+            let mut queue = CommandQueue::default();
+            let mut combatant = Combatant::new(1, 0, CharacterClass::Paladin);
+            let mut trace = DecisionTrace::default();
+            {
+                let mut commands = Commands::new(&mut queue, &world);
+                let mut builder =
+                    trace.start_ability_decision(ActorView::from_info(&roster[&paladin]), None);
+                try_holy_shock_heal(
+                    &mut commands,
+                    &mut CombatLog::default(),
+                    &abilities,
+                    &mut combatant,
+                    paladin_pos,
+                    None,
+                    &ctx,
+                    &mut builder,
+                );
+                builder.finish();
+            }
+            queue.apply(&mut world);
+            let healed = world
+                .query::<&HolyShockHealPending>()
+                .iter(&world)
+                .map(|pending| pending.target)
+                .next();
+            let event = serde_json::to_value(&trace.pending_events[0]).unwrap();
+            let candidate = event["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["ability"] == "HolyShock")
+                .cloned()
+                .unwrap();
+            (healed, candidate)
+        };
+
+        let both = roster_with(40.0);
+        assert_eq!(
+            shock(&both, &[]).0,
+            Some(warrior),
+            "in sight: the lowest ally"
+        );
+        let (healed, candidate) = shock(&both, &pillar);
+        assert_eq!(
+            healed,
+            Some(mage),
+            "the occluded Warrior yields to the Mage in sight"
+        );
+        assert_eq!(candidate["status"], "chosen");
+
+        let warrior_only = roster_with(100.0);
+        assert_eq!(shock(&warrior_only, &[]).0, Some(warrior));
+        let (healed, candidate) = shock(&warrior_only, &pillar);
+        assert_eq!(healed, None, "no Holy Shock heal through the pillar");
+        assert_eq!(candidate["status"], "rejected");
+        assert_eq!(candidate["reason"], "LosBlocked");
     }
 }
