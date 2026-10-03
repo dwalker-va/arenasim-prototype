@@ -36,7 +36,8 @@ use bevy::time::TimeUpdateStrategy;
 
 use arenasim::combat::CombatPlugin;
 use arenasim::states::play_match::components::{
-    AutoAttackKind, AutoAttackSwing, Combatant, HitFlinch, Pet, RangedHitArrival, VisualBody,
+    AutoAttackKind, AutoAttackSwing, Combatant, HitFlinch, Pet, RangedHitArrival,
+    VictoryCelebration, VisualBody,
 };
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::play_match::systems::CombatSystemPhase;
@@ -71,6 +72,9 @@ struct Seen {
     /// The two players, recorded while the match lives — its entities are
     /// despawned when it ends.
     players: Vec<(Entity, CharacterClass)>,
+    /// The first frame of the victory celebration: from then on the
+    /// celebration's choreography draws the winners' bodies, not their gait.
+    decided: Option<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -178,8 +182,12 @@ fn observe_bodies(
         &Children,
     )>,
     bodies: Query<(&Transform, &VisualBody)>,
+    celebration: Option<Res<VictoryCelebration>>,
 ) {
     let frame = seen.frame;
+    if celebration.is_some() && seen.decided.is_none() {
+        seen.decided = Some(frame);
+    }
     for (unit, combatant, tf, flinch, pet, children) in units.iter() {
         if pet.is_none() && !seen.players.iter().any(|(e, _)| *e == unit) {
             seen.players.push((unit, combatant.class));
@@ -364,6 +372,11 @@ fn the_flinch_reads_on_moving_victims_in_a_real_match() {
     let mut moving_melee_on_warrior = 0;
     for &(frame, _, target, kind) in &seen.swings {
         if kind != AutoAttackKind::Melee {
+            continue;
+        }
+        // A blow landing as the match is decided (dying-blow semantics) is
+        // drawn under the victory celebration, which owns the body.
+        if seen.decided.is_some_and(|d| frame >= d) {
             continue;
         }
         // A melee reaction starts in the sim tick, so it is drawn this frame.

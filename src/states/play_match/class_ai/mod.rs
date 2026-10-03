@@ -1638,7 +1638,7 @@ pub fn try_purge_enemy(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
     if def.cooldown > 0.0 {
-        combatant.ability_cooldowns.insert(ability, def.cooldown);
+        combatant.start_cooldown(ability, abilities);
     }
 
     let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());

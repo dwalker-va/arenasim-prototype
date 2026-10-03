@@ -400,7 +400,7 @@ fn try_frost_shock(
 
     builder.choose(ability, Some(target_entity), true);
 
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras); // 0.0 — completes immediately
     commands
@@ -697,7 +697,7 @@ fn try_totem(
     ));
 
     combatant.current_mana -= def.mana_cost;
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
 
     combat_log.log(

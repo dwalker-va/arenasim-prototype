@@ -958,7 +958,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         let def = self.abilities.get_unchecked(&ability);
         self.builder.choose(ability, Some(target), true);
         if def.cooldown > 0.0 {
-            combatant.ability_cooldowns.insert(ability, def.cooldown);
+            combatant.start_cooldown(ability, self.abilities);
         }
         combatant.global_cooldown = GCD;
         let cast_time = calculate_cast_time(def.cast_time, self.auras);

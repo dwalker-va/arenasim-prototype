@@ -282,6 +282,7 @@ pub fn pet_ai_system(
                             &mut commands,
                             &mut combat_log,
                             def,
+                            &abilities,
                             entity,
                             &mut combatant,
                             my_pos,
@@ -291,6 +292,7 @@ pub fn pet_ai_system(
                             &mut commands,
                             &mut combat_log,
                             def,
+                            &abilities,
                             entity,
                             &mut combatant,
                             command.target,
@@ -299,6 +301,7 @@ pub fn pet_ai_system(
                             &mut commands,
                             &mut combat_log,
                             def,
+                            &abilities,
                             entity,
                             &mut combatant,
                             command.target,
@@ -636,7 +639,7 @@ pub(crate) fn execute_spell_lock(
     let ability = AbilityType::SpellLock;
     let def = abilities.get_unchecked(&ability);
 
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
 
     let caster_id = pet_combatant_id(
         combatant.team,
@@ -735,7 +738,7 @@ fn try_devour_magic(
 
     builder.choose(ability, Some(target_entity), true);
 
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = super::super::constants::GCD;
 
     let caster_id = pet_combatant_id(
@@ -774,6 +777,7 @@ pub(crate) fn execute_spider_web(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     def: &crate::states::play_match::ability_config::AbilityConfig,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -796,7 +800,7 @@ pub(crate) fn execute_spider_web(
         PlayMatchEntity,
     ));
 
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = super::super::constants::GCD;
 
     let caster_id = pet_combatant_id(
@@ -818,6 +822,7 @@ pub(crate) fn execute_boar_charge(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     def: &crate::states::play_match::ability_config::AbilityConfig,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     target: Entity,
@@ -829,7 +834,7 @@ pub(crate) fn execute_boar_charge(
         commands.spawn((aura_pending, PlayMatchEntity));
     }
 
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = super::super::constants::GCD;
 
     let caster_id = pet_combatant_id(
@@ -852,6 +857,7 @@ pub(crate) fn execute_masters_call(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     def: &crate::states::play_match::ability_config::AbilityConfig,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     target: Entity,
@@ -876,7 +882,7 @@ pub(crate) fn execute_masters_call(
         PlayMatchEntity,
     ));
 
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = super::super::constants::GCD;
 
     let caster_id = pet_combatant_id(
@@ -984,7 +990,9 @@ fn spider_autonomous_dispatch(
     }
 
     builder.choose(ability, Some(target), true);
-    execute_spider_web(commands, combat_log, def, entity, combatant, my_pos, target);
+    execute_spider_web(
+        commands, combat_log, def, abilities, entity, combatant, my_pos, target,
+    );
 }
 
 /// Autonomous Boar Charge dispatch. Friendly-CC guard applies here because
@@ -1071,7 +1079,9 @@ fn boar_autonomous_dispatch(
     }
 
     builder.choose(ability, Some(target), true);
-    execute_boar_charge(commands, combat_log, def, entity, combatant, target);
+    execute_boar_charge(
+        commands, combat_log, def, abilities, entity, combatant, target,
+    );
 }
 
 /// Autonomous Master's Call dispatch. Cleanses Root/MovementSpeedSlow from
@@ -1163,7 +1173,9 @@ fn bird_autonomous_dispatch(
     }
 
     builder.choose(ability, Some(target), true);
-    execute_masters_call(commands, combat_log, def, entity, combatant, target);
+    execute_masters_call(
+        commands, combat_log, def, abilities, entity, combatant, target,
+    );
 }
 
 #[cfg(test)]

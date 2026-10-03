@@ -602,9 +602,7 @@ fn try_charge(
     builder.choose(charge, Some(target_entity), true);
 
     // Execute Charge
-    combatant
-        .ability_cooldowns
-        .insert(charge, charge_def.cooldown);
+    combatant.start_cooldown(charge, abilities);
     combatant.global_cooldown = GCD;
 
     commands.entity(entity).insert(ChargingState {
@@ -799,9 +797,7 @@ fn try_mortal_strike(
 
     // Execute Mortal Strike
     combatant.current_mana -= ms_def.mana_cost;
-    combatant
-        .ability_cooldowns
-        .insert(mortal_strike, ms_def.cooldown);
+    combatant.start_cooldown(mortal_strike, abilities);
     combatant.global_cooldown = GCD;
 
     // Log
@@ -935,10 +931,9 @@ pub fn try_berserker_rage_while_cc(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::BerserkerRage;
-    let def = match abilities.get(&ability) {
-        Some(d) => d,
-        None => return false,
-    };
+    if abilities.get(&ability).is_none() {
+        return false;
+    }
 
     // Hard-CC'd in a non-fear way: cannot act at all. Horror also fully locks
     // the Warrior out — only a real Fear leaves the "break out" window open.
@@ -1010,7 +1005,7 @@ pub fn try_berserker_rage_while_cc(
         caster_class: combatant.class,
     });
 
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
 
     log_ability_use(

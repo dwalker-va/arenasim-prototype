@@ -10,6 +10,21 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
 - 1.5 seconds between most abilities
 - Prevents ability spam, creates tactical decisions
 
+### Shared Cooldown Categories
+- Some abilities share one cooldown: using any member puts every member on
+  it. Declared per ability as `cooldown_category` in `abilities.ron`, after the
+  Classic client's `SpellCategory`; applied by `Combatant::start_cooldown`,
+  the one place a cooldown starts (`tests/cooldown_site_audit.rs`).
+- **Traps.** Freezing Trap and Frost Trap are both `Trap`: throwing either
+  locks both for 15s. Source: client 1.15.9.69547 (wago.tools DB2) —
+  `SpellCategories` puts every rank of Freezing (1499/14310/14311), Frost
+  (13809), Immolation and Explosive Trap in category 411 "Trap", and
+  `SpellCooldowns` gives each a 15000ms `CategoryRecoveryTime` and a
+  `RecoveryTime` of 0, so the category cooldown is the traps' only cooldown.
+  It sits beside the one-active-trap rule (a new trap replaces the Hunter's
+  live one): the cooldown decides when the next trap can go, the slot decides
+  what happens to the last.
+
 ### Casting
 - Movement stops while casting non-instant spells
 - Caster faces target when beginning a cast

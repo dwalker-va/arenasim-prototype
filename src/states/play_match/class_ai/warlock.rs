@@ -892,7 +892,7 @@ fn try_death_coil(
     ));
 
     combatant.current_mana -= def.mana_cost;
-    combatant.ability_cooldowns.insert(death_coil, def.cooldown);
+    combatant.start_cooldown(death_coil, abilities);
     combatant.global_cooldown = GCD;
 
     let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());

@@ -398,10 +398,9 @@ pub fn try_divine_shield(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::DivineShield;
-    let def = match abilities.get(&ability) {
-        Some(d) => d,
-        None => return false,
-    };
+    if abilities.get(&ability).is_none() {
+        return false;
+    }
 
     if combatant
         .ability_cooldowns
@@ -459,7 +458,7 @@ pub fn try_divine_shield(
         caster_class: combatant.class,
     });
 
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -520,10 +519,9 @@ pub fn try_divine_shield_while_cc(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::DivineShield;
-    let def = match abilities.get(&ability) {
-        Some(d) => d,
-        None => return false,
-    };
+    if abilities.get(&ability).is_none() {
+        return false;
+    }
 
     if combatant
         .ability_cooldowns
@@ -610,7 +608,7 @@ pub fn try_divine_shield_while_cc(
         caster_class: combatant.class,
     });
 
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -884,7 +882,7 @@ fn try_holy_shock_heal(
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
 
     log_ability_use(
         combat_log,
@@ -987,7 +985,7 @@ fn try_holy_shock_damage(
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
-    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.start_cooldown(ability, abilities);
 
     log_ability_use(
         combat_log,
@@ -1070,6 +1068,7 @@ fn try_hammer_of_justice(
         combat_log,
         entity,
         def,
+        abilities,
         combatant,
         *target_entity,
         target_id,
@@ -1135,6 +1134,7 @@ fn try_dip_hammer_of_justice(
         combat_log,
         entity,
         def,
+        abilities,
         combatant,
         target,
         info.log_id(),
@@ -1154,6 +1154,7 @@ fn cast_hammer_of_justice(
     combat_log: &mut CombatLog,
     entity: Entity,
     def: &AbilityConfig,
+    abilities: &AbilityDefinitions,
     combatant: &mut Combatant,
     target_entity: Entity,
     target_id: crate::combat::log::CombatantId,
@@ -1185,9 +1186,7 @@ fn cast_hammer_of_justice(
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
-    combatant
-        .ability_cooldowns
-        .insert(AbilityType::HammerOfJustice, def.cooldown);
+    combatant.start_cooldown(AbilityType::HammerOfJustice, abilities);
 
     let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
     log_ability_use(

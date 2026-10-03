@@ -3651,9 +3651,14 @@ mod hunter_postures {
     /// peel on the first swing. The pet-only root tier makes it hold fire while
     /// its Web is up. Pre-fix the Spider attacked within ~0.8s of webbing;
     /// post-fix the next swing only lands after the ~4s root window.
+    ///
+    /// Against a Rogue: since the Hunter's traps share one cooldown (AS-196)
+    /// Hunter v Warrior ends before the Spider's second Web, and its first
+    /// always meets the Warrior's Charge immunity — no Web lands on the
+    /// Warrior in seeds 0-79.
     #[test]
     fn hunter_pet_does_not_break_own_web() {
-        let log = run_capturing_log(vec!["Hunter"], vec!["Warrior"]);
+        let log = run_capturing_log(vec!["Hunter"], vec!["Rogue"]);
         // First time the Spider's Web is APPLIED (not merely cast) to the enemy.
         let web_applied = log
             .lines()

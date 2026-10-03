@@ -970,7 +970,10 @@
         ),
 
         // Freezing Trap: Incapacitates first enemy contact (like Polymorph but stationary)
-        // WoW Classic Spell ID 1499: Instant, 50 mana, 25s CD, 10s freeze
+        // WoW Classic Spell ID 1499: Instant, 50 mana, 10s freeze. Its 15s
+        // cooldown is the Trap category's, shared with every trap: client
+        // SpellCategories puts all trap ranks in category 411 "Trap", and
+        // SpellCooldowns gives them CategoryRecoveryTime 15000, RecoveryTime 0.
         FreezingTrap: (
             name: "Freezing Trap",
             class: Hunter,
@@ -978,7 +981,8 @@
             cast_time: 0.0,
             range: 30.0,  // Placement range
             mana_cost: 26.0,
-            cooldown: 25.0,
+            cooldown: 15.0,
+            cooldown_category: Some(Trap),
             applies_aura: Some((
                 aura_type: Incapacitate,
                 duration: 10.0,
@@ -989,7 +993,8 @@
         ),
 
         // Frost Trap: Creates persistent slow zone on trigger
-        // WoW Classic Spell ID 13809: Instant, 60 mana, 20s CD, 30s zone
+        // WoW Classic Spell ID 13809: Instant, 60 mana, 30s zone; the shared
+        // 15s Trap category cooldown (see Freezing Trap).
         // Scaled: 10s zone duration for faster ArenaSim gameplay
         FrostTrap: (
             name: "Frost Trap",
@@ -998,7 +1003,8 @@
             cast_time: 0.0,
             range: 30.0,  // Placement range
             mana_cost: 26.0,
-            cooldown: 20.0,
+            cooldown: 15.0,
+            cooldown_category: Some(Trap),
             spell_school: None,
             // The slow is an engine-applied zone aura, not an `applies_aura`
             // block, so nothing here generates a sentence for it. Prose carries

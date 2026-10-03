@@ -180,6 +180,16 @@ pub struct AbilityConfig {
     /// Cooldown after cast in seconds
     #[serde(default)]
     pub cooldown: f32,
+    /// A cooldown SHARED with every other ability in the same category: using
+    /// any member puts all of them on cooldown (Classic's spell cooldown
+    /// category — Freezing Trap and Frost Trap are both `Trap`). Every member
+    /// of a category must declare the same `cooldown` (`validate()`), which is
+    /// the category's cooldown. Applied by [`Combatant::start_cooldown`], the
+    /// one place an ability's cooldown starts.
+    ///
+    /// [`Combatant::start_cooldown`]: super::components::Combatant::start_cooldown
+    #[serde(default)]
+    pub cooldown_category: Option<CooldownCategory>,
 
     // === Damage ===
     /// Base minimum damage (before stat scaling)
@@ -300,6 +310,17 @@ pub struct DispelBacklashConfig {
     /// Coefficient applied to the caster's spell power at cast time.
     #[serde(default)]
     pub damage_sp_coefficient: f32,
+}
+
+/// A shared cooldown category ([`AbilityConfig::cooldown_category`]). Named
+/// after the Classic client's `SpellCategory` it mirrors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CooldownCategory {
+    /// Classic `SpellCategory` 411 "Trap": every rank of Freezing, Frost,
+    /// Immolation and Explosive Trap, with a 15s `CategoryRecoveryTime` and no
+    /// per-spell `RecoveryTime` (client 1.15.9.69547, `SpellCategories` /
+    /// `SpellCooldowns`).
+    Trap,
 }
 
 fn default_scaling_none() -> ScalingStat {
@@ -589,6 +610,26 @@ impl AbilityDefinitions {
             }
         }
 
+        // A cooldown category has ONE cooldown: every member must declare the
+        // same `cooldown`, or which member was used would decide how long the
+        // others wait.
+        for (ability, def) in &self.definitions {
+            let Some(category) = def.cooldown_category else {
+                continue;
+            };
+            for (other, other_def) in &self.definitions {
+                if other_def.cooldown_category == Some(category)
+                    && other_def.cooldown != def.cooldown
+                {
+                    panic!(
+                        "abilities.ron: {:?} and {:?} share cooldown category {:?} but declare \
+                         different cooldowns ({} vs {}). A category has one cooldown.",
+                        ability, other, category, def.cooldown, other_def.cooldown
+                    );
+                }
+            }
+        }
+
         if missing.is_empty() {
             Ok(())
         } else {
@@ -737,6 +778,7 @@ mod tests {
             min_range: None,
             mana_cost: 0.0,
             cooldown: 0.0,
+            cooldown_category: None,
             damage_base_min: 0.0,
             damage_base_max: 0.0,
             damage_coefficient: 0.0,
