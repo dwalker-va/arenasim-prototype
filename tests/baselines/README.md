@@ -47,7 +47,8 @@ by someone who was not there.
 
 | File | Captured | Notes |
 |---|---|---|
-| `legacy_behaviour_2026-10-02_priest_dispel_walk.txt` | 2026-10-02 | **Current.** After the Priest began walking into Dispel Magic's reach of a teammate in urgent CC (card AS-187). Diffed against the fresh `main` capture below. |
+| `legacy_behaviour_2026-10-02_dispel_walk_edge.txt` | 2026-10-02 | **Current.** After the healers' dispel walk began holding its reach, gating the Paladin's on Cleanse being castable, and yielding to a dying teammate (card AS-197). Diffed against a fresh run of `main` @ `68db71b`, which reproduced the file below exactly. |
+| `legacy_behaviour_2026-10-02_priest_dispel_walk.txt` | 2026-10-02 | After the Priest began walking into Dispel Magic's reach of a teammate in urgent CC (card AS-187). Diffed against the fresh `main` capture below. |
 | `legacy_behaviour_2026-10-02_main_64dbe39.txt` | 2026-10-02 | A FRESH run of `main` @ `64dbe39`, the base AS-187 was measured against. |
 | `legacy_behaviour_2026-09-28_starting_rage.txt` | 2026-09-28 | After Warriors began entering the gates at 0 rage instead of 100 (card AS-172). Captured against a FRESH run of `main` @ `d5f21c1`, which reproduced the weapon-speed file exactly. |
 | `legacy_behaviour_2026-09-28_weapon_speed.txt` | 2026-09-28 | After every weapon took its swing speed from a named Classic item (card AS-167). Captured against a FRESH run of `main` @ `17cb9f0`, which reproduced the two-hander-budget file exactly. |
@@ -57,6 +58,21 @@ by someone who was not there.
 | `legacy_behaviour_2026-08-02_backlash_ids.txt` | 2026-08-02 | After the `[BACKLASH]` log-id fix. Verified reproducible: two independent runs agreed on all 27 cells. |
 | `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | After moving the simulation to `FixedUpdate`. Verified reproducible when captured. |
 | `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | Pre-fixed-timestep. Also verified reproducible when captured. |
+
+### 2026-10-02 — the dispel walk holds its reach (AS-197)
+
+**3 of 27 cells moved, all `healer_v_healer`**: BasicArena 1, TwinPillars 1,
+PillaredArena 4. Winner and duration held in all three; only the log digest
+moved. The attribution is positive in each: the team-1 Priest's dispel walk to
+the feared Warrior reaches the bare 30yd edge, where `main` released it (a
+`FormationShift` / `CommitExpired` at that tick is the first differing trace
+line) and the walk now carries on toward `DISPEL_REACH_MARGIN` inside range.
+The Dispel Magic lands on the same tick in both arms; the Priest has walked a
+frame or two further, which is the log's first difference (a position).
+`TwinPillars healer_v_healer 4` diverges in its trace the same way and its log
+does not. The `ranged_v_melee` and `pet_comp` cells field a Priest or a Paladin
+and did not move, traces included; six of them trace one walk each, which no
+new rule touched.
 
 ### 2026-10-02 — the Priest's dispel walk (AS-187)
 

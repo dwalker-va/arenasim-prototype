@@ -302,14 +302,12 @@ fn probe(team1: &[&str], team2: &[&str], map: &str, seed: u64) -> Played {
 }
 
 impl Played {
-    /// Frames on which `class`'s healer could not cast its dispel while a
-    /// teammate sat in urgent crowd control beyond its range — the moments a
-    /// walk would have to be refused. The non-vacuity count for rule 1.
-    fn unable_while_owed(&self, class: CharacterClass) -> usize {
-        let range = AbilityDefinitions::default()
-            .get(&dispel_of(class).unwrap())
-            .unwrap()
-            .range;
+    /// Frames on which a free `class` healer could not cast its dispel while a
+    /// teammate sat in urgent crowd control at least `min_distance` away — the
+    /// moments a walk would have to be refused. The non-vacuity count for
+    /// rule 1. (Out of REACH is range or sight; the observer has positions,
+    /// not sightlines, so the probe bounds distance from below instead.)
+    fn unable_while_owed(&self, class: CharacterClass, min_distance: f32) -> usize {
         self.frames
             .iter()
             .filter(|f| {
@@ -324,7 +322,7 @@ impl Played {
                                 && !a.is_pet
                                 && a.alive
                                 && a.has(URGENT_CC)
-                                && xz(a.pos).distance(xz(h.pos)) > range
+                                && xz(a.pos).distance(xz(h.pos)) >= min_distance
                         })
                 })
             })
@@ -358,11 +356,11 @@ impl Played {
     }
 }
 
-/// Rule 1, played: `Warrior+Paladin vs Warlock+Priest` on Nagrand, seed 3. A
-/// teammate sits in urgent crowd control beyond Cleanse's range while the
-/// Paladin is silenced or locked out of Holy; before AS-197 the Paladin walked
-/// for the Cleanse it could not cast (three `DispelChase`s, 23.3-24.7s). It
-/// must not walk while it cannot cast.
+/// Rule 1, played: `Warrior+Paladin vs Warlock+Priest` on Nagrand, seed 3. The
+/// Felhunter Spell Locks the Paladin's Flash of Light (Holy locked 3s, from
+/// 22.75s) as the Warlock's Death Coil sends the Warrior off ~30yd round a
+/// pillar; before AS-197 the Paladin walked for the Cleanse it could not cast
+/// (three `DispelChase`s, 23.3-24.7s). It must not walk while it cannot cast.
 #[test]
 fn a_paladin_that_cannot_cleanse_does_not_walk_for_it() {
     let played = probe(
@@ -371,10 +369,10 @@ fn a_paladin_that_cannot_cleanse_does_not_walk_for_it() {
         "PillaredArena",
         3,
     );
-    let unable = played.unable_while_owed(CharacterClass::Paladin);
+    let unable = played.unable_while_owed(CharacterClass::Paladin, 25.0);
     assert!(
         unable >= 30,
-        "vacuous: the Paladin could not Cleanse a teammate beyond range on only {unable} frames"
+        "vacuous: the Paladin could not Cleanse a CC'd teammate 25yd+ off on only {unable} frames"
     );
     let b = played.breaches(urgency_hp());
     assert!(
