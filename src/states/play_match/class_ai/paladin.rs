@@ -1841,12 +1841,7 @@ mod reach_tests {
     /// the caster's own state (AS-204).
     #[test]
     fn an_occluded_heal_still_reports_the_paladin_silenced() {
-        let silenced = ActiveAuras {
-            auras: vec![Aura {
-                effect_type: AuraType::Silence,
-                ..Default::default()
-            }],
-        };
+        let silenced = silenced();
         let reason = |obstacles: &[ObstacleVolume]| {
             let abilities = AbilityDefinitions::default();
             let mut s = scene(1, 0.3, 1.0);
@@ -1876,12 +1871,7 @@ mod reach_tests {
     /// Light's band is behind the pillar is refused for the silence.
     #[test]
     fn an_occluded_holy_light_still_reports_the_paladin_silenced() {
-        let silenced = ActiveAuras {
-            auras: vec![Aura {
-                effect_type: AuraType::Silence,
-                ..Default::default()
-            }],
-        };
+        let silenced = silenced();
         let reason = |obstacles: &[ObstacleVolume]| {
             let abilities = AbilityDefinitions::default();
             let mut s = scene(1, 0.6, 1.0);

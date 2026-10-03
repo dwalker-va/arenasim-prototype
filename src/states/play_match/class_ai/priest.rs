@@ -2575,21 +2575,37 @@ mod reach_tests {
         assert_eq!(reason(&pillar()), open, "behind the pillar");
     }
 
-    /// An out-of-mana Priest is refused Power Word: Shield for mana, whether
-    /// its only candidate is in sight or behind the pillar. (The Priest carries
-    /// Weakened Soul and the Mage sits between 70% and full, so only the
-    /// Warrior is a candidate.)
+    /// A silenced Priest is refused Power Word: Shield for the silence,
+    /// whether its only candidate is in sight or behind the pillar. (The
+    /// Priest carries Weakened Soul and the Mage sits between 70% and full, so
+    /// only the Warrior is a candidate. Silence, not mana: the shield checks
+    /// mana before it picks.)
     #[test]
-    fn an_occluded_shield_still_reports_the_priest_out_of_mana() {
+    fn an_occluded_shield_still_reports_the_priest_silenced() {
+        let silenced = silenced();
         let reason = |obstacles: &[ObstacleVolume]| {
+            let abilities = AbilityDefinitions::default();
             let mut s = scene(0.3, 0.8);
             let me = s.units[0];
             s.auras.insert(me, vec![weakened_soul()]);
-            s.prep = Some(|c| c.current_mana = 0.0);
-            candidate(&shield(&mut s, obstacles), "PowerWordShield")["reason"].clone()
+            let trace = s.run(obstacles, |commands, ctx, combatant, builder| {
+                try_power_word_shield(
+                    commands,
+                    &mut CombatLog::default(),
+                    &abilities,
+                    me,
+                    combatant,
+                    CASTER,
+                    Some(&silenced),
+                    ctx,
+                    &mut HashSet::new(),
+                    builder,
+                )
+            });
+            candidate(&trace, "PowerWordShield")["reason"].clone()
         };
         let open = reason(&[]);
-        assert!(open.get("InsufficientMana").is_some(), "{open}");
+        assert!(open.get("SilencedOrLocked").is_some(), "{open}");
         assert_eq!(reason(&pillar()), open, "behind the pillar");
     }
 

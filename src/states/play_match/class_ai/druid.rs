@@ -1837,14 +1837,15 @@ mod reach_tests {
     }
 
     /// A Druid with Swiftmend on cooldown is refused it for the cooldown,
-    /// whether its only dying ally (carrying a Rejuvenation to consume) is in
-    /// sight or behind the pillar.
+    /// whether its only dying ally (carrying the Druid's own Rejuvenation to
+    /// consume, so the open map reaches the Swiftmend cast) is in sight or
+    /// behind the pillar.
     #[test]
     fn an_occluded_emergency_heal_still_reports_swiftmend_on_cooldown() {
         let reason = |obstacles: &[ObstacleVolume]| {
             let mut s = scene(0.3, 1.0, &[]);
             let warrior = s.units[1];
-            s.auras.insert(warrior, rejuvenation());
+            s.auras.insert(warrior, rejuvenation(s.units[0]));
             s.prep = Some(|c| {
                 c.ability_cooldowns.insert(AbilityType::Swiftmend, 3.0);
             });

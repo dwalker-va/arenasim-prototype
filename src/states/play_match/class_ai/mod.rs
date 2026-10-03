@@ -2276,6 +2276,17 @@ pub(crate) mod reach_fixture {
         }
     }
 
+    /// A caster's auras carrying a Silence: a refusal no check ahead of the
+    /// target pick reports (the pick precedes `pre_cast_ok`).
+    pub fn silenced() -> ActiveAuras {
+        ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::Silence,
+                ..Default::default()
+            }],
+        }
+    }
+
     /// The chosen ability and its target's id in the first decision of `trace`.
     pub fn outcome(trace: &DecisionTrace) -> Option<(String, Option<u64>)> {
         let event = serde_json::to_value(&trace.pending_events[0]).unwrap();
