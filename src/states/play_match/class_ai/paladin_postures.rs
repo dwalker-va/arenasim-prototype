@@ -220,7 +220,9 @@ pub fn evaluate_paladin_posture(
     // a Flash of Light on a less-hurt ally in sight would root the Paladin
     // short of the dying one, so it defers, while a heal on a dying ally in
     // sight (and the instant Holy Shock) fires.
-    if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
+    if let Some(ally) =
+        medic_chase_override(entity, my_pos, next, ctx, shared, state, directive, now)
+    {
         medic_chase_tick(
             commands,
             entity,

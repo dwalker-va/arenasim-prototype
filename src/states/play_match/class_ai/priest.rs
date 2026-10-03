@@ -1843,7 +1843,9 @@ pub fn evaluate_priest_posture(
     // The walk wins over a movement-locking cast that is not itself critical:
     // a Flash Heal on a less-hurt ally in sight would root the Priest short of
     // the dying one, so it defers, while a heal on a dying ally in sight fires.
-    if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
+    if let Some(ally) =
+        medic_chase_override(entity, my_pos, next, ctx, shared, state, directive, now)
+    {
         medic_chase_tick(
             commands,
             entity,
