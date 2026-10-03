@@ -1235,6 +1235,37 @@ pub fn dispel_chase_target(
     current_mana: f32,
     dispel: AbilityType,
 ) -> Option<Entity> {
+    match owed_dispel(ctx, abilities, entity, my_pos, current_mana, dispel)? {
+        OwedDispel::Unreached(ally) => Some(ally),
+        OwedDispel::Reached(_) => None,
+    }
+}
+
+/// An urgent dispel a healer owes a teammate — see [`owed_dispel`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwedDispel {
+    /// The dispel reaches this teammate from where the healer stands: the
+    /// rotation's urgent dispel frees it on its next GCD.
+    Reached(Entity),
+    /// No owed teammate is reached; this is the nearest one, which the healer
+    /// must walk to ([`dispel_chase_target`]).
+    Unreached(Entity),
+}
+
+/// Whether the healer owes `dispel` to a teammate held in crowd control it
+/// removes at the urgent bar, and whether the dispel reaches one from `my_pos`.
+/// A reached teammate wins over every unreached one (the rotation frees it
+/// first, where the healer stands); otherwise the nearest unreached one, entity
+/// order breaking ties. `None` when no teammate holds such crowd control, or the
+/// healer cannot afford the dispel.
+pub fn owed_dispel(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    my_pos: Vec3,
+    current_mana: f32,
+    dispel: AbilityType,
+) -> Option<OwedDispel> {
     let def = abilities.get(&dispel)?;
     let AllyRemoval { scope, .. } = ally_removal(dispel)?;
     if current_mana < def.mana_cost {
@@ -1254,14 +1285,32 @@ pub fn dispel_chase_target(
             continue;
         }
         if ally_reach(ctx, def.range, my_pos, ally.position) == AllyReach::Reaches {
-            return None;
+            return Some(OwedDispel::Reached(ally.entity));
         }
         let distance = my_pos.distance(ally.position);
         if nearest.is_none_or(|(d, e)| (distance, ally.entity) < (d, e)) {
             nearest = Some((distance, ally.entity));
         }
     }
-    nearest.map(|(_, e)| e)
+    nearest.map(|(_, e)| OwedDispel::Unreached(e))
+}
+
+/// The dying-first rule for a dispel owed to `ally`: whether some OTHER living
+/// non-pet teammate than the healer and `ally` is below `urgency_hp_threshold`.
+/// While one is, no dispel walk runs — the heal is the higher-value GCD (a
+/// teammate in CC loses its actions for the CC's length, a dying one for the
+/// match), and a walk to the CC'd teammate can carry the healer off the dying
+/// one's heal range and sight. The CC'd teammate itself does not count: walking
+/// to it brings it into heal range too. Pets never count (`alive_allies`).
+pub fn another_teammate_dying(
+    ctx: &CombatContext,
+    entity: Entity,
+    ally: Entity,
+    urgency_hp_threshold: f32,
+) -> bool {
+    ctx.alive_allies()
+        .iter()
+        .any(|a| a.entity != entity && a.entity != ally && a.health_pct() < urgency_hp_threshold)
 }
 
 /// Shared dispel logic used by Priest (Dispel Magic) and Paladin (Cleanse).

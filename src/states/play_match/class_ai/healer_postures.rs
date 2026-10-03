@@ -19,7 +19,7 @@ use crate::states::play_match::combat_core::{
     compass_directions_16, mask_and_los_bitmask, score_directions, AnchorConstraint, ScorerInputs,
 };
 use crate::states::play_match::components::{
-    HealerPosture, MovementDirective, MovementGoal, Posture,
+    DispelWalkPhase, HealerPosture, MovementDirective, MovementGoal, Posture,
 };
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementEventBuilder, MovementGoalKind, MovementTrigger,
@@ -27,8 +27,9 @@ use crate::states::play_match::decision_trace::{
 };
 use crate::states::play_match::map_geometry::{has_line_of_sight, EYE_HEIGHT};
 use crate::states::play_match::movement_config::{MovementWeights, SharedMovementConfig};
+use crate::states::play_match::team_solve::DISPEL_REACH_MARGIN;
 
-use super::{pressing_when_ahead, CombatContext, CombatantInfo};
+use super::{pressing_when_ahead, CombatContext, CombatantInfo, OwedDispel};
 
 /// Distance ahead at which the position scorer evaluates candidate steps.
 pub(super) const SCORER_LOOKAHEAD: f32 = 2.0;
@@ -353,14 +354,38 @@ pub(super) fn medic_chase_override<'c>(
     medic_chase_target(entity, my_pos, ctx, shared)
 }
 
+/// What a healer's `Legacy` dispel walk does this frame ([`dispel_chase_override`]).
+pub(super) enum DispelStep<'c> {
+    /// Walk toward this teammate: the dispel does not reach it yet.
+    Walk(&'c CombatantInfo),
+    /// The walk reached `ally` and the dispel is still owed: hold `at`, the
+    /// point the walk reached, until it lands.
+    Hold { ally: Entity, at: Vec3 },
+}
+
 /// Whether a healer's dispel walk should override the normal movement tick
-/// this frame: the walk is allowed ([`ally_walk_allowed`]) and a teammate held
-/// in urgent crowd control `dispel` removes is out of its reach — beyond its
-/// range, or in range behind cover
-/// ([`dispel_chase_target`](super::dispel_chase_target)). Returns that ally.
-/// The walk runs until the teammate is in range AND in sight, the two gates
-/// the dispel itself passes, so it never parks where the cast is refused.
-/// The medic chase outranks it: a dying ally the healer cannot see comes first.
+/// this frame, and how. It runs while the walk is allowed
+/// ([`ally_walk_allowed`]), the healer could cast `dispel` on arrival
+/// ([`can_cast_dispel`](super::can_cast_dispel) — neither silenced nor locked
+/// out of its school), and a teammate is held in urgent crowd control `dispel`
+/// removes ([`owed_dispel`](super::owed_dispel)):
+///
+/// - beyond its range or behind cover: [`DispelStep::Walk`] to it, until it is
+///   in range AND in sight, the two gates the dispel itself passes;
+/// - reached, once the walk has run: on to `DISPEL_REACH_MARGIN` inside the
+///   range, then [`DispelStep::Hold`] the point the walk reached until the
+///   dispel lands or stops being owed. Releasing on reach
+///   handed movement back to a posture that could step the healer straight
+///   back out of range while the GCD ran, and the walk re-armed — a stutter at
+///   the range edge.
+///
+/// **A dying teammate comes first**
+/// ([`another_teammate_dying`](super::another_teammate_dying)): no walk and no
+/// hold while any other living non-pet teammate is below
+/// `urgency_hp_threshold` — the rule `TeamPlan`'s `DispelGoal` keeps. The medic
+/// chase outranks the walk for a dying teammate the healer cannot see; this
+/// covers the one it can.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn dispel_chase_override<'c>(
     abilities: &AbilityDefinitions,
     entity: Entity,
@@ -369,12 +394,121 @@ pub(super) fn dispel_chase_override<'c>(
     next: Posture,
     ctx: &'c CombatContext,
     dispel: AbilityType,
-) -> Option<&'c CombatantInfo> {
-    if !ally_walk_allowed(entity, next, ctx) {
+    shared: &SharedMovementConfig,
+    state: &HealerPosture,
+) -> Option<DispelStep<'c>> {
+    if !ally_walk_allowed(entity, next, ctx)
+        || !super::can_cast_dispel(ctx, abilities, entity, dispel)
+    {
         return None;
     }
-    let ally = super::dispel_chase_target(ctx, abilities, entity, my_pos, current_mana, dispel)?;
-    ctx.combatants.get(&ally)
+    let owed = super::owed_dispel(ctx, abilities, entity, my_pos, current_mana, dispel)?;
+    let (OwedDispel::Reached(ally) | OwedDispel::Unreached(ally)) = owed;
+    if super::another_teammate_dying(ctx, entity, ally, shared.urgency_hp_threshold) {
+        return None;
+    }
+    let info = ctx.combatants.get(&ally)?;
+    match (owed, state.dispel_walk) {
+        (OwedDispel::Unreached(_), _) => Some(DispelStep::Walk(info)),
+        (OwedDispel::Reached(_), DispelWalkPhase::Off) => None,
+        // A live walk carries on to `DISPEL_REACH_MARGIN` inside the range
+        // before it holds, and a hold resumes walking only once the teammate is
+        // out of reach altogether: a band, so a teammate drifting along the
+        // edge (a feared one running) does not flip walk and hold every frame.
+        (OwedDispel::Reached(_), DispelWalkPhase::Walking) => {
+            let range = abilities.get(&dispel)?.range;
+            if my_pos.distance(info.position) > range - DISPEL_REACH_MARGIN {
+                Some(DispelStep::Walk(info))
+            } else {
+                Some(DispelStep::Hold { ally, at: my_pos })
+            }
+        }
+        (OwedDispel::Reached(_), DispelWalkPhase::Holding(at)) => {
+            Some(DispelStep::Hold { ally, at })
+        }
+    }
+}
+
+/// Run the dispel walk's `step`: the walk to the teammate (traced
+/// `DispelChase`, per [`ally_walk_tick`]), or the hold at its reach point
+/// (traced `DispelHold` once, on reaching).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn dispel_walk_tick(
+    commands: &mut Commands,
+    entity: Entity,
+    my_pos: Vec3,
+    step: DispelStep,
+    state: &mut HealerPosture,
+    directive: Option<&MovementDirective>,
+    shared: &SharedMovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+    ctx: &CombatContext,
+) {
+    match step {
+        DispelStep::Walk(ally) => {
+            if matches!(state.dispel_walk, DispelWalkPhase::Holding(_)) {
+                // The teammate left reach (a feared one runs): walk again,
+                // re-targeted now rather than when the hold's window ends.
+                state.medic_target = None;
+            }
+            state.dispel_walk = DispelWalkPhase::Walking;
+            ally_walk_tick(
+                commands,
+                entity,
+                my_pos,
+                ally,
+                state,
+                directive,
+                shared,
+                now,
+                decision_trace,
+                ctx,
+                MovementTrigger::DispelChase,
+            );
+        }
+        DispelStep::Hold { ally, at } => {
+            let reached_now = !matches!(state.dispel_walk, DispelWalkPhase::Holding(_));
+            if reached_now || directive.is_none_or(|d| now >= d.expires) {
+                commands.entity(entity).try_insert(MovementDirective {
+                    goal: MovementGoal::Point(at),
+                    expires: now + shared.directive_ttl,
+                    committed_until: now + shared.commit_window,
+                });
+            }
+            state.dispel_walk = DispelWalkPhase::Holding(at);
+            state.medic_target = None;
+            state.last_direction = None;
+            state.last_point = None;
+            if reached_now {
+                if let Some(mut builder) =
+                    start_movement_event_with_target(decision_trace, ctx, ally, my_pos)
+                {
+                    builder.direction_change(
+                        state.posture.into(),
+                        MovementTrigger::DispelHold,
+                        MovementGoalKind::Point,
+                    );
+                    builder.finish();
+                }
+            }
+        }
+    }
+}
+
+/// End a live ally walk — the medic chase, the dispel walk or its hold — so the
+/// posture's own tick takes movement back: drop the walk's directive and clear
+/// its state. A no-op when no walk is live.
+pub(super) fn release_ally_walk(
+    commands: &mut Commands,
+    entity: Entity,
+    state: &mut HealerPosture,
+) {
+    if state.medic_target.is_some() || state.dispel_walk != DispelWalkPhase::Off {
+        commands.entity(entity).remove::<MovementDirective>();
+        state.medic_target = None;
+        state.dispel_walk = DispelWalkPhase::Off;
+    }
 }
 
 /// Whether a healer may take a direct walk to a teammate this frame: current
@@ -435,6 +569,9 @@ pub(super) fn medic_chase_tick(
     decision_trace: &mut DecisionTrace,
     ctx: &CombatContext,
 ) {
+    // The medic chase takes over from any dispel walk: a later return to the
+    // dispel starts a fresh walk rather than holding a point this chase left.
+    state.dispel_walk = DispelWalkPhase::Off;
     ally_walk_tick(
         commands,
         entity,
@@ -1295,8 +1432,21 @@ mod tests {
                 Default::default(),
                 profile,
             );
-            dispel_chase_override(&defs, paladin, Vec3::ZERO, 100.0, next, &ctx, cleanse)
-                .map(|ally| ally.entity)
+            match dispel_chase_override(
+                &defs,
+                paladin,
+                Vec3::ZERO,
+                100.0,
+                next,
+                &ctx,
+                cleanse,
+                &SharedMovementConfig::default(),
+                &HealerPosture::new(0.0),
+            ) {
+                Some(DispelStep::Walk(ally)) => Some(ally.entity),
+                Some(DispelStep::Hold { .. }) => panic!("held a walk that never ran"),
+                None => None,
+            }
         };
 
         use AiProfile::{Legacy, TeamPlan};
@@ -1312,5 +1462,178 @@ mod tests {
             None,
             "retired under TeamPlan PRESSURED"
         );
+    }
+
+    /// The three rules over the walk itself (AS-197): no walk while the
+    /// Paladin cannot Cleanse; a walk that reaches HOLDS its reach point while
+    /// Cleanse is still owed (and only a walk that ran — a teammate CC'd in
+    /// reach is the rotation's alone); and nothing while another teammate the
+    /// Paladin could heal instead is dying — but the CC'd teammate itself
+    /// dying does not count.
+    #[test]
+    fn the_dispel_walk_gates_on_cleanse_holds_on_reach_and_yields_to_the_dying() {
+        use crate::states::match_config::CharacterClass;
+        use crate::states::play_match::abilities::SpellSchool;
+        use crate::states::play_match::components::{Aura, AuraType};
+        use crate::states::play_match::traps::freezing_trap_aura;
+        use std::collections::BTreeMap;
+
+        let defs = AbilityDefinitions::default();
+        let cleanse = AbilityType::PaladinCleanse;
+        let range = defs.get(&cleanse).unwrap().range;
+        let (paladin, warrior, rogue) = (
+            Entity::from_raw(1),
+            Entity::from_raw(2),
+            Entity::from_raw(3),
+        );
+        let unit = |entity, class, position, hp| CombatantInfo {
+            entity,
+            team: 1,
+            slot: 0,
+            class,
+            current_health: hp,
+            max_health: 100.0,
+            current_mana: 100.0,
+            max_mana: 100.0,
+            position,
+            velocity: Vec3::ZERO,
+            is_alive: true,
+            stealthed: false,
+            target: None,
+            is_pet: false,
+            casting_ability: None,
+            pet_type: None,
+            pet: None,
+        };
+        let trap = freezing_trap_aura(Entity::from_raw(9));
+        let mut silence = trap.clone();
+        silence.effect_type = AuraType::Silence;
+        let mut holy_lock = trap.clone();
+        holy_lock.effect_type = AuraType::SpellSchoolLockout;
+        holy_lock.magnitude = SpellSchool::Holy.to_lockout_magnitude();
+        let dr = BTreeMap::new();
+        let cds = BTreeMap::new();
+
+        #[derive(Debug, PartialEq)]
+        enum Did {
+            Walk,
+            Hold(Vec3),
+            Nothing,
+        }
+        let step = |warrior_x: f32,
+                    warrior_hp: f32,
+                    rogue_hp: f32,
+                    paladin_auras: Vec<Aura>,
+                    phase: DispelWalkPhase| {
+            let roster: BTreeMap<Entity, CombatantInfo> = [
+                (
+                    paladin,
+                    unit(paladin, CharacterClass::Paladin, Vec3::ZERO, 100.0),
+                ),
+                (
+                    warrior,
+                    unit(
+                        warrior,
+                        CharacterClass::Warrior,
+                        Vec3::new(warrior_x, 0.0, 0.0),
+                        warrior_hp,
+                    ),
+                ),
+                (
+                    rogue,
+                    unit(
+                        rogue,
+                        CharacterClass::Rogue,
+                        Vec3::new(-10.0, 0.0, 0.0),
+                        rogue_hp,
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect();
+            let mut auras = BTreeMap::new();
+            auras.insert(warrior, vec![trap.clone()]);
+            auras.insert(paladin, paladin_auras);
+            let ctx = CombatContext::new(
+                paladin,
+                1,
+                &roster,
+                &auras,
+                &dr,
+                &cds,
+                &[],
+                Default::default(),
+                Default::default(),
+            );
+            let mut state = HealerPosture::new(0.0);
+            state.dispel_walk = phase;
+            match dispel_chase_override(
+                &defs,
+                paladin,
+                Vec3::ZERO,
+                100.0,
+                Posture::Free,
+                &ctx,
+                cleanse,
+                &SharedMovementConfig::default(),
+                &state,
+            ) {
+                Some(DispelStep::Walk(ally)) => {
+                    assert_eq!(ally.entity, warrior);
+                    Did::Walk
+                }
+                Some(DispelStep::Hold { ally, at }) => {
+                    assert_eq!(ally, warrior);
+                    Did::Hold(at)
+                }
+                None => Did::Nothing,
+            }
+        };
+        use DispelWalkPhase::{Holding, Off, Walking};
+        let (far, near) = (range + 15.0, range - 2.0);
+        let held = Vec3::new(1.0, 0.0, 2.0);
+
+        // The control, then the Cleanse gate.
+        assert_eq!(step(far, 100.0, 100.0, vec![], Off), Did::Walk);
+        assert_eq!(
+            step(far, 100.0, 100.0, vec![silence.clone()], Off),
+            Did::Nothing
+        );
+        assert_eq!(
+            step(far, 100.0, 100.0, vec![holy_lock.clone()], Off),
+            Did::Nothing
+        );
+
+        // Reach: hold where the walk reached, then keep that point.
+        assert_eq!(step(near, 100.0, 100.0, vec![], Off), Did::Nothing);
+        assert_eq!(
+            step(near, 100.0, 100.0, vec![], Walking),
+            Did::Hold(Vec3::ZERO)
+        );
+        // The band: a live walk carries on past the bare edge before holding,
+        // and a hold does not give way there.
+        let edge = range - DISPEL_REACH_MARGIN / 2.0;
+        assert_eq!(step(edge, 100.0, 100.0, vec![], Walking), Did::Walk);
+        assert_eq!(
+            step(edge, 100.0, 100.0, vec![], Holding(held)),
+            Did::Hold(held)
+        );
+        assert_eq!(
+            step(near, 100.0, 100.0, vec![], Holding(held)),
+            Did::Hold(held)
+        );
+        // ...and stop holding once Cleanse cannot be cast.
+        assert_eq!(
+            step(near, 100.0, 100.0, vec![silence], Holding(held)),
+            Did::Nothing
+        );
+        // A teammate leaving reach is walked to again.
+        assert_eq!(step(far, 100.0, 100.0, vec![], Holding(held)), Did::Walk);
+
+        // Dying first: the sighted Rogue below half holds both walk and hold.
+        assert_eq!(step(far, 100.0, 20.0, vec![], Off), Did::Nothing);
+        assert_eq!(step(near, 100.0, 20.0, vec![], Holding(held)), Did::Nothing);
+        // The trapped Warrior's own HP does not count.
+        assert_eq!(step(far, 20.0, 100.0, vec![], Off), Did::Walk);
     }
 }

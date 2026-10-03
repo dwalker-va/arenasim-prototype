@@ -143,6 +143,24 @@ pub struct HealerPosture {
     /// (or `None` → `Some`) is what emits its `DispelChase` trace event. Always
     /// `None` under `Legacy`, whose dispel walk is `medic_target`'s.
     pub solve_dispel: Option<Entity>,
+    /// The `Legacy` dispel walk's phase (Paladin AS-180, Priest AS-187):
+    /// `Walking` while it walks to a teammate it cannot yet free, `Holding`
+    /// once that teammate is in reach and the dispel is still owed — the healer
+    /// stands at the point it reached until the dispel lands or stops being
+    /// owed, rather than handing movement back to a posture that can step it
+    /// out of range while the GCD runs. `Off` otherwise.
+    pub dispel_walk: DispelWalkPhase,
+}
+
+/// Phase of a healer's `Legacy` dispel walk ([`HealerPosture::dispel_walk`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum DispelWalkPhase {
+    #[default]
+    Off,
+    /// Walking toward the teammate (the walk's directive is `medic_target`'s).
+    Walking,
+    /// Reached: holding the point the walk reached until the dispel lands.
+    Holding(Vec3),
 }
 
 impl HealerPosture {
@@ -160,6 +178,7 @@ impl HealerPosture {
             dip_until: 0.0,
             medic_target: None,
             solve_dispel: None,
+            dispel_walk: DispelWalkPhase::Off,
         }
     }
 }
