@@ -45,7 +45,9 @@ use bevy::prelude::*;
 use std::collections::BTreeMap;
 
 use super::arena_bounds::ArenaBounds;
-use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
+use super::map_geometry::{
+    has_line_of_sight, nearest_standable, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS,
+};
 use super::team_plan::{Anchor, RoleIntent, Stance};
 
 /// Where a candidate position is probed from, as an offset ring around the
@@ -66,6 +68,10 @@ pub struct SolveUnit {
     pub team: u8,
     pub slot: u8,
     pub pos: Vec2,
+    /// World height of the unit's feet. The solve is planar, but whether a
+    /// spot can be stood on is decided at this height — the same test the
+    /// collision resolver applies to the unit's moves.
+    pub y: f32,
     pub is_healer: bool,
     pub is_melee: bool,
     pub is_pet: bool,
@@ -833,20 +839,14 @@ const W_DISPEL: f32 = 1.0e9;
 /// satisfies its intent, standing still also satisfies it, and standing still is
 /// nearest.
 pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
-    // Two hard exclusions with no useful gradient: outside the arena, and
-    // INSIDE another obstacle. The second is a review catch — a point inside a
-    // pillar is occluded from everyone and therefore maximally attractive to
-    // `OccupyCover`, but unreachable: the mover parks against the collision
-    // skin forever chasing it. (The unit's own current position is candidate 0
-    // and is never inside a volume, so this cannot exclude everything.)
     // Out-of-bounds is the one hard exclusion. Screening candidates that sit
     // INSIDE an obstacle was tried (a review finding: an in-pillar point is
     // occluded from everyone and "unreachable") and MEASURED AT -10pt on the
-    // flagship comp, so it is deliberately absent: chasing the unreachable
-    // point parks the mover against the pillar's collision skin, and a healer
-    // pressed against cover IS in cover — the resolver keeps it out of the
-    // volume, and that pillar-hugging equilibrium beats every "reachable"
-    // alternative candidate. Do not re-add the screen without re-measuring.
+    // flagship comp, so it is deliberately absent: a healer pressed against
+    // cover IS in cover, and that pillar-hugging equilibrium beats every
+    // "reachable" alternative candidate. Do not re-add the screen without
+    // re-measuring. An in-pillar WINNER is never issued as it stands, though:
+    // see the projection at the end of this function.
     let usable = |c: &Vec2| {
         ctx.world
             .bounds
@@ -939,7 +939,23 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
     }
     // Every candidate excluded (a unit already outside the arena): hold. The
     // executor clamps and slides, so this is a safe terminal answer.
-    best.map(|(_, p)| p).unwrap_or(ctx.unit.pos)
+    //
+    // THE ANSWER IS A SPOT THE UNIT CAN STAND ON. The local ring and the steps
+    // toward an ally are offsets from the unit that take no account of the
+    // pillar beside it, so near cover the winner can lie inside a footprint —
+    // a goal nobody can reach, which the executor only approaches and stalls
+    // a body radius short of (AS-190). It is moved out through the footprint's
+    // nearest face — the spot the steering helper was already heading for —
+    // so the unit walks onto the skin on the side it was already pressed
+    // against: the flush, in-cover spot the choice was worth. The
+    // CHOICE is unchanged — it is still scored at the in-pillar point. Scoring
+    // each candidate at its projection instead is a different solve, not this
+    // fix: measured on the flagship comp it moves outcomes by a large margin,
+    // so it needs its own head-to-head before it ships. A winner no projection
+    // frees (overlapping footprints, which no shipped map has) holds.
+    best.map_or(ctx.unit.pos, |(_, p)| {
+        nearest_standable(&ctx.world.obstacles, p, ctx.unit.y).unwrap_or(ctx.unit.pos)
+    })
 }
 
 /// Solve the whole team, in [`solve_order`], each unit seeing the placements
@@ -1106,6 +1122,7 @@ pub fn world_from_context(
             team: c.team,
             slot: c.slot,
             pos: Vec2::new(c.position.x, c.position.z),
+            y: c.position.y,
             is_healer: c.class.is_healer(),
             // Pets: by ability reach, not by inherited class — see
             // `enemy_casters_of`.
@@ -1171,6 +1188,7 @@ mod tests {
             team,
             slot,
             pos: Vec2::new(x, z),
+            y: 1.0,
             is_healer: false,
             is_melee: false,
             is_pet: false,
@@ -1908,6 +1926,62 @@ mod tests {
         assert!(
             spot.distance(Vec2::new(3.0, 0.0)) > 3.0,
             "must move AWAY from the melee, got {spot:?}"
+        );
+    }
+
+    /// AS-190: the solve never answers with a spot inside a footprint. A healer
+    /// pressed against a pillar has local-ring candidates inside it, and an
+    /// in-pillar point is occluded from every caster, so it can win
+    /// `OccupyCover` — the answer is then moved onto the pillar's skin.
+    /// Swept round the pillar, with the ally and the caster at several
+    /// bearings; the second count proves the sweep reached the case (an answer
+    /// that is none of the candidates was projected).
+    #[test]
+    fn the_answer_is_always_a_spot_the_unit_can_stand_on() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let skin = super::super::map_geometry::prism_apothem(6.0, 8) + MOVER_RADIUS;
+        let (mut cases, mut projected) = (0, 0);
+        for i in 0..32 {
+            let a = i as f32 * std::f32::consts::TAU / 32.0;
+            // Just outside the skin's corners and flats alike.
+            let at = Vec2::from_angle(a) * (skin / (std::f32::consts::PI / 8.0).cos() + 0.05);
+            for (ally, caster) in [
+                (Vec2::new(-25.0, 5.0), Vec2::new(25.0, 0.0)),
+                (Vec2::new(0.0, -25.0), Vec2::new(0.0, 25.0)),
+                (Vec2::new(20.0, 20.0), Vec2::new(-20.0, -20.0)),
+            ] {
+                let mut w = world(vec![
+                    healer(1, 1, 0, at.x, at.y),
+                    unit(2, 1, 1, ally.x, ally.y),
+                    unit(3, 2, 0, caster.x, caster.y),
+                ]);
+                w.obstacles = vec![pillar_at(0.0, 0.0)];
+                if position_blocked(&w.obstacles, Vec3::new(at.x, 1.0, at.y)) {
+                    continue;
+                }
+                let ctx = SolveContext {
+                    world: &w,
+                    unit: w.units[0],
+                    focus: None,
+                    placed: &BTreeMap::new(),
+                };
+                let spot = solve_unit(RoleIntent::OccupyCover, &ctx);
+                cases += 1;
+                assert!(
+                    !position_blocked(&w.obstacles, Vec3::new(spot.x, 1.0, spot.y)),
+                    "healer at {at:?} (ally {ally:?}, caster {caster:?}) sent inside \
+                     the pillar to {spot:?}"
+                );
+                if !candidates_for(&ctx).contains(&spot) {
+                    projected += 1;
+                }
+            }
+        }
+        assert!(cases > 0, "every start was inside the pillar");
+        assert!(
+            projected > 0,
+            "no answer of {cases} needed projecting — the sweep never reached an \
+             in-pillar winner, so it proves nothing"
         );
     }
 

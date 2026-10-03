@@ -490,6 +490,67 @@ pub fn position_blocked(obstacles: &[ObstacleVolume], p: Vec3) -> bool {
     obstacles.iter().any(|v| penetrates_footprint(v, p_xz, p.y))
 }
 
+/// The nearest spot to `p` a mover at height `mover_y` can stand on: `p` itself
+/// when no footprint (inflated by [`MOVER_RADIUS`]) holds it, else `p` moved out
+/// through the least-penetrated face of the footprint that does — the same exit
+/// the collision resolver takes. Every result passes [`position_blocked`].
+///
+/// `None` only when no such spot is found within one pass per obstacle, which
+/// needs overlapping footprints; the shipped maps have none. An unblocked `p`
+/// comes back bit-identical, so an obstacle-free map is untouched.
+pub fn nearest_standable(obstacles: &[ObstacleVolume], p: Vec2, mover_y: f32) -> Option<Vec2> {
+    let mut q = p;
+    for _ in 0..=obstacles.len() {
+        let Some(volume) = obstacles
+            .iter()
+            .find(|v| penetrates_footprint(v, q, mover_y))
+        else {
+            return Some(q);
+        };
+        q = push_out_of_footprint(volume, q);
+    }
+    None
+}
+
+/// `p`, which penetrates `volume`'s inflated footprint, moved just outside it
+/// through the nearest face.
+fn push_out_of_footprint(volume: &ObstacleVolume, p: Vec2) -> Vec2 {
+    match *volume {
+        ObstacleVolume::Cylinder {
+            center_xz, radius, ..
+        } => {
+            let out = (p - center_xz).normalize_or(Vec2::X);
+            center_xz + out * (radius + MOVER_RADIUS + PUSH_OUT_EPS)
+        }
+        ObstacleVolume::Aabb { min, max } => {
+            let (min_x, max_x) = (min.x - MOVER_RADIUS, max.x + MOVER_RADIUS);
+            let (min_z, max_z) = (min.z - MOVER_RADIUS, max.z + MOVER_RADIUS);
+            // Least penetration first; fixed order breaks ties.
+            let exits = [
+                (p.x - min_x, Vec2::new(min_x - PUSH_OUT_EPS, p.y)),
+                (max_x - p.x, Vec2::new(max_x + PUSH_OUT_EPS, p.y)),
+                (p.y - min_z, Vec2::new(p.x, min_z - PUSH_OUT_EPS)),
+                (max_z - p.y, Vec2::new(p.x, max_z + PUSH_OUT_EPS)),
+            ];
+            exits
+                .into_iter()
+                .fold(None::<(f32, Vec2)>, |best, e| match best {
+                    Some(b) if b.0 <= e.0 => Some(b),
+                    _ => Some(e),
+                })
+                .map_or(p, |(_, q)| q)
+        }
+        ObstacleVolume::Prism {
+            center_xz,
+            circumradius,
+            sides,
+            rotation,
+            ..
+        } => PrismHull::new(center_xz, circumradius, sides, rotation)
+            .map_or(p, |hull| hull.push_out(p)),
+    }
+}
+
 /// Whether the mover's XZ collision disc strictly penetrates the volume's
 /// footprint (only when the mover's `y` overlaps the volume's span). Strict, so
 /// a mover resting flush on the expanded boundary is *not* penetrating
@@ -1746,6 +1807,67 @@ mod tests {
             Vec3::new(-20.0, 8.0, 0.0),
             Vec3::new(20.0, 8.0, 0.0),
         ));
+    }
+
+    /// `nearest_standable` leaves a free spot bit-identical, and moves a spot
+    /// inside any shape's footprint out through the NEAREST face to a spot
+    /// `position_blocked` accepts — just past the skin, not across the shape.
+    #[test]
+    fn nearest_standable_exits_through_the_nearest_face() {
+        let shapes = [
+            cylinder(0.0, 0.0, 4.0, 0.0, 5.0),
+            aabb(-4.0, 0.0, -2.0, 4.0, 5.0, 2.0),
+            octagon(0.0, 0.0, 6.0),
+        ];
+        for shape in shapes {
+            let vols = [shape];
+            let free = Vec2::new(30.0, 0.5);
+            assert_eq!(nearest_standable(&vols, free, 1.0), Some(free));
+            for inside in [Vec2::new(1.0, 0.3), Vec2::new(-0.4, -1.5), Vec2::ZERO] {
+                let out = nearest_standable(&vols, inside, 1.0).expect("one shape always frees");
+                assert!(
+                    !position_blocked(&vols, Vec3::new(out.x, 1.0, out.y)),
+                    "{shape:?}: {inside:?} -> {out:?} is still blocked"
+                );
+                // On the skin: a hair outside it, and a step back toward the
+                // centre is inside again.
+                let (c, r) = shape.footprint_disc();
+                assert!(
+                    out.distance(c) <= r + MOVER_RADIUS + 0.01,
+                    "{inside:?} -> {out:?}"
+                );
+                let back = out + (c - out).normalize_or_zero() * 0.01;
+                assert!(
+                    position_blocked(&vols, Vec3::new(back.x, 1.0, back.y)),
+                    "{shape:?}: {out:?} is not on the skin"
+                );
+            }
+        }
+        // Nearest face, not any face: a spot just inside the box's long +z
+        // face leaves through it, not through an end.
+        let box_out = nearest_standable(
+            &[aabb(-4.0, 0.0, -2.0, 4.0, 5.0, 2.0)],
+            Vec2::new(3.0, 2.2),
+            1.0,
+        )
+        .unwrap();
+        assert!(
+            (box_out.x - 3.0).abs() < 1e-5 && box_out.y > 2.5,
+            "got {box_out:?}"
+        );
+        // The cylinder's exit is radial: it keeps the bearing it came in on.
+        let out = nearest_standable(
+            &[cylinder(0.0, 0.0, 4.0, 0.0, 5.0)],
+            Vec2::new(0.0, -1.0),
+            1.0,
+        )
+        .unwrap();
+        assert!(out.x.abs() < 1e-5 && out.y < -4.5, "got {out:?}");
+        // A volume entirely above the mover blocks nothing, so frees nothing.
+        let high = [cylinder(0.0, 0.0, 4.0, 10.0, 5.0)];
+        assert_eq!(nearest_standable(&high, Vec2::ZERO, 1.0), Some(Vec2::ZERO));
+        // No obstacles: identity.
+        assert_eq!(nearest_standable(&[], Vec2::ZERO, 1.0), Some(Vec2::ZERO));
     }
 
     #[test]
