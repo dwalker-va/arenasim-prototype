@@ -670,17 +670,21 @@ as a PRESSURED `DispelChase` once per walk; the Paladin's band-hold steps aside
 for it. A no-op whenever no dispel is owed, so a `TeamPlan` match without one
 is byte-identical.
 
-**Ally dispels need sight.** Every cast that frees a teammate — Dispel Magic,
-Cleanse, Devour Magic, Master's Call — picks its teammate with
-`class_ai::ally_reach`: range, then line of sight, the same two gates and order
-`pre_cast_ok` applies to every other targeted cast. An occluded teammate is
-skipped for a reachable one and, if none is reachable, the cast is rejected
-`LosBlocked`. A Hunter-dispatched Master's Call is re-checked by the Bird when
-it executes (`pet_ai::pet_command_rejection`), which asks `has_line_of_sight`
-directly — sight only, since range was the dispatch's check. The dispel walk
-asks `ally_reach`, so it ends exactly where the cast becomes possible. Purge
-goes through `pre_cast_ok` and was always sight-gated. A no-op on
-obstacle-free maps (BasicArena stays byte-identical).
+**Target choice needs sight.** Every cast that CHOOSES its target from
+several candidates filters by reach before it ranks: `class_ai::cast_reach`,
+range then line of sight, the same two gates and order `pre_cast_ok` applies to
+every targeted cast. So an occluded best pick yields to the best one in sight
+instead of being picked and then refused; with none in reach the cast is
+rejected `LosBlocked`. The choosers: the ally dispels (Dispel Magic, Cleanse,
+Devour Magic, Master's Call), Purge (`select_purge` — the best buff it can
+see) and the Holy Shock heal (`CombatContext::lowest_health_ally_in_reach`).
+The dispel walk asks `cast_reach`, so it ends exactly where the cast becomes
+possible. The pet strikes, Spider Web and Boar Charge, ask
+`pet_ai::pet_strike_reach` (range, Boar Charge's dead zone, sight) on every
+path: the Hunter's dispatch, the pet's own while its Hunter casts, and the
+pet's re-check when it executes a dispatched command
+(`pet_ai::pet_command_rejection`), which also re-checks a Master's Call's
+sight. A no-op on obstacle-free maps (BasicArena stays byte-identical).
 
 **Travel Form escape (Druid)** — no RON knob. A shifted Druid is in ESCAPE for
 as long as it stays shifted (`evaluate_caster_healer_posture`'s `shifted`

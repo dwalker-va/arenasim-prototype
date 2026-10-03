@@ -46,6 +46,7 @@ use super::components::{
     DispelScope, PetType,
 };
 use super::constants::GCD;
+use super::decision_trace::RejectionReason;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume};
 use super::match_config::CharacterClass;
 use super::utils::log_ability_use;
@@ -462,6 +463,43 @@ impl<'a> CombatContext<'a> {
                     && my_pos.distance(info.position) <= max_range
             })
             .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
+    }
+
+    /// [`Self::lowest_health_ally_below`], choosing only among allies the cast
+    /// REACHES ([`cast_reach`]: range, then sight). An occluded lowest ally
+    /// yields to the lowest one in sight, rather than being picked and then
+    /// refused. With nobody in reach the error is the reason to trace:
+    /// `LosBlocked` when an ally qualified on range and only sight stood in the
+    /// way, `NoValidTarget` otherwise. With every candidate in sight (any
+    /// obstacle-free map) it picks exactly what `lowest_health_ally_below` does.
+    pub fn lowest_health_ally_in_reach(
+        &self,
+        max_hp_pct: f32,
+        max_range: f32,
+        my_pos: Vec3,
+    ) -> Result<&CombatantInfo, RejectionReason> {
+        let mut occluded = false;
+        self.alive_allies()
+            .into_iter()
+            .filter(|info| {
+                !info.is_pet && !self.is_cycloned(info.entity) && info.health_pct() < max_hp_pct
+            })
+            .filter(
+                |info| match cast_reach(self, max_range, my_pos, info.position) {
+                    CastReach::Reaches => true,
+                    CastReach::OutOfRange { .. } => false,
+                    CastReach::LosBlocked => {
+                        occluded = true;
+                        false
+                    }
+                },
+            )
+            .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
+            .ok_or(if occluded {
+                RejectionReason::LosBlocked
+            } else {
+                RejectionReason::NoValidTarget
+            })
     }
 
     /// Returns true if all allies are above the given HP threshold.
@@ -918,9 +956,12 @@ pub struct PurgeChoice {
     pub scope: DispelScope,
 }
 
-/// The purge worth casting: among living, non-pet enemies within `range`
-/// carrying an [`Aura::can_be_purged`] buff worth at least `min_priority`
+/// The purge worth casting: among living, non-pet enemies the purge REACHES
+/// ([`cast_reach`]: within `range`, then in sight) carrying an
+/// [`Aura::can_be_purged`] buff worth at least `min_priority`
 /// ([`aura_purge_priority`]), the enemy whose best buff is worth the most.
+/// Reach filters BEFORE value ranks, so an occluded enemy with the best buff
+/// yields to the best one in sight instead of refusing the whole cast.
 /// Ties prefer the enemy HEALER (deny its defensives first), then the lowest
 /// entity (BTreeMap order — deterministic); within one enemy the first aura at
 /// the best priority wins.
@@ -928,6 +969,10 @@ pub struct PurgeChoice {
 /// The scope is pinned to the chosen buff's type, and also to its source when
 /// that buff is source-keyed ([`Aura::distinct_by_source`]): a purge chosen for
 /// a Rejuvenation must not take the Lifebloom beside it.
+///
+/// With no purge in reach the error is the reason to trace: `LosBlocked` when
+/// an enemy in range carried a buff worth the purge and only sight stood in the
+/// way, `NoValidTarget` otherwise.
 pub fn select_purge(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
@@ -935,15 +980,17 @@ pub fn select_purge(
     my_pos: Vec3,
     range: f32,
     min_priority: i32,
-) -> Option<PurgeChoice> {
+) -> Result<PurgeChoice, RejectionReason> {
     let enemy_healer = ctx.enemy_healer();
     // (choice, is_healer)
     let mut best: Option<(PurgeChoice, bool)> = None;
+    let mut occluded = false;
     for (e, info) in ctx.combatants.iter() {
         if info.team == my_team || !info.is_alive || info.is_pet {
             continue;
         }
-        // Range gate (final mana/range is re-checked by pre_cast_ok on the winner).
+        // Range gate; sight is asked below, once the enemy is worth a purge
+        // (pre_cast_ok re-checks both on the winner, with mana).
         if my_pos.distance(info.position) > range {
             continue;
         }
@@ -962,6 +1009,14 @@ pub fn select_purge(
         };
         if priority < min_priority {
             continue;
+        }
+        match cast_reach(ctx, range, my_pos, info.position) {
+            CastReach::Reaches => {}
+            CastReach::OutOfRange { .. } => continue,
+            CastReach::LosBlocked => {
+                occluded = true;
+                continue;
+            }
         }
         let is_healer = enemy_healer == Some(*e);
         let better = match &best {
@@ -990,7 +1045,11 @@ pub fn select_purge(
             ));
         }
     }
-    best.map(|(choice, _)| choice)
+    match best {
+        Some((choice, _)) => Ok(choice),
+        None if occluded => Err(RejectionReason::LosBlocked),
+        None => Err(RejectionReason::NoValidTarget),
+    }
 }
 
 /// Calculate purge priority for a BENEFICIAL aura on an enemy.
@@ -1389,32 +1448,34 @@ pub fn ally_dispel_priority(aura: &Aura) -> i32 {
     }
 }
 
-/// Whether an ally-freeing cast of range `range` from `from` reaches a teammate
-/// at `to`.
+/// Whether a targeted cast of range `range` from `from` reaches a unit at `to`.
 ///
 /// The two gates every targeted cast passes at cast start (`pre_cast_ok`), in
-/// the same order — range first, then line of sight, so an out-of-range ally is
-/// reported as out of range, never as occluded. Every ally-freeing path asks
-/// this one question: the healers' dispels ([`try_dispel_ally`]), Devour Magic,
-/// Master's Call, and the walk that carries a healer to a teammate it cannot
-/// yet free ([`dispel_chase_target`]) — so the walk ends exactly where the cast
-/// becomes possible. On an obstacle-free map sight always holds and this is the
-/// range check alone.
+/// the same order — range first, then line of sight, so an out-of-range unit is
+/// reported as out of range, never as occluded. Every path that CHOOSES its
+/// target from several candidates asks this one question while choosing, so an
+/// occluded best pick yields to the best one in reach instead of refusing the
+/// cast: the healers' dispels ([`try_dispel_ally`]), Devour Magic, Master's
+/// Call, Purge ([`select_purge`]), the Holy Shock heal
+/// ([`CombatContext::lowest_health_ally_in_reach`]), and the walk that carries
+/// a healer to a teammate it cannot yet free ([`dispel_chase_target`]) — so the
+/// walk ends exactly where the cast becomes possible. On an obstacle-free map
+/// sight always holds and this is the range check alone.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum AllyReach {
+pub enum CastReach {
     Reaches,
     OutOfRange { distance: f32 },
     LosBlocked,
 }
 
-pub fn ally_reach(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> AllyReach {
+pub fn cast_reach(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> CastReach {
     let distance = from.distance(to);
     if distance > range {
-        AllyReach::OutOfRange { distance }
+        CastReach::OutOfRange { distance }
     } else if !has_line_of_sight(ctx.obstacles, from, to) {
-        AllyReach::LosBlocked
+        CastReach::LosBlocked
     } else {
-        AllyReach::Reaches
+        CastReach::Reaches
     }
 }
 
@@ -1447,7 +1508,7 @@ pub fn can_cast_dispel(
 /// nearest living non-pet teammate (never the healer itself) holding crowd
 /// control that `dispel` removes at the urgent bar, which `dispel` does not
 /// reach from where the healer stands — beyond its range, or in range but out of
-/// sight ([`ally_reach`]). `None` when such a teammate is already reached (the
+/// sight ([`cast_reach`]). `None` when such a teammate is already reached (the
 /// rotation's urgent dispel frees it where the healer stands), when there is
 /// none, or when the healer cannot afford the dispel on arrival.
 ///
@@ -1516,7 +1577,7 @@ pub fn owed_dispel(
         if !urgent {
             continue;
         }
-        if ally_reach(ctx, def.range, my_pos, ally.position) == AllyReach::Reaches {
+        if cast_reach(ctx, def.range, my_pos, ally.position) == CastReach::Reaches {
             return Some(OwedDispel::Reached(ally.entity));
         }
         let distance = my_pos.distance(ally.position);
@@ -1564,7 +1625,7 @@ pub struct AllyDispelScan {
 /// Cleanse): among living teammates `dispel` may free ([`ally_removal`] — scope
 /// and pet reach), the one whose highest-priority debuff the dispel TAKES
 /// ([`DispelScope::takes`]) is worth at least `min_priority`, and which the
-/// dispel reaches ([`ally_reach`]).
+/// dispel reaches ([`cast_reach`]).
 ///
 /// Two exclusions are structural, never a low score:
 /// - a debuff the scope does not take is not a candidate at all — a Cyclone is
@@ -1615,16 +1676,16 @@ pub fn scan_ally_dispel(
         }
 
         // Range, then line of sight — the gates every targeted cast passes.
-        match ally_reach(ctx, range, my_pos, info.position) {
-            AllyReach::Reaches => {}
-            AllyReach::OutOfRange { distance } => {
+        match cast_reach(ctx, range, my_pos, info.position) {
+            CastReach::Reaches => {}
+            CastReach::OutOfRange { distance } => {
                 scan.nearest_out_of_range = Some(
                     scan.nearest_out_of_range
                         .map_or(distance, |d| d.min(distance)),
                 );
                 continue;
             }
-            AllyReach::LosBlocked => {
+            CastReach::LosBlocked => {
                 scan.los_blocked = true;
                 continue;
             }
@@ -1651,7 +1712,7 @@ pub fn scan_ally_dispel(
 /// - 20: Include slows (not recommended)
 ///
 /// Only an ally the dispel reaches is a candidate: in range AND in sight
-/// ([`ally_reach`]), so a healer never dispels a teammate through a pillar.
+/// ([`cast_reach`]), so a healer never dispels a teammate through a pillar.
 ///
 /// Predicate failures emit typed reject events on the dispel ability;
 /// success emits choose.
@@ -1672,8 +1733,6 @@ pub fn try_dispel_ally(
     caster_class: CharacterClass,
     trace: &mut crate::states::play_match::decision_trace::DecisionEventBuilder<'_>,
 ) -> bool {
-    use crate::states::play_match::decision_trace::RejectionReason;
-
     let def = abilities.get_unchecked(&ability_type);
 
     // Check if spell school is locked out
@@ -1807,7 +1866,6 @@ pub fn try_purge_enemy(
     trace: &mut crate::states::play_match::decision_trace::DecisionEventBuilder<'_>,
 ) -> bool {
     use self::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
-    use crate::states::play_match::decision_trace::RejectionReason;
 
     let ability = AbilityType::Purge;
     let def = abilities.get_unchecked(&ability);
@@ -1815,22 +1873,24 @@ pub fn try_purge_enemy(
     // Value floor: `min_priority` is PURGE_MIN_PRIORITY for the ordinary purge
     // (only high-value defensives and sustain — cheap re-buffs like Fortitude
     // aren't worth the cast), PURGE_URGENT_PRIORITY for the urgent one.
-    let Some(PurgeChoice {
+    let PurgeChoice {
         target: target_entity,
         position: target_pos,
         scope,
         ..
-    }) = select_purge(
+    } = match select_purge(
         ctx,
         abilities,
         combatant.team,
         my_pos,
         def.range,
         min_priority,
-    )
-    else {
-        trace.reject(ability, RejectionReason::NoValidTarget);
-        return false;
+    ) {
+        Ok(choice) => choice,
+        Err(reason) => {
+            trace.reject(ability, reason);
+            return false;
+        }
     };
 
     // Universal pre-cast guard (lockout / silence / cooldown / mana / range /

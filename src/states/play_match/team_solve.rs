@@ -402,7 +402,7 @@ pub const C_COHESION: u16 = 1 << 5;
 pub const C_DISPEL: u16 = 1 << 6;
 
 /// Yards inside the dispel's range a spot must be to count as reaching. The
-/// rotation measures reach in 3D from the healer's feet ([`ally_reach`](super::class_ai::ally_reach));
+/// rotation measures reach in 3D from the healer's feet ([`cast_reach`](super::class_ai::cast_reach));
 /// the solve measures it on the ground plane, so a spot exactly at range here
 /// could still be just out of it there, and the healer would hold a spot it
 /// cannot dispel from.

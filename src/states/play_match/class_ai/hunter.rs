@@ -2095,7 +2095,7 @@ fn dispatch_pet_ability(
 /// Try to dispatch Spider Web onto the Hunter's current target. Snapshot
 /// heuristics only — pet AI re-validates at execution time. Emits a
 /// pet_decision trace event with `dispatched_by: Some(hunter_entity)`.
-fn try_dispatch_spider_web(
+pub(super) fn try_dispatch_spider_web(
     commands: &mut Commands,
     abilities: &AbilityDefinitions,
     decision_trace: &mut DecisionTrace,
@@ -2161,7 +2161,7 @@ fn try_dispatch_spider_web(
 }
 
 /// Try to dispatch Boar Charge onto the Hunter's current target.
-fn try_dispatch_boar_charge(
+pub(super) fn try_dispatch_boar_charge(
     commands: &mut Commands,
     abilities: &AbilityDefinitions,
     decision_trace: &mut DecisionTrace,
@@ -2311,16 +2311,16 @@ pub(super) fn try_dispatch_masters_call(
         return false;
     };
 
-    // Range, then line of sight from the bird (`ally_reach`, the gates every
+    // Range, then line of sight from the bird (`cast_reach`, the gates every
     // ally-freeing cast passes).
     if let Some(target_info) = ctx.combatants.get(&target) {
-        let reason = match super::ally_reach(ctx, def.range, pet_pos, target_info.position) {
-            super::AllyReach::Reaches => None,
-            super::AllyReach::OutOfRange { distance } => Some(RejectionReason::OutOfRange {
+        let reason = match super::cast_reach(ctx, def.range, pet_pos, target_info.position) {
+            super::CastReach::Reaches => None,
+            super::CastReach::OutOfRange { distance } => Some(RejectionReason::OutOfRange {
                 distance,
                 max: def.range,
             }),
-            super::AllyReach::LosBlocked => Some(RejectionReason::LosBlocked),
+            super::CastReach::LosBlocked => Some(RejectionReason::LosBlocked),
         };
         if let Some(reason) = reason {
             builder.reject(ability, reason);
@@ -2342,7 +2342,8 @@ pub(super) fn try_dispatch_masters_call(
 
 /// Snapshot-side predicate check for damaging/charge pet abilities (Spider
 /// Web, Boar Charge). Returns the first failing rejection reason, or `None`
-/// if all snapshot heuristics pass.
+/// if all snapshot heuristics pass. Reach (range, dead zone, sight) is
+/// `pet_ai::pet_strike_reach`, the check the pet repeats when it executes.
 fn dispatch_predicates_for_damaging(
     ability: AbilityType,
     def: &crate::states::play_match::ability_config::AbilityConfig,
@@ -2375,18 +2376,10 @@ fn dispatch_predicates_for_damaging(
         return Some(RejectionReason::NoValidTarget);
     }
 
-    let dist = pet_info.position.distance(target_info.position);
-    if dist > def.range {
-        return Some(RejectionReason::OutOfRange {
-            distance: dist,
-            max: def.range,
-        });
-    }
-    if ability == AbilityType::BoarCharge && dist < CHARGE_MIN_RANGE {
-        return Some(RejectionReason::WithinDeadZone {
-            distance: dist,
-            min: CHARGE_MIN_RANGE,
-        });
+    if let Some(reason) =
+        super::pet_ai::pet_strike_reach(ability, def, pet_info.position, target_info.position, ctx)
+    {
+        return Some(reason);
     }
 
     // Friendly-CC guard only applies to abilities that deal damage on landing

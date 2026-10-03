@@ -136,7 +136,7 @@ pub fn decide_shaman_action(
 
     // P3b: urgent Purge — a buff worth more than the filler nuke (Innervate:
     // a match's worth of the enemy healer's mana). Asked only when one is in
-    // range, so the ordinary purge at P6 keeps the trace's one Purge entry.
+    // reach, so the ordinary purge at P6 keeps the trace's one Purge entry.
     if super::select_purge(
         ctx,
         abilities,
@@ -145,7 +145,7 @@ pub fn decide_shaman_action(
         abilities.get_unchecked(&AbilityType::Purge).range,
         super::PURGE_URGENT_PRIORITY,
     )
-    .is_some()
+    .is_ok()
         && super::try_purge_enemy(
             commands,
             combat_log,
