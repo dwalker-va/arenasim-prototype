@@ -1456,8 +1456,11 @@ pub fn ally_dispel_priority(aura: &Aura) -> i32 {
 /// target from several candidates asks this one question while choosing, so an
 /// occluded best pick yields to the best one in reach instead of refusing the
 /// cast: the healers' dispels ([`try_dispel_ally`]), Devour Magic, Master's
-/// Call, Purge ([`select_purge`]), the Holy Shock heal
-/// ([`CombatContext::lowest_health_ally_in_reach`]), and the walk that carries
+/// Call, Purge ([`select_purge`]), every heal that ranks allies by health
+/// ([`CombatContext::lowest_health_ally_in_reach`]), Holy Shock damage, and
+/// — through [`sight_blocks`] — the choosers that rank without a range
+/// filter (Power Word: Shield and Fortitude, Mark of the Wild, the Druid's heal
+/// focus); and the walk that carries
 /// a healer to a teammate it cannot yet free ([`dispel_chase_target`]) — so the
 /// walk ends exactly where the cast becomes possible. On an obstacle-free map
 /// sight always holds and this is the range check alone.
@@ -1477,6 +1480,19 @@ pub fn cast_reach(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> Cast
     } else {
         CastReach::Reaches
     }
+}
+
+/// Whether SIGHT alone keeps a cast of `range` from `from` off a unit at `to`:
+/// in range, but occluded ([`cast_reach`] says `LosBlocked`).
+///
+/// For the choosers that rank their candidates without a range filter — Power
+/// Word: Shield, Power Word: Fortitude, Mark of the Wild and the Druid's heal
+/// focus. They drop such a candidate before ranking, so an occluded best pick
+/// yields to the best one in sight, while a best pick beyond range is still
+/// picked and refused exactly as it always was. On an obstacle-free map this is
+/// never true and the choice is unchanged.
+pub fn sight_blocks(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> bool {
+    cast_reach(ctx, range, from, to) == CastReach::LosBlocked
 }
 
 /// Whether `entity` could cast `dispel` this instant as far as its own state
@@ -2098,5 +2114,176 @@ mod dispel_reach_tests {
             .collect();
         reaching.sort_by_key(|a| format!("{a:?}"));
         assert_eq!(reaching, vec![AbilityType::PaladinCleanse]);
+    }
+}
+
+/// The scene the reach-first heal probes share (AS-202): the caster at the
+/// origin; `BEHIND` 16yd down +X behind a pillar centred 8yd out; `IN_SIGHT`
+/// 16yd down +Z with a clear line. Both are in every heal's range and in Holy
+/// Shock's 20yd damage range, so only sight separates them.
+#[cfg(test)]
+pub(crate) mod reach_fixture {
+    use super::*;
+    use crate::states::play_match::components::DRTracker;
+    use crate::states::play_match::decision_trace::DecisionTrace;
+
+    pub const CASTER: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+    pub const BEHIND: Vec3 = Vec3::new(16.0, 1.0, 0.0);
+    pub const IN_SIGHT: Vec3 = Vec3::new(0.0, 1.0, 16.0);
+
+    static NO_DR: BTreeMap<Entity, DRTracker> = BTreeMap::new();
+    static NO_CDS: BTreeMap<Entity, BTreeMap<AbilityType, f32>> = BTreeMap::new();
+
+    pub fn unit(
+        entity: Entity,
+        team: u8,
+        class: CharacterClass,
+        position: Vec3,
+        health_pct: f32,
+    ) -> CombatantInfo {
+        CombatantInfo {
+            entity,
+            team,
+            slot: 0,
+            class,
+            current_health: 100.0 * health_pct,
+            max_health: 100.0,
+            current_mana: 100.0,
+            max_mana: 100.0,
+            position,
+            velocity: Vec3::ZERO,
+            is_alive: true,
+            stealthed: false,
+            target: None,
+            is_pet: false,
+            casting_ability: None,
+            pet_type: None,
+            pet: None,
+        }
+    }
+
+    pub fn roster(units: Vec<CombatantInfo>) -> BTreeMap<Entity, CombatantInfo> {
+        units.into_iter().map(|u| (u.entity, u)).collect()
+    }
+
+    /// The pillar between the caster and `BEHIND`, and nothing else.
+    pub fn pillar() -> Vec<ObstacleVolume> {
+        vec![ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(8.0, 0.0),
+            radius: 2.0,
+            base_y: 0.0,
+            height: 10.0,
+        }]
+    }
+
+    pub fn ctx<'a>(
+        me: Entity,
+        roster: &'a BTreeMap<Entity, CombatantInfo>,
+        auras: &'a BTreeMap<Entity, Vec<Aura>>,
+        obstacles: &'a [ObstacleVolume],
+    ) -> CombatContext<'a> {
+        CombatContext::new(
+            me,
+            roster[&me].team,
+            roster,
+            auras,
+            &NO_DR,
+            &NO_CDS,
+            obstacles,
+            Default::default(),
+            Default::default(),
+        )
+    }
+
+    /// A caster on team 1 at [`CASTER`] and the units around it. `units[0]` is
+    /// the caster; the rest follow in the order given.
+    pub struct ReachScene {
+        pub world: World,
+        pub units: Vec<Entity>,
+        pub roster: BTreeMap<Entity, CombatantInfo>,
+        pub auras: BTreeMap<Entity, Vec<Aura>>,
+        pub combatant: Combatant,
+        caster: CharacterClass,
+    }
+
+    impl ReachScene {
+        /// `others`: (team, class, position, health fraction) per unit.
+        pub fn new(caster: CharacterClass, others: &[(u8, CharacterClass, Vec3, f32)]) -> Self {
+            let mut world = World::new();
+            let me = world.spawn_empty().id();
+            let mut units = vec![me];
+            let mut infos = vec![unit(me, 1, caster, CASTER, 1.0)];
+            for &(team, class, position, hp) in others {
+                let e = world.spawn_empty().id();
+                units.push(e);
+                infos.push(unit(e, team, class, position, hp));
+            }
+            ReachScene {
+                world,
+                units,
+                roster: roster(infos),
+                auras: BTreeMap::new(),
+                combatant: Combatant::new(1, 0, caster),
+                caster,
+            }
+        }
+
+        /// One decision by a fresh caster (off every cooldown) over the scene,
+        /// with `obstacles`: `decide` runs a `try_*` against a fresh trace, and
+        /// its commands are applied.
+        // The closure's bound sits in a `where` clause so the registration
+        // audit, which reads parameter lists, does not take this test helper
+        // for a Bevy system that takes `Commands`.
+        pub fn run<F>(&mut self, obstacles: &[ObstacleVolume], decide: F) -> DecisionTrace
+        where
+            F: FnOnce(
+                &mut Commands,
+                &CombatContext,
+                &mut Combatant,
+                &mut crate::states::play_match::decision_trace::DecisionEventBuilder,
+            ) -> bool,
+        {
+            let me = self.units[0];
+            // Every run starts off the global cooldown and every cooldown.
+            self.combatant = Combatant::new(1, 0, self.caster);
+            let mut trace = DecisionTrace::default();
+            let mut queue = bevy::ecs::world::CommandQueue::default();
+            {
+                let ctx = ctx(me, &self.roster, &self.auras, obstacles);
+                let mut commands = Commands::new(&mut queue, &self.world);
+                let mut builder = ctx
+                    .start_ability_decision(&mut trace, None, CASTER)
+                    .expect("the caster is in its own roster");
+                decide(&mut commands, &ctx, &mut self.combatant, &mut builder);
+                builder.finish();
+            }
+            queue.apply(&mut self.world);
+            trace
+        }
+    }
+
+    /// The chosen ability and its target's id in the first decision of `trace`.
+    pub fn outcome(trace: &DecisionTrace) -> Option<(String, Option<u64>)> {
+        let event = serde_json::to_value(&trace.pending_events[0]).unwrap();
+        event["outcome"]["ability"]
+            .as_str()
+            .map(|a| (a.to_string(), event["outcome"]["target_id"].as_u64()))
+    }
+
+    /// `ability` chosen on `target`, as [`outcome`] reports it.
+    pub fn chose(ability: &str, target: Entity) -> Option<(String, Option<u64>)> {
+        Some((ability.to_string(), Some(target.index() as u64)))
+    }
+
+    /// The traced candidate for `ability` in the first decision of `trace`.
+    pub fn candidate(trace: &DecisionTrace, ability: &str) -> serde_json::Value {
+        let event = serde_json::to_value(&trace.pending_events[0]).unwrap();
+        event["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["ability"] == ability)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {ability} candidate in {event}"))
     }
 }

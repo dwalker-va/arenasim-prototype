@@ -633,7 +633,13 @@ composes) or the committed ESCAPE window, and never while the healer is
 hard-CC'd (`is_ccd`, Root included). Keyed on OCCLUSION, not range, so it is a
 provable no-op on obstacle-free maps (BasicArena stays byte-identical). Traced
 via the existing `SeekLos` trigger with a `point` goal and the ally in the
-target view.
+target view. **The walk wins over a heal that is not critical:** while it is
+live the healer's plan defers movement-locking casts exactly as a dip or ESCAPE
+window does (`escape_defer` / `cast_defer`), so the heal fallback above cannot
+root it short of the dying ally to heal a less-hurt one it can see. An ally in
+sight who is ALSO at or below `urgency_hp_threshold` is still healed, and
+instants (Holy Shock, Power Word: Shield, the Druid's kit) still fire
+(`tests/medic_chase_heal_rule.rs`).
 
 **Dispel walk (Paladin, Priest)** — `healer_postures::dispel_chase_override`,
 choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and
@@ -677,7 +683,14 @@ every targeted cast. So an occluded best pick yields to the best one in sight
 instead of being picked and then refused; with none in reach the cast is
 rejected `LosBlocked`. The choosers: the ally dispels (Dispel Magic, Cleanse,
 Devour Magic, Master's Call), Purge (`select_purge` — the best buff it can
-see) and the Holy Shock heal (`CombatContext::lowest_health_ally_in_reach`).
+see), every heal that ranks allies by health (`CombatContext::lowest_health_ally_in_reach`:
+Flash Heal, Flash of Light, Holy Light, the Holy Shock heal, Lesser Healing
+Wave, the Druid's emergency heal and top-up Rejuvenation) and Holy Shock damage
+(the first enemy within 20yd in sight). The choosers that rank without a range
+filter — Power Word: Shield, Power Word: Fortitude, Mark of the Wild and the
+Druid's heal focus — drop a candidate only SIGHT keeps them off
+(`class_ai::sight_blocks`) before ranking, so a best pick beyond range is still
+picked and refused as before.
 The dispel walk asks `cast_reach`, so it ends exactly where the cast becomes
 possible. The pet strikes, Spider Web and Boar Charge, ask
 `pet_ai::pet_strike_reach` (range, Boar Charge's dead zone, sight) on every

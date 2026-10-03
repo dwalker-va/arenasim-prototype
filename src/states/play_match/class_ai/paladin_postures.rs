@@ -216,6 +216,10 @@ pub fn evaluate_paladin_posture(
 
     // Medic chase (shared) overrides FREE legacy pursuit / PRESSURED denial when
     // a dying teammate is occluded — walk around cover to regain sight and heal.
+    // The walk wins over a movement-locking heal that is not itself critical:
+    // a Flash of Light on a less-hurt ally in sight would root the Paladin
+    // short of the dying one, so it defers, while a heal on a dying ally in
+    // sight (and the instant Holy Shock) fires.
     if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
         medic_chase_tick(
             commands,
@@ -229,6 +233,7 @@ pub fn evaluate_paladin_posture(
             decision_trace,
             ctx,
         );
+        plan.cast_defer = Some(shared.urgency_hp_threshold);
     } else if let Some(step) = dispel_chase_override(
         abilities,
         entity,
