@@ -43,10 +43,11 @@ use super::{CombatContext, CombatantInfo};
 /// [`decide_priest_action`] (mirrors the Paladin's `PaladinMovementPlan`):
 /// the escape-defer urgency input plus the Psychic Scream dip gate.
 pub struct PriestMovementPlan {
-    /// `Some(urgency_hp_threshold)` while an ESCAPE window, a DIP or a dispel
-    /// walk is live: the heal ladder defers non-critical movement-locking casts
-    /// (R7) — a cast mid-walk would hold the Priest out of Dispel Magic's reach
-    /// while its teammate's CC runs.
+    /// `Some(urgency_hp_threshold)` while an ESCAPE window, a DIP, a dispel
+    /// walk or a medic walk is live: the heal ladder defers non-critical
+    /// movement-locking casts (R7) — a cast mid-walk would hold the Priest out
+    /// of Dispel Magic's reach while its teammate's CC runs, or short of the
+    /// dying teammate the medic walk is rounding a pillar to see.
     pub escape_defer: Option<f32>,
     /// Psychic Scream gate for this tick (no dip / dip cast).
     pub scream_dip: ScreamDipPlan,
@@ -611,6 +612,7 @@ fn try_fortitude(
     let def = abilities.get_unchecked(&ability);
 
     let mut unbuffed_ally: Option<(Entity, Vec3)> = None;
+    let mut occluded = false;
 
     for (ally_entity, info) in ctx.combatants.iter() {
         // A cycloned ally takes no buff (`CombatContext::is_cycloned`).
@@ -636,12 +638,24 @@ fn try_fortitude(
         if fortified_this_frame.contains(ally_entity) {
             continue;
         }
+        // An ally in range but out of sight yields to the next one in sight.
+        if super::sight_blocks(ctx, def.range, my_pos, info.position) {
+            occluded = true;
+            continue;
+        }
         unbuffed_ally = Some((*ally_entity, info.position));
         break;
     }
 
     let Some((buff_target, target_pos)) = unbuffed_ally else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
+        builder.reject(
+            ability,
+            if occluded {
+                RejectionReason::LosBlocked
+            } else {
+                RejectionReason::NoValidTarget
+            },
+        );
         return false;
     };
 
@@ -731,6 +745,7 @@ fn try_power_word_shield(
     }
 
     let mut best_candidate: Option<(Entity, Vec3, f32)> = None;
+    let mut occluded = false;
 
     for (ally_entity, info) in ctx.combatants.iter() {
         if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
@@ -761,6 +776,15 @@ fn try_power_word_shield(
         let is_full_hp = hp_percent >= 1.0;
         let is_below_threshold = hp_percent < 0.7;
 
+        // An ally in range but out of sight is dropped before ranking, so it
+        // yields to the best candidate in sight.
+        if (is_full_hp || is_below_threshold)
+            && super::sight_blocks(ctx, pw_shield_def.range, my_pos, info.position)
+        {
+            occluded = true;
+            continue;
+        }
+
         if is_full_hp || is_below_threshold {
             match best_candidate {
                 None => best_candidate = Some((*ally_entity, info.position, hp_percent)),
@@ -773,7 +797,14 @@ fn try_power_word_shield(
     }
 
     let Some((shield_entity, target_pos, _)) = best_candidate else {
-        builder.reject(pw_shield, RejectionReason::NoValidTarget);
+        builder.reject(
+            pw_shield,
+            if occluded {
+                RejectionReason::LosBlocked
+            } else {
+                RejectionReason::NoValidTarget
+            },
+        );
         return false;
     };
 
@@ -916,9 +947,14 @@ fn try_flash_heal(
     let ability = AbilityType::FlashHeal;
     let def = abilities.get_unchecked(&ability);
 
-    let Some(target_info) = ctx.lowest_health_ally_below(0.9, def.range, my_pos) else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
-        return false;
+    // Reach (range, then sight) filters before health ranks: an occluded
+    // lowest ally yields to the lowest one in sight.
+    let target_info = match ctx.lowest_health_ally_in_reach(0.9, def.range, my_pos) {
+        Ok(info) => info,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
     };
     let heal_target = target_info.entity;
     let target_pos = target_info.position;
@@ -928,7 +964,8 @@ fn try_flash_heal(
             builder.reject(
                 ability,
                 RejectionReason::PreconditionUnmet {
-                    note: "dip/escape/dispel walk live: non-critical heal deferred".to_string(),
+                    note: "dip/escape/dispel/medic walk live: non-critical heal deferred"
+                        .to_string(),
                 },
             );
             return false;
@@ -1017,7 +1054,8 @@ fn try_mind_blast(
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
-                note: "dip/escape/dispel walk live: movement-locking cast deferred".to_string(),
+                note: "dip/escape/dispel/medic walk live: movement-locking cast deferred"
+                    .to_string(),
             },
         );
         return false;
@@ -1207,7 +1245,8 @@ fn try_mana_burn(
             builder.reject(
                 ability,
                 RejectionReason::PreconditionUnmet {
-                    note: "dip/escape/dispel walk live: movement-locking cast deferred".to_string(),
+                    note: "dip/escape/dispel/medic walk live: movement-locking cast deferred"
+                        .to_string(),
                 },
             );
             return false;
@@ -1615,7 +1654,7 @@ fn priest_dip_tick(
 /// formation re-commit changes only — never per-tick.
 ///
 /// The plan's `escape_defer` is `Some(urgency_hp_threshold)` while an ESCAPE
-/// window, a DIP or a dispel walk is live — the caller threads it into
+/// window, a DIP, a dispel walk or a medic walk is live — the caller threads it into
 /// `decide_priest_action`, whose heal priority defers non-critical
 /// movement-locking casts meanwhile (R7 cast-vs-move urgency; AE1). `None`
 /// otherwise.
@@ -1767,6 +1806,9 @@ pub fn evaluate_priest_posture(
     let mut cast_defer = false;
     // Medic chase (shared) overrides FREE formation / PRESSURED denial when a
     // dying teammate is occluded — walk around cover to regain sight and heal.
+    // The walk wins over a movement-locking cast that is not itself critical:
+    // a Flash Heal on a less-hurt ally in sight would root the Priest short of
+    // the dying one, so it defers, while a heal on a dying ally in sight fires.
     if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
         medic_chase_tick(
             commands,
@@ -1780,6 +1822,7 @@ pub fn evaluate_priest_posture(
             decision_trace,
             ctx,
         );
+        cast_defer = true;
     } else if let Some(step) = dispel_chase_override(
         abilities,
         entity,
@@ -1888,8 +1931,8 @@ pub fn evaluate_priest_posture(
         commands.entity(entity).try_insert(*state);
     }
 
-    // Cast-vs-move urgency: a live ESCAPE window, a DIP or a dispel walk defers
-    // non-critical movement-locking casts (an undeferred heal mid-walk would
+    // Cast-vs-move urgency: a live ESCAPE window, a DIP, a dispel walk or a
+    // medic walk defers non-critical movement-locking casts (an undeferred heal mid-walk would
     // stall it).
     let escape_defer = if cast_defer || matches!(state.posture, Posture::Escape | Posture::Dip) {
         Some(shared.urgency_hp_threshold)
@@ -2189,4 +2232,195 @@ fn compute_formation_point(
     }
 
     Some(clamp_to_arena(&ctx.bounds, point))
+}
+
+// ----------------------------------------------------------------------------
+// AS-202: the Priest's ally picks choose among allies in sight
+// ----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod reach_tests {
+    use super::*;
+    use crate::states::play_match::class_ai::reach_fixture::*;
+    use crate::states::play_match::map_geometry::ObstacleVolume;
+    use CharacterClass::{Mage, Priest, Warrior};
+
+    /// The Priest with a Warrior `BEHIND` the pillar and a Mage `IN_SIGHT`.
+    fn scene(warrior_hp: f32, mage_hp: f32) -> ReachScene {
+        ReachScene::new(
+            Priest,
+            &[
+                (1, Warrior, BEHIND, warrior_hp),
+                (1, Mage, IN_SIGHT, mage_hp),
+            ],
+        )
+    }
+
+    fn flash_heal(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let me = s.units[0];
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_flash_heal(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                None,
+                builder,
+            )
+        })
+    }
+
+    fn shield(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let me = s.units[0];
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_power_word_shield(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                &mut HashSet::new(),
+                builder,
+            )
+        })
+    }
+
+    fn fortitude(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let me = s.units[0];
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_fortitude(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                &mut HashSet::new(),
+                builder,
+            )
+        })
+    }
+
+    fn aura(effect_type: AuraType, name: &str) -> Aura {
+        Aura {
+            effect_type,
+            ability_name: name.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Flash Heal heals the lowest ally it can SEE: an occluded lowest ally
+    /// yields to the next one in sight, a sighted lowest ally is healed with
+    /// the pillar standing, and with nobody else hurt the heal is refused
+    /// `LosBlocked`.
+    #[test]
+    fn flash_heal_falls_back_to_the_lowest_ally_in_sight() {
+        let mut s = scene(0.3, 0.6);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&flash_heal(&mut s, &[])),
+            chose("FlashHeal", warrior),
+            "no pillar: the lowest ally"
+        );
+        assert_eq!(
+            outcome(&flash_heal(&mut s, &pillar())),
+            chose("FlashHeal", mage),
+            "the occluded Warrior yields to the Mage in sight"
+        );
+
+        let mut s = scene(0.6, 0.3);
+        let mage = s.units[2];
+        assert_eq!(
+            outcome(&flash_heal(&mut s, &pillar())),
+            chose("FlashHeal", mage),
+            "a lowest ally in sight is healed with the pillar standing"
+        );
+
+        let mut s = scene(0.3, 1.0);
+        let trace = flash_heal(&mut s, &pillar());
+        assert_eq!(outcome(&trace), None, "no Flash Heal through the pillar");
+        assert_eq!(candidate(&trace, "FlashHeal")["reason"], "LosBlocked");
+    }
+
+    /// Power Word: Shield ranks only the allies it can see.
+    #[test]
+    fn power_word_shield_falls_back_to_the_best_ally_in_sight() {
+        let mut s = scene(0.3, 0.5);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&shield(&mut s, &[])),
+            chose("PowerWordShield", warrior),
+            "no pillar: the lowest candidate"
+        );
+        assert_eq!(
+            outcome(&shield(&mut s, &pillar())),
+            chose("PowerWordShield", mage),
+            "the occluded Warrior yields to the Mage in sight"
+        );
+
+        let mut s = scene(0.5, 0.3);
+        let mage = s.units[2];
+        assert_eq!(
+            outcome(&shield(&mut s, &pillar())),
+            chose("PowerWordShield", mage),
+            "a best candidate in sight is shielded with the pillar standing"
+        );
+
+        // The Priest itself is full health (a candidate) unless it carries
+        // Weakened Soul, and the Mage is no candidate between 70% and full.
+        let mut s = scene(0.3, 0.8);
+        let me = s.units[0];
+        s.auras
+            .insert(me, vec![aura(AuraType::WeakenedSoul, "Weakened Soul")]);
+        let trace = shield(&mut s, &pillar());
+        assert_eq!(outcome(&trace), None, "no shield through the pillar");
+        assert_eq!(candidate(&trace, "PowerWordShield")["reason"], "LosBlocked");
+    }
+
+    /// Power Word: Fortitude buffs the first unbuffed ally it can see.
+    #[test]
+    fn fortitude_falls_back_to_the_next_unbuffed_ally_in_sight() {
+        let fortified = || vec![aura(AuraType::MaxHealthIncrease, "Power Word: Fortitude")];
+        let mut s = scene(1.0, 1.0);
+        let (me, warrior, mage) = (s.units[0], s.units[1], s.units[2]);
+        s.auras.insert(me, fortified());
+        assert_eq!(
+            outcome(&fortitude(&mut s, &[])),
+            chose("PowerWordFortitude", warrior),
+            "no pillar: the first unbuffed ally"
+        );
+        assert_eq!(
+            outcome(&fortitude(&mut s, &pillar())),
+            chose("PowerWordFortitude", mage),
+            "the occluded Warrior yields to the Mage in sight"
+        );
+
+        s.auras.insert(warrior, fortified());
+        assert_eq!(
+            outcome(&fortitude(&mut s, &pillar())),
+            chose("PowerWordFortitude", mage),
+            "a first unbuffed ally in sight is buffed with the pillar standing"
+        );
+
+        s.auras.remove(&warrior);
+        s.auras.insert(mage, fortified());
+        let trace = fortitude(&mut s, &pillar());
+        assert_eq!(outcome(&trace), None, "no Fortitude through the pillar");
+        assert_eq!(
+            candidate(&trace, "PowerWordFortitude")["reason"],
+            "LosBlocked"
+        );
+    }
 }

@@ -246,12 +246,16 @@ fn try_lesser_healing_wave(
     let ability = AbilityType::LesserHealingWave;
     let def = abilities.get_unchecked(&ability);
 
-    let Some(target_info) =
-        ctx.lowest_health_ally_below(hp_threshold, movement.shared.heal_range, my_pos)
-    else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
-        return false;
-    };
+    // Reach (range, then sight) filters before health ranks: an occluded
+    // lowest ally yields to the lowest one in sight.
+    let target_info =
+        match ctx.lowest_health_ally_in_reach(hp_threshold, movement.shared.heal_range, my_pos) {
+            Ok(info) => info,
+            Err(reason) => {
+                builder.reject(ability, reason);
+                return false;
+            }
+        };
     let heal_target = target_info.entity;
     let target_pos = target_info.position;
 
@@ -260,7 +264,8 @@ fn try_lesser_healing_wave(
             builder.reject(
                 ability,
                 RejectionReason::PreconditionUnmet {
-                    note: "escape window live: non-critical heal deferred".to_string(),
+                    note: "escape window or medic walk live: non-critical heal deferred"
+                        .to_string(),
                 },
             );
             return false;
@@ -474,7 +479,8 @@ fn try_lightning_bolt(
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
-                note: "escape window live: movement-locking cast deferred".to_string(),
+                note: "escape window or medic walk live: movement-locking cast deferred"
+                    .to_string(),
             },
         );
         return false;
@@ -837,4 +843,85 @@ fn try_fire_totem(
         TotemElement::Fire,
         builder,
     )
+}
+
+// ----------------------------------------------------------------------------
+// AS-202: Lesser Healing Wave chooses among allies in sight
+// ----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod reach_tests {
+    use super::*;
+    use crate::states::match_config::CharacterClass::{Mage, Shaman, Warrior};
+    use crate::states::play_match::class_ai::reach_fixture::*;
+    use crate::states::play_match::map_geometry::ObstacleVolume;
+
+    fn scene(warrior_hp: f32, mage_hp: f32) -> ReachScene {
+        ReachScene::new(
+            Shaman,
+            &[
+                (1, Warrior, BEHIND, warrior_hp),
+                (1, Mage, IN_SIGHT, mage_hp),
+            ],
+        )
+    }
+
+    fn wave(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let movement = MovementConfig::default();
+        let me = s.units[0];
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_lesser_healing_wave(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                0.9,
+                None,
+                &movement,
+                builder,
+            )
+        })
+    }
+
+    /// Lesser Healing Wave heals the lowest ally it can SEE.
+    #[test]
+    fn lesser_healing_wave_falls_back_to_the_lowest_ally_in_sight() {
+        let mut s = scene(0.3, 0.6);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&wave(&mut s, &[])),
+            chose("LesserHealingWave", warrior),
+            "no pillar: the lowest ally"
+        );
+        assert_eq!(
+            outcome(&wave(&mut s, &pillar())),
+            chose("LesserHealingWave", mage),
+            "the occluded Warrior yields to the Mage in sight"
+        );
+
+        let mut s = scene(0.6, 0.3);
+        let mage = s.units[2];
+        assert_eq!(
+            outcome(&wave(&mut s, &pillar())),
+            chose("LesserHealingWave", mage),
+            "a lowest ally in sight is healed with the pillar standing"
+        );
+
+        let mut s = scene(0.3, 1.0);
+        let trace = wave(&mut s, &pillar());
+        assert_eq!(
+            outcome(&trace),
+            None,
+            "no Lesser Healing Wave through the pillar"
+        );
+        assert_eq!(
+            candidate(&trace, "LesserHealingWave")["reason"],
+            "LosBlocked"
+        );
+    }
 }

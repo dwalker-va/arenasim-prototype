@@ -26,8 +26,9 @@ use super::CombatContext;
 /// Justice / Psychic Scream dip).
 #[derive(Default)]
 pub struct CasterHealerPlan {
-    /// `Some(urgency_hp_threshold)` while an ESCAPE window is live: the
-    /// rotation defers non-critical movement-locking casts for the window.
+    /// `Some(urgency_hp_threshold)` while an ESCAPE window or a medic walk is
+    /// live: the rotation defers non-critical movement-locking casts
+    /// meanwhile.
     pub escape_defer: Option<f32>,
     /// The live PRESSURED trigger this tick (`compound_pressure_trigger`),
     /// kept for parity with the Priest plan.
@@ -144,7 +145,12 @@ pub fn evaluate_caster_healer_posture(
 
     // Medic chase (shared) overrides FREE formation / PRESSURED denial when a
     // dying teammate is occluded — walk around cover to regain sight and heal.
-    if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
+    // The walk wins over a movement-locking cast that is not itself critical,
+    // exactly as an ESCAPE window does: a hardcast heal on a less-hurt ally in
+    // sight would root the healer short of the dying one.
+    let medic_chase = medic_chase_override(entity, my_pos, next, ctx, shared);
+    let medic_walk = medic_chase.is_some();
+    if let Some(ally) = medic_chase {
         medic_chase_tick(
             commands,
             entity,
@@ -236,7 +242,7 @@ pub fn evaluate_caster_healer_posture(
         commands.entity(entity).try_insert(*state);
     }
 
-    let escape_defer = if state.posture == Posture::Escape {
+    let escape_defer = if medic_walk || state.posture == Posture::Escape {
         Some(shared.urgency_hp_threshold)
     } else {
         None

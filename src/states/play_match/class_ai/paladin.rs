@@ -42,8 +42,8 @@ use super::{CombatContext, CombatantInfo};
 /// [`decide_paladin_action`] (mirrors the Priest's `escape_defer` but adds
 /// the Hammer of Justice gate).
 pub struct PaladinMovementPlan {
-    /// `Some(urgency_hp_threshold)` while an ESCAPE window, a DIP or a dispel
-    /// walk is live: the heal ladder defers non-critical movement-locking casts
+    /// `Some(urgency_hp_threshold)` while an ESCAPE window, a DIP, a dispel
+    /// walk or a medic walk is live: the heal ladder defers non-critical movement-locking casts
     /// (Flash of Light, Holy Light) whose would-be target is ABOVE the
     /// threshold — casting locks movement, and an undeferred heal mid-dip would
     /// stall the walk into a budget abort (R8; same rule as the Priest's R7),
@@ -670,9 +670,14 @@ fn try_flash_of_light(
         return false;
     }
 
-    let Some(target_info) = ctx.lowest_health_ally_below(0.9, def.range, my_pos) else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
-        return false;
+    // Reach (range, then sight) filters before health ranks: an occluded
+    // lowest ally yields to the lowest one in sight.
+    let target_info = match ctx.lowest_health_ally_in_reach(0.9, def.range, my_pos) {
+        Ok(info) => info,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
     };
     let target_entity = target_info.entity;
     let target_pos = target_info.position;
@@ -682,7 +687,8 @@ fn try_flash_of_light(
             builder.reject(
                 ability,
                 RejectionReason::PreconditionUnmet {
-                    note: "dip/escape/dispel walk live: non-critical heal deferred".to_string(),
+                    note: "dip/escape/dispel/medic walk live: non-critical heal deferred"
+                        .to_string(),
                 },
             );
             return false;
@@ -770,18 +776,21 @@ fn try_holy_light(
         return false;
     }
 
-    let Some(target_info) =
-        ctx.lowest_health_ally_below(SAFE_HEAL_MAX_THRESHOLD, def.range, my_pos)
-    else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
-        return false;
-    };
+    let target_info =
+        match ctx.lowest_health_ally_in_reach(SAFE_HEAL_MAX_THRESHOLD, def.range, my_pos) {
+            Ok(info) => info,
+            Err(reason) => {
+                builder.reject(ability, reason);
+                return false;
+            }
+        };
     if let Some(threshold) = cast_defer {
         if target_info.health_pct() > threshold {
             builder.reject(
                 ability,
                 RejectionReason::PreconditionUnmet {
-                    note: "dip/escape/dispel walk live: non-critical heal deferred".to_string(),
+                    note: "dip/escape/dispel/medic walk live: non-critical heal deferred"
+                        .to_string(),
                 },
             );
             return false;
@@ -934,24 +943,38 @@ fn try_holy_shock_damage(
         return false;
     }
 
+    // The first enemy the shock REACHES (range, then sight): an occluded enemy
+    // in range yields to the next one in sight rather than being picked and
+    // then refused.
+    let mut occluded = false;
     let damage_target = ctx
         .combatants
         .iter()
         .filter(|(_, info)| info.team != combatant.team && info.current_health > 0.0)
         .filter(|(e, _)| !ctx.entity_is_immune(**e))
         .find_map(|(e, info)| {
-            if my_pos.distance(info.position) <= HOLY_SHOCK_DAMAGE_RANGE {
+            match super::cast_reach(ctx, HOLY_SHOCK_DAMAGE_RANGE, my_pos, info.position) {
                 // Resolve the pet-aware id here — the filter above does NOT
                 // exclude pets, so a Felhunter can be the target and its raw
                 // (slot, class) would build an impossible "Team 2 Warlock #11".
-                Some((e, info.position, info.log_id()))
-            } else {
-                None
+                super::CastReach::Reaches => Some((e, info.position, info.log_id())),
+                super::CastReach::LosBlocked => {
+                    occluded = true;
+                    None
+                }
+                super::CastReach::OutOfRange { .. } => None,
             }
         });
 
     let Some((target_entity, target_pos, target_id)) = damage_target else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
+        builder.reject(
+            ability,
+            if occluded {
+                RejectionReason::LosBlocked
+            } else {
+                RejectionReason::NoValidTarget
+            },
+        );
         return false;
     };
 
@@ -1611,5 +1634,181 @@ mod tests {
         assert_eq!(healed, None, "no Holy Shock heal through the pillar");
         assert_eq!(candidate["status"], "rejected");
         assert_eq!(candidate["reason"], "LosBlocked");
+    }
+}
+
+// ----------------------------------------------------------------------------
+// AS-202: the Paladin's heals and Holy Shock damage choose targets in sight
+// ----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod reach_tests {
+    use super::*;
+    use crate::states::play_match::class_ai::reach_fixture::*;
+    use crate::states::play_match::map_geometry::ObstacleVolume;
+    use CharacterClass::{Mage, Paladin, Warrior};
+
+    /// The Paladin with a Warrior `BEHIND` the pillar and a Mage `IN_SIGHT`,
+    /// both on `team` (1: allies, 2: enemies).
+    fn scene(team: u8, warrior_hp: f32, mage_hp: f32) -> ReachScene {
+        ReachScene::new(
+            Paladin,
+            &[
+                (team, Warrior, BEHIND, warrior_hp),
+                (team, Mage, IN_SIGHT, mage_hp),
+            ],
+        )
+    }
+
+    fn flash_of_light(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let me = s.units[0];
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_flash_of_light(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                None,
+                builder,
+            )
+        })
+    }
+
+    fn holy_light(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let me = s.units[0];
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_holy_light(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                None,
+                builder,
+            )
+        })
+    }
+
+    fn holy_shock_damage(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_holy_shock_damage(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                builder,
+            )
+        })
+    }
+
+    /// Flash of Light heals the lowest ally it can SEE.
+    #[test]
+    fn flash_of_light_falls_back_to_the_lowest_ally_in_sight() {
+        let mut s = scene(1, 0.3, 0.6);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&flash_of_light(&mut s, &[])),
+            chose("FlashOfLight", warrior),
+            "no pillar: the lowest ally"
+        );
+        assert_eq!(
+            outcome(&flash_of_light(&mut s, &pillar())),
+            chose("FlashOfLight", mage),
+            "the occluded Warrior yields to the Mage in sight"
+        );
+
+        let mut s = scene(1, 0.6, 0.3);
+        let mage = s.units[2];
+        assert_eq!(
+            outcome(&flash_of_light(&mut s, &pillar())),
+            chose("FlashOfLight", mage),
+            "a lowest ally in sight is healed with the pillar standing"
+        );
+
+        let mut s = scene(1, 0.3, 1.0);
+        let trace = flash_of_light(&mut s, &pillar());
+        assert_eq!(
+            outcome(&trace),
+            None,
+            "no Flash of Light through the pillar"
+        );
+        assert_eq!(candidate(&trace, "FlashOfLight")["reason"], "LosBlocked");
+    }
+
+    /// Holy Light heals the lowest ally in its band (50-85%) it can SEE.
+    #[test]
+    fn holy_light_falls_back_to_the_lowest_ally_in_sight() {
+        let mut s = scene(1, 0.6, 0.75);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&holy_light(&mut s, &[])),
+            chose("HolyLight", warrior),
+            "no pillar: the lowest ally"
+        );
+        assert_eq!(
+            outcome(&holy_light(&mut s, &pillar())),
+            chose("HolyLight", mage),
+            "the occluded Warrior yields to the Mage in sight"
+        );
+
+        let mut s = scene(1, 0.75, 0.6);
+        let mage = s.units[2];
+        assert_eq!(
+            outcome(&holy_light(&mut s, &pillar())),
+            chose("HolyLight", mage),
+            "a lowest ally in sight is healed with the pillar standing"
+        );
+
+        let mut s = scene(1, 0.6, 1.0);
+        let trace = holy_light(&mut s, &pillar());
+        assert_eq!(outcome(&trace), None, "no Holy Light through the pillar");
+        assert_eq!(candidate(&trace, "HolyLight")["reason"], "LosBlocked");
+    }
+
+    /// Holy Shock damage strikes the first enemy within 20yd it can SEE. The
+    /// Warrior precedes the Mage in entity order, so it is the first pick
+    /// whenever it is in sight.
+    #[test]
+    fn holy_shock_damage_falls_back_to_an_enemy_in_sight() {
+        let mut s = scene(2, 1.0, 1.0);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&holy_shock_damage(&mut s, &[])),
+            chose("HolyShock", warrior),
+            "no pillar: the first enemy in range"
+        );
+        assert_eq!(
+            outcome(&holy_shock_damage(&mut s, &pillar())),
+            chose("HolyShock", mage),
+            "the occluded Warrior yields to the Mage in sight"
+        );
+
+        // The Mage alone, in sight with the pillar standing.
+        s.roster.remove(&warrior);
+        assert_eq!(
+            outcome(&holy_shock_damage(&mut s, &pillar())),
+            chose("HolyShock", mage),
+            "a first enemy in sight is struck with the pillar standing"
+        );
+
+        let mut s = scene(2, 1.0, 1.0);
+        let mage = s.units[2];
+        s.roster.remove(&mage);
+        let trace = holy_shock_damage(&mut s, &pillar());
+        assert_eq!(outcome(&trace), None, "no Holy Shock through the pillar");
+        assert_eq!(candidate(&trace, "HolyShock")["reason"], "LosBlocked");
     }
 }

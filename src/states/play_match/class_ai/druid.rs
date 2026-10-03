@@ -348,15 +348,19 @@ impl AllyThreat {
 /// The ally the Druid keeps its heals rolling on: the one the most visible
 /// enemies are attacking; failing that, the one the most are closing on (the
 /// pre-HoT, before any damage lands). Ties go to the lower HP fraction, then
-/// to entity order. `None` when nobody is under threat.
+/// to entity order. `None` when nobody is under threat. Only allies `eligible`
+/// accepts are ranked: the heal focus passes the allies its HoTs are not kept
+/// off by sight alone ([`super::sight_blocks`]), the control focus every ally.
 pub fn focused_ally<'c>(
     ctx: &'c CombatContext,
     threat_radius: f32,
+    eligible: impl Fn(&CombatantInfo) -> bool,
 ) -> Option<(&'c CombatantInfo, AllyThreat)> {
     ctx.alive_allies()
         .into_iter()
         // A cycloned ally takes no heal (`CombatContext::is_cycloned`).
         .filter(|ally| !ctx.is_cycloned(ally.entity))
+        .filter(|ally| eligible(ally))
         .map(|ally| (ally, AllyThreat::on(ctx, ally, threat_radius)))
         .filter(|(_, threat)| threat.any())
         .max_by(|(a, a_threat), (b, b_threat)| {
@@ -529,11 +533,13 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// the run.
     fn rotation(&mut self, combatant: &mut Combatant) -> bool {
         // 2-3. The emergency button, and the Rejuvenation that arms it.
+        // Reach (range, then sight) filters before health ranks: an occluded
+        // dying ally yields to the lowest dying one in sight.
         let dying = self
             .ctx
-            .lowest_health_ally_below(DRUID_EMERGENCY_HP, self.heal_range, self.my_pos)
+            .lowest_health_ally_in_reach(DRUID_EMERGENCY_HP, self.heal_range, self.my_pos)
             .map(|a| (a.entity, a.position));
-        if let Some((ally, ally_pos)) = dying {
+        if let Ok((ally, ally_pos)) = dying {
             if self.has_own(ally, AbilityType::Rejuvenation) {
                 if self.cast(combatant, AbilityType::Swiftmend, ally, ally_pos) {
                     return true;
@@ -549,9 +555,8 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                     return true;
                 }
             }
-        } else {
-            self.builder
-                .reject(AbilityType::Swiftmend, RejectionReason::NoValidTarget);
+        } else if let Err(reason) = dying {
+            self.builder.reject(AbilityType::Swiftmend, reason);
         }
 
         // The escape shift.
@@ -573,10 +578,16 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             );
         }
 
-        // 5-6. Keep the focused ally's heals rolling.
-        let focus = focused_ally(self.ctx, self.threat_radius)
-            .filter(|(a, _)| self.my_pos.distance(a.position) <= self.heal_range)
-            .map(|(a, threat)| (a.entity, a.position, a.health_pct(), threat));
+        // 5-6. Keep the focused ally's heals rolling. An ally the HoTs could
+        // reach but for sight is not ranked, so an occluded focus yields to the
+        // most-threatened ally in sight; a focus beyond heal range is still
+        // passed over, as it always was.
+        let (ctx, my_pos, heal_range) = (self.ctx, self.my_pos, self.heal_range);
+        let focus = focused_ally(ctx, self.threat_radius, |a| {
+            !super::sight_blocks(ctx, heal_range, my_pos, a.position)
+        })
+        .filter(|(a, _)| my_pos.distance(a.position) <= heal_range)
+        .map(|(a, threat)| (a.entity, a.position, a.health_pct(), threat));
         if let Some((ally, ally_pos, hp, threat)) = focus {
             let urgent = hp < DRUID_URGENT_HP;
 
@@ -629,8 +640,13 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 .reject(AbilityType::Lifebloom, RejectionReason::NoValidTarget);
         }
 
-        // 7. Control: a peel for the focused ally, or the enemy healer.
-        if self.try_control(combatant, focus.map(|(e, _, hp, _)| (e, hp))) {
+        // 7. Control: a peel for the focused ally, or the enemy healer. The
+        // peel's focus is ranked over every ally, sight or not: its attackers
+        // may be in sight when the ally is not.
+        let control_focus = focused_ally(ctx, self.threat_radius, |_| true)
+            .filter(|(a, _)| my_pos.distance(a.position) <= heal_range)
+            .map(|(a, _)| (a.entity, a.health_pct()));
+        if self.try_control(combatant, control_focus) {
             return true;
         }
 
@@ -642,7 +658,8 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             .into_iter()
             .filter(|a| {
                 a.health_pct() < DRUID_TOP_UP_HP
-                    && self.my_pos.distance(a.position) <= self.heal_range
+                    && super::cast_reach(self.ctx, self.heal_range, self.my_pos, a.position)
+                        == super::CastReach::Reaches
                     && !self.ctx.is_cycloned(a.entity)
                     && Some(a.entity) != focus_entity
                     && !self.has_own(a.entity, AbilityType::Rejuvenation)
@@ -864,11 +881,13 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// pre-match buff has no cast to resolve.
     fn try_mark_of_the_wild(&mut self, combatant: &mut Combatant) -> bool {
         let ability = AbilityType::MarkOfTheWild;
+        let mark_range = self.abilities.get_unchecked(&ability).range;
+        let mut occluded = false;
         let unbuffed = self
             .ctx
             .alive_allies()
             .into_iter()
-            .find(|a| {
+            .filter(|a| {
                 !self.ctx.is_cycloned(a.entity)
                     && !self.ctx.active_auras.get(&a.entity).is_some_and(|auras| {
                         auras
@@ -876,10 +895,22 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                             .any(|aura| aura.compound == Some(CompoundDebuff::MarkOfTheWild))
                     })
             })
+            // An ally in range but out of sight yields to the next one in sight.
+            .find(|a| {
+                let blocked = super::sight_blocks(self.ctx, mark_range, self.my_pos, a.position);
+                occluded |= blocked;
+                !blocked
+            })
             .map(|a| (a.entity, a.position));
         let Some((target, target_pos)) = unbuffed else {
-            self.builder
-                .reject(ability, RejectionReason::AlreadyApplied);
+            self.builder.reject(
+                ability,
+                if occluded {
+                    RejectionReason::LosBlocked
+                } else {
+                    RejectionReason::AlreadyApplied
+                },
+            );
             return false;
         };
         if !self.guard(combatant, ability, target, target_pos) {
@@ -1274,5 +1305,219 @@ mod tests {
             DAMPENING_START_SECS + DAMPENING_RAMP_SECS * 0.5,
             "the horizon is the moment dampening reaches 50%"
         );
+    }
+}
+
+// ----------------------------------------------------------------------------
+// AS-202: the Druid's heals choose among allies in sight
+// ----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod reach_tests {
+    use super::*;
+    use crate::states::match_config::CharacterClass::{Druid, Mage, Rogue, Warrior};
+    use crate::states::play_match::class_ai::reach_fixture::*;
+    use crate::states::play_match::map_geometry::ObstacleVolume;
+
+    /// The Druid with a Warrior `BEHIND` the pillar and a Mage `IN_SIGHT`,
+    /// plus one enemy Rogue beside, and attacking, each ally `attacked` names
+    /// (1 the Warrior, 2 the Mage).
+    fn scene(warrior_hp: f32, mage_hp: f32, attacked: &[usize]) -> ReachScene {
+        let mut units = vec![
+            (1, Warrior, BEHIND, warrior_hp),
+            (1, Mage, IN_SIGHT, mage_hp),
+        ];
+        for &ally in attacked {
+            let at = if ally == 1 { BEHIND } else { IN_SIGHT };
+            units.push((2, Rogue, at + Vec3::new(1.0, 0.0, 1.0), 1.0));
+        }
+        let mut s = ReachScene::new(Druid, &units);
+        for (i, &ally) in attacked.iter().enumerate() {
+            let (rogue, target) = (s.units[3 + i], s.units[ally]);
+            s.roster.get_mut(&rogue).unwrap().target = Some(target);
+        }
+        s
+    }
+
+    /// One Druid turn: `step` runs against a [`DruidTurn`] over the scene.
+    fn turn(
+        s: &mut ReachScene,
+        obstacles: &[ObstacleVolume],
+        time_since_gates: f32,
+        step: impl FnOnce(&mut DruidTurn, &mut Combatant) -> bool,
+    ) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let movement = MovementConfig::default();
+        let me = s.units[0];
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            let mut log = CombatLog::default();
+            let mut turn = DruidTurn {
+                commands,
+                combat_log: &mut log,
+                abilities: &abilities,
+                entity: me,
+                my_pos: CASTER,
+                auras: None,
+                ctx,
+                heal_range: movement.shared.heal_range,
+                threat_radius: movement.shared.threat_intent_radius,
+                pressured: false,
+                time_since_gates,
+                builder,
+            };
+            step(&mut turn, combatant)
+        })
+    }
+
+    /// One rotation turn (everything after the pre-match buff).
+    fn rotation(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        turn(s, obstacles, 20.0, |t, c| t.rotation(c))
+    }
+
+    fn mark(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        turn(s, obstacles, 0.0, |t, c| t.try_mark_of_the_wild(c))
+    }
+
+    /// A fresh Rejuvenation, well clear of its refresh window.
+    fn rejuvenation() -> Vec<Aura> {
+        vec![Aura {
+            effect_type: AuraType::HealingOverTime,
+            ability_name: "Rejuvenation".to_string(),
+            duration: 12.0,
+            ..Default::default()
+        }]
+    }
+
+    /// The emergency step (Swiftmend, or the Rejuvenation that arms it) goes
+    /// to the lowest DYING ally it can see. The Mage carries a Rejuvenation,
+    /// so the emergency step Swiftmends it, and the top-up (which skips an
+    /// ally with one) cannot be what heals it.
+    #[test]
+    fn the_emergency_heal_falls_back_to_a_dying_ally_in_sight() {
+        let mut s = scene(0.3, 0.4, &[]);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        s.auras.insert(mage, rejuvenation());
+        assert_eq!(
+            outcome(&rotation(&mut s, &[])),
+            chose("Rejuvenation", warrior),
+            "no pillar: the lowest dying ally"
+        );
+        assert_eq!(
+            outcome(&rotation(&mut s, &pillar())),
+            chose("Swiftmend", mage),
+            "the occluded Warrior yields to the dying Mage in sight"
+        );
+
+        let mut s = scene(0.4, 0.3, &[]);
+        let mage = s.units[2];
+        s.auras.insert(mage, rejuvenation());
+        assert_eq!(
+            outcome(&rotation(&mut s, &pillar())),
+            chose("Swiftmend", mage),
+            "a dying ally in sight is healed with the pillar standing"
+        );
+
+        let mut s = scene(0.3, 1.0, &[]);
+        let trace = rotation(&mut s, &pillar());
+        assert_eq!(outcome(&trace), None, "no heal through the pillar");
+        assert_eq!(candidate(&trace, "Swiftmend")["reason"], "LosBlocked");
+    }
+
+    /// The focus heals go to the most-attacked ally the Druid can see. Both
+    /// allies carry a Rejuvenation, so the focus is rolled a Lifebloom — a
+    /// cast only the focus step makes.
+    #[test]
+    fn the_focus_heals_fall_back_to_an_attacked_ally_in_sight() {
+        let scene_rejuvenated = |warrior_hp, mage_hp| {
+            // Both attacked once: the lower one is the focus.
+            let mut s = scene(warrior_hp, mage_hp, &[1, 2]);
+            for ally in [s.units[1], s.units[2]] {
+                s.auras.insert(ally, rejuvenation());
+            }
+            s
+        };
+        let mut s = scene_rejuvenated(0.7, 0.75);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&rotation(&mut s, &[])),
+            chose("Lifebloom", warrior),
+            "no pillar: the focus is the lower attacked ally"
+        );
+        assert_eq!(
+            outcome(&rotation(&mut s, &pillar())),
+            chose("Lifebloom", mage),
+            "the occluded Warrior yields to the attacked Mage in sight"
+        );
+
+        let mut s = scene_rejuvenated(0.75, 0.7);
+        let mage = s.units[2];
+        assert_eq!(
+            outcome(&rotation(&mut s, &pillar())),
+            chose("Lifebloom", mage),
+            "a focus in sight is healed with the pillar standing"
+        );
+    }
+
+    /// The top-up Rejuvenation goes to the lowest hurt ally the Druid can see.
+    #[test]
+    fn the_top_up_falls_back_to_a_hurt_ally_in_sight() {
+        let mut s = scene(0.6, 0.7, &[]);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&rotation(&mut s, &[])),
+            chose("Rejuvenation", warrior),
+            "no pillar: the lowest hurt ally"
+        );
+        assert_eq!(
+            outcome(&rotation(&mut s, &pillar())),
+            chose("Rejuvenation", mage),
+            "the occluded Warrior yields to the hurt Mage in sight"
+        );
+
+        let mut s = scene(0.7, 0.6, &[]);
+        let mage = s.units[2];
+        assert_eq!(
+            outcome(&rotation(&mut s, &pillar())),
+            chose("Rejuvenation", mage),
+            "a lowest hurt ally in sight is topped up with the pillar standing"
+        );
+    }
+
+    /// Mark of the Wild goes to the first unmarked ally the Druid can see.
+    #[test]
+    fn mark_of_the_wild_falls_back_to_the_next_unmarked_ally_in_sight() {
+        let marked = || {
+            vec![Aura {
+                effect_type: AuraType::MaxHealthIncrease,
+                compound: Some(CompoundDebuff::MarkOfTheWild),
+                ..Default::default()
+            }]
+        };
+        let mut s = scene(1.0, 1.0, &[]);
+        let (me, warrior, mage) = (s.units[0], s.units[1], s.units[2]);
+        s.auras.insert(me, marked());
+        assert_eq!(
+            outcome(&mark(&mut s, &[])),
+            chose("MarkOfTheWild", warrior),
+            "no pillar: the first unmarked ally"
+        );
+        assert_eq!(
+            outcome(&mark(&mut s, &pillar())),
+            chose("MarkOfTheWild", mage),
+            "the occluded Warrior yields to the Mage in sight"
+        );
+
+        s.auras.insert(warrior, marked());
+        assert_eq!(
+            outcome(&mark(&mut s, &pillar())),
+            chose("MarkOfTheWild", mage),
+            "a first unmarked ally in sight is marked with the pillar standing"
+        );
+
+        s.auras.remove(&warrior);
+        s.auras.insert(mage, marked());
+        let trace = mark(&mut s, &pillar());
+        assert_eq!(outcome(&trace), None, "no Mark through the pillar");
+        assert_eq!(candidate(&trace, "MarkOfTheWild")["reason"], "LosBlocked");
     }
 }
