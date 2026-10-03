@@ -750,10 +750,14 @@ steered to its nearest shell point and held a body radius short of it — the
 helper returns `Some(Vec2::ZERO)`, which every caller treats as "don't move";
 rounding toward the unreachable point itself parked the mover on the nearest
 vertex and flipped it across that vertex every tick. That hold is a backstop,
-not a licence to issue such goals: the `TeamPlan` solve moves an in-footprint
-answer onto the footprint's skin (`map_geometry::nearest_standable`, AS-190), and
-`tests/team_plan_standable_goals.rs` fails on any `Point` goal a `TeamPlan` unit
-is given inside a footprint on Nagrand. The helper's first line is
+not a licence to issue such goals: under `TeamPlan` the team solve and the
+healers' FREE formation point both move an in-footprint point onto the
+footprint's skin (`map_geometry::nearest_standable`, AS-190), and
+`tests/standable_point_goals.rs` fails on any `Point` goal a `TeamPlan` healer is
+given inside a footprint on Nagrand. (`Legacy`'s formation point can still land
+inside a pillar — AS-203.) A new producer of `Point` goals owes the same
+projection. The
+helper's first line is
 `if obstacles.is_empty() { return None }` and each caller falls back to its exact
 legacy direct-normalize on `None`, so **BasicArena stays byte-identical**. This
 makes competent pursuers (melee and Mage) round pillars cleanly; a documented

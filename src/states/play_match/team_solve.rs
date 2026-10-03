@@ -947,12 +947,10 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
     // a body radius short of (AS-190). It is moved out through the footprint's
     // nearest face — the spot the steering helper was already heading for —
     // so the unit walks onto the skin on the side it was already pressed
-    // against: the flush, in-cover spot the choice was worth. The
-    // CHOICE is unchanged — it is still scored at the in-pillar point. Scoring
-    // each candidate at its projection instead is a different solve, not this
-    // fix: measured on the flagship comp it moves outcomes by a large margin,
-    // so it needs its own head-to-head before it ships. A winner no projection
-    // frees (overlapping footprints, which no shipped map has) holds.
+    // against. The CHOICE is unchanged: it is still scored at the in-pillar
+    // point, which can be more hidden than the skin spot the unit ends up on
+    // (scoring candidates where they would be stood on is AS-201). A winner no
+    // projection frees (touching footprints — see `nearest_standable`) holds.
     best.map_or(ctx.unit.pos, |(_, p)| {
         nearest_standable(&ctx.world.obstacles, p, ctx.unit.y).unwrap_or(ctx.unit.pos)
     })

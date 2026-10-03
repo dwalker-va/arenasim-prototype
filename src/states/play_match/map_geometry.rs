@@ -496,8 +496,11 @@ pub fn position_blocked(obstacles: &[ObstacleVolume], p: Vec3) -> bool {
 /// the collision resolver takes. Every result passes [`position_blocked`].
 ///
 /// `None` only when no such spot is found within one pass per obstacle, which
-/// needs overlapping footprints; the shipped maps have none. An unblocked `p`
-/// comes back bit-identical, so an obstacle-free map is untouched.
+/// needs footprints that touch or overlap — TestVerticality's ramp boxes share
+/// faces, so a point pushed out of one can land in the next. Callers fall back
+/// to a spot they know is free (the solve holds, a formation point is issued
+/// as it stands to the executor's hold). An unblocked `p` comes back
+/// bit-identical, so an obstacle-free map is untouched.
 pub fn nearest_standable(obstacles: &[ObstacleVolume], p: Vec2, mover_y: f32) -> Option<Vec2> {
     let mut q = p;
     for _ in 0..=obstacles.len() {
