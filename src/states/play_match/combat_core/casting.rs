@@ -731,16 +731,19 @@ pub fn process_casting(
         else if def.is_heal() {
             // A heal that consumes an aura (Swiftmend eats Rejuvenation) takes
             // it as it lands. The AI only casts it at a target that carries
-            // one; a consumed aura that blooms would bloom here, since it has
-            // ended — none does today.
+            // its own; a consumed aura that blooms would bloom here, since it
+            // has ended — none does today. With two Druids' Rejuvenations on
+            // the target it eats the caster's own, and another's only when the
+            // caster has none (Classic's Swiftmend takes any Druid's).
             if let Some(consumed) = def.consumes_aura {
                 let consumed_name = &abilities.get_unchecked(&consumed).name;
                 if let Some(auras) = target_auras.as_deref_mut() {
-                    if let Some(index) = auras
+                    let named = |a: &Aura| &a.ability_name == consumed_name;
+                    let own = auras
                         .auras
                         .iter()
-                        .position(|a| &a.ability_name == consumed_name)
-                    {
+                        .position(|a| named(a) && a.caster == Some(caster_entity));
+                    if let Some(index) = own.or_else(|| auras.auras.iter().position(named)) {
                         let eaten = auras.remove_debuff_at(index);
                         target.reverse_stat_mutation(&eaten);
                         if let Some(bloom) = BloomPending::for_ending(target_entity, &eaten) {

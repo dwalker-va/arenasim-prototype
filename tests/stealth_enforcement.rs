@@ -546,6 +546,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     false,
                     true,
                     0.0,
+                    &mut Default::default(),
                     &mut trace,
                 );
             }

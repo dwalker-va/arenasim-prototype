@@ -1299,7 +1299,16 @@ pub enum DispelScope {
     /// is a different buff from a same-type sibling — a Druid's Rejuvenation
     /// and its Lifebloom are both `HealingOverTime` — so a purge chosen for one
     /// must not take the other.
-    PurgeSource { effect: AuraType, source: String },
+    ///
+    /// `owner` pins it to one CASTER's instance as well, for a per-caster
+    /// stacking aura ([`Aura::stack_owner`](super::Aura::stack_owner)): with
+    /// two Druids' Lifeblooms on one target, the purge takes the one it chose.
+    /// `None` for every other source-keyed buff.
+    PurgeSource {
+        effect: AuraType,
+        source: String,
+        owner: Option<Entity>,
+    },
     /// Master's Call: a movement impairment of one of these types, whatever
     /// its removal class — it clears physical harm as well as magic.
     Impairments(Vec<AuraType>),
@@ -1321,8 +1330,15 @@ impl DispelScope {
             DispelScope::Magic => aura.can_be_dispelled(),
             DispelScope::MagicOrPoison => aura.can_be_dispelled() || aura.is_cleansable_poison(),
             DispelScope::Purge(effect) => aura.effect_type == *effect && aura.can_be_purged(),
-            DispelScope::PurgeSource { effect, source } => {
-                aura.effect_type == *effect && aura.ability_name == *source && aura.can_be_purged()
+            DispelScope::PurgeSource {
+                effect,
+                source,
+                owner,
+            } => {
+                aura.effect_type == *effect
+                    && aura.ability_name == *source
+                    && aura.stack_owner() == *owner
+                    && aura.can_be_purged()
             }
             DispelScope::Impairments(effects) => effects.contains(&aura.effect_type),
         }

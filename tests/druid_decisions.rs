@@ -62,6 +62,8 @@ fn mark() -> Aura {
 struct Scene {
     ally_hp: f32,
     ally_rejuvenated: bool,
+    /// A SECOND Druid on the team has its own Rejuvenation on the ally.
+    other_druid_rejuvenated: bool,
     druid_mana: f32,
 }
 
@@ -102,6 +104,15 @@ fn decide(scene: Scene) -> Option<(AbilityType, &'static str)> {
         let def = abilities.get_unchecked(&AbilityType::Rejuvenation);
         ally_auras.push(AuraPending::from_ability(ally, druid, def).unwrap().aura);
     }
+    if scene.other_druid_rejuvenated {
+        let other_druid = world.spawn_empty().id();
+        let def = abilities.get_unchecked(&AbilityType::Rejuvenation);
+        ally_auras.push(
+            AuraPending::from_ability(ally, other_druid, def)
+                .unwrap()
+                .aura,
+        );
+    }
     active_auras.insert(ally, ally_auras);
     let dr = BTreeMap::new();
     let cooldowns = BTreeMap::new();
@@ -135,6 +146,7 @@ fn decide(scene: Scene) -> Option<(AbilityType, &'static str)> {
         false,
         true,
         30.0,
+        &mut Default::default(),
         &mut trace,
     );
 
@@ -167,6 +179,7 @@ fn a_dying_ally_without_rejuvenation_gets_rejuvenation_to_arm_swiftmend() {
         decide(Scene {
             ally_hp: DYING,
             ally_rejuvenated: false,
+            other_druid_rejuvenated: false,
             druid_mana: 1.0,
         }),
         Some((AbilityType::Rejuvenation, "ally"))
@@ -179,6 +192,7 @@ fn a_dying_ally_with_rejuvenation_gets_swiftmend() {
         decide(Scene {
             ally_hp: DYING,
             ally_rejuvenated: true,
+            other_druid_rejuvenated: false,
             druid_mana: 1.0,
         }),
         Some((AbilityType::Swiftmend, "ally"))
@@ -192,6 +206,7 @@ fn a_druid_low_on_mana_innervates_itself() {
         decide(Scene {
             ally_hp: 100.0,
             ally_rejuvenated: true,
+            other_druid_rejuvenated: false,
             druid_mana: below,
         }),
         Some((AbilityType::Innervate, "self"))
@@ -203,7 +218,133 @@ fn a_druid_with_mana_does_not_innervate() {
     let chosen = decide(Scene {
         ally_hp: 100.0,
         ally_rejuvenated: true,
+        other_druid_rejuvenated: false,
         druid_mana: DRUID_INNERVATE_MANA_PCT + 0.3,
     });
     assert_ne!(chosen.map(|(a, _)| a), Some(AbilityType::Innervate));
+}
+
+/// A Rejuvenation is the caster's own (`StackScope::PerCaster`): another
+/// Druid's on the dying ally does not arm THIS Druid's Swiftmend, so it lays
+/// its own Rejuvenation first.
+#[test]
+fn another_druids_rejuvenation_does_not_arm_swiftmend() {
+    assert_eq!(
+        decide(Scene {
+            ally_hp: DYING,
+            ally_rejuvenated: false,
+            other_druid_rejuvenated: true,
+            druid_mana: 1.0,
+        }),
+        Some((AbilityType::Rejuvenation, "ally"))
+    );
+}
+
+/// Two Druids and a Warrior before the gates, nobody marked. Each Druid
+/// decides in turn from the SAME aura snapshot, as `decide_abilities` runs
+/// them in one frame; `share` says whether they share one same-frame Mark set
+/// (the real wiring) or each get a fresh one. Returns the Mark's target per
+/// Druid, in decision order.
+fn same_frame_marks(share: bool) -> Vec<Option<Entity>> {
+    let mut world = World::new();
+    let druids = [world.spawn_empty().id(), world.spawn_empty().id()];
+    let warrior = world.spawn_empty().id();
+    let abilities = AbilityDefinitions::default();
+    let movement = MovementConfig::default();
+    let mut combat_log = CombatLog::default();
+
+    let mut roster = BTreeMap::new();
+    for (i, &druid) in druids.iter().enumerate() {
+        let mut me = info(
+            druid,
+            1,
+            CharacterClass::Druid,
+            Vec3::new(i as f32, 1.0, 0.0),
+        );
+        me.slot = i as u8;
+        roster.insert(druid, me);
+    }
+    roster.insert(
+        warrior,
+        info(
+            warrior,
+            1,
+            CharacterClass::Warrior,
+            Vec3::new(5.0, 1.0, 0.0),
+        ),
+    );
+    let active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
+    let dr = BTreeMap::new();
+    let cooldowns = BTreeMap::new();
+
+    let mut shared = std::collections::HashSet::new();
+    let mut targets = Vec::new();
+    for (i, &druid) in druids.iter().enumerate() {
+        let mut combatant = Combatant::new(1, i as u8, CharacterClass::Druid);
+        let my_pos = roster[&druid].position;
+        let ctx = CombatContext::new(
+            druid,
+            1,
+            &roster,
+            &active_auras,
+            &dr,
+            &cooldowns,
+            &[],
+            Default::default(),
+            Default::default(),
+        );
+        let mut fresh = std::collections::HashSet::new();
+        let marked = if share { &mut shared } else { &mut fresh };
+        let mut trace = DecisionTrace::default();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        decide_druid_action(
+            &mut commands,
+            &mut combat_log,
+            &abilities,
+            druid,
+            &mut combatant,
+            my_pos,
+            None,
+            &ctx,
+            &movement,
+            false,
+            false,
+            0.0,
+            marked,
+            &mut trace,
+        );
+        queue.apply(&mut world);
+        let mut pending = world.query::<&AuraPending>();
+        let target = pending
+            .iter(&world)
+            .filter(|p| p.aura.caster == Some(druid))
+            .map(|p| p.target)
+            .next();
+        targets.push(target);
+    }
+    targets
+}
+
+/// Two Druids marking in one frame mark two DIFFERENT allies: the second does
+/// not spend 30 mana refreshing a Mark that lands next frame. The unshared
+/// control shows the scene would otherwise send both Marks to one ally.
+#[test]
+fn two_druids_never_mark_the_same_ally_in_one_frame() {
+    let shared = same_frame_marks(true);
+    assert!(
+        shared.iter().all(Option::is_some),
+        "both Druids cast a Mark: {shared:?}"
+    );
+    assert_ne!(
+        shared[0], shared[1],
+        "the second Druid must mark a different ally"
+    );
+
+    let unshared = same_frame_marks(false);
+    assert!(unshared[0].is_some());
+    assert_eq!(
+        unshared[0], unshared[1],
+        "control: without the same-frame set both Druids pick the same ally"
+    );
 }

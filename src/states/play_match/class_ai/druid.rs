@@ -43,6 +43,8 @@
 //! (`caster_healer_posture`) on the `druid:` block of `movement.ron`.
 #![allow(clippy::too_many_arguments)]
 
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 
 use crate::combat::log::CombatLog;
@@ -377,23 +379,31 @@ pub fn focused_ally<'c>(
         })
 }
 
-/// This Druid's aura from `ability` on `target`, if any.
+/// This Druid's aura from `ability` on `target`, if any — the one it cast.
+/// Another Druid's Lifebloom on the same ally is that Druid's stack, not this
+/// one's ([`StackScope::PerCaster`]).
 fn own_aura<'c>(
     ctx: &'c CombatContext,
     abilities: &AbilityDefinitions,
+    caster: Entity,
     target: Entity,
     ability: AbilityType,
 ) -> Option<&'c Aura> {
     let name = &abilities.get_unchecked(&ability).name;
-    ctx.active_auras
-        .get(&target)
-        .and_then(|auras| auras.iter().find(|a| &a.ability_name == name))
+    ctx.active_auras.get(&target).and_then(|auras| {
+        auras
+            .iter()
+            .find(|a| &a.ability_name == name && a.caster == Some(caster))
+    })
 }
 
 /// Druid AI: decides and executes one ability per global cooldown.
 ///
 /// `time_since_gates` feeds the mana governor. `gates_opened` holds every
 /// combat action until the gates open; only Mark of the Wild is cast before.
+/// `marked_this_frame` holds the allies a Druid has already sent a Mark of the
+/// Wild to this frame, shared by every Druid's turn — see
+/// [`DruidTurn::try_mark_of_the_wild`].
 /// Returns `true` if an action was taken this frame.
 pub fn decide_druid_action(
     commands: &mut Commands,
@@ -408,6 +418,7 @@ pub fn decide_druid_action(
     pressured: bool,
     gates_opened: bool,
     time_since_gates: f32,
+    marked_this_frame: &mut HashSet<Entity>,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
     // Shifted: nothing is cast in Travel Form, so the only decision is
@@ -501,6 +512,7 @@ pub fn decide_druid_action(
             threat_radius: movement.shared.threat_intent_radius,
             pressured,
             time_since_gates,
+            marked_this_frame,
             builder: &mut builder,
         };
         turn.try_mark_of_the_wild(combatant) || (gates_opened && turn.rotation(combatant))
@@ -524,6 +536,8 @@ struct DruidTurn<'a, 'b, 'w, 's, 'c> {
     /// The posture machine's PRESSURED trigger this tick.
     pressured: bool,
     time_since_gates: f32,
+    /// Allies sent a Mark of the Wild this frame, by any Druid.
+    marked_this_frame: &'a mut HashSet<Entity>,
     builder: &'a mut DecisionEventBuilder<'b>,
 }
 
@@ -879,6 +893,12 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// Mark of the Wild on the first ally (self included, pets excluded) who
     /// does not carry it. Applied directly, like Power Word: Fortitude: a
     /// pre-match buff has no cast to resolve.
+    ///
+    /// An ally another Druid has already sent a Mark to THIS frame counts as
+    /// carrying it (`marked_this_frame`): the Mark lands next frame, so the
+    /// aura snapshot cannot show it yet, and a second Mark would only refresh
+    /// the first — 30 mana for nothing. The Paladin's `paladin_aura_this_frame`
+    /// is the same guard.
     fn try_mark_of_the_wild(&mut self, combatant: &mut Combatant) -> bool {
         let ability = AbilityType::MarkOfTheWild;
         let mark_range = self.abilities.get_unchecked(&ability).range;
@@ -889,6 +909,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             .into_iter()
             .filter(|a| {
                 !self.ctx.is_cycloned(a.entity)
+                    && !self.marked_this_frame.contains(&a.entity)
                     && !self.ctx.active_auras.get(&a.entity).is_some_and(|auras| {
                         auras
                             .iter()
@@ -922,6 +943,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         combatant.current_mana -= def.mana_cost;
         combatant.global_cooldown = GCD;
         self.log_use(combatant, &def.name, target, "casts");
+        self.marked_this_frame.insert(target);
         if let Some(pending) = AuraPending::from_ability(target, self.entity, def) {
             self.commands.spawn(pending);
         }
@@ -1055,7 +1077,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     }
 
     fn own(&self, target: Entity, ability: AbilityType) -> Option<&Aura> {
-        own_aura(self.ctx, self.abilities, target, ability)
+        own_aura(self.ctx, self.abilities, self.entity, target, ability)
     }
 
     fn has_own(&self, target: Entity, ability: AbilityType) -> bool {
@@ -1084,7 +1106,11 @@ mod tests {
         Aura {
             effect_type: AuraType::HealingOverTime,
             duration,
-            stacks: Some(AuraStacks { count, max: 3 }),
+            stacks: Some(AuraStacks {
+                count,
+                max: 3,
+                scope: StackScope::PerCaster,
+            }),
             ..Default::default()
         }
     }
@@ -1349,6 +1375,7 @@ mod reach_tests {
         let abilities = AbilityDefinitions::default();
         let movement = MovementConfig::default();
         let me = s.units[0];
+        let mut marked = HashSet::new();
         s.run(obstacles, |commands, ctx, combatant, builder| {
             let mut log = CombatLog::default();
             let mut turn = DruidTurn {
@@ -1363,6 +1390,7 @@ mod reach_tests {
                 threat_radius: movement.shared.threat_intent_radius,
                 pressured: false,
                 time_since_gates,
+                marked_this_frame: &mut marked,
                 builder,
             };
             step(&mut turn, combatant)
@@ -1378,12 +1406,15 @@ mod reach_tests {
         turn(s, obstacles, 0.0, |t, c| t.try_mark_of_the_wild(c))
     }
 
-    /// A fresh Rejuvenation, well clear of its refresh window.
-    fn rejuvenation() -> Vec<Aura> {
+    /// A fresh Rejuvenation `by` cast, well clear of its refresh window. A
+    /// Rejuvenation is its caster's own (`StackScope::PerCaster`), so the
+    /// Druid under test must have cast it for its rotation to count it.
+    fn rejuvenation(by: Entity) -> Vec<Aura> {
         vec![Aura {
             effect_type: AuraType::HealingOverTime,
             ability_name: "Rejuvenation".to_string(),
             duration: 12.0,
+            caster: Some(by),
             ..Default::default()
         }]
     }
@@ -1396,7 +1427,7 @@ mod reach_tests {
     fn the_emergency_heal_falls_back_to_a_dying_ally_in_sight() {
         let mut s = scene(0.3, 0.4, &[]);
         let (warrior, mage) = (s.units[1], s.units[2]);
-        s.auras.insert(mage, rejuvenation());
+        s.auras.insert(mage, rejuvenation(s.units[0]));
         assert_eq!(
             outcome(&rotation(&mut s, &[])),
             chose("Rejuvenation", warrior),
@@ -1410,7 +1441,7 @@ mod reach_tests {
 
         let mut s = scene(0.4, 0.3, &[]);
         let mage = s.units[2];
-        s.auras.insert(mage, rejuvenation());
+        s.auras.insert(mage, rejuvenation(s.units[0]));
         assert_eq!(
             outcome(&rotation(&mut s, &pillar())),
             chose("Swiftmend", mage),
@@ -1432,7 +1463,7 @@ mod reach_tests {
             // Both attacked once: the lower one is the focus.
             let mut s = scene(warrior_hp, mage_hp, &[1, 2]);
             for ally in [s.units[1], s.units[2]] {
-                s.auras.insert(ally, rejuvenation());
+                s.auras.insert(ally, rejuvenation(s.units[0]));
             }
             s
         };

@@ -516,3 +516,267 @@ fn a_rider_is_never_a_purge_candidate() {
     world.run_system_once(process_dispels).unwrap();
     assert_eq!(mark_of_the_wild_effects(&world, ally).len(), before);
 }
+
+// ----------------------------------------------------------------------------
+// Two Druids: a heal over time is the CASTER's, a buff is the TARGET's
+// (`StackScope`).
+// ----------------------------------------------------------------------------
+
+fn second_druid(world: &mut World) -> Entity {
+    world
+        .spawn((
+            Combatant::new(1, 2, CharacterClass::Druid),
+            Transform::default(),
+        ))
+        .id()
+}
+
+fn lifebloom_of(world: &World, ally: Entity, caster: Entity) -> Vec<Aura> {
+    auras_named(world, ally, "Lifebloom")
+        .into_iter()
+        .filter(|a| a.caster == Some(caster))
+        .collect()
+}
+
+#[test]
+fn two_druids_each_keep_their_own_lifebloom_stack() {
+    let mut world = world(0.0);
+    let (druid_a, ally) = druid_and_ally(&mut world);
+    let druid_b = second_druid(&mut world);
+
+    land(&mut world, cast(AbilityType::Lifebloom, ally, druid_a, 100.0));
+    land(&mut world, cast(AbilityType::Lifebloom, ally, druid_a, 100.0));
+    land(&mut world, cast(AbilityType::Lifebloom, ally, druid_b, 100.0));
+    assert_eq!(
+        auras_named(&world, ally, "Lifebloom").len(),
+        2,
+        "the second Druid's Lifebloom lands beside the first's"
+    );
+    let a = lifebloom_of(&world, ally, druid_a);
+    let b = lifebloom_of(&world, ally, druid_b);
+    assert_eq!((a.len(), b.len()), (1, 1));
+    assert_eq!(a[0].stack_count(), 2, "B's cast must not deepen A's stack");
+    assert_eq!(b[0].stack_count(), 1);
+
+    // One Druid's recast still refreshes and deepens its OWN stack only.
+    if let Some(mut auras) = world.entity_mut(ally).get_mut::<ActiveAuras>() {
+        for aura in auras.auras.iter_mut() {
+            aura.duration = 2.0;
+        }
+    }
+    land(&mut world, cast(AbilityType::Lifebloom, ally, druid_a, 100.0));
+    let a = lifebloom_of(&world, ally, druid_a);
+    let b = lifebloom_of(&world, ally, druid_b);
+    assert_eq!(auras_named(&world, ally, "Lifebloom").len(), 2);
+    assert_eq!((a[0].stack_count(), a[0].duration), (3, 7.0));
+    assert_eq!(
+        (b[0].stack_count(), b[0].duration),
+        (1, 2.0),
+        "A's refresh leaves B's stack alone"
+    );
+}
+
+/// Both Druids' first Lifebloom in ONE frame, on an ally with no auras yet:
+/// the same-frame path (`new_auras_map`, the per-frame applied set) keeps them
+/// apart too.
+#[test]
+fn two_druids_lifeblooms_in_one_frame_land_as_two_stacks() {
+    let mut world = world(0.0);
+    let (druid_a, ally) = druid_and_ally(&mut world);
+    let druid_b = second_druid(&mut world);
+    world.spawn(cast(AbilityType::Lifebloom, ally, druid_a, 100.0));
+    world.spawn(cast(AbilityType::Lifebloom, ally, druid_b, 100.0));
+    world.run_system_once(apply_pending_auras).unwrap();
+    assert_eq!(lifebloom_of(&world, ally, druid_a).len(), 1);
+    assert_eq!(lifebloom_of(&world, ally, druid_b).len(), 1);
+}
+
+#[test]
+fn each_druids_lifebloom_blooms_separately() {
+    let mut world = world(1.0);
+    let (druid_a, ally) = druid_and_ally(&mut world);
+    let druid_b = second_druid(&mut world);
+    let ending = |caster: Entity, stacks: u8, spell_power: f32| {
+        let mut aura = cast(AbilityType::Lifebloom, ally, caster, spell_power).aura;
+        aura.stacks = aura
+            .stacks
+            .map(|s| arenasim::states::play_match::AuraStacks { count: stacks, ..s });
+        aura.duration = 0.5; // its last frame
+        aura.time_until_next_tick = 5.0; // no ordinary tick this frame
+        aura
+    };
+    let a = ending(druid_a, 3, 100.0);
+    let b = ending(druid_b, 1, 40.0);
+    let (bloom_a, bloom_b) = (a.bloom_heal().unwrap(), b.bloom_heal().unwrap());
+    world
+        .entity_mut(ally)
+        .insert(ActiveAuras { auras: vec![a, b] });
+
+    world.run_system_once(process_hot_ticks).unwrap();
+    world.run_system_once(update_auras).unwrap();
+    world.run_system_once(process_blooms).unwrap();
+
+    let blooms = world
+        .resource::<CombatLog>()
+        .entries
+        .iter()
+        .filter(|e| e.message.contains("Lifebloom blooms on"))
+        .count();
+    assert_eq!(blooms, 2, "each Druid's stack blooms on its own");
+    let healing = |e: Entity| world.entity(e).get::<Combatant>().unwrap().healing_done;
+    assert_eq!(healing(druid_a), bloom_a, "A's bloom: its 3 stacks, its spell power");
+    assert_eq!(healing(druid_b), bloom_b, "B's bloom: its 1 stack, its spell power");
+}
+
+#[test]
+fn two_druids_marks_of_the_wild_do_not_stack() {
+    let mut world = world(0.0);
+    let (druid_a, ally) = druid_and_ally(&mut world);
+    let druid_b = second_druid(&mut world);
+    let base_max = world.entity(ally).get::<Combatant>().unwrap().max_health;
+    land(
+        &mut world,
+        cast(AbilityType::MarkOfTheWild, ally, druid_a, 0.0),
+    );
+    let one_mark = mark_of_the_wild_effects(&world, ally).len();
+    land(
+        &mut world,
+        cast(AbilityType::MarkOfTheWild, ally, druid_b, 0.0),
+    );
+    assert_eq!(
+        mark_of_the_wild_effects(&world, ally).len(),
+        one_mark,
+        "a second Druid's Mark refreshes the first, never lands beside it"
+    );
+    let def = AbilityDefinitions::default();
+    let bonus = def
+        .get_unchecked(&AbilityType::MarkOfTheWild)
+        .applies_aura
+        .as_ref()
+        .unwrap()
+        .magnitude;
+    assert_eq!(
+        world.entity(ally).get::<Combatant>().unwrap().max_health,
+        base_max + bonus,
+        "the health bonus is granted once"
+    );
+    assert!(log_has(&world, "Mark of the Wild refreshed"));
+}
+
+/// Two Druids' Rejuvenations on one ally, and a purge pinned to one of them
+/// (`DispelScope::PurgeSource` with its `owner`): it takes that one, whatever
+/// the random pick among candidates would have rolled.
+#[test]
+fn a_purge_takes_the_druids_rejuvenation_it_chose() {
+    for seed in 0..16u64 {
+        for victim in [0usize, 1] {
+            let mut world = world(0.0);
+            world.insert_resource(GameRng::from_seed(seed));
+            let (druid_a, ally) = druid_and_ally(&mut world);
+            let druid_b = second_druid(&mut world);
+            let casters = [druid_a, druid_b];
+            land(
+                &mut world,
+                cast(AbilityType::Rejuvenation, ally, druid_a, 100.0),
+            );
+            land(
+                &mut world,
+                cast(AbilityType::Rejuvenation, ally, druid_b, 100.0),
+            );
+            assert_eq!(auras_named(&world, ally, "Rejuvenation").len(), 2);
+            let shaman = world
+                .spawn(Combatant::new(2, 0, CharacterClass::Shaman))
+                .id();
+            world.spawn(DispelPending {
+                target: ally,
+                dispeller: shaman,
+                log_prefix: "[PURGE]",
+                caster_class: CharacterClass::Shaman,
+                heal_on_success: None,
+                scope: DispelScope::PurgeSource {
+                    effect: AuraType::HealingOverTime,
+                    source: "Rejuvenation".to_string(),
+                    owner: Some(casters[victim]),
+                },
+            });
+            world.run_system_once(process_dispels).unwrap();
+            let left: Vec<Option<Entity>> = auras_named(&world, ally, "Rejuvenation")
+                .iter()
+                .map(|a| a.caster)
+                .collect();
+            assert_eq!(
+                left,
+                vec![Some(casters[1 - victim])],
+                "seed {seed}: the purge must take the chosen Druid's Rejuvenation"
+            );
+        }
+    }
+}
+
+/// Swiftmend eats its caster's OWN Rejuvenation when two Druids have one up —
+/// here the second in the aura list, so a first-match would take the wrong one.
+#[test]
+fn swiftmend_eats_its_casters_own_rejuvenation() {
+    let mut world = world(1.0 / 60.0);
+    world.insert_resource(AbilityDefinitions::default());
+    world.insert_resource(ActiveMapGeometry {
+        bounds: Default::default(),
+        volumes: Vec::new(),
+        cover_anchors: Vec::new(),
+    });
+    let (druid_a, ally) = druid_and_ally(&mut world);
+    let druid_b = second_druid(&mut world);
+    let rejuv_a = cast(AbilityType::Rejuvenation, ally, druid_a, 100.0).aura;
+    let rejuv_b = cast(AbilityType::Rejuvenation, ally, druid_b, 100.0).aura;
+    world.entity_mut(ally).insert(ActiveAuras {
+        auras: vec![rejuv_a, rejuv_b],
+    });
+    world.entity_mut(druid_b).insert(CastingState {
+        ability: AbilityType::Swiftmend,
+        time_remaining: 0.001,
+        target: Some(ally),
+        interrupted: false,
+        interrupted_display_time: 0.0,
+    });
+    world.run_system_once(process_casting).unwrap();
+
+    let left: Vec<Option<Entity>> = auras_named(&world, ally, "Rejuvenation")
+        .iter()
+        .map(|a| a.caster)
+        .collect();
+    assert_eq!(left, vec![Some(druid_a)], "B's Swiftmend eats B's Rejuvenation");
+}
+
+/// With no Rejuvenation of its own on the target, Swiftmend eats another
+/// Druid's (Classic's Swiftmend consumes any Druid's Rejuvenation).
+#[test]
+fn swiftmend_falls_back_to_another_druids_rejuvenation() {
+    let mut world = world(1.0 / 60.0);
+    world.insert_resource(AbilityDefinitions::default());
+    world.insert_resource(ActiveMapGeometry {
+        bounds: Default::default(),
+        volumes: Vec::new(),
+        cover_anchors: Vec::new(),
+    });
+    let (druid_a, ally) = druid_and_ally(&mut world);
+    let druid_b = second_druid(&mut world);
+    let rejuv_a = cast(AbilityType::Rejuvenation, ally, druid_a, 100.0).aura;
+    world
+        .entity_mut(ally)
+        .insert(ActiveAuras { auras: vec![rejuv_a] });
+    world.entity_mut(druid_b).insert(CastingState {
+        ability: AbilityType::Swiftmend,
+        time_remaining: 0.001,
+        target: Some(ally),
+        interrupted: false,
+        interrupted_display_time: 0.0,
+    });
+    let before = health(&world, ally);
+    world.run_system_once(process_casting).unwrap();
+
+    assert!(
+        auras_named(&world, ally, "Rejuvenation").is_empty(),
+        "B's Swiftmend eats A's Rejuvenation when B has none"
+    );
+    assert!(health(&world, ally) > before);
+}

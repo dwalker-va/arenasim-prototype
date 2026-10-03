@@ -87,7 +87,10 @@ pub struct AuraEffect {
     /// Makes the aura STACKING: keyed by its source ability instead of its
     /// type, refreshed rather than refused when that source applies it again,
     /// and gaining a stack per application up to `max_stacks`. `max_stacks: 1`
-    /// is refresh-only. See [`AuraStacks`](super::components::AuraStacks).
+    /// is refresh-only. Whose application refreshes it — the same caster for a
+    /// heal or damage over time, anyone for a buff — follows `aura_type`; see
+    /// [`StackScope`](super::components::StackScope). See
+    /// [`AuraStacks`](super::components::AuraStacks).
     #[serde(default)]
     pub stacking: Option<AuraStackingConfig>,
     /// Makes the aura BLOOM: a direct heal on its bearer when it ends by
