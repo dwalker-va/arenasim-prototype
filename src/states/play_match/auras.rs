@@ -209,10 +209,17 @@ pub fn reflect_instant_cc_in_snapshot(
 /// - a holder in TRAVEL FORM is immune to Polymorph (a shapeshifted Druid
 ///   cannot be polymorphed).
 pub fn aura_immunity_source(auras: &[Aura], aura: &Aura) -> Option<&'static str> {
+    aura_type_immunity_source(auras, aura.effect_type)
+}
+
+/// [`aura_immunity_source`] for an aura of `effect_type` not yet built — the
+/// question an AI asks before it casts (the Mage does not cast Polymorph at a
+/// Druid in Travel Form).
+pub fn aura_type_immunity_source(auras: &[Aura], effect_type: AuraType) -> Option<&'static str> {
     if auras.iter().any(|a| a.effect_type == AuraType::Cyclone) {
         return Some("Cyclone");
     }
-    if aura.effect_type == AuraType::Polymorph
+    if effect_type == AuraType::Polymorph
         && auras.iter().any(|a| a.effect_type == AuraType::TravelForm)
     {
         return Some("Travel Form");

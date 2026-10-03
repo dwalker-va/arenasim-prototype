@@ -355,6 +355,8 @@ pub fn focused_ally<'c>(
 ) -> Option<(&'c CombatantInfo, AllyThreat)> {
     ctx.alive_allies()
         .into_iter()
+        // A cycloned ally takes no heal (`CombatContext::is_cycloned`).
+        .filter(|ally| !ctx.is_cycloned(ally.entity))
         .map(|ally| (ally, AllyThreat::on(ctx, ally, threat_radius)))
         .filter(|(_, threat)| threat.any())
         .max_by(|(a, a_threat), (b, b_threat)| {
@@ -641,6 +643,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             .filter(|a| {
                 a.health_pct() < DRUID_TOP_UP_HP
                     && self.my_pos.distance(a.position) <= self.heal_range
+                    && !self.ctx.is_cycloned(a.entity)
                     && Some(a.entity) != focus_entity
                     && !self.has_own(a.entity, AbilityType::Rejuvenation)
             })
@@ -866,11 +869,12 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             .alive_allies()
             .into_iter()
             .find(|a| {
-                !self.ctx.active_auras.get(&a.entity).is_some_and(|auras| {
-                    auras
-                        .iter()
-                        .any(|aura| aura.compound == Some(CompoundDebuff::MarkOfTheWild))
-                })
+                !self.ctx.is_cycloned(a.entity)
+                    && !self.ctx.active_auras.get(&a.entity).is_some_and(|auras| {
+                        auras
+                            .iter()
+                            .any(|aura| aura.compound == Some(CompoundDebuff::MarkOfTheWild))
+                    })
             })
             .map(|a| (a.entity, a.position));
         let Some((target, target_pos)) = unbuffed else {

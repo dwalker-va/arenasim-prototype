@@ -134,6 +134,35 @@ pub fn decide_shaman_action(
         return true;
     }
 
+    // P3b: urgent Purge — a buff worth more than the filler nuke (Innervate:
+    // a match's worth of the enemy healer's mana). Asked only when one is in
+    // range, so the ordinary purge at P6 keeps the trace's one Purge entry.
+    if super::select_purge(
+        ctx,
+        abilities,
+        combatant.team,
+        my_pos,
+        abilities.get_unchecked(&AbilityType::Purge).range,
+        super::PURGE_URGENT_PRIORITY,
+    )
+    .is_some()
+        && super::try_purge_enemy(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            super::PURGE_URGENT_PRIORITY,
+            &mut builder,
+        )
+    {
+        builder.finish();
+        return true;
+    }
+
     // P4: Lightning Bolt — cast-time filler nuke on the kill target. Deferred
     // while fleeing (don't hardcast mid-escape).
     if try_lightning_bolt(
@@ -183,6 +212,7 @@ pub fn decide_shaman_action(
         my_pos,
         auras,
         ctx,
+        super::PURGE_MIN_PRIORITY,
         &mut builder,
     ) {
         builder.finish();

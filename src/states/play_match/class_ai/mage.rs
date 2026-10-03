@@ -588,6 +588,17 @@ fn try_frost_nova(
     true
 }
 
+/// Whether the engine would refuse a Polymorph on `target` — it is shifted into
+/// Travel Form or cycloned — asked through the engine's own immunity rule
+/// (`auras::aura_type_immunity_source`), so the Mage never casts one that
+/// cannot land.
+pub fn polymorph_refused(ctx: &CombatContext, target: Entity) -> bool {
+    ctx.active_auras.get(&target).is_some_and(|auras| {
+        crate::states::play_match::auras::aura_type_immunity_source(auras, AuraType::Polymorph)
+            .is_some()
+    })
+}
+
 /// Try to cast Polymorph on the CC target (non-kill target).
 fn try_polymorph(
     commands: &mut Commands,
@@ -624,6 +635,14 @@ fn try_polymorph(
         return false;
     };
     let target_pos = target_info.position;
+
+    // A Druid in Travel Form (or a cycloned target) cannot be polymorphed: the
+    // engine refuses the aura (`aura_immunity_source`), so the cast would
+    // spend the GCD and land nothing.
+    if polymorph_refused(ctx, cc_target) {
+        builder.reject(ability, RejectionReason::TargetImmune);
+        return false;
+    }
 
     if ctx.is_dr_immune(cc_target, DRCategory::Incapacitates) {
         builder.reject(

@@ -116,14 +116,13 @@ pub fn acquire_targets(
         }
 
         let has_shadow_sight = shadow_sight_holders.contains(&entity);
-        let is_immune = active_auras_map
-            .get(&entity)
-            .map(|auras| {
-                auras
-                    .iter()
-                    .any(|a| a.effect_type == AuraType::DamageImmunity)
-            })
-            .unwrap_or(false);
+        // Divine Shield or a Cyclone: the one immunity predicate the class AIs
+        // ask too, so an attacker switches off a cycloned target.
+        let is_immune = active_auras_map.get(&entity).is_some_and(|auras| {
+            auras
+                .iter()
+                .any(|a| class_ai::grants_damage_immunity(a.effect_type))
+        });
         let is_pet = pet_query.get(entity).is_ok();
 
         if c.team == 1 {
@@ -1871,24 +1870,55 @@ pub fn check_interrupts(
 
         // Only Warriors, Rogues, and Shamans have interrupts. Exhaustive, so a
         // new class has to say whether it interrupts.
-        match combatant.class {
-            match_config::CharacterClass::Warrior
-            | match_config::CharacterClass::Rogue
-            | match_config::CharacterClass::Shaman => {}
+        let interrupt_ability = match combatant.class {
+            match_config::CharacterClass::Warrior => AbilityType::Pummel,
+            match_config::CharacterClass::Rogue => AbilityType::Kick,
+            match_config::CharacterClass::Shaman => AbilityType::WindShear,
             match_config::CharacterClass::Mage
             | match_config::CharacterClass::Priest
             | match_config::CharacterClass::Warlock
             | match_config::CharacterClass::Paladin
             | match_config::CharacterClass::Hunter
             | match_config::CharacterClass::Druid => continue,
-        }
+        };
 
-        // Pick the interrupt target. Warriors/Rogues interrupt their current kill
+        // Divine Shield or a Cyclone — the AI's one immunity predicate.
+        let is_immune = |e: Entity| {
+            all_auras.get(e).is_ok_and(|a| {
+                a.auras
+                    .iter()
+                    .any(|au| class_ai::grants_damage_immunity(au.effect_type))
+            })
+        };
+
+        // First, the cast every interrupter takes ahead of its usual pick: an
+        // enemy Druid's Cyclone ([`class_ai::priority_interrupt_target`]), from
+        // every enemy mid-cast within this interrupter's reach. Nobody casting
+        // one leaves the usual pick below unchanged.
+        let interrupt_range = abilities.get_unchecked(&interrupt_ability).range;
+        let priority_target = class_ai::priority_interrupt_target(
+            casting_combatants.iter().filter_map(|(e, c, t)| {
+                if c.team == combatant.team || !c.is_alive() || is_immune(e) {
+                    return None;
+                }
+                let cast = casting_targets.get(e).ok().filter(|cs| !cs.interrupted)?;
+                let distance = transform.translation.distance(t.translation);
+                (distance <= interrupt_range).then_some(class_ai::InterruptCandidate {
+                    entity: e,
+                    ability: cast.ability,
+                    distance,
+                })
+            }),
+        );
+
+        // Then the usual pick. Warriors/Rogues interrupt their current kill
         // target. The Shaman instead scans for ANY casting enemy in Wind Shear
         // range, preferring the enemy HEALER mid-cast (then nearest, then lowest
         // entity id for determinism) so Wind Shear locks enemy heals rather than
         // only the kill target's casts.
-        let target_entity = if combatant.class == match_config::CharacterClass::Shaman {
+        let target_entity = if let Some(priority) = priority_target {
+            priority
+        } else if combatant.class == match_config::CharacterClass::Shaman {
             let my_pos = transform.translation;
             let wind_shear_range = abilities.get_unchecked(&AbilityType::WindShear).range;
             let mut best: Option<(Entity, bool, f32)> = None;
@@ -1901,14 +1931,9 @@ pub fn check_interrupts(
                     Ok(cs) if !cs.interrupted => {}
                     _ => continue,
                 }
-                // Skip immune targets (Divine Shield).
-                if let Ok(a) = all_auras.get(e) {
-                    if a.auras
-                        .iter()
-                        .any(|au| au.effect_type == AuraType::DamageImmunity)
-                    {
-                        continue;
-                    }
+                // Skip immune targets (Divine Shield, Cyclone).
+                if is_immune(e) {
+                    continue;
                 }
                 let dist = my_pos.distance(t.translation);
                 if dist > wind_shear_range {
@@ -1942,15 +1967,9 @@ pub fn check_interrupts(
             target_entity
         };
 
-        // Don't waste interrupts on immune targets (Divine Shield)
-        if let Ok(target_auras) = all_auras.get(target_entity) {
-            if target_auras
-                .auras
-                .iter()
-                .any(|a| a.effect_type == AuraType::DamageImmunity)
-            {
-                continue;
-            }
+        // Don't waste interrupts on immune targets (Divine Shield, Cyclone)
+        if is_immune(target_entity) {
+            continue;
         }
 
         let Ok(target_transform) = positions.get(target_entity) else {
@@ -1985,24 +2004,10 @@ pub fn check_interrupts(
             continue;
         }
 
-        // Determine which interrupt ability to use based on class
-        let interrupt_ability = match combatant.class {
-            match_config::CharacterClass::Warrior => AbilityType::Pummel,
-            match_config::CharacterClass::Rogue => {
-                // Rogues cannot use Kick while stealthed - must break stealth first
-                if combatant.stealthed {
-                    continue;
-                }
-                AbilityType::Kick
-            }
-            match_config::CharacterClass::Shaman => AbilityType::WindShear,
-            match_config::CharacterClass::Mage
-            | match_config::CharacterClass::Priest
-            | match_config::CharacterClass::Warlock
-            | match_config::CharacterClass::Paladin
-            | match_config::CharacterClass::Hunter
-            | match_config::CharacterClass::Druid => continue,
-        };
+        // Rogues cannot use Kick while stealthed - must break stealth first
+        if interrupt_ability == AbilityType::Kick && combatant.stealthed {
+            continue;
+        }
 
         let ability_def = abilities.get_unchecked(&interrupt_ability);
 

@@ -183,6 +183,27 @@ produces it.
 - Diminishes on its own bucket (`DRCategory::Cyclone`): Polymorph and Fear do
   not shorten it, and it does not shorten them
 - Nothing is used from inside it — not Divine Shield, not Berserker Rage
+- The other classes' AIs play against it (AS-163): it counts as immunity
+  through the same predicate as Divine Shield (`class_ai::grants_damage_immunity`),
+  so attackers switch off a cycloned target, interrupts and Mana Burn are not
+  spent on it, and a healer neither heals, buffs nor dispels a cycloned ally.
+  Its CAST is every interrupter's first pick — Kick, Pummel, Wind Shear and
+  Spell Lock take an enemy Druid's Cyclone over any other cast in reach
+  (`class_ai::priority_interrupt_target`)
+- Mana Burn is blocked by Cyclone and by Divine Shield alike: a burn that lands
+  on either destroys nothing (`[MANA BURN] ... fails: ... is immune`)
+
+### Purge priority (Shaman)
+- Keyed by the aura INSTANCE, not its type (`class_ai::aura_purge_priority`):
+  the type's default (`purge_priority`), unless the aura BLOOMS (Lifebloom —
+  worth 0, since a purge that takes it heals its bearer) or its source ability
+  sets `purge_priority` in its RON `applies_aura` (Innervate — 110, the urgent
+  bar, which the Shaman purges ahead of its filler Lightning Bolt)
+- Rejuvenation keeps the `HealingOverTime` default, 70 — exactly the floor: a
+  legitimate purge, taken only in a GCD the Shaman has nothing better for
+- A purge chosen for a source-keyed buff takes that buff only
+  (`DispelScope::PurgeSource`), so a purge for a Rejuvenation never blooms the
+  Lifebloom beside it
 
 ### Travel Form (Druid escape shift)
 - Instant, 25 mana, on the global cooldown. Shifting removes every Root and

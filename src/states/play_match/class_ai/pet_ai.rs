@@ -513,6 +513,16 @@ fn felhunter_ai(
     );
 }
 
+/// The cast Spell Lock interrupts, from every enemy cast it reaches (each with
+/// whether it is a heal), in query order: an enemy Druid's Cyclone first
+/// ([`super::priority_interrupt_target`], every interrupter's first pick), then
+/// the first heal, then the first cast of any kind.
+pub fn spell_lock_target(casts: &[(super::InterruptCandidate, bool)]) -> Option<Entity> {
+    super::priority_interrupt_target(casts.iter().map(|(cast, _)| *cast))
+        .or_else(|| casts.iter().find(|(_, heal)| *heal).map(|(c, _)| c.entity))
+        .or_else(|| casts.first().map(|(c, _)| c.entity))
+}
+
 /// Try to interrupt an enemy cast with Spell Lock.
 fn try_spell_lock(
     commands: &mut Commands,
@@ -547,10 +557,11 @@ fn try_spell_lock(
     // Collect every interruptible enemy cast in range, then pick the highest-value
     // one. Spell Lock applies a *school-specific* lockout, so interrupting a heal
     // locks the healer out of healing — far more valuable than eating a DPS nuke.
-    // Priority: heal cast > any other cast (first-seen). This turns the Felhunter's
-    // one interrupt per 24s into a heal-denial tool instead of a random interrupt.
-    let mut first_caster: Option<Entity> = None;
-    let mut heal_caster: Option<Entity> = None;
+    // Priority: an enemy Druid's Cyclone (`super::priority_interrupt_target`,
+    // every interrupter's first pick) > heal cast > any other cast (first-seen).
+    // This turns the Felhunter's one interrupt per 24s into a heal-denial tool
+    // instead of a random interrupt.
+    let mut reachable: Vec<(super::InterruptCandidate, bool)> = Vec::new();
     for (target_entity, target_combatant, cast_state) in casting_targets.iter() {
         if target_combatant.team == my_team || !target_combatant.is_alive() {
             continue;
@@ -570,14 +581,16 @@ fn try_spell_lock(
         if distance > def.range {
             continue;
         }
-        if first_caster.is_none() {
-            first_caster = Some(target_entity);
-        }
-        if heal_caster.is_none() && abilities.get_unchecked(&cast_state.ability).is_heal() {
-            heal_caster = Some(target_entity);
-        }
+        reachable.push((
+            super::InterruptCandidate {
+                entity: target_entity,
+                ability: cast_state.ability,
+                distance,
+            },
+            abilities.get_unchecked(&cast_state.ability).is_heal(),
+        ));
     }
-    if let Some(target_entity) = heal_caster.or(first_caster) {
+    if let Some(target_entity) = spell_lock_target(&reachable) {
         builder.choose(ability, Some(target_entity), true);
         execute_spell_lock(
             commands,
@@ -694,6 +707,10 @@ fn try_devour_magic(
 
     for (ally_entity, info) in ctx.combatants.iter() {
         if info.team != my_team || !info.is_alive || (info.is_pet && !removal.reaches_pets) {
+            continue;
+        }
+        // No dispel reaches a cycloned teammate (`scan_ally_dispel`'s rule).
+        if ctx.is_cycloned(*ally_entity) {
             continue;
         }
         let has_dispellable = ctx

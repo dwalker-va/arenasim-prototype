@@ -435,14 +435,18 @@ impl<'a> CombatContext<'a> {
             .collect()
     }
 
-    /// Get lowest health ally
+    /// Get the lowest health ally a heal can reach — never a cycloned one.
     pub fn lowest_health_ally(&self) -> Option<&CombatantInfo> {
         self.alive_allies()
             .into_iter()
+            .filter(|info| !self.is_cycloned(info.entity))
             .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
     }
 
-    /// Find the lowest-health ally below a given HP percentage threshold, within range, excluding pets.
+    /// Find the lowest-health ally below a given HP percentage threshold, within
+    /// range, excluding pets — and excluding a cycloned ally, which no heal
+    /// reaches ([`Self::is_cycloned`]). The healers' heal-target pick, so a
+    /// healer heals the next ally instead of a Cyclone.
     pub fn lowest_health_ally_below(
         &self,
         max_hp_pct: f32,
@@ -453,6 +457,7 @@ impl<'a> CombatContext<'a> {
             .into_iter()
             .filter(|info| {
                 !info.is_pet
+                    && !self.is_cycloned(info.entity)
                     && info.health_pct() < max_hp_pct
                     && my_pos.distance(info.position) <= max_range
             })
@@ -645,16 +650,23 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
-    /// Check if an entity has damage immunity (Divine Shield).
+    /// Check if an entity is immune to damage — Divine Shield or a Cyclone
+    /// ([`grants_damage_immunity`], the one predicate target acquisition and
+    /// the interrupt checks also ask). An attacker never spends a cast on it.
     pub fn entity_is_immune(&self, entity: Entity) -> bool {
         self.active_auras
             .get(&entity)
-            .map(|auras| {
-                auras
-                    .iter()
-                    .any(|a| a.effect_type == AuraType::DamageImmunity)
-            })
-            .unwrap_or(false)
+            .is_some_and(|auras| auras.iter().any(|a| grants_damage_immunity(a.effect_type)))
+    }
+
+    /// Whether `entity` is CYCLONED: out of reach of every spell, friendly ones
+    /// included. A cycloned ally takes no healing, no buff and no dispel
+    /// (`ActiveAuras::is_cycloned`, which the engine's funnels ask), so a healer
+    /// never spends a cast on one.
+    pub fn is_cycloned(&self, entity: Entity) -> bool {
+        self.active_auras
+            .get(&entity)
+            .is_some_and(|auras| auras.iter().any(|a| a.effect_type == AuraType::Cyclone))
     }
 
     /// Check if an entity is DR-immune to a specific CC category.
@@ -864,6 +876,123 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
 /// bar, so Purge never wastes a cast stripping cheap re-buffs like Fortitude.
 pub const PURGE_MIN_PRIORITY: i32 = 70;
 
+/// The urgent purge bar: a buff worth stripping ahead of the purger's filler
+/// damage, not just in the GCDs it has nothing better for. Above every type's
+/// default, so only a per-aura override reaches it — today Innervate alone.
+pub const PURGE_URGENT_PRIORITY: i32 = 110;
+
+/// What purging this aura INSTANCE off an enemy is worth. Priority is keyed by
+/// the aura, not by its type, because two auras of one type can be worth
+/// opposite things:
+///
+/// - A BLOOMING aura (Lifebloom, [`Aura::bloom_heal`]) is worth **0**: a purge
+///   that takes it blooms it, which HEALS its bearer. Purging it is a gift.
+/// - An aura whose source ability sets `purge_priority` in its RON
+///   `applies_aura` is worth that ([`AbilityDefinitions::source_effect`]):
+///   Innervate is [`PURGE_URGENT_PRIORITY`], where its type,
+///   `ManaRegenIncrease`, is Mage Armor's 25 and never purged.
+/// - Everything else is worth its type ([`purge_priority`]). Rejuvenation is
+///   a `HealingOverTime` at 70, exactly the floor: a legitimate purge, taken
+///   after every defensive and Innervate, and only in a GCD the purger has
+///   nothing better for.
+///
+/// Every AI that strips an ENEMY's buff asks this. Today that is the Shaman's
+/// Purge alone: Devour Magic and Master's Call free allies ([`ally_removal`]).
+pub fn aura_purge_priority(aura: &Aura, abilities: &AbilityDefinitions) -> i32 {
+    if aura.bloom.is_some() {
+        return 0;
+    }
+    abilities
+        .source_effect(aura)
+        .and_then(|effect| effect.purge_priority)
+        .unwrap_or_else(|| purge_priority(aura.effect_type))
+}
+
+/// A purge the purger's AI has chosen: whom, what it is worth, and the removal
+/// scope that takes exactly the chosen buff.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PurgeChoice {
+    pub target: Entity,
+    pub position: Vec3,
+    pub priority: i32,
+    pub scope: DispelScope,
+}
+
+/// The purge worth casting: among living, non-pet enemies within `range`
+/// carrying an [`Aura::can_be_purged`] buff worth at least `min_priority`
+/// ([`aura_purge_priority`]), the enemy whose best buff is worth the most.
+/// Ties prefer the enemy HEALER (deny its defensives first), then the lowest
+/// entity (BTreeMap order — deterministic); within one enemy the first aura at
+/// the best priority wins.
+///
+/// The scope is pinned to the chosen buff's type, and also to its source when
+/// that buff is source-keyed ([`Aura::distinct_by_source`]): a purge chosen for
+/// a Rejuvenation must not take the Lifebloom beside it.
+pub fn select_purge(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    my_team: u8,
+    my_pos: Vec3,
+    range: f32,
+    min_priority: i32,
+) -> Option<PurgeChoice> {
+    let enemy_healer = ctx.enemy_healer();
+    // (choice, is_healer)
+    let mut best: Option<(PurgeChoice, bool)> = None;
+    for (e, info) in ctx.combatants.iter() {
+        if info.team == my_team || !info.is_alive || info.is_pet {
+            continue;
+        }
+        // Range gate (final mana/range is re-checked by pre_cast_ok on the winner).
+        if my_pos.distance(info.position) > range {
+            continue;
+        }
+        let Some(enemy_auras) = ctx.active_auras.get(e) else {
+            continue;
+        };
+        let mut best_aura: Option<(&Aura, i32)> = None;
+        for aura in enemy_auras.iter().filter(|a| a.can_be_purged()) {
+            let priority = aura_purge_priority(aura, abilities);
+            if best_aura.is_none_or(|(_, bp)| priority > bp) {
+                best_aura = Some((aura, priority));
+            }
+        }
+        let Some((aura, priority)) = best_aura else {
+            continue;
+        };
+        if priority < min_priority {
+            continue;
+        }
+        let is_healer = enemy_healer == Some(*e);
+        let better = match &best {
+            None => true,
+            Some((b, best_heal)) => {
+                priority > b.priority || (priority == b.priority && is_healer && !best_heal)
+            }
+        };
+        if better {
+            let scope = if aura.distinct_by_source() {
+                DispelScope::PurgeSource {
+                    effect: aura.effect_type,
+                    source: aura.ability_name.clone(),
+                }
+            } else {
+                DispelScope::Purge(aura.effect_type)
+            };
+            best = Some((
+                PurgeChoice {
+                    target: *e,
+                    position: info.position,
+                    priority,
+                    scope,
+                },
+                is_healer,
+            ));
+        }
+    }
+    best.map(|(choice, _)| choice)
+}
+
 /// Calculate purge priority for a BENEFICIAL aura on an enemy.
 /// Higher values = more valuable to strip with Purge.
 ///
@@ -988,6 +1117,96 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::FearImmunity
         | AuraType::TravelForm => false,
     }
+}
+
+/// Does this aura make its holder IMMUNE TO DAMAGE — a target no attacker,
+/// interrupt or Mana Burn should spend a cast on?
+///
+/// Divine Shield, and a Cyclone (TBC: a cycloned unit takes no damage and no
+/// healing). The AI's one immunity predicate: [`CombatContext::entity_is_immune`],
+/// target acquisition and the interrupt checks all ask here, so they cannot
+/// drift apart the way they once did (Divine Shield was immune everywhere, a
+/// Cyclone nowhere).
+///
+/// Exhaustive on purpose, for the reason [`is_hard_cc`] gives.
+pub const fn grants_damage_immunity(aura: AuraType) -> bool {
+    match aura {
+        AuraType::DamageImmunity | AuraType::Cyclone => true,
+
+        AuraType::MovementSpeedSlow
+        | AuraType::Root
+        | AuraType::Stun
+        | AuraType::Fear
+        | AuraType::Polymorph
+        | AuraType::Incapacitate
+        | AuraType::MaxHealthIncrease
+        | AuraType::DamageOverTime
+        | AuraType::SpellSchoolLockout
+        | AuraType::HealingReduction
+        | AuraType::MaxManaIncrease
+        | AuraType::AttackPowerIncrease
+        | AuraType::ShadowSight
+        | AuraType::Absorb
+        | AuraType::WeakenedSoul
+        | AuraType::DamageReduction
+        | AuraType::CastTimeIncrease
+        | AuraType::DamageTakenReduction
+        | AuraType::SpellResistanceBuff
+        | AuraType::ArmorIncrease
+        | AuraType::AttackPowerReduction
+        | AuraType::CritChanceIncrease
+        | AuraType::ManaRegenIncrease
+        | AuraType::AttackSpeedSlow
+        | AuraType::LockoutDurationReduction
+        | AuraType::FrostArmorBuff
+        | AuraType::Silence
+        | AuraType::WeaponPoison
+        | AuraType::SpellPowerIncrease
+        | AuraType::HealingOverTime
+        | AuraType::WindfuryBuff
+        | AuraType::FearImmunity
+        | AuraType::TravelForm => false,
+    }
+}
+
+/// Whether an interrupter should take this cast ahead of every other: an enemy
+/// Druid's CYCLONE, which removes a teammate from the fight for its duration.
+/// The Druid's heals are all instant, so its crowd control is its only
+/// interruptible cast — and the lockout lands on Nature, the school of every
+/// heal it has. Asked by every interrupter (Kick, Pummel and Wind Shear in
+/// `check_interrupts`, Spell Lock in the Felhunter's AI) through
+/// [`priority_interrupt_target`].
+pub fn is_priority_interrupt(ability: AbilityType) -> bool {
+    matches!(ability, AbilityType::Cyclone)
+}
+
+/// An enemy mid-cast that an interrupter can reach: in its interrupt's range,
+/// cast not already interrupted, and not immune.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InterruptCandidate {
+    pub entity: Entity,
+    /// The ability being cast.
+    pub ability: AbilityType,
+    pub distance: f32,
+}
+
+/// The enemy an interrupter must interrupt FIRST, whatever its usual pick: the
+/// nearest candidate casting an [`is_priority_interrupt`] cast (entity order
+/// breaking ties), or `None` when nobody is — and the interrupter's own
+/// ranking applies unchanged.
+pub fn priority_interrupt_target<I>(candidates: I) -> Option<Entity>
+where
+    I: IntoIterator<Item = InterruptCandidate>,
+{
+    candidates
+        .into_iter()
+        .filter(|c| is_priority_interrupt(c.ability))
+        .min_by(|a, b| {
+            a.distance
+                .total_cmp(&b.distance)
+                .then(a.entity.cmp(&b.entity))
+        })
+        .map(|c| c.entity)
 }
 
 /// How far a dispel ABILITY reaches across the removal classes. Every dispel
@@ -1242,7 +1461,8 @@ pub fn dispel_chase_target(
     }
     let mut nearest: Option<(f32, Entity)> = None;
     for ally in ctx.alive_allies() {
-        if ally.entity == entity {
+        // Never itself, and never a cycloned teammate: no dispel reaches one.
+        if ally.entity == entity || ctx.is_cycloned(ally.entity) {
             continue;
         }
         let urgent = ctx.active_auras.get(&ally.entity).is_some_and(|auras| {
@@ -1262,6 +1482,99 @@ pub fn dispel_chase_target(
         }
     }
     nearest.map(|(_, e)| e)
+}
+
+/// What a healer's ally-dispel candidate scan found ([`scan_ally_dispel`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct AllyDispelScan {
+    /// The ally to dispel: the reachable one whose best removable debuff is
+    /// worth the most, first in entity order on a tie.
+    pub target: Option<Entity>,
+    /// The nearest ally that WOULD qualify but stands beyond the dispel's
+    /// range — reported when nobody reachable qualifies, so a trace tells
+    /// "nothing to dispel" apart from "something to dispel, out of reach".
+    pub nearest_out_of_range: Option<f32>,
+    /// Some qualifying ally stands in range but out of sight. Reported ahead of
+    /// a distant one: `LosBlocked` names the nearer miss.
+    pub los_blocked: bool,
+}
+
+/// The healers' ally-dispel candidate scan (Priest's Dispel Magic, Paladin's
+/// Cleanse): among living teammates `dispel` may free ([`ally_removal`] — scope
+/// and pet reach), the one whose highest-priority debuff the dispel TAKES
+/// ([`DispelScope::takes`]) is worth at least `min_priority`, and which the
+/// dispel reaches ([`ally_reach`]).
+///
+/// Two exclusions are structural, never a low score:
+/// - a debuff the scope does not take is not a candidate at all — a Cyclone is
+///   never dispellable (`AuraType::is_magic_dispellable`), so no bar, however
+///   low, makes it one;
+/// - a CYCLONED teammate is not a candidate ([`CombatContext::is_cycloned`]):
+///   nothing reaches it, so a debuff underneath the Cyclone waits for it to end.
+pub fn scan_ally_dispel(
+    ctx: &CombatContext,
+    dispel: AbilityType,
+    my_team: u8,
+    my_pos: Vec3,
+    range: f32,
+    min_priority: i32,
+) -> AllyDispelScan {
+    let Some(AllyRemoval {
+        scope,
+        reaches_pets,
+    }) = ally_removal(dispel)
+    else {
+        return AllyDispelScan::default();
+    };
+    let mut scan = AllyDispelScan::default();
+    let mut best: Option<(Entity, i32)> = None;
+
+    for (e, info) in ctx.combatants.iter() {
+        // Must be alive ally; pets only where this dispel reaches them
+        // (`ally_removal` — the healers' dispels do not).
+        if info.team != my_team || info.current_health <= 0.0 || (info.is_pet && !reaches_pets) {
+            continue;
+        }
+        if ctx.is_cycloned(*e) {
+            continue;
+        }
+        let Some(ally_auras) = ctx.active_auras.get(e) else {
+            continue;
+        };
+
+        // Highest priority debuff on this ally that the dispel takes.
+        let highest_priority = ally_auras
+            .iter()
+            .filter(|aura| scope.takes(aura))
+            .map(ally_dispel_priority)
+            .max()
+            .unwrap_or(-1);
+        if highest_priority < min_priority || highest_priority < 0 {
+            continue;
+        }
+
+        // Range, then line of sight — the gates every targeted cast passes.
+        match ally_reach(ctx, range, my_pos, info.position) {
+            AllyReach::Reaches => {}
+            AllyReach::OutOfRange { distance } => {
+                scan.nearest_out_of_range = Some(
+                    scan.nearest_out_of_range
+                        .map_or(distance, |d| d.min(distance)),
+                );
+                continue;
+            }
+            AllyReach::LosBlocked => {
+                scan.los_blocked = true;
+                continue;
+            }
+        }
+
+        if best.is_none_or(|(_, best_prio)| highest_priority > best_prio) {
+            best = Some((*e, highest_priority));
+        }
+    }
+    scan.target = best.map(|(e, _)| e);
+    scan
 }
 
 /// Shared dispel logic used by Priest (Dispel Magic) and Paladin (Cleanse).
@@ -1336,71 +1649,23 @@ pub fn try_dispel_ally(
         return false;
     }
 
-    let AllyRemoval {
-        scope,
-        reaches_pets,
-    } = ally_removal(ability_type).expect("the healers' dispels free allies");
+    let AllyRemoval { scope, .. } =
+        ally_removal(ability_type).expect("the healers' dispels free allies");
 
-    // Find ally with highest priority dispellable debuff
-    let mut best_candidate: Option<(Entity, i32)> = None;
-    // Allies that WOULD qualify but the dispel does not reach — reported when
-    // nobody reachable qualifies, so a trace tells "nothing to dispel" apart
-    // from "something to dispel, out of reach". An occluded ally in range is
-    // reported ahead of a distant one: `LosBlocked` names the nearer miss.
-    let mut nearest_out_of_range: Option<f32> = None;
-    let mut los_blocked = false;
+    let AllyDispelScan {
+        target: best_candidate,
+        nearest_out_of_range,
+        los_blocked,
+    } = scan_ally_dispel(
+        ctx,
+        ability_type,
+        combatant.team,
+        my_pos,
+        def.range,
+        min_priority,
+    );
 
-    for (e, info) in ctx.combatants.iter() {
-        // Must be alive ally; pets only where this dispel reaches them
-        // (`ally_removal` — the healers' dispels do not).
-        if info.team != combatant.team
-            || info.current_health <= 0.0
-            || (info.is_pet && !reaches_pets)
-        {
-            continue;
-        }
-
-        // Check if ally has any dispellable debuffs
-        let Some(ally_auras) = ctx.active_auras.get(e) else {
-            continue;
-        };
-
-        // Find highest priority dispellable debuff on this ally
-        let highest_priority = ally_auras
-            .iter()
-            .filter(|aura| scope.takes(aura))
-            .map(ally_dispel_priority)
-            .max()
-            .unwrap_or(-1);
-
-        if highest_priority < min_priority {
-            continue;
-        }
-
-        // Range, then line of sight — the gates every targeted cast passes.
-        match ally_reach(ctx, def.range, my_pos, info.position) {
-            AllyReach::Reaches => {}
-            AllyReach::OutOfRange { distance } => {
-                nearest_out_of_range =
-                    Some(nearest_out_of_range.map_or(distance, |d| d.min(distance)));
-                continue;
-            }
-            AllyReach::LosBlocked => {
-                los_blocked = true;
-                continue;
-            }
-        }
-
-        match best_candidate {
-            None => best_candidate = Some((*e, highest_priority)),
-            Some((_, best_prio)) if highest_priority > best_prio => {
-                best_candidate = Some((*e, highest_priority));
-            }
-            _ => {}
-        }
-    }
-
-    let Some((dispel_target, _)) = best_candidate else {
+    let Some(dispel_target) = best_candidate else {
         let reason = match nearest_out_of_range {
             _ if los_blocked => RejectionReason::LosBlocked,
             Some(distance) => RejectionReason::OutOfRange {
@@ -1453,21 +1718,20 @@ pub fn try_dispel_ally(
 
 /// Offensive dispel: the Shaman's Purge. Structural mirror of
 /// [`try_dispel_ally`], but scans ENEMIES (team != self) for a beneficial,
-/// [`Aura::can_be_purged`] aura and strips the single highest-[`purge_priority`]
-/// one.
+/// [`Aura::can_be_purged`] aura and strips the single highest-[`aura_purge_priority`]
+/// one worth at least `min_priority`.
 ///
-/// Target selection: among enemies in Purge range carrying a purgeable buff,
-/// pick the one whose best buff has the highest priority. Ties prefer the enemy
-/// HEALER (deny its defensives first), then the lowest entity id (BTreeMap
-/// iteration order — deterministic for seeded replay).
+/// Target selection is [`select_purge`]: among enemies in Purge range carrying
+/// a purgeable buff, the one whose best buff has the highest priority; ties
+/// prefer the enemy HEALER, then the lowest entity id.
 ///
 /// Gated by [`pre_cast_ok`] with `check_friendly_cc: false` (offensive — no
-/// friendly-CC concern) and `check_target_immune: true` (respect Divine Shield;
-/// range/mana/lockout/silence handled by the guard). Predicate failures emit
-/// typed reject events; success emits choose and spawns a `DispelPending` whose
-/// scope is pinned to the single chosen (purgeable) buff type, so
+/// friendly-CC concern) and `check_target_immune: true` (respect Divine Shield
+/// and Cyclone; range/mana/lockout/silence handled by the guard). Predicate
+/// failures emit typed reject events; success emits choose and spawns a
+/// `DispelPending` whose scope is pinned to the chosen buff, so
 /// `process_dispels` strips that beneficial aura from the enemy — a random pick
-/// only if the enemy holds several auras of that same type (intentional).
+/// only if the enemy holds several auras the scope takes (intentional).
 #[allow(clippy::too_many_arguments)]
 pub fn try_purge_enemy(
     commands: &mut Commands,
@@ -1478,6 +1742,7 @@ pub fn try_purge_enemy(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    min_priority: i32,
     trace: &mut crate::states::play_match::decision_trace::DecisionEventBuilder<'_>,
 ) -> bool {
     use self::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
@@ -1486,65 +1751,23 @@ pub fn try_purge_enemy(
     let ability = AbilityType::Purge;
     let def = abilities.get_unchecked(&ability);
 
-    let enemy_healer = ctx.enemy_healer();
-
-    // Best enemy to purge: (entity, position, chosen aura, priority, is_healer).
-    let mut best: Option<(Entity, Vec3, AuraType, i32, bool)> = None;
-
-    for (e, info) in ctx.combatants.iter() {
-        // Must be an alive enemy, skip pets.
-        if info.team == combatant.team || !info.is_alive || info.is_pet {
-            continue;
-        }
-
-        // Range gate (final mana/range is re-checked by pre_cast_ok on the winner).
-        if my_pos.distance(info.position) > def.range {
-            continue;
-        }
-
-        let Some(enemy_auras) = ctx.active_auras.get(e) else {
-            continue;
-        };
-
-        // Highest-priority purgeable buff on this enemy. First aura at the max
-        // priority wins (stable by aura-vec order — deterministic).
-        let mut best_aura: Option<(AuraType, i32)> = None;
-        for aura in enemy_auras {
-            if !aura.can_be_purged() {
-                continue;
-            }
-            let priority = purge_priority(aura.effect_type);
-            match best_aura {
-                None => best_aura = Some((aura.effect_type, priority)),
-                Some((_, bp)) if priority > bp => best_aura = Some((aura.effect_type, priority)),
-                _ => {}
-            }
-        }
-
-        let Some((aura_type, priority)) = best_aura else {
-            continue;
-        };
-
-        // Value floor: only spend a GCD purging high-value defensives
-        // (Absorb / DamageTakenReduction / HoT-class sustain, priority >= 70).
-        // Cheap re-buffs (Fortitude, attack/spell power) aren't worth the cast.
-        if priority < PURGE_MIN_PRIORITY {
-            continue;
-        }
-
-        let is_healer = enemy_healer == Some(*e);
-        let better = match best {
-            None => true,
-            Some((_, _, _, best_prio, best_heal)) => {
-                priority > best_prio || (priority == best_prio && is_healer && !best_heal)
-            }
-        };
-        if better {
-            best = Some((*e, info.position, aura_type, priority, is_healer));
-        }
-    }
-
-    let Some((target_entity, target_pos, chosen_aura, _, _)) = best else {
+    // Value floor: `min_priority` is PURGE_MIN_PRIORITY for the ordinary purge
+    // (only high-value defensives and sustain — cheap re-buffs like Fortitude
+    // aren't worth the cast), PURGE_URGENT_PRIORITY for the urgent one.
+    let Some(PurgeChoice {
+        target: target_entity,
+        position: target_pos,
+        scope,
+        ..
+    }) = select_purge(
+        ctx,
+        abilities,
+        combatant.team,
+        my_pos,
+        def.range,
+        min_priority,
+    )
+    else {
         trace.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
@@ -1603,9 +1826,10 @@ pub fn try_purge_enemy(
         "casts",
     );
 
-    // Pin the filter to the chosen (highest-priority) buff type so process_dispels
-    // targets that valuable buff rather than any purgeable aura. If the enemy
-    // holds several auras of that type the strip is a random pick among them
+    // The scope is pinned to the chosen (highest-priority) buff — its type, and
+    // its source when it is source-keyed — so process_dispels targets that
+    // valuable buff rather than any purgeable aura. If the enemy holds several
+    // auras the scope takes, the strip is a random pick among them
     // (intentional — see process_dispels).
     commands.spawn(DispelPending {
         target: target_entity,
@@ -1613,7 +1837,7 @@ pub fn try_purge_enemy(
         log_prefix: "[PURGE]",
         caster_class: combatant.class,
         heal_on_success: None,
-        scope: DispelScope::Purge(chosen_aura),
+        scope,
     });
 
     true
