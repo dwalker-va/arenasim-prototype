@@ -7,6 +7,7 @@
 //! | Piece | Status |
 //! |---|---|
 //! | `OccupyCover` via [`solve_position`] | **LIVE** under `TeamPlan` (healer PRESSURED/FREE, `healer_postures.rs`). Measured at n=100 head-to-head: +36pt Warlock+Priest, +14pt Hunter+Priest, +10pt Warrior+Priest, -6pt (noise) Rogue+Priest. |
+//! | [`DispelGoal`] on `OccupyCover` | **LIVE** under `TeamPlan` (Priest, Paladin PRESSURED; AS-187). The `Legacy` dispel walk's job: while a teammate is owed an urgent dispel the healer cannot reach, reaching it is the only constraint scored. |
 //! | `HoldRange` | Wired to the Mage/Hunter kiter, **measured ~-17pt, reverted — and the ending is now DECIDED: ranged DPS stays on the scorer permanently** (design doc, 2026-08-06). Constraint definition kept for the lone-healer fallback and future melee use; do not re-wire kiters absent step 8's reopening condition. |
 //! | `ScreenPartner`, `PressTarget`, `StackAnchor` | **NEVER RUN IN BATTLE.** Unit-tested against their written definitions only. All three consumed intents were under-specified in ways only measurement exposed (sight-of-ally, castability, the range ceiling) — assume these carry the same debt and budget a measurement pass before trusting them. |
 //! | [`solve_team`] / [`solve_order`] / [`focal_point`] / [`assign_intents`] / cohesion | **NO CALLERS.** The dependent team-level solve, kept because the design requires convergent AND divergent shapes from the start (retrofitting divergence would mean redoing the solve). It has never placed a unit in a real match. |
@@ -75,6 +76,26 @@ pub struct SolveUnit {
     /// locked out of its healing school? See [`violations`]'s `OccupyCover` arm
     /// for why positioning depends on it.
     pub can_cast_heal: bool,
+    /// A teammate this unit owes an urgent dispel it cannot yet deliver — see
+    /// [`DispelGoal`]. Set only on the unit being solved, by its own posture
+    /// tick ([`SolveWorld::with_dispel_goal`]); `None` for everyone else.
+    pub dispel_goal: Option<DispelGoal>,
+}
+
+/// A teammate held in crowd control that this healer's dispel removes at the
+/// urgent bar, standing where the dispel does not reach it — beyond its range,
+/// or in range behind cover ([`dispel_chase_target`](super::class_ai::dispel_chase_target)).
+///
+/// It makes `OccupyCover` owe ONE more thing — reach of that teammate — and
+/// owe it ahead of everything else the intent asks for (see [`C_DISPEL`]). It
+/// lasts exactly until the dispel reaches: from then on the rotation's urgent
+/// dispel frees the teammate on its next GCD, and the goal is gone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DispelGoal {
+    /// The teammate to free.
+    pub ally: Entity,
+    /// The dispel's range.
+    pub range: f32,
 }
 
 /// Everything the solve needs about the world, owned so it is trivially testable
@@ -95,6 +116,14 @@ pub struct SolveWorld {
 }
 
 impl SolveWorld {
+    /// This world with `goal` set as `entity`'s owed dispel.
+    pub fn with_dispel_goal(mut self, entity: Entity, goal: Option<DispelGoal>) -> Self {
+        if let Some(unit) = self.units.iter_mut().find(|u| u.entity == entity) {
+            unit.dispel_goal = goal;
+        }
+        self
+    }
+
     fn unit(&self, entity: Entity) -> Option<&SolveUnit> {
         self.units.iter().find(|u| u.entity == entity)
     }
@@ -310,6 +339,14 @@ impl SolveContext<'_> {
             .map(|u| self.ally_pos(u))
     }
 
+    /// Where the teammate this unit owes a dispel is, and the dispel's range.
+    /// `None` when nothing is owed, or the teammate is no longer in the world.
+    fn dispel_ward(&self) -> Option<(Vec2, f32)> {
+        let goal = self.unit.dispel_goal?;
+        let ally = self.world.unit(goal.ally)?;
+        Some((self.ally_pos(ally), goal.range))
+    }
+
     /// The ally an `OccupyCover` healer must stay able to reach — the nearest
     /// living non-pet teammate. `None` for a lone unit, which makes the leash
     /// vacuous rather than unsatisfiable.
@@ -347,6 +384,29 @@ pub const C_STANDOFF: u16 = 1 << 3;
 pub const C_BOUNDS: u16 = 1 << 4;
 /// Must be on the same side of the focus as the rest of the team.
 pub const C_COHESION: u16 = 1 << 5;
+/// Must REACH the teammate this unit owes a dispel ([`DispelGoal`]): within the
+/// dispel's range, less [`DISPEL_REACH_MARGIN`], and in sight of it — the two
+/// gates the dispel itself passes. While it is owed it is the ONLY constraint
+/// scored (see [`infeasibility`]): a dispel is one instant GCD that turns a
+/// teammate who cannot act back into one who can, so a healer gives up cover —
+/// and, in a 3v3, sight of a HEALTHY other ally — for the seconds the walk
+/// takes, as the `Legacy` dispel walk does. It is never owed while another
+/// teammate is dying ([`dispel_goal`]), so it cannot carry the healer off a
+/// heal that matters more.
+///
+/// It also walks past enemy melee, deliberately: the walk is the `Legacy`
+/// walk's straight line, and `OccupyCover`'s only standoff (`C_STANDOFF`) holds
+/// just while the healer CANNOT cast — a state in which no dispel is owed — so
+/// no proximity constraint is suspended by the goal. A melee on the healer
+/// makes it PRESSURED, not unable to dispel; the dispel is instant.
+pub const C_DISPEL: u16 = 1 << 6;
+
+/// Yards inside the dispel's range a spot must be to count as reaching. The
+/// rotation measures reach in 3D from the healer's feet ([`ally_reach`](super::class_ai::ally_reach));
+/// the solve measures it on the ground plane, so a spot exactly at range here
+/// could still be just out of it there, and the healer would hold a spot it
+/// cannot dispel from.
+pub const DISPEL_REACH_MARGIN: f32 = 1.0;
 
 /// Evaluate `intent`'s constraint set at `candidate`.
 ///
@@ -376,6 +436,13 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
 
     match intent {
         RoleIntent::OccupyCover => {
+            if let Some((ally, range)) = ctx.dispel_ward() {
+                if candidate.distance(ally) > range - DISPEL_REACH_MARGIN
+                    || !world.sees(candidate, ally)
+                {
+                    v |= C_DISPEL;
+                }
+            }
             if !occluded_from_casters(candidate) {
                 v |= C_OCCLUDED;
             }
@@ -611,6 +678,25 @@ pub fn candidates_for(ctx: &SolveContext) -> Vec<Vec2> {
         }
     }
 
+    // Toward the teammate owed a dispel — the reaching spots nearest the healer
+    // lie along this line when nothing blocks it. Absent when nothing is owed,
+    // so the candidate set (and every solve without a goal) is unchanged.
+    if let Some((ally, range)) = ctx.dispel_ward() {
+        // (Every intent but `OccupyCover` ignores the goal, and only a healer
+        // solving `OccupyCover` is ever given one.)
+        let toward = (ally - ctx.unit.pos).normalize_or_zero();
+        if toward != Vec2::ZERO {
+            for step in ALLY_APPROACH_STEPS {
+                out.push(ctx.unit.pos + toward * step);
+            }
+            // The nearest point on that line that is in range.
+            let short = ctx.unit.pos.distance(ally) - (range - DISPEL_REACH_MARGIN);
+            if short > 0.0 {
+                out.push(ctx.unit.pos + toward * (short + 0.5));
+            }
+        }
+    }
+
     // Local ring: the fine adjustment, and the fallback gradient when no
     // geometric candidate is an improvement.
     for i in 0..SOLVE_DIRECTIONS {
@@ -654,6 +740,20 @@ fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32
     const W_COHESION: f32 = 1.0;
 
     let v = violations(intent, candidate, ctx);
+    // While a dispel is owed, reaching the teammate IS the intent, and every
+    // other constraint waits on it. Weighing it beside them fails both ways: a
+    // cover or sight cost pins the healer to a covered spot one step short of
+    // reach (each step closer is a step into the open), and among reaching
+    // spots it would walk the healer on to a covered one while the teammate's
+    // CC runs. Reaching is binary here, so every reaching spot ties at zero and
+    // the stand-still tie-break takes the NEAREST one — the shortest walk to the
+    // dispel. Among non-reaching spots none is preferred, and [`solve_unit`]
+    // walks straight at the teammate instead. The goal lasts only until the
+    // dispel reaches, so cover and sight are back on the next re-solve after
+    // the cast.
+    if ctx.unit.dispel_goal.is_some() && intent == RoleIntent::OccupyCover {
+        return if v & C_DISPEL != 0 { W_DISPEL } else { 0.0 };
+    }
     let mut cost = 0.0;
 
     // Binary constraints contribute their full scale — there is no "partly in
@@ -717,6 +817,10 @@ fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32
     }
     cost
 }
+
+/// The cost of a spot that does not reach the teammate owed a dispel (a
+/// reaching one costs zero).
+const W_DISPEL: f32 = 1.0e9;
 
 /// Pick the best position for one unit under `intent`.
 ///
@@ -820,6 +924,19 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
             best = Some((key, candidate));
         }
     }
+    // No candidate reaches the teammate owed a dispel: walk straight at it, as
+    // the `Legacy` dispel walk does. The candidates are local and a few along the
+    // line to it, none of which may clear the pillar it stands behind; a `Point`
+    // goal at the teammate is tangent-steered around that pillar, and the walk
+    // ends at the first re-solve from which a candidate reaches.
+    if let Some((ally, _)) = ctx
+        .dispel_ward()
+        .filter(|_| intent == RoleIntent::OccupyCover)
+    {
+        if best.is_none_or(|((cost, _, _), _)| cost >= W_DISPEL) {
+            return ally;
+        }
+    }
     // Every candidate excluded (a unit already outside the arena): hold. The
     // executor clamps and slides, so this is a safe terminal answer.
     best.map(|(_, p)| p).unwrap_or(ctx.unit.pos)
@@ -920,6 +1037,58 @@ fn can_cast_heal(
     !super::abilities::is_spell_school_locked(school, wrapped.as_ref())
 }
 
+/// The dispel `entity` owes a teammate it cannot yet reach, as a [`DispelGoal`]
+/// for its own solve: the teammate the dispel walk would walk to
+/// ([`dispel_chase_target`](super::class_ai::dispel_chase_target) — urgent CC
+/// `dispel` removes, out of range or out of sight, the dispel affordable), and
+/// only while the healer could cast it this instant. A hard-CC'd, silenced or
+/// school-locked healer owes nothing it can pay, so it keeps to cover.
+///
+/// **A dying teammate comes first.** Nothing is owed while any OTHER living
+/// non-pet teammate is below `urgency_hp_threshold`: the goal ranks above every
+/// other constraint, so owing it would walk the healer off the heal range and
+/// sight of the teammate about to die — `Legacy`'s medic-first order turned
+/// upside down. The goal is dropped rather than made to share the solve with
+/// that teammate's sight and leash, because the heal is the higher-value GCD
+/// either way: a teammate in CC loses its actions for the CC's length, a dying
+/// one loses them for the match. With the goal gone the healer is back on the
+/// ordinary `OccupyCover` solve. That solve does not guarantee the dying
+/// teammate's reach: its sight and leash are held to the NEAREST teammate, and
+/// its heal-range leash is soft enough that cover can outweigh it (card
+/// AS-198). What dropping the goal guarantees is only that the dispel no longer
+/// pulls the healer away. The CC'd teammate itself is not counted — walking to
+/// it brings it into heal range too — and neither are pets.
+pub fn dispel_goal(
+    ctx: &super::class_ai::CombatContext,
+    abilities: &super::ability_config::AbilityDefinitions,
+    entity: Entity,
+    my_pos: Vec3,
+    current_mana: f32,
+    dispel: super::abilities::AbilityType,
+    urgency_hp_threshold: f32,
+) -> Option<DispelGoal> {
+    let def = abilities.get(&dispel)?;
+    // Hard-CC'd (the walk gate's own exclusion): it can neither walk nor cast,
+    // and a directive issued now would be stale on release.
+    if ctx.is_ccd(entity) || !super::class_ai::can_cast_dispel(ctx, abilities, entity, dispel) {
+        return None;
+    }
+    let ally =
+        super::class_ai::dispel_chase_target(ctx, abilities, entity, my_pos, current_mana, dispel)?;
+    // `alive_allies` is non-pet teammates only, so a hurt pet never holds it.
+    let someone_else_dying = ctx
+        .alive_allies()
+        .iter()
+        .any(|a| a.entity != entity && a.entity != ally && a.health_pct() < urgency_hp_threshold);
+    if someone_else_dying {
+        return None;
+    }
+    Some(DispelGoal {
+        ally,
+        range: def.range,
+    })
+}
+
 /// Build a [`SolveWorld`] from the AI's per-frame view.
 ///
 /// Living units only, in the `BTreeMap` order `CombatContext` already
@@ -953,6 +1122,7 @@ pub fn world_from_context(
             is_pet: c.slot >= super::constants::PET_SLOT_BASE,
             ability_range: c.class.preferred_range(),
             can_cast_heal: can_cast_heal(ctx, c),
+            dispel_goal: None,
         })
         .collect();
     SolveWorld {
@@ -1012,6 +1182,7 @@ mod tests {
             ability_range: 30.0,
             // Test healers can heal unless a case says otherwise.
             can_cast_heal: true,
+            dispel_goal: None,
         }
     }
 
@@ -1335,6 +1506,86 @@ mod tests {
             violations(RoleIntent::OccupyCover, Vec2::new(-10.0, 0.0), &ctx) & C_SIGHT,
             0,
             "a spot the healer cannot heal from must not satisfy OccupyCover"
+        );
+    }
+
+    /// THE DISPEL GOAL (AS-187). A healer hidden from the enemy caster, in heal
+    /// range and in sight of its ally, satisfies `OccupyCover` and stands still
+    /// — until that ally is owed a dispel from beyond the dispel's range. Then
+    /// reaching it is all the solve scores: the healer leaves its cover for the
+    /// NEAREST spot from which the dispel reaches, not the ally itself and not a
+    /// covered spot further on.
+    #[test]
+    fn an_owed_dispel_outranks_cover_and_takes_the_nearest_reaching_spot() {
+        let w = world(vec![
+            healer(1, 1, 0, 0.0, 0.0),
+            melee(2, 1, 1, 38.0, 0.0), // in heal range, beyond dispel range
+            unit(3, 2, 0, 0.0, 30.0),  // enemy caster, hidden behind the pillar
+        ]);
+        let w = SolveWorld {
+            obstacles: vec![pillar_at(0.0, 8.0)],
+            ..w
+        };
+        let solve = |w: &SolveWorld| {
+            let ctx = SolveContext {
+                world: w,
+                unit: w.units[0],
+                focus: None,
+                placed: &BTreeMap::new(),
+            };
+            solve_unit(RoleIntent::OccupyCover, &ctx)
+        };
+        assert_eq!(solve(&w), Vec2::ZERO, "the control: satisfied, it holds");
+
+        let goal = DispelGoal {
+            ally: e(2),
+            range: 30.0,
+        };
+        let w = w.with_dispel_goal(e(1), Some(goal));
+        let spot = solve(&w);
+        let reach = 30.0 - DISPEL_REACH_MARGIN;
+        let to_ally = spot.distance(Vec2::new(38.0, 0.0));
+        assert!(to_ally <= reach, "{spot:?} does not reach the ally");
+        assert!(
+            to_ally > reach - 1.0,
+            "{spot:?} walks further in than reach needs"
+        );
+        assert!(
+            w.sees(spot, Vec2::new(0.0, 30.0)),
+            "the reaching spot is in the open — cover was given up for it"
+        );
+    }
+
+    /// No candidate reaches the ally owed a dispel — it stands behind a pillar
+    /// wider than every approach sample — so the solve walks straight at the
+    /// ally, the `Point` goal the executor tangent-steers around the pillar.
+    #[test]
+    fn with_no_reaching_candidate_the_solve_walks_at_the_owed_ally() {
+        let w = SolveWorld {
+            obstacles: vec![ObstacleVolume::Cylinder {
+                center_xz: Vec2::new(20.0, 0.0),
+                radius: 10.0,
+                base_y: 0.0,
+                height: 10.0,
+            }],
+            ..world(vec![healer(1, 1, 0, 0.0, 0.0), melee(2, 1, 1, 32.0, 0.0)])
+        }
+        .with_dispel_goal(
+            e(1),
+            Some(DispelGoal {
+                ally: e(2),
+                range: 30.0,
+            }),
+        );
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        assert_eq!(
+            solve_unit(RoleIntent::OccupyCover, &ctx),
+            Vec2::new(32.0, 0.0)
         );
     }
 

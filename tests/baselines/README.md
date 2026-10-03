@@ -47,7 +47,9 @@ by someone who was not there.
 
 | File | Captured | Notes |
 |---|---|---|
-| `legacy_behaviour_2026-09-28_starting_rage.txt` | 2026-09-28 | **Current.** After Warriors began entering the gates at 0 rage instead of 100 (card AS-172). Captured against a FRESH run of `main` @ `d5f21c1`, which reproduced the weapon-speed file exactly. |
+| `legacy_behaviour_2026-10-02_priest_dispel_walk.txt` | 2026-10-02 | **Current.** After the Priest began walking into Dispel Magic's reach of a teammate in urgent CC (card AS-187). Diffed against the fresh `main` capture below. |
+| `legacy_behaviour_2026-10-02_main_64dbe39.txt` | 2026-10-02 | A FRESH run of `main` @ `64dbe39`, the base AS-187 was measured against. |
+| `legacy_behaviour_2026-09-28_starting_rage.txt` | 2026-09-28 | After Warriors began entering the gates at 0 rage instead of 100 (card AS-172). Captured against a FRESH run of `main` @ `d5f21c1`, which reproduced the weapon-speed file exactly. |
 | `legacy_behaviour_2026-09-28_weapon_speed.txt` | 2026-09-28 | After every weapon took its swing speed from a named Classic item (card AS-167). Captured against a FRESH run of `main` @ `17cb9f0`, which reproduced the two-hander-budget file exactly. |
 | `legacy_behaviour_2026-09-28_two_hander_budget.txt` | 2026-09-28 | After the Warrior's Arcanite Reaper was re-priced at its displaced pair (card AS-115). Captured against a FRESH run of `main` @ `4c4689c`, which reproduced the 09-27 file exactly. |
 | `legacy_behaviour_2026-09-27_immolate_rng.txt` | 2026-09-27 | After Immolate's apply burst stopped drawing from `game_rng` (card AS-154). Captured against a FRESH run of `main` @ `a2f483a` — see the note under the table. |
@@ -55,6 +57,23 @@ by someone who was not there.
 | `legacy_behaviour_2026-08-02_backlash_ids.txt` | 2026-08-02 | After the `[BACKLASH]` log-id fix. Verified reproducible: two independent runs agreed on all 27 cells. |
 | `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | After moving the simulation to `FixedUpdate`. Verified reproducible when captured. |
 | `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | Pre-fixed-timestep. Also verified reproducible when captured. |
+
+### 2026-10-02 — the Priest's dispel walk (AS-187)
+
+**4 of 27 cells moved against `main` @ `64dbe39`, all `healer_v_healer`
+(`Warrior,Priest` vs `Warlock,Priest`)**: BasicArena 1, TwinPillars 1 and 4,
+PillaredArena 4. `ranged_v_melee` and `pet_comp` also field a Priest and did
+not move — no teammate of theirs sat in urgent CC beyond Dispel Magic's reach
+while the Priest could cast it.
+
+The attribution is positive in every moved cell: the team-1 Priest's first
+`DispelChase` (the enemy Priest's opening Psychic Scream, then the Warlock's
+Death Coil, holding the Warrior 30-38yd off) precedes
+the first differing event line, which in three cells is that Priest's Dispel
+Magic on the Warrior landing earlier than `main` freed it (18.52s, 18.98s,
+18.60s), and in PillaredArena 4 follows a walk begun at 23.3s. TwinPillars 1
+now ends a 300s DRAW: the Warrior and the Warlock die and the two Priests idle
+out of mana on either side of a pillar, an endgame neither Priest walks in.
 
 ### 2026-09-28 — Warriors start at 0 rage (AS-172)
 

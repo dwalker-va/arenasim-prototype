@@ -1172,6 +1172,31 @@ pub fn ally_reach(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> Ally
     }
 }
 
+/// Whether `entity` could cast `dispel` this instant as far as its own state
+/// goes: not silenced, and not locked out of the dispel's school. A healer that
+/// cannot cast its dispel has no reason to walk for it — the walk would carry it
+/// into reach, release there, and hand it back to a posture that steps it out
+/// again, strobing at the range edge for the whole lockout.
+pub fn can_cast_dispel(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    dispel: AbilityType,
+) -> bool {
+    let Some(def) = abilities.get(&dispel) else {
+        return false;
+    };
+    let auras = ctx.active_auras.get(&entity);
+    if auras.is_some_and(|a| a.iter().any(|aura| aura.effect_type == AuraType::Silence)) {
+        return false;
+    }
+    // `is_spell_school_locked` takes `ActiveAuras`; the context stores the aura
+    // vec directly, so rebuild the thin wrapper rather than duplicate the
+    // school decoding it owns.
+    let wrapped = auras.map(|a| ActiveAuras { auras: a.clone() });
+    !is_spell_school_locked(def.spell_school, wrapped.as_ref())
+}
+
 /// The teammate a healer should WALK to so that `dispel` can free it: the
 /// nearest living non-pet teammate (never the healer itself) holding crowd
 /// control that `dispel` removes at the urgent bar, which `dispel` does not

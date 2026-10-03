@@ -137,6 +137,12 @@ pub struct HealerPosture {
     /// to re-target the ally's live position. Always `None` on obstacle-free
     /// maps (no ally is ever occluded, so the chase never arms).
     pub medic_target: Option<Entity>,
+    /// `TeamPlan` PRESSURED only: the teammate the team solve is currently
+    /// walking the healer to reach with a dispel (`team_solve::DispelGoal`).
+    /// Marks the walk as live — the heal deferral reads it — and a change here
+    /// (or `None` → `Some`) is what emits its `DispelChase` trace event. Always
+    /// `None` under `Legacy`, whose dispel walk is `medic_target`'s.
+    pub solve_dispel: Option<Entity>,
 }
 
 impl HealerPosture {
@@ -153,6 +159,7 @@ impl HealerPosture {
             dip_target: None,
             dip_until: 0.0,
             medic_target: None,
+            solve_dispel: None,
         }
     }
 }

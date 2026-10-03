@@ -622,22 +622,34 @@ provable no-op on obstacle-free maps (BasicArena stays byte-identical). Traced
 via the existing `SeekLos` trigger with a `point` goal and the ally in the
 target view.
 
-**Dispel walk (Paladin)** — `healer_postures::dispel_chase_override`, choosing
-its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse only
-reaches allies within its 30yd range AND in sight, so a teammate held in urgent
-crowd control that Cleanse removes (`URGENT_DISPEL_PRIORITY`: Freezing Trap,
-Polymorph, the UA silence, Fear) beyond that range or behind cover would
-otherwise sit out the whole CC. The Paladin walks straight at the nearest such
-teammate (a `MovementGoal::Point`, tangent-steered round a pillar, same walk as
-the medic chase, which outranks it) until the rotation's urgent Cleanse reaches
-it, deferring non-critical heals as it does during a dip. It shares the medic
-chase's gate (FREE/PRESSURED only, never while hard-CC'd, retired under
-`TeamPlan` PRESSURED), and does not walk while a qualifying teammate is already
-reached or the Paladin cannot afford Cleanse. Traced as `DispelChase`; a
-Cleanse that declines because its only candidates are unreachable is traced
-`LosBlocked` (one in range behind cover) or `OutOfRange` with the distance,
-never `NoValidTarget`. Wired for the Paladin only: the Priest's Dispel Magic has
-the same gap and no walk.
+**Dispel walk (Paladin, Priest)** — `healer_postures::dispel_chase_override`,
+choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and
+Dispel Magic only reach allies within their 30yd range AND in sight, so a
+teammate held in urgent crowd control the dispel removes
+(`URGENT_DISPEL_PRIORITY`: Freezing Trap, Polymorph, the UA silence, Fear)
+beyond that range or behind cover would otherwise sit out the whole CC. The
+healer walks straight at the nearest such teammate (a `MovementGoal::Point`,
+tangent-steered round a pillar, same walk as the medic chase, which outranks it)
+until the rotation's urgent dispel reaches it, deferring non-critical casts as
+it does during a dip. It shares the medic chase's gate (FREE/PRESSURED only,
+never while hard-CC'd, retired under `TeamPlan` PRESSURED), and does not walk
+while a qualifying teammate is already reached or the healer cannot afford the
+dispel. Traced as `DispelChase`; a dispel that declines because its only
+candidates are unreachable is traced `LosBlocked` (one in range behind cover) or
+`OutOfRange` with the distance, never `NoValidTarget`.
+
+Under `TeamPlan` PRESSURED the team solve walks there instead:
+`team_solve::dispel_goal` hands the same teammate to the healer's `OccupyCover`
+solve as a `DispelGoal`, and while one is owed REACHING it (`C_DISPEL`: in range
+less `DISPEL_REACH_MARGIN`, in sight) is the only thing the solve scores — the
+nearest reaching spot wins, cover and ally sight wait one GCD, and with no
+reaching candidate the solve walks straight at the teammate. Not owed by a
+healer that is hard-CC'd, silenced or locked out of the dispel's school, nor
+while any OTHER living teammate is below `urgency_hp_threshold` — a dying
+teammate comes first, as the medic chase outranks the `Legacy` walk. Traced
+as a PRESSURED `DispelChase` once per walk; the Paladin's band-hold steps aside
+for it. A no-op whenever no dispel is owed, so a `TeamPlan` match without one
+is byte-identical.
 
 **Ally dispels need sight.** Every cast that frees a teammate — Dispel Magic,
 Cleanse, Devour Magic, Master's Call — picks its teammate with

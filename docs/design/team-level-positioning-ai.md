@@ -500,6 +500,20 @@ measured.** Assume the three intents that still have no consumer
   the far wall and never casting again. The floor and ceiling together are the
   tuned `range_band` this intent replaces.
 
+- **`OccupyCover` owes a DISPEL first (AS-187).** Retiring the medic chase
+  under `TeamPlan` PRESSURED retired the dispel walk built on its gate, so a
+  pressured healer never walked to free a teammate held in urgent CC beyond
+  its dispel's reach. The intent now carries an optional `DispelGoal`: while a
+  dispel is owed, reaching the teammate (range and sight) is the ONLY scored
+  constraint, the nearest reaching spot wins, and with none among the
+  candidates the solve walks straight at the teammate. It is lexicographic, not
+  weighted, because a weight beside cover pins the healer one covered step
+  short of reach; and it is temporal like the castability condition — it lasts
+  one GCD past arrival, then cover and sight are back. It is not owed while
+  another teammate is below the urgency threshold: a dying ally comes first,
+  `Legacy`'s medic-first order, so the goal can never walk the healer off a
+  heal that matters more.
+
 #### The framing does not fit a kiter, and that is structural
 
 **Measured: `HoldRange` on the Mage/Hunter ENGAGE/KITE machine cost roughly 17

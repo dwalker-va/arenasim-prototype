@@ -240,6 +240,8 @@ fn caster_healer_pressured_tick(
         &block.weights,
         combatant.target,
         None,
+        // No ally dispel in the kit.
+        None,
         now,
         decision_trace,
         transitioned,
