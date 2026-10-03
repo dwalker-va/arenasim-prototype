@@ -569,7 +569,7 @@ fn try_spell_lock(
         if target_combatant.team == my_team || !target_combatant.is_alive() {
             continue;
         }
-        if cast_state.interrupted {
+        if !super::cast_is_interruptible(cast_state, abilities) {
             continue;
         }
         if ctx.entity_is_immune(target_entity) {

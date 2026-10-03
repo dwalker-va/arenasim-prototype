@@ -2,6 +2,7 @@
 
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityDefinitions;
+use super::super::class_ai;
 use super::super::components::*;
 use super::super::constants::DIVINE_SHIELD_DAMAGE_PENALTY;
 use super::super::utils::combat_log_id_for;
@@ -249,10 +250,14 @@ pub fn process_interrupts(
     for (interrupt_entity, interrupt) in interrupts.iter() {
         let mut interrupted = false;
 
-        // Check if target is casting
+        // Check if target is casting. A cast already interrupted, or an
+        // instant routed through a zero-length cast, is no interrupt target:
+        // the interrupt was spent (cooldown and cost, at its use site) and does
+        // nothing — no cut, no lockout. The AI never queues one at an instant
+        // (`class_ai::cast_is_interruptible`); this keeps every other path that
+        // queues an `InterruptPending` to the same rule.
         if let Ok((mut cast_state, target_combatant)) = casting_targets.get_mut(interrupt.target) {
-            // Don't interrupt if already interrupted
-            if !cast_state.interrupted {
+            if class_ai::cast_is_interruptible(&cast_state, &abilities) {
                 // Get the spell school of the interrupted spell
                 let interrupted_ability_def = abilities.get_unchecked(&cast_state.ability);
                 let interrupted_school = interrupted_ability_def.spell_school;

@@ -460,7 +460,9 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
 `process_casting` applies every aura it lands through
 `AuraPending::from_ability_scaled`, so an instant routed through a zero-length
 `CastingState` (the Druid's heals, Frost Shock) may set `magnitude_coefficient`;
-add it to `SP_SCALED_AURA_WIRED`. A heal may also `consumes_aura: Some(<Ability>)`
+add it to `SP_SCALED_AURA_WIRED`. Such a cast is still an instant: no interrupt
+takes it (`AbilityConfig::has_cast_bar`, read from `cast_time`; see Interrupts in
+`docs/design/wow-mechanics.md`). A heal may also `consumes_aura: Some(<Ability>)`
 — Swiftmend eats the target's Rejuvenation as it lands.
 
 **Shared cooldowns** — `cooldown_category: Some(<CooldownCategory>)` puts the

@@ -42,8 +42,8 @@ use super::ability_config::AbilityDefinitions;
 use super::ai_profile::AiProfile;
 use super::arena_bounds::ArenaBounds;
 use super::components::{
-    ActiveAuras, Aura, AuraType, Combatant, DRCategory, DRTracker, DispelPending, DispelScope,
-    PetType,
+    ActiveAuras, Aura, AuraType, CastingState, Combatant, DRCategory, DRTracker, DispelPending,
+    DispelScope, PetType,
 };
 use super::constants::GCD;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume};
@@ -1180,8 +1180,20 @@ pub fn is_priority_interrupt(ability: AbilityType) -> bool {
     matches!(ability, AbilityType::Cyclone)
 }
 
+/// Whether an interrupt can take this cast: it has a cast bar
+/// ([`AbilityConfig::has_cast_bar`](super::ability_config::AbilityConfig::has_cast_bar))
+/// and is not already interrupted. An instant routed through a zero-length
+/// `CastingState` (the Druid's heals, Frost Shock) is no target: every
+/// interrupter's candidate scan (`check_interrupts` for Kick, Pummel and Wind
+/// Shear, the Felhunter's Spell Lock) asks here, so none spends its interrupt
+/// on one, and `process_interrupts` asks again at resolution, where an
+/// interrupt that finds one is spent and does nothing.
+pub fn cast_is_interruptible(cast: &CastingState, abilities: &AbilityDefinitions) -> bool {
+    !cast.interrupted && abilities.get_unchecked(&cast.ability).has_cast_bar()
+}
+
 /// An enemy mid-cast that an interrupter can reach: in its interrupt's range,
-/// cast not already interrupted, and not immune.
+/// cast interruptible ([`cast_is_interruptible`]), and not immune.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct InterruptCandidate {
     pub entity: Entity,

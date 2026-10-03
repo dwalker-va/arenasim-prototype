@@ -353,6 +353,18 @@ impl AbilityConfig {
         self.healing_base_max > 0.0 || self.healing_coefficient > 0.0
     }
 
+    /// Whether a cast of this ability in progress — a `CastingState` — has a
+    /// cast bar to interrupt. Only an ability with a cast time does. An instant
+    /// the AI routes through a ZERO-LENGTH `CastingState` so the generic
+    /// completion path lands it (the Druid's heals and Moonfire, Frost Shock)
+    /// is still an instant: in Classic nothing interrupts one. Answered from
+    /// the config's own `cast_time`, never a list, so every such route is
+    /// covered by construction. Channels are a separate state and stay
+    /// interruptible.
+    pub fn has_cast_bar(&self) -> bool {
+        self.cast_time > 0.0
+    }
+
     /// Returns true if this is a channeled ability
     pub fn is_channel(&self) -> bool {
         self.channel_duration.is_some()
