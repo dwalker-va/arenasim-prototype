@@ -775,6 +775,122 @@ fn a_pressured_teamplan_priest_rounds_a_wide_pillar_no_candidate_clears() {
     assert!(freed.triggers.iter().any(|t| t == "DispelChase"));
 }
 
+/// The solve's walk HOLDS its reach (AS-198, the `TeamPlan` half of AS-197).
+/// The Warrior trapped 15yd beyond Dispel Magic's range in the open, the enemy
+/// Hunter moved off the line above the reaching spot, and a pillar whose shadow
+/// from the Hunter is a fully satisfying cover spot 34yd from the Warrior —
+/// inside heal range, outside dispel range. The Priest's GCD is still running
+/// when it arrives, so the dispel waits; the Priest must hold reach until it
+/// lands, rather than stepping back to the cover spot the moment the dispel
+/// reaches and walking in again when the goal re-arms.
+#[test]
+fn a_pressured_teamplan_priest_holds_reach_until_the_dispel_lands() {
+    let range = dispel_range();
+    let mut s = scene(range + 15.0, trapped());
+    s.profile = AiProfile::TeamPlan;
+    s.posture = Some(held(Posture::Pressured));
+    s.roster.get_mut(&s.hunter).unwrap().position = Vec3::new(16.0, 1.0, 30.0);
+    s.obstacles.push(ObstacleVolume::Prism {
+        center_xz: Vec2::new(8.0, 8.0),
+        circumradius: 6.0,
+        sides: 8,
+        rotation: 0.0,
+        base_y: 0.0,
+        height: 5.0,
+    });
+    let speed = s.combatant.base_movement_speed;
+    // Busy for a second past the walk: the dispel cannot land on arrival.
+    let busy = (15.0 + 1.0) / speed + 1.0;
+    s.combatant.global_cooldown = busy;
+
+    let freed = step_until_dispelled(&mut s, 10.0).expect("the trapped Warrior is never freed");
+    let reached = freed
+        .path
+        .iter()
+        .position(|p| p.distance(s.warrior_pos) <= range)
+        .expect("the Priest never reached the Warrior");
+    let worst = freed.path[reached..]
+        .iter()
+        .map(|p| p.distance(s.warrior_pos))
+        .fold(0.0f32, f32::max);
+    assert!(
+        worst <= range,
+        "stepped back to {worst:.1}yd from the Warrior while the dispel waited"
+    );
+    assert_eq!(
+        freed
+            .triggers
+            .iter()
+            .filter(|t| *t == "DispelChase")
+            .count(),
+        1,
+        "the walk re-armed: {:?}",
+        freed.triggers
+    );
+    assert!(
+        freed.at <= busy + 2.0 / 60.0,
+        "freed {:.2}s after the GCD came back",
+        freed.at - busy
+    );
+}
+
+/// The dying teammate's reach holds against cover, through the Priest's own
+/// posture tick (AS-198). The scene above, with the enemy Hunter moved 40yd off
+/// the line and an eight-sided pillar 8yd off it in between, so the pillar's
+/// shadow lies along the line on the Warrior's side — 46yd from the Rogue. With
+/// the Rogue dying, the `TeamPlan` Priest held PRESSURED is solved to a spot in
+/// heal range and sight of the Rogue, not into the shadow. The control: with
+/// nobody hurt and nothing trapped, the same Priest takes the cover.
+#[test]
+fn a_pressured_teamplan_priest_keeps_a_dying_teammate_over_cover() {
+    let heal_range = MovementConfig::default().shared.heal_range;
+    let hunter_pos = Vec3::new(20.0, 1.0, 40.0);
+    let pillar = ObstacleVolume::Prism {
+        center_xz: Vec2::new(20.0, 8.0),
+        circumradius: 6.0,
+        sides: 8,
+        rotation: 0.0,
+        base_y: 0.0,
+        height: 5.0,
+    };
+    let solve = |rogue_hp: f32, warrior_auras: Vec<Aura>| {
+        let mut s = scene(dispel_range() + 15.0, warrior_auras);
+        s.profile = AiProfile::TeamPlan;
+        s.posture = Some(held(Posture::Pressured));
+        s.obstacles.push(pillar.clone());
+        s.roster.get_mut(&s.hunter).unwrap().position = hunter_pos;
+        let rogue = s.world.spawn_empty().id();
+        let rogue_pos = Vec3::new(-30.0, 1.0, 0.0);
+        let mut r = info(rogue, 1, CharacterClass::Rogue, rogue_pos);
+        r.slot = 2;
+        r.current_health = rogue_hp;
+        s.roster.insert(rogue, r);
+        let melee = s.world.spawn_empty().id();
+        let mut m = info(melee, 2, CharacterClass::Warrior, Vec3::new(10.0, 1.0, 0.0));
+        m.slot = 1;
+        s.roster.insert(melee, m);
+        let p = s.posture().walk_point();
+        (p, rogue_pos, s.obstacles.clone())
+    };
+
+    let (p, rogue_pos, obstacles) = solve(20.0, trapped());
+    assert!(
+        p.distance(rogue_pos) <= heal_range,
+        "solved to {p:?}, {:.1}yd from the dying Rogue — beyond heal range {heal_range}",
+        p.distance(rogue_pos)
+    );
+    assert!(
+        has_line_of_sight(&obstacles, p, rogue_pos),
+        "solved to {p:?}, out of the dying Rogue's sight"
+    );
+
+    let (p, _, obstacles) = solve(100.0, Vec::new());
+    assert!(
+        !has_line_of_sight(&obstacles, p, hunter_pos),
+        "the control: with nobody dying the Priest should hide from the Hunter, solved to {p:?}"
+    );
+}
+
 /// A DYING teammate outranks the owed dispel (the `Legacy` medic-first order).
 /// The scene adds a second teammate, a Rogue 30yd behind the Priest at 20% HP;
 /// the Warrior is trapped 45yd the other way, beyond Dispel Magic's range, and
