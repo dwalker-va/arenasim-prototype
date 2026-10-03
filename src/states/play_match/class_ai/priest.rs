@@ -2313,10 +2313,18 @@ mod reach_tests {
         })
     }
 
-    fn aura(effect_type: AuraType, name: &str) -> Aura {
+    fn weakened_soul() -> Aura {
         Aura {
-            effect_type,
-            ability_name: name.to_string(),
+            effect_type: AuraType::WeakenedSoul,
+            ability_name: "Weakened Soul".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn fortitude_buff() -> Aura {
+        Aura {
+            effect_type: AuraType::MaxHealthIncrease,
+            ability_name: "Power Word: Fortitude".to_string(),
             ..Default::default()
         }
     }
@@ -2382,8 +2390,7 @@ mod reach_tests {
         // Weakened Soul, and the Mage is no candidate between 70% and full.
         let mut s = scene(0.3, 0.8);
         let me = s.units[0];
-        s.auras
-            .insert(me, vec![aura(AuraType::WeakenedSoul, "Weakened Soul")]);
+        s.auras.insert(me, vec![weakened_soul()]);
         let trace = shield(&mut s, &pillar());
         assert_eq!(outcome(&trace), None, "no shield through the pillar");
         assert_eq!(candidate(&trace, "PowerWordShield")["reason"], "LosBlocked");
@@ -2392,7 +2399,7 @@ mod reach_tests {
     /// Power Word: Fortitude buffs the first unbuffed ally it can see.
     #[test]
     fn fortitude_falls_back_to_the_next_unbuffed_ally_in_sight() {
-        let fortified = || vec![aura(AuraType::MaxHealthIncrease, "Power Word: Fortitude")];
+        let fortified = || vec![fortitude_buff()];
         let mut s = scene(1.0, 1.0);
         let (me, warrior, mage) = (s.units[0], s.units[1], s.units[2]);
         s.auras.insert(me, fortified());
