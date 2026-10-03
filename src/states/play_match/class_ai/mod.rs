@@ -2231,16 +2231,18 @@ pub(crate) mod reach_fixture {
         /// One decision by a fresh caster (off every cooldown) over the scene,
         /// with `obstacles`: `decide` runs a `try_*` against a fresh trace, and
         /// its commands are applied.
-        pub fn run(
-            &mut self,
-            obstacles: &[ObstacleVolume],
-            decide: impl FnOnce(
+        // The closure's bound sits in a `where` clause so the registration
+        // audit, which reads parameter lists, does not take this test helper
+        // for a Bevy system that takes `Commands`.
+        pub fn run<F>(&mut self, obstacles: &[ObstacleVolume], decide: F) -> DecisionTrace
+        where
+            F: FnOnce(
                 &mut Commands,
                 &CombatContext,
                 &mut Combatant,
                 &mut crate::states::play_match::decision_trace::DecisionEventBuilder,
             ) -> bool,
-        ) -> DecisionTrace {
+        {
             let me = self.units[0];
             // Every run starts off the global cooldown and every cooldown.
             self.combatant = Combatant::new(1, 0, self.caster);
