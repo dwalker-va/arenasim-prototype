@@ -685,13 +685,24 @@ Under `TeamPlan` PRESSURED the team solve walks there instead:
 solve as a `DispelGoal`, and while one is owed REACHING it (`C_DISPEL`: in range
 less `DISPEL_REACH_MARGIN`, in sight) is the only thing the solve scores — the
 nearest reaching spot wins, cover and ally sight wait one GCD, and with no
-reaching candidate the solve walks straight at the teammate. Not owed by a
+reaching candidate the solve walks straight at the teammate. Once the walk
+reaches, the goal HOLDS until the dispel lands or stops being owed (the
+`Legacy` hold's rule), so the solve cannot step the healer back to cover out
+of range while the GCD runs. Not owed by a
 healer that is hard-CC'd, silenced or locked out of the dispel's school, nor
 while any OTHER living teammate is below `urgency_hp_threshold` — a dying
 teammate comes first, as the medic chase outranks the `Legacy` walk. Traced
 as a PRESSURED `DispelChase` once per walk; the Paladin's band-hold steps aside
 for it. A no-op whenever no dispel is owed, so a `TeamPlan` match without one
 is byte-identical.
+
+**A dying teammate anchors the `TeamPlan` healer.** While the healer can heal
+and a living non-pet teammate is below `urgency_hp_threshold`, `OccupyCover`
+anchors on the most hurt such teammate (not the nearest) and REACHING it
+(`team_solve::C_DYING`: within `heal_range` less `HEAL_REACH_MARGIN`, in sight)
+ranks above every other constraint — cover is chosen only among the spots the
+heal still lands from. A silenced or school-locked healer owes no reach and
+keeps to cover and distance.
 
 **Target choice needs sight.** Every cast that CHOOSES its target from
 several candidates filters by reach before it ranks: `class_ai::cast_reach`,
