@@ -1871,4 +1871,39 @@ mod reach_tests {
         assert!(open.get("SilencedOrLocked").is_some(), "{open}");
         assert_eq!(reason(&pillar()), open, "behind the pillar");
     }
+
+    /// The same for Holy Light: a silenced Paladin whose only ally in Holy
+    /// Light's band is behind the pillar is refused for the silence.
+    #[test]
+    fn an_occluded_holy_light_still_reports_the_paladin_silenced() {
+        let silenced = ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::Silence,
+                ..Default::default()
+            }],
+        };
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let abilities = AbilityDefinitions::default();
+            let mut s = scene(1, 0.6, 1.0);
+            let me = s.units[0];
+            let trace = s.run(obstacles, |commands, ctx, combatant, builder| {
+                try_holy_light(
+                    commands,
+                    &mut CombatLog::default(),
+                    &abilities,
+                    me,
+                    combatant,
+                    CASTER,
+                    Some(&silenced),
+                    ctx,
+                    None,
+                    builder,
+                )
+            });
+            candidate(&trace, "HolyLight")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("SilencedOrLocked").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
 }

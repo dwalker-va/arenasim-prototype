@@ -2575,6 +2575,41 @@ mod reach_tests {
         assert_eq!(reason(&pillar()), open, "behind the pillar");
     }
 
+    /// An out-of-mana Priest is refused Power Word: Shield for mana, whether
+    /// its only candidate is in sight or behind the pillar. (The Priest carries
+    /// Weakened Soul and the Mage sits between 70% and full, so only the
+    /// Warrior is a candidate.)
+    #[test]
+    fn an_occluded_shield_still_reports_the_priest_out_of_mana() {
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let mut s = scene(0.3, 0.8);
+            let me = s.units[0];
+            s.auras.insert(me, vec![weakened_soul()]);
+            s.prep = Some(|c| c.current_mana = 0.0);
+            candidate(&shield(&mut s, obstacles), "PowerWordShield")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("InsufficientMana").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
+
+    /// An out-of-mana Priest is refused Power Word: Fortitude for mana,
+    /// whether its only unbuffed ally is in sight or behind the pillar.
+    #[test]
+    fn an_occluded_fortitude_still_reports_the_priest_out_of_mana() {
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let mut s = scene(1.0, 1.0);
+            let (me, mage) = (s.units[0], s.units[2]);
+            s.auras.insert(me, vec![fortitude_buff()]);
+            s.auras.insert(mage, vec![fortitude_buff()]);
+            s.prep = Some(|c| c.current_mana = 0.0);
+            candidate(&fortitude(&mut s, obstacles), "PowerWordFortitude")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("InsufficientMana").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
+
     /// A dying ally the heal reaches still holds it, pillar or not.
     #[test]
     fn a_reachable_dying_ally_still_holds_the_scream() {

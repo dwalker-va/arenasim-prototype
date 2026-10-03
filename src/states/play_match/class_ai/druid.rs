@@ -1835,4 +1835,47 @@ mod reach_tests {
         let behind = control_reason_without_mana(&mut s, &pillar(), None, "EntanglingRoots");
         assert_eq!(behind, open);
     }
+
+    /// A Druid with Swiftmend on cooldown is refused it for the cooldown,
+    /// whether its only dying ally (carrying a Rejuvenation to consume) is in
+    /// sight or behind the pillar.
+    #[test]
+    fn an_occluded_emergency_heal_still_reports_swiftmend_on_cooldown() {
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let mut s = scene(0.3, 1.0, &[]);
+            let warrior = s.units[1];
+            s.auras.insert(warrior, rejuvenation());
+            s.prep = Some(|c| {
+                c.ability_cooldowns.insert(AbilityType::Swiftmend, 3.0);
+            });
+            candidate(&rotation(&mut s, obstacles), "Swiftmend")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("OnCooldown").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
+
+    /// An out-of-mana Druid is refused Mark of the Wild for mana, whether its
+    /// only unmarked ally is in sight or behind the pillar.
+    #[test]
+    fn an_occluded_mark_still_reports_the_druid_out_of_mana() {
+        let marked = || {
+            vec![Aura {
+                effect_type: AuraType::MaxHealthIncrease,
+                compound: Some(CompoundDebuff::MarkOfTheWild),
+                ..Default::default()
+            }]
+        };
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let mut s = scene(1.0, 1.0, &[]);
+            let (me, mage) = (s.units[0], s.units[2]);
+            s.auras.insert(me, marked());
+            s.auras.insert(mage, marked());
+            s.prep = Some(|c| c.current_mana = 0.0);
+            candidate(&mark(&mut s, obstacles), "MarkOfTheWild")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("InsufficientMana").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
 }

@@ -1081,4 +1081,56 @@ mod reach_tests {
         assert_eq!(outcome(&trace), None);
         assert_eq!(candidate(&trace, "FrostShock")["reason"], "NoValidTarget");
     }
+
+    /// An out-of-mana Shaman is refused Lesser Healing Wave for mana, whether
+    /// its only hurt ally is in sight or behind the pillar.
+    #[test]
+    fn an_occluded_heal_still_reports_the_shaman_out_of_mana() {
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let mut s = scene(0.3, 1.0);
+            s.prep = Some(|c| c.current_mana = 0.0);
+            candidate(&wave(&mut s, obstacles), "LesserHealingWave")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("InsufficientMana").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
+
+    /// An out-of-mana Shaman is refused Purge for mana, whether its only
+    /// shielded enemy is in sight or behind the pillar.
+    #[test]
+    fn an_occluded_purge_still_reports_the_shaman_out_of_mana() {
+        let reason = |obstacles: &[ObstacleVolume]| {
+            let abilities = AbilityDefinitions::default();
+            let mut s = ReachScene::new(Shaman, &[(2, Warrior, BEHIND, 1.0)]);
+            let (me, enemy) = (s.units[0], s.units[1]);
+            s.auras.insert(
+                enemy,
+                vec![Aura {
+                    effect_type: AuraType::Absorb,
+                    duration: 10.0,
+                    ..Default::default()
+                }],
+            );
+            s.prep = Some(|c| c.current_mana = 0.0);
+            let trace = s.run(obstacles, |commands, ctx, combatant, builder| {
+                super::super::try_purge_enemy(
+                    commands,
+                    &mut CombatLog::default(),
+                    &abilities,
+                    me,
+                    combatant,
+                    CASTER,
+                    None,
+                    ctx,
+                    super::super::PURGE_MIN_PRIORITY,
+                    builder,
+                )
+            });
+            candidate(&trace, "Purge")["reason"].clone()
+        };
+        let open = reason(&[]);
+        assert!(open.get("InsufficientMana").is_some(), "{open}");
+        assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
 }
