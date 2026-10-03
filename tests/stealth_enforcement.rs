@@ -544,6 +544,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     &ctx,
                     &movement,
                     false,
+                    None,
                     true,
                     0.0,
                     &mut Default::default(),

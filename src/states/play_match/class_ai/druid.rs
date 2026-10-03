@@ -7,7 +7,8 @@
 //! healing when arena dampening arrives.
 //!
 //! The rotation, in priority order:
-//! 1. Mark of the Wild on any ally without it (pre-match, in practice).
+//! 1. Mark of the Wild on any ally without it (pre-match, in practice) — but
+//!    not while a teammate is dying: then it waits behind the heals (7).
 //! 2. Swiftmend — the emergency button — on a dying ally carrying Rejuvenation.
 //! 3. An emergency Rejuvenation on a dying ally without one, which arms
 //!    Swiftmend for the next global cooldown.
@@ -18,10 +19,23 @@
 //!    bloom managed on purpose (see [`lifebloom_decision`]). A threat that is
 //!    only closing gets the Rejuvenation, not the stack: rolling three stacks
 //!    on an ally nobody is hitting yet is mana spent on overheal.
-//! 7. Control, when an ally needs a peel or the kill needs its healer gone
+//! 7. The heals a teammate below `urgency_hp_threshold` is owed (see
+//!    [`DruidTurn::try_dying_heal`]), then a Mark of the Wild step 1 held back.
+//! 8. Control, when an ally needs a peel or the kill needs its healer gone
 //!    (see [`DruidTurn::try_control`]): Cyclone, then Entangling Roots.
-//! 8. Rejuvenation on any other injured ally.
-//! 9. Moonfire on the kill target.
+//! 9. Rejuvenation on any other injured ally.
+//! 10. Moonfire on the kill target.
+//!
+//! **A dying teammate is healed before any damage or utility.** A teammate
+//! below `urgency_hp_threshold` that the Druid can reach (range, then sight)
+//! gets every heal its kit can still add — Swiftmend or the Rejuvenation that
+//! arms it (2-3), its own Rejuvenation, a Lifebloom stack (7) — before Mark of
+//! the Wild, Cyclone or Entangling Roots that is not a peel, or Moonfire. And
+//! while the medic walk is live and its teammate is NOT yet in reach, those
+//! damage and utility casts are held outright: every Druid spell is an instant
+//! on the global cooldown, so a Moonfire cast while the walk rounds a pillar
+//! edge spends the 1.5s in which sight returns, and the heal waits for it. The
+//! peel for a dying ally, Travel Form, Innervate and the heals are never held.
 //!
 //! Between the emergency steps and Innervate sits the ESCAPE SHIFT: Travel
 //! Form when a threat is on the Druid and it is rooted or slowed, or when a
@@ -33,10 +47,11 @@
 //! has work (an ally to heal or an enemy in spell reach), or at once if it
 //! is rooted again ([`should_leave_form`]).
 //!
-//! Steps 5-9 answer to the MANA GOVERNOR ([`mana_reserve`]): proactive heals,
+//! Steps 5-10 answer to the MANA GOVERNOR ([`mana_reserve`]): proactive heals,
 //! control and damage are paid for only out of mana above a reserve that
 //! shrinks as the match heads into dampening. The emergency steps (2, 3), the
-//! shift and a peel for a dying ally never ask it, and neither does a focused
+//! dying teammate's heals (7), the shift and a peel for a dying ally never ask
+//! it, and neither does a focused
 //! ally who has dropped below [`DRUID_URGENT_HP`].
 //!
 //! Movement is the shared caster-healer posture machine
@@ -399,6 +414,8 @@ fn own_aura<'c>(
 
 /// Druid AI: decides and executes one ability per global cooldown.
 ///
+/// `medic_walk` is the teammate a live medic walk is walking to (the posture
+/// plan's): see the dying-teammate rule in the module docs.
 /// `time_since_gates` feeds the mana governor. `gates_opened` holds every
 /// combat action until the gates open; only Mark of the Wild is cast before.
 /// `marked_this_frame` holds the allies a Druid has already sent a Mark of the
@@ -416,6 +433,7 @@ pub fn decide_druid_action(
     ctx: &CombatContext,
     movement: &MovementConfig,
     pressured: bool,
+    medic_walk: Option<Entity>,
     gates_opened: bool,
     time_since_gates: f32,
     marked_this_frame: &mut HashSet<Entity>,
@@ -510,12 +528,14 @@ pub fn decide_druid_action(
             ctx,
             heal_range: movement.shared.heal_range,
             threat_radius: movement.shared.threat_intent_radius,
+            urgency_hp: movement.shared.urgency_hp_threshold,
+            medic_walk,
             pressured,
             time_since_gates,
             marked_this_frame,
             builder: &mut builder,
         };
-        turn.try_mark_of_the_wild(combatant) || (gates_opened && turn.rotation(combatant))
+        turn.take(combatant, gates_opened)
     };
     builder.finish();
     acted
@@ -533,6 +553,10 @@ struct DruidTurn<'a, 'b, 'w, 's, 'c> {
     ctx: &'a CombatContext<'c>,
     heal_range: f32,
     threat_radius: f32,
+    /// `shared.urgency_hp_threshold`: a teammate below it is dying.
+    urgency_hp: f32,
+    /// The teammate a live medic walk is walking to.
+    medic_walk: Option<Entity>,
     /// The posture machine's PRESSURED trigger this tick.
     pressured: bool,
     time_since_gates: f32,
@@ -542,10 +566,22 @@ struct DruidTurn<'a, 'b, 'w, 's, 'c> {
 }
 
 impl DruidTurn<'_, '_, '_, '_, '_> {
-    /// Steps 2-8 — everything after the pre-match buff. Every heal is an
+    /// The whole turn: the pre-match buff (step 1), then, once the gates are
+    /// open, the rotation. A dying teammate moves Mark of the Wild behind its
+    /// heals (step 7).
+    fn take(&mut self, combatant: &mut Combatant, gates_opened: bool) -> bool {
+        let dying = gates_opened && self.teammate_dying();
+        (!dying && self.try_mark_of_the_wild(combatant, false))
+            || (gates_opened && self.rotation(combatant, dying))
+    }
+
+    /// Steps 2-10 — everything after the pre-match buff. Every heal is an
     /// instant, so an ESCAPE window has nothing to defer: the Druid heals on
     /// the run.
-    fn rotation(&mut self, combatant: &mut Combatant) -> bool {
+    ///
+    /// `mark_waits`: a teammate is dying ([`Self::teammate_dying`]), so Mark
+    /// of the Wild was held back from step 1 for step 7.
+    fn rotation(&mut self, combatant: &mut Combatant, mark_waits: bool) -> bool {
         // 2-3. The emergency button, and the Rejuvenation that arms it.
         // Reach (range, then sight) filters before health ranks: an occluded
         // dying ally yields to the lowest dying one in sight.
@@ -655,17 +691,28 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 .reject(AbilityType::Lifebloom, RejectionReason::NoValidTarget);
         }
 
-        // 7. Control: a peel for the focused ally, or the enemy healer. The
+        // 7. A dying teammate's heals, then the Mark step 1 held back — unless
+        // the medic walk's teammate is still out of reach, when the Mark waits
+        // with the rest of the damage and utility.
+        let held = self.held_for_medic_walk();
+        if self.try_dying_heal(combatant) {
+            return true;
+        }
+        if mark_waits && self.try_mark_of_the_wild(combatant, held) {
+            return true;
+        }
+
+        // 8. Control: a peel for the focused ally, or the enemy healer. The
         // peel's focus is ranked over every ally, sight or not: its attackers
         // may be in sight when the ally is not.
         let control_focus = focused_ally(ctx, self.threat_radius, |_| true)
             .filter(|(a, _)| my_pos.distance(a.position) <= heal_range)
             .map(|(a, _)| (a.entity, a.health_pct()));
-        if self.try_control(combatant, control_focus) {
+        if self.try_control(combatant, control_focus, held) {
             return true;
         }
 
-        // 8. Rejuvenation on anyone else who is hurt and has none.
+        // 9. Rejuvenation on anyone else who is hurt and has none.
         let focus_entity = focus.map(|(e, _, _, _)| e);
         let top_up = self
             .ctx
@@ -691,8 +738,68 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             }
         }
 
-        // 9. Moonfire on the kill target, when it is not already burning.
-        self.try_moonfire(combatant)
+        // 10. Moonfire on the kill target, when it is not already burning.
+        self.try_moonfire(combatant, held)
+    }
+
+    /// Whether a teammate (the Druid included, pets excluded) is DYING: below
+    /// `urgency_hp_threshold` within heal range, in sight or not — or the
+    /// medic walk is live, which is the same thing behind cover.
+    fn teammate_dying(&self) -> bool {
+        self.medic_walk.is_some()
+            || self.ctx.alive_allies().into_iter().any(|a| {
+                !a.is_pet
+                    && !self.ctx.is_cycloned(a.entity)
+                    && a.health_pct() < self.urgency_hp
+                    && self.my_pos.distance(a.position) <= self.heal_range
+            })
+    }
+
+    /// Whether damage and utility are held for the medic walk: it is live,
+    /// and its teammate is not yet in reach of a heal (range, then sight).
+    fn held_for_medic_walk(&self) -> bool {
+        self.medic_walk.is_some_and(|ally| {
+            self.ctx.combatants.get(&ally).is_some_and(|a| {
+                super::cast_reach(self.ctx, self.heal_range, self.my_pos, a.position)
+                    != super::CastReach::Reaches
+            })
+        })
+    }
+
+    /// The rejection a held damage or utility cast reports.
+    fn held_reason() -> RejectionReason {
+        RejectionReason::PreconditionUnmet {
+            note: "holding the global cooldown for a dying teammate the medic walk has not \
+                   reached"
+                .to_string(),
+        }
+    }
+
+    /// Step 7: the lowest teammate below `urgency_hp_threshold` in reach gets
+    /// what the kit can still add — its own Rejuvenation when it carries none
+    /// (or it is in its refresh window), then a Lifebloom as
+    /// [`lifebloom_decision`] rules it for an ally under attack. Never
+    /// governed: the ally is dying. Swiftmend and the Rejuvenation that arms
+    /// it are steps 2-3, for an ally below [`DRUID_EMERGENCY_HP`]. With every
+    /// heal already rolling there is nothing to add, and the rotation goes on.
+    fn try_dying_heal(&mut self, combatant: &mut Combatant) -> bool {
+        let Ok(ally) =
+            self.ctx
+                .lowest_health_ally_in_reach(self.urgency_hp, self.heal_range, self.my_pos)
+        else {
+            return false;
+        };
+        let (ally, ally_pos, hp) = (ally.entity, ally.position, ally.health_pct());
+        if self
+            .own(ally, AbilityType::Rejuvenation)
+            .is_none_or(|a| a.duration < REJUVENATION_REFRESH_SECS)
+            && self.cast(combatant, AbilityType::Rejuvenation, ally, ally_pos)
+        {
+            return true;
+        }
+        let lifebloom = self.own(ally, AbilityType::Lifebloom).cloned();
+        lifebloom_decision(lifebloom.as_ref(), hp, true) == LifebloomDecision::Cast
+            && self.cast(combatant, AbilityType::Lifebloom, ally, ally_pos)
     }
 
     /// Travel Form, when [`shift_trigger`] says so. An instant: the mana and
@@ -771,7 +878,14 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// A target already under hard crowd control, or immune to the bucket by
     /// diminishing returns, is passed over, and so is a peel pick in range but
     /// out of sight: the next attacker in sight is taken instead.
-    fn try_control(&mut self, combatant: &mut Combatant, focus: Option<(Entity, f32)>) -> bool {
+    ///
+    /// While `held` ([`Self::held_for_medic_walk`]) only the peel may cast.
+    fn try_control(
+        &mut self,
+        combatant: &mut Combatant,
+        focus: Option<(Entity, f32)>,
+        held: bool,
+    ) -> bool {
         let kill_target = combatant.target;
         let usable = |turn: &Self, e: &CombatantInfo, category: DRCategory| {
             e.is_alive
@@ -856,6 +970,10 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             .filter(|h| usable(self, h, DRCategory::Cyclone))
             .map(|h| (h.entity, h.position));
         match healer {
+            Some(_) if kill_close && held => {
+                self.builder
+                    .reject(AbilityType::Cyclone, Self::held_reason());
+            }
             Some((healer, healer_pos)) if kill_close => {
                 if self.governed_cast(combatant, AbilityType::Cyclone, healer, healer_pos, false) {
                     return true;
@@ -919,6 +1037,11 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             self.builder.reject(roots, reason);
             return false;
         };
+        if held {
+            self.builder
+                .reject(AbilityType::EntanglingRoots, Self::held_reason());
+            return false;
+        }
         self.governed_cast(
             combatant,
             AbilityType::EntanglingRoots,
@@ -937,7 +1060,10 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// aura snapshot cannot show it yet, and a second Mark would only refresh
     /// the first — 30 mana for nothing. The Paladin's `paladin_aura_this_frame`
     /// is the same guard.
-    fn try_mark_of_the_wild(&mut self, combatant: &mut Combatant) -> bool {
+    ///
+    /// While `held` ([`Self::held_for_medic_walk`]) an ally who needs the Mark
+    /// is refused it for now.
+    fn try_mark_of_the_wild(&mut self, combatant: &mut Combatant, held: bool) -> bool {
         let ability = AbilityType::MarkOfTheWild;
         let mark_range = self.abilities.get_unchecked(&ability).range;
         let mut occluded = false;
@@ -970,6 +1096,10 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             self.builder.reject(ability, reason);
             return false;
         };
+        if held {
+            self.builder.reject(ability, Self::held_reason());
+            return false;
+        }
         if !self.guard(combatant, ability, target, target_pos) {
             return false;
         }
@@ -987,8 +1117,9 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     }
 
     /// Moonfire on the kill target: governed, and skipped while its DoT is
-    /// still up or the target is under our own breakable crowd control.
-    fn try_moonfire(&mut self, combatant: &mut Combatant) -> bool {
+    /// still up or the target is under our own breakable crowd control — and
+    /// while `held` ([`Self::held_for_medic_walk`]).
+    fn try_moonfire(&mut self, combatant: &mut Combatant, held: bool) -> bool {
         let ability = AbilityType::Moonfire;
         let Some(target) = combatant.target else {
             self.builder.reject(ability, RejectionReason::NoValidTarget);
@@ -1007,6 +1138,10 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         if self.has_own(target, ability) {
             self.builder
                 .reject(ability, RejectionReason::AlreadyApplied);
+            return false;
+        }
+        if held {
+            self.builder.reject(ability, Self::held_reason());
             return false;
         }
         self.governed_cast(combatant, ability, target, target_pos, false)
@@ -1438,11 +1573,13 @@ mod reach_tests {
         s
     }
 
-    /// One Druid turn: `step` runs against a [`DruidTurn`] over the scene.
+    /// One Druid turn: `step` runs against a [`DruidTurn`] over the scene,
+    /// with the medic walk walking to `medic_walk`.
     fn turn(
         s: &mut ReachScene,
         obstacles: &[ObstacleVolume],
         time_since_gates: f32,
+        medic_walk: Option<Entity>,
         step: impl FnOnce(&mut DruidTurn, &mut Combatant) -> bool,
     ) -> DecisionTrace {
         let abilities = AbilityDefinitions::default();
@@ -1461,6 +1598,8 @@ mod reach_tests {
                 ctx,
                 heal_range: movement.shared.heal_range,
                 threat_radius: movement.shared.threat_intent_radius,
+                urgency_hp: movement.shared.urgency_hp_threshold,
+                medic_walk,
                 pressured: false,
                 time_since_gates,
                 marked_this_frame: &mut marked,
@@ -1472,11 +1611,13 @@ mod reach_tests {
 
     /// One rotation turn (everything after the pre-match buff).
     fn rotation(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        turn(s, obstacles, 20.0, |t, c| t.rotation(c))
+        turn(s, obstacles, 20.0, None, |t, c| t.rotation(c, false))
     }
 
     fn mark(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        turn(s, obstacles, 0.0, |t, c| t.try_mark_of_the_wild(c))
+        turn(s, obstacles, 0.0, None, |t, c| {
+            t.try_mark_of_the_wild(c, false)
+        })
     }
 
     /// A fresh Rejuvenation `by` cast, well clear of its refresh window. A
@@ -1662,7 +1803,9 @@ mod reach_tests {
         obstacles: &[ObstacleVolume],
         focus: Option<(Entity, f32)>,
     ) -> DecisionTrace {
-        turn(s, obstacles, 20.0, |t, c| t.try_control(c, focus))
+        turn(s, obstacles, 20.0, None, |t, c| {
+            t.try_control(c, focus, false)
+        })
     }
 
     /// The Cyclone peel takes the dying ally's nearest attacker; behind the
@@ -1801,9 +1944,9 @@ mod reach_tests {
         focus: Option<(Entity, f32)>,
         ability: &str,
     ) -> serde_json::Value {
-        let trace = turn(s, obstacles, 20.0, |t, c| {
+        let trace = turn(s, obstacles, 20.0, None, |t, c| {
             c.current_mana = 0.0;
-            t.try_control(c, focus)
+            t.try_control(c, focus, false)
         });
         candidate(&trace, ability)["reason"].clone()
     }
@@ -1878,5 +2021,190 @@ mod reach_tests {
         let open = reason(&[]);
         assert!(open.get("InsufficientMana").is_some(), "{open}");
         assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-210: a dying teammate is healed before any damage or utility
+    // ------------------------------------------------------------------------
+
+    /// [`scene`] plus an enemy Rogue 10yd down -Z, in sight of the Druid and
+    /// attacking nobody: the Druid's kill target, so Moonfire has a target.
+    fn kill_scene(warrior_hp: f32, mage_hp: f32) -> (ReachScene, Entity) {
+        let mut s = scene(warrior_hp, mage_hp, &[]);
+        let rogue = s.world.spawn_empty().id();
+        s.units.push(rogue);
+        s.roster.insert(
+            rogue,
+            unit(rogue, 2, Rogue, Vec3::new(0.0, 1.0, -10.0), 1.0),
+        );
+        (s, rogue)
+    }
+
+    /// One whole Druid turn after the gates (`DruidTurn::take`) at the kill
+    /// target, with the medic walk walking to `medic_walk`.
+    fn take(
+        s: &mut ReachScene,
+        obstacles: &[ObstacleVolume],
+        kill: Entity,
+        medic_walk: Option<Entity>,
+    ) -> DecisionTrace {
+        turn(s, obstacles, 20.0, medic_walk, |t, c| {
+            c.target = Some(kill);
+            t.take(c, true)
+        })
+    }
+
+    /// This Druid's Lifebloom: `count` stacks with `duration` left.
+    fn own_lifebloom(by: Entity, count: u8, duration: f32) -> Aura {
+        Aura {
+            effect_type: AuraType::HealingOverTime,
+            ability_name: "Lifebloom".to_string(),
+            duration,
+            caster: Some(by),
+            stacks: Some(AuraStacks {
+                count,
+                max: 3,
+                scope: StackScope::PerCaster,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Everyone carries Mark of the Wild, so the Mark is not what is tested.
+    fn mark_everyone(s: &mut ReachScene) {
+        for &e in &s.units[..3] {
+            s.auras.entry(e).or_default().push(Aura {
+                effect_type: AuraType::MaxHealthIncrease,
+                compound: Some(CompoundDebuff::MarkOfTheWild),
+                ..Default::default()
+            });
+        }
+    }
+
+    /// The repro shape in sight: a Mage below `urgency_hp_threshold` carrying
+    /// the Druid's Rejuvenation, attacked by nobody the Druid sees (so not the
+    /// focus), with no Swiftmend to spend on it. No step before Moonfire used
+    /// to heal it — the emergency step needs Swiftmend, the focus step needs
+    /// an attacker, the top-up skips a Rejuvenation carrier. It gets the
+    /// Lifebloom its kit can still add.
+    #[test]
+    fn a_dying_teammate_in_reach_is_healed_before_moonfire() {
+        // Between the emergency and urgency thresholds: not an emergency.
+        let (mut s, kill) = kill_scene(1.0, 0.47);
+        let (me, mage) = (s.units[0], s.units[2]);
+        mark_everyone(&mut s);
+        s.auras.entry(mage).or_default().extend(rejuvenation(me));
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Lifebloom", mage),
+            "a Mage at 47% carrying Rejuvenation"
+        );
+
+        // An emergency, with Swiftmend on cooldown.
+        let (mut s, kill) = kill_scene(1.0, 0.3);
+        let (me, mage) = (s.units[0], s.units[2]);
+        mark_everyone(&mut s);
+        s.auras.entry(mage).or_default().extend(rejuvenation(me));
+        s.prep = Some(|c| {
+            c.ability_cooldowns.insert(AbilityType::Swiftmend, 10.0);
+        });
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Lifebloom", mage),
+            "a Mage at 30% carrying Rejuvenation, Swiftmend on cooldown"
+        );
+
+        // With every heal it has already rolling there is nothing to add:
+        // the damage goes out.
+        let (mut s, kill) = kill_scene(1.0, 0.47);
+        let (me, mage) = (s.units[0], s.units[2]);
+        mark_everyone(&mut s);
+        s.auras.entry(mage).or_default().extend(rejuvenation(me));
+        s.auras
+            .entry(mage)
+            .or_default()
+            .push(own_lifebloom(me, 3, 5.0));
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Moonfire", kill),
+            "Rejuvenation and a full Lifebloom stack already rolling"
+        );
+
+        // And a healthy team is Moonfired as before.
+        let (mut s, kill) = kill_scene(1.0, 1.0);
+        mark_everyone(&mut s);
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Moonfire", kill),
+            "nobody hurt"
+        );
+    }
+
+    /// While the medic walk is live and its teammate is behind the pillar, the
+    /// Druid holds Moonfire: the global cooldown it would spend is the one in
+    /// which sight comes back. Once the teammate is in reach it is healed.
+    #[test]
+    fn the_medic_walk_holds_damage_until_its_teammate_is_reached() {
+        let (mut s, kill) = kill_scene(0.4, 1.0);
+        let warrior = s.units[1];
+        mark_everyone(&mut s);
+
+        let trace = take(&mut s, &pillar(), kill, Some(warrior));
+        assert_eq!(outcome(&trace), None, "the Warrior is behind the pillar");
+        let note = &candidate(&trace, "Moonfire")["reason"]["PreconditionUnmet"]["note"];
+        assert!(
+            note.as_str().is_some_and(|n| n.contains("medic walk")),
+            "Moonfire is held for the walk: {note}"
+        );
+
+        // Sight back: the dying Warrior gets the heal.
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, Some(warrior))),
+            chose("Rejuvenation", warrior),
+            "the Warrior in reach"
+        );
+
+        // The hold is the walk's: with no walk live, the Druid with nothing it
+        // can heal Moonfires as before.
+        assert_eq!(
+            outcome(&take(&mut s, &pillar(), kill, None)),
+            chose("Moonfire", kill),
+            "no medic walk"
+        );
+    }
+
+    /// Mark of the Wild leads the rotation, but not over a dying teammate's
+    /// heal, and not while the medic walk has not reached its teammate.
+    #[test]
+    fn mark_of_the_wild_waits_behind_a_dying_teammate() {
+        let (mut s, kill) = kill_scene(1.0, 0.47);
+        let mage = s.units[2];
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Rejuvenation", mage),
+            "the dying Mage's heal before the Mark"
+        );
+
+        let (mut s, kill) = kill_scene(1.0, 1.0);
+        let me = s.units[0];
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("MarkOfTheWild", me),
+            "nobody dying: the Mark leads"
+        );
+
+        let (mut s, kill) = kill_scene(0.4, 1.0);
+        let warrior = s.units[1];
+        let trace = take(&mut s, &pillar(), kill, Some(warrior));
+        assert_eq!(
+            outcome(&trace),
+            None,
+            "the walk has not reached the Warrior"
+        );
+        let note = &candidate(&trace, "MarkOfTheWild")["reason"]["PreconditionUnmet"]["note"];
+        assert!(
+            note.as_str().is_some_and(|n| n.contains("medic walk")),
+            "the Mark is held for the walk: {note}"
+        );
     }
 }

@@ -656,7 +656,8 @@ window does (`escape_defer` / `cast_defer`), so the heal fallback above cannot
 root it short of the dying ally to heal a less-hurt one it can see. An ally in
 sight who is ALSO at or below `urgency_hp_threshold` is still healed, and
 instants (Holy Shock, Power Word: Shield, the Druid's kit) still fire
-(`tests/medic_chase_heal_rule.rs`).
+(`tests/medic_chase_heal_rule.rs`). The Druid holds its own damage and
+utility for the walk instead — see *Dying teammate first* below.
 
 **Dispel walk (Paladin, Priest)** — `healer_postures::dispel_chase_override`,
 choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and
@@ -737,6 +738,23 @@ path: the Hunter's dispatch, the pet's own while its Hunter casts, and the
 pet's re-check when it executes a dispatched command
 (`pet_ai::pet_command_rejection`), which also re-checks a Master's Call's
 sight. A no-op on obstacle-free maps (BasicArena stays byte-identical).
+
+**Dying teammate first (Druid)** — no RON knob; reuses `urgency_hp_threshold`.
+A teammate below the threshold that the Druid can reach (range, then sight) gets
+every heal its kit can still add — Swiftmend or the Rejuvenation that arms it,
+its own Rejuvenation, a Lifebloom stack — before any damage or utility: Mark of
+the Wild, a Cyclone or Entangling Roots that is not a peel, Moonfire. With every
+heal already rolling on it there is nothing to add, and the damage goes out.
+While the medic walk is live and its teammate is NOT yet in reach, that damage
+and utility is held outright (traced `PreconditionUnmet`, "holding the global
+cooldown ..."): every Druid spell is an instant on the global cooldown, so a
+Moonfire cast as the walk rounds a pillar edge spent the 1.5s in which sight
+came back, and the heal waited for it. The peel, Travel Form, Innervate and the
+heals are never held. The rule lives in the Druid's rotation order
+(`class_ai/druid.rs`, `DruidTurn::take` / `try_dying_heal` /
+`held_for_medic_walk`; the walk's teammate reaches it as
+`CasterHealerPlan::medic_walk`), so no other healer's deferral changes
+(`tests/druid_dying_heal.rs`).
 
 **Travel Form escape (Druid)** — `druid.weights.flee`. A shifted Druid is in
 ESCAPE for as long as it stays shifted (`evaluate_caster_healer_posture`'s

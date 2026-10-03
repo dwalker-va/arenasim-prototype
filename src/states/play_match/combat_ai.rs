@@ -1324,7 +1324,9 @@ pub fn decide_abilities(
             // Druid: the Shaman's caster-healer posture machine on its own
             // `druid:` block, then a rotation of instants. The posture's
             // ESCAPE deferral is not threaded into the rotation — every heal
-            // the Druid has is an instant, so there is nothing to defer.
+            // the Druid has is an instant, so there is nothing to defer. The
+            // medic walk's teammate is: while it is out of reach the rotation
+            // holds damage and utility for the heal (`class_ai::druid`).
             match_config::CharacterClass::Druid => {
                 let mut plan = class_ai::caster_healer_posture::CasterHealerPlan::default();
                 if countdown.gates_opened {
@@ -1363,6 +1365,7 @@ pub fn decide_abilities(
                     &ctx,
                     &movement_config,
                     plan.pressured,
+                    plan.medic_walk,
                     countdown.gates_opened,
                     time_since_gates,
                     &mut marked_this_frame,
