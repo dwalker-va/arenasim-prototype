@@ -27,7 +27,8 @@ use arenasim::headless::{run_headless_match_observed, FrameObservation, Headless
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::auras::apply_pending_auras;
 use arenasim::states::play_match::class_ai::druid::{
-    decide_druid_action, DRUID_MAX_CHASE_SECS, DRUID_MIN_FORM_SECS, DRUID_RESHIFT_HOLD_SECS,
+    decide_druid_action, DRUID_EMERGENCY_HP, DRUID_MAX_CHASE_SECS, DRUID_MIN_FORM_SECS,
+    DRUID_RESHIFT_HOLD_SECS,
 };
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
 use arenasim::states::play_match::combat_core::{apply_damage_with_absorb, apply_healing};
@@ -807,6 +808,30 @@ const SHIFT_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
         "PillaredArena",
         2,
     ),
+    // Rooted in the form with a chaser on it, and re-shifting through the root.
+    (
+        &["Warrior", "Druid"],
+        &["Hunter", "Shaman"],
+        "PillaredArena",
+        3,
+    ),
+    (&["Rogue", "Druid"], &["Hunter", "Shaman"], "BasicArena", 4),
+    (&["Rogue", "Druid"], &["Hunter", "Shaman"], "BasicArena", 5),
+    (&["Rogue", "Druid"], &["Hunter", "Paladin"], "BasicArena", 1),
+    (&["Rogue", "Druid"], &["Hunter", "Paladin"], "BasicArena", 3),
+    (
+        &["Hunter", "Druid"],
+        &["Hunter", "Paladin"],
+        "BasicArena",
+        3,
+    ),
+    (
+        &["Hunter", "Druid"],
+        &["Hunter", "Paladin"],
+        "BasicArena",
+        4,
+    ),
+    (&["Hunter", "Druid"], &["Mage", "Druid"], "PillaredArena", 4),
 ];
 const CYCLONE_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
     (&["Warrior", "Druid"], &["Rogue", "Priest"], "BasicArena", 1),
@@ -840,17 +865,21 @@ fn hindered(types: &[AuraType]) -> bool {
 /// How long after a shift the chase is measured.
 const OUTRUN_WINDOW_SECS: f32 = 1.5;
 
-/// How close to a wall or a pillar a shift must start to count as the known
-/// PIN: a Druid with its back to the arena edge or a Nagrand pillar can only
-/// run along it while the chaser cuts the corner (AS-164). The two misses this
-/// probe sees start 2.6 and 4.7 yd from one; a miss farther out than this is
-/// a real outrun failure.
+/// How close to a wall or a pillar ON ITS ESCAPE SIDE a shift must start to
+/// count as the known PIN: a Druid with its back to the arena edge or a
+/// Nagrand pillar can only run along it while the chaser cuts the corner
+/// (AS-164). The misses this probe has seen start 1.1 to 4.7 yd from one; a
+/// miss farther out than this is a real outrun failure.
 const WALL_PIN_YARDS: f32 = 6.0;
 
 /// Yards from `pos` to the nearest point a mover cannot stand on in `map` —
 /// outside the arena's walkable region, or inside a pillar's footprint —
 /// marched outward along 64 headings.
-fn wall_distance(map: &str, pos: Vec3) -> f32 {
+///
+/// Only headings on the Druid's ESCAPE side count — within 90 degrees of
+/// straight away from `chaser` — so a wall behind the chaser, or beside the
+/// Druid, does not excuse a shift that failed to gain ground.
+fn wall_distance(map: &str, pos: Vec3, chaser: Vec3) -> f32 {
     use arenasim::states::match_config::ArenaMap;
     use arenasim::states::play_match::map_config::load_map_geometry_config;
     use arenasim::states::play_match::map_geometry::position_blocked;
@@ -862,10 +891,14 @@ fn wall_distance(map: &str, pos: Vec3) -> f32 {
     let geometry = load_map_geometry_config()
         .expect("maps.ron loads")
         .active_for(arena);
+    let away = Vec3::new(pos.x - chaser.x, 0.0, pos.z - chaser.z).normalize_or_zero();
     (0..64)
         .map(|i| {
             let angle = i as f32 * std::f32::consts::TAU / 64.0;
-            let dir = Vec3::new(angle.cos(), 0.0, angle.sin());
+            Vec3::new(angle.cos(), 0.0, angle.sin())
+        })
+        .filter(|dir| dir.dot(away) >= 0.0)
+        .map(|dir| {
             let mut d = 0.0;
             while d < 200.0
                 && geometry.bounds.contains(pos + dir * d)
@@ -977,13 +1010,13 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
             let gap = |f: &FrameObservation| {
                 xz(f.combatants[&druid].position).distance(xz(f.combatants[&chaser].position))
             };
-            let wall = wall_distance(map, after.position);
+            let wall = wall_distance(map, after.position, pair[1].combatants[&chaser].position);
             if gap(end_frame) > gap(&pair[1]) {
                 gained += 1;
             } else {
                 eprintln!(
                     "no ground gained: {t1:?} v {t2:?} {map} #{seed} at {start:.2}s, gap \
-                     {:.1} -> {:.1}, {wall:.1} yd from a wall or pillar",
+                     {:.1} -> {:.1}, {wall:.1} yd from a wall or pillar on its escape side",
                     gap(&pair[1]),
                     gap(end_frame)
                 );
@@ -993,7 +1026,7 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
                 assert!(
                     wall <= WALL_PIN_YARDS,
                     "{t1:?} v {t2:?} {map} #{seed} at {start:.2}s: no ground gained on the \
-                     chaser ({:.1} -> {:.1} yd) {wall:.1} yd from any wall or pillar — in the \
+                     chaser ({:.1} -> {:.1} yd) {wall:.1} yd from any wall or pillar on its escape side — in the \
                      open, not the known wall-pin (within {WALL_PIN_YARDS} yd, AS-164)",
                     gap(&pair[1]),
                     gap(end_frame)
@@ -1161,6 +1194,15 @@ const IDLE_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
 /// observed gap may fall short of it by float error, never by a frame.
 const REVERSAL_SECS: f32 = DRUID_RESHIFT_HOLD_SECS - 0.5 / 60.0;
 
+/// The global cooldown, and Travel Form's cost — what a re-shift through a
+/// root waits for and pays.
+const GCD_SECS: f32 = 1.5;
+const TRAVEL_FORM_MANA: f32 = 25.0;
+
+/// How late a re-shift through a root may land after its global cooldown
+/// allows it: the decision frame and the landing frame, with a frame spare.
+const RESHIFT_SLACK_SECS: f32 = 3.0 / 60.0;
+
 /// How long a Druid rooted in the form may stay shifted: the frame it decides
 /// to leave and the frame the leave lands, with a frame of slack.
 const ROOTED_EXIT_SECS: f32 = 0.05;
@@ -1193,14 +1235,20 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
     let mut windows = 0;
     let mut safe_checks = 0;
     let mut rooted_exits = 0;
+    let mut reshifts_through_roots = 0;
     for (t1, t2, map, seed) in SHIFT_MATCHES.iter().chain(IDLE_MATCHES) {
         let played = play(t1, t2, map, *seed);
         let mut shifted_at: Option<f32> = None;
+        // A rooted exit with a chaser still on the Druid: (exit time, the
+        // latest time the re-shift may land). The re-shift waits only for the
+        // global cooldown left from the shift it came out of, and lands a
+        // frame after its decision.
+        let mut reshift_due: Option<(f32, f32)> = None;
         let mut safe_since: Option<f32> = None;
         let mut rooted_since: Option<f32> = None;
         // When it last left the form of its own accord (unrooted).
         let mut voluntary_leave: Option<f32> = None;
-        for f in &played.frames {
+        for (k, f) in played.frames.iter().enumerate() {
             let Some((_, d)) = f
                 .combatants
                 .iter()
@@ -1223,6 +1271,9 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
             let shifted = d.alive && d.aura_types.contains(&AuraType::TravelForm);
             match (shifted_at, shifted) {
                 (None, true) => {
+                    if reshift_due.take().is_some() {
+                        reshifts_through_roots += 1;
+                    }
                     if let Some(left) = voluntary_leave {
                         assert!(
                             f.sim_time - left >= REVERSAL_SECS,
@@ -1244,6 +1295,37 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
                         if rooted {
                             rooted_exits += 1;
                             voluntary_leave = None;
+                            // A melee or pet still on it, mana for the shift,
+                            // and nothing holding it: the rotation re-shifts
+                            // through the root.
+                            let chaser_on = f.combatants.values().any(|c| {
+                                c.team != 1
+                                    && c.alive
+                                    && (c.is_pet || c.class.is_melee())
+                                    && xz(c.position).distance(xz(d.position)) <= 7.5
+                            });
+                            // The emergency heals (a teammate or the Druid itself
+                            // below 45%) outrank the shift in the rotation, so a
+                            // dying team spends the global cooldown on them first.
+                            // Read on the frame BEFORE the exit: the frame it
+                            // left on already shows the heal it chose instead.
+                            let before = &played.frames[k.saturating_sub(1)];
+                            let emergency = before.combatants.values().any(|c| {
+                                c.team == 1
+                                    && !c.is_pet
+                                    && c.alive
+                                    && c.current_health < c.max_health * DRUID_EMERGENCY_HP
+                                    && xz(c.position).distance(xz(d.position)) <= 40.0
+                            });
+                            if chaser_on
+                                && !emergency
+                                && !held
+                                && d.current_mana >= TRAVEL_FORM_MANA
+                            {
+                                let gcd_left = (at + GCD_SECS - f.sim_time).max(0.0);
+                                reshift_due =
+                                    Some((f.sim_time, f.sim_time + gcd_left + RESHIFT_SLACK_SECS));
+                            }
                         } else {
                             voluntary_leave = Some(f.sim_time);
                         }
@@ -1255,6 +1337,22 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
                     continue;
                 }
                 _ => {}
+            }
+            if let Some((exit, due)) = reshift_due {
+                let still_owed = d.alive && rooted && !held && !shifted;
+                if !still_owed {
+                    // The root ended or something stopped it acting first:
+                    // nothing left to break through.
+                    reshift_due = None;
+                } else {
+                    assert!(
+                        f.sim_time <= due,
+                        "{t1:?} v {t2:?} {map} #{seed}: left the form rooted at {exit:.2}s \
+                         with a chaser on it, and is still rooted out of form at {:.2}s — \
+                         the re-shift through the root was due by {due:.2}s",
+                        f.sim_time
+                    );
+                }
             }
             // Rooted in the form: out of it on the next frame — a rooted form
             // is no faster than none, and the rotation re-shifts through it.
@@ -1317,7 +1415,11 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
     }
     eprintln!(
         "{windows} Travel Form windows, {safe_checks} safe-with-work frames checked, \
-         {rooted_exits} rooted exits"
+         {rooted_exits} rooted exits, {reshifts_through_roots} re-shifts through a root"
+    );
+    assert!(
+        reshifts_through_roots >= 2,
+        "only {reshifts_through_roots} re-shifts through a root were owed — the seeds moved"
     );
     assert!(
         rooted_exits >= 2,
