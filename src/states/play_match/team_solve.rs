@@ -991,6 +991,17 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
         .fold((f32::MAX, f32::MIN), |(lo, hi), c| (lo.min(c), hi.max(c)));
     let field_is_flat = !scored.is_empty() && (flat.1 - flat.0) < 1e-6;
 
+    // Whether any candidate sees the ally the healer must be able to heal —
+    // see the sight fallback below.
+    let sight_ward = ctx.anchor_ally_pos().filter(|_| {
+        intent == RoleIntent::OccupyCover
+                && ctx.unit.can_cast_heal
+                // An owed dispel is the only constraint while it lasts.
+                && ctx.unit.dispel_goal.is_none()
+    });
+    let sight_reachable =
+        sight_ward.is_none_or(|ally| scored.iter().any(|(_, c)| ctx.world.sees(*c, ally)));
+
     let mut best: Option<((f32, f32, f32), Vec2)> = None;
     for (cost, candidate) in scored {
         // Lexicographic: satisfy the intent, then (flat fields only) get out of
@@ -1023,6 +1034,18 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
         if best.is_none_or(|((cost, _, _), _)| cost >= W_DISPEL) {
             return ally;
         }
+    }
+    // No candidate sees the ally the healer anchors on: walk straight at it,
+    // the same fallback as the dispel goal's. Sight is binary, so when a
+    // pillar hides the ally from the healer and from every local step, every
+    // candidate pays the same sight cost and the stand-still tie-break would
+    // park the healer behind that pillar for good — out of the heal it most
+    // needs to land when the ally is dying (`C_DYING`). A `Point` goal at the
+    // ally is tangent-steered around the pillar, and the walk ends at the first
+    // re-solve from which a candidate sees it. Only while the healer can heal:
+    // a healer that cannot owes no sight.
+    if let (Some(ally), false) = (sight_ward, sight_reachable) {
+        return ally;
     }
     // Every candidate excluded (a unit already outside the arena): hold. The
     // executor clamps and slides, so this is a safe terminal answer.
@@ -1831,6 +1854,114 @@ mod tests {
         assert!(
             spot.distance(Vec2::new(-70.0, 0.0)) <= 50.0 + 1e-3,
             "{spot:?}: took cover short of the step toward the dying teammate"
+        );
+    }
+
+    /// Re-solve `w`'s healer `steps` times, moving it after each solve up to
+    /// `stride` yards toward the answer the way the executor walks a `Point`
+    /// goal (tangent-steered round obstacles, resolved against them). Returns
+    /// every position it stood at, the start included.
+    fn walk_resolves(mut w: SolveWorld, steps: usize, stride: f32) -> Vec<Vec2> {
+        use crate::states::play_match::map_geometry::{resolve_movement, steer_toward_goal};
+        let mut path = vec![w.units[0].pos];
+        for _ in 0..steps {
+            let goal = solve_healer(&w);
+            let mut pos = w.units[0].pos;
+            // Sub-steps, so a stride never cuts a pillar's corner.
+            for _ in 0..30 {
+                let to_goal = goal - pos;
+                if to_goal.length() < 1e-3 {
+                    break;
+                }
+                let dir = steer_toward_goal(&w.obstacles, pos, goal, 1.0)
+                    .unwrap_or_else(|| to_goal.normalize_or_zero());
+                let step = (dir * stride / 30.0).clamp_length_max(to_goal.length());
+                let next = resolve_movement(
+                    &w.obstacles,
+                    Vec3::new(pos.x, 1.0, pos.y),
+                    Vec3::new(pos.x + step.x, 1.0, pos.y + step.y),
+                );
+                pos = Vec2::new(next.x, next.z);
+            }
+            w.units[0].pos = pos;
+            path.push(pos);
+        }
+        path
+    }
+
+    /// A dying teammate hidden behind a pillar must not park the healer
+    /// (AS-198, round 2). Every candidate is in heal range of it or near it,
+    /// and none sees it, so every one pays the same sight cost — and standing
+    /// still won that tie forever, 38.6yd away and blind. Re-solved from
+    /// where it walks, the healer rounds the pillar into reach and sight, and
+    /// stays there. With and without an enemy melee beside it.
+    #[test]
+    fn a_dying_teammate_behind_a_pillar_is_walked_into_sight() {
+        for with_melee in [false, true] {
+            let mut dying = unit(2, 1, 1, 40.0, 0.0);
+            dying.health_pct = 0.2;
+            let mut units = vec![healer(1, 1, 0, 0.0, 0.0), dying];
+            if with_melee {
+                units.push(melee(4, 2, 0, 3.0, 0.0));
+            }
+            let w = SolveWorld {
+                obstacles: vec![pillar_at(30.0, 0.0)],
+                ..world(units)
+            };
+            let ally = Vec2::new(40.0, 0.0);
+            assert!(!w.sees(Vec2::ZERO, ally), "the scene must start blind");
+            let reach = w.heal_range - HEAL_REACH_MARGIN;
+            let path = walk_resolves(w.clone(), 30, 3.0);
+            let end = *path.last().unwrap();
+            assert!(
+                w.sees(end, ally) && end.distance(ally) <= reach,
+                "melee {with_melee}: after 30 re-solves the healer is at {end:?}, \
+                 {:.1}yd from the dying teammate, sight {}",
+                end.distance(ally),
+                w.sees(end, ally)
+            );
+        }
+    }
+
+    /// The same hole for a HEALTHY anchor: sight of the ally is the top
+    /// ordinary constraint, and a pillar that hides it from every candidate
+    /// must not park the healer either.
+    #[test]
+    fn an_anchor_behind_a_pillar_is_walked_into_sight() {
+        let w = SolveWorld {
+            obstacles: vec![pillar_at(15.0, 0.0)],
+            ..world(vec![healer(1, 1, 0, 0.0, 0.0), unit(2, 1, 1, 25.0, 0.0)])
+        };
+        let ally = Vec2::new(25.0, 0.0);
+        assert!(!w.sees(Vec2::ZERO, ally), "the scene must start blind");
+        let end = *walk_resolves(w.clone(), 30, 3.0).last().unwrap();
+        assert!(w.sees(end, ally), "parked blind at {end:?}");
+    }
+
+    /// Out of the dying teammate's reach, SIGHT is scored before range: a spot
+    /// that sees it from a yard beyond reach beats one in range that cannot.
+    #[test]
+    fn out_of_reach_of_the_dying_sight_outranks_range() {
+        let mut dying = unit(2, 1, 1, 40.0, 0.0);
+        dying.health_pct = 0.2;
+        let w = SolveWorld {
+            obstacles: vec![pillar_at(30.0, 0.0)],
+            ..world(vec![healer(1, 1, 0, 0.0, 0.0), dying])
+        };
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        let ally = Vec2::new(40.0, 0.0);
+        let blind_in_range = Vec2::new(20.0, 0.0);
+        let sighted_beyond = Vec2::new(40.0, 40.0);
+        assert!(!w.sees(blind_in_range, ally) && w.sees(sighted_beyond, ally));
+        assert!(sighted_beyond.distance(ally) > w.heal_range - HEAL_REACH_MARGIN);
+        assert!(
+            infeasibility(RoleIntent::OccupyCover, sighted_beyond, &ctx)
+                < infeasibility(RoleIntent::OccupyCover, blind_in_range, &ctx)
         );
     }
 

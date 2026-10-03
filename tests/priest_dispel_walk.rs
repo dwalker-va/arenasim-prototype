@@ -213,6 +213,8 @@ impl Scene {
             )
         };
         queue.apply(&mut self.world);
+        // What the tick left the posture state as, for the next tick.
+        self.posture = state;
         let directive = self.world.get::<MovementDirective>(self.priest).cloned();
         let moves = trace
             .pending_events
@@ -888,6 +890,39 @@ fn a_pressured_teamplan_priest_keeps_a_dying_teammate_over_cover() {
     assert!(
         !has_line_of_sight(&obstacles, p, hunter_pos),
         "the control: with nobody dying the Priest should hide from the Hunter, solved to {p:?}"
+    );
+}
+
+/// The hold yields to a dying teammate too. The solve walked the Priest to
+/// the trapped Warrior and is holding it there, Dispel Magic reaching; a
+/// third teammate, a Rogue 10yd behind the Priest, then drops below the
+/// urgency threshold. The held goal must drop — no deferral, no live walk —
+/// exactly as an unreached one would. The control: with the Rogue healthy the
+/// same tick keeps holding.
+#[test]
+fn a_held_dispel_goal_drops_when_another_teammate_is_dying() {
+    let hold = |rogue_hp: f32| {
+        let mut s = scene(dispel_range() - 1.5, trapped());
+        s.profile = AiProfile::TeamPlan;
+        let mut state = held(Posture::Pressured);
+        state.solve_dispel = Some(s.warrior);
+        s.posture = Some(state);
+        let rogue = s.world.spawn_empty().id();
+        let mut r = info(rogue, 1, CharacterClass::Rogue, Vec3::new(-10.0, 1.0, 0.0));
+        r.slot = 2;
+        r.current_health = rogue_hp;
+        s.roster.insert(rogue, r);
+        let tick = s.posture();
+        (
+            tick.plan.escape_defer.is_some(),
+            s.posture.unwrap().solve_dispel == Some(s.warrior),
+        )
+    };
+    assert_eq!(hold(100.0), (true, true), "the control: a held walk holds");
+    assert_eq!(
+        hold(20.0),
+        (false, false),
+        "the hold kept the Priest on the dispel while the Rogue was dying"
     );
 }
 

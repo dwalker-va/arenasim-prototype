@@ -525,7 +525,11 @@ measured.** Assume the three intents that still have no consumer
   it, and the healer hides while its teammate dies. Like the castability
   condition it is temporal — it binds only while someone is dying and the
   healer can cast — so the measured cover value is untouched the rest of the
-  time.
+  time. Sight is binary, so a pillar that hides the ally from every candidate
+  spot gives the solve no gradient; then it walks straight at the ally until a
+  candidate sees it, rather than letting the stand-still tie-break park the
+  healer blind. (The Paladin's band-hold still parks it before the solve —
+  AS-209.)
 
 #### The framing does not fit a kiter, and that is structural
 

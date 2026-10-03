@@ -701,8 +701,12 @@ and a living non-pet teammate is below `urgency_hp_threshold`, `OccupyCover`
 anchors on the most hurt such teammate (not the nearest) and REACHING it
 (`team_solve::C_DYING`: within `heal_range` less `HEAL_REACH_MARGIN`, in sight)
 ranks above every other constraint — cover is chosen only among the spots the
-heal still lands from. A silenced or school-locked healer owes no reach and
-keeps to cover and distance.
+heal still lands from. When no candidate spot can see the healer's anchor
+ally at all (a pillar between them), the solve walks straight at the ally,
+tangent-steered, until one can — the dispel goal's fallback — instead of
+parking blind. A silenced or school-locked healer owes no reach and keeps to
+cover and distance. Not yet for the Paladin: its `TeamPlan` band-hold parks
+it before the solve runs (AS-209).
 
 **Target choice needs sight.** Every cast that CHOOSES its target from
 several candidates filters by reach before it ranks: `class_ai::cast_reach`,
