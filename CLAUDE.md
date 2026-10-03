@@ -644,7 +644,13 @@ composes) or the committed ESCAPE window, and never while the healer is
 hard-CC'd (`is_ccd`, Root included). Keyed on OCCLUSION, not range, so it is a
 provable no-op on obstacle-free maps (BasicArena stays byte-identical). Traced
 via the existing `SeekLos` trigger with a `point` goal and the ally in the
-target view. **The walk wins over a heal that is not critical:** while it is
+target view. Once live, the chase HOLDS after sight returns until its
+directive's `commit_window` has run (while its teammate is still alive and
+below the threshold): letting go on the frame sight returned let a formation
+point on the occluded side of a pillar edge step the healer straight back, and
+the two traded it every frame (`healer_postures::held_medic_chase`,
+`tests/medic_chase_hold.rs`). Only the release waits — the onset, and a switch
+to a more-injured teammate out of sight, are never held. **The walk wins over a heal that is not critical:** while it is
 live the healer's plan defers movement-locking casts exactly as a dip or ESCAPE
 window does (`escape_defer` / `cast_defer`), so the heal fallback above cannot
 root it short of the dying ally to heal a less-hurt one it can see. An ally in

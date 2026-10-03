@@ -356,19 +356,57 @@ pub(super) fn medic_chase_target<'c>(
 // ---------------------------------------------------------------------------
 
 /// Whether the medic chase should override the normal movement tick this frame:
-/// the walk is allowed ([`ally_walk_allowed`]) and a dying occluded teammate
-/// exists. Returns that ally.
+/// the walk is allowed ([`ally_walk_allowed`]) and either a dying occluded
+/// teammate exists — returned at once, so the chase's onset and a switch to a
+/// more-injured teammate are never delayed — or a live chase is still inside
+/// its commit window ([`held_medic_chase`]).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn medic_chase_override<'c>(
     entity: Entity,
     my_pos: Vec3,
     next: Posture,
     ctx: &'c CombatContext,
     shared: &SharedMovementConfig,
+    state: &HealerPosture,
+    directive: Option<&MovementDirective>,
+    now: f32,
 ) -> Option<&'c CombatantInfo> {
     if !ally_walk_allowed(entity, next, ctx) {
         return None;
     }
     medic_chase_target(entity, my_pos, ctx, shared)
+        .or_else(|| held_medic_chase(ctx, shared, state, directive, now))
+}
+
+/// The teammate a live medic chase keeps walking to after sight returns: the
+/// chase's own teammate, still alive and below `urgency_hp_threshold`, while
+/// the chase's directive is inside its commit window. `None` otherwise — and
+/// for a dispel walk, which marks `medic_target` too.
+///
+/// This is the release side of the chase's hysteresis. A chase that let go the
+/// frame sight returned handed movement to a posture tick whose own goal (a
+/// formation point behind the same pillar) stepped the healer straight back
+/// out of sight, and the chase re-armed the next frame: on a pillar edge the
+/// two traded the healer every frame (AS-205). Held for the commit window, the
+/// chase walks the healer clear of the edge it re-acquired sight on, so it
+/// lets go only once a commit window has run.
+fn held_medic_chase<'c>(
+    ctx: &'c CombatContext,
+    shared: &SharedMovementConfig,
+    state: &HealerPosture,
+    directive: Option<&MovementDirective>,
+    now: f32,
+) -> Option<&'c CombatantInfo> {
+    if state.dispel_walk != DispelWalkPhase::Off {
+        return None;
+    }
+    let held = state.medic_target?;
+    if directive.is_none_or(|d| now >= d.committed_until) {
+        return None;
+    }
+    ctx.combatants
+        .get(&held)
+        .filter(|a| a.is_alive && !a.is_pet && a.health_pct() < shared.urgency_hp_threshold)
 }
 
 /// What a healer's `Legacy` dispel walk does this frame ([`dispel_chase_override`]).

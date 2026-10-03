@@ -148,7 +148,8 @@ pub fn evaluate_caster_healer_posture(
     // The walk wins over a movement-locking cast that is not itself critical,
     // exactly as an ESCAPE window does: a hardcast heal on a less-hurt ally in
     // sight would root the healer short of the dying one.
-    let medic_chase = medic_chase_override(entity, my_pos, next, ctx, shared);
+    let medic_chase =
+        medic_chase_override(entity, my_pos, next, ctx, shared, state, directive, now);
     let medic_walk = medic_chase.is_some();
     if let Some(ally) = medic_chase {
         medic_chase_tick(
