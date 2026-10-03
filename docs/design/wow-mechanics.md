@@ -35,6 +35,16 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
 - Interrupting a cast locks that spell school for X seconds
 - Only the interrupted school is locked (e.g., interrupting Frostbolt locks Frost, not Arcane)
 - Spell schools: Physical, Fire, Frost, Shadow, Arcane, Holy, Nature
+- **Nothing interrupts an instant**, as in Classic — including an instant the
+  AI routes through a zero-length `CastingState` so the generic completion path
+  lands it (the Druid's heals and Moonfire, Frost Shock). The rule is
+  `AbilityConfig::has_cast_bar` (a `cast_time` above zero), asked through
+  `class_ai::cast_is_interruptible` by every interrupter's candidate scan —
+  Kick, Pummel and Wind Shear in `check_interrupts`, the Felhunter's Spell Lock
+  — so none is spent on one, and again by `process_interrupts`, where an
+  interrupt that somehow reaches one is spent and cuts and locks nothing. A
+  school lockout already running still blocks an instant of that school.
+  Channels stay interruptible.
 
 ### Auto-Attacks
 - Disabled while casting

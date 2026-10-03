@@ -1901,7 +1901,10 @@ pub fn check_interrupts(
                 if c.team == combatant.team || !c.is_alive() || is_immune(e) {
                     return None;
                 }
-                let cast = casting_targets.get(e).ok().filter(|cs| !cs.interrupted)?;
+                let cast = casting_targets
+                    .get(e)
+                    .ok()
+                    .filter(|cs| class_ai::cast_is_interruptible(cs, &abilities))?;
                 let distance = transform.translation.distance(t.translation);
                 (distance <= interrupt_range).then_some(class_ai::InterruptCandidate {
                     entity: e,
@@ -1926,9 +1929,9 @@ pub fn check_interrupts(
                 if c.team == combatant.team || !c.is_alive() {
                     continue;
                 }
-                // Mid an un-interrupted cast?
+                // Mid a cast Wind Shear can take (cast bar, not interrupted)?
                 match casting_targets.get(e) {
-                    Ok(cs) if !cs.interrupted => {}
+                    Ok(cs) if class_ai::cast_is_interruptible(cs, &abilities) => {}
                     _ => continue,
                 }
                 // Skip immune targets (Divine Shield, Cyclone).
@@ -1985,8 +1988,10 @@ pub fn check_interrupts(
         let is_interruptable: bool;
 
         if let Ok(cast_state) = casting_targets.get(target_entity) {
-            if cast_state.interrupted {
-                continue; // Already interrupted
+            // Already interrupted, or an instant routed through a zero-length
+            // cast — nothing to interrupt, so the interrupt is not spent.
+            if !class_ai::cast_is_interruptible(cast_state, &abilities) {
+                continue;
             }
             target_ability_name = abilities.get_unchecked(&cast_state.ability).name.clone();
             is_interruptable = true;
