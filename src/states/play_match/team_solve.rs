@@ -1051,9 +1051,13 @@ fn can_cast_heal(
 /// upside down. The goal is dropped rather than made to share the solve with
 /// that teammate's sight and leash, because the heal is the higher-value GCD
 /// either way: a teammate in CC loses its actions for the CC's length, a dying
-/// one loses them for the match. With the goal gone the ordinary `OccupyCover`
-/// solve keeps sight and heal range of the nearest teammate. The CC'd teammate
-/// itself is not counted — walking to it brings it into heal range too.
+/// one loses them for the match. With the goal gone the healer is back on the
+/// ordinary `OccupyCover` solve. That solve does not guarantee the dying
+/// teammate's reach: its sight and leash are held to the NEAREST teammate, and
+/// its heal-range leash is soft enough that cover can outweigh it (card
+/// AS-198). What dropping the goal guarantees is only that the dispel no longer
+/// pulls the healer away. The CC'd teammate itself is not counted — walking to
+/// it brings it into heal range too — and neither are pets.
 pub fn dispel_goal(
     ctx: &super::class_ai::CombatContext,
     abilities: &super::ability_config::AbilityDefinitions,
@@ -1071,9 +1075,11 @@ pub fn dispel_goal(
     }
     let ally =
         super::class_ai::dispel_chase_target(ctx, abilities, entity, my_pos, current_mana, dispel)?;
-    let someone_else_dying = ctx.alive_allies().iter().any(|a| {
-        a.entity != entity && a.entity != ally && !a.is_pet && a.health_pct() < urgency_hp_threshold
-    });
+    // `alive_allies` is non-pet teammates only, so a hurt pet never holds it.
+    let someone_else_dying = ctx
+        .alive_allies()
+        .iter()
+        .any(|a| a.entity != entity && a.entity != ally && a.health_pct() < urgency_hp_threshold);
     if someone_else_dying {
         return None;
     }

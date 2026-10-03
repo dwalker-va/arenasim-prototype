@@ -821,6 +821,35 @@ fn a_dying_teammate_outranks_the_owed_dispel_under_teamplan() {
     assert!(p.distance(warrior_pos) <= dispel_range());
 }
 
+/// What does NOT count as "another teammate dying": the CC'd teammate itself
+/// (walking to it brings it into heal range too), and a friendly pet. In both
+/// scenes a `TeamPlan` Priest held PRESSURED still walks for the dispel.
+#[test]
+fn the_trapped_teammate_and_pets_do_not_hold_the_walk() {
+    use arenasim::states::play_match::{PetType, PET_SLOT_BASE};
+    let chases = |s: &mut Scene| {
+        s.profile = AiProfile::TeamPlan;
+        s.posture = Some(held(Posture::Pressured));
+        s.posture().triggers().contains(&"DispelChase")
+    };
+
+    // The trapped Warrior is itself at 20%, and no one else is hurt.
+    let mut s = scene(dispel_range() + 15.0, trapped());
+    s.roster.get_mut(&s.warrior).unwrap().current_health = 20.0;
+    assert!(chases(&mut s), "a dying trapped teammate held its own walk");
+
+    // A friendly pet beside the Priest at 20%.
+    let mut s = scene(dispel_range() + 15.0, trapped());
+    let pet = s.world.spawn_empty().id();
+    let mut p = info(pet, 1, CharacterClass::Hunter, Vec3::new(-5.0, 1.0, 0.0));
+    p.slot = PET_SLOT_BASE;
+    p.is_pet = true;
+    p.pet_type = Some(PetType::Boar);
+    p.current_health = 20.0;
+    s.roster.insert(pet, p);
+    assert!(chases(&mut s), "a hurt friendly pet held the walk");
+}
+
 // ============================================================================
 // End to end: headless matches
 // ============================================================================
