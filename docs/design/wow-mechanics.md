@@ -244,7 +244,9 @@ produces it.
 - AI: the Druid shifts when PRESSURED and rooted, or snared with a melee or pet
   chasing it, or below 60% HP with a melee on it. A snare with no chaser is
   shrugged off — the form outruns legs, not spells. The posture machine then
-  runs it in ESCAPE from its melee and pet chasers (`ShiftEscape`). It shifts
+  runs it in ESCAPE from its melee and pet chasers (`ShiftEscape`): it flees
+  the nearest chaser at every range and holds its heading from one commit
+  window to the next, bending only for walls, pillars and cover. It shifts
   out at once if it is rooted again, and re-shifts through the root. Otherwise
   it shifts out once it has been shifted 3s, no melee or pet is within
   striking reach (nor within 12 yd, for its first 8s in form), the shift rule

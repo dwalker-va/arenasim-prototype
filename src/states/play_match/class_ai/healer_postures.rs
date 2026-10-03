@@ -650,8 +650,9 @@ pub(super) fn ally_walk_tick(
 /// the CHASERS (melee and pets) inside the intent radius — the form outruns
 /// those and buys nothing against a spell, so a ranged enemy must not bend
 /// the run back toward a chaser — and re-commits in windows while it stays
-/// shifted. A re-commit (`prev` already ESCAPE) is traced as a direction
-/// change, not a transition.
+/// shifted, fleeing the nearest chaser and holding its last heading. A
+/// re-commit (`prev` already ESCAPE) is traced as a direction change, not a
+/// transition.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn escape_tick(
     commands: &mut Commands,
@@ -701,6 +702,31 @@ pub(super) fn escape_tick(
         threat_positions.insert(t.entity, t.position);
     }
 
+    // A chaser escape (Travel Form) outruns its chasers, so it maximises
+    // distance from the nearest one (`flee`, constant at every range) rather
+    // than only repelling by proximity — a chaser 10yd off is worth 1/11 of a
+    // point of repulsion, too little to hold a heading against the edge and
+    // cover terms, which then flip it back toward the chaser each window. It
+    // also keeps its heading through the windows it chains (`commitment_bonus`
+    // toward the last one). An impairment window carries neither: it is one
+    // window, scored once.
+    let xz_dist = |p: Vec3| Vec2::new(p.x - my_pos.x, p.z - my_pos.z).length();
+    let (nearest_threat, committed_direction) = if chasers_only {
+        (
+            threat_positions
+                .values()
+                .copied()
+                .min_by(|a, b| xz_dist(*a).total_cmp(&xz_dist(*b))),
+            if prev == Posture::Escape {
+                state.last_direction
+            } else {
+                None
+            },
+        )
+    } else {
+        (None, None)
+    };
+
     let inputs = ScorerInputs {
         bounds: ctx.bounds,
         my_pos,
@@ -716,8 +742,8 @@ pub(super) fn escape_tick(
         wand_target: None,
         wand_range: shared.wand_range,
         range_band: None,
-        nearest_threat: None,
-        committed_direction: None,
+        nearest_threat,
+        committed_direction,
         obstacles: ctx.obstacles.to_vec(),
         // A healer does not leash to itself.
         healer_point: None,

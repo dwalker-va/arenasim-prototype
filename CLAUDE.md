@@ -616,7 +616,7 @@ with the context-steering mask refactor.
 - `corner_penalty` (Priest 6.0 / Paladin 4.0) — graded penalty approaching arena corners
 - `wand_pull` (Priest 0.5 / Paladin 0.0 / Mage 0.0) — low-weight pull toward wand range of the kill target (`0.0` disables it for the wandless Paladin). The Mage keeps this at `0.0`: it HAS a wand and DOES fall back to it when out of mana, but via the pursuit stop distance (see the DPS kiter OOM wand fallback below), not this orbit-scorer term — the term's LoS-preserving lateral meander is slow to corner a juking target
 - `range_band` (0.0 for healers; Mage/Hunter 2.0 / 0.5) — ring-attraction toward the kill target's `[min, max]` band; disabled for healers
-- `flee` (0.0 for healers + Mage; Hunter 6.0) — constant pull away from the nearest threat, NOT proximity-weighted (distance-maximization), so a chased ranged DPS outruns an un-impaired chaser at all ranges. Hunter's `corner_penalty` (8.0) must EXCEED `flee` or the kiter flees into corners.
+- `flee` (0.0 for healers + Mage; Hunter 6.0; Druid 6.0, read only in Travel Form) — constant pull away from the nearest threat, NOT proximity-weighted (distance-maximization), so a chased ranged DPS outruns an un-impaired chaser at all ranges. Hunter's `corner_penalty` (8.0) must EXCEED `flee` or the kiter flees into corners.
 - `commitment_bonus` (1.5/1.5) — bonus toward the committed direction during the commit window
 - `los_seek` (0.0 for healers; Mage 2.0 / Hunter 1.0) — reward for candidate steps that have/restore line of sight to the kill target; drives occluded-in-range casters to orbit to a sighted angle instead of idling
 - `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (`press_advantage_margin`)
@@ -686,12 +686,19 @@ pet's re-check when it executes a dispatched command
 (`pet_ai::pet_command_rejection`), which also re-checks a Master's Call's
 sight. A no-op on obstacle-free maps (BasicArena stays byte-identical).
 
-**Travel Form escape (Druid)** — no RON knob. A shifted Druid is in ESCAPE for
-as long as it stays shifted (`evaluate_caster_healer_posture`'s `shifted`
-argument; the Shaman passes `false`): it runs from every visible CHASER (melee
-or pet — the form cannot outrun a spell) inside `threat_intent_radius` and
-re-scores each `commit_window`, traced as
-`ShiftEscape` on entry and `CommitExpired` after. The shift and the shift out
+**Travel Form escape (Druid)** — `druid.weights.flee`. A shifted Druid is in
+ESCAPE for as long as it stays shifted (`evaluate_caster_healer_posture`'s
+`shifted` argument; the Shaman passes `false`): it runs from every visible
+CHASER (melee or pet — the form cannot outrun a spell) inside
+`threat_intent_radius` and re-scores each `commit_window`, traced as
+`ShiftEscape` on entry and `CommitExpired` after. It is a kiter's run, not a
+healer's retreat: `flee` maximises distance from the nearest chaser at every
+range, and `commitment_bonus` pulls each re-score toward the last heading.
+Proximity-faded `threat_repulsion` alone was worth a fraction of a point
+against a chaser 10yd off, so the edge and cover terms flipped the heading back
+toward the chaser every window (AS-200). `escape_tick` reads both only for a
+chaser escape, so the Priest's, Paladin's and Shaman's impairment windows are
+unchanged. The shift and the shift out
 are the Druid AI's (`class_ai/druid.rs` — `shift_trigger`, `should_leave_form`);
 rules in `docs/design/wow-mechanics.md` (Travel Form).
 
