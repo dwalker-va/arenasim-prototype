@@ -748,6 +748,79 @@ fn without_a_trap_the_pressured_teamplan_priest_does_not_walk_to_the_warrior() {
     );
 }
 
+/// The fallback walk, stepped: the Warrior trapped behind a pillar so wide that
+/// none of the solve's candidates — local steps, shadow points, shoulders, the
+/// line toward the Warrior — reaches it at first. A `TeamPlan` Priest held
+/// PRESSURED must still free it: the solve walks straight at the Warrior when
+/// nothing reaches, and tangent steering rounds the pillar. (Without the
+/// fallback every candidate ties and the stand-still tie-break wins.)
+#[test]
+fn a_pressured_teamplan_priest_rounds_a_wide_pillar_no_candidate_clears() {
+    let range = dispel_range();
+    let mut s = scene(32.0, trapped());
+    s.profile = AiProfile::TeamPlan;
+    s.posture = Some(held(Posture::Pressured));
+    s.obstacles.push(ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(20.0, 0.0),
+        radius: 10.0,
+        base_y: 0.0,
+        height: 10.0,
+    });
+    assert!(!has_line_of_sight(&s.obstacles, PRIEST_POS, s.warrior_pos));
+
+    let freed = step_until_dispelled(&mut s, 8.0)
+        .expect("the Priest never rounds the wide pillar to free the Warrior");
+    assert!(has_line_of_sight(&s.obstacles, freed.from, s.warrior_pos));
+    assert!(freed.from.distance(s.warrior_pos) <= range);
+    assert!(freed.triggers.iter().any(|t| t == "DispelChase"));
+}
+
+/// A DYING teammate outranks the owed dispel (the `Legacy` medic-first order).
+/// The scene adds a second teammate, a Rogue 30yd behind the Priest at 20% HP;
+/// the Warrior is trapped 45yd the other way, beyond Dispel Magic's range, and
+/// an enemy Warrior stands 10yd from the Priest on the way. A `TeamPlan` Priest
+/// held PRESSURED owes no dispel while the Rogue is dying: no `DispelChase`, and
+/// it stays in heal range and sight of the Rogue rather than walking 46yd off it
+/// past the enemy melee. The same scene with the Rogue healthy walks — the
+/// control that the scene does owe the dispel.
+#[test]
+fn a_dying_teammate_outranks_the_owed_dispel_under_teamplan() {
+    let heal_range = MovementConfig::default().shared.heal_range;
+    let walk = |rogue_hp: f32| {
+        let mut s = scene(dispel_range() + 15.0, trapped());
+        s.profile = AiProfile::TeamPlan;
+        s.posture = Some(held(Posture::Pressured));
+        let rogue = s.world.spawn_empty().id();
+        let rogue_pos = Vec3::new(-30.0, 1.0, 0.0);
+        let mut r = info(rogue, 1, CharacterClass::Rogue, rogue_pos);
+        r.slot = 2;
+        r.current_health = rogue_hp;
+        s.roster.insert(rogue, r);
+        let melee = s.world.spawn_empty().id();
+        let mut m = info(melee, 2, CharacterClass::Warrior, Vec3::new(10.0, 1.0, 0.0));
+        m.slot = 1;
+        s.roster.insert(melee, m);
+        let tick = s.posture();
+        let chased = tick.triggers().contains(&"DispelChase");
+        (chased, tick.walk_point(), rogue_pos, s.warrior_pos)
+    };
+
+    let (chased, p, rogue_pos, _) = walk(20.0);
+    assert!(!chased, "walked for the dispel while the Rogue was dying");
+    assert!(
+        p.distance(rogue_pos) <= heal_range,
+        "solved {:.1}yd from the dying Rogue, beyond heal range {heal_range}",
+        p.distance(rogue_pos)
+    );
+
+    let (chased, p, _, warrior_pos) = walk(100.0);
+    assert!(
+        chased,
+        "the control: a healthy Rogue does not hold the walk"
+    );
+    assert!(p.distance(warrior_pos) <= dispel_range());
+}
+
 // ============================================================================
 // End to end: headless matches
 // ============================================================================

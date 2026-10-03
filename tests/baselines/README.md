@@ -48,7 +48,7 @@ by someone who was not there.
 | File | Captured | Notes |
 |---|---|---|
 | `legacy_behaviour_2026-10-02_priest_dispel_walk.txt` | 2026-10-02 | **Current.** After the Priest began walking into Dispel Magic's reach of a teammate in urgent CC (card AS-187). Diffed against the fresh `main` capture below. |
-| `legacy_behaviour_2026-10-02_main_0a9a0c0.txt` | 2026-10-02 | A FRESH run of `main` @ `0a9a0c0`, the base AS-187 was measured against. It does NOT reproduce the 09-28 file: 16 cells moved across the cards merged since, none of which recorded a baseline. |
+| `legacy_behaviour_2026-10-02_main_c361b87.txt` | 2026-10-02 | A FRESH run of `main` @ `c361b87`, the base AS-187 was measured against. It does NOT reproduce the 09-28 file: 16 cells moved across the cards merged since, none of which recorded a baseline (see the note below). |
 | `legacy_behaviour_2026-09-28_starting_rage.txt` | 2026-09-28 | After Warriors began entering the gates at 0 rage instead of 100 (card AS-172). Captured against a FRESH run of `main` @ `d5f21c1`, which reproduced the weapon-speed file exactly. |
 | `legacy_behaviour_2026-09-28_weapon_speed.txt` | 2026-09-28 | After every weapon took its swing speed from a named Classic item (card AS-167). Captured against a FRESH run of `main` @ `17cb9f0`, which reproduced the two-hander-budget file exactly. |
 | `legacy_behaviour_2026-09-28_two_hander_budget.txt` | 2026-09-28 | After the Warrior's Arcanite Reaper was re-priced at its displaced pair (card AS-115). Captured against a FRESH run of `main` @ `4c4689c`, which reproduced the 09-27 file exactly. |
@@ -60,7 +60,7 @@ by someone who was not there.
 
 ### 2026-10-02 — the Priest's dispel walk (AS-187)
 
-**4 of 27 cells moved against `main` @ `0a9a0c0`, all `healer_v_healer`
+**4 of 27 cells moved against `main` @ `c361b87`, all `healer_v_healer`
 (`Warrior,Priest` vs `Warlock,Priest`)**: BasicArena 1, TwinPillars 1 and 4,
 PillaredArena 4. `ranged_v_melee` and `pet_comp` also field a Priest and did
 not move — no teammate of theirs sat in urgent CC beyond Dispel Magic's reach
@@ -73,6 +73,15 @@ Magic on the Warrior landing earlier than `main` freed it (18.52s, 18.98s,
 18.60s), and in PillaredArena 4 follows a walk begun at 23.3s. TwinPillars 1
 now ends a 300s DRAW: the Warrior and the Warlock die and the two Priests idle
 out of mana on either side of a pillar, an endgame neither Priest walks in.
+
+**`main` itself moved under the cards between 09-28 and here, unrecorded.** A
+fresh run of `main` @ `0a9a0c0` differed from the 09-28 file in 16 cells (every
+`ranged_v_melee` and `pet_comp` cell on BasicArena and PillaredArena, plus
+TwinPillars `healer_v_healer 1` and `pet_comp` 1, 4, 7). Two more moved between
+`0a9a0c0` and `c361b87`, both from AS-194 (one trap per Hunter), which recorded
+no baseline: BasicArena `pet_comp 1` (63.22s -> 63.37s) and TwinPillars
+`pet_comp 7` (same 87.97s, different SHA). AS-187's own four cells are identical
+against either base.
 
 ### 2026-09-28 — Warriors start at 0 rage (AS-172)
 

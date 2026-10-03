@@ -644,7 +644,9 @@ solve as a `DispelGoal`, and while one is owed REACHING it (`C_DISPEL`: in range
 less `DISPEL_REACH_MARGIN`, in sight) is the only thing the solve scores — the
 nearest reaching spot wins, cover and ally sight wait one GCD, and with no
 reaching candidate the solve walks straight at the teammate. Not owed by a
-healer that is hard-CC'd, silenced or locked out of the dispel's school. Traced
+healer that is hard-CC'd, silenced or locked out of the dispel's school, nor
+while any OTHER living teammate is below `urgency_hp_threshold` — a dying
+teammate comes first, as the medic chase outranks the `Legacy` walk. Traced
 as a PRESSURED `DispelChase` once per walk; the Paladin's band-hold steps aside
 for it. A no-op whenever no dispel is owed, so a `TeamPlan` match without one
 is byte-identical.

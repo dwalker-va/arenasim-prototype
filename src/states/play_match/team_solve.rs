@@ -389,8 +389,16 @@ pub const C_COHESION: u16 = 1 << 5;
 /// gates the dispel itself passes. While it is owed it is the ONLY constraint
 /// scored (see [`infeasibility`]): a dispel is one instant GCD that turns a
 /// teammate who cannot act back into one who can, so a healer gives up cover —
-/// and, in a 3v3, sight of its other ally — for the seconds the walk takes, as
-/// the `Legacy` dispel walk does.
+/// and, in a 3v3, sight of a HEALTHY other ally — for the seconds the walk
+/// takes, as the `Legacy` dispel walk does. It is never owed while another
+/// teammate is dying ([`dispel_goal`]), so it cannot carry the healer off a
+/// heal that matters more.
+///
+/// It also walks past enemy melee, deliberately: the walk is the `Legacy`
+/// walk's straight line, and `OccupyCover`'s only standoff (`C_STANDOFF`) holds
+/// just while the healer CANNOT cast — a state in which no dispel is owed — so
+/// no proximity constraint is suspended by the goal. A melee on the healer
+/// makes it PRESSURED, not unable to dispel; the dispel is instant.
 pub const C_DISPEL: u16 = 1 << 6;
 
 /// Yards inside the dispel's range a spot must be to count as reaching. The
@@ -1035,6 +1043,17 @@ fn can_cast_heal(
 /// `dispel` removes, out of range or out of sight, the dispel affordable), and
 /// only while the healer could cast it this instant. A hard-CC'd, silenced or
 /// school-locked healer owes nothing it can pay, so it keeps to cover.
+///
+/// **A dying teammate comes first.** Nothing is owed while any OTHER living
+/// non-pet teammate is below `urgency_hp_threshold`: the goal ranks above every
+/// other constraint, so owing it would walk the healer off the heal range and
+/// sight of the teammate about to die — `Legacy`'s medic-first order turned
+/// upside down. The goal is dropped rather than made to share the solve with
+/// that teammate's sight and leash, because the heal is the higher-value GCD
+/// either way: a teammate in CC loses its actions for the CC's length, a dying
+/// one loses them for the match. With the goal gone the ordinary `OccupyCover`
+/// solve keeps sight and heal range of the nearest teammate. The CC'd teammate
+/// itself is not counted — walking to it brings it into heal range too.
 pub fn dispel_goal(
     ctx: &super::class_ai::CombatContext,
     abilities: &super::ability_config::AbilityDefinitions,
@@ -1042,6 +1061,7 @@ pub fn dispel_goal(
     my_pos: Vec3,
     current_mana: f32,
     dispel: super::abilities::AbilityType,
+    urgency_hp_threshold: f32,
 ) -> Option<DispelGoal> {
     let def = abilities.get(&dispel)?;
     // Hard-CC'd (the walk gate's own exclusion): it can neither walk nor cast,
@@ -1051,6 +1071,12 @@ pub fn dispel_goal(
     }
     let ally =
         super::class_ai::dispel_chase_target(ctx, abilities, entity, my_pos, current_mana, dispel)?;
+    let someone_else_dying = ctx.alive_allies().iter().any(|a| {
+        a.entity != entity && a.entity != ally && !a.is_pet && a.health_pct() < urgency_hp_threshold
+    });
+    if someone_else_dying {
+        return None;
+    }
     Some(DispelGoal {
         ally,
         range: def.range,

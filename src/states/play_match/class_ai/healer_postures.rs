@@ -707,6 +707,7 @@ pub(super) fn healer_pressured_tick_shared(
                 my_pos,
                 d.current_mana,
                 d.ability,
+                shared.urgency_hp_threshold,
             )
         })
     } else {

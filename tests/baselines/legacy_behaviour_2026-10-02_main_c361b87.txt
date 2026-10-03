@@ -6,7 +6,7 @@ BasicArena     healer_v_healer  7    Team_2   54.73s     82108d22d1588451
 BasicArena     ranged_v_melee   1    Team_1   53.57s     893a90f927a0c5a3
 BasicArena     ranged_v_melee   4    Team_2   55.83s     921fc8acfa0d7a62
 BasicArena     ranged_v_melee   7    Team_1   61.87s     ce1238a46db6a148
-BasicArena     pet_comp         1    Team_2   63.22s     c76e62b16aac60ce
+BasicArena     pet_comp         1    Team_2   63.37s     4813a5cad1240b06
 BasicArena     pet_comp         4    Team_1   74.92s     d74889721fe01cd1
 BasicArena     pet_comp         7    Team_1   65.53s     8ec0c8260d20301e
 TwinPillars    healer_v_healer  1    Team_2   86.84s     2aaaf6762f3ea820
@@ -17,7 +17,7 @@ TwinPillars    ranged_v_melee   4    Team_2   48.23s     0546233881ad6d6b
 TwinPillars    ranged_v_melee   7    Team_2   55.92s     4b46967e3227c307
 TwinPillars    pet_comp         1    Team_1   83.22s     7386163c00fac81a
 TwinPillars    pet_comp         4    Team_2   58.15s     816fe7255425d6c7
-TwinPillars    pet_comp         7    Team_1   87.97s     40b9b8e7cc95334d
+TwinPillars    pet_comp         7    Team_1   87.97s     8996c05574124374
 PillaredArena  healer_v_healer  1    Team_1   64.22s     433fc879868c01db
 PillaredArena  healer_v_healer  4    Team_1   47.25s     246ee3a610b2d669
 PillaredArena  healer_v_healer  7    Team_1   55.30s     e4bde50e7f281fde

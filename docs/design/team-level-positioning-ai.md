@@ -509,7 +509,10 @@ measured.** Assume the three intents that still have no consumer
   candidates the solve walks straight at the teammate. It is lexicographic, not
   weighted, because a weight beside cover pins the healer one covered step
   short of reach; and it is temporal like the castability condition — it lasts
-  one GCD past arrival, then cover and sight are back.
+  one GCD past arrival, then cover and sight are back. It is not owed while
+  another teammate is below the urgency threshold: a dying ally comes first,
+  `Legacy`'s medic-first order, so the goal can never walk the healer off a
+  heal that matters more.
 
 #### The framing does not fit a kiter, and that is structural
 
