@@ -65,12 +65,13 @@ fn log_time(line: &str) -> Option<f32> {
     line[open + 1..close].trim().parse().ok()
 }
 
-/// Every instant's display name: no cast bar, not a channel. Derived from the
-/// shipped config, so a new instant is covered without an edit here.
+/// Every instant's display name: no cast time, not a channel. Derived from the
+/// shipped config, so a new instant is covered without an edit here — and read
+/// from `cast_time` itself, not through the rule under test.
 fn instant_names(defs: &AbilityDefinitions) -> Vec<String> {
     let names: Vec<String> = defs
         .iter()
-        .filter(|(_, d)| !d.has_cast_bar() && !d.is_channel())
+        .filter(|(_, d)| d.cast_time <= 0.0 && !d.is_channel())
         .map(|(_, d)| d.name.clone())
         .collect();
     for routed in [
@@ -234,7 +235,7 @@ fn interrupters_still_interrupt_a_cast_bar_in_play() {
                 .find(|(_, d)| d.name == spell)
                 .unwrap_or_else(|| panic!("no ability named {spell}"));
             assert!(
-                def.has_cast_bar() || def.is_channel(),
+                def.cast_time > 0.0 || def.is_channel(),
                 "{class:?} interrupted {spell} at {t}s, which has no cast bar"
             );
         }
@@ -289,8 +290,7 @@ fn resolve_pummel_at(ability: AbilityType, cast_time: f32) -> (bool, usize) {
 #[test]
 fn an_interrupt_resolving_on_an_instant_does_nothing() {
     let defs = AbilityDefinitions::default();
-    assert!(!defs.get_unchecked(&AbilityType::Lifebloom).has_cast_bar());
-    assert!(defs.get_unchecked(&AbilityType::Cyclone).has_cast_bar());
+    assert_eq!(defs.get_unchecked(&AbilityType::Lifebloom).cast_time, 0.0);
 
     assert_eq!(
         resolve_pummel_at(AbilityType::Lifebloom, 0.0),
