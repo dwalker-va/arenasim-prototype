@@ -65,12 +65,14 @@ pub fn apply_damage_with_absorb(
         target.current_health
     );
 
-    // Check for damage immunity (Divine Shield) — blocks all incoming damage
+    // Check for damage immunity (Divine Shield, or a Cyclone) — blocks all
+    // incoming damage
     if let Some(ref auras) = active_auras {
-        if auras
-            .auras
-            .iter()
-            .any(|a| a.effect_type == AuraType::DamageImmunity)
+        if auras.is_cycloned()
+            || auras
+                .auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::DamageImmunity)
         {
             return (0.0, 0.0);
         }

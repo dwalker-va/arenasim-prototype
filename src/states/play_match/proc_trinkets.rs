@@ -276,6 +276,7 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
         | AuraType::Fear
         | AuraType::Polymorph
         | AuraType::Incapacitate
+        | AuraType::Cyclone
         | AuraType::Silence
         | AuraType::SpellSchoolLockout => None,
         // Debuffs and enemy-facing effects: same objection — a proc buffs its
@@ -295,6 +296,8 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
         // weight at all — `DamageTakenReduction` at magnitude 1.0 is immunity,
         // which the budget would happily sell for one point.
         AuraType::DamageTakenReduction | AuraType::DamageImmunity | AuraType::FearImmunity => None,
+        // A shapeshift is an ability's state, not a stat a trinket could sell.
+        AuraType::TravelForm => None,
         // Reveals stealthed enemies and reveals the holder. A visibility swap,
         // not a quantity — there is no magnitude to multiply.
         AuraType::ShadowSight => None,

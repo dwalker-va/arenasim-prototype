@@ -119,6 +119,19 @@ pub enum AuraType {
     /// written into the `armor` stat, so removing the aura removes the bonus.
     /// Used by the Druid's Mark of the Wild.
     ArmorIncrease,
+    /// Cyclone (TBC) - the target is swept up: it cannot move or act, and is
+    /// immune to damage AND to healing for the duration. Never breaks on
+    /// damage, is not dispellable, and diminishes on its own DR bucket
+    /// ([`DRCategory::Cyclone`]). The damage immunity lives at the top of
+    /// `apply_damage_with_absorb`, the healing immunity at the top of
+    /// `apply_healing` — the one site each for all damage and all healing.
+    /// Magnitude unused (always 1.0 by convention).
+    Cyclone,
+    /// The Druid's Travel Form - a shapeshift, not a spell on the holder
+    /// (magnitude = movement speed multiplier, e.g. 1.4 = 40% faster). While
+    /// it is up the holder is immune to Polymorph and cannot cast; shifting
+    /// into it breaks every root and snare (`effects::travel_form`).
+    TravelForm,
 }
 
 /// A debuff's REMOVAL CLASS — what kind of thing it is for the purpose of
@@ -265,7 +278,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 33] = [
+    pub const ALL: [AuraType; 35] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -299,6 +312,8 @@ impl AuraType {
         AuraType::WindfuryBuff,
         AuraType::FearImmunity,
         AuraType::ArmorIncrease,
+        AuraType::Cyclone,
+        AuraType::TravelForm,
     ];
 
     /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
@@ -321,6 +336,7 @@ impl AuraType {
             AuraType::Fear => "Fear",
             AuraType::Polymorph => "Polymorph",
             AuraType::Incapacitate => "Incapacitate",
+            AuraType::Cyclone => "Cyclone",
             AuraType::Silence => "Silence",
             AuraType::SpellSchoolLockout => "School Lockout",
             AuraType::DamageOverTime => "Damage over Time",
@@ -336,6 +352,7 @@ impl AuraType {
             AuraType::FearImmunity => "Fear Immunity",
             AuraType::MaxHealthIncrease => "Health Buff",
             AuraType::ArmorIncrease => "Armor Buff",
+            AuraType::TravelForm => "Shapeshift",
             AuraType::MaxManaIncrease => "Mana Buff",
             AuraType::AttackPowerIncrease => "Attack Power Buff",
             AuraType::SpellPowerIncrease => "Spell Power Buff",
@@ -380,6 +397,10 @@ impl AuraType {
             AuraType::Incapacitate => {
                 "The target is frozen where it stands, unable to act. Any damage frees it."
             }
+            AuraType::Cyclone => {
+                "The target is swept up and cannot act. Nothing can damage or heal it until the \
+                 effect ends, and nothing removes it early."
+            }
             AuraType::Silence => {
                 "The target cannot use any ability that costs mana. Rage, energy and free \
                  abilities still work."
@@ -413,6 +434,10 @@ impl AuraType {
             }
             AuraType::MaxHealthIncrease => "Raises the holder's maximum health.",
             AuraType::ArmorIncrease => "Raises the holder's armor, reducing physical damage taken.",
+            AuraType::TravelForm => {
+                "The holder takes a faster animal shape. Shifting breaks roots and snares; while \
+                 shifted it cannot be polymorphed and cannot cast."
+            }
             AuraType::MaxManaIncrease => "Raises the holder's maximum mana.",
             AuraType::AttackPowerIncrease => "Raises the holder's attack power.",
             AuraType::SpellPowerIncrease => "Raises the holder's spell power.",
@@ -512,6 +537,12 @@ impl AuraType {
             | AuraType::AttackPowerReduction
             | AuraType::AttackSpeedSlow => false,
 
+            // Cyclone is magic crowd control that NO dispel takes (TBC). It is
+            // the one CC here that is undispellable by rule rather than by
+            // removal class: its school is Nature, so the class above says
+            // "magic" and this arm is what says no.
+            AuraType::Cyclone => false,
+
             // Today these two mechanics arrive only from curses (Curse of
             // Weakness, Curse of Tongues), and the CURSE class already stops
             // them upstream — see `Aura::can_be_dispelled`. They stay false
@@ -548,7 +579,8 @@ impl AuraType {
             | AuraType::FrostArmorBuff
             | AuraType::SpellResistanceBuff
             | AuraType::ArmorIncrease
-            | AuraType::FearImmunity => false,
+            | AuraType::FearImmunity
+            | AuraType::TravelForm => false,
         }
     }
 
@@ -588,6 +620,7 @@ impl AuraType {
             | AuraType::Fear
             | AuraType::Polymorph
             | AuraType::Incapacitate
+            | AuraType::Cyclone
             | AuraType::Silence
             | AuraType::SpellSchoolLockout
             | AuraType::DamageOverTime
@@ -613,7 +646,8 @@ impl AuraType {
             | AuraType::FrostArmorBuff
             | AuraType::SpellResistanceBuff
             | AuraType::ArmorIncrease
-            | AuraType::FearImmunity => false,
+            | AuraType::FearImmunity
+            | AuraType::TravelForm => false,
 
             // Mechanical markers, not effects: clearing these would grant a
             // cooldown reset (WeakenedSoul) or corrupt tracking state.
@@ -666,6 +700,10 @@ pub enum CompoundDebuff {
     /// resistance to each school of magic, one buff. A purge that takes it
     /// takes all of it.
     MarkOfTheWild,
+    /// The Druid's Entangling Roots: a root (the face) and a small Nature
+    /// damage over time, one debuff. Whatever ends the root — a damage break,
+    /// a dispel, a Travel Form shift, its duration — ends the damage with it.
+    EntanglingRoots,
 }
 
 impl CompoundDebuff {
@@ -677,9 +715,10 @@ impl CompoundDebuff {
     /// exhaustive match is.** What it buys is COVERAGE: the guards below sweep
     /// it, so compound N+1 is checked the moment it is declared here, instead
     /// of a test quietly continuing to check only the one it was written for.
-    pub const ALL: [CompoundDebuff; 2] = [
+    pub const ALL: [CompoundDebuff; 3] = [
         CompoundDebuff::FrostArmorChill,
         CompoundDebuff::MarkOfTheWild,
+        CompoundDebuff::EntanglingRoots,
     ];
 
     /// The effect that REPRESENTS this debuff: the icon the frames draw, the
@@ -703,6 +742,7 @@ impl CompoundDebuff {
         match self {
             CompoundDebuff::FrostArmorChill => AuraType::MovementSpeedSlow,
             CompoundDebuff::MarkOfTheWild => AuraType::MaxHealthIncrease,
+            CompoundDebuff::EntanglingRoots => AuraType::Root,
         }
     }
 }
@@ -1113,7 +1153,9 @@ impl Aura {
             | AuraType::ArmorIncrease => true,
 
             // Beneficial, but DELIBERATELY unpurgeable — see the doc above.
-            AuraType::DamageImmunity | AuraType::FearImmunity => false,
+            // Travel Form joins them: a shapeshift is the Druid's own body,
+            // not a spell cast on it, so a purge has nothing to take.
+            AuraType::DamageImmunity | AuraType::FearImmunity | AuraType::TravelForm => false,
 
             // Mechanical markers, not buffs.
             AuraType::ShadowSight | AuraType::WeaponPoison | AuraType::WeakenedSoul => false,
@@ -1125,6 +1167,7 @@ impl Aura {
             | AuraType::Fear
             | AuraType::Polymorph
             | AuraType::Incapacitate
+            | AuraType::Cyclone
             | AuraType::Silence
             | AuraType::SpellSchoolLockout
             | AuraType::DamageOverTime
@@ -1148,6 +1191,61 @@ pub struct ActiveAuras {
 }
 
 impl ActiveAuras {
+    /// Whether the holder is CYCLONED: immune to every damage, every heal and
+    /// every new aura until the Cyclone ends. The funnels ask this —
+    /// `apply_damage_with_absorb`, `apply_healing`, `apply_pending_auras` —
+    /// and so does each site that pushes an aura straight into the vector
+    /// instead of queueing it (a Frost Trap zone, a totem pulse, a poison).
+    pub fn is_cycloned(&self) -> bool {
+        self.auras
+            .iter()
+            .any(|a| a.effect_type == AuraType::Cyclone)
+    }
+
+    /// Whether the holder is shapeshifted into Travel Form — and so cannot
+    /// cast or attack, and cannot be polymorphed.
+    pub fn is_shapeshifted(&self) -> bool {
+        self.auras
+            .iter()
+            .any(|a| a.effect_type == AuraType::TravelForm)
+    }
+
+    /// Break every movement impairment on the holder: every `Root` and every
+    /// `MovementSpeedSlow`, whatever its removal class — a shapeshift clears
+    /// physical harm (Concussive Shot, Crippling Poison) as well as magic. Each
+    /// goes as a whole DEBUFF, so Entangling Roots takes its damage rider with
+    /// it and a Frost Armor chill its attack-speed half (see
+    /// [`CompoundDebuff`]). Returns the names of what broke, in aura order.
+    ///
+    /// The first root-and-snare BREAK in the game (Master's Call lifts one
+    /// impairment, at random, as a dispel does); Travel Form is its caller,
+    /// and anything else that frees its holder outright should be too.
+    pub fn break_movement_impairments(&mut self) -> Vec<String> {
+        let impairing = |a: &Aura| {
+            matches!(a.effect_type, AuraType::Root | AuraType::MovementSpeedSlow)
+                && !a.is_compound_rider()
+        };
+        let broken_compounds: Vec<CompoundDebuff> = self
+            .auras
+            .iter()
+            .filter(|a| impairing(a))
+            .filter_map(|a| a.compound)
+            .collect();
+        let broken: Vec<String> = self
+            .auras
+            .iter()
+            .filter(|a| impairing(a))
+            .map(|a| a.ability_name.clone())
+            .collect();
+        self.auras.retain(|a| {
+            !impairing(a)
+                && !a
+                    .compound
+                    .is_some_and(|compound| broken_compounds.contains(&compound))
+        });
+        broken
+    }
+
     /// Remove the DEBUFF the aura at `index` belongs to: that aura, plus every
     /// other effect sharing its [`CompoundDebuff`]. Returns the indexed aura.
     ///
@@ -1460,10 +1558,15 @@ pub enum DRCategory {
     /// carries `dr_category_override: Some(Horror)` to land here. Set only via
     /// the override, never returned by `from_aura_type`.
     Horror = 7,
+    /// Cyclone's dedicated DR bucket (TBC). A cyclone diminishes only other
+    /// cyclones — never Polymorph or Freezing Trap (Incapacitates) and never
+    /// Fear. The one dedicated bucket reached from `from_aura_type`, because
+    /// Cyclone is the one mechanic that is its own `AuraType`.
+    Cyclone = 8,
 }
 
 impl DRCategory {
-    pub const COUNT: usize = 8;
+    pub const COUNT: usize = 9;
 
     #[inline]
     pub fn index(self) -> usize {
@@ -1532,6 +1635,7 @@ impl DRCategory {
             AuraType::Root => Some(DRCategory::Roots),
             AuraType::MovementSpeedSlow => Some(DRCategory::Slows),
             AuraType::Silence => Some(DRCategory::Silence),
+            AuraType::Cyclone => Some(DRCategory::Cyclone),
 
             // READ THIS GROUP TWICE. Hostile effects that genuinely restrict
             // what the target can do, or how fast it does it, and are still
@@ -1580,7 +1684,8 @@ impl DRCategory {
             | AuraType::FrostArmorBuff
             | AuraType::SpellResistanceBuff
             | AuraType::ArmorIncrease
-            | AuraType::FearImmunity => None,
+            | AuraType::FearImmunity
+            | AuraType::TravelForm => None,
 
             // Mechanical markers, not effects. They track state (a spent soul,
             // a coated weapon, a revealed unit) and nobody chains them.
@@ -1811,6 +1916,15 @@ mod compound_tests {
                 })
                 .chain(crate::states::play_match::combat_core::compound_riders(
                     CompoundDebuff::MarkOfTheWild,
+                ))
+                .collect(),
+                CompoundDebuff::EntanglingRoots => std::iter::once(Aura {
+                    effect_type: AuraType::Root,
+                    compound: Some(CompoundDebuff::EntanglingRoots),
+                    ..Default::default()
+                })
+                .chain(crate::states::play_match::combat_core::compound_riders(
+                    CompoundDebuff::EntanglingRoots,
                 ))
                 .collect(),
             };
@@ -2312,7 +2426,7 @@ mod dr_category_tests {
     /// too — the second is a balance change and should have to be typed here.
     #[test]
     fn dr_category_selection_is_exactly_the_diminished_set() {
-        let expected: [(AuraType, DRCategory); 7] = [
+        let expected: [(AuraType, DRCategory); 8] = [
             (AuraType::Stun, DRCategory::Stuns),
             (AuraType::Fear, DRCategory::Fears),
             (AuraType::Polymorph, DRCategory::Incapacitates),
@@ -2320,6 +2434,9 @@ mod dr_category_tests {
             (AuraType::Root, DRCategory::Roots),
             (AuraType::MovementSpeedSlow, DRCategory::Slows),
             (AuraType::Silence, DRCategory::Silence),
+            // Deliberate: Cyclone diminishes on its own bucket (TBC), never
+            // with Polymorph, Freezing Trap or Fear.
+            (AuraType::Cyclone, DRCategory::Cyclone),
         ];
 
         for ty in AuraType::ALL {

@@ -125,6 +125,7 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
     "FlareSkirt",
     "FlareWait",
     "FlareCommit",
+    "ShiftEscape",
 ];
 
 /// One reference matchup: team configs + seed + label for error messages.

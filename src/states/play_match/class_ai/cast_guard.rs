@@ -43,6 +43,9 @@ pub struct PreCastOpts {
     pub bypass_silence: bool,
 }
 
+/// The rejection note for a cast refused because the caster is in Travel Form.
+pub const SHAPESHIFTED_NOTE: &str = "shapeshifted: nothing is cast in Travel Form";
+
 /// Run the standard pre-cast guard sequence.
 ///
 /// Returns `true` if every check passes and the caller should proceed with
@@ -60,13 +63,14 @@ pub struct PreCastOpts {
 /// 1. friendly-CC (opt-in)
 /// 2. friendly-DoTs (opt-in)
 /// 3. target damage immunity (opt-in)
-/// 4. spell-school lockout
-/// 5. silence (skipped when `bypass_silence`; otherwise auto-gated on
+/// 4. shapeshift: nothing is cast in Travel Form
+/// 5. spell-school lockout
+/// 6. silence (skipped when `bypass_silence`; otherwise auto-gated on
 ///    `mana_cost > 0` and caster resource type)
-/// 6. per-ability cooldown
-/// 7. mana / range / min-range / stealth (via `can_cast_config` for
+/// 7. per-ability cooldown
+/// 8. mana / range / min-range / stealth (via `can_cast_config` for
 ///    targeted casts; mana-only for self-targeted)
-/// 8. line-of-sight from caster to target (targeted casts only; skipped for
+/// 9. line-of-sight from caster to target (targeted casts only; skipped for
 ///    self-targeted / ground-placed casts). Runs AFTER `can_cast_config` so
 ///    an out-of-range target fails on range, not LoS. A no-op on maps with no
 ///    obstacles (empty `ctx.obstacles`).
@@ -90,6 +94,11 @@ pub fn pre_cast_ok(
         if opts.check_target_immune && ctx.entity_is_immune(target_entity) {
             return false;
         }
+    }
+
+    // Nothing is cast in Travel Form: the Druid shifts back first.
+    if auras.is_some_and(ActiveAuras::is_shapeshifted) {
+        return false;
     }
 
     if is_spell_school_locked(def.spell_school, auras) {
@@ -154,6 +163,11 @@ pub fn classify_pre_cast_failure(
         if opts.check_target_immune && ctx.entity_is_immune(target_entity) {
             return RejectionReason::TargetImmune;
         }
+    }
+    if auras.is_some_and(ActiveAuras::is_shapeshifted) {
+        return RejectionReason::PreconditionUnmet {
+            note: SHAPESHIFTED_NOTE.to_string(),
+        };
     }
     if is_spell_school_locked(def.spell_school, auras) {
         return RejectionReason::SilencedOrLocked {

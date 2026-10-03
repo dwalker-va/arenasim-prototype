@@ -958,12 +958,25 @@ pub fn decide_abilities(
                     .any(|a| super::utils::is_incapacitating(&a.effect_type))
             })
             .unwrap_or(false);
+        // Nothing is used from inside a Cyclone — not even the CC-break
+        // cooldowns below, which answer the CC a Cyclone is not.
+        let is_cycloned = snapshot
+            .active_auras
+            .get(&entity)
+            .is_some_and(|auras_slice| {
+                auras_slice
+                    .iter()
+                    .any(|a| a.effect_type == AuraType::Cyclone)
+            });
 
         // Paladin-specific: Divine Shield can be used while incapacitated.
         // Because the normal dispatch never runs this frame, we own a builder
         // here so the Divine-Shield-while-CC decision still produces a trace
         // event when the predicates fire.
-        if is_incapacitated && combatant.class == match_config::CharacterClass::Paladin {
+        if is_incapacitated
+            && !is_cycloned
+            && combatant.class == match_config::CharacterClass::Paladin
+        {
             let cc_ctx = snapshot.context_for(entity);
             let actor_view = cc_ctx
                 .self_info()
@@ -994,7 +1007,10 @@ pub fn decide_abilities(
         // Warrior-specific: Berserker Rage can be used while feared (TBC rule —
         // breaks the fear + grants fear immunity; horror/stun/poly stay locked).
         // Same builder-ownership shape as the Paladin Divine Shield arm above.
-        if is_incapacitated && combatant.class == match_config::CharacterClass::Warrior {
+        if is_incapacitated
+            && !is_cycloned
+            && combatant.class == match_config::CharacterClass::Warrior
+        {
             let cc_ctx = snapshot.context_for(entity);
             let actor_view = cc_ctx
                 .self_info()
@@ -1279,6 +1295,8 @@ pub fn decide_abilities(
                             directive,
                             &movement_config,
                             &movement_config.shaman,
+                            // The Shaman has no shapeshift.
+                            false,
                             time.elapsed_secs(),
                             &mut decision_trace,
                         );
@@ -1304,11 +1322,12 @@ pub fn decide_abilities(
             // ESCAPE deferral is not threaded into the rotation — every heal
             // the Druid has is an instant, so there is nothing to defer.
             match_config::CharacterClass::Druid => {
+                let mut plan = class_ai::caster_healer_posture::CasterHealerPlan::default();
                 if countdown.gates_opened {
                     if let Ok((healer_posture, _mage, directive, _reset, _flare)) =
                         posture_movement.get_mut(entity)
                     {
-                        class_ai::caster_healer_posture::evaluate_caster_healer_posture(
+                        plan = class_ai::caster_healer_posture::evaluate_caster_healer_posture(
                             &mut commands,
                             entity,
                             &combatant,
@@ -1318,6 +1337,8 @@ pub fn decide_abilities(
                             directive,
                             &movement_config,
                             &movement_config.druid,
+                            // Travel Form: a shifted Druid runs (ESCAPE).
+                            auras.as_deref().is_some_and(ActiveAuras::is_shapeshifted),
                             time.elapsed_secs(),
                             &mut decision_trace,
                         );
@@ -1337,6 +1358,7 @@ pub fn decide_abilities(
                     auras.as_deref(),
                     &ctx,
                     &movement_config,
+                    plan.pressured,
                     countdown.gates_opened,
                     time_since_gates,
                     &mut decision_trace,

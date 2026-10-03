@@ -18,13 +18,26 @@
 //!    bloom managed on purpose (see [`lifebloom_decision`]). A threat that is
 //!    only closing gets the Rejuvenation, not the stack: rolling three stacks
 //!    on an ally nobody is hitting yet is mana spent on overheal.
-//! 7. Rejuvenation on any other injured ally.
-//! 8. Moonfire on the kill target.
+//! 7. Control, when an ally needs a peel or the kill needs its healer gone
+//!    (see [`DruidTurn::try_control`]): Cyclone, then Entangling Roots.
+//! 8. Rejuvenation on any other injured ally.
+//! 9. Moonfire on the kill target.
 //!
-//! Steps 5-8 answer to the MANA GOVERNOR ([`mana_reserve`]): proactive heals
-//! and damage are paid for only out of mana above a reserve that shrinks as
-//! the match heads into dampening. The emergency steps (2, 3) never ask it,
-//! and neither does a focused ally who has dropped below [`DRUID_URGENT_HP`].
+//! Between the emergency steps and Innervate sits the ESCAPE SHIFT: Travel
+//! Form when a threat is on the Druid and it is rooted or slowed, or when a
+//! melee is beating on it (see [`shift_trigger`]). The shift breaks the
+//! impairment and the posture machine runs; while shifted the Druid casts
+//! nothing. It shifts back — free, no global cooldown — once it has been
+//! shifted [`DRUID_MIN_FORM_SECS`], no chaser is within striking reach (nor
+//! within the danger radius, for the first [`DRUID_MAX_CHASE_SECS`]) and it
+//! has work (an ally to heal or an enemy in spell reach), or at once if it
+//! is rooted again ([`should_leave_form`]).
+//!
+//! Steps 5-9 answer to the MANA GOVERNOR ([`mana_reserve`]): proactive heals,
+//! control and damage are paid for only out of mana above a reserve that
+//! shrinks as the match heads into dampening. The emergency steps (2, 3), the
+//! shift and a peel for a dying ally never ask it, and neither does a focused
+//! ally who has dropped below [`DRUID_URGENT_HP`].
 //!
 //! Movement is the shared caster-healer posture machine
 //! (`caster_healer_posture`) on the `druid:` block of `movement.ron`.
@@ -78,6 +91,158 @@ pub const GOVERNOR_RESERVE_AT_GATES: f32 = 0.5;
 /// reaches 50% (it starts at `DAMPENING_START_SECS` and ramps to 100% over
 /// `DAMPENING_RAMP_SECS`). Mana saved past it buys heals worth half as much.
 pub const GOVERNOR_HORIZON_SECS: f32 = DAMPENING_START_SECS + DAMPENING_RAMP_SECS * 0.5;
+/// A melee attacking the Druid while it is below this HP fraction is reason
+/// enough to shift and open distance, rooted or not.
+pub const DRUID_SHIFT_OPEN_HP: f32 = 0.6;
+/// Cyclone the enemy healer once the kill target is below this HP fraction:
+/// six seconds of no heals is worth the most when the kill is close.
+pub const DRUID_CYCLONE_KILL_HP: f32 = 0.4;
+
+/// Why the Druid shifts into Travel Form, when it should.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShiftReason {
+    /// Rooted, or snared with a melee or pet chasing it: the shift breaks the
+    /// impairment.
+    BreakImpairment,
+    /// A melee is beating on a hurt Druid: the shift opens distance.
+    OpenDistance,
+}
+
+/// What the escape-shift rule reads, for [`shift_trigger`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShiftView {
+    /// The posture machine's PRESSURED trigger: a visible threat is on the
+    /// Druid or closing on it.
+    pub pressured: bool,
+    pub rooted: bool,
+    pub snared: bool,
+    /// A visible melee enemy or pet targeting the Druid within the intent
+    /// radius — the kind of threat a faster Druid can leave behind.
+    pub chaser: bool,
+    /// A visible melee enemy or pet targeting the Druid within striking reach.
+    pub melee_on_me: bool,
+    pub self_health_pct: f32,
+}
+
+impl ShiftView {
+    /// The view of the Druid at `my_pos` with `auras` on it.
+    pub fn of(
+        ctx: &CombatContext,
+        entity: Entity,
+        my_pos: Vec3,
+        auras: Option<&ActiveAuras>,
+        pressured: bool,
+        threat_radius: f32,
+        self_health_pct: f32,
+    ) -> Self {
+        let has =
+            |ty: AuraType| auras.is_some_and(|a| a.auras.iter().any(|aura| aura.effect_type == ty));
+        let chasers = || {
+            ctx.enemies_targeting(entity)
+                .into_iter()
+                .filter(|e| e.class.is_melee() || e.is_pet)
+        };
+        Self {
+            pressured,
+            rooted: has(AuraType::Root),
+            snared: has(AuraType::MovementSpeedSlow),
+            chaser: chasers().any(|e| e.position.distance(my_pos) <= threat_radius),
+            melee_on_me: chasers()
+                .any(|e| e.position.distance(my_pos) <= MELEE_RANGE + DRUID_ATTACK_RANGE_SLACK),
+            self_health_pct,
+        }
+    }
+}
+
+/// The escape-shift rule, pure so it can be tested on its own. Only while
+/// PRESSURED:
+/// - rooted → break it;
+/// - snared WITH a melee or pet chasing it → break it. A snare with no chaser
+///   is shrugged off: the form outruns legs, not spells, so shifting out of a
+///   Frostbolt or Frost Shock from a caster buys nothing;
+/// - a melee attacking it while it is below [`DRUID_SHIFT_OPEN_HP`] → open
+///   distance.
+pub fn shift_trigger(view: ShiftView) -> Option<ShiftReason> {
+    if !view.pressured {
+        return None;
+    }
+    if view.rooted || (view.snared && view.chaser) {
+        return Some(ShiftReason::BreakImpairment);
+    }
+    if view.melee_on_me && view.self_health_pct < DRUID_SHIFT_OPEN_HP {
+        return Some(ShiftReason::OpenDistance);
+    }
+    None
+}
+
+/// The least time a Druid spends in Travel Form before it may leave to cast:
+/// long enough to open real distance at the form's speed, and two global
+/// cooldowns so a shift is never paid for and thrown straight back.
+pub const DRUID_MIN_FORM_SECS: f32 = 3.0;
+/// How long a chaser that cannot close to striking reach may keep the Druid
+/// shifted. Past this the Druid stops running and uses its kit: its heals are
+/// instants, and a chaser that never lands a hit is one it can outpace again
+/// on the next shift.
+pub const DRUID_MAX_CHASE_SECS: f32 = 8.0;
+/// How long a Druid that left the form of its own accord holds the shift back:
+/// one global cooldown, as the cast it left to make would. A chaser that
+/// closes in that window is not answered with a shift straight back.
+pub const DRUID_RESHIFT_HOLD_SECS: f32 = GCD;
+
+/// What a shifted Druid can see from inside the form, for [`should_leave_form`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FormView {
+    /// Seconds since it shifted.
+    pub in_form_secs: f32,
+    /// Rooted again while shifted.
+    pub rooted: bool,
+    /// A visible melee enemy or pet within the danger radius — a chaser the
+    /// form has not yet shaken off.
+    pub chaser_near: bool,
+    /// A visible melee enemy or pet within striking reach of the Druid.
+    pub chaser_striking: bool,
+    /// An ally in heal range below [`DRUID_TOP_UP_HP`].
+    pub healing_needed: bool,
+    /// A visible enemy within the Druid's spell reach (Moonfire's range):
+    /// something to Moonfire, root or cyclone.
+    pub enemy_in_reach: bool,
+    /// [`shift_trigger`] would fire for the Druid as it stands: a leave now
+    /// would be answered by a shift straight back.
+    pub would_reshift: bool,
+}
+
+/// Whether a shifted Druid leaves Travel Form. Leaving is free and costs no
+/// global cooldown.
+/// - **Rooted again**: it leaves at once, whatever else holds — a rooted form
+///   is no faster than no form, and the rotation re-shifts to break the root
+///   if a threat is still on it. A new SNARE does not: the form still outruns
+///   a slowed chaser, and shifting out and back in under a Mage's Frostbolts
+///   would spend mana and a global cooldown on every bolt.
+/// - **Never into a re-shift**: not with a chaser in striking reach, and not
+///   while [`shift_trigger`] would fire — leaving would buy one frame out of
+///   form for 25 mana and a global cooldown on the shift straight back. And a
+///   Druid that leaves of its own accord holds the shift back for
+///   [`DRUID_RESHIFT_HOLD_SECS`], so a chaser closing just after is not
+///   answered with one either.
+/// - Otherwise it leaves once it is **safe** — it has been shifted at least
+///   [`DRUID_MIN_FORM_SECS`], and no chaser is within the danger radius
+///   unless it has run for [`DRUID_MAX_CHASE_SECS`] without shaking it —
+///   **and has work**: an ally to heal, or an enemy in reach of its spells.
+///
+/// Safe with nothing in reach, it stays shifted: the form is faster and
+/// there is nothing to cast. A caster hitting the Druid from range does not
+/// keep it shifted — the form buys nothing against a spell.
+pub fn should_leave_form(view: FormView) -> bool {
+    if view.rooted {
+        return true;
+    }
+    if view.chaser_striking || view.would_reshift {
+        return false;
+    }
+    view.in_form_secs >= DRUID_MIN_FORM_SECS
+        && (!view.chaser_near || view.in_form_secs >= DRUID_MAX_CHASE_SECS)
+        && (view.healing_needed || view.enemy_in_reach)
+}
 
 /// The mana the governor holds back `time_since_gates` seconds into the fight:
 /// [`GOVERNOR_RESERVE_AT_GATES`] of the pool at the gates, falling linearly to
@@ -234,10 +399,80 @@ pub fn decide_druid_action(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     movement: &MovementConfig,
+    pressured: bool,
     gates_opened: bool,
     time_since_gates: f32,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
+    // Shifted: nothing is cast in Travel Form, so the only decision is
+    // whether to leave it. Leaving is free and on no global cooldown, so it
+    // is decided before the GCD gate. It is not an ability decision — the
+    // posture machine traces the ESCAPE it ends, and the log says it.
+    if let Some(form) = auras.and_then(|a| {
+        a.auras
+            .iter()
+            .find(|aura| aura.effect_type == AuraType::TravelForm)
+    }) {
+        let form_duration = abilities
+            .get_unchecked(&AbilityType::TravelForm)
+            .applies_aura
+            .as_ref()
+            .map_or(form.duration, |a| a.duration);
+        let view = FormView {
+            in_form_secs: form_duration - form.duration,
+            rooted: auras.is_some_and(|a| {
+                a.auras
+                    .iter()
+                    .any(|aura| aura.effect_type == AuraType::Root)
+            }),
+            chaser_near: ctx
+                .visible_enemies_within(entity, my_pos, movement.shared.danger_radius)
+                .iter()
+                .any(|e| e.class.is_melee() || e.is_pet),
+            chaser_striking: ctx
+                .visible_enemies_within(entity, my_pos, MELEE_RANGE + DRUID_ATTACK_RANGE_SLACK)
+                .iter()
+                .any(|e| e.class.is_melee() || e.is_pet),
+            healing_needed: ctx.alive_allies().into_iter().any(|a| {
+                a.health_pct() < DRUID_TOP_UP_HP
+                    && my_pos.distance(a.position) <= movement.shared.heal_range
+            }),
+            enemy_in_reach: !ctx
+                .visible_enemies_within(
+                    entity,
+                    my_pos,
+                    abilities.get_unchecked(&AbilityType::Moonfire).range,
+                )
+                .is_empty(),
+            would_reshift: shift_trigger(ShiftView::of(
+                ctx,
+                entity,
+                my_pos,
+                auras,
+                pressured,
+                movement.shared.threat_intent_radius,
+                combatant.current_health / combatant.max_health,
+            ))
+            .is_some(),
+        };
+        if gates_opened && should_leave_form(view) {
+            commands.spawn(ShapeshiftPending {
+                caster: entity,
+                shift: Shift::Out,
+            });
+            // Left to cast, so it holds the shift back as a cast's global
+            // cooldown would. A rooted exit holds nothing back: it leaves
+            // to re-shift through the root.
+            if !view.rooted {
+                combatant
+                    .ability_cooldowns
+                    .insert(AbilityType::TravelForm, DRUID_RESHIFT_HOLD_SECS);
+            }
+            return true;
+        }
+        return false;
+    }
+
     if combatant.global_cooldown > 0.0 {
         return false;
     }
@@ -258,6 +493,7 @@ pub fn decide_druid_action(
             ctx,
             heal_range: movement.shared.heal_range,
             threat_radius: movement.shared.threat_intent_radius,
+            pressured,
             time_since_gates,
             builder: &mut builder,
         };
@@ -279,6 +515,8 @@ struct DruidTurn<'a, 'b, 'w, 's, 'c> {
     ctx: &'a CombatContext<'c>,
     heal_range: f32,
     threat_radius: f32,
+    /// The posture machine's PRESSURED trigger this tick.
+    pressured: bool,
     time_since_gates: f32,
     builder: &'a mut DecisionEventBuilder<'b>,
 }
@@ -312,6 +550,11 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         } else {
             self.builder
                 .reject(AbilityType::Swiftmend, RejectionReason::NoValidTarget);
+        }
+
+        // The escape shift.
+        if self.try_travel_form(combatant) {
+            return true;
         }
 
         // 4. Self-Innervate when the pool runs low.
@@ -384,7 +627,12 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 .reject(AbilityType::Lifebloom, RejectionReason::NoValidTarget);
         }
 
-        // 7. Rejuvenation on anyone else who is hurt and has none.
+        // 7. Control: a peel for the focused ally, or the enemy healer.
+        if self.try_control(combatant, focus.map(|(e, _, hp, _)| (e, hp))) {
+            return true;
+        }
+
+        // 8. Rejuvenation on anyone else who is hurt and has none.
         let focus_entity = focus.map(|(e, _, _, _)| e);
         let top_up = self
             .ctx
@@ -408,8 +656,204 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             }
         }
 
-        // 8. Moonfire on the kill target, when it is not already burning.
+        // 9. Moonfire on the kill target, when it is not already burning.
         self.try_moonfire(combatant)
+    }
+
+    /// Travel Form, when [`shift_trigger`] says so. An instant: the mana and
+    /// the global cooldown are paid here, and `effects::process_travel_form`
+    /// breaks the roots and snares and puts the form on next frame.
+    fn try_travel_form(&mut self, combatant: &mut Combatant) -> bool {
+        let ability = AbilityType::TravelForm;
+        let view = ShiftView::of(
+            self.ctx,
+            self.entity,
+            self.my_pos,
+            self.auras,
+            self.pressured,
+            self.threat_radius,
+            combatant.current_health / combatant.max_health,
+        );
+        if shift_trigger(view).is_none() {
+            self.builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: "no threat to escape: not pressured, unsnared or unchased, or healthy"
+                        .to_string(),
+                },
+            );
+            return false;
+        }
+        let def = self.abilities.get_unchecked(&ability);
+        let opts = PreCastOpts::default();
+        if !pre_cast_ok(
+            ability,
+            def,
+            combatant,
+            self.my_pos,
+            self.auras,
+            None,
+            self.ctx,
+            opts,
+        ) {
+            self.builder.reject(
+                ability,
+                classify_pre_cast_failure(
+                    ability,
+                    def,
+                    combatant,
+                    self.my_pos,
+                    self.auras,
+                    None,
+                    self.ctx,
+                    opts,
+                ),
+            );
+            return false;
+        }
+        self.builder.choose(ability, Some(self.entity), true);
+        combatant.current_mana -= def.mana_cost;
+        combatant.global_cooldown = GCD;
+        self.log_use(combatant, &def.name, self.entity, "casts");
+        self.commands.spawn(ShapeshiftPending {
+            caster: self.entity,
+            shift: Shift::IntoTravelForm,
+        });
+        true
+    }
+
+    /// Crowd control, in priority order:
+    /// 1. **Cyclone as a peel** — the focused ally is below [`DRUID_URGENT_HP`]
+    ///    and a visible enemy is attacking it: cyclone the attacker. Never
+    ///    governed: an ally is dying.
+    /// 2. **Cyclone on the enemy healer** — the kill target is below
+    ///    [`DRUID_CYCLONE_KILL_HP`]: six seconds with no heals on it.
+    /// 3. **Entangling Roots** — a melee enemy attacking the Druid or the
+    ///    focused ally (or closing on either) is pinned.
+    ///
+    /// The kill target is never cycloned or rooted: a Cyclone would make it
+    /// immune to the team's damage, and the team's damage would break a root.
+    /// A target already under hard crowd control, or immune to the bucket by
+    /// diminishing returns, is passed over.
+    fn try_control(&mut self, combatant: &mut Combatant, focus: Option<(Entity, f32)>) -> bool {
+        let kill_target = combatant.target;
+        let usable = |turn: &Self, e: &CombatantInfo, category: DRCategory| {
+            e.is_alive
+                && Some(e.entity) != kill_target
+                && !turn.ctx.is_ccd(e.entity)
+                && !turn.ctx.is_dr_immune(e.entity, category)
+        };
+        // Enemies attacking `ally` from within their reach, nearest first.
+        let attackers_of = |turn: &Self, ally: Entity| -> Vec<(Entity, Vec3)> {
+            let Some(ally_pos) = turn.ctx.combatants.get(&ally).map(|a| a.position) else {
+                return Vec::new();
+            };
+            let mut attackers: Vec<&CombatantInfo> = turn
+                .ctx
+                .enemies_targeting(ally)
+                .into_iter()
+                .filter(|e| {
+                    let reach = match e.pet_type {
+                        Some(pet) => pet.preferred_range(),
+                        None => e.class.preferred_range(),
+                    } + DRUID_ATTACK_RANGE_SLACK;
+                    e.position.distance(ally_pos) <= reach
+                })
+                .collect();
+            attackers.sort_by(|a, b| {
+                turn.my_pos
+                    .distance(a.position)
+                    .partial_cmp(&turn.my_pos.distance(b.position))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            attackers
+                .into_iter()
+                .map(|e| (e.entity, e.position))
+                .collect()
+        };
+
+        // 1. Cyclone to peel for a dying focus.
+        let peel = focus
+            .filter(|&(_, hp)| hp < DRUID_URGENT_HP)
+            .and_then(|(ally, _)| {
+                attackers_of(self, ally).into_iter().find(|(e, _)| {
+                    self.ctx
+                        .combatants
+                        .get(e)
+                        .is_some_and(|info| !info.is_pet && usable(self, info, DRCategory::Cyclone))
+                })
+            });
+        if let Some((enemy, enemy_pos)) = peel {
+            if self.cast(combatant, AbilityType::Cyclone, enemy, enemy_pos) {
+                return true;
+            }
+        }
+
+        // 2. Cyclone the enemy healer when the kill is close.
+        let kill_close = kill_target
+            .and_then(|t| self.ctx.combatants.get(&t))
+            .is_some_and(|t| t.is_alive && t.health_pct() < DRUID_CYCLONE_KILL_HP);
+        let healer = self
+            .ctx
+            .enemy_healer()
+            .and_then(|h| self.ctx.combatants.get(&h))
+            .filter(|h| usable(self, h, DRCategory::Cyclone))
+            .map(|h| (h.entity, h.position));
+        match healer {
+            Some((healer, healer_pos)) if kill_close => {
+                if self.governed_cast(combatant, AbilityType::Cyclone, healer, healer_pos, false) {
+                    return true;
+                }
+            }
+            _ if peel.is_none() => {
+                self.builder.reject(
+                    AbilityType::Cyclone,
+                    RejectionReason::PreconditionUnmet {
+                        note: "no dying ally to peel for, and no enemy healer to cyclone \
+                               while the kill is close"
+                            .to_string(),
+                    },
+                );
+            }
+            _ => {}
+        }
+
+        // 3. Entangling Roots on a melee on the Druid or on its focus.
+        let mut guarded = vec![self.entity];
+        if let Some((ally, _)) = focus {
+            guarded.push(ally);
+        }
+        let melee_threat = guarded.into_iter().find_map(|ally| {
+            let ally_pos = self.ctx.combatants.get(&ally)?.position;
+            self.ctx
+                .enemies_targeting(ally)
+                .into_iter()
+                .filter(|e| {
+                    (e.class.is_melee() || e.is_pet)
+                        && e.position.distance(ally_pos) <= self.threat_radius
+                        && usable(self, e, DRCategory::Roots)
+                })
+                .min_by(|a, b| {
+                    a.position
+                        .distance(ally_pos)
+                        .partial_cmp(&b.position.distance(ally_pos))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|e| (e.entity, e.position))
+        });
+        let Some((enemy, enemy_pos)) = melee_threat else {
+            self.builder
+                .reject(AbilityType::EntanglingRoots, RejectionReason::NoValidTarget);
+            return false;
+        };
+        let urgent = focus.is_some_and(|(_, hp)| hp < DRUID_URGENT_HP);
+        self.governed_cast(
+            combatant,
+            AbilityType::EntanglingRoots,
+            enemy,
+            enemy_pos,
+            urgent,
+        )
     }
 
     /// Mark of the Wild on the first ally (self included, pets excluded) who
@@ -534,14 +978,17 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         target_pos: Vec3,
     ) -> bool {
         let def = self.abilities.get_unchecked(&ability);
-        let opts = if ability == AbilityType::Moonfire {
-            PreCastOpts {
+        let opts = match ability {
+            AbilityType::Moonfire => PreCastOpts {
                 check_friendly_cc: true,
                 check_target_immune: true,
                 ..Default::default()
-            }
-        } else {
-            PreCastOpts::default()
+            },
+            AbilityType::EntanglingRoots | AbilityType::Cyclone => PreCastOpts {
+                check_target_immune: true,
+                ..Default::default()
+            },
+            _ => PreCastOpts::default(),
         };
         let target = Some((target, target_pos));
         if pre_cast_ok(
@@ -657,6 +1104,157 @@ mod tests {
             lifebloom_decision(Some(&lifebloom(3, 1.0)), 0.5, true),
             LifebloomDecision::LetBloom,
             "hurt: let the bloom land rather than refresh it away"
+        );
+    }
+
+    fn shift() -> ShiftView {
+        ShiftView {
+            pressured: true,
+            rooted: false,
+            snared: false,
+            chaser: false,
+            melee_on_me: false,
+            self_health_pct: 1.0,
+        }
+    }
+
+    #[test]
+    fn the_shift_answers_a_threat_only() {
+        // Not pressured: nothing, rooted or not.
+        assert_eq!(
+            shift_trigger(ShiftView {
+                pressured: false,
+                rooted: true,
+                ..shift()
+            }),
+            None
+        );
+        // Pressured and rooted: break it.
+        assert_eq!(
+            shift_trigger(ShiftView {
+                rooted: true,
+                ..shift()
+            }),
+            Some(ShiftReason::BreakImpairment)
+        );
+        // Snared with a melee or pet chasing: break it...
+        assert_eq!(
+            shift_trigger(ShiftView {
+                snared: true,
+                chaser: true,
+                ..shift()
+            }),
+            Some(ShiftReason::BreakImpairment)
+        );
+        // ...but a snare with no chaser is shrugged off: the form outruns
+        // legs, not spells.
+        assert_eq!(
+            shift_trigger(ShiftView {
+                snared: true,
+                ..shift()
+            }),
+            None
+        );
+        // Pressured, free, a melee on a hurt Druid: open distance.
+        assert_eq!(
+            shift_trigger(ShiftView {
+                melee_on_me: true,
+                self_health_pct: DRUID_SHIFT_OPEN_HP - 0.01,
+                ..shift()
+            }),
+            Some(ShiftReason::OpenDistance)
+        );
+        // ...but not on a healthy one, and not with no melee on it.
+        assert_eq!(
+            shift_trigger(ShiftView {
+                melee_on_me: true,
+                self_health_pct: DRUID_SHIFT_OPEN_HP,
+                ..shift()
+            }),
+            None
+        );
+        assert_eq!(
+            shift_trigger(ShiftView {
+                self_health_pct: 0.1,
+                ..shift()
+            }),
+            None
+        );
+    }
+
+    fn view() -> FormView {
+        FormView {
+            in_form_secs: DRUID_MIN_FORM_SECS,
+            rooted: false,
+            chaser_near: false,
+            chaser_striking: false,
+            healing_needed: true,
+            enemy_in_reach: false,
+            would_reshift: false,
+        }
+    }
+
+    #[test]
+    fn the_druid_leaves_the_form_once_safe_with_work_to_do() {
+        assert!(should_leave_form(view()));
+        assert!(should_leave_form(FormView {
+            healing_needed: false,
+            enemy_in_reach: true,
+            ..view()
+        }));
+        assert!(
+            !should_leave_form(FormView {
+                in_form_secs: DRUID_MIN_FORM_SECS - 0.1,
+                ..view()
+            }),
+            "a fresh shift is not thrown straight back"
+        );
+        assert!(
+            !should_leave_form(FormView {
+                chaser_near: true,
+                ..view()
+            }),
+            "a chaser inside the danger radius keeps it shifted"
+        );
+        assert!(
+            should_leave_form(FormView {
+                chaser_near: true,
+                in_form_secs: DRUID_MAX_CHASE_SECS,
+                ..view()
+            }),
+            "...until it has run too long without shaking it"
+        );
+        assert!(
+            !should_leave_form(FormView {
+                chaser_near: true,
+                chaser_striking: true,
+                in_form_secs: DRUID_MAX_CHASE_SECS,
+                ..view()
+            }),
+            "never with the chaser in striking reach"
+        );
+        assert!(
+            !should_leave_form(FormView {
+                healing_needed: false,
+                ..view()
+            }),
+            "nothing to heal and nothing in reach: stay fast"
+        );
+        assert!(
+            should_leave_form(FormView {
+                in_form_secs: 0.1,
+                chaser_near: true,
+                rooted: true,
+                ..view()
+            }),
+            "rooted again: leave at once, to re-shift"
+        );
+        assert!(
+            !should_leave_form(FormView {
+                would_reshift: true,
+                ..view()
+            }),
+            "never into a shift straight back"
         );
     }
 

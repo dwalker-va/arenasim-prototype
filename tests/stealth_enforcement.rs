@@ -543,6 +543,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     auras,
                     &ctx,
                     &movement,
+                    false,
                     true,
                     0.0,
                     &mut trace,
@@ -809,7 +810,7 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | ShadowResistanceAura | ConcentrationAura | LightningBolt | FrostShock
         | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem | EarthTotem
         | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild
-        | Innervate => false,
+        | Innervate | EntanglingRoots | Cyclone | TravelForm => false,
     }
 }
 

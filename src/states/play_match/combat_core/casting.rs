@@ -1096,9 +1096,10 @@ pub fn process_channeling(
         .iter()
         .filter(|(_, _, _, _, auras)| {
             auras.as_ref().is_some_and(|a| {
-                a.auras
-                    .iter()
-                    .any(|aura| aura.effect_type == AuraType::DamageImmunity)
+                a.is_cycloned()
+                    || a.auras
+                        .iter()
+                        .any(|aura| aura.effect_type == AuraType::DamageImmunity)
             })
         })
         .map(|(entity, _, _, _, _)| entity)

@@ -54,6 +54,13 @@ pub struct CasterHealerPlan {
 /// Returns a [`CasterHealerPlan`] whose `escape_defer` is
 /// `Some(urgency_hp_threshold)` while an ESCAPE window is live — the rotation
 /// defers non-critical movement-locking casts for the window.
+///
+/// `shifted` is the Druid's Travel Form (always `false` for the Shaman): a
+/// shifted healer is in ESCAPE for as long as it stays shifted — the form
+/// broke its roots and snares and it cannot cast, so running is the whole of
+/// its job. It runs from every visible CHASER — a melee enemy or pet — inside
+/// the intent radius (the form outruns legs, not spells) and re-scores its
+/// direction each commit window.
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_caster_healer_posture(
     commands: &mut Commands,
@@ -65,6 +72,7 @@ pub fn evaluate_caster_healer_posture(
     directive: Option<&MovementDirective>,
     movement: &MovementConfig,
     block: &CasterHealerMovementConfig,
+    shifted: bool,
     now: f32,
     decision_trace: &mut DecisionTrace,
 ) -> CasterHealerPlan {
@@ -97,6 +105,7 @@ pub fn evaluate_caster_healer_posture(
     };
 
     let next = match prev {
+        _ if shifted => Posture::Escape,
         Posture::Escape if now < state.escape_until => Posture::Escape,
         Posture::Escape if trigger => Posture::Pressured,
         Posture::Escape => Posture::Free,
@@ -126,6 +135,12 @@ pub fn evaluate_caster_healer_posture(
             }
         }
     }
+    // A shift escape has no window to run out: it re-commits each commit
+    // window for as long as the healer stays shifted.
+    let shift_commit = shifted && (transitioned || now >= state.escape_until);
+    if shift_commit {
+        state.escape_until = now + shared.commit_window;
+    }
 
     // Medic chase (shared) overrides FREE formation / PRESSURED denial when a
     // dying teammate is occluded — walk around cover to regain sight and heal.
@@ -148,6 +163,26 @@ pub fn evaluate_caster_healer_posture(
             state.medic_target = None;
         }
         match next {
+            Posture::Escape if shifted => escape_tick(
+                commands,
+                entity,
+                my_pos,
+                ctx,
+                state,
+                directive,
+                shared,
+                &block.weights,
+                decision_trace,
+                shift_commit,
+                prev,
+                if prev == Posture::Escape {
+                    MovementTrigger::CommitExpired
+                } else {
+                    MovementTrigger::ShiftEscape
+                },
+                shared.threat_intent_radius,
+                true,
+            ),
             Posture::Escape => escape_tick(
                 commands,
                 entity,
@@ -160,6 +195,9 @@ pub fn evaluate_caster_healer_posture(
                 decision_trace,
                 transitioned,
                 prev,
+                MovementTrigger::EscapeWindowOpen,
+                shared.danger_radius,
+                false,
             ),
             Posture::Pressured => caster_healer_pressured_tick(
                 commands,

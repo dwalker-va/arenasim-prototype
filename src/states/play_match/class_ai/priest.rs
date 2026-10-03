@@ -1827,6 +1827,9 @@ pub fn evaluate_priest_posture(
                 decision_trace,
                 transitioned,
                 prev,
+                MovementTrigger::EscapeWindowOpen,
+                shared.danger_radius,
+                false,
             ),
             Posture::Pressured => {
                 cast_defer = pressured_tick(

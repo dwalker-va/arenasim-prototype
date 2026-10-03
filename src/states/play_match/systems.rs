@@ -46,6 +46,7 @@ pub use super::effects::process_divine_shield;
 pub use super::effects::process_holy_shock_damage;
 pub use super::effects::process_holy_shock_heals;
 pub use super::effects::process_mana_burn;
+pub use super::effects::process_travel_form;
 
 // === Phase 2: Combat and Movement ===
 pub use super::auras::process_aura_breaks;
@@ -205,8 +206,17 @@ pub fn add_core_combat_systems<M, N>(
             slow_zone_system,       // Zone slow refresh before aura processing
             flare_system, // Exposes Rogues standing in a Flare before anyone acquires targets
             totem_pulse_system, // Totem dedup + buff pulse on allies (after slow_zone_system)
-            process_divine_shield, // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
-            process_berserker_rage, // Must run BEFORE apply_pending_auras so FearImmunity blocks queued Fears
+            // The self-applied immunities and shifts, in this order, all BEFORE
+            // apply_pending_auras so each immunity meets the CC queued this frame:
+            // DamageImmunity blocks CC, FearImmunity blocks queued Fears, and a
+            // shifted Druid meets a queued Polymorph immune. A nested chain,
+            // because the outer tuple is at Bevy's 20-system limit.
+            (
+                process_divine_shield,
+                process_berserker_rage,
+                process_travel_form,
+            )
+                .chain(),
             apply_pending_auras,
             process_dispels,
             // Must run AFTER process_dispels (consumes BacklashPending events that

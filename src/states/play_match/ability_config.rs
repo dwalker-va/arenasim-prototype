@@ -497,6 +497,9 @@ impl AbilityDefinitions {
             AbilityType::Moonfire,
             AbilityType::MarkOfTheWild,
             AbilityType::Innervate,
+            AbilityType::EntanglingRoots,
+            AbilityType::Cyclone,
+            AbilityType::TravelForm,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities

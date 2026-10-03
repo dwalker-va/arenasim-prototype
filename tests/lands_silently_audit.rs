@@ -200,6 +200,7 @@ fn aura_family(t: AuraType) -> AuraFamily {
         | AuraType::Fear
         | AuraType::Polymorph
         | AuraType::Incapacitate
+        | AuraType::Cyclone
         | AuraType::Silence
         | AuraType::SpellSchoolLockout
         | AuraType::MovementSpeedSlow
@@ -226,7 +227,8 @@ fn aura_family(t: AuraType) -> AuraFamily {
         | AuraType::HealingOverTime
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
-        | AuraType::ArmorIncrease => AuraFamily::Status,
+        | AuraType::ArmorIncrease
+        | AuraType::TravelForm => AuraFamily::Status,
     }
 }
 
@@ -462,7 +464,9 @@ const CONTROL_MEMBERS: &[AbilityType] = &[
     CheapShot,
     ConcussiveShot,
     CripplingPoison,
+    Cyclone,
     DeathCoil,
+    EntanglingRoots,
     Fear,
     FreezingTrap,
     FrostNova,
@@ -508,9 +512,16 @@ fn control_finds_every_member() {
     assert_finds("crowd-control", is_control, CONTROL_MEMBERS);
 }
 
+const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[(Cyclone, "AS-160 (Druid visuals)")];
+
 #[test]
 fn control_lands_nothing_silently() {
-    assert_judged("crowd-control", is_control, control_treatment, &[]);
+    assert_judged(
+        "crowd-control",
+        is_control,
+        control_treatment,
+        CONTROL_KNOWN_SILENT,
+    );
 }
 
 // ── family: buff / debuff application ───────────────────────────────────────
@@ -546,6 +557,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     PowerWordShield,
     Rejuvenation,
     ShadowResistanceAura,
+    TravelForm,
     WaterTotem,
 ];
 
@@ -607,6 +619,7 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (Innervate, "AS-160 (Druid visuals)"),
     (MarkOfTheWild, "AS-160 (Druid visuals)"),
+    (TravelForm, "AS-160 (Druid visuals)"),
 ];
 
 #[test]

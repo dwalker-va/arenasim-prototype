@@ -5,6 +5,7 @@
 //! through [`apply_healing`]. The rules that apply to ALL healing received live
 //! here and nowhere else, so a new heal site cannot forget one of them:
 //!
+//! 0. A CYCLONED target takes no healing at all ([`AuraType::Cyclone`]).
 //! 1. [`AuraType::HealingReduction`] (Mortal Strike's Mortal Wound and the
 //!    other healing debuffs): Classic cuts all healing received, heal over time
 //!    ticks included.
@@ -61,6 +62,12 @@ pub fn apply_healing(
     dampening: &ArenaDampening,
     amount: f32,
 ) -> f32 {
+    // Healing immunity: nothing heals a cycloned target — no direct heal, no
+    // tick, no bloom, no drain. First, so no tell and no dampening either.
+    if target_auras.is_some_and(ActiveAuras::is_cycloned) {
+        return 0.0;
+    }
+
     // Healing reduction: each debuff's magnitude is a multiplier (0.65 = 35%
     // reduction), and two of them compound.
     let mut healing = amount;

@@ -149,6 +149,10 @@ produces it.
 - Prevents movement only
 - Target can still attack and cast spells
 - Example: Frost Nova (6s duration)
+- Entangling Roots (Druid, 1.5s cast, 8s) is a root plus a small Nature DoT,
+  bound into one compound debuff: whatever ends the root (80 damage, a dispel,
+  a Travel Form shift, its duration) ends the DoT too. The DoT's own ticks
+  count toward the break.
 
 ### Stun
 - Prevents all actions (movement, attacking, casting)
@@ -166,6 +170,42 @@ produces it.
 - Breaks on ANY damage (threshold: 0)
 - Separate category from stuns for future diminishing returns
 - Example: Mage Polymorph (10s duration)
+
+### Cyclone (Druid, TBC)
+- 1.5s cast, 20 yd, 6s: the target cannot move or act
+- The target is immune to damage AND healing for the duration, and no new
+  aura of any kind lands on it (friendly or hostile). The damage immunity is at
+  the top of `apply_damage_with_absorb`, the healing immunity at the top of
+  `apply_healing`, the aura immunity in `apply_pending_auras` — plus the three
+  sites that push an aura directly (Frost Trap zone, totem pulse, Crippling
+  Poison)
+- Never breaks on damage, and no dispel takes it
+- Diminishes on its own bucket (`DRCategory::Cyclone`): Polymorph and Fear do
+  not shorten it, and it does not shorten them
+- Nothing is used from inside it — not Divine Shield, not Berserker Rage
+
+### Travel Form (Druid escape shift)
+- Instant, 25 mana, on the global cooldown. Shifting removes every Root and
+  every `MovementSpeedSlow` on the Druid, whatever its removal class (the
+  physical snares too), each as a whole debuff
+- While shifted: +40% movement speed, immune to Polymorph, no casting and no
+  auto-attacks. Not purgeable or dispellable — a shapeshift is not a spell on
+  the Druid
+- **Leaving the form is free and costs no global cooldown** (WoW's cancel-aura),
+  so the Druid can shift out and cast an instant heal on the same beat. The
+  form has no timer that matters (600s ceiling); the Druid ends it
+- No second resource pool and no kit swap — an escape shift only
+- AI: the Druid shifts when PRESSURED and rooted, or snared with a melee or pet
+  chasing it, or below 60% HP with a melee on it. A snare with no chaser is
+  shrugged off — the form outruns legs, not spells. The posture machine then
+  runs it in ESCAPE from its melee and pet chasers (`ShiftEscape`). It shifts
+  out at once if it is rooted again, and re-shifts through the root. Otherwise
+  it shifts out once it has been shifted 3s, no melee or pet is within
+  striking reach (nor within 12 yd, for its first 8s in form), the shift rule
+  would not fire straight back, and it has work — an ally in range below 80%
+  HP, or an enemy within Moonfire's range. With nothing to heal and nothing in
+  reach it stays shifted. After a leave of its own accord it holds the shift
+  back for one global cooldown, as the cast it left to make would
 
 ### Future: Diminishing Returns
 - Not yet implemented
@@ -296,6 +336,8 @@ For auras that can break on damage:
 | `SpellLockout`      | Prevents casting school for duration     |
 | `WeakenedSoul`      | Prevents PW:S reapplication              |
 | `ShadowSight`       | Can see stealthed enemies                |
+| `Cyclone`           | No acting; immune to damage, healing and new auras |
+| `TravelForm`        | Druid shapeshift: speed, Polymorph immunity, no casting |
 
 ---
 

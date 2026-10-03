@@ -311,6 +311,12 @@ pub enum MovementTrigger {
     /// a teammate fell below half health, or the Flare was relit over its
     /// approach (an `entity` goal: plain pursuit of its target).
     FlareCommit,
+    /// → ESCAPE (Druid): the healer shifted into Travel Form, which broke its
+    /// roots and snares; it runs from every melee or pet CHASER inside the
+    /// intent radius (the form outruns legs, not spells) for as long as it
+    /// stays shifted, re-committing its direction each commit window (traced
+    /// as `CommitExpired`).
+    ShiftEscape,
 }
 
 /// Shape of the movement goal carried by the directive this decision issued.
