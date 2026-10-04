@@ -22,12 +22,13 @@
 //! 7. What a teammate below `urgency_hp_threshold` is owed, and the peels (see
 //!    [`DruidTurn::try_dying_heal`]): the teammate's Rejuvenation; Cyclone on
 //!    an enemy attacking the focus once it is below [`DRUID_URGENT_HP`]; Roots
-//!    on a melee attacking or closing on a dying teammate; the teammate's
+//!    on a melee enemy or pet attacking or closing on a dying teammate; the
+//!    teammate's
 //!    Lifebloom stack while it is under attack — then a Mark of the Wild step 1
 //!    held back.
-//! 8. Control, when the kill needs its healer gone or a melee is on the Druid
-//!    or its focus (see [`DruidTurn::try_control`]): Cyclone, then Entangling
-//!    Roots.
+//! 8. Control, when the kill needs its healer gone or a melee enemy or pet is
+//!    on the Druid or its focus (see [`DruidTurn::try_control`]): Cyclone, then
+//!    Entangling Roots.
 //! 9. Rejuvenation on any other injured ally.
 //! 10. Moonfire on the kill target.
 //!
@@ -35,8 +36,8 @@
 //! below `urgency_hp_threshold` that the Druid can reach (range, then sight)
 //! gets what its kit can still add — below [`DRUID_EMERGENCY_HP`], Swiftmend
 //! or the Rejuvenation that arms it (2-3); otherwise its own Rejuvenation, and
-//! a Lifebloom stack while it is under attack (7) — and a melee attacking or
-//! closing on it is rooted (the Roots PEEL, 7), before Mark of the Wild, a
+//! a Lifebloom stack while it is under attack (7) — and a melee enemy or pet
+//! attacking or closing on it is rooted (the Roots PEEL, 7), before Mark of the Wild, a
 //! Cyclone or Entangling Roots that is not a peel, or Moonfire. And while the
 //! medic walk is live and its teammate is NOT yet in reach, those damage and
 //! utility casts are held outright: every Druid spell is an instant on the
@@ -549,6 +550,27 @@ pub fn decide_druid_action(
     acted
 }
 
+/// How [`DruidTurn::melee_threat`] treats a candidate beyond Roots' range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RootsPick {
+    /// The Roots PEEL: reach-first, range then sight, as `ally_reach` is — a
+    /// candidate beyond range is passed over for one Roots can land on.
+    Peel,
+    /// Step 8's Roots: a candidate beyond range is still picked and refused,
+    /// the rule for every chooser that ranks without a range filter.
+    Step8,
+}
+
+/// The candidates [`DruidTurn::melee_threat`] passed over, for the rejection
+/// a pick that found none reports.
+#[derive(Debug, Clone, Copy, Default)]
+struct RootsSkipped {
+    /// One immune to damage.
+    immune: bool,
+    /// One in range but out of sight.
+    occluded: bool,
+}
+
 /// What the Cyclone peel ([`DruidTurn::try_cyclone_peel`]) did this turn.
 #[derive(Debug, Clone, Copy, Default)]
 struct CyclonePeel {
@@ -939,10 +961,20 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// The Roots PEEL: Entangling Roots on a melee enemy or pet attacking or
     /// closing on a teammate below `urgency_hp_threshold` within heal range
     /// (the Druid included; in sight or not — the melee may be in sight when
-    /// the teammate is not), lowest teammate first. Never governed and never
+    /// the teammate is not), lowest teammate first. The pick is reach-first
+    /// ([`RootsPick::Peel`]): an attacker Roots cannot land on yields to the
+    /// next one, then to the next dying teammate's. Never governed and never
     /// held for the medic walk. Silent when there is nothing to peel: step 8's
     /// Roots traces the rejection.
     fn try_roots_peel(&mut self, combatant: &mut Combatant) -> bool {
+        // A Druid that cannot cast Roots at all leaves the refusal to step 8,
+        // so a frame carries one Roots rejection, not two.
+        if self
+            .caster_refusal(combatant, AbilityType::EntanglingRoots)
+            .is_some()
+        {
+            return false;
+        }
         let mut dying: Vec<&CombatantInfo> = self
             .ctx
             .alive_allies()
@@ -960,8 +992,12 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         let dying: Vec<Entity> = dying.into_iter().map(|a| a.entity).collect();
-        let Some((enemy, enemy_pos)) = self.melee_threat(combatant.target, &dying, &mut false)
-        else {
+        let Some((enemy, enemy_pos)) = self.melee_threat(
+            combatant.target,
+            &dying,
+            RootsPick::Peel,
+            &mut RootsSkipped::default(),
+        ) else {
             return false;
         };
         self.cast(combatant, AbilityType::EntanglingRoots, enemy, enemy_pos)
@@ -970,13 +1006,17 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// The Roots pick: for the first of `guarded` that has one, the visible
     /// melee enemy or pet targeting it within `threat_intent_radius` — nearest
     /// to it first — that Roots can take (alive, not the kill target, not
-    /// already crowd-controlled, not immune by diminishing returns). A pick
-    /// Roots could reach but for sight is passed over, and sets `occluded`.
+    /// already crowd-controlled, not immune by diminishing returns). A
+    /// candidate Roots would refuse for the target alone is passed over for
+    /// the next one, then for the next guarded ally's, and noted in `skipped`:
+    /// one immune to damage ([`CombatContext::entity_is_immune`]), and one in
+    /// range but out of sight. `mode` says what happens to one beyond range.
     fn melee_threat(
         &self,
         kill_target: Option<Entity>,
         guarded: &[Entity],
-        occluded: &mut bool,
+        mode: RootsPick,
+        skipped: &mut RootsSkipped,
     ) -> Option<(Entity, Vec3)> {
         let roots_range = self
             .abilities
@@ -996,10 +1036,21 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                         && !self.ctx.is_dr_immune(e.entity, DRCategory::Roots)
                 })
                 .filter(|e| {
-                    let blocked =
-                        super::sight_blocks(self.ctx, roots_range, self.my_pos, e.position);
-                    *occluded |= blocked;
-                    !blocked
+                    let reach = super::cast_reach(self.ctx, roots_range, self.my_pos, e.position);
+                    let passed_over = match reach {
+                        super::CastReach::Reaches => false,
+                        super::CastReach::LosBlocked => {
+                            skipped.occluded = true;
+                            true
+                        }
+                        super::CastReach::OutOfRange { .. } => mode == RootsPick::Peel,
+                    };
+                    if passed_over {
+                        return false;
+                    }
+                    let immune = self.ctx.entity_is_immune(e.entity);
+                    skipped.immune |= immune;
+                    !immune
                 })
                 .min_by(|a, b| {
                     a.position
@@ -1079,8 +1130,10 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     ///    governed: an ally is dying.
     /// 2. **Cyclone on the enemy healer** — the kill target is below
     ///    [`DRUID_CYCLONE_KILL_HP`]: six seconds with no heals on it.
-    /// 3. **Entangling Roots** — a melee enemy attacking the Druid or the
-    ///    focused ally (or closing on either) is pinned.
+    /// 3. **Entangling Roots** — a melee enemy or pet attacking the Druid or
+    ///    the focused ally (or closing on either) is pinned. One immune to
+    ///    damage, or in range but out of sight, is passed over for the next;
+    ///    one beyond range is still picked and refused ([`RootsPick::Step8`]).
     ///
     /// The kill target is never cycloned or rooted: a Cyclone would make it
     /// immune to the team's damage, and the team's damage would break a root.
@@ -1138,23 +1191,27 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             _ => {}
         }
 
-        // 3. Entangling Roots on a melee on the Druid or on its focus.
+        // 3. Entangling Roots on a melee or pet on the Druid or its focus.
         let mut guarded = vec![self.entity];
         if let Some((ally, _)) = focus {
             guarded.push(ally);
         }
-        let mut roots_occluded = false;
-        let melee_threat = self.melee_threat(kill_target, &guarded, &mut roots_occluded);
+        let mut skipped = RootsSkipped::default();
+        let melee_threat = self.melee_threat(kill_target, &guarded, RootsPick::Step8, &mut skipped);
         let urgent = focus.is_some_and(|(_, hp)| hp < DRUID_URGENT_HP);
         let Some((enemy, enemy_pos)) = melee_threat else {
             let roots = AbilityType::EntanglingRoots;
-            // An occluded pick reports what a cast on it would have met first:
-            // the governor, then the caster's own state, then sight.
-            let reason = if roots_occluded {
+            // A passed-over pick reports what a cast on it would have met
+            // first: the governor, then the caster's own state, then the
+            // target — immune (the pick in sight), else out of sight.
+            let reason = if skipped.immune || skipped.occluded {
+                let target = if skipped.immune {
+                    RejectionReason::TargetImmune
+                } else {
+                    RejectionReason::LosBlocked
+                };
                 self.governor_refusal(combatant, roots, urgent)
-                    .unwrap_or_else(|| {
-                        self.unreached(combatant, roots, RejectionReason::LosBlocked)
-                    })
+                    .unwrap_or_else(|| self.caster_refusal(combatant, roots).unwrap_or(target))
             } else {
                 RejectionReason::NoValidTarget
             };
@@ -1301,6 +1358,40 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             RejectionReason::PreconditionUnmet {
                 note: "mana governor: holding the reserve for dampening".to_string(),
             }
+        })
+    }
+
+    /// The caster's own refusal of `ability` — Travel Form, a lockout, a
+    /// silence, a cooldown, mana — asked with no target, in `pre_cast_ok`'s
+    /// order. `None` when the caster could cast it.
+    fn caster_refusal(
+        &self,
+        combatant: &Combatant,
+        ability: AbilityType,
+    ) -> Option<RejectionReason> {
+        let def = self.abilities.get_unchecked(&ability);
+        let opts = Self::guard_opts(ability);
+        (!pre_cast_ok(
+            ability,
+            def,
+            combatant,
+            self.my_pos,
+            self.auras,
+            None,
+            self.ctx,
+            opts,
+        ))
+        .then(|| {
+            classify_pre_cast_failure(
+                ability,
+                def,
+                combatant,
+                self.my_pos,
+                self.auras,
+                None,
+                self.ctx,
+                opts,
+            )
         })
     }
 
@@ -2523,6 +2614,138 @@ mod reach_tests {
         assert!(
             note.as_str().is_some_and(|n| n.contains("medic walk")),
             "the Mark is held for the walk: {note}"
+        );
+    }
+
+    /// The Roots peel picks reach-first: the lowest dying teammate's only
+    /// melee is beyond Roots' range, so it yields to the next dying teammate's
+    /// melee, which Roots can land on. (Swiftmend and Cyclone on cooldown, the
+    /// Druid under the governor's reserve and every heal rolling, so the peel
+    /// is the only cast left.)
+    #[test]
+    fn the_roots_peel_passes_over_an_attacker_beyond_range() {
+        let (mut s, kill) = kill_scene(0.40, 0.48);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        s.roster.get_mut(&warrior).unwrap().position = Vec3::new(0.0, 1.0, -38.0);
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, warrior);
+        all_heals_rolling(&mut s, mage);
+        add_enemy(&mut s, Warrior, Vec3::new(0.0, 1.0, -45.0), Some(warrior));
+        let near = add_enemy(
+            &mut s,
+            Rogue,
+            IN_SIGHT + Vec3::new(1.0, 0.0, 1.0),
+            Some(mage),
+        );
+        s.prep = Some(|c| {
+            under_the_reserve(c);
+            c.ability_cooldowns.insert(AbilityType::Swiftmend, 10.0);
+            c.ability_cooldowns.insert(AbilityType::Cyclone, 10.0);
+        });
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("EntanglingRoots", near)
+        );
+    }
+
+    /// Step 8's Roots passes over an attacker immune to damage: a Rogue on
+    /// the Druid under a damage immunity yields to the Warrior on the focus.
+    /// With no other attacker, the immune one is reported.
+    #[test]
+    fn step_eight_roots_passes_over_an_immune_attacker() {
+        let immune = || {
+            vec![Aura {
+                effect_type: AuraType::DamageImmunity,
+                ..Default::default()
+            }]
+        };
+        let (mut s, kill) = kill_scene(1.0, 0.7);
+        let (me, mage) = (s.units[0], s.units[2]);
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, mage);
+        let rogue = add_enemy(&mut s, Rogue, Vec3::new(3.0, 1.0, 0.0), Some(me));
+        s.auras.insert(rogue, immune());
+        let warrior = add_enemy(
+            &mut s,
+            Warrior,
+            IN_SIGHT + Vec3::new(1.0, 0.0, 1.0),
+            Some(mage),
+        );
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("EntanglingRoots", warrior),
+            "the Warrior on the focus, past the immune Rogue on the Druid"
+        );
+
+        let (mut s, kill) = kill_scene(1.0, 1.0);
+        let me = s.units[0];
+        mark_everyone(&mut s);
+        // The Rogue makes the Druid the focus: its heals are rolling.
+        all_heals_rolling(&mut s, me);
+        let rogue = add_enemy(&mut s, Rogue, Vec3::new(3.0, 1.0, 0.0), Some(me));
+        s.auras.insert(rogue, immune());
+        let trace = take(&mut s, &[], kill, None);
+        assert_eq!(
+            candidate(&trace, "EntanglingRoots")["reason"],
+            "TargetImmune",
+            "only the immune Rogue"
+        );
+    }
+
+    /// The Cyclone peel waits for the focus to drop below `DRUID_URGENT_HP`:
+    /// above it, the Rogue attacking the focus is rooted, not cycloned.
+    #[test]
+    fn the_cyclone_peel_waits_for_the_urgent_threshold() {
+        let cast_on_the_attacker = |mage_hp: f32| {
+            let (mut s, kill) = kill_scene(1.0, mage_hp);
+            let mage = s.units[2];
+            mark_everyone(&mut s);
+            all_heals_rolling(&mut s, mage);
+            let rogue = add_enemy(
+                &mut s,
+                Rogue,
+                IN_SIGHT + Vec3::new(1.0, 0.0, 1.0),
+                Some(mage),
+            );
+            (outcome(&take(&mut s, &[], kill, None)), rogue)
+        };
+        let (above, rogue) = cast_on_the_attacker(DRUID_URGENT_HP + 0.05);
+        assert_eq!(
+            above,
+            chose("EntanglingRoots", rogue),
+            "the focus above the threshold"
+        );
+        let (below, rogue) = cast_on_the_attacker(DRUID_URGENT_HP - 0.05);
+        assert_eq!(below, chose("Cyclone", rogue), "the focus below it");
+    }
+
+    /// A Druid out of mana for Roots is refused it once a frame: the peel
+    /// leaves the refusal to step 8.
+    #[test]
+    fn a_druid_out_of_mana_traces_one_roots_refusal() {
+        let (mut s, kill) = kill_scene(1.0, 0.47);
+        let mage = s.units[2];
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, mage);
+        add_enemy(
+            &mut s,
+            Warrior,
+            IN_SIGHT + Vec3::new(0.0, 0.0, 12.0),
+            Some(mage),
+        );
+        s.prep = Some(|c| c.current_mana = 0.0);
+        let trace = take(&mut s, &[], kill, None);
+        let event = serde_json::to_value(&trace.pending_events[0]).unwrap();
+        let roots: Vec<_> = event["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["ability"] == "EntanglingRoots")
+            .collect();
+        assert_eq!(roots.len(), 1, "{event}");
+        assert!(
+            roots[0]["reason"].get("InsufficientMana").is_some(),
+            "{event}"
         );
     }
 }

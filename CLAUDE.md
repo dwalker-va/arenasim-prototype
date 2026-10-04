@@ -724,11 +724,14 @@ Wave, the Druid's emergency heal and top-up Rejuvenation), Holy Shock damage
 (the first enemy within 20yd in sight) and the Shaman's Frost Shock peel (the
 nearest attacker in sight). The choosers that rank without a range
 filter — Power Word: Shield, Power Word: Fortitude, Mark of the Wild, the
-Druid's heal focus and its Cyclone and Entangling Roots peels — drop a candidate
-only SIGHT keeps them off (`class_ai::sight_blocks`) before ranking, so a best
-pick beyond range is still picked and refused as before. The Druid's peels
-take an attacker in sight even when the ally they peel for is not: the control
-focus is ranked over every ally. The Priest's defensive Psychic Scream holds for
+Druid's heal focus, its Cyclone peel and its step-8 Entangling Roots — drop a
+candidate only SIGHT keeps them off (`class_ai::sight_blocks`) before ranking,
+so a best pick beyond range is still picked and refused as before. The Druid's
+step-8 Roots also passes over an attacker immune to damage. Its Roots PEEL for a
+dying teammate is reach-first (range, then sight, then immunity): an attacker it
+cannot land on yields to the next, then to the next dying teammate's. The
+Druid's peels take an attacker in sight even when the ally they peel for is
+not: the control focus is ranked over every ally. The Priest's defensive Psychic Scream holds for
 a critical heal only when the dying ally is in reach — one behind cover is the
 medic chase's to reach, and no heal can land on it yet.
 The dispel walk asks `cast_reach`, so it ends exactly where the cast becomes
@@ -746,8 +749,8 @@ Cyclone or Entangling Roots that is not a peel, Moonfire): below
 `DRUID_EMERGENCY_HP` (0.45) Swiftmend or the Rejuvenation that arms it;
 otherwise its own Rejuvenation, then a Lifebloom stack while it is under attack
 (a threat only closing on it gets the Rejuvenation, not the stack). Entangling
-Roots on a melee attacking or closing on a dying teammate is a PEEL and comes
-before that stack. With nothing left to add, the damage goes out. While the
+Roots on a melee enemy or pet attacking or closing on a dying teammate is a PEEL
+and comes before that stack. With nothing left to add, the damage goes out. While the
 medic walk is live and its teammate is NOT yet in reach, damage and utility are
 held outright (traced `PreconditionUnmet`, "holding the global cooldown ..."):
 every Druid spell is an instant on the global cooldown, so a Moonfire cast as
