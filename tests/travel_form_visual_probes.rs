@@ -149,7 +149,7 @@ impl Harness {
         let socket = world
             .spawn((
                 WeaponSocket {
-                    kind: WeaponKind::Mace,
+                    kind: WeaponKind::Staff,
                     hand: WeaponHand::Main,
                     owner: unit,
                     rest: Transform::IDENTITY,

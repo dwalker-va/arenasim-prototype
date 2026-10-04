@@ -1770,10 +1770,11 @@ pub struct VisualBody {
     pub rest_y: f32,
 }
 
-/// Which weapon model a [`WeaponSocket`] holds. Decides the glTF asset, the
-/// mount pose, and the swing arc. Chosen from the equipped item's weapon type
-/// by `weapon_model` in `play_match/mod.rs`, where the items drawn with a
-/// stand-in silhouette are named.
+/// Which weapon model a [`WeaponSocket`] holds. Decides the art (a glTF asset,
+/// or the primitives a staff is built from), the mount pose, and the swing
+/// arc. Chosen from the equipped item's weapon type by `weapon_model` in
+/// `play_match/mod.rs`, where the items drawn with a stand-in silhouette are
+/// named.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WeaponKind {
     TwoHandAxe,
@@ -1786,6 +1787,10 @@ pub enum WeaponKind {
     /// (see the AS-132 client-data doc §4), which is why this is its own kind
     /// rather than a re-skinned melee weapon.
     Wand,
+    /// A two-handed staff: a long wooden haft with a knob at the head, built
+    /// from primitives (`staff_parts` in `play_match/mod.rs`). Held and swung
+    /// like the two-hand axe — only the silhouette differs.
+    Staff,
 }
 
 /// Which hand a [`WeaponSocket`] occupies, and which hand an
@@ -1802,8 +1807,9 @@ pub enum WeaponHand {
 }
 
 /// A weapon held by a combatant: a child of the [`VisualBody`] carrying a glTF
-/// `SceneRoot`. Purely graphical — spawned only by the graphical
-/// `spawn_combatant` path, so headless never sees one.
+/// `SceneRoot`, or for a [`WeaponKind::Staff`] the primitive meshes it is
+/// built from as its own children. Purely graphical — spawned only by the
+/// graphical `spawn_combatant` path, so headless never sees one.
 ///
 /// The swing animation writes this entity's LOCAL `Transform` every frame
 /// (never the sim parent's — see [`VisualBody`]). `rest` is the mount pose the
@@ -1911,9 +1917,11 @@ impl WeaponSet {
     pub fn of(kind: WeaponKind) -> Self {
         match kind {
             WeaponKind::Bow | WeaponKind::Wand => WeaponSet::Ranged,
-            WeaponKind::TwoHandAxe | WeaponKind::Dagger | WeaponKind::Mace | WeaponKind::Shield => {
-                WeaponSet::Melee
-            }
+            WeaponKind::TwoHandAxe
+            | WeaponKind::Dagger
+            | WeaponKind::Mace
+            | WeaponKind::Shield
+            | WeaponKind::Staff => WeaponSet::Melee,
         }
     }
 }
