@@ -13,6 +13,7 @@ pub mod emoji;
 pub mod hud;
 pub mod interpolation;
 pub mod overlays;
+pub mod status_labels;
 pub mod team_frames;
 
 // Re-export all public items for backwards compatibility

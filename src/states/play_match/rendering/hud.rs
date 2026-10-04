@@ -4,6 +4,7 @@
 
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
+use crate::states::play_match::rendering::status_labels::overhead_status_labels;
 use bevy::prelude::*;
 use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
@@ -413,118 +414,19 @@ pub fn render_health_bars(
                         );
                     }
 
-                    // Status effect indicators (if has auras)
+                    // Status labels (STUN / FEAR / CYCLONE / ...) with their
+                    // duration countdowns. Which aura shows which label, and
+                    // the rule that every full loss of control shows one, live
+                    // in `status_labels`.
                     if let Some(auras) = active_auras {
-                        // STUN indicator with duration countdown
-                        if let Some(stun_aura) =
-                            auras.auras.iter().find(|a| a.effect_type == AuraType::Stun)
-                        {
-                            let stun_text = format!("STUN {:.1}s", stun_aura.duration);
+                        for (label, aura) in overhead_status_labels(&auras.auras) {
+                            let text = format!("{} {:.1}s", label.text, aura.duration);
                             render_status_label(
                                 ui,
                                 &bar_pos,
                                 bar_width,
                                 &mut status_offset,
-                                &stun_text,
-                                status_color,
-                                ui_scale,
-                                pixels_per_point,
-                            );
-                        }
-
-                        // ROOT indicator with duration countdown
-                        if let Some(root_aura) =
-                            auras.auras.iter().find(|a| a.effect_type == AuraType::Root)
-                        {
-                            let root_text = format!("ROOT {:.1}s", root_aura.duration);
-                            render_status_label(
-                                ui,
-                                &bar_pos,
-                                bar_width,
-                                &mut status_offset,
-                                &root_text,
-                                status_color,
-                                ui_scale,
-                                pixels_per_point,
-                            );
-                        }
-
-                        // FEAR / HORROR indicator with duration countdown. Death Coil
-                        // applies a Fear-type aura (for the flee locomotion) but is
-                        // mechanically a separate horror with its own DR, so it gets
-                        // its own "HORROR" label to parallel "FEAR".
-                        if let Some(fear_aura) =
-                            auras.auras.iter().find(|a| a.effect_type == AuraType::Fear)
-                        {
-                            let label = if fear_aura.ability_name == "Death Coil" {
-                                "HORROR"
-                            } else {
-                                "FEAR"
-                            };
-                            let fear_text = format!("{} {:.1}s", label, fear_aura.duration);
-                            render_status_label(
-                                ui,
-                                &bar_pos,
-                                bar_width,
-                                &mut status_offset,
-                                &fear_text,
-                                status_color,
-                                ui_scale,
-                                pixels_per_point,
-                            );
-                        }
-
-                        // SHEEPED indicator with duration countdown (Polymorph)
-                        if let Some(poly_aura) = auras
-                            .auras
-                            .iter()
-                            .find(|a| a.effect_type == AuraType::Polymorph)
-                        {
-                            let poly_text = format!("SHEEPED {:.1}s", poly_aura.duration);
-                            render_status_label(
-                                ui,
-                                &bar_pos,
-                                bar_width,
-                                &mut status_offset,
-                                &poly_text,
-                                status_color,
-                                ui_scale,
-                                pixels_per_point,
-                            );
-                        }
-
-                        // SILENCE indicator with duration countdown
-                        if let Some(silence_aura) = auras
-                            .auras
-                            .iter()
-                            .find(|a| a.effect_type == AuraType::Silence)
-                        {
-                            let silence_text = format!("SILENCE {:.1}s", silence_aura.duration);
-                            render_status_label(
-                                ui,
-                                &bar_pos,
-                                bar_width,
-                                &mut status_offset,
-                                &silence_text,
-                                status_color,
-                                ui_scale,
-                                pixels_per_point,
-                            );
-                        }
-
-                        // BERSERK indicator with duration countdown (Berserker Rage fear immunity)
-                        if let Some(br_aura) = auras
-                            .auras
-                            .iter()
-                            .find(|a| a.effect_type == AuraType::FearImmunity)
-                        {
-                            let br_text = format!("BERSERK {:.1}s", br_aura.duration);
-                            render_status_label(
-                                ui,
-                                &bar_pos,
-                                bar_width,
-                                &mut status_offset,
-                                &br_text,
+                                &text,
                                 status_color,
                                 ui_scale,
                                 pixels_per_point,

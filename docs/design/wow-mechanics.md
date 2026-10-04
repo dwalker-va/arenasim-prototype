@@ -170,6 +170,15 @@ produces it.
 
 ## Crowd Control
 
+**Full loss of control is always labelled over the victim.** Stun, Fear,
+Polymorph, Incapacitate and Cyclone (the `utils::is_incapacitating` set) each
+show a white overhead label with a countdown — `STUN`, `FEAR` (`HORROR` for
+Death Coil), `SHEEPED`, `FROZEN` (Freezing Trap; any other incapacitate reads
+`INCAPACITATED`), `CYCLONE`. Partial control is not held to the rule: Root and
+Silence keep their labels, a snare never gets one.
+`rendering/status_labels.rs` holds the mapping as an exhaustive match, and its
+tests fail if a full-CC type or spell is left unlabelled.
+
 ### Root
 - Prevents movement only
 - Target can still attack and cast spells
