@@ -52,7 +52,9 @@ use crate::states::play_match::components::*;
 //   arrive as aura ticks: `kind_for` and the config-field audit iterate
 //   healing fields, which a HoT config does not have, so aura-tick heals
 //   route through `kind_for_hot_tick` (exhaustive over `AuraType` — the
-//   compiler forces every new aura type to declare whether its ticks heal).
+//   compiler forces every new aura type to declare whether its ticks heal —
+//   then by the HoT's RON name through `HotVisual::for_hot`, so only Healing
+//   Stream pulses per tick; the Druid's HoTs draw in `druid_heals.rs`).
 //
 // Everything is additive (every material and emitter in the source set is M2
 // blend mode 4), Holy is pure gold, Nature is green + gold. Emitter constants

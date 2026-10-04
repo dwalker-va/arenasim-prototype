@@ -22,7 +22,10 @@
 //!
 //! [`AuraApplyRoute::for_aura`] decides, exhaustively over `AuraType`: the band,
 //! or a named bespoke owner (CC, shields, the DoT layer, the slow ring, ...)
-//! that already draws the application. Nothing here re-decides it.
+//! that already draws the application. Nothing here re-decides it. The
+//! detector asks [`AuraApplyRoute::for_instance`], which first hands a named
+//! aura with its own landing (Rejuvenation's swirl, Mark of the Wild's glyph)
+//! to that landing — their types are shared with auras that keep the band.
 //!
 //! ## Detection — renderer-side, off `ActiveAuras`
 //!
@@ -263,7 +266,9 @@ impl AuraApplyLedger {
 pub fn aura_band_cues(fresh: &[&Aura]) -> Vec<(AuraBandPolarity, Color)> {
     let mut cues: Vec<(AuraBandPolarity, Color)> = Vec::new();
     for aura in fresh {
-        if AuraApplyRoute::for_aura(aura.effect_type) != AuraApplyRoute::Band {
+        if AuraApplyRoute::for_instance(aura.effect_type, &aura.ability_name)
+            != AuraApplyRoute::Band
+        {
             continue;
         }
         let polarity = AuraBandPolarity::of(aura.effect_type);

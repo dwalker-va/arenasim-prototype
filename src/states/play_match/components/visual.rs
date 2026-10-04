@@ -571,13 +571,21 @@ impl HealImpact {
     /// EXHAUSTIVE over [`AuraType`] on purpose — no wildcard arm — so adding
     /// a new aura type forces a decision here at compile time: either its
     /// ticks heal the bearer and it names a landing, or it goes in the
-    /// explicit non-healing group. `tests/heal_impact_visual_probes.rs` pins
-    /// the mapping and proves the tick site actually spawns it.
-    pub fn kind_for_hot_tick(aura: AuraType) -> Option<HealImpactKind> {
+    /// explicit non-healing group. A heal over time is then routed by its RON
+    /// `name:` through [`HotVisual::for_hot`], because two HoTs can share the
+    /// type and still draw differently: Healing Stream pulses per tick, while
+    /// the Druid's Rejuvenation and Lifebloom draw nothing on a tick (their
+    /// identity is a landing and a sustained state). `name` is the aura's
+    /// `ability_name`. `tests/heal_impact_visual_probes.rs` pins the mapping
+    /// and proves the tick site actually spawns it.
+    pub fn kind_for_hot_tick(aura: AuraType, name: &str) -> Option<HealImpactKind> {
         match aura {
-            // The one aura type whose ticks heal the bearer (Healing Stream
-            // Totem's pulse buff).
-            AuraType::HealingOverTime => Some(HealImpactKind::TotemPulse),
+            // The one aura type whose ticks heal the bearer: which HoT it is
+            // decides whether a tick draws.
+            AuraType::HealingOverTime => match HotVisual::for_hot(name)? {
+                HotVisual::TickPulse(kind) => Some(kind),
+                HotVisual::LandingSwirl | HotVisual::SustainedPulse => None,
+            },
             // Every other aura type's ticks do not heal the bearer. DoT
             // leeches (Death Coil, Drain Life) heal the CASTER at their own
             // sites, not through the bearer's aura tick.
@@ -617,6 +625,205 @@ impl HealImpact {
             | AuraType::TravelForm => None,
         }
     }
+}
+
+// ============================================================================
+// Druid heals over time and Mark of the Wild (AS-212)
+// ============================================================================
+//
+// From `docs/design/2026-10-03-druid-client-data.md` (Rulings 1): the client
+// draws Rejuvenation as a one-shot ribbon swirl when it LANDS and nothing on
+// its ticks; Lifebloom as a sustained pulse over the head while it lives and a
+// gold burst when it BLOOMS; Mark of the Wild as a brief glyph above the head.
+// The renderer is `rendering/effects/druid_heals.rs`.
+
+/// Rejuvenation's aura name (the RON `name:` string).
+pub const REJUVENATION_AURA: &str = "Rejuvenation";
+/// Lifebloom's aura name (the RON `name:` string).
+pub const LIFEBLOOM_AURA: &str = "Lifebloom";
+/// Mark of the Wild's aura name (the RON `name:` string).
+pub const MARK_OF_THE_WILD_AURA: &str = "Mark of the Wild";
+
+/// What a heal-over-time aura draws — the ONE place a HoT meets its visual,
+/// routed by the aura's RON name the way `DotStateVisual::for_dot` routes a
+/// DoT. [`HealImpact::kind_for_hot_tick`] (the tick site) and the
+/// lands-silently audit both ask it, so a HoT routed nowhere fails the build.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HotVisual {
+    /// Each tick lands a heal impact: Healing Stream Totem's blip.
+    TickPulse(HealImpactKind),
+    /// Rejuvenation: a ribbon swirl when the aura lands (or is refreshed), and
+    /// nothing on its ticks — the client has no sustained state for it.
+    LandingSwirl,
+    /// Lifebloom: a sustained pulse over the head for as long as the aura
+    /// lives, and a gold burst when it blooms. Nothing on its ticks.
+    SustainedPulse,
+}
+
+impl HotVisual {
+    /// The visual for a heal over time named `name`, or `None` when nothing
+    /// draws it. `None` is what the lands-silently audit fails on, so it never
+    /// means "handled elsewhere".
+    pub fn for_hot(name: &str) -> Option<HotVisual> {
+        match name {
+            REJUVENATION_AURA => Some(HotVisual::LandingSwirl),
+            LIFEBLOOM_AURA => Some(HotVisual::SustainedPulse),
+            _ if name == super::totems::TotemElement::Water.buff_name() => {
+                Some(HotVisual::TickPulse(HealImpactKind::TotemPulse))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Which one-shot an aura plays on its bearer when it LANDS.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AuraLandingKind {
+    /// Rejuvenation: five green ribbons orbit the body for 3 s
+    /// (`rejuvenation_impact_base.m2`, kit 56).
+    RejuvenationSwirl,
+    /// Mark of the Wild: the paw glyph above the head for 0.667 s
+    /// (`markofwild_impact_head.m2`, kit 542).
+    MarkOfTheWildGlyph,
+}
+
+impl AuraLandingKind {
+    /// The landing an aura of `aura_type` named `name` plays, or `None`.
+    pub fn for_aura(aura_type: AuraType, name: &str) -> Option<AuraLandingKind> {
+        match aura_type {
+            AuraType::HealingOverTime => match HotVisual::for_hot(name)? {
+                HotVisual::LandingSwirl => Some(AuraLandingKind::RejuvenationSwirl),
+                HotVisual::TickPulse(_) | HotVisual::SustainedPulse => None,
+            },
+            AuraType::MaxHealthIncrease if name == MARK_OF_THE_WILD_AURA => {
+                Some(AuraLandingKind::MarkOfTheWildGlyph)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// An aura that LANDED — a fresh application or a refresh — playing its
+/// one-shot on the bearer.
+///
+/// Spawned by `apply_pending_auras` at the two points an aura lands, so it
+/// exists in both modes; rendered only in graphical mode. Purely cosmetic,
+/// like [`HealImpact`]: it reads combat state, writes none, and draws no
+/// `game_rng`.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct AuraLanding {
+    /// The bearer. The landing TRACKS it.
+    pub target: Entity,
+    pub kind: AuraLandingKind,
+}
+
+/// What an aura's BLOOM draws when it lands, routed by the aura's RON name.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BloomVisual {
+    /// Lifebloom's gold flower-burst at the chest (`lifebloom_impact.m2`,
+    /// kit 6965).
+    GoldBurst,
+}
+
+impl BloomVisual {
+    /// The burst a bloom from the aura named `name` plays, or `None`.
+    pub fn for_bloom(name: &str) -> Option<BloomVisual> {
+        match name {
+            LIFEBLOOM_AURA => Some(BloomVisual::GoldBurst),
+            _ => None,
+        }
+    }
+}
+
+/// A bloom that LANDED, playing its burst on the bearer.
+///
+/// Spawned by `process_blooms`, the one site every bloom lands at, after that
+/// system's own alive check — so it follows the sim's bloom rules exactly:
+/// expiry, a purge and a dispel bloom; a refresh and the bearer's death do
+/// not. It is not a heal site. Purely cosmetic, like [`AuraLanding`].
+#[derive(Component, Clone, Copy, Debug)]
+pub struct BloomBurst {
+    pub target: Entity,
+    pub kind: BloomVisual,
+}
+
+/// The four Druid effects the AS-160 bench signed off.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DruidEffect {
+    RejuvenationSwirl,
+    LifebloomPulse,
+    LifebloomBloom,
+    MarkOfTheWildGlyph,
+}
+
+/// The rig one Druid effect plays from (graphical only). A one-shot (the
+/// swirl, the bloom, the glyph) emits for its window and retires when its last
+/// particle has died. A [`DruidEffect::LifebloomPulse`] rig is ONE caster's
+/// Lifebloom on one bearer — two Druids' Lifeblooms are two auras and draw as
+/// two pulses — and lives exactly as long as that aura does on a living
+/// bearer.
+#[derive(Component, Debug)]
+pub struct DruidEffectRig {
+    pub target: Entity,
+    pub effect: DruidEffect,
+    /// The Lifebloom's caster, for a pulse; `None` for the one-shots.
+    pub caster: Option<Entity>,
+    pub age: f32,
+    /// Particles owed per emitter (fractional carry).
+    pub carry: Vec<f32>,
+    /// Particles emitted so far — the scatter seed.
+    pub emitted: u32,
+}
+
+/// One Rejuvenation ribbon: a camera-facing band whose mesh is rebuilt each
+/// frame along the last stretch of its orbit (graphical only).
+#[derive(Component, Debug)]
+pub struct RejuvenationRibbon {
+    /// The swirl rig it belongs to.
+    pub rig: Entity,
+    /// 0..5 — sets its phase, height, direction and green.
+    pub index: usize,
+    pub mesh: Handle<Mesh>,
+}
+
+/// One of Mark of the Wild's two superimposed glyph plates (graphical only).
+#[derive(Component, Debug)]
+pub struct MarkOfTheWildPlate {
+    pub rig: Entity,
+    /// 0 = red-orange, 1 = gold.
+    pub layer: usize,
+}
+
+/// A particle from one of the Druid effects' emitters (graphical only). The
+/// entity carries the position; its children are the sprite and, for an
+/// emitter with a tail, the streak behind it.
+#[derive(Component, Debug)]
+pub struct DruidParticle {
+    /// The rig that emitted it. A particle whose rig is gone is retired with
+    /// it, which is how a sustained state's particles leave with its aura.
+    pub rig: Entity,
+    pub effect: DruidEffect,
+    /// Index into the effect's emitter table.
+    pub emitter: usize,
+    pub age: f32,
+    pub life: f32,
+    pub velocity: Vec3,
+    /// The bearer it follows, and where the bearer was last frame.
+    pub follow: Option<(Entity, Vec3)>,
+    /// Sprite roll, radians.
+    pub angle: f32,
+    /// Stature scale (a pet bearer draws smaller).
+    pub stature: f32,
+    /// The emitter's colour/alpha palettes over a life: sprite, then streak.
+    pub sprite_palette: std::sync::Arc<[Handle<StandardMaterial>]>,
+    pub streak_palette: std::sync::Arc<[Handle<StandardMaterial>]>,
+}
+
+/// The sprite or streak child of a [`DruidParticle`].
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DruidParticlePart {
+    Sprite,
+    Streak,
 }
 
 /// A flat, per-landing piece of a heal impact (graphical only).
@@ -1079,9 +1286,27 @@ pub enum AuraApplyOwner {
     /// plus Crippling Poison's proc flash, which has no hit of its own. A band
     /// here would double every one of those impacts.
     SlowRing,
+    /// A named aura whose LANDING has its own one-shot: Rejuvenation's ribbon
+    /// swirl and Mark of the Wild's glyph (`druid_heals.rs`). Owned per aura
+    /// NAME, not per type — see [`AuraApplyRoute::for_instance`] — because
+    /// their types are shared with auras that keep the band (Healing Stream's
+    /// HoT, Power Word: Fortitude). Lifebloom is not here: its pulse starts a
+    /// beat after it lands, so the band is its only application cue.
+    AuraLanding,
 }
 
 impl AuraApplyRoute {
+    /// Route one aura INSTANCE's application: a named aura with a bespoke
+    /// landing ([`AuraLandingKind::for_aura`]) is owned by it; every other
+    /// aura routes by its type ([`Self::for_aura`]). The renderer asks this.
+    pub fn for_instance(aura_type: AuraType, name: &str) -> Self {
+        if AuraLandingKind::for_aura(aura_type, name).is_some() {
+            AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding)
+        } else {
+            Self::for_aura(aura_type)
+        }
+    }
+
     /// Route an aura type's application.
     ///
     /// **EXHAUSTIVE on purpose — never add a `_ =>` arm.** A new aura type must

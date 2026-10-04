@@ -546,6 +546,69 @@ fn owned_applications_raise_no_band() {
     );
 }
 
+/// Rejuvenation and Mark of the Wild have bespoke landings (`druid_heals.rs`),
+/// so the band stays off them — by NAME, because their types are shared with
+/// auras that keep it (Healing Stream's HoT, Power Word: Fortitude). Lifebloom
+/// keeps the band: its pulse starts a beat after it lands, so the band is its
+/// only application cue.
+#[test]
+fn a_named_landing_owns_its_application_and_its_type_siblings_keep_the_band() {
+    let owned = AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding);
+    let route = AuraApplyRoute::for_instance;
+    assert_eq!(route(AuraType::HealingOverTime, "Rejuvenation"), owned);
+    assert_eq!(
+        route(AuraType::MaxHealthIncrease, "Mark of the Wild"),
+        owned
+    );
+    assert_eq!(
+        route(AuraType::HealingOverTime, "Lifebloom"),
+        AuraApplyRoute::Band
+    );
+    assert_eq!(
+        route(AuraType::HealingOverTime, "Healing Stream Totem"),
+        AuraApplyRoute::Band
+    );
+    assert_eq!(
+        route(AuraType::MaxHealthIncrease, "Power Word: Fortitude"),
+        AuraApplyRoute::Band
+    );
+    // Any other name routes exactly as its type does.
+    for t in AuraType::ALL {
+        assert_eq!(route(t, "Arcane Intellect"), AuraApplyRoute::for_aura(t));
+    }
+}
+
+#[test]
+fn rejuvenation_and_mark_of_the_wild_raise_no_band_but_lifebloom_does() {
+    let hot = |name: &str| aura(AuraType::HealingOverTime, name, Some(SpellSchool::Nature));
+    let mark = aura(
+        AuraType::MaxHealthIncrease,
+        "Mark of the Wild",
+        Some(SpellSchool::Nature),
+    );
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![hot("Rejuvenation"), mark]);
+    h.tick(3);
+    assert!(
+        h.bands().is_empty(),
+        "the swirl and the glyph own their landings"
+    );
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![hot("Lifebloom")]);
+    h.tick(3);
+    assert_eq!(h.bands().len(), 1, "Lifebloom's landing keeps the band");
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![fortitude()]);
+    h.tick(3);
+    assert_eq!(h.bands().len(), 1, "Fortitude keeps the band");
+}
+
 #[test]
 fn a_corpse_gets_no_band() {
     let mut h = Harness::new();

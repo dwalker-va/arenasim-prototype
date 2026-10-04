@@ -894,21 +894,39 @@ fn a_spent_landing_despawns_with_all_its_pieces() {
 // the landing — `hot_tick_spawns_the_totem_pulse_landing` drives the real
 // `process_hot_ticks` for that.
 
-/// The aura-tick router names the blessed mapping: HealingOverTime ticks land
-/// as the totem pulse blip; non-healing aura ticks land nothing.
+/// The aura-tick router names the blessed mapping: Healing Stream's ticks land
+/// as the totem pulse blip; the Druid's Rejuvenation and Lifebloom ticks land
+/// nothing (their identity is a landing and a sustained state — AS-160
+/// Rulings 1); an unrouted HoT name lands nothing, which the lands-silently
+/// audit fails on; non-healing aura ticks land nothing.
 #[test]
 fn the_aura_tick_router_names_the_blessed_mapping() {
     assert_eq!(
-        HealImpact::kind_for_hot_tick(AuraType::HealingOverTime),
+        HealImpact::kind_for_hot_tick(AuraType::HealingOverTime, "Healing Stream Totem"),
         Some(HealImpactKind::TotemPulse)
     );
     assert_eq!(
-        HealImpact::kind_for_hot_tick(AuraType::DamageOverTime),
+        HealImpact::kind_for_hot_tick(AuraType::HealingOverTime, "Rejuvenation"),
         None
     );
-    assert_eq!(HealImpact::kind_for_hot_tick(AuraType::Absorb), None);
     assert_eq!(
-        HealImpact::kind_for_hot_tick(AuraType::MaxHealthIncrease),
+        HealImpact::kind_for_hot_tick(AuraType::HealingOverTime, "Lifebloom"),
+        None
+    );
+    assert_eq!(
+        HealImpact::kind_for_hot_tick(AuraType::HealingOverTime, "Renew"),
+        None
+    );
+    assert_eq!(
+        HealImpact::kind_for_hot_tick(AuraType::DamageOverTime, "Healing Stream Totem"),
+        None
+    );
+    assert_eq!(
+        HealImpact::kind_for_hot_tick(AuraType::Absorb, "Power Word: Shield"),
+        None
+    );
+    assert_eq!(
+        HealImpact::kind_for_hot_tick(AuraType::MaxHealthIncrease, "Mark of the Wild"),
         None
     );
 }

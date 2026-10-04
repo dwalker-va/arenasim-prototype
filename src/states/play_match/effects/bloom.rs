@@ -92,6 +92,20 @@ pub fn process_blooms(
             pending.amount,
         );
 
+        // The burst a bloom plays, spawned here — after the alive check, at the
+        // one site every bloom lands — so it blooms exactly when the heal does.
+        // Purely cosmetic, like the heal landings; rendered only in graphical
+        // mode (`rendering/effects/druid_heals.rs`).
+        if let Some(kind) = BloomVisual::for_bloom(&pending.ability_name) {
+            commands.spawn((
+                BloomBurst {
+                    target: pending.target,
+                    kind,
+                },
+                PlayMatchEntity,
+            ));
+        }
+
         let target_id = combat_log_id_for(&target, pet_query.get(pending.target).ok());
         let self_bloom = pending.caster == Some(pending.target);
         if self_bloom {

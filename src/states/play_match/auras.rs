@@ -576,6 +576,7 @@ pub fn apply_pending_auras(
                     format!("{}'s {} refreshed", target_id, pending.aura.ability_name)
                 };
                 combat_log.log(CombatLogEventType::Buff, message);
+                spawn_aura_landing(&mut commands, pending.target, &pending.aura);
                 commands.entity(pending_entity).despawn();
                 continue;
             }
@@ -897,6 +898,7 @@ pub fn apply_pending_auras(
                     rider
                 })
         });
+        spawn_aura_landing(&mut commands, pending.target, &aura_to_add);
         let to_add = std::iter::once(aura_to_add).chain(riders.into_iter().flatten());
 
         // Add aura to target
@@ -919,6 +921,17 @@ pub fn apply_pending_auras(
     // Now insert ActiveAuras components for entities that didn't have them
     for (entity, auras) in new_auras_map {
         commands.entity(entity).insert(ActiveAuras { auras });
+    }
+}
+
+/// Spawn the one-shot an aura plays where it LANDS — a fresh application or a
+/// refresh — if it has one (Rejuvenation's swirl, Mark of the Wild's glyph).
+/// Same both-modes spawn idiom as the heal landings: purely cosmetic, reads
+/// combat state, writes none, draws no `game_rng`; rendered only in graphical
+/// mode (`rendering/effects/druid_heals.rs`).
+fn spawn_aura_landing(commands: &mut Commands, target: Entity, aura: &Aura) {
+    if let Some(kind) = AuraLandingKind::for_aura(aura.effect_type, &aura.ability_name) {
+        commands.spawn((AuraLanding { target, kind }, PlayMatchEntity));
     }
 }
 
@@ -1480,8 +1493,10 @@ pub fn process_hot_ticks(
         // purely cosmetic, reads combat state, writes none, draws no
         // `game_rng`; rendered only in graphical mode. Routed through the
         // aura-tick router because a HoT's config has no healing fields for
-        // `kind_for` to see (the Healing Stream Totem silent-heal hole).
-        if let Some(kind) = HealImpact::kind_for_hot_tick(AuraType::HealingOverTime) {
+        // `kind_for` to see (the Healing Stream Totem silent-heal hole), and
+        // by the HoT's name, because the Druid's HoTs draw nothing per tick.
+        if let Some(kind) = HealImpact::kind_for_hot_tick(AuraType::HealingOverTime, &ability_name)
+        {
             commands.spawn((
                 HealImpact {
                     target: target_entity,
