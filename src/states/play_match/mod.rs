@@ -1112,11 +1112,11 @@ fn walk_phase_seed(xz: Vec2) -> f32 {
 
 /// How a weapon-socket item is drawn.
 ///
-/// The art is six silhouettes ([`WeaponKind`]) and the item set spans sixteen
+/// The art is seven silhouettes ([`WeaponKind`]) and the item set spans sixteen
 /// [`WeaponType`]s, so the mapping cannot be one-to-one. Rather than approximate
 /// quietly, every item says which of three things it gets: its own model, a
 /// STAND-IN silhouette from the same grip family (a one-handed sword draws the
-/// dagger, a staff draws the two-hand axe, a crossbow draws the bow), or
+/// dagger, a polearm draws the two-hand axe, a crossbow draws the bow), or
 /// nothing at all. `the_proxied_and_undrawn_items_are_named` pins which shipped
 /// items land in the last two, so a new item cannot join either silently.
 ///
@@ -1159,8 +1159,9 @@ fn weapon_model(item: &equipment::ItemConfig) -> WeaponModel {
         (W::Bow, _) => Exact(K::Bow),
         (W::Wand, _) => Exact(K::Wand),
         (W::Shield, _) => Exact(K::Shield),
+        (W::Staff, _) => Exact(K::Staff),
         // Two-handers without art share the two-hand axe's grip and chop.
-        (W::Mace | W::Sword, true) | (W::Staff | W::Polearm, _) => Proxy(K::TwoHandAxe),
+        (W::Mace | W::Sword, true) | (W::Polearm, _) => Proxy(K::TwoHandAxe),
         // One-handed chopping heads share the mace's.
         (W::Axe, false) => Proxy(K::Mace),
         // One-handed blades share the dagger's.
@@ -1237,16 +1238,83 @@ fn held_weapon_sets_swap(models: &[(WeaponKind, WeaponHand)]) -> bool {
     in_main(WeaponSet::Ranged) && in_main(WeaponSet::Melee)
 }
 
-/// Asset path for each weapon model (all CC0 — see assets/models/weapons/LICENSE.md).
-fn weapon_asset_path(kind: WeaponKind) -> &'static str {
+/// Where a weapon model's geometry comes from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum WeaponArt {
+    /// A glTF scene (all CC0 — see assets/models/weapons/LICENSE.md).
+    Scene(&'static str),
+    /// Built from primitives at spawn ([`staff_parts`]).
+    Staff,
+}
+
+/// The art each weapon model is drawn with. Wildcard-free, so a new
+/// [`WeaponKind`] is a compile error here until it names its art.
+fn weapon_art(kind: WeaponKind) -> WeaponArt {
     match kind {
-        WeaponKind::TwoHandAxe => "models/weapons/axe_2handed.gltf",
-        WeaponKind::Dagger => "models/weapons/dagger.gltf",
-        WeaponKind::Bow => "models/weapons/bow_wooden.glb",
-        WeaponKind::Mace => "models/weapons/hammer_double.glb",
-        WeaponKind::Shield => "models/weapons/shield_round.gltf",
-        WeaponKind::Wand => "models/weapons/wand_rod.gltf",
+        WeaponKind::TwoHandAxe => WeaponArt::Scene("models/weapons/axe_2handed.gltf"),
+        WeaponKind::Dagger => WeaponArt::Scene("models/weapons/dagger.gltf"),
+        WeaponKind::Bow => WeaponArt::Scene("models/weapons/bow_wooden.glb"),
+        WeaponKind::Mace => WeaponArt::Scene("models/weapons/hammer_double.glb"),
+        WeaponKind::Shield => WeaponArt::Scene("models/weapons/shield_round.gltf"),
+        WeaponKind::Wand => WeaponArt::Scene("models/weapons/wand_rod.gltf"),
+        WeaponKind::Staff => WeaponArt::Staff,
     }
+}
+
+/// Radius of the staff's haft.
+const STAFF_HAFT_RADIUS: f32 = 0.045;
+/// Where the haft's butt end sits below the grip, along local -Y.
+const STAFF_BUTT: f32 = 0.55;
+/// Where the centre of the staff's knob sits above the grip, along local +Y.
+const STAFF_HEAD: f32 = 1.45;
+/// Radius of the knob at the staff's head.
+const STAFF_KNOB_RADIUS: f32 = 0.12;
+
+/// The staff, as primitives in the socket's local frame — the convention every
+/// weapon model follows: the haft along local +Y with the grip at the origin,
+/// so [`weapon_mount`] composes aim and scale on top exactly as it does for the
+/// glTF models.
+///
+/// A pill and a hint, like the bodies: the haft is a long thin capsule, and a
+/// round knob and a collar beneath it make the head. About two yards end to
+/// end — a little longer than the two-hand axe, and a fraction of its width,
+/// which is what tells the two apart at a glance.
+fn staff_parts() -> [(Mesh, StandardMaterial, Transform); 3] {
+    let wood = StandardMaterial {
+        base_color: Color::srgb(0.30, 0.20, 0.12),
+        perceptual_roughness: 0.8,
+        metallic: 0.0,
+        ..default()
+    };
+    let head_wood = StandardMaterial {
+        base_color: Color::srgb(0.45, 0.32, 0.19),
+        perceptual_roughness: 0.7,
+        metallic: 0.0,
+        ..default()
+    };
+    // The capsule's length excludes its two end caps.
+    let haft_length = STAFF_BUTT + STAFF_HEAD - 2.0 * STAFF_HAFT_RADIUS;
+    let haft_mid = (STAFF_HEAD - STAFF_BUTT) / 2.0;
+    [
+        (
+            Capsule3d::new(STAFF_HAFT_RADIUS, haft_length).into(),
+            wood.clone(),
+            Transform::from_xyz(0.0, haft_mid, 0.0),
+        ),
+        (
+            Cylinder::new(STAFF_HAFT_RADIUS * 1.7, 0.07).into(),
+            wood,
+            Transform::from_xyz(0.0, STAFF_HEAD - STAFF_KNOB_RADIUS - 0.03, 0.0),
+        ),
+        (
+            Sphere::new(STAFF_KNOB_RADIUS)
+                .mesh()
+                .ico(2)
+                .expect("ico(2) is in range"),
+            head_wood,
+            Transform::from_xyz(0.0, STAFF_HEAD, 0.0),
+        ),
+    ]
 }
 
 /// Mount pose for a weapon socket, local to the `VisualBody` (capsule radius
@@ -1303,6 +1371,12 @@ fn weapon_mount(kind: WeaponKind, hand: WeaponHand) -> Transform {
         // the flick has somewhere to travel to.
         WeaponKind::Wand => Transform::from_xyz(0.62 * side, 0.55, 0.05)
             .with_rotation(Quat::from_rotation_x(-0.45))
+            .with_scale(Vec3::splat(1.0)),
+        // Carried like the two-hand axe — the same grip point and forward
+        // lean, so its swing reads the same — but at full scale and with no
+        // roll: a round haft has no edge to turn toward the target.
+        WeaponKind::Staff => Transform::from_xyz(0.78 * side, 0.1, 0.2)
+            .with_rotation(Quat::from_rotation_x(0.75))
             .with_scale(Vec3::splat(1.0)),
     }
 }
@@ -1429,9 +1503,6 @@ pub(crate) fn spawn_combatant(
         let rest = weapon_mount(kind, hand);
         let socket = commands
             .spawn((
-                SceneRoot(asset_server.load(
-                    bevy::gltf::GltfAssetLabel::Scene(0).from_asset(weapon_asset_path(kind)),
-                )),
                 WeaponSocket {
                     kind,
                     hand,
@@ -1449,8 +1520,31 @@ pub(crate) fn spawn_combatant(
                     last_s: 0.0,
                 },
                 rest,
+                // Explicit rather than left to `SceneRoot`'s required
+                // components: a built staff has no scene, and its parts
+                // inherit visibility from here (Travel Form hides the socket).
+                Visibility::Inherited,
             ))
             .id();
+        match weapon_art(kind) {
+            WeaponArt::Scene(path) => {
+                commands.entity(socket).insert(SceneRoot(
+                    asset_server.load(bevy::gltf::GltfAssetLabel::Scene(0).from_asset(path)),
+                ));
+            }
+            WeaponArt::Staff => {
+                for (mesh, material, transform) in staff_parts() {
+                    let part = commands
+                        .spawn((
+                            Mesh3d(meshes.add(mesh)),
+                            MeshMaterial3d(materials.add(material)),
+                            transform,
+                        ))
+                        .id();
+                    commands.entity(socket).add_child(part);
+                }
+            }
+        }
         if swaps {
             // Two sets, one out at a time — the bow until a target closes to
             // melee reach (`animate_weapon_swings` keeps it current).
@@ -1831,6 +1925,8 @@ mod held_weapon_tests {
     const MACE: &str = "models/weapons/hammer_double.glb";
     const SHIELD: &str = "models/weapons/shield_round.gltf";
     const WAND: &str = "models/weapons/wand_rod.gltf";
+    /// The staff loads no asset: it is built from primitives at spawn.
+    const STAFF: &str = "<built staff>";
 
     /// Which side of the body a weapon's WORLD position sits on. The unit
     /// spawns at the origin facing +Z at identity rotation, so the main hand
@@ -1859,13 +1955,13 @@ mod held_weapon_tests {
     fn spawn_held(class: C, loadout: &[(ItemSlot, ItemId)]) -> (Vec<(&'static str, Side)>, bool) {
         let (mut app, unit) = spawn_unit(class, loadout);
         let world = app.world_mut();
-        let mut query = world.query::<(&WeaponSocket, &SceneRoot, &GlobalTransform)>();
+        let mut query = world.query::<(&WeaponSocket, Option<&SceneRoot>, &GlobalTransform)>();
         let assets = world.resource::<AssetServer>().clone();
         let mut out: Vec<(&'static str, Side)> = query
             .iter(world)
             .filter(|(socket, ..)| socket.owner == unit)
-            .map(|(_, scene, global)| {
-                let model = model_of(&assets, scene);
+            .map(|(socket, scene, global)| {
+                let model = model_of(&assets, socket, scene);
                 let x = global.translation().x;
                 assert!(x.abs() > 0.3, "{model} sits on neither side (x = {x})");
                 (model, if x > 0.0 { MainHand } else { OffHand })
@@ -1879,8 +1975,18 @@ mod held_weapon_tests {
         (out, dual_wielding)
     }
 
-    /// The model asset a socket's scene was loaded from.
-    fn model_of(assets: &AssetServer, scene: &SceneRoot) -> &'static str {
+    /// The model asset a socket's scene was loaded from, or [`STAFF`] for the
+    /// one kind that is built rather than loaded — which must load nothing.
+    fn model_of(
+        assets: &AssetServer,
+        socket: &WeaponSocket,
+        scene: Option<&SceneRoot>,
+    ) -> &'static str {
+        let Some(scene) = scene else {
+            assert_eq!(socket.kind, WeaponKind::Staff, "only a staff has no scene");
+            return STAFF;
+        };
+        assert_ne!(socket.kind, WeaponKind::Staff, "a staff loads no scene");
         let models = [AXE, DAGGER, BOW, MACE, SHIELD, WAND];
         let path = assets.get_path(scene.0.id()).expect("a loaded model path");
         models
@@ -1898,14 +2004,22 @@ mod held_weapon_tests {
     ) -> Vec<(&'static str, Option<WeaponSet>, Visibility)> {
         let (mut app, unit) = spawn_unit(class, loadout);
         let world = app.world_mut();
-        let mut query =
-            world.query::<(&WeaponSocket, &SceneRoot, Option<&WeaponSetSwap>, &Visibility)>();
+        let mut query = world.query::<(
+            &WeaponSocket,
+            Option<&SceneRoot>,
+            Option<&WeaponSetSwap>,
+            &Visibility,
+        )>();
         let assets = world.resource::<AssetServer>().clone();
         let mut out: Vec<_> = query
             .iter(world)
             .filter(|(socket, ..)| socket.owner == unit)
-            .map(|(_, scene, swap, visibility)| {
-                (model_of(&assets, scene), swap.map(|s| s.set), *visibility)
+            .map(|(socket, scene, swap, visibility)| {
+                (
+                    model_of(&assets, socket, scene),
+                    swap.map(|s| s.set),
+                    *visibility,
+                )
             })
             .collect();
         out.sort_by_key(|(model, set, _)| (*model, format!("{set:?}")));
@@ -1990,6 +2104,8 @@ mod held_weapon_tests {
             (C::Mage, vec![(WAND, MainHand)]),
             (C::Priest, vec![(WAND, MainHand)]),
             (C::Warlock, vec![(WAND, MainHand)]),
+            // No wand for the Druid: its staff is what it holds.
+            (C::Druid, vec![(STAFF, MainHand)]),
         ] {
             assert_eq!(held(class, &default_loadout(class)), expected, "{class:?}");
         }
@@ -2178,10 +2294,142 @@ mod held_weapon_tests {
     fn proxied_items_draw_their_stand_in() {
         let crossbow = [(ItemSlot::Ranged, ItemId::DeadeyeCrossbow)];
         assert_eq!(held(C::Hunter, &crossbow), vec![(BOW, MainHand)]);
-        let staff = [(ItemSlot::MainHand, ItemId::CrescentStaff)];
-        assert_eq!(held(C::Warrior, &staff), vec![(AXE, MainHand)]);
+        let polearm = [(ItemSlot::MainHand, ItemId::Peacemaker)];
+        assert_eq!(held(C::Warrior, &polearm), vec![(AXE, MainHand)]);
         let sword = [(ItemSlot::MainHand, ItemId::FrostbiteBlade)];
         assert_eq!(held(C::Rogue, &sword), vec![(DAGGER, MainHand)]);
+    }
+
+    /// Every staff in the item set draws the staff, whoever holds it: the
+    /// route is the weapon TYPE, so a new staff needs no art of its own.
+    #[test]
+    fn every_staff_draws_the_staff() {
+        let item_defs = items();
+        let mut staves: Vec<_> = item_defs
+            .iter()
+            .filter(|(_, item)| item.weapon_type == equipment::WeaponType::Staff)
+            .map(|(id, item)| (id.as_str(), weapon_model(item)))
+            .collect();
+        staves.sort_by_key(|(id, _)| *id);
+        assert_eq!(
+            staves,
+            vec![
+                ("CrescentStaff", WeaponModel::Exact(WeaponKind::Staff)),
+                ("RunestaffOfElements", WeaponModel::Exact(WeaponKind::Staff)),
+            ]
+        );
+        // A caster with a staff and no wand holds the staff up.
+        let staff = [(ItemSlot::MainHand, ItemId::RunestaffOfElements)];
+        for class in [C::Mage, C::Priest, C::Warlock, C::Druid] {
+            assert_eq!(held(class, &staff), vec![(STAFF, MainHand)], "{class:?}");
+        }
+    }
+
+    /// The drawn staff, measured off its meshes: a Druid in its default
+    /// loadout holds a weapon about two yards long and a fraction of that
+    /// wide, with its widest point at the head — the staff's silhouette. The
+    /// two-hand axe it used to borrow is 1.72 long and 1.24 wide across its
+    /// blade (`axe_2handed.gltf`'s POSITION bounds), so it fails the length,
+    /// the width and the shape checks alike.
+    #[test]
+    fn a_druid_holds_a_staff_shaped_weapon() {
+        let (mut app, unit) = spawn_unit(C::Druid, &default_loadout(C::Druid));
+        let world = app.world_mut();
+        let mut sockets = world.query::<(Entity, &WeaponSocket, &GlobalTransform)>();
+        let held: Vec<_> = sockets
+            .iter(world)
+            .filter(|(_, socket, _)| socket.owner == unit)
+            .map(|(e, socket, global)| (e, socket.kind, *global))
+            .collect();
+        assert_eq!(held.len(), 1, "the Druid holds one weapon");
+        let (socket, kind, socket_global) = held[0];
+        assert_eq!(kind, WeaponKind::Staff);
+        assert!(
+            world.get::<SceneRoot>(socket).is_none(),
+            "the staff loads no model"
+        );
+
+        // Every vertex of every mesh under the socket, in the socket's frame
+        // (haft along +Y, grip at the origin) and in the world.
+        let to_socket = socket_global.affine().inverse();
+        let mut local = Vec::new();
+        let mut world_points = Vec::new();
+        let mut parts = world.query::<(&Mesh3d, &GlobalTransform, &ChildOf)>();
+        let meshes = world.resource::<Assets<Mesh>>();
+        for (mesh, global, parent) in parts.iter(world) {
+            if parent.parent() != socket {
+                continue;
+            }
+            let mesh = meshes.get(&mesh.0).expect("a built mesh");
+            let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(positions)) =
+                mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            else {
+                panic!("a part with no positions");
+            };
+            for p in positions {
+                let w = global.transform_point(Vec3::from_array(*p));
+                world_points.push(w);
+                local.push(to_socket.transform_point3(w));
+            }
+        }
+        assert!(
+            local.len() > 100,
+            "the staff has geometry: {} vertices",
+            local.len()
+        );
+
+        let (lo, hi) = local.iter().fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| {
+            (lo.min(*p), hi.max(*p))
+        });
+        let size = hi - lo;
+        let width = size.x.max(size.z);
+        assert!(
+            (1.9..=2.2).contains(&size.y),
+            "the staff is {:.2} long, not about two yards",
+            size.y
+        );
+        assert!(
+            width / size.y < 0.15,
+            "the staff is {width:.2} wide for {:.2} long — a blade, not a haft",
+            size.y
+        );
+        assert!(
+            lo.y < -0.4 && hi.y > 1.4,
+            "the grip is not low on the haft: {lo} .. {hi}"
+        );
+
+        // The shape: thin along the haft, widest at the head.
+        let radius = |p: &Vec3| Vec2::new(p.x, p.z).length();
+        // The haft's vertices: a capsule has rings only at its ends, so this
+        // takes everything below the middle (the butt and the ring above it)
+        // and insists on finding some, or `haft` would be a vacuous 0.
+        let haft_points: Vec<f32> = local.iter().filter(|p| p.y < 0.5).map(radius).collect();
+        assert!(haft_points.len() > 8, "no haft vertices measured");
+        let haft = haft_points.into_iter().fold(0.0, f32::max);
+        let widest = local.iter().map(radius).fold(0.0, f32::max);
+        let widest_at = local
+            .iter()
+            .find(|p| radius(p) == widest)
+            .expect("a widest vertex")
+            .y;
+        assert!(haft < 0.06, "the haft is {haft:.3} thick");
+        assert!(widest > 2.0 * haft, "the head is no wider than the haft");
+        assert!(
+            widest_at > 1.2,
+            "the widest point is at y {widest_at:.2}, not the head"
+        );
+
+        // Mounted on the main-hand side, the head carried up and out in front.
+        let head = world_points
+            .iter()
+            .copied()
+            .max_by(|a, b| a.y.total_cmp(&b.y))
+            .expect("a vertex");
+        assert!(head.x > 0.5, "the staff is not in the main hand: {head}");
+        assert!(
+            head.y > 0.8 && head.z > 0.6,
+            "the head is not up and forward: {head}"
+        );
     }
 
     /// Names every shipped weapon-socket item that is NOT drawn with its own
@@ -2211,11 +2459,9 @@ mod held_weapon_tests {
             proxied,
             BTreeSet::from([
                 "AzuresongMageblade",
-                "CrescentStaff",
                 "DeadeyeCrossbow",
                 "FrostbiteBlade",
                 "Peacemaker",
-                "RunestaffOfElements",
                 "SniperScope",
                 "StormbladeEdge",
             ])

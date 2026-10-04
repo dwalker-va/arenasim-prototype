@@ -889,12 +889,12 @@ fn swing_pose(kind: WeaponKind, s: f32) -> Transform {
                 flick * s
             }
         }
-        // TwoHandAxe / Mace: big readable arc, raised back past vertical on
-        // windup and chopped forward-down through the target on release. In
-        // the socket frame, POSITIVE X-rotation pitches forward — windup is
-        // negative (s < 0 keeps the product negative), release positive. The
-        // mount's own 0.75 forward lean adds to these totals.
-        _ => {
+        // TwoHandAxe / Mace / Staff: big readable arc, raised back past
+        // vertical on windup and chopped forward-down through the target on
+        // release. In the socket frame, POSITIVE X-rotation pitches forward —
+        // windup is negative (s < 0 keeps the product negative), release
+        // positive. The mount's own 0.75 forward lean adds to these totals.
+        WeaponKind::TwoHandAxe | WeaponKind::Mace | WeaponKind::Staff => {
             if s < 0.0 {
                 0.9 * s
             } else {
@@ -1724,6 +1724,7 @@ mod swing_tests {
             WeaponKind::Mace,
             WeaponKind::Shield,
             WeaponKind::Wand,
+            WeaponKind::Staff,
         ] {
             for s in [-1.0, -0.4, 0.0, 0.35, 1.0] {
                 let direct = swing_pose(kind, s);
@@ -1732,6 +1733,20 @@ mod swing_tests {
                 assert_eq!(direct.translation, via_arc.translation, "{kind:?} at s={s}");
             }
         }
+    }
+
+    #[test]
+    fn a_staff_swings_the_two_hand_arc() {
+        // The staff is a two-hander with its own silhouette, not its own
+        // motion: every stroke it plays is the two-hand axe's, so swapping the
+        // art cannot have changed how a Druid's swing reads.
+        for s in [-1.0, -0.4, 0.0, 0.35, 1.0] {
+            let staff = swing_pose(WeaponKind::Staff, s);
+            let axe = swing_pose(WeaponKind::TwoHandAxe, s);
+            assert_eq!(staff.rotation, axe.rotation, "s={s}");
+            assert_eq!(staff.translation, axe.translation, "s={s}");
+        }
+        assert!(swings(WeaponKind::Staff));
     }
 
     #[test]
@@ -1746,6 +1761,7 @@ mod swing_tests {
                 WeaponKind::Bow,
                 WeaponKind::Mace,
                 WeaponKind::Shield,
+                WeaponKind::Staff,
             ] {
                 let p = stroke_profile(SwingStyle::Auto, kind, interval);
                 assert_eq!(
