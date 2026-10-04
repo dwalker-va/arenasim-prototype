@@ -665,9 +665,18 @@ impl Plugin for StatesPlugin {
                 // neither could ever restore. Chaining keeps at most one marker
                 // set (sheep wins the tie). See
                 // tests/fear_visual_probes.rs::simultaneous_fear_and_polymorph_do_not_deadlock.
+                //
+                // Travel Form after both, chained: the form defers to a sheep
+                // already up (and the sheep to the form), so the same sync
+                // point keeps at most one of the two mesh-swappers. Fear
+                // composes with the form instead of excluding it, and
+                // `dress_travel_form` runs last so the parts wear a husk tint
+                // that lands this frame.
                 (
                     play_match::update_polymorph_visuals, // Sheep body swap when polymorphed
                     play_match::update_fear_visuals,      // Shadow-husk tint when feared
+                    play_match::update_travel_form_visuals, // Druid on all fours in Travel Form
+                    play_match::dress_travel_form,        // Form parts follow the body material
                 )
                     .chain(),
                 // Fear sub-effects nested to keep the outer tuple within Bevy's 20-limit.
@@ -872,6 +881,15 @@ impl Plugin for StatesPlugin {
                 play_match::update_transform_puffs,       // Expand, rise and fade
                 play_match::cleanup_expired_transform_puffs, // Remove expired puffs
             )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // The shapeshift puff (kit 3610) at both ends of a Travel Form —
+        // graphical only. Its particles are client particles, aged and turned
+        // by `animate_client_particles` / `billboard_hunter_shots`.
+        .add_systems(
+            Update,
+            play_match::update_shift_puffs
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
@@ -1105,6 +1123,7 @@ impl Plugin for StatesPlugin {
                 play_match::update_walk_animation,
                 play_match::update_sheep_hop,
                 play_match::update_fear_run,
+                play_match::update_travel_bound,
                 play_match::cleanup_hit_flinch,
             )
                 .chain()

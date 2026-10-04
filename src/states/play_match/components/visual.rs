@@ -288,6 +288,77 @@ pub struct SheepPart {
 #[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct FearedVisual;
 
+/// Marker: a Druid's body is drawn as Travel Form, the pill on all fours
+/// (`rendering/effects/shapeshift.rs`). Single source of truth for the form's
+/// look — the hidden standing capsule, the form rig, the bound gait and the
+/// hidden weapons all key off it, never off `ActiveAuras`.
+///
+/// The form owns its OWN restore slot ([`TravelFormBodyMesh`]) and never
+/// touches the shared [`OriginalMesh`] / [`OriginalBodyMaterial`] pair, because
+/// Fear lands on a shifted Druid: the form swaps the body's MESH and Fear its
+/// MATERIAL, so the two compose in either order instead of excluding each other.
+/// Polymorph cannot land on a shifted Druid (Travel Form is immune), and the
+/// form defers to a sheep that is already up (`Without<PolymorphedVisual>`),
+/// with the mirror guard on the polymorph system.
+///
+/// SparseSet, because it is inserted on the combatant on the frame clock: a
+/// table-stored component would move the combatant between archetypes at
+/// display rate and reorder the sim's queries with it.
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub struct TravelFormVisual {
+    /// The [`TravelFormRig`] drawing the form, a child of the unit's
+    /// [`VisualBody`].
+    pub rig: Entity,
+}
+
+/// The standing capsule mesh Travel Form took off the [`VisualBody`], stored on
+/// that body until the form ends. The form's own slot: see [`TravelFormVisual`].
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub struct TravelFormBodyMesh(pub Handle<Mesh>);
+
+/// The pivot of a Druid's Travel Form body: a child of its [`VisualBody`] at
+/// the lying pill's centre, laid along the unit's heading (+Z). The bound's
+/// nose-up/nose-down rock is this entity's rotation; the bob rides the body's
+/// own local Y, which the rig inherits.
+#[derive(Component)]
+pub struct TravelFormRig {
+    /// The SIM entity, so the rig is never confused with another Druid's.
+    pub owner: Entity,
+    /// The current rock, radians, nose up positive.
+    pub rock: f32,
+    /// The body material the parts were last dressed in. When the body's
+    /// material changes (a Fear's husk lands or lifts), the parts follow it.
+    pub dressed_in: Option<Handle<StandardMaterial>>,
+}
+
+/// One primitive of the Travel Form body (the lying pill, head, an ear, the
+/// tail), a child of its [`TravelFormRig`]. `shade` darkens the body's
+/// material for this part (1.0 wears the body's material itself).
+#[derive(Component)]
+pub struct TravelFormPart {
+    pub shade: f32,
+}
+
+/// The shapeshift puff (`druidmorph_impact_base.m2`, kit 3610), playing at a
+/// Druid's feet as it shifts in or out. Emits world-space client particles
+/// for [`SHIFT_PUFF_SECS`](crate::states::play_match::SHIFT_PUFF_SECS), then
+/// retires; its particles finish their own lives.
+#[derive(Component)]
+pub struct ShiftPuff {
+    /// The Druid the puff follows while it emits.
+    pub owner: Entity,
+    /// Where it emits from: the Druid's feet, refreshed while the Druid exists.
+    pub origin: Vec3,
+    /// The Druid's heading, yaw only: the client emitters' forward offsets.
+    pub facing: Quat,
+    pub age: f32,
+    /// Particles owed per emitter, carried between frames.
+    pub carry: [f32; 4],
+    pub emitted: u32,
+}
+
 /// The breathing shadow aura sphere spawned as a child of a feared combatant's
 /// [`VisualBody`]. Mirrors [`SheepPart`]'s owner scoping: `owner` is the SIM
 /// entity, so restore despawns exactly this unit's shroud and two

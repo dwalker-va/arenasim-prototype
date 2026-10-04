@@ -1160,6 +1160,7 @@ pub fn animate_weapon_swings(
             Option<&CastingState>,
             Option<&ChannelingState>,
             Option<&PolymorphedVisual>,
+            Option<&TravelFormVisual>,
         ),
         Without<WeaponSocket>,
     >,
@@ -1169,7 +1170,7 @@ pub fn animate_weapon_swings(
 
     let dt = time.delta_secs();
     for (mut socket, mut transform, mut visibility, swap) in sockets.iter_mut() {
-        let Ok((combatant, owner_tf, auras, casting, channeling, polymorphed_marker)) =
+        let Ok((combatant, owner_tf, auras, casting, channeling, polymorphed_marker, shifted)) =
             owners.get(socket.owner)
         else {
             continue;
@@ -1180,7 +1181,7 @@ pub fn animate_weapon_swings(
         let mut target_dist = f32::INFINITY;
         if combatant.is_alive() {
             if let Some(target) = combatant.target {
-                if let Ok((target_combatant, target_tf, _, _, _, _)) = owners.get(target) {
+                if let Ok((target_combatant, target_tf, _, _, _, _, _)) = owners.get(target) {
                     if target_combatant.is_alive() {
                         socket.aim = target_tf.translation;
                         target_dist = owner_tf.translation.distance(target_tf.translation);
@@ -1212,8 +1213,10 @@ pub fn animate_weapon_swings(
         // truth — a killing blow leaves the aura on the corpse until it
         // ticks out naturally, but the marker (and thus this hide) flips
         // back the same frame the body is restored.
+        // A Druid in Travel Form is on all fours with no hands to hold its
+        // staff (`shapeshift.rs`), keyed off its marker the same way.
         let polymorphed = polymorphed_marker.is_some();
-        let wanted = if polymorphed || stowed {
+        let wanted = if polymorphed || shifted.is_some() || stowed {
             Visibility::Hidden
         } else {
             Visibility::Inherited
