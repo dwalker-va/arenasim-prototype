@@ -490,6 +490,34 @@ const MUTANTS = [
     replace: "if(false){",
     mustFail: ["board page: Cancel card retires a card from the drawer, and the review page lists it as cancelled"],
   },
+  {
+    name: "board-header-links-milestones",
+    file: "ui/board.html",
+    find: "    + milestoneNav()\n",
+    replace: "",
+    mustFail: ["board page: the header links every unreleased milestone's review page"],
+  },
+  {
+    name: "board-header-past-milestones-apart",
+    file: "ui/board.html",
+    find: 'var live = state.milestones.filter(function(m){ return m.status !== "released"; });',
+    replace: "var live = state.milestones.slice();",
+    mustFail: ["board page: the header links every unreleased milestone's review page"],
+  },
+  {
+    name: "board-header-past-list-stays-open",
+    file: "ui/board.html",
+    find: "if(mspast) mspast.ontoggle = function(){ pastOpen = mspast.open; };",
+    replace: "",
+    mustFail: ["board page: the header links every unreleased milestone's review page"],
+  },
+  {
+    name: "review-page-links-the-board",
+    file: "ui/review.html",
+    find: '<a class=\\"btn\\" id=\\"boardlink\\" href=\\"/\\">',
+    replace: '<a class=\\"btn\\" id=\\"boardlink\\" href=\\"/?m=" + encodeURIComponent(NAME) + "\\">',
+    mustFail: ["review page: links back to the whole board"],
+  },
 ];
 
 // The control: the unmutated copy, same layout, same environment.

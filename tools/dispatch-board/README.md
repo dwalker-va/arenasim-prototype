@@ -8,8 +8,11 @@ board and serves, on `127.0.0.1:7453`,
   (orchestrator, PM, subagents) talks to the same process;
 - `/` — the web UI (the ported artifact page: six columns, drag, drawer,
   answering a question, the attach-PR dialog), with a milestone filter
-  (`/?m=0.7`) and a link to one card's drawer (`/?card=AS-7`);
-- `/milestones/<name>` — a milestone's review page (see *Milestones*);
+  (`/?m=0.7`) and a link to one card's drawer (`/?card=AS-7`); its header
+  links every open and in-review milestone's review page, and the released
+  ones under *Past milestones*, all from the live milestone list;
+- `/milestones/<name>` — a milestone's review page (see *Milestones*), linking
+  back to the whole board and to that milestone's cards on it;
 - `/api/events` — the event feed the `wait` CLI blocks on;
 - `/favicon.svg`, `/favicon-32.png`, `/favicon-16.png` — the tab icon: the
   game's own `packaging/icon.svg` and `packaging/icon/icon_{32,16}.png`
