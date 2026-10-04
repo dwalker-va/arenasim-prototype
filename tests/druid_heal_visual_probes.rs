@@ -836,3 +836,108 @@ fn the_glyph_is_two_superimposed_camera_facing_plates_over_the_crown_for_two_thi
     };
     assert_eq!(left, 0, "and takes its plates");
 }
+
+/// Whether a texel adds anything to the frame under a plate's material. Bevy
+/// premultiplies an `AlphaMode::Add` fragment by its alpha and adds it; a LIT
+/// fragment carries the PBR specular (F0 = 0.04 for a dielectric, whatever
+/// its base colour) and the ambient, so under a lit material any texel with
+/// alpha adds light — black included.
+fn texel_adds_light(material: &StandardMaterial, texel: [u8; 4]) -> bool {
+    let has_alpha = texel[3] > 0;
+    match material.alpha_mode {
+        AlphaMode::Add if material.unlit => has_alpha && texel[..3].iter().any(|c| *c > 0),
+        AlphaMode::Add | AlphaMode::Blend | AlphaMode::Premultiplied => has_alpha,
+        AlphaMode::Mask(cutoff) => f32::from(texel[3]) / 255.0 >= cutoff,
+        _ => true,
+    }
+}
+
+/// The paw texture is the decoded `agility_128.blp` — DXT1 with no alpha, a
+/// white paw on black — so every texel is opaque and the background is in the
+/// colour. Under the plates' own material, the frame round the paw must add
+/// nothing, or the plate draws as a lit square (AS-225).
+#[test]
+fn the_glyph_plates_add_nothing_outside_the_paw() {
+    use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
+    use bevy::render::render_asset::RenderAssetUsages;
+
+    let bytes = std::fs::read(std::path::Path::new("assets").join(MOTW_GLYPH_TEXTURE))
+        .expect("the decoded agility_128 texture is committed");
+    let paw = Image::from_buffer(
+        &bytes,
+        ImageType::Extension("png"),
+        CompressedImageFormats::NONE,
+        true,
+        ImageSampler::Default,
+        RenderAssetUsages::default(),
+    )
+    .expect("the paw decodes");
+    let (w, h) = (paw.width() as usize, paw.height() as usize);
+    let data = paw.data.as_ref().expect("pixel data");
+    assert_eq!(data.len(), w * h * 4, "RGBA8");
+    let texel = |x: usize, y: usize| {
+        let i = (y * w + x) * 4;
+        [data[i], data[i + 1], data[i + 2], data[i + 3]]
+    };
+    // The frame: every texel within 8 of an edge. The paw's nearest stroke
+    // is 11 texels in, so this is all background — and it is the part of the
+    // quad that drew as a box.
+    const FRAME: usize = 8;
+    let frame: Vec<(usize, usize)> = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .filter(|&(x, y)| x.min(y).min(w - 1 - x).min(h - 1 - y) < FRAME)
+        .collect();
+    // The frame is opaque black: the shape is in the colour.
+    assert!(frame.iter().all(|&(x, y)| texel(x, y) == [0, 0, 0, 255]));
+    let paw_texels: Vec<[u8; 4]> = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .map(|(x, y)| texel(x, y))
+        .filter(|t| t[..3].iter().any(|c| *c > 200))
+        .collect();
+    assert!(paw_texels.len() > 500, "the paw is there to draw");
+
+    let mut harness = Harness::new();
+    let ally = harness.bearer(Vec3::new(0.0, COMBATANT_Y, 0.0), vec![]);
+    harness.app.world_mut().spawn(AuraLanding {
+        target: ally,
+        kind: AuraLandingKind::MarkOfTheWildGlyph,
+    });
+    harness.tick(3);
+    let world = harness.app.world_mut();
+    let handles: Vec<(usize, Handle<StandardMaterial>)> = {
+        let mut q = world.query::<(&MarkOfTheWildPlate, &MeshMaterial3d<StandardMaterial>)>();
+        q.iter(world).map(|(p, m)| (p.layer, m.0.clone())).collect()
+    };
+    assert_eq!(handles.len(), 2, "red-orange and gold");
+    let materials = world.resource::<Assets<StandardMaterial>>();
+    for (layer, handle) in handles {
+        let material = materials.get(&handle).expect("plate material");
+        let wears = material
+            .base_color_texture
+            .as_ref()
+            .and_then(|t| t.path())
+            .map(|p| p.path().to_path_buf());
+        assert_eq!(
+            wears.as_deref(),
+            Some(std::path::Path::new(MOTW_GLYPH_TEXTURE)),
+            "plate {layer} wears the paw"
+        );
+        let lit = frame
+            .iter()
+            .filter(|&&(x, y)| texel_adds_light(material, texel(x, y)))
+            .count();
+        assert_eq!(
+            lit,
+            0,
+            "plate {layer}: {lit} of {} frame texels add light under {:?} (unlit: {})",
+            frame.len(),
+            material.alpha_mode,
+            material.unlit
+        );
+        // ...while the paw itself still draws.
+        assert!(
+            paw_texels.iter().all(|t| texel_adds_light(material, *t)),
+            "plate {layer} draws the paw"
+        );
+    }
+}

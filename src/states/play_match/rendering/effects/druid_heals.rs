@@ -94,8 +94,10 @@ pub const MOTW_PLATES: [bool; 2] = [true, true]; // red-orange, gold
 pub const MOTW_OPACITY: f32 = 1.00;
 
 /// The decoded client texture the glyph plates wear: `spells/agility_128.blp`
-/// (CASC fdid 165558), a white paw on black. Opaque, so it is drawn additively:
-/// the black adds nothing.
+/// (CASC fdid 165558, DXT1 with no alpha), a white paw on black. The shape is
+/// in the colour, not the alpha, so the plates are drawn the way the client's
+/// material draws them — additive and unlit (`markofwild_impact_head.m2`,
+/// blend 4, flags `0x13`) — and the black adds nothing (`glyph_material`).
 pub const MOTW_GLYPH_TEXTURE: &str = "textures/effects/agility_128.png";
 
 // ── Bench geometry ───────────────────────────────────────────────────────────
@@ -825,6 +827,35 @@ fn additive(
     })
 }
 
+/// A glyph plate's material: additive and UNLIT, as the client's is. The paw
+/// texture is opaque — its shape is in the colour — so `additive`'s lit
+/// material would light the whole quad: a black, opaque texel still takes the
+/// PBR specular (F0 = 0.04 whatever the base colour) and the ambient, and
+/// `AlphaMode::Add` adds them, which drew the plate's square outline. Unlit,
+/// the plate adds `colour × texel × alpha`, so the black adds exactly zero.
+/// The glow rides in the base colour (linear, above 1 on the HDR camera).
+fn glyph_material(
+    materials: &mut Assets<StandardMaterial>,
+    color: Color,
+    texture: Handle<Image>,
+) -> Handle<StandardMaterial> {
+    let c = color.to_linear();
+    materials.add(StandardMaterial {
+        base_color: Color::linear_rgba(
+            c.red * PLATE_GLOW,
+            c.green * PLATE_GLOW,
+            c.blue * PLATE_GLOW,
+            0.0,
+        ),
+        base_color_texture: Some(texture),
+        unlit: true,
+        alpha_mode: AlphaMode::Add,
+        cull_mode: None,
+        double_sided: true,
+        ..default()
+    })
+}
+
 fn palette_step(t: f32) -> usize {
     ((t.clamp(0.0, 1.0) * PALETTE_STEPS as f32) as usize).min(PALETTE_STEPS - 1)
 }
@@ -992,12 +1023,10 @@ pub fn spawn_druid_effects(
                     if !MOTW_PLATES[layer] {
                         continue;
                     }
-                    let material = additive(
+                    let material = glyph_material(
                         &mut materials,
                         Color::srgb_u8(rgb[0], rgb[1], rgb[2]),
-                        0.0,
-                        PLATE_GLOW,
-                        Some(assets.paw.clone()),
+                        assets.paw.clone(),
                     );
                     // Both plates share one plane, superimposed, as the
                     // client's two quads are and the bench draws them: the
