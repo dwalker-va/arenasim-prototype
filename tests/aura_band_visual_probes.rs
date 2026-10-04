@@ -71,9 +71,7 @@ const BAND_TYPES: &[AuraType] = &[
     AuraType::HealingOverTime,
     AuraType::WindfuryBuff,
     AuraType::ArmorIncrease,
-    // The Druid's Cyclone and Travel Form, until AS-160 gives them treatments
-    // of their own.
-    AuraType::Cyclone,
+    // Travel Form, which has no apply treatment of its own.
     AuraType::TravelForm,
 ];
 
@@ -103,6 +101,7 @@ fn every_bespoke_owner_is_one_that_exists() {
     let expected: &[(AuraType, AuraApplyOwner)] = &[
         (AuraType::Root, HardCc),
         (AuraType::Stun, HardCc),
+        (AuraType::Cyclone, CycloneFunnel),
         (AuraType::Fear, FearShroud),
         (AuraType::Polymorph, Polymorph),
         (AuraType::Incapacitate, IceBlock),
