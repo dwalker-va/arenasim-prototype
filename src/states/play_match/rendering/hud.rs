@@ -4,7 +4,7 @@
 
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::play_match::rendering::status_labels::overhead_status_labels;
+use crate::states::play_match::rendering::status_labels::{label_text, overhead_status_labels};
 use bevy::prelude::*;
 use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
@@ -420,7 +420,7 @@ pub fn render_health_bars(
                     // in `status_labels`.
                     if let Some(auras) = active_auras {
                         for (label, aura) in overhead_status_labels(&auras.auras) {
-                            let text = format!("{} {:.1}s", label.text, aura.duration);
+                            let text = label_text(&label, aura);
                             render_status_label(
                                 ui,
                                 &bar_pos,

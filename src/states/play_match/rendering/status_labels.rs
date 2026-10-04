@@ -105,6 +105,12 @@ pub fn overhead_status_label(aura: &Aura) -> Option<OverheadLabel> {
     }
 }
 
+/// The text the HUD draws for `label` on `aura`: the label and the aura's
+/// remaining duration, to a tenth of a second (`STUN 2.4s`).
+pub fn label_text(label: &OverheadLabel, aura: &Aura) -> String {
+    format!("{} {:.1}s", label.text, aura.duration)
+}
+
 /// The labels to stack above one combatant, nearest the health bar first,
 /// each with the aura it counts down. One label per aura TYPE — the first
 /// aura of that type — so two stuns read as one `STUN`.
@@ -223,6 +229,89 @@ mod tests {
             assert!(!is_incapacitating(&t), "{t:?} is not full loss of control");
         }
         assert!(overhead_status_label(&aura(AuraType::MovementSpeedSlow, "")).is_none());
+    }
+
+    /// One aura of EVERY labelled type, handed over shuffled, stacks in the
+    /// one fixed order nearest the bar first. The input is checked against
+    /// `AuraType::ALL`, so a newly labelled type has to be placed here too.
+    #[test]
+    fn every_labelled_type_stacks_in_the_fixed_order() {
+        let shuffled = vec![
+            aura(AuraType::Silence, "Unstable Affliction"),
+            aura(AuraType::Cyclone, "Cyclone"),
+            aura(AuraType::FearImmunity, "Berserker Rage"),
+            aura(AuraType::Polymorph, "Polymorph"),
+            aura(AuraType::Root, "Frost Nova"),
+            aura(AuraType::Incapacitate, "Freezing Trap"),
+            aura(AuraType::Fear, "Fear"),
+            aura(AuraType::Stun, "Kidney Shot"),
+        ];
+        let mut labelled: Vec<String> = AuraType::ALL
+            .into_iter()
+            .filter(|t| overhead_status_label(&aura(*t, "")).is_some())
+            .map(|t| format!("{t:?}"))
+            .collect();
+        let mut given: Vec<String> = shuffled
+            .iter()
+            .map(|a| format!("{:?}", a.effect_type))
+            .collect();
+        labelled.sort();
+        given.sort();
+        assert_eq!(given, labelled, "the shuffle must hold every labelled type once");
+
+        let stack: Vec<&str> = overhead_status_labels(&shuffled)
+            .into_iter()
+            .map(|(l, _)| l.text)
+            .collect();
+        assert_eq!(
+            stack,
+            vec!["STUN", "ROOT", "FEAR", "SHEEPED", "FROZEN", "CYCLONE", "SILENCE", "BERSERK"]
+        );
+
+        // An incapacitate that is not Freezing Trap takes the same slot.
+        let mut other = shuffled.clone();
+        other[5] = aura(AuraType::Incapacitate, "Sap");
+        let stack: Vec<&str> = overhead_status_labels(&other)
+            .into_iter()
+            .map(|(l, _)| l.text)
+            .collect();
+        assert_eq!(
+            stack,
+            vec!["STUN", "ROOT", "FEAR", "SHEEPED", "INCAPACITATED", "CYCLONE", "SILENCE", "BERSERK"]
+        );
+    }
+
+    /// Two auras of one type show one label: the FIRST aura's, whichever
+    /// name it carries.
+    #[test]
+    fn a_shared_type_shows_only_its_first_aura() {
+        let fear_first = vec![aura(AuraType::Fear, "Fear"), aura(AuraType::Fear, "Death Coil")];
+        let shown: Vec<(&str, &str)> = overhead_status_labels(&fear_first)
+            .into_iter()
+            .map(|(l, a)| (l.text, a.ability_name.as_str()))
+            .collect();
+        assert_eq!(shown, vec![("FEAR", "Fear")]);
+
+        let coil_first = vec![aura(AuraType::Fear, "Death Coil"), aura(AuraType::Fear, "Fear")];
+        let shown: Vec<(&str, &str)> = overhead_status_labels(&coil_first)
+            .into_iter()
+            .map(|(l, a)| (l.text, a.ability_name.as_str()))
+            .collect();
+        assert_eq!(shown, vec![("HORROR", "Death Coil")]);
+    }
+
+    /// The drawn text is the label plus the remaining duration to a tenth.
+    #[test]
+    fn label_text_counts_down_to_a_tenth() {
+        let mut stun = aura(AuraType::Stun, "Kidney Shot");
+        stun.duration = 2.44;
+        let l = overhead_status_label(&stun).unwrap();
+        assert_eq!(label_text(&l, &stun), "STUN 2.4s");
+
+        let mut coil = aura(AuraType::Fear, "Death Coil");
+        coil.duration = 3.0;
+        let l = overhead_status_label(&coil).unwrap();
+        assert_eq!(label_text(&l, &coil), "HORROR 3.0s");
     }
 
     /// The stack reads nearest-first in the established order, one per type.
