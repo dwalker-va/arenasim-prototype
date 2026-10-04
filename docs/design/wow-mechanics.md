@@ -252,7 +252,11 @@ tests fail if a full-CC type or spell is left unlabelled.
 - No second resource pool and no kit swap — an escape shift only
 - AI: the Druid shifts when PRESSURED and rooted, or snared with a melee or pet
   chasing it, or below 60% HP with a melee on it. A snare with no chaser is
-  shrugged off — the form outruns legs, not spells. The posture machine then
+  shrugged off — the form outruns legs, not spells. A shift that breaks a root
+  or snare is the Druid's next action: only an emergency heal (Swiftmend, or
+  the Rejuvenation that arms it, on a teammate below 45%) goes first, and only
+  for one global cooldown — the shift takes the next, whoever is still dying.
+  The posture machine then
   runs it in ESCAPE from its melee and pet chasers (`ShiftEscape`): it flees
   the nearest chaser at every range and holds its heading from one commit
   window to the next, bending only for walls, pillars and cover. It shifts
