@@ -31,6 +31,12 @@ use crate::states::play_match::components::*;
 //   dedicated launch model instead: `nature_cast_hand.m2`, a ~0.3 s tight
 //   (~2°) jet of water-ring shockwaves (21.4/s) and gold glow sparks.
 //
+// The Druid (`docs/design/2026-10-03-druid-client-data.md`) draws the Nature
+// hands on every cast but Moonfire, whose kit 730 (`magic_cast_hand.m2`) is
+// the third family, Arcane: a 1000 ms one-shot sparkle with no precast. Most
+// Druid casts are instants, which play the launch alone as they land
+// (`spawn_instant_cast_hands`) — there is no cast window to loop through.
+//
 // Timing is event-edge-driven in the source: the precast loop lives from the
 // cast-start edge to the cast-end edge — its duration IS the actual cast
 // time, decided by gameplay, never a visual constant — and an interrupted
@@ -147,6 +153,169 @@ pub const HEAL_CAST_RELEASE_PITCH: f32 = 0.16;
 /// Seconds the loop pitch eases in over at cast start.
 pub const HEAL_CAST_POSTURE_EASE_SECS: f32 = 0.25;
 
+// --- Instants (the Druid's zero-length casts) ---------------------------------
+
+/// A Nature instant plays the cast kit alone — the launch jet — as it lands
+/// (the (3,13) cast event; an instant has no precast window). The hand glow
+/// re-flares with it, so the green reads at a glance; `false` leaves the jet
+/// alone.
+pub const NATURE_INSTANT_HAND_GLOW: bool = true;
+
+// --- Moonfire's arcane hands (kit 730, `magic_cast_hand.m2`) -----------------
+//
+// AS-160 bench sign-off (`docs/design/2026-10-03-druid-client-data.md`,
+// `docs/design/benches/2026-10-03-druid-visuals-bench.html`): three emitters
+// per hand over the 1000 ms kit — `cyan_glow3` motes, `star5a` twinkles, and
+// a `teleporttarget` ring disc for the first 300 ms. Geometry and tracks are
+// the bench's drawing code, ported.
+
+pub const MOONFIRE_CAST_HANDS: bool = true;
+pub const MOONFIRE_HAND_SIZE_MUL: f32 = 1.00;
+/// The kit's length — the model's single 1000 ms sequence.
+pub const MOONFIRE_HAND_SECS: f32 = 1.0;
+/// Motes and stars per hand.
+pub const ARCANE_HAND_MOTES: u32 = 5;
+/// One mote's rise, seconds per cycle; the five are staggered a fifth apart.
+pub const ARCANE_MOTE_CYCLE_SECS: f32 = 0.8;
+/// Quad diameters, yards (the bench's sprite sizes).
+pub const ARCANE_MOTE_SIZE: f32 = 0.32;
+pub const ARCANE_STAR_SIZE: f32 = 0.30;
+/// The ring disc's window, and its diameter at the start and end of it.
+pub const ARCANE_RING_SECS: f32 = 0.30;
+pub const ARCANE_RING_DIAMETERS: [f32; 2] = [0.30, 1.50];
+/// Seconds per radian of a star's spin.
+const ARCANE_STAR_SPIN_SECS: f32 = 0.30;
+const ARCANE_EMISSIVE: f32 = 2.0;
+
+/// Colour tracks, 0..255 keyed on a particle's phase (the kit's tracks).
+const ARCANE_MOTE_RGB: [(f32, [f32; 3]); 3] = [
+    (0.0, [167.0, 84.0, 244.0]),
+    (0.55, [62.0, 227.0, 229.0]),
+    (1.0, [250.0, 230.0, 2.0]),
+];
+const ARCANE_STAR_RGB: [(f32, [f32; 3]); 3] = [
+    (0.0, [0.0, 221.0, 62.0]),
+    (0.5, [183.0, 250.0, 251.0]),
+    (1.0, [246.0, 211.0, 20.0]),
+];
+const ARCANE_RING_RGB: [(f32, [f32; 3]); 3] = [
+    (0.0, [255.0, 234.0, 0.0]),
+    (0.35, [173.0, 89.0, 238.0]),
+    (1.0, [30.0, 236.0, 136.0]),
+];
+const ARCANE_MOTE_ALPHA: [(f32, f32); 3] = [(0.0, 0.25), (0.55, 0.99), (1.0, 0.04)];
+const ARCANE_STAR_ALPHA: [(f32, f32); 3] = [(0.0, 0.44), (0.5, 0.79), (1.0, 0.0)];
+const ARCANE_RING_ALPHA: f32 = 0.7;
+
+fn keyed_rgb(track: &[(f32, [f32; 3])], t: f32) -> [f32; 3] {
+    let t = t.clamp(0.0, 1.0);
+    for pair in track.windows(2) {
+        let ((t0, a), (t1, b)) = (pair[0], pair[1]);
+        if t <= t1 {
+            let u = ((t - t0) / (t1 - t0)).clamp(0.0, 1.0);
+            return [0, 1, 2].map(|i| (a[i] + (b[i] - a[i]) * u) / 255.0);
+        }
+    }
+    track[track.len() - 1].1.map(|c| c / 255.0)
+}
+
+fn keyed_scalar(track: &[(f32, f32)], t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    for pair in track.windows(2) {
+        let ((t0, a), (t1, b)) = (pair[0], pair[1]);
+        if t <= t1 {
+            let u = ((t - t0) / (t1 - t0)).clamp(0.0, 1.0);
+            return a + (b - a) * u;
+        }
+    }
+    track[track.len() - 1].1
+}
+
+/// A mote's colour (sRGB 0..1) at phase `t`: violet -> cyan -> gold.
+pub fn arcane_mote_rgb(t: f32) -> [f32; 3] {
+    keyed_rgb(&ARCANE_MOTE_RGB, t)
+}
+
+/// A star's colour at phase `t`: green -> pale cyan -> gold.
+pub fn arcane_star_rgb(t: f32) -> [f32; 3] {
+    keyed_rgb(&ARCANE_STAR_RGB, t)
+}
+
+/// The ring disc's colour at progress `t` through its window: gold ->
+/// violet -> green.
+pub fn arcane_ring_rgb(t: f32) -> [f32; 3] {
+    keyed_rgb(&ARCANE_RING_RGB, t)
+}
+
+/// Phase 0..1 of the `index`th mote (and star) at `age`: each cycles every
+/// [`ARCANE_MOTE_CYCLE_SECS`], staggered a fifth of a cycle apart.
+pub fn arcane_phase(index: u32, age: f32) -> f32 {
+    (age / ARCANE_MOTE_CYCLE_SECS + index as f32 / ARCANE_HAND_MOTES as f32).fract()
+}
+
+/// Rig-local position of the `index`th mote at `age`: a 0.15 yd scatter
+/// about the hand that swings slowly fore and aft, rising 0.3 yd a cycle.
+pub fn arcane_mote_local(index: u32, age: f32) -> Vec3 {
+    let a = index as f32 * 2.4;
+    Vec3::new(
+        a.sin() * 0.15,
+        arcane_phase(index, age) * 0.3,
+        (a + age * 5.0).cos() * 0.15,
+    )
+}
+
+/// Rig-local position of the `index`th star at `age`: just above the hand,
+/// rising 0.2 yd a cycle.
+pub fn arcane_star_local(index: u32, age: f32) -> Vec3 {
+    Vec3::new(
+        0.0,
+        0.1 + arcane_phase(index, age) * 0.2,
+        (index as f32 * 1.7).sin() * 0.12,
+    )
+}
+
+/// The ring disc's diameter at `age`, swelling across its window.
+pub fn arcane_ring_diameter(age: f32) -> f32 {
+    let t = (age / ARCANE_RING_SECS).clamp(0.0, 1.0);
+    (ARCANE_RING_DIAMETERS[0] + (ARCANE_RING_DIAMETERS[1] - ARCANE_RING_DIAMETERS[0]) * t)
+        * MOONFIRE_HAND_SIZE_MUL
+}
+
+/// An arcane piece's pose and look at `age`: rig-local translation, quad
+/// diameter, sRGB colour and alpha. Pure, so the probes and the update
+/// system read one definition.
+fn arcane_piece_state(role: HealCastPieceRole, age: f32) -> (Vec3, f32, [f32; 3], f32) {
+    match role {
+        HealCastPieceRole::ArcaneMote { index } => {
+            let t = arcane_phase(index, age);
+            (
+                arcane_mote_local(index, age),
+                ARCANE_MOTE_SIZE * MOONFIRE_HAND_SIZE_MUL,
+                arcane_mote_rgb(t),
+                keyed_scalar(&ARCANE_MOTE_ALPHA, t),
+            )
+        }
+        HealCastPieceRole::ArcaneStar { index } => {
+            let t = arcane_phase(index, age);
+            (
+                arcane_star_local(index, age),
+                ARCANE_STAR_SIZE * MOONFIRE_HAND_SIZE_MUL,
+                arcane_star_rgb(t),
+                keyed_scalar(&ARCANE_STAR_ALPHA, t),
+            )
+        }
+        _ => {
+            let t = (age / ARCANE_RING_SECS).clamp(0.0, 1.0);
+            (
+                Vec3::ZERO,
+                arcane_ring_diameter(age),
+                arcane_ring_rgb(t),
+                ARCANE_RING_ALPHA * (1.0 - t),
+            )
+        }
+    }
+}
+
 // --- Pure geometry (probed directly) ------------------------------------------
 
 /// How long a family's launch flare runs.
@@ -154,22 +323,25 @@ pub fn heal_cast_flare_secs(kind: HealCastKind) -> f32 {
     match kind {
         HealCastKind::Holy => HOLY_LAUNCH_FLARE_SECS,
         HealCastKind::Nature => NATURE_LAUNCH_BURST_SECS,
+        HealCastKind::Arcane => MOONFIRE_HAND_SECS,
     }
 }
 
-/// The glow quad sizes (outer, core) for a family.
+/// The glow quad sizes (outer, core) for a family. Arcane hands draw no glow
+/// ball; they share Nature's numbers only so the table stays total.
 pub fn heal_cast_glow_sizes(kind: HealCastKind) -> [f32; 2] {
     let sizes = match kind {
         HealCastKind::Holy => HOLY_CAST_GLOW_SIZES,
-        HealCastKind::Nature => NATURE_CAST_GLOW_SIZES,
+        HealCastKind::Nature | HealCastKind::Arcane => NATURE_CAST_GLOW_SIZES,
     };
     [sizes[0] * GLOW_SCALE, sizes[1] * GLOW_SCALE]
 }
 
+/// A family's wisp width (Arcane draws no wisps; see above).
 pub fn heal_cast_wisp_width(kind: HealCastKind) -> f32 {
     match kind {
         HealCastKind::Holy => HOLY_CAST_WISP_WIDTH,
-        HealCastKind::Nature => NATURE_CAST_WISP_WIDTH,
+        HealCastKind::Nature | HealCastKind::Arcane => NATURE_CAST_WISP_WIDTH,
     }
 }
 
@@ -258,7 +430,7 @@ fn water_ring_blue() -> Color {
 fn glow_color(kind: HealCastKind) -> Color {
     match kind {
         HealCastKind::Holy => holy_gold_pale(),
-        HealCastKind::Nature => nature_green(),
+        HealCastKind::Nature | HealCastKind::Arcane => nature_green(),
     }
 }
 
@@ -266,7 +438,7 @@ fn glow_color(kind: HealCastKind) -> Color {
 fn wisp_alpha(kind: HealCastKind) -> f32 {
     match kind {
         HealCastKind::Holy => 0.80,
-        HealCastKind::Nature => 0.70,
+        HealCastKind::Nature | HealCastKind::Arcane => 0.70,
     }
 }
 
@@ -276,6 +448,9 @@ fn wisp_alpha(kind: HealCastKind) -> f32 {
 pub struct HealCastAssets {
     quad: Handle<Mesh>,
     ring: Handle<Mesh>,
+    /// Moonfire's ring disc: a thin band at 0.85 of the radius, 0.16 wide
+    /// (the bench's stroked circle), scaled to the disc's radius.
+    arcane_ring: Handle<Mesh>,
     star: Handle<Image>,
     dot: Handle<Image>,
 }
@@ -287,6 +462,7 @@ impl HealCastAssets {
             // The water-ring sprite: a thin annulus, billboarded and expanded
             // over its life (the `hard_cc.rs` CC-flare idiom).
             ring: meshes.add(Annulus::new(0.72, 1.0).mesh().resolution(40)),
+            arcane_ring: meshes.add(Annulus::new(0.77, 0.93).mesh().resolution(40)),
             star: images.add(star_flash_texture()),
             dot: images.add(soft_dot_texture()),
         }
@@ -314,8 +490,10 @@ fn additive_material(
 // --- Systems ------------------------------------------------------------------
 
 /// Spawn the two hand rigs (and the cast posture) when a combatant starts a
-/// hard-cast heal. Non-heal casts are untouched — they keep the generic
-/// casting orb (`spawn_casting_orbs` skips heals; this is the replacement).
+/// hard cast routed to a hand family. Every other hard cast is untouched — it
+/// keeps the generic casting orb (`spawn_casting_orbs` skips routed casts;
+/// this is the replacement). A zero-length cast is left to
+/// [`spawn_instant_cast_hands`], and so is a family with no precast loop.
 pub fn spawn_heal_cast_glows(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -330,6 +508,9 @@ pub fn spawn_heal_cast_glows(
         let Some(kind) = HealCastKind::for_ability(casting.ability) else {
             continue;
         };
+        if !kind.has_precast() || casting.time_remaining <= 0.0 {
+            continue;
+        }
         // A cast already flagged interrupted never lights up (the casting-orb
         // guard: its ending marker was already consumed).
         if casting.interrupted {
@@ -355,115 +536,273 @@ pub fn spawn_heal_cast_glows(
             }
             _ => true,
         };
-        let wisp_width = heal_cast_wisp_width(kind);
-
         for side in [1.0_f32, -1.0] {
-            // Per-rig materials: alphas are animated absolutely each frame,
-            // so nothing outside this rig may share the handles.
-            let outer_material = additive_material(
+            spawn_hand_rig(
+                &mut commands,
                 &mut materials,
-                glow_color(kind),
-                2.0,
-                Some(assets.dot.clone()),
+                assets,
+                HandRig {
+                    caster,
+                    body,
+                    kind,
+                    side,
+                    phase: HealCastPhase::Loop,
+                    has_launch_flash,
+                    drives_posture: true,
+                },
             );
-            let core_material = additive_material(
-                &mut materials,
-                glow_color(kind),
-                2.8,
-                Some(assets.dot.clone()),
-            );
-
-            let rig = commands
-                .spawn((
-                    Transform::from_translation(spell_hand_local(side)),
-                    Visibility::default(),
-                    HealCastHand {
-                        caster,
-                        body,
-                        kind,
-                        side,
-                        age: 0.0,
-                        phase: HealCastPhase::Loop,
-                        has_launch_flash,
-                        leaf_carry: 0.0,
-                        burst_carry: [0.0; 2],
-                        emitted: 0,
-                        quad: assets.quad.clone(),
-                        ring_mesh: assets.ring.clone(),
-                        leaf_material: additive_material(
-                            &mut materials,
-                            leaf_brown(),
-                            1.2,
-                            Some(assets.dot.clone()),
-                        ),
-                        spark_material: additive_material(
-                            &mut materials,
-                            super::heal_impact::holy_gold(),
-                            NATURE_LAUNCH_SPARK_EMISSIVE,
-                            Some(assets.dot.clone()),
-                        ),
-                        ring_material: additive_material(
-                            &mut materials,
-                            water_ring_blue().with_alpha(NATURE_LAUNCH_RING_ALPHA),
-                            NATURE_LAUNCH_RING_EMISSIVE,
-                            None,
-                        ),
-                    },
-                ))
-                .id();
-            commands.entity(body).add_child(rig);
-
-            let mut parts: Vec<Entity> = Vec::new();
-            for (role, material, alpha) in [
-                (HealCastPieceRole::GlowOuter, outer_material, 0.55),
-                (HealCastPieceRole::GlowCore, core_material, 0.85),
-            ] {
-                parts.push(
-                    commands
-                        .spawn((
-                            HealCastPiece {
-                                role,
-                                base_alpha: alpha,
-                            },
-                            Mesh3d(assets.quad.clone()),
-                            MeshMaterial3d(material),
-                            Transform::from_scale(Vec3::splat(1e-3)),
-                            NotShadowCaster,
-                        ))
-                        .id(),
-                );
-            }
-            for index in 0..3_u32 {
-                let (color, texture) = match kind {
-                    // Ribbon-blur streamers for Holy, star threads for Nature
-                    // — the source's genericglow2b vs star11b split.
-                    HealCastKind::Holy => (holy_wisp_color(index), assets.dot.clone()),
-                    HealCastKind::Nature => (nature_wisp_color(index), assets.star.clone()),
-                };
-                let material = additive_material(&mut materials, color, 2.2, Some(texture));
-                parts.push(
-                    commands
-                        .spawn((
-                            HealCastPiece {
-                                role: HealCastPieceRole::Wisp { index },
-                                base_alpha: wisp_alpha(kind),
-                            },
-                            Mesh3d(assets.quad.clone()),
-                            MeshMaterial3d(material),
-                            Transform::from_translation(heal_cast_wisp_head(index, 0.0))
-                                .with_scale(Vec3::new(wisp_width, 1e-3, 1.0)),
-                            NotShadowCaster,
-                        ))
-                        .id(),
-                );
-            }
-            commands.entity(rig).add_children(&parts);
         }
 
         commands
             .entity(caster)
             .try_insert(HealCastPosture { pitch: 0.0 });
     }
+}
+
+/// The hand flash of a zero-length cast — the launch alone (the (3,13) cast
+/// event), since an instant has no precast window. A zero-length cast is
+/// inserted and completed inside one sim tick, so no render-frame system
+/// ever sees its `CastingState`; this plays off the `Landed` marker instead,
+/// which names the ability ([`LandedCast`]). Travel Form carries no cast
+/// state at all, so its shift into the form plays it the same way.
+///
+/// Scoped by [`HealCastKind::for_ability`], not by the instant: only the
+/// Druid's instants are routed, so every other class's instants (Frost
+/// Shock among them) still draw no hands. Runs in `FixedUpdate` after
+/// `CombatResolution` and before `consume_cast_ending_signals`, which
+/// despawns the marker; a shift is read the tick it is queued, before
+/// `process_travel_form` resolves it the next tick.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_instant_cast_hands(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut assets: Local<Option<HealCastAssets>>,
+    abilities: Res<crate::states::play_match::ability_config::AbilityDefinitions>,
+    landed: Query<(&CastEnding, &LandedCast), Added<CastEnding>>,
+    shifts: Query<&ShapeshiftPending, Added<ShapeshiftPending>>,
+    casters: Query<&Children>,
+    bodies: Query<(), With<VisualBody>>,
+) {
+    use crate::states::play_match::abilities::AbilityType;
+
+    let instants = landed
+        .iter()
+        .filter(|(ending, cast)| {
+            ending.kind == CastEndingKind::Landed
+                && abilities.get_unchecked(&cast.ability).cast_time <= 0.0
+        })
+        .map(|(ending, cast)| (ending.caster, cast.ability));
+    let shifts_in = shifts
+        .iter()
+        .filter(|pending| pending.shift == Shift::IntoTravelForm)
+        .map(|pending| (pending.caster, AbilityType::TravelForm));
+
+    for (caster, ability) in instants.chain(shifts_in) {
+        let Some(kind) = HealCastKind::for_ability(ability) else {
+            continue;
+        };
+        if kind == HealCastKind::Arcane && !MOONFIRE_CAST_HANDS {
+            continue;
+        }
+        let Some(body) = casters
+            .get(caster)
+            .ok()
+            .and_then(|children| children.iter().find(|&child| bodies.get(child).is_ok()))
+        else {
+            continue; // headless-shaped caster with no rendered body
+        };
+        let assets = assets.get_or_insert_with(|| HealCastAssets::build(&mut meshes, &mut images));
+        for side in [1.0_f32, -1.0] {
+            spawn_hand_rig(
+                &mut commands,
+                &mut materials,
+                assets,
+                HandRig {
+                    caster,
+                    body,
+                    kind,
+                    side,
+                    phase: HealCastPhase::Flare {
+                        remaining: heal_cast_flare_secs(kind),
+                    },
+                    has_launch_flash: true,
+                    drives_posture: false,
+                },
+            );
+        }
+    }
+}
+
+/// What a hand rig is: whose, which family, which hand, and where it starts.
+struct HandRig {
+    caster: Entity,
+    body: Entity,
+    kind: HealCastKind,
+    side: f32,
+    phase: HealCastPhase,
+    has_launch_flash: bool,
+    drives_posture: bool,
+}
+
+/// Spawn one hand rig at its spell-hand socket under the caster's
+/// `VisualBody`, with the pieces its family shows from its starting phase:
+/// a precast loop's glow and wisps; an instant Nature flash's glow (the jet
+/// is emitted by the update pass); Moonfire's motes, stars and ring disc.
+fn spawn_hand_rig(
+    commands: &mut Commands,
+    materials: &mut Assets<StandardMaterial>,
+    assets: &HealCastAssets,
+    spec: HandRig,
+) {
+    let HandRig {
+        caster,
+        body,
+        kind,
+        side,
+        phase,
+        has_launch_flash,
+        drives_posture,
+    } = spec;
+    let rig = commands
+        .spawn((
+            Transform::from_translation(spell_hand_local(side)),
+            Visibility::default(),
+            HealCastHand {
+                caster,
+                body,
+                kind,
+                side,
+                age: 0.0,
+                phase,
+                has_launch_flash,
+                drives_posture,
+                leaf_carry: 0.0,
+                burst_carry: [0.0; 2],
+                emitted: 0,
+                quad: assets.quad.clone(),
+                ring_mesh: assets.ring.clone(),
+                leaf_material: additive_material(
+                    materials,
+                    leaf_brown(),
+                    1.2,
+                    Some(assets.dot.clone()),
+                ),
+                spark_material: additive_material(
+                    materials,
+                    super::heal_impact::holy_gold(),
+                    NATURE_LAUNCH_SPARK_EMISSIVE,
+                    Some(assets.dot.clone()),
+                ),
+                ring_material: additive_material(
+                    materials,
+                    water_ring_blue().with_alpha(NATURE_LAUNCH_RING_ALPHA),
+                    NATURE_LAUNCH_RING_EMISSIVE,
+                    None,
+                ),
+            },
+        ))
+        .id();
+    commands.entity(body).add_child(rig);
+
+    let instant = !matches!(phase, HealCastPhase::Loop);
+    // Per-piece materials throughout: alphas (and the arcane colours) are
+    // animated absolutely each frame, so nothing else may share a handle.
+    let mut piece = |role: HealCastPieceRole,
+                     base_alpha: f32,
+                     mesh: Handle<Mesh>,
+                     material: Handle<StandardMaterial>,
+                     at: Vec3,
+                     scale: Vec3| {
+        commands
+            .spawn((
+                HealCastPiece { role, base_alpha },
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::from_translation(at).with_scale(scale),
+                NotShadowCaster,
+            ))
+            .id()
+    };
+    let mut parts: Vec<Entity> = Vec::new();
+
+    if kind == HealCastKind::Arcane {
+        let mut arcane = |role: HealCastPieceRole, mesh: Handle<Mesh>, texture| {
+            let (at, _, rgb, _) = arcane_piece_state(role, 0.0);
+            let material = additive_material(
+                materials,
+                Color::srgb(rgb[0], rgb[1], rgb[2]).with_alpha(0.0),
+                ARCANE_EMISSIVE,
+                texture,
+            );
+            piece(role, 1.0, mesh, material, at, Vec3::splat(1e-3))
+        };
+        for index in 0..ARCANE_HAND_MOTES {
+            parts.push(arcane(
+                HealCastPieceRole::ArcaneMote { index },
+                assets.quad.clone(),
+                Some(assets.dot.clone()),
+            ));
+            parts.push(arcane(
+                HealCastPieceRole::ArcaneStar { index },
+                assets.quad.clone(),
+                Some(assets.star.clone()),
+            ));
+        }
+        parts.push(arcane(
+            HealCastPieceRole::ArcaneRing,
+            assets.arcane_ring.clone(),
+            None,
+        ));
+        commands.entity(rig).add_children(&parts);
+        return;
+    }
+
+    if !instant || kind == HealCastKind::Holy || NATURE_INSTANT_HAND_GLOW {
+        for (role, strength, alpha) in [
+            (HealCastPieceRole::GlowOuter, 2.0, 0.55),
+            (HealCastPieceRole::GlowCore, 2.8, 0.85),
+        ] {
+            let material = additive_material(
+                materials,
+                glow_color(kind),
+                strength,
+                Some(assets.dot.clone()),
+            );
+            parts.push(piece(
+                role,
+                alpha,
+                assets.quad.clone(),
+                material,
+                Vec3::ZERO,
+                Vec3::splat(1e-3),
+            ));
+        }
+    }
+    // Wisps belong to the precast loop (and to Holy's re-flare of it); a
+    // Nature launch is the jet, never the swirl.
+    if !instant || kind == HealCastKind::Holy {
+        let wisp_width = heal_cast_wisp_width(kind);
+        for index in 0..3_u32 {
+            let (color, texture) = match kind {
+                // Ribbon-blur streamers for Holy, star threads for Nature
+                // — the source's genericglow2b vs star11b split.
+                HealCastKind::Holy => (holy_wisp_color(index), assets.dot.clone()),
+                _ => (nature_wisp_color(index), assets.star.clone()),
+            };
+            let material = additive_material(materials, color, 2.2, Some(texture));
+            parts.push(piece(
+                HealCastPieceRole::Wisp { index },
+                wisp_alpha(kind),
+                assets.quad.clone(),
+                material,
+                heal_cast_wisp_head(index, 0.0),
+                Vec3::new(wisp_width, 1e-3, 1.0),
+            ));
+        }
+    }
+    commands.entity(rig).add_children(&parts);
 }
 
 /// Per-frame animation: the glow pulse, the wisp swirl, the Nature leaf
@@ -632,6 +971,34 @@ pub fn update_heal_cast_glows(
 
         for child in children.iter() {
             if let Ok((piece, mut part, material)) = pieces.get_mut(child) {
+                if matches!(
+                    piece.role,
+                    HealCastPieceRole::ArcaneMote { .. }
+                        | HealCastPieceRole::ArcaneStar { .. }
+                        | HealCastPieceRole::ArcaneRing
+                ) {
+                    // Moonfire's kit runs on its own tracks, not the
+                    // glow-ball bloom and re-flare.
+                    let (at, size, rgb, alpha) = arcane_piece_state(piece.role, age);
+                    part.translation = at;
+                    let radius_scale = match piece.role {
+                        // The ring mesh is unit-RADIUS; the quads unit-width.
+                        HealCastPieceRole::ArcaneRing => 0.5,
+                        _ => 1.0,
+                    };
+                    let shown = alpha > 0.0;
+                    part.scale = Vec3::splat(if shown {
+                        (size * radius_scale).max(1e-3)
+                    } else {
+                        1e-3
+                    });
+                    if let Some(material) = materials.get_mut(&material.0) {
+                        let color = Color::srgb(rgb[0], rgb[1], rgb[2]);
+                        material.emissive = emissive_of(color, ARCANE_EMISSIVE);
+                        material.base_color = color.with_alpha(alpha * piece.base_alpha);
+                    }
+                    continue;
+                }
                 let alpha = piece.base_alpha * bloom * flare_alpha;
                 match piece.role {
                     HealCastPieceRole::GlowOuter => {
@@ -649,6 +1016,9 @@ pub fn update_heal_cast_glows(
                         part.translation = head - tangent * (length * 0.5);
                         part.scale = Vec3::new(wisp_width * flare_scale, length.max(1e-3), 1.0);
                     }
+                    HealCastPieceRole::ArcaneMote { .. }
+                    | HealCastPieceRole::ArcaneStar { .. }
+                    | HealCastPieceRole::ArcaneRing => {}
                 }
                 if let Some(material) = materials.get_mut(&material.0) {
                     material.base_color.set_alpha(alpha);
@@ -776,7 +1146,7 @@ pub fn update_heal_cast_posture(
         // lean is the pose the new cast wants.
         let rig = rigs
             .iter()
-            .filter(|rig| rig.caster == caster && rig.side > 0.0)
+            .filter(|rig| rig.caster == caster && rig.side > 0.0 && rig.drives_posture)
             .max_by_key(|rig| matches!(rig.phase, HealCastPhase::Loop) as u8);
 
         if dying.is_some() {
@@ -900,6 +1270,11 @@ pub fn billboard_heal_cast_glows(
                         // projection in the billboard plane.
                         let roll = (-t_cam.x).atan2(t_cam.y);
                         part.rotation = facing * Quat::from_rotation_z(roll);
+                    }
+                    HealCastPieceRole::ArcaneStar { .. } => {
+                        // The twinkle spins as it rises.
+                        part.rotation =
+                            facing * Quat::from_rotation_z(rig.age / ARCANE_STAR_SPIN_SECS);
                     }
                     _ => {
                         part.rotation = facing;

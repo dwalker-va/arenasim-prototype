@@ -583,6 +583,10 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
         });
         let this = match t {
             _ if curse => Some("curse apply apparition (warlock_dots.rs)"),
+            // A non-heal the client lands with a heal's kit (Innervate).
+            _ if HealImpact::kind_for(a).is_some() => {
+                Some("heal-kit landing on cast (heal_impact.rs)")
+            }
             AuraType::Absorb | AuraType::DamageImmunity => {
                 Some("shield bubble (shield_bubbles.rs)")
             }
@@ -617,7 +621,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (AirTotem, "AS-134 (aura application — totem pulse)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
-    (Innervate, "AS-160 (Druid visuals)"),
     (MarkOfTheWild, "AS-160 (Druid visuals)"),
     (TravelForm, "AS-160 (Druid visuals)"),
 ];

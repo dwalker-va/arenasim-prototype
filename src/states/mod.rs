@@ -629,6 +629,18 @@ impl Plugin for StatesPlugin {
                 .before(play_match::consume_cast_ending_signals)
                 .run_if(in_combat_scene),
         )
+        // Instant hand flashes (the Druid's zero-length casts and its Travel
+        // Form shift): read off the `Landed` marker that names the ability,
+        // so BEFORE `consume_cast_ending_signals` despawns it, and in
+        // FixedUpdate because the cast starts and lands inside one sim tick.
+        .add_systems(
+            FixedUpdate,
+            play_match::spawn_instant_cast_hands
+                .after(CombatSystemPhase::CombatResolution)
+                .after(play_match::consume_heal_cast_endings)
+                .before(play_match::consume_cast_ending_signals)
+                .run_if(in_combat_scene),
+        )
         // Combat resolution, death, and visual effects (after core combat)
         .add_systems(
             Update,
