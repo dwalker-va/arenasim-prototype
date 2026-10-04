@@ -68,8 +68,9 @@ pub const ROOTS_DUST_DENSITY_MUL: f32 = 1.00;
 /// Segments per root — the bench's 11-point polyline.
 pub const ROOT_SEGMENTS: usize = 10;
 
-/// Dust puffs (P0+P2 `dust1`): 30/s through the birth, stopping at 1500ms.
-const ROOT_DUST_RATE: f32 = 30.0;
+/// Dust puffs (P0+P2 `dust1`): 30/s through the birth, tapering to nothing
+/// between 1334ms and 1500ms.
+const ROOT_DUST_RATE: [(f32, f32); 3] = [(0.0, 30.0), (1.334, 30.0), (1.5, 0.0)];
 const ROOT_DUST_SPEED: f32 = 0.278;
 const ROOT_DUST_CONE: f32 = 1.571;
 const ROOT_DUST_LIFE: f32 = 2.0;
@@ -833,7 +834,7 @@ pub fn update_root_tendrils(
         let seed_base = rig.owner.index().wrapping_mul(7919);
 
         if ROOTS_LAYERS[1] {
-            tendrils.dust_acc += ROOT_DUST_RATE * ROOTS_DUST_DENSITY_MUL * dt;
+            tendrils.dust_acc += keyed(&ROOT_DUST_RATE, age) * ROOTS_DUST_DENSITY_MUL * dt;
             while tendrils.dust_acc >= 1.0 {
                 tendrils.dust_acc -= 1.0;
                 tendrils.seq = tendrils.seq.wrapping_add(1);

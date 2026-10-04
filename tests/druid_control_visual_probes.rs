@@ -909,3 +909,266 @@ fn the_spin_winds_down_forward_to_facing_front() {
         assert!(h.body_rotation(body).angle_between(Quat::IDENTITY) < 1e-3);
     }
 }
+
+/// No strip of a held funnel ever dips below the floor. Every kept layer's
+/// lowest edge sits above its emitter, and every kept emitter is at or above
+/// the ground; only the violet skirt (P4), which the sign-off turned off,
+/// starts below it. Checked on every frame of a funnel older than its longest
+/// band life, at every edge vertex of every strip.
+#[test]
+fn no_funnel_strip_ever_dips_below_the_floor() {
+    let mut h = Harness::new();
+    let (unit, _) = h.spawn_unit(1.0, -3.0);
+    h.apply(unit, aura_from_config(AbilityType::Cyclone));
+    let mut strips_seen = 0;
+    let mut lowest = f32::MAX;
+    for _ in 0..ticks(3.5) {
+        h.tick(1);
+        let mut q = h
+            .app
+            .world_mut()
+            .query::<(&CycloneBand, &GlobalTransform)>();
+        for (_, g) in q.iter(h.app.world()) {
+            strips_seen += 1;
+            for i in 0..=100 {
+                let u = i as f32 / 100.0;
+                for top in [false, true] {
+                    lowest = lowest.min(g.transform_point(strip_point(u, top)).y);
+                }
+            }
+        }
+    }
+    assert!(
+        strips_seen > 1000,
+        "the funnel was full of strips ({strips_seen})"
+    );
+    assert!(
+        lowest >= 0.0,
+        "a funnel strip dipped {lowest:.3}yd below the floor"
+    );
+}
+
+// ==============================================================================
+// Against the real Travel Form and death systems
+// ==============================================================================
+
+mod with_travel_form_and_death {
+    use super::*;
+    use arenasim::states::play_match::components::{DeathAnimation, TravelFormVisual};
+    use arenasim::states::play_match::{
+        animate_death, dress_travel_form, update_polymorph_visuals, update_travel_bound,
+        update_travel_form_visuals,
+    };
+
+    /// A 60fps clock, so the form's bound and the death fall run at a real
+    /// frame rate.
+    const FRAME: Duration = Duration::from_micros(16_667);
+
+    fn long_aura(t: AuraType) -> Aura {
+        Aura {
+            effect_type: t,
+            duration: 30.0,
+            break_on_damage_threshold: -1.0,
+            ..Default::default()
+        }
+    }
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::transform::TransformPlugin,
+        ));
+        app.init_asset::<Mesh>();
+        app.init_asset::<StandardMaterial>();
+        app.init_asset::<Image>();
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(FRAME));
+        app.add_systems(
+            Update,
+            (
+                update_polymorph_visuals,
+                update_fear_visuals,
+                update_travel_form_visuals,
+                dress_travel_form,
+                update_walk_animation,
+                update_fear_run,
+                update_travel_bound,
+                animate_death,
+                update_cyclone_visuals,
+                update_cyclone_funnels,
+                update_druid_motes,
+            )
+                .chain(),
+        );
+        app.add_systems(
+            PostUpdate,
+            apply_cyclone_lift.before(TransformSystem::TransformPropagate),
+        );
+        app
+    }
+
+    fn spawn(app: &mut App) -> (Entity, Entity) {
+        let world = app.world_mut();
+        let mesh = world
+            .resource_mut::<Assets<Mesh>>()
+            .add(Capsule3d::new(0.5, 1.5));
+        let mat = world
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial::default());
+        let body = world
+            .spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(mat),
+                OriginalMesh(mesh),
+                VisualBody { rest_y: 0.0 },
+                Transform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        let unit = world
+            .spawn((
+                Transform::from_xyz(0.0, BODY_Y, 0.0),
+                Visibility::default(),
+                Combatant::new(1, 0, CharacterClass::Druid),
+                WalkAnim {
+                    phase: 0.0,
+                    previous_xz: Vec2::ZERO,
+                    idle_time: 1.0,
+                    body_offset: 0.0,
+                },
+            ))
+            .id();
+        world.entity_mut(unit).add_child(body);
+        (unit, body)
+    }
+
+    fn set(app: &mut App, unit: Entity, types: &[AuraType]) {
+        let auras = types.iter().map(|&t| long_aura(t)).collect();
+        app.world_mut()
+            .entity_mut(unit)
+            .insert(ActiveAuras { auras });
+    }
+
+    fn step(app: &mut App, n: usize) {
+        for _ in 0..n {
+            app.update();
+        }
+    }
+
+    fn world_y(app: &App, e: Entity) -> f32 {
+        app.world()
+            .get::<GlobalTransform>(e)
+            .unwrap()
+            .translation()
+            .y
+    }
+
+    fn world_rotation(app: &App, e: Entity) -> Quat {
+        app.world()
+            .get::<GlobalTransform>(e)
+            .unwrap()
+            .compute_transform()
+            .rotation
+    }
+
+    #[test]
+    fn a_shifted_druid_caught_in_cyclone_lifts_the_cat_and_sets_it_back_down() {
+        let mut app = app();
+        let (unit, body) = spawn(&mut app);
+        set(&mut app, unit, &[AuraType::TravelForm]);
+        step(&mut app, 30);
+        let rig = app
+            .world()
+            .get::<TravelFormVisual>(unit)
+            .expect("shifted")
+            .rig;
+        let rest_y = world_y(&app, rig);
+        let rest_rotation = world_rotation(&app, rig);
+
+        set(&mut app, unit, &[AuraType::TravelForm, AuraType::Cyclone]);
+        step(&mut app, 90);
+        let lifted = world_y(&app, rig) - rest_y;
+        assert!(
+            lifted > CYCLONE_VICTIM_LIFT - CYCLONE_VICTIM_BOB - 0.01
+                && lifted < CYCLONE_VICTIM_LIFT + CYCLONE_VICTIM_BOB + 0.01,
+            "the cat floats about {CYCLONE_VICTIM_LIFT}yd up (got {lifted:.3})"
+        );
+        // It spins about the vertical: the cat stays level.
+        let up = world_rotation(&app, rig) * Vec3::Y;
+        assert!(
+            (up - Vec3::Y).length() < 1e-3,
+            "the cat tipped: up = {up:?}"
+        );
+        assert!(app.world().get::<TravelFormVisual>(unit).is_some());
+
+        set(&mut app, unit, &[AuraType::TravelForm]);
+        step(&mut app, 300);
+        assert!(
+            (world_y(&app, rig) - rest_y).abs() < 1e-4,
+            "the cat is back down"
+        );
+        assert!(
+            world_rotation(&app, rig).angle_between(rest_rotation) < 1e-3,
+            "the cat faces forward again"
+        );
+        assert!(app.world().get::<CycloneLift>(body).is_none());
+
+        // Leaving the form afterwards stands the capsule back up at rest.
+        set(&mut app, unit, &[]);
+        step(&mut app, 30);
+        assert!((world_y(&app, body) - BODY_Y).abs() < 1e-4);
+    }
+
+    #[test]
+    fn shifting_out_mid_air_keeps_the_capsule_lifted_then_lands_it() {
+        let mut app = app();
+        let (unit, body) = spawn(&mut app);
+        set(&mut app, unit, &[AuraType::TravelForm, AuraType::Cyclone]);
+        step(&mut app, 60);
+        set(&mut app, unit, &[AuraType::Cyclone]);
+        step(&mut app, 30);
+        let lifted = world_y(&app, body) - BODY_Y;
+        assert!(
+            lifted > 0.2,
+            "the capsule is still lifted after the form ({lifted:.3})"
+        );
+
+        set(&mut app, unit, &[]);
+        step(&mut app, 300);
+        assert!((world_y(&app, body) - BODY_Y).abs() < 1e-4);
+        assert!(world_rotation(&app, body).angle_between(Quat::IDENTITY) < 1e-3);
+    }
+
+    #[test]
+    fn death_while_cycloned_ends_on_the_real_death_fall_pose() {
+        let mut app = app();
+        let (unit, body) = spawn(&mut app);
+        set(&mut app, unit, &[AuraType::Cyclone]);
+        step(&mut app, 90);
+        app.world_mut()
+            .get_mut::<Combatant>(unit)
+            .unwrap()
+            .current_health = 0.0;
+        app.world_mut()
+            .entity_mut(unit)
+            .insert(DeathAnimation::new(Vec3::X));
+        step(&mut app, 400);
+
+        let t = app.world().get::<Transform>(body).unwrap();
+        assert!(
+            (t.translation.y - (0.0 - 0.5)).abs() < 1e-4,
+            "the corpse sinks to its rest less 0.5, got {}",
+            t.translation.y
+        );
+        let fall = Quat::from_axis_angle(
+            Vec3::Y.cross(Vec3::X).normalize(),
+            std::f32::consts::FRAC_PI_2,
+        );
+        assert!(
+            t.rotation.angle_between(fall) < 1e-3,
+            "the corpse lies in the death fall's pose, not a spun one"
+        );
+        assert!(app.world().get::<CycloneLift>(body).is_none());
+    }
+}
