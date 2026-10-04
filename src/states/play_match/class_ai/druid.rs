@@ -2748,4 +2748,39 @@ mod reach_tests {
             "{event}"
         );
     }
+
+    /// The Roots peel picks in sight: the lowest dying teammate's only melee
+    /// is in range but behind the pillar, so it yields to the next dying
+    /// teammate's melee in sight. (Swiftmend and Cyclone on cooldown, the
+    /// Druid under the governor's reserve and every heal rolling, so the peel
+    /// is the only cast left.)
+    #[test]
+    fn the_roots_peel_passes_over_an_attacker_out_of_sight() {
+        let (mut s, kill) = kill_scene(0.40, 0.48);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, warrior);
+        all_heals_rolling(&mut s, mage);
+        add_enemy(
+            &mut s,
+            Warrior,
+            BEHIND + Vec3::new(1.0, 0.0, 1.0),
+            Some(warrior),
+        );
+        let near = add_enemy(
+            &mut s,
+            Rogue,
+            IN_SIGHT + Vec3::new(1.0, 0.0, 1.0),
+            Some(mage),
+        );
+        s.prep = Some(|c| {
+            under_the_reserve(c);
+            c.ability_cooldowns.insert(AbilityType::Swiftmend, 10.0);
+            c.ability_cooldowns.insert(AbilityType::Cyclone, 10.0);
+        });
+        assert_eq!(
+            outcome(&take(&mut s, &pillar(), kill, None)),
+            chose("EntanglingRoots", near)
+        );
+    }
 }
