@@ -186,6 +186,24 @@ pub struct LightningBoltStrike {
     pub end: Vec3,
 }
 
+/// Moonfire's landing — a moon orb overhead and a thin beam dropping onto the
+/// victim (`moonfire_impact_base.m2`, kit 3293, @Base).
+///
+/// Spawned deterministically at the Moonfire landing in `process_casting` (no
+/// `game_rng` draw), so it is byte-neutral in headless like
+/// [`LightningBoltStrike`]. The graphical-only systems in
+/// `rendering/effects/moonfire.rs` dress and animate it. Moonfire does NOT
+/// route through [`SchoolImpact`]: this is its whole landing, and its DoT has
+/// no sustained visual (the client has none; the aura icon carries it).
+#[derive(Component)]
+pub struct MoonfireLanding {
+    /// The victim. The landing tracks it while it plays.
+    pub target: Entity,
+    /// Victim position at the landing — where the landing stays if the victim
+    /// is gone.
+    pub origin: Vec3,
+}
+
 /// Component for tracking death fall animation.
 /// When a combatant dies, this component is added to animate them falling over.
 #[derive(Component)]

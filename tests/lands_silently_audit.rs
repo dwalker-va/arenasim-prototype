@@ -24,7 +24,9 @@
 //!    for every member except exactly the `KNOWN_SILENT` ones. Set equality in
 //!    BOTH directions: a new silent member fails, AND a known-silent member
 //!    that has since gained a visual fails — so the list can only shrink and
-//!    can never go stale. Each entry names the card that clears it.
+//!    can never go stale. Each entry names the card that clears it — or, for
+//!    a member the design rules silent, is a permanent [`SilentByDesign`]
+//!    entry citing the design doc that ruled it (which must exist).
 //!
 //! On top of the families, `every_ability_belongs_to_a_family` makes the
 //! families a cover of the whole config: an ability that no family scans is
@@ -138,6 +140,44 @@ fn check_judged(
     }
 }
 
+/// A member that lands with no visual in its family BY RULING, not pending a
+/// card: the client gives it none and a design doc rules it stays that way.
+/// Permanent where a known-silent entry is temporary, so it names the doc that
+/// ruled it instead of a card — and the doc must exist.
+struct SilentByDesign {
+    ability: AbilityType,
+    /// Repo-relative path of the design doc that rules it silent.
+    doc: &'static str,
+    reason: &'static str,
+}
+
+/// A by-design entry must cite a design doc that exists, and give a reason.
+fn check_rulings(family: &str, rulings: &[SilentByDesign]) -> Result<(), String> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut problems = Vec::new();
+    for r in rulings {
+        if !r.doc.starts_with("docs/") || !root.join(r.doc).is_file() {
+            problems.push(format!(
+                "{:?} is silent by design in {family}, but its ruling `{}` is not a design \
+                 doc in docs/ — cite the doc that rules it, or list it as known-silent with \
+                 the card that will draw it",
+                r.ability, r.doc
+            ));
+        }
+        if r.reason.trim().is_empty() {
+            problems.push(format!(
+                "{:?} is silent by design in {family} with no reason",
+                r.ability
+            ));
+        }
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n"))
+    }
+}
+
 fn scan(pred: impl Fn(AbilityType, &AbilityConfig) -> bool) -> BTreeSet<AbilityType> {
     AbilityDefinitions::default()
         .iter()
@@ -174,6 +214,24 @@ fn assert_judged(
     if let Err(e) = judged {
         panic!("{e}");
     }
+}
+
+/// [`assert_judged`] for a family with members silent by ruling: they count
+/// as listed (so one that gains a visual fails the same way), and each must
+/// cite its doc.
+fn assert_judged_with_rulings(
+    family: &str,
+    pred: fn(AbilityType, &AbilityConfig) -> bool,
+    judge: Judge,
+    known_silent: &[(AbilityType, &str)],
+    rulings: &[SilentByDesign],
+) {
+    if let Err(e) = check_rulings(family, rulings) {
+        panic!("{e}");
+    }
+    let mut listed: Vec<(AbilityType, &str)> = known_silent.to_vec();
+    listed.extend(rulings.iter().map(|r| (r.ability, r.doc)));
+    assert_judged(family, pred, judge, &listed);
 }
 
 // ── aura classification ─────────────────────────────────────────────────────
@@ -334,6 +392,7 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
         LightningBolt => Some("forked-arc strike (casting.rs → lightning_bolt.rs)"),
         Immolate => Some("landing flame burst (casting.rs → flame.rs)"),
         DrainLife => Some("drain beam (drain_life.rs, keyed on the channel's ability)"),
+        Moonfire => Some("moon orb + beam landing (casting.rs → moonfire.rs)"),
         // The empowered swing carries `HeroicStrikeSwing` (auto_attack.rs);
         // heroic_strike.rs lays its trail and lands it through the client
         // landing router, so the router must answer for it.
@@ -346,7 +405,7 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
 
 /// The Druid's kit lands silently until its visuals are built — each
 /// "AS-160" entry here and below is cleared by AS-160's build cards.
-const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[(Moonfire, "AS-160 (Druid visuals)")];
+const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
 
 #[test]
 fn direct_damage_finds_every_member() {
@@ -361,6 +420,14 @@ fn direct_damage_lands_nothing_silently() {
         damage_landing,
         DIRECT_DAMAGE_KNOWN_SILENT,
     );
+}
+
+/// Moonfire lands through its own orb-and-beam landing, never the shared
+/// school impact as well — the two would play over each other.
+#[test]
+fn moonfire_lands_through_its_own_landing_only() {
+    assert_eq!(SchoolImpact::anchor_for(Moonfire), None);
+    assert!(bolt_kind_for(Moonfire).is_none());
 }
 
 /// The four Hunter shots land through the client's landing, not their school
@@ -411,14 +478,18 @@ fn dot_finds_every_member() {
     assert_finds("DoT", is_dot, DOT_MEMBERS);
 }
 
+/// DoTs that draw no state by ruling. The landing is the whole visual and the
+/// aura icon carries the DoT, as with Curse of Tongues.
+const DOT_SILENT_BY_DESIGN: &[SilentByDesign] = &[SilentByDesign {
+    ability: Moonfire,
+    doc: "docs/design/2026-10-03-druid-client-data.md",
+    reason: "client has no state; aura icon carries it (ruling 2; the Curse of Tongues \
+             precedent) — the orb-and-beam landing is the whole visual",
+}];
+
 #[test]
 fn dot_lands_nothing_silently() {
-    assert_judged(
-        "DoT",
-        is_dot,
-        dot_state,
-        &[(Moonfire, "AS-160 (Druid visuals)")],
-    );
+    assert_judged_with_rulings("DoT", is_dot, dot_state, &[], DOT_SILENT_BY_DESIGN);
 }
 
 /// The router names each state it draws — a pin on the judge, so a wrong
@@ -873,6 +944,32 @@ fn harness_fails_a_duplicated_listing() {
     )
     .unwrap_err();
     assert!(err.contains("twice"), "{err}");
+}
+
+#[test]
+fn harness_holds_a_ruling_to_a_doc_that_exists() {
+    let ruled = |doc| SilentByDesign {
+        ability: Fear,
+        doc,
+        reason: "planted",
+    };
+    assert_eq!(
+        check_rulings(
+            "planted",
+            &[ruled("docs/design/2026-10-03-druid-client-data.md")]
+        ),
+        Ok(())
+    );
+    for bad in ["AS-0", "docs/design/no-such-ruling.md"] {
+        let err = check_rulings("planted", &[ruled(bad)]).unwrap_err();
+        assert!(err.contains("is not a design doc"), "{err}");
+    }
+    let unreasoned = SilentByDesign {
+        reason: " ",
+        ..ruled("docs/design/2026-10-03-druid-client-data.md")
+    };
+    let err = check_rulings("planted", &[unreasoned]).unwrap_err();
+    assert!(err.contains("no reason"), "{err}");
 }
 
 #[test]

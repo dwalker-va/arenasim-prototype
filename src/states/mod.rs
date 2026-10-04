@@ -1042,6 +1042,20 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Moonfire landing: moon orb, beam, base glow and wisps on the victim.
+        // Graphical-only — the marker is spawned byte-neutrally by
+        // `process_casting`, so headless never draws it.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_moonfire_landings,
+                play_match::update_moonfire_landings,
+                play_match::cleanup_moonfire_landings,
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Disengage trail + charge trail visual effects
         .add_systems(
             Update,

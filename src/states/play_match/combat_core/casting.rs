@@ -675,6 +675,19 @@ pub fn process_casting(
                 commands.spawn((ImmolateApplyBurst { origin: target_pos }, PlayMatchEntity));
             }
 
+            // Moonfire's orb-and-beam landing. Deterministic marker, no
+            // `game_rng` draw; drawn by the graphical-only systems in
+            // `rendering/effects/moonfire.rs`, so it is byte-neutral in headless.
+            if ability == AbilityType::Moonfire {
+                commands.spawn((
+                    MoonfireLanding {
+                        target: target_entity,
+                        origin: target_pos,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
+
             // Signature Lightning Bolt strike (graphical-only visual seam).
             // Deterministic spawn — NO game_rng draw — so this is byte-neutral
             // in headless. The forked-arc geometry and flash/impact burst are

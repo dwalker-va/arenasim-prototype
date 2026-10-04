@@ -96,3 +96,5 @@ mod heroic_strike;
 pub use heroic_strike::*;
 mod web_missile;
 pub use web_missile::*;
+mod moonfire;
+pub use moonfire::*;
