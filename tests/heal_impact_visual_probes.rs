@@ -208,8 +208,90 @@ fn the_router_names_the_blessed_mappings() {
         HealImpact::kind_for(AbilityType::LesserHealingWave),
         Some(HealImpactKind::HealingWave)
     );
+    // Swiftmend and Innervate share kit 101 with Healing Wave in the client
+    // (`docs/design/2026-10-03-druid-client-data.md`).
+    assert_eq!(
+        HealImpact::kind_for(AbilityType::Swiftmend),
+        Some(HealImpactKind::HealingWave)
+    );
+    assert_eq!(
+        HealImpact::kind_for(AbilityType::Innervate),
+        Some(HealImpactKind::HealingWave)
+    );
     assert_eq!(HealImpact::kind_for(AbilityType::MortalStrike), None);
     assert_eq!(HealImpact::kind_for(AbilityType::Frostbolt), None);
+}
+
+/// Innervate heals nothing, yet LANDS the Healing Wave splash: drive the real
+/// `process_casting` over a Druid's zero-length Innervate onto an ally and
+/// assert the landing spawned on that ally — the wiring the router alone
+/// cannot prove. The marker the cast leaves names the ability that landed,
+/// which is what the cast-side hand flash reads.
+#[test]
+fn innervate_lands_the_healing_wave_splash() {
+    use arenasim::states::play_match::combat_core::process_casting;
+    use arenasim::states::play_match::components::{
+        CastEnding, CastEndingKind, CastingState, GameRng, LandedCast, MatchCountdown,
+    };
+    use arenasim::states::play_match::map_config::ActiveMapGeometry;
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(TimeUpdateStrategy::ManualDuration(TICK))
+        .insert_resource(MatchCountdown {
+            time_remaining: 0.0,
+            gates_opened: true,
+        })
+        .insert_resource(CombatLog::default())
+        .insert_resource(GameRng::from_seed(0))
+        .insert_resource(AbilityDefinitions::default())
+        .insert_resource(ArenaDampening::default())
+        .insert_resource(ActiveMapGeometry {
+            bounds: Default::default(),
+            volumes: Vec::new(),
+            cover_anchors: Vec::new(),
+        })
+        .add_systems(Update, process_casting);
+    let druid = app
+        .world_mut()
+        .spawn((
+            Transform::from_xyz(0.0, 1.0, 0.0),
+            Combatant::new(1, 0, CharacterClass::Druid),
+        ))
+        .id();
+    let ally = app
+        .world_mut()
+        .spawn((
+            Transform::from_xyz(4.0, 1.0, 0.0),
+            Combatant::new(1, 1, CharacterClass::Priest),
+        ))
+        .id();
+    app.world_mut()
+        .entity_mut(druid)
+        .insert(CastingState::new(AbilityType::Innervate, ally, 0.0));
+    for _ in 0..3 {
+        app.update();
+    }
+
+    let landings: Vec<(Entity, HealImpactKind)> = app
+        .world_mut()
+        .query::<&HealImpact>()
+        .iter(app.world())
+        .map(|i| (i.target, i.kind))
+        .collect();
+    assert_eq!(landings, vec![(ally, HealImpactKind::HealingWave)]);
+
+    let markers: Vec<(CastEndingKind, AbilityType)> = app
+        .world_mut()
+        .query::<(&CastEnding, &LandedCast)>()
+        .iter(app.world())
+        .filter(|(e, _)| e.caster == druid)
+        .map(|(e, l)| (e.kind, l.ability))
+        .collect();
+    assert_eq!(
+        markers,
+        vec![(CastEndingKind::Landed, AbilityType::Innervate)]
+    );
 }
 
 // ── pure recipe checks ─────────────────────────────────────────────────────

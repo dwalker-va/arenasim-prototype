@@ -82,11 +82,12 @@ pub fn spawn_casting_orbs(
         if interrupted {
             continue;
         }
-        // Hard-cast heals telegraph with the per-hand heal-cast glow
-        // (`heal_cast.rs`) instead of the generic gathering orb — the Classic
-        // client's cast-side vocabulary for heals lives on the caster's spell
-        // hands, not on a gathering point. Everything else (non-heal casts,
-        // and every channel — no heal channels exist) keeps the orb.
+        // Hard-cast heals — and every Druid cast — telegraph with the
+        // per-hand cast glow (`heal_cast.rs`, routed by
+        // `HealCastKind::for_ability`) instead of the generic gathering orb:
+        // the Classic client's cast-side vocabulary for them lives on the
+        // caster's spell hands, not on a gathering point. Everything else
+        // (other casts, and every channel) keeps the orb.
         if matches!(phase, CastingOrbPhase::Growing) && HealCastKind::for_ability(ability).is_some()
         {
             continue;

@@ -442,10 +442,11 @@ pub struct HealImpact {
 }
 
 impl HealImpact {
-    /// Which landing a heal ability plays — the single routing table the
-    /// spawn sites derive from. `None` only for abilities that are not
-    /// direct heals; `tests/heal_impact_visual_probes.rs` checks every
-    /// `is_heal()` ability in the config reaches SOME landing.
+    /// Which landing a cast plays on its target — the single routing table
+    /// the spawn sites derive from. Every direct heal has one
+    /// (`tests/heal_impact_visual_probes.rs` checks every `is_heal()` ability
+    /// in the config reaches SOME landing); Innervate is the one non-heal
+    /// that lands one, because the client gives it the heal's kit.
     pub fn kind_for(ability: AbilityType) -> Option<HealImpactKind> {
         match ability {
             AbilityType::FlashHeal => Some(HealImpactKind::FlashHeal),
@@ -455,9 +456,12 @@ impl HealImpact {
             AbilityType::FlashOfLight => Some(HealImpactKind::FlashOfLight),
             // LHW and Healing Wave are one visual in the client.
             AbilityType::LesserHealingWave => Some(HealImpactKind::HealingWave),
-            // Swiftmend borrows the Nature heal landing until the Druid's own
-            // visuals land (AS-160).
-            AbilityType::Swiftmend => Some(HealImpactKind::HealingWave),
+            // Swiftmend and Innervate land with this same kit in the client
+            // (kit 101, `restoration_impact_base.m2`, shared with Healing
+            // Wave — `docs/design/2026-10-03-druid-client-data.md`). Client-
+            // faithful, not a borrow. Innervate heals nothing, so its landing
+            // spawns beside the heal branch in `process_casting`.
+            AbilityType::Swiftmend | AbilityType::Innervate => Some(HealImpactKind::HealingWave),
             _ => None,
         }
     }
@@ -602,6 +606,10 @@ pub struct HealImpactRig {
 /// two-layer glow ball with three wide gold ribbon wisps; Nature (Shaman) is
 /// `nature_precast_low_hand.m2` — the same swirl skeleton re-dressed green
 /// with thin star-threads plus a lazy shed of leaves.
+///
+/// The Druid draws these hands on EVERY cast, heal or not
+/// (`docs/design/2026-10-03-druid-client-data.md`): the Nature pair on all
+/// but Moonfire, whose hands are the arcane sparkle of `magic_cast_hand.m2`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HealCastKind {
     /// Gold glow + wide gold ribbon wisps; launch is a one-shot re-flare of
@@ -610,22 +618,47 @@ pub enum HealCastKind {
     /// Green glow + thin green star-thread wisps + leaf drift; launch is a
     /// dedicated ~0.3s water-ring and gold-spark jet (`nature_cast_hand.m2`).
     Nature,
+    /// Moonfire's cast kit 730, `magic_cast_hand.m2`: a 1000 ms one-shot of
+    /// cyan motes, star twinkles and a brief ring disc on each hand. The
+    /// client gives it no precast loop, so it only ever plays as a launch.
+    Arcane,
 }
 
 impl HealCastKind {
-    /// Which cast-side family a HARD-CAST heal ability plays — the single
-    /// routing table for the hand glows, mirroring [`HealImpact::kind_for`]
-    /// on the impact side. `None` for everything that is not a hard-cast
-    /// heal: instants (Holy Shock never carries a `CastingState`) and every
-    /// non-heal cast, which keep the generic casting orb.
+    /// Which cast-side family an ability's hands play — the single routing
+    /// table for the hand glows, mirroring [`HealImpact::kind_for`] on the
+    /// impact side. A hard cast winds up through the precast loop and
+    /// launches on landing (`spawn_heal_cast_glows`); a zero-length cast
+    /// plays the launch alone as it lands (`spawn_instant_cast_hands`).
+    /// `None` keeps the generic casting orb on a hard cast and draws nothing
+    /// on an instant: every other class's instants are unrouted (Holy Shock
+    /// never carries a `CastingState`; Frost Shock is a zero-length one).
     pub fn for_ability(ability: AbilityType) -> Option<HealCastKind> {
         match ability {
             AbilityType::FlashHeal | AbilityType::HolyLight | AbilityType::FlashOfLight => {
                 Some(HealCastKind::Holy)
             }
             AbilityType::LesserHealingWave => Some(HealCastKind::Nature),
+            // The Druid: kits 345/181 and 100/183 are the Shaman's two Nature
+            // hand models, on every cast but Moonfire. Travel Form carries no
+            // cast state; its shift (`ShapeshiftPending`) plays its hands.
+            AbilityType::Rejuvenation
+            | AbilityType::Lifebloom
+            | AbilityType::Swiftmend
+            | AbilityType::Innervate
+            | AbilityType::MarkOfTheWild
+            | AbilityType::EntanglingRoots
+            | AbilityType::Cyclone
+            | AbilityType::TravelForm => Some(HealCastKind::Nature),
+            AbilityType::Moonfire => Some(HealCastKind::Arcane),
             _ => None,
         }
+    }
+
+    /// Whether the family has a precast loop for a hard cast to wind up
+    /// through. Arcane has none in the client.
+    pub fn has_precast(self) -> bool {
+        !matches!(self, HealCastKind::Arcane)
     }
 }
 
@@ -661,6 +694,9 @@ pub struct HealCastHand {
     /// Whether a `Landed` ending plays the launch flare. True for every heal
     /// except Flash of Light when `FLASH_OF_LIGHT_HAS_LAUNCH_FLASH` is off.
     pub has_launch_flash: bool,
+    /// Whether the rig drives the caster's cast posture. A hard cast's rigs
+    /// do; an instant's one-shot hand flash leaves the torso alone.
+    pub drives_posture: bool,
     /// Fractional leaves owed since the last spawn (Nature loop).
     pub leaf_carry: f32,
     /// Fractional launch-burst motes owed: `[water rings, gold sparks]`.
@@ -684,6 +720,12 @@ pub enum HealCastPieceRole {
     GlowCore,
     /// One of the three orbiting wisps (gold ribbons / green star-threads).
     Wisp { index: u32 },
+    /// One of Moonfire's rising `cyan_glow3` motes (P0 of `magic_cast_hand.m2`).
+    ArcaneMote { index: u32 },
+    /// One of Moonfire's `star5a` twinkles (P1).
+    ArcaneStar { index: u32 },
+    /// Moonfire's `teleporttarget` ring disc, the kit's first 300 ms (P2).
+    ArcaneRing,
 }
 
 #[derive(Component)]
@@ -1819,6 +1861,18 @@ pub struct InterruptedBy {
     pub ability: AbilityType,
     /// Who used it.
     pub interrupter: Entity,
+}
+
+/// Rides a `Landed` [`CastEnding`] marker, naming the ability that landed.
+/// Spawned on the same marker at the two landed sites in `process_casting`,
+/// and read by the graphical `spawn_instant_cast_hands`, which plays a
+/// zero-length cast's hand flash: such a cast is inserted and completed
+/// inside one sim tick, so no render-frame system ever sees its
+/// `CastingState`. A component on the existing marker (the [`InterruptedBy`]
+/// idiom), so the sim spawns no extra entity; inert in headless.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct LandedCast {
+    pub ability: AbilityType,
 }
 
 /// Lifecycle phase of a [`CastingOrb`].

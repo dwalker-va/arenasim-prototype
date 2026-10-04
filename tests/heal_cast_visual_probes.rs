@@ -28,15 +28,17 @@ use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
     CastEnding, CastEndingKind, CastingOrb, CastingState, Combatant, HealCastBurstKind,
     HealCastBurstMote, HealCastHand, HealCastKind, HealCastLeaf, HealCastPhase, HealCastPiece,
-    HealCastPieceRole, HealCastPosture, VisualBody,
+    HealCastPieceRole, HealCastPosture, LandedCast, ShapeshiftPending, Shift, VisualBody,
 };
 use arenasim::states::play_match::{
+    arcane_mote_local, arcane_mote_rgb, arcane_ring_rgb, arcane_star_rgb,
     billboard_heal_cast_glows, cleanup_heal_cast_glows, consume_cast_ending_signals,
     consume_heal_cast_endings, heal_cast_glow_sizes, heal_cast_wisp_length, spawn_casting_orbs,
-    spawn_heal_cast_glows, spell_hand_local, update_heal_cast_glows, update_heal_cast_posture,
-    FLASH_OF_LIGHT_HAS_LAUNCH_FLASH, HEAL_CAST_WISP_LIFETIMES, HEAL_CAST_WISP_ORBIT_RADIUS,
-    HOLY_CAST_WISP_WIDTH, HOLY_LAUNCH_FLARE_SECS, NATURE_CAST_LEAF_SPEED, NATURE_CAST_WISP_WIDTH,
-    NATURE_LAUNCH_BURST_SECS, NATURE_LAUNCH_SPREAD, SPELL_HAND_X, SPELL_HAND_Y,
+    spawn_heal_cast_glows, spawn_instant_cast_hands, spell_hand_local, update_heal_cast_glows,
+    update_heal_cast_posture, FLASH_OF_LIGHT_HAS_LAUNCH_FLASH, HEAL_CAST_WISP_LIFETIMES,
+    HEAL_CAST_WISP_ORBIT_RADIUS, HOLY_CAST_WISP_WIDTH, HOLY_LAUNCH_FLARE_SECS, MOONFIRE_HAND_SECS,
+    NATURE_CAST_LEAF_SPEED, NATURE_CAST_WISP_WIDTH, NATURE_LAUNCH_BURST_SECS, NATURE_LAUNCH_SPREAD,
+    SPELL_HAND_X, SPELL_HAND_Y,
 };
 use arenasim::CharacterClass;
 
@@ -68,6 +70,7 @@ impl Harness {
             Update,
             (
                 consume_heal_cast_endings,
+                spawn_instant_cast_hands,
                 consume_cast_ending_signals,
                 spawn_casting_orbs,
                 spawn_heal_cast_glows,
@@ -389,6 +392,7 @@ fn holy_glow_layers_and_wisps_at_blessed_geometry() {
                 );
             }
             HealCastPieceRole::Wisp { .. } => {}
+            other => panic!("{other:?} has no place on a Holy rig"),
         }
         // Billboarded through the FULL parent chain (facing composes the
         // caster rotation AND the body's posture pitch): the rendered quad
@@ -509,6 +513,7 @@ fn nature_hands_shed_drifting_leaves() {
                      {NATURE_CAST_WISP_WIDTH} — star-threads, not streamers"
                 );
             }
+            other => panic!("{other:?} has no place on a Nature rig"),
         }
     }
 
@@ -770,4 +775,295 @@ fn fizzles_and_silent_vanishes_tear_down_clean() {
     h.tick(2);
     assert_eq!(h.rigs().len(), 0, "state-gone-with-no-marker: cleaned up");
     assert_eq!(h.pieces().len(), 0);
+}
+
+// ── the Druid's hands (AS-211) ─────────────────────────────────────────────
+
+/// Land a zero-length cast the way `process_casting` does: the `Landed`
+/// marker, carrying the ability that landed.
+fn land_instant(h: &mut Harness, caster: Entity, ability: AbilityType) {
+    h.app.world_mut().spawn((
+        CastEnding {
+            caster,
+            kind: CastEndingKind::Landed,
+        },
+        LandedCast { ability },
+    ));
+}
+
+fn rig_kinds(h: &mut Harness) -> Vec<HealCastKind> {
+    let mut q = h.app.world_mut().query::<&HealCastHand>();
+    q.iter(h.app.world()).map(|r| r.kind).collect()
+}
+
+/// Every Druid cast reaches a hand family — Nature for all but Moonfire,
+/// whose hands are the arcane sparkle (kit 730). Travel Form is a cast too
+/// (its precast kit 345 is the Nature hand), played by the shift entry.
+#[test]
+fn every_druid_cast_reaches_its_hand_family() {
+    let defs = AbilityDefinitions::default();
+    let druid = defs.own_abilities_for_class(CharacterClass::Druid);
+    assert_min("druid abilities", druid.len(), 9);
+    for ability in druid {
+        let expected = if ability == AbilityType::Moonfire {
+            HealCastKind::Arcane
+        } else {
+            HealCastKind::Nature
+        };
+        assert_eq!(
+            HealCastKind::for_ability(ability),
+            Some(expected),
+            "{ability:?} must route to the {expected:?} hands"
+        );
+    }
+}
+
+/// The instant entry is the Druid's and nobody else's: every zero-length
+/// cast of every OTHER class lands with no hand rig at all, so their
+/// instants look exactly as they did. Frost Shock — the other zero-length
+/// `CastingState` in real matches — is driven through the full start and
+/// landing, and draws neither a rig nor an orb.
+#[test]
+fn other_classes_instants_draw_no_hands() {
+    let defs = AbilityDefinitions::default();
+    let mut h = Harness::new();
+    let mut checked = 0;
+    for (ability, config) in defs.iter() {
+        if config.class == CharacterClass::Druid || config.cast_time > 0.0 {
+            continue;
+        }
+        let (caster, _) = h.spawn_caster(config.class, Vec3::new(0.0, 1.0, 0.0));
+        land_instant(&mut h, caster, *ability);
+        h.tick(2);
+        assert_eq!(
+            h.rigs().len(),
+            0,
+            "{ability:?} is another class's instant and must draw no hands"
+        );
+        checked += 1;
+    }
+    assert_min("other classes' instants", checked, 20);
+
+    let (shaman, _) = h.spawn_caster(CharacterClass::Shaman, Vec3::new(3.0, 1.0, 0.0));
+    h.begin_cast(shaman, AbilityType::FrostShock);
+    h.tick(1);
+    land_instant(&mut h, shaman, AbilityType::FrostShock);
+    h.app
+        .world_mut()
+        .entity_mut(shaman)
+        .remove::<CastingState>();
+    h.tick(3);
+    assert_eq!(h.rigs().len(), 0, "Frost Shock draws no hands");
+    assert_eq!(h.count::<CastingOrb>(), 0, "nor a windup orb");
+}
+
+/// Each Druid Nature instant flashes BOTH hands as it lands — the Nature
+/// launch jet plus a brief green re-flare of the hand glow — and the whole
+/// show is over within the launch window. No precast loop, and the torso
+/// posture is left to real casts.
+#[test]
+fn druid_instants_flash_both_hands_nature() {
+    let defs = AbilityDefinitions::default();
+    let mut instants: Vec<AbilityType> = defs
+        .own_abilities_for_class(CharacterClass::Druid)
+        .into_iter()
+        .filter(|a| {
+            defs.get_unchecked(a).cast_time <= 0.0
+                && *a != AbilityType::Moonfire
+                && *a != AbilityType::TravelForm
+        })
+        .collect();
+    instants.sort();
+    let mut expected = vec![
+        AbilityType::Rejuvenation,
+        AbilityType::Lifebloom,
+        AbilityType::Swiftmend,
+        AbilityType::MarkOfTheWild,
+        AbilityType::Innervate,
+    ];
+    expected.sort();
+    assert_eq!(instants, expected, "the Druid's Nature instants");
+
+    for ability in instants {
+        let mut h = Harness::new();
+        let at = Vec3::new(1.0, 1.0, -2.0);
+        let (druid, _) = h.spawn_caster(CharacterClass::Druid, at);
+        h.spawn_camera(Vec3::new(0.0, 7.0, 20.0), at);
+        land_instant(&mut h, druid, ability);
+        h.tick(6); // ~0.1s into the 0.3s launch
+
+        let rigs = h.rigs();
+        assert_eq!(rigs.len(), 2, "{ability:?}: both hands");
+        assert!(
+            rigs.iter()
+                .all(|(_, phase, ..)| matches!(phase, HealCastPhase::Flare { .. })),
+            "{ability:?}: an instant has no precast loop"
+        );
+        for (side, _, local, world) in &rigs {
+            assert!((*local - spell_hand_local(*side)).length() < 1e-4);
+            assert!((*world - (at + spell_hand_local(*side))).length() < 1e-3);
+        }
+        assert_eq!(rig_kinds(&mut h), vec![HealCastKind::Nature; 2]);
+        let glows = h
+            .pieces()
+            .into_iter()
+            .filter(|(role, _, _, alpha)| {
+                matches!(
+                    role,
+                    HealCastPieceRole::GlowOuter | HealCastPieceRole::GlowCore
+                ) && *alpha > 0.05
+            })
+            .count();
+        assert_eq!(glows, 4, "{ability:?}: a lit green glow on each hand");
+        assert_min("launch jet motes", h.bursts().len(), 4);
+        assert_eq!(h.count::<HealCastPosture>(), 0, "{ability:?}: no posture");
+        assert_eq!(h.count::<CastingOrb>(), 0);
+
+        h.tick((NATURE_LAUNCH_BURST_SECS / DT).ceil() as u32 + 3);
+        assert_eq!(h.rigs().len(), 0, "{ability:?}: the flash retires");
+        assert_eq!(h.pieces().len(), 0);
+        assert_eq!(h.bursts().len(), 0);
+    }
+}
+
+/// The Druid's two hard casts telegraph with the Nature precast loop in
+/// place of the generic orb, and launch like Lesser Healing Wave.
+#[test]
+fn druid_hard_casts_wind_up_nature_hands() {
+    for ability in [AbilityType::EntanglingRoots, AbilityType::Cyclone] {
+        let mut h = Harness::new();
+        let (druid, _) = h.spawn_caster(CharacterClass::Druid, Vec3::new(0.0, 1.0, 0.0));
+        h.begin_cast(druid, ability);
+        h.tick(20);
+        let rigs = h.rigs();
+        assert_eq!(rigs.len(), 2, "{ability:?}: both hands wind up");
+        assert!(rigs
+            .iter()
+            .all(|(_, phase, ..)| matches!(phase, HealCastPhase::Loop)));
+        assert_eq!(rig_kinds(&mut h), vec![HealCastKind::Nature; 2]);
+        assert_eq!(h.count::<CastingOrb>(), 0, "{ability:?}: no orb");
+        h.end_cast(druid, CastEndingKind::Landed);
+        h.tick(4);
+        assert_min("launch jet", h.bursts().len(), 2);
+    }
+}
+
+/// Travel Form's shift flashes the Nature hands; leaving the form does not.
+#[test]
+fn the_travel_form_shift_flashes_nature_hands() {
+    let mut h = Harness::new();
+    let (druid, _) = h.spawn_caster(CharacterClass::Druid, Vec3::new(0.0, 1.0, 0.0));
+    let out = h
+        .app
+        .world_mut()
+        .spawn(ShapeshiftPending {
+            caster: druid,
+            shift: Shift::Out,
+        })
+        .id();
+    h.tick(2);
+    h.app.world_mut().despawn(out);
+    assert_eq!(h.rigs().len(), 0, "leaving the form plays no hands");
+
+    let into = h
+        .app
+        .world_mut()
+        .spawn(ShapeshiftPending {
+            caster: druid,
+            shift: Shift::IntoTravelForm,
+        })
+        .id();
+    h.tick(1);
+    // The shift resolves (and its pending entity goes) the next sim tick.
+    h.app.world_mut().despawn(into);
+    h.tick(2);
+    assert_eq!(h.rigs().len(), 2, "the shift lights both hands once");
+    assert_eq!(rig_kinds(&mut h), vec![HealCastKind::Nature; 2]);
+    h.tick((NATURE_LAUNCH_BURST_SECS / DT).ceil() as u32 + 3);
+    assert_eq!(h.rigs().len(), 0);
+}
+
+/// Moonfire's arcane hands (`magic_cast_hand.m2`, kit 730): on each hand,
+/// five rising cyan motes and five star twinkles over the 1000 ms kit, and a
+/// ring disc for its first 300 ms — no green glow, no Nature jet.
+#[test]
+fn moonfire_sparkles_arcane_hands() {
+    let mut h = Harness::new();
+    let at = Vec3::new(0.0, 1.0, 0.0);
+    let (druid, _) = h.spawn_caster(CharacterClass::Druid, at);
+    h.spawn_camera(Vec3::new(0.0, 7.0, 20.0), at);
+    land_instant(&mut h, druid, AbilityType::Moonfire);
+    h.tick(6); // ~0.1s
+
+    assert_eq!(rig_kinds(&mut h), vec![HealCastKind::Arcane; 2]);
+    let pieces = h.pieces();
+    let count = |f: &dyn Fn(&HealCastPieceRole) -> bool| {
+        pieces
+            .iter()
+            .filter(|(r, _, _, a)| f(r) && *a > 0.01)
+            .count()
+    };
+    assert_eq!(
+        count(&|r| matches!(r, HealCastPieceRole::ArcaneMote { .. })),
+        10
+    );
+    assert_eq!(
+        count(&|r| matches!(r, HealCastPieceRole::ArcaneStar { .. })),
+        10
+    );
+    assert_eq!(count(&|r| matches!(r, HealCastPieceRole::ArcaneRing)), 2);
+    assert_eq!(
+        count(&|r| matches!(
+            r,
+            HealCastPieceRole::GlowOuter | HealCastPieceRole::GlowCore
+        )),
+        0,
+        "no Nature glow"
+    );
+    assert_eq!(h.bursts().len(), 0, "no Nature jet");
+
+    // Every piece hangs off a hand: within the kit's ~0.5 yd of a socket.
+    let sockets = [at + spell_hand_local(1.0), at + spell_hand_local(-1.0)];
+    for (role, _, g, _) in &pieces {
+        let d = sockets
+            .iter()
+            .map(|s| (g.translation() - *s).length())
+            .fold(f32::MAX, f32::min);
+        assert!(d < 0.5, "{role:?} drifted {d} yd from the hands");
+    }
+
+    // The motes RISE: a mote's height climbs with its phase (0.3 yd a cycle).
+    let y0 = arcane_mote_local(0, 0.0).y;
+    let y1 = arcane_mote_local(0, 0.4).y;
+    assert!(y1 > y0 + 0.1, "motes rise ({y0} -> {y1})");
+
+    // The ring disc is the first 300 ms only.
+    h.tick(18); // ~0.4s
+    let rings = h
+        .pieces()
+        .into_iter()
+        .filter(|(r, _, _, a)| matches!(r, HealCastPieceRole::ArcaneRing) && *a > 0.01)
+        .count();
+    assert_eq!(rings, 0, "the ring disc is gone after 300 ms");
+
+    h.tick(((MOONFIRE_HAND_SECS - 0.4) / DT).ceil() as u32 + 3);
+    assert_eq!(h.rigs().len(), 0, "the 1000 ms kit retires");
+    assert_eq!(h.pieces().len(), 0);
+}
+
+/// The kit's colour tracks: motes violet -> cyan -> gold, stars green ->
+/// pale cyan -> gold, the ring gold -> violet -> green.
+#[test]
+fn arcane_hand_colour_tracks_are_the_kits() {
+    let close = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 0.02);
+    let c = |r: f32, g: f32, b: f32| [r / 255.0, g / 255.0, b / 255.0];
+    assert!(close(arcane_mote_rgb(0.0), c(167.0, 84.0, 244.0)));
+    assert!(close(arcane_mote_rgb(0.55), c(62.0, 227.0, 229.0)));
+    assert!(close(arcane_mote_rgb(1.0), c(250.0, 230.0, 2.0)));
+    assert!(close(arcane_star_rgb(0.0), c(0.0, 221.0, 62.0)));
+    assert!(close(arcane_star_rgb(0.5), c(183.0, 250.0, 251.0)));
+    assert!(close(arcane_star_rgb(1.0), c(246.0, 211.0, 20.0)));
+    assert!(close(arcane_ring_rgb(0.0), c(255.0, 234.0, 0.0)));
+    assert!(close(arcane_ring_rgb(0.35), c(173.0, 89.0, 238.0)));
+    assert!(close(arcane_ring_rgb(1.0), c(30.0, 236.0, 136.0)));
 }

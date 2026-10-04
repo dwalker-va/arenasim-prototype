@@ -444,6 +444,7 @@ pub fn process_casting(
                     caster: caster_entity,
                     kind: CastEndingKind::Landed,
                 },
+                LandedCast { ability },
                 PlayMatchEntity,
             ));
 
@@ -543,6 +544,8 @@ pub fn process_casting(
                 caster: caster_entity,
                 kind: CastEndingKind::Landed,
             },
+            // Names what landed, for the instant hand flash (graphical only).
+            LandedCast { ability },
             PlayMatchEntity,
         ));
 
@@ -821,6 +824,22 @@ pub fn process_casting(
             // Spawn the per-spell heal landing (rendering/effects/
             // heal_impact.rs). Deterministic spawn — no `game_rng` draw —
             // so it is byte-neutral in headless, like the FCT above.
+            if let Some(kind) = HealImpact::kind_for(ability) {
+                commands.spawn((
+                    HealImpact {
+                        target: target_entity,
+                        kind,
+                        age: 0.0,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
+        }
+
+        // A non-heal the client lands with a heal's kit (Innervate: kit 101,
+        // Healing Wave's splash). Deterministic spawn, no `game_rng` draw —
+        // byte-neutral in headless, like the heal landing above.
+        if !def.is_heal() {
             if let Some(kind) = HealImpact::kind_for(ability) {
                 commands.spawn((
                     HealImpact {
