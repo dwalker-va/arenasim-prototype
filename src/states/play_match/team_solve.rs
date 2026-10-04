@@ -7,7 +7,8 @@
 //! | Piece | Status |
 //! |---|---|
 //! | `OccupyCover` via [`solve_position`] | **LIVE** under `TeamPlan` (healer PRESSURED/FREE, `healer_postures.rs`). Measured at n=100 head-to-head: +36pt Warlock+Priest, +14pt Hunter+Priest, +10pt Warrior+Priest, -6pt (noise) Rogue+Priest. |
-//! | [`DispelGoal`] on `OccupyCover` | **LIVE** under `TeamPlan` (Priest, Paladin PRESSURED; AS-187). The `Legacy` dispel walk's job: while a teammate is owed an urgent dispel the healer cannot reach, reaching it is the only constraint scored. |
+//! | [`DispelGoal`] on `OccupyCover` | **LIVE** under `TeamPlan` (Priest, Paladin PRESSURED; AS-187). The `Legacy` dispel walk's job: while a teammate is owed an urgent dispel the healer cannot reach, reaching it is the only constraint scored, and the goal holds on reach until the dispel lands. |
+//! | [`C_DYING`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-198). While the healer can heal, the most hurt teammate below `urgency_hp_threshold` anchors it, and reaching that teammate ranks above cover. |
 //! | `HoldRange` | Wired to the Mage/Hunter kiter, **measured ~-17pt, reverted — and the ending is now DECIDED: ranged DPS stays on the scorer permanently** (design doc, 2026-08-06). Constraint definition kept for the lone-healer fallback and future melee use; do not re-wire kiters absent step 8's reopening condition. |
 //! | `ScreenPartner`, `PressTarget`, `StackAnchor` | **NEVER RUN IN BATTLE.** Unit-tested against their written definitions only. All three consumed intents were under-specified in ways only measurement exposed (sight-of-ally, castability, the range ceiling) — assume these carry the same debt and budget a measurement pass before trusting them. |
 //! | [`solve_team`] / [`solve_order`] / [`focal_point`] / [`assign_intents`] / cohesion | **NO CALLERS.** The dependent team-level solve, kept because the design requires convergent AND divergent shapes from the start (retrofitting divergence would mean redoing the solve). It has never placed a unit in a real match. |
@@ -86,6 +87,10 @@ pub struct SolveUnit {
     /// [`DispelGoal`]. Set only on the unit being solved, by its own posture
     /// tick ([`SolveWorld::with_dispel_goal`]); `None` for everyone else.
     pub dispel_goal: Option<DispelGoal>,
+    /// Current health as a fraction of maximum. A teammate below
+    /// [`SolveWorld::urgency_hp_threshold`] is DYING, and an `OccupyCover`
+    /// healer anchors on it ([`C_DYING`]).
+    pub health_pct: f32,
 }
 
 /// A teammate held in crowd control that this healer's dispel removes at the
@@ -119,6 +124,10 @@ pub struct SolveWorld {
     pub threat_radius: f32,
     /// The team's called kill target, if any.
     pub kill_target: Option<Entity>,
+    /// `shared.urgency_hp_threshold` from `movement.ron`: a teammate below
+    /// this health fraction is dying ([`C_DYING`]). `0.0` — the default —
+    /// counts nobody as dying.
+    pub urgency_hp_threshold: f32,
 }
 
 impl SolveWorld {
@@ -127,6 +136,13 @@ impl SolveWorld {
         if let Some(unit) = self.units.iter_mut().find(|u| u.entity == entity) {
             unit.dispel_goal = goal;
         }
+        self
+    }
+
+    /// This world with `threshold` as the health fraction below which a
+    /// teammate is dying.
+    pub fn with_urgency_hp_threshold(mut self, threshold: f32) -> Self {
+        self.urgency_hp_threshold = threshold;
         self
     }
 
@@ -353,18 +369,38 @@ impl SolveContext<'_> {
         Some((self.ally_pos(ally), goal.range))
     }
 
-    /// The ally an `OccupyCover` healer must stay able to reach — the nearest
-    /// living non-pet teammate. `None` for a lone unit, which makes the leash
-    /// vacuous rather than unsatisfiable.
-    fn anchor_ally_pos(&self) -> Option<Vec2> {
+    /// The teammate an `OccupyCover` healer anchors on while one is dying: the
+    /// living non-pet teammate furthest below
+    /// [`SolveWorld::urgency_hp_threshold`], the first in unit order on a tie.
+    /// `None` while nobody is below it.
+    fn dying_ally_pos(&self) -> Option<Vec2> {
+        let threshold = self.world.urgency_hp_threshold;
         self.world
             .allies_of(self.unit.team, self.unit.entity)
-            .map(|a| self.ally_pos(a))
+            .filter(|a| a.health_pct < threshold)
             .min_by(|a, b| {
-                a.distance(self.unit.pos)
-                    .partial_cmp(&b.distance(self.unit.pos))
+                a.health_pct
+                    .partial_cmp(&b.health_pct)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
+            .map(|a| self.ally_pos(a))
+    }
+
+    /// The ally an `OccupyCover` healer must stay able to reach — the most
+    /// urgent DYING teammate while one is ([`Self::dying_ally_pos`]), else the
+    /// nearest living non-pet teammate. `None` for a lone unit, which makes the
+    /// leash vacuous rather than unsatisfiable.
+    fn anchor_ally_pos(&self) -> Option<Vec2> {
+        self.dying_ally_pos().or_else(|| {
+            self.world
+                .allies_of(self.unit.team, self.unit.entity)
+                .map(|a| self.ally_pos(a))
+                .min_by(|a, b| {
+                    a.distance(self.unit.pos)
+                        .partial_cmp(&b.distance(self.unit.pos))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        })
     }
 }
 
@@ -407,6 +443,23 @@ pub const C_COHESION: u16 = 1 << 5;
 /// makes it PRESSURED, not unable to dispel; the dispel is instant.
 pub const C_DISPEL: u16 = 1 << 6;
 
+/// Must REACH the dying teammate an `OccupyCover` healer anchors on
+/// ([`SolveWorld::urgency_hp_threshold`]): within `heal_range`, less
+/// [`HEAL_REACH_MARGIN`], and in sight of it — the two gates a heal passes.
+/// While the healer can heal, it ranks above every other `OccupyCover`
+/// constraint (see [`infeasibility`]): cover is worth nothing to a team whose
+/// teammate dies out of its healer's reach, so the solve takes cover only
+/// among the spots from which the heal still lands. A healer that cannot heal
+/// (silenced, or locked out of its school) owes no reach — it could not use
+/// it — and keeps to cover and distance as before.
+pub const C_DYING: u16 = 1 << 7;
+
+/// Yards inside `heal_range` a spot must be to count as reaching a dying
+/// teammate, for the reason [`DISPEL_REACH_MARGIN`] gives: the solve measures
+/// on the ground plane, the heal in 3D, and a spot held exactly at the edge
+/// drifts in and out of it as the teammate moves.
+pub const HEAL_REACH_MARGIN: f32 = 1.0;
+
 /// Yards inside the dispel's range a spot must be to count as reaching. The
 /// rotation measures reach in 3D from the healer's feet ([`cast_reach`](super::class_ai::cast_reach));
 /// the solve measures it on the ground plane, so a spot exactly at range here
@@ -418,7 +471,8 @@ pub const DISPEL_REACH_MARGIN: f32 = 1.0;
 ///
 /// Each arm is the design doc's bullet for that intent, transcribed:
 ///
-/// - `OccupyCover` — occluded from enemy casters; within `heal_range` of the anchor ally.
+/// - `OccupyCover` — occluded from enemy casters; within `heal_range` of the anchor ally;
+///   reaching a dying teammate ([`C_DYING`]) and an owed dispel ([`C_DISPEL`]).
 /// - `ScreenPartner` — has LoS to the partner; lacks LoS to the enemy kill target.
 /// - `PressTarget` — in ability range of the kill target; has LoS to it.
 /// - `HoldRange` — outside enemy threat range; retains LoS to the kill target.
@@ -451,6 +505,13 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
             }
             if !occluded_from_casters(candidate) {
                 v |= C_OCCLUDED;
+            }
+            if let Some(dying) = ctx.dying_ally_pos().filter(|_| ctx.unit.can_cast_heal) {
+                if candidate.distance(dying) > world.heal_range - HEAL_REACH_MARGIN
+                    || !world.sees(candidate, dying)
+                {
+                    v |= C_DYING;
+                }
             }
             if let Some(ally) = ctx.anchor_ally_pos() {
                 if candidate.distance(ally) > world.heal_range {
@@ -760,6 +821,26 @@ fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32
     if ctx.unit.dispel_goal.is_some() && intent == RoleIntent::OccupyCover {
         return if v & C_DISPEL != 0 { W_DISPEL } else { 0.0 };
     }
+    // A dying teammate's reach comes next, on the same lexicographic terms:
+    // every spot that reaches it outranks every spot that does not, and among
+    // the reaching spots the ordinary constraints below choose — cover
+    // included. A weight beside cover could not hold this: one yard of leash
+    // costs `W_LEASH`, and a covered spot six yards out of heal range then
+    // undercuts an exposed one inside it. Among the spots that do NOT reach,
+    // only the distance to reach is scored — sight first, then yards beyond
+    // range — so the healer walks into reach rather than toward cover that
+    // would carry it further off.
+    if v & C_DYING != 0 {
+        let mut cost = W_DYING;
+        if let Some(dying) = ctx.dying_ally_pos() {
+            if !world.sees(candidate, dying) {
+                cost += W_SIGHT;
+            }
+            let reach = world.heal_range - HEAL_REACH_MARGIN;
+            cost += W_LEASH * (candidate.distance(dying) - reach).max(0.0);
+        }
+        return cost;
+    }
     let mut cost = 0.0;
 
     // Binary constraints contribute their full scale — there is no "partly in
@@ -827,6 +908,12 @@ fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32
 /// The cost of a spot that does not reach the teammate owed a dispel (a
 /// reaching one costs zero).
 const W_DISPEL: f32 = 1.0e9;
+
+/// The floor cost of a spot that does not reach a dying teammate
+/// ([`C_DYING`]) — above anything the ordinary constraints can add up to, below
+/// [`W_DISPEL`] (which is never scored beside it: while a dispel is owed the
+/// goal is the only constraint, and none is owed while another teammate dies).
+const W_DYING: f32 = 1.0e6;
 
 /// Pick the best position for one unit under `intent`.
 ///
@@ -904,6 +991,17 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
         .fold((f32::MAX, f32::MIN), |(lo, hi), c| (lo.min(c), hi.max(c)));
     let field_is_flat = !scored.is_empty() && (flat.1 - flat.0) < 1e-6;
 
+    // Whether any candidate sees the ally the healer must be able to heal —
+    // see the sight fallback below.
+    let sight_ward = ctx.anchor_ally_pos().filter(|_| {
+        intent == RoleIntent::OccupyCover
+                && ctx.unit.can_cast_heal
+                // An owed dispel is the only constraint while it lasts.
+                && ctx.unit.dispel_goal.is_none()
+    });
+    let sight_reachable =
+        sight_ward.is_none_or(|ally| scored.iter().any(|(_, c)| ctx.world.sees(*c, ally)));
+
     let mut best: Option<((f32, f32, f32), Vec2)> = None;
     for (cost, candidate) in scored {
         // Lexicographic: satisfy the intent, then (flat fields only) get out of
@@ -936,6 +1034,18 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
         if best.is_none_or(|((cost, _, _), _)| cost >= W_DISPEL) {
             return ally;
         }
+    }
+    // No candidate sees the ally the healer anchors on: walk straight at it,
+    // the same fallback as the dispel goal's. Sight is binary, so when a
+    // pillar hides the ally from the healer and from every local step, every
+    // candidate pays the same sight cost and the stand-still tie-break would
+    // park the healer behind that pillar for good — out of the heal it most
+    // needs to land when the ally is dying (`C_DYING`). A `Point` goal at the
+    // ally is tangent-steered around the pillar, and the walk ends at the first
+    // re-solve from which a candidate sees it. Only while the healer can heal:
+    // a healer that cannot owes no sight.
+    if let (Some(ally), false) = (sight_ward, sight_reachable) {
+        return ally;
     }
     // Every candidate excluded (a unit already outside the arena): hold. The
     // executor clamps and slides, so this is a safe terminal answer.
@@ -1058,6 +1168,15 @@ fn can_cast_heal(
 /// only while the healer could cast it this instant. A hard-CC'd, silenced or
 /// school-locked healer owes nothing it can pay, so it keeps to cover.
 ///
+/// **The goal holds on reach.** `walking_to` is the teammate the solve was
+/// already walking the healer to; once the dispel reaches it, the goal stays
+/// until the dispel lands or stops being owed, exactly as the `Legacy` walk
+/// holds its reach point: the ordinary solve would otherwise take over while
+/// the GCD runs and could step the healer back to cover out of the dispel's
+/// range, re-arming the goal — a walk out and in again before the dispel. Held,
+/// the solve carries the healer on to [`DISPEL_REACH_MARGIN`] inside the range
+/// and, that spot satisfying the goal, stands it there.
+///
 /// **A dying teammate comes first.** Nothing is owed while any OTHER living
 /// non-pet teammate is below `urgency_hp_threshold`: the goal ranks above every
 /// other constraint, so owing it would walk the healer off the heal range and
@@ -1066,12 +1185,10 @@ fn can_cast_heal(
 /// that teammate's sight and leash, because the heal is the higher-value GCD
 /// either way: a teammate in CC loses its actions for the CC's length, a dying
 /// one loses them for the match. With the goal gone the healer is back on the
-/// ordinary `OccupyCover` solve. That solve does not guarantee the dying
-/// teammate's reach: its sight and leash are held to the NEAREST teammate, and
-/// its heal-range leash is soft enough that cover can outweigh it (card
-/// AS-198). What dropping the goal guarantees is only that the dispel no longer
-/// pulls the healer away. The CC'd teammate itself is not counted — walking to
-/// it brings it into heal range too — and neither are pets.
+/// ordinary `OccupyCover` solve, which anchors on the dying teammate and holds
+/// its reach above cover ([`C_DYING`]). The CC'd teammate itself is not
+/// counted — walking to it brings it into heal range too — and neither are
+/// pets.
 pub fn dispel_goal(
     ctx: &super::class_ai::CombatContext,
     abilities: &super::ability_config::AbilityDefinitions,
@@ -1080,7 +1197,9 @@ pub fn dispel_goal(
     current_mana: f32,
     dispel: super::abilities::AbilityType,
     urgency_hp_threshold: f32,
+    walking_to: Option<Entity>,
 ) -> Option<DispelGoal> {
+    use super::class_ai::OwedDispel;
     let def = abilities.get(&dispel)?;
     // Hard-CC'd (the walk gate's own exclusion): it can neither walk nor cast,
     // and a directive issued now would be stale on release.
@@ -1088,7 +1207,11 @@ pub fn dispel_goal(
         return None;
     }
     let ally =
-        super::class_ai::dispel_chase_target(ctx, abilities, entity, my_pos, current_mana, dispel)?;
+        match super::class_ai::owed_dispel(ctx, abilities, entity, my_pos, current_mana, dispel)? {
+            OwedDispel::Unreached(ally) => ally,
+            OwedDispel::Reached(ally) if walking_to == Some(ally) => ally,
+            OwedDispel::Reached(_) => return None,
+        };
     if super::class_ai::another_teammate_dying(ctx, entity, ally, urgency_hp_threshold) {
         return None;
     }
@@ -1133,6 +1256,7 @@ pub fn world_from_context(
             ability_range: c.class.preferred_range(),
             can_cast_heal: can_cast_heal(ctx, c),
             dispel_goal: None,
+            health_pct: c.health_pct(),
         })
         .collect();
     SolveWorld {
@@ -1142,6 +1266,7 @@ pub fn world_from_context(
         heal_range,
         threat_radius,
         kill_target,
+        urgency_hp_threshold: 0.0,
     }
 }
 
@@ -1194,6 +1319,7 @@ mod tests {
             // Test healers can heal unless a case says otherwise.
             can_cast_heal: true,
             dispel_goal: None,
+            health_pct: 1.0,
         }
     }
 
@@ -1219,6 +1345,7 @@ mod tests {
             heal_range: 40.0,
             threat_radius: 12.0,
             kill_target: None,
+            urgency_hp_threshold: 0.5,
         }
     }
 
@@ -1597,6 +1724,400 @@ mod tests {
         assert_eq!(
             solve_unit(RoleIntent::OccupyCover, &ctx),
             Vec2::new(32.0, 0.0)
+        );
+    }
+
+    /// The card's scene (AS-198): the healer at the origin, a teammate at
+    /// `dying_x` on the -X side, a second teammate at `other_x` on +X, an enemy
+    /// melee 10yd from the healer toward +X, and an enemy caster 40yd off the
+    /// line on the `side` (+1 or -1) of an eight-sided pillar 8yd off it — so
+    /// the pillar's shadow lies along the line, on the +X side, out of the -X
+    /// teammate's heal range.
+    fn dying_scene(dying_x: f32, other_x: f32, side: f32, dying_hp: f32) -> SolveWorld {
+        let mut dying = unit(2, 1, 1, dying_x, 0.0);
+        dying.health_pct = dying_hp;
+        SolveWorld {
+            obstacles: vec![pillar_at(20.0, 8.0 * side)],
+            ..world(vec![
+                healer(1, 1, 0, 0.0, 0.0),
+                dying,
+                unit(3, 1, 2, other_x, 0.0),
+                melee(4, 2, 0, 10.0, 0.0),
+                unit(5, 2, 1, 20.0, 40.0 * side),
+            ])
+        }
+    }
+
+    fn solve_healer(w: &SolveWorld) -> Vec2 {
+        let ctx = SolveContext {
+            world: w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        solve_unit(RoleIntent::OccupyCover, &ctx)
+    }
+
+    /// THE DYING ANCHOR (AS-198). A teammate below the urgency threshold must
+    /// stay in heal range and sight of the solved spot: cover outweighed a soft
+    /// leash, and the healer walked into the pillar's shadow 46-55yd from the
+    /// teammate about to die. Four layouts — the dying teammate nearer and
+    /// further than the other one, the caster on either side.
+    #[test]
+    fn a_dying_teammate_stays_in_heal_range_and_sight() {
+        for (dying_x, other_x) in [(-30.0, 45.0), (-36.0, 32.0)] {
+            for side in [1.0, -1.0] {
+                let w = dying_scene(dying_x, other_x, side, 0.2);
+                let spot = solve_healer(&w);
+                let dying = Vec2::new(dying_x, 0.0);
+                let layout = format!("dying at {dying_x}, other at {other_x}, side {side}");
+                assert!(
+                    spot.distance(dying) <= w.heal_range - HEAL_REACH_MARGIN,
+                    "{layout}: solved to {spot:?}, {:.1}yd from the dying teammate",
+                    spot.distance(dying)
+                );
+                assert!(w.sees(spot, dying), "{layout}: {spot:?} cannot see it");
+            }
+        }
+    }
+
+    /// The control: the same scenes with nobody below the threshold keep the
+    /// cover the solve was measured on — the healer hides from the caster.
+    #[test]
+    fn with_nobody_dying_the_same_scenes_still_take_cover() {
+        for (dying_x, other_x) in [(-30.0, 45.0), (-36.0, 32.0)] {
+            for side in [1.0, -1.0] {
+                let w = dying_scene(dying_x, other_x, side, 0.9);
+                let spot = solve_healer(&w);
+                assert!(
+                    !w.sees(spot, Vec2::new(20.0, 40.0 * side)),
+                    "dying at {dying_x}, side {side}: {spot:?} is in the caster's sight"
+                );
+            }
+        }
+    }
+
+    /// Cover is kept WITHIN the dying teammate's reach: with a covered spot in
+    /// heal range of it, the healer takes that spot, not merely any reaching one.
+    #[test]
+    fn a_dying_anchor_still_takes_cover_inside_its_reach() {
+        let mut dying = unit(2, 1, 1, -20.0, 0.0);
+        dying.health_pct = 0.2;
+        let w = SolveWorld {
+            obstacles: vec![pillar_at(5.0, 8.0)],
+            ..world(vec![
+                healer(1, 1, 0, 0.0, 0.0),
+                dying,
+                unit(5, 2, 1, 5.0, 40.0),
+            ])
+        };
+        let spot = solve_healer(&w);
+        let dying = Vec2::new(-20.0, 0.0);
+        assert!(spot.distance(dying) <= w.heal_range - HEAL_REACH_MARGIN);
+        assert!(
+            w.sees(spot, dying),
+            "{spot:?} cannot see the dying teammate"
+        );
+        assert!(
+            !w.sees(spot, Vec2::new(5.0, 40.0)),
+            "{spot:?}: gave up cover the dying teammate's reach did not cost"
+        );
+    }
+
+    /// Out of reach of a dying teammate, the solve scores only the way back
+    /// into reach. The teammate is 70yd off, beyond every candidate's reach;
+    /// the step 20yd toward it is in the enemy caster's sight, and a pillar's
+    /// shadow 12yd toward it is not. Cover must not buy the 8yd that separate
+    /// them — the healer takes the longer step toward the heal.
+    #[test]
+    fn out_of_reach_of_the_dying_the_solve_walks_toward_reach_not_cover() {
+        let mut dying = unit(2, 1, 1, -70.0, 0.0);
+        dying.health_pct = 0.2;
+        let w = SolveWorld {
+            obstacles: vec![pillar_at(-12.0, 8.0)],
+            ..world(vec![
+                healer(1, 1, 0, 0.0, 0.0),
+                dying,
+                unit(5, 2, 1, -12.0, 40.0),
+            ])
+        };
+        let caster = Vec2::new(-12.0, 40.0);
+        assert!(
+            w.sees(Vec2::new(-20.0, 0.0), caster),
+            "the long step is exposed"
+        );
+        assert!(
+            !w.sees(Vec2::new(-12.0, 0.0), caster),
+            "the shadow is covered"
+        );
+        let spot = solve_healer(&w);
+        assert!(
+            spot.distance(Vec2::new(-70.0, 0.0)) <= 50.0 + 1e-3,
+            "{spot:?}: took cover short of the step toward the dying teammate"
+        );
+    }
+
+    /// Re-solve `w`'s healer `steps` times, moving it after each solve up to
+    /// `stride` yards toward the answer the way the executor walks a `Point`
+    /// goal (tangent-steered round obstacles, resolved against them). Returns
+    /// every position it stood at, the start included.
+    fn walk_resolves(mut w: SolveWorld, steps: usize, stride: f32) -> Vec<Vec2> {
+        use crate::states::play_match::map_geometry::{resolve_movement, steer_toward_goal};
+        let mut path = vec![w.units[0].pos];
+        for _ in 0..steps {
+            let goal = solve_healer(&w);
+            let mut pos = w.units[0].pos;
+            // Sub-steps, so a stride never cuts a pillar's corner.
+            for _ in 0..30 {
+                let to_goal = goal - pos;
+                if to_goal.length() < 1e-3 {
+                    break;
+                }
+                let dir = steer_toward_goal(&w.obstacles, pos, goal, 1.0)
+                    .unwrap_or_else(|| to_goal.normalize_or_zero());
+                let step = (dir * stride / 30.0).clamp_length_max(to_goal.length());
+                let next = resolve_movement(
+                    &w.obstacles,
+                    Vec3::new(pos.x, 1.0, pos.y),
+                    Vec3::new(pos.x + step.x, 1.0, pos.y + step.y),
+                );
+                pos = Vec2::new(next.x, next.z);
+            }
+            w.units[0].pos = pos;
+            path.push(pos);
+        }
+        path
+    }
+
+    /// A dying teammate hidden behind a pillar must not park the healer
+    /// (AS-198, round 2). Every candidate is in heal range of it or near it,
+    /// and none sees it, so every one pays the same sight cost — and standing
+    /// still won that tie forever, 38.6yd away and blind. Re-solved from
+    /// where it walks, the healer rounds the pillar into reach and sight, and
+    /// stays there. With and without an enemy melee beside it.
+    #[test]
+    fn a_dying_teammate_behind_a_pillar_is_walked_into_sight() {
+        for with_melee in [false, true] {
+            let mut dying = unit(2, 1, 1, 40.0, 0.0);
+            dying.health_pct = 0.2;
+            let mut units = vec![healer(1, 1, 0, 0.0, 0.0), dying];
+            if with_melee {
+                units.push(melee(4, 2, 0, 3.0, 0.0));
+            }
+            let w = SolveWorld {
+                obstacles: vec![pillar_at(30.0, 0.0)],
+                ..world(units)
+            };
+            let ally = Vec2::new(40.0, 0.0);
+            assert!(!w.sees(Vec2::ZERO, ally), "the scene must start blind");
+            let reach = w.heal_range - HEAL_REACH_MARGIN;
+            let path = walk_resolves(w.clone(), 30, 3.0);
+            let end = *path.last().unwrap();
+            assert!(
+                w.sees(end, ally) && end.distance(ally) <= reach,
+                "melee {with_melee}: after 30 re-solves the healer is at {end:?}, \
+                 {:.1}yd from the dying teammate, sight {}",
+                end.distance(ally),
+                w.sees(end, ally)
+            );
+        }
+    }
+
+    /// The same hole for a HEALTHY anchor: sight of the ally is the top
+    /// ordinary constraint, and a pillar that hides it from every candidate
+    /// must not park the healer either.
+    #[test]
+    fn an_anchor_behind_a_pillar_is_walked_into_sight() {
+        let w = SolveWorld {
+            obstacles: vec![pillar_at(15.0, 0.0)],
+            ..world(vec![healer(1, 1, 0, 0.0, 0.0), unit(2, 1, 1, 25.0, 0.0)])
+        };
+        let ally = Vec2::new(25.0, 0.0);
+        assert!(!w.sees(Vec2::ZERO, ally), "the scene must start blind");
+        let end = *walk_resolves(w.clone(), 30, 3.0).last().unwrap();
+        assert!(w.sees(end, ally), "parked blind at {end:?}");
+    }
+
+    /// The fallback aims at the DYING teammate, not the nearest: a dying
+    /// teammate behind a pillar, a healthier one nearer and in plain sight.
+    /// Seeing the healthy one must not count as seeing the one the healer has
+    /// to reach. With and without an enemy melee beside the healer.
+    #[test]
+    fn the_sight_fallback_walks_to_the_dying_teammate_not_the_nearest() {
+        for with_melee in [false, true] {
+            let mut dying = unit(2, 1, 1, 40.0, 0.0);
+            dying.health_pct = 0.2;
+            let mut healthy = unit(3, 1, 2, -10.0, 0.0);
+            healthy.health_pct = 0.9;
+            let mut units = vec![healer(1, 1, 0, 0.0, 0.0), dying, healthy];
+            if with_melee {
+                units.push(melee(4, 2, 0, 3.0, 0.0));
+            }
+            let w = SolveWorld {
+                obstacles: vec![pillar_at(30.0, 0.0)],
+                ..world(units)
+            };
+            let ally = Vec2::new(40.0, 0.0);
+            assert!(
+                !w.sees(Vec2::ZERO, ally),
+                "the dying teammate starts hidden"
+            );
+            assert!(
+                w.sees(Vec2::ZERO, Vec2::new(-10.0, 0.0)),
+                "the healthy one in sight"
+            );
+            let end = *walk_resolves(w.clone(), 30, 3.0).last().unwrap();
+            assert!(
+                w.sees(end, ally) && end.distance(ally) <= w.heal_range - HEAL_REACH_MARGIN,
+                "melee {with_melee}: ended at {end:?}, {:.1}yd from the dying teammate, \
+                 sight {}",
+                end.distance(ally),
+                w.sees(end, ally)
+            );
+        }
+    }
+
+    /// A healer that cannot heal owes no sight, so a hidden ally does not
+    /// walk it out of its cover: the solve never answers with the ally's spot.
+    #[test]
+    fn a_healer_that_cannot_heal_is_not_walked_to_a_hidden_ally() {
+        let mut w = SolveWorld {
+            obstacles: vec![pillar_at(15.0, 0.0)],
+            ..world(vec![healer(1, 1, 0, 0.0, 0.0), unit(2, 1, 1, 25.0, 0.0)])
+        };
+        w.units[0].can_cast_heal = false;
+        let ally = Vec2::new(25.0, 0.0);
+        assert!(!w.sees(Vec2::ZERO, ally));
+        assert_ne!(solve_healer(&w), ally);
+    }
+
+    /// The fallback is for a healer with NO candidate in sight. Blind where it
+    /// stands, but with a step of its local ring that sees the ally, the healer
+    /// takes a seeing candidate rather than walking at the ally.
+    #[test]
+    fn a_seeing_candidate_beats_the_sight_fallback() {
+        let w = SolveWorld {
+            obstacles: vec![pillar_at(10.0, 0.0)],
+            ..world(vec![healer(1, 1, 0, 0.0, 5.5), unit(2, 1, 1, 20.0, 5.5)])
+        };
+        let ally = Vec2::new(20.0, 5.5);
+        assert!(!w.sees(Vec2::new(0.0, 5.5), ally), "blind where it stands");
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        assert!(
+            candidates_for(&ctx).iter().any(|c| w.sees(*c, ally)),
+            "the scene needs a seeing candidate"
+        );
+        let spot = solve_healer(&w);
+        assert_ne!(spot, ally, "walked at the ally with a seeing step at hand");
+        assert!(w.sees(spot, ally), "{spot:?} does not see the ally");
+    }
+
+    /// The sight fallback waits on an owed dispel like everything else: with a
+    /// nearer teammate hidden behind a pillar from every candidate, the healer
+    /// still takes the nearest spot the dispel reaches, rather than walking at
+    /// the hidden teammate.
+    #[test]
+    fn an_owed_dispel_outranks_the_sight_fallback() {
+        let w = SolveWorld {
+            obstacles: vec![pillar_at(-6.0, 0.0)],
+            ..world(vec![
+                healer(1, 1, 0, 0.0, 0.0),
+                melee(2, 1, 1, 38.0, 0.0),
+                unit(3, 1, 2, -12.0, 0.0),
+            ])
+        }
+        .with_dispel_goal(
+            e(1),
+            Some(DispelGoal {
+                ally: e(2),
+                range: 30.0,
+            }),
+        );
+        assert!(!w.sees(Vec2::ZERO, Vec2::new(-12.0, 0.0)));
+        let spot = solve_healer(&w);
+        assert!(
+            spot.distance(Vec2::new(38.0, 0.0)) <= 30.0 - DISPEL_REACH_MARGIN,
+            "{spot:?} does not reach the teammate owed the dispel"
+        );
+    }
+
+    /// Out of the dying teammate's reach, SIGHT is scored before range: a spot
+    /// that sees it from a yard beyond reach beats one in range that cannot.
+    #[test]
+    fn out_of_reach_of_the_dying_sight_outranks_range() {
+        let mut dying = unit(2, 1, 1, 40.0, 0.0);
+        dying.health_pct = 0.2;
+        let w = SolveWorld {
+            obstacles: vec![pillar_at(30.0, 0.0)],
+            ..world(vec![healer(1, 1, 0, 0.0, 0.0), dying])
+        };
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        let ally = Vec2::new(40.0, 0.0);
+        let blind_in_range = Vec2::new(20.0, 0.0);
+        let sighted_beyond = Vec2::new(40.0, 40.0);
+        assert!(!w.sees(blind_in_range, ally) && w.sees(sighted_beyond, ally));
+        assert!(sighted_beyond.distance(ally) > w.heal_range - HEAL_REACH_MARGIN);
+        assert!(
+            infeasibility(RoleIntent::OccupyCover, sighted_beyond, &ctx)
+                < infeasibility(RoleIntent::OccupyCover, blind_in_range, &ctx)
+        );
+    }
+
+    /// Which teammate anchors: the one furthest below the threshold, wherever
+    /// it stands; the nearest one while nobody is below it.
+    #[test]
+    fn the_most_urgent_teammate_anchors_the_healer() {
+        let mut near = unit(2, 1, 1, -10.0, 0.0);
+        let mut far = unit(3, 1, 2, 30.0, 0.0);
+        near.health_pct = 0.4;
+        far.health_pct = 0.1;
+        let w = world(vec![healer(1, 1, 0, 0.0, 0.0), near, far]);
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        assert_eq!(ctx.anchor_ally_pos(), Some(Vec2::new(30.0, 0.0)));
+
+        let w = w.with_urgency_hp_threshold(0.0);
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        assert_eq!(ctx.anchor_ally_pos(), Some(Vec2::new(-10.0, 0.0)));
+    }
+
+    /// A healer that cannot heal owes a dying teammate no reach — it could not
+    /// use it — and keeps the castability rule's distance instead.
+    #[test]
+    fn a_healer_that_cannot_heal_owes_the_dying_no_reach() {
+        let w = dying_scene(-30.0, 45.0, 1.0, 0.2);
+        let locked = SolveUnit {
+            can_cast_heal: false,
+            ..w.units[0]
+        };
+        let ctx = SolveContext {
+            world: &w,
+            unit: locked,
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, Vec2::new(60.0, 0.0), &ctx) & C_DYING,
+            0
         );
     }
 
