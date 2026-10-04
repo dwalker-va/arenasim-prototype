@@ -36,7 +36,7 @@ use arenasim::states::play_match::components::{
     DruidParticle, GameRng, HealImpact, HealImpactKind, MarkOfTheWildPlate, RejuvenationRibbon,
     LIFEBLOOM_AURA, MARK_OF_THE_WILD_AURA, REJUVENATION_AURA,
 };
-use arenasim::states::play_match::effects::{process_blooms, process_dispels};
+use arenasim::states::play_match::effects::{process_blooms, process_dispels, BloomPending};
 use arenasim::states::play_match::{
     animate_druid_effects, animate_druid_particles, billboard_druid_particles,
     cleanup_druid_effects, glyph_alpha, spawn_druid_effects, AbilityDefinitions, AbilityType,
@@ -283,6 +283,47 @@ fn the_burst_plays_when_lifebloom_is_purged_or_purged_by_source() {
     }
 }
 
+/// The burst site's OWN alive check, pinned directly: a bloom that reaches
+/// `process_blooms` for a bearer who is already dead (killed after its aura's
+/// last frame queued the bloom) lands no heal and plays no burst. The
+/// expiry-path probe below cannot show this — `process_hot_ticks` never
+/// queues a bloom for a corpse in the first place.
+#[test]
+fn a_bloom_queued_for_a_dead_bearer_plays_no_burst() {
+    let mut world = world(0.0);
+    let (druid, ally) = druid_and_ally(&mut world);
+    world
+        .entity_mut(ally)
+        .get_mut::<Combatant>()
+        .unwrap()
+        .current_health = 0.0;
+    world.spawn(BloomPending {
+        target: ally,
+        amount: 40.0,
+        ability_name: LIFEBLOOM_AURA.to_string(),
+        caster: Some(druid),
+    });
+    world.run_system_once(process_blooms).unwrap();
+    assert!(bursts(&mut world).is_empty(), "a corpse does not bloom");
+
+    // The same pending bloom on a LIVING bearer does burst — the probe is
+    // not vacuous.
+    let mut world = world_alive();
+    let (druid, ally) = druid_and_ally(&mut world);
+    world.spawn(BloomPending {
+        target: ally,
+        amount: 40.0,
+        ability_name: LIFEBLOOM_AURA.to_string(),
+        caster: Some(druid),
+    });
+    world.run_system_once(process_blooms).unwrap();
+    assert_eq!(bursts(&mut world), vec![(ally, BloomVisual::GoldBurst)]);
+}
+
+fn world_alive() -> World {
+    world(0.0)
+}
+
 #[test]
 fn no_burst_on_a_refresh_or_on_the_bearers_death() {
     // A refresh.
@@ -427,7 +468,8 @@ fn lifebloom_from(caster: Entity) -> Aura {
     }
 }
 
-fn ribbon_positions(h: &mut Harness) -> Vec<(usize, Vec<Vec3>)> {
+/// Each ribbon's vertex positions and its triangle-list index count.
+fn ribbon_positions(h: &mut Harness) -> Vec<(usize, Vec<Vec3>, usize)> {
     let world = h.app.world_mut();
     let mut q = world.query::<&RejuvenationRibbon>();
     let ribbons: Vec<(usize, Handle<Mesh>)> =
@@ -442,7 +484,12 @@ fn ribbon_positions(h: &mut Harness) -> Vec<(usize, Vec<Vec3>)> {
             else {
                 panic!("ribbon positions")
             };
-            (i, ps.iter().map(|p| Vec3::from_array(*p)).collect())
+            let indices = mesh.indices().map_or(0, |ix| ix.len());
+            (
+                i,
+                ps.iter().map(|p| Vec3::from_array(*p)).collect(),
+                indices,
+            )
         })
         .collect()
 }
@@ -461,10 +508,16 @@ fn rejuvenation_swirls_five_banded_ribbons_round_the_body_then_leaves() {
     assert_eq!(h.rigs(DruidEffect::RejuvenationSwirl).len(), 1);
     let ribbons = ribbon_positions(&mut h);
     assert_eq!(ribbons.len(), 5, "five ribbons");
-    for (index, verts) in &ribbons {
+    for (index, verts, indices) in &ribbons {
         // A full trail: 15 samples, two edge vertices each — a strip, not a
         // sprite.
         assert_eq!(verts.len(), 30, "ribbon {index} is a band of 15 samples");
+        // And it is DRAWN: two triangles per segment between the 15 samples.
+        assert_eq!(
+            *indices,
+            (15 - 1) * 6,
+            "ribbon {index} must emit its strip's triangles"
+        );
         let floor_height = REJUV_RIBBON_HEIGHTS[*index];
         let mut along = 0.0;
         for pair in verts.chunks(2) {
@@ -699,7 +752,7 @@ fn two_bloom_bursts_on_one_bearer_play_as_two() {
 }
 
 #[test]
-fn the_glyph_is_two_crossed_plates_over_the_crown_for_two_thirds_of_a_second() {
+fn the_glyph_is_two_superimposed_camera_facing_plates_over_the_crown_for_two_thirds_of_a_second() {
     assert!(
         std::path::Path::new("assets")
             .join(MOTW_GLYPH_TEXTURE)
@@ -709,6 +762,15 @@ fn the_glyph_is_two_crossed_plates_over_the_crown_for_two_thirds_of_a_second() {
     let mut h = Harness::new();
     let at = Vec3::new(-1.0, COMBATANT_Y, 4.0);
     let ally = h.bearer(at, vec![]);
+    // A bearer turned away from the world axes, so a plate that merely
+    // inherited the bearer's facing could not pass for camera-facing.
+    h.app
+        .world_mut()
+        .get_mut::<Transform>(ally)
+        .unwrap()
+        .rotation = Quat::from_rotation_y(1.1);
+    let camera = Transform::from_xyz(8.0, 9.0, 14.0).looking_at(at, Vec3::Y);
+    h.app.world_mut().spawn((Camera3d::default(), camera));
     h.app.world_mut().spawn(AuraLanding {
         target: ally,
         kind: AuraLandingKind::MarkOfTheWildGlyph,
@@ -733,9 +795,25 @@ fn the_glyph_is_two_crossed_plates_over_the_crown_for_two_thirds_of_a_second() {
         let (scale, _, _) = g.to_scale_rotation_translation();
         assert!((scale.x - MOTW_GLYPH_SIZE).abs() < 1e-3);
     }
-    // Crossed: their faces are a quarter turn apart.
+    // One plane, superimposed — the client's two quads, and the bench's one
+    // screen-space glyph — so the gold fades out over the red-orange on the
+    // same face. And that face is turned to the camera.
     let normal = |g: &GlobalTransform| g.compute_transform().rotation * Vec3::Z;
-    assert!(normal(&plates[0].1).dot(normal(&plates[1].1)).abs() < 1e-3);
+    assert!(
+        plates[0]
+            .1
+            .translation()
+            .distance(plates[1].1.translation())
+            < 1e-4
+    );
+    assert!(normal(&plates[0].1).dot(normal(&plates[1].1)) > 1.0 - 1e-4);
+    let facing = camera.rotation * Vec3::Z;
+    for (layer, g) in &plates {
+        assert!(
+            normal(g).dot(facing) > 1.0 - 1e-3,
+            "plate {layer} faces the camera"
+        );
+    }
 
     // The client's weight track: peaks at 167 ms, gold gone by 500 ms.
     assert!(glyph_alpha(0, 0.167) > glyph_alpha(0, 0.4));

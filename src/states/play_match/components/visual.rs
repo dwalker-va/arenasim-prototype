@@ -786,7 +786,7 @@ pub struct RejuvenationRibbon {
     pub mesh: Handle<Mesh>,
 }
 
-/// One of Mark of the Wild's two crossed glyph plates (graphical only).
+/// One of Mark of the Wild's two superimposed glyph plates (graphical only).
 #[derive(Component, Debug)]
 pub struct MarkOfTheWildPlate {
     pub rig: Entity,
@@ -1286,9 +1286,27 @@ pub enum AuraApplyOwner {
     /// plus Crippling Poison's proc flash, which has no hit of its own. A band
     /// here would double every one of those impacts.
     SlowRing,
+    /// A named aura whose LANDING has its own one-shot: Rejuvenation's ribbon
+    /// swirl and Mark of the Wild's glyph (`druid_heals.rs`). Owned per aura
+    /// NAME, not per type — see [`AuraApplyRoute::for_instance`] — because
+    /// their types are shared with auras that keep the band (Healing Stream's
+    /// HoT, Power Word: Fortitude). Lifebloom is not here: its pulse starts a
+    /// beat after it lands, so the band is its only application cue.
+    AuraLanding,
 }
 
 impl AuraApplyRoute {
+    /// Route one aura INSTANCE's application: a named aura with a bespoke
+    /// landing ([`AuraLandingKind::for_aura`]) is owned by it; every other
+    /// aura routes by its type ([`Self::for_aura`]). The renderer asks this.
+    pub fn for_instance(aura_type: AuraType, name: &str) -> Self {
+        if AuraLandingKind::for_aura(aura_type, name).is_some() {
+            AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding)
+        } else {
+            Self::for_aura(aura_type)
+        }
+    }
+
     /// Route an aura type's application.
     ///
     /// **EXHAUSTIVE on purpose — never add a `_ =>` arm.** A new aura type must

@@ -5,7 +5,7 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::view::NoFrustumCulling;
 use std::collections::{HashMap, HashSet};
-use std::f32::consts::{FRAC_PI_2, TAU};
+use std::f32::consts::TAU;
 use std::sync::Arc;
 
 use super::school_impact::{IMPACT_PET_BODY_Y, IMPACT_PET_STATURE};
@@ -32,8 +32,8 @@ use crate::states::play_match::components::*;
 // - **The bloom** (`lifebloom_impact.m2`, kit 6965): four gold layers at the
 //   chest — a swelling glow, a shockwave sphere, rising star streaks and
 //   drifting stars — when the aura blooms.
-// - **Mark of the Wild** (`markofwild_impact_head.m2`, kit 542): two crossed
-//   0.7 yd plates of the client's own paw texture (`spells/agility_128.blp`,
+// - **Mark of the Wild** (`markofwild_impact_head.m2`, kit 542): two superimposed,
+//   camera-facing 0.7 yd plates of the client's own paw texture (`spells/agility_128.blp`,
 //   decoded to `assets/textures/effects/agility_128.png`), red-orange and gold,
 //   1.03 yd above the head for 0.667 s.
 //
@@ -999,16 +999,16 @@ pub fn spawn_druid_effects(
                         PLATE_GLOW,
                         Some(assets.paw.clone()),
                     );
-                    // Two crossed plates, a quarter turn apart about the
-                    // vertical: one always faces the camera well enough to read.
+                    // Both plates share one plane, superimposed, as the
+                    // client's two quads are and the bench draws them: the
+                    // gold layer fades out over the red-orange one. They
+                    // face the camera (`animate_druid_effects`).
                     let plate = commands
                         .spawn((
                             MarkOfTheWildPlate { rig, layer },
                             Mesh3d(assets.quad.clone()),
                             MeshMaterial3d(material),
-                            Transform::from_translation(lift)
-                                .with_rotation(Quat::from_rotation_y(layer as f32 * FRAC_PI_2))
-                                .with_scale(Vec3::splat(size)),
+                            Transform::from_translation(lift).with_scale(Vec3::splat(size)),
                             NotShadowCaster,
                         ))
                         .id();
@@ -1043,13 +1043,21 @@ pub fn animate_druid_effects(
         Without<DruidEffectRig>,
     >,
     ribbons: Query<(&RejuvenationRibbon, &MeshMaterial3d<StandardMaterial>)>,
-    plates: Query<(&MarkOfTheWildPlate, &MeshMaterial3d<StandardMaterial>)>,
+    mut plates: Query<
+        (
+            &MarkOfTheWildPlate,
+            &MeshMaterial3d<StandardMaterial>,
+            &mut Transform,
+        ),
+        (Without<DruidEffectRig>, Without<Combatant>),
+    >,
     camera: Query<&GlobalTransform, With<Camera3d>>,
 ) {
     let dt = time.delta_secs();
     let assets =
         assets.get_or_insert_with(|| DruidAssets::build(&mut meshes, &mut images, &asset_server));
     let eye = camera.iter().next().map(|c| c.translation());
+    let cam_rotation = camera.iter().next().map(|c| c.compute_transform().rotation);
 
     for (rig_entity, mut rig, mut transform) in rigs.iter_mut() {
         let bearer = bearers.get(rig.target).ok();
@@ -1152,9 +1160,14 @@ pub fn animate_druid_effects(
         }
 
         if effect == DruidEffect::MarkOfTheWildGlyph {
-            for (plate, material) in plates.iter() {
+            for (plate, material, mut plate_transform) in plates.iter_mut() {
                 if plate.rig != rig_entity {
                     continue;
+                }
+                // Billboard: the plates face the camera, as the bench's
+                // screen-space glyph does.
+                if let Some(cam) = cam_rotation {
+                    plate_transform.rotation = transform.rotation.inverse() * cam;
                 }
                 if let Some(m) = materials.get_mut(&material.0) {
                     let a = glyph_alpha(plate.layer, age);
