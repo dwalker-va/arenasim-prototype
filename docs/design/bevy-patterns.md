@@ -169,6 +169,22 @@ commands.spawn((
 // Add mesh, materials, etc.
 ```
 
+### Graphical State on Combatants
+
+**Problem**: Query iteration follows table row order, and inserting or removing
+a table-stored component moves an entity to another table. A visual system that
+did so to a combatant on the frame clock (a hit flinch, a death fall) reordered
+the combatants every sim loop visits by frame rate (AS-175).
+
+**Solution**: Declare such a component `#[component(storage = "SparseSet")]` —
+it changes the combatant's archetype, not its table — and name it in
+`FRAME_CLOCK_VISUALS`. Enforced for combatants by
+`tests/frame_rate_determinism.rs`. A sim query that names one of these
+components, even as a filter (`Without<DeathAnimation>`), iterates archetype by
+archetype and brings the bug back. Other sim entities (projectiles, traps, slow
+zones, totems) are not covered yet: AS-216. See
+`docs/solutions/implementation-patterns/adding-visual-effect-bevy.md` (gotcha 11).
+
 ### Entity Despawn Safety
 
 **Problem**: Entity may be despawned before system runs

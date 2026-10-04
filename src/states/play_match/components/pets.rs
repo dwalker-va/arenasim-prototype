@@ -252,6 +252,7 @@ pub struct IceBlockVisual {
 /// distance-paced along the actual leap path (the same construction as
 /// `ChargeTrailEmitter` — Disengage covers 15 yd at 30 yd/s).
 #[derive(Component)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct DisengageTrailEmitter {
     /// World position of the last emitted trail element.
     pub last_emit: Vec3,
@@ -289,6 +290,7 @@ pub struct DisengageSparkMote {
 /// element, so emission is distance-paced along the actual dash path
 /// (frame-rate independent — the dash covers ~28 yd/s).
 #[derive(Component)]
+#[component(storage = "SparseSet")] // frame-clock visual state on a sim entity (AS-175)
 pub struct ChargeTrailEmitter {
     /// World position of the last emitted trail element.
     pub last_emit: Vec3,

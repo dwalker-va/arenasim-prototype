@@ -215,6 +215,27 @@ Use `target_transform.translation + Vec3::Y * 1.0` for effects centered on comba
 
 Bevy has a compile-time tuple size limit for system groups. Each visual effect type gets its own `.add_systems()` block with a comment explaining why.
 
+### 11. Visual State on a Combatant Is `SparseSet`
+
+A component a graphical-only system inserts on, or removes from, a combatant
+must be declared `#[component(storage = "SparseSet")]` and named in
+`FRAME_CLOCK_VISUALS` in `tests/frame_rate_determinism.rs`. A table-stored
+component moves the combatant to another table, which reshuffles the order
+every sim query visits combatants in; done on the frame clock, that made RNG
+draw order and same-tick log order depend on the display's frame rate
+(AS-175). A sparse-set component changes only the combatant's archetype, never
+its table row. Effect entities of your own and the `VisualBody` child are
+unaffected. The test fails, naming the component, when a combatant changes
+table anywhere but inside a fixed tick, or when the frame clock changes a
+component on one that the list does not name.
+
+Never name one of these components in a SIM query, not even as a filter
+(`Without<DeathAnimation>`): a query over a sparse-set component iterates
+archetype by archetype, and archetypes do change on the frame clock, so the
+bug comes back. The rule and the test cover combatants only; other sim
+entities (projectiles, traps, slow zones, totems) still take Bevy's own
+table-stored render components from visual systems, and are AS-216.
+
 ## Color Reference
 
 | Class/School | Base Color | Emissive | Used By |
