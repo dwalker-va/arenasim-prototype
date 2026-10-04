@@ -18,14 +18,14 @@
 use std::time::Duration;
 
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, ClientParticle, Combatant, OriginalMesh, ShiftPuff, VisualBody,
-    WalkAnim,
+    ActiveAuras, Aura, AuraType, ClientParticle, Combatant, OriginalBodyMaterial, OriginalMesh,
+    ShiftPuff, SwingStyle, VisualBody, WalkAnim, WeaponHand, WeaponKind, WeaponSocket,
 };
 use arenasim::states::play_match::{
-    animate_client_particles, dress_travel_form, update_fear_run, update_fear_visuals,
-    update_polymorph_visuals, update_shift_puffs, update_travel_bound, update_travel_form_visuals,
-    update_walk_animation, SHIFT_PUFF_SECS, TRAVEL_BODY_HEIGHT, TRAVEL_BODY_LENGTH,
-    TRAVEL_BOUND_BOB, TRAVEL_BOUND_ROCK_DEG, TRAVEL_STRIDE,
+    animate_client_particles, animate_weapon_swings, dress_travel_form, update_fear_run,
+    update_fear_visuals, update_polymorph_visuals, update_shift_puffs, update_travel_bound,
+    update_travel_form_visuals, update_walk_animation, SHIFT_PUFF_SECS, TRAVEL_BODY_HEIGHT,
+    TRAVEL_BODY_LENGTH, TRAVEL_BOUND_BOB, TRAVEL_BOUND_ROCK_DEG, TRAVEL_STRIDE,
 };
 use arenasim::CharacterClass;
 use bevy::pbr::NotShadowCaster;
@@ -94,6 +94,7 @@ impl Harness {
                 update_travel_bound,
                 update_shift_puffs,
                 animate_client_particles,
+                animate_weapon_swings,
             )
                 .chain(),
         );
@@ -139,6 +140,34 @@ impl Harness {
             .id();
         world.entity_mut(unit).add_child(body);
         (unit, body, material)
+    }
+
+    /// A staff in the Druid's main hand, a socket on its body as the client
+    /// mounts it.
+    fn give_staff(&mut self, unit: Entity, body: Entity) -> Entity {
+        let world = self.app.world_mut();
+        let socket = world
+            .spawn((
+                WeaponSocket {
+                    kind: WeaponKind::Mace,
+                    hand: WeaponHand::Main,
+                    owner: unit,
+                    rest: Transform::IDENTITY,
+                    release_t: None,
+                    aim: Vec3::ZERO,
+                    yaw_local: 0.0,
+                    prev_owner_yaw: 0.0,
+                    windup_s: 0.0,
+                    swing_style: SwingStyle::Auto,
+                    stroke_interval: 0.0,
+                    last_s: 0.0,
+                },
+                Transform::default(),
+                Visibility::Inherited,
+            ))
+            .id();
+        world.entity_mut(body).add_child(socket);
+        socket
     }
 
     fn set_auras(&mut self, unit: Entity, types: &[AuraType]) {
@@ -473,6 +502,120 @@ fn a_sheep_keeps_the_body_until_it_lifts() {
     h.step(3);
     assert_on_all_fours(&h, unit, "sheep lifted, still shifted");
     assert_wears(&h, unit, DRUID_ORANGE, true, "sheep lifted, still shifted");
+}
+
+/// The form's restore slot is its own: after a shift in and out, the shared
+/// `OriginalMesh` / `OriginalBodyMaterial` slots still hold what the client
+/// spawned, so a later Polymorph turns the Druid into a sheep and restores the
+/// standing body from them.
+#[test]
+fn a_shift_leaves_the_shared_restore_slots_for_a_later_polymorph() {
+    let mut h = Harness::new();
+    let (unit, body, material) = h.spawn_druid(0.0);
+    h.step(1);
+    let standing = h.app.world().get::<Mesh3d>(body).unwrap().0.clone();
+    let slots = |h: &Harness| {
+        let world = h.app.world();
+        (
+            world.get::<OriginalMesh>(body).map(|m| m.0.clone()),
+            world.get::<OriginalBodyMaterial>(body).map(|m| m.0.clone()),
+        )
+    };
+    let before = slots(&h);
+    assert_eq!(before, (Some(standing.clone()), None));
+
+    h.set_auras(unit, &[AuraType::TravelForm]);
+    h.step(2);
+    assert_on_all_fours(&h, unit, "shifted");
+    assert_eq!(
+        slots(&h),
+        before,
+        "the form must not touch the shared slots"
+    );
+
+    h.set_auras(unit, &[]);
+    h.step(2);
+    assert_standing(&h, unit, "shifted out");
+    assert_eq!(slots(&h), before, "nor leave anything in them");
+
+    h.set_auras(unit, &[AuraType::Polymorph]);
+    h.step(2);
+    let e = h.extent(unit);
+    assert!(
+        e.height() < 1.0 && e.max.x - e.min.x < 1.6 && e.max.x - e.min.x > 0.5,
+        "a Polymorph after the shift draws the sheep, extent {e:?}"
+    );
+    assert_eq!(
+        slots(&h),
+        (Some(standing.clone()), Some(material.clone())),
+        "the sheep stored the real class material"
+    );
+
+    h.set_auras(unit, &[]);
+    h.step(2);
+    assert_standing(&h, unit, "sheep lifted");
+    assert_wears(&h, unit, DRUID_ORANGE, false, "sheep lifted");
+    assert_eq!(h.app.world().get::<Mesh3d>(body).unwrap().0, standing);
+    assert_eq!(slots(&h), before);
+}
+
+#[test]
+fn the_staff_is_put_away_while_shifted() {
+    let mut h = Harness::new();
+    let (unit, body, _) = h.spawn_druid(0.0);
+    let staff = h.give_staff(unit, body);
+    h.step(1);
+    assert!(h.shown(staff), "standing, the Druid holds its staff");
+    h.set_auras(unit, &[AuraType::TravelForm]);
+    h.step(1);
+    assert!(!h.shown(staff), "on all fours, no staff");
+    h.set_auras(unit, &[]);
+    h.step(1);
+    assert!(h.shown(staff), "standing again, the staff is back");
+}
+
+/// The bound is driven by DISTANCE: a quarter of a stride into a run the nose
+/// is at its full rock up, and three quarters in at its full rock down, at any
+/// pace — and a run of two strides rocks nose-up exactly twice, however long
+/// it takes.
+#[test]
+fn the_bound_keeps_its_stride_at_any_pace() {
+    for speed in [3.5f32, 7.0, 10.5] {
+        let mut h = Harness::new();
+        let (unit, _, _) = h.spawn_druid(0.0);
+        h.set_auras(unit, &[AuraType::TravelForm]);
+        h.step(2);
+        let dt = TICK.as_secs_f32();
+        let step = speed * dt;
+        let frames = (2.0 * TRAVEL_STRIDE / step).round() as usize;
+        let mut pitches = Vec::with_capacity(frames);
+        for _ in 0..frames {
+            h.app
+                .world_mut()
+                .get_mut::<Transform>(unit)
+                .unwrap()
+                .translation
+                .x += step;
+            h.step(1);
+            let (_, axis) = h.lying_pill_axis(unit);
+            pitches.push(axis.y.asin().to_degrees());
+        }
+        // The frame at which the run has covered `share` of a stride.
+        let at = |share: f32| pitches[(share * TRAVEL_STRIDE / step).round() as usize - 1];
+        let rock = TRAVEL_BOUND_ROCK_DEG;
+        for (share, want) in [(0.25, rock), (0.75, -rock), (1.25, rock), (1.75, -rock)] {
+            let got = at(share);
+            assert!(
+                (got - want).abs() < 1.0,
+                "at {speed} yd/s, {share} of a stride in: pitch {got}°, want {want}°"
+            );
+        }
+        let nose_ups = pitches
+            .windows(3)
+            .filter(|w| w[1] > w[0] && w[1] >= w[2] && w[1] > rock * 0.8)
+            .count();
+        assert_eq!(nose_ups, 2, "at {speed} yd/s: two strides, two bounds");
+    }
 }
 
 #[test]

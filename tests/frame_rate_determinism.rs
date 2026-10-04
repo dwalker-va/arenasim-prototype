@@ -466,7 +466,7 @@ fn results_rows(results: &MatchResults) -> String {
 /// (`default_matches_exercise_every_frame_clock_visual`), so a visual missing
 /// from it fails the run, and so does one no default match exercises.
 /// (`RenderInterpolation` is sparse too, but enrolled on the fixed tick.)
-const FRAME_CLOCK_VISUALS: [&str; 13] = [
+const FRAME_CLOCK_VISUALS: [&str; 14] = [
     "ChargeTrailEmitter",
     "CurseApparitionsFired",
     "DeathAnimation",
@@ -480,6 +480,7 @@ const FRAME_CLOCK_VISUALS: [&str; 13] = [
     "RootedVisual",
     "SlowTrailEmitter",
     "StunnedVisual",
+    "TravelFormVisual",
 ];
 
 /// Every combatant's table and archetype as last seen, and every time one
@@ -890,7 +891,7 @@ const QUERY_ORDER_SENSITIVE_VISUALS: [&str; 10] = [
     "RootedVisual",
     "SlowTrailEmitter",
 ];
-const CROWD_CONTROL_VISUALS: [&str; 9] = [
+const CROWD_CONTROL_VISUALS: [&str; 10] = [
     "ChargeTrailEmitter",
     "DeathAnimation",
     "HealCastPosture",
@@ -900,6 +901,7 @@ const CROWD_CONTROL_VISUALS: [&str; 9] = [
     "RootedVisual",
     "SlowTrailEmitter",
     "StunnedVisual",
+    "TravelFormVisual",
 ];
 
 /// Under every schedule, the frame clock changed exactly `expected` on the
