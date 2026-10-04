@@ -72,6 +72,11 @@ pub struct ObservedCombatant {
     /// Lets probes assert a combatant carries (or does not carry) a totem buff
     /// without `&World` access. Empty when the entity has no `ActiveAuras`.
     pub aura_types: Vec<AuraType>,
+    /// The combatant's current target. Lets probes tell an enemy that is
+    /// threatening a unit from one that is merely standing near it.
+    pub target: Option<Entity>,
+    /// In stealth: unseen by its enemies, so no threat to them yet.
+    pub stealthed: bool,
     /// The spot this combatant's live movement directive walks it to, when that
     /// directive is a `MovementGoal::Point`; `None` for a directional or entity
     /// goal, or no directive. Lets probes check WHERE the AI sends a unit, not
@@ -990,6 +995,8 @@ fn observe_frame(world: &World) -> FrameObservation {
                 current_mana: combatant.current_mana,
                 max_mana: combatant.max_mana,
                 aura_types,
+                target: combatant.target,
+                stealthed: combatant.stealthed,
                 point_goal: entity_ref
                     .get::<MovementDirective>()
                     .and_then(|d| match d.goal {

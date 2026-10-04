@@ -467,6 +467,11 @@ pub struct Combatant {
     /// Hunter-specific: the target hold of a Freezing Trap thrown at the enemy
     /// healer under melee pressure ([`TrapRetarget`]).
     pub trap_retarget: Option<TrapRetarget>,
+    /// Druid-specific: an emergency heal has gone out while a shift to break
+    /// a root or snare was owed. The heal's exemption is one global cooldown,
+    /// so the next one goes to the shift. Cleared once the Druid is free of
+    /// roots and snares.
+    pub druid_emergency_heal_spent: bool,
     /// Equipped proc trinkets and their live internal cooldowns, in socket
     /// order. Filled by [`Combatant::apply_equipment`].
     ///
@@ -649,6 +654,7 @@ impl Combatant {
             paladin_aura: PaladinAura::default(),
             hunter_opened: false,
             trap_retarget: None,
+            druid_emergency_heal_spent: false,
             proc_trinkets: Vec::new(),
         }
     }

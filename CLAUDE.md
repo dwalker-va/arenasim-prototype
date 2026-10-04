@@ -776,7 +776,10 @@ toward the chaser every window (AS-200). `escape_tick` reads both only for a
 chaser escape, so the Priest's, Paladin's and Shaman's impairment windows are
 unchanged. The shift and the shift out
 are the Druid AI's (`class_ai/druid.rs` — `shift_trigger`, `should_leave_form`);
-rules in `docs/design/wow-mechanics.md` (Travel Form).
+rules in `docs/design/wow-mechanics.md` (Travel Form). A shift that breaks a
+root or snare takes the Druid's next global cooldown: an emergency heal may
+take ONE first (`Combatant::druid_emergency_heal_spent` remembers it until the
+Druid is free), pinned by `a_root_is_broken_on_the_next_global_cooldown`.
 
 **Tangent steering (goal-directed pillar rounding)** — `map_geometry::steer_toward_goal`
 (pure, unit-tested; no RON knob). When a mover with a DESTINATION has the

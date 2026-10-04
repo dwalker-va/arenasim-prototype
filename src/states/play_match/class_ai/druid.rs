@@ -48,7 +48,10 @@
 //!
 //! Between the emergency steps and Innervate sits the ESCAPE SHIFT: Travel
 //! Form when a threat is on the Druid and it is rooted or slowed, or when a
-//! melee is beating on it (see [`shift_trigger`]). The shift breaks the
+//! melee is beating on it (see [`shift_trigger`]). A shift that would break
+//! a root or a snare is the Druid's next action: an emergency heal (2-3) may
+//! take one global cooldown first, and the shift takes the one after it,
+//! whoever is still dying. The shift breaks the
 //! impairment and the posture machine runs; while shifted the Druid casts
 //! nothing. It shifts back — free, no global cooldown — once it has been
 //! shifted [`DRUID_MIN_FORM_SECS`], no chaser is within striking reach (nor
@@ -448,6 +451,19 @@ pub fn decide_druid_action(
     marked_this_frame: &mut HashSet<Entity>,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
+    // Free of roots and snares: the next impairment's emergency heal is owed
+    // afresh (see the escape shift in `DruidTurn::rotation`).
+    if !auras.is_some_and(|a| {
+        a.auras.iter().any(|aura| {
+            matches!(
+                aura.effect_type,
+                AuraType::Root | AuraType::MovementSpeedSlow
+            )
+        })
+    }) {
+        combatant.druid_emergency_heal_spent = false;
+    }
+
     // Shifted: nothing is cast in Travel Form, so the only decision is
     // whether to leave it. Leaving is free and on no global cooldown, so it
     // is decided before the GCD gate. It is not an ability decision — the
@@ -623,6 +639,17 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// `mark_waits`: a teammate is dying ([`Self::teammate_dying`]), so Mark
     /// of the Wild was held back from step 1 for step 7.
     fn rotation(&mut self, combatant: &mut Combatant, mark_waits: bool) -> bool {
+        // The escape shift goes on the next global cooldown, behind only the
+        // emergency heals (2-3) — and when the shift would break a root or a
+        // snare, behind ONE of them: the emergency heal's exemption is one
+        // global cooldown, and the shift takes the one after it.
+        let breaks_impairment = shift_trigger(self.shift_view(combatant))
+            == Some(ShiftReason::BreakImpairment);
+        let shift_first = breaks_impairment && combatant.druid_emergency_heal_spent;
+        if shift_first && self.try_travel_form(combatant) {
+            return true;
+        }
+
         // 2-3. The emergency button, and the Rejuvenation that arms it.
         // Reach (range, then sight) filters before health ranks: an occluded
         // dying ally yields to the lowest dying one in sight.
@@ -631,10 +658,8 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             .lowest_health_ally_in_reach(DRUID_EMERGENCY_HP, self.heal_range, self.my_pos)
             .map(|a| (a.entity, a.position));
         if let Ok((ally, ally_pos)) = dying {
-            if self.has_own(ally, AbilityType::Rejuvenation) {
-                if self.cast(combatant, AbilityType::Swiftmend, ally, ally_pos) {
-                    return true;
-                }
+            let healed = if self.has_own(ally, AbilityType::Rejuvenation) {
+                self.cast(combatant, AbilityType::Swiftmend, ally, ally_pos)
             } else {
                 self.builder.reject(
                     AbilityType::Swiftmend,
@@ -642,17 +667,21 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                         note: "dying ally carries no Rejuvenation to consume".to_string(),
                     },
                 );
-                if self.cast(combatant, AbilityType::Rejuvenation, ally, ally_pos) {
-                    return true;
+                self.cast(combatant, AbilityType::Rejuvenation, ally, ally_pos)
+            };
+            if healed {
+                if breaks_impairment {
+                    combatant.druid_emergency_heal_spent = true;
                 }
+                return true;
             }
         } else if let Err(reason) = dying {
             let reason = self.unreached(combatant, AbilityType::Swiftmend, reason);
             self.builder.reject(AbilityType::Swiftmend, reason);
         }
 
-        // The escape shift.
-        if self.try_travel_form(combatant) {
+        // The escape shift, when no emergency heal went first.
+        if !shift_first && self.try_travel_form(combatant) {
             return true;
         }
 
@@ -1062,12 +1091,9 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         })
     }
 
-    /// Travel Form, when [`shift_trigger`] says so. An instant: the mana and
-    /// the global cooldown are paid here, and `effects::process_travel_form`
-    /// breaks the roots and snares and puts the form on next frame.
-    fn try_travel_form(&mut self, combatant: &mut Combatant) -> bool {
-        let ability = AbilityType::TravelForm;
-        let view = ShiftView::of(
+    /// What the escape-shift rule reads, for the Druid as it stands.
+    fn shift_view(&self, combatant: &Combatant) -> ShiftView {
+        ShiftView::of(
             self.ctx,
             self.entity,
             self.my_pos,
@@ -1075,8 +1101,15 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             self.pressured,
             self.threat_radius,
             combatant.current_health / combatant.max_health,
-        );
-        if shift_trigger(view).is_none() {
+        )
+    }
+
+    /// Travel Form, when [`shift_trigger`] says so. An instant: the mana and
+    /// the global cooldown are paid here, and `effects::process_travel_form`
+    /// breaks the roots and snares and puts the form on next frame.
+    fn try_travel_form(&mut self, combatant: &mut Combatant) -> bool {
+        let ability = AbilityType::TravelForm;
+        if shift_trigger(self.shift_view(combatant)).is_none() {
             self.builder.reject(
                 ability,
                 RejectionReason::PreconditionUnmet {

@@ -36,6 +36,7 @@ use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, CastingState, Combatant, DRTracker,
     GameRng, ShapeshiftPending, Shift,
 };
+use arenasim::states::play_match::constants::GCD;
 use arenasim::states::play_match::decision_trace::{AbilityOutcome, DecisionTrace, EventPayload};
 use arenasim::states::play_match::effects::process_travel_form;
 use arenasim::states::play_match::movement_config::load_movement_config;
@@ -477,6 +478,18 @@ fn decide_scene_with(
     enemy_distance: f32,
     ally_hp: f32,
 ) -> (Option<AbilityType>, bool, bool) {
+    decide_scene_rooted(combatant, form_secs, enemy_distance, ally_hp, false)
+}
+
+/// [`decide_scene_with`], with the Druid under an Entangling Roots when
+/// `rooted`.
+fn decide_scene_rooted(
+    combatant: &mut Combatant,
+    form_secs: Option<f32>,
+    enemy_distance: f32,
+    ally_hp: f32,
+    rooted: bool,
+) -> (Option<AbilityType>, bool, bool) {
     let mut world = World::new();
     let druid = world.spawn_empty().id();
     let ally = world.spawn_empty().id();
@@ -511,6 +524,9 @@ fn decide_scene_with(
         let mut form = aura_of(AbilityType::TravelForm, druid, druid);
         form.duration -= secs;
         self_auras.push(form);
+    }
+    if rooted {
+        self_auras.push(aura_of(AbilityType::EntanglingRoots, druid, enemy));
     }
     let mut active = BTreeMap::new();
     active.insert(druid, self_auras.clone());
@@ -711,6 +727,64 @@ fn a_voluntary_leave_holds_the_reshift_back() {
         chosen,
         Some(AbilityType::TravelForm),
         "shifted straight back after leaving of its own accord"
+    );
+}
+
+/// A rooted Druid with a melee on it and a dying ally heals the ally on its
+/// first global cooldown and shifts through the root on the next, though the
+/// ally is still dying: the emergency heal's exemption is one global
+/// cooldown — and an ally above the emergency threshold holds the shift back
+/// not at all. Paired with a shift that breaks nothing — a hurt Druid opening
+/// distance from a melee — which stays behind every emergency heal; and once
+/// the Druid is free of the root, the next root's heal is owed afresh.
+#[test]
+fn a_rooted_druid_heals_once_then_shifts_through_the_root() {
+    // A decision on `druid`, its global cooldown spent, with the ally dying.
+    let next = |druid: &mut Combatant, rooted: bool| {
+        druid.global_cooldown = 0.0;
+        decide_scene_rooted(druid, None, 1.0, 20.0, rooted).0
+    };
+
+    let mut rooted = Combatant::new(1, 1, CharacterClass::Druid);
+    assert_eq!(
+        next(&mut rooted, true),
+        Some(AbilityType::Rejuvenation),
+        "rooted with an ally dying: the emergency heal goes first"
+    );
+    assert_eq!(
+        next(&mut rooted, true),
+        Some(AbilityType::TravelForm),
+        "the next global cooldown breaks the root, the ally dying or not"
+    );
+    assert_eq!(
+        next(&mut rooted, false),
+        Some(AbilityType::Rejuvenation),
+        "free of the root: the rotation is back to the heals"
+    );
+    assert_eq!(
+        next(&mut rooted, true),
+        Some(AbilityType::Rejuvenation),
+        "a new root: its emergency heal is owed afresh"
+    );
+
+    // An ally hurt but above the emergency threshold (45%) holds nothing
+    // back. A literal, so a moved threshold fails here.
+    let mut fresh = Combatant::new(1, 1, CharacterClass::Druid);
+    assert_eq!(
+        decide_scene_rooted(&mut fresh, None, 1.0, 55.0, true).0,
+        Some(AbilityType::TravelForm),
+        "an ally above the emergency threshold: the root is broken first"
+    );
+
+    // Control: below the open-distance bar with a melee on it, unrooted. That
+    // shift breaks nothing, and waits behind every emergency heal.
+    let mut hurt = Combatant::new(1, 1, CharacterClass::Druid);
+    hurt.current_health = hurt.max_health * 0.5;
+    assert_eq!(next(&mut hurt, false), Some(AbilityType::Rejuvenation));
+    assert_eq!(
+        next(&mut hurt, false),
+        Some(AbilityType::Rejuvenation),
+        "a shift that breaks no root waits behind the emergency heals"
     );
 }
 
@@ -1288,15 +1362,6 @@ const IDLE_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
 /// observed gap may fall short of it by float error, never by a frame.
 const REVERSAL_SECS: f32 = DRUID_RESHIFT_HOLD_SECS - 0.5 / 60.0;
 
-/// The global cooldown, and Travel Form's cost — what a re-shift through a
-/// root waits for and pays.
-const GCD_SECS: f32 = 1.5;
-const TRAVEL_FORM_MANA: f32 = 25.0;
-
-/// How late a re-shift through a root may land after its global cooldown
-/// allows it: the decision frame and the landing frame, with a frame spare.
-const RESHIFT_SLACK_SECS: f32 = 3.0 / 60.0;
-
 /// How long a Druid rooted in the form may stay shifted: the frame it decides
 /// to leave and the frame the leave lands, with a frame of slack.
 const ROOTED_EXIT_SECS: f32 = 0.05;
@@ -1309,7 +1374,9 @@ const LEAVE_SLACK_SECS: f32 = 0.5;
 /// The form is neither thrown straight back nor idled in:
 /// - a shift is not reversed inside [`DRUID_MIN_FORM_SECS`] unless the Druid
 ///   was rooted again;
-/// - a Druid rooted in the form is out of it within [`ROOTED_EXIT_SECS`];
+/// - a Druid rooted in the form is out of it within [`ROOTED_EXIT_SECS`]
+///   (the re-shift through the root is
+///   [`a_root_is_broken_on_the_next_global_cooldown`]'s);
 /// - an unrooted leave is not followed by a re-shift inside
 ///   [`REVERSAL_SECS`];
 /// - a Druid shifted past the dwell, with no melee or pet enemy within
@@ -1329,20 +1396,14 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
     let mut windows = 0;
     let mut safe_checks = 0;
     let mut rooted_exits = 0;
-    let mut reshifts_through_roots = 0;
     for (t1, t2, map, seed) in SHIFT_MATCHES.iter().chain(IDLE_MATCHES) {
         let played = play(t1, t2, map, *seed);
         let mut shifted_at: Option<f32> = None;
-        // A rooted exit with a chaser still on the Druid: (exit time, the
-        // latest time the re-shift may land). The re-shift waits only for the
-        // global cooldown left from the shift it came out of, and lands a
-        // frame after its decision.
-        let mut reshift_due: Option<(f32, f32)> = None;
         let mut safe_since: Option<f32> = None;
         let mut rooted_since: Option<f32> = None;
         // When it last left the form of its own accord (unrooted).
         let mut voluntary_leave: Option<f32> = None;
-        for (k, f) in played.frames.iter().enumerate() {
+        for f in &played.frames {
             let Some((_, d)) = f
                 .combatants
                 .iter()
@@ -1365,9 +1426,6 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
             let shifted = d.alive && d.aura_types.contains(&AuraType::TravelForm);
             match (shifted_at, shifted) {
                 (None, true) => {
-                    if reshift_due.take().is_some() {
-                        reshifts_through_roots += 1;
-                    }
                     if let Some(left) = voluntary_leave {
                         assert!(
                             f.sim_time - left >= REVERSAL_SECS,
@@ -1389,37 +1447,6 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
                         if rooted {
                             rooted_exits += 1;
                             voluntary_leave = None;
-                            // A melee or pet still on it, mana for the shift,
-                            // and nothing holding it: the rotation re-shifts
-                            // through the root.
-                            let chaser_on = f.combatants.values().any(|c| {
-                                c.team != 1
-                                    && c.alive
-                                    && (c.is_pet || c.class.is_melee())
-                                    && xz(c.position).distance(xz(d.position)) <= 7.5
-                            });
-                            // The emergency heals (a teammate or the Druid itself
-                            // below 45%) outrank the shift in the rotation, so a
-                            // dying team spends the global cooldown on them first.
-                            // Read on the frame BEFORE the exit: the frame it
-                            // left on already shows the heal it chose instead.
-                            let before = &played.frames[k.saturating_sub(1)];
-                            let emergency = before.combatants.values().any(|c| {
-                                c.team == 1
-                                    && !c.is_pet
-                                    && c.alive
-                                    && c.current_health < c.max_health * DRUID_EMERGENCY_HP
-                                    && xz(c.position).distance(xz(d.position)) <= 40.0
-                            });
-                            if chaser_on
-                                && !emergency
-                                && !held
-                                && d.current_mana >= TRAVEL_FORM_MANA
-                            {
-                                let gcd_left = (at + GCD_SECS - f.sim_time).max(0.0);
-                                reshift_due =
-                                    Some((f.sim_time, f.sim_time + gcd_left + RESHIFT_SLACK_SECS));
-                            }
                         } else {
                             voluntary_leave = Some(f.sim_time);
                         }
@@ -1431,22 +1458,6 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
                     continue;
                 }
                 _ => {}
-            }
-            if let Some((exit, due)) = reshift_due {
-                let still_owed = d.alive && rooted && !held && !shifted;
-                if !still_owed {
-                    // The root ended or something stopped it acting first:
-                    // nothing left to break through.
-                    reshift_due = None;
-                } else {
-                    assert!(
-                        f.sim_time <= due,
-                        "{t1:?} v {t2:?} {map} #{seed}: left the form rooted at {exit:.2}s \
-                         with a chaser on it, and is still rooted out of form at {:.2}s — \
-                         the re-shift through the root was due by {due:.2}s",
-                        f.sim_time
-                    );
-                }
             }
             // Rooted in the form: out of it on the next frame — a rooted form
             // is no faster than none, and the rotation re-shifts through it.
@@ -1509,11 +1520,7 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
     }
     eprintln!(
         "{windows} Travel Form windows, {safe_checks} safe-with-work frames checked, \
-         {rooted_exits} rooted exits, {reshifts_through_roots} re-shifts through a root"
-    );
-    assert!(
-        reshifts_through_roots >= 2,
-        "only {reshifts_through_roots} re-shifts through a root were owed — the seeds moved"
+         {rooted_exits} rooted exits"
     );
     assert!(
         rooted_exits >= 2,
@@ -1526,6 +1533,228 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
     assert!(
         safe_checks > 0,
         "no shifted Druid was ever safe with work — vacuous"
+    );
+}
+
+// ── Travel Form: a root is broken on the next global cooldown ──────────────
+
+/// More matches for the root-break probe: a Druid rooted while a teammate —
+/// itself, in each of these — is dying, where the emergency heal goes first.
+const ROOT_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
+    (&["Rogue", "Druid"], &["Hunter", "Shaman"], "BasicArena", 3),
+    (&["Rogue", "Druid"], &["Hunter", "Paladin"], "BasicArena", 2),
+    (
+        &["Hunter", "Druid"],
+        &["Hunter", "Paladin"],
+        "BasicArena",
+        1,
+    ),
+    (
+        &["Warrior", "Druid"],
+        &["Hunter", "Priest"],
+        "PillaredArena",
+        2,
+    ),
+];
+
+/// How late a shift may land after the global cooldown that allows it: the
+/// decision frame and the landing frame, with two frames spare for the log's
+/// 0.01s rounding and the cooldown's float steps.
+const SHIFT_SLACK_SECS: f32 = 4.0 / 60.0;
+
+/// How close to the edge of the PRESSURED trigger's radii an enemy may stand
+/// and still count: the AI reads positions before the frame moves them, the
+/// observation after, so a threat on the very edge is left out.
+const PRESSURE_MARGIN_YARDS: f32 = 0.5;
+
+/// A crowd control, silence or lockout that keeps the Druid from shifting.
+fn cannot_shift(types: &[AuraType]) -> bool {
+    types.iter().any(|t| {
+        matches!(
+            t,
+            AuraType::Stun
+                | AuraType::Fear
+                | AuraType::Polymorph
+                | AuraType::Incapacitate
+                | AuraType::Cyclone
+                | AuraType::Silence
+                | AuraType::SpellSchoolLockout
+        )
+    })
+}
+
+/// The posture machine's PRESSURED trigger, as the world shows it: a visible
+/// enemy targeting `druid` within the danger radius, or a melee or pet
+/// targeting it within the intent radius. A caster CLOSING on it also counts
+/// for the AI, and is left out here: the probe owes the shift only where the
+/// Druid surely sees the threat.
+fn pressured(f: &FrameObservation, druid: Entity, movement: &MovementConfig) -> bool {
+    let d = &f.combatants[&druid];
+    let shared = &movement.shared;
+    f.combatants.values().any(|c| {
+        let distance = c.position.distance(d.position);
+        c.team != d.team
+            && c.alive
+            && !c.stealthed
+            && c.target == Some(druid)
+            && (distance <= shared.danger_radius - PRESSURE_MARGIN_YARDS
+                || (distance <= shared.threat_intent_radius - PRESSURE_MARGIN_YARDS
+                    && (c.is_pet || c.class.is_melee())))
+    })
+}
+
+/// A root on a threatened Druid is broken on its next global cooldown: from
+/// the moment the shift is owed — the Druid rooted, a threat on it
+/// ([`pressured`]), mana for Travel Form and nothing stopping it casting — it
+/// is shifted and free within one global cooldown. A root that lands in the
+/// form counts the same: the Druid leaves at once and shifts back through it.
+///
+/// The one exemption is an EMERGENCY HEAL: a teammate (the Druid included)
+/// below [`DRUID_EMERGENCY_HP`] gets Swiftmend or the Rejuvenation that arms
+/// it first. It is not taken on trust: the heal must be cast on that first
+/// global cooldown, on a teammate the world shows below the threshold, and
+/// it moves the deadline back by exactly one global cooldown — the shift is
+/// due on the one after it, a second emergency heal or no.
+#[test]
+fn a_root_is_broken_on_the_next_global_cooldown() {
+    let movement = load_movement_config().expect("movement.ron loads");
+    let defs = AbilityDefinitions::default();
+    let shift_mana = defs.get_unchecked(&AbilityType::TravelForm).mana_cost;
+    let mut owed = 0;
+    let mut broken = 0;
+    let mut from_the_form = 0;
+    let mut exempted = 0;
+    let mut lapsed = 0;
+    for (t1, t2, map, seed) in SHIFT_MATCHES.iter().chain(ROOT_MATCHES) {
+        let played = play(t1, t2, map, *seed);
+        let druids: Vec<Entity> = played.frames[0]
+            .combatants
+            .iter()
+            .filter(|(_, c)| c.class == CharacterClass::Druid && !c.is_pet)
+            .map(|(e, _)| *e)
+            .collect();
+        for druid in druids {
+            let first = &played.frames[0].combatants[&druid];
+            let id = log_id(first.team, first.slot, first.class);
+            // Every cast the Druid makes: (time, spell, target's log id).
+            let casts: Vec<(f32, String, String)> = played
+                .log
+                .lines()
+                .filter_map(|l| {
+                    let at = log_time(l)?;
+                    let (_, rest) = l.split_once(&format!("{id} casts "))?;
+                    let (spell, target) = rest.split_once(" on ")?;
+                    Some((at, spell.to_string(), target.trim().to_string()))
+                })
+                .collect();
+            // A heal cast at `at` on `target` is an emergency heal when the
+            // world showed the target below the threshold the frame before.
+            let emergency = |at: f32, spell: &str, target: &str| {
+                let before = played.frames.iter().take_while(|f| f.sim_time < at - 0.005).last();
+                (spell == "Swiftmend" || spell == "Rejuvenation")
+                    && before.is_some_and(|f| {
+                        f.combatants.values().any(|c| {
+                            !c.is_pet
+                                && log_id(c.team, c.slot, c.class) == target
+                                && c.alive
+                                && c.current_health < c.max_health * DRUID_EMERGENCY_HP
+                        })
+                    })
+            };
+            // While the shift is owed: when it became owed, whether the Druid
+            // was shifted then, the emergency heal that went first, and the
+            // deadline.
+            let mut window: Option<(f32, bool, Option<f32>, f32)> = None;
+            for f in &played.frames {
+                let d = &f.combatants[&druid];
+                let rooted = d.aura_types.contains(&AuraType::Root);
+                let shifted = d.aura_types.contains(&AuraType::TravelForm);
+                if shifted && !rooted {
+                    if window.take().is_some() {
+                        broken += 1;
+                    }
+                    continue;
+                }
+                let is_owed = d.alive
+                    && rooted
+                    && !cannot_shift(&d.aura_types)
+                    && d.current_mana >= shift_mana
+                    && pressured(f, druid, &movement);
+                if !is_owed {
+                    if window.take().is_some() {
+                        lapsed += 1;
+                    }
+                    // The root ended, or something stopped the Druid shifting
+                    // first — out of mana once its emergency heal is paid for,
+                    // most often: nothing owed. A new window starts afresh.
+                    continue;
+                }
+                let (since, in_form, heal, due) = *window.get_or_insert_with(|| {
+                    owed += 1;
+                    if shifted {
+                        from_the_form += 1;
+                    }
+                    // The first global cooldown's deadline; an emergency heal
+                    // cast inside it moves the deadline to one global
+                    // cooldown after the heal.
+                    let first_due = f.sim_time + GCD + SHIFT_SLACK_SECS;
+                    let heal = casts
+                        .iter()
+                        .find(|(at, spell, target)| {
+                            *at >= f.sim_time - 0.01
+                                && *at <= first_due
+                                && emergency(*at, spell, target)
+                        })
+                        .map(|(at, _, _)| *at);
+                    if heal.is_some() {
+                        exempted += 1;
+                    }
+                    let due = heal.map_or(first_due, |at| at + GCD + SHIFT_SLACK_SECS);
+                    (f.sim_time, shifted, heal, due)
+                });
+                let what = format!(
+                    "{t1:?} v {t2:?} {map} #{seed}: {id} rooted{} with a threat on it since \
+                     {since:.2}s",
+                    if in_form { " in the form" } else { "" }
+                );
+                // The shift is its next action: nothing else is cast while it
+                // is owed, but the one emergency heal. A cast logged on the
+                // frame the window opened was decided before the Druid could
+                // see it.
+                let other = casts.iter().find(|(at, spell, _)| {
+                    *at > since + 0.006
+                        && *at <= f.sim_time + 0.006
+                        && spell != "Travel Form"
+                        && heal.is_none_or(|h| (*at - h).abs() > 0.006)
+                });
+                assert!(
+                    other.is_none(),
+                    "{what}, and cast {other:?} instead of the shift"
+                );
+                assert!(
+                    f.sim_time <= due,
+                    "{what}, and still not shifted free at {:.2}s — the shift was due by \
+                     {due:.2}s",
+                    f.sim_time
+                );
+            }
+        }
+    }
+    eprintln!(
+        "{owed} shifts owed through a root ({from_the_form} of them rooted in the form, \
+         {exempted} after an emergency heal): {broken} made, {lapsed} no longer owed first"
+    );
+    assert!(
+        broken >= 28,
+        "only {broken} shifts through a root were made — the seeds moved"
+    );
+    assert!(
+        from_the_form >= 15,
+        "only {from_the_form} roots landed in the form — the seeds moved"
+    );
+    assert!(
+        exempted >= 10,
+        "only {exempted} emergency heals went before a shift — the exemption is untested"
     );
 }
 
