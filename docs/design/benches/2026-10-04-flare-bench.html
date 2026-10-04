@@ -1,0 +1,371 @@
+<title>Flare Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#141210; --panel:#1d1a16; --panel2:#26221c; --line:#3a332a;
+  --text:#ece6dc; --muted:#a09584; --accent:#ff9a3c; --warn:#e8b04a;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --sans:"IBM Plex Sans", system-ui, -apple-system, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+body{padding-inline:16px;padding-block:16px 32px}
+h1{font-size:18px;font-weight:600;margin:0;letter-spacing:.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:12.5px;margin-top:2px;max-width:72ch;line-height:1.45}
+header{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:end;justify-content:space-between;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.stage{background:#0c0b09;border:1px solid var(--line);border-radius:8px;position:relative;overflow:hidden}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;max-width:100%;cursor:grab}
+.hud{position:absolute;left:10px;top:8px;font-family:var(--mono);font-size:11.5px;color:var(--muted);pointer-events:none;line-height:1.5}
+.transport{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;border-top:1px solid var(--line);background:var(--panel)}
+.transport label{display:flex;gap:6px;align-items:center;font-size:13px}
+button.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+button.btn.primary{border-color:var(--accent);color:var(--accent)}
+button.btn:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:4px;font:inherit}
+#scrub{flex:1;min-width:160px}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
+.card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:600}
+.layer{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line)}
+.layer:first-of-type{border-top:0}
+.layer label{flex:1;cursor:pointer}
+.layer .nm{font-weight:500}
+.layer .ds{display:block;color:var(--muted);font-size:12px;line-height:1.35}
+.tag{font-family:var(--mono);font-size:10.5px;color:var(--warn);margin-left:4px}
+.knob{display:grid;grid-template-columns:118px minmax(0,1fr) 48px;gap:8px;align-items:center;padding:3px 0}
+.knob span{font-size:12.5px;color:var(--muted)}
+.knob output{font-family:var(--mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.notes{color:var(--muted);font-size:12.5px;line-height:1.5;margin:0;padding-left:16px}
+.notes li{margin:3px 0}
+.notes b{color:var(--text);font-weight:500}
+pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:#0c0b09;border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;margin:0;color:#f1d9b8}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+.graph{width:100%;height:84px;display:block;margin-top:6px}
+</style>
+
+<header>
+  <div>
+    <h1>Flare Bench <span style="color:var(--muted);font-weight:400">· AS-222</span></h1>
+    <div class="sub">Classic Era 1.15.9 <code>flare_state_base.m2</code>, the area model of Flare (spell 1543, visual 112198). Its sequence is exactly 30 s, the length of the Flare, so the bench keys every track to the Flare's own clock. Playback is real time. Untick layers you don't want, tune the multipliers, then copy the constants block.</div>
+  </div>
+  <div class="legend"><span>drag = orbit</span><span>wheel = zoom</span><span>capsules ±1.25 about y=1.0</span></div>
+</header>
+
+<div class="grid">
+  <div>
+    <div class="stage">
+      <canvas id="cv" width="1280" height="800" aria-label="Flare preview on the arena floor"></canvas>
+      <div class="hud" id="hud"></div>
+      <div class="transport">
+        <button class="btn primary" id="replay">Relight</button>
+        <button class="btn" id="pause">Pause</button>
+        <button class="btn" id="end">Last 3 s</button>
+        <input type="range" id="scrub" min="0" max="30" step="0.01" value="0" aria-label="Flare clock">
+        <label>camera
+          <select id="camsel">
+            <option value="match" selected>match (60 yd)</option>
+            <option value="close">sandbox (18 yd)</option>
+          </select></label>
+        <label><input type="checkbox" id="loop" checked> loop</label>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="row"><h2 style="margin:0">Ground pool weight over the life (client tracks)</h2></div>
+      <canvas id="gr" class="graph" width="1200" height="168" aria-label="Pool weight graph"></canvas>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="row"><h2 style="margin:0">Rust constants (flare.rs)</h2><button class="btn" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+  <div class="side">
+    <div class="card"><h2>Layers</h2><div id="layers"></div></div>
+    <div class="card"><h2>Knobs</h2><div id="knobs"></div></div>
+    <div class="card"><h2>What the client data says</h2>
+      <ul class="notes">
+        <li><b>Ground pool:</b> two flat 13.9 yd glow quads (<code>genericglow2_64</code>, <code>genericglow64</code>), additive, orange <code>(0.992, 0.467, 0)</code>. Their texture weights are the pulse: quad A swings 0.05 ↔ 0.10 every 100 ms for the whole 30 s (a 5 Hz shimmer); quad B eases 0.10 → 0.05 over the first 15.2 s, then swings 0.05 ↔ 0.10 every 167 ms (3 Hz). The two beat against each other in the second half, so a dying flare sputters harder. Both fall to 0 over the last 0.5 s.</li>
+        <li><b>The flare itself lies on the ground</b> (0.2 yd up), not in the air: <code>flare.blp</code> sprites, 0.667 yd, 10/s living 0.4 s, colour white-gold → orange → gold. Twinkle at 30 Hz with size jumping 0.4×–1.1×: that is the flicker. Its rate steps 10 → 20/s at 29.0 s and → 5/s at 29.5 s: a last flare-up, then out.</li>
+        <li><b>Sparks:</b> 25/s at the start, falling linearly to 0 at 29 s, launched into the upper hemisphere at 1.67 yd/s under 1.39 yd/s² gravity, 1 s life, 0.139 → 0 yd, red → orange → pale yellow. The flare spits less as it burns down.</li>
+        <li><b>Burn-out smoke:</b> 20/s from 29.33 to 29.97 s, 3 s life, 0.11 yd puffs in dark red → dark blue, additive. Near-invisible at our camera: off by default.</li>
+        <li><b>Not client:</b> the rim marks the 10 yd gameplay radius (the client glow is a soft 7 yd pool), and the halo is a readability glow behind the flare. Both are ours; untick either.</li>
+        <li><b>Bench limits:</b> canvas adds in sRGB with no bloom; Bevy adds in linear HDR and blooms the emissive, so the client will read somewhat hotter than this.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const TAU=Math.PI*2;
+const lerp=(a,b,t)=>a+(b-a)*t, clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function keys(k,t){
+  if(t<=k[0][0]) return k[0][1];
+  for(let i=1;i<k.length;i++){ if(t<=k[i][0]){const a=k[i-1],b=k[i],u=(t-a[0])/(b[0]-a[0]||1);
+    return Array.isArray(a[1])?a[1].map((x,j)=>lerp(x,b[1][j],u)):lerp(a[1],b[1],u);} }
+  return k[k.length-1][1];
+}
+const rgb=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+
+// ---------- the math flare.rs ships (ported verbatim) ----------
+const CLIENT_SEQ_SECS=30.0;          // flare_state_base.m2 sequence 0
+const POOL_RGB=[0.992,0.467,0.0];
+const CORE_LIFE=0.4;
+const CORE_RAMP_COLOR=[[255,255,192],[255,95,20],[253,220,40]], CORE_RAMP_ALPHA=[1,1,0], CORE_RAMP_MID=0.75;
+const SPARK_TRACK=[[0,25],[29,0]];
+function tri(x){const f=x-Math.floor(x);return 1-Math.abs(2*f-1);}
+/** flare_clock: seconds into the client sequence for a flare with `remaining` of `total` left */
+function flareClock(remaining,total){return clamp(1-remaining/total,0,1)*CLIENT_SEQ_SECS;}
+/** flare_pool_weight: the two quads' texture weights, summed */
+function poolWeight(clock,age){
+  const a = clock>=29.5 ? keys([[29.5,0.10],[29.6,0.03],[30,0]],clock) : 0.05+0.05*tri(age/0.2);
+  const b = clock>=29.5 ? keys([[29.5,0.05],[29.667,0.07],[30,0]],clock)
+          : clock<15.167 ? 0.10-0.05*(clock/15.167) : 0.05+0.05*tri(age*3.0);
+  return a+b;
+}
+/** flare_core_rate: the core emitter's stepped rate track, relative to its 10/s */
+function coreRate(clock){return clock<29?1:clock<29.5?2:clock<30?0.5:0;}
+function shotJitter(seed){
+  let s=(Math.imul(seed,747796405)+2891336453)>>>0;
+  s=Math.imul((((s>>>((s>>>28)+4))^s)>>>0),277803737)>>>0;
+  return (((s>>>22)^s)>>>0)/4294967295;
+}
+function draw(seed,k){return shotJitter((seed^((Math.imul(k,0x9E3779B9)+k)>>>0))>>>0);}
+/** flare_twinkle: a size factor held for one 1/HZ step */
+function twinkle(seed,age){const step=Math.floor(age*K.twinkleHz);return lerp(K.twinkleMin,K.twinkleMax,draw(seed,step));}
+function ramp3(k,mid,t){t=clamp(t,0,1);return t<mid?lerp(k[0],k[1],t/mid):lerp(k[1],k[2],(t-mid)/(1-mid));}
+function rampColor(k,mid,t){return [0,1,2].map(c=>ramp3([k[0][c],k[1][c],k[2][c]],mid,t));}
+
+// ---------- knobs and layers ----------
+const KNOBS=[
+  {key:'poolGain',   label:'pool gain',     min:1,  max:10, step:0.1,  def:4.0, rust:'FLARE_POOL_GAIN', note:'alpha = client weight × this'},
+  {key:'poolRadius', label:'pool radius',   min:0.4,max:1.6,step:0.05, def:1.0, rust:'FLARE_POOL_RADIUS_SCALE', note:'× the 10 yd gameplay radius'},
+  {key:'poolFalloff',label:'pool falloff',  min:0.5,max:4,  step:0.1,  def:1.6, rust:'FLARE_POOL_FALLOFF', note:'alpha = (1 - r²)^this'},
+  {key:'rimAlpha',   label:'rim alpha',     min:0,  max:0.8,step:0.01, def:0.22,rust:'FLARE_RIM_ALPHA'},
+  {key:'coreSize',   label:'core size',     min:0.3,max:4,  step:0.05, def:1.6, rust:'FLARE_CORE_DIAMETER', note:'yd; client 0.667'},
+  {key:'coreHeight', label:'core height',   min:0.1,max:2,  step:0.05, def:0.45,rust:'FLARE_CORE_HEIGHT', note:'yd; client 0.2'},
+  {key:'twinkleHz',  label:'twinkle Hz',    min:5,  max:60, step:1,    def:30,  rust:'FLARE_TWINKLE_HZ'},
+  {key:'twinkleMin', label:'twinkle min',   min:0.1,max:1,  step:0.05, def:0.4, rust:'FLARE_TWINKLE_MIN'},
+  {key:'twinkleMax', label:'twinkle max',   min:0.5,max:2,  step:0.05, def:1.1, rust:'FLARE_TWINKLE_MAX'},
+  {key:'haloSize',   label:'halo size',     min:0.5,max:8,  step:0.1,  def:3.0, rust:'FLARE_HALO_DIAMETER', note:'yd'},
+  {key:'haloAlpha',  label:'halo alpha',    min:0,  max:1,  step:0.01, def:0.45,rust:'FLARE_HALO_ALPHA'},
+  {key:'sparkRate',  label:'spark rate',    min:0,  max:2,  step:0.05, def:1.0, rust:'FLARE_SPARK_RATE', note:'× client 25/s'},
+  {key:'sparkSize',  label:'spark size',    min:0.5,max:4,  step:0.05, def:2.0, rust:'FLARE_SPARK_SIZE', note:'× client 0.139 yd'},
+];
+const LAYERS=[
+  {id:'pool',  nm:'Ground pool',  ds:'Two client glow quads summed: 5 Hz shimmer, 3 Hz sputter in the second half.', on:true},
+  {id:'rim',   nm:'Radius rim',   ds:'Thin ring at the 10 yd gameplay radius, steady, fading with the pool.', on:true, ours:true},
+  {id:'core',  nm:'Burning flare',ds:'Four overlapping star sprites cycling the client colour ramp, sizes jumping at 30 Hz.', on:true},
+  {id:'halo',  nm:'Core halo',    ds:'Soft glow behind the flare, flickering with it.', on:true, ours:true},
+  {id:'sparks',nm:'Sparks',       ds:'Upward spits under gravity; the rate dies away to 29 s.', on:true},
+  {id:'smoke', nm:'Burn-out smoke',ds:'Dark additive puffs in the last 0.7 s.', on:false},
+];
+const K={}; for(const k of KNOBS) K[k.key]=k.def;
+const ON={}; for(const L of LAYERS) ON[L.id]=L.on;
+const CORE_SPRITES=4;
+
+// ---------- camera ----------
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const CAMS={match:{dist:60,pitch:(90-38.7)*Math.PI/180},close:{dist:18,pitch:0.55}};
+const cam={yaw:0.5,pitch:CAMS.match.pitch,dist:CAMS.match.dist,target:[0,0.5,0]};
+let dragP=null;
+cv.addEventListener('pointerdown',e=>{dragP=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'});
+cv.addEventListener('pointermove',e=>{if(!dragP)return;cam.yaw-=(e.clientX-dragP[0])*0.008;cam.pitch=clamp(cam.pitch+(e.clientY-dragP[1])*0.006,0.08,1.45);dragP=[e.clientX,e.clientY]});
+cv.addEventListener('pointerup',()=>{dragP=null;cv.style.cursor='grab'});
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.dist=clamp(cam.dist*(1+e.deltaY*0.001),6,120)},{passive:false});
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const norm=a=>{const l=Math.hypot(...a)||1;return[a[0]/l,a[1]/l,a[2]/l]};
+let VIEW;
+function setupView(){
+  const cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
+  const eye=[cam.target[0]+cam.dist*cp*Math.sin(cam.yaw),cam.target[1]+cam.dist*sp,cam.target[2]+cam.dist*cp*Math.cos(cam.yaw)];
+  const f=norm(sub(cam.target,eye)), r=norm(cross(f,[0,1,0])), u=cross(r,f);
+  VIEW={eye,f,r,u,fl:(cv.height/2)/Math.tan(Math.PI/8)}; // Bevy's default 45° vertical fov
+}
+function proj(p){const d=sub(p,VIEW.eye),z=dot(d,VIEW.f); if(z<0.1) return null;
+  const s=VIEW.fl/z; return {x:cv.width/2+dot(d,VIEW.r)*s,y:cv.height/2-dot(d,VIEW.u)*s,s,z};}
+
+// ---------- scene ----------
+const FLOOR=[0.79*255,0.66*255,0.46*255]; // create_surface_texture floor base
+function drawFloor(){
+  const pts=[];for(let i=0;i<72;i++){const a=i/72*TAU;const q=proj([30*Math.cos(a),0,30*Math.sin(a)]);if(q)pts.push(q)}
+  g.fillStyle=rgb(FLOOR.map(c=>c*0.82),1);g.beginPath();pts.forEach((q,i)=>i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y));g.closePath();g.fill();
+  g.strokeStyle='rgba(0,0,0,0.06)';g.lineWidth=1;
+  for(let i=-28;i<=28;i+=4){line3([i,0,-28],[i,0,28]);line3([-28,0,i],[28,0,i]);}
+}
+function line3(a,b){const p=proj(a),q=proj(b);if(!p||!q)return;g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();}
+function drawCapsule(c,col){
+  const top=proj([c[0],c[1]+0.75,c[2]]),bot=proj([c[0],c[1]-0.75,c[2]]);if(!top||!bot)return;
+  const w=0.5*top.s;
+  const gr=g.createLinearGradient(top.x-w,0,top.x+w,0);
+  gr.addColorStop(0,rgb(col.map(x=>x*0.55),1));gr.addColorStop(0.45,rgb(col,1));gr.addColorStop(1,rgb(col.map(x=>x*0.45),1));
+  g.fillStyle=gr;g.beginPath();g.arc(top.x,top.y,w,Math.PI,0);g.lineTo(bot.x+w,bot.y);g.arc(bot.x,bot.y,w,0,Math.PI);g.closePath();g.fill();
+}
+// A flat textured quad on the floor: affine map of the unit disc through the projected centre and axes.
+function groundDisc(center,radius,paint){
+  const c=proj(center),px=proj([center[0]+radius,center[1],center[2]]),pz=proj([center[0],center[1],center[2]+radius]);
+  if(!c||!px||!pz)return;
+  g.save();g.setTransform(px.x-c.x,px.y-c.y,pz.x-c.x,pz.y-c.y,c.x,c.y);paint();g.restore();
+}
+function poolGradient(alpha){
+  const gr=g.createRadialGradient(0,0,0,0,0,1);
+  for(let i=0;i<=10;i++){const r=i/10;const a=Math.pow(Math.max(0,1-r*r),K.poolFalloff)*alpha;gr.addColorStop(r,rgb(POOL_RGB.map(x=>x*255),clamp(a,0,1)));}
+  return gr;
+}
+// star_flash_texture: a round core plus two crossed rays; soft_dot_texture: (1-r)^2.2
+function star(p,size,col,a,ang){
+  const q=proj(p);if(!q||a<=0.003)return;const r=Math.max(0.8,size*q.s*0.5);
+  g.save();g.translate(q.x,q.y);g.rotate(ang);
+  const core=g.createRadialGradient(0,0,0,0,0,r);core.addColorStop(0,rgb(col,a));core.addColorStop(0.35,rgb(col,a*0.3));core.addColorStop(1,rgb(col,0));
+  g.fillStyle=core;g.beginPath();g.arc(0,0,r,0,TAU);g.fill();
+  g.fillStyle=rgb(col,a*0.75);
+  g.beginPath();g.ellipse(0,0,r,r*0.09,0,0,TAU);g.fill();g.beginPath();g.ellipse(0,0,r*0.09,r,0,0,TAU);g.fill();
+  g.restore();
+}
+function softDot(p,size,col,a){
+  const q=proj(p);if(!q||a<=0.003)return;const r=Math.max(0.8,size*q.s*0.5);
+  const gr=g.createRadialGradient(q.x,q.y,0,q.x,q.y,r);
+  for(let i=0;i<=8;i++){const t=i/8;gr.addColorStop(t,rgb(col,a*Math.pow(1-t,2.2)));}
+  g.fillStyle=gr;g.beginPath();g.arc(q.x,q.y,r,0,TAU);g.fill();
+}
+
+// ---------- the rig ----------
+const RADIUS=10, TOTAL=30, SEED=7;
+const HUNTER=[-16,1,6], ROGUE=[6.5,1,-6.5], FLARE=[0,0,0];
+let remaining=TOTAL, age=0, paused=false, sparks=[], smoke=[], carry=0, smokeCarry=0, emitted=0;
+function relight(){remaining=TOTAL;age=0;sparks=[];smoke=[];carry=0;smokeCarry=0;emitted=0;}
+function sparkCount(t0,t1){ // integral of the linear track, clipped to [0,29]
+  const a=Math.max(0,t0),b=Math.min(29,t1); if(b<=a)return 0;
+  const at=x=>25*(1-x/29); return 0.5*(at(a)+at(b))*(b-a);
+}
+function step(dt){
+  const before=flareClock(remaining,TOTAL);
+  remaining-=dt; age+=dt;
+  if(remaining<=0){ if(document.getElementById('loop').checked){relight();return;} remaining=0; }
+  const clock=flareClock(remaining,TOTAL);
+  if(ON.sparks){
+    carry+=sparkCount(before,clock)*K.sparkRate;
+    while(carry>=1){carry-=1;const s=SEED*2654435761+emitted++;
+      const polar=draw(s,1)*Math.PI/2, az=draw(s,2)*TAU, sp=1.667+(draw(s,3)-0.5)*0.2;
+      sparks.push({x:[FLARE[0],0.08,FLARE[2]],v:[Math.sin(polar)*Math.cos(az)*sp,Math.cos(polar)*sp,Math.sin(polar)*Math.sin(az)*sp],age:0});}
+  }
+  if(ON.smoke){
+    const a=Math.max(29.333,before),b=Math.min(29.967,clock); if(b>a) smokeCarry+=20*(b-a);
+    while(smokeCarry>=1){smokeCarry-=1;const s=SEED*977+emitted++;const az=draw(s,1)*TAU;
+      smoke.push({x:[FLARE[0],0.25,FLARE[2]],v:[Math.cos(az)*0.556,0,Math.sin(az)*0.556],age:0});}
+  }
+  for(const p of sparks){p.age+=dt;p.v[1]-=1.389*dt;p.x=p.x.map((x,i)=>x+p.v[i]*dt);if(p.x[1]<0.02){p.x[1]=0.02;p.v=[p.v[0]*0.4,0,p.v[2]*0.4];}}
+  sparks=sparks.filter(p=>p.age<1.0);
+  for(const p of smoke){p.age+=dt;p.x=p.x.map((x,i)=>x+p.v[i]*dt);}
+  smoke=smoke.filter(p=>p.age<3.0);
+}
+
+function render(){
+  setupView();
+  g.setTransform(1,0,0,1,0,0);
+  g.fillStyle='#0c0b09';g.fillRect(0,0,cv.width,cv.height);
+  drawFloor();
+  const clock=flareClock(remaining,TOTAL), alive=remaining>0;
+  const endFade=clamp((CLIENT_SEQ_SECS-clock)/0.5,0,1);
+  g.globalCompositeOperation='lighter';
+  if(alive&&ON.pool){
+    const w=poolWeight(clock,age), alpha=w*K.poolGain;
+    groundDisc(FLARE,RADIUS*K.poolRadius,()=>{g.fillStyle=poolGradient(alpha);g.beginPath();g.arc(0,0,1,0,TAU);g.fill();});
+  }
+  if(alive&&ON.rim){
+    groundDisc(FLARE,RADIUS,()=>{g.strokeStyle=rgb(POOL_RGB.map(x=>x*255),K.rimAlpha*endFade);g.lineWidth=0.015;g.beginPath();g.arc(0,0,1-0.0075,0,TAU);g.stroke();});
+  }
+  g.globalCompositeOperation='source-over';
+  // units for scale: a Rogue just inside the rim, the Hunter outside it
+  const units=[[HUNTER,[171,212,115]],[ROGUE,[255,245,105]]].sort((a,b)=>proj(b[0]).z-proj(a[0]).z);
+  for(const [p,c] of units) drawCapsule(p,c);
+  g.globalCompositeOperation='lighter';
+  const rate=coreRate(clock);
+  if(alive&&ON.halo){
+    const flick=0.75+0.25*(twinkle(SEED+99,age)-K.twinkleMin)/Math.max(1e-3,K.twinkleMax-K.twinkleMin);
+    softDot([FLARE[0],K.coreHeight,FLARE[2]],K.haloSize,[255,170,70],K.haloAlpha*Math.min(rate,1.5)*flick);
+  }
+  if(alive&&ON.core&&rate>0){
+    for(let k=0;k<CORE_SPRITES;k++){
+      const cyc=age/CORE_LIFE+k/CORE_SPRITES, n=Math.floor(cyc), ph=cyc-n, s=SEED*31+k*7919+n;
+      const col=rampColor(CORE_RAMP_COLOR,CORE_RAMP_MID,ph), a=ramp3(CORE_RAMP_ALPHA,CORE_RAMP_MID,ph)*Math.min(rate,1);
+      const size=K.coreSize*twinkle(SEED*131+k,age)*(rate>1?1.25:1);
+      const off=[(draw(s,1)-0.5)*0.12,(draw(s,2)-0.5)*0.12,(draw(s,3)-0.5)*0.12];
+      star([FLARE[0]+off[0],K.coreHeight+off[1],FLARE[2]+off[2]],size,col,a,draw(s,4)*TAU+age*0.5);
+    }
+  }
+  for(const p of sparks){const t=p.age/1.0;
+    star(p.x,ramp3([0.139,0.028,0.0],0.8,t)*K.sparkSize,rampColor([[250,5,0],[255,120,0],[255,252,176]],0.8,t),1,0);}
+  for(const p of smoke){const t=p.age/3.0;
+    softDot(p.x,ramp3([0.014,0.111,0.0],0.25,t),rampColor([[37,0,0],[0,5,102],[180,180,227]],0.25,t),ramp3([1,0.39,0],0.25,t));}
+  g.globalCompositeOperation='source-over';
+  document.getElementById('hud').innerHTML=
+    `flare clock ${clock.toFixed(2)} s · remaining ${Math.max(0,remaining).toFixed(2)} s<br>`+
+    `pool weight ${alive?poolWeight(clock,age).toFixed(3):'—'} · core rate ×${rate} · sparks ${sparks.length}`;
+  document.getElementById('scrub').value=clock.toFixed(2);
+}
+
+// ---------- graph of the pool weight ----------
+function drawGraph(){
+  const c=document.getElementById('gr'),q=c.getContext('2d'),W=c.width,H=c.height;
+  q.clearRect(0,0,W,H);q.fillStyle='#0c0b09';q.fillRect(0,0,W,H);
+  const x=t=>8+(W-16)*t/30, y=w=>H-12-(H-24)*w/0.22;
+  q.strokeStyle='#3a332a';q.lineWidth=1;q.font='20px IBM Plex Mono, monospace';q.fillStyle='#a09584';
+  for(const t of [0,5,10,15,20,25,30]){q.beginPath();q.moveTo(x(t),6);q.lineTo(x(t),H-12);q.stroke();q.fillText(t+'s',x(t)+4,24);}
+  q.strokeStyle='#ff9a3c';q.lineWidth=2;q.beginPath();
+  for(let i=0;i<=3000;i++){const t=i/100;const w=poolWeight(t,t);i?q.lineTo(x(t),y(w)):q.moveTo(x(t),y(w));}
+  q.stroke();
+  const t=flareClock(remaining,TOTAL);q.strokeStyle='#ece6dc';q.beginPath();q.moveTo(x(t),6);q.lineTo(x(t),H-12);q.stroke();
+}
+
+// ---------- UI ----------
+function buildUI(){
+  const L=document.getElementById('layers');
+  for(const l of LAYERS){
+    const d=document.createElement('div');d.className='layer';
+    d.innerHTML=`<input type="checkbox" id="L_${l.id}" ${l.on?'checked':''}><label for="L_${l.id}"><span class="nm">${l.nm}</span>${l.ours?'<span class="tag">ours</span>':''}<span class="ds">${l.ds}</span></label>`;
+    L.appendChild(d);
+    d.querySelector('input').addEventListener('change',e=>{ON[l.id]=e.target.checked;emit();});
+  }
+  const KN=document.getElementById('knobs');
+  for(const k of KNOBS){
+    const d=document.createElement('div');d.className='knob';
+    d.innerHTML=`<span title="${k.note||''}">${k.label}</span><input type="range" id="K_${k.key}" min="${k.min}" max="${k.max}" step="${k.step}" value="${k.def}"><output id="O_${k.key}">${k.def}</output>`;
+    KN.appendChild(d);
+    d.querySelector('input').addEventListener('input',e=>{K[k.key]=parseFloat(e.target.value);document.getElementById('O_'+k.key).textContent=e.target.value;emit();});
+  }
+  document.getElementById('replay').onclick=()=>{relight();paused=false;document.getElementById('pause').textContent='Pause';};
+  document.getElementById('pause').onclick=e=>{paused=!paused;e.target.textContent=paused?'Play':'Pause';};
+  document.getElementById('end').onclick=()=>{relight();remaining=3;age=27;sparks=[];};
+  document.getElementById('scrub').addEventListener('input',e=>{const c=parseFloat(e.target.value);remaining=TOTAL*(1-c/CLIENT_SEQ_SECS);age=c;sparks=[];smoke=[];});
+  document.getElementById('camsel').addEventListener('change',e=>{const c=CAMS[e.target.value];cam.dist=c.dist;cam.pitch=c.pitch;});
+  document.getElementById('copy').onclick=async()=>{const t=document.getElementById('out').textContent;
+    try{await navigator.clipboard.writeText(t);document.getElementById('copy').textContent='Copied';}
+    catch(_){const r=document.createRange();r.selectNodeContents(document.getElementById('out'));const s=getSelection();s.removeAllRanges();s.addRange(r);}
+    setTimeout(()=>document.getElementById('copy').textContent='Copy',1200);};
+  emit();
+}
+function fmt(v){const s=String(v);return s.includes('.')?s:s+'.0';}
+function emit(){
+  const lines=['// AS-222 Flare Bench: flare_state_base.m2 (166196), spell 1543'];
+  const off=LAYERS.filter(l=>!ON[l.id]).map(l=>l.nm);
+  if(off.length) lines.push('// layers off: '+off.join(', '));
+  for(const k of KNOBS) lines.push(`pub const ${k.rust}: f32 = ${fmt(K[k.key])};`);
+  document.getElementById('out').textContent=lines.join('\n');
+}
+
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  if(!paused) step(dt);
+  render(); drawGraph();
+  requestAnimationFrame(frame);
+}
+buildUI();relight();requestAnimationFrame(frame);
+</script>

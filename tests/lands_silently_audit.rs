@@ -866,9 +866,9 @@ const NO_FAMILY: &[(AbilityType, &str)] = &[
     ),
     (
         Flare,
-        "a placement — a lit disc the size of its radius with a flare hanging over it \
-         (flare.rs); it lands nothing on anyone. A placeholder: the bespoke Classic \
-         look is its own card",
+        "a placement — the client's flare burning on the ground in a pulsing pool of \
+         light, a rim at its radius (flare.rs), for as long as the Flare burns; it \
+         lands nothing on anyone",
     ),
 ];
 
