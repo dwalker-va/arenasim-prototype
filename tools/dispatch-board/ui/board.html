@@ -61,7 +61,20 @@
 .tag.ms{color:var(--c-merged);font-weight:500}
 .msbar{display:flex;gap:8px;align-items:center}
 .msbar select{font:inherit;font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:6px 8px}
-a.btn{text-decoration:none;display:inline-block}
+.mslinks{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.mslinks>a{font:600 13px/1 "IBM Plex Mono",monospace;color:var(--c-progress);text-decoration:none;border:1px solid var(--c-progress);border-radius:99px;padding:4px 10px;background:var(--surface)}
+.mslinks>a.in_review{color:var(--c-merged);border-color:var(--c-merged)}
+.mslinks>a:hover{background:var(--surface2)}
+.mslinks .st{font:500 10.5px "IBM Plex Sans",sans-serif;letter-spacing:.05em;text-transform:uppercase;margin-left:6px;opacity:.85}
+.mspast{position:relative;font-size:12px;color:var(--muted)}
+.mspast summary{cursor:pointer;list-style:none}
+.mspast summary::-webkit-details-marker{display:none}
+.mspast summary::after{content:" ▾"}
+.mspast[open] summary::after{content:" ▴"}
+.mspast .menu{position:absolute;z-index:20;top:calc(100% + 6px);left:0;min-width:150px;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:4px 0}
+.mspast .menu a{display:block;padding:5px 12px;color:var(--ink);text-decoration:none;font:500 12.5px "IBM Plex Mono",monospace;white-space:nowrap}
+.mspast .menu a:hover{background:var(--surface2)}
+.mspast .menu .st{color:var(--muted);margin-left:8px;font-size:11px}
 .dsec{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}
 .dsec h3{font:600 12px "Barlow Semi Condensed",sans-serif;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0}
 .mrow textarea.short{min-height:64px}
@@ -117,6 +130,7 @@ var NO_MS = "-";
 var params = new URLSearchParams(location.search);
 var msFilter = params.get("m") || "";
 var showNewMs = false;
+var pastOpen = false;   // the header's "Past milestones" list, kept open across redraws
 var full = {};            // id -> full card (body + activity), fetched when its drawer opens
 var connected = false, loadedOnce = false;
 var openCardId = null, showNew = false, confirmDelete = false, statusMsg = "connecting…", showArchived = false;
@@ -447,6 +461,23 @@ function restoreDraft(d, keepDrawer){
   });
 }
 
+// The header's milestone links, from the live milestone list: every unreleased
+// milestone's review page up front, the released ones (newest first) in a list.
+function milestoneNav(){
+  function href(m){ return "/milestones/" + encodeURIComponent(m.name); }
+  var live = state.milestones.filter(function(m){ return m.status !== "released"; });
+  var past = state.milestones.filter(function(m){ return m.status === "released"; }).reverse();
+  if(!live.length && !past.length) return "";
+  return "<nav class=\"mslinks\" aria-label=\"Milestones\">"
+    + live.map(function(m){
+        return "<a class=\"" + esc(m.status) + "\" href=\"" + href(m) + "\" title=\"Milestone " + esc(m.name) + " review\">" + esc(m.name) + " <span class=\"st\">" + esc(m.status.replace("_"," ")) + "</span></a>";
+      }).join("")
+    + (past.length ? "<details class=\"mspast\" id=\"mspast\"" + (pastOpen ? " open" : "") + "><summary>Past milestones (" + past.length + ")</summary><div class=\"menu\">"
+      + past.map(function(m){ return "<a href=\"" + href(m) + "\">" + esc(m.name) + " <span class=\"st\">" + esc(m.tag || "released") + "</span></a>"; }).join("")
+      + "</div></details>" : "")
+    + "</nav>";
+}
+
 function render(){
   var keep = captureDraft();
   // The user's edits, read before anything is redrawn.
@@ -481,6 +512,7 @@ function render(){
     ? "<a class=\"btn\" id=\"reviewlink\" href=\"/milestones/" + encodeURIComponent(msFilter) + "\">Review " + esc(msFilter) + " →</a>" : "";
   app.innerHTML =
     "<div class=\"hdr\"><h1>ArenaSim <span class=\"ax\">Dispatch</span></h1>"
+    + milestoneNav()
     + "<span class=\"sub\">" + shown.length + " cards · drag to In&nbsp;Progress to put an agent on it</span>"
     + "<span class=\"spacer\"></span><span class=\"stat\">" + esc(statusMsg) + "</span>"
     + "<span class=\"msbar\"><select id=\"msel\" aria-label=\"Milestone filter\">" + msel + "</select>" + reviewLink
@@ -535,6 +567,8 @@ function wire(){
       fetchFull(c.id);
     });
   };
+  var mspast = document.getElementById("mspast");
+  if(mspast) mspast.ontoggle = function(){ pastOpen = mspast.open; };
   var archbtn = document.getElementById("archbtn");
   if(archbtn) archbtn.onclick = function(){ showArchived = !showArchived; render(); };
   var provl = document.getElementById("provl");
@@ -691,6 +725,12 @@ function wire(){
 
 document.addEventListener("keydown", function(e){
   if(e.key === "Escape" && (openCardId || showNew || showNewMs || pending)){ closeAll(); render(); }
+  else if(e.key === "Escape" && pastOpen) closePast();
+});
+// The past-milestones list is a menu: a click anywhere else closes it.
+function closePast(){ pastOpen = false; var p = document.getElementById("mspast"); if(p) p.open = false; }
+document.addEventListener("click", function(e){
+  if(pastOpen && !(e.target.closest && e.target.closest("#mspast"))) closePast();
 });
 
 // Live refresh: the daemon nudges this page on every board event, whoever wrote it.

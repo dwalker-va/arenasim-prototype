@@ -43,6 +43,7 @@ button:focus-visible,[draggable]:focus-visible,input:focus-visible,textarea:focu
 .stat{color:var(--muted);font:400 12px "IBM Plex Mono",monospace}
 .btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:7px;padding:7px 13px;font-weight:500}
 .btn:hover{border-color:var(--muted)}
+a.btn{text-decoration:none;display:inline-block}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--btn-primary-ink);font-weight:600}
 .btn.danger{color:var(--p1);border-color:var(--p1)}
 .btn:disabled{opacity:.45;cursor:default}

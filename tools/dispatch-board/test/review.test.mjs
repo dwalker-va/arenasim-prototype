@@ -360,3 +360,57 @@ test("board page: Cancel card retires a card from the drawer, and the review pag
   assert.match(work, /Warriors start at 0 rage/);
   assert.doesNotMatch(work, /dropped idea/, "the cancelled card is listed with the work");
 });
+
+test("board page: the header links every unreleased milestone's review page, past ones behind a list, from the live milestone list", async (t) => {
+  const d = await spawnDaemon(t);
+  d.t = t;
+  const { client } = await milestoneWithCards(d);
+  // 0.6 released (an empty milestone closes at once), 0.8 open, 0.7 taken to review.
+  assert.ok((await call(client, "create_milestone", { name: "0.6", ...orch })).ok);
+  const v6 = (await call(client, "list_milestones", {})).value.find((m) => m.name === "0.6").version;
+  const closed = await call(client, "close_milestone", { name: "0.6", expected_version: v6, tag: "v0.6.0", ...orch });
+  assert.ok(closed.ok, JSON.stringify(closed.value));
+  assert.ok((await call(client, "create_milestone", { name: "0.8", ...orch })).ok);
+  assert.ok((await call(client, "update_milestone", { name: "0.7", patch: { status: "in_review" }, expected_version: 1, ...orch })).ok);
+
+  // The unfiltered board: no filter has picked a milestone, so any review link is the header's own.
+  const pg = await openDom(t, d.base, uiPage(), "/", (doc) => doc.querySelector(".card"));
+  const { doc } = pg;
+  const links = (sel) => [...doc.querySelectorAll(sel)].map((a) => [a.getAttribute("href"), a.textContent]);
+  assert.ok(doc.querySelector(".hdr nav.mslinks"), "the header has no milestone navigation");
+  assert.deepEqual(
+    links(".hdr nav.mslinks > a"),
+    [["/milestones/0.7", "0.7 in review"], ["/milestones/0.8", "0.8 open"]],
+    "every unreleased milestone, prominent in the header",
+  );
+  assert.deepEqual(links(".hdr nav.mslinks .mspast a"), [["/milestones/0.6", "0.6 v0.6.0"]], "a released milestone sits in the past list");
+  assert.equal(doc.querySelector(".hdr nav.mslinks .mspast summary").textContent, "Past milestones (1)");
+
+  // A milestone created after the page loaded appears on the next refresh — no code names one.
+  assert.ok((await call(client, "create_milestone", { name: "0.9-rc", ...orch })).ok);
+  pg.nudge();
+  await until("the new milestone's link", () => doc.querySelector('.hdr nav.mslinks > a[href="/milestones/0.9-rc"]'));
+
+  // The past list stays open across a redraw once the user opens it.
+  const past = doc.querySelector(".hdr nav.mslinks .mspast");
+  past.open = true;
+  pg.fire(past, "toggle");
+  assert.ok((await call(client, "create_milestone", { name: "1.0", ...orch })).ok);
+  pg.nudge();
+  await until("the redraw", () => doc.querySelector('.hdr nav.mslinks > a[href="/milestones/1.0"]'));
+  assert.equal(doc.querySelector(".hdr nav.mslinks .mspast").open, true, "a redraw closed the past-milestones list");
+});
+
+test("review page: links back to the whole board, and to the milestone's own cards on it", async (t) => {
+  const d = await spawnDaemon(t);
+  d.t = t;
+  await milestoneWithCards(d);
+  const rv = await openDom(t, d.base, reviewPage(), "/milestones/0.7", (doc) => doc.querySelector("#changed"));
+  const back = rv.doc.getElementById("boardlink");
+  assert.ok(back, "the review page has no link back to the board");
+  assert.equal(back.getAttribute("href"), "/");
+  assert.equal(rv.doc.getElementById("mscards").getAttribute("href"), "/?m=0.7");
+  // A milestone that does not exist still offers the way back.
+  const lost = await openDom(t, d.base, reviewPage(), "/milestones/nope", (doc) => /no milestone nope/.test(doc.querySelector(".hdr .stat")?.textContent ?? ""));
+  assert.equal(lost.doc.getElementById("boardlink").getAttribute("href"), "/");
+});

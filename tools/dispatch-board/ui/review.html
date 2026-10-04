@@ -272,7 +272,9 @@ function render(){
   var ae = document.activeElement, focus = ae && ae.dataset && ae.dataset.key ? {key: ae.dataset.key, s: ae.selectionStart, e: ae.selectionEnd} : null;
   rendered = {};
   var head = "<div class=\"hdr\"><h1>ArenaSim <span class=\"ax\">Dispatch</span></h1><span class=\"sub\">Milestone " + esc(NAME) + " review</span>"
-    + "<span class=\"spacer\"></span><span class=\"stat\">" + esc(statusMsg) + "</span><a class=\"back\" href=\"/?m=" + encodeURIComponent(NAME) + "\">← Board</a></div>";
+    + "<span class=\"spacer\"></span><span class=\"stat\">" + esc(statusMsg) + "</span>"
+    + "<a class=\"back\" id=\"mscards\" href=\"/?m=" + encodeURIComponent(NAME) + "\">" + esc(NAME) + " cards on the board</a>"
+    + "<a class=\"btn\" id=\"boardlink\" href=\"/\">← Board</a></div>";
   if(!data){ app.innerHTML = head; return; }
   var m = data.milestone;
   var meta = "<p class=\"meta\"><span class=\"status " + esc(m.status) + "\">" + esc(m.status.replace("_"," ")) + "</span> · opened " + esc(day(m.created))
