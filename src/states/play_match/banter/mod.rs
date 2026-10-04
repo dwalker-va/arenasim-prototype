@@ -21,6 +21,8 @@
 
 mod resolver;
 mod scheduler;
+#[cfg(test)]
+mod shipped_pool;
 pub mod vocab;
 mod watcher;
 
