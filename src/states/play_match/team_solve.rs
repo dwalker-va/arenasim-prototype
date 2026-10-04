@@ -1938,6 +1938,85 @@ mod tests {
         assert!(w.sees(end, ally), "parked blind at {end:?}");
     }
 
+    /// The fallback aims at the DYING teammate, not the nearest: a dying
+    /// teammate behind a pillar, a healthier one nearer and in plain sight.
+    /// Seeing the healthy one must not count as seeing the one the healer has
+    /// to reach. With and without an enemy melee beside the healer.
+    #[test]
+    fn the_sight_fallback_walks_to_the_dying_teammate_not_the_nearest() {
+        for with_melee in [false, true] {
+            let mut dying = unit(2, 1, 1, 40.0, 0.0);
+            dying.health_pct = 0.2;
+            let mut healthy = unit(3, 1, 2, -10.0, 0.0);
+            healthy.health_pct = 0.9;
+            let mut units = vec![healer(1, 1, 0, 0.0, 0.0), dying, healthy];
+            if with_melee {
+                units.push(melee(4, 2, 0, 3.0, 0.0));
+            }
+            let w = SolveWorld {
+                obstacles: vec![pillar_at(30.0, 0.0)],
+                ..world(units)
+            };
+            let ally = Vec2::new(40.0, 0.0);
+            assert!(
+                !w.sees(Vec2::ZERO, ally),
+                "the dying teammate starts hidden"
+            );
+            assert!(
+                w.sees(Vec2::ZERO, Vec2::new(-10.0, 0.0)),
+                "the healthy one in sight"
+            );
+            let end = *walk_resolves(w.clone(), 30, 3.0).last().unwrap();
+            assert!(
+                w.sees(end, ally) && end.distance(ally) <= w.heal_range - HEAL_REACH_MARGIN,
+                "melee {with_melee}: ended at {end:?}, {:.1}yd from the dying teammate, \
+                 sight {}",
+                end.distance(ally),
+                w.sees(end, ally)
+            );
+        }
+    }
+
+    /// A healer that cannot heal owes no sight, so a hidden ally does not
+    /// walk it out of its cover: the solve never answers with the ally's spot.
+    #[test]
+    fn a_healer_that_cannot_heal_is_not_walked_to_a_hidden_ally() {
+        let mut w = SolveWorld {
+            obstacles: vec![pillar_at(15.0, 0.0)],
+            ..world(vec![healer(1, 1, 0, 0.0, 0.0), unit(2, 1, 1, 25.0, 0.0)])
+        };
+        w.units[0].can_cast_heal = false;
+        let ally = Vec2::new(25.0, 0.0);
+        assert!(!w.sees(Vec2::ZERO, ally));
+        assert_ne!(solve_healer(&w), ally);
+    }
+
+    /// The fallback is for a healer with NO candidate in sight. Blind where it
+    /// stands, but with a step of its local ring that sees the ally, the healer
+    /// takes a seeing candidate rather than walking at the ally.
+    #[test]
+    fn a_seeing_candidate_beats_the_sight_fallback() {
+        let w = SolveWorld {
+            obstacles: vec![pillar_at(10.0, 0.0)],
+            ..world(vec![healer(1, 1, 0, 0.0, 5.5), unit(2, 1, 1, 20.0, 5.5)])
+        };
+        let ally = Vec2::new(20.0, 5.5);
+        assert!(!w.sees(Vec2::new(0.0, 5.5), ally), "blind where it stands");
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        assert!(
+            candidates_for(&ctx).iter().any(|c| w.sees(*c, ally)),
+            "the scene needs a seeing candidate"
+        );
+        let spot = solve_healer(&w);
+        assert_ne!(spot, ally, "walked at the ally with a seeing step at hand");
+        assert!(w.sees(spot, ally), "{spot:?} does not see the ally");
+    }
+
     /// The sight fallback waits on an owed dispel like everything else: with a
     /// nearer teammate hidden behind a pillar from every candidate, the healer
     /// still takes the nearest spot the dispel reaches, rather than walking at
