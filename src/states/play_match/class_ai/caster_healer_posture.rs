@@ -33,6 +33,11 @@ pub struct CasterHealerPlan {
     /// The live PRESSURED trigger this tick (`compound_pressure_trigger`),
     /// kept for parity with the Priest plan.
     pub pressured: bool,
+    /// The teammate a live medic walk is walking to, if one is. The Druid's
+    /// rotation holds its damage and utility casts while that teammate is out
+    /// of its reach (`class_ai::druid`), so the global cooldown is free for
+    /// the heal the walk is about to make possible.
+    pub medic_walk: Option<Entity>,
 }
 
 // ============================================================================
@@ -150,7 +155,7 @@ pub fn evaluate_caster_healer_posture(
     // sight would root the healer short of the dying one.
     let medic_chase =
         medic_chase_override(entity, my_pos, next, ctx, shared, state, directive, now);
-    let medic_walk = medic_chase.is_some();
+    let medic_walk = medic_chase.map(|ally| ally.entity);
     if let Some(ally) = medic_chase {
         medic_chase_tick(
             commands,
@@ -243,7 +248,7 @@ pub fn evaluate_caster_healer_posture(
         commands.entity(entity).try_insert(*state);
     }
 
-    let escape_defer = if medic_walk || state.posture == Posture::Escape {
+    let escape_defer = if medic_walk.is_some() || state.posture == Posture::Escape {
         Some(shared.urgency_hp_threshold)
     } else {
         None
@@ -252,6 +257,7 @@ pub fn evaluate_caster_healer_posture(
     CasterHealerPlan {
         escape_defer,
         pressured: trigger,
+        medic_walk,
     }
 }
 

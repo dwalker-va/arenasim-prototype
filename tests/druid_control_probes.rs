@@ -542,6 +542,7 @@ fn decide_scene_with(
         &ctx,
         &movement,
         true,
+        None,
         true,
         60.0,
         &mut Default::default(),

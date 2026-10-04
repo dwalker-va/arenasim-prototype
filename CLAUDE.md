@@ -656,7 +656,8 @@ window does (`escape_defer` / `cast_defer`), so the heal fallback above cannot
 root it short of the dying ally to heal a less-hurt one it can see. An ally in
 sight who is ALSO at or below `urgency_hp_threshold` is still healed, and
 instants (Holy Shock, Power Word: Shield, the Druid's kit) still fire
-(`tests/medic_chase_heal_rule.rs`).
+(`tests/medic_chase_heal_rule.rs`). The Druid holds its own damage and
+utility for the walk instead — see *Dying teammate first* below.
 
 **Dispel walk (Paladin, Priest)** — `healer_postures::dispel_chase_override`,
 choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and
@@ -723,11 +724,14 @@ Wave, the Druid's emergency heal and top-up Rejuvenation), Holy Shock damage
 (the first enemy within 20yd in sight) and the Shaman's Frost Shock peel (the
 nearest attacker in sight). The choosers that rank without a range
 filter — Power Word: Shield, Power Word: Fortitude, Mark of the Wild, the
-Druid's heal focus and its Cyclone and Entangling Roots peels — drop a candidate
-only SIGHT keeps them off (`class_ai::sight_blocks`) before ranking, so a best
-pick beyond range is still picked and refused as before. The Druid's peels
-take an attacker in sight even when the ally they peel for is not: the control
-focus is ranked over every ally. The Priest's defensive Psychic Scream holds for
+Druid's heal focus, its Cyclone peel and its step-8 Entangling Roots — drop a
+candidate only SIGHT keeps them off (`class_ai::sight_blocks`) before ranking,
+so a best pick beyond range is still picked and refused as before. The Druid's
+step-8 Roots also passes over an attacker immune to damage. Its Roots PEEL for a
+dying teammate is reach-first (range, then sight, then immunity): an attacker it
+cannot land on yields to the next, then to the next dying teammate's. The
+Druid's peels take an attacker in sight even when the ally they peel for is
+not: the control focus is ranked over every ally. The Priest's defensive Psychic Scream holds for
 a critical heal only when the dying ally is in reach — one behind cover is the
 medic chase's to reach, and no heal can land on it yet.
 The dispel walk asks `cast_reach`, so it ends exactly where the cast becomes
@@ -737,6 +741,26 @@ path: the Hunter's dispatch, the pet's own while its Hunter casts, and the
 pet's re-check when it executes a dispatched command
 (`pet_ai::pet_command_rejection`), which also re-checks a Master's Call's
 sight. A no-op on obstacle-free maps (BasicArena stays byte-identical).
+
+**Dying teammate first (Druid)** — no RON knob; reuses `urgency_hp_threshold`.
+A teammate below the threshold that the Druid can reach (range, then sight) gets
+what its kit can still add before any damage or utility (Mark of the Wild, a
+Cyclone or Entangling Roots that is not a peel, Moonfire): below
+`DRUID_EMERGENCY_HP` (0.45) Swiftmend or the Rejuvenation that arms it;
+otherwise its own Rejuvenation, then a Lifebloom stack while it is under attack
+(a threat only closing on it gets the Rejuvenation, not the stack). Entangling
+Roots on a melee enemy or pet attacking or closing on a dying teammate is a PEEL
+and comes before that stack. With nothing left to add, the damage goes out. While the
+medic walk is live and its teammate is NOT yet in reach, damage and utility are
+held outright (traced `PreconditionUnmet`, "holding the global cooldown ..."):
+every Druid spell is an instant on the global cooldown, so a Moonfire cast as
+the walk rounds a pillar edge would spend the 1.5s in which sight comes back.
+The peels (Cyclone for a focus below `DRUID_URGENT_HP`, Roots for a dying
+teammate), Travel Form, Innervate and the heals are never held. The rule lives
+in the Druid's rotation order (`class_ai/druid.rs`, `DruidTurn::take` /
+`try_dying_heal` / `try_roots_peel` / `held_for_medic_walk`; the walk's
+teammate reaches it as `CasterHealerPlan::medic_walk`), so no other healer's
+deferral changes (`tests/druid_dying_heal.rs`).
 
 **Travel Form escape (Druid)** — `druid.weights.flee`. A shifted Druid is in
 ESCAPE for as long as it stays shifted (`evaluate_caster_healer_posture`'s

@@ -541,13 +541,14 @@ fn the_repro_druid_commits_to_one_goal() {
     let events = druid_movement(repro_config());
 
     // The scenario still happens: the Druid chases the Mage round the pillar
-    // edge, over and over, in the repro window.
+    // edge, more than once, in the repro window — until its heal lifts the
+    // Mage back over the urgency threshold and the chase has no teammate.
     let chases_in_window = events
         .iter()
         .filter(|(t, trig)| *t >= 94.0 && trig == "SeekLos")
         .count();
     assert!(
-        chases_in_window >= 3,
+        chases_in_window >= 2,
         "the repro no longer reaches the pillar edge: {chases_in_window} SeekLos at/after 94s \
          — re-seed this probe"
     );

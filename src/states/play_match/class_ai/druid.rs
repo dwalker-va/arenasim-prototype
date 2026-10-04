@@ -7,7 +7,8 @@
 //! healing when arena dampening arrives.
 //!
 //! The rotation, in priority order:
-//! 1. Mark of the Wild on any ally without it (pre-match, in practice).
+//! 1. Mark of the Wild on any ally without it (pre-match, in practice) — but
+//!    not while a teammate is dying: then it waits behind the heals (7).
 //! 2. Swiftmend — the emergency button — on a dying ally carrying Rejuvenation.
 //! 3. An emergency Rejuvenation on a dying ally without one, which arms
 //!    Swiftmend for the next global cooldown.
@@ -18,10 +19,32 @@
 //!    bloom managed on purpose (see [`lifebloom_decision`]). A threat that is
 //!    only closing gets the Rejuvenation, not the stack: rolling three stacks
 //!    on an ally nobody is hitting yet is mana spent on overheal.
-//! 7. Control, when an ally needs a peel or the kill needs its healer gone
-//!    (see [`DruidTurn::try_control`]): Cyclone, then Entangling Roots.
-//! 8. Rejuvenation on any other injured ally.
-//! 9. Moonfire on the kill target.
+//! 7. What a teammate below `urgency_hp_threshold` is owed, and the peels (see
+//!    [`DruidTurn::try_dying_heal`]): the teammate's Rejuvenation; Cyclone on
+//!    an enemy attacking the focus once it is below [`DRUID_URGENT_HP`]; Roots
+//!    on a melee enemy or pet attacking or closing on a dying teammate; the
+//!    teammate's
+//!    Lifebloom stack while it is under attack — then a Mark of the Wild step 1
+//!    held back.
+//! 8. Control, when the kill needs its healer gone or a melee enemy or pet is
+//!    on the Druid or its focus (see [`DruidTurn::try_control`]): Cyclone, then
+//!    Entangling Roots.
+//! 9. Rejuvenation on any other injured ally.
+//! 10. Moonfire on the kill target.
+//!
+//! **A dying teammate is healed before any damage or utility.** A teammate
+//! below `urgency_hp_threshold` that the Druid can reach (range, then sight)
+//! gets what its kit can still add — below [`DRUID_EMERGENCY_HP`], Swiftmend
+//! or the Rejuvenation that arms it (2-3); otherwise its own Rejuvenation, and
+//! a Lifebloom stack while it is under attack (7) — and a melee enemy or pet
+//! attacking or closing on it is rooted (the Roots PEEL, 7), before Mark of the Wild, a
+//! Cyclone or Entangling Roots that is not a peel, or Moonfire. And while the
+//! medic walk is live and its teammate is NOT yet in reach, those damage and
+//! utility casts are held outright: every Druid spell is an instant on the
+//! global cooldown, so a Moonfire cast while the walk rounds a pillar edge
+//! spends the 1.5s in which sight returns, and the heal waits for it. The
+//! peels (the Cyclone for a focus below [`DRUID_URGENT_HP`], the Roots for a
+//! dying teammate), Travel Form, Innervate and the heals are never held.
 //!
 //! Between the emergency steps and Innervate sits the ESCAPE SHIFT: Travel
 //! Form when a threat is on the Druid and it is rooted or slowed, or when a
@@ -33,10 +56,11 @@
 //! has work (an ally to heal or an enemy in spell reach), or at once if it
 //! is rooted again ([`should_leave_form`]).
 //!
-//! Steps 5-9 answer to the MANA GOVERNOR ([`mana_reserve`]): proactive heals,
+//! Steps 5-10 answer to the MANA GOVERNOR ([`mana_reserve`]): proactive heals,
 //! control and damage are paid for only out of mana above a reserve that
 //! shrinks as the match heads into dampening. The emergency steps (2, 3), the
-//! shift and a peel for a dying ally never ask it, and neither does a focused
+//! dying teammate's heals (7), the shift and a peel for a dying ally never ask
+//! it, and neither does a focused
 //! ally who has dropped below [`DRUID_URGENT_HP`].
 //!
 //! Movement is the shared caster-healer posture machine
@@ -399,6 +423,8 @@ fn own_aura<'c>(
 
 /// Druid AI: decides and executes one ability per global cooldown.
 ///
+/// `medic_walk` is the teammate a live medic walk is walking to (the posture
+/// plan's): see the dying-teammate rule in the module docs.
 /// `time_since_gates` feeds the mana governor. `gates_opened` holds every
 /// combat action until the gates open; only Mark of the Wild is cast before.
 /// `marked_this_frame` holds the allies a Druid has already sent a Mark of the
@@ -416,6 +442,7 @@ pub fn decide_druid_action(
     ctx: &CombatContext,
     movement: &MovementConfig,
     pressured: bool,
+    medic_walk: Option<Entity>,
     gates_opened: bool,
     time_since_gates: f32,
     marked_this_frame: &mut HashSet<Entity>,
@@ -510,15 +537,49 @@ pub fn decide_druid_action(
             ctx,
             heal_range: movement.shared.heal_range,
             threat_radius: movement.shared.threat_intent_radius,
+            urgency_hp: movement.shared.urgency_hp_threshold,
+            medic_walk,
             pressured,
             time_since_gates,
             marked_this_frame,
             builder: &mut builder,
         };
-        turn.try_mark_of_the_wild(combatant) || (gates_opened && turn.rotation(combatant))
+        turn.take(combatant, gates_opened)
     };
     builder.finish();
     acted
+}
+
+/// How [`DruidTurn::melee_threat`] treats a candidate beyond Roots' range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RootsPick {
+    /// The Roots PEEL: reach-first, range then sight, as `ally_reach` is — a
+    /// candidate beyond range is passed over for one Roots can land on.
+    Peel,
+    /// Step 8's Roots: a candidate beyond range is still picked and refused,
+    /// the rule for every chooser that ranks without a range filter.
+    Step8,
+}
+
+/// The candidates [`DruidTurn::melee_threat`] passed over, for the rejection
+/// a pick that found none reports.
+#[derive(Debug, Clone, Copy, Default)]
+struct RootsSkipped {
+    /// One immune to damage.
+    immune: bool,
+    /// One in range but out of sight.
+    occluded: bool,
+}
+
+/// What the Cyclone peel ([`DruidTurn::try_cyclone_peel`]) did this turn.
+#[derive(Debug, Clone, Copy, Default)]
+struct CyclonePeel {
+    /// It cast.
+    cast: bool,
+    /// It found an attacker in sight to cyclone.
+    picked: bool,
+    /// It passed over an attacker it could reach but for sight.
+    occluded: bool,
 }
 
 /// One decision's worth of context, so the rotation's steps share it instead
@@ -533,6 +594,10 @@ struct DruidTurn<'a, 'b, 'w, 's, 'c> {
     ctx: &'a CombatContext<'c>,
     heal_range: f32,
     threat_radius: f32,
+    /// `shared.urgency_hp_threshold`: a teammate below it is dying.
+    urgency_hp: f32,
+    /// The teammate a live medic walk is walking to.
+    medic_walk: Option<Entity>,
     /// The posture machine's PRESSURED trigger this tick.
     pressured: bool,
     time_since_gates: f32,
@@ -542,10 +607,22 @@ struct DruidTurn<'a, 'b, 'w, 's, 'c> {
 }
 
 impl DruidTurn<'_, '_, '_, '_, '_> {
-    /// Steps 2-8 — everything after the pre-match buff. Every heal is an
+    /// The whole turn: the pre-match buff (step 1), then, once the gates are
+    /// open, the rotation. A dying teammate moves Mark of the Wild behind its
+    /// heals (step 7).
+    fn take(&mut self, combatant: &mut Combatant, gates_opened: bool) -> bool {
+        let dying = gates_opened && self.teammate_dying();
+        (!dying && self.try_mark_of_the_wild(combatant, false))
+            || (gates_opened && self.rotation(combatant, dying))
+    }
+
+    /// Steps 2-10 — everything after the pre-match buff. Every heal is an
     /// instant, so an ESCAPE window has nothing to defer: the Druid heals on
     /// the run.
-    fn rotation(&mut self, combatant: &mut Combatant) -> bool {
+    ///
+    /// `mark_waits`: a teammate is dying ([`Self::teammate_dying`]), so Mark
+    /// of the Wild was held back from step 1 for step 7.
+    fn rotation(&mut self, combatant: &mut Combatant, mark_waits: bool) -> bool {
         // 2-3. The emergency button, and the Rejuvenation that arms it.
         // Reach (range, then sight) filters before health ranks: an occluded
         // dying ally yields to the lowest dying one in sight.
@@ -655,17 +732,31 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 .reject(AbilityType::Lifebloom, RejectionReason::NoValidTarget);
         }
 
-        // 7. Control: a peel for the focused ally, or the enemy healer. The
-        // peel's focus is ranked over every ally, sight or not: its attackers
-        // may be in sight when the ally is not.
+        // The control focus: the ally the peels guard. It is ranked over every
+        // ally, sight or not: its attackers may be in sight when it is not.
         let control_focus = focused_ally(ctx, self.threat_radius, |_| true)
             .filter(|(a, _)| my_pos.distance(a.position) <= heal_range)
             .map(|(a, _)| (a.entity, a.health_pct()));
-        if self.try_control(combatant, control_focus) {
+
+        // 7. A dying teammate's heals and the peels, then the Mark step 1 held
+        // back — unless the medic walk's teammate is still out of reach, when
+        // the Mark waits with the rest of the damage and utility.
+        let held = self.held_for_medic_walk();
+        let mut cyclone_peel = CyclonePeel::default();
+        if self.try_dying_heal(combatant, control_focus, &mut cyclone_peel) {
+            return true;
+        }
+        if mark_waits && self.try_mark_of_the_wild(combatant, held) {
             return true;
         }
 
-        // 8. Rejuvenation on anyone else who is hurt and has none.
+        // 8. Control: the enemy healer, and Roots on a melee on the Druid or
+        // its focus.
+        if self.try_control(combatant, control_focus, held, cyclone_peel) {
+            return true;
+        }
+
+        // 9. Rejuvenation on anyone else who is hurt and has none.
         let focus_entity = focus.map(|(e, _, _, _)| e);
         let top_up = self
             .ctx
@@ -691,8 +782,284 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             }
         }
 
-        // 9. Moonfire on the kill target, when it is not already burning.
-        self.try_moonfire(combatant)
+        // 10. Moonfire on the kill target, when it is not already burning.
+        self.try_moonfire(combatant, held)
+    }
+
+    /// Whether a teammate (the Druid included, pets excluded) is DYING: below
+    /// `urgency_hp_threshold` within heal range, in sight or not — or the
+    /// medic walk is live, which is the same thing behind cover.
+    fn teammate_dying(&self) -> bool {
+        self.medic_walk.is_some()
+            || self.ctx.alive_allies().into_iter().any(|a| {
+                !a.is_pet
+                    && !self.ctx.is_cycloned(a.entity)
+                    && a.health_pct() < self.urgency_hp
+                    && self.my_pos.distance(a.position) <= self.heal_range
+            })
+    }
+
+    /// Whether damage and utility are held for the medic walk: it is live,
+    /// and its teammate is not yet in reach of a heal (range, then sight).
+    fn held_for_medic_walk(&self) -> bool {
+        self.medic_walk.is_some_and(|ally| {
+            self.ctx.combatants.get(&ally).is_some_and(|a| {
+                super::cast_reach(self.ctx, self.heal_range, self.my_pos, a.position)
+                    != super::CastReach::Reaches
+            })
+        })
+    }
+
+    /// The rejection a held damage or utility cast reports.
+    fn held_reason() -> RejectionReason {
+        RejectionReason::PreconditionUnmet {
+            note: "holding the global cooldown for a dying teammate the medic walk has not \
+                   reached"
+                .to_string(),
+        }
+    }
+
+    /// Step 7, for the teammates below `urgency_hp_threshold`, and the peels.
+    /// Never governed and never held: they are dying.
+    /// 1. The lowest one in reach (range, then sight) gets its own
+    ///    Rejuvenation when it carries none, or it is in its refresh window.
+    /// 2. The peels: the Cyclone for the control focus
+    ///    ([`Self::try_cyclone_peel`], whose verdict lands in `cyclone_peel`
+    ///    for step 8 to read), then the Roots for a dying teammate
+    ///    ([`Self::try_roots_peel`]).
+    /// 3. That lowest one gets a Lifebloom as [`lifebloom_decision`] rules it:
+    ///    only while it is under attack — a threat that is only closing gets
+    ///    the Rejuvenation and the peel, not the stack.
+    ///
+    /// Swiftmend and the Rejuvenation that arms it are steps 2-3, for an ally
+    /// below [`DRUID_EMERGENCY_HP`]. With nothing left to add, the rotation
+    /// goes on.
+    fn try_dying_heal(
+        &mut self,
+        combatant: &mut Combatant,
+        control_focus: Option<(Entity, f32)>,
+        cyclone_peel: &mut CyclonePeel,
+    ) -> bool {
+        let lowest = self
+            .ctx
+            .lowest_health_ally_in_reach(self.urgency_hp, self.heal_range, self.my_pos)
+            .ok()
+            .map(|a| {
+                (
+                    a.entity,
+                    a.position,
+                    a.health_pct(),
+                    AllyThreat::on(self.ctx, a, self.threat_radius),
+                )
+            });
+        if let Some((ally, ally_pos, _, _)) = lowest {
+            if self
+                .own(ally, AbilityType::Rejuvenation)
+                .is_none_or(|a| a.duration < REJUVENATION_REFRESH_SECS)
+                && self.cast(combatant, AbilityType::Rejuvenation, ally, ally_pos)
+            {
+                return true;
+            }
+        }
+        *cyclone_peel = self.try_cyclone_peel(combatant, control_focus);
+        if cyclone_peel.cast || self.try_roots_peel(combatant) {
+            return true;
+        }
+        let Some((ally, ally_pos, hp, threat)) = lowest else {
+            return false;
+        };
+        let lifebloom = self.own(ally, AbilityType::Lifebloom).cloned();
+        lifebloom_decision(lifebloom.as_ref(), hp, threat.attacking > 0) == LifebloomDecision::Cast
+            && self.cast(combatant, AbilityType::Lifebloom, ally, ally_pos)
+    }
+
+    /// The Cyclone PEEL: the control focus is below [`DRUID_URGENT_HP`] and a
+    /// visible enemy (not a pet) is attacking it — cyclone the nearest such
+    /// attacker to the Druid. Never governed and never held: an ally is dying.
+    /// An attacker in range but out of sight is passed over for the next one in
+    /// sight; one beyond range is still picked and refused, as it always was.
+    /// The kill target, a target already under hard crowd control and one
+    /// immune to Cyclone by diminishing returns are never picked.
+    fn try_cyclone_peel(
+        &mut self,
+        combatant: &mut Combatant,
+        focus: Option<(Entity, f32)>,
+    ) -> CyclonePeel {
+        let kill_target = combatant.target;
+        let usable = |turn: &Self, e: &CombatantInfo, category: DRCategory| {
+            e.is_alive
+                && Some(e.entity) != kill_target
+                && !turn.ctx.is_ccd(e.entity)
+                && !turn.ctx.is_dr_immune(e.entity, category)
+        };
+        // Enemies attacking `ally` from within their reach, nearest first.
+        let attackers_of = |turn: &Self, ally: Entity| -> Vec<(Entity, Vec3)> {
+            let Some(ally_pos) = turn.ctx.combatants.get(&ally).map(|a| a.position) else {
+                return Vec::new();
+            };
+            let mut attackers: Vec<&CombatantInfo> = turn
+                .ctx
+                .enemies_targeting(ally)
+                .into_iter()
+                .filter(|e| {
+                    let reach = match e.pet_type {
+                        Some(pet) => pet.preferred_range(),
+                        None => e.class.preferred_range(),
+                    } + DRUID_ATTACK_RANGE_SLACK;
+                    e.position.distance(ally_pos) <= reach
+                })
+                .collect();
+            attackers.sort_by(|a, b| {
+                turn.my_pos
+                    .distance(a.position)
+                    .partial_cmp(&turn.my_pos.distance(b.position))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            attackers
+                .into_iter()
+                .map(|e| (e.entity, e.position))
+                .collect()
+        };
+
+        // An enemy a cast of `ability` could reach but for sight
+        // ([`super::sight_blocks`]) is passed over for the next one, so an
+        // occluded peel pick yields to one in sight; a pick beyond range is
+        // still picked and refused, as it always was.
+        let cyclone_range = self.abilities.get_unchecked(&AbilityType::Cyclone).range;
+        let mut cyclone_occluded = false;
+
+        // The attacker to cyclone.
+        let peel = focus
+            .filter(|&(_, hp)| hp < DRUID_URGENT_HP)
+            .and_then(|(ally, _)| {
+                attackers_of(self, ally).into_iter().find(|&(e, pos)| {
+                    let eligible = self.ctx.combatants.get(&e).is_some_and(|info| {
+                        !info.is_pet && usable(self, info, DRCategory::Cyclone)
+                    });
+                    let blocked =
+                        eligible && super::sight_blocks(self.ctx, cyclone_range, self.my_pos, pos);
+                    cyclone_occluded |= blocked;
+                    eligible && !blocked
+                })
+            });
+        let mut verdict = CyclonePeel {
+            cast: false,
+            picked: peel.is_some(),
+            occluded: cyclone_occluded,
+        };
+        if let Some((enemy, enemy_pos)) = peel {
+            verdict.cast = self.cast(combatant, AbilityType::Cyclone, enemy, enemy_pos);
+        } else if cyclone_occluded {
+            // Never governed: a peel is for a dying ally.
+            let reason =
+                self.unreached(combatant, AbilityType::Cyclone, RejectionReason::LosBlocked);
+            self.builder.reject(AbilityType::Cyclone, reason);
+        }
+        verdict
+    }
+
+    /// The Roots PEEL: Entangling Roots on a melee enemy or pet attacking or
+    /// closing on a teammate below `urgency_hp_threshold` within heal range
+    /// (the Druid included; in sight or not — the melee may be in sight when
+    /// the teammate is not), lowest teammate first. The pick is reach-first
+    /// ([`RootsPick::Peel`]): an attacker Roots cannot land on yields to the
+    /// next one, then to the next dying teammate's. Never governed and never
+    /// held for the medic walk. Silent when there is nothing to peel: step 8's
+    /// Roots traces the rejection.
+    fn try_roots_peel(&mut self, combatant: &mut Combatant) -> bool {
+        // A Druid that cannot cast Roots at all leaves the refusal to step 8,
+        // so a frame carries one Roots rejection, not two.
+        if self
+            .caster_refusal(combatant, AbilityType::EntanglingRoots)
+            .is_some()
+        {
+            return false;
+        }
+        let mut dying: Vec<&CombatantInfo> = self
+            .ctx
+            .alive_allies()
+            .into_iter()
+            .filter(|a| {
+                !a.is_pet
+                    && !self.ctx.is_cycloned(a.entity)
+                    && a.health_pct() < self.urgency_hp
+                    && self.my_pos.distance(a.position) <= self.heal_range
+            })
+            .collect();
+        dying.sort_by(|a, b| {
+            a.health_pct()
+                .partial_cmp(&b.health_pct())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let dying: Vec<Entity> = dying.into_iter().map(|a| a.entity).collect();
+        let Some((enemy, enemy_pos)) = self.melee_threat(
+            combatant.target,
+            &dying,
+            RootsPick::Peel,
+            &mut RootsSkipped::default(),
+        ) else {
+            return false;
+        };
+        self.cast(combatant, AbilityType::EntanglingRoots, enemy, enemy_pos)
+    }
+
+    /// The Roots pick: for the first of `guarded` that has one, the visible
+    /// melee enemy or pet targeting it within `threat_intent_radius` — nearest
+    /// to it first — that Roots can take (alive, not the kill target, not
+    /// already crowd-controlled, not immune by diminishing returns). A
+    /// candidate Roots would refuse for the target alone is passed over for
+    /// the next one, then for the next guarded ally's, and noted in `skipped`:
+    /// one immune to damage ([`CombatContext::entity_is_immune`]), and one in
+    /// range but out of sight. `mode` says what happens to one beyond range.
+    fn melee_threat(
+        &self,
+        kill_target: Option<Entity>,
+        guarded: &[Entity],
+        mode: RootsPick,
+        skipped: &mut RootsSkipped,
+    ) -> Option<(Entity, Vec3)> {
+        let roots_range = self
+            .abilities
+            .get_unchecked(&AbilityType::EntanglingRoots)
+            .range;
+        guarded.iter().find_map(|&ally| {
+            let ally_pos = self.ctx.combatants.get(&ally)?.position;
+            self.ctx
+                .enemies_targeting(ally)
+                .into_iter()
+                .filter(|e| {
+                    (e.class.is_melee() || e.is_pet)
+                        && e.position.distance(ally_pos) <= self.threat_radius
+                        && e.is_alive
+                        && Some(e.entity) != kill_target
+                        && !self.ctx.is_ccd(e.entity)
+                        && !self.ctx.is_dr_immune(e.entity, DRCategory::Roots)
+                })
+                .filter(|e| {
+                    let reach = super::cast_reach(self.ctx, roots_range, self.my_pos, e.position);
+                    let passed_over = match reach {
+                        super::CastReach::Reaches => false,
+                        super::CastReach::LosBlocked => {
+                            skipped.occluded = true;
+                            true
+                        }
+                        super::CastReach::OutOfRange { .. } => mode == RootsPick::Peel,
+                    };
+                    if passed_over {
+                        return false;
+                    }
+                    let immune = self.ctx.entity_is_immune(e.entity);
+                    skipped.immune |= immune;
+                    !immune
+                })
+                .min_by(|a, b| {
+                    a.position
+                        .distance(ally_pos)
+                        .partial_cmp(&b.position.distance(ally_pos))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|e| (e.entity, e.position))
+        })
     }
 
     /// Travel Form, when [`shift_trigger`] says so. An instant: the mana and
@@ -763,15 +1130,27 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     ///    governed: an ally is dying.
     /// 2. **Cyclone on the enemy healer** — the kill target is below
     ///    [`DRUID_CYCLONE_KILL_HP`]: six seconds with no heals on it.
-    /// 3. **Entangling Roots** — a melee enemy attacking the Druid or the
-    ///    focused ally (or closing on either) is pinned.
+    /// 3. **Entangling Roots** — a melee enemy or pet attacking the Druid or
+    ///    the focused ally (or closing on either) is pinned. One immune to
+    ///    damage, or in range but out of sight, is passed over for the next;
+    ///    one beyond range is still picked and refused ([`RootsPick::Step8`]).
     ///
     /// The kill target is never cycloned or rooted: a Cyclone would make it
     /// immune to the team's damage, and the team's damage would break a root.
     /// A target already under hard crowd control, or immune to the bucket by
     /// diminishing returns, is passed over, and so is a peel pick in range but
     /// out of sight: the next attacker in sight is taken instead.
-    fn try_control(&mut self, combatant: &mut Combatant, focus: Option<(Entity, f32)>) -> bool {
+    ///
+    /// The Cyclone peel (1) is made at step 7 ([`Self::try_cyclone_peel`]);
+    /// `cyclone_peel` is its verdict. While `held`
+    /// ([`Self::held_for_medic_walk`]) the rest is held.
+    fn try_control(
+        &mut self,
+        combatant: &mut Combatant,
+        focus: Option<(Entity, f32)>,
+        held: bool,
+        cyclone_peel: CyclonePeel,
+    ) -> bool {
         let kill_target = combatant.target;
         let usable = |turn: &Self, e: &CombatantInfo, category: DRCategory| {
             e.is_alive
@@ -779,72 +1158,6 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 && !turn.ctx.is_ccd(e.entity)
                 && !turn.ctx.is_dr_immune(e.entity, category)
         };
-        // Enemies attacking `ally` from within their reach, nearest first.
-        let attackers_of = |turn: &Self, ally: Entity| -> Vec<(Entity, Vec3)> {
-            let Some(ally_pos) = turn.ctx.combatants.get(&ally).map(|a| a.position) else {
-                return Vec::new();
-            };
-            let mut attackers: Vec<&CombatantInfo> = turn
-                .ctx
-                .enemies_targeting(ally)
-                .into_iter()
-                .filter(|e| {
-                    let reach = match e.pet_type {
-                        Some(pet) => pet.preferred_range(),
-                        None => e.class.preferred_range(),
-                    } + DRUID_ATTACK_RANGE_SLACK;
-                    e.position.distance(ally_pos) <= reach
-                })
-                .collect();
-            attackers.sort_by(|a, b| {
-                turn.my_pos
-                    .distance(a.position)
-                    .partial_cmp(&turn.my_pos.distance(b.position))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            attackers
-                .into_iter()
-                .map(|e| (e.entity, e.position))
-                .collect()
-        };
-
-        // An enemy a cast of `ability` could reach but for sight
-        // ([`super::sight_blocks`]) is passed over for the next one, so an
-        // occluded peel pick yields to one in sight; a pick beyond range is
-        // still picked and refused, as it always was.
-        let cyclone_range = self.abilities.get_unchecked(&AbilityType::Cyclone).range;
-        let roots_range = self
-            .abilities
-            .get_unchecked(&AbilityType::EntanglingRoots)
-            .range;
-        let mut cyclone_occluded = false;
-        let mut roots_occluded = false;
-
-        // 1. Cyclone to peel for a dying focus.
-        let peel = focus
-            .filter(|&(_, hp)| hp < DRUID_URGENT_HP)
-            .and_then(|(ally, _)| {
-                attackers_of(self, ally).into_iter().find(|&(e, pos)| {
-                    let eligible = self.ctx.combatants.get(&e).is_some_and(|info| {
-                        !info.is_pet && usable(self, info, DRCategory::Cyclone)
-                    });
-                    let blocked =
-                        eligible && super::sight_blocks(self.ctx, cyclone_range, self.my_pos, pos);
-                    cyclone_occluded |= blocked;
-                    eligible && !blocked
-                })
-            });
-        if let Some((enemy, enemy_pos)) = peel {
-            if self.cast(combatant, AbilityType::Cyclone, enemy, enemy_pos) {
-                return true;
-            }
-        } else if cyclone_occluded {
-            // Never governed: a peel is for a dying ally.
-            let reason =
-                self.unreached(combatant, AbilityType::Cyclone, RejectionReason::LosBlocked);
-            self.builder.reject(AbilityType::Cyclone, reason);
-        }
-
         // 2. Cyclone the enemy healer when the kill is close.
         let kill_close = kill_target
             .and_then(|t| self.ctx.combatants.get(&t))
@@ -856,12 +1169,16 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             .filter(|h| usable(self, h, DRCategory::Cyclone))
             .map(|h| (h.entity, h.position));
         match healer {
+            Some(_) if kill_close && held => {
+                self.builder
+                    .reject(AbilityType::Cyclone, Self::held_reason());
+            }
             Some((healer, healer_pos)) if kill_close => {
                 if self.governed_cast(combatant, AbilityType::Cyclone, healer, healer_pos, false) {
                     return true;
                 }
             }
-            _ if peel.is_none() && !cyclone_occluded => {
+            _ if !cyclone_peel.picked && !cyclone_peel.occluded => {
                 self.builder.reject(
                     AbilityType::Cyclone,
                     RejectionReason::PreconditionUnmet {
@@ -874,51 +1191,38 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             _ => {}
         }
 
-        // 3. Entangling Roots on a melee on the Druid or on its focus.
+        // 3. Entangling Roots on a melee or pet on the Druid or its focus.
         let mut guarded = vec![self.entity];
         if let Some((ally, _)) = focus {
             guarded.push(ally);
         }
-        let melee_threat = guarded.into_iter().find_map(|ally| {
-            let ally_pos = self.ctx.combatants.get(&ally)?.position;
-            self.ctx
-                .enemies_targeting(ally)
-                .into_iter()
-                .filter(|e| {
-                    (e.class.is_melee() || e.is_pet)
-                        && e.position.distance(ally_pos) <= self.threat_radius
-                        && usable(self, e, DRCategory::Roots)
-                })
-                .filter(|e| {
-                    let blocked =
-                        super::sight_blocks(self.ctx, roots_range, self.my_pos, e.position);
-                    roots_occluded |= blocked;
-                    !blocked
-                })
-                .min_by(|a, b| {
-                    a.position
-                        .distance(ally_pos)
-                        .partial_cmp(&b.position.distance(ally_pos))
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .map(|e| (e.entity, e.position))
-        });
+        let mut skipped = RootsSkipped::default();
+        let melee_threat = self.melee_threat(kill_target, &guarded, RootsPick::Step8, &mut skipped);
         let urgent = focus.is_some_and(|(_, hp)| hp < DRUID_URGENT_HP);
         let Some((enemy, enemy_pos)) = melee_threat else {
             let roots = AbilityType::EntanglingRoots;
-            // An occluded pick reports what a cast on it would have met first:
-            // the governor, then the caster's own state, then sight.
-            let reason = if roots_occluded {
+            // A passed-over pick reports what a cast on it would have met
+            // first: the governor, then the caster's own state, then the
+            // target — immune (the pick in sight), else out of sight.
+            let reason = if skipped.immune || skipped.occluded {
+                let target = if skipped.immune {
+                    RejectionReason::TargetImmune
+                } else {
+                    RejectionReason::LosBlocked
+                };
                 self.governor_refusal(combatant, roots, urgent)
-                    .unwrap_or_else(|| {
-                        self.unreached(combatant, roots, RejectionReason::LosBlocked)
-                    })
+                    .unwrap_or_else(|| self.caster_refusal(combatant, roots).unwrap_or(target))
             } else {
                 RejectionReason::NoValidTarget
             };
             self.builder.reject(roots, reason);
             return false;
         };
+        if held {
+            self.builder
+                .reject(AbilityType::EntanglingRoots, Self::held_reason());
+            return false;
+        }
         self.governed_cast(
             combatant,
             AbilityType::EntanglingRoots,
@@ -937,7 +1241,10 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// aura snapshot cannot show it yet, and a second Mark would only refresh
     /// the first — 30 mana for nothing. The Paladin's `paladin_aura_this_frame`
     /// is the same guard.
-    fn try_mark_of_the_wild(&mut self, combatant: &mut Combatant) -> bool {
+    ///
+    /// While `held` ([`Self::held_for_medic_walk`]) an ally who needs the Mark
+    /// is refused it for now.
+    fn try_mark_of_the_wild(&mut self, combatant: &mut Combatant, held: bool) -> bool {
         let ability = AbilityType::MarkOfTheWild;
         let mark_range = self.abilities.get_unchecked(&ability).range;
         let mut occluded = false;
@@ -970,6 +1277,10 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             self.builder.reject(ability, reason);
             return false;
         };
+        if held {
+            self.builder.reject(ability, Self::held_reason());
+            return false;
+        }
         if !self.guard(combatant, ability, target, target_pos) {
             return false;
         }
@@ -987,8 +1298,9 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     }
 
     /// Moonfire on the kill target: governed, and skipped while its DoT is
-    /// still up or the target is under our own breakable crowd control.
-    fn try_moonfire(&mut self, combatant: &mut Combatant) -> bool {
+    /// still up or the target is under our own breakable crowd control — and
+    /// while `held` ([`Self::held_for_medic_walk`]).
+    fn try_moonfire(&mut self, combatant: &mut Combatant, held: bool) -> bool {
         let ability = AbilityType::Moonfire;
         let Some(target) = combatant.target else {
             self.builder.reject(ability, RejectionReason::NoValidTarget);
@@ -1007,6 +1319,10 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         if self.has_own(target, ability) {
             self.builder
                 .reject(ability, RejectionReason::AlreadyApplied);
+            return false;
+        }
+        if held {
+            self.builder.reject(ability, Self::held_reason());
             return false;
         }
         self.governed_cast(combatant, ability, target, target_pos, false)
@@ -1042,6 +1358,40 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             RejectionReason::PreconditionUnmet {
                 note: "mana governor: holding the reserve for dampening".to_string(),
             }
+        })
+    }
+
+    /// The caster's own refusal of `ability` — Travel Form, a lockout, a
+    /// silence, a cooldown, mana — asked with no target, in `pre_cast_ok`'s
+    /// order. `None` when the caster could cast it.
+    fn caster_refusal(
+        &self,
+        combatant: &Combatant,
+        ability: AbilityType,
+    ) -> Option<RejectionReason> {
+        let def = self.abilities.get_unchecked(&ability);
+        let opts = Self::guard_opts(ability);
+        (!pre_cast_ok(
+            ability,
+            def,
+            combatant,
+            self.my_pos,
+            self.auras,
+            None,
+            self.ctx,
+            opts,
+        ))
+        .then(|| {
+            classify_pre_cast_failure(
+                ability,
+                def,
+                combatant,
+                self.my_pos,
+                self.auras,
+                None,
+                self.ctx,
+                opts,
+            )
         })
     }
 
@@ -1414,6 +1764,7 @@ mod tests {
 #[cfg(test)]
 mod reach_tests {
     use super::*;
+    use crate::states::match_config::CharacterClass;
     use crate::states::match_config::CharacterClass::{Druid, Mage, Rogue, Warrior};
     use crate::states::play_match::class_ai::reach_fixture::*;
     use crate::states::play_match::map_geometry::ObstacleVolume;
@@ -1438,11 +1789,13 @@ mod reach_tests {
         s
     }
 
-    /// One Druid turn: `step` runs against a [`DruidTurn`] over the scene.
+    /// One Druid turn: `step` runs against a [`DruidTurn`] over the scene,
+    /// with the medic walk walking to `medic_walk`.
     fn turn(
         s: &mut ReachScene,
         obstacles: &[ObstacleVolume],
         time_since_gates: f32,
+        medic_walk: Option<Entity>,
         step: impl FnOnce(&mut DruidTurn, &mut Combatant) -> bool,
     ) -> DecisionTrace {
         let abilities = AbilityDefinitions::default();
@@ -1461,6 +1814,8 @@ mod reach_tests {
                 ctx,
                 heal_range: movement.shared.heal_range,
                 threat_radius: movement.shared.threat_intent_radius,
+                urgency_hp: movement.shared.urgency_hp_threshold,
+                medic_walk,
                 pressured: false,
                 time_since_gates,
                 marked_this_frame: &mut marked,
@@ -1472,11 +1827,13 @@ mod reach_tests {
 
     /// One rotation turn (everything after the pre-match buff).
     fn rotation(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        turn(s, obstacles, 20.0, |t, c| t.rotation(c))
+        turn(s, obstacles, 20.0, None, |t, c| t.rotation(c, false))
     }
 
     fn mark(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        turn(s, obstacles, 0.0, |t, c| t.try_mark_of_the_wild(c))
+        turn(s, obstacles, 0.0, None, |t, c| {
+            t.try_mark_of_the_wild(c, false)
+        })
     }
 
     /// A fresh Rejuvenation `by` cast, well clear of its refresh window. A
@@ -1662,7 +2019,10 @@ mod reach_tests {
         obstacles: &[ObstacleVolume],
         focus: Option<(Entity, f32)>,
     ) -> DecisionTrace {
-        turn(s, obstacles, 20.0, |t, c| t.try_control(c, focus))
+        turn(s, obstacles, 20.0, None, |t, c| {
+            let peel = t.try_cyclone_peel(c, focus);
+            peel.cast || t.try_control(c, focus, false, peel)
+        })
     }
 
     /// The Cyclone peel takes the dying ally's nearest attacker; behind the
@@ -1801,9 +2161,10 @@ mod reach_tests {
         focus: Option<(Entity, f32)>,
         ability: &str,
     ) -> serde_json::Value {
-        let trace = turn(s, obstacles, 20.0, |t, c| {
+        let trace = turn(s, obstacles, 20.0, None, |t, c| {
             c.current_mana = 0.0;
-            t.try_control(c, focus)
+            let peel = t.try_cyclone_peel(c, focus);
+            peel.cast || t.try_control(c, focus, false, peel)
         });
         candidate(&trace, ability)["reason"].clone()
     }
@@ -1878,5 +2239,548 @@ mod reach_tests {
         let open = reason(&[]);
         assert!(open.get("InsufficientMana").is_some(), "{open}");
         assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-210: a dying teammate is healed before any damage or utility
+    // ------------------------------------------------------------------------
+
+    /// [`scene`] plus an enemy Rogue 10yd down -Z, in sight of the Druid and
+    /// attacking nobody: the Druid's kill target, so Moonfire has a target.
+    fn kill_scene(warrior_hp: f32, mage_hp: f32) -> (ReachScene, Entity) {
+        let mut s = scene(warrior_hp, mage_hp, &[]);
+        let rogue = add_enemy(&mut s, Rogue, Vec3::new(0.0, 1.0, -10.0), None);
+        (s, rogue)
+    }
+
+    /// An enemy of `class` at `at`, targeting `target`.
+    fn add_enemy(
+        s: &mut ReachScene,
+        class: CharacterClass,
+        at: Vec3,
+        target: Option<Entity>,
+    ) -> Entity {
+        let e = s.world.spawn_empty().id();
+        s.units.push(e);
+        let mut info = unit(e, 2, class, at, 1.0);
+        info.target = target;
+        s.roster.insert(e, info);
+        e
+    }
+
+    /// One whole Druid turn after the gates (`DruidTurn::take`) at the kill
+    /// target, with the medic walk walking to `medic_walk`.
+    fn take(
+        s: &mut ReachScene,
+        obstacles: &[ObstacleVolume],
+        kill: Entity,
+        medic_walk: Option<Entity>,
+    ) -> DecisionTrace {
+        turn(s, obstacles, 20.0, medic_walk, |t, c| {
+            c.target = Some(kill);
+            t.take(c, true)
+        })
+    }
+
+    /// This Druid's Lifebloom: `count` stacks with `duration` left.
+    fn own_lifebloom(by: Entity, count: u8, duration: f32) -> Aura {
+        Aura {
+            effect_type: AuraType::HealingOverTime,
+            ability_name: "Lifebloom".to_string(),
+            duration,
+            caster: Some(by),
+            stacks: Some(AuraStacks {
+                count,
+                max: 3,
+                scope: StackScope::PerCaster,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Every heal the Druid has rolling on `ally`: its Rejuvenation and a full
+    /// Lifebloom stack, both well clear of their refresh points.
+    fn all_heals_rolling(s: &mut ReachScene, ally: Entity) {
+        let me = s.units[0];
+        let auras = s.auras.entry(ally).or_default();
+        auras.extend(rejuvenation(me));
+        auras.push(own_lifebloom(me, 3, 8.0));
+    }
+
+    /// Everyone carries Mark of the Wild, so the Mark is not what is tested.
+    fn mark_everyone(s: &mut ReachScene) {
+        for &e in &s.units[..3] {
+            s.auras.entry(e).or_default().push(Aura {
+                effect_type: AuraType::MaxHealthIncrease,
+                compound: Some(CompoundDebuff::MarkOfTheWild),
+                ..Default::default()
+            });
+        }
+    }
+
+    /// A Druid whose mana sits under the governor's reserve: every proactive
+    /// cast (the focus heals above `DRUID_URGENT_HP`, the top-up, Moonfire) is
+    /// refused, so only a heal step 7 makes can land. Above the Innervate
+    /// threshold, so Innervate does not take the turn either.
+    fn under_the_reserve(c: &mut Combatant) {
+        c.current_mana = c.max_mana * 0.4;
+    }
+
+    /// The dying Mage carries the Druid's Rejuvenation and is attacked by an
+    /// enemy caster; the enemy's attention is on the Warrior, who is the focus
+    /// and has every heal rolling. No step before Moonfire used to add to the
+    /// Mage — the focus step is the Warrior's, the top-up skips a Rejuvenation
+    /// carrier. Step 7 rolls a Lifebloom on it. Attacked by nobody, the Mage
+    /// gets no stack: with its Rejuvenation rolling there is nothing to add,
+    /// and the damage goes out.
+    #[test]
+    fn a_dying_teammate_in_reach_is_healed_before_moonfire() {
+        let attacked = |mage_attacked: bool| {
+            let (mut s, kill) = kill_scene(0.7, 0.47);
+            let (me, warrior, mage) = (s.units[0], s.units[1], s.units[2]);
+            mark_everyone(&mut s);
+            all_heals_rolling(&mut s, warrior);
+            s.auras.entry(mage).or_default().extend(rejuvenation(me));
+            for dz in [-3.0, 3.0] {
+                add_enemy(
+                    &mut s,
+                    Mage,
+                    BEHIND + Vec3::new(10.0, 0.0, dz),
+                    Some(warrior),
+                );
+            }
+            if mage_attacked {
+                add_enemy(
+                    &mut s,
+                    Mage,
+                    IN_SIGHT + Vec3::new(-10.0, 0.0, 0.0),
+                    Some(mage),
+                );
+            }
+            (s, kill, mage)
+        };
+
+        let (mut s, kill, mage) = attacked(true);
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Lifebloom", mage),
+            "a Mage at 47% carrying Rejuvenation, under attack"
+        );
+
+        let (mut s, kill, _) = attacked(false);
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Moonfire", kill),
+            "a Mage at 47% carrying Rejuvenation, attacked by nobody"
+        );
+
+        let (mut s, kill) = kill_scene(1.0, 1.0);
+        mark_everyone(&mut s);
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Moonfire", kill),
+            "nobody hurt"
+        );
+    }
+
+    /// A dying teammate with no melee threat on it gets step 7's heal — a
+    /// Rejuvenation the governor would refuse anyone else — and it is the one
+    /// in SIGHT: a lower dying teammate behind the pillar is passed over.
+    #[test]
+    fn step_seven_heals_the_lowest_dying_teammate_in_sight() {
+        let (mut s, kill) = kill_scene(0.46, 0.48);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        mark_everyone(&mut s);
+        s.prep = Some(under_the_reserve);
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Rejuvenation", warrior),
+            "no pillar: the lowest dying teammate"
+        );
+        assert_eq!(
+            outcome(&take(&mut s, &pillar(), kill, None)),
+            chose("Rejuvenation", mage),
+            "the Warrior behind the pillar yields to the dying Mage in sight"
+        );
+    }
+
+    /// `urgency_hp_threshold` is a strict bound: a teammate AT it is not dying.
+    /// The Mage there is the focus (an enemy caster is on it), so a Mark held
+    /// back for a dying teammate would yield to the focus Rejuvenation.
+    #[test]
+    fn a_teammate_at_the_urgency_threshold_is_not_dying() {
+        let threshold = MovementConfig::default().shared.urgency_hp_threshold;
+
+        let (mut s, kill) = kill_scene(1.0, threshold);
+        let (me, mage) = (s.units[0], s.units[2]);
+        add_enemy(
+            &mut s,
+            Mage,
+            IN_SIGHT + Vec3::new(-10.0, 0.0, 0.0),
+            Some(mage),
+        );
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("MarkOfTheWild", me),
+            "the Mark leads"
+        );
+
+        let (mut s, kill) = kill_scene(1.0, threshold);
+        mark_everyone(&mut s);
+        s.prep = Some(under_the_reserve);
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            None,
+            "no step 7 heal at the threshold"
+        );
+
+        let (mut s, kill) = kill_scene(1.0, threshold - 0.01);
+        let mage = s.units[2];
+        mark_everyone(&mut s);
+        s.prep = Some(under_the_reserve);
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Rejuvenation", mage),
+            "just below it"
+        );
+    }
+
+    /// A melee closing on a dying teammate is rooted — a PEEL, ahead of any
+    /// Lifebloom stack and never held for the medic walk. The Mage carries the
+    /// Druid's Rejuvenation; an enemy Warrior targets it from 12yd, closing,
+    /// not yet attacking.
+    #[test]
+    fn a_melee_closing_on_a_dying_teammate_is_rooted() {
+        let closing = || {
+            let (mut s, kill) = kill_scene(0.4, 0.47);
+            let (me, mage) = (s.units[0], s.units[2]);
+            mark_everyone(&mut s);
+            s.auras.entry(mage).or_default().extend(rejuvenation(me));
+            let enemy = add_enemy(
+                &mut s,
+                Warrior,
+                IN_SIGHT + Vec3::new(0.0, 0.0, 12.0),
+                Some(mage),
+            );
+            (s, kill, enemy)
+        };
+
+        let (mut s, kill, enemy) = closing();
+        // The Warrior ally is in sight below the emergency threshold: give it
+        // its heals so step 2-3 has nothing to do.
+        let warrior = s.units[1];
+        all_heals_rolling(&mut s, warrior);
+        s.prep = Some(|c| {
+            c.ability_cooldowns.insert(AbilityType::Swiftmend, 10.0);
+        });
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("EntanglingRoots", enemy),
+            "a Warrior closing on the dying Mage"
+        );
+
+        // The medic walk to the Warrior behind the pillar holds damage and
+        // utility; the peel goes anyway.
+        let (mut s, kill, enemy) = closing();
+        let warrior = s.units[1];
+        assert_eq!(
+            outcome(&take(&mut s, &pillar(), kill, Some(warrior))),
+            chose("EntanglingRoots", enemy),
+            "the peel under the medic walk's hold"
+        );
+    }
+
+    /// The Cyclone peel comes before the Roots peel: a Warrior beating on the
+    /// dying Mage (the focus, every heal rolling) is cycloned, not rooted.
+    #[test]
+    fn the_cyclone_peel_comes_before_the_roots_peel() {
+        let (mut s, kill) = kill_scene(1.0, 0.47);
+        let mage = s.units[2];
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, mage);
+        let attacker = add_enemy(
+            &mut s,
+            Warrior,
+            IN_SIGHT + Vec3::new(1.0, 0.0, 1.0),
+            Some(mage),
+        );
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Cyclone", attacker),
+            "a Warrior attacking the dying Mage"
+        );
+    }
+
+    /// While the medic walk is live and its teammate is behind the pillar, the
+    /// Druid holds Moonfire: the global cooldown it would spend is the one in
+    /// which sight comes back. Once the teammate is in reach it is healed.
+    #[test]
+    fn the_medic_walk_holds_damage_until_its_teammate_is_reached() {
+        let (mut s, kill) = kill_scene(0.4, 1.0);
+        let warrior = s.units[1];
+        mark_everyone(&mut s);
+
+        let trace = take(&mut s, &pillar(), kill, Some(warrior));
+        assert_eq!(outcome(&trace), None, "the Warrior is behind the pillar");
+        let note = &candidate(&trace, "Moonfire")["reason"]["PreconditionUnmet"]["note"];
+        assert!(
+            note.as_str().is_some_and(|n| n.contains("medic walk")),
+            "Moonfire is held for the walk: {note}"
+        );
+
+        // Sight back: the dying Warrior gets the heal.
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, Some(warrior))),
+            chose("Rejuvenation", warrior),
+            "the Warrior in reach"
+        );
+
+        // The hold is the walk's: with no walk live, the Druid with nothing it
+        // can heal Moonfires as before.
+        assert_eq!(
+            outcome(&take(&mut s, &pillar(), kill, None)),
+            chose("Moonfire", kill),
+            "no medic walk"
+        );
+    }
+
+    /// The hold lets go once the walk's teammate is in reach: with every heal
+    /// already rolling on it there is nothing to add, and Moonfire goes out
+    /// while the walk is still live.
+    #[test]
+    fn the_hold_releases_once_the_walks_teammate_is_in_reach() {
+        let (mut s, kill) = kill_scene(1.0, 0.47);
+        let mage = s.units[2];
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, mage);
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, Some(mage))),
+            chose("Moonfire", kill),
+            "the walk's Mage in sight with every heal rolling"
+        );
+    }
+
+    /// The Cyclone peel is never held: the walk to the dying Warrior behind
+    /// the pillar holds damage and utility, and a Rogue beating on the focus
+    /// (the Mage, below `DRUID_URGENT_HP`, every heal rolling) is cycloned.
+    #[test]
+    fn the_cyclone_peel_goes_out_under_the_hold() {
+        let (mut s, kill) = kill_scene(0.4, 0.55);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, mage);
+        let attacker = add_enemy(
+            &mut s,
+            Rogue,
+            IN_SIGHT + Vec3::new(1.0, 0.0, 1.0),
+            Some(mage),
+        );
+        assert_eq!(
+            outcome(&take(&mut s, &pillar(), kill, Some(warrior))),
+            chose("Cyclone", attacker),
+            "the peel for the focus under the medic walk's hold"
+        );
+    }
+
+    /// Mark of the Wild leads the rotation, but not over a dying teammate's
+    /// heal, and not while the medic walk has not reached its teammate.
+    #[test]
+    fn mark_of_the_wild_waits_behind_a_dying_teammate() {
+        let (mut s, kill) = kill_scene(1.0, 0.47);
+        let mage = s.units[2];
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Rejuvenation", mage),
+            "the dying Mage's heal before the Mark"
+        );
+
+        let (mut s, kill) = kill_scene(1.0, 1.0);
+        let me = s.units[0];
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("MarkOfTheWild", me),
+            "nobody dying: the Mark leads"
+        );
+
+        let (mut s, kill) = kill_scene(0.4, 1.0);
+        let warrior = s.units[1];
+        let trace = take(&mut s, &pillar(), kill, Some(warrior));
+        assert_eq!(
+            outcome(&trace),
+            None,
+            "the walk has not reached the Warrior"
+        );
+        let note = &candidate(&trace, "MarkOfTheWild")["reason"]["PreconditionUnmet"]["note"];
+        assert!(
+            note.as_str().is_some_and(|n| n.contains("medic walk")),
+            "the Mark is held for the walk: {note}"
+        );
+    }
+
+    /// The Roots peel picks reach-first: the lowest dying teammate's only
+    /// melee is beyond Roots' range, so it yields to the next dying teammate's
+    /// melee, which Roots can land on. (Swiftmend and Cyclone on cooldown, the
+    /// Druid under the governor's reserve and every heal rolling, so the peel
+    /// is the only cast left.)
+    #[test]
+    fn the_roots_peel_passes_over_an_attacker_beyond_range() {
+        let (mut s, kill) = kill_scene(0.40, 0.48);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        s.roster.get_mut(&warrior).unwrap().position = Vec3::new(0.0, 1.0, -38.0);
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, warrior);
+        all_heals_rolling(&mut s, mage);
+        add_enemy(&mut s, Warrior, Vec3::new(0.0, 1.0, -45.0), Some(warrior));
+        let near = add_enemy(
+            &mut s,
+            Rogue,
+            IN_SIGHT + Vec3::new(1.0, 0.0, 1.0),
+            Some(mage),
+        );
+        s.prep = Some(|c| {
+            under_the_reserve(c);
+            c.ability_cooldowns.insert(AbilityType::Swiftmend, 10.0);
+            c.ability_cooldowns.insert(AbilityType::Cyclone, 10.0);
+        });
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("EntanglingRoots", near)
+        );
+    }
+
+    /// Step 8's Roots passes over an attacker immune to damage: a Rogue on
+    /// the Druid under a damage immunity yields to the Warrior on the focus.
+    /// With no other attacker, the immune one is reported.
+    #[test]
+    fn step_eight_roots_passes_over_an_immune_attacker() {
+        let immune = || {
+            vec![Aura {
+                effect_type: AuraType::DamageImmunity,
+                ..Default::default()
+            }]
+        };
+        let (mut s, kill) = kill_scene(1.0, 0.7);
+        let (me, mage) = (s.units[0], s.units[2]);
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, mage);
+        let rogue = add_enemy(&mut s, Rogue, Vec3::new(3.0, 1.0, 0.0), Some(me));
+        s.auras.insert(rogue, immune());
+        let warrior = add_enemy(
+            &mut s,
+            Warrior,
+            IN_SIGHT + Vec3::new(1.0, 0.0, 1.0),
+            Some(mage),
+        );
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("EntanglingRoots", warrior),
+            "the Warrior on the focus, past the immune Rogue on the Druid"
+        );
+
+        let (mut s, kill) = kill_scene(1.0, 1.0);
+        let me = s.units[0];
+        mark_everyone(&mut s);
+        // The Rogue makes the Druid the focus: its heals are rolling.
+        all_heals_rolling(&mut s, me);
+        let rogue = add_enemy(&mut s, Rogue, Vec3::new(3.0, 1.0, 0.0), Some(me));
+        s.auras.insert(rogue, immune());
+        let trace = take(&mut s, &[], kill, None);
+        assert_eq!(
+            candidate(&trace, "EntanglingRoots")["reason"],
+            "TargetImmune",
+            "only the immune Rogue"
+        );
+    }
+
+    /// The Cyclone peel waits for the focus to drop below `DRUID_URGENT_HP`:
+    /// above it, the Rogue attacking the focus is rooted, not cycloned.
+    #[test]
+    fn the_cyclone_peel_waits_for_the_urgent_threshold() {
+        let cast_on_the_attacker = |mage_hp: f32| {
+            let (mut s, kill) = kill_scene(1.0, mage_hp);
+            let mage = s.units[2];
+            mark_everyone(&mut s);
+            all_heals_rolling(&mut s, mage);
+            let rogue = add_enemy(
+                &mut s,
+                Rogue,
+                IN_SIGHT + Vec3::new(1.0, 0.0, 1.0),
+                Some(mage),
+            );
+            (outcome(&take(&mut s, &[], kill, None)), rogue)
+        };
+        let (above, rogue) = cast_on_the_attacker(DRUID_URGENT_HP + 0.05);
+        assert_eq!(
+            above,
+            chose("EntanglingRoots", rogue),
+            "the focus above the threshold"
+        );
+        let (below, rogue) = cast_on_the_attacker(DRUID_URGENT_HP - 0.05);
+        assert_eq!(below, chose("Cyclone", rogue), "the focus below it");
+    }
+
+    /// A Druid out of mana for Roots is refused it once a frame: the peel
+    /// leaves the refusal to step 8.
+    #[test]
+    fn a_druid_out_of_mana_traces_one_roots_refusal() {
+        let (mut s, kill) = kill_scene(1.0, 0.47);
+        let mage = s.units[2];
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, mage);
+        add_enemy(
+            &mut s,
+            Warrior,
+            IN_SIGHT + Vec3::new(0.0, 0.0, 12.0),
+            Some(mage),
+        );
+        s.prep = Some(|c| c.current_mana = 0.0);
+        let trace = take(&mut s, &[], kill, None);
+        let event = serde_json::to_value(&trace.pending_events[0]).unwrap();
+        let roots: Vec<_> = event["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["ability"] == "EntanglingRoots")
+            .collect();
+        assert_eq!(roots.len(), 1, "{event}");
+        assert!(
+            roots[0]["reason"].get("InsufficientMana").is_some(),
+            "{event}"
+        );
+    }
+
+    /// The Roots peel picks in sight: the lowest dying teammate's only melee
+    /// is in range but behind the pillar, so it yields to the next dying
+    /// teammate's melee in sight. (Swiftmend and Cyclone on cooldown, the
+    /// Druid under the governor's reserve and every heal rolling, so the peel
+    /// is the only cast left.)
+    #[test]
+    fn the_roots_peel_passes_over_an_attacker_out_of_sight() {
+        let (mut s, kill) = kill_scene(0.40, 0.48);
+        let (warrior, mage) = (s.units[1], s.units[2]);
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, warrior);
+        all_heals_rolling(&mut s, mage);
+        add_enemy(
+            &mut s,
+            Warrior,
+            BEHIND + Vec3::new(1.0, 0.0, 1.0),
+            Some(warrior),
+        );
+        let near = add_enemy(
+            &mut s,
+            Rogue,
+            IN_SIGHT + Vec3::new(1.0, 0.0, 1.0),
+            Some(mage),
+        );
+        s.prep = Some(|c| {
+            under_the_reserve(c);
+            c.ability_cooldowns.insert(AbilityType::Swiftmend, 10.0);
+            c.ability_cooldowns.insert(AbilityType::Cyclone, 10.0);
+        });
+        assert_eq!(
+            outcome(&take(&mut s, &pillar(), kill, None)),
+            chose("EntanglingRoots", near)
+        );
     }
 }
