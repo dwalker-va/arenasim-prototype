@@ -54,7 +54,8 @@ use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::components::{
-    AuraType, CurseKind, HealImpact, InstantAbilityFired, SchoolImpact, TotemElement,
+    AuraLandingKind, AuraType, CurseKind, HealImpact, HealImpactKind, HotVisual,
+    InstantAbilityFired, SchoolImpact, TotemElement,
 };
 use arenasim::states::play_match::{
     bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, DotStateVisual,
@@ -662,14 +663,37 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
                 Some("shield bubble (shield_bubbles.rs)")
             }
             AuraType::HealingReduction => Some("heal-refused tell (mortal_wounds.rs)"),
-            AuraType::HealingOverTime => {
-                HealImpact::kind_for_hot_tick(t).map(|_| "per-tick heal pulse (heal_impact.rs)")
-            }
+            // A heal over time routes by its name: a per-tick pulse (Healing
+            // Stream, the tick site's `kind_for_hot_tick`), a landing swirl
+            // (Rejuvenation, `AuraLandingKind` at `apply_pending_auras`), or a
+            // sustained pulse (Lifebloom, detected off `ActiveAuras`).
+            AuraType::HealingOverTime => HotVisual::for_hot(&c.name).map(|v| match v {
+                HotVisual::TickPulse(_) => {
+                    assert_eq!(
+                        HealImpact::kind_for_hot_tick(t, &c.name),
+                        Some(HealImpactKind::TotemPulse)
+                    );
+                    "per-tick heal pulse (heal_impact.rs)"
+                }
+                HotVisual::LandingSwirl => {
+                    assert_eq!(
+                        AuraLandingKind::for_aura(t, &c.name),
+                        Some(AuraLandingKind::RejuvenationSwirl)
+                    );
+                    "Rejuvenation ribbon swirl on landing (druid_heals.rs)"
+                }
+                HotVisual::SustainedPulse => "Lifebloom head pulse while it lives (druid_heals.rs)",
+            }),
             AuraType::FearImmunity if a == BerserkerRage => {
                 Some("berserk mask (effects/berserker_rage.rs → berserk.rs)")
             }
             AuraType::TravelForm => {
                 Some("pill on all fours + shift puff (TravelFormVisual → shapeshift.rs)")
+            }
+            _ if AuraLandingKind::for_aura(t, &c.name)
+                == Some(AuraLandingKind::MarkOfTheWildGlyph) =>
+            {
+                Some("Mark of the Wild glyph on landing (druid_heals.rs)")
             }
             _ => family_application_cue(t),
         };
@@ -695,7 +719,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (AirTotem, "AS-134 (aura application — totem pulse)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
-    (MarkOfTheWild, "AS-160 (Druid visuals)"),
 ];
 
 #[test]

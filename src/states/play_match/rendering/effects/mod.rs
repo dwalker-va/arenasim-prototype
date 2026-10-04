@@ -100,3 +100,5 @@ mod web_missile;
 pub use web_missile::*;
 mod moonfire;
 pub use moonfire::*;
+mod druid_heals;
+pub use druid_heals::*;

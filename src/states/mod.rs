@@ -860,6 +860,23 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // The Druid's heal-over-time and Mark of the Wild visuals
+        // (`druid_heals.rs`): spawn (consumes the sim's landing and bloom
+        // markers, detects Lifebloom pulses) -> animate rigs (emit, ribbons,
+        // plates, retire) -> particles -> billboard -> cleanup.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_druid_effects,
+                play_match::animate_druid_effects,
+                play_match::animate_druid_particles,
+                play_match::billboard_druid_particles,
+                play_match::cleanup_druid_effects,
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Dispel burst visual effects (separate group to avoid tuple size limits)
         // Still used by Concussive Shot impact and Master's Call — NOT the dispel.
         .add_systems(
