@@ -2432,6 +2432,79 @@ mod held_weapon_tests {
         );
     }
 
+    /// Whether `e` renders: nothing on its path to the root is `Hidden`.
+    fn shown(world: &World, mut e: Entity) -> bool {
+        loop {
+            if world.get::<Visibility>(e) == Some(&Visibility::Hidden) {
+                return false;
+            }
+            match world.get::<ChildOf>(e) {
+                Some(parent) => e = parent.parent(),
+                None => return true,
+            }
+        }
+    }
+
+    /// The staff a REAL spawn hands a Druid is put away in Travel Form and
+    /// comes back when it shifts out, through the production systems. The
+    /// built staff has no `SceneRoot` to bring a `Visibility` with it, so this
+    /// is what proves the socket carries one: without it `animate_weapon_swings`
+    /// (which hides the socket, and aims and swings it) never matches the
+    /// socket, and the staff stays in the paws of the travel form.
+    #[test]
+    fn a_spawned_druid_puts_its_staff_away_while_shifted() {
+        let (mut app, unit) = spawn_unit(C::Druid, &default_loadout(C::Druid));
+        app.add_systems(
+            Update,
+            (
+                update_travel_form_visuals,
+                dress_travel_form,
+                animate_weapon_swings,
+            )
+                .chain(),
+        );
+        let world = app.world_mut();
+        let mut parts = world.query::<(Entity, &ChildOf, &Mesh3d)>();
+        let mut sockets = world.query::<(Entity, &WeaponSocket)>();
+        let socket = sockets
+            .iter(world)
+            .find(|(_, socket)| socket.owner == unit)
+            .map(|(e, _)| e)
+            .expect("the Druid holds a weapon");
+        let staff: Vec<Entity> = parts
+            .iter(world)
+            .filter(|(_, parent, _)| parent.parent() == socket)
+            .map(|(e, ..)| e)
+            .collect();
+        assert_eq!(staff.len(), 3, "haft, collar and knob");
+        let staff_shown = |app: &App| staff.iter().all(|&p| shown(app.world(), p));
+        let staff_hidden = |app: &App| staff.iter().all(|&p| !shown(app.world(), p));
+
+        app.update();
+        assert!(staff_shown(&app), "standing, the Druid holds its staff");
+
+        let travel_form = Aura {
+            effect_type: AuraType::TravelForm,
+            duration: 30.0,
+            magnitude: 0.0,
+            break_on_damage_threshold: -1.0,
+            ..Default::default()
+        };
+        app.world_mut().entity_mut(unit).insert(ActiveAuras {
+            auras: vec![travel_form],
+        });
+        app.update();
+        app.update();
+        assert!(staff_hidden(&app), "on all fours, no staff");
+
+        app.world_mut()
+            .entity_mut(unit)
+            .insert(ActiveAuras { auras: vec![] });
+        app.update();
+        app.update();
+        assert!(staff_shown(&app), "standing again, the staff is back");
+    }
+
     /// Names every shipped weapon-socket item that is NOT drawn with its own
     /// model, as an exact set: a new item without art must be added here on
     /// purpose, so the gap between the item set and the models stays visible.
