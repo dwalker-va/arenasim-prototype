@@ -53,9 +53,12 @@
 //! after every tick, which must match tick for tick across schedules; and a
 //! watch fails the run outright the moment a combatant changes table anywhere
 //! but inside a fixed tick, naming the component — so a new frame-clock insert
-//! is caught even on a frame where it happens not to reorder anything.
+//! is caught even on a frame where it happens not to reorder anything. The
+//! watch only sees visuals a match actually draws, so the three default
+//! matches between them field all nine classes, and the third asserts that the four classes the first two leave out each had a
+//! visual land on a combatant.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use bevy::app::RunFixedMainLoopSystem;
@@ -70,8 +73,8 @@ use bevy::time::TimeUpdateStrategy;
 use arenasim::combat::log::CombatLog;
 use arenasim::combat::CombatPlugin;
 use arenasim::states::play_match::components::{
-    ActiveAuras, CastingState, ChannelingState, Combatant, MatchCountdown, MatchResults, Pet,
-    Projectile, Trap, TrapLaunchProjectile, VictoryCelebration,
+    ActiveAuras, AuraType, CastingState, ChannelingState, Combatant, MatchCountdown, MatchResults,
+    Pet, Projectile, Trap, TrapLaunchProjectile, VictoryCelebration,
 };
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::play_match::{
@@ -201,6 +204,9 @@ struct Ticks {
     /// decided, which is when `check_match_end` builds and saves them.
     results: Option<String>,
     report: Option<String>,
+    /// Components the frame clock put on a combatant, with the class each one
+    /// is credited to (from the table watch).
+    inserted_off_tick: BTreeSet<(String, String)>,
 }
 
 struct Fnv(u64);
@@ -458,6 +464,10 @@ struct TableWatch {
     /// sim made on it — the watch saw real moves and told them apart.
     checked_off_tick: usize,
     moves_on_tick: usize,
+    /// Every component put on a combatant off the tick, with the class whose
+    /// kit it shows (see `credited_class`) — what the frame clock exercised,
+    /// whatever its storage.
+    inserted_off_tick: BTreeSet<(String, String)>,
 }
 
 /// Compare every combatant's table with where it was last seen, and record it.
@@ -484,6 +494,7 @@ fn watch_tables(world: &mut World, phase: &'static str) {
         })
         .collect();
     let (mut moves, mut checked, mut on_tick) = (Vec::new(), 0, 0);
+    let mut inserted = Vec::new();
     let watch = world.resource::<TableWatch>();
     for (e, &(table, archetype)) in &now {
         let Some(&(was_table, was_archetype)) = watch.seen.get(e) else {
@@ -494,6 +505,14 @@ fn watch_tables(world: &mut World, phase: &'static str) {
             continue;
         }
         checked += 1;
+        if archetype != was_archetype {
+            let (added, _) = component_change(world, was_archetype, archetype, None);
+            for component in added.iter().map(|c| short_name(c)) {
+                for class in credited_class(world, *e, &component) {
+                    inserted.push((component.clone(), class));
+                }
+            }
+        }
         if table != was_table {
             let c = world.get::<Combatant>(*e).expect("a combatant");
             moves.push(format!(
@@ -512,31 +531,85 @@ fn watch_tables(world: &mut World, phase: &'static str) {
     }
     let mut watch = world.resource_mut::<TableWatch>();
     watch.moves.extend(moves);
+    watch.inserted_off_tick.extend(inserted);
     watch.checked_off_tick += checked;
     watch.moves_on_tick += on_tick;
     watch.seen = now;
 }
 
-/// The table-stored components that differ between two archetypes, by name.
-fn table_component_change(world: &World, from: ArchetypeId, to: ArchetypeId) -> String {
+/// The components added and removed between two archetypes, by name — only
+/// those of `storage`, when given.
+fn component_change(
+    world: &World,
+    from: ArchetypeId,
+    to: ArchetypeId,
+    storage: Option<StorageType>,
+) -> (Vec<String>, Vec<String>) {
     let archetypes = world.archetypes();
     let components = world.components();
-    let table_set = |id: ArchetypeId| -> Vec<String> {
+    let set = |id: ArchetypeId| -> Vec<String> {
         archetypes[id]
             .components()
             .filter(|&c| {
-                components.get_info(c).map(|i| i.storage_type()) == Some(StorageType::Table)
+                storage.is_none() || components.get_info(c).map(|i| i.storage_type()) == storage
             })
             .map(|c| components.get_name(c).map_or("?".into(), |n| n.to_string()))
             .collect()
     };
-    let (before, after) = (table_set(from), table_set(to));
-    let added: Vec<&String> = after.iter().filter(|c| !before.contains(c)).collect();
-    let removed: Vec<&String> = before.iter().filter(|c| !after.contains(c)).collect();
+    let (before, after) = (set(from), set(to));
+    let added = after
+        .iter()
+        .filter(|c| !before.contains(c))
+        .cloned()
+        .collect();
+    let removed = before
+        .iter()
+        .filter(|c| !after.contains(c))
+        .cloned()
+        .collect();
+    (added, removed)
+}
+
+/// The table-stored components that differ between two archetypes, by name.
+fn table_component_change(world: &World, from: ArchetypeId, to: ArchetypeId) -> String {
+    let (added, removed) = component_change(world, from, to, Some(StorageType::Table));
     format!(
         "added {added:?}, removed {removed:?} — give a graphical-only component \
          `#[component(storage = \"SparseSet\")]`"
     )
+}
+
+/// The class whose kit a visual component just put on `bearer` shows: the
+/// caster of the bearer's aura that component draws, or the bearer itself for
+/// its own heal cast. `"-"` for a component no one class owns (a flinch, a
+/// death fall).
+fn credited_class(world: &World, bearer: Entity, component: &str) -> Vec<String> {
+    let class_of = |e: Entity| world.get::<Combatant>(e).map(|c| format!("{:?}", c.class));
+    let drawn = match component {
+        "StunnedVisual" => AuraType::Stun,
+        "RootedVisual" => AuraType::Root,
+        "SlowTrailEmitter" => AuraType::MovementSpeedSlow,
+        "FearedVisual" => AuraType::Fear,
+        "PolymorphedVisual" => AuraType::Polymorph,
+        "HealCastPosture" => return class_of(bearer).into_iter().collect(),
+        _ => return vec!["-".into()],
+    };
+    let casters: BTreeSet<String> = world
+        .get::<ActiveAuras>(bearer)
+        .map(|a| {
+            a.auras
+                .iter()
+                .filter(|a| a.effect_type == drawn)
+                .filter_map(|a| a.caster.and_then(class_of))
+                .collect()
+        })
+        .unwrap_or_default();
+    casters.into_iter().collect()
+}
+
+/// `a::b::HitFlinch` -> `HitFlinch`.
+fn short_name(path: &str) -> String {
+    path.rsplit("::").next().unwrap_or(path).to_string()
 }
 
 /// Run `cfg` to the Results screen under one frame schedule.
@@ -575,7 +648,9 @@ fn run(cfg: &str, frames: impl Iterator<Item = Frame>) -> Ticks {
         moves.len(),
         moves[..moves.len().min(8)].join("\n")
     );
-    std::mem::take(&mut *app.world_mut().resource_mut::<Ticks>())
+    let mut ticks = std::mem::take(&mut *app.world_mut().resource_mut::<Ticks>());
+    ticks.inserted_off_tick = watch.inserted_off_tick;
+    ticks
 }
 
 /// Every tick both runs saw is identical, and any tick one ran past the
@@ -757,6 +832,46 @@ fn results_and_report_do_not_depend_on_the_display_rate() {
     assert_frame_rate_independent(QUERY_ORDER_SENSITIVE, schedules);
 }
 
+/// A match that exercises the frame-clock visuals of the four classes the
+/// other two matches do not field, so the table watch sees them land on
+/// combatants: the Rogue's stun and Crippling Poison slow, the Druid's
+/// Entangling Roots, the Shaman's Frost Shock slow and the Paladin's heal-cast
+/// posture.
+const KIT_COVERAGE: &str = r#"{"team1":["Druid","Paladin"],"team2":["Rogue","Shaman"],"map":"BasicArena","random_seed":0}"#;
+
+#[test]
+fn rogue_druid_shaman_and_paladin_visuals_stay_off_the_tables() {
+    let schedules = vec![
+        (
+            "16667us frames".to_string(),
+            run(KIT_COVERAGE, fixed_rate(16_667)),
+        ),
+        (
+            "40000us frames".to_string(),
+            run(KIT_COVERAGE, fixed_rate(40_000)),
+        ),
+    ];
+    // Non-vacuity: under every schedule, the frame clock put a visual
+    // component on a combatant for each of the four classes — credited to the
+    // class by the aura it draws, or by its own heal cast (`credited_class`).
+    for (label, ticks) in &schedules {
+        let credited: BTreeSet<&str> = ticks
+            .inserted_off_tick
+            .iter()
+            .map(|(_, class)| class.as_str())
+            .collect();
+        for class in ["Rogue", "Druid", "Shaman", "Paladin"] {
+            assert!(
+                credited.contains(class),
+                "{KIT_COVERAGE}: under {label} no frame-clock visual was credited to the \
+                 {class}, so the watch never saw its kit land: {:?}",
+                ticks.inserted_off_tick
+            );
+        }
+    }
+    assert_frame_rate_independent(KIT_COVERAGE, schedules);
+}
+
 /// The wider sweep: more matchups, maps and seeds, and the frame schedules a
 /// player can actually produce — 25Hz, and irregular frames under pause,
 /// fast-forward and slow-motion. Minutes of simulation, so opt-in:
@@ -764,7 +879,7 @@ fn results_and_report_do_not_depend_on_the_display_rate() {
 #[test]
 #[ignore]
 fn sweep_matchups_and_schedules() {
-    const MATCHES: [&str; 8] = [
+    const MATCHES: [&str; 9] = [
         FOUND_ON,
         r#"{"team1":["Warrior"],"team2":["Hunter"],"map":"BasicArena","random_seed":3}"#,
         r#"{"team1":["Rogue"],"team2":["Mage"],"map":"BasicArena","random_seed":42}"#,
@@ -773,6 +888,7 @@ fn sweep_matchups_and_schedules() {
         r#"{"team1":["Warlock","Rogue"],"team2":["Hunter","Paladin"],"map":"PillaredArena","random_seed":3}"#,
         r#"{"team1":["Rogue","Shaman"],"team2":["Warlock","Priest"],"map":"PillaredArena","random_seed":13}"#,
         r#"{"team1":["Warrior","Priest","Mage"],"team2":["Hunter","Warlock","Shaman"],"map":"TwinPillars","random_seed":21}"#,
+        KIT_COVERAGE,
     ];
     for cfg in MATCHES {
         let mut schedules = displays(cfg);
