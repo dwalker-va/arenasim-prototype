@@ -767,6 +767,135 @@ mod tests {
         }
     }
 
+    /// Classes owning an ability, by display name (a pet ability's class is its
+    /// owner's, as `abilities.ron` records it).
+    fn ability_classes_by_name() -> std::collections::HashMap<String, Vec<CharacterClass>> {
+        use crate::states::play_match::ability_config::load_ability_definitions;
+
+        let definitions =
+            load_ability_definitions().expect("assets/config/abilities.ron must load");
+        let mut by_name: std::collections::HashMap<String, Vec<CharacterClass>> =
+            std::collections::HashMap::new();
+        for (_, config) in definitions.iter() {
+            by_name
+                .entry(config.name.clone())
+                .or_default()
+                .push(config.class);
+        }
+        by_name
+    }
+
+    /// The ability-icon ownership rule (banter.ron header, "ABILITY ICONS NAME
+    /// A CLASS THAT IS IN THE MATCH"): every `{ability:X}` must belong to a
+    /// class the ENTRY ITSELF guarantees is present — one of its bound speaker
+    /// classes, or its target class.
+    ///
+    /// This is what makes speaker gating structural rather than a convention:
+    /// a Shaman's Purge can only appear in an entry that binds a Shaman
+    /// speaker (or targets one), so the resolver's class binding — not the
+    /// author's care — keeps it out of every other speaker's mouth.
+    #[test]
+    fn shipped_banter_ability_icons_name_a_class_the_entry_binds() {
+        use crate::states::play_match::banter::vocab;
+
+        let config = load_banter_config().expect("assets/config/banter.ron must load");
+        let owners = ability_classes_by_name();
+
+        for (index, exchange) in config.exchanges.iter().enumerate() {
+            let mut present: Vec<CharacterClass> = exchange
+                .speakers
+                .iter()
+                .filter_map(|s| match s.class {
+                    ClassConstraint::Class(class) => Some(class),
+                    ClassConstraint::Any => None,
+                })
+                .collect();
+            if let ClassConstraint::Class(target) = exchange.target {
+                present.push(target);
+            }
+
+            for (i, beat) in exchange.beats.iter().enumerate() {
+                for span in vocab::parse(&beat.text) {
+                    let vocab::Span::Ability(name) = span else {
+                        continue;
+                    };
+                    let classes = owners.get(&name).cloned().unwrap_or_default();
+                    assert!(
+                        classes.iter().any(|c| present.contains(c)),
+                        "exchanges[{}] ({:?}) beat {} shows {{ability:{}}} (owned by {:?}), but \
+                         the entry only guarantees {:?} are in the match — bind the owning class \
+                         as a speaker or the target, or say it with an emoji verb",
+                        index,
+                        exchange.context,
+                        i,
+                        name,
+                        classes,
+                        present
+                    );
+                }
+            }
+        }
+    }
+
+    /// `{ability:X} {emoji:no}` reads "stop X" — so X must be something that
+    /// CAN be stopped: a cast with a cast bar, or a channel. An instant (a
+    /// HoT, Purge, Divine Shield) is over before anyone could act on the call.
+    ///
+    /// "Adjacent" ignores whitespace only, so `{emoji:no} ! {ability:Fear}`
+    /// (two thoughts) is not read as a stop call.
+    #[test]
+    fn shipped_banter_never_asks_to_stop_an_instant() {
+        use crate::states::play_match::ability_config::load_ability_definitions;
+        use crate::states::play_match::banter::vocab;
+
+        let config = load_banter_config().expect("assets/config/banter.ron must load");
+        let definitions =
+            load_ability_definitions().expect("assets/config/abilities.ron must load");
+        let stoppable = |name: &str| {
+            definitions
+                .iter()
+                .filter(|(_, c)| c.name == name)
+                .any(|(_, c)| c.has_cast_bar() || c.is_channel())
+        };
+        let is_no = |span: Option<&vocab::Span>| matches!(span, Some(vocab::Span::Emoji(e)) if e == "no");
+
+        let mut stopped: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for (index, exchange) in config.exchanges.iter().enumerate() {
+            for (i, beat) in exchange.beats.iter().enumerate() {
+                let spans: Vec<vocab::Span> = vocab::parse(&beat.text)
+                    .into_iter()
+                    .filter(|s| !matches!(s, vocab::Span::Text(t) if t.trim().is_empty()))
+                    .collect();
+                for (k, span) in spans.iter().enumerate() {
+                    let vocab::Span::Ability(name) = span else {
+                        continue;
+                    };
+                    let prev = k.checked_sub(1).and_then(|p| spans.get(p));
+                    if !(is_no(prev) || is_no(spans.get(k + 1))) {
+                        continue;
+                    }
+                    stopped.insert(name.clone());
+                    assert!(
+                        stoppable(name),
+                        "exchanges[{}] ({:?}) beat {} asks to stop {{ability:{}}}, which has no \
+                         cast bar and is not a channel — an instant cannot be stopped",
+                        index,
+                        exchange.context,
+                        i,
+                        name
+                    );
+                }
+            }
+        }
+        // Non-vacuity: the anti-Druid call is a stop call, so a parse that
+        // stopped seeing them would fail here rather than pass on nothing.
+        assert!(
+            stopped.contains("Cyclone"),
+            "expected the anti-Druid opener's Cyclone among the stop calls, found {:?}",
+            stopped
+        );
+    }
+
     /// Missing file → loader error with a clear message. The plugin panics
     /// with this exact string, so testing the loader covers the panic path
     /// without aborting the test binary.

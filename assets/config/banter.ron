@@ -281,12 +281,14 @@
                 (role: "responder", text: "{emoji:skull} {emoji:arrow} {target} {emoji:equals} {emoji:headstone} !"),
             ],
         ),
+        // The Druid's heals are all instant — nothing there to stop — so the
+        // call is its one cast worth an interrupt: the Cyclone.
         (
             context: Opening,
             speakers: [ (role: "caller", class: Any), (role: "responder", class: Any) ],
             target: Class(Druid),
             beats: [
-                (role: "caller",    text: "{target} {ability:Rejuvenation} {emoji:no}"),
+                (role: "caller",    text: "{target} {ability:Cyclone} {emoji:no}"),
                 (role: "responder", text: "{emoji:skull} {emoji:arrow} {target} {emoji:equals} {emoji:headstone} !"),
             ],
         ),
@@ -652,6 +654,17 @@
                 (role: "responder", text: "{target} {ability:Wind Shear} ?"),
                 (role: "caller",    text: "… {emoji:angry} {emoji:angry} {emoji:angry}"),
                 (role: "responder", text: "{emoji:skull} {emoji:arrow} {target} {emoji:equals} {emoji:headstone} !"),
+            ],
+        ),
+        // The disruptor's answer to a Druid: an instant HoT cannot be stopped,
+        // but it can be taken. Innervate first — the AI's urgent purge.
+        (
+            context: Opening,
+            speakers: [ (role: "caller", class: Class(Shaman)), (role: "responder", class: Any) ],
+            target: Class(Druid),
+            beats: [
+                (role: "caller",    text: "{ability:Purge} {emoji:arrow} {target} {ability:Innervate} , {ability:Rejuvenation} !"),
+                (role: "responder", text: "{emoji:yes}"),
             ],
         ),
         // Ban the bubble ("sure thing, monkey").
