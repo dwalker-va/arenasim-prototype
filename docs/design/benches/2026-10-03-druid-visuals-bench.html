@@ -1,0 +1,695 @@
+<title>Druid Visuals Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#121614; --panel:#1a201d; --panel2:#222a26; --line:#2f3934;
+  --text:#e4e9e2; --muted:#8e9a92; --accent:#ff7d0a; --accent2:#7fc46a; --warn:#e8b04a;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --sans:"IBM Plex Sans", system-ui, -apple-system, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+body{padding-inline:16px;padding-block:16px 32px}
+h1{font-size:18px;font-weight:600;margin:0;letter-spacing:.01em}
+.sub{color:var(--muted);font-size:12.5px;margin-top:2px;max-width:70ch}
+header{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:end;justify-content:space-between;margin-bottom:12px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tab{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+.tab[aria-selected="true"]{border-color:var(--accent);color:var(--accent);background:var(--panel2)}
+.tab:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:12px}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+.stage{background:#0c0f0d;border:1px solid var(--line);border-radius:8px;position:relative;overflow:hidden}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;max-width:100%;cursor:grab}
+.hud{position:absolute;left:10px;top:8px;font-family:var(--mono);font-size:11.5px;color:var(--muted);pointer-events:none}
+.transport{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;border-top:1px solid var(--line);background:var(--panel)}
+button.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+button.btn.primary{border-color:var(--accent);color:var(--accent)}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
+.card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:600}
+.layer{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line)}
+.layer:first-of-type{border-top:0}
+.layer label{flex:1;cursor:pointer}
+.layer .nm{font-weight:500}
+.layer .ds{display:block;color:var(--muted);font-size:12px;line-height:1.35}
+.sw{width:10px;height:10px;border-radius:2px;margin-top:5px;flex:none}
+.knob{display:grid;grid-template-columns:110px minmax(0,1fr) 46px;gap:8px;align-items:center;padding:3px 0}
+.knob span{font-size:12.5px;color:var(--muted)}
+.knob output{font-family:var(--mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.notes{color:var(--muted);font-size:12.5px;line-height:1.5;margin:0;padding-left:16px}
+.notes li{margin:2px 0}
+.notes b{color:var(--text);font-weight:500}
+.inferred{color:var(--warn)}
+pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:#0c0f0d;border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;margin:0;color:#cfe3c8}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+@media (prefers-reduced-motion: reduce){ .tab{transition:none} }
+</style>
+
+<header>
+  <div>
+    <h1>Druid Visuals Bench <span style="color:var(--muted);font-weight:400">· AS-160</span></h1>
+    <div class="sub">Classic Era 1.15.9 client values, parsed from each model's M2 file. Every slider starts at the client's value (×1.0). Playback starts at real time. Untick the layers you don't want, then copy the constants block.</div>
+  </div>
+  <div class="legend"><span>drag = orbit</span><span>wheel = zoom</span><span>body: capsule ±1.25 about y=1.0</span></div>
+</header>
+
+<nav class="tabs" role="tablist" id="tabs"></nav>
+
+<div class="grid">
+  <div>
+    <div class="stage">
+      <canvas id="cv" width="1280" height="800" aria-label="Effect preview"></canvas>
+      <div class="hud" id="hud"></div>
+      <div class="transport">
+        <button class="btn primary" id="replay">Replay</button>
+        <button class="btn" id="pause">Pause</button>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="loop" checked> loop</label>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px">speed
+          <select id="speed" style="background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:4px;font:inherit">
+            <option value="1" selected>1.0× (real)</option><option value="0.5">0.5×</option><option value="0.25">0.25×</option>
+          </select></label>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="moving"> victim moving</label>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="row"><h2 style="margin:0">Rust constants — current effect</h2><button class="btn" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+  <div class="side">
+    <div class="card"><h2>Layers</h2><div id="layers"></div></div>
+    <div class="card"><h2>Multipliers over client</h2><div id="knobs"></div></div>
+    <div class="card"><h2>What the client data says</h2><ul class="notes" id="notes"></ul></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---------- small math ----------
+const TAU=Math.PI*2, rnd=Math.random;
+const lerp=(a,b,t)=>a+(b-a)*t, clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function keys(k,t){ // k: [[t,v],...] t in 0..1 (or ms), v number or array
+  if(t<=k[0][0]) return k[0][1];
+  for(let i=1;i<k.length;i++){ if(t<=k[i][0]){const a=k[i-1],b=k[i],u=(t-a[0])/(b[0]-a[0]||1);
+    return Array.isArray(a[1])?a[1].map((x,j)=>lerp(x,b[1][j],u)):lerp(a[1],b[1],u);} }
+  return k[k.length-1][1];
+}
+function windowOn(win,ms){ if(!win) return true; let on=win[0][1]; for(const [t,v] of win){ if(ms>=t) on=v; } return !!on; }
+const rgb=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+
+// ---------- camera ----------
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const cam={yaw:0.65,pitch:0.42,dist:12,target:[0,1.2,0]};
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'});
+cv.addEventListener('pointermove',e=>{if(!drag)return;cam.yaw-= (e.clientX-drag[0])*0.008;cam.pitch=clamp(cam.pitch+(e.clientY-drag[1])*0.006,0.05,1.35);drag=[e.clientX,e.clientY]});
+cv.addEventListener('pointerup',()=>{drag=null;cv.style.cursor='grab'});
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.dist=clamp(cam.dist*(1+e.deltaY*0.001),3,60)},{passive:false});
+let VIEW;
+function setupView(){
+  const cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
+  const eye=[cam.target[0]+cam.dist*cp*Math.sin(cam.yaw),cam.target[1]+cam.dist*sp,cam.target[2]+cam.dist*cp*Math.cos(cam.yaw)];
+  const f=norm(sub(cam.target,eye)), r=norm(cross(f,[0,1,0])), u=cross(r,f);
+  VIEW={eye,f,r,u,fl:cv.height*1.25};
+}
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const norm=a=>{const l=Math.hypot(...a)||1;return[a[0]/l,a[1]/l,a[2]/l]};
+function proj(p){const d=sub(p,VIEW.eye),z=dot(d,VIEW.f); if(z<0.1) return null;
+  const s=VIEW.fl/z; return {x:cv.width/2+dot(d,VIEW.r)*s,y:cv.height/2-dot(d,VIEW.u)*s,s,z};}
+
+// ---------- scene primitives ----------
+const FLOOR=[0.79*255,0.66*255,0.46*255];
+function drawFloor(){
+  // ground disc of radius 9 as filled polygon, shaded slightly with distance
+  const pts=[];for(let i=0;i<48;i++){const a=i/48*TAU;const q=proj([9*Math.cos(a),0,9*Math.sin(a)]);if(q)pts.push(q)}
+  g.fillStyle=rgb(FLOOR.map(c=>c*0.82),1);g.beginPath();pts.forEach((q,i)=>i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y));g.closePath();g.fill();
+  g.strokeStyle='rgba(0,0,0,0.08)';g.lineWidth=1;
+  for(let i=-8;i<=8;i+=2){line3([i,0,-8],[i,0,8]);line3([-8,0,i],[8,0,i]);}
+}
+function line3(a,b){const p=proj(a),q=proj(b);if(!p||!q)return;g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();}
+function drawCapsule(c,col,alpha=1){ // capsule r=0.5 half-height 0.75 centred on c (Bevy Capsule3d(0.5,1.5))
+  const top=proj([c[0],c[1]+0.75,c[2]]),bot=proj([c[0],c[1]-0.75,c[2]]);if(!top||!bot)return;
+  const w=0.5*top.s;
+  g.globalAlpha=alpha;
+  const gr=g.createLinearGradient(top.x-w,0,top.x+w,0);
+  gr.addColorStop(0,rgb(col.map(x=>x*0.55),1));gr.addColorStop(0.45,rgb(col,1));gr.addColorStop(1,rgb(col.map(x=>x*0.45),1));
+  g.fillStyle=gr;g.beginPath();
+  g.arc(top.x,top.y,w,Math.PI,0);g.lineTo(bot.x+w,bot.y);g.arc(bot.x,bot.y,w,0,Math.PI);g.closePath();g.fill();
+  g.globalAlpha=1;
+}
+function shadow(c,r=0.55){const p=proj([c[0],0.01,c[2]]);if(!p)return;g.fillStyle='rgba(0,0,0,0.22)';g.beginPath();g.ellipse(p.x,p.y,r*p.s,r*p.s*Math.max(0.15,Math.sin(cam.pitch)),0,0,TAU);g.fill();}
+
+// sprite kinds — every one is a textured billboard quad with alpha from the texture (what Bevy can draw)
+function sprite(kind,p,size,col,a,ang=0,streak=null){
+  const q=proj(p);if(!q||a<=0.003)return;const r=Math.max(0.6,size*q.s*0.5);
+  g.save();g.translate(q.x,q.y);
+  if(kind==='glow'||kind==='cloud'||kind==='smoke'||kind==='dust'){
+    const gr=g.createRadialGradient(0,0,0,0,0,r);
+    const soft=kind==='glow'?[1,0.45,0]:kind==='cloud'?[0.9,0.6,0]:[0.85,0.5,0];
+    gr.addColorStop(0,rgb(col,a*soft[0]));gr.addColorStop(0.45,rgb(col,a*soft[1]));gr.addColorStop(1,rgb(col,0));
+    g.fillStyle=gr;g.beginPath();g.arc(0,0,r,0,TAU);g.fill();
+  } else if(kind==='star'){
+    g.rotate(ang);g.fillStyle=rgb(col,a);
+    for(let k=0;k<2;k++){g.rotate(Math.PI/4*k*2);g.beginPath();g.ellipse(0,0,r,r*0.12,0,0,TAU);g.fill();g.beginPath();g.ellipse(0,0,r*0.12,r,0,0,TAU);g.fill();}
+    const gr=g.createRadialGradient(0,0,0,0,0,r*0.45);gr.addColorStop(0,rgb([255,255,255],a));gr.addColorStop(1,rgb(col,0));g.fillStyle=gr;g.beginPath();g.arc(0,0,r*0.45,0,TAU);g.fill();
+  } else if(kind==='ring'){
+    g.strokeStyle=rgb(col,a);g.lineWidth=Math.max(1,r*0.16);g.beginPath();g.arc(0,0,r*0.85,0,TAU);g.stroke();
+  } else if(kind==='rock'){
+    g.rotate(ang);g.fillStyle=rgb(col,a);g.fillRect(-r,-r*0.7,r*2,r*1.4);
+  }
+  g.restore();
+  if(streak){ // stretched band along velocity (cylindrical billboard)
+    const q2=proj(streak);if(!q2)return;
+    g.strokeStyle=rgb(col,a*0.85);g.lineCap='round';g.lineWidth=Math.max(1,r*0.7);
+    g.beginPath();g.moveTo(q.x,q.y);g.lineTo(q2.x,q2.y);g.stroke();
+  }
+}
+
+// ---------- particle emitter (M2-shaped) ----------
+// spec: {name, desc, col (swatch), anchor:'feet'|'chest'|'head'|'origin', pos:[x,y,z] (M2 z = up),
+//  etype 1 cone / 2 sphere, speed, vRange, hRange, life, rate:[[ms,v]] , win:[[ms,on]], loopMs,
+//  color:[[t,[r,g,b]]], alpha:[[t,a]], scale:[[t,s]], gravity, drag, tail, kind, blend:'add'|'alpha', spin}
+class Emitter{
+  constructor(s,fx){this.s=s;this.fx=fx;this.ps=[];this.acc=0;}
+  reset(){this.ps=[];this.acc=0;}
+  update(dt,ms,origin,alive){
+    const s=this.s,K=this.fx.knobs;
+    const loopMs=s.loopMs||this.fx.durMs;
+    const lm=s.loopMs?(ms%s.loopMs):ms;
+    if(alive && windowOn(s.win,lm)){
+      const rate=Array.isArray(s.rate)?keys(s.rate,lm):s.rate;
+      this.acc+=rate*dt*(K.density??1);
+      while(this.acc>=1){this.acc-=1;this.spawn(origin);}
+    }
+    const gy=-(s.gravity||0);
+    for(const p of this.ps){
+      p.age+=dt;
+      p.v[1]+=gy*dt; const dr=Math.max(0,1-(s.drag||0)*dt*3); p.v=p.v.map(x=>x*dr);
+      p.x=[p.x[0]+p.v[0]*dt,p.x[1]+p.v[1]*dt,p.x[2]+p.v[2]*dt];
+      if(s.followVictim) {p.x[0]+=origin[0]-p.o[0];p.x[2]+=origin[2]-p.o[2];p.o=[...origin];}
+      p.ang+=(s.spin||0)*TAU*dt;
+    }
+    this.ps=this.ps.filter(p=>p.age<p.life);
+  }
+  spawn(origin){
+    const s=this.s,K=this.fx.knobs,spread=K.spread??1;
+    const pol=(rnd()*2-1)*s.vRange, az=rnd()*(s.hRange||TAU);
+    let dir=[Math.sin(pol)*Math.cos(az),Math.cos(pol),Math.sin(pol)*Math.sin(az)];
+    if(s.vRange>=3.1) dir=norm([rnd()*2-1,rnd()*2-1,rnd()*2-1]);
+    const off=s.pos||[0,0,0], area=(s.area||0)*spread;
+    const start=[origin[0]+off[0]*spread+(rnd()-0.5)*area,origin[1]+(this.fx.anchorY(s.anchor))+off[2],origin[2]+off[1]*spread+(rnd()-0.5)*area];
+    const sp=s.speed*spread;
+    this.ps.push({x:start,v:dir.map(d=>d*sp),age:0,life:s.life*(K.duration??1),ang:rnd()*TAU,o:[...origin]});
+  }
+  draw(){
+    const s=this.s,K=this.fx.knobs,size=K.size??1;
+    g.globalCompositeOperation=s.blend==='alpha'?'source-over':'lighter';
+    for(const p of this.ps){
+      const t=p.age/p.life, col=keys(s.color,t), a=keys(s.alpha,t)*(K.opacity??1), sc=keys(s.scale,t)*size*2;
+      let streak=null;
+      if(s.tail){const sp=Math.hypot(...p.v);if(sp>0.2){const L=Math.min(s.tail*0.12,sp*0.06)*size;const v=norm(p.v);streak=[p.x[0]-v[0]*L,p.x[1]-v[1]*L,p.x[2]-v[2]*L];}}
+      sprite(s.kind||'glow',p.x,sc,col,a,p.ang,streak);
+    }
+    g.globalCompositeOperation='source-over';
+  }
+}
+
+// ---------- effect registry ----------
+const ANCH={feet:0.0,origin:0.0,chest:1.45,head:2.25,hands:1.35};
+function mkFx(def){
+  const fx={...def,knobs:{},layersOn:{},emitters:[]};
+  for(const k of def.knobDefs) fx.knobs[k.key]=k.def;
+  for(const L of def.layers) fx.layersOn[L.id]=L.on!==false;
+  fx.anchorY=a=>ANCH[a]??0;
+  for(const L of def.layers) if(L.emitter) fx.emitters.push({id:L.id,e:new Emitter(L.emitter,fx)});
+  return fx;
+}
+const STD=[
+  {key:'size',label:'size ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'spread',label:'spread ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'duration',label:'duration ×',min:0.3,max:2,step:0.05,def:1},
+  {key:'density',label:'density ×',min:0.1,max:2,step:0.05,def:1},
+];
+
+const EFFECTS=[
+// ---------------------------------------------------------------- Rejuvenation
+mkFx({id:'rejuv',name:'Rejuvenation',sub:'landing · rejuvenation_impact_base.m2 @Base · 3.0 s',durMs:3000,frame:{dist:9,ty:1.1},
+ rust:'REJUVENATION_LANDING',
+ notes:[
+  'Kit 56, which plays once on the ally when the HoT lands. The client has <b>no sustained state</b>, so per your ruling the ticks draw nothing.',
+  'Five <b>ribbons</b> ride bones that orbit the body about 0.75 yd off its axis, at heights 0.7–2.0. Texture crystalball, 0.28 yd wide, alpha 0.5. Each ribbon has its own green.',
+  '<span class="inferred">The orbit rate and rise are inferred from bone rotation keys (15–27 keys over 3 s) and were not solved exactly. Adjust them with the knobs.</span>',
+  'Two flare spark emitters and a faint white starburst sit at the body core. All are additive.'],
+ knobDefs:[...STD,{key:'orbitRev',label:'orbit rev/s',min:0.2,max:3,step:0.05,def:1.0},{key:'orbitR',label:'orbit radius yd',min:0.3,max:1.5,step:0.05,def:0.75},{key:'trail',label:'ribbon trail s',min:0.1,max:1,step:0.05,def:0.45}],
+ layers:[
+  {id:'ribbons',name:'Ribbons ×5',desc:'Green bands orbiting the body (crystalball).',sw:[93,196,12],custom:true},
+  {id:'flareA',name:'Flare sparks (large)',desc:'P0 flare.blp, size 0.28, 0.3 s life, 20/s',sw:[89,219,26],emitter:{anchor:'chest',pos:[0,0,-0.36],etype:2,speed:0,vRange:3.14,hRange:TAU,life:0.3,rate:20,area:0.9,
+   color:[[0,[0,84,20]],[0.5,[253,253,253]],[1,[89,219,26]]],alpha:[[0,0.39],[0.5,1],[1,0.39]],scale:[[0,0.278],[1,0.278]],kind:'star'}},
+  {id:'flareB',name:'Flare sparks (small)',desc:'P2 flare.blp, size 0.14, yellow-green',sw:[141,219,103],emitter:{anchor:'chest',pos:[0,0,-0.3],etype:2,speed:0,vRange:3.14,hRange:TAU,life:0.3,rate:20,area:0.9,
+   color:[[0,[0,84,20]],[0.5,[253,253,40]],[1,[141,219,103]]],alpha:[[0,0.39],[0.5,1],[1,0.39]],scale:[[0,0.139],[1,0.139]],kind:'star'}},
+  {id:'burst',name:'Starburst pulse',desc:'P1 starbursts (2×2), white, alpha ≤ 0.22',sw:[230,240,230],emitter:{anchor:'chest',pos:[0,0,-0.32],etype:1,speed:0,vRange:0,hRange:TAU,life:0.2,rate:28.8,
+   color:[[0,[255,255,255]],[1,[255,255,255]]],alpha:[[0,0],[0.5,0.22],[1,0]],scale:[[0,0.972],[0.5,1.389],[1,0.972]],kind:'glow'}},
+ ],
+ customDraw(fx,ms,origin,phase){ // ribbons
+  if(!fx.layersOn.ribbons) return;
+  const cols=[[0,172,49],[70,91,13],[156,228,54],[93,196,12],[24,128,0]];
+  const hs=[0.7,1.0,1.35,1.7,2.0], K=fx.knobs, dur=fx.durMs*K.duration;
+  if(ms>dur) return;
+  const fade=Math.min(1,ms/150)*Math.min(1,(dur-ms)/400);
+  g.globalCompositeOperation='lighter';g.lineCap='round';
+  for(let i=0;i<5;i++){
+    const steps=14;let prev=null;
+    for(let k=0;k<=steps;k++){
+      const tt=ms/1000-K.trail*k/steps; if(tt<0) break;
+      const a=(tt*K.orbitRev*TAU*(i%2?1:-1))+i*TAU/5, r=K.orbitR*K.spread, y=hs[i]+0.12*Math.sin(tt*3+i);
+      const p=proj([origin[0]+r*Math.cos(a),y,origin[2]+r*Math.sin(a)]); if(!p) continue;
+      if(prev){g.strokeStyle=rgb(cols[i],0.5*fade*(1-k/steps)*(K.opacity??1));g.lineWidth=Math.max(1,0.28*K.size*p.s);g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();}
+      prev=p;
+    }
+  }
+  g.globalCompositeOperation='source-over';
+ },
+ constants(fx){const K=fx.knobs;return [
+  `// Rejuvenation landing — rejuvenation_impact_base.m2 (kit 56), AS-160 bench`,
+  `pub const REJUV_LANDING_SECS: f32 = ${(3.0*K.duration).toFixed(2)};`,
+  `pub const REJUV_RIBBONS: bool = ${fx.layersOn.ribbons};`,
+  `pub const REJUV_RIBBON_ORBIT_REV_PER_SEC: f32 = ${K.orbitRev.toFixed(2)};`,
+  `pub const REJUV_RIBBON_ORBIT_RADIUS: f32 = ${(K.orbitR*K.spread).toFixed(2)};`,
+  `pub const REJUV_RIBBON_WIDTH: f32 = ${(0.278*K.size).toFixed(3)};`,
+  `pub const REJUV_RIBBON_TRAIL_SECS: f32 = ${K.trail.toFixed(2)};`,
+  `pub const REJUV_FLARE_LARGE: bool = ${fx.layersOn.flareA};`,
+  `pub const REJUV_FLARE_SMALL: bool = ${fx.layersOn.flareB};`,
+  `pub const REJUV_STARBURST: bool = ${fx.layersOn.burst};`,
+  `pub const REJUV_SIZE_MUL: f32 = ${K.size.toFixed(2)};`,
+  `pub const REJUV_DENSITY_MUL: f32 = ${K.density.toFixed(2)};`,
+  `// HoT ticks: no visual (client has no (7,8) state) — per-ability HoT route returns None.`];}
+}),
+// ---------------------------------------------------------------- Lifebloom state
+mkFx({id:'lbstate',name:'Lifebloom (sustained)',sub:'state · lifebloom_state.m2 @Head · 1834 ms loop',durMs:7000,loopFx:true,frame:{dist:7,ty:1.6},
+ notes:['This is the SoD Lifebloom rune (408124) from this build, kit 6966, a (7,8) aura state. It is the Druid\'s <b>one sustained ally channel</b>.',
+  'Each 1834 ms loop is one pulse. Green streaks fire 100–600 ms, and star flashes run 0–967 ms. The second half of the loop is quiet.',
+  'P0 streaks rise at 1.11 yd/s with drag 0.5 and tail 1.85, colour green → white → pale yellow. P1 star flashes move at 3.33 yd/s, colour teal → pale yellow → white.',
+  'Our Lifebloom stacks to 3. The client draws one state however many stacks there are; the bench has a knob if you want stacks to show.'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1},{key:'stacks',label:'stacks shown',min:1,max:3,step:1,def:1}],
+ layers:[
+  {id:'streaks',name:'Green streaks',desc:'P0 ribbonblur green, 100–600 ms of each loop',sw:[22,185,0],emitter:{anchor:'head',pos:[0,0,0.54-0.25],etype:1,speed:1.111,vRange:0.35,hRange:TAU,life:0.6,loopMs:1834,
+   rate:[[0,15],[100,20],[600,5],[1834,15]],win:[[0,0],[100,1],[600,0]],color:[[0,[22,185,0]],[0.8,[255,255,255]],[1,[252,255,156]]],alpha:[[0,0.13],[0.8,1],[1,0]],scale:[[0,0.083],[0.8,0.014],[1,0]],drag:0.5,tail:1.85,kind:'glow',followVictim:true}},
+  {id:'flashes',name:'Star flashes',desc:'P1 starflashyellow, 0–967 ms of each loop',sw:[0,213,85],emitter:{anchor:'head',pos:[-0.16,-0.02,-0.13-0.25],etype:1,speed:3.333,vRange:0.6,hRange:TAU,life:0.5,loopMs:1834,
+   rate:10,win:[[0,1],[967,0]],color:[[0,[0,213,85]],[0.5,[254,255,156]],[1,[255,255,255]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0],[0.5,0.139],[1,0]],tail:0.8,spin:0.05,kind:'star',followVictim:true}},
+ ],
+ constants(fx){const K=fx.knobs;return [
+  `// Lifebloom sustained state — lifebloom_state.m2 (kit 6966), AS-160 bench`,
+  `pub const LIFEBLOOM_STATE_LOOP_MS: u32 = 1834;`,
+  `pub const LIFEBLOOM_STATE_STREAKS: bool = ${fx.layersOn.streaks};`,
+  `pub const LIFEBLOOM_STATE_FLASHES: bool = ${fx.layersOn.flashes};`,
+  `pub const LIFEBLOOM_STATE_SIZE_MUL: f32 = ${K.size.toFixed(2)};`,
+  `pub const LIFEBLOOM_STATE_SPREAD_MUL: f32 = ${K.spread.toFixed(2)};`,
+  `pub const LIFEBLOOM_STATE_LIFE_MUL: f32 = ${K.duration.toFixed(2)};`,
+  `pub const LIFEBLOOM_STATE_DENSITY_MUL: f32 = ${K.density.toFixed(2)};`,
+  `pub const LIFEBLOOM_STATE_OPACITY: f32 = ${K.opacity.toFixed(2)};`,
+  `pub const LIFEBLOOM_STATE_SCALES_WITH_STACKS: bool = ${K.stacks>1};`];}
+}),
+// ---------------------------------------------------------------- Lifebloom bloom
+mkFx({id:'bloom',name:'Lifebloom bloom',sub:'one-shot · lifebloom_impact.m2 @Chest · 1867 ms',durMs:1867,frame:{dist:8,ty:1.4},
+ notes:['This is SoD helper 408245, kit 6965. It plays when the aura ends (expiry, or a purge or dispel), which are the same endings our <code>BloomPending</code> covers.',
+  'The palette is <b>gold</b> (255,156,0) → pale yellow → white. That is a deliberate contrast with the green state.',
+  'Four layers: a swelling glow (0.23 → 0.88 yd, 100–633 ms), a shockwave sphere, rising star streaks (tail 3.4) and drifting stars.',
+  '<span class="inferred">Attachment 34 is read as Chest from the community enum, not from data.</span>'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'glow',name:'Swelling glow',desc:'P0 yellow_glow_dim, 100–633 ms',sw:[255,156,0],emitter:{anchor:'chest',pos:[0,0,0.05],etype:1,speed:0,vRange:0,hRange:TAU,life:0.9,rate:[[0,15],[100,20],[633,5],[1867,5]],win:[[0,0],[100,1],[633,0]],
+   color:[[0,[255,156,0]],[0.8,[255,255,255]],[1,[252,255,156]]],alpha:[[0,0],[0.8,1],[1,0]],scale:[[0,0.228],[0.8,0.883],[1,0.783]],drag:0.5,kind:'glow'}},
+  {id:'shock',name:'Shockwave sphere',desc:'P1 shockwavewater, full sphere, first 1 s',sw:[254,255,156],emitter:{anchor:'chest',pos:[0.02,0,0.12],etype:2,speed:3.333,vRange:3.14,hRange:TAU,life:1.0,rate:10,win:[[0,1],[1000,0]],
+   color:[[0,[255,156,0]],[0.5,[254,255,156]],[1,[255,255,255]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0],[0.5,0.139],[1,0]],tail:1.75,kind:'glow'}},
+  {id:'streaks',name:'Rising star streaks',desc:'P2 star5a, tail 3.4',sw:[255,200,90],emitter:{anchor:'chest',pos:[0.02,0,0],etype:1,speed:3.333,vRange:0.15,hRange:TAU,life:1.0,rate:10,win:[[0,1],[1000,0]],
+   color:[[0,[255,156,0]],[0.5,[254,255,156]],[1,[255,255,255]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0],[0.5,0.139],[1,0]],tail:3.4,spin:-0.05,kind:'star'}},
+  {id:'stars',name:'Drifting stars',desc:'P3 yellow_star_dim, 16/s, 1.25 s life',sw:[255,230,150],emitter:{anchor:'chest',pos:[0,0,0.47],etype:2,speed:1.111,vRange:3.14,hRange:TAU,life:1.25,rate:16,win:[[0,1],[1000,0]],
+   color:[[0,[255,156,0]],[0.5,[254,255,156]],[1,[255,255,255]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0],[0.5,0.139],[1,0]],tail:2.05,spin:-0.05,kind:'star'}},
+ ],
+ constants(fx){const K=fx.knobs,L=fx.layersOn;return [
+  `// Lifebloom bloom — lifebloom_impact.m2 (kit 6965), AS-160 bench`,
+  `pub const BLOOM_SECS: f32 = ${(1.867*K.duration).toFixed(2)};`,
+  `pub const BLOOM_LAYERS: [bool; 4] = [${L.glow}, ${L.shock}, ${L.streaks}, ${L.stars}]; // glow, shockwave, streaks, drift stars`,
+  `pub const BLOOM_SIZE_MUL: f32 = ${K.size.toFixed(2)};`,
+  `pub const BLOOM_SPREAD_MUL: f32 = ${K.spread.toFixed(2)};`,
+  `pub const BLOOM_DENSITY_MUL: f32 = ${K.density.toFixed(2)};`,
+  `pub const BLOOM_OPACITY: f32 = ${K.opacity.toFixed(2)};`];}
+}),
+// ---------------------------------------------------------------- Moonfire
+mkFx({id:'moonfire',name:'Moonfire',sub:'cast hands magic_cast_hand.m2 · landing moonfire_impact_base.m2 @Base',durMs:2600,frame:{dist:22,ty:6.5},
+ notes:['Built to your TBC reference: a <b>moon orb</b> about 14 yd overhead, a <b>thin violet-white beam</b> dropping from it onto the target, and a violet glow with spiralling wisps around the target\'s feet.',
+  'The client mesh agrees with that shape. It stands 13.9 yd tall, its narrowest radius (0.37–0.71 yd) sits at the top (the orb) and at the base (the beam core), and one colour track is violet (47,0,144).',
+  'Timing from the texture-weight tracks: blue glow peaks at 667 ms (gone by 1333), a ribbon layer peaks at 600 (gone by 1533), the core holds 700–1000, and the afterglow fades by 2267.',
+  'Cast side is kit 730: two arcane sparkle hands. The bench plays the cast 0.3 s before the landing.',
+  'Per your ruling, the DoT has <b>no sustained visual</b>.',
+  '<span class="inferred">Orb size, beam width and wisp count were read off the screenshot, not solved from the mesh (its submeshes were not split out).</span>'],
+ knobDefs:[{key:'height',label:'orb height yd',min:3,max:16,step:0.25,def:13.9},{key:'orb',label:'orb radius yd',min:0.1,max:1.2,step:0.02,def:0.55},{key:'beam',label:'beam width yd',min:0.04,max:0.6,step:0.01,def:0.18},{key:'base',label:'base glow radius yd',min:0.3,max:2,step:0.05,def:0.9},{key:'wisps',label:'wisps',min:0,max:6,step:1,def:3},{key:'duration',label:'duration ×',min:0.3,max:2,step:0.05,def:1},{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1},{key:'size',label:'hand size ×',min:0.2,max:2,step:0.05,def:1}],
+ layers:[
+  {id:'hands',name:'Arcane cast hands',desc:'kit 730 · cyan motes, stars, ring disc',sw:[62,227,229],custom:true},
+  {id:'orb',name:'Moon orb',desc:'white-blue glowing orb at the top',sw:[220,235,255],custom:true},
+  {id:'beam',name:'Beam',desc:'white core in a violet halo',sw:[150,90,255],custom:true},
+  {id:'base',name:'Base glow',desc:'violet column of light around the target',sw:[120,60,220],custom:true},
+  {id:'wisps',name:'Spiral wisps',desc:'pale ribbons curling up around the target',sw:[200,190,255],custom:true},
+ ],
+ customDraw(fx,ms,origin){
+  const K=fx.knobs,L=fx.layersOn,T=ms/K.duration;
+  if(L.hands && ms<1000){ const c=[-4,1.0,0]; g.globalCompositeOperation='lighter';
+    for(const side of[-1,1]){const h=[c[0]+0.15,1.35,c[2]+side*0.45];
+      for(let i=0;i<5;i++){const t=((ms/800)+i/5)%1; const col=keys([[0,[167,84,244]],[0.55,[62,227,229]],[1,[250,230,2]]],t);
+        sprite('glow',[h[0]+Math.cos(i*2.4+ms/200)*0.15,h[1]+t*0.3,h[2]+Math.sin(i*2.4)*0.15],0.16*K.size*2,col,keys([[0,0.25],[0.55,0.99],[1,0.04]],t));
+        sprite('star',[h[0]+Math.sin(i*1.7)*0.12,h[1]+0.1+t*0.2,h[2]],0.3*K.size,keys([[0,[0,221,62]],[0.5,[183,250,251]],[1,[246,211,20]]],t),keys([[0,0.55],[0.5,0.99],[1,0]],t)*0.8,ms/300);}
+      if(ms<300){const t=ms/300;sprite('ring',h,(0.15+t*0.6)*K.size*2,keys([[0,[255,234,0]],[0.35,[173,89,238]],[1,[30,236,136]]],t),0.7*(1-t));}}
+    g.globalCompositeOperation='source-over'; }
+  const lt=T-300; if(lt<0) return;
+  const op=K.opacity, env=k=>keys(k,lt)*op, H=K.height;
+  const main=env([[0,0],[150,1],[1000,1],[1500,0.55],[2267,0]]);
+  g.globalCompositeOperation='lighter';
+  const vband=(r,col,a,y0,y1)=>{const p=proj([origin[0],y0,origin[2]]),q=proj([origin[0],y1,origin[2]]);if(!p||!q||a<=0.003)return;
+    const w0=r*p.s,w1=r*q.s; const gr=g.createLinearGradient(p.x-w0,0,p.x+w0,0);
+    gr.addColorStop(0,rgb(col,0));gr.addColorStop(0.5,rgb(col,a));gr.addColorStop(1,rgb(col,0));g.fillStyle=gr;
+    g.beginPath();g.moveTo(p.x-w0,p.y);g.lineTo(q.x-w1,q.y);g.lineTo(q.x+w1,q.y);g.lineTo(p.x+w0,p.y);g.closePath();g.fill();};
+  if(L.base){const a=env([[0,0],[200,0.5],[667,0.6],[1333,0.3],[2267,0]]); vband(K.base,[110,50,220],a,0,2.6); vband(K.base*0.6,[150,110,255],a*0.6,0,1.6);
+    const q=proj([origin[0],0.02,origin[2]]);if(q&&a>0.01){g.fillStyle=rgb([160,120,255],a*0.5);g.beginPath();g.ellipse(q.x,q.y,K.base*q.s,K.base*q.s*Math.sin(cam.pitch),0,0,TAU);g.fill();}}
+  if(L.beam){vband(K.beam*3,[130,60,255],main*0.55,0,H); vband(K.beam*1.4,[190,150,255],main*0.8,0,H); vband(K.beam*0.5,[255,255,255],main,0,H);}
+  if(L.orb){const a=env([[0,0],[200,1],[1000,1],[1600,0.4],[2267,0]]);sprite('glow',[origin[0],H,origin[2]],K.orb*5,[150,170,255],a*0.6);sprite('glow',[origin[0],H,origin[2]],K.orb*2.4,[240,248,255],a);}
+  if(L.wisps){const a=env([[0,0],[600,0.8],[1533,0]]); g.lineCap='round';
+    for(let w=0;w<K.wisps;w++){let prev=null;for(let k=0;k<=24;k++){const u=k/24, ang=w*TAU/K.wisps+u*5+lt/350, r=0.35+0.35*u, y=u*2.2*Math.min(1,lt/600);
+      const p=proj([origin[0]+r*Math.cos(ang),y,origin[2]+r*Math.sin(ang)]);if(!p)continue;
+      if(prev){g.strokeStyle=rgb([210,200,255],a*(1-u)*0.9);g.lineWidth=Math.max(1,0.06*p.s);g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();}prev=p;}}}
+  g.globalCompositeOperation='source-over';
+ },
+ constants(fx){const K=fx.knobs,L=fx.layersOn;return [
+  `// Moonfire — magic_cast_hand.m2 (kit 730) + moonfire_impact_base.m2 (kit 3293), AS-160 bench`,
+  `pub const MOONFIRE_CAST_HANDS: bool = ${L.hands};`,
+  `pub const MOONFIRE_HAND_SIZE_MUL: f32 = ${K.size.toFixed(2)};`,
+  `pub const MOONFIRE_ORB_HEIGHT: f32 = ${K.height.toFixed(2)};`,
+  `pub const MOONFIRE_ORB_RADIUS: f32 = ${K.orb.toFixed(2)};`,
+  `pub const MOONFIRE_BEAM_WIDTH: f32 = ${K.beam.toFixed(2)};`,
+  `pub const MOONFIRE_BASE_GLOW_RADIUS: f32 = ${K.base.toFixed(2)};`,
+  `pub const MOONFIRE_WISPS: usize = ${K.wisps};`,
+  `pub const MOONFIRE_LANDING_SECS: f32 = ${(2.267*K.duration).toFixed(2)};`,
+  `pub const MOONFIRE_LAYERS: [bool; 4] = [${L.orb}, ${L.beam}, ${L.base}, ${L.wisps}]; // orb, beam, base glow, wisps`,
+  `pub const MOONFIRE_OPACITY: f32 = ${K.opacity.toFixed(2)};`,
+  `// DoT: no sustained visual (client has none) — DoT-family entry becomes a reasoned permanent one.`];}
+}),
+// ---------------------------------------------------------------- Mark of the Wild
+mkFx({id:'motw',name:'Mark of the Wild',sub:'landing · markofwild_impact_head.m2 @Head · 667 ms',durMs:900,frame:{dist:6,ty:2.0},
+ notes:['This is kit 542, shared with Gift of the Wild. The model is just <b>two flat quads</b> 0.7 × 0.7 yd, placed 0.68–1.38 yd above the head anchor.',
+  'Texture agility_128.blp in two colours, red-orange (223,52,0) and gold (255,201,0). Weight goes 0 → 0.5 at 167 ms → 0 at 667 ms.',
+  '<span class="inferred">The BLP was not decoded, so the glyph drawn here is a stand-in. Decode agility_128.blp before building.</span>'],
+ knobDefs:[{key:'size',label:'size ×',min:0.3,max:2,step:0.05,def:1},{key:'lift',label:'height ×',min:0.3,max:1.5,step:0.05,def:1},{key:'duration',label:'duration ×',min:0.5,max:3,step:0.05,def:1},{key:'opacity',label:'opacity ×',min:0.2,max:2,step:0.05,def:1}],
+ layers:[{id:'red',name:'Red-orange plate',desc:'colour track 0 · (223,52,0)',sw:[223,52,0],custom:true},{id:'gold',name:'Gold plate',desc:'colour track 1 · (255,201,0), fades by 500 ms',sw:[255,201,0],custom:true}],
+ customDraw(fx,ms,origin){
+  const K=fx.knobs,t=ms/K.duration; if(t>667) return;
+  const c=[origin[0],2.25+1.03*K.lift,origin[2]],q=proj(c);if(!q)return;
+  g.globalCompositeOperation='lighter';
+  const draw=(col,a)=>{ if(a<=0) return; const r=0.35*K.size*q.s; g.save();g.translate(q.x,q.y);
+    const gr=g.createRadialGradient(0,0,0,0,0,r);gr.addColorStop(0,rgb(col,a));gr.addColorStop(1,rgb(col,0));g.fillStyle=gr;
+    // stand-in glyph: four pads + palm
+    for(const [x,y,s] of [[-0.45,-0.55,0.28],[-0.15,-0.75,0.28],[0.15,-0.75,0.28],[0.45,-0.55,0.28],[0,0.15,0.55]]){g.beginPath();g.ellipse(x*r,y*r,s*r,s*r*1.15,0,0,TAU);g.fill();}
+    g.restore(); };
+  if(fx.layersOn.red) draw([223,52,0],keys([[0,0],[167,0.5],[667,0]],t)*2*K.opacity);
+  if(fx.layersOn.gold) draw([255,201,0],keys([[0,0],[167,0.5],[500,0],[667,0]],t)*2*K.opacity);
+  g.globalCompositeOperation='source-over';
+ },
+ constants(fx){const K=fx.knobs;return [
+  `// Mark of the Wild — markofwild_impact_head.m2 (kit 542), AS-160 bench`,
+  `pub const MOTW_GLYPH_SIZE: f32 = ${(0.7*K.size).toFixed(2)};`,
+  `pub const MOTW_GLYPH_HEIGHT_ABOVE_HEAD: f32 = ${(1.03*K.lift).toFixed(2)};`,
+  `pub const MOTW_GLYPH_SECS: f32 = ${(0.667*K.duration).toFixed(3)};`,
+  `pub const MOTW_PLATES: [bool; 2] = [${fx.layersOn.red}, ${fx.layersOn.gold}]; // red-orange, gold`,
+  `pub const MOTW_OPACITY: f32 = ${K.opacity.toFixed(2)};`];}
+}),
+// ---------------------------------------------------------------- Entangling Roots
+mkFx({id:'roots',name:'Entangling Roots',sub:'state · entanglingroots_state.m2 @origin · birth 1.5 s / hold / death 1.3 s',durMs:6000,frame:{dist:7,ty:0.9},
+ notes:['Kit 66, a (7,8) state. It <b>replaces the Spider Web silk sheet</b> that <code>root_style</code> gives Nature roots today.',
+  'A 300-vertex bark mesh (kalidartreetrunk02.blp). Sequences: birth 1500 ms, stand 1500 ms, death 1300 ms.',
+  'Dust puffs (earth brown, 30/s) and pebbles (gravity 4.2) play during the <b>birth only</b>. The green ground disc has rate 0 and is left out.',
+  '<span class="inferred">The root silhouette is bone-posed and was not solved. The bench draws a stand-in ring of curling tapered roots; count, height and curl are knobs. The bench holds 3.2 s, then plays the death.</span>'],
+ knobDefs:[{key:'count',label:'root count',min:3,max:10,step:1,def:6},{key:'height',label:'root height yd',min:0.3,max:2,step:0.05,def:1.1},{key:'radius',label:'ring radius yd',min:0.3,max:1.2,step:0.05,def:0.6},{key:'curl',label:'curl',min:0,max:1.5,step:0.05,def:0.8},{key:'thick',label:'thickness ×',min:0.4,max:2,step:0.05,def:1},{key:'size',label:'dust size ×',min:0.2,max:2,step:0.05,def:1},{key:'density',label:'dust density ×',min:0,max:2,step:0.05,def:1},{key:'duration',label:'dust life ×',min:0.3,max:2,step:0.05,def:1},{key:'spread',label:'dust spread ×',min:0.3,max:2,step:0.05,def:1}],
+ layers:[
+  {id:'roots',name:'Bark roots (mesh)',desc:'kalidartreetrunk02 · opaque',sw:[96,70,42],custom:true},
+  {id:'dust',name:'Dust puffs',desc:'P0+P2 dust1, earth brown, birth only',sw:[157,146,87],emitter:{anchor:'feet',pos:[0,0,0.1],etype:1,speed:0.278,vRange:1.571,hRange:TAU,life:2.0,rate:[[0,30],[1334,30],[1500,0]],win:[[0,1],[1500,0]],area:1.0,
+   color:[[0,[106,91,0]],[0.2,[126,112,34]],[1,[157,146,87]]],alpha:[[0,0.39],[0.2,0.69],[1,0]],scale:[[0,0],[0.2,0.417],[1,0.694]],kind:'dust',blend:'alpha',spin:0.4}},
+  {id:'pebbles',name:'Pebbles',desc:'P1 partrock, gravity 4.2',sw:[126,112,34],emitter:{anchor:'feet',pos:[0,0,0.1],etype:1,speed:3.333,vRange:1.222,hRange:TAU,life:3.0,rate:[[0,0],[167,20],[834,10],[1500,0.001]],win:[[0,1],[1500,0]],
+   color:[[0,[106,91,0]],[1,[157,146,87]]],alpha:[[0,1],[1,1]],scale:[[0,0.028],[1,0.028]],gravity:4.167,kind:'rock',blend:'alpha',spin:-0.4,floorKill:true}},
+ ],
+ customDraw(fx,ms,origin){
+  if(!fx.layersOn.roots) return; const K=fx.knobs;
+  const hold=3200, grow=ms<1500?ms/1500: ms<1500+hold?1: Math.max(0,1-(ms-1500-hold)/1300);
+  if(grow<=0) return; const e=1-Math.pow(1-grow,3);
+  const roots=[];
+  for(let i=0;i<K.count;i++){const a0=i*TAU/K.count+0.3*Math.sin(i*7.1); const pts=[];
+    for(let k=0;k<=10;k++){const u=k/10*e; const r=K.radius*(1.25-0.75*u)+0.05*Math.sin(i*3+k); const a=a0+K.curl*u*1.6*(i%2?1:-1);
+      pts.push([origin[0]+r*Math.cos(a),K.height*u*(0.85+0.3*Math.sin(i*1.9)),origin[2]+r*Math.sin(a)]);}
+    roots.push(pts);}
+  // depth sort by mid point
+  roots.sort((A,B)=>proj(B[5])?.z-proj(A[5])?.z);
+  g.lineCap='round';
+  for(const pts of roots){ for(let k=0;k<pts.length-1;k++){const p=proj(pts[k]),q=proj(pts[k+1]);if(!p||!q)continue;
+    const w=0.11*K.thick*(1-k/11)*p.s; const shade=0.75+0.25*Math.sin(k*1.7);
+    g.strokeStyle=rgb([96*shade,70*shade,42*shade],1);g.lineWidth=Math.max(1,w);g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();
+    g.strokeStyle=rgb([150,118,78],0.35);g.lineWidth=Math.max(0.5,w*0.3);g.beginPath();g.moveTo(p.x-w*0.2,p.y);g.lineTo(q.x-w*0.2,q.y);g.stroke();}}
+ },
+ constants(fx){const K=fx.knobs,L=fx.layersOn;return [
+  `// Entangling Roots state — entanglingroots_state.m2 (kit 66), AS-160 bench`,
+  `// New RootStyle::Roots for Nature roots (replaces RootStyle::Web).`,
+  `pub const ROOTS_BIRTH_SECS: f32 = 1.5;`,
+  `pub const ROOTS_DEATH_SECS: f32 = 1.3;`,
+  `pub const ROOTS_COUNT: usize = ${K.count};`,
+  `pub const ROOTS_HEIGHT: f32 = ${K.height.toFixed(2)};`,
+  `pub const ROOTS_RING_RADIUS: f32 = ${K.radius.toFixed(2)};`,
+  `pub const ROOTS_CURL: f32 = ${K.curl.toFixed(2)};`,
+  `pub const ROOTS_BASE_THICKNESS: f32 = ${(0.11*K.thick).toFixed(3)};`,
+  `pub const ROOTS_BARK: Color = Color::srgb(0.376, 0.275, 0.165);`,
+  `pub const ROOTS_LAYERS: [bool; 3] = [${L.roots}, ${L.dust}, ${L.pebbles}]; // roots, dust, pebbles`,
+  `pub const ROOTS_DUST_SIZE_MUL: f32 = ${K.size.toFixed(2)};`,
+  `pub const ROOTS_DUST_DENSITY_MUL: f32 = ${K.density.toFixed(2)};`];}
+}),
+// ---------------------------------------------------------------- Cyclone
+mkFx({id:'cyclone',name:'Cyclone',sub:'state · cyclone_state.m2 @Base (Enveloping Winds kit 861) · funnel of cyclonegeo band meshes',durMs:6000,frame:{dist:11,ty:2.0},
+ notes:['The Era client has <b>no Druid Cyclone</b>. This is the wind-vortex kit from Enveloping Winds and Tornado, the nearest era analogue. It reproduces your TBC screenshot\'s dark, flaring funnel.',
+  'Emitters P0–P4 are <b>model emitters</b>. Each particle is a <code>cyclonegeo*.m2</code> mesh: a twisted strip of <code>clouds4.blp</code> about 200° around the victim at a 1.5 yd radius, climbing about 1.8 yd across its span. There are three copies rotated 90° apart.',
+  'The strips rise at 1.4–2.8 yd/s and grow (one emitter: ×0.56 → 0.19 → 1.11 over a 3 s life). That stacks into a funnel narrow at the waist and wide at the top. They are alpha-blended; P0 fades to near-black (30,30,30), the others to white.',
+  'Rim debris spawns <code>cyclonerock</code> pebble models from a 2.54 yd rim, rising. Plus toon smoke at the feet.',
+  '<span class="inferred">The strips have no particle spin, so the funnel\'s rotation is inferred (and is a knob). In-game this is a mesh strip with vertex/texture alpha, which Bevy can draw. Lift and victim spin are invented; your screenshot suggests a small lift.</span>'],
+ knobDefs:[{key:'size',label:'band size ×',min:0.3,max:2,step:0.05,def:1},{key:'rise',label:'rise speed ×',min:0.3,max:2,step:0.05,def:1},{key:'duration',label:'band life ×',min:0.3,max:2,step:0.05,def:1},{key:'density',label:'density ×',min:0.1,max:2,step:0.05,def:1},{key:'spinRevF',label:'funnel spin rev/s',min:0,max:3,step:0.05,def:1.2},{key:'tone',label:'darkness',min:0,max:1,step:0.05,def:0.55},{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:0.8},{key:'lift',label:'victim lift yd',min:0,max:2,step:0.05,def:0.35},{key:'spinRev',label:'victim spin rev/s',min:0,max:3,step:0.05,def:0.75},{key:'bob',label:'lift bob yd',min:0,max:0.4,step:0.01,def:0.08}],
+ layers:[
+  {id:'f0',name:'Dark core bands',desc:'P0 · cyclonegeo3 · speed 2.8 · fades to (30,30,30)',sw:[60,60,60],custom:true},
+  {id:'f1',name:'Body bands',desc:'P1+P2 · cyclonegeo3/geo · 3 s life, flare at top',sw:[170,170,170],custom:true},
+  {id:'f3',name:'Crown bands',desc:'P3 · cyclonegeo2 at +1.36',sw:[210,210,210],custom:true},
+  {id:'f4',name:'Violet-tipped skirt',desc:'P4 · cyclonegeo · ends (31,3,243)',sw:[31,3,243],custom:true,on:false},
+  {id:'smoke',name:'Toon smoke',desc:'P5 toonsmoke16 at the feet',sw:[236,235,233],emitter:{anchor:'feet',pos:[0,0,0.07],etype:1,speed:0.5,vRange:3.14,hRange:TAU,life:2.0,rate:10,color:[[0,[180,180,175]],[1,[220,220,215]]],alpha:[[0,0.3],[0.5,0.3],[1,0]],scale:[[0,0.4],[0.5,0.55],[1,0.7]],drag:0.4,spin:2,kind:'smoke',blend:'alpha'}},
+  {id:'rim',name:'Rim pebbles',desc:'P6–P10 cyclonerock models, r 2.54, rising',sw:[98,85,77],emitter:{anchor:'feet',pos:[0,0,0.15],rim:2.54,etype:1,speed:3.265,vRange:0.087,hRange:TAU,life:0.7,rate:16,gravity:-6.944,color:[[0,[98,85,77]],[1,[98,85,77]]],alpha:[[0,0.8],[0.95,0.9],[1,0]],scale:[[0,0.06],[1,0.06]],kind:'rock',blend:'alpha'}},
+  {id:'body',name:'Victim lift + spin',desc:'invented · own transform component',sw:[255,125,10],custom:true},
+ ],
+ bands:[],acc:{},
+ customDraw(fx,ms,origin){
+  const K=fx.knobs,L=fx.layersOn;
+  const specs={f0:{y:0,sp:2.778,life:1,rate:13,col:[[0,[153,153,153]],[0.5,[81,81,81]],[1,[30,30,30]]],a:[[0,0.39],[0.5,1],[1,0]],sc:[[0,0.417],[0.5,0.139],[1,0.417]]},
+    f1:{y:0,sp:1.389,life:3,rate:34,col:[[0,[153,153,153]],[0.7,[255,255,255]],[1,[255,255,255]]],a:[[0,0.39],[0.7,0.85],[1,0]],sc:[[0,0.556],[0.7,0.3],[1,1.111]]},
+    f3:{y:1.36,sp:0.278,life:1,rate:11,col:[[0,[153,153,153]],[0.7,[255,255,255]],[1,[255,255,255]]],a:[[0,0.39],[0.7,0.24],[1,0]],sc:[[0,0.222],[0.7,0.694],[1,1.111]]},
+    f4:{y:-0.33,sp:1.389,life:3,rate:22,col:[[0,[153,153,153]],[0.7,[255,255,255]],[1,[31,3,243]]],a:[[0,0.39],[0.7,0.78],[1,0]],sc:[[0,0.556],[0.7,0.194],[1,1.111]]}};
+  const dt=fx._dt||0;
+  for(const id in specs){ if(!L[id]) continue; const sp=specs[id]; fx.acc[id]=(fx.acc[id]||0)+sp.rate*dt*K.density;
+    while(fx.acc[id]>=1){fx.acc[id]-=1; fx.bands.push({id,age:0,life:sp.life*K.duration,y:sp.y,rot:rnd()*TAU});} }
+  for(const b of fx.bands) b.age+=dt; fx.bands=fx.bands.filter(b=>b.age<b.life && L[b.id]);
+  // strip shape (from cyclonegeo verts): fraction u over ~200°, bottom edge & top edge heights
+  const A0=122*Math.PI/180, SPAN=198*Math.PI/180;
+  const bot=u=>keys([[0,-0.55],[0.16,-0.86],[0.35,-0.85],[0.5,-0.69],[0.66,-0.42],[0.82,0.01],[1,0.73]],u);
+  const top=u=>keys([[0,-0.55],[0.16,0.13],[0.35,0.51],[0.5,0.78],[0.66,0.96],[0.82,0.96],[1,0.73]],u);
+  const rad=u=>keys([[0,1.57],[0.16,1.52],[0.5,1.5],[0.82,1.52],[1,1.73]],u);
+  const spin=ms/1000*K.spinRevF*TAU;
+  const items=[];
+  for(const b of fx.bands){ const sp=specs[b.id],t=b.age/b.life, sc=keys(sp.sc,t)*K.size*1.25, a=keys(sp.a,t)*K.opacity*0.55;
+    let col=keys(sp.col,t); col=col.map(c=>c*(1-K.tone)+ (c*0.25)*K.tone);
+    const yc=0.9*sc+b.y+sp.sp*K.rise*b.age; const r0=b.rot+spin;
+    const pts=(edge)=>{const out=[];for(let i=0;i<=10;i++){const u=i/10,ang=r0+A0+SPAN*u,r=rad(u)*sc;out.push([origin[0]+r*Math.cos(ang),yc+edge(u)*sc,origin[2]+r*Math.sin(ang)]);}return out;};
+    const T=pts(top),B=pts(bot); const mid=proj([origin[0],yc,origin[2]]);
+    items.push({z:mid?mid.z:0,T,B,col,a});}
+  items.sort((p,q)=>q.z-p.z);
+  g.globalCompositeOperation='source-over';
+  for(const it of items){ const Tp=it.T.map(proj),Bp=it.B.map(proj); if(Tp.some(x=>!x)||Bp.some(x=>!x)) continue;
+    // soft band: fill with low alpha, then a few inner streaks for the cloud texture
+    g.fillStyle=rgb(it.col,it.a*0.6); g.beginPath(); Tp.forEach((q,i)=>i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y)); for(let i=Bp.length-1;i>=0;i--) g.lineTo(Bp[i].x,Bp[i].y); g.closePath(); g.fill();
+    g.strokeStyle=rgb(it.col,it.a*0.7); g.lineWidth=1.5;
+    for(const f of [0.3,0.55,0.8]){ g.beginPath(); Tp.forEach((q,i)=>{const b=Bp[i];const x=lerp(b.x,q.x,f),y=lerp(b.y,q.y,f); i?g.lineTo(x,y):g.moveTo(x,y);}); g.stroke(); } }
+ },
+ constants(fx){const K=fx.knobs,L=fx.layersOn;return [
+  `// Cyclone — cyclone_state.m2 (kit 861, borrowed from Enveloping Winds), AS-160 bench`,
+  `// Funnel = particles that are cyclonegeo strip MESHES (≈200° twisted cloud band, r≈1.5, 1.8 yd climb).`,
+  `pub const CYCLONE_LAYERS: [bool; 6] = [${L.f0}, ${L.f1}, ${L.f3}, ${L.f4}, ${L.smoke}, ${L.rim}]; // dark core, body, crown, violet skirt, smoke, rim`,
+  `pub const CYCLONE_BAND_SIZE_MUL: f32 = ${K.size.toFixed(2)};`,
+  `pub const CYCLONE_BAND_RISE_MUL: f32 = ${K.rise.toFixed(2)};`,
+  `pub const CYCLONE_BAND_LIFE_MUL: f32 = ${K.duration.toFixed(2)};`,
+  `pub const CYCLONE_DENSITY_MUL: f32 = ${K.density.toFixed(2)};`,
+  `pub const CYCLONE_FUNNEL_SPIN_REV_PER_SEC: f32 = ${K.spinRevF.toFixed(2)};`,
+  `pub const CYCLONE_DARKNESS: f32 = ${K.tone.toFixed(2)};`,
+  `pub const CYCLONE_OPACITY: f32 = ${K.opacity.toFixed(2)};`,
+  `pub const CYCLONE_VICTIM_LIFT: f32 = ${L.body?K.lift.toFixed(2):'0.0'};`,
+  `pub const CYCLONE_VICTIM_SPIN_REV_PER_SEC: f32 = ${L.body?K.spinRev.toFixed(2):'0.0'};`,
+  `pub const CYCLONE_VICTIM_BOB: f32 = ${L.body?K.bob.toFixed(2):'0.0'};`];}
+}),
+// ---------------------------------------------------------------- Travel Form
+mkFx({id:'travel',name:'Travel Form',sub:'shift puff druidmorph_impact_base.m2 @Base · body: a pill on all fours',durMs:6000,frame:{dist:9,ty:0.9},moverDefault:true,
+ notes:['Our combatants are pills, so the form speaks the same language. The standing pill <b>lies down</b> into a low horizontal pill and gains a small head pill and a raised tail. That reads as "on all fours and fast" without any anatomy.',
+  'The client proportions are a guide only. The cheetah (tiger.m2 at ×0.8) is about 2.7 yd nose to tail tip and 1.14 yd tall, with the tail <b>held raised</b>. The pill keeps the low, long silhouette and the raised tail.',
+  'The gait is a <b>bound</b>: the body bobs and rocks nose-up/nose-down once per stride, driven by distance travelled as in <code>gait.rs</code>. The run is 800 ms at 6.94 yd/s at model scale, which gives a stride of about 4.4 yd at ×0.8.',
+  'It keeps the class tint like every other pill, and needs its <b>own</b> restore component, never the shared material slot.',
+  'Kit 3610 (shared by every shapeshift) plays on shift in and out: white toon-smoke puff, violet → sky-blue flash, fast streaks. The bench shifts in at 0 s and out at 4.5 s.'],
+ knobDefs:[{key:'bodyLen',label:'body length yd',min:1,max:2.6,step:0.05,def:1.7},{key:'bodyR',label:'body radius yd',min:0.2,max:0.6,step:0.02,def:0.36},{key:'bodyY',label:'body height yd',min:0.3,max:1.0,step:0.02,def:0.6},{key:'stride',label:'stride yd',min:1,max:6,step:0.1,def:4.4},{key:'bob',label:'bound bob yd',min:0,max:0.4,step:0.01,def:0.12},{key:'rock',label:'bound rock °',min:0,max:25,step:1,def:9},{key:'earH',label:'ear height yd',min:0.08,max:0.4,step:0.01,def:0.2},{key:'earW',label:'ear half-width yd',min:0.04,max:0.2,step:0.01,def:0.09},{key:'speed',label:'run speed yd/s',min:3,max:12,step:0.5,def:7},{key:'size',label:'puff size ×',min:0.2,max:2,step:0.05,def:1},{key:'spread',label:'puff spread ×',min:0.2,max:2,step:0.05,def:1},{key:'duration',label:'puff life ×',min:0.3,max:2,step:0.05,def:1},{key:'density',label:'puff density ×',min:0.1,max:2,step:0.05,def:1}],
+ layers:[
+  {id:'body',name:'Lying pill',desc:'horizontal capsule, class tint',sw:[255,125,10],custom:true},
+  {id:'head',name:'Head pill',desc:'small sphere, forward and raised',sw:[255,150,50],custom:true},
+  {id:'ears',name:'Cat ears',desc:'two small pointed ears on the head',sw:[200,95,10],custom:true},
+  {id:'tail',name:'Raised tail',desc:'thin capsule angled up and back',sw:[220,110,10],custom:true},
+  {id:'glow',name:'Violet flash',desc:'P0 genericglow2c, swells to 1.84',sw:[106,180,243],emitter:{anchor:'feet',pos:[0.22,0,1.07-0.6],etype:1,speed:0.064,vRange:0.017,hRange:TAU,life:1.32,rate:5,win:[[0,1],[1400,0]],
+   color:[[0,[69,0,210]],[0.5,[106,180,243]],[1,[69,0,210]]],alpha:[[0,0.22],[0.5,0.36],[1,0]],scale:[[0,0.153],[0.5,0.744],[1,1.844]],drag:0.15,kind:'glow'}},
+  {id:'smoke',name:'White smoke ×2',desc:'P1+P2 toonsmoke16, 74/s total',sw:[240,240,240],emitter:{anchor:'feet',pos:[0.05,0,0.9-0.6],etype:2,speed:1.25,vRange:3.14,hRange:TAU,life:1.25,rate:74,win:[[0,1],[1700,0]],
+   color:[[0,[255,255,255]],[1,[255,255,255]]],alpha:[[0,0.7],[0.5,1],[1,0]],scale:[[0,0.55],[0.5,0.5],[1,0.26]],drag:0.05,spin:0.7,kind:'smoke',blend:'alpha'}},
+  {id:'streaks',name:'Fast streaks',desc:'P3 gradient64flipa, tail 5.0',sw:[115,121,255],emitter:{anchor:'feet',pos:[0,0,1.13-0.6],etype:2,speed:3.889,vRange:3.14,hRange:TAU,life:0.8,rate:20,win:[[0,1],[1400,0]],
+   color:[[0,[115,121,255]],[0.5,[112,210,255]],[1,[244,252,255]]],alpha:[[0,0],[0.5,0.59],[1,0]],scale:[[0,0.003],[0.5,0.278],[1,0.028]],tail:5,spin:-2,kind:'glow'}},
+  {id:'motes',name:'Star motes',desc:'P4 stardust, violet → white',sw:[119,196,255],emitter:{anchor:'feet',pos:[0,0,1.11-0.6],etype:2,speed:0.556,vRange:3.14,hRange:TAU,life:1.0,rate:20,win:[[0,1],[1400,0]],
+   color:[[0,[61,0,187]],[0.5,[119,196,255]],[1,[255,255,255]]],alpha:[[0,1],[0.5,1],[1,0]],scale:[[0,0.194],[1,0.194]],kind:'star'}},
+ ],
+ constants(fx){const K=fx.knobs,L=fx.layersOn;return [
+  `// Travel Form — pill body + druidmorph_impact_base.m2 (kit 3610) shift puff, AS-160 bench`,
+  `pub const SHIFT_PUFF_SECS: f32 = ${(1.7*K.duration).toFixed(2)};`,
+  `pub const SHIFT_PUFF_LAYERS: [bool; 4] = [${L.glow}, ${L.smoke}, ${L.streaks}, ${L.motes}]; // flash, smoke, streaks, motes`,
+  `pub const SHIFT_PUFF_SIZE_MUL: f32 = ${K.size.toFixed(2)};`,
+  `pub const SHIFT_PUFF_SPREAD_MUL: f32 = ${K.spread.toFixed(2)};`,
+  `pub const SHIFT_PUFF_DENSITY_MUL: f32 = ${K.density.toFixed(2)};`,
+  `pub const TRAVEL_BODY_LENGTH: f32 = ${K.bodyLen.toFixed(2)}; // tip to tip, Capsule3d::new(r, len - 2r) laid along heading`,
+  `pub const TRAVEL_BODY_RADIUS: f32 = ${K.bodyR.toFixed(2)};`,
+  `pub const TRAVEL_BODY_HEIGHT: f32 = ${K.bodyY.toFixed(2)}; // centre above ground`,
+  `pub const TRAVEL_PARTS: [bool; 3] = [${L.head}, ${L.ears}, ${L.tail}]; // head, ears, tail`,
+  `pub const TRAVEL_EAR_HEIGHT: f32 = ${K.earH.toFixed(2)}; // cone ears\npub const TRAVEL_EAR_HALF_WIDTH: f32 = ${K.earW.toFixed(2)};`,
+  `pub const TRAVEL_STRIDE: f32 = ${K.stride.toFixed(2)}; // yd per bound`,
+  `pub const TRAVEL_BOUND_BOB: f32 = ${K.bob.toFixed(2)};`,
+  `pub const TRAVEL_BOUND_ROCK_DEG: f32 = ${K.rock.toFixed(0)}.0;`];}
+}),
+];
+
+// ---------- Cyclone swirl + rim spawn overrides ----------
+const _spawn=Emitter.prototype.spawn;
+Emitter.prototype.spawn=function(origin){
+  const s=this.s;
+  if(s.rim){const K=this.fx.knobs,a=rnd()*TAU,r=s.rim*(K.spread??1);
+    this.ps.push({x:[origin[0]+r*Math.cos(a),0.15,origin[2]+r*Math.sin(a)],v:[0,s.speed*(K.spread??1),0],age:0,life:s.life*(K.duration??1),ang:0,o:[...origin]});return;}
+  _spawn.call(this,origin);
+  if(s.swirl){const p=this.ps[this.ps.length-1];p.swirl={a:rnd()*TAU,r:0.25+rnd()*0.2};}
+};
+const _upd=Emitter.prototype.update;
+Emitter.prototype.update=function(dt,ms,origin,alive){
+  _upd.call(this,dt,ms,origin,alive);
+  if(this.s.swirl){const K=this.fx.knobs;for(const p of this.ps){const t=p.age/p.life;p.swirl.a+=dt*(5-2.5*t);const r=(p.swirl.r+t*1.1)*(K.spread??1);
+    p.x[0]=origin[0]+r*Math.cos(p.swirl.a);p.x[2]=origin[2]+r*Math.sin(p.swirl.a);}}
+  if(this.s.floorKill) for(const p of this.ps){ if(p.x[1]<0.02){p.x[1]=0.02;p.v=[0,0,0];} }
+};
+
+// ---------- body drawing ----------
+function drawPillSeg(a,b,r,col){ // capsule between two points, screen-space
+  const p=proj(a),q=proj(b);if(!p||!q)return;const w=r*(p.s+q.s);
+  g.strokeStyle=rgb(col.map(x=>x*0.62),1);g.lineCap='round';g.lineWidth=w;g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();
+  g.strokeStyle=rgb(col,1);g.lineWidth=w*0.78;g.beginPath();g.moveTo(p.x,p.y-w*0.06);g.lineTo(q.x,q.y-w*0.06);g.stroke();
+  g.strokeStyle=rgb(col.map(x=>Math.min(255,x*1.25)),0.5);g.lineWidth=w*0.25;g.beginPath();g.moveTo(p.x,p.y-w*0.22);g.lineTo(q.x,q.y-w*0.22);g.stroke();}
+function drawCat(c,heading,phase,fx){
+  const K=fx.knobs, col=[255,125,10];
+  const fwd=[Math.cos(heading),0,Math.sin(heading)];
+  const rock=Math.sin(phase*TAU)*K.rock*Math.PI/180, bob=Math.abs(Math.sin(phase*TAU))*K.bob;
+  const half=K.bodyLen/2-K.bodyR, cy=K.bodyY+bob;
+  const at=(f,y)=>{const yy=y+f*Math.sin(rock);return[c[0]+fwd[0]*f*Math.cos(rock),yy,c[2]+fwd[2]*f*Math.cos(rock)];};
+  const parts=[];
+  parts.push({p:at(0,cy),d:()=>drawPillSeg(at(-half,cy),at(half,cy),K.bodyR,col)});
+  if(fx.layersOn.tail){const base=at(-K.bodyLen/2+0.05,cy+0.1),tip=at(-K.bodyLen/2-0.45,cy+0.55);parts.push({p:base,d:()=>drawPillSeg(base,tip,0.07,col.map(x=>x*0.9))});}
+  if(fx.layersOn.head){const h=at(K.bodyLen/2+0.05,cy+0.32),hr=K.bodyR*0.78;parts.push({p:h,d:()=>{drawPillSeg(h,h,hr,col);
+    if(fx.layersOn.ears){for(const sd of[-1,1]){const side=[-fwd[2]*sd*hr*0.5,0,fwd[0]*sd*hr*0.5];const sw=[-fwd[2]*sd*K.earW,0,fwd[0]*sd*K.earW];const b0=[h[0]+side[0]-sw[0],h[1]+hr*0.6,h[2]+side[2]-sw[2]],b1=[h[0]+side[0]+sw[0],h[1]+hr*0.6,h[2]+side[2]+sw[2]],tp=[h[0]+side[0]*1.15-fwd[0]*0.04,h[1]+hr*0.6+K.earH,h[2]+side[2]*1.15-fwd[2]*0.04];const P=[b0,tp,b1].map(proj);if(P.every(Boolean)){g.fillStyle=rgb(col.map(x=>x*0.8),1);g.beginPath();g.moveTo(P[0].x,P[0].y);g.lineTo(P[1].x,P[1].y);g.lineTo(P[2].x,P[2].y);g.closePath();g.fill();}}}}});}
+  parts.forEach(q=>{const pp=proj(q.p);q.z=pp?pp.z:0;});parts.sort((a,b)=>b.z-a.z).forEach(q=>q.d());
+}
+// ---------- UI wiring ----------
+let cur=EFFECTS[0], t0=performance.now(), simMs=0, paused=false, lastNow=performance.now();
+const $=id=>document.getElementById(id);
+function buildTabs(){const nav=$('tabs');nav.innerHTML='';
+  for(const fx of EFFECTS){const b=document.createElement('button');b.className='tab';b.role='tab';b.id='tab-'+fx.id;b.textContent=fx.name;b.setAttribute('aria-selected',fx===cur);
+    b.onclick=()=>{cur=fx;try{localStorage.setItem('druidbench.tab',fx.id)}catch(e){};select();};nav.appendChild(b);} }
+function select(){
+  document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-selected',b.id==='tab-'+cur.id));
+  cam.dist=cur.frame.dist;cam.target=[0,cur.frame.ty,0];
+  $('moving').checked=!!cur.moverDefault;
+  const L=$('layers');L.innerHTML='';
+  for(const l of cur.layers){const d=document.createElement('div');d.className='layer';const id='ly-'+cur.id+'-'+l.id;
+    d.innerHTML=`<input type="checkbox" id="${id}" ${cur.layersOn[l.id]?'checked':''}><span class="sw" style="background:${rgb(l.sw,1)}"></span><label for="${id}"><span class="nm">${l.name}</span><span class="ds">${l.desc}</span></label>`;
+    d.querySelector('input').onchange=e=>{cur.layersOn[l.id]=e.target.checked;renderOut();};L.appendChild(d);}
+  const Kn=$('knobs');Kn.innerHTML='';
+  for(const k of cur.knobDefs){const d=document.createElement('div');d.className='knob';const id='kn-'+cur.id+'-'+k.key;
+    d.innerHTML=`<span>${k.label}</span><input type="range" id="${id}" min="${k.min}" max="${k.max}" step="${k.step}" value="${cur.knobs[k.key]}"><output for="${id}">${(+cur.knobs[k.key]).toFixed(2)}</output>`;
+    const inp=d.querySelector('input'),o=d.querySelector('output');inp.oninput=()=>{cur.knobs[k.key]=+inp.value;o.textContent=(+inp.value).toFixed(2);renderOut();};Kn.appendChild(d);}
+  const rs=document.createElement('button');rs.className='btn';rs.textContent='Reset to client values';rs.style.marginTop='8px';
+  rs.onclick=()=>{for(const k of cur.knobDefs)cur.knobs[k.key]=k.def;for(const l of cur.layers)cur.layersOn[l.id]=l.on!==false;select();};Kn.appendChild(rs);
+  $('notes').innerHTML=cur.notes.map(n=>`<li>${n}</li>`).join('');
+  restart();renderOut();
+}
+function renderOut(){$('out').textContent=cur.constants(cur).join('\n');}
+function restart(){simMs=0;cur.emitters.forEach(x=>x.e.reset());if(cur.bands){cur.bands=[];cur.acc={};}}
+$('replay').onclick=restart;
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Play':'Pause';};
+$('copy').onclick=()=>{const txt=$('out').textContent;const done=()=>{$('copy').textContent='Copied';setTimeout(()=>$('copy').textContent='Copy',1200)};
+  try{navigator.clipboard.writeText(txt).then(done,()=>sel());}catch(e){sel();}
+  function sel(){const r=document.createRange();r.selectNodeContents($('out'));const s=getSelection();s.removeAllRanges();s.addRange(r);}};
+
+// ---------- main loop ----------
+function victimPos(ms){ if(!$('moving').checked) return [0,1.0,0];
+  const sp=cur.id==='travel'?cur.knobs.speed:3; const R=3.2, a=(ms/1000)*sp/R; return [R*Math.cos(a)-0,1.0,R*Math.sin(a)]; }
+function frame(now){
+  const dt=Math.min(0.05,(now-lastNow)/1000)*(+$('speed').value); lastNow=now;
+  if(!paused){simMs+=dt*1000;} cur._dt=paused?0:dt;
+  const total=(cur.id==='cyclone'||cur.id==='roots'||cur.id==='lbstate'||cur.id==='travel')?cur.durMs:cur.durMs*(cur.knobs.duration??1)+900;
+  if(simMs>total){ if($('loop').checked) restart(); else simMs=total; }
+  setupView();
+  g.fillStyle='#0c0f0d';g.fillRect(0,0,cv.width,cv.height);
+  drawFloor();
+  const vp=victimPos(simMs), origin=[vp[0],0,vp[2]];
+  // Travel form puff fires at shift in (0) and out (4500)
+  const travel=cur.id==='travel', shiftOutAt=4500;
+  for(const {id,e} of cur.emitters){
+    if(!cur.layersOn[id]){e.ps=[];continue;}
+    let ms=simMs, alive=true;
+    if(travel){ ms= simMs<shiftOutAt?simMs:simMs-shiftOutAt; }
+    if(!paused) e.update(dt,ms,origin,alive);
+  }
+  // body
+  shadow(vp, travel&&cur.layersOn.body&&simMs<shiftOutAt?0.9:0.55);
+  if(cur.id==='cyclone' && cur.layersOn.body){
+    const K=cur.knobs, rise=Math.min(1,simMs/600);
+    const yaw=simMs/1000*K.spinRev*TAU;
+    const c=[vp[0],1.0+K.lift*rise+K.bob*Math.sin(simMs/400),vp[2]];
+    // spin shown via a facing stripe
+    drawCapsule(c,[255,125,10]);
+    const f=proj([c[0]+0.45*Math.cos(yaw),c[1]+0.4,c[2]+0.45*Math.sin(yaw)]);
+    if(f&&Math.sin(yaw-cam.yaw+Math.PI/2)>-0.2){g.fillStyle='#2a1a08';g.beginPath();g.arc(f.x,f.y,0.09*f.s,0,TAU);g.fill();}
+  } else if(travel && cur.layersOn.body && simMs<shiftOutAt){
+    const sp=cur.knobs.speed, dist=simMs/1000*sp, heading=(simMs/1000)*sp/3.2+Math.PI/2;
+    drawCat([vp[0],0,vp[2]],$('moving').checked?heading:0, (dist/cur.knobs.stride)%1, cur);
+  } else if(cur.id==='moonfire'){
+    drawCapsule([-4,1.0,0],[255,125,10]); drawCapsule(vp,[150,160,175]);
+  } else {
+    drawCapsule(vp, cur.id==='roots'||cur.id==='cyclone'?[150,160,175]:[150,160,175]);
+  }
+  // effects
+  if(cur.customDraw) cur.customDraw(cur,simMs,vp);
+  for(const {id,e} of cur.emitters) if(cur.layersOn[id]) e.draw();
+  $('hud').textContent=`${cur.name} — ${cur.sub}\nt = ${(simMs/1000).toFixed(2)} s`;
+  $('hud').style.whiteSpace='pre';
+  requestAnimationFrame(frame);
+}
+buildTabs();
+try{const saved=localStorage.getItem('druidbench.tab');const f=EFFECTS.find(x=>x.id===saved);if(f)cur=f;}catch(e){}
+select();
+requestAnimationFrame(frame);
+</script>

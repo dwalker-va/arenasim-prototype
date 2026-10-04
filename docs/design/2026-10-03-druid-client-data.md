@@ -120,17 +120,18 @@ Already measured in `2026-09-06-heal-impact-client-data.md`, and already shipped
 ### `moonfire_impact_base.m2` (Moonfire landing, @Base)
 
 - A **mesh** model: 342 vertices; extent x/y ±3.8, z −2.0 … **13.9**.
-- It is a column of light descending from far above the target. It is not a particle
-  burst.
+- It is a **moon orb about 14 yd overhead and a thin beam** dropping from it onto the
+  target, with a violet glow and spiralling wisps at the feet. That reading comes from the
+  user's TBC reference screenshot. The mesh agrees: its narrowest radius (0.37–0.71 yd)
+  sits at the top (the orb) and at the base (the beam core). The 2–3.8 yd rings between
+  them were not split into submeshes. It is not a particle burst.
 - One sequence of 12000 ms, but every texture-weight track is dark after **2300 ms**:
   - `blue_glow2` 0 → peak at 667 → 0 at 1333 ms;
   - `red_glow3` 0 → 1133 → 0 at 2267 ms;
   - `ribbonblur1bea_gold` peaks at 600, gone by 1533 ms;
   - `gradient` held 700–1000 ms, gone by 1167 ms.
-- One colour track is violet `(47,0,144)`. The visible event is about **1.3 s of
-  blue-and-gold column**, with a red-violet afterglow out to 2.3 s.
-- Not yet measured: the column's radius profile. Bucket the vertex cloud along z before
-  benching, per the recipe's gotcha 4.
+- One colour track is violet `(47,0,144)`. The visible event is about **1.3 s of bright
+  beam**, fading out by 2.3 s.
 
 ### `magic_cast_hand.m2` (Moonfire cast hand)
 
@@ -170,19 +171,27 @@ Already measured in `2026-09-06-heal-impact-client-data.md`, and already shipped
 
 ### `cyclone_state.m2` (Cyclone stand-in, @Base)
 
-- Eleven emitters and no mesh. Loop 2066 ms, death sequence 158 (2200 ms).
-- **Funnel, P0–P4:** `clouds.blp`, blend 1 (alpha-key, not additive), in grey `(153,153,153)`
-  → white.
+- Eleven emitters and no mesh of its own. Loop 2066 ms, death sequence 158 (2200 ms).
+- **Funnel, P0–P4: MODEL emitters.** The `GPID` chunk names each emitter's particle
+  geometry. P0–P4 spawn `cyclonegeo.m2` / `cyclonegeo2.m2` / `cyclonegeo3.m2` (the same
+  strip rotated 90° apart). Each strip is 12 vertices of `spells/clouds4.blp`: a twisted
+  band wrapping about **200°** around the axis at radius 1.34–1.73. Its bottom edge climbs
+  −0.86 → 0.73 and its top edge 0.13 → 0.96 across the span, and both ends taper to a
+  tip. The particles rise (1.4–2.8 yd/s) and scale (e.g. ×0.56 → 0.19 → 1.11 over a 3 s
+  life), so the strips stack into a funnel that is narrow at the waist and wide at the
+  top. That matches the user's TBC reference screenshot. Blend 1 (alpha-key, not
+  additive); grey `(153,153,153)` → white. P0 ends near-black `(30,30,30)`, which gives the
+  funnel its dark core.
   - Speeds and rates are keyframed on a 2066 ms loop, which gives it a gusting funnel.
   - P4's colour ends violet-blue `(31,3,243)`.
   - Heights run −0.33 … 1.36.
 - **P5:** `toonsmoke16` (8×8 atlas) white smoke, spin 2.0, 3 s life.
-- **P6–P10:** brown `(98,85,77)` debris. Four of them sit at radius **2.54 yd** around the
-  base with gravity −6.9 and life 0.7 s, so dust is kicked up at the funnel's rim.
+- **P6–P10:** `cyclonerock1/2.m2` pebble models, brown `(98,85,77)`. Four of them sit at
+  radius **2.54 yd** around the base with gravity −6.9 and life 0.7 s, so pebbles are
+  kicked up at the funnel's rim.
 - **Victim animation:** kit 861 carries `SpellVisualAnim` loop **41**. Its name is not in the
-  table; in the community enum, 41 sits in the swim/fall block. Before building a
-  "lifted" pose on it, check what TBC Cyclone actually did to the victim. Ask for a
-  reference.
+  table; in the community enum, 41 sits in the swim/fall block. The user's TBC
+  screenshot shows the victim only slightly off the ground.
 - This is the client's wind-vortex kit, shared with Windfury (kit 363), Tornado and
   Enveloping Winds. **Enveloping Winds (aura 12 = stun) is a wind CC that suspends its
   victim. It is the closest era analogue to Cyclone**, as Wind Shear borrowed in AS-137.
@@ -214,10 +223,9 @@ Already measured in `2026-09-06-heal-impact-client-data.md`, and already shipped
   - Run (5): 800 ms at move speed 6.94;
   - Walk (4): 1000 ms at 2.5;
   - Stand (0): 2000 ms.
-- Our bodies are primitive capsules, so the build is a primitive cat assembled the way
-  Polymorph builds its sheep: a horizontal torso, a head, four legs and a raised tail.
-  It needs its OWN restore components; see the card's constraint about
-  `OriginalBodyMaterial`.
+- These proportions are a guide only. Our combatants are pills, so the form speaks the
+  same language (user ruling 5): the standing pill lies down into a low horizontal pill
+  with a head pill, cat ears and a raised tail. It has no legs; the gait is a bound.
 
 ## Sustained channels per victim (budget count)
 
@@ -252,20 +260,154 @@ Already measured in `2026-09-06-heal-impact-client-data.md`, and already shipped
 4. **Innervate: faithful reuse.** It lands with the shipped `HealImpactKind::HealingWave`
    splash (kit 101), with zero new art. The rising aura band and the icon tell it apart
    from a heal.
+5. **Travel Form is a pill on all fours, not a cheetah.** A realistic cat clashes with
+   pill combatants. The body is a horizontal capsule with a small head pill, two pointed
+   cat ears ("just enough of a hint") and a thin raised tail. It keeps the class tint,
+   and its gait is a bound: a bob and a nose-up/nose-down rock once per stride, driven by
+   distance travelled. It needs its OWN restore components, never the shared
+   `OriginalMesh` / `OriginalBodyMaterial` slot, because Fear can land on a shifted Druid.
+6. **Moonfire and Cyclone follow the user's TBC screenshots.** Moonfire is the orb and
+   thin beam; Cyclone is the dark, flaring funnel of `cyclonegeo` strips. Both
+   corrections are recorded in place above.
 
 Not put to the user because the data settles them, so they stand unless reversed:
 
 - Swiftmend keeps the Healing Wave landing; it is already faithful.
 - Entangling Roots gets a new bark-root style in place of the web.
 - Mark of the Wild gets its 0.67 s glyph.
-- Moonfire gets its arcane cast hands and its column.
-- Travel Form gets a primitive cheetah body with its own restore component, plus the
-  shift puff on entry and exit.
+- Moonfire gets its arcane cast hands and its orb-and-beam landing.
+- Travel Form gets the shift puff on entry and exit.
 - Every other Druid cast routes to the shipped `HealCastKind::Nature` hands, including
   the instants.
 
 ## Bench
 
-The Druid Visuals Bench is https://claude.ai/artifact/SF3kLUNLY5wVRjFFSzRXwn. Every
-effect opens at the client's values (×1.0) at real time, with one toggle per emitter
-layer. Its sign-off goes here.
+The Druid Visuals Bench is https://claude.ai/artifact/SF3kLUNLY5wVRjFFSzRXwn. A copy of
+the signed-off version is `docs/design/benches/2026-10-03-druid-visuals-bench.html`.
+Open it in a browser. Its drawing code is the reference to port: the band geometry,
+the gait, the layer timings.
+
+## Bench sign-off (2026-10-03)
+
+The user signed off **every tab at its defaults**. Build to the values below, then refine
+them in the Animation Sandbox rather than re-researching (see
+`client-values-are-a-ceiling-not-a-target`).
+
+- **Every layer is kept, with one exception:** Cyclone's violet-tipped skirt (P4) is off.
+- The bench's stand-ins are approved as shapes, and the build should match them:
+  - the Rejuvenation ribbon orbit;
+  - the root silhouette;
+  - the Moonfire orb, beam and wisps;
+  - the Cyclone lift.
+- **Mark of the Wild's glyph** stays a stand-in until `spells/agility_128.blp` is decoded.
+  The build card decodes it and uses the real texture.
+- Bench primitives are textured billboards and alpha meshes, all expressible in Bevy.
+  Every spawned piece carries `NotShadowCaster` (see
+  `preview-visual-work-before-implementing`).
+
+```rust
+### Rejuvenation
+// Rejuvenation landing — rejuvenation_impact_base.m2 (kit 56), AS-160 bench
+pub const REJUV_LANDING_SECS: f32 = 3.00;
+pub const REJUV_RIBBONS: bool = true;
+pub const REJUV_RIBBON_ORBIT_REV_PER_SEC: f32 = 1.00;
+pub const REJUV_RIBBON_ORBIT_RADIUS: f32 = 0.75;
+pub const REJUV_RIBBON_WIDTH: f32 = 0.278;
+pub const REJUV_RIBBON_TRAIL_SECS: f32 = 0.45;
+pub const REJUV_FLARE_LARGE: bool = true;
+pub const REJUV_FLARE_SMALL: bool = true;
+pub const REJUV_STARBURST: bool = true;
+pub const REJUV_SIZE_MUL: f32 = 1.00;
+pub const REJUV_DENSITY_MUL: f32 = 1.00;
+// HoT ticks: no visual (client has no (7,8) state) — per-ability HoT route returns None.
+
+### Lifebloom (sustained)
+// Lifebloom sustained state — lifebloom_state.m2 (kit 6966), AS-160 bench
+pub const LIFEBLOOM_STATE_LOOP_MS: u32 = 1834;
+pub const LIFEBLOOM_STATE_STREAKS: bool = true;
+pub const LIFEBLOOM_STATE_FLASHES: bool = true;
+pub const LIFEBLOOM_STATE_SIZE_MUL: f32 = 1.00;
+pub const LIFEBLOOM_STATE_SPREAD_MUL: f32 = 1.00;
+pub const LIFEBLOOM_STATE_LIFE_MUL: f32 = 1.00;
+pub const LIFEBLOOM_STATE_DENSITY_MUL: f32 = 1.00;
+pub const LIFEBLOOM_STATE_OPACITY: f32 = 1.00;
+pub const LIFEBLOOM_STATE_SCALES_WITH_STACKS: bool = false;
+
+### Lifebloom bloom
+// Lifebloom bloom — lifebloom_impact.m2 (kit 6965), AS-160 bench
+pub const BLOOM_SECS: f32 = 1.87;
+pub const BLOOM_LAYERS: [bool; 4] = [true, true, true, true]; // glow, shockwave, streaks, drift stars
+pub const BLOOM_SIZE_MUL: f32 = 1.00;
+pub const BLOOM_SPREAD_MUL: f32 = 1.00;
+pub const BLOOM_DENSITY_MUL: f32 = 1.00;
+pub const BLOOM_OPACITY: f32 = 1.00;
+
+### Moonfire
+// Moonfire — magic_cast_hand.m2 (kit 730) + moonfire_impact_base.m2 (kit 3293), AS-160 bench
+pub const MOONFIRE_CAST_HANDS: bool = true;
+pub const MOONFIRE_HAND_SIZE_MUL: f32 = 1.00;
+pub const MOONFIRE_ORB_HEIGHT: f32 = 13.90;
+pub const MOONFIRE_ORB_RADIUS: f32 = 0.55;
+pub const MOONFIRE_BEAM_WIDTH: f32 = 0.18;
+pub const MOONFIRE_BASE_GLOW_RADIUS: f32 = 0.90;
+pub const MOONFIRE_WISPS: usize = 3;
+pub const MOONFIRE_LANDING_SECS: f32 = 2.27;
+pub const MOONFIRE_LAYERS: [bool; 4] = [true, true, true, true]; // orb, beam, base glow, wisps
+pub const MOONFIRE_OPACITY: f32 = 1.00;
+// DoT: no sustained visual (client has none) — DoT-family entry becomes a reasoned permanent one.
+
+### Mark of the Wild
+// Mark of the Wild — markofwild_impact_head.m2 (kit 542), AS-160 bench
+pub const MOTW_GLYPH_SIZE: f32 = 0.70;
+pub const MOTW_GLYPH_HEIGHT_ABOVE_HEAD: f32 = 1.03;
+pub const MOTW_GLYPH_SECS: f32 = 0.667;
+pub const MOTW_PLATES: [bool; 2] = [true, true]; // red-orange, gold
+pub const MOTW_OPACITY: f32 = 1.00;
+
+### Entangling Roots
+// Entangling Roots state — entanglingroots_state.m2 (kit 66), AS-160 bench
+// New RootStyle::Roots for Nature roots (replaces RootStyle::Web).
+pub const ROOTS_BIRTH_SECS: f32 = 1.5;
+pub const ROOTS_DEATH_SECS: f32 = 1.3;
+pub const ROOTS_COUNT: usize = 6;
+pub const ROOTS_HEIGHT: f32 = 1.10;
+pub const ROOTS_RING_RADIUS: f32 = 0.60;
+pub const ROOTS_CURL: f32 = 0.80;
+pub const ROOTS_BASE_THICKNESS: f32 = 0.110;
+pub const ROOTS_BARK: Color = Color::srgb(0.376, 0.275, 0.165);
+pub const ROOTS_LAYERS: [bool; 3] = [true, true, true]; // roots, dust, pebbles
+pub const ROOTS_DUST_SIZE_MUL: f32 = 1.00;
+pub const ROOTS_DUST_DENSITY_MUL: f32 = 1.00;
+
+### Cyclone
+// Cyclone — cyclone_state.m2 (kit 861, borrowed from Enveloping Winds), AS-160 bench
+// Funnel = particles that are cyclonegeo strip MESHES (≈200° twisted cloud band, r≈1.5, 1.8 yd climb).
+pub const CYCLONE_LAYERS: [bool; 6] = [true, true, true, false, true, true]; // dark core, body, crown, violet skirt, smoke, rim
+pub const CYCLONE_BAND_SIZE_MUL: f32 = 1.00;
+pub const CYCLONE_BAND_RISE_MUL: f32 = 1.00;
+pub const CYCLONE_BAND_LIFE_MUL: f32 = 1.00;
+pub const CYCLONE_DENSITY_MUL: f32 = 1.00;
+pub const CYCLONE_FUNNEL_SPIN_REV_PER_SEC: f32 = 1.20;
+pub const CYCLONE_DARKNESS: f32 = 0.55;
+pub const CYCLONE_OPACITY: f32 = 0.80;
+pub const CYCLONE_VICTIM_LIFT: f32 = 0.35;
+pub const CYCLONE_VICTIM_SPIN_REV_PER_SEC: f32 = 0.75;
+pub const CYCLONE_VICTIM_BOB: f32 = 0.08;
+
+### Travel Form
+// Travel Form — pill body + druidmorph_impact_base.m2 (kit 3610) shift puff, AS-160 bench
+pub const SHIFT_PUFF_SECS: f32 = 1.70;
+pub const SHIFT_PUFF_LAYERS: [bool; 4] = [true, true, true, true]; // flash, smoke, streaks, motes
+pub const SHIFT_PUFF_SIZE_MUL: f32 = 1.00;
+pub const SHIFT_PUFF_SPREAD_MUL: f32 = 1.00;
+pub const SHIFT_PUFF_DENSITY_MUL: f32 = 1.00;
+pub const TRAVEL_BODY_LENGTH: f32 = 1.70; // tip to tip, Capsule3d::new(r, len - 2r) laid along heading
+pub const TRAVEL_BODY_RADIUS: f32 = 0.36;
+pub const TRAVEL_BODY_HEIGHT: f32 = 0.60; // centre above ground
+pub const TRAVEL_PARTS: [bool; 3] = [true, true, true]; // head, ears, tail
+pub const TRAVEL_EAR_HEIGHT: f32 = 0.20; // cone ears
+pub const TRAVEL_EAR_HALF_WIDTH: f32 = 0.09;
+pub const TRAVEL_STRIDE: f32 = 4.40; // yd per bound
+pub const TRAVEL_BOUND_BOB: f32 = 0.12;
+pub const TRAVEL_BOUND_ROCK_DEG: f32 = 9.0;
+```
