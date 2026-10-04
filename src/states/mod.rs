@@ -791,6 +791,32 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Druid control (`druid_control.rs`): Entangling Roots' bark roots,
+        // grown on the root rigs the hard-CC group above spawns and ages (so
+        // after it), and Cyclone's funnel. Graphical-only.
+        .add_systems(
+            Update,
+            (
+                play_match::update_root_tendrils,
+                play_match::update_cyclone_visuals,
+                play_match::update_cyclone_funnels,
+                play_match::update_druid_motes,
+            )
+                .chain()
+                .after(play_match::cleanup_cc_flares)
+                .run_if(in_combat_scene),
+        )
+        // The cycloned victim's lift composes on top of every `Update`
+        // writer of its body's transform (the gaits, the death sink, the
+        // victory bounce, the swing lean, the heal posture, the pet tilt), so
+        // it runs after all of them — in `PostUpdate`, before propagation, so
+        // the body renders lifted this frame. See `CycloneLift`.
+        .add_systems(
+            PostUpdate,
+            play_match::apply_cyclone_lift
+                .before(TransformSystem::TransformPropagate)
+                .run_if(in_combat_scene),
+        )
         // Frostbolt and Shadow Bolt: the bespoke missiles and the bursts
         // they leave on their victims.
         //

@@ -74,6 +74,8 @@ mod mortal_wounds;
 pub use mortal_wounds::*;
 mod hard_cc;
 pub use hard_cc::*;
+mod druid_control;
+pub use druid_control::*;
 mod rogue_crescents;
 pub use rogue_crescents::*;
 mod holy_justice;

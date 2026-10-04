@@ -3,6 +3,9 @@ use bevy::prelude::*;
 use bevy::render::mesh::ConeAnchor;
 use std::f32::consts::{FRAC_PI_2, TAU};
 
+use super::druid_control::{
+    build_bark_roots, root_tendrils_retract_secs, RootTendrils, ENTANGLING_ROOTS_AURA,
+};
 use crate::states::play_match::abilities::SpellSchool;
 use crate::states::play_match::components::*;
 
@@ -21,9 +24,10 @@ use crate::states::play_match::components::*;
 // The spatial grammar carries the distinction, because Root and Stun differ
 // mechanically and must be told apart at a glance:
 //
-//   Root  -> AT THE FEET. Ice crystals (Frost school) or a webbed sheet (Nature)
-//            stabbing up around the victim, then completely STILL. A rooted unit
-//            may still cast and swing; only its feet are held.
+//   Root  -> AT THE FEET. Ice crystals (Frost school), a webbed sheet (Nature)
+//            or bark roots (Entangling Roots, `druid_control.rs`) around the
+//            victim, then completely STILL. A rooted unit may still cast and
+//            swing; only its feet are held.
 //   Stun  -> OVER THE HEAD. A hueless whirl of beads turning once per second.
 //            A stunned unit is provably inert (`is_incapacitated` blocks
 //            auto-attacks and strips `CastingState`), so the whirl converts an
@@ -232,13 +236,26 @@ pub fn cc_jitter(seed: u32) -> f32 {
     ((s >> 9) & 0xFFFF) as f32 / 65536.0
 }
 
-/// Which restraint object a rooted unit wears, chosen from the aura's school so
-/// a future root inherits a treatment with no code change. Frost Nova is
-/// `spell_school: Frost`, Spider Web is `Nature`; anything else — including an
-/// aura that lost its school on the way through `AuraPending::from_ability`,
-/// which maps Physical/None to `None` — gets ice.
+/// Which restraint object a rooted unit wears.
+///
+/// Entangling Roots is routed by its RON `name:` — it shares the Nature school
+/// with Spider Web, and the school alone would dress the Druid's roots in the
+/// spider's silk. Every other root is chosen from its school, so a future root
+/// inherits a treatment with no code change: Frost Nova is `spell_school:
+/// Frost`, Spider Web is `Nature`, and anything else — including an aura that
+/// lost its school on the way through `AuraPending::from_ability`, which maps
+/// Physical/None to `None` — gets ice.
 pub fn root_style(aura: &Aura) -> RootStyle {
-    match aura.spell_school {
+    root_style_for(&aura.ability_name, aura.spell_school)
+}
+
+/// [`root_style`] from the two fields it reads, so the lands-silently audit can
+/// ask it of an ability config without building an aura.
+pub fn root_style_for(ability_name: &str, school: Option<SpellSchool>) -> RootStyle {
+    if ability_name == ENTANGLING_ROOTS_AURA {
+        return RootStyle::Roots;
+    }
+    match school {
         Some(SpellSchool::Nature) => RootStyle::Web,
         _ => RootStyle::Ice,
     }
@@ -268,11 +285,14 @@ pub fn cc_envelope(age: f32, retract: Option<f32>, grow_secs: f32, retract_secs:
     }
 }
 
-/// How long a rig of this kind takes to retract once its exit is armed.
-pub fn retract_secs(kind: CcKind) -> f32 {
-    match kind {
-        CcKind::Root => ROOT_RETRACT_SECS,
-        CcKind::Stun => STUN_RETRACT_SECS,
+/// How long a rig takes to retract once its exit is armed. Bark roots play the
+/// state model's 1.3s death sequence; the ice and the web sink on the shared
+/// envelope.
+pub fn retract_secs(rig: &CcRig) -> f32 {
+    match (rig.kind, rig.style) {
+        (CcKind::Root, Some(RootStyle::Roots)) => root_tendrils_retract_secs(),
+        (CcKind::Root, _) => ROOT_RETRACT_SECS,
+        (CcKind::Stun, _) => STUN_RETRACT_SECS,
     }
 }
 
@@ -282,15 +302,17 @@ pub fn retract_secs(kind: CcKind) -> f32 {
 
 /// Spawns the hub for one rig with its children already in place, positioned
 /// correctly at spawn so nothing is ever seen at the origin for a frame.
+#[allow(clippy::too_many_arguments)]
 fn spawn_rig<B: Bundle>(
     commands: &mut Commands,
     children: Vec<B>,
     owner: Entity,
     kind: CcKind,
+    style: Option<RootStyle>,
     origin: Vec3,
     lift: f32,
     delay: f32,
-) {
+) -> Entity {
     let hub = commands
         .spawn((
             Transform::from_translation(origin).with_scale(Vec3::ZERO),
@@ -302,6 +324,7 @@ fn spawn_rig<B: Bundle>(
                 retract: None,
                 lift,
                 delay,
+                style,
             },
             PlayMatchEntity,
         ))
@@ -314,6 +337,7 @@ fn spawn_rig<B: Bundle>(
         let e = commands.spawn(child).id();
         commands.entity(hub).add_child(e);
     }
+    hub
 }
 
 fn build_ice_crystals(
@@ -683,10 +707,6 @@ pub fn update_hard_cc_visuals(
                 if style_changed {
                     arm_retract(&mut rigs, CcKind::Root);
                 }
-                let parts = match style {
-                    RootStyle::Ice => build_ice_crystals(&mut meshes, &mut materials, seed),
-                    RootStyle::Web => build_web_sheet(&mut meshes, &mut materials, seed),
-                };
                 let origin = Vec3::new(
                     transform.translation.x,
                     CC_GROUND_Y,
@@ -700,15 +720,42 @@ pub fn update_hard_cc_visuals(
                 if nova_delay.is_some() {
                     commands.entity(entity).remove::<NovaFreezeDelay>();
                 }
-                spawn_rig(
-                    &mut commands,
-                    parts,
-                    entity,
-                    CcKind::Root,
-                    origin,
-                    0.0,
-                    delay,
-                );
+                // The styles' parts are different bundle types, so each arm
+                // spawns its own hub through the one generic `spawn_rig`.
+                let mut rig = |parts| {
+                    spawn_rig(
+                        &mut commands,
+                        parts,
+                        entity,
+                        CcKind::Root,
+                        Some(style),
+                        origin,
+                        0.0,
+                        delay,
+                    )
+                };
+                match style {
+                    RootStyle::Ice => {
+                        rig(build_ice_crystals(&mut meshes, &mut materials, seed));
+                    }
+                    RootStyle::Web => {
+                        rig(build_web_sheet(&mut meshes, &mut materials, seed));
+                    }
+                    RootStyle::Roots => {
+                        let parts = build_bark_roots(&mut meshes, &mut materials, seed);
+                        let hub = spawn_rig(
+                            &mut commands,
+                            parts,
+                            entity,
+                            CcKind::Root,
+                            Some(style),
+                            origin,
+                            0.0,
+                            delay,
+                        );
+                        commands.entity(hub).insert(RootTendrils::default());
+                    }
+                }
                 commands.entity(entity).try_insert(RootedVisual { style });
                 // Only on a genuine appearance or a style swap. A silent
                 // reconcile must not pop a second flare.
@@ -741,6 +788,7 @@ pub fn update_hard_cc_visuals(
                     parts,
                     entity,
                     CcKind::Stun,
+                    None,
                     origin,
                     stun_lift,
                     0.0,
@@ -792,6 +840,16 @@ pub fn update_cc_rigs(
         let stature = if is_pet { CC_PET_STATURE } else { 1.0 };
 
         match rig.kind {
+            // Bark roots grow along their own length (`update_root_tendrils`),
+            // so the hub stays at full size and only follows its owner.
+            CcKind::Root if rig.style == Some(RootStyle::Roots) => {
+                transform.translation = Vec3::new(
+                    owner_transform.translation.x,
+                    CC_GROUND_Y,
+                    owner_transform.translation.z,
+                );
+                transform.scale = Vec3::splat(stature);
+            }
             CcKind::Root => {
                 let e = cc_envelope(
                     (rig.age - rig.delay).max(0.0),
@@ -910,7 +968,7 @@ pub fn cleanup_cc_rigs(
     owners: Query<(), With<Combatant>>,
 ) {
     for (entity, rig) in rigs.iter() {
-        let finished = rig.retract.is_some_and(|r| r >= retract_secs(rig.kind));
+        let finished = rig.retract.is_some_and(|r| r >= retract_secs(rig));
         // Recursive despawn takes the unmarked children with it.
         if finished || owners.get(rig.owner).is_err() {
             commands.entity(entity).despawn();

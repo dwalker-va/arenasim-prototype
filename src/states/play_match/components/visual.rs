@@ -1246,8 +1246,13 @@ pub enum AuraApplyRoute {
 /// reviewable suppression set for [`AuraBand`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AuraApplyOwner {
-    /// Root crystals / web sheet and the stun whirl (`hard_cc.rs`).
+    /// Root crystals / web sheet / bark roots and the stun whirl
+    /// (`hard_cc.rs`, the roots in `druid_control.rs`).
     HardCc,
+    /// Cyclone's funnel of cloud bands and its lifted, spinning victim
+    /// (`druid_control.rs`). The funnel builds from the ground up the moment
+    /// the aura lands, so a rising band would only double it.
+    CycloneFunnel,
     /// Fear shroud, apply flash and flee run (`fear.rs`).
     FearShroud,
     /// Sheep body swap and transform puffs (`polymorph.rs`).
@@ -1333,9 +1338,10 @@ impl AuraApplyRoute {
             | AuraType::HealingOverTime
             | AuraType::WindfuryBuff => AuraApplyRoute::Band,
 
-            // The Druid's Cyclone and Travel Form have no bespoke treatment
-            // yet (AS-160 scopes them), so the family cue draws them.
-            AuraType::Cyclone | AuraType::TravelForm => AuraApplyRoute::Band,
+            // Travel Form has no bespoke apply treatment of its own, so the
+            // family cue draws it.
+            AuraType::TravelForm => AuraApplyRoute::Band,
+            AuraType::Cyclone => AuraApplyRoute::Owned(AuraApplyOwner::CycloneFunnel),
 
             AuraType::Root | AuraType::Stun => AuraApplyRoute::Owned(AuraApplyOwner::HardCc),
             AuraType::Fear => AuraApplyRoute::Owned(AuraApplyOwner::FearShroud),
@@ -2462,9 +2468,10 @@ pub struct WindfuryTornado {
     pub spin: f32,
 }
 
-/// Which restraint object a rooted unit wears. Selected from the aura's
-/// `spell_school` (Frost Nova is `Frost`, Spider Web is `Nature`), so a future
-/// root inherits a treatment with no code change.
+/// Which restraint object a rooted unit wears. Selected by
+/// `hard_cc::root_style_for`: Entangling Roots by its RON name, everything else
+/// from the aura's `spell_school` (Frost Nova is `Frost`, Spider Web is
+/// `Nature`), so a future root inherits a treatment with no code change.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RootStyle {
     /// Faceted ice crystals stabbing up around the feet.
@@ -2472,6 +2479,10 @@ pub enum RootStyle {
     /// A webbed sheet over the shins — spokes out to a hem pinned on the floor,
     /// crossed by concentric rings.
     Web,
+    /// Bark roots curling up out of the ground around the legs, with a puff of
+    /// dust and pebbles while they grow (`entanglingroots_state.m2`, kit 66;
+    /// drawn by `druid_control.rs`).
+    Roots,
 }
 
 /// Marker: this unit is rooted and wearing the feet treatment.
@@ -2537,6 +2548,11 @@ pub struct CcRig {
     /// sim-to-render correction, and is large and negative for pets). Used by
     /// the Stun whirl; the Root rig ignores it and pins to the floor instead.
     pub lift: f32,
+    /// The restraint a Root rig carries, `None` on a Stun rig. Decides the
+    /// rig's timing: the ice and the web scale in and out on the shared
+    /// envelope, while bark roots grow along their own length and take longer
+    /// to withdraw (`druid_control.rs`).
+    pub style: Option<RootStyle>,
 }
 
 /// The one-shot ring marking the instant a hard CC lands. Per VICTIM, so a Frost

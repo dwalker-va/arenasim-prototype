@@ -55,11 +55,11 @@ use arenasim::states::play_match::ability_config::{AbilityConfig, AbilityDefinit
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::components::{
     AuraLandingKind, AuraType, CurseKind, HealImpact, HealImpactKind, HotVisual,
-    InstantAbilityFired, SchoolImpact, TotemElement,
+    InstantAbilityFired, RootStyle, SchoolImpact, TotemElement,
 };
 use arenasim::states::play_match::{
-    bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, DotStateVisual,
-    InterruptLanding, SlowTint,
+    bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, root_style_for,
+    DotStateVisual, InterruptLanding, SlowTint,
 };
 
 use AbilityType::*;
@@ -553,9 +553,10 @@ const CONTROL_MEMBERS: &[AbilityType] = &[
 
 /// The victim treatment of a member's control aura. Keyed on the aura TYPE
 /// (the renderers poll `ActiveAuras` for it), except Incapacitate, whose ice
-/// block is spawned by the trap trigger rather than by the aura, and a slow,
+/// block is spawned by the trap trigger rather than by the aura, a slow,
 /// whose ring is tinted through `SlowTint::for_slow` by the aura's RON
-/// `name:` — so a slow with no tint arm lands silently.
+/// `name:` — so a slow with no tint arm lands silently — and a root, whose
+/// restraint `root_style_for` picks from its name and school.
 fn control_treatment(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
     let mut treatment = None;
     for t in granted_auras(a, c) {
@@ -564,7 +565,11 @@ fn control_treatment(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> 
         }
         let this = match t {
             AuraType::Stun => Some("stun whirl (hard_cc.rs)"),
-            AuraType::Root => Some("root restraint (hard_cc.rs)"),
+            AuraType::Root => Some(match root_style_for(&c.name, Some(c.spell_school)) {
+                RootStyle::Roots => "bark roots (druid_control.rs)",
+                RootStyle::Ice | RootStyle::Web => "root restraint (hard_cc.rs)",
+            }),
+            AuraType::Cyclone => Some("cyclone funnel + lifted victim (druid_control.rs)"),
             AuraType::Fear => Some("fear shroud (fear.rs)"),
             AuraType::Polymorph => Some("sheep swap (polymorph.rs)"),
             AuraType::Incapacitate if a == FreezingTrap => Some("ice block (traps.rs)"),
@@ -584,7 +589,7 @@ fn control_finds_every_member() {
     assert_finds("crowd-control", is_control, CONTROL_MEMBERS);
 }
 
-const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[(Cyclone, "AS-160 (Druid visuals)")];
+const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
 
 #[test]
 fn control_lands_nothing_silently() {
