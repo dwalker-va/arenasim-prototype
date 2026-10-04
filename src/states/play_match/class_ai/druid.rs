@@ -19,12 +19,15 @@
 //!    bloom managed on purpose (see [`lifebloom_decision`]). A threat that is
 //!    only closing gets the Rejuvenation, not the stack: rolling three stacks
 //!    on an ally nobody is hitting yet is mana spent on overheal.
-//! 7. What a teammate below `urgency_hp_threshold` is owed (see
-//!    [`DruidTurn::try_dying_heal`]): its Rejuvenation, a Roots peel on a
-//!    melee attacking or closing on it, a Lifebloom stack while it is under
-//!    attack — then a Mark of the Wild step 1 held back.
-//! 8. Control, when an ally needs a peel or the kill needs its healer gone
-//!    (see [`DruidTurn::try_control`]): Cyclone, then Entangling Roots.
+//! 7. What a teammate below `urgency_hp_threshold` is owed, and the peels (see
+//!    [`DruidTurn::try_dying_heal`]): the teammate's Rejuvenation; Cyclone on
+//!    an enemy attacking the focus once it is below [`DRUID_URGENT_HP`]; Roots
+//!    on a melee attacking or closing on a dying teammate; the teammate's
+//!    Lifebloom stack while it is under attack — then a Mark of the Wild step 1
+//!    held back.
+//! 8. Control, when the kill needs its healer gone or a melee is on the Druid
+//!    or its focus (see [`DruidTurn::try_control`]): Cyclone, then Entangling
+//!    Roots.
 //! 9. Rejuvenation on any other injured ally.
 //! 10. Moonfire on the kill target.
 //!
@@ -546,6 +549,17 @@ pub fn decide_druid_action(
     acted
 }
 
+/// What the Cyclone peel ([`DruidTurn::try_cyclone_peel`]) did this turn.
+#[derive(Debug, Clone, Copy, Default)]
+struct CyclonePeel {
+    /// It cast.
+    cast: bool,
+    /// It found an attacker in sight to cyclone.
+    picked: bool,
+    /// It passed over an attacker it could reach but for sight.
+    occluded: bool,
+}
+
 /// One decision's worth of context, so the rotation's steps share it instead
 /// of each taking a dozen parameters.
 struct DruidTurn<'a, 'b, 'w, 's, 'c> {
@@ -696,24 +710,27 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 .reject(AbilityType::Lifebloom, RejectionReason::NoValidTarget);
         }
 
-        // 7. A dying teammate's heals, then the Mark step 1 held back — unless
-        // the medic walk's teammate is still out of reach, when the Mark waits
-        // with the rest of the damage and utility.
+        // The control focus: the ally the peels guard. It is ranked over every
+        // ally, sight or not: its attackers may be in sight when it is not.
+        let control_focus = focused_ally(ctx, self.threat_radius, |_| true)
+            .filter(|(a, _)| my_pos.distance(a.position) <= heal_range)
+            .map(|(a, _)| (a.entity, a.health_pct()));
+
+        // 7. A dying teammate's heals and the peels, then the Mark step 1 held
+        // back — unless the medic walk's teammate is still out of reach, when
+        // the Mark waits with the rest of the damage and utility.
         let held = self.held_for_medic_walk();
-        if self.try_dying_heal(combatant) {
+        let mut cyclone_peel = CyclonePeel::default();
+        if self.try_dying_heal(combatant, control_focus, &mut cyclone_peel) {
             return true;
         }
         if mark_waits && self.try_mark_of_the_wild(combatant, held) {
             return true;
         }
 
-        // 8. Control: a peel for the focused ally, or the enemy healer. The
-        // peel's focus is ranked over every ally, sight or not: its attackers
-        // may be in sight when the ally is not.
-        let control_focus = focused_ally(ctx, self.threat_radius, |_| true)
-            .filter(|(a, _)| my_pos.distance(a.position) <= heal_range)
-            .map(|(a, _)| (a.entity, a.health_pct()));
-        if self.try_control(combatant, control_focus, held) {
+        // 8. Control: the enemy healer, and Roots on a melee on the Druid or
+        // its focus.
+        if self.try_control(combatant, control_focus, held, cyclone_peel) {
             return true;
         }
 
@@ -780,11 +797,14 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         }
     }
 
-    /// Step 7, for the teammates below `urgency_hp_threshold`. Never governed
-    /// and never held: they are dying.
+    /// Step 7, for the teammates below `urgency_hp_threshold`, and the peels.
+    /// Never governed and never held: they are dying.
     /// 1. The lowest one in reach (range, then sight) gets its own
     ///    Rejuvenation when it carries none, or it is in its refresh window.
-    /// 2. The Roots PEEL ([`Self::try_roots_peel`]).
+    /// 2. The peels: the Cyclone for the control focus
+    ///    ([`Self::try_cyclone_peel`], whose verdict lands in `cyclone_peel`
+    ///    for step 8 to read), then the Roots for a dying teammate
+    ///    ([`Self::try_roots_peel`]).
     /// 3. That lowest one gets a Lifebloom as [`lifebloom_decision`] rules it:
     ///    only while it is under attack — a threat that is only closing gets
     ///    the Rejuvenation and the peel, not the stack.
@@ -792,7 +812,12 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// Swiftmend and the Rejuvenation that arms it are steps 2-3, for an ally
     /// below [`DRUID_EMERGENCY_HP`]. With nothing left to add, the rotation
     /// goes on.
-    fn try_dying_heal(&mut self, combatant: &mut Combatant) -> bool {
+    fn try_dying_heal(
+        &mut self,
+        combatant: &mut Combatant,
+        control_focus: Option<(Entity, f32)>,
+        cyclone_peel: &mut CyclonePeel,
+    ) -> bool {
         let lowest = self
             .ctx
             .lowest_health_ally_in_reach(self.urgency_hp, self.heal_range, self.my_pos)
@@ -814,7 +839,8 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 return true;
             }
         }
-        if self.try_roots_peel(combatant) {
+        *cyclone_peel = self.try_cyclone_peel(combatant, control_focus);
+        if cyclone_peel.cast || self.try_roots_peel(combatant) {
             return true;
         }
         let Some((ally, ally_pos, hp, threat)) = lowest else {
@@ -823,6 +849,91 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         let lifebloom = self.own(ally, AbilityType::Lifebloom).cloned();
         lifebloom_decision(lifebloom.as_ref(), hp, threat.attacking > 0) == LifebloomDecision::Cast
             && self.cast(combatant, AbilityType::Lifebloom, ally, ally_pos)
+    }
+
+    /// The Cyclone PEEL: the control focus is below [`DRUID_URGENT_HP`] and a
+    /// visible enemy (not a pet) is attacking it — cyclone the nearest such
+    /// attacker to the Druid. Never governed and never held: an ally is dying.
+    /// An attacker in range but out of sight is passed over for the next one in
+    /// sight; one beyond range is still picked and refused, as it always was.
+    /// The kill target, a target already under hard crowd control and one
+    /// immune to Cyclone by diminishing returns are never picked.
+    fn try_cyclone_peel(
+        &mut self,
+        combatant: &mut Combatant,
+        focus: Option<(Entity, f32)>,
+    ) -> CyclonePeel {
+        let kill_target = combatant.target;
+        let usable = |turn: &Self, e: &CombatantInfo, category: DRCategory| {
+            e.is_alive
+                && Some(e.entity) != kill_target
+                && !turn.ctx.is_ccd(e.entity)
+                && !turn.ctx.is_dr_immune(e.entity, category)
+        };
+        // Enemies attacking `ally` from within their reach, nearest first.
+        let attackers_of = |turn: &Self, ally: Entity| -> Vec<(Entity, Vec3)> {
+            let Some(ally_pos) = turn.ctx.combatants.get(&ally).map(|a| a.position) else {
+                return Vec::new();
+            };
+            let mut attackers: Vec<&CombatantInfo> = turn
+                .ctx
+                .enemies_targeting(ally)
+                .into_iter()
+                .filter(|e| {
+                    let reach = match e.pet_type {
+                        Some(pet) => pet.preferred_range(),
+                        None => e.class.preferred_range(),
+                    } + DRUID_ATTACK_RANGE_SLACK;
+                    e.position.distance(ally_pos) <= reach
+                })
+                .collect();
+            attackers.sort_by(|a, b| {
+                turn.my_pos
+                    .distance(a.position)
+                    .partial_cmp(&turn.my_pos.distance(b.position))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            attackers
+                .into_iter()
+                .map(|e| (e.entity, e.position))
+                .collect()
+        };
+
+        // An enemy a cast of `ability` could reach but for sight
+        // ([`super::sight_blocks`]) is passed over for the next one, so an
+        // occluded peel pick yields to one in sight; a pick beyond range is
+        // still picked and refused, as it always was.
+        let cyclone_range = self.abilities.get_unchecked(&AbilityType::Cyclone).range;
+        let mut cyclone_occluded = false;
+
+        // The attacker to cyclone.
+        let peel = focus
+            .filter(|&(_, hp)| hp < DRUID_URGENT_HP)
+            .and_then(|(ally, _)| {
+                attackers_of(self, ally).into_iter().find(|&(e, pos)| {
+                    let eligible = self.ctx.combatants.get(&e).is_some_and(|info| {
+                        !info.is_pet && usable(self, info, DRCategory::Cyclone)
+                    });
+                    let blocked =
+                        eligible && super::sight_blocks(self.ctx, cyclone_range, self.my_pos, pos);
+                    cyclone_occluded |= blocked;
+                    eligible && !blocked
+                })
+            });
+        let mut verdict = CyclonePeel {
+            cast: false,
+            picked: peel.is_some(),
+            occluded: cyclone_occluded,
+        };
+        if let Some((enemy, enemy_pos)) = peel {
+            verdict.cast = self.cast(combatant, AbilityType::Cyclone, enemy, enemy_pos);
+        } else if cyclone_occluded {
+            // Never governed: a peel is for a dying ally.
+            let reason =
+                self.unreached(combatant, AbilityType::Cyclone, RejectionReason::LosBlocked);
+            self.builder.reject(AbilityType::Cyclone, reason);
+        }
+        verdict
     }
 
     /// The Roots PEEL: Entangling Roots on a melee enemy or pet attacking or
@@ -977,12 +1088,15 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// diminishing returns, is passed over, and so is a peel pick in range but
     /// out of sight: the next attacker in sight is taken instead.
     ///
-    /// While `held` ([`Self::held_for_medic_walk`]) only the peel may cast.
+    /// The Cyclone peel (1) is made at step 7 ([`Self::try_cyclone_peel`]);
+    /// `cyclone_peel` is its verdict. While `held`
+    /// ([`Self::held_for_medic_walk`]) the rest is held.
     fn try_control(
         &mut self,
         combatant: &mut Combatant,
         focus: Option<(Entity, f32)>,
         held: bool,
+        cyclone_peel: CyclonePeel,
     ) -> bool {
         let kill_target = combatant.target;
         let usable = |turn: &Self, e: &CombatantInfo, category: DRCategory| {
@@ -991,68 +1105,6 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 && !turn.ctx.is_ccd(e.entity)
                 && !turn.ctx.is_dr_immune(e.entity, category)
         };
-        // Enemies attacking `ally` from within their reach, nearest first.
-        let attackers_of = |turn: &Self, ally: Entity| -> Vec<(Entity, Vec3)> {
-            let Some(ally_pos) = turn.ctx.combatants.get(&ally).map(|a| a.position) else {
-                return Vec::new();
-            };
-            let mut attackers: Vec<&CombatantInfo> = turn
-                .ctx
-                .enemies_targeting(ally)
-                .into_iter()
-                .filter(|e| {
-                    let reach = match e.pet_type {
-                        Some(pet) => pet.preferred_range(),
-                        None => e.class.preferred_range(),
-                    } + DRUID_ATTACK_RANGE_SLACK;
-                    e.position.distance(ally_pos) <= reach
-                })
-                .collect();
-            attackers.sort_by(|a, b| {
-                turn.my_pos
-                    .distance(a.position)
-                    .partial_cmp(&turn.my_pos.distance(b.position))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            attackers
-                .into_iter()
-                .map(|e| (e.entity, e.position))
-                .collect()
-        };
-
-        // An enemy a cast of `ability` could reach but for sight
-        // ([`super::sight_blocks`]) is passed over for the next one, so an
-        // occluded peel pick yields to one in sight; a pick beyond range is
-        // still picked and refused, as it always was.
-        let cyclone_range = self.abilities.get_unchecked(&AbilityType::Cyclone).range;
-        let mut cyclone_occluded = false;
-        let mut roots_occluded = false;
-
-        // 1. Cyclone to peel for a dying focus.
-        let peel = focus
-            .filter(|&(_, hp)| hp < DRUID_URGENT_HP)
-            .and_then(|(ally, _)| {
-                attackers_of(self, ally).into_iter().find(|&(e, pos)| {
-                    let eligible = self.ctx.combatants.get(&e).is_some_and(|info| {
-                        !info.is_pet && usable(self, info, DRCategory::Cyclone)
-                    });
-                    let blocked =
-                        eligible && super::sight_blocks(self.ctx, cyclone_range, self.my_pos, pos);
-                    cyclone_occluded |= blocked;
-                    eligible && !blocked
-                })
-            });
-        if let Some((enemy, enemy_pos)) = peel {
-            if self.cast(combatant, AbilityType::Cyclone, enemy, enemy_pos) {
-                return true;
-            }
-        } else if cyclone_occluded {
-            // Never governed: a peel is for a dying ally.
-            let reason =
-                self.unreached(combatant, AbilityType::Cyclone, RejectionReason::LosBlocked);
-            self.builder.reject(AbilityType::Cyclone, reason);
-        }
-
         // 2. Cyclone the enemy healer when the kill is close.
         let kill_close = kill_target
             .and_then(|t| self.ctx.combatants.get(&t))
@@ -1073,7 +1125,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                     return true;
                 }
             }
-            _ if peel.is_none() && !cyclone_occluded => {
+            _ if !cyclone_peel.picked && !cyclone_peel.occluded => {
                 self.builder.reject(
                     AbilityType::Cyclone,
                     RejectionReason::PreconditionUnmet {
@@ -1091,6 +1143,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         if let Some((ally, _)) = focus {
             guarded.push(ally);
         }
+        let mut roots_occluded = false;
         let melee_threat = self.melee_threat(kill_target, &guarded, &mut roots_occluded);
         let urgent = focus.is_some_and(|(_, hp)| hp < DRUID_URGENT_HP);
         let Some((enemy, enemy_pos)) = melee_threat else {
@@ -1876,7 +1929,8 @@ mod reach_tests {
         focus: Option<(Entity, f32)>,
     ) -> DecisionTrace {
         turn(s, obstacles, 20.0, None, |t, c| {
-            t.try_control(c, focus, false)
+            let peel = t.try_cyclone_peel(c, focus);
+            peel.cast || t.try_control(c, focus, false, peel)
         })
     }
 
@@ -2018,7 +2072,8 @@ mod reach_tests {
     ) -> serde_json::Value {
         let trace = turn(s, obstacles, 20.0, None, |t, c| {
             c.current_mana = 0.0;
-            t.try_control(c, focus, false)
+            let peel = t.try_cyclone_peel(c, focus);
+            peel.cast || t.try_control(c, focus, false, peel)
         });
         candidate(&trace, ability)["reason"].clone()
     }
@@ -2259,12 +2314,20 @@ mod reach_tests {
     }
 
     /// `urgency_hp_threshold` is a strict bound: a teammate AT it is not dying.
+    /// The Mage there is the focus (an enemy caster is on it), so a Mark held
+    /// back for a dying teammate would yield to the focus Rejuvenation.
     #[test]
     fn a_teammate_at_the_urgency_threshold_is_not_dying() {
         let threshold = MovementConfig::default().shared.urgency_hp_threshold;
 
         let (mut s, kill) = kill_scene(1.0, threshold);
-        let me = s.units[0];
+        let (me, mage) = (s.units[0], s.units[2]);
+        add_enemy(
+            &mut s,
+            Mage,
+            IN_SIGHT + Vec3::new(-10.0, 0.0, 0.0),
+            Some(mage),
+        );
         assert_eq!(
             outcome(&take(&mut s, &[], kill, None)),
             chose("MarkOfTheWild", me),
@@ -2333,6 +2396,27 @@ mod reach_tests {
             outcome(&take(&mut s, &pillar(), kill, Some(warrior))),
             chose("EntanglingRoots", enemy),
             "the peel under the medic walk's hold"
+        );
+    }
+
+    /// The Cyclone peel comes before the Roots peel: a Warrior beating on the
+    /// dying Mage (the focus, every heal rolling) is cycloned, not rooted.
+    #[test]
+    fn the_cyclone_peel_comes_before_the_roots_peel() {
+        let (mut s, kill) = kill_scene(1.0, 0.47);
+        let mage = s.units[2];
+        mark_everyone(&mut s);
+        all_heals_rolling(&mut s, mage);
+        let attacker = add_enemy(
+            &mut s,
+            Warrior,
+            IN_SIGHT + Vec3::new(1.0, 0.0, 1.0),
+            Some(mage),
+        );
+        assert_eq!(
+            outcome(&take(&mut s, &[], kill, None)),
+            chose("Cyclone", attacker),
+            "a Warrior attacking the dying Mage"
         );
     }
 
