@@ -668,6 +668,9 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             AuraType::FearImmunity if a == BerserkerRage => {
                 Some("berserk mask (effects/berserker_rage.rs → berserk.rs)")
             }
+            AuraType::TravelForm => {
+                Some("pill on all fours + shift puff (TravelFormVisual → shapeshift.rs)")
+            }
             _ => family_application_cue(t),
         };
         // Every status aura must be drawn for the member to pass.
@@ -693,7 +696,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (MarkOfTheWild, "AS-160 (Druid visuals)"),
-    (TravelForm, "AS-160 (Druid visuals)"),
 ];
 
 #[test]

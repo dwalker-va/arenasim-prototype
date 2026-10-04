@@ -16,6 +16,8 @@ mod polymorph;
 pub use polymorph::*;
 mod transform_puffs;
 pub use transform_puffs::*;
+mod shapeshift;
+pub use shapeshift::*;
 mod flame;
 pub use flame::*;
 mod drain_life;

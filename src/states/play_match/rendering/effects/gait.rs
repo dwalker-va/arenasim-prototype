@@ -1,4 +1,5 @@
 use super::hit_reaction::{hit_flinch_offset, hit_flinch_weight};
+use super::shapeshift::{TRAVEL_BOUND_BOB, TRAVEL_BOUND_ROCK_DEG, TRAVEL_STRIDE};
 use crate::states::play_match::components::*;
 use bevy::prelude::*;
 
@@ -201,8 +202,9 @@ fn apply_gait_offset(
 /// post-`CombatResolution` window, so excluding their drivers is still the
 /// cleanest way to avoid the last-writer-wins race. `Without<PolymorphedVisual>`
 /// does the same for [`update_sheep_hop`], which owns the gait while a unit is
-/// a sheep, and `Without<FearedVisual>` for [`update_fear_run`], which owns it
-/// while a unit is feared.
+/// a sheep, `Without<FearedVisual>` for [`update_fear_run`], which owns it
+/// while a unit is feared, and `Without<TravelFormVisual>` for
+/// [`update_travel_bound`], which owns it while a Druid is in Travel Form.
 ///
 /// Graphical-mode only — registered in `StatesPlugin::build()`, never in
 /// `add_core_combat_systems`. Visual-only; touches no gameplay state.
@@ -222,6 +224,7 @@ pub fn update_walk_animation(
             Without<VisualBody>,
             Without<PolymorphedVisual>,
             Without<FearedVisual>,
+            Without<TravelFormVisual>,
         ),
     >,
     mut bodies: Query<(&mut Transform, &VisualBody)>,
@@ -355,6 +358,9 @@ pub fn update_fear_run(
         (
             With<FearedVisual>,
             Without<PolymorphedVisual>,
+            // A shifted Druid's body is the form, so the bound owns its gait
+            // while it is feared too (the husk tint still rides the form).
+            Without<TravelFormVisual>,
             // Death and celebration own the body Y when present, mirroring the
             // walk bob and sheep hop — the `FearedVisual` removal on death is a
             // deferred Command, so without these the panic run would race the
@@ -394,6 +400,89 @@ pub fn update_fear_run(
             GAIT_SETTLE_RATE * time.delta_secs(),
             flinch_offset_of(flinch),
         );
+    }
+}
+
+/// Rate the bound's rock eases back to level once idle, in radians per second
+/// — the 9° rock settles in about the time the bob does.
+const TRAVEL_ROCK_SETTLE_RATE: f32 = 0.8;
+
+/// Drive the bound on a Druid in Travel Form, replacing the walk bob
+/// (`shapeshift.rs` draws the form).
+///
+/// Distance-driven like every gait here, at one bound per
+/// [`TRAVEL_STRIDE`] yards, ported from the AS-160 bench's `drawCat`: the body
+/// bobs `|sin|` of the stride phase (up twice a stride, landing between) by
+/// [`TRAVEL_BOUND_BOB`], and rocks `sin` of it — nose up, then nose down, once
+/// per stride — by [`TRAVEL_BOUND_ROCK_DEG`]. The bob is the body's local Y,
+/// written through [`apply_gait_offset`] so a hit's flinch composes with it
+/// and an idle Druid eases down; the rock is the [`TravelFormRig`]'s rotation
+/// about its own centre, which only this system writes. The flinch takes the
+/// rock over as it takes the bob over, and an idle Druid eases level.
+///
+/// Shares [`WalkAnim`] with the other gaits, so the walk resumes on a live
+/// baseline when the form ends. Filters mirror theirs: death and celebration
+/// own the body Y, a sheep keeps its hop (the two never coexist), and
+/// `Without<VisualBody>` / `Without<Combatant>` keep the three queries
+/// disjoint.
+///
+/// Graphical-mode only — registered in `StatesPlugin::build()`, never in
+/// `add_core_combat_systems`. Visual-only; touches no gameplay state.
+pub fn update_travel_bound(
+    time: Res<Time>,
+    mut movers: Query<
+        (
+            &Transform,
+            &mut WalkAnim,
+            &Combatant,
+            &Children,
+            &TravelFormVisual,
+            Option<&HitFlinch>,
+        ),
+        (
+            Without<PolymorphedVisual>,
+            Without<DeathAnimation>,
+            Without<Celebrating>,
+            Without<VisualBody>,
+        ),
+    >,
+    mut bodies: Query<(&mut Transform, &VisualBody)>,
+    mut rigs: Query<
+        (&mut Transform, &mut TravelFormRig),
+        (Without<VisualBody>, Without<Combatant>),
+    >,
+) {
+    let dt = time.delta_secs();
+    for (transform, mut walk, combatant, children, form, flinch) in movers.iter_mut() {
+        let idle = advance_gait(
+            &mut walk,
+            transform.translation.xz(),
+            TRAVEL_STRIDE,
+            combatant.is_alive(),
+            dt,
+        );
+        let bob = walk.phase.sin().abs() * TRAVEL_BOUND_BOB;
+        let flinch = flinch_offset_of(flinch);
+        apply_gait_offset(
+            children,
+            &mut bodies,
+            &mut walk,
+            idle,
+            bob,
+            GAIT_SETTLE_RATE * dt,
+            flinch,
+        );
+        let Ok((mut rig_transform, mut rig)) = rigs.get_mut(form.rig) else {
+            continue;
+        };
+        if idle {
+            let step = TRAVEL_ROCK_SETTLE_RATE * dt;
+            rig.rock -= rig.rock.clamp(-step, step);
+        } else {
+            rig.rock = walk.phase.sin() * TRAVEL_BOUND_ROCK_DEG.to_radians();
+        }
+        // +Z is the heading, so nose-up is a negative turn about +X.
+        rig_transform.rotation = Quat::from_rotation_x(-rig.rock * (1.0 - flinch.1));
     }
 }
 

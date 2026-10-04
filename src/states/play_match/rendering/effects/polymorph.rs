@@ -40,6 +40,10 @@ pub fn update_polymorph_visuals(
     // this, a Fear-then-Polymorph sequence has Polymorph overwrite the real
     // material handle Fear stored, leaving the unit stuck on the husk tint.
     // (Fear's query carries the mirror `Without<PolymorphedVisual>`.)
+    // `Without<TravelFormVisual>` is the same guard against a Druid's Travel
+    // Form, which takes the same body mesh away (`shapeshift.rs` carries the
+    // mirror). The sim makes a shifted Druid immune to Polymorph, so in
+    // practice only the form's half ever bites.
     combatants: Query<
         (
             Entity,
@@ -49,7 +53,7 @@ pub fn update_polymorph_visuals(
             Option<&PolymorphedVisual>,
             &Children,
         ),
-        Without<FearedVisual>,
+        (Without<FearedVisual>, Without<TravelFormVisual>),
     >,
     mut bodies: Query<(
         &mut Mesh3d,
