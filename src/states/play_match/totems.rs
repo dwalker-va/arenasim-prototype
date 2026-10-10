@@ -27,7 +27,8 @@ const TOTEM_BUFF_REFRESH_WINDOW: f32 = 2.0;
 /// Build the beneficial aura a totem pulses. `break_on_damage_threshold: -1.0`
 /// (never breaks); `ability_name` is the element's stable buff name (refresh
 /// key). HoT buffs tick every second; flat buffs (`tick_interval 0.0`) don't.
-fn make_totem_aura(
+/// Public so `tests/aura_dispel_type_audit.rs` checks the buff that lands.
+pub fn make_totem_aura(
     aura_type: AuraType,
     magnitude: f32,
     owner: Entity,

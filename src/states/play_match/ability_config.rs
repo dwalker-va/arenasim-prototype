@@ -76,8 +76,11 @@ pub struct AuraEffect {
     /// from the aura type.
     ///
     /// Declare it explicitly for the two families the school gets wrong:
-    /// - `Poison` for a poison on a magic-school ability (Crippling Poison is
-    ///   `Nature`).
+    /// - `Poison` for a poison on a magic-school ability (Crippling Poison and
+    ///   Serpent Sting are `Nature`).
+    ///
+    /// `tests/aura_dispel_type_audit.rs` tables every ability's class against
+    /// Classic's, so a missed declaration fails there.
     /// - `Curse` for the Warlock's curses, which are `Shadow` and would
     ///   otherwise read as ordinary dispellable magic.
     ///

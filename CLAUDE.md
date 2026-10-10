@@ -341,6 +341,12 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
 
 2. **Add to validation list** in `ability_config.rs`:
    - Add `AbilityType::NewAbility` to the `expected_abilities` array in `validate()`
+   - Add its row to `expected` in `tests/aura_dispel_type_audit.rs` — the
+     removal class its aura resolves to and the dispel type Classic gives it
+     (`SpellCategories.DispelType`). The match has no wildcard, so the test
+     suite does not compile until the row exists. A poison or curse on a
+     magic-school ability needs `dispel_type: Poison` / `Curse` in step 3, or
+     a Priest can dispel it
 
 3. **Add definition to `abilities.ron`**:
    ```ron

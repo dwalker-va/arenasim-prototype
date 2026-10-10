@@ -384,11 +384,12 @@ fn a_paladin_that_cannot_cleanse_does_not_walk_for_it() {
 
 /// Rule 2, played, for each walk: a healer that walked into reach of a teammate
 /// in urgent crowd control holds there while the dispel is owed — it never
-/// steps from inside the dispel's range to outside it. Before AS-197 both
-/// walks released on reach and the posture stepped the healer back out while
-/// the GCD ran: the Priest in `Hunter+Priest vs Mage+Warlock` (BasicArena, seed
-/// 1) at 23.9-24.1s, and the Paladin in `Rogue+Paladin vs Warlock+Rogue`
-/// (Nagrand, seed 2) at 34.7-35.0s.
+/// steps from inside the dispel's range to outside it. Before AS-197 a walk
+/// released on reach and the posture could step the healer back out while the
+/// GCD ran — the Paladin in `Rogue+Paladin vs Warlock+Rogue` (Nagrand, seed 2)
+/// did at 34.7-35.0s. The Priest's match, `Hunter+Priest vs Mage+Warlock`
+/// (BasicArena, seed 6), carries two walks that reach their teammate while the
+/// dispel is owed.
 #[test]
 fn a_healer_that_walked_into_dispel_reach_holds_there_while_the_dispel_is_owed() {
     for (class, team1, team2, map, seed) in [
@@ -397,7 +398,7 @@ fn a_healer_that_walked_into_dispel_reach_holds_there_while_the_dispel_is_owed()
             ["Hunter", "Priest"],
             ["Mage", "Warlock"],
             "BasicArena",
-            1,
+            6,
         ),
         (
             CharacterClass::Paladin,

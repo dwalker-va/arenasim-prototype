@@ -946,6 +946,9 @@
                 duration: 15.0,
                 magnitude: 10.0,  // flat per tick; 5 ticks = 50 total (vs Corruption 60/25 mana)
                 tick_interval: 3.0,
+                // A POISON, as in Classic (spell 1978): only a cleanse takes
+                // it. Nature school would otherwise read as dispellable magic.
+                dispel_type: Poison,
             )),
             spell_school: Nature,
             // No projectile_visuals: the missile and landing are the client's,
