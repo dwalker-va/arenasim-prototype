@@ -39,16 +39,25 @@ use crate::states::play_match::components::*;
 // - **Burn-out smoke** (20/s, 29.33-29.97 s, 0.11 yd dark additive puffs) is
 //   not drawn: it is invisible at the match camera.
 //
-// Two layers are ours, not the client's. The RIM is a thin ring at the
-// gameplay radius: the client's soft pool fades out well inside 10 yd, and a
-// Rogue that walks past the rim unrevealed must read as a missed guess, not a
-// bug. The HALO is a soft glow behind the flare so the flare reads at the
-// match camera's 60 yd.
+// **The pool's SHAPE is ours (AS-232), its pulse the client's.** The client's
+// soft glow fades out by about 8 yd, so a Rogue was revealed while it still
+// stood on dark floor. The pool here holds a lit plateau out to the gameplay
+// reveal radius under a brighter centre, then spills a short skirt PAST it
+// (`flare_pool_profile`): the visible edge of the light always lies outside
+// the reveal, so a Rogue is never revealed before it visibly stands in the
+// light. The client's pulse still drives the whole pool's brightness, so the
+// flicker reaches past the radius instead of dulling inside it.
 //
-// The bench's knobs (AS-222 Flare Bench, docs/design/benches/
+// Two layers are ours outright. The RIM is a gold band centred on the reveal
+// radius, bright against the pool and lit for as long as the reveal is (no end
+// fade): it is the line a Rogue crosses to be seen. The HALO is a soft glow
+// behind the flare so the flare reads at the match camera's 60 yd. Both take
+// their gold from the flare's own palette; no new hue.
+//
+// The bench's knobs (AS-222/AS-232 Flare Bench, docs/design/benches/
 // 2026-10-04-flare-bench.html) sit on top of the transcription as named
 // constants; the bench ports `flare_clock`, `flare_pool_weight`,
-// `flare_core_rate` and `flare_twinkle` verbatim.
+// `flare_pool_profile`, `flare_core_rate` and `flare_twinkle` verbatim.
 //
 // **The rig is detached from the gameplay Flare.** `FlareZone` is a sim entity
 // (`flare_system` reads it every tick), so nothing here inserts on it: the rig
@@ -63,12 +72,17 @@ use crate::states::play_match::components::*;
 
 /// Pool alpha per unit of the client's summed texture weight (0.10-0.20).
 pub const FLARE_POOL_GAIN: f32 = 4.0;
-/// Pool half-width as a fraction of the gameplay radius.
-pub const FLARE_POOL_RADIUS_SCALE: f32 = 1.0;
-/// Pool texture alpha is `(1 - r²)^FALLOFF` across its radius.
+/// The lit floor held out to the reveal radius, as a fraction of the centre.
+pub const FLARE_POOL_PLATEAU: f32 = 0.4;
+/// How far the light spills past the reveal radius, as a multiple of it. The
+/// pool quad's half-width is the radius times this.
+pub const FLARE_POOL_SKIRT: f32 = 1.12;
+/// The centre's glow over the plateau is `(1 - r²)^FALLOFF`.
 pub const FLARE_POOL_FALLOFF: f32 = 1.6;
-/// The rim at the gameplay radius.
-pub const FLARE_RIM_ALPHA: f32 = 0.22;
+/// The rim on the reveal radius: its alpha, steady while the Flare burns.
+pub const FLARE_RIM_ALPHA: f32 = 0.7;
+/// The rim's width, yards, centred on the reveal radius.
+pub const FLARE_RIM_WIDTH: f32 = 0.4;
 /// The burning flare's sprite diameter, yards (client 0.667).
 pub const FLARE_CORE_DIAMETER: f32 = 1.6;
 /// Height of the flare's sprites above the floor, yards (client 0.2).
@@ -120,11 +134,11 @@ const HALO_GLOW: f32 = 2.5;
 /// The pool and rim sit a hair above the floor so they never z-fight it.
 const POOL_LIFT: f32 = 0.03;
 const RIM_LIFT: f32 = 0.035;
-const RIM_WIDTH: f32 = 0.15;
 /// Where the sparks are born, above the flare's foot (client 0.08).
 const SPARK_HEIGHT: f32 = 0.08;
-/// Generated pool texture, pixels on a side.
-const POOL_PX: u32 = 128;
+/// Generated pool texture, pixels on a side (fine enough that the skirt's
+/// 1.2 yd falls across a dozen texels).
+const POOL_PX: u32 = 256;
 
 /// The client's spark rate: 25/s at the start, linearly to 0 at 29 s.
 const SPARK_TRACK: &[(f32, f32)] = &[(0.0, 25.0), (29.0, 0.0)];
@@ -200,6 +214,21 @@ pub fn flare_pool_weight(clock: f32, age: f32) -> f32 {
     a + b
 }
 
+/// The pool texture's alpha at `rho`, the distance from the flare over the
+/// reveal radius: a bright centre over a lit plateau held to the reveal
+/// radius (`rho = 1`), then a smoothstep skirt out to `FLARE_POOL_SKIRT`.
+pub fn flare_pool_profile(rho: f32) -> f32 {
+    let p = FLARE_POOL_PLATEAU;
+    if rho <= 1.0 {
+        p + (1.0 - p) * (1.0 - rho * rho).max(0.0).powf(FLARE_POOL_FALLOFF)
+    } else if rho < FLARE_POOL_SKIRT {
+        let u = (rho - 1.0) / (FLARE_POOL_SKIRT - 1.0);
+        p * (1.0 - u * u * (3.0 - 2.0 * u))
+    } else {
+        0.0
+    }
+}
+
 /// The core emitter's stepped rate track, relative to its steady 10/s.
 pub fn flare_core_rate(clock: f32) -> f32 {
     if clock < 29.0 {
@@ -218,11 +247,6 @@ pub fn flare_core_rate(clock: f32) -> f32 {
 pub fn flare_twinkle(seed: u32, age: f32) -> f32 {
     let step = (age.max(0.0) * FLARE_TWINKLE_HZ) as u32;
     FLARE_TWINKLE_MIN + (FLARE_TWINKLE_MAX - FLARE_TWINKLE_MIN) * draw(seed, step)
-}
-
-/// The pool and rim fade over the client's last half second.
-fn end_fade(clock: f32) -> f32 {
-    ((FLARE_CLIENT_SEQ_SECS - clock) / 0.5).clamp(0.0, 1.0)
 }
 
 fn ramp3(keys: [f32; 3], mid: f32, t: f32) -> f32 {
@@ -254,7 +278,8 @@ fn glow(color: Color, gain: f32) -> LinearRgba {
     LinearRgba::rgb(c.red * gain, c.green * gain, c.blue * gain)
 }
 
-/// The pool's soft disc: white, `(1 - r²)^FLARE_POOL_FALLOFF` in alpha.
+/// The pool's disc: white, `flare_pool_profile` in alpha, the texture's edge
+/// at `FLARE_POOL_SKIRT` times the reveal radius.
 fn flare_pool_texture() -> Image {
     use bevy::render::render_asset::RenderAssetUsages;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -266,13 +291,13 @@ fn flare_pool_texture() -> Image {
         for x in 0..size {
             let dx = (x as f32 - centre) / centre;
             let dy = (y as f32 - centre) / centre;
-            let r2 = dx * dx + dy * dy;
-            let a = (1.0 - r2).max(0.0).powf(FLARE_POOL_FALLOFF);
+            let rho = (dx * dx + dy * dy).sqrt() * FLARE_POOL_SKIRT;
+            let a = flare_pool_profile(rho);
             let i = ((y * size + x) * 4) as usize;
             data[i] = 255;
             data[i + 1] = 255;
             data[i + 2] = 255;
-            data[i + 3] = (a * 255.0) as u8;
+            data[i + 3] = (a * 255.0).round() as u8;
         }
     }
     Image::new(
@@ -326,7 +351,7 @@ pub struct FlareRig {
 pub enum FlarePart {
     /// The lit pool on the floor.
     Pool,
-    /// The ring at the gameplay radius.
+    /// The band on the reveal radius.
     Rim,
     /// The soft glow behind the burning flare.
     Halo,
@@ -397,7 +422,7 @@ pub fn spawn_flare_visuals(
     let gold = Color::srgb(hr, hg, hb);
     for (flare_entity, flare, transform) in new_flares.iter() {
         let pool_material = materials.add(additive(&assets.pool_texture, orange, 0.0, POOL_GLOW));
-        let pool_size = 2.0 * flare.radius * FLARE_POOL_RADIUS_SCALE;
+        let pool_size = 2.0 * flare.radius * FLARE_POOL_SKIRT;
         let pool = commands
             .spawn((
                 FlarePart::Pool,
@@ -409,8 +434,8 @@ pub fn spawn_flare_visuals(
             .id();
 
         let rim_material = materials.add(StandardMaterial {
-            base_color: orange.with_alpha(0.0),
-            emissive: glow(orange, RIM_GLOW),
+            base_color: gold.with_alpha(0.0),
+            emissive: glow(gold, RIM_GLOW),
             alpha_mode: AlphaMode::Add,
             cull_mode: None,
             double_sided: true,
@@ -421,7 +446,16 @@ pub fn spawn_flare_visuals(
                 FlarePart::Rim,
                 // `Annulus` lies in XY facing +Z; a quarter turn back lays it
                 // on the floor facing up.
-                Mesh3d(meshes.add(Annulus::new(flare.radius - RIM_WIDTH, flare.radius))),
+                Mesh3d(
+                    meshes.add(
+                        Annulus::new(
+                            flare.radius - 0.5 * FLARE_RIM_WIDTH,
+                            flare.radius + 0.5 * FLARE_RIM_WIDTH,
+                        )
+                        .mesh()
+                        .resolution(128),
+                    ),
+                ),
                 MeshMaterial3d(rim_material.clone()),
                 Transform::from_xyz(0.0, RIM_LIFT, 0.0)
                     .with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
@@ -518,15 +552,15 @@ pub fn update_flare_visuals(
         let previous = rig.clock;
         let clock = flare_clock(flare.duration_remaining, rig.total);
         rig.clock = clock;
-        let fade = end_fade(clock);
 
         // The pool: the client's two pulsing weights, summed.
         if let Some(m) = materials.get_mut(&rig.pool_material) {
             let alpha = (flare_pool_weight(clock, age) * FLARE_POOL_GAIN).clamp(0.0, 1.0);
             m.base_color = orange.with_alpha(alpha);
         }
+        // The rim stands as long as the reveal does: no end fade.
         if let Some(m) = materials.get_mut(&rig.rim_material) {
-            m.base_color = orange.with_alpha(FLARE_RIM_ALPHA * fade);
+            m.base_color.set_alpha(FLARE_RIM_ALPHA);
         }
 
         // The burning flare.
