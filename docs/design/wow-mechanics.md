@@ -247,17 +247,32 @@ tests fail if a full-CC type or spell is left unlabelled.
   Classic's is magic, and Psychic Scream, the Spider's Web, the Paladin auras
   and the totem buffs are magic where Classic's have no dispel type
 
-### Purge priority (Shaman)
-- Keyed by the aura INSTANCE, not its type (`class_ai::aura_purge_priority`):
-  the type's default (`purge_priority`), unless the aura BLOOMS (Lifebloom —
-  worth 0, since a purge that takes it heals its bearer) or its source ability
-  sets `purge_priority` in its RON `applies_aura` (Innervate — 110, the urgent
-  bar, which the Shaman purges ahead of its filler Lightning Bolt)
-- Rejuvenation keeps the `HealingOverTime` default, 70 — exactly the floor: a
-  legitimate purge, taken only in a GCD the Shaman has nothing better for
-- A purge chosen for a source-keyed buff takes that buff only
-  (`DispelScope::PurgeSource`), so a purge for a Rejuvenation never blooms the
-  Lifebloom beside it
+### Purge (Shaman)
+- **The pick is random; the Shaman never chooses the buff.** A Purge takes one
+  of the target's purgeable buffs (`DispelScope::Purge`), uniformly at random
+  over the AURAS in `process_dispels` — a three-stack Lifebloom is one
+  candidate, as likely as a Rejuvenation. The AI decides only whether to cast
+  and on whom.
+- **One stack per purge.** A stacked aura loses one stack and stays, its
+  duration untouched (`ActiveAuras::take_one_at`); a purged Lifebloom stack
+  blooms for one stack. Anything unstacked comes off whole (a compound like
+  Mark of the Wild with its riders, and its health with it).
+- **What a pick is worth** is keyed by the aura INSTANCE
+  (`class_ai::purge_pick_value`): the type's default (`purge_priority`), unless
+  its source ability sets `purge_priority` in its RON `applies_aura`
+  (Innervate — 110, the urgent bar) or it BLOOMS (Lifebloom —
+  `-PURGE_BLOOM_COST`, -70: the stack taken heals its bearer). Rejuvenation
+  keeps the `HealingOverTime` default, 70.
+- **The decision** (`class_ai::select_purge`, over `PurgeOdds`): a target is
+  purged when it carries a buff worth the bar — 110 for the urgent purge,
+  cast ahead of the filler Lightning Bolt; 70 for the ordinary one, in a GCD
+  the Shaman has nothing better for — AND the expected value of the random
+  pick, the mean of its candidates' worths, is positive. Innervate beside a
+  Lifebloom purges ((110 - 70) / 2 = 20); Lifebloom alone, or Rejuvenation
+  beside it (an even 0), holds; Innervate beside two Druids' Lifeblooms holds
+  (-10). Among targets worth it, the best expected pick wins, ties to the
+  enemy healer. A held purge is traced `PreconditionUnmet` with
+  `purge odds: expected E over N buffs (K blooming)`.
 
 ### Travel Form (Druid escape shift)
 - Instant, 25 mana, on the global cooldown. Shifting removes every Root and

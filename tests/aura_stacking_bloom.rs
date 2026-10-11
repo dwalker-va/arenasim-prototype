@@ -363,35 +363,63 @@ fn mark_of_the_wild_and_shadow_resistance_aura_land_in_either_order() {
     }
 }
 
+/// Queue one Purge of `target` by a fresh enemy Shaman.
+fn purge(world: &mut World, target: Entity) {
+    let shaman = world
+        .spawn(Combatant::new(2, 0, CharacterClass::Shaman))
+        .id();
+    world.spawn(DispelPending {
+        target,
+        dispeller: shaman,
+        log_prefix: "[PURGE]",
+        caster_class: CharacterClass::Shaman,
+        heal_on_success: None,
+        scope: DispelScope::Purge,
+    });
+}
+
+/// One Purge takes ONE stack of a stacked Lifebloom, and that stack blooms:
+/// one stack's heal, the aura left in place one stack lighter with its
+/// duration untouched. A second Purge takes the last stack, and the aura goes.
+///
+/// Mutant killed: `take_one_at` removing the whole aura — the first purge
+/// leaves no Lifebloom and blooms for both stacks.
 #[test]
-fn a_bloom_lands_when_the_aura_is_purged() {
+fn a_purge_takes_one_lifebloom_stack_and_blooms_for_it() {
     let mut world = world(0.0);
     let (druid, ally) = druid_and_ally(&mut world);
     let mut aura = cast(AbilityType::Lifebloom, ally, druid, 100.0).aura;
     aura.stacks = aura
         .stacks
         .map(|s| arenasim::states::play_match::AuraStacks { count: 2, ..s });
+    aura.duration = 4.5;
     let per_stack = aura.bloom.unwrap();
     world
         .entity_mut(ally)
         .insert(ActiveAuras { auras: vec![aura] });
-    let shaman = world
-        .spawn(Combatant::new(2, 0, CharacterClass::Shaman))
-        .id();
-    world.spawn(DispelPending {
-        target: ally,
-        dispeller: shaman,
-        log_prefix: "[PURGE]",
-        caster_class: CharacterClass::Shaman,
-        heal_on_success: None,
-        scope: DispelScope::Purge(AuraType::HealingOverTime),
-    });
 
     let before = health(&world, ally);
+    purge(&mut world, ally);
+    world.run_system_once(process_dispels).unwrap();
+    world.run_system_once(process_blooms).unwrap();
+    let left = auras_named(&world, ally, "Lifebloom");
+    assert_eq!(left.len(), 1, "one stack of two leaves the aura up");
+    assert_eq!(left[0].stack_count(), 1);
+    assert_eq!(left[0].duration, 4.5, "taking a stack does not refresh it");
+    assert_eq!(
+        health(&world, ally) - before,
+        per_stack,
+        "the stack taken blooms for one stack"
+    );
+    assert!(log_has(&world, "Lifebloom removed from"));
+    assert!(log_has(&world, "(one stack; 1 left)"));
+
+    let before = health(&world, ally);
+    purge(&mut world, ally);
     world.run_system_once(process_dispels).unwrap();
     world.run_system_once(process_blooms).unwrap();
     assert!(auras_named(&world, ally, "Lifebloom").is_empty());
-    assert_eq!(health(&world, ally) - before, per_stack * 2.0);
+    assert_eq!(health(&world, ally) - before, per_stack);
 }
 
 #[test]
@@ -468,17 +496,7 @@ fn a_purge_takes_all_of_mark_of_the_wild_and_its_health() {
         &mut world,
         cast(AbilityType::MarkOfTheWild, ally, druid, 0.0),
     );
-    let shaman = world
-        .spawn(Combatant::new(2, 0, CharacterClass::Shaman))
-        .id();
-    world.spawn(DispelPending {
-        target: ally,
-        dispeller: shaman,
-        log_prefix: "[PURGE]",
-        caster_class: CharacterClass::Shaman,
-        heal_on_success: None,
-        scope: DispelScope::Purge(AuraType::MaxHealthIncrease),
-    });
+    purge(&mut world, ally);
     world.run_system_once(process_dispels).unwrap();
 
     assert!(
@@ -492,6 +510,9 @@ fn a_purge_takes_all_of_mark_of_the_wild_and_its_health() {
     );
 }
 
+/// Mark of the Wild is ONE purge candidate, its face: none of its riders —
+/// purgeable types, every one — gives the compound an extra chance at the
+/// random pick.
 #[test]
 fn a_rider_is_never_a_purge_candidate() {
     let mut world = world(0.0);
@@ -500,21 +521,14 @@ fn a_rider_is_never_a_purge_candidate() {
         &mut world,
         cast(AbilityType::MarkOfTheWild, ally, druid, 0.0),
     );
-    let before = mark_of_the_wild_effects(&world, ally).len();
-    let shaman = world
-        .spawn(Combatant::new(2, 0, CharacterClass::Shaman))
-        .id();
-    // Pinned to a RIDER's type: nothing else on the target is a candidate.
-    world.spawn(DispelPending {
-        target: ally,
-        dispeller: shaman,
-        log_prefix: "[PURGE]",
-        caster_class: CharacterClass::Shaman,
-        heal_on_success: None,
-        scope: DispelScope::Purge(AuraType::SpellResistanceBuff),
-    });
-    world.run_system_once(process_dispels).unwrap();
-    assert_eq!(mark_of_the_wild_effects(&world, ally).len(), before);
+    let effects = mark_of_the_wild_effects(&world, ally);
+    assert!(effects.len() > 1, "the Mark has riders");
+    let candidates: Vec<&Aura> = effects
+        .iter()
+        .filter(|a| DispelScope::Purge.takes(a))
+        .collect();
+    assert_eq!(candidates.len(), 1);
+    assert!(!candidates[0].is_compound_rider());
 }
 
 // ----------------------------------------------------------------------------
@@ -663,54 +677,42 @@ fn two_druids_marks_of_the_wild_do_not_stack() {
     assert!(log_has(&world, "Mark of the Wild refreshed"));
 }
 
-/// Two Druids' Rejuvenations on one ally, and a purge pinned to one of them
-/// (`DispelScope::PurgeSource` with its `owner`): it takes that one, whatever
-/// the random pick among candidates would have rolled.
+/// Two Druids' Rejuvenations on one ally: no purge can choose between them.
+/// Over a run of seeds the random pick takes each Druid's in turn, and
+/// exactly one comes off every time.
 #[test]
-fn a_purge_takes_the_druids_rejuvenation_it_chose() {
-    for seed in 0..16u64 {
-        for victim in [0usize, 1] {
-            let mut world = world(0.0);
-            world.insert_resource(GameRng::from_seed(seed));
-            let (druid_a, ally) = druid_and_ally(&mut world);
-            let druid_b = second_druid(&mut world);
-            let casters = [druid_a, druid_b];
+fn a_purge_cannot_choose_which_druids_rejuvenation_it_takes() {
+    let mut taken = [0usize; 2];
+    for seed in 0..32u64 {
+        let mut world = world(0.0);
+        world.insert_resource(GameRng::from_seed(seed));
+        let (druid_a, ally) = druid_and_ally(&mut world);
+        let druid_b = second_druid(&mut world);
+        let casters = [druid_a, druid_b];
+        for caster in casters {
             land(
                 &mut world,
-                cast(AbilityType::Rejuvenation, ally, druid_a, 100.0),
-            );
-            land(
-                &mut world,
-                cast(AbilityType::Rejuvenation, ally, druid_b, 100.0),
-            );
-            assert_eq!(auras_named(&world, ally, "Rejuvenation").len(), 2);
-            let shaman = world
-                .spawn(Combatant::new(2, 0, CharacterClass::Shaman))
-                .id();
-            world.spawn(DispelPending {
-                target: ally,
-                dispeller: shaman,
-                log_prefix: "[PURGE]",
-                caster_class: CharacterClass::Shaman,
-                heal_on_success: None,
-                scope: DispelScope::PurgeSource {
-                    effect: AuraType::HealingOverTime,
-                    source: "Rejuvenation".to_string(),
-                    owner: Some(casters[victim]),
-                },
-            });
-            world.run_system_once(process_dispels).unwrap();
-            let left: Vec<Option<Entity>> = auras_named(&world, ally, "Rejuvenation")
-                .iter()
-                .map(|a| a.caster)
-                .collect();
-            assert_eq!(
-                left,
-                vec![Some(casters[1 - victim])],
-                "seed {seed}: the purge must take the chosen Druid's Rejuvenation"
+                cast(AbilityType::Rejuvenation, ally, caster, 100.0),
             );
         }
+        assert_eq!(auras_named(&world, ally, "Rejuvenation").len(), 2);
+        purge(&mut world, ally);
+        world.run_system_once(process_dispels).unwrap();
+        let left: Vec<Option<Entity>> = auras_named(&world, ally, "Rejuvenation")
+            .iter()
+            .map(|a| a.caster)
+            .collect();
+        assert_eq!(left.len(), 1, "seed {seed}: one purge takes one buff");
+        let victim = casters
+            .iter()
+            .position(|c| left[0] != Some(*c))
+            .expect("one Druid's Rejuvenation is gone");
+        taken[victim] += 1;
     }
+    assert!(
+        taken.iter().all(|&n| n > 0),
+        "the pick must reach both Druids' Rejuvenations, took {taken:?}"
+    );
 }
 
 /// Swiftmend eats its caster's OWN Rejuvenation when two Druids have one up —

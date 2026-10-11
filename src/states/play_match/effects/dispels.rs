@@ -56,52 +56,58 @@ pub fn process_dispels(
                 .collect();
 
             if !dispellable_indices.is_empty() {
-                // Randomly select one to remove (WoW Classic behavior). This
-                // randomness is INTENTIONAL design, not a rough edge: even when
-                // the caster pinned the scope to one type (e.g. Shaman Purge), a
-                // target carrying multiple matching auras gets a coin-flip among
-                // them. Keeping dispels/purges probabilistic adds matchup
-                // variance and forces heavier purge investment to reliably strip
-                // the buff you want. Do NOT change this to a deterministic
-                // highest-magnitude pick.
+                // Randomly select one to remove (WoW Classic behavior), uniform
+                // over the qualifying AURAS — a stacked aura is one candidate,
+                // whatever its stacks. This randomness is INTENTIONAL design,
+                // not a rough edge, and it is the only pick there is: no
+                // remover chooses the aura it takes (a Purge's scope is every
+                // purgeable buff). Keeping dispels and purges probabilistic
+                // adds matchup variance and forces heavier purge investment to
+                // reliably strip the buff you want. Do NOT change this to a
+                // deterministic highest-value pick.
                 let random_idx =
                     (game_rng.random_f32() * dispellable_indices.len() as f32) as usize;
                 let idx_to_remove =
                     dispellable_indices[random_idx.min(dispellable_indices.len() - 1)];
 
-                // Takes the whole DEBUFF, not one effect: a compound debuff's
-                // riders come off with its face (see `CompoundDebuff`). Only
-                // the face was ever a dispel candidate above, so this changes
-                // nothing about WHICH debuff is rolled — only how much of it
-                // actually leaves.
-                let removed_aura = active_auras.remove_debuff_at(idx_to_remove);
+                // ONE application comes off: a stacked aura (three stacks of
+                // Lifebloom) loses one stack and stays; anything else goes
+                // whole — and a whole DEBUFF, not one effect: a compound
+                // debuff's riders come off with its face (see
+                // `CompoundDebuff`). Only the face was ever a dispel candidate
+                // above, so this changes nothing about WHICH debuff is rolled —
+                // only how much of it actually leaves.
+                let (removed_aura, stacks_left) = active_auras.take_one_at(idx_to_remove);
 
                 // A buff that raised a stat when it landed gives it back when
                 // it is taken, exactly as it does when it runs out — a purged
                 // Mark of the Wild takes its health with it.
-                combatant.reverse_stat_mutation(&removed_aura);
+                if stacks_left == 0 {
+                    combatant.reverse_stat_mutation(&removed_aura);
+                }
 
                 // A blooming aura blooms when it is taken, not only when it
                 // runs out (TBC Lifebloom): the bearer is healed, whoever
-                // removed it.
+                // removed it — for the stacks taken, so one stack's bloom when
+                // one of several stacks comes off.
                 if let Some(bloom) = BloomPending::for_ending(pending.target, &removed_aura) {
                     commands.spawn(bloom);
                 }
 
-                // Log the dispel using the provided log prefix
+                // Log the dispel using the provided log prefix; a stack taken
+                // off a stacked aura says how many remain.
                 let target_id = combat_log_id_for(&combatant, pet_query.get(pending.target).ok());
-                combat_log.log(
-                    CombatLogEventType::Buff,
-                    format!(
-                        "{} {} removed from {}",
-                        pending.log_prefix, removed_aura.ability_name, target_id
-                    ),
+                let left = if stacks_left > 0 {
+                    format!(" (one stack; {stacks_left} left)")
+                } else {
+                    String::new()
+                };
+                let line = format!(
+                    "{} {} removed from {}{}",
+                    pending.log_prefix, removed_aura.ability_name, target_id, left
                 );
-
-                info!(
-                    "{} {} removed from {}",
-                    pending.log_prefix, removed_aura.ability_name, target_id
-                );
+                combat_log.log(CombatLogEventType::Buff, line.clone());
+                info!("{line}");
 
                 // Spawn dispel visual effect — the ribbon that coils around the
                 // dispelled combatant, climbs it and plays out (distinct from

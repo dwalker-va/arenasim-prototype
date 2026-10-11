@@ -20,8 +20,7 @@ use arenasim::states::play_match::class_ai::{
 };
 use arenasim::states::play_match::components::DispelScope;
 use arenasim::states::play_match::{
-    AbilityDefinitions, AbilityType, Aura, AuraPending, AuraType, DRCategory, DRTracker,
-    DispelType, PetType,
+    AbilityDefinitions, Aura, AuraType, DRCategory, DRTracker, DispelType, PetType,
 };
 
 // ============================================================================
@@ -309,10 +308,10 @@ fn purge_priority_returns_zero_for_debuffs_and_unpurgeable() {
 // ============================================================================
 
 /// `try_purge_enemy`'s own candidate scan (`select_purge`), floorless and in
-/// range of everyone, returning `(enemy, chosen buff type)`. `None` when no
-/// enemy carries a purgeable buff (the reject path). The first combatant on
-/// `my_team` in the snapshot is the purger.
-fn select_purge_target(snapshot: &CombatSnapshot, my_team: u8) -> Option<(Entity, AuraType)> {
+/// range of everyone, returning the enemy it would purge. `None` when no enemy
+/// is worth a purge (the reject path). The first combatant on `my_team` in the
+/// snapshot is the purger.
+fn select_purge_target(snapshot: &CombatSnapshot, my_team: u8) -> Option<Entity> {
     let me = *snapshot
         .combatants
         .iter()
@@ -329,16 +328,11 @@ fn select_purge_target(snapshot: &CombatSnapshot, my_team: u8) -> Option<(Entity
         i32::MIN,
     )
     .ok()
-    .map(|choice| match choice.scope {
-        DispelScope::Purge(effect) | DispelScope::PurgeSource { effect, .. } => {
-            (choice.target, effect)
-        }
-        other => panic!("a purge scoped {other:?}"),
-    })
+    .map(|choice| choice.target)
 }
 
 #[test]
-fn shaman_purges_enemy_with_dispellable_buff() {
+fn shaman_purges_enemy_with_a_purgeable_buff() {
     let me = Entity::from_raw(1);
     let enemy = Entity::from_raw(2);
 
@@ -348,7 +342,8 @@ fn shaman_purges_enemy_with_dispellable_buff() {
         .insert(enemy, info(enemy, 2, CharacterClass::Warrior));
 
     // Enemy carries an offensive AttackPower buff AND a defensive Absorb. Both
-    // are purgeable; the Shaman strips the higher-priority defensive first.
+    // are purgeable, and the purge takes one of them at random: the odds are
+    // the mean of the two.
     snapshot.active_auras.insert(
         enemy,
         vec![
@@ -357,57 +352,34 @@ fn shaman_purges_enemy_with_dispellable_buff() {
         ],
     );
 
-    let (target, buff) = select_purge_target(&snapshot, 1).expect("a purgeable enemy buff exists");
-    assert_eq!(target, enemy, "the buffed enemy is the purge target");
+    assert_eq!(select_purge_target(&snapshot, 1), Some(enemy));
+    let ctx = snapshot.context_for(me);
+    let odds = select_purge(
+        &ctx,
+        &AbilityDefinitions::default(),
+        1,
+        Vec3::ZERO,
+        f32::MAX,
+        0,
+    )
+    .unwrap()
+    .odds;
+    assert_eq!(odds.candidates, 2);
+    assert_eq!(odds.best, purge_priority(AuraType::Absorb));
     assert_eq!(
-        buff,
-        AuraType::Absorb,
-        "the defensive Absorb outranks the AttackPower buff"
+        odds.expected,
+        (purge_priority(AuraType::Absorb) + purge_priority(AuraType::AttackPowerIncrease)) as f32
+            / 2.0
     );
 }
 
-/// Two enemy Druids' Rejuvenations on one enemy: the purge `select_purge`
-/// picks is pinned to ONE Druid's instance (`PurgeSource { owner }`), so it
-/// takes the one it ranked and never the other Druid's.
+/// The purge's scope never names a buff: it is every purgeable buff the
+/// target carries, and the pick among them is `process_dispels`'s.
 #[test]
-fn shaman_purge_pins_one_druids_rejuvenation() {
-    let me = Entity::from_raw(1);
-    let enemy = Entity::from_raw(2);
-    let druid_a = Entity::from_raw(3);
-    let druid_b = Entity::from_raw(4);
-
-    let mut snapshot = snapshot_for(me, 1, CharacterClass::Shaman);
-    snapshot
-        .combatants
-        .insert(enemy, info(enemy, 2, CharacterClass::Warrior));
-    let defs = AbilityDefinitions::default();
-    let rejuv = |caster| {
-        AuraPending::from_ability(enemy, caster, defs.get_unchecked(&AbilityType::Rejuvenation))
-            .unwrap()
-            .aura
-    };
-    let (a, b) = (rejuv(druid_a), rejuv(druid_b));
-    snapshot
-        .active_auras
-        .insert(enemy, vec![a.clone(), b.clone()]);
-
-    let ctx = snapshot.context_for(me);
-    let choice = select_purge(&ctx, &defs, 1, Vec3::ZERO, f32::MAX, i32::MIN)
-        .expect("a purgeable Rejuvenation exists");
-    assert_eq!(choice.target, enemy);
-    assert_eq!(
-        choice.scope,
-        DispelScope::PurgeSource {
-            effect: AuraType::HealingOverTime,
-            source: "Rejuvenation".to_string(),
-            owner: Some(druid_a),
-        }
-    );
-    assert!(choice.scope.takes(&a));
-    assert!(
-        !choice.scope.takes(&b),
-        "the purge must not reach the other Druid's Rejuvenation"
-    );
+fn shaman_purge_scope_is_every_purgeable_buff() {
+    assert!(DispelScope::Purge.takes(&aura_with(AuraType::Absorb, None, -1.0)));
+    assert!(DispelScope::Purge.takes(&aura_with(AuraType::MaxHealthIncrease, None, -1.0)));
+    assert!(!DispelScope::Purge.takes(&aura_with(AuraType::Root, None, -1.0)));
 }
 
 #[test]
@@ -2284,13 +2256,13 @@ mod druid_counterplay {
     use arenasim::states::play_match::class_ai::mage::polymorph_refused;
     use arenasim::states::play_match::class_ai::pet_ai::spell_lock_target;
     use arenasim::states::play_match::class_ai::{
-        aura_purge_priority, priority_interrupt_target, scan_ally_dispel, InterruptCandidate,
-        PURGE_URGENT_PRIORITY,
+        priority_interrupt_target, purge_pick_value, scan_ally_dispel, InterruptCandidate,
+        PurgeOdds, PURGE_BLOOM_COST, PURGE_URGENT_PRIORITY,
     };
     use arenasim::states::play_match::components::{
         ActiveAuras, AuraPending, CastingState, Combatant, InterruptPending, MatchCountdown,
     };
-    use arenasim::states::play_match::decision_trace::DecisionTrace;
+    use arenasim::states::play_match::decision_trace::{DecisionTrace, RejectionReason};
     use arenasim::states::play_match::movement_config::MovementConfig;
     use arenasim::states::play_match::systems::{acquire_targets, check_interrupts};
 
@@ -2303,19 +2275,19 @@ mod druid_counterplay {
             .aura
     }
 
-    // ---- 1. Purge priority by aura instance ----
+    // ---- 1. Purge: worth by aura instance, odds over a random pick ----
 
     /// Innervate is worth the urgent bar, though its type (ManaRegenIncrease)
-    /// is Mage Armor's 25 and never purged; and the Shaman takes it over every
-    /// other candidate — a Power Word: Shield on another enemy (Absorb, 100)
-    /// and the Druid's own Rejuvenation — with a scope that takes Innervate and
-    /// nothing else.
+    /// is Mage Armor's 25. Only the Druid carrying it clears the urgent bar —
+    /// a Power Word: Shield on another enemy (Absorb, 100) does not — while at
+    /// the ordinary bar the enemies rank by their odds, and the Shield alone
+    /// (100) beats Innervate diluted by a Rejuvenation ((110 + 70) / 2).
     ///
     /// Mutant killed: drop `purge_priority: Some(110)` from Innervate in
-    /// `abilities.ron` (or the `source_effect` lookup in `aura_purge_priority`):
-    /// Innervate falls back to 25 and the Absorb wins.
+    /// `abilities.ron` (or the `source_effect` lookup in `purge_pick_value`):
+    /// Innervate falls back to 25 and nothing clears the urgent bar.
     #[test]
-    fn shaman_purges_innervate_over_the_other_candidates() {
+    fn shaman_purges_innervate_at_the_urgent_bar() {
         let defs = AbilityDefinitions::default();
         let me = Entity::from_raw(1);
         let druid = Entity::from_raw(2);
@@ -2331,16 +2303,13 @@ mod druid_counterplay {
         let rejuvenation = landed(AbilityType::Rejuvenation, druid, druid);
         snapshot
             .active_auras
-            .insert(druid, vec![rejuvenation.clone(), innervate.clone()]);
+            .insert(druid, vec![rejuvenation, innervate.clone()]);
         snapshot.active_auras.insert(
             priest,
             vec![landed(AbilityType::PowerWordShield, priest, priest)],
         );
 
-        assert_eq!(
-            aura_purge_priority(&innervate, &defs),
-            PURGE_URGENT_PRIORITY
-        );
+        assert_eq!(purge_pick_value(&innervate, &defs), PURGE_URGENT_PRIORITY);
         assert_eq!(
             purge_priority(AuraType::ManaRegenIncrease),
             25,
@@ -2348,65 +2317,131 @@ mod druid_counterplay {
         );
 
         let ctx = snapshot.context_for(me);
-        for bar in [PURGE_MIN_PRIORITY, PURGE_URGENT_PRIORITY] {
-            let choice = select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, bar)
-                .unwrap_or_else(|_| panic!("Innervate clears the {bar} bar"));
-            assert_eq!(choice.target, druid);
-            assert!(choice.scope.takes(&innervate));
-            assert!(
-                !choice.scope.takes(&rejuvenation),
-                "the purge chosen for Innervate takes nothing else"
-            );
-        }
+        let urgent = select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, PURGE_URGENT_PRIORITY)
+            .expect("Innervate clears the urgent bar");
+        assert_eq!(urgent.target, druid);
+        assert_eq!(urgent.odds.expected, 90.0);
+        let ordinary = select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, PURGE_MIN_PRIORITY)
+            .expect("both clear the ordinary bar");
+        assert_eq!(ordinary.target, priest, "the better odds win");
     }
 
-    /// Lifebloom blooms when a purge takes it, which HEALS its bearer, so it is
-    /// worth nothing to a purger: a target carrying only Lifebloom is no purge
-    /// target at all, and beside a Rejuvenation the purge goes to the
-    /// Rejuvenation with a scope that cannot take the Lifebloom.
+    /// The purge decision over the random pick, case by case: the target is
+    /// held when the expected value of the pick is not positive, a Lifebloom
+    /// stack counting `-PURGE_BLOOM_COST` (its bloom heals the target) and the
+    /// pick landing on each purgeable AURA with equal chance, however many
+    /// stacks it has. A held purge traces its odds.
     ///
-    /// Mutant killed: drop the `aura.bloom.is_some()` arm of
-    /// `aura_purge_priority` — Lifebloom scores its type's 70 and is chosen.
-    /// Mutant killed: pin every purge to the TYPE alone (`DispelScope::Purge`
-    /// for a source-keyed buff) — the Rejuvenation's scope takes the Lifebloom.
+    /// Mutants killed: drop the `aura.bloom.is_some()` arm of
+    /// `purge_pick_value` (Lifebloom alone scores 70 and is purged); drop the
+    /// `favourable()` gate in `select_purge` (Lifebloom-heavy targets are
+    /// purged); weight the pick by STACKS rather than auras (three Lifebloom
+    /// stacks beside Innervate hold).
     #[test]
-    fn shaman_does_not_purge_lifebloom() {
+    fn shaman_purge_weighs_the_odds_of_a_random_pick() {
         let defs = AbilityDefinitions::default();
         let me = Entity::from_raw(1);
         let druid = Entity::from_raw(2);
-        let mut snapshot = snapshot_for(me, 1, CharacterClass::Shaman);
-        snapshot
-            .combatants
-            .insert(druid, info(druid, 2, CharacterClass::Druid));
+        let other_druid = Entity::from_raw(3);
         let lifebloom = landed(AbilityType::Lifebloom, druid, druid);
-        assert!(
-            lifebloom.can_be_purged(),
-            "Lifebloom is purgeable — the AI declines it"
-        );
-        assert_eq!(aura_purge_priority(&lifebloom, &defs), 0);
-
-        snapshot.active_auras.insert(druid, vec![lifebloom.clone()]);
-        let ctx = snapshot.context_for(me);
-        assert!(
-            select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, PURGE_MIN_PRIORITY).is_err(),
-            "Lifebloom alone is not worth a purge"
-        );
-
+        assert!(lifebloom.can_be_purged());
+        assert_eq!(purge_pick_value(&lifebloom, &defs), -PURGE_BLOOM_COST);
+        let mut three_stacks = lifebloom.clone();
+        three_stacks.stacks = three_stacks
+            .stacks
+            .map(|s| arenasim::states::play_match::AuraStacks { count: 3, ..s });
+        let other_lifebloom = landed(AbilityType::Lifebloom, druid, other_druid);
+        let innervate = landed(AbilityType::Innervate, druid, druid);
         let rejuvenation = landed(AbilityType::Rejuvenation, druid, druid);
-        snapshot
-            .active_auras
-            .insert(druid, vec![lifebloom.clone(), rejuvenation.clone()]);
-        let ctx = snapshot.context_for(me);
-        let choice = select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, PURGE_MIN_PRIORITY)
-            .expect("the Rejuvenation is a purge");
+        let mark = landed(AbilityType::MarkOfTheWild, druid, druid);
+
+        let decide = |auras: Vec<Aura>, bar: i32| {
+            let mut snapshot = snapshot_for(me, 1, CharacterClass::Shaman);
+            snapshot
+                .combatants
+                .insert(druid, info(druid, 2, CharacterClass::Druid));
+            snapshot.active_auras.insert(druid, auras);
+            select_purge(&snapshot.context_for(me), &defs, 1, Vec3::ZERO, 30.0, bar)
+        };
+        let purges =
+            |auras: Vec<Aura>, bar: i32| -> PurgeOdds { decide(auras, bar).expect("a purge").odds };
+        let held = |auras: Vec<Aura>, bar: i32| -> String {
+            match decide(auras, bar) {
+                Err(RejectionReason::PreconditionUnmet { note }) => note,
+                other => panic!("expected the purge held on its odds, got {other:?}"),
+            }
+        };
+
+        // Innervate alone: purge.
         assert_eq!(
-            choice.priority, PURGE_MIN_PRIORITY,
-            "Rejuvenation sits at the floor"
+            purges(vec![innervate.clone()], PURGE_URGENT_PRIORITY).expected,
+            110.0
         );
-        assert!(choice.scope.takes(&rejuvenation));
-        assert!(
-            !choice.scope.takes(&lifebloom),
-            "a purge for Rejuvenation never blooms the Lifebloom beside it"
+        // Innervate and one Lifebloom stack: a coin flip worth (110 - 70) / 2.
+        assert_eq!(
+            purges(
+                vec![innervate.clone(), lifebloom.clone()],
+                PURGE_URGENT_PRIORITY
+            )
+            .expected,
+            20.0
+        );
+        // Three stacks are still ONE candidate: the same odds.
+        assert_eq!(
+            purges(
+                vec![innervate.clone(), three_stacks.clone()],
+                PURGE_URGENT_PRIORITY
+            )
+            .expected,
+            20.0
+        );
+        // A whole Druid kit: Innervate, Mark, Rejuvenation, Lifebloom.
+        let kit = purges(
+            vec![
+                innervate.clone(),
+                mark.clone(),
+                rejuvenation.clone(),
+                lifebloom.clone(),
+            ],
+            PURGE_URGENT_PRIORITY,
+        );
+        assert_eq!((kit.candidates, kit.blooming), (4, 1));
+        assert!(kit.expected > 0.0);
+
+        // Lifebloom stacks only: hold, at every bar, and say why.
+        assert_eq!(
+            held(vec![three_stacks.clone()], i32::MIN),
+            "purge odds: expected -70.0 over 1 buffs (1 blooming)"
+        );
+        // Rejuvenation and a Lifebloom: an even trade is no purge.
+        assert_eq!(
+            held(
+                vec![rejuvenation.clone(), lifebloom.clone()],
+                PURGE_MIN_PRIORITY
+            ),
+            "purge odds: expected 0.0 over 2 buffs (1 blooming)"
+        );
+        // Two Druids' Lifeblooms crowd out the Innervate.
+        assert_eq!(
+            held(
+                vec![
+                    innervate.clone(),
+                    lifebloom.clone(),
+                    other_lifebloom.clone()
+                ],
+                PURGE_URGENT_PRIORITY
+            ),
+            "purge odds: expected -10.0 over 3 buffs (2 blooming)"
+        );
+        // Nothing worth the bar is no odds at all: nothing to purge.
+        assert!(matches!(
+            decide(vec![mark.clone()], PURGE_MIN_PRIORITY),
+            Err(RejectionReason::NoValidTarget)
+        ));
+        // The odds are the pick's own: computed over every candidate.
+        assert_eq!(
+            PurgeOdds::of([&innervate, &lifebloom], &defs).map(|o| o.expected),
+            Some(20.0)
         );
     }
 

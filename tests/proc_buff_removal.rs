@@ -100,17 +100,12 @@ fn queue(app: &mut App, target: Entity, scope: DispelScope) {
     });
 }
 
-/// The headline: a purge pinned to the proc buff's own type, facing nothing
-/// else, takes nothing.
+/// The headline: a purge facing the proc buff and nothing else takes nothing.
 #[test]
 fn a_purge_cannot_remove_a_proc_buff() {
     let mut app = dispel_app(1);
     let target = wearer(&mut app, vec![dragonspine_buff()]);
-    queue(
-        &mut app,
-        target,
-        DispelScope::Purge(AuraType::AttackPowerIncrease),
-    );
+    queue(&mut app, target, DispelScope::Purge);
     app.update();
     assert_eq!(names(&app, target), vec!["Dragonspine Trophy"]);
 }
@@ -124,11 +119,7 @@ fn a_purge_beside_a_same_type_magic_buff_always_takes_the_magic_one() {
     for seed in 0..32 {
         let mut app = dispel_app(seed);
         let target = wearer(&mut app, vec![dragonspine_buff(), battle_shout_buff()]);
-        queue(
-            &mut app,
-            target,
-            DispelScope::Purge(AuraType::AttackPowerIncrease),
-        );
+        queue(&mut app, target, DispelScope::Purge);
         app.update();
         assert_eq!(
             names(&app, target),
@@ -145,14 +136,14 @@ fn no_removal_scope_takes_a_proc_buff() {
     let scopes = [
         DispelScope::Magic,
         DispelScope::MagicOrPoison,
-        DispelScope::Purge(proc.effect_type),
+        DispelScope::Purge,
         DispelScope::Impairments(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
     ];
     for scope in scopes {
         assert!(!scope.takes(&proc), "{scope:?} takes a proc buff");
     }
     // ...while the same scope set does take the shout it is purged beside.
-    assert!(DispelScope::Purge(AuraType::AttackPowerIncrease).takes(&battle_shout_buff()));
+    assert!(DispelScope::Purge.takes(&battle_shout_buff()));
 }
 
 // ============================================================================

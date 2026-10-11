@@ -134,9 +134,10 @@ pub fn decide_shaman_action(
         return true;
     }
 
-    // P3b: urgent Purge — a buff worth more than the filler nuke (Innervate:
-    // a match's worth of the enemy healer's mana). Asked only when one is in
-    // reach, so the ordinary purge at P6 keeps the trace's one Purge entry.
+    // P3b: urgent Purge — a target carrying a buff worth more than the filler
+    // nuke (Innervate: a match's worth of the enemy healer's mana), when the
+    // random pick is worth the gamble. Asked only when one is in reach, so the
+    // ordinary purge at P6 keeps the trace's one Purge entry.
     if super::select_purge(
         ctx,
         abilities,
@@ -202,7 +203,8 @@ pub fn decide_shaman_action(
         return true;
     }
 
-    // P6: Purge — strip a beneficial aura off an enemy (prefers the healer).
+    // P6: Purge — the enemy with the best odds of a random strip (ties to the
+    // healer), when one carries a buff worth the cast.
     if super::try_purge_enemy(
         commands,
         combat_log,

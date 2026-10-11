@@ -1299,12 +1299,13 @@
             spell_school: Nature,
         ),
 
-        // Purge: offensive dispel — removes one beneficial aura from an enemy.
-        // Enemy-buff-removal mechanic arrives in U4; this entry just declares it.
+        // Purge: offensive dispel — removes one beneficial aura from an enemy,
+        // picked at random from its purgeable buffs (process_dispels); one
+        // stack of a stacked one. The AI chooses whom, never which buff.
         Purge: (
             name: "Purge",
             class: Shaman,
-            description: "Removes one beneficial magic effect from an enemy.",
+            description: "Removes one beneficial magic effect from an enemy, chosen at random. A stacked effect loses one stack.",
             icon: "icons/abilities/spell_nature_purge.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -1410,8 +1411,8 @@
         ),
 
         // Lifebloom (TBC): instant heal over time that stacks to 3, refreshes on
-        // recast, and BLOOMS for a direct heal per stack when it runs out or is
-        // dispelled or purged.
+        // recast, and BLOOMS for a direct heal per stack when it runs out — or
+        // for the one stack a dispel or purge takes.
         Lifebloom: (
             name: "Lifebloom",
             class: Druid,
@@ -1512,7 +1513,8 @@
                 // The most valuable purge in the game: a match's worth of a
                 // healer's mana, against a type (ManaRegenIncrease) whose
                 // default is Mage Armor's minor re-buff. At the urgent purge
-                // bar, so the Shaman strips it ahead of its filler nuke.
+                // bar, so the Shaman purges a target carrying it ahead of its
+                // filler nuke (which buff comes off is still a random pick).
                 purge_priority: Some(110),
             )),
             spell_school: Nature,

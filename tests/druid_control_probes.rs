@@ -977,6 +977,11 @@ const OUTRUN_WINDOW_SECS: f32 = 1.5;
 /// failure.
 const WALL_PIN_YARDS: f32 = 5.0;
 
+/// The same pin met mid-run: a shift that starts farther out but RUNS INTO a
+/// wall or a pillar on its escape side inside the window — its escape-side
+/// clearance falls to this — is pinned from then on.
+const WALL_REACHED_YARDS: f32 = 1.0;
+
 /// How many times a shifted Druid may turn its heading back on itself (more
 /// than 90 degrees, one commit window to the next) in one stay in the form.
 /// A Druid running from a chaser keeps running away from it; a run that
@@ -1183,12 +1188,26 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
                     gap(end_frame)
                 );
                 // The one known miss: a Druid shifting with its back to a wall
-                // or a pillar can only run along it (AS-164). Anywhere else, a
-                // shift that does not gain ground on its chaser is a fault.
+                // or a pillar — or running into one inside the window — can
+                // only run along it (AS-164). Anywhere else, a shift that does
+                // not gain ground on its chaser is a fault.
+                let met_wall = played
+                    .frames
+                    .iter()
+                    .filter(|f| f.sim_time >= start && f.sim_time <= end_frame.sim_time)
+                    .map(|f| {
+                        wall_distance(
+                            map,
+                            f.combatants[&druid].position,
+                            f.combatants[&chaser].position,
+                        )
+                    })
+                    .fold(f32::MAX, f32::min);
                 assert!(
-                    wall <= WALL_PIN_YARDS,
+                    wall <= WALL_PIN_YARDS || met_wall <= WALL_REACHED_YARDS,
                     "{t1:?} v {t2:?} {map} #{seed} at {start:.2}s: no ground gained on the \
-                     chaser ({:.1} -> {:.1} yd) {wall:.1} yd from any wall or pillar on its escape side — in the \
+                     chaser ({:.1} -> {:.1} yd) {wall:.1} yd from any wall or pillar on its escape side, \
+                     and never within {WALL_REACHED_YARDS} yd of one in the window — in the \
                      open, not the known wall-pin (within {WALL_PIN_YARDS} yd, AS-164)",
                     gap(&pair[1]),
                     gap(end_frame)

@@ -909,9 +909,11 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
     }
 }
 
-/// Minimum [`purge_priority`] worth spending a GCD on: only high-value
-/// defensives (Absorb / DamageTakenReduction / HoT-class sustain) clear this
-/// bar, so Purge never wastes a cast stripping cheap re-buffs like Fortitude.
+/// The reason to purge: a target is worth a Purge only if it carries a buff
+/// worth at least this ([`purge_pick_value`]) — high-value defensives and
+/// HoT-class sustain — so Purge never spends a GCD on a target holding only
+/// cheap re-buffs like Fortitude. Whether the random pick is then worth
+/// taking is [`PurgeOdds::favourable`].
 pub const PURGE_MIN_PRIORITY: i32 = 70;
 
 /// The urgent purge bar: a buff worth stripping ahead of the purger's filler
@@ -919,26 +921,38 @@ pub const PURGE_MIN_PRIORITY: i32 = 70;
 /// default, so only a per-aura override reaches it — today Innervate alone.
 pub const PURGE_URGENT_PRIORITY: i32 = 110;
 
-/// What purging this aura INSTANCE off an enemy is worth. Priority is keyed by
-/// the aura, not by its type, because two auras of one type can be worth
-/// opposite things:
+/// What a purge pick that lands on a BLOOMING aura costs, on the
+/// [`purge_pick_value`] scale. The pick takes one stack, and that stack blooms
+/// ([`Aura::bloom_heal`]): a heal handed to the enemy.
 ///
-/// - A BLOOMING aura (Lifebloom, [`Aura::bloom_heal`]) is worth **0**: a purge
-///   that takes it blooms it, which HEALS its bearer. Purging it is a gift.
+/// Set at [`PURGE_MIN_PRIORITY`] — one stack's bloom given away costs as much
+/// as the least buff worth a purge gains. So a coin flip between Innervate and
+/// a Lifebloom is worth a cast, and one between a Rejuvenation and a Lifebloom
+/// is not.
+pub const PURGE_BLOOM_COST: i32 = PURGE_MIN_PRIORITY;
+
+/// What one purge pick that lands on this aura INSTANCE is worth. Keyed by the
+/// aura, not by its type, because two auras of one type can be worth opposite
+/// things:
+///
+/// - A BLOOMING aura (Lifebloom, [`Aura::bloom_heal`]) is worth
+///   **-[`PURGE_BLOOM_COST`]**: the stack a purge takes blooms, which HEALS its
+///   bearer.
 /// - An aura whose source ability sets `purge_priority` in its RON
 ///   `applies_aura` is worth that ([`AbilityDefinitions::source_effect`]):
 ///   Innervate is [`PURGE_URGENT_PRIORITY`], where its type,
-///   `ManaRegenIncrease`, is Mage Armor's 25 and never purged.
+///   `ManaRegenIncrease`, is Mage Armor's 25.
 /// - Everything else is worth its type ([`purge_priority`]). Rejuvenation is
-///   a `HealingOverTime` at 70, exactly the floor: a legitimate purge, taken
-///   after every defensive and Innervate, and only in a GCD the purger has
-///   nothing better for.
+///   a `HealingOverTime` at 70, exactly the floor.
 ///
-/// Every AI that strips an ENEMY's buff asks this. Today that is the Shaman's
-/// Purge alone: Devour Magic and Master's Call free allies ([`ally_removal`]).
-pub fn aura_purge_priority(aura: &Aura, abilities: &AbilityDefinitions) -> i32 {
+/// The purger never chooses which buff comes off — `process_dispels` picks
+/// one at random — so these values are weighed together by [`PurgeOdds`],
+/// never used to pick. Every AI that strips an ENEMY's buff asks this. Today
+/// that is the Shaman's Purge alone: Devour Magic and Master's Call free allies
+/// ([`ally_removal`]).
+pub fn purge_pick_value(aura: &Aura, abilities: &AbilityDefinitions) -> i32 {
     if aura.bloom.is_some() {
-        return 0;
+        return -PURGE_BLOOM_COST;
     }
     abilities
         .source_effect(aura)
@@ -946,33 +960,90 @@ pub fn aura_purge_priority(aura: &Aura, abilities: &AbilityDefinitions) -> i32 {
         .unwrap_or_else(|| purge_priority(aura.effect_type))
 }
 
-/// A purge the purger's AI has chosen: whom, what it is worth, and the removal
-/// scope that takes exactly the chosen buff.
+/// The odds of one Purge on one target. `process_dispels` takes ONE of the
+/// target's purgeable buffs ([`DispelScope::Purge`]), uniformly at random over
+/// the AURAS — a three-stack Lifebloom is one candidate, as likely as a
+/// one-stack Rejuvenation — so the purge is worth the mean of every
+/// candidate's [`purge_pick_value`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PurgeOdds {
+    /// Buffs the purge could take, each an equal chance.
+    pub candidates: usize,
+    /// How many of them bloom when taken.
+    pub blooming: usize,
+    /// The most valuable of them: the reason to purge at all, held to the
+    /// caller's bar ([`PURGE_MIN_PRIORITY`] or [`PURGE_URGENT_PRIORITY`]).
+    pub best: i32,
+    /// The expected value of the random pick.
+    pub expected: f32,
+}
+
+impl PurgeOdds {
+    /// The odds over `auras` (one target's), or `None` when a purge would
+    /// take nothing.
+    pub fn of<'a>(
+        auras: impl IntoIterator<Item = &'a Aura>,
+        abilities: &AbilityDefinitions,
+    ) -> Option<Self> {
+        let mut candidates = 0usize;
+        let mut blooming = 0usize;
+        let mut best = i32::MIN;
+        let mut total = 0i32;
+        for aura in auras.into_iter().filter(|a| DispelScope::Purge.takes(a)) {
+            let value = purge_pick_value(aura, abilities);
+            candidates += 1;
+            blooming += usize::from(aura.bloom.is_some());
+            best = best.max(value);
+            total += value;
+        }
+        (candidates > 0).then(|| Self {
+            candidates,
+            blooming,
+            best,
+            expected: total as f32 / candidates as f32,
+        })
+    }
+
+    /// Whether the random pick is worth the cast: its expected value is
+    /// positive. A Lifebloom stack drags the odds down by its share of the
+    /// candidates, so the purge stays worth it beside Innervate and stops
+    /// being worth it as blooms crowd out what is worth taking.
+    pub fn favourable(&self) -> bool {
+        self.expected > 0.0
+    }
+
+    /// The trace note for a purge held on these odds.
+    pub fn held_note(&self) -> String {
+        format!(
+            "purge odds: expected {:.1} over {} buffs ({} blooming)",
+            self.expected, self.candidates, self.blooming
+        )
+    }
+}
+
+/// A purge the purger's AI has chosen to cast: on whom, and the odds. Never
+/// WHICH buff — that is the random pick's.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PurgeChoice {
     pub target: Entity,
     pub position: Vec3,
-    pub priority: i32,
-    pub scope: DispelScope,
+    pub odds: PurgeOdds,
 }
 
 /// The purge worth casting: among living, non-pet enemies the purge REACHES
-/// ([`cast_reach`]: within `range`, then in sight) carrying an
-/// [`Aura::can_be_purged`] buff worth at least `min_priority`
-/// ([`aura_purge_priority`]), the enemy whose best buff is worth the most.
-/// Reach filters BEFORE value ranks, so an occluded enemy with the best buff
-/// yields to the best one in sight instead of refusing the whole cast.
-/// Ties prefer the enemy HEALER (deny its defensives first), then the lowest
-/// entity (BTreeMap order — deterministic); within one enemy the first aura at
-/// the best priority wins.
-///
-/// The scope is pinned to the chosen buff's type, and also to its source when
-/// that buff is source-keyed ([`Aura::distinct_by_source`]): a purge chosen for
-/// a Rejuvenation must not take the Lifebloom beside it.
+/// ([`cast_reach`]: within `range`, then in sight) whose [`PurgeOdds`] carry a
+/// buff worth at least `min_priority` AND are [`PurgeOdds::favourable`], the
+/// enemy with the best expected pick. Reach filters BEFORE value ranks, so an
+/// occluded enemy with the best odds yields to the best one in sight instead
+/// of refusing the whole cast. Ties prefer the enemy HEALER (deny its
+/// defensives first), then the lowest entity (BTreeMap order —
+/// deterministic).
 ///
 /// With no purge in reach the error is the reason to trace: `LosBlocked` when
-/// an enemy in range carried a buff worth the purge and only sight stood in the
-/// way, `NoValidTarget` otherwise.
+/// an enemy in range was worth the purge and only sight stood in the way;
+/// `PreconditionUnmet`, its note carrying the odds ([`PurgeOdds::held_note`]),
+/// when an enemy carried a buff worth the purge but the pick was not worth
+/// the gamble; `NoValidTarget` otherwise.
 pub fn select_purge(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
@@ -985,6 +1056,7 @@ pub fn select_purge(
     // (choice, is_healer)
     let mut best: Option<(PurgeChoice, bool)> = None;
     let mut occluded = false;
+    let mut held: Option<PurgeOdds> = None;
     for (e, info) in ctx.combatants.iter() {
         if info.team == my_team || !info.is_alive || info.is_pet {
             continue;
@@ -997,17 +1069,15 @@ pub fn select_purge(
         let Some(enemy_auras) = ctx.active_auras.get(e) else {
             continue;
         };
-        let mut best_aura: Option<(&Aura, i32)> = None;
-        for aura in enemy_auras.iter().filter(|a| a.can_be_purged()) {
-            let priority = aura_purge_priority(aura, abilities);
-            if best_aura.is_none_or(|(_, bp)| priority > bp) {
-                best_aura = Some((aura, priority));
-            }
-        }
-        let Some((aura, priority)) = best_aura else {
+        let Some(odds) = PurgeOdds::of(enemy_auras.iter(), abilities) else {
             continue;
         };
-        if priority < min_priority {
+        if odds.best < min_priority {
+            continue;
+        }
+        if !odds.favourable() {
+            // The first held enemy names the odds in the trace.
+            held.get_or_insert(odds);
             continue;
         }
         match cast_reach(ctx, range, my_pos, info.position) {
@@ -1022,34 +1092,28 @@ pub fn select_purge(
         let better = match &best {
             None => true,
             Some((b, best_heal)) => {
-                priority > b.priority || (priority == b.priority && is_healer && !best_heal)
+                odds.expected > b.odds.expected
+                    || (odds.expected == b.odds.expected && is_healer && !best_heal)
             }
         };
         if better {
-            let scope = if aura.distinct_by_source() {
-                DispelScope::PurgeSource {
-                    effect: aura.effect_type,
-                    source: aura.ability_name.clone(),
-                    owner: aura.stack_owner(),
-                }
-            } else {
-                DispelScope::Purge(aura.effect_type)
-            };
             best = Some((
                 PurgeChoice {
                     target: *e,
                     position: info.position,
-                    priority,
-                    scope,
+                    odds,
                 },
                 is_healer,
             ));
         }
     }
-    match best {
-        Some((choice, _)) => Ok(choice),
-        None if occluded => Err(RejectionReason::LosBlocked),
-        None => Err(RejectionReason::NoValidTarget),
+    match (best, held) {
+        (Some((choice, _)), _) => Ok(choice),
+        (None, _) if occluded => Err(RejectionReason::LosBlocked),
+        (None, Some(odds)) => Err(RejectionReason::PreconditionUnmet {
+            note: odds.held_note(),
+        }),
+        (None, None) => Err(RejectionReason::NoValidTarget),
     }
 }
 
@@ -1856,21 +1920,20 @@ pub fn try_dispel_ally(
 }
 
 /// Offensive dispel: the Shaman's Purge. Structural mirror of
-/// [`try_dispel_ally`], but scans ENEMIES (team != self) for a beneficial,
-/// [`Aura::can_be_purged`] aura and strips the single highest-[`aura_purge_priority`]
-/// one worth at least `min_priority`.
+/// [`try_dispel_ally`], but aimed at an ENEMY's beneficial,
+/// [`Aura::can_be_purged`] auras.
 ///
-/// Target selection is [`select_purge`]: among enemies in Purge range carrying
-/// a purgeable buff, the one whose best buff has the highest priority; ties
-/// prefer the enemy HEALER, then the lowest entity id.
+/// The AI decides only WHETHER to purge and on WHOM ([`select_purge`]: an
+/// enemy carrying a buff worth at least `min_priority` whose random pick is
+/// [`PurgeOdds::favourable`]). It never chooses the buff: the spawned
+/// `DispelPending` is scoped [`DispelScope::Purge`], every purgeable buff, and
+/// `process_dispels` takes one of them at random.
 ///
 /// Gated by [`pre_cast_ok`] with `check_friendly_cc: false` (offensive — no
 /// friendly-CC concern) and `check_target_immune: true` (respect Divine Shield
 /// and Cyclone; range/mana/lockout/silence handled by the guard). Predicate
-/// failures emit typed reject events; success emits choose and spawns a
-/// `DispelPending` whose scope is pinned to the chosen buff, so
-/// `process_dispels` strips that beneficial aura from the enemy — a random pick
-/// only if the enemy holds several auras the scope takes (intentional).
+/// failures emit typed reject events — a purge held on its odds is
+/// `PreconditionUnmet` with the odds in the note; success emits choose.
 #[allow(clippy::too_many_arguments)]
 pub fn try_purge_enemy(
     commands: &mut Commands,
@@ -1897,12 +1960,12 @@ pub fn try_purge_enemy(
     };
 
     // Value floor: `min_priority` is PURGE_MIN_PRIORITY for the ordinary purge
-    // (only high-value defensives and sustain — cheap re-buffs like Fortitude
-    // aren't worth the cast), PURGE_URGENT_PRIORITY for the urgent one.
+    // (only a target carrying a high-value defensive or sustain buff — cheap
+    // re-buffs like Fortitude aren't worth the cast), PURGE_URGENT_PRIORITY
+    // for the urgent one. The odds of the random pick are select_purge's too.
     let PurgeChoice {
         target: target_entity,
         position: target_pos,
-        scope,
         ..
     } = match select_purge(
         ctx,
@@ -1970,18 +2033,15 @@ pub fn try_purge_enemy(
         "casts",
     );
 
-    // The scope is pinned to the chosen (highest-priority) buff — its type, and
-    // its source when it is source-keyed — so process_dispels targets that
-    // valuable buff rather than any purgeable aura. If the enemy holds several
-    // auras the scope takes, the strip is a random pick among them
-    // (intentional — see process_dispels).
+    // Any purgeable buff: process_dispels picks the one that comes off, at
+    // random (intentional — see process_dispels).
     commands.spawn(DispelPending {
         target: target_entity,
         dispeller: entity,
         log_prefix: "[PURGE]",
         caster_class: combatant.class,
         heal_on_success: None,
-        scope,
+        scope: DispelScope::Purge,
     });
 
     true

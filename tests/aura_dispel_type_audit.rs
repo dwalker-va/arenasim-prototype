@@ -537,20 +537,9 @@ fn felhunter_devour_magic_cannot_take_serpent_sting() {
     ));
 }
 
-/// Purge is offensive and magic-only: pinned to the sting's own type, it still
-/// finds nothing to take.
+/// Purge is offensive and magic-only: it takes enemy buffs, so a sting on its
+/// target is nothing it can take.
 #[test]
 fn shaman_purge_cannot_take_serpent_sting() {
-    assert!(sting_survives(
-        DispelScope::Purge(AuraType::DamageOverTime),
-        CharacterClass::Shaman
-    ));
-    assert!(sting_survives(
-        DispelScope::PurgeSource {
-            effect: AuraType::DamageOverTime,
-            source: "Serpent Sting".to_string(),
-            owner: None,
-        },
-        CharacterClass::Shaman
-    ));
+    assert!(sting_survives(DispelScope::Purge, CharacterClass::Shaman));
 }
