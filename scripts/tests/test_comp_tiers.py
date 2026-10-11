@@ -244,6 +244,22 @@ class ReportTests(FixtureTestCase):
         self.assertHas(run, "dominant-shape watch")
         self.assertHas(run, "/10 top-10 comps are double-healer")
 
+    def test_a_gzipped_csv_reads_the_same_as_the_plain_one(self):
+        """The canonical baselines are committed as `.csv.gz`."""
+        import gzip
+        import shutil
+
+        path = self._csv(
+            ("Warrior+Priest", "Mage+Priest", "team1"),
+            ("Warrior+Priest", "Rogue+Paladin", "team2"),
+        )
+        gz = path + ".gz"
+        with open(path, "rb") as src, gzip.open(gz, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        self.assertEqual(ct.load(gz), ct.load(path))
+        run = self.assertOk(self.report(gz, "--size", "2"))
+        self.assertHas(run, "2 matches")
+
     def test_without_size_the_legacy_report_runs(self):
         path = self._csv(
             ("Warrior", "Mage", "team1"),

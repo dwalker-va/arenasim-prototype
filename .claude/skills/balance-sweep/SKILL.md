@@ -140,13 +140,17 @@ Current-state references (batch harness, 300s cap). **Regenerate and overwrite
 these after any change that ships**, and update the summary's class/comp tier
 lists:
 
-- `docs/design/balance/canonical_1v1_n100_300s.csv` (full 8×8)
-- `docs/design/balance/canonical_2v2_full_n100_300s.csv` (complete 784-cell matrix)
-- `docs/design/balance/canonical_3v3_full_n50_300s.csv` (complete 3,136-cell matrix)
+- `docs/design/balance/canonical_1v1_n100_300s.csv.gz` (full 9×9)
+- `docs/design/balance/canonical_2v2_full_n100_300s.csv.gz` (complete 1,296-cell matrix)
+- `docs/design/balance/canonical_3v3_full_n50_300s.csv.gz` (complete 7,056-cell matrix)
 - `docs/design/balance/canonical_baselines_summary.md` — tier lists + the current
   meta read (what's meta-defining / unplayable), with a generated-on date inside.
 
-Analyze with `scripts/comp_tiers.py <csv> --size {2,3}`. The summary must report
+The matrices are committed **gzipped** (`gzip -9 -n`; the 3v3 is about 37MB
+raw, 2.3MB compressed). `scripts/comp_tiers.py` reads `.csv.gz` directly, so
+regenerate to a plain CSV and compress it in place before committing.
+
+Analyze with `scripts/comp_tiers.py <csv[.gz]> --size {2,3}`. The summary must report
 **both class-tier views** and **two structural canaries** (methodology,
 2026-07-02):
 
@@ -154,7 +158,7 @@ Analyze with `scripts/comp_tiers.py <csv> --size {2,3}`. The summary must report
   structurally non-competitive comps. Competitive = both sides competitive;
   2v2 = at most 1 healer (double-DPS playable, double-healer not), 3v3 = 1 **or
   2** healers (double-healer 3v3 is a legitimate meta shape; only triple-DPS and
-  triple-healer are out). Healers = Priest/Paladin/Shaman. Competitive is the
+  triple-healer are out). Healers = Priest/Paladin/Shaman/Druid. Competitive is the
   meta read; all-comps is for completeness.
 - **Anomaly canary:** any non-competitive comp winning ≥50% — especially vs the
   competitive field — points at a fundamental balance issue (e.g. an offensive

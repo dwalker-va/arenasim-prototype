@@ -1,260 +1,104 @@
 # Canonical Balance Baselines
 
-**Generated 2026-07-09** — regenerated after the **Priest sustain cycle**:
-(1) Power Word: Shield now scales with spell power (25 + 0.4 × SP ≈ 70 absorb
-at the stock 112-SP loadout, was flat 50), (2) new Priest ability **Mana
-Burn** (1.5s interruptible Shadow cast, destroys 50 mana on an enemy mana
-user, AI holds it for enemy-healer CC windows), (3) Priest FREE-posture
-`burn_pull` positioning. Supersedes the 2026-07-04 arena-dampening baselines.
-
-**Headline: the shield fix centered the healer bracket and cleared the last
-standing anomaly.** Priest jumped from bracket-floor healer to within reach
-of the pack (2v2 comp 46.7 → 51.8, healer spread 13.4 → 7.5pt; 3v3 healers
-converged at 50.2/50.2/49.4), paid for mostly by Paladin/Shaman and melee
-burst. The spell-power-scaled shield is the anti-burst lever dampening
-couldn't be: **Mage+Rogue+Warlock — the anomaly flagged as this cycle's
-headline — cleared (53.3/53.2 → 49.6/48.8)**. New watch item: **Mage+Priest
-is the new #1 2v2 comp (83.9)**, dethroning Mage+Shaman head-to-head via
-layered absorbs (Ice Barrier + 70pt PW:S) on the Mage. Draw rates and average
-durations are unchanged (2v2 0.7% / 50s, 3v3 0.2% / 54s).
+**Generated 2026-10-10 at `ea63f4f`** (the 0.7 milestone sweep, card AS-164):
+nine classes, the Druid's first canonical run. AS-240 (TBC dispel classes)
+landed after this commit and is not in these numbers. Full findings:
+`2026-10-10-as164-milestone-sweep.md`.
 
 Authoritative current-state references. Use as the "before" when assessing a
-balance change — **compare batch-vs-batch only**, and **full-canonical vs
-full-canonical**.
+balance change — **compare batch-vs-batch only, full-canonical vs
+full-canonical**, and for exact attribution run a paired A/B at a fixed commit
+rather than diffing against these files (cells drift between cycles; see the
+`balance-methodology` memory).
 
 | Format | File | Coverage | N | Matches | Draws |
 |---|---|---|---|---|---|
-| 1v1 | `canonical_1v1_n100_300s.csv` | full 8×8 | 100 | 6,400 | 2.2% |
-| 2v2 | `canonical_2v2_full_n100_300s.csv` | every distinct-class pair × pair (784) | 100 | 78,400 | 0.7% |
-| 3v3 | `canonical_3v3_full_n50_300s.csv` | every distinct-class triple × triple (3,136) | 50 | 156,800 | 0.2% |
+| 1v1 | `canonical_1v1_n100_300s.csv.gz` | full 9×9 | 100 | 8,100 | 8.95% |
+| 2v2 | `canonical_2v2_full_n100_300s.csv.gz` | every distinct-class pair × pair (1,296) | 100 | 129,600 | 2.55% |
+| 3v3 | `canonical_3v3_full_n50_300s.csv.gz` | every distinct-class triple × triple (7,056) | 50 | 352,800 | 0.79% |
 
-Distinct-class comps, both orderings, 300s cap, default loadouts/strategy.
-Regenerate via `scripts/gen_sweep.py --full {1,2,3}` + `arenasim --batch`,
-then analyze with **`scripts/comp_tiers.py <csv> --size {2,3}`** (all-comps +
-competitive tiers, comp lists, canaries). See the `balance-sweep` skill.
+Distinct-class comps, both orderings, 300s cap, BasicArena, `Legacy` AI,
+default loadouts. Committed gzipped (`gzip -9 -n`). Regenerate with
+`scripts/gen_sweep.py --full {1,2,3}` and `arenasim --batch`, compress, then
+`scripts/comp_tiers.py <csv.gz> --size {2,3}` (it reads `.gz` directly).
 
----
+## Two views: all-comps and competitive
 
-## Two views: all-comps vs competitive
+Healers are Priest, Paladin, Shaman and Druid.
+- **2v2 competitive:** at most one healer on each side.
+- **3v3 competitive:** one or two healers on each side.
 
-Class scores are reported two ways, per methodology (2026-07-02):
+## Class standings
 
-- **All-comps** — every comp, for completeness. Polluted by structurally
-  non-competitive comps a class happens to appear in.
-- **Competitive** — both sides restricted to competitive shapes. This is the
-  meta read. Definitions (healers = Priest/Paladin/Shaman):
-  - **2v2 competitive:** at most 1 healer (double-DPS is playable;
-    double-healer is not).
-  - **3v3 competitive:** 1 **or 2** healers — double-healer 3v3 is a
-    legitimate meta shape; only triple-DPS and triple-healer are out.
+Win rate of every match the class's comp plays; draws count as non-wins.
 
-## Class standings (winrate of comps containing the class)
-
-Sorted by 2v2 competitive. Δ = change vs the dampening baseline (2026-07-04).
-
-| Class | 1v1 (Δ) | 2v2 all (Δ) | **2v2 comp (Δ)** | 3v3 all (Δ) | **3v3 comp (Δ)** |
+| Class | 1v1 | 2v2 all | **2v2 competitive** | 3v3 all | **3v3 competitive** |
 |---|---|---|---|---|---|
-| Mage | 62.6 (+0.0) | 66.4 (−0.7) | **66.0** (−0.6) | 62.3 (−0.8) | **66.2** (−0.1) |
-| Shaman | 43.1 (+0.0) | 54.7 (−0.1) | **59.3** (−0.8) | 53.1 (−0.7) | **50.2** (−1.3) |
-| Paladin | 70.4 (−0.8) | 52.4 (−1.2) | **57.6** (−1.7) | 53.3 (−0.5) | **49.4** (−1.0) |
-| **Priest** | **31.3 (+1.3)** | **48.1 (+3.9)** | **51.8 (+5.1)** | **53.1 (+3.3)** | **50.2 (+2.9)** |
-| Hunter | 44.3 (+0.0) | 45.6 (+0.0) | **45.3** (+0.2) | 40.9 (−0.4) | **38.3** (−0.4) |
-| Warlock | 37.1 (−0.1) | 45.1 (−0.3) | **43.5** (−0.2) | 46.7 (−0.1) | **47.0** (+0.2) |
-| Rogue | 78.8 (−0.8) | 43.9 (−1.0) | **41.6** (−0.7) | 46.3 (−0.2) | **52.1** (+0.3) |
-| **Warrior** | **23.8 (+0.3)** | **41.0 (−0.7)** | **39.2** (−0.5) | 43.5 (−0.8) | **45.9** (−0.8) |
+| Paladin | 52.6 | 49.5 | **63.1** | 51.0 | **51.5** |
+| Mage | 70.9 | 61.1 | **58.1** | 57.0 | **56.4** |
+| Priest | 38.4 | 44.7 | **52.3** | 49.4 | **50.1** |
+| Shaman | 30.6 | 41.1 | **51.4** | 46.3 | **47.0** |
+| Rogue | 75.9 | 55.6 | **49.5** | 52.7 | **54.7** |
+| Warrior | 38.5 | 52.3 | **46.3** | 52.8 | **54.0** |
+| Hunter | 61.8 | 50.7 | **45.2** | 45.1 | **43.2** |
+| Druid | 8.2 | 37.0 | **45.1** | 45.3 | **46.9** |
+| Warlock | 32.8 | 46.6 | **40.0** | 46.8 | **44.7** |
 
-Reading the deltas: **this cycle is a targeted Priest lift with a broad,
-shallow tax.** Priest +5.1 (2v2 comp) / +2.9 (3v3 comp) is the only move
-above 1.7pt in either team bracket; everyone else pays a fraction of a point
-to ~1.7 (Paladin) — partly head-to-head vs stronger Priests, partly shields
-blunting burst (Rogue/Warrior tick down). **The healer brackets converged**:
-2v2 healer spread 13.4 → 7.5pt (Shaman 59.3 / Paladin 57.6 / Priest 51.8),
-and 3v3 healers are functionally tied (Priest 50.2 / Shaman 50.2 /
-Paladin 49.4). **Priest remains the healer-vs-healer 1v1 king** (94.5/5.5
-over Paladin, 100/0 over Shaman at N=200 both-orderings) — wand damage plus
-Mana Burn is the healer endgame. 1v1 remains a diagnostic bracket only.
+**The read.** The Paladin is the strongest healer and the strongest 2v2 class
+(63.1), the healer four of five DPS do best with. The Mage leads 3v3 (56.4) and
+every 3v3 top-5 comp contains one. The Druid is the weakest 2v2 healer (45.1,
+six points under the Shaman) and sits level with the Shaman in 3v3; its
+mechanism metrics point at healing throughput, not mana, as the constraint. The
+Warlock is the 2v2 floor (40.0) and the Hunter the 3v3 floor (43.2). 1v1 is
+diagnostic only: the Druid's 8.2 there is a healer with almost no damage (it
+draws 100% of its mirror and of Druid v Shaman at the cap).
 
-## 2v2 comp tier list (784 matchups)
+## 2v2 comp tier list
 
-**Meta-defining (top):**
-| Winrate | Comp | Shape |
-|---|---|---|
-| **83.9%** | **Mage+Priest** (+5.5) | 1h |
-| 80.5% | Mage+Shaman (−2.9) | 1h |
-| 76.6% | Mage+Paladin (−3.2) | 1h |
-| 66.6% | Mage+Warlock (−0.3) | 0h |
-| 64.1% | Rogue+Shaman (−0.8) | 1h |
-| 63.5% | Paladin+Warrior (−0.8) | 1h |
-| 60.5% | Paladin+Warlock (−1.5) | 1h |
-| 59.6% | Shaman+Warlock (−0.3) | 1h |
+| Top | | Bottom | |
+|---|---|---|---|
+| Warrior+Paladin | 77.5% | Druid+Shaman | 4.3% |
+| Mage+Shaman | 72.7% | Druid+Paladin | 9.8% |
+| Rogue+Paladin | 70.5% | Druid+Priest | 16.8% |
+| Mage+Priest | 70.5% | Paladin+Priest | 19.3% |
+| Mage+Paladin | 69.1% | Priest+Shaman | 25.4% |
+| Hunter+Paladin | 65.8% | Paladin+Shaman | 25.5% |
+| Priest+Rogue | 64.2% | Rogue+Warlock | 36.9% |
+| Druid+Rogue | 63.9% | Warlock+Warrior | 38.3% |
 
-**Unplayable (bottom):**
-| Winrate | Comp |
-|---|---|
-| 40.0% | Priest+Shaman (+5.2) |
-| 38.7% | Hunter+Rogue (−0.9) |
-| 36.7% | Hunter+Warlock (−1.6) |
-| 33.3% | Hunter+Warrior (−1.0) |
-| 23.3% | Rogue+Warrior (−2.3) |
-| 23.0% | Warlock+Warrior (−1.7) |
-| 22.8% | Rogue+Warlock (−1.7) |
-| **14.2%** | **Paladin+Priest** (−0.7) |
+## 3v3 comp tier list
 
-**Mage+Priest took #1 (83.9)**, beating Mage+Shaman head-to-head decisively
-in both orderings (62→87 / 38→12): layered absorbs on the game's best damage
-dealer. The signature cells of the cycle are the Priest-survives-the-train
-matchups — Warrior+Priest vs Warrior+Rogue 19→59, vs Warrior+Mage 27→63 —
-and the revived squishy-partner comps (Rogue+Priest vs Mage+Shaman 2→43,
-Priest+Warlock vs Mage+Paladin 38→82). Paladin+Priest remains the absolute
-floor: two healers still can't out-sustain dampening.
-
-## 3v3 comp tier list (3,136 matchups)
-
-**Meta-defining (top):**
-| Winrate | Comp | Shape |
-|---|---|---|
-| **86.2%** | **Mage+Shaman+Warlock** (−0.5) | 1h |
-| 79.8% | Mage+Paladin+Warlock (−1.7) | 1h |
-| 78.3% | Mage+Priest+Warlock (+3.7) | 1h |
-| 76.6% | Mage+Priest+Shaman (−1.6) | 2h |
-| 75.1% | Mage+Paladin+Shaman (−1.0) | 2h |
-| 73.1% | Mage+Priest+Rogue (+2.4) | 1h |
-| 69.6% | Mage+Shaman+Warrior (−1.8) | 1h |
-| 69.4% | Mage+Paladin+Rogue (new to top-8) | 1h |
-
-**Unplayable (bottom):**
-| Winrate | Comp |
-|---|---|
-| 33.9% | Hunter+Paladin+Priest (+2.8) |
-| 32.6% | Hunter+Mage+Rogue (−1.8) |
-| 30.0% | Mage+Rogue+Warrior (new to list) |
-| 19.6% | Hunter+Rogue+Warlock (−1.2) |
-| 17.2% | Paladin+Priest+Shaman (+1.2) |
-| 17.1% | Rogue+Warlock+Warrior (−0.8) |
-| 15.5% | Hunter+Warlock+Warrior (−1.5) |
-| **13.2%** | **Hunter+Rogue+Warrior** (−0.7) |
-
-Mage+Shaman+Warlock holds #1 (86.2). Every top-8 comp still contains Mage.
-The Priest-carrying Mage comps gained (Mage+Priest+Warlock +3.7, now #3;
-Mage+Priest+Rogue +2.4) while burst-shape comps slid (Mage+Rogue+Warrior
-fell into the bottom-8 at 30.0 — shields hurt triple-burst from both sides
-of the table).
+| Top | | Bottom | |
+|---|---|---|---|
+| Mage+Paladin+Warlock | 76.6% | Druid+Priest+Shaman | 4.6% |
+| Mage+Shaman+Warlock | 74.7% | Druid+Paladin+Priest | 4.9% |
+| Mage+Priest+Warlock | 73.7% | Druid+Paladin+Shaman | 5.8% |
+| Mage+Paladin+Warrior | 72.9% | Paladin+Priest+Shaman | 9.2% |
+| Mage+Paladin+Rogue | 71.9% | Hunter+Rogue+Warrior | 20.9% |
+| Druid+Paladin+Warrior | 71.9% | Hunter+Rogue+Warlock | 25.0% |
+| Paladin+Priest+Warrior | 70.6% | Hunter+Warlock+Warrior | 26.3% |
+| Hunter+Priest+Rogue | 70.0% | Druid+Priest+Warlock | 28.0% |
 
 ## Canaries
 
-Two standing structural checks, run every regeneration
-(`scripts/comp_tiers.py`).
-
-### Anomaly check — non-competitive comps performing competitively
-
-| Bracket | Comp | Full-field | vs competitive | Verdict |
-|---|---|---|---|---|
-| 2v2 | Paladin+Shaman (2h) | 42.9% | 47.6% | **stays cleared** (43.5/48.5 last cycle) |
-| 3v3 | **Mage+Rogue+Warlock** (0h) | **49.6%** | **48.8%** | **CLEARED** (was 53.3/53.2 — the standing headline anomaly) |
-| 3v3 | Hunter+Mage+Warlock (0h) | 49.0% | 40.4% | farm-the-trash profile, not beating real comps — watch |
-| 3v3 | Mage+Warlock+Warrior (0h) | 45.9% | 46.1% | receded from near-threshold (49.1/49.8) — no action |
-
-- **Mage+Rogue+Warlock: resolved — by shield scaling, not a targeted nerf.**
-  A triple-burst comp beating the competitive field was a burst-vs-healing
-  statement; dampening (a late-game lever) couldn't touch a comp that wins
-  early, but a spell-power-scaled Power Word: Shield is exactly the
-  early-game EHP that blunts an opener. Its biggest losses are against
-  Priest+healer frames (vs Warrior+Priest+Shaman 100→68, vs
-  Priest+Warlock+Shaman 84→50). **No anomaly currently fires in any
-  bracket** — first time since the canary was introduced.
-- **Paladin+Shaman** stays below water (47.6 vs competitive) — the dampening
-  fix holds under the new shield math.
-
-### Dominant-shape watch (3v3)
-
-**Current: 2/10 of the top-10 3v3 comps are double-healer** (Mage+Priest+Shaman
-76.6, Mage+Paladin+Shaman 75.1) — present, not dominant, unchanged count for
-three cycles. Both 2h comps *lost* ~1–1.6pt this cycle (their opponents'
-Priests got tankier too). No action.
-
-## What's meta-defining vs unplayable — the read
-
-- **Mage's grip is intact but no longer widening** (2v2 comp 66.0, 3v3 comp
-  66.2, both flat-to-slightly-down; every 3v3 top-8 comp still contains
-  Mage; its best partner changed from Shaman to Priest in 2v2).
-  **Mage+Priest at 83.9 is the comp to watch**: if a future cycle pushes it
-  past the mid-80s, the queued counterplay lever is Shaman Purge
-  prioritizing shield-stripping — it taxes exactly this comp without
-  touching the Priest kit. LoS/pillar play remains the deferred structural
-  answer to Mage itself.
-- **The healer bracket is centered for the first time**: 2v2 comp
-  Shaman 59.3 / Paladin 57.6 / Priest 51.8 (was a 13.4pt spread), 3v3 comp
-  50.2/50.2/49.4. The Priest fix was sustain (shield scaling), not the new
-  ability — Mana Burn measured roughly +0.3pt on its own (see
-  `2026-07-05` findings in the priest-mana-burn memory/PR) and is a
-  skill-expressive layer, not the balance lever.
-- **Priest owns healer-vs-healer harder than ever** (1v1: 94.5/5.5 vs
-  Paladin, 100/0 vs Shaman) — wand damage decides healer duels once
-  dampening bites, and Mana Burn accelerates the endgame. All healer-mirror
-  1v1s resolve; no draw regression.
-- **Warrior remains the 2v2 competitive floor (39.2)**; shields blunting
-  burst nicked all melee slightly (Rogue 41.6). The queued non-fear lever
-  (Intercept) stands, and any melee buff should be re-sliced against
-  shielded targets specifically.
-- **Hunter is still the competitive 3v3 floor (38.3)** — four cycles
-  running. Unmoved by this cycle (its damage is sustained physical, neither
-  the shield tax nor the shield benefit lands on it disproportionately).
-  The diagnosed levers (gear mana, trap-window burst conversion) remain the
-  highest-value queued buff work.
-- **Structural floors**: Paladin+Priest 14.2 in 2v2, Hunter+Rogue+Warrior
-  13.2 and Paladin+Priest+Shaman 17.2 in 3v3. Healer stacking without
-  damage is still the single worst thing you can do in a comp — by design.
-
-## Changes this cycle (vs the dampening baseline, 2026-07-04)
-
-- **Power Word: Shield scales with spell power**: absorb = 25 + 0.4 × caster
-  effective SP (base + gear + aura bonuses) ≈ 70 at the stock 112-SP Priest
-  loadout, was flat 50 — the one Priest number that never grew with the kit
-  (Flash Heal lands ~100 at the same SP). Implemented as a general
-  `applies_aura.magnitude_coefficient` config field applied via
-  `AuraPending::from_ability_scaled`; `ability_config::validate()` panics on
-  a non-zero coefficient for any ability whose apply site isn't wired, so a
-  RON edit can't silently no-op. Only PW:Shield opts in this cycle.
-- **New Priest ability: Mana Burn** — 1.5s interruptible Shadow cast, 40yd,
-  25 mana, no cooldown, destroys 50 mana on an enemy mana user (healers only
-  by AI policy; `ResourceType::Mana` guard in the effect — Warrior rage and
-  Rogue energy reuse `current_mana` and are never burnable). Deals no damage,
-  so it can never break CC. NOT scaled by ArenaDampening (it is pressure
-  toward resolution). The AI holds it for enemy-healer CC windows (two-tier
-  health floor above Flash Heal) with standstill safety gates
-  (escape/pressured/focus/stealth) that apply only while `cast_time > 0`.
-  Measured alone it is a small positive (~+0.3pt 2v2, 73%-favorable winner
-  flips); the instant-cast variant measured +3.6pt but was rejected as too
-  divergent from Classic.
-- **Priest `burn_pull` positioning** (movement.ron): while the burn window
-  is open, the FREE formation point clamps toward Mana Burn range of the
-  enemy healer, never beyond heal range of the ally centroid.
-- **Effect:** Priest 2v2 comp 46.7 → 51.8, 3v3 47.3 → 50.2; healer tiers
-  converged; Mage+Rogue+Warlock anomaly cleared (53.2 → 48.8 vs
-  competitive); Mage+Priest new #1 2v2 comp (83.9); draws and durations
-  unchanged (2v2 0.7% / 50s, 3v3 0.2% / 54s).
-- **Regression matchups for future cycles** (the cells that prove the
-  mechanisms; N=100/side): Warrior+Priest vs Warrior+Rogue 59% (train
-  survival), Rogue+Priest vs Mage+Shaman 43% (squishy-partner revival),
-  Rogue+Warlock vs Mage+Priest 0% (shields blunt burst), Mage+Priest vs
-  Mage+Shaman 87% (the concentration watch), Mage+Rogue+Warlock vs
-  Warrior+Priest+Shaman 68% in 3v3 (anomaly stays dead).
+- **Anomaly (non-competitive comp at or above 50% against competitive comps):**
+  2v2 none (best: Paladin+Shaman 30.3%). **3v3: Mage+Warlock+Warrior fires**,
+  58.7% full-field and 59.0% against competitive comps — a no-healer comp
+  out-trading healed ones. Watch.
+- **Dominant shape (3v3):** 3 of the top-10 comps are double-healer. Present,
+  not dominant.
 
 ## Caveats
 
-- **Spawn-side asymmetry** up to ~18% in some matchups; the full matrix runs both
-  orderings so tier lists average it out.
-- **Batch harness order-sensitivity** (deferred): a few points off the historical
-  multithreaded `--matrix` numbers. Compare batch-vs-batch only.
-- **Default loadouts & strategy.** Strategy-var sweeps (poisons, openers, pets,
-  totems, curses…) are a separate axis — see the `balance-sweep` skill.
-- **Class-tier metric:** winrate over all matches where the class appears on a
-  side (draws count as losses); computed by `scripts/comp_tiers.py`.
-- **Dampening horizon:** any mechanic or AI change aimed at the late game
-  (sustain, attrition, mana economy) now interacts with the 75–195s dampening
-  ramp — sweep long-game comps (healer pairs, DoT attrition) explicitly when
-  touching it.
-- **Shield-scaling horizon (new):** absorb magnitudes now scale with SP, so
-  any future SP change (gear cycles, Flametongue-style buffs, new casters)
-  moves shield strength too — a max-mana or SP item tweak is no longer
-  heal-only. Budget-check SP items with shields in mind.
+- **Draws are mostly the cap, and mostly double-healer comps.** 2,940 of the
+  2v2's 3,302 draws hit 300s. In competitive comps the 2v2 draw rate is 0.83%
+  with no Druid, 0.80% with one side's and 4.12% with both — under the Shaman
+  mirror's 6.36%. Druid mirrors run long (median 95s) but resolve; only in 1v1,
+  where it has no damage-dealer beside it, does a Druid fail to kill (Druid v
+  Druid and Druid v Shaman draw 100% at the cap).
+- **Spawn side.** Both orderings run, so tier lists average it out; AS-104
+  measured no team-1 advantage beyond ±1.3pt.
+- **Default loadouts and strategy.** Strategy-variable sweeps (pets, openers,
+  curses, auras) are a separate axis — see the `balance-sweep` skill.
+- **Dampening horizon.** Any change aimed at the late game interacts with the
+  75–195s dampening ramp; sweep healer pairs and Druid comps explicitly.

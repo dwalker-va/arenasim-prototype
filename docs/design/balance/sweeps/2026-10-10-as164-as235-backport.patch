@@ -1,0 +1,24 @@
+AS-164: the AS-235 headless-executor fix, backported onto the bisect commits.
+
+Applied to each of 1ade748 1323a25 b175653 e6c0e93 147e95b before building
+(`git apply` from the tree root; the hunk offset differs per commit). It puts
+the Fixed* schedules on the single-threaded executor, as AS-235 (163bf54) did on
+main. It changes speed, not output: 147e95b built WITHOUT it reproduces the
+committed bisect cells 400/400 on side_won.
+
+--- a/src/headless/runner.rs
++++ b/src/headless/runner.rs
+@@ -895,7 +895,12 @@
+             .edit_schedule(Update, single)
+             .edit_schedule(PostUpdate, single)
+             .edit_schedule(Last, single)
+-            .edit_schedule(Startup, single);
++            .edit_schedule(Startup, single)
++            .edit_schedule(FixedFirst, single)
++            .edit_schedule(FixedPreUpdate, single)
++            .edit_schedule(FixedUpdate, single)
++            .edit_schedule(FixedPostUpdate, single)
++            .edit_schedule(FixedLast, single);
+     }
+
+     // Registration guard (debug builds / cargo test only): movement config

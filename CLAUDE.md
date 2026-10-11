@@ -265,13 +265,17 @@ For deeper context, see these focused references:
   Priest pinned against the pillar or vibrating there. The DPS half was reverted:
   constraint satisfaction cannot express a kiter's distance-maximisation.
   `Legacy` is byte-identical throughout.
-  **Definitive n=100 head-to-head** (2026-08-06, CSV in `docs/design/balance/`):
-  the healer solve + kiter leash is worth +36pt to Warlock+Priest (z=5.2), +14pt
-  to Hunter+Priest (z=2.2), +10pt to Warrior+Priest (z=1.8), -6pt (noise) to
-  Rogue+Priest. Those figures predate AS-181, which changed how TeamPlan units
-  round Nagrand pillars; they are due a re-measure at the 0.7 milestone sweep.
-  **Sample-size warning stands:** every earlier n=12 win-rate figure
-  was noise around these values. Prefer per-frame mechanism metrics
+  **Head-to-head, n=300 per arm** (2026-10-10 at `ea63f4f`, PillaredArena;
+  `docs/design/balance/2026-10-10-as164-milestone-sweep.md` §6): the healer
+  solve + kiter leash is worth +25pt to Warlock+Priest (z=6.7), +3pt to
+  Warrior+Priest (ns), +2pt to Hunter+Priest, -45pt to Rogue+Priest (z=-13.1)
+  and -9pt to Warrior+Mage+Priest vs Rogue+Warlock+Paladin (z=-2.8). Each
+  effect is measured against the `Legacy` baseline of the same comps, so a
+  change to `Legacy` moves it too. The Rogue+Priest effect is about half each:
+  `Legacy` Rogue+Priest is stronger (100% against Hunter+Priest, after AS-44's
+  dispel fix) and `TeamPlan` Rogue+Priest is weaker (55%).
+  **Sample-size warning stands:** an n=12 win-rate figure is noise around
+  these values. Prefer per-frame mechanism metrics
   (`tests/camp_sweep.rs`); for win rate use `scripts/headtohead_sweep.py`
   (~100 matches/cell via the parallel `--batch` runner, Wilson CIs, z-tests).
   **Measurement rule:** `AiProfiles` is PER-TEAM; a uniform-profile A/B cannot
@@ -898,6 +902,8 @@ scripts/paired_sweep.py before.csv after.csv \
 - **Priest**: Mana, healer, Flash Heal/Mind Blast/Power Word: Fortitude
 - **Warlock**: Mana, DoT caster, Corruption/Shadow Bolt/Fear
 - **Paladin**: Mana, healer/melee, Holy Shock/Flash of Light/Hammer of Justice
+- **Shaman**: Mana, offensive healer, Lightning Bolt/Lesser Healing Wave/Purge/Wind Shear/Frost Shock and totems
+- **Druid**: Mana, restoration healer (instant heals over time) and control, Rejuvenation/Lifebloom/Swiftmend/Entangling Roots/Cyclone/Moonfire/Innervate, a Travel Form escape shift; no wand
 - **Hunter**: Mana, ranged physical DPS with pet, Aimed Shot/Arcane Shot/Concussive Shot/Disengage/Freezing Trap/Frost Trap/Flare. Two auto-attacks on separate timers: Auto Shot at 8-35yd, and a melee swing from its main-hand (and off-hand) weapon inside `MELEE_RANGE` when it holds one (the default loadout does not); nothing in the dead zone between (see `docs/design/wow-mechanics.md`, Auto-Attacks). Pet engagement model: pet inherits Hunter's target, pursues into melee via existing target-pursuit movement, and retreats ("Heel") when pet HP drops below 25%. Per-pet headline abilities (Spider Web, Boar Charge, Master's Call) are dispatched by Hunter AI via the `PetCommand` component (hybrid model — Hunter owns headline calls, pet handles auto-attacks and pursuit). When Hunter is mid-cast (CastingState excludes it from `decide_abilities`), `pet_ai_system` falls back to autonomous dispatch using the same predicate logic; trace events distinguish via `dispatched_by` (set for Hunter dispatch, omitted for autonomous). Iteration 2a shipped pet target ownership + Heel predicate + PetCommand framework; iteration 2b shipped the Hunter `try_dispatch_*` helpers plus the pet-side `pet_command_rejection` authoritative check, with the autonomous fallback kept to cover Hunter's CastingState windows.
 
 ## Common Tasks
