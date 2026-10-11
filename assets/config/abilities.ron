@@ -1054,6 +1054,7 @@
                 duration: 4.0,
                 magnitude: 1.0,
                 break_on_damage: 80.0,  // Same as Frost Nova
+                dispel_type: Physical,  // TBC's Web (4167) is a Physical-school root: no dispel frees it
             )),
             spell_school: Nature,
             projectile_speed: Some(50.0),
@@ -1152,6 +1153,7 @@
                 aura_type: FrostArmorBuff,
                 duration: 600.0,
                 magnitude: 1.0,
+                dispel_type: Untyped,  // TBC: a Mage armor has no dispel type; no purge takes it
             )),
             spell_school: Frost,
         ),
@@ -1170,6 +1172,7 @@
                 aura_type: ManaRegenIncrease,
                 duration: 600.0,
                 magnitude: 8.0,
+                dispel_type: Untyped,  // TBC: a Mage armor has no dispel type; no purge takes it
             )),
             spell_school: Arcane,
         ),
@@ -1188,6 +1191,7 @@
                 aura_type: CritChanceIncrease,
                 duration: 600.0,
                 magnitude: 0.05,
+                dispel_type: Untyped,  // TBC: a Mage armor has no dispel type; no purge takes it
             )),
             spell_school: Fire,
         ),
@@ -1565,6 +1569,7 @@
                 duration: 6.0,
                 magnitude: 1.0,
                 break_on_damage: -1.0, // never breaks on damage
+                dispel_type: Untyped,  // TBC: Cyclone (33786) has no dispel type
             )),
             spell_school: Nature,
         ),

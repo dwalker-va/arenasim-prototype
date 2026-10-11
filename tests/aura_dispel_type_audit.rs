@@ -188,24 +188,11 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::ArcaneIntellect => config(S::Magic, T::Magic),
         AbilityType::IceBarrier => config(S::Magic, T::Magic),
         AbilityType::Polymorph => config(S::Magic, T::Magic),
-        AbilityType::FrostArmor => config_diverging(
-            S::Magic,
-            T::NoType, // 7301
-            "PENDING RULING (AS-240): TBC gives the Mage armors no dispel type; the sim's \
-             read as magic from their school, so a purge takes them",
-        ),
-        AbilityType::MageArmorSpell => config_diverging(
-            S::Magic,
-            T::NoType, // 27125
-            "PENDING RULING (AS-240): TBC gives the Mage armors no dispel type; the sim's \
-             read as magic from their school, so a purge takes them",
-        ),
-        AbilityType::MoltenArmor => config_diverging(
-            S::Magic,
-            T::NoType, // 30482
-            "PENDING RULING (AS-240): TBC gives the Mage armors no dispel type; the sim's \
-             read as magic from their school, so a purge takes them",
-        ),
+        // Mage armors: no dispel type in TBC (7301, 27125, 30482); the user
+        // ruled them unpurgeable (2026-10-11).
+        AbilityType::FrostArmor => config(S::Untyped, T::NoType),
+        AbilityType::MageArmorSpell => config(S::Untyped, T::NoType),
+        AbilityType::MoltenArmor => config(S::Untyped, T::NoType),
 
         // ---- Priest ----
         AbilityType::FlashHeal => Row::NoAura,
@@ -260,7 +247,8 @@ fn expected(ability: AbilityType) -> Row {
             S::Unclassed,
             T::Magic, // 1020
             "TBC's Divine Shield is Magic, but only Mass Dispel removes it, and the sim has \
-             no Mass Dispel; no purge takes it (`AuraType::DamageImmunity`)",
+             no Mass Dispel; no purge takes it (`AuraType::DamageImmunity`). Kept by user \
+             ruling, 2026-10-11",
         ),
         // Paladin auras: no dispel type in TBC, and the user ruled them
         // unpurgeable (2026-10-11).
@@ -282,22 +270,17 @@ fn expected(ability: AbilityType) -> Row {
         },
         AbilityType::FrostTrap => Row::Aura {
             source: Source::Engine(|| frost_trap_slow_aura(Entity::PLACEHOLDER, 0.5)),
-            sim: S::Magic,
+            // No dispel type; the user ruled it undispellable (2026-10-11).
+            sim: S::Untyped,
             tbc: T::NoType, // Frost Trap Aura, 13810
-            divergence: Some(
-                "PENDING RULING (AS-240): TBC's Frost Trap Aura has no dispel type; the sim's \
-                 slow is Frost-school magic, which a dispel takes",
-            ),
+            divergence: None,
         },
         AbilityType::Flare => Row::NoAura,
 
         // ---- Hunter pets ----
-        AbilityType::SpiderWeb => config_diverging(
-            S::Magic,
-            T::NoType, // Web, 4167 (Physical school)
-            "PENDING RULING (AS-240): TBC's Web is a Physical-school root with no dispel \
-             type; the sim's is a Nature-school root, which a dispel takes",
-        ),
+        // Web, 4167: a Physical-school root with no dispel type. The user
+        // ruled it physical (2026-10-11), so no dispel frees it.
+        AbilityType::SpiderWeb => config(S::Physical, T::NoType),
         AbilityType::BoarCharge => config(S::Physical, T::NoType),
         AbilityType::MastersCall => Row::NoAura,
 
@@ -322,12 +305,9 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::MarkOfTheWild => config(S::Magic, T::Magic),
         AbilityType::Innervate => config(S::Magic, T::Magic),
         AbilityType::EntanglingRoots => config(S::Magic, T::Magic),
-        AbilityType::Cyclone => config_diverging(
-            S::Magic,
-            T::NoType, // 33786
-            "PENDING RULING (AS-240): Cyclone takes its class from the Nature school, but no \
-             dispel takes it by RULE (`AuraType::Cyclone` is never a dispel candidate)",
-        ),
+        // 33786, no dispel type (user ruling, 2026-10-11). Its TYPE is never a
+        // dispel candidate either (`AuraType::Cyclone`).
+        AbilityType::Cyclone => config(S::Untyped, T::NoType),
         // 783. A shapeshift, not a magic buff: the user ruled nothing purges
         // or dispels it (2026-10-11).
         AbilityType::TravelForm => config(S::Untyped, T::NoType),
@@ -459,18 +439,7 @@ fn every_divergence_from_tbc_is_explained() {
 
     // The divergences are a fixed, named set: a new one is a decision, not drift.
     divergent.sort();
-    assert_eq!(
-        divergent,
-        [
-            "Cyclone",
-            "DivineShield",
-            "FrostArmor",
-            "FrostTrap",
-            "MageArmorSpell",
-            "MoltenArmor",
-            "SpiderWeb",
-        ]
-    );
+    assert_eq!(divergent, ["DivineShield"]);
 }
 
 /// TBC's poisons are the sim's poisons, and nothing else is. Cleanse is the
@@ -588,19 +557,70 @@ fn purge_scopes(aura: &Aura) -> [DispelScope; 2] {
     ]
 }
 
-/// User ruling, 2026-10-11: no purge takes a Paladin aura, a totem's buff or
-/// Travel Form. Each is checked as the engine lands it, through the real
-/// `process_dispels`, against both purge shapes.
+/// Every way `ability`'s buff could be taken that the rulings forbid: either
+/// purge shape (pinned to its type, pinned to its source) and every ally-side
+/// removal. Checked on the aura as the engine lands it, through the real
+/// `process_dispels`.
 ///
-/// The control is the SAME aura with its class put back to the school's
-/// default: that one a purge takes. So each survival is the class at work,
-/// not a purge that could never have reached the aura's type. Travel Form has
-/// no such control: its TYPE is unpurgeable too (`Aura::can_be_purged`), so
-/// it is held by two rules, and its class is pinned by the table above.
+/// With `control`, also the SAME aura with its class put back to the school's
+/// default, which a purge must take. So a survival is the class at work, not a
+/// purge that could never have reached the aura's type.
+fn purge_failures(defs: &AbilityDefinitions, ability: AbilityType, control: bool) -> Vec<String> {
+    let aura = landed_aura(defs, ability);
+    let mut wrong = Vec::new();
+    for scope in purge_scopes(&aura) {
+        if !survives(aura.clone(), scope.clone(), CharacterClass::Shaman) {
+            wrong.push(format!("{ability:?}: {scope:?} took {}", aura.ability_name));
+        }
+        if !control {
+            continue;
+        }
+        let mut as_magic = aura.clone();
+        as_magic.dispel_type = DispelType::Auto;
+        if survives(as_magic, scope.clone(), CharacterClass::Shaman) {
+            wrong.push(format!(
+                "{ability:?}: control: {scope:?} could not take it even as magic, so the \
+                 check above proves nothing"
+            ));
+        }
+    }
+    wrong.extend(dispel_failures(&aura, ability));
+    wrong
+}
+
+/// Every ally-side removal that takes `aura` (it should take none).
+fn dispel_failures(aura: &Aura, ability: AbilityType) -> Vec<String> {
+    let mut wrong = Vec::new();
+    for dispel in [
+        AbilityType::DispelMagic,
+        AbilityType::PaladinCleanse,
+        AbilityType::DevourMagic,
+    ] {
+        if !survives(
+            aura.clone(),
+            ally_dispel_scope(dispel),
+            CharacterClass::Priest,
+        ) {
+            wrong.push(format!(
+                "{ability:?}: {dispel:?} took {}",
+                aura.ability_name
+            ));
+        }
+    }
+    wrong
+}
+
+/// User ruling, 2026-10-11: no purge takes a Paladin aura, a totem's buff or
+/// Travel Form.
+///
+/// Travel Form has no control: its TYPE is unpurgeable too
+/// (`Aura::can_be_purged`), so two rules hold it, and the table above pins
+/// its class.
 #[test]
 fn purge_cannot_take_a_paladin_aura_a_totem_buff_or_travel_form() {
     let defs = AbilityDefinitions::default();
-    let rulings = [
+    let mut wrong = Vec::new();
+    for ability in [
         AbilityType::DevotionAura,
         AbilityType::ShadowResistanceAura,
         AbilityType::ConcentrationAura,
@@ -608,46 +628,64 @@ fn purge_cannot_take_a_paladin_aura_a_totem_buff_or_travel_form() {
         AbilityType::WaterTotem,
         AbilityType::EarthTotem,
         AbilityType::FireTotem,
-        AbilityType::TravelForm,
-    ];
+    ] {
+        wrong.extend(purge_failures(&defs, ability, true));
+    }
+    wrong.extend(purge_failures(&defs, AbilityType::TravelForm, false));
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// User ruling, 2026-10-11: no purge takes a Mage armor (TBC gives the armors
+/// no dispel type).
+#[test]
+fn purge_cannot_take_a_mage_armor() {
+    let defs = AbilityDefinitions::default();
     let mut wrong = Vec::new();
-    for ability in rulings {
-        let aura = landed_aura(&defs, ability);
-        for scope in purge_scopes(&aura) {
-            if !survives(aura.clone(), scope.clone(), CharacterClass::Shaman) {
-                wrong.push(format!("{ability:?}: {scope:?} took {}", aura.ability_name));
-            }
-            if ability == AbilityType::TravelForm {
-                continue;
-            }
-            let mut as_magic = aura.clone();
-            as_magic.dispel_type = DispelType::Auto;
-            if survives(as_magic, scope.clone(), CharacterClass::Shaman) {
-                wrong.push(format!(
-                    "{ability:?}: control — {scope:?} could not take it even as magic, so the \
-                     check above proves nothing"
-                ));
-            }
-        }
-        // No ally-side removal reaches it either.
-        for dispel in [
-            AbilityType::DispelMagic,
-            AbilityType::PaladinCleanse,
-            AbilityType::DevourMagic,
-        ] {
-            if !survives(
-                aura.clone(),
-                ally_dispel_scope(dispel),
-                CharacterClass::Priest,
-            ) {
-                wrong.push(format!(
-                    "{ability:?}: {dispel:?} took {}",
-                    aura.ability_name
-                ));
-            }
-        }
+    for ability in [
+        AbilityType::FrostArmor,
+        AbilityType::MageArmorSpell,
+        AbilityType::MoltenArmor,
+    ] {
+        wrong.extend(purge_failures(&defs, ability, true));
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// `ability`'s debuff, as the engine lands it, survives every ally-side
+/// removal. The control is the same debuff with its class put back to the
+/// school's default, which Dispel Magic must take: so a survival is the class
+/// at work, not a dispel that never reaches the mechanic.
+fn assert_undispellable(ability: AbilityType) {
+    let defs = AbilityDefinitions::default();
+    let aura = landed_aura(&defs, ability);
+    let wrong = dispel_failures(&aura, ability);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+
+    let mut as_magic = aura;
+    as_magic.dispel_type = DispelType::Auto;
+    assert!(
+        !survives(
+            as_magic,
+            ally_dispel_scope(AbilityType::DispelMagic),
+            CharacterClass::Priest
+        ),
+        "control: Dispel Magic cannot take {ability:?} even as magic, so the check proves nothing"
+    );
+}
+
+/// User ruling, 2026-10-11: the Spider's Web is physical (TBC's Web is a
+/// Physical-school root), so no dispel frees its victim. Master's Call still
+/// does: it clears movement impairments whatever their class.
+#[test]
+fn no_dispel_frees_a_web() {
+    assert_undispellable(AbilityType::SpiderWeb);
+}
+
+/// User ruling, 2026-10-11: Frost Trap's slow has no dispel type (TBC's Frost
+/// Trap Aura), so no dispel lifts it.
+#[test]
+fn no_dispel_lifts_the_frost_trap_slow() {
+    assert_undispellable(AbilityType::FrostTrap);
 }
 
 /// User ruling, 2026-10-11: Psychic Scream is dispellable. A Priest's Dispel

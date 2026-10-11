@@ -211,21 +211,25 @@ pub enum DispelType {
     /// abilities qualify, and nothing written about the CLASS should name one —
     /// otherwise every such addition rewrites a tooltip.
     ///
-    /// Derived from the applying ability's `spell_school`, not hand-declared:
-    /// see [`DispelType::for_ability`]. That keeps one fact ("Concussive Shot
-    /// is physical") in one place instead of restating it on the aura, where
-    /// the two copies could disagree.
+    /// Usually derived from the applying ability's `spell_school` rather than
+    /// hand-declared: see [`DispelType::for_ability`]. That keeps one fact
+    /// ("Concussive Shot is physical") in one place instead of restating it on
+    /// the aura, where the two copies could disagree. The Spider's Web is the
+    /// one declaration: a Nature-school pet ability whose TBC aura is a
+    /// Physical-school root.
     Physical,
     /// NO dispel type: a spell with a magic school that TBC still gives no
-    /// `DispelType` (0), so nothing dispels, cleanses or purges it. A Paladin
-    /// aura, a totem's buff, a shapeshift. They are spells, not wounds, so
-    /// `Physical` would misdescribe them. They are simply not the kind of
+    /// `DispelType` (0), so nothing dispels, cleanses or purges it. The Paladin
+    /// auras, the totem buffs, the Mage armors, Travel Form, Cyclone and the
+    /// Frost Trap slow. They are spells, not wounds, so `Physical` would
+    /// misdescribe them. They are simply not the kind of
     /// effect a removal takes hold of.
     ///
     /// Declared, never derived. The school says Holy or Nature, and the school
     /// cannot tell Devotion Aura from Power Word: Fortitude. The RON declares
     /// it (`dispel_type: Untyped`) on a config aura, and an engine constructor
-    /// sets it on an aura built in code (the totem buffs). Unlike `Curse`,
+    /// sets it on an aura built in code (the totem buffs, the Frost Trap
+    /// slow). Unlike `Curse`,
     /// this is not a class waiting for a server: no removal is meant to take it.
     Untyped,
 }
@@ -1115,7 +1119,7 @@ impl Aura {
     }
 
     /// Returns true if this aura carries NO dispel type — a Paladin aura, a
-    /// totem's buff, a shapeshift. No dispel, cleanse or purge takes it, and no
+    /// totem's buff, a Mage armor, a shapeshift. No dispel, cleanse or purge takes it, and no
     /// effect is meant to. See [`DispelType::Untyped`].
     pub fn is_untyped(&self) -> bool {
         matches!(self.dispel_type, DispelType::Untyped)
@@ -1219,8 +1223,9 @@ impl Aura {
     /// whatever its mechanic: a proc trinket's attack-power buff is the same
     /// `AttackPowerIncrease` as a shout, and is `DispelType::Physical` because
     /// an item's effect is not a spell (see `ProcConfig::aura`). The Paladin
-    /// auras, the totem buffs and Travel Form are `DispelType::Untyped`: TBC
-    /// gives them no dispel type, so a purge cannot take them either.
+    /// auras, the totem buffs, the Mage armors and Travel Form are
+    /// `DispelType::Untyped`: TBC gives them no dispel type, so a purge cannot
+    /// take them either.
     pub fn can_be_purged(&self) -> bool {
         // **Exhaustive on purpose — do not add a `_ =>` arm.** A removal class
         // silently falling through to the magic branch is a buff becoming

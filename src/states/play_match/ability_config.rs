@@ -81,7 +81,10 @@ pub struct AuraEffect {
     /// - `Curse` for the Warlock's curses, which are `Shadow` and would
     ///   otherwise read as ordinary dispellable magic.
     /// - `Untyped` for a spell TBC gives no dispel type at all (the Paladin
-    ///   auras, Travel Form): no dispel, cleanse or purge takes it.
+    ///   auras, the Mage armors, Travel Form, Cyclone): no dispel, cleanse or
+    ///   purge takes it.
+    /// - `Physical` for a magic-school ability whose TBC aura is physical (the
+    ///   Spider's Web).
     ///
     /// `tests/aura_dispel_type_audit.rs` tables every ability's class against
     /// TBC's, so a missed declaration fails there.

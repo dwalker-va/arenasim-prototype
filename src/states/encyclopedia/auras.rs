@@ -426,7 +426,8 @@ impl NamedAura {
     /// difference. The absolute rung is reserved for what genuinely nothing
     /// touches: the unpurgeable self-buffs (Divine Shield, Berserker Rage), a
     /// proc trinket's physical buff, the buffs with no dispel type (the Paladin
-    /// auras, the totem buffs, Travel Form — `Aura::is_untyped`), and the
+    /// auras, the totem buffs, the Mage armors, Travel Form —
+    /// `Aura::is_untyped`), and the
     /// mechanical markers (Weakened Soul, Shadow Sight, weapon poisons).
     ///
     /// The buff half is disjoint by construction: a dispel lifts harmful magic
@@ -751,7 +752,13 @@ fn engine_entry(
             magnitude: FROST_TRAP_SLOW_MAGNITUDE,
             school: Some(SpellSchool::Frost),
             break_on_damage: -1.0,
-            dispel_type: DispelType::Auto,
+            // The engine's own constructor decides the class, as for the
+            // totem buffs below.
+            dispel_type: crate::states::play_match::traps::frost_trap_slow_aura(
+                bevy::prelude::Entity::PLACEHOLDER,
+                FROST_TRAP_SLOW_MAGNITUDE,
+            )
+            .dispel_type,
             persistence: Persistence::WhileSourceActive("while you stand in the zone"),
             riders: EngineSpec::no_riders(),
             provenance: format!(
@@ -1924,10 +1931,13 @@ mod tests {
                 "Divine Shield",
                 "Shadow Sight",
                 // No dispel type (TBC): no purge takes a Paladin aura, a
-                // totem's buff or a shapeshift.
+                // totem's buff, a Mage armor or a shapeshift.
                 "Concentration Aura",
                 "Devotion Aura",
                 "Flametongue Totem",
+                "Frost Armor",
+                "Mage Armor",
+                "Molten Armor",
                 "Healing Stream Totem",
                 "Shadow Resistance Aura",
                 "Strength of Earth Totem",

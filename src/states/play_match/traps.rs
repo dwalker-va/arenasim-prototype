@@ -45,7 +45,9 @@ pub fn freezing_trap_aura(owner: Entity) -> Aura {
 /// The slow a Frost Trap zone holds on an enemy standing in it. The one
 /// definition: `slow_zone_system` pushes it (refreshed each tick, so it carries
 /// a short duration and never diminishes), and `tests/aura_dispel_type_audit.rs`
-/// checks its removal class against Classic's Frost Trap Aura.
+/// checks its removal class against TBC's Frost Trap Aura (13810), which has no
+/// dispel type: [`DispelType::Untyped`], so no dispel lifts it. The school
+/// stays Frost for every other question.
 pub fn frost_trap_slow_aura(owner: Entity, magnitude: f32) -> Aura {
     Aura {
         effect_type: AuraType::MovementSpeedSlow,
@@ -63,7 +65,7 @@ pub fn frost_trap_slow_aura(owner: Entity, magnitude: f32) -> Aura {
         applied_this_frame: false,
         backlash_damage: None,
         dr_category_override: None,
-        dispel_type: DispelType::Auto,
+        dispel_type: DispelType::Untyped,
         compound: None,
         source_item: None,
         stacks: None,
