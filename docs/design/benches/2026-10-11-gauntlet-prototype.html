@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gauntlet Prototype</title>
+<!--
+  AS-253: a click-through of the recommended gameplay loop (the Gauntlet) from
+  docs/design/proposals/2026-10-11-gameplay-loop.md.
+
+  Everything here is MOCK. The "fight" is a scripted stand-in for PlayMatch, not
+  the sim: its outcome is a weighted coin flip so the loop can be felt end to
+  end. Class, ability and item names and icons are the game's own, read from the
+  checkout by relative path (open this file from docs/design/benches/ inside the
+  repo; outside it the icons fall back to coloured initials).
+
+  The look is deliberately neutral: the screens' visual language belongs to the
+  UI design system (AS-251). Judge the FLOW and the decisions, not the styling.
+-->
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#13110e; --panel:#1d1a15; --panel2:#27231c; --line:#3c342a;
+  --text:#ece5d8; --muted:#a39886; --gold:#e6b450; --win:#7fbf6a; --loss:#d0614f;
+  --t1:#4f8fe0; --t2:#d8534a;
+  --sans: Georgia, "Times New Roman", serif;
+  --ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px;line-height:1.4}
+body{padding:16px}
+.wrap{max-width:980px;margin:0 auto}
+header.top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 16px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+header.top h1{font-family:var(--sans);font-size:20px;margin:0;color:var(--gold);letter-spacing:.02em}
+.note{color:var(--muted);font-size:12px;max-width:70ch}
+h2{font-family:var(--sans);font-size:22px;margin:0 0 4px;color:var(--gold)}
+.sub{color:var(--muted);margin:0 0 14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
+.row{display:flex;flex-wrap:wrap;gap:12px}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+button{font:inherit;cursor:pointer}
+.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:9px 16px;border-radius:6px}
+.btn:hover{border-color:var(--gold)}
+.btn.primary{background:#3a2c12;border-color:var(--gold);color:var(--gold);font-weight:600}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn:focus-visible,.card:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px}
+.card{background:var(--panel2);border:2px solid var(--line);border-radius:8px;padding:12px;text-align:left;color:var(--text);display:flex;flex-direction:column;gap:6px;min-width:0}
+.card:hover{border-color:#6a5a40}
+.card.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+.card .title{font-weight:600;font-size:15px}
+.card .meta{color:var(--muted);font-size:12px}
+.tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;border:1px solid var(--line);color:var(--muted)}
+.tag.heal{color:var(--win);border-color:#3f6334}
+.ico{width:40px;height:40px;border-radius:5px;border:1px solid #000;object-fit:cover;flex:none;background:#333;display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#111}
+.ico.sm{width:24px;height:24px;border-radius:3px;font-size:11px}
+.ico.lg{width:56px;height:56px}
+.hstack{display:flex;align-items:center;gap:10px;min-width:0}
+.pips{display:flex;gap:4px;align-items:center}
+.pip{width:14px;height:14px;border-radius:50%;border:1px solid var(--line);background:#0c0b09}
+.pip.w{background:var(--win);border-color:var(--win)}
+.pip.l{background:var(--loss);border-color:var(--loss)}
+.record{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;font-size:13px}
+.threat{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line)}
+.threat:first-of-type{border-top:0}
+.answer{color:var(--win)}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:4px;padding:6px;font:inherit;font-size:13px}
+.frames{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.frame{display:flex;align-items:center;gap:8px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);margin-bottom:6px;width:100%;color:var(--text);text-align:left}
+.frame.enemy:hover{border-color:var(--t2)}
+.frame.called{border-color:var(--t2);box-shadow:0 0 0 1px var(--t2) inset}
+.bar{flex:1;height:12px;background:#0c0b09;border-radius:3px;overflow:hidden;min-width:40px}
+.bar>i{display:block;height:100%;background:var(--win);transition:width .25s}
+.log{height:170px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted);background:#0c0b09;border:1px solid var(--line);border-radius:6px;padding:8px}
+.log b{color:var(--text);font-weight:500}
+.big{font-family:var(--sans);font-size:34px;margin:4px 0}
+.win{color:var(--win)} .loss{color:var(--loss)}
+.delta{font-size:12px}
+.delta .up{color:var(--win)} .delta .dn{color:var(--loss)}
+.matchlist .m{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;padding:6px 0;border-top:1px solid var(--line)}
+.toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--gold);padding:10px 14px;border-radius:6px;max-width:calc(100% - 32px);font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all;display:none}
+.menu{display:flex;flex-direction:column;gap:10px;align-items:center;padding:40px 0}
+.menu .btn{width:280px;padding:14px;font-size:16px}
+@media (max-width:620px){.frames{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>ArenaSim · Gauntlet prototype</h1>
+    <div class="note">Mock click-through for AS-253. Fights are a scripted stand-in, not the sim. Judge the flow and the decisions, not the styling.</div>
+  </header>
+  <main id="app"></main>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+"use strict";
+const ICON_ROOT = "../../../assets/";
+
+// ---- Game content (names and icons from the game's own RON) ----------------
+const CLASSES = {
+  Warrior:{col:"#C69B6D", heal:false, gear:"plate-ap", role:"Melee"},
+  Mage:   {col:"#3FC7EB", heal:false, gear:"cloth",    role:"Ranged caster"},
+  Rogue:  {col:"#FFF468", heal:false, gear:"leather-ap", role:"Melee, stealth"},
+  Priest: {col:"#FFFFFF", heal:true,  gear:"cloth",    role:"Healer"},
+  Warlock:{col:"#8788EE", heal:false, gear:"cloth",    role:"DoT caster, Felhunter"},
+  Paladin:{col:"#F48CBA", heal:true,  gear:"plate-sp", role:"Healer, melee"},
+  Hunter: {col:"#AAD372", heal:false, gear:"mail-ap",  role:"Ranged physical, pet"},
+  Shaman: {col:"#0070DD", heal:true,  gear:"caster-acc", role:"Healer, totems"},
+  Druid:  {col:"#FF7C0A", heal:true,  gear:"caster-acc", role:"Healer, HoTs and control"},
+};
+// What each class threatens, as an intel line (icon = that ability's real art).
+const THREATS = {
+  Warrior:[["ability_warrior_savageblow","Mortal Strike cuts all healing on its target"],["ability_warrior_charge","Charge closes the gap instantly"]],
+  Mage:[["spell_nature_polymorph","Polymorphs your healer"],["spell_frost_frostnova","Frost Nova roots your melee"]],
+  Rogue:[["ability_cheapshot","Opens from stealth with Cheap Shot"],["ability_rogue_kidneyshot","Chains Kidney Shot for a ~10s stun"]],
+  Priest:[["spell_shadow_psychicscream","Psychic Scream fears anyone close"],["spell_shadow_manaburn","Mana Burns your healer"]],
+  Warlock:[["spell_shadow_possession","Fears your healer"],["spell_shadow_mindrot","Felhunter's Spell Lock silences a caster"]],
+  Paladin:[["spell_holy_sealofmight","Hammer of Justice stuns"],["spell_holy_divineintervention","Divine Shield at low health"]],
+  Hunter:[["spell_frost_chainsofice","Freezing Trap on your healer"],["spell_nature_web","Spider's Web roots from range"]],
+  Shaman:[["spell_nature_cyclone","Wind Shear interrupts your casts"],["spell_nature_purge","Purges your buffs"]],
+  Druid:[["spell_nature_earthbind","Cyclones your damage dealer"],["spell_nature_rejuvenation","Heals over time: hard to burst"]],
+};
+const KIT = {Warrior:"Mortal Strike",Mage:"Frostbolt",Rogue:"Sinister Strike",Priest:"Flash Heal",Warlock:"Corruption",Paladin:"Flash of Light",Hunter:"Arcane Shot",Shaman:"Lightning Bolt",Druid:"Rejuvenation"};
+// Per-class pre-match choice (the existing MatchConfig options).
+const CHOICES = {
+  Hunter:{label:"Pet",opts:["Spider","Boar","Bird"]},
+  Rogue:{label:"Opener",opts:["Cheap Shot","Ambush"]},
+  Warlock:{label:"Curse on kill target",opts:["Curse of Agony","Curse of Tongues","Curse of Weakness"]},
+  Warrior:{label:"Shout",opts:["Battle Shout","Commanding Shout"]},
+  Mage:{label:"Armor",opts:["Frost Armor","Mage Armor","Molten Armor"]},
+  Paladin:{label:"Aura",opts:["Devotion Aura","Concentration Aura","Shadow Resistance Aura"]},
+};
+// Answers: [your class, choice value or null, their class, line]
+const ANSWERS = [
+  ["Hunter","Bird","Mage","Bird's Master's Call frees your team from Frost Nova"],
+  ["Hunter","Bird","Hunter","Bird's Master's Call frees your team from Web"],
+  ["Warlock",null,"Mage","Felhunter can devour Polymorph off your healer"],
+  ["Warlock",null,"Priest","Spell Lock answers their healer's casts"],
+  ["Warlock","Curse of Tongues",null,"Curse of Tongues slows their healer's casts"],
+  ["Paladin","Concentration Aura","Shaman","Concentration Aura shrugs off interrupts' pushback"],
+  ["Paladin","Shadow Resistance Aura","Warlock","Shadow Resistance Aura softens their shadow damage"],
+  ["Paladin","Shadow Resistance Aura","Priest","Shadow Resistance Aura softens their shadow damage"],
+  ["Rogue","Cheap Shot",null,"Cheap Shot into Kidney Shot locks their healer"],
+  ["Warrior",null,"Priest","Mortal Strike on their kill target halves their healing"],
+  ["Warrior",null,"Druid","Mortal Strike cuts the Druid's HoTs too"],
+  ["Mage","Frost Armor","Rogue","Frost Armor chills melee that hit you"],
+  ["Mage","Frost Armor","Warrior","Frost Armor chills melee that hit you"],
+];
+const GEAR = {
+  "plate-ap":[["Warlord's Crown",75,"Head","inv_helmet_72","+18 HP +12 AP +4% crit"],["Warlord's Breastplate",75,"Chest","inv_chest_plate16","+24 HP +10 AP +3% crit"],["Warlord's Spaulders",71,"Shoulders","inv_shoulder_34","+14 HP +8 AP +2% crit"],["Bloodlord's Battleaxe",75,"Main Hand","inv_axe_09","+16 AP +5% crit"]],
+  "plate-sp":[["Judgement Crown",75,"Head","inv_helmet_05","+18 HP +12 SP +16 mana"],["Judgement Breastplate",75,"Chest","inv_chest_chain_11","+20 HP +10 SP +0.5 regen"],["Judgement Gauntlets",73,"Hands","inv_gauntlets_29","+12 HP +8 SP +1% crit"],["Mace of the Redeemer",73,"Main Hand","inv_mace_05","+4 HP +10 SP"]],
+  "mail-ap":[["Giantstalker Helm",73,"Head","inv_helmet_05","+18 HP +10 AP +3% crit"],["Giantstalker Tunic",73,"Chest","inv_chest_chain_11","+22 HP +10 AP +3% crit"],["Giantstalker Legs",73,"Legs","inv_pants_mail_03","+20 HP +8 AP +3% crit"],["Eaglestrike Bow",73,"Ranged","inv_weapon_bow_01","+8 AP +2% crit"]],
+  "leather-ap":[["Deathdealer Cowl",73,"Head","inv_helmet_41","+16 HP +12 AP +4% crit"],["Deathdealer Tunic",73,"Chest","inv_chest_cloth_07","+18 HP +10 AP +4% crit"],["Deathdealer Mantle",71,"Shoulders","inv_shoulder_23","+12 HP +8 AP +2% crit"],["Fang of the Viper",73,"Main Hand","inv_sword_48","+6 AP +3% crit"]],
+  "cloth":[["Arcanist Crown",73,"Head","inv_helmet_53","+10 HP +12 SP +20 mana"],["Arcanist Robes",73,"Chest","inv_chest_cloth_03","+12 HP +14 SP +20 mana"],["Arcanist Leggings",73,"Legs","inv_pants_08","+10 HP +10 SP +0.5 regen"],["Wand of the Invoker",71,"Ranged","inv_wand_1h_stratholme_d_01","+8 SP +10 mana"]],
+  "caster-acc":[["Runestaff of Elements",73,"Main Hand","inv_staff_06","+20 SP +17 mana"],["Pendant of Clarity",70,"Neck","inv_jewelry_talisman_07","+6 SP +0.5 regen"],["Ring of Arcane Insight",70,"Ring","inv_jewelry_ring_40","+8 SP +10 mana"]],
+  "acc-ap":[["Cloak of Conquest",70,"Back","inv_misc_cape_17","+12 HP +4 AP +1% crit"],["Pendant of Might",70,"Neck","inv_jewelry_necklace_09","+8 AP +2% crit"],["Ring of Brute Force",70,"Ring","inv_jewelry_ring_15","+6 AP +2% crit"],["Insignia of the Alliance",70,"Trinket","inv_misc_token_argentdawn2","+8 AP +6 SP"]],
+  "acc-sp":[["Cloak of Wisdom",70,"Back","inv_misc_cape_18","+8 HP +6 SP +10 mana"],["Talisman of Ephemeral Power",70,"Trinket","inv_misc_root_02","+20 HP +1.5 regen"],["Ring of Fortitude",70,"Ring","inv_jewelry_ring_05","+16 HP"]],
+};
+const SLOTS_PER_COMBATANT = 14, START_ILVL = 57;
+const MAPS = ["Basic Arena","Nagrand Arena","Twin Pillars"];
+const OPP_NAMES = ["Gate Rats","The Dustcloaks","Ashen Pair","Thornwatch","Stormhold Duo","The Gilded Fangs","Champions of the Ring"];
+const OPP_POOL = [ // one opponent pair per tier (the real table would hold several per tier)
+  ["Warrior","Priest"],["Rogue","Druid"],["Mage","Shaman"],["Warlock","Priest"],["Hunter","Paladin"],["Rogue","Priest"],["Warrior","Paladin"]];
+const AI_BY_TIER = ["Legacy","Legacy","Legacy","Legacy","TeamPlan","TeamPlan","TeamPlan"];
+
+// ---- Seeded RNG: a run is its seed plus its choices --------------------------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+let rng = Math.random;
+function pick(arr,n){const a=arr.slice(),out=[];while(out.length<n&&a.length){out.push(a.splice(Math.floor(rng()*a.length),1)[0])}return out}
+
+// ---- State ------------------------------------------------------------------
+let S = null, saved = null;
+function newRun(){
+  const seed = Math.floor(Math.random()*1e9);
+  rng = mulberry32(seed);
+  const classes = Object.keys(CLASSES);
+  let offer = pick(classes,4);
+  if(!offer.some(c=>CLASSES[c].heal)){offer[3]=pick(classes.filter(c=>CLASSES[c].heal),1)[0]}
+  S = {seed, offer, draft:[], team:[], wins:0, losses:0, history:[], prep:{}, screen:"draft", sel:null};
+  render();
+}
+function ilvl(c){return (START_ILVL*(SLOTS_PER_COMBATANT-c.upgrades.length)+c.upgrades.reduce((s,u)=>s+u[1],0))/SLOTS_PER_COMBATANT}
+function opponent(){
+  const tier = Math.min(S.wins, 6);
+  const map = MAPS[(S.wins+S.losses)%3];
+  return {tier, name:OPP_NAMES[tier], classes:OPP_POOL[tier], ai:AI_BY_TIER[tier], map, ilvl: (START_ILVL + tier*0.8).toFixed(1)};
+}
+function answersFor(opp){
+  const out=[];
+  for(const [mine,val,theirs,line] of ANSWERS){
+    const c = S.team.find(t=>t.cls===mine); if(!c) continue;
+    if(val && S.prep[mine]!==val) continue;
+    if(theirs && !opp.classes.includes(theirs)) continue;
+    out.push(line);
+  }
+  return out;
+}
+
+// ---- Helpers ----------------------------------------------------------------
+const $app = document.getElementById("app");
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function classIcon(cls,size=""){
+  const c=CLASSES[cls];
+  return `<img class="ico ${size}" style="border-color:${c.col}" alt="${cls}" src="${ICON_ROOT}icons/classes/${cls.toLowerCase()}.png" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'ico ${size}',textContent:'${cls[0]}',style:'background:${c.col}'}))">`;
+}
+function abilityIcon(file){return `<img class="ico sm" alt="" src="${ICON_ROOT}icons/abilities/${file}.jpg" onerror="this.style.visibility='hidden'">`}
+function itemIcon(file){return `<img class="ico" alt="" src="${ICON_ROOT}icons/items/${file}.jpg" onerror="this.style.visibility='hidden'">`}
+function pips(){
+  let w="",l="";
+  for(let i=0;i<7;i++) w+=`<span class="pip ${i<S.wins?"w":""}" title="win ${i+1}"></span>`;
+  for(let i=0;i<3;i++) l+=`<span class="pip ${i<S.losses?"l":""}" title="loss ${i+1}"></span>`;
+  return `<div class="record"><span>Wins</span><span class="pips">${w}</span><span>Losses</span><span class="pips">${l}</span><span class="note">Run seed ${S.seed}</span></div>`;
+}
+function teamStrip(){
+  return `<div class="grid g2">${S.team.map(c=>`
+    <div class="hstack">${classIcon(c.cls,"lg")}<div><div class="title" style="color:${CLASSES[c.cls].col}">${c.cls}</div>
+    <div class="meta">avg ilvl ${ilvl(c).toFixed(1)} · ${c.upgrades.length} upgrade${c.upgrades.length===1?"":"s"}</div>
+    <div class="row" style="gap:4px;margin-top:4px">${c.upgrades.map(u=>`<img class="ico sm" title="${esc(u[0])}" src="${ICON_ROOT}icons/items/${u[3]}.jpg" alt="">`).join("")}</div></div></div>`).join("")}</div>`;
+}
+function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",5000)}
+function showReplay(i){toast("In the client this opens the match with --replay. Its whole record: "+S.history[i].replay)}
+function go(screen){S.screen=screen;S.sel=null;render();window.scrollTo(0,0)}
+
+// ---- Screens ----------------------------------------------------------------
+function render(){
+  if(!S){ $app.innerHTML = `<div class="menu"><h2>ArenaSim</h2>
+      ${saved?`<button class="btn primary" onclick="S=saved;saved=null;go('hub')">Continue run (${saved.wins}-${saved.losses})</button>`:""}
+      <button class="btn ${saved?"":"primary"}" onclick="saved=null;newRun()">${saved?"Abandon and start a new run":"Gauntlet"}</button>
+      <button class="btn" disabled title="The existing configure-match sandbox">Custom Match</button>
+      <button class="btn" disabled>Encyclopedia</button><button class="btn" disabled>Options</button>
+      <p class="note">Gauntlet: draft two classes, then win as many as you can before your third loss.</p></div>`; return; }
+  ({draft,hub,prepare,fight:drawFight,result,reward,end})[S.screen]();
+}
+
+function draft(){
+  $app.innerHTML = `<h2>Draft your team</h2><p class="sub">Pick two of the four classes offered. At least one healer is always on offer.</p>
+  <div class="grid g4">${S.offer.map(c=>`<button class="card ${S.draft.includes(c)?"sel":""}" onclick="toggleDraft('${c}')">
+    <div class="hstack">${classIcon(c,"lg")}<div><div class="title" style="color:${CLASSES[c].col}">${c}</div>
+    <div class="meta">${CLASSES[c].role}</div></div></div>
+    ${CLASSES[c].heal?'<span class="tag heal">Healer</span>':'<span class="tag">Damage</span>'}
+    <div class="meta">Threatens: ${THREATS[c].map(t=>t[1]).join("; ")}.</div></button>`).join("")}</div>
+  <div class="actions"><button class="btn" onclick="S=null;render()">Back</button>
+  <button class="btn primary" ${S.draft.length===2?"":"disabled"} onclick="confirmDraft()">Start run</button></div>`;
+}
+function toggleDraft(c){const i=S.draft.indexOf(c);if(i>=0)S.draft.splice(i,1);else if(S.draft.length<2)S.draft.push(c);render()}
+function confirmDraft(){S.team=S.draft.map(cls=>({cls,upgrades:[]}));S.team.forEach(c=>{if(CHOICES[c.cls])S.prep[c.cls]=CHOICES[c.cls].opts[0]});go("hub")}
+
+function intel(opp){
+  const ans = answersFor(opp);
+  return `<div class="panel"><div class="hstack" style="justify-content:space-between;flex-wrap:wrap">
+    <div><div class="meta">Next opponent · tier ${opp.tier+1} of 7</div><div class="title" style="font-size:18px;color:var(--t2)">${opp.name}</div></div>
+    <div class="row" style="gap:6px">${opp.classes.map(c=>classIcon(c)).join("")}</div></div>
+    <div class="meta" style="margin:6px 0 8px">${opp.classes.join(" + ")} · ${opp.map} · ${opp.ai} AI · avg ilvl ${opp.ilvl}</div>
+    ${opp.classes.flatMap(c=>THREATS[c].map(t=>`<div class="threat">${abilityIcon(t[0])}<span><b style="color:${CLASSES[c].col}">${c}:</b> ${t[1]}</span></div>`)).join("")}
+    <div style="margin-top:10px"><div class="meta">Your answers with the current setup</div>
+    ${ans.length?ans.map(a=>`<div class="answer">+ ${a}</div>`).join(""):'<div class="note">None yet. Prepare may change that.</div>'}</div></div>`;
+}
+function hub(){
+  const opp = opponent();
+  $app.innerHTML = `<h2>The Gauntlet</h2>${pips()}<div style="height:12px"></div>
+  <div class="grid g2"><div class="panel"><div class="meta" style="margin-bottom:8px">Your team</div>${teamStrip()}</div>${intel(opp)}</div>
+  <div class="actions"><button class="btn" onclick="saved=S;S=null;render();toast('Run saved. Continue it from the main menu.')">Save and exit</button>
+  <button class="btn primary" onclick="go('prepare')">Prepare</button></div>`;
+}
+function prepare(){
+  const opp = opponent();
+  const sel = (id,label,opts,val)=>`<label class="f">${label}<select onchange="${id}">${opts.map(o=>`<option ${o===val?"selected":""}>${esc(o)}</option>`).join("")}</select></label>`;
+  S.prep.kill ??= 1; S.prep.cc ??= 0;
+  $app.innerHTML = `<h2>Prepare</h2><p class="sub">Answer what the intel shows. These are today's pre-match choices; only the opponent being visible is new.</p>
+  <div class="grid g2"><div class="panel grid">
+    ${sel("S.prep.kill=this.selectedIndex;render()","Kill target",opp.classes,opp.classes[S.prep.kill])}
+    ${sel("S.prep.cc=this.selectedIndex;render()","CC target",opp.classes,opp.classes[S.prep.cc])}
+    ${S.team.filter(c=>CHOICES[c.cls]).map(c=>sel(`S.prep['${c.cls}']=this.value;render()`,`${c.cls}: ${CHOICES[c.cls].label}`,CHOICES[c.cls].opts,S.prep[c.cls])).join("")}
+  </div>${intel(opp)}</div>
+  <div class="actions"><button class="btn" onclick="go('hub')">Back</button><button class="btn primary" onclick="startFight()">Fight</button></div>`;
+}
+
+// ---- The mock fight -----------------------------------------------------------
+let F=null, timer=null;
+function startFight(){
+  const opp = opponent();
+  const mine = S.team.reduce((s,c)=>s+ilvl(c),0)/2, theirs = +opp.ilvl;
+  const ans = answersFor(opp).length;
+  const p = Math.max(.12, Math.min(.88, .70 + (mine-theirs)*.05 + ans*.07 - opp.tier*.03 + (S.prep.kill===1?.04:0)));
+  const win = rng() < p;
+  F = {opp, p, win, t:0, called:S.prep.kill, hp:{a:[100,100],b:[100,100]}, log:[], speed:1, calls:0};
+  F.log.push(`<b>0.0s</b> Gates open on ${opp.map}.`);
+  go("fight"); tick();
+}
+function tick(){
+  clearTimeout(timer);
+  if(!F||S.screen!=="fight") return;
+  F.t += 1.5;
+  const loserSide = F.win ? "b":"a", winSide = F.win ? "a":"b";
+  const dmg = (side,i,amt)=>{F.hp[side][i]=Math.max(0,F.hp[side][i]-amt)};
+  const kt = loserSide==="b" ? F.called : 1;
+  dmg(loserSide, kt, 6+rng()*9); dmg(winSide, Math.floor(rng()*2), 2+rng()*6);
+  const names = {a:S.team.map(c=>c.cls), b:F.opp.classes};
+  const lines = [
+    `${names.b[0]} casts ${KIT[names.b[0]]} on ${names.a[1]}.`,
+    `${names.a[0]} casts ${KIT[names.a[0]]} on ${names.b[F.called]}.`,
+    `${names.a[1]} casts ${KIT[names.a[1]]}.`,
+    `${names.b[1]} casts ${KIT[names.b[1]]}.`];
+  F.log.push(`<b>${F.t.toFixed(1)}s</b> ${esc(lines[Math.floor(rng()*lines.length)])}`);
+  const done = F.hp[loserSide].some(h=>h<=0) || F.t>=60;
+  if(done){
+    if(!F.hp[loserSide].some(h=>h<=0)) F.hp[loserSide][kt]=0;
+    const dead = F.hp[loserSide].findIndex(h=>h<=0);
+    F.log.push(`<b>${F.t.toFixed(1)}s</b> ${names[loserSide][dead]} dies. ${F.win?"Victory.":"Defeat."}`);
+    drawFight(); timer=setTimeout(finishFight,900); return;
+  }
+  drawFight(); timer=setTimeout(tick, 700/F.speed);
+}
+function callTarget(i){if(!F)return;F.called=i;F.calls++;F.log.push(`<b>${F.t.toFixed(1)}s</b> Kill call: ${F.opp.classes[i]}. Your team switches.`);drawFight()}
+function drawFight(){
+  const frame=(cls,hp,enemy,i)=>`<${enemy?"button":"div"} class="frame ${enemy?"enemy":""} ${enemy&&F.called===i?"called":""}" ${enemy?`onclick="callTarget(${i})" title="Click to call this kill target"`:""}>
+    ${classIcon(cls,"sm")}<span style="width:62px">${cls}</span><span class="bar"><i style="width:${hp}%;background:${hp<35?"var(--loss)":"var(--win)"}"></i></span></${enemy?"button":"div"}>`;
+  $app.innerHTML = `<h2>${esc(F.opp.name)} · ${F.opp.map}</h2><p class="sub">Stand-in for PlayMatch. Click an enemy frame to make a kill call, as in the real client.</p>
+  <div class="panel"><div class="frames">
+    <div><div class="meta" style="color:var(--t1)">Your team</div>${S.team.map((c,i)=>frame(c.cls,F.hp.a[i],false,i)).join("")}</div>
+    <div><div class="meta" style="color:var(--t2)">${esc(F.opp.name)}</div>${F.opp.classes.map((c,i)=>frame(c,F.hp.b[i],true,i)).join("")}</div></div>
+    <div class="log" id="log">${F.log.join("<br>")}</div>
+    <div class="actions" style="margin-top:10px"><span class="note" style="margin-right:auto">${F.t.toFixed(1)}s</span>
+    ${[1,2,3].map(s=>`<button class="btn ${F.speed===s?"primary":""}" onclick="F.speed=${s};drawFight()">${s}x</button>`).join("")}</div></div>`;
+  const l=document.getElementById("log"); l.scrollTop=l.scrollHeight;
+}
+const MAP_IDS = {"Basic Arena":"BasicArena","Nagrand Arena":"PillaredArena","Twin Pillars":"TwinPillars"};
+function finishFight(){
+  if(F.win) S.wins++; else S.losses++;
+  const replay = JSON.stringify({team1:S.team.map(c=>c.cls),team2:F.opp.classes,map:MAP_IDS[F.opp.map],random_seed:S.seed+S.history.length});
+  S.history.push({opp:F.opp.name, classes:F.opp.classes, won:F.win, t:F.t, replay});
+  go("result");
+}
+function result(){
+  const won = F.win;
+  const over = S.wins>=7 || S.losses>=3;
+  const odds = Math.round(F.p*100);
+  $app.innerHTML = `<h2>Results</h2>${pips()}
+  <div class="panel" style="margin-top:12px"><div class="big ${won?"win":"loss"}">${won?"Victory":"Defeat"}</div>
+  <div class="meta">vs ${esc(F.opp.name)} (${F.opp.classes.join(" + ")}) · ${F.t.toFixed(1)}s · ${F.calls} kill call${F.calls===1?"":"s"}</div>
+  <p class="note">The real Results screen sits here unchanged: damage, healing, CC breakdown and the combat log.</p>
+  <div class="panel" style="background:var(--panel2);margin-top:8px"><div class="meta">Phase 2 idea · rematch odds</div>
+  Twenty background replays of this matchup: your setup wins about <b>${odds}%</b>. ${won? (odds<45?"You beat the odds.":"A sound setup."): (odds>=55?"That one was the dice.":"The setup was the problem; try another answer.")}</div></div>
+  <div class="actions"><button class="btn" onclick="showReplay(${S.history.length-1})">Watch replay</button>
+  <button class="btn primary" onclick="go('${over?"end":"reward"}')">${over?"Finish run":"Continue run"}</button></div>`;
+}
+function reward(){
+  if(!S.offers){
+    const pool = [];
+    for(const c of S.team){
+      const g = CLASSES[c.cls].gear;
+      const acc = ["plate-ap","mail-ap","leather-ap"].includes(g) ? "acc-ap" : "acc-sp";
+      for(const it of GEAR[g].concat(GEAR[acc])) if(!c.upgrades.some(u=>u[0]===it[0])) pool.push([c.cls,it]);
+    }
+    S.offers = pick(pool,3);
+  }
+  $app.innerHTML = `<h2>Choose a reward</h2><p class="sub">${S.history.at(-1).won?"A win":"Even a loss"} earns one pick. It is equipped at once.</p>
+  <div class="grid g3">${S.offers.map(([cls,it],i)=>`<button class="card ${S.sel===i?"sel":""}" onclick="S.sel=${i};render()">
+    <div class="hstack">${itemIcon(it[3])}<div><div class="title" style="color:#a335ee">${esc(it[0])}</div><div class="meta">ilvl ${it[1]} · ${it[2]}</div></div></div>
+    <div class="hstack">${classIcon(cls,"sm")}<span class="meta">for your ${cls}</span></div>
+    <div class="delta"><span class="up">${esc(it[4])}</span><br><span class="dn">replaces a starting ${it[2].toLowerCase()} piece (ilvl ${START_ILVL})</span></div></button>`).join("")}</div>
+  <div class="actions"><button class="btn primary" ${S.sel===null?"disabled":""} onclick="takeReward()">Take it</button></div>`;
+}
+function takeReward(){const [cls,it]=S.offers[S.sel];S.team.find(c=>c.cls===cls).upgrades.push(it);S.offers=null;go("hub")}
+function end(){
+  $app.innerHTML = `<h2>Run complete</h2>${pips()}
+  <div class="panel" style="margin-top:12px"><div class="big ${S.wins>=7?"win":""}">${S.wins} win${S.wins===1?"":"s"}${S.wins>=7?" · Gauntlet cleared":""}</div>
+  ${teamStrip()}</div>
+  <div class="panel matchlist" style="margin-top:12px"><div class="meta">Every match is a seed and a config: replayable for the cost of a few hundred bytes.</div>
+  ${S.history.map((h,i)=>`<div class="m"><span>${i+1}. <span class="${h.won?"win":"loss"}">${h.won?"W":"L"}</span> vs ${esc(h.opp)} (${h.classes.join(" + ")})</span>
+  <button class="btn" onclick="showReplay(${i})">Watch replay</button></div>`).join("")}</div>
+  <div class="actions"><button class="btn" onclick="S=null;render()">Main menu</button><button class="btn primary" onclick="newRun()">New run</button></div>`;
+}
+render();
+</script>
+</body>
+</html>
