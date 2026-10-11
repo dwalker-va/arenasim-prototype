@@ -31,6 +31,7 @@ use crate::states::match_config::{CharacterClass, MatchConfig};
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::results_ui::class_color32;
+use crate::ui::driver as ui_driver;
 
 use super::{get_aura_icon_key, is_buff_aura};
 
@@ -728,7 +729,17 @@ fn draw_aura_row(
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 egui::Color32::WHITE,
             );
+            // Which art actually reached the frame — a `--ui-script` cannot see
+            // pixels, and a fallback square is drawn in the same place.
+            ui_driver::note_into(
+                painter.ctx(),
+                format_args!("aura-icon-drawn:{}", aura.icon_key),
+            );
         } else {
+            ui_driver::note_into(
+                painter.ctx(),
+                format_args!("aura-icon-missing:{}", aura.icon_key),
+            );
             // Fallback square tinted by buff/debuff so kittest renders read.
             let fallback = if aura.is_buff {
                 egui::Color32::from_rgb(140, 120, 30)

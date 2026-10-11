@@ -217,18 +217,25 @@ fn build_graphical_app(
 
     let mut app = App::new();
     app
-        // Bevy default plugins with settings-based window configuration
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "ArenaSim".to_string(),
-                resolution: (width, height).into(),
-                mode: window_mode,
-                present_mode,
-                resizable: true,
-                ..default()
-            }),
-            ..default()
-        }))
+        // Bevy default plugins with settings-based window configuration, and
+        // the asset reader rooted where the RON configs are read from — never
+        // Bevy's default, which looks beside the executable when cargo is not
+        // the launcher (`arenasim::paths::assets_dir`).
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "ArenaSim".to_string(),
+                        resolution: (width, height).into(),
+                        mode: window_mode,
+                        present_mode,
+                        resizable: true,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(arenasim::paths::asset_plugin()),
+        )
         // Our game plugins
         .add_plugins((
             EguiPlugin {

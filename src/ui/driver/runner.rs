@@ -89,6 +89,12 @@ pub enum Micro {
     /// is over. See [`tooltip_gate`] — this is a WALL-CLOCK wait expressed as
     /// a predicate, not a frame count, because every gate egui applies is.
     SettleForTooltip,
+    /// Poll each frame for a note containing `needle`, for up to `secs`
+    /// seconds of wall clock. See [`Step::AwaitNote`].
+    AwaitNote {
+        secs: u32,
+        needle: String,
+    },
     /// Evaluate an assertion (or `dump`) against the last drawn frame.
     Check(Step),
 }
@@ -142,6 +148,9 @@ pub struct UiScriptRun {
     warmup: u32,
     /// Last `GameState` logged, so transitions are logged once each.
     last_state: Option<GameState>,
+    /// When the current `await-note` began polling — wall clock, because its
+    /// timeout is.
+    await_started: Option<std::time::Instant>,
     /// Set once the verdict is in; every later frame is a no-op.
     done: bool,
 }
@@ -183,6 +192,7 @@ impl UiScriptRun {
             last_seen: None,
             warmup: config.settle_frames.max(2),
             last_state: None,
+            await_started: None,
             done: false,
         }
     }
@@ -235,6 +245,10 @@ pub fn expand(step: &Step, settle: u32) -> VecDeque<Micro> {
             q.push_back(Micro::Idle(settle));
         }
         Step::Wait { frames } => q.push_back(Micro::Idle(*frames)),
+        Step::AwaitNote { secs, needle } => q.push_back(Micro::AwaitNote {
+            secs: *secs,
+            needle: needle.clone(),
+        }),
         other => q.push_back(Micro::Check(other.clone())),
     }
     q
@@ -593,6 +607,27 @@ pub fn run_ui_script(
                 repeat: false,
                 window,
             });
+        }
+        Micro::AwaitNote { secs, needle } => {
+            let started = *run
+                .await_started
+                .get_or_insert_with(std::time::Instant::now);
+            if frame.has_note(&needle) {
+                let waited = started.elapsed().as_secs_f32();
+                run.log
+                    .line(&format!("  ok  note ~ {needle} (after {waited:.1}s)"));
+                run.await_started = None;
+            } else if started.elapsed().as_secs() >= u64::from(secs) {
+                run.fail(format!(
+                    "no note matched `{needle}` within {secs}s. Notes on the last \
+                     frame: {:?}",
+                    frame.notes
+                ));
+                commands.entity(window).despawn();
+                return;
+            } else {
+                run.queue.push_front(Micro::AwaitNote { secs, needle });
+            }
         }
         Micro::Check(step) => match evaluate(&step, &frame, now, &encyclopedia) {
             Ok(lines) => {

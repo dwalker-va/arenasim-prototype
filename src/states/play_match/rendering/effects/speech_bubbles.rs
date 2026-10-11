@@ -1,5 +1,6 @@
 use crate::states::play_match::banter::vocab;
 use crate::states::play_match::components::*;
+use crate::ui::driver as ui_driver;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use egui::emath::GuiRounding;
@@ -127,10 +128,20 @@ pub fn render_speech_bubbles(
                     match class_icons.textures.get(class) {
                         Some(texture) => {
                             painter.image(*texture, icon_rect, UV_FULL, egui::Color32::WHITE);
+                            // For a `--ui-script`, which sees no pixels: the
+                            // portrait art drew, not the initial plate below.
+                            ui_driver::note_into(
+                                ctx,
+                                format_args!("banter-portrait-drawn:{class:?}"),
+                            );
                         }
                         // No texture: a dark plate carrying the class initial,
                         // so the line still reads if art is missing.
                         None => {
+                            ui_driver::note_into(
+                                ctx,
+                                format_args!("banter-portrait-missing:{class:?}"),
+                            );
                             painter.rect_filled(icon_rect, 3.0, egui::Color32::from_gray(40));
                             painter.text(
                                 icon_rect.center(),

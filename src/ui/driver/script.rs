@@ -14,6 +14,7 @@
 //! assert-state Encyclopedia
 //! assert-view Ability(MortalStrike)
 //! assert-note tooltip:ability:MortalStrike
+//! await-note 30 banter-portrait-drawn  # poll until a note shows, up to 30s
 //! assert-no-note equip-row:Ring2:override
 //! assert-visible equip:restore   # drawn AND on screen
 //! assert-absent pick:BandOfAccuria  # not drawn at all (clipped != absent)
@@ -100,6 +101,15 @@ pub enum Step {
     AssertNote { needle: String },
     /// No note from the last drawn frame contains this substring.
     AssertNoNote { needle: String },
+    /// Poll every frame until some drawn frame carries a note containing this
+    /// substring, failing after `secs` seconds of WALL CLOCK.
+    ///
+    /// For something that arrives on the game's own clock rather than in
+    /// response to the script — a banter line, an aura landing mid-match —
+    /// where no preceding step can set the frame up for `assert-note`. The
+    /// timeout is seconds because what it waits on is: a frame count would
+    /// make the bound a property of the machine's frame rate.
+    AwaitNote { secs: u32, needle: String },
     /// A widget with this id was drawn on the last frame AND is on screen.
     /// A widget that is laid out but scrolled out of view FAILS this, and
     /// says so distinctly.
@@ -129,6 +139,7 @@ impl Step {
             Step::AssertView { topic } => format!("assert-view {topic}"),
             Step::AssertNote { needle } => format!("assert-note {needle}"),
             Step::AssertNoNote { needle } => format!("assert-no-note {needle}"),
+            Step::AwaitNote { secs, needle } => format!("await-note {secs} {needle}"),
             Step::AssertVisible { id } => format!("assert-visible {id}"),
             Step::AssertAbsent { id } => format!("assert-absent {id}"),
             Step::AssertEnabled { id, enabled } => format!("assert-enabled {id} {enabled}"),
@@ -278,6 +289,24 @@ fn parse_step(line_no: usize, line: &str) -> Result<Step, ParseError> {
             }
             Step::AssertNoNote { needle: rest }
         }
+        "await-note" => {
+            let mut it = rest.splitn(2, char::is_whitespace);
+            let n = it.next().unwrap_or("");
+            let secs = n.parse::<u32>().ok().filter(|s| *s > 0).ok_or_else(|| {
+                err(
+                    line_no,
+                    format!("`await-note` needs a timeout in whole seconds (> 0), got `{n}`"),
+                )
+            })?;
+            let needle = it.next().unwrap_or("").trim().to_string();
+            if needle.is_empty() {
+                return Err(err(
+                    line_no,
+                    "`await-note` needs a substring after its timeout",
+                ));
+            }
+            Step::AwaitNote { secs, needle }
+        }
         "assert-visible" => Step::AssertVisible {
             id: one_word("a widget id")?,
         },
@@ -317,8 +346,8 @@ fn parse_step(line_no: usize, line: &str) -> Result<Step, ParseError> {
                 line_no,
                 format!(
                     "unknown step `{other}` (hover, click, key, wait, assert-state, \
-                     assert-view, assert-note, assert-no-note, assert-visible, \
-                     assert-absent, assert-enabled, dump)"
+                     assert-view, assert-note, assert-no-note, await-note, \
+                     assert-visible, assert-absent, assert-enabled, dump)"
                 ),
             ))
         }

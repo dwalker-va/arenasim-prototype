@@ -54,7 +54,7 @@ pub mod registry;
 pub mod runner;
 pub mod script;
 
-pub use registry::{mark, note};
+pub use registry::{mark, note, note_into};
 pub use script::Script;
 
 /// Frames of settle after each injected event. Three is comfortably more than
