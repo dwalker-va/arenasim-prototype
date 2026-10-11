@@ -59,13 +59,16 @@ fn a_placed_freezing_trap_records_the_enemy_it_was_aimed_at() {
     // enforces. None fields a Rogue: a lane trap thrown for a stealthed enemy
     // cannot name it, and records no aim by design (pinned separately below).
     //
-    // The double-healer comp's seed is 15, the first of seeds 0-39 in which
+    // The double-healer comp's seed is 7, the first of seeds 0-39 in which
     // it throws one: since the traps share one cooldown (AS-196) the Frost
     // Trap peel on the Paladin usually takes it first (seed 0 threw none).
-    // Re-pinned from 12 when the Paladin began Cleansing a Web that holds its
-    // Priest back (AS-234).
+    // Re-pinned when the Web became physical (AS-240). Before, the enemy
+    // Priest dispelled the Spider's Web off itself and, from AS-234, the
+    // Paladin Cleansed it too (which moved this seed from 12 to 15). Now
+    // nothing frees a Web, so those GCDs go elsewhere and the matches run
+    // differently: 12 and 15 throw no Freezing Trap; 7, 13 and 30 do.
     let comps: [(&[&str], &[&str], u64); 3] = [
-        (&["Hunter", "Priest"], &["Priest", "Paladin"], 15),
+        (&["Hunter", "Priest"], &["Priest", "Paladin"], 7),
         (&["Hunter", "Priest"], &["Warrior", "Priest"], 4),
         (&["Hunter"], &["Warrior"], 0),
     ];
@@ -473,6 +476,12 @@ fn no_trap_lands_beyond_its_range() {
 /// despawned with its Warlock while the Rogue sprang the trap. Pinned: every
 /// throw names the Rogue and springs on it.
 ///
+/// The Hunter runs a Boar here. With the default Spider the lane scenario has
+/// all but gone since AS-240: the Felhunter can no longer devour the Web off
+/// its Warlock, the Hunter's Priest now dies first, and the Frost Trap peel on
+/// the Rogue takes the shared trap cooldown, so one seed in 600 throws a lane
+/// trap. With the Boar it is the first three of seeds 0-12.
+///
 /// Hunter+Priest vs Rogue+Warrior: at gates-open the Rogue is in stealth, the
 /// lane throw is decided on it without seeing it (nobody on its team could free
 /// it), so the trace records no aim — and it springs on the Rogue.
@@ -508,8 +517,9 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
     };
 
     let mut named = 0usize;
-    for seed in [4u64, 8, 11] {
+    for seed in [4u64, 7, 12] {
         let mut cfg = config(&["Hunter", "Priest"], &["Warlock", "Rogue"], seed);
+        cfg.team1_hunter_pet_types = vec!["Boar".to_string()];
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
         let classes = class_of(&events);
@@ -573,13 +583,17 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
 /// and 61 when the default Hunter took up its polearm, AS-195, and from 61,
 /// 108 and 166 when the traps came onto one shared cooldown, AS-196: no trap
 /// that springs on the Rogue in the first 400 seeds breaks, but the hold fires
-/// in only these two.)
+/// in only these two.) The Hunter runs a Boar for the reason the lane-trap
+/// probe above gives: with the Spider, no seed of 800 reaches this ending once
+/// no dispel frees a Web (AS-240). With the Boar the hold fires in 44 and 97,
+/// the first two of seeds 0-97.
 #[test]
 fn the_hunters_own_shot_does_not_break_its_trap() {
     use arenasim::states::play_match::class_ai::hunter_dip::OWN_TRAP_WOULD_BREAK;
 
-    for seed in [276u64, 310] {
+    for seed in [44u64, 97] {
         let mut cfg = config(&["Hunter", "Priest"], &["Warlock", "Rogue"], seed);
+        cfg.team1_hunter_pet_types = vec!["Boar".to_string()];
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
         let sprung = log
@@ -641,11 +655,12 @@ fn against_a_lone_priest_the_opener_is_serpent_sting() {
 /// first three of seeds 0-7. Re-pinned from 1, 3 and 4 when the traps came
 /// onto one shared cooldown (AS-196): in most seeds the Frost Trap peel on the
 /// Rogue now takes the cooldown first, and no Freezing Trap is thrown in the
-/// minute.
+/// minute. Back to 1, 3 and 4 when no dispel could free a Web (AS-240): the
+/// enemy Priest's Dispel Magic on its own Web had moved 3, 5 and 7 there.
 #[test]
 fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
     let mut caught = 0usize;
-    for seed in [3u64, 5, 7] {
+    for seed in [1u64, 3, 4] {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
@@ -709,11 +724,13 @@ fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
 /// Rogue during the freeze (seed 6 was swapped for 1 when the polearm moved
 /// that match off the scenario; 1, 8 and 9 became 3, 5 and 7, the first three
 /// of seeds 0-15, when the traps came onto one shared cooldown, AS-196: the
-/// Frost Trap peel on the Rogue now takes the cooldown first in most seeds).
+/// Frost Trap peel on the Rogue now takes the cooldown first in most seeds;
+/// they became 1, 3 and 4, again the first three of seeds 0-15, when no dispel
+/// could free a Web, AS-240).
 #[test]
 fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
     const GATES_OPEN: f64 = 10.0;
-    for seed in [3u64, 5, 7] {
+    for seed in [1u64, 3, 4] {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.team1_kill_target = Some(1);
         cfg.max_duration_secs = 60.0;
