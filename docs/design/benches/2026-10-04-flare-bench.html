@@ -51,8 +51,8 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:#0c0b09;bo
 
 <header>
   <div>
-    <h1>Flare Bench <span style="color:var(--muted);font-weight:400">· AS-222</span></h1>
-    <div class="sub">Classic Era 1.15.9 <code>flare_state_base.m2</code>, the area model of Flare (spell 1543, visual 112198). Its sequence is exactly 30 s, the length of the Flare, so the bench keys every track to the Flare's own clock. Playback is real time. Untick layers you don't want, tune the multipliers, then copy the constants block.</div>
+    <h1>Flare Bench <span style="color:var(--muted);font-weight:400">· AS-222 / AS-232</span></h1>
+    <div class="sub">Classic Era 1.15.9 <code>flare_state_base.m2</code>, the area model of Flare (spell 1543, visual 112198). Its sequence is exactly 30 s, the length of the Flare, so the bench keys every track to the Flare's own clock. Playback is real time. Untick layers you don't want, tune the multipliers, then copy the constants block. <b style="color:var(--text);font-weight:500">AS-232:</b> the dashed white circle is the gameplay reveal radius (10 yd, bench-only). The lit floor must reach past it, the gold rim must sit on it, and the walking Rogue turns solid at the moment the sim reveals it.</div>
   </div>
   <div class="legend"><span>drag = orbit</span><span>wheel = zoom</span><span>capsules ±1.25 about y=1.0</span></div>
 </header>
@@ -93,7 +93,8 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:#0c0b09;bo
         <li><b>The flare itself lies on the ground</b> (0.2 yd up), not in the air: <code>flare.blp</code> sprites, 0.667 yd, 10/s living 0.4 s, colour white-gold → orange → gold. Twinkle at 30 Hz with size jumping 0.4×–1.1×: that is the flicker. Its rate steps 10 → 20/s at 29.0 s and → 5/s at 29.5 s: a last flare-up, then out.</li>
         <li><b>Sparks:</b> 25/s at the start, falling linearly to 0 at 29 s, launched into the upper hemisphere at 1.67 yd/s under 1.39 yd/s² gravity, 1 s life, 0.139 → 0 yd, red → orange → pale yellow. The flare spits less as it burns down.</li>
         <li><b>Burn-out smoke:</b> 20/s from 29.33 to 29.97 s, 3 s life, 0.11 yd puffs in dark red → dark blue, additive. Near-invisible at our camera: off by default.</li>
-        <li><b>Not client:</b> the rim marks the 10 yd gameplay radius (the client glow is a soft 7 yd pool), and the halo is a readability glow behind the flare. Both are ours; untick either.</li>
+        <li><b>Not client:</b> the rim marks the 10 yd gameplay radius, and the halo is a readability glow behind the flare. Both are ours; untick either.</li>
+        <li><b>AS-232, the reveal radius.</b> The client's soft pool fades out by about 8 yd, so a Rogue was revealed while still standing on dark floor. The pool now holds a lit plateau (<code>FLARE_POOL_PLATEAU</code> of the centre) out to the 10 yd reveal radius and spills a skirt past it to <code>FLARE_POOL_SKIRT</code> × 10 yd. The client's pulse still drives its brightness, so the flicker runs out past the reveal radius instead of dulling inside it. The rim is thicker, gold (the halo's own colour), centred on 10 yd, and stays lit until the Flare goes out. The HUD's lit edge counts additive alpha at or above 0.08 as visibly lit; the pulse low is the worst case.</li>
         <li><b>Bench limits:</b> canvas adds in sRGB with no bloom; Bevy adds in linear HDR and blooms the emissive, so the client will read somewhat hotter than this.</li>
       </ul>
     </div>
@@ -128,6 +129,22 @@ function poolWeight(clock,age){
           : clock<15.167 ? 0.10-0.05*(clock/15.167) : 0.05+0.05*tri(age*3.0);
   return a+b;
 }
+/** flare_pool_profile: the pool texture's alpha at `rho` = distance / reveal radius.
+ *  A bright centre over a lit plateau held to the reveal radius, then a skirt
+ *  that spills past it and dies by FLARE_POOL_SKIRT. */
+function poolProfile(rho){
+  const P=K.poolPlateau,S=K.poolSkirt;
+  if(rho<=1) return P+(1-P)*Math.pow(Math.max(0,1-rho*rho),K.poolFalloff);
+  if(rho<S){const u=(rho-1)/(S-1);return P*(1-u*u*(3-2*u));}
+  return 0;
+}
+/** The visible floor: additive pool alpha below this does not read as lit. */
+const VISIBLE_ALPHA=0.08;
+/** How far out the pool visibly reaches at a given alpha, yards. */
+function visibleEdge(alpha){
+  let edge=0; for(let i=0;i<=2000;i++){const r=i/2000*RADIUS*K.poolSkirt; if(alpha*poolProfile(r/RADIUS)>=VISIBLE_ALPHA) edge=r;}
+  return edge;
+}
 /** flare_core_rate: the core emitter's stepped rate track, relative to its 10/s */
 function coreRate(clock){return clock<29?1:clock<29.5?2:clock<30?0.5:0;}
 function shotJitter(seed){
@@ -144,9 +161,11 @@ function rampColor(k,mid,t){return [0,1,2].map(c=>ramp3([k[0][c],k[1][c],k[2][c]
 // ---------- knobs and layers ----------
 const KNOBS=[
   {key:'poolGain',   label:'pool gain',     min:1,  max:10, step:0.1,  def:4.0, rust:'FLARE_POOL_GAIN', note:'alpha = client weight × this'},
-  {key:'poolRadius', label:'pool radius',   min:0.4,max:1.6,step:0.05, def:1.0, rust:'FLARE_POOL_RADIUS_SCALE', note:'× the 10 yd gameplay radius'},
-  {key:'poolFalloff',label:'pool falloff',  min:0.5,max:4,  step:0.1,  def:1.6, rust:'FLARE_POOL_FALLOFF', note:'alpha = (1 - r²)^this'},
-  {key:'rimAlpha',   label:'rim alpha',     min:0,  max:0.8,step:0.01, def:0.22,rust:'FLARE_RIM_ALPHA'},
+  {key:'poolPlateau',label:'pool plateau',  min:0,  max:1,  step:0.01, def:0.4, rust:'FLARE_POOL_PLATEAU', note:'lit floor held out to the reveal radius, as a fraction of the centre'},
+  {key:'poolSkirt',  label:'pool skirt',    min:1,  max:1.5,step:0.01, def:1.12,rust:'FLARE_POOL_SKIRT', note:'× the reveal radius the light spills out to'},
+  {key:'poolFalloff',label:'pool falloff',  min:0.5,max:4,  step:0.1,  def:1.6, rust:'FLARE_POOL_FALLOFF', note:'centre glow over the plateau: (1 - r²)^this'},
+  {key:'rimAlpha',   label:'rim alpha',     min:0,  max:1,  step:0.01, def:0.7, rust:'FLARE_RIM_ALPHA'},
+  {key:'rimWidth',   label:'rim width',     min:0.05,max:1, step:0.05, def:0.4, rust:'FLARE_RIM_WIDTH', note:'yd, centred on the reveal radius'},
   {key:'coreSize',   label:'core size',     min:0.3,max:4,  step:0.05, def:1.6, rust:'FLARE_CORE_DIAMETER', note:'yd; client 0.667'},
   {key:'coreHeight', label:'core height',   min:0.1,max:2,  step:0.05, def:0.45,rust:'FLARE_CORE_HEIGHT', note:'yd; client 0.2'},
   {key:'twinkleHz',  label:'twinkle Hz',    min:5,  max:60, step:1,    def:30,  rust:'FLARE_TWINKLE_HZ'},
@@ -159,11 +178,13 @@ const KNOBS=[
 ];
 const LAYERS=[
   {id:'pool',  nm:'Ground pool',  ds:'Two client glow quads summed: 5 Hz shimmer, 3 Hz sputter in the second half.', on:true},
-  {id:'rim',   nm:'Radius rim',   ds:'Thin ring at the 10 yd gameplay radius, steady, fading with the pool.', on:true, ours:true},
+  {id:'rim',   nm:'Radius rim',   ds:'Gold ring centred on the 10 yd reveal radius, steady until the Flare goes out.', on:true, ours:true},
   {id:'core',  nm:'Burning flare',ds:'Four overlapping star sprites cycling the client colour ramp, sizes jumping at 30 Hz.', on:true},
   {id:'halo',  nm:'Core halo',    ds:'Soft glow behind the flare, flickering with it.', on:true, ours:true},
   {id:'sparks',nm:'Sparks',       ds:'Upward spits under gravity; the rate dies away to 29 s.', on:true},
   {id:'smoke', nm:'Burn-out smoke',ds:'Dark additive puffs in the last 0.7 s.', on:false},
+  {id:'reveal',nm:'Reveal radius',ds:'Bench overlay only: a dashed line at exactly the 10 yd gameplay radius.', on:true, bench:true},
+  {id:'walker',nm:'Rogue walk-in', ds:'Bench only: a stealthed Rogue walks in and out; it turns solid when the sim would reveal it.', on:true, bench:true},
 ];
 const K={}; for(const k of KNOBS) K[k.key]=k.def;
 const ON={}; for(const L of LAYERS) ON[L.id]=L.on;
@@ -213,9 +234,10 @@ function groundDisc(center,radius,paint){
   if(!c||!px||!pz)return;
   g.save();g.setTransform(px.x-c.x,px.y-c.y,pz.x-c.x,pz.y-c.y,c.x,c.y);paint();g.restore();
 }
+// The disc spans rho 0..FLARE_POOL_SKIRT; sampled finely so the skirt's edge is the shipped one.
 function poolGradient(alpha){
   const gr=g.createRadialGradient(0,0,0,0,0,1);
-  for(let i=0;i<=10;i++){const r=i/10;const a=Math.pow(Math.max(0,1-r*r),K.poolFalloff)*alpha;gr.addColorStop(r,rgb(POOL_RGB.map(x=>x*255),clamp(a,0,1)));}
+  for(let i=0;i<=64;i++){const r=i/64;const a=poolProfile(r*K.poolSkirt)*alpha;gr.addColorStop(r,rgb(POOL_RGB.map(x=>x*255),clamp(a,0,1)));}
   return gr;
 }
 // star_flash_texture: a round core plus two crossed rays; soft_dot_texture: (1-r)^2.2
@@ -237,7 +259,12 @@ function softDot(p,size,col,a){
 
 // ---------- the rig ----------
 const RADIUS=10, TOTAL=30, SEED=7;
-const HUNTER=[-16,1,6], ROGUE=[6.5,1,-6.5], FLARE=[0,0,0];
+const HUNTER=[-16,1,6], FLARE=[0,0,0];
+const RIM_RGB=[255,170,70]; // the halo's gold (HALO_RGB): the flare's own palette, no new hue
+// The walking Rogue: in from 15 yd to 5 yd and back out every 10 s, on a bearing facing the camera.
+const WALK_PERIOD=10, WALK_FAR=15, WALK_NEAR=5, WALK_BEARING=[0.62,0,0.78];
+function rogueDistance(t){const u=(t%WALK_PERIOD)/WALK_PERIOD;const v=u<0.5?u*2:2-u*2;return lerp(WALK_FAR,WALK_NEAR,0.5-0.5*Math.cos(v*Math.PI));}
+let walkClock=0;
 let remaining=TOTAL, age=0, paused=false, sparks=[], smoke=[], carry=0, smokeCarry=0, emitted=0;
 function relight(){remaining=TOTAL;age=0;sparks=[];smoke=[];carry=0;smokeCarry=0;emitted=0;}
 function sparkCount(t0,t1){ // integral of the linear track, clipped to [0,29]
@@ -246,7 +273,7 @@ function sparkCount(t0,t1){ // integral of the linear track, clipped to [0,29]
 }
 function step(dt){
   const before=flareClock(remaining,TOTAL);
-  remaining-=dt; age+=dt;
+  remaining-=dt; age+=dt; walkClock+=dt;
   if(remaining<=0){ if(document.getElementById('loop').checked){relight();return;} remaining=0; }
   const clock=flareClock(remaining,TOTAL);
   if(ON.sparks){
@@ -272,19 +299,28 @@ function render(){
   g.fillStyle='#0c0b09';g.fillRect(0,0,cv.width,cv.height);
   drawFloor();
   const clock=flareClock(remaining,TOTAL), alive=remaining>0;
-  const endFade=clamp((CLIENT_SEQ_SECS-clock)/0.5,0,1);
   g.globalCompositeOperation='lighter';
   if(alive&&ON.pool){
     const w=poolWeight(clock,age), alpha=w*K.poolGain;
-    groundDisc(FLARE,RADIUS*K.poolRadius,()=>{g.fillStyle=poolGradient(alpha);g.beginPath();g.arc(0,0,1,0,TAU);g.fill();});
+    groundDisc(FLARE,RADIUS*K.poolSkirt,()=>{g.fillStyle=poolGradient(alpha);g.beginPath();g.arc(0,0,1,0,TAU);g.fill();});
   }
   if(alive&&ON.rim){
-    groundDisc(FLARE,RADIUS,()=>{g.strokeStyle=rgb(POOL_RGB.map(x=>x*255),K.rimAlpha*endFade);g.lineWidth=0.015;g.beginPath();g.arc(0,0,1-0.0075,0,TAU);g.stroke();});
+    // Centred on the reveal radius, as wide as FLARE_RIM_WIDTH; no end fade (it stands as long as the reveal does).
+    groundDisc(FLARE,RADIUS,()=>{g.strokeStyle=rgb(RIM_RGB,K.rimAlpha);g.lineWidth=K.rimWidth/RADIUS;g.beginPath();g.arc(0,0,1,0,TAU);g.stroke();});
   }
   g.globalCompositeOperation='source-over';
-  // units for scale: a Rogue just inside the rim, the Hunter outside it
-  const units=[[HUNTER,[171,212,115]],[ROGUE,[255,245,105]]].sort((a,b)=>proj(b[0]).z-proj(a[0]).z);
-  for(const [p,c] of units) drawCapsule(p,c);
+  if(ON.reveal){
+    groundDisc(FLARE,RADIUS,()=>{g.strokeStyle='rgba(255,255,255,0.9)';g.lineWidth=0.006;g.setLineDash([0.04,0.03]);g.beginPath();g.arc(0,0,1,0,TAU);g.stroke();g.setLineDash([]);});
+  }
+  // The Hunter outside, and the Rogue walking in and out. The sim reveals at centre distance <= radius.
+  const rd=rogueDistance(walkClock), revealed=alive&&rd<=RADIUS;
+  const ROGUE=[WALK_BEARING[0]*rd,1,WALK_BEARING[2]*rd];
+  const units=[[HUNTER,[171,212,115],1]];
+  if(ON.walker) units.push([ROGUE,[255,245,105],revealed?1:0.3]);
+  units.sort((a,b)=>proj(b[0]).z-proj(a[0]).z);
+  for(const [p,c,a] of units){g.globalAlpha=a;drawCapsule(p,c);g.globalAlpha=1;}
+  if(ON.walker){const q=proj([ROGUE[0],2.6,ROGUE[2]]);if(q){g.font='600 22px IBM Plex Mono, monospace';g.textAlign='center';
+    g.fillStyle=revealed?'#ffffff':'rgba(255,255,255,0.55)';g.fillText(revealed?'revealed':'stealthed',q.x,q.y);g.textAlign='start';}}
   g.globalCompositeOperation='lighter';
   const rate=coreRate(clock);
   if(alive&&ON.halo){
@@ -305,9 +341,15 @@ function render(){
   for(const p of smoke){const t=p.age/3.0;
     softDot(p.x,ramp3([0.014,0.111,0.0],0.25,t),rampColor([[37,0,0],[0,5,102],[180,180,227]],0.25,t),ramp3([1,0.39,0],0.25,t));}
   g.globalCompositeOperation='source-over';
+  // The lit floor's visible edge now, and at the pulse's low (weight 0.10) — the worst case in the steady burn.
+  const edgeNow=alive?visibleEdge(poolWeight(clock,age)*K.poolGain):0, edgeLow=visibleEdge(0.10*K.poolGain);
+  const ok=edgeLow>=RADIUS;
   document.getElementById('hud').innerHTML=
     `flare clock ${clock.toFixed(2)} s · remaining ${Math.max(0,remaining).toFixed(2)} s<br>`+
-    `pool weight ${alive?poolWeight(clock,age).toFixed(3):'—'} · core rate ×${rate} · sparks ${sparks.length}`;
+    `pool weight ${alive?poolWeight(clock,age).toFixed(3):'—'} · core rate ×${rate} · sparks ${sparks.length}<br>`+
+    `lit edge ${edgeNow.toFixed(1)} yd now · ${edgeLow.toFixed(1)} yd at the pulse low · reveal ${RADIUS} yd `+
+    `<span style="color:${ok?'#9fd17a':'#ff6b5a'}">${ok?'reveal inside the lit edge':'REVEAL OUTSIDE THE LIT EDGE'}</span><br>`+
+    `rogue at ${rd.toFixed(1)} yd · ${revealed?'revealed':'stealthed'}`;
   document.getElementById('scrub').value=clock.toFixed(2);
 }
 
@@ -329,7 +371,7 @@ function buildUI(){
   const L=document.getElementById('layers');
   for(const l of LAYERS){
     const d=document.createElement('div');d.className='layer';
-    d.innerHTML=`<input type="checkbox" id="L_${l.id}" ${l.on?'checked':''}><label for="L_${l.id}"><span class="nm">${l.nm}</span>${l.ours?'<span class="tag">ours</span>':''}<span class="ds">${l.ds}</span></label>`;
+    d.innerHTML=`<input type="checkbox" id="L_${l.id}" ${l.on?'checked':''}><label for="L_${l.id}"><span class="nm">${l.nm}</span>${l.ours?'<span class="tag">ours</span>':''}${l.bench?'<span class="tag">bench</span>':''}<span class="ds">${l.ds}</span></label>`;
     L.appendChild(d);
     d.querySelector('input').addEventListener('change',e=>{ON[l.id]=e.target.checked;emit();});
   }
@@ -353,9 +395,9 @@ function buildUI(){
 }
 function fmt(v){const s=String(v);return s.includes('.')?s:s+'.0';}
 function emit(){
-  const lines=['// AS-222 Flare Bench: flare_state_base.m2 (166196), spell 1543'];
-  const off=LAYERS.filter(l=>!ON[l.id]).map(l=>l.nm);
-  if(off.length) lines.push('// layers off: '+off.join(', '));
+  const lines=['// AS-222/AS-232 Flare Bench: flare_state_base.m2 (166196), spell 1543'];
+  const offShipped=LAYERS.filter(l=>!l.bench&&!ON[l.id]).map(l=>l.nm);
+  if(offShipped.length) lines.push('// layers off: '+offShipped.join(', '));
   for(const k of KNOBS) lines.push(`pub const ${k.rust}: f32 = ${fmt(K[k.key])};`);
   document.getElementById('out').textContent=lines.join('\n');
 }

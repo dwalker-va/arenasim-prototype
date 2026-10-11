@@ -30,9 +30,25 @@ use arenasim::states::play_match::traps::flare_system;
 use arenasim::states::play_match::{
     animate_client_particles, spawn_flare_visuals, update_flare_visuals, AbilityDefinitions, Aura,
     ClientParticle, Combatant, FlarePart, FlareRig, FlareZone, GameRng, MovementConfig,
-    FLARE_CORE_DIAMETER, FLARE_CORE_HEIGHT, FLARE_CORE_SPRITES, FLARE_POOL_GAIN,
-    FLARE_POOL_RADIUS_SCALE, FLARE_TWINKLE_MAX, FLARE_TWINKLE_MIN,
+    FLARE_CORE_DIAMETER, FLARE_CORE_HEIGHT, FLARE_CORE_SPRITES, FLARE_POOL_GAIN, FLARE_TWINKLE_MAX,
+    FLARE_TWINKLE_MIN,
 };
+
+/// Additive pool alpha (material alpha times texture alpha) at or above this
+/// reads as lit floor at the match camera; below it the floor looks dark.
+const VISIBLE_ALPHA: f32 = 0.08;
+/// The rim's alpha never drops below this while the Flare burns.
+const RIM_ALPHA_FLOOR: f32 = 0.5;
+/// ...and is at least this many times the pool's own alpha where the rim
+/// lies, so it reads as a line against the lit floor, not as more floor.
+const RIM_CONTRAST: f32 = 2.0;
+/// The rim is at least this wide, yards: a band, not a hairline.
+const RIM_MIN_WIDTH: f32 = 0.3;
+/// The pool's light must reach at least this far past the reveal radius,
+/// yards, through the steady burn: an edge outside it, not a texel outside.
+const LIT_MARGIN: f32 = 0.3;
+/// Bearings the pool is measured along.
+const BEARINGS: usize = 16;
 
 const TICK: Duration = Duration::from_millis(50);
 const DT: f32 = 0.05;
@@ -241,6 +257,51 @@ impl Harness {
             .clone()
     }
 
+    /// What the pool actually draws along `bearing` (radians) from `centre`:
+    /// for each `step` yards out to past the quad's edge, the additive alpha
+    /// the renderer puts on the floor there — the material's alpha times its
+    /// texture's alpha at that point of the pool quad (zero off the quad).
+    fn pool_alpha_along(&mut self, centre: Vec3, bearing: f32, step: f32) -> Vec<(f32, f32)> {
+        let pool = self.part(FlarePart::Pool);
+        let vs = self.world_vertices(pool);
+        let (min_x, max_x) = vs.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
+            (lo.min(v.x), hi.max(v.x))
+        });
+        let (min_z, max_z) = vs.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
+            (lo.min(v.z), hi.max(v.z))
+        });
+        let m = self.material(pool);
+        let tex = m.base_color_texture.clone().expect("the pool is textured");
+        let world = self.app.world();
+        let image = world
+            .resource::<Assets<Image>>()
+            .get(&tex)
+            .expect("pool texture");
+        let w = image.width() as usize;
+        let h = image.height() as usize;
+        let data = image.data.as_ref().expect("pool texels");
+        let alpha = m.base_color.alpha();
+        let dir = Vec3::new(bearing.cos(), 0.0, bearing.sin());
+        let reach = (max_x - min_x).max(max_z - min_z);
+        let mut out = Vec::new();
+        let mut r = 0.0;
+        while r <= reach {
+            let p = centre + dir * r;
+            let u = (p.x - min_x) / (max_x - min_x);
+            let v = (p.z - min_z) / (max_z - min_z);
+            let a = if (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v) {
+                let x = (u * (w - 1) as f32).round() as usize;
+                let y = (v * (h - 1) as f32).round() as usize;
+                data[(y * w + x) * 4 + 3] as f32 / 255.0
+            } else {
+                0.0
+            };
+            out.push((r, alpha * a));
+            r += step;
+        }
+        out
+    }
+
     fn flare_left(&mut self, flare: Entity) -> Option<f32> {
         self.app
             .world()
@@ -256,6 +317,17 @@ struct Frame {
     pool_rgb: [f32; 3],
     core_sizes: Vec<f32>,
     core_rgb: Vec<[f32; 3]>,
+    /// How far the pool visibly reaches: the nearest of every bearing's
+    /// farthest visibly lit point, yards.
+    pool_extent: f32,
+    /// The dimmest the pool draws anywhere inside the reveal radius.
+    pool_min_inside: f32,
+    /// The brightest the pool draws on the rim's band.
+    pool_at_radius: f32,
+    /// The rim's drawn alpha.
+    rim_alpha: f32,
+    /// How far out the rim's mesh reaches (its outer edge), yards.
+    rim_outer: f32,
 }
 
 /// Light a Flare from the Hunter's decider and record every tick of its burn
@@ -285,12 +357,45 @@ fn burn() -> (Harness, Entity, Vec3, Vec<Frame>) {
             let c = h.material(core).base_color.to_srgba();
             core_rgb.push([c.red, c.green, c.blue]);
         }
+        let mut pool_extent = f32::MAX;
+        let mut pool_min_inside = f32::MAX;
+        let mut pool_at_radius = 0.0f32;
+        for b in 0..BEARINGS {
+            let bearing = b as f32 / BEARINGS as f32 * std::f32::consts::TAU;
+            let ray = h.pool_alpha_along(centre, bearing, 0.02);
+            let edge = ray
+                .iter()
+                .filter(|(_, a)| *a >= VISIBLE_ALPHA)
+                .map(|(r, _)| *r)
+                .fold(0.0f32, f32::max);
+            pool_extent = pool_extent.min(edge);
+            for (r, a) in &ray {
+                if *r <= FLARE_RADIUS {
+                    pool_min_inside = pool_min_inside.min(*a);
+                }
+                if (*r - FLARE_RADIUS).abs() <= 0.25 {
+                    pool_at_radius = pool_at_radius.max(*a);
+                }
+            }
+        }
+        let rim = h.part(FlarePart::Rim);
+        let rim_alpha = h.material(rim).base_color.alpha();
+        let rim_outer = h
+            .world_vertices(rim)
+            .iter()
+            .map(|v| v.xz().distance(centre.xz()))
+            .fold(0.0f32, f32::max);
         frames.push(Frame {
             burnt: FLARE_DURATION - left,
             pool_alpha: pool_rgb.alpha,
             pool_rgb: [pool_rgb.red, pool_rgb.green, pool_rgb.blue],
             core_sizes,
             core_rgb,
+            pool_extent,
+            pool_min_inside,
+            pool_at_radius,
+            rim_alpha,
+            rim_outer,
         });
     }
     (h, flare, centre, frames)
@@ -335,9 +440,9 @@ fn the_gameplay_flare_is_never_drawn_on() {
 }
 
 /// Where it lies: the pool and rim flat on the floor, just above it, centred
-/// on the Flare; the rim exactly at the gameplay radius, the pool reaching it;
-/// the burning flare's sprites at the flare, above the floor, facing the
-/// camera.
+/// on the Flare; the rim a band centred on the reveal radius, the pool quad
+/// reaching past it; the burning flare's sprites at the flare, above the
+/// floor, facing the camera.
 #[test]
 fn the_pool_and_rim_lie_on_the_floor_at_the_gameplay_radius() {
     let mut h = Harness::new();
@@ -353,13 +458,27 @@ fn the_pool_and_rim_lie_on_the_floor_at_the_gameplay_radius() {
         "rig at {at}, Flare at {centre}"
     );
 
+    // AS-232: the rim sits ON the reveal radius — a band straddling it,
+    // centred on it — so the Rogue is revealed as its feet cross the band.
     let rim = h.part(FlarePart::Rim);
     let rim_vs = h.world_vertices(rim);
-    let outer = rim_vs
+    let (inner, outer) = rim_vs
         .iter()
         .map(|v| v.xz().distance(centre.xz()))
-        .fold(0.0f32, f32::max);
-    assert!((outer - FLARE_RADIUS).abs() < 1e-3, "rim reaches {outer}");
+        .fold((f32::MAX, 0.0f32), |(lo, hi), d| (lo.min(d), hi.max(d)));
+    assert!(
+        inner < FLARE_RADIUS && outer > FLARE_RADIUS,
+        "the rim {inner}..{outer} does not straddle the {FLARE_RADIUS} yd reveal radius"
+    );
+    assert!(
+        ((inner + outer) / 2.0 - FLARE_RADIUS).abs() < 0.02,
+        "the rim {inner}..{outer} is not centred on the reveal radius"
+    );
+    assert!(
+        outer - inner >= RIM_MIN_WIDTH && outer - inner <= 1.0,
+        "the rim is {} yd wide",
+        outer - inner
+    );
     for v in &rim_vs {
         assert!(v.y > 0.0 && v.y < 0.1, "rim vertex off the floor: {v}");
     }
@@ -374,8 +493,10 @@ fn the_pool_and_rim_lie_on_the_floor_at_the_gameplay_radius() {
         .iter()
         .map(|v| (v.z - centre.z).abs())
         .fold(0.0f32, f32::max);
-    let want = FLARE_RADIUS * FLARE_POOL_RADIUS_SCALE;
-    assert!((reach_x - want).abs() < 1e-3 && (reach_z - want).abs() < 1e-3);
+    assert!(
+        reach_x > FLARE_RADIUS && (reach_x - reach_z).abs() < 1e-3,
+        "the pool quad reaches {reach_x} x {reach_z}"
+    );
     for v in &pool_vs {
         assert!(v.y > 0.0 && v.y < 0.1, "pool vertex off the floor: {v}");
     }
@@ -527,4 +648,72 @@ fn the_flare_spits_sparks_that_die_away() {
         late < early / 2,
         "the sparks do not die away: {early} early, {late} late"
     );
+}
+
+/// AS-232: a Rogue is never revealed while it visibly stands outside the
+/// light. Measured off what the pool DRAWS — its quad's world extent, its
+/// texture's alpha and its material's alpha, every tick, on every bearing:
+/// through the steady burn the lit floor is unbroken inside the reveal radius
+/// and visibly reaches past it; to the last frame, the lit area (the pool, or
+/// the rim on the radius) reaches the reveal radius.
+#[test]
+fn the_lit_area_reaches_the_reveal_radius_for_the_whole_burn() {
+    let (_, _, _, frames) = burn();
+    // The client's own last half second (clock 29.5-30) puts the pool out.
+    let steady_end = FLARE_DURATION * (29.5 / 30.0);
+    let mut steady = 0;
+    let mut tightest = f32::MAX;
+    for f in &frames {
+        let rim_lit = f.rim_alpha >= VISIBLE_ALPHA;
+        let lit_extent = f.pool_extent.max(if rim_lit { f.rim_outer } else { 0.0 });
+        assert!(
+            lit_extent >= FLARE_RADIUS,
+            "at {:.2}s the lit area reaches {lit_extent:.2} yd, inside the {FLARE_RADIUS} yd reveal",
+            f.burnt
+        );
+        if f.burnt < steady_end {
+            steady += 1;
+            tightest = tightest.min(f.pool_extent);
+            assert!(
+                f.pool_min_inside >= VISIBLE_ALPHA,
+                "at {:.2}s the pool is dark ({:.3}) somewhere inside the reveal radius",
+                f.burnt,
+                f.pool_min_inside
+            );
+        }
+    }
+    let expected = (steady_end / DT) as usize;
+    assert!(
+        steady + 2 >= expected,
+        "only {steady} of {expected} steady-burn ticks measured"
+    );
+    assert!(
+        tightest >= FLARE_RADIUS + LIT_MARGIN,
+        "the pool's light stops at {tightest:.2} yd on some tick, not clear of the {FLARE_RADIUS} yd reveal"
+    );
+}
+
+/// AS-232: the rim is the line a Rogue crosses to be seen. It is lit at a
+/// stated floor on every tick the Flare burns — no end fade, since the reveal
+/// does not fade — and brighter than the pool where it lies, so it reads as
+/// an edge and not as more floor.
+#[test]
+fn the_rim_is_bright_against_the_pool_for_the_whole_burn() {
+    let (_, _, _, frames) = burn();
+    assert!(frames.len() > 500, "only {} ticks", frames.len());
+    for f in &frames {
+        assert!(
+            f.rim_alpha >= RIM_ALPHA_FLOOR,
+            "at {:.2}s the rim is drawn at alpha {:.3}",
+            f.burnt,
+            f.rim_alpha
+        );
+        assert!(
+            f.rim_alpha >= RIM_CONTRAST * f.pool_at_radius,
+            "at {:.2}s the rim ({:.3}) barely clears the pool under it ({:.3})",
+            f.burnt,
+            f.rim_alpha,
+            f.pool_at_radius
+        );
+    }
 }
