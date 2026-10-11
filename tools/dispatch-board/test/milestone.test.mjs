@@ -312,7 +312,7 @@ test("ticks: versioned per step, persisted, never a board event; a reworded step
   assert.deepEqual(after.map((s) => [s.text, s.checked]), [["Step one, reworded", false], ["Step two", false]]);
 });
 
-test("submit: each comment becomes a card on the milestone at its source's iteration + 1, linked back; drafts clear; one event", (t) => {
+test("submit: saves every comment as one batch on the milestone, with what it was on, and files no card; drafts clear; one event", (t) => {
   const { board } = tempBoard(t);
   const { a, b, keys } = reviewFixture(board);
   const u = { actor: "board" };
@@ -320,7 +320,7 @@ test("submit: each comment becomes a card on the milestone at its source's itera
   board.saveReviewDraft("0.7", keys[1], "Step two did nothing\nsecond line", 0, u);
   board.saveReviewDraft("0.7", `card:${b.id}`, "Tooltip clips", 0, u);
   board.saveReviewDraft("0.7", "milestone", "Good milestone overall; do the sweep", 0, u);
-  board.saveReviewDraft("0.7", "milestone", "Good milestone; do the sweep next", 1, u);
+  board.saveReviewDraft("0.7", "milestone", "  Good milestone; do the sweep next  ", 1, u);
   refused(() => board.saveReviewDraft("0.7", "milestone", "stale", 1, u), "stale_version");
   refused(() => board.saveReviewDraft("0.7", "card:AS-99", "not on it", 0, u), "invalid", /not a review item/);
   const head = board.head();
@@ -328,66 +328,64 @@ test("submit: each comment becomes a card on the milestone at its source's itera
   assert.equal(Object.keys(drafts).length, 4);
   assert.equal(board.head(), head, "saving a draft is not a board event");
 
+  const cardsBefore = board.listCards({ include_archived: true });
+  const activityBefore = board.getCard(a.id).activity.length;
   const expected = Object.fromEntries(Object.entries(drafts).map(([k, d]) => [k, d.version]));
   const r = board.submitReview("0.7", expected, u);
-  assert.equal(r.cards.length, 4);
-  const bySource = Object.fromEntries(r.cards.map((c) => [c.source.key, c]));
-  const onA = bySource[`card:${a.id}`];
-  assert.deepEqual([onA.milestone, onA.iteration, onA.column, onA.role, onA.source.card], ["0.7", 2, "backlog", "engineer", a.id]);
-  assert.match(onA.title, new RegExp(`^Review feedback on ${a.id}: The ice is too bright$`));
-  assert.match(onA.body, /The ice is too bright/);
-  assert.deepEqual(onA.links, [{ label: `${a.id} PR #1 (feedback source)`, url: PR(1).url }], "linked to the source's PR as a reference, never as its own pr");
-  assert.equal(onA.pr, null);
-  const onStep = bySource[keys[1]];
-  assert.deepEqual([onStep.iteration, onStep.source.card], [2, a.id]);
-  assert.match(onStep.body, /checklist step "Step two"/);
-  assert.equal(bySource[`card:${b.id}`].iteration, 3, "one after its source's own iteration");
-  assert.equal(bySource.milestone.iteration, 3, "milestone-level feedback: one after the milestone's latest iteration");
-  assert.equal(bySource.milestone.source.card, null);
-  assert.match(board.getCard(a.id).activity.at(-1).msg, new RegExp(`review feedback filed as ${bySource[keys[1]].id}`));
+  assert.deepEqual(board.listCards({ include_archived: true }), cardsBefore, "submitting filed or changed a card");
+  assert.equal(board.getCard(a.id).activity.length, activityBefore, "submitting wrote to a source card");
+
+  assert.deepEqual([r.batch.id, r.batch.milestone, r.batch.by, r.batch.version], ["FB-1", "0.7", "board", 1]);
+  assert.deepEqual(
+    r.batch.comments.map((c) => [c.id, c.key, c.target, c.text, c.triage]),
+    [
+      ["c1", `card:${a.id}`, { kind: "card", card: a.id, title: "card 1" }, "The ice is too bright", null],
+      ["c2", keys[1], { kind: "step", card: a.id, text: "Step two" }, "Step two did nothing\nsecond line", null],
+      ["c3", `card:${b.id}`, { kind: "card", card: b.id, title: "card 2" }, "Tooltip clips", null],
+      ["c4", "milestone", { kind: "milestone" }, "Good milestone; do the sweep next", null],
+    ],
+  );
 
   const after = board.getMilestone("0.7");
   assert.deepEqual(after.feedback.drafts, {}, "submitted comments are cleared");
-  assert.deepEqual(after.feedback.submissions.map((s) => s.cards), [r.cards.map((c) => c.id)]);
-  assert.deepEqual(after.in_flight.map((c) => c.id), r.cards.map((c) => c.id));
+  assert.deepEqual(after.feedback.batches, [r.batch]);
+  assert.deepEqual(after.feedback.submissions, [], "a batch is not an auto-filed submission");
+  assert.deepEqual(after.in_flight, []);
   const evs = events(board, head);
-  assert.deepEqual(evs.map((e) => e.kind), ["created", "created", "created", "created", "review_submitted"]);
-  assert.deepEqual(evs[0].data, { column: "backlog", title: r.cards[0].title, milestone: "0.7", iteration: r.cards[0].iteration });
-  assert.deepEqual(evs.at(-1).data, { milestone: "0.7", cards: r.cards.map((c) => c.id) });
-  assert.equal(evs.at(-1).actor, "board");
+  assert.deepEqual(evs.map((e) => [e.kind, e.actor, e.data]), [["review_submitted", "board", { milestone: "0.7", batch: "FB-1", comments: 4 }]]);
 });
 
-test("submit: a comment changed or added since the user read it refuses the whole submission, filing nothing", (t) => {
+test("submit: a comment changed or added since the user read it refuses the whole submission, saving nothing", (t) => {
   const { board } = tempBoard(t);
   const { a, keys } = reviewFixture(board);
   const u = { actor: "board" };
   board.saveReviewDraft("0.7", `card:${a.id}`, "one", 0, u);
   const seen = { [`card:${a.id}`]: 1 };
   board.saveReviewDraft("0.7", keys[0], "added in another window", 0, u);
-  const before = board.listCards({ include_archived: true }).length;
   const err = refused(() => board.submitReview("0.7", seen, u), "stale_version", new RegExp(keys[0]));
   assert.ok(err.current.drafts[keys[0]], "the refusal carries the drafts as they are now");
   board.saveReviewDraft("0.7", `card:${a.id}`, "one, edited", 1, u);
   refused(() => board.submitReview("0.7", { [`card:${a.id}`]: 1, [keys[0]]: 1 }, u), "stale_version");
-  assert.equal(board.listCards({ include_archived: true }).length, before);
-  assert.equal(board.submitReview("0.7", { [`card:${a.id}`]: 2, [keys[0]]: 1 }, u).cards.length, 2);
+  assert.deepEqual(board.listFeedbackBatches(), [], "a refused submission saved a batch");
+  assert.equal(Object.keys(board.getMilestone("0.7").feedback.drafts).length, 2, "a refused submission cleared a draft");
+  assert.equal(board.submitReview("0.7", { [`card:${a.id}`]: 2, [keys[0]]: 1 }, u).batch.comments.length, 2);
 });
 
-test("submit: no comments records a submission with no cards; a released milestone's review is closed", (t) => {
+test("submit: no comments saves an empty batch (the approval); a released milestone's review is closed", (t) => {
   const { board } = tempBoard(t);
   const { keys } = reviewFixture(board);
   const head = board.head();
   const r = board.submitReview("0.7", {}, { actor: "board" });
-  assert.deepEqual(r.cards, []);
-  assert.deepEqual(r.milestone.submissions.map((s) => s.cards), [[]]);
-  assert.deepEqual(events(board, head).map((e) => [e.kind, e.data]), [["review_submitted", { milestone: "0.7", cards: [] }]]);
+  assert.deepEqual([r.batch.id, r.batch.comments], ["FB-1", []]);
+  assert.deepEqual(events(board, head).map((e) => [e.kind, e.data]), [["review_submitted", { milestone: "0.7", batch: "FB-1", comments: 0 }]]);
+  assert.deepEqual(board.listFeedbackBatches({ pending: true }), [], "an empty batch has nothing to triage");
   board.closeMilestone("0.7", r.milestone.version, o);
   refused(() => board.submitReview("0.7", {}, { actor: "board" }), "invalid", /released/);
   refused(() => board.setReviewCheck("0.7", keys[0], true, 0, { actor: "board" }), "invalid", /released/);
   refused(() => board.saveReviewDraft("0.7", "milestone", "late", 0, { actor: "board" }), "invalid", /released/);
 });
 
-test("submit: a comment whose step was reworded away still files against its card, and can be cleared instead", (t) => {
+test("submit: a comment whose step was reworded away, or whose card left the milestone, is still sent, its snapshot empty", (t) => {
   const { board } = tempBoard(t);
   const { a, keys } = reviewFixture(board);
   const u = { actor: "board" };
@@ -395,29 +393,31 @@ test("submit: a comment whose step was reworded away still files against its car
   board.updateCard(a.id, { human_testing: "- Something else entirely" }, board.getCard(a.id).version, o);
   refused(() => board.saveReviewDraft("0.7", keys[0], "edit it", 1, u), "invalid", /not a review item/);
   const r = board.submitReview("0.7", { [keys[0]]: 1 }, u);
-  assert.deepEqual([r.cards[0].source.card, r.cards[0].iteration], [a.id, 2]);
+  assert.deepEqual(r.batch.comments.map((c) => [c.target, c.text]), [[{ kind: "step", card: a.id, text: null }, "orphan me"]]);
 
   board.saveReviewDraft("0.7", `card:${a.id}`, "moved off later", 0, u);
   board.updateCard(a.id, { milestone: null }, board.getCard(a.id).version, o);
-  refused(() => board.submitReview("0.7", { [`card:${a.id}`]: 1 }, u), "invalid", /no longer names an item/);
-  board.saveReviewDraft("0.7", `card:${a.id}`, "", 1, u);
-  assert.deepEqual(board.submitReview("0.7", {}, u).cards, []);
+  const r2 = board.submitReview("0.7", { [`card:${a.id}`]: 1 }, u);
+  assert.deepEqual(r2.batch.comments.map((c) => [c.id, c.target]), [["c1", { kind: "card", card: a.id, title: null }]]);
+  assert.equal(r2.batch.id, "FB-2");
 });
 
 // ---------------------------------------------------------------- export / import
 
-test("schema 2 round trip: milestones, their ticks, drafts and submissions, and every card field survive exactly", (t) => {
+test("schema 2 round trip: milestones, their ticks, drafts and feedback batches, and every card field survive exactly", (t) => {
   const { board } = tempBoard(t);
   const { a, keys } = reviewFixture(board);
   board.recordRuling(a.id, { text: "keep", numbers: { x: 1 } }, o);
   board.setReviewCheck("0.7", keys[0], true, 0, { actor: "board" });
   board.saveReviewDraft("0.7", keys[1], "draft kept", 0, { actor: "board" });
-  board.submitReview("0.7", { [keys[1]]: 1 }, { actor: "board" });
+  const fb = board.submitReview("0.7", { [keys[1]]: 1 }, { actor: "board" }).batch;
+  board.triageFeedback(fb.id, [{ comment: "c1", outcome: "merged_into", card: a.id }], fb.version, o);
+  board.submitReview("0.7", {}, { actor: "board" });
   board.saveReviewDraft("0.7", "milestone", "unsubmitted", 0, { actor: "board" });
   board.createMilestone("0.8", o);
   const out = board.exportState();
   assert.equal(out.schema, 2);
-  assert.deepEqual(out.milestones.map((m) => [m.name, m.review.length]), [["0.7", 3], ["0.8", 0]]);
+  assert.deepEqual(out.milestones.map((m) => [m.name, m.review.length, m.batches.map((x) => x.id)]), [["0.7", 3, ["FB-1", "FB-2"]], ["0.8", 0, []]]);
 
   const { board: b2 } = tempBoard(t);
   const r = b2.importState(structuredClone(out), { actor: "import" });
@@ -426,6 +426,10 @@ test("schema 2 round trip: milestones, their ticks, drafts and submissions, and 
   const p = b2.getMilestone("0.7");
   assert.equal(p.checklist.groups[0].cards[0].steps[0].checked, true);
   assert.equal(p.feedback.drafts.milestone.text, "unsubmitted");
+  assert.deepEqual(p.feedback.batches[0].comments[0].triage.card, a.id);
+  assert.deepEqual(b2.getCard(a.id).from_feedback, [{ batch: "FB-1", comment: "c1", milestone: "0.7", outcome: "merged_into" }]);
+  // The next batch numbers on from the imported ones.
+  assert.equal(b2.submitReview("0.7", { milestone: 1 }, { actor: "board" }).batch.id, "FB-3");
 });
 
 test("schema 2 import: refuses a card naming a milestone the state lacks, and a schema 1 human_review card arrives merged", (t) => {

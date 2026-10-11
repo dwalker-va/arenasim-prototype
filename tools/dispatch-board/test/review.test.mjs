@@ -111,11 +111,10 @@ test("wake-up: the new event kinds reach `wait` in the existing line shape; tick
   const sub = await post(d.base, "/api/milestones/0.7/submit", { expected: { [`card:${a.id}`]: 1 } });
   assert.equal(sub.status, 200, JSON.stringify(sub.body));
   const r = await one.done;
-  // The new cards and the submission commit in one write, so they wake the waiter as one batch.
-  assert.deepEqual(r.lines.map((l) => [l.actor, l.kind]), [["board", "created"], ["board", "review_submitted"]]);
+  // The submission is one event naming the batch; no card is filed with it.
+  assert.deepEqual(r.lines.map((l) => [l.actor, l.kind]), [["board", "review_submitted"]]);
   const all = (await call(client, "events_since", { cursor: head, ignore_actors: ["orchestrator"] })).value.events;
-  assert.deepEqual(all.map((e) => [e.kind, e.data.milestone]), [["created", "0.7"], ["review_submitted", "0.7"]]);
-  assert.deepEqual(all[1].data.cards, [sub.body.cards[0].id]);
+  assert.deepEqual(all.map((e) => [e.kind, e.data]), [["review_submitted", { milestone: "0.7", batch: sub.body.batch.id, comments: 1 }]]);
 });
 
 test("web UI API: the review page, theme and milestone endpoints are served; the same guards hold", async (t) => {
@@ -170,7 +169,7 @@ async function openDom(t, base, html, path, ready) {
   return { dom, doc, fire, nudge: () => es.onmessage({}), status: () => doc.querySelector(".hdr .stat").textContent };
 }
 
-test("review page: ticks persist, a comment saves as it is typed, and submitting files an iteration-2 card", async (t) => {
+test("review page: ticks persist, a comment saves as it is typed, and submitting sends one batch, filing no card", async (t) => {
   const d = await spawnDaemon(t);
   d.t = t;
   const { client, a, b } = await milestoneWithCards(d);
@@ -212,20 +211,19 @@ test("review page: ticks persist, a comment saves as it is typed, and submitting
   wt.value = "Ship it after the rage fix";
   pg.fire(wt, "input");
 
-  // Submit: the first click asks, the second files — flushing the unsaved comment first.
+  // Submit: the first click asks, the second sends — flushing the unsaved comment first.
+  const cardsBefore = (await call(client, "list_cards", { include_archived: true })).value;
   doc.getElementById("submit").click();
-  assert.match(doc.getElementById("submit").textContent, /Confirm: file 2 cards/);
+  assert.match(doc.getElementById("submit").textContent, /Confirm: send 2 comments/);
   doc.getElementById("submit").click();
-  await until("the submission", () => /submitted — filed/.test(pg.status()));
-  const filed = (await call(client, "list_cards", { milestone: "0.7", iteration: 2 })).value;
-  assert.equal(filed.length, 2);
-  const full = await Promise.all(filed.map(async (c) => (await call(client, "get_card", { id: c.id })).value));
-  assert.deepEqual(full.map((c) => c.source.key).sort(), [`card:${a.id}`, "milestone"]);
-  assert.match(full.find((c) => c.source.key === `card:${a.id}`).body, /The rage bar flickers at 0/);
+  await until("the submission", () => /submitted — FB-1, 2 comments sent for triage/.test(pg.status()));
+  assert.deepEqual((await call(client, "list_cards", { include_archived: true })).value, cardsBefore, "submitting filed a card");
+  const batch = (await call(client, "get_feedback_batch", { id: "FB-1" })).value;
+  assert.deepEqual(batch.comments.map((c) => [c.key, c.text, c.triage]).sort(), [[`card:${a.id}`, "The rage bar flickers at 0", null], ["milestone", "Ship it after the rage fix", null]]);
   p = (await call(client, "get_milestone", { name: "0.7" })).value;
   assert.deepEqual(p.feedback.drafts, {});
-  assert.deepEqual(p.feedback.submissions[0].cards.sort(), filed.map((c) => c.id).sort());
-  await until("the page to list the new cards in flight", () => /Still in flight/.test(doc.querySelector("#changed").textContent));
+  await until("the page to list the batch", () => doc.querySelectorAll('#batches .batch[data-batch="FB-1"] .bcomment').length === 2);
+  assert.equal(doc.querySelectorAll("#batches .triage.pending").length, 2, "an untriaged comment is not shown as pending");
   assert.ok(b);
 });
 

@@ -276,9 +276,21 @@ test("review page: leads with the guide's units, in order, before a collapsed Fu
   assert.deepEqual([...doc.querySelectorAll('#guide .unit[data-unit="druid-root"] .cards a')].map((x) => x.textContent), ids.slice(0, 2));
   assert.equal(doc.querySelectorAll("#guide input[data-check]").length, 3);
   assert.deepEqual([...doc.querySelectorAll("#guide button[data-replay]")].map((b) => b.dataset.replay), ["guide:druid-root:shift"], "one ▶ per check with a replay");
-  // Nothing is removed: every per-card section is inside the detail.
-  assert.deepEqual([...detail.querySelectorAll("section > h2")].map((h) => h.textContent), ["What changed", "What to check", "Your decisions", "Balance", "Known gaps and follow-ups", "Feedback"]);
+  // Every unit and every check takes a comment, beside its ▶.
+  assert.deepEqual([...doc.querySelectorAll("#guide .ucomment [data-open]")].map((b) => b.dataset.open), ["guide:druid-root", "guide:flare"], "a unit without its comment box");
+  assert.deepEqual(
+    [...doc.querySelectorAll("#guide .ccomment [data-open]")].map((b) => b.dataset.open),
+    ["guide:druid-root:shift", "guide:druid-root:no-loop", "guide:flare:flash"],
+    "a check without its comment box",
+  );
+  // Nothing is removed: every per-card section is inside the detail; Feedback
+  // and its Submit sit beside the guide, between it and the detail.
+  assert.deepEqual([...detail.querySelectorAll("section > h2")].map((h) => h.textContent), ["What changed", "What to check", "Your decisions", "Balance", "Known gaps and follow-ups"]);
   assert.equal(guide.querySelector("section"), null);
+  const fb = doc.getElementById("feedback");
+  assert.ok(fb && !detail.contains(fb), "Feedback is folded inside the detail");
+  assert.ok(guide.compareDocumentPosition(fb) & 4 && fb.compareDocumentPosition(detail) & 4, "Feedback is not between the guide and the detail");
+  assert.ok(fb.querySelector("#submit"), "no Submit beside the guide");
 
   // A tick on a check persists through the same versioned route as a checklist step.
   const box = doc.querySelector('#guide input[data-check="guide:flare:flash"]');

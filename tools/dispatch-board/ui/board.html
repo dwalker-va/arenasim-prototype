@@ -372,7 +372,8 @@ function drawerHtml(s, edits){
   }
   return "<div class=\"overlay\" id=\"ovl\"><div class=\"drawer\" data-id=\"" + esc(c.id) + "\" role=\"dialog\" aria-label=\"Card detail\">"
     + "<button class=\"closex\" id=\"d-close\" aria-label=\"Close\">×</button>"
-    + "<div class=\"cid\" style=\"font:500 11px 'IBM Plex Mono',monospace;color:var(--muted)\">" + esc(c.id) + " · created " + esc(fmt(c.created)) + " · v" + esc(c.version) + (c.source ? " · review feedback on " + esc(c.source.card || "milestone " + c.source.milestone) : "") + "</div>"
+    + "<div class=\"cid\" style=\"font:500 11px 'IBM Plex Mono',monospace;color:var(--muted)\">" + esc(c.id) + " · created " + esc(fmt(c.created)) + " · v" + esc(c.version) + (c.source ? " · review feedback on " + esc(c.source.card || "milestone " + c.source.milestone) : "")
+    + (c.from_feedback && c.from_feedback.length ? " · from review feedback " + c.from_feedback.map(function(f){ return esc(f.batch + "/" + f.comment); }).join(", ") : "") + "</div>"
     + stale + cancelled + claim + wt
     + "<div class=\"mrow\"><label for=\"d-title\">Title</label><input id=\"d-title\" value=\"" + esc(c.title) + "\" " + (ro?"disabled":"") + "></div>"
     + "<div class=\"tworow\">"

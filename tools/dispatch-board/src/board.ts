@@ -248,6 +248,12 @@ CREATE TABLE IF NOT EXISTS review_items (
   draft      TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (milestone, key)
 );
+CREATE TABLE IF NOT EXISTS review_batches (
+  n         INTEGER PRIMARY KEY,
+  milestone TEXT NOT NULL REFERENCES milestones(name),
+  version   INTEGER NOT NULL DEFAULT 1,
+  doc       TEXT NOT NULL CHECK (json_valid(doc))
+);
 `;
 
 interface MilestoneRow {
@@ -262,6 +268,64 @@ export interface ReviewItem {
   checked_at: string | null;
   checked_by: string | null;
   draft: string;
+}
+
+/**
+ * What a review comment was written on, as it read when the user submitted
+ * it — so a batch reads on its own after the guide or a card has changed. A
+ * snapshot field is null when its item had already left the page (a step
+ * reworded away, a unit dropped from the guide).
+ */
+export type FeedbackTarget =
+  | { kind: "milestone" }
+  | { kind: "card"; card: string; title: string | null }
+  | { kind: "step"; card: string; text: string | null }
+  | { kind: "guide_unit"; unit: string; title: string | null }
+  | { kind: "guide_check"; unit: string; check: string; title: string | null; text: string | null };
+/** What the orchestrator decided about one comment. */
+export const TRIAGE_OUTCOMES = ["filed", "merged_into", "no_action"] as const;
+export type TriageOutcome = (typeof TRIAGE_OUTCOMES)[number];
+export interface Triage {
+  outcome: TriageOutcome;
+  /** The card it became (filed) or was folded into (merged_into). */
+  card?: string;
+  /** Required for no_action: why nothing is filed (already fixed, answered, out of scope). */
+  reason?: string;
+  t: string;
+  by: string;
+}
+/** One comment of a submitted review: `triage` is null until the orchestrator records it (pending). */
+export interface FeedbackComment {
+  id: string;
+  /** The review item it was typed on: milestone, card:<id>, check:<card>:<hash>, guide:<unit>, guide:<unit>:<check>. */
+  key: string;
+  target: FeedbackTarget;
+  text: string;
+  triage: Triage | null;
+}
+/** One submission of a milestone review, read and triaged as a whole by the orchestrator. */
+export interface FeedbackBatch {
+  id: string;
+  milestone: string;
+  t: string;
+  by: string;
+  comments: FeedbackComment[];
+}
+/** The link a card carries back to each review comment it was filed from or merged with (`from_feedback`). */
+export interface FeedbackRef {
+  batch: string;
+  comment: string;
+  milestone: string;
+  outcome: "filed" | "merged_into";
+}
+/** A feedback batch id: FB-<n>, allocated by the board. */
+export const BATCH_ID = /^FB-([1-9]\d*)$/;
+const TRIAGE_MAX_REASON = 2000;
+
+interface BatchRow {
+  n: number;
+  version: number;
+  doc: string;
 }
 
 interface CardRow {
@@ -405,6 +469,10 @@ export interface ReviewGuide {
 export function guideCheckKey(unit: string, check: string): string {
   return `guide:${unit}:${check}`;
 }
+/** The review item key a comment on a whole guide unit is stored under (a unit has no tick). */
+export function guideUnitKey(unit: string): string {
+  return `guide:${unit}`;
+}
 
 function checkFields(o: Record<string, unknown>, allowed: string[], what: string): void {
   const extra = Object.keys(o).filter((k) => !allowed.includes(k));
@@ -490,6 +558,29 @@ export function checkGuide(v: unknown, cardsOn: Set<string>, t: string): GuideUn
     }
     return unit;
   });
+}
+
+/**
+ * What a review item key names, with the words the user saw beside it:
+ * the guide's unit title and check text, a card's title, a checklist step's
+ * text. A snapshot is null when the item has since left the page.
+ */
+export function feedbackTarget(
+  key: string,
+  guide: ReviewGuide | null,
+  steps: Map<string, { text: string }>,
+  titles: Map<string, string>,
+): FeedbackTarget {
+  if (key === "milestone") return { kind: "milestone" };
+  const [kind, a, b] = key.split(":");
+  if (kind === "card") return { kind: "card", card: a, title: titles.get(a) ?? null };
+  if (kind === "check") return { kind: "step", card: a, text: steps.get(key)?.text ?? null };
+  if (kind === "guide") {
+    const unit = guide?.units.find((u) => u.id === a);
+    if (b === undefined) return { kind: "guide_unit", unit: a, title: unit?.title ?? null };
+    return { kind: "guide_check", unit: a, check: b, title: unit?.title ?? null, text: unit?.checks.find((c) => c.id === b)?.text ?? null };
+  }
+  invalid(`${key} is not a review item key`);
 }
 
 /** Validate a patch; returns it with `pr` normalised to {number, url}. */
@@ -1799,16 +1890,20 @@ export class Board extends EventEmitter {
 
   /**
    * What a review page may tick or comment on, right now: the milestone as a
-   * whole, each of its cards, and each current checklist step of a finished
-   * card, and each check of the review guide (tickable only: comments on a
-   * unit or check are AS-238's). A key outside this set is refused, so a tick
-   * cannot land on a step that has since been reworded away.
+   * whole, each of its cards, each current checklist step of a finished card,
+   * and each unit (comment only) and check of the review guide. A key outside
+   * this set is refused, so a tick cannot land on a step that has since been
+   * reworded away.
    */
   private reviewKeys(name: string): { comment: Set<string>; check: Map<string, { card?: Record<string, unknown>; text: string }> } {
     const comment = new Set(["milestone"]);
     const check = new Map<string, { card?: Record<string, unknown>; text: string }>();
     for (const u of this.guideOf(JSON.parse(this.milestoneRow(name).doc) as Record<string, unknown>)?.units ?? []) {
-      for (const c of u.checks) check.set(guideCheckKey(u.id, c.id), { text: c.text });
+      comment.add(guideUnitKey(u.id));
+      for (const c of u.checks) {
+        check.set(guideCheckKey(u.id, c.id), { text: c.text });
+        comment.add(guideCheckKey(u.id, c.id));
+      }
     }
     for (const r of this.milestoneCardRows(name)) {
       const c = JSON.parse(r.doc) as Record<string, unknown>;
@@ -1891,14 +1986,17 @@ export class Board extends EventEmitter {
   }
 
   /**
-   * Submit the review: every non-empty feedback draft becomes a new card on
-   * the same milestone at its source's iteration + 1, linked back to the item
-   * it came from; the drafts are cleared; one `review_submitted` event names
-   * the new cards (none, when the user had no feedback). `expected` is the
-   * version of every draft the user is submitting, as they saw it — a draft
-   * changed or added elsewhere refuses the whole submission.
+   * Submit the review: every non-empty feedback draft is saved, with what it
+   * was written on, as ONE feedback batch on the milestone; the drafts are
+   * cleared; one `review_submitted` event names the batch. No card is filed
+   * here: the orchestrator reads the whole batch, decides how many cards it
+   * needs (comments overlap), and records each comment's outcome with
+   * triage_feedback. A batch with no comments is the user approving the
+   * milestone. `expected` is the version of every draft the user is
+   * submitting, as they saw it — a draft changed or added elsewhere refuses
+   * the whole submission.
    */
-  submitReview(name: string, expected: Record<string, number>, meta: WriteMeta): { milestone: Milestone; cards: Card[] } {
+  submitReview(name: string, expected: Record<string, number>, meta: WriteMeta): { milestone: Milestone; batch: FeedbackBatch & { version: number } } {
     const actor = checkActor(meta.actor);
     if (!isObj(expected) || !Object.values(expected).every((v) => Number.isInteger(v))) {
       invalid("expected must map each submitted draft's key to the version you read");
@@ -1922,62 +2020,149 @@ export class Board extends EventEmitter {
           { drafts: Object.fromEntries(drafts.map((d) => [d.key, { text: d.draft, version: d.version }])) },
         );
       }
-      const { check } = this.reviewKeys(name);
-      const cardsOn = this.milestoneCardRows(name).map((r) => JSON.parse(r.doc) as Record<string, unknown>);
-      const top = Math.max(1, ...cardsOn.map((c) => (Number.isInteger(c.iteration) ? (c.iteration as number) : 1)));
-      const by = meta.by ?? actor;
-      const t = now();
-      const created: Card[] = [];
-      for (const d of drafts) {
-        // A step reworded since its comment was written still names its card in its key.
-        const step = check.get(d.key);
-        const srcId = d.key === "milestone" ? null : d.key.split(":")[1];
-        const src = srcId ? cardsOn.find((c) => c.id === srcId) : undefined;
-        if (d.key !== "milestone" && !src) invalid(`${d.key} no longer names an item on milestone ${name}: clear that comment and submit again`);
-        const iteration = src ? (Number.isInteger(src.iteration) ? (src.iteration as number) : 1) + 1 : top + 1;
-        const what = src ? `${String(src.id)}: ${String(src.title)}` : `milestone ${name}`;
-        const first = d.draft.trim().split(/\r?\n/)[0];
-        const title = `Review feedback on ${src ? String(src.id) : `milestone ${name}`}: ${first.length > 80 ? `${first.slice(0, 79)}…` : first}`;
-        const body =
-          `User feedback from the milestone ${name} review (${t.slice(0, 10)}), on ${what}` +
-          (step ? `, checklist step "${step.text}"` : "") +
-          `:\n\n${d.draft.trim()}\n`;
-        const srcPr = src && isObj(src.pr) && typeof src.pr.url === "string" ? [{ label: `${String(src.id)} PR #${String(src.pr.number)} (feedback source)`, url: src.pr.url }] : [];
-        const card = this.insertCard(
-          {
-            title,
-            body,
-            column: "backlog",
-            role: "engineer",
-            priority: "P2",
-            links: srcPr,
-            pr: null,
-            worktree: null,
-            question: null,
-            agent: null,
-            activity: null,
-            created: t,
-            updated: t,
-            milestone: name,
-            iteration,
-            source: { milestone: name, key: d.key, card: srcId },
-          },
-          by,
-          actor,
-          `Filed from the milestone ${name} review: feedback on ${src ? String(src.id) : "the milestone"}`,
-        );
-        created.push(card);
-        if (src) {
-          const sr = this.row(String(src.id));
-          this.commitDoc(sr.id, sr.version, JSON.parse(sr.doc));
-          this.appendActivityRow(sr.id, { t, by, msg: `Milestone ${name} review feedback filed as ${card.id} (iteration ${iteration})` });
-        }
-        this.writeReviewItem(name, d.key, d.version, { draft: "" });
+      const steps = this.reviewKeys(name).check;
+      const guide = this.guideOf(doc);
+      const titles = new Map(this.milestoneCardRows(name).map((r) => [r.id, String((JSON.parse(r.doc) as Record<string, unknown>).title)]));
+      const comments: FeedbackComment[] = drafts.map((d, i) => ({
+        id: `c${i + 1}`,
+        key: d.key,
+        target: feedbackTarget(d.key, guide, steps, titles),
+        text: d.draft.trim(),
+        triage: null,
+      }));
+      for (const d of drafts) this.writeReviewItem(name, d.key, d.version, { draft: "" });
+      const n = (this.db.prepare("SELECT coalesce(max(n), 0) + 1 AS n FROM review_batches").get() as { n: number }).n;
+      const batch: FeedbackBatch = { id: `FB-${n}`, milestone: name, t: now(), by: meta.by ?? actor, comments };
+      this.db.prepare("INSERT INTO review_batches(n, milestone, doc) VALUES (?, ?, ?)").run(n, name, JSON.stringify(batch));
+      this.recordEvent(actor, "review_submitted", null, { milestone: name, batch: batch.id, comments: comments.length });
+      return { milestone: this.milestoneOf(m), batch: { ...batch, version: 1 } };
+    });
+  }
+
+  private batchRow(id: string): BatchRow {
+    const m = typeof id === "string" ? BATCH_ID.exec(id) : null;
+    const r = m ? (this.db.prepare("SELECT n, version, doc FROM review_batches WHERE n = ?").get(Number(m[1])) as BatchRow | undefined) : undefined;
+    if (!r) throw new BoardError("not_found", `no feedback batch ${String(id)}`);
+    return r;
+  }
+
+  private batchOf(r: BatchRow): FeedbackBatch & { version: number } {
+    return Object.assign(JSON.parse(r.doc) as FeedbackBatch, { version: r.version });
+  }
+
+  /** A milestone's batches, oldest first, each with its version. */
+  private milestoneBatches(name: string): (FeedbackBatch & { version: number })[] {
+    return (this.db.prepare("SELECT n, version, doc FROM review_batches WHERE milestone = ? ORDER BY n").all(name) as BatchRow[]).map((r) => this.batchOf(r));
+  }
+
+  /** One feedback batch, whole: every comment with what it was on and its triage (null: pending). */
+  getFeedbackBatch(id: string): FeedbackBatch & { version: number } {
+    return this.batchOf(this.batchRow(id));
+  }
+
+  /**
+   * Batch summaries, oldest first: id, milestone, t, by, comments, pending
+   * (comments with no triage yet), version. `pending: true` keeps only the
+   * batches with an untriaged comment — the orchestrator's to-do list.
+   */
+  listFeedbackBatches(opts: { milestone?: string; pending?: boolean } = {}): Record<string, unknown>[] {
+    const rows = (
+      opts.milestone === undefined
+        ? this.db.prepare("SELECT n, version, doc FROM review_batches ORDER BY n").all()
+        : this.db.prepare("SELECT n, version, doc FROM review_batches WHERE milestone = ? ORDER BY n").all(opts.milestone)
+    ) as BatchRow[];
+    return rows
+      .map((r) => {
+        const b = this.batchOf(r);
+        return { id: b.id, milestone: b.milestone, t: b.t, by: b.by, comments: b.comments.length, pending: b.comments.filter((c) => c.triage === null).length, version: b.version };
+      })
+      .filter((s) => !opts.pending || s.pending > 0);
+  }
+
+  /**
+   * Record the orchestrator's triage of a batch's comments under the batch's
+   * version: each named comment becomes `filed` (as card X), `merged_into`
+   * (card X) or `no_action` (with a reason). Comments not named keep their
+   * triage. A card named by `filed` or `merged_into` gains the link back in
+   * its `from_feedback`, in the same write — and a re-triage that moves a
+   * comment off a card takes the link off that card — so a card and the
+   * comments it answers always name each other.
+   */
+  triageFeedback(id: string, entries: unknown, expectedVersion: number, meta: WriteMeta): FeedbackBatch & { version: number } {
+    const actor = checkActor(meta.actor);
+    checkVersion(expectedVersion);
+    if (!Array.isArray(entries) || !entries.length) invalid("triage must be a non-empty array of {comment, outcome, card?, reason?}");
+    const seen = new Set<string>();
+    const parsed = (entries as unknown[]).map((e, i) => {
+      const where = `triage[${i}]`;
+      if (!isObj(e)) invalid(`${where} must be an object: {comment, outcome, card?, reason?}`);
+      checkFields(e, ["comment", "outcome", "card", "reason"], where);
+      if (typeof e.comment !== "string" || !e.comment) invalid(`${where}.comment must name a comment of the batch (c1, c2, ...)`);
+      if (seen.has(e.comment)) invalid(`comment ${e.comment} is triaged twice in one write`);
+      seen.add(e.comment);
+      if (!(TRIAGE_OUTCOMES as readonly unknown[]).includes(e.outcome)) invalid(`${where}.outcome must be one of ${TRIAGE_OUTCOMES.join(", ")}`);
+      const outcome = e.outcome as TriageOutcome;
+      let card: string | undefined;
+      if (outcome === "no_action") {
+        if (e.card !== undefined) invalid(`${where}: no_action names no card`);
+        checkText(e.reason, `${where}.reason`, { nonEmpty: true });
+      } else {
+        if (typeof e.card !== "string" || !e.card) invalid(`${where}: ${outcome} needs the card it ${outcome === "filed" ? "became" : "was merged into"} (card: "AS-x")`);
+        card = e.card;
+        if (e.reason !== undefined) checkText(e.reason, `${where}.reason`, { nonEmpty: true });
       }
-      doc.submissions = [...(Array.isArray(doc.submissions) ? doc.submissions : []), { t, by, cards: created.map((c) => c.id) }];
-      this.commitMilestone(name, m.version, doc);
-      this.recordEvent(actor, "review_submitted", null, { milestone: name, cards: created.map((c) => c.id) });
-      return { milestone: this.milestoneOf(this.milestoneRow(name)), cards: created };
+      const reason = e.reason === undefined ? undefined : (e.reason as string).trim();
+      if (reason !== undefined && reason.length > TRIAGE_MAX_REASON) invalid(`${where}.reason is at most ${TRIAGE_MAX_REASON} characters`);
+      return { comment: e.comment as string, outcome, card, reason };
+    });
+    return this.write(() => {
+      const r = this.batchRow(id);
+      const b = this.batchOf(r);
+      if (r.version !== expectedVersion) {
+        throw new BoardError("stale_version", `feedback batch ${id} is at version ${r.version}, not ${expectedVersion}: it changed since you read it. Re-read and re-apply.`, undefined, { ...b });
+      }
+      const t = now();
+      const by = meta.by ?? actor;
+      const retriaged = new Set<string>();
+      const touched = new Set<string>();
+      for (const e of parsed) {
+        const c = b.comments.find((x) => x.id === e.comment);
+        if (!c) invalid(`batch ${id} has no comment ${e.comment} (it has ${b.comments.map((x) => x.id).join(", ") || "none"})`);
+        if (e.card !== undefined && !this.db.prepare("SELECT 1 FROM cards WHERE id = ? AND deleted_at IS NULL").get(e.card)) {
+          invalid(`no card ${e.card}: file it first (create_card), then record it here`);
+        }
+        if (c.triage?.card) touched.add(c.triage.card);
+        if (e.card) touched.add(e.card);
+        retriaged.add(c.id);
+        c.triage = { outcome: e.outcome, ...(e.card ? { card: e.card } : {}), ...(e.reason ? { reason: e.reason } : {}), t, by };
+      }
+      // Each touched card's links to these comments are rebuilt from the new triage.
+      for (const cardId of touched) {
+        const cr = this.row(cardId);
+        const doc = JSON.parse(cr.doc) as Record<string, unknown>;
+        const before: FeedbackRef[] = Array.isArray(doc.from_feedback) ? (doc.from_feedback as FeedbackRef[]) : [];
+        const isOld = (f: FeedbackRef) => f.batch === b.id && retriaged.has(f.comment);
+        const added: FeedbackRef[] = b.comments
+          .filter((c) => retriaged.has(c.id) && c.triage?.card === cardId)
+          .map((c) => ({ batch: b.id, comment: c.id, milestone: b.milestone, outcome: c.triage!.outcome as "filed" | "merged_into" }));
+        const after = [...before.filter((f) => !isOld(f)), ...added];
+        if (JSON.stringify(after) === JSON.stringify(before)) continue;
+        if (after.length) doc.from_feedback = after;
+        else delete doc.from_feedback;
+        this.commitDoc(cardId, cr.version, doc);
+        const same = (x: FeedbackRef, y: FeedbackRef) => x.batch === y.batch && x.comment === y.comment && x.outcome === y.outcome;
+        for (const f of before.filter((f) => isOld(f) && !added.some((a) => same(a, f)))) {
+          this.appendActivityRow(cardId, { t, by, msg: `No longer linked to milestone ${b.milestone} review feedback ${b.id}/${f.comment}` });
+        }
+        for (const a of added.filter((a) => !before.some((f) => same(a, f)))) {
+          this.appendActivityRow(cardId, { t, by, msg: `${a.outcome === "filed" ? "Filed from" : "Merged with"} milestone ${b.milestone} review feedback ${b.id}/${a.comment}` });
+        }
+      }
+      const { version: _v, ...stored } = b;
+      const info = this.db.prepare("UPDATE review_batches SET doc = ?, version = version + 1 WHERE n = ? AND version = ?").run(JSON.stringify(stored), r.n, r.version);
+      if (info.changes !== 1) throw new BoardError("stale_version", `feedback batch ${id} changed underneath this write; re-read it`);
+      this.recordEvent(actor, "feedback_triaged", null, { milestone: b.milestone, batch: b.id, comments: parsed.map((e) => e.comment), cards: [...touched] });
+      return this.getFeedbackBatch(id);
     });
   }
 
@@ -1994,7 +2179,7 @@ export class Board extends EventEmitter {
     const live = cards.filter((c) => c.cancelled == null);
     const finished = live.filter(isFinished);
     const brief = (c: Record<string, unknown>) =>
-      pick(c, ["id", "title", "column", "role", "pr", "merge_sha", "merged_at", "summary", "area", "iteration", "worktree", "source", "version"]);
+      pick(c, ["id", "title", "column", "role", "pr", "merge_sha", "merged_at", "summary", "area", "iteration", "worktree", "source", "from_feedback", "version"]);
     const areaOrder = [...AREAS, null];
     const byArea = (list: Record<string, unknown>[]) =>
       areaOrder
@@ -2087,6 +2272,9 @@ export class Board extends EventEmitter {
       feedback: {
         drafts: Object.fromEntries([...items.values()].filter((i) => i.draft).map((i) => [i.key, { text: i.draft, version: i.version }])),
         versions: Object.fromEntries([...items.values()].map((i) => [i.key, i.version])),
+        // Oldest first. Each comment carries its triage, or null while it is pending.
+        batches: this.milestoneBatches(name),
+        // Submissions made before batches: each filed one card per comment, automatically.
         submissions: m.submissions ?? [],
       },
     };
@@ -2141,6 +2329,7 @@ export class Board extends EventEmitter {
     const milestones = legacy ? [] : state.milestones;
     if (!Array.isArray(milestones)) invalid("a schema 2 state carries milestones: an array");
     const names = new Set<string>();
+    const batchIds = new Set<string>();
     (milestones as unknown[]).forEach((m, i) => {
       if (!isObj(m)) invalid(`milestones[${i}] is not an object`);
       checkMilestoneName(m.name);
@@ -2150,6 +2339,16 @@ export class Board extends EventEmitter {
       if (!Array.isArray(m.review)) invalid(`milestone ${String(m.name)}: review must be an array`);
       (m.review as unknown[]).forEach((it, j) => {
         if (!isObj(it) || typeof it.key !== "string" || typeof it.draft !== "string") invalid(`milestone ${String(m.name)}.review[${j}] must be {key, checked_at, checked_by, draft}`);
+      });
+      // Exports made before feedback batches carry none.
+      if (m.batches !== undefined && !Array.isArray(m.batches)) invalid(`milestone ${String(m.name)}: batches must be an array`);
+      ((m.batches ?? []) as unknown[]).forEach((fb, j) => {
+        const id = isObj(fb) && typeof fb.id === "string" ? BATCH_ID.exec(fb.id) : null;
+        if (!id || !isObj(fb) || fb.milestone !== m.name || !Array.isArray(fb.comments)) {
+          invalid(`milestone ${String(m.name)}.batches[${j}] must be {id: FB-<n>, milestone: ${String(m.name)}, t, by, comments: [...]}`);
+        }
+        if (batchIds.has(fb.id as string)) invalid(`duplicate feedback batch ${String(fb.id)}`);
+        batchIds.add(fb.id as string);
       });
     });
     const cards = state.cards as unknown[];
@@ -2208,8 +2407,11 @@ export class Board extends EventEmitter {
     return this.write(() => {
       if (!this.isEmpty()) throw new BoardError("not_empty", "import only loads into an EMPTY database; this one already has cards");
       for (const m of milestones as Record<string, unknown>[]) {
-        const { review, ...doc } = m;
+        const { review, batches, ...doc } = m;
         this.db.prepare("INSERT INTO milestones(name, doc) VALUES (?, ?)").run(m.name, JSON.stringify(doc));
+        for (const fb of (batches ?? []) as FeedbackBatch[]) {
+          this.db.prepare("INSERT INTO review_batches(n, milestone, doc) VALUES (?, ?, ?)").run(Number(BATCH_ID.exec(fb.id)![1]), m.name, JSON.stringify(fb));
+        }
         for (const it of review as ReviewItem[]) {
           this.db
             .prepare("INSERT INTO review_items(milestone, key, checked_at, checked_by, draft) VALUES (?, ?, ?, ?, ?)")
@@ -2244,7 +2446,7 @@ export class Board extends EventEmitter {
   /**
    * The full state: the backup and restore path. A schema 2 board exports
    * `{schema: 2, nextId, cards, milestones}` (each milestone with its review
-   * ticks and drafts); a database not yet migrated exports exactly the
+   * ticks and drafts, and its feedback batches); a database not yet migrated exports exactly the
    * `{schema: 1, nextId, cards}` it always did, so the pre-cutover backup is
    * the same file whichever build writes it.
    */
@@ -2259,9 +2461,12 @@ export class Board extends EventEmitter {
     });
     const nextId = Number(this.meta("next_id"));
     if (this.schema < 2) return { schema: this.schema, nextId, cards };
+    const batchTable = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'review_batches'").get();
     const milestones = (this.db.prepare("SELECT name, version, doc FROM milestones ORDER BY rowid").all() as MilestoneRow[]).map((r) => ({
       ...(JSON.parse(r.doc) as Record<string, unknown>),
       review: [...this.reviewItems(r.name).values()].map(({ key, checked_at, checked_by, draft }) => ({ key, checked_at, checked_by, draft })),
+      // A database the batch-era daemon has never opened has no batch table yet (an export opens read-only).
+      batches: batchTable ? this.milestoneBatches(r.name).map(({ version: _v, ...b }) => b) : [],
     }));
     return { schema: 2, nextId, cards, milestones };
   }

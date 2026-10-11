@@ -30,7 +30,7 @@ const ENV = {
   ...(realBoardPage() ? { DISPATCH_BOARD_FIXTURE: realBoardPage() } : {}),
   ...(realBoardExport() ? { DISPATCH_BOARD_EXPORT_FIXTURE: realBoardExport() } : {}),
 };
-const SUITES = ["board", "race", "daemon", "roundtrip", "ui", "prwork", "milestone", "migration", "review", "guide", "replay"];
+const SUITES = ["board", "race", "daemon", "roundtrip", "ui", "prwork", "milestone", "migration", "review", "guide", "replay", "feedback"];
 
 /** A copy of the package's dist/ui/test under .mutants/<name>/, optionally with one edit applied. */
 function copyTo(name) {
@@ -227,7 +227,14 @@ const MUTANTS = [
     file: "dist/board.js",
     find: "if (this.schema < 2)",
     replace: "if (true)",
-    mustFail: ["schema 2 round trip: milestones, their ticks, drafts and submissions"],
+    mustFail: ["schema 2 round trip: milestones, their ticks, drafts and feedback batches"],
+  },
+  {
+    name: "export-carries-batches",
+    file: "dist/board.js",
+    find: "batches: batchTable ?",
+    replace: "batches: false ?",
+    mustFail: ["schema 2 round trip: milestones, their ticks, drafts and feedback batches"],
   },
   {
     // The close is versioned: a stale one must move nothing (round 2).
@@ -350,11 +357,152 @@ const MUTANTS = [
     mustFail: ["submit: a comment changed or added since the user read it refuses the whole submission"],
   },
   {
-    name: "submit-iteration-plus-one",
+    // Submitting saves a batch and files nothing: a card filed per comment is caught.
+    name: "submit-files-no-cards",
     file: "dist/board.js",
-    find: "? src.iteration : 1) + 1",
-    replace: "? src.iteration : 1) + 0",
-    mustFail: ["submit: each comment becomes a card on the milestone at its source's iteration + 1"],
+    find: 'this.writeReviewItem(name, d.key, d.version, { draft: "" });',
+    replace:
+      'this.writeReviewItem(name, d.key, d.version, { draft: "" }); this.insertCard({ title: d.draft, body: "", column: "backlog", role: "engineer", priority: "P2", links: [], pr: null, worktree: null, question: null, agent: null, activity: null, created: now(), updated: now(), milestone: name, iteration: 2 }, "board", actor, "Filed");',
+    mustFail: [
+      "submit: saves every comment as one batch on the milestone",
+      "batch: guide units and checks take comments",
+      "review page: guide units and checks take comments, and the guide's own Submit sends them as a batch, filing no card",
+      "review page: ticks persist, a comment saves as it is typed, and submitting sends one batch, filing no card",
+    ],
+  },
+  {
+    name: "submit-clears-drafts",
+    file: "dist/board.js",
+    find: 'this.writeReviewItem(name, d.key, d.version, { draft: "" });',
+    replace: "{}",
+    mustFail: ["submit: saves every comment as one batch on the milestone"],
+  },
+  {
+    name: "batch-keeps-text",
+    file: "dist/board.js",
+    find: "text: d.draft.trim(),",
+    replace: 'text: "",',
+    mustFail: ["submit: saves every comment as one batch on the milestone", "batch: guide units and checks take comments", "review page: guide units and checks take comments"],
+  },
+  {
+    name: "batch-keeps-target",
+    file: "dist/board.js",
+    find: "target: feedbackTarget(d.key, guide, steps, titles),",
+    replace: 'target: { kind: "milestone" },',
+    mustFail: ["submit: saves every comment as one batch on the milestone", "batch: guide units and checks take comments", "review page: guide units and checks take comments"],
+  },
+  {
+    name: "triage-version-guard",
+    file: "dist/board.js",
+    find: "if (r.version !== expectedVersion) {",
+    replace: "if (false) {",
+    mustFail: ["triage: each outcome is recorded under the batch's version", "MCP: the orchestrator lists pending batches"],
+  },
+  {
+    name: "triage-is-stored",
+    file: "dist/board.js",
+    find: ".run(JSON.stringify(stored), r.n, r.version);",
+    replace: ".run(r.doc, r.n, r.version);",
+    mustFail: ["triage: each outcome is recorded under the batch's version", "review page: an untriaged comment shows as pending, a triaged one its outcome"],
+  },
+  {
+    name: "triage-links-card",
+    file: "dist/board.js",
+    find: "doc.from_feedback = after;",
+    replace: "delete doc.from_feedback;",
+    mustFail: ["triage: each outcome is recorded under the batch's version", "MCP: the orchestrator lists pending batches"],
+  },
+  {
+    name: "triage-moves-link",
+    file: "dist/board.js",
+    find: "const isOld = (f) => f.batch === b.id && retriaged.has(f.comment);",
+    replace: "const isOld = (f) => false;",
+    mustFail: ["triage: each outcome is recorded under the batch's version"],
+  },
+  {
+    name: "triage-card-must-exist",
+    file: "dist/board.js",
+    find: 'if (e.card !== undefined && !this.db.prepare("SELECT 1 FROM cards WHERE id = ? AND deleted_at IS NULL").get(e.card)) {',
+    replace: "if (false) {",
+    mustFail: ["triage: refuses what it cannot record"],
+  },
+  {
+    name: "review-page-renders-triage",
+    file: "ui/review.html",
+    find: "if(!tr) return",
+    replace: "if(true) return",
+    mustFail: ["review page: an untriaged comment shows as pending, a triaged one its outcome"],
+  },
+  {
+    name: "review-page-shows-pending",
+    file: "ui/review.html",
+    find: '"<div class=\\"triage pending\\">Pending — not triaged yet</div>"',
+    replace: '""',
+    mustFail: ["review page: an untriaged comment shows as pending, a triaged one its outcome", "review page: ticks persist, a comment saves as it is typed"],
+  },
+  {
+    name: "review-page-unit-comments",
+    file: "ui/review.html",
+    find: 'out += "<div class=\\"ucomment\\">" + commentBox("guide:" + u.id, "Comment on " + u.title) + "</div>";',
+    replace: "",
+    mustFail: ["review page: guide units and checks take comments"],
+  },
+  {
+    name: "review-page-feedback-beside-guide",
+    file: "ui/review.html",
+    find: '? lead + fb + "<details class=\\"detail\\" id=\\"detail\\""',
+    replace: '? lead + "<details class=\\"detail\\" id=\\"detail\\""',
+    mustFail: ["review page: leads with the guide's units, in order, before a collapsed Full detail", "review page: guide units and checks take comments"],
+  },
+  // Escaping: every text another party typed goes through esc(). One mutant per draw.
+  {
+    name: "escape-guide-title",
+    file: "ui/review.html",
+    find: '<span class=\\"ttl\\">" + esc(u.title) + "</span>"',
+    replace: '<span class=\\"ttl\\">" + u.title + "</span>"',
+    mustFail: ["review page: every text a person or agent typed renders as text"],
+  },
+  {
+    name: "escape-guide-summary",
+    file: "ui/review.html",
+    find: '"<div class=\\"sum\\">" + esc(u.summary)',
+    replace: '"<div class=\\"sum\\">" + u.summary',
+    mustFail: ["review page: every text a person or agent typed renders as text"],
+  },
+  {
+    name: "escape-guide-check",
+    file: "ui/review.html",
+    find: '<span class=\\"said\\">" + esc(c.text)',
+    replace: '<span class=\\"said\\">" + c.text',
+    mustFail: ["review page: every text a person or agent typed renders as text"],
+  },
+  {
+    name: "escape-comment",
+    file: "ui/review.html",
+    find: '"<div class=\\"said\\">" + esc(c.text)',
+    replace: '"<div class=\\"said\\">" + c.text',
+    mustFail: ["review page: every text a person or agent typed renders as text"],
+  },
+  {
+    name: "escape-comment-target",
+    file: "ui/review.html",
+    find: '"Unit: " + esc(tg.title || tg.unit)',
+    replace: '"Unit: " + (tg.title || tg.unit)',
+    mustFail: ["review page: every text a person or agent typed renders as text"],
+  },
+  {
+    name: "escape-triage-reason",
+    file: "ui/review.html",
+    find: "esc(tr.reason)",
+    replace: "tr.reason",
+    mustFail: ["review page: every text a person or agent typed renders as text"],
+  },
+  {
+    name: "escape-draft",
+    file: "ui/review.html",
+    find: '+ esc(text) + "</textarea>"',
+    replace: '+ text + "</textarea>"',
+    mustFail: ["review page: every text a person or agent typed renders as text"],
   },
   {
     name: "followups-are-the-open-window",
@@ -608,8 +756,8 @@ const MUTANTS = [
   {
     name: "review-page-guide-before-detail",
     file: "ui/review.html",
-    find: '? guide() + "<details class=\\"detail\\" id=\\"detail\\"" + (detailOpen ? " open" : "") + "><summary>Full detail',
-    replace: '? "<details class=\\"detail\\" id=\\"detail\\"" + (detailOpen ? " open" : "") + "></details>" + guide() + "<details class=\\"detail\\"" + (detailOpen ? " open" : "") + "><summary>Full detail',
+    find: '? lead + fb + "<details class=\\"detail\\" id=\\"detail\\"" + (detailOpen ? " open" : "") + "><summary>Full detail',
+    replace: '? "<details class=\\"detail\\" id=\\"detail\\"" + (detailOpen ? " open" : "") + "></details>" + lead + fb + "<details class=\\"detail\\"" + (detailOpen ? " open" : "") + "><summary>Full detail',
     mustFail: ["review page: leads with the guide's units, in order, before a collapsed Full detail"],
   },
   {
@@ -629,8 +777,8 @@ const MUTANTS = [
   {
     name: "review-page-no-guide-note",
     file: "ui/review.html",
-    find: ': "<div class=\\"nudge\\" id=\\"noguide\\">No review guide has been written for this milestone yet: the per-card detail follows.</div>" + detail);',
-    replace: ": detail);",
+    find: ': "<div class=\\"nudge\\" id=\\"noguide\\">No review guide has been written for this milestone yet: the per-card detail follows.</div>" + detail + fb);',
+    replace: ": detail + fb);",
     mustFail: ["review page: with no guide yet, the detail is the page, with a note saying so"],
   },
   // ---- the replay button (AS-237)

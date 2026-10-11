@@ -32,7 +32,8 @@ awaiting the release) and the archive.
 - **The entity:** `name`, `status` (`open` → `in_review` → `released`),
   `created` / `released_at`, `tag`, `release_url`, `review_sha` (the main
   commit the review checklist applies to), `sweep` (the milestone sweep's
-  summary and link), and `submissions`. `released` is reached only by
+  summary and link), and `submissions` (the rounds submitted before feedback
+  batches, each listing the cards it auto-filed). `released` is reached only by
   `close_milestone`, which moves every one of its merged cards to done in the
   same write, is refused while any of its cards is unfinished, and is final.
 - **Move rules**, for every writer: a card enters `merged` only through
@@ -56,8 +57,11 @@ awaiting the release) and the archive.
   `human_testing` (the PR's steps, one per line), `sweep` (`done-on-card` /
   `deferred-to-milestone` / `none`, plus a line), `gaps`, and — never
   patchable — `rulings` (dated user decisions with their numbers, appended by
-  `record_ruling`), `merge_sha` / `merged_at` (set by `mark_merged`) and, on a
-  feedback card, `source`. A released milestone takes no new cards.
+  `record_ruling`), `merge_sha` / `merged_at` (set by `mark_merged`),
+  `from_feedback` (the review comments the card was filed for or merged with —
+  `[{batch, comment, milestone, outcome}]`, written only by `triage_feedback`)
+  and, on a card auto-filed before batches, `source`. A released milestone
+  takes no new cards.
 - **The review page** is assembled by the daemon (`get_milestone` is the same
   payload) from those fields alone: *What changed* (finished cards by area),
   *What to check* (every step of every finished card's `human_testing`, as one
@@ -104,16 +108,34 @@ awaiting the release) and the archive.
 - **Ticks and comments** persist, each item under its own version (a comment
   changed in another window is shown, never overwritten). They are not board
   events — nothing acts on them, and the orchestrator's `wait` would otherwise
-  wake for every box — but open pages refresh on them. **Submitting** files each
-  comment as a backlog card on the same milestone at its source's iteration + 1
-  (source = the card, or the card owning the checklist step; the milestone's
-  latest iteration for a comment on the whole), linked back (`source`, the
-  source PR as a reference link, an activity line on the source card), clears
-  the comments, and records one `review_submitted` event naming the new cards —
-  none, when there was no feedback. A submission names the version of every
-  comment it submits, so one changed meanwhile refuses it.
+  wake for every box — but open pages refresh on them. A comment can be left on
+  a guide unit (`guide:<unit>`), a guide check (`guide:<unit>:<check>`, the key
+  its tick uses), a card (`card:<id>`), a checklist step (`check:<card>:<hash>`)
+  or the milestone as a whole (`milestone`). With a guide, the whole-milestone
+  comment and **Submit** sit right below it, outside the collapsed detail.
+- **Submitting files no card.** It saves every comment as one **feedback
+  batch** on the milestone — `{id: "FB-<n>", milestone, t, by, comments: [{id:
+  "c1", key, target, text, triage}]}`, in the `review_batches` table with its
+  own `version` — clears the comments, and records one `review_submitted` event
+  `{milestone, batch, comments: <count>}`. A comment's `target` is what it was
+  written on, as it read then: `{kind: milestone}`, `{kind: card, card,
+  title}`, `{kind: step, card, text}`, `{kind: guide_unit, unit, title}` or
+  `{kind: guide_check, unit, check, title, text}` (a snapshot is null when its
+  item had already left the page). A batch with no comments is the approval. A
+  submission names the version of every comment it submits, so one changed
+  meanwhile refuses it.
+- **Triage is the orchestrator's.** `list_feedback_batches(milestone?,
+  pending?)` lists batches (`pending` = comments not yet triaged);
+  `get_feedback_batch(id)` reads one whole; `triage_feedback(id, triage: [{comment,
+  outcome, card?, reason?}], expected_version, actor)` records each comment as
+  `filed` (as `card`), `merged_into` (`card`) or `no_action` (with a `reason`),
+  under the batch's version, and in the same write links each named card back
+  (`from_feedback`, plus an activity line) — re-triaging a comment moves its
+  link. One `feedback_triaged` event. The review page lists every past batch
+  with each comment's outcome, or *pending* until one is recorded; rounds
+  submitted before batches still show the cards they auto-filed.
 - **Events** added: `ruling`, `merged`, `cancelled`, `milestone_created`, `milestone_updated`,
-  `milestone_sweep`, `milestone_guide`, `milestone_closed`, `review_submitted`, `migrated`. Every
+  `milestone_sweep`, `milestone_guide`, `milestone_closed`, `review_submitted`, `feedback_triaged`, `migrated`. Every
   line keeps the `{cursor, t, actor, kind, card, data}` shape; a milestone's
   name is in `data.milestone`.
 
@@ -180,8 +202,9 @@ node dist/cli.js migrate                            # schema 1 -> 2, daemon stop
 ```
 
 `export` writes `{schema: 2, nextId, cards, milestones}` (each milestone with
-its ticks and comments); on a database not yet migrated it writes the
-`{schema: 1, nextId, cards}` it always did. `import` takes either.
+its ticks, comments and feedback `batches`); on a database not yet migrated it
+writes the `{schema: 1, nextId, cards}` it always did. `import` takes either,
+and a schema 2 export from before batches (no `batches`) too.
 
 **Schema.** The database records its layout in `meta.schema`: 1 is the AS-153
 board, with a `human_review` column; 2 adds milestones and replaces that column
@@ -195,6 +218,12 @@ one `migrated` event and sets the schema. Nothing else changes: the board id
 and every event cursor survive, so a running `wait` just reconnects. Restoring
 the backup file (with the previous build) is the rollback. Importing a schema 1
 state applies the same `human_review` → `merged` move.
+
+The feedback-batch table is additive and needs no migration: the daemon creates
+it (`CREATE TABLE IF NOT EXISTS`) when it opens a schema 2 database, and leaves
+every existing row — the auto-filed cards and their `source`, a milestone's
+`submissions` — as it was. An older build opening the database ignores the
+table.
 
 Import migrates artifact-era cards to the current model: each gains `pr` (the
 card's own PR, derived from its hand-off record — never from `links`, which
@@ -215,7 +244,8 @@ mutant names must pass there, or no kill is counted. The copies live under
 ```bash
 npm test                 # the suite: concurrency, rules, round trip, daemon, wake-up, UI drawer (jsdom),
                          # milestones, the review page and its guide, the replay button (an injected
-                         # spawn or a stub script — never the game), the schema 1 -> 2 migration
+                         # spawn or a stub script — never the game), feedback batches and triage,
+                         # the review page's escaping, the schema 1 -> 2 migration
 npm run test:mutation    # removes each guard from dist/ and proves the suite fails
 ```
 
