@@ -67,6 +67,23 @@ awaiting the release) and the archive.
   *Balance* (the milestone sweep; which cards deferred to it), *Known gaps and
   follow-ups* (stated gaps; the cards filed while it was open, by id range),
   and *Feedback*.
+- **The review guide** leads the review page, with the sections above folded
+  under a collapsed *Full detail* (a milestone with no guide shows them as the
+  page, saying so). The orchestrator writes it with
+  `set_review_guide(name, guide, expected_version, actor)`, which replaces the
+  whole guide under the milestone's version: `guide = {units: [{id, title,
+  summary, checks: [{id, text, replay?}] (1-3), cards: [ids on this milestone],
+  changed_since?}]}`. Unit and check ids are stable (`[A-Za-z0-9._-]`, ≤32);
+  `replay` is the game's headless/replay match config as a JSON object naming
+  both teams. It is stored on the milestone document as `review_guide`
+  (`{units, updated, by}`) — no schema change — and `get_milestone` returns it
+  once, as `guide`, with the units exactly as stored and the tick state beside
+  them (`ticks`, keyed `guide:<unit>:<check>`), so `guide.units` can be passed
+  straight back. A check's tick is a review item under that key and **carries
+  over** across rewrites, except a tick made before its unit's `changed_since`
+  (a board time no later than the write) and a tick on a check the new guide
+  drops: the write clears both, each under its own version, so a check that is
+  new or comes back starts unticked. Refused on a released milestone.
 - **Ticks and comments** persist, each item under its own version (a comment
   changed in another window is shown, never overwritten). They are not board
   events — nothing acts on them, and the orchestrator's `wait` would otherwise
@@ -79,7 +96,7 @@ awaiting the release) and the archive.
   none, when there was no feedback. A submission names the version of every
   comment it submits, so one changed meanwhile refuses it.
 - **Events** added: `ruling`, `merged`, `cancelled`, `milestone_created`, `milestone_updated`,
-  `milestone_sweep`, `milestone_closed`, `review_submitted`, `migrated`. Every
+  `milestone_sweep`, `milestone_guide`, `milestone_closed`, `review_submitted`, `migrated`. Every
   line keeps the `{cursor, t, actor, kind, card, data}` shape; a milestone's
   name is in `data.milestone`.
 
@@ -179,7 +196,7 @@ mutant names must pass there, or no kill is counted. The copies live under
 
 ```bash
 npm test                 # the suite: concurrency, rules, round trip, daemon, wake-up, UI drawer (jsdom),
-                         # milestones, the review page, the schema 1 -> 2 migration
+                         # milestones, the review page and its guide, the schema 1 -> 2 migration
 npm run test:mutation    # removes each guard from dist/ and proves the suite fails
 ```
 

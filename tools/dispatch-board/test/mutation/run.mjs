@@ -30,7 +30,7 @@ const ENV = {
   ...(realBoardPage() ? { DISPATCH_BOARD_FIXTURE: realBoardPage() } : {}),
   ...(realBoardExport() ? { DISPATCH_BOARD_EXPORT_FIXTURE: realBoardExport() } : {}),
 };
-const SUITES = ["board", "race", "daemon", "roundtrip", "ui", "prwork", "milestone", "migration", "review"];
+const SUITES = ["board", "race", "daemon", "roundtrip", "ui", "prwork", "milestone", "migration", "review", "guide"];
 
 /** A copy of the package's dist/ui/test under .mutants/<name>/, optionally with one edit applied. */
 function copyTo(name) {
@@ -517,6 +517,121 @@ const MUTANTS = [
     find: '<a class=\\"btn\\" id=\\"boardlink\\" href=\\"/\\">',
     replace: '<a class=\\"btn\\" id=\\"boardlink\\" href=\\"/?m=" + encodeURIComponent(NAME) + "\\">',
     mustFail: ["review page: links back to the whole board"],
+  },
+  // ---- the review guide (AS-236)
+  {
+    name: "guide-version-guard",
+    file: "dist/board.js",
+    find: 'const { m, doc } = this.loadMilestone(name, expectedVersion);\n            if (doc.status === "released") {\n                throw new BoardError("invalid", `milestone ${name} is released; its review is closed`',
+    replace: 'const { m, doc } = this.loadMilestone(name, this.milestoneRow(name).version);\n            if (doc.status === "released") {\n                throw new BoardError("invalid", `milestone ${name} is released; its review is closed`',
+    mustFail: [
+      "guide: a stale version is refused with the milestone as it is now",
+      "MCP: set_review_guide round-trips through get_milestone; a stale version is a tool error",
+    ],
+  },
+  {
+    name: "guide-released-refused",
+    file: "dist/board.js",
+    find: 'if (doc.status === "released") {\n                throw new BoardError("invalid", `milestone ${name} is released; its review is closed`',
+    replace: 'if (false) {\n                throw new BoardError("invalid", `milestone ${name} is released; its review is closed`',
+    mustFail: ["guide: refused on a released milestone"],
+  },
+  {
+    name: "guide-changed-unit-resets-ticks",
+    file: "dist/board.js",
+    find: "if (since === undefined || (since !== null && it.checked_at < since)) {",
+    replace: "if (since === undefined) {",
+    mustFail: ["guide: ticks persist across an update that does not mark the unit changed, and reset when it does"],
+  },
+  {
+    name: "guide-unchanged-unit-keeps-ticks",
+    file: "dist/board.js",
+    find: "if (since === undefined || (since !== null && it.checked_at < since)) {",
+    replace: "if (true) {",
+    mustFail: [
+      "guide: ticks persist across an update that does not mark the unit changed, and reset when it does",
+      "guide: a new check starts unticked",
+    ],
+  },
+  {
+    name: "guide-dropped-check-clears-tick",
+    file: "dist/board.js",
+    find: "if (since === undefined || (since !== null && it.checked_at < since)) {",
+    replace: "if (since !== undefined && since !== null && it.checked_at < since) {",
+    mustFail: ["guide: a new check starts unticked, and a dropped check's tick does not come back with it"],
+  },
+  {
+    name: "guide-checks-are-tickable",
+    file: "dist/board.js",
+    find: "check.set(guideCheckKey(u.id, c.id), { text: c.text });",
+    replace: "void 0;",
+    mustFail: [
+      "guide: ticks persist across an update that does not mark the unit changed, and reset when it does",
+      "review page: leads with the guide's units, in order, before a collapsed Full detail",
+    ],
+  },
+  {
+    name: "guide-returned-once",
+    file: "dist/board.js",
+    find: "const { review_guide: _stored, ...milestone } = m;",
+    replace: "const milestone = m;",
+    mustFail: ["guide: set_review_guide stores the units as given, and get_milestone returns them once"],
+  },
+  {
+    name: "guide-cards-on-milestone",
+    file: "dist/board.js",
+    find: 'if (typeof c !== "string" || !cardsOn.has(c))',
+    replace: 'if (typeof c !== "string")',
+    mustFail: ["guide: malformed units are refused"],
+  },
+  {
+    name: "guide-at-most-three-checks",
+    file: "dist/board.js",
+    find: "o.checks.length > GUIDE_MAX_CHECKS",
+    replace: "false",
+    mustFail: ["guide: malformed units are refused"],
+  },
+  {
+    name: "guide-changed-since-not-future",
+    file: "dist/board.js",
+    find: "if (o.changed_since > t)",
+    replace: "if (false)",
+    mustFail: ["guide: malformed units are refused"],
+  },
+  {
+    name: "guide-replay-names-both-teams",
+    file: "dist/board.js",
+    find: 'for (const team of ["team1", "team2"]) {',
+    replace: "for (const team of []) {",
+    mustFail: ["guide: malformed units are refused"],
+  },
+  {
+    name: "review-page-guide-before-detail",
+    file: "ui/review.html",
+    find: '? guide() + "<details class=\\"detail\\" id=\\"detail\\"" + (detailOpen ? " open" : "") + "><summary>Full detail',
+    replace: '? "<details class=\\"detail\\" id=\\"detail\\"" + (detailOpen ? " open" : "") + "></details>" + guide() + "<details class=\\"detail\\"" + (detailOpen ? " open" : "") + "><summary>Full detail',
+    mustFail: ["review page: leads with the guide's units, in order, before a collapsed Full detail"],
+  },
+  {
+    name: "review-page-detail-starts-collapsed",
+    file: "ui/review.html",
+    find: '(detailOpen ? " open" : "")',
+    replace: '" open"',
+    mustFail: ["review page: leads with the guide's units, in order, before a collapsed Full detail"],
+  },
+  {
+    name: "review-page-detail-stays-open",
+    file: "ui/review.html",
+    find: "if(det) det.ontoggle = function(){ detailOpen = det.open; };",
+    replace: "",
+    mustFail: ["review page: leads with the guide's units, in order, before a collapsed Full detail"],
+  },
+  {
+    name: "review-page-no-guide-note",
+    file: "ui/review.html",
+    find: ': "<div class=\\"nudge\\" id=\\"noguide\\">No review guide has been written for this milestone yet: the per-card detail follows.</div>" + detail);',
+    replace: ": detail);",
+    mustFail: ["review page: with no guide yet, the detail is the page, with a note saying so"],
   },
 ];
 

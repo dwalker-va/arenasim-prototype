@@ -110,10 +110,10 @@ Stored as four tables:
 |---|---|
 | `cards` | one row per card: the document above minus `activity`, its `version`, and `column`/`role` as indexed generated columns. Every write bumps `version` by one. |
 | `activity` | one row per activity entry, **append-only** (triggers refuse UPDATE and DELETE). |
-| `events` | one row per write — `cursor` (monotonic), `t`, `actor`, `kind` (`created`, `moved`, `edited`, `answered`, `claimed`, `claim_released`, `claim_finished`, `activity`, `body_appended`, `deleted`, `ruling`, `merged`, `cancelled`, `milestone_created`, `milestone_updated`, `milestone_sweep`, `milestone_closed`, `review_submitted`, `migrated`), `card`, `data` (a milestone's name in `data.milestone`). The wake-up feed. |
+| `events` | one row per write — `cursor` (monotonic), `t`, `actor`, `kind` (`created`, `moved`, `edited`, `answered`, `claimed`, `claim_released`, `claim_finished`, `activity`, `body_appended`, `deleted`, `ruling`, `merged`, `cancelled`, `milestone_created`, `milestone_updated`, `milestone_sweep`, `milestone_guide`, `milestone_closed`, `review_submitted`, `migrated`), `card`, `data` (a milestone's name in `data.milestone`). The wake-up feed. |
 | `meta` | `next_id` and the id prefix — id allocation is the daemon's, so no caller keeps `nextId` — the board id, and `schema` (2; the daemon refuses any other until `migrate` has run). |
-| `milestones` | one row per milestone: `name`, `status` (`open`, `in_review`, `released`), `created`, `released_at`, `tag`, `release_url`, `review_sha`, `sweep`, `submissions`, `first_id`/`end_id` (the card ids issued while it was open), and its own `version`. |
-| `review_items` | one row per review-page checklist tick or feedback comment, keyed by milestone and item, each with its own `version`. |
+| `milestones` | one row per milestone: `name`, `status` (`open`, `in_review`, `released`), `created`, `released_at`, `tag`, `release_url`, `review_sha`, `sweep`, `submissions`, `first_id`/`end_id` (the card ids issued while it was open), `review_guide` (the review units `set_review_guide` wrote; part of the milestone document, so no schema change), and its own `version`. |
+| `review_items` | one row per review-page tick (a checklist step, or a guide check keyed `guide:<unit>:<check>`) or feedback comment, keyed by milestone and item, each with its own `version`. |
 
 `agent.name` is new: `claim_card` records the spawned agent's name there, so
 the live-claim audit joins claims to live agents mechanically.
@@ -246,7 +246,22 @@ core-combat card to run serially.
   controls, pinned-gate re-records, small seeded spot checks) still happen per
   card. The milestone sweep's result goes on the milestone
   (`set_milestone_sweep`) and may itself produce feedback cards.
-- **The review page** (`/milestones/<name>`, the same payload as
+- **The review guide leads the review page.** The user reviews the milestone,
+  not its cards, and many cards often point at one theme. So the orchestrator
+  writes a **review guide** from the milestone's merged cards
+  (`set_review_guide`): an ordered list of *review units*, each a theme
+  ("Druid in a root", "Flare readability") with a stable `id`, a `title`, a
+  one-paragraph `summary` (what changed and why it matters), 1-3 `checks` (a
+  stable `id`, a short instruction, and optionally a `replay` config — the
+  game's headless/replay match config as structured JSON) and the `cards` it
+  covers. The page shows the units first, one tick per check, and folds
+  everything below into a collapsed *Full detail*. A check's tick is keyed by
+  its unit and check ids, so it **carries over** when the orchestrator rewrites
+  the guide for the next round — unless the unit is marked changed
+  (`changed_since`: a board time, usually the `merged_at` of the feedback card
+  that changed it; ticks made before it are cleared) or the check is new. A
+  milestone with no guide shows the detail as the page, saying so.
+- **The detail** (the rest of the review page; `/milestones/<name>`, the same payload as
   `get_milestone`) builds itself from each card's structured fields, so the
   orchestrator never writes it by hand: *What changed* (each finished card's
   `summary`, grouped by `area`, with its card and PR), *What to check* (every
@@ -607,15 +622,27 @@ milestone's own `version`; `get_milestone` / `list_milestones` return it).
 3. **Sweep.** Once every card is merged, run the milestone sweep if any card
    deferred to it (`balance.deferred` in `get_milestone`) and record it with
    `set_milestone_sweep(summary, link: <the committed doc or CSV>)`.
-4. **Hand it to the user.** `update_milestone(status: "in_review", review_sha:
+4. **Write the review guide.** Read `get_milestone` and group its merged cards
+   into themed review units — one per thing the user would judge in one look,
+   however many cards it took — and write them with
+   `set_review_guide(name, guide: {units}, expected_version)`. Each unit's
+   checks say what to watch and what wrong looks like, drawn from the cards'
+   `human_testing`; give a check a `replay` config when a seeded headless match
+   shows it. A card with nothing to check still belongs to the unit its change
+   is part of.
+5. **Hand it to the user.** `update_milestone(status: "in_review", review_sha:
    <origin/main HEAD>)` — the build the checklist applies to — and give the user
    the review page, `http://127.0.0.1:7453/milestones/<name>`. Do not restate
    its contents: the page is the review.
-5. **Iterate.** Each submission with feedback files the next iteration's cards
+6. **Iterate.** Each submission with feedback files the next iteration's cards
    (step 7 above); they go through the same pipeline and land in `merged`, and
-   the review page shows them. Repeat 3-5 on the new work until a submission
-   comes back empty, or the user says the milestone is done.
-6. **Close and release.** `close_milestone(name, expected_version)` moves every
+   the review page shows them. Before handing the page back, rewrite the guide
+   (step 4) from `guide.units` as `get_milestone` returns them: keep every unit
+   and check id that still applies, so its tick carries over; set a unit's
+   `changed_since` to the `merged_at` of the newest card that changed it, so its
+   ticks reset; give a new check a new id. Repeat 3-6 on the new work until a
+   submission comes back empty, or the user says the milestone is done.
+7. **Close and release.** `close_milestone(name, expected_version)` moves every
    merged card to `done` in one write (refused while any card on the milestone is
    unfinished — finish it, or move it to the next milestone) and returns the
    cards for the release bundle; spawn the Release Manager with them (Release

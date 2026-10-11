@@ -16,7 +16,7 @@ test("MCP: tools are served and list_cards returns summaries only", async (t) =>
   assert.deepEqual(names, [
     "answer_question", "append_activity", "append_to_body", "cancel_card", "claim_card", "close_milestone", "create_card", "create_milestone",
     "events_since", "finish_claim", "get_card", "get_milestone", "list_cards", "list_milestones", "mark_merged", "move_card",
-    "record_ruling", "release_claim", "set_milestone_sweep", "update_card", "update_milestone",
+    "record_ruling", "release_claim", "set_milestone_sweep", "set_review_guide", "update_card", "update_milestone",
   ]);
   const created = await call(client, "create_card", { title: "via mcp", body: "long spec", role: "engineer", actor: "pm-test" });
   assert.ok(created.ok);

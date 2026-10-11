@@ -367,6 +367,131 @@ function checkSweep(v: unknown): { status: string; summary?: string } | null {
   return v as { status: string; summary?: string };
 }
 
+// ---- the milestone review guide
+
+/** A review unit's or check's id: stable across guide updates, it keys the check's tick. */
+export const GUIDE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+export const GUIDE_MAX_UNITS = 40;
+export const GUIDE_MAX_CHECKS = 3;
+const GUIDE_MAX_TEXT = 4000;
+const GUIDE_MAX_REPLAY = 8000;
+/** A board timestamp, as `now()` writes it (UTC to the second, no zone). */
+const BOARD_TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$/;
+
+/** One check of a review unit: a short instruction, and optionally the headless/replay config to watch it in. */
+export interface GuideCheck {
+  id: string;
+  text: string;
+  /** The game's headless/replay match config (`{team1, team2, map?, random_seed?, …}`), stored as structured JSON. */
+  replay?: Record<string, unknown> | null;
+}
+/** One themed, reviewable unit of a milestone: several cards may point at it. */
+export interface GuideUnit {
+  id: string;
+  title: string;
+  summary: string;
+  checks: GuideCheck[];
+  cards: string[];
+  /** Set by the orchestrator when the unit's substance changed: ticks made before it no longer count. */
+  changed_since?: string | null;
+}
+export interface ReviewGuide {
+  units: GuideUnit[];
+  updated: string;
+  by: string;
+}
+
+/** The review item key a guide check's tick is stored under. */
+export function guideCheckKey(unit: string, check: string): string {
+  return `guide:${unit}:${check}`;
+}
+
+function checkFields(o: Record<string, unknown>, allowed: string[], what: string): void {
+  const extra = Object.keys(o).filter((k) => !allowed.includes(k));
+  if (extra.length) invalid(`${what} has unknown field(s): ${extra.join(", ")} (allowed: ${allowed.join(", ")})`);
+}
+
+function checkGuideId(v: unknown, what: string): string {
+  if (typeof v !== "string" || !GUIDE_ID.test(v)) invalid(`${what} must be 1-32 of [A-Za-z0-9._-], starting alphanumeric`);
+  return v as string;
+}
+
+function checkGuideText(v: unknown, what: string, singleLine: boolean): string {
+  const s = checkText(v, what, { nonEmpty: true, singleLine }) as string;
+  if (s.length > GUIDE_MAX_TEXT) invalid(`${what} is at most ${GUIDE_MAX_TEXT} characters`);
+  return s.trim();
+}
+
+/** A replay config: the game's headless config shape — a JSON object naming both teams. The game validates the rest when it runs it. */
+function checkReplay(v: unknown, what: string): Record<string, unknown> | null {
+  if (v === undefined || v === null) return null;
+  if (!isObj(v)) invalid(`${what} must be a JSON object (the game's headless config: {team1, team2, map?, …})`);
+  const r = v as Record<string, unknown>;
+  for (const team of ["team1", "team2"]) {
+    const t = r[team];
+    if (!Array.isArray(t) || !t.length || !t.every((x) => typeof x === "string" && x.trim())) invalid(`${what}.${team} must be a non-empty array of class names`);
+  }
+  if (JSON.stringify(r).length > GUIDE_MAX_REPLAY) invalid(`${what} is at most ${GUIDE_MAX_REPLAY} characters of JSON`);
+  return r;
+}
+
+/**
+ * Validate a review guide against the milestone it is written for. `cardsOn`
+ * is the ids of the milestone's cards: a unit may cover only those.
+ * `t` is the write's own time: a `changed_since` after it would void ticks
+ * the user makes after this write, so it is refused.
+ */
+export function checkGuide(v: unknown, cardsOn: Set<string>, t: string): GuideUnit[] {
+  if (!isObj(v)) invalid("guide must be an object: {units: [...]}");
+  checkFields(v as Record<string, unknown>, ["units"], "guide");
+  const units = (v as Record<string, unknown>).units;
+  if (!Array.isArray(units)) invalid("guide.units must be an array of review units");
+  if (units.length > GUIDE_MAX_UNITS) invalid(`a guide holds at most ${GUIDE_MAX_UNITS} units`);
+  const unitIds = new Set<string>();
+  return units.map((u, i) => {
+    const where = `guide.units[${i}]`;
+    if (!isObj(u)) invalid(`${where} must be an object`);
+    const o = u as Record<string, unknown>;
+    checkFields(o, ["id", "title", "summary", "checks", "cards", "changed_since"], where);
+    const id = checkGuideId(o.id, `${where}.id`);
+    if (unitIds.has(id)) invalid(`duplicate unit id ${id}`);
+    unitIds.add(id);
+    const title = checkGuideText(o.title, `${where}.title`, true);
+    const summary = checkGuideText(o.summary, `${where}.summary`, false);
+    if (!Array.isArray(o.checks) || o.checks.length < 1 || o.checks.length > GUIDE_MAX_CHECKS) {
+      invalid(`${where}.checks must hold 1-${GUIDE_MAX_CHECKS} checks`);
+    }
+    const checkIds = new Set<string>();
+    const checks = (o.checks as unknown[]).map((c, j) => {
+      const cw = `${where}.checks[${j}]`;
+      if (!isObj(c)) invalid(`${cw} must be an object: {id, text, replay?}`);
+      const co = c as Record<string, unknown>;
+      checkFields(co, ["id", "text", "replay"], cw);
+      const cid = checkGuideId(co.id, `${cw}.id`);
+      if (checkIds.has(cid)) invalid(`duplicate check id ${cid} in unit ${id}`);
+      checkIds.add(cid);
+      const out: GuideCheck = { id: cid, text: checkGuideText(co.text, `${cw}.text`, false) };
+      const replay = checkReplay(co.replay, `${cw}.replay`);
+      if (replay) out.replay = replay;
+      return out;
+    });
+    if (!Array.isArray(o.cards) || !o.cards.length) invalid(`${where}.cards must name at least one card the unit covers`);
+    const cards = [...new Set(o.cards as unknown[])].map((c) => {
+      if (typeof c !== "string" || !cardsOn.has(c)) invalid(`${where}.cards: ${String(c)} is not a card on this milestone`);
+      return c as string;
+    });
+    const unit: GuideUnit = { id, title, summary, checks, cards };
+    if (o.changed_since !== undefined && o.changed_since !== null) {
+      if (typeof o.changed_since !== "string" || !BOARD_TIME.test(o.changed_since)) {
+        invalid(`${where}.changed_since must be a board timestamp (YYYY-MM-DDTHH:MM:SS, UTC — e.g. a card's merged_at) or null`);
+      }
+      if ((o.changed_since as string) > t) invalid(`${where}.changed_since ${String(o.changed_since)} is in the future (now ${t})`);
+      unit.changed_since = o.changed_since as string;
+    }
+    return unit;
+  });
+}
+
 /** Validate a patch; returns it with `pr` normalised to {number, url}. */
 function checkPatch(patch: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...patch };
@@ -1545,6 +1670,44 @@ export class Board extends EventEmitter {
   }
 
   /**
+   * Write the milestone's review guide (the orchestrator's, from its merged
+   * cards): a list of themed review units, each with 1-3 checks. Replaces the
+   * whole guide. A check's tick is keyed by its unit and check ids, so it
+   * carries over to the new guide — except a tick made before its unit's
+   * `changed_since`, and a tick on a check this guide drops: both are cleared
+   * here, so a check that is new, or that comes back, starts unticked.
+   * Clearing goes through each tick's own version (never a delete), so a page
+   * still holding the old version is refused rather than writing over it.
+   */
+  setReviewGuide(name: string, guide: unknown, expectedVersion: number, meta: WriteMeta): Milestone {
+    const actor = checkActor(meta.actor);
+    checkVersion(expectedVersion);
+    return this.write(() => {
+      const { m, doc } = this.loadMilestone(name, expectedVersion);
+      if (doc.status === "released") {
+        throw new BoardError("invalid", `milestone ${name} is released; its review is closed`, undefined, this.milestoneOf(m));
+      }
+      const t = now();
+      const units = checkGuide(guide, new Set(this.milestoneCardRows(name).map((r) => r.id)), t);
+      const live = new Map<string, string | null>();
+      for (const u of units) for (const c of u.checks) live.set(guideCheckKey(u.id, c.id), u.changed_since ?? null);
+      const cleared: string[] = [];
+      for (const it of this.reviewItems(name).values()) {
+        if (!it.key.startsWith("guide:") || !it.checked_at) continue;
+        const since = live.get(it.key);
+        if (since === undefined || (since !== null && it.checked_at < since)) {
+          this.writeReviewItem(name, it.key, it.version, { checked_at: null, checked_by: null });
+          cleared.push(it.key);
+        }
+      }
+      doc.review_guide = { units, updated: t, by: meta.by ?? actor } satisfies ReviewGuide;
+      this.commitMilestone(name, m.version, doc);
+      this.recordEvent(actor, "milestone_guide", null, { milestone: name, units: units.length, ticks_cleared: cleared.length });
+      return this.milestoneOf(this.milestoneRow(name));
+    });
+  }
+
+  /**
    * Close a milestone the user has approved: every one of its merged cards
    * moves to done, and the milestone becomes released — one write. Refused
    * while any of its cards is unfinished (move those to another milestone, or
@@ -1604,6 +1767,10 @@ export class Board extends EventEmitter {
       .all(name) as CardRow[];
   }
 
+  private guideOf(doc: Record<string, unknown>): ReviewGuide | null {
+    return isObj(doc.review_guide) ? (doc.review_guide as unknown as ReviewGuide) : null;
+  }
+
   private reviewItems(name: string): Map<string, ReviewItem> {
     const rows = this.db
       .prepare("SELECT key, version, checked_at, checked_by, draft FROM review_items WHERE milestone = ? ORDER BY rowid")
@@ -1614,12 +1781,16 @@ export class Board extends EventEmitter {
   /**
    * What a review page may tick or comment on, right now: the milestone as a
    * whole, each of its cards, and each current checklist step of a finished
-   * card. A key outside this set is refused, so a tick cannot land on a step
-   * that has since been reworded away.
+   * card, and each check of the review guide (tickable only: comments on a
+   * unit or check are AS-238's). A key outside this set is refused, so a tick
+   * cannot land on a step that has since been reworded away.
    */
-  private reviewKeys(name: string): { comment: Set<string>; check: Map<string, { card: Record<string, unknown>; text: string }> } {
+  private reviewKeys(name: string): { comment: Set<string>; check: Map<string, { card?: Record<string, unknown>; text: string }> } {
     const comment = new Set(["milestone"]);
-    const check = new Map<string, { card: Record<string, unknown>; text: string }>();
+    const check = new Map<string, { card?: Record<string, unknown>; text: string }>();
+    for (const u of this.guideOf(JSON.parse(this.milestoneRow(name).doc) as Record<string, unknown>)?.units ?? []) {
+      for (const c of u.checks) check.set(guideCheckKey(u.id, c.id), { text: c.text });
+    }
     for (const r of this.milestoneCardRows(name)) {
       const c = JSON.parse(r.doc) as Record<string, unknown>;
       comment.add(`card:${r.id}`);
@@ -1834,9 +2005,33 @@ export class Board extends EventEmitter {
       .filter((c) => c.milestone !== name)
       .map((c) => pick(c, ["id", "title", "column", "role", "milestone", "created"]));
 
+    // The guide leads the page. It is returned once, here — not again inside
+    // `milestone` — with its units exactly as stored, so a writer can pass
+    // `guide.units` straight back to set_review_guide; tick state rides
+    // beside them in `ticks`, keyed as guideCheckKey(unit, check).
+    const { review_guide: _stored, ...milestone } = m;
+    const g = this.guideOf(m);
+    const guide = g
+      ? {
+          updated: g.updated,
+          by: g.by,
+          units: g.units,
+          ticks: Object.fromEntries(
+            g.units.flatMap((u) =>
+              u.checks.map((c) => {
+                const key = guideCheckKey(u.id, c.id);
+                const it = items.get(key);
+                return [key, { checked: !!it?.checked_at, checked_at: it?.checked_at ?? null, checked_by: it?.checked_by ?? null, version: it?.version ?? 0 }];
+              }),
+            ),
+          ),
+        }
+      : null;
+
     return {
-      milestone: m,
-      what_changed: byArea(finished).map((g) => ({ area: g.area, cards: g.cards.map(brief) })),
+      milestone,
+      guide,
+      what_changed:byArea(finished).map((g) => ({ area: g.area, cards: g.cards.map(brief) })),
       in_flight: live.filter((c) => !FINISHED_COLUMNS.includes(c.column as string)).map(brief),
       cancelled: cards
         .filter((c) => isObj(c.cancelled))
