@@ -303,7 +303,13 @@ def h2h(path, old=None):
                 t.add(side_result(r, side))
         return t
 
-    for seeds_name, seeds in (("seeds 1-100 (the 2026-08-06 seeds)", range(1, 101)), ("seeds 1-300", range(1, 301))):
+    max_seed = max(int(r["seed"]) for r in rows)
+    windows = [("seeds 1-100 (the 2026-08-06 seeds)", range(1, 101))]
+    if max_seed > 100:
+        # Only a run that goes past the 2026-08-06 seeds has a second window;
+        # on a 100-seed CSV it would print the same table twice.
+        windows.append((f"seeds 1-{max_seed}", range(1, max_seed + 1)))
+    for seeds_name, seeds in windows:
         print(f"### {seeds_name}")
         print()
         print("| Side given TeamPlan | vs | baseline (LL) | with TeamPlan | effect | z |")

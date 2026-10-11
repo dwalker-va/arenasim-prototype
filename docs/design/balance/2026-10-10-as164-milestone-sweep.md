@@ -65,9 +65,10 @@ Every figure in this doc recomputes from the committed files:
 | §7 AS-234 | `sweeps/2026-10-10-as164-as234-slices.py 2026-10-10-as164-as234-{before…,after…}.csv` |
 
 Rebuilding a binary is needed only to re-run a sweep, never to check a figure.
-The bisect binaries are each commit plus the AS-235 headless-executor patch
-(single-threaded `Fixed*` schedules), which changes speed and not output: the
-`1ade748` rebuild reproduces the 2026-08-06 table's aggregates exactly.
+The bisect binaries are each commit plus the AS-235 headless-executor fix,
+backported as `sweeps/2026-10-10-as164-as235-backport.patch` (single-threaded
+`Fixed*` schedules). It changes speed, not output: `147e95b` built without it
+reproduces the committed bisect cells 400 of 400 on who won.
 
 The mechanism rows come from `tests/milestone_mechanisms.rs`, an `#[ignore]`d
 observed-run reporter (per-frame mana, auras, deaths; per-match casts, trap
@@ -219,10 +220,14 @@ duels`; all 700 observed rows match the 1v1 CSV):
 | Paladin | 83% | 766 | 10.9 | 9.6 |
 | Priest | 0% | 65 | 2.1 | 17.1 |
 
-Against a Priest, a Shaman or another Druid it deals under 100 damage in 300 seconds and
-spends its mana keeping Lifebloom on itself. It never swings its staff. That is AI positioning, not a code bug: the
-healer movement AI never closes to the 2.5yd melee reach, so the staff's
-auto-attack never has a target in range.
+Against a Priest, a Shaman or another Druid it deals under 100 damage in 300
+seconds and casts Lifebloom on itself 17–25 times; since it takes little damage
+in those duels, most of those Lifeblooms are likely cast at or near full health
+(an inference from the damage figures, not a measured health reading). Against
+those three it never swings its staff; against a Paladin, which closes to melee,
+it does land staff Auto Attacks. That is AI
+positioning, not a code bug: the healer movement AI never closes to the 2.5yd
+melee reach itself, so the staff only swings when an opponent comes to it.
 
 2,940 of the 2v2's 3,302 draws are the 300s cap rather than a mutual kill.
 
@@ -335,7 +340,9 @@ Seeds 1–100 are the 2026-08-06 table's seeds, so those rows pair with
 `2026-08-06-team-solve-headtohead-n100.csv`.
 
 **What moved since 2026-08-06, on those seeds.** Rebuilding `1ade748` (that
-table's commit) reproduces its four effects exactly (+14 / −6 / +9 / +36). For
+table's commit) reproduces three of its four effects exactly (Hunter+Priest +14,
+Rogue+Priest −6, Warlock+Priest +36); Warrior+Priest comes out +9 against the
+original +10 (details below the bisect table). For
 Rogue+Priest against Hunter+Priest, the effect went from −6 to −46pt, and it
 splits about evenly between the two arms: the **Legacy** Rogue+Priest went from
 79 to 100 wins of 100 (+21), and the **TeamPlan** Rogue+Priest from 73 to 54
@@ -366,10 +373,18 @@ spread over the later merges. The 3v3 cell's Legacy arm also came back down
 after #161 (192 → 173 of 200), so its effect is −13pt on these 200 seeds and
 −9pt on all 300.
 
-The `1ade748` rebuild's aggregates match the committed 2026-08-06 CSV exactly;
-483 of its 600 rows are identical in winner and duration, and the 2 rows whose
-winner differs (both `pillar_TL`) offset each other
-(`2026-10-10-as164-teamplan-repro-1ade748.csv`).
+The `1ade748` rebuild against the committed 2026-08-06 CSV
+(`2026-10-10-as164-teamplan-repro-1ade748.csv`): 483 of 600 rows are identical
+in winner and duration. Two rows change winner, in different cells:
+`hunter_TL` seed 85 (a draw at 300.00s becomes a team-2 win at 62.68s, which
+leaves team 1's win count unchanged) and `pillar_TL` seed 22 (a team-1 win at
+68.75s becomes a team-2 win at 62.53s, which takes Warrior+Priest's TeamPlan arm
+from 87 to 86 wins and its effect from +10 to +9). The other 115 differing rows
+differ in duration only. **These 117 differences are unattributed.** The
+leading candidate is the hash-ordered loadout fold AS-58 removed (`1ade748`
+predates `3c9f63b`), which gave one binary different float stats from run to
+run; a same-binary control — the `1ade748` build run twice — would show whether
+it does.
 
 **Mechanism**, from observed runs of the Hunter cell at `ea63f4f`
 (`mechanisms.py h2h_hunter`, seeds 1–100):
@@ -415,8 +430,9 @@ Slices tested: 8 enemy classes plus the total; two enemy slices significant.
   of a Rejuvenation / Lifebloom magnitude raise against a governor relaxation,
   and pick the one that moves the Druid without moving its Priest matchup.
 - **Druid solo endgame** (backlog). 1v1 Druid v Druid and v Shaman draw 100/100
-  at the cap; the Druid keeps Lifebloom on itself at full health and never closes
-  to staff range. Not a competitive-play problem (§3), so no milestone pull.
+  at the cap; the Druid deals under 100 damage, keeps casting Lifebloom on itself
+  while taking little damage, and never closes to staff range. Not a
+  competitive-play problem (§3), so no milestone pull.
 - **Druid `corner_penalty` below its `flee`** (0.8). A breach of the stated
   movement rule; measure 8.0 on the Nagrand Druid panel alongside the alcove
   metrics.

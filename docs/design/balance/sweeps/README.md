@@ -165,7 +165,10 @@ committed copies carry the prefix:
   `../2026-10-10-as164-teamplan-headtohead-n300.csv`).
 - `bisect.jsonl` (its `hunter` and `wmp` cells, seeds 1-200) and `repro0806.jsonl`
   (the 2026-08-06 cells, seeds 1-100) — the TeamPlan bisect, run on each of
-  `1ade748 1323a25 b175653 e6c0e93 147e95b` built with the AS-235 executor patch.
+  `1ade748 1323a25 b175653 e6c0e93 147e95b` built with
+  `2026-10-10-as164-as235-backport.patch` applied (the AS-235 headless-executor
+  fix; it changes speed, not output — `147e95b` built without it reproduces the
+  committed bisect cells 400/400 on side_won).
   `2026-10-10-as164-bisect-table.py` folds those runs and the head-to-head CSV
   into `../2026-10-10-as164-teamplan-bisect.csv`; the `1ade748` reproduction is
   `../2026-10-10-as164-teamplan-repro-1ade748.csv`.
