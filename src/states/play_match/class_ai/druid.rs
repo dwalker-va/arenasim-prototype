@@ -115,7 +115,12 @@ pub const LIFEBLOOM_DECISION_SECS: f32 = 1.5;
 pub const LIFEBLOOM_BLOOM_HP: f32 = 0.75;
 /// The mana governor's reserve at the gates, as a fraction of the pool. It
 /// shrinks linearly to nothing by [`GOVERNOR_HORIZON_SECS`].
-pub const GOVERNOR_RESERVE_AT_GATES: f32 = 0.5;
+///
+/// A competitive match lasts about a minute, so most of them end with the
+/// reserve still near its starting size. Half the pool there kept the Druid
+/// idle beside a hurt teammate with the mana to heal in hand; 0.3 still holds
+/// a late-game reserve back through the opening minute.
+pub const GOVERNOR_RESERVE_AT_GATES: f32 = 0.3;
 /// When the governor stops holding mana back: the moment arena dampening
 /// reaches 50% (it starts at `DAMPENING_START_SECS` and ramps to 100% over
 /// `DAMPENING_RAMP_SECS`). Mana saved past it buys heals worth half as much.
@@ -1777,9 +1782,9 @@ mod tests {
 
     #[test]
     fn the_governor_reserve_shrinks_to_nothing_by_half_dampening() {
-        assert_eq!(mana_reserve(300.0, 0.0), 150.0);
+        assert!((mana_reserve(300.0, 0.0) - 90.0).abs() < 1e-3);
         let halfway = mana_reserve(300.0, GOVERNOR_HORIZON_SECS * 0.5);
-        assert!((halfway - 75.0).abs() < 1e-3, "{halfway}");
+        assert!((halfway - 45.0).abs() < 1e-3, "{halfway}");
         assert_eq!(mana_reserve(300.0, GOVERNOR_HORIZON_SECS), 0.0);
         assert_eq!(mana_reserve(300.0, GOVERNOR_HORIZON_SECS * 2.0), 0.0);
         assert_eq!(
@@ -2301,6 +2306,9 @@ mod reach_tests {
         e
     }
 
+    /// Seconds after the gates at which [`take`] runs its turn.
+    const TAKE_SECS: f32 = 20.0;
+
     /// One whole Druid turn after the gates (`DruidTurn::take`) at the kill
     /// target, with the medic walk walking to `medic_walk`.
     fn take(
@@ -2309,7 +2317,7 @@ mod reach_tests {
         kill: Entity,
         medic_walk: Option<Entity>,
     ) -> DecisionTrace {
-        turn(s, obstacles, 20.0, medic_walk, |t, c| {
+        turn(s, obstacles, TAKE_SECS, medic_walk, |t, c| {
             c.target = Some(kill);
             t.take(c, true)
         })
@@ -2353,10 +2361,13 @@ mod reach_tests {
 
     /// A Druid whose mana sits under the governor's reserve: every proactive
     /// cast (the focus heals above `DRUID_URGENT_HP`, the top-up, Moonfire) is
-    /// refused, so only a heal step 7 makes can land. Above the Innervate
-    /// threshold, so Innervate does not take the turn either.
+    /// refused, so only a heal step 7 makes can land. Innervate is on its
+    /// cooldown, so it does not take the turn either.
     fn under_the_reserve(c: &mut Combatant) {
-        c.current_mana = c.max_mana * 0.4;
+        // Ten mana over the reserve at [`take`]'s moment: less than any cast
+        // costs, so every proactive cast would dip into it.
+        c.current_mana = mana_reserve(c.max_mana, TAKE_SECS) + 10.0;
+        c.ability_cooldowns.insert(AbilityType::Innervate, 60.0);
     }
 
     /// The dying Mage carries the Druid's Rejuvenation and is attacked by an
@@ -2475,6 +2486,35 @@ mod reach_tests {
             outcome(&take(&mut s, &[], kill, None)),
             chose("Rejuvenation", mage),
             "just below it"
+        );
+    }
+
+    /// AS-247: a Druid with half its pool, twenty seconds into the fight,
+    /// heals the teammate an enemy is hurting rather than banking the mana.
+    /// The Mage at 70% is neither dying nor below `DRUID_URGENT_HP`, so the
+    /// Rejuvenation is proactive and answers to the governor; a reserve of
+    /// half the pool at the gates refused it, and the Druid stood idle.
+    #[test]
+    fn a_druid_with_mana_in_hand_heals_a_hurt_teammate() {
+        let (mut s, kill) = kill_scene(1.0, 0.7);
+        let mage = s.units[2];
+        mark_everyone(&mut s);
+        add_enemy(
+            &mut s,
+            Mage,
+            IN_SIGHT + Vec3::new(-10.0, 0.0, 0.0),
+            Some(mage),
+        );
+        s.prep = Some(|c| {
+            c.current_mana = c.max_mana * 0.5;
+            c.ability_cooldowns.insert(AbilityType::Innervate, 60.0);
+        });
+        let trace = take(&mut s, &[], kill, None);
+        assert_eq!(
+            outcome(&trace),
+            chose("Rejuvenation", mage),
+            "{}",
+            candidate(&trace, "Rejuvenation")
         );
     }
 
