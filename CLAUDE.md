@@ -1005,15 +1005,19 @@ the report. Detail in the sweep-tiers doc. `scripts/agg_sweep.py` does single-ar
 win-rate tables; `scripts/{hunter,mage,shaman}_2v2_matrix.sh` and `--matrix N`
 are the older per-cell-CSV wrappers (columns per `src/headless/matrix.rs:217`).
 
-**Size a sweep at 1-2.5 matches/sec.** Measured: 1.00/sec at `--jobs 6` under
-three-way load and 1.52/sec at `--jobs 16` under load, 2.05/sec at `--jobs 6`
-and 2.54/sec at `--jobs 8` on a quiet box. A match costs ~1.37 CPU-seconds,
-**62-67% of it kernel time that is present on a quiet box too**, and the
-batch runner reaches only 2-3 effective cores of 18 whatever `--jobs` says —
-so contention is worth at most roughly 2.5x, not the order of magnitude the
-raw `sys` time suggests. Read 2.5x as a CEILING: no pair here varied load
-alone, so prefer the effective-cores figure (+33%) where it has to carry
-weight — see "What a sweep actually costs" in the sweep-tiers doc. Size
+**Size a sweep at about 20 matches/sec per `--jobs` worker.** Measured on a
+2,700-match 2v2 BasicArena sweep at load ~26: 45/sec at `--jobs 2`, 87/sec at
+`--jobs 4` and 118/sec at `--jobs 6`. A match costs ~0.04 CPU-seconds, about
+2% of it kernel time. Halve that for a mix heavy in 3v3, PillaredArena or
+`TeamPlan` (~0.065 CPU-seconds a match), or on a box far past its core count
+(a 5,442-match mixed batch ran at 23/sec at `--jobs 4` at load 46). A
+directional sweep is about a minute, and an authority run is minutes, not
+hours. That rests on the headless runner putting EVERY schedule on the
+single-threaded executor (`force_single_threaded_executors`, guarded by
+`tests/headless_executor.rs`). A schedule left multi-threaded parks each worker
+on a condvar every tick and costs 30x or more with byte-identical output, so
+only the throughput shows it. See "What a sweep actually costs" in the
+sweep-tiers doc. Size
 `--jobs` off how many agents are sweeping RIGHT NOW rather than a number
 picked at launch; a conservative 6 chosen off `uptime` still lost once a
 third agent started. Contention costs wall clock

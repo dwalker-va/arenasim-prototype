@@ -245,76 +245,42 @@ cheap tier on its own.
 
 ## What a sweep actually costs
 
-The card was filed on the belief that this box does about **0.57 matches a
-second**, and that number drove its whole framing. It is low. But the first
-version of this section, written from one run, then over-corrected in the
-other direction, and the correction is worth keeping because it is the
-mistake `CLAUDE.md` names: **attributing a difference by elimination.**
+**A match costs about 0.04 CPU-seconds, almost all of it simulation.** Kernel
+time is about 2% of the total. Measured 2026-10-10 on one 2,700-match sweep
+(`gen_sweep.py --full 2 --exclude-double-healer --n 3`, BasicArena, `Legacy`)
+with the same binary at three `--jobs` values, back to back, at a load average
+of about 26 on 18 cores, timed with `/usr/bin/time -p`:
 
-Two runs of the same binary on the same machine, `/usr/bin/time -p`:
+| `--jobs` | wall | matches/sec | user/match | sys/match |
+|---|---|---|---|---|
+| 2 | 59.6s | 45 | 0.041s | 0.0009s |
+| 4 | 31.2s | 87 | 0.042s | 0.0007s |
+| 6 | 22.8s | 118 | 0.042s | 0.0007s |
 
-| run | matches | `--jobs` | load | wall | matches/sec | user/match | **sys/match** | effective cores |
-|---|---|---|---|---|---|---|---|---|
-| A | 1,750 (Rogue 2v2) | 16 | 17–70 | 1147.7s | 1.52 | 0.456s | **0.921s** | 2.10 |
-| B | 2,640 (this card's diagonal) | 6 | 6–8 | 1285.8s | 2.05 | 0.513s | **0.847s** | 2.79 |
+Throughput scales close to linearly with `--jobs`, at about **20 matches/sec
+per worker**. The three CSVs are byte-identical to each other.
 
-**The kernel time is not contention.** Run A spends two CPU-seconds in the
-kernel for every one simulating, and it is tempting — I did it — to read that
-as thrashing, because A ran at load 60 with 101 GB of 128 resident. Run B
-says otherwise: at load 6–8 with a third of the workers, the kernel cost per
-match is *the same* (0.85s against 0.92s). It is a property of the workload,
-present on a quiet box, and it is **62–67% of the total CPU a match costs**
-(66.9% in run A, 62.3% in run B, 64.1% pooled over the two).
+**The mix matters.** A 3v3 match, a PillaredArena match or a `TeamPlan` side
+costs more than a 2v2 BasicArena one. A 5,442-match batch spread over
+1v1/2v2/3v3, both maps and every profile assignment cost 0.065 CPU-seconds a
+match, and ran at 23 matches/sec at `--jobs 4` with the box at load 46.
 
-That kills the inference I drew from run A alone. "A match costs 0.46
-CPU-seconds of `user`, so 18 cores should do ~40/sec" ignores the 0.9s of
-`sys` that does not go away. **The real per-match cost is ~1.37 CPU-seconds**,
-stable across both runs, and the batch runner turns it into only **2–3
-effective cores out of 18** whichever `--jobs` it is given. That ceiling is
-unexplained and nobody has looked at it; it is the single biggest lever on
-sweep cost and it is not a scheduling problem.
+**So: size a sweep at 20 matches/sec per `--jobs` worker on a 2v2 BasicArena
+mix, and at about half that for a mix heavy in 3v3 or pillars, or on a box well
+past its core count.** The default directional sweep (2,330 matches) is about
+a minute at `--jobs 4`. A 25,000-match authority run is well under half an
+hour.
 
-**Contention is real, smaller than the card assumed, and not cleanly
-measured by either pair here.** A and B ran different sweeps, so their
-matches/sec are not comparable; the honest figure from that pair is
-effective cores, 2.10 to 2.79, about **+33%**. AS-99's pair fixes the sweep
-instead — same binary, same 520 configs — but moves `--jobs` along with the
-load:
-
-| | `--jobs` | wall clock | matches/sec |
-|---|---|---|---|
-| under three-way load | 6 | 518.2s | 1.00 |
-| quiet | 8 | 205.1s | 2.54 |
-
-**2.5x, with the two runs agreeing byte for byte — but that is a ceiling on
-contention, not a measurement of it.** Going 6 to 8 jobs on a quieter box can
-only add throughput, so some of 1.00 -> 2.54 is the jobs change rather than
-the load. The confound has a known direction, which is what keeps the number
-useful: **contention is worth AT MOST about 2.5x.** Charging the whole gap to
-load would be attributing a difference by elimination — the mistake this
-section opened by confessing to, committed in its own headline figure.
-
-So the two figures are partial views rather than a disagreement for the
-reader to settle. **+33%** is the effective-cores view: same box, confounded
-by different sweeps. **2.5x** is the throughput view: same sweep, confounded
-by different `--jobs`. The load effect sits at or below the higher of them,
-and **a one-variable pair — same sweep, same `--jobs`, load alone — has not
-been run.** Prefer +33% where a contention figure has to carry weight.
-
-Two further caveats on the AS-99 pair, because this doc asks the same of
-everyone else: a committed CSV does not carry timing, so unlike every other
-number here it is a reported observation rather than something a reader can
-recompute from the repo; and its two `--jobs` values are part of that same
-reported observation, so the confound above is not recoverable from the CSV
-either.
-
-**So: size a sweep at 1–2.5 matches/sec, not 0.57 and not 40.** Every figure
-above lands in that band or at its edge — 1.00 and 1.52 under load, 2.05 and
-2.54 quiet. **That band needs none of the causal argument above**: it is what
-sweeps were observed to run at, not a claim about why. Scheduling is worth
-somewhere between 1.3x and 2.5x, and it is free to claim — but a quiet box
-does not make authority scale cheap, it makes it at most about two and a half
-times less expensive than the card feared.
+**This rests on one property of the headless runner: every schedule it ticks
+runs on the single-threaded executor.** `force_single_threaded_executors` in
+`src/headless/runner.rs` sets it on every schedule in the app's own
+`Schedules`, and `tests/headless_executor.rs` fails the default `cargo test`
+if any schedule is left multi-threaded. A schedule on the multi-threaded
+executor hands each tick's systems to the one shared `ComputeTaskPool` and
+parks the worker on a condvar. The batch then spends most of its CPU in the
+kernel and runs 30x slower on a quiet box, and more under load, with
+byte-identical output. Since the output does not move, only the throughput
+shows it.
 
 ### Thrashing costs wall clock and nothing else
 
@@ -336,18 +302,11 @@ the one to make.
 
 **Key it off the number of agents sweeping right now, not off a number you
 chose at launch.** `uptime` is worth reading, but reading it once is not
-enough, and this is measured rather than supposed: AS-99 sized its jobs off
-`uptime` *before* starting (load 26–39), picked `--jobs 6` as a deliberately
-conservative division of 18 cores, and still ran at 1.00 matches/sec — the
-same sweep it later got 2.54 from on a quiet box at `--jobs 8`. A number
-chosen once goes stale the moment another agent starts, which is exactly what
-happened: three agents each independently reasonable and collectively
-thrashing.
-
-A load average well above the core count means a wall-clock estimate is
-wrong by a factor of two or three, in the direction you will not enjoy.
-Beyond that, `--jobs` is not the lever — see the effective-cores ceiling
-above.
+enough: a number chosen once goes stale the moment another agent starts. A
+load average well above the core count stretches a wall-clock estimate by a
+factor of two or more. With a match costing 0.04 CPU-seconds, the worst
+contention still delivers a directional sweep in minutes, so a modest
+`--jobs 4` is rarely the thing that makes a run late.
 
 ## The team-1 mirrored-slice question: settled
 

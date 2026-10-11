@@ -1021,32 +1021,24 @@ fn observe_frame(world: &World) -> FrameObservation {
     }
 }
 
-/// Shared implementation behind `run_headless_match_with` (no preload, no
-/// observer), `run_headless_match_prepared` (preloaded configs — batch
-/// runner), and `run_headless_match_observed` (per-frame observer — behavior
-/// probes). One loop, so no path can drift from the canonical one.
-fn run_match_impl(
-    config: HeadlessMatchConfig,
+/// Build the headless match [`App`] for `config`: minimal plugins, the fixed
+/// 1/60s clock, the game configs (preloaded or from disk), the
+/// [`HeadlessPlugin`], and a single-threaded executor on every schedule.
+///
+/// [`run_match_impl`] drives the result frame by frame; it is public so a test
+/// can inspect the app the runner actually ticks (`tests/headless_executor.rs`).
+pub fn build_headless_app(
+    config: &HeadlessMatchConfig,
     suppress_log: bool,
-    trace_config: Option<TraceConfig>,
     preloaded: Option<&PreloadedConfigs>,
-    mut observer: Option<&mut dyn FnMut(&FrameObservation)>,
-) -> Result<MatchResult, String> {
-    if !suppress_log {
-        println!("Starting headless match simulation...");
-        println!("  Team 1: {:?}", config.team1);
-        println!("  Team 2: {:?}", config.team2);
-        println!("  Map: {}", config.map);
-        println!("  Max duration: {:.0}s", config.max_duration_secs);
-    }
-
+) -> App {
     let mut app = App::new();
     app
         // Minimal plugins - no window, no rendering.
         // We don't use `ScheduleRunnerPlugin::run_loop` here because that path
         // calls `App::run()` which (in this Bevy version) replaces the app's
         // world with a default before returning, making post-run resource
-        // access impossible. The manual `update()` loop below preserves the
+        // access impossible. `run_match_impl`'s manual `update()` loop preserves the
         // world so we can pull `MatchResult` out at the end.
         .add_plugins(MinimalPlugins)
         // Force `Time` to advance by a fixed 1/60s per `update()` call.
@@ -1082,25 +1074,51 @@ fn run_match_impl(
         suppress_log,
     });
 
-    // Run each match with the single-threaded executor: systems execute inline
-    // on the calling thread instead of being dispatched to the shared global
-    // ComputeTaskPool. This is what lets the batch runner's match-level worker
-    // threads scale — otherwise every match funnels its system execution through
-    // the one task pool and cross-match parallelism collapses. Determinism is
-    // preserved (and arguably strengthened): execution order is fully fixed by
-    // the explicit combat-phase ordering.
-    {
-        use bevy::ecs::schedule::ExecutorKind;
-        let single = |s: &mut Schedule| {
-            s.set_executor_kind(ExecutorKind::SingleThreaded);
-        };
-        app.edit_schedule(First, single)
-            .edit_schedule(PreUpdate, single)
-            .edit_schedule(Update, single)
-            .edit_schedule(PostUpdate, single)
-            .edit_schedule(Last, single)
-            .edit_schedule(Startup, single);
+    force_single_threaded_executors(&mut app);
+    app
+}
+
+/// Run every schedule the app holds with the single-threaded executor.
+///
+/// Systems then execute inline on the calling thread instead of being
+/// dispatched to the shared global `ComputeTaskPool`, which is what lets the
+/// batch runner's match-level worker threads scale: a multi-threaded schedule
+/// funnels every match's systems through the one pool and parks the workers on
+/// a condvar, so most of a match's CPU time goes to the kernel. Execution order
+/// is fixed by the schedule's own topological order.
+///
+/// The set is read from the app's [`Schedules`] rather than listed, so a
+/// schedule a future plugin adds is covered without anyone remembering to name
+/// it. It must run after every plugin that adds a schedule; the runner adds
+/// none once the app is built.
+fn force_single_threaded_executors(app: &mut App) {
+    use bevy::ecs::schedule::{ExecutorKind, Schedules};
+    let mut schedules = app.world_mut().resource_mut::<Schedules>();
+    for (_, schedule) in schedules.iter_mut() {
+        schedule.set_executor_kind(ExecutorKind::SingleThreaded);
     }
+}
+
+/// Shared implementation behind `run_headless_match_with` (no preload, no
+/// observer), `run_headless_match_prepared` (preloaded configs — batch
+/// runner), and `run_headless_match_observed` (per-frame observer — behavior
+/// probes). One loop, so no path can drift from the canonical one.
+fn run_match_impl(
+    config: HeadlessMatchConfig,
+    suppress_log: bool,
+    trace_config: Option<TraceConfig>,
+    preloaded: Option<&PreloadedConfigs>,
+    mut observer: Option<&mut dyn FnMut(&FrameObservation)>,
+) -> Result<MatchResult, String> {
+    if !suppress_log {
+        println!("Starting headless match simulation...");
+        println!("  Team 1: {:?}", config.team1);
+        println!("  Team 2: {:?}", config.team2);
+        println!("  Map: {}", config.map);
+        println!("  Max duration: {:.0}s", config.max_duration_secs);
+    }
+
+    let mut app = build_headless_app(&config, suppress_log, preloaded);
 
     // Registration guard (debug builds / cargo test only): movement config
     // must be loaded in BOTH the headless runner (here) and the graphical
