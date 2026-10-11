@@ -1874,8 +1874,8 @@ mod tests {
     /// off this list by taking it out of the CATALOG: the attack-speed effect
     /// is now a rider on the chill, which is dispellable by its face. Note
     /// what did NOT change to achieve that — `is_magic_dispellable` still
-    /// refuses `AttackSpeedSlow`, so the five schoolless `[—]` rows below are
-    /// exactly as they were.
+    /// refuses `AttackSpeedSlow`, so the five schoolless `[—]` rows below (the
+    /// shout and the interrupt lockouts) are exactly as they were.
     #[test]
     fn the_immune_to_dispel_rung_is_pinned() {
         let mut rows: Vec<String> = catalog(&abilities(), &items())
@@ -1897,8 +1897,12 @@ mod tests {
                 "Boar Charge [Physical]",
                 "Cheap Shot [Physical]",
                 "Concussive Shot [Physical]",
-                "Cyclone [Magic]",
+                // Cyclone, the Frost Trap slow and the Web carry no
+                // dispellable class in TBC (user ruling, 2026-10-11): the
+                // first two have no dispel type, the Web is physical.
+                "Cyclone [—]",
                 "Demoralizing Shout [—]",
+                "Frost Trap [—]",
                 "Hammer of Justice [Magic]",
                 "Kick [—]",
                 "Kidney Shot [Physical]",
@@ -1906,6 +1910,7 @@ mod tests {
                 "Pummel [—]",
                 "Rend [Physical]",
                 "Spell Lock [—]",
+                "Web [Physical]",
                 "Wind Shear [—]",
             ]
         );
