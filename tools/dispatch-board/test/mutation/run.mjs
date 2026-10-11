@@ -689,6 +689,30 @@ const MUTANTS = [
     mustFail: ["replay endpoint: a second launch of the same check within 2s is ignored"],
   },
   {
+    name: "replay-no-shell",
+    file: "dist/replay.js",
+    find: "{ cwd, detached: true,",
+    replace: "{ cwd, shell: true, detached: true,",
+    mustFail: [
+      "replay launcher: the real detached spawn runs argv exactly",
+      "replay launcher: the real spawn of a process that outlives the window is launched",
+    ],
+  },
+  {
+    name: "json-content-type-guard",
+    file: "dist/server.js",
+    find: 'if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {',
+    replace: "if (false) {",
+    mustFail: ["replay endpoint: a cross-site request"],
+  },
+  {
+    name: "cross-origin-guard",
+    file: "dist/server.js",
+    find: "if (origin && !allowedHosts().some((h) => origin === `http://${h}`))",
+    replace: "if (false)",
+    mustFail: ["replay endpoint: a cross-site request"],
+  },
+  {
     name: "replay-retry-after-failure",
     file: "dist/replay.js",
     find: "else\n            this.last.delete(rk);\n        return result;",

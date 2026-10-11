@@ -48,8 +48,11 @@ function seedGuide(board) {
 }
 
 /** An executable stub file standing in for the game binary (never run by the fake spawn). */
+// A path a shell would split and expand: argv must reach the game verbatim, with no shell between.
+const SHELLY = "game dir;$(x) &";
+
 function stubBinary(dir, script = "#!/bin/sh\nexit 0\n") {
-  const p = join(dir, "bin", "arenasim");
+  const p = join(dir, SHELLY, "arenasim");
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, script);
   chmodSync(p, 0o755);
@@ -78,16 +81,20 @@ function fakeSpawn(behave = () => {}) {
 async function daemon(t, replay = {}) {
   const tmp = tempDir();
   const { Board } = await import("../dist/board.js");
-  const b = new Board(tmp.db);
+  // The board's data dir — where replay files go — carries shell metacharacters too.
+  const dataDir = join(tmp.dir, `data ${SHELLY}`);
+  mkdirSync(dataDir);
+  const dbPath = join(dataDir, "board.db");
+  const b = new Board(dbPath);
   seedGuide(b);
   b.close();
   const binary = replay.binary === undefined ? stubBinary(tmp.dir) : replay.binary;
-  const d = await startDaemon({ dbPath: tmp.db, port: 0, log: () => {}, replay: { earlyExitMs: 60, ...replay, binary } });
+  const d = await startDaemon({ dbPath, port: 0, log: () => {}, replay: { earlyExitMs: 60, ...replay, binary } });
   t.after(async () => {
     await d.close();
     tmp.cleanup();
   });
-  return { base: `http://127.0.0.1:${d.port}`, dir: tmp.dir, binary };
+  return { base: `http://127.0.0.1:${d.port}`, dir: dataDir, binary };
 }
 
 const launch = (base, body, name = "0.7") => post(base, `/api/milestones/${encodeURIComponent(name)}/replay`, body);
@@ -116,6 +123,21 @@ test("replay endpoint: an unknown milestone or check key is refused, and nothing
   assert.equal((await launch(base, { key: "guide:druid-root:no-loop" })).status, 422, "a check with no replay config");
   assert.equal((await launch(base, {})).status, 422, "no key");
   assert.equal(spawn.calls.length, 0);
+});
+
+test("replay endpoint: a cross-site request — foreign or null Origin, or a non-JSON body — is refused, and nothing is launched", async (t) => {
+  const spawn = fakeSpawn();
+  const { base } = await daemon(t, { spawn: spawn.fn });
+  const url = `${base}/api/milestones/0.7/replay`;
+  const body = JSON.stringify({ key: KEY });
+  const req = (headers) => fetch(url, { method: "POST", headers, body });
+  assert.equal((await req({ "content-type": "application/json", origin: "https://evil.example" })).status, 403);
+  assert.equal((await req({ "content-type": "application/json", origin: "null" })).status, 403);
+  assert.equal((await req({ "content-type": "text/plain" })).status, 415, "a form-postable content type");
+  assert.equal(spawn.calls.length, 0);
+  // The same request from our own origin, as JSON, does launch: the refusals above are the guards, not the key.
+  assert.equal((await req({ "content-type": "application/json", origin: base })).status, 200);
+  assert.equal(spawn.calls.length, 1);
 });
 
 test("replay endpoint: a body carrying its own config or command is refused; nothing is launched", async (t) => {
@@ -216,12 +238,14 @@ test("replay launcher: the real detached spawn runs argv exactly, and an early e
   t.after(tmp.cleanup);
   const out = join(tmp.dir, "argv.txt");
   const bin = stubBinary(tmp.dir, `#!/bin/sh\nprintf '%s\\n' "$0" "$@" > '${out}'\necho "Error loading replay config: boom" >&2\nexit 3\n`);
-  const l = new ReplayLauncher({ binary: bin, dataDir: tmp.dir, cwd: tmp.dir, earlyExitMs: 5000 });
+  const dataDir = join(tmp.dir, `data ${SHELLY}`);
+  const l = new ReplayLauncher({ binary: bin, dataDir, cwd: tmp.dir, earlyExitMs: 5000 });
   const r = await l.launch("0.7", KEY, REPLAY);
   assert.equal(r.status, "exited");
   assert.equal(r.message, "the game exited with code 3");
   assert.equal(r.stderr_tail, "Error loading replay config: boom");
   assert.deepEqual(readFileSync(out, "utf8").trimEnd().split("\n"), [bin, "--replay", r.file]);
+  assert.ok(bin.includes(SHELLY) && r.file.includes(SHELLY), "both paths carry the shell metacharacters");
 });
 
 test("replay launcher: the real spawn of a process that outlives the window is launched", async (t) => {
