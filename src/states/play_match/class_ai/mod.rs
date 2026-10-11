@@ -1136,8 +1136,8 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
     match aura_type {
         // Defensives — most valuable to remove (denies mitigation / sustain).
         AuraType::Absorb => 100,              // PW:Shield / damage absorb
-        AuraType::DamageTakenReduction => 90, // flat incoming-damage cut
-        AuraType::HealingOverTime => 70,      // ongoing sustain (Healing Stream)
+        AuraType::DamageTakenReduction => 90, // flat damage cut (Devotion Aura is untyped)
+        AuraType::HealingOverTime => 70,      // ongoing sustain (Rejuvenation)
         // Offensive throughput buffs.
         AuraType::AttackPowerIncrease => 60,
         AuraType::SpellPowerIncrease => 60,

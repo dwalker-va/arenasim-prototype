@@ -28,6 +28,10 @@ const TOTEM_BUFF_REFRESH_WINDOW: f32 = 2.0;
 /// (never breaks); `ability_name` is the element's stable buff name (refresh
 /// key). HoT buffs tick every second; flat buffs (`tick_interval 0.0`) don't.
 /// Public so `tests/aura_dispel_type_audit.rs` checks the buff that lands.
+///
+/// The buff is [`DispelType::Untyped`]: TBC gives a totem's aura no dispel
+/// type, so no purge strips it. The school stays (it is still Nature or Fire
+/// magic for every other question); only removal is ruled out.
 pub fn make_totem_aura(
     aura_type: AuraType,
     magnitude: f32,
@@ -56,7 +60,7 @@ pub fn make_totem_aura(
         applied_this_frame: false,
         backlash_damage: None,
         dr_category_override: None,
-        dispel_type: DispelType::Auto,
+        dispel_type: DispelType::Untyped,
         compound: None,
         source_item: None,
         stacks: None,

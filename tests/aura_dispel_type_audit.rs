@@ -1,38 +1,56 @@
-//! Every aura's removal class, checked against its Classic dispel type.
+//! Every aura's removal class, checked against its TBC dispel type.
 //!
 //! An aura's removal class decides who can take it off: a dispel takes MAGIC, a
 //! cleanse takes magic and POISON, nothing in the arena takes a CURSE, and no
-//! removal takes a PHYSICAL effect. `abilities.ron` declares the class only
-//! where the school gets it wrong (`dispel_type: Poison`, `dispel_type:
-//! Curse`); everything else is derived from the school, and Nature, Shadow and
-//! the rest derive to magic. So an ability that Classic calls a poison and that
+//! removal takes a PHYSICAL effect or one with no dispel type at all
+//! (UNTYPED). `abilities.ron` declares the class only where the school gets it
+//! wrong (`dispel_type: Poison`, `dispel_type: Curse`, `dispel_type:
+//! Untyped`); everything else is derived from the school, and Nature, Shadow
+//! and the rest derive to magic. So an ability that TBC calls a poison and that
 //! forgets the declaration ships as dispellable magic, with nothing to say so.
 //! That is how Serpent Sting came to be dispelled by Priests.
 //!
 //! [`expected`] is the guard: an EXPLICIT row per ability, written by hand, in
 //! an exhaustive `match` with no wildcard arm. A new `AbilityType` does not
-//! compile until someone writes its row, and the row has to state what Classic
+//! compile until someone writes its row, and the row has to state what TBC
 //! calls the aura and what the sim resolves it to. The tests then check the row
 //! against the aura the engine actually builds — from the RON for a config aura,
 //! from the engine's own constructor for an aura built in code (traps, totems).
 //!
-//! **Where the sim and Classic disagree, the row says why.** A row whose two
+//! **Where the sim and TBC disagree, the row says why.** A row whose two
 //! classes disagree must carry a `divergence` reason, and a row whose classes
 //! agree must not, so a divergence is always a decision someone wrote down and
 //! never an accident the table absorbed.
 //!
-//! ## The Classic column
+//! ## The TBC column
 //!
-//! `SpellCategories.DispelType` from the Classic client (wago.tools build
-//! 1.15.9.69547) for the spell that carries the aura (the highest rank; the
-//! ranks agree): 1 Magic, 2 Curse, 3 Disease, 4 Poison, 0 none. Where the
-//! aura is a separate spell from the ability, the aura's spell is the one read
-//! (Freezing Trap Effect 3355, Frost Trap Aura 13810). TBC abilities the Classic
-//! client does not carry (Unstable Affliction, Lifebloom, Molten Armor,
-//! Commanding Shout, Cyclone) take their TBC dispel type, marked `TBC`.
+//! TBC dispel rules are the guide (user ruling, 2026-10-11). Exceptions are
+//! the user's, case by case, and each one is a `divergence` row.
 //!
-//! Classic's "none" is satisfied by a PHYSICAL aura or by a schoolless one that
-//! declares no class: either way no dispel, cleanse or purge takes it as magic.
+//! The column is `SpellCategories.DispelType` from the TBC Classic client,
+//! wago.tools build **2.5.6.69795** (the `wow_anniversary` product): 1 Magic,
+//! 2 Curse, 3 Disease, 4 Poison, 0 none. It is read at `DifficultyID` 0. This
+//! build carries extra rows per difficulty for some spells, and they can
+//! disagree: an NPC Psychic Scream, 13704, reads both Magic and none. The
+//! spell read is the one that carries the aura. That is the highest player
+//! rank (the ranks agree), or the aura's own spell where it is separate from
+//! the ability: Freezing Trap Effect 3355, Frost Trap Aura 13810, Crippling
+//! Poison 11201. Wowhead TBC agrees on every row spot-checked against it.
+//!
+//! **Why not the Classic Era client.** Era (1.15.9) reproduces patch 1.12,
+//! and this sim does not follow 1.12. Psychic Scream is the clearest case:
+//! every Era rank reads DispelType 0. That is a faithful reading of the Era
+//! data, not a misread column or a triggered spell. Patch 2.0.1 made Psychic
+//! Scream "a magic effect [that] can now be dispelled", and every TBC rank
+//! reads Magic. Era and TBC also disagree on these:
+//! - Concussive Shot: Era Magic, TBC none.
+//! - Frost Trap Aura: Era Magic, TBC none.
+//! - Divine Shield: Era none, TBC Magic.
+//! - the Mage armors: Era Magic, TBC none.
+//!
+//! TBC's "none" is satisfied by a PHYSICAL aura, an UNTYPED one, or a
+//! schoolless one that declares no class. In every case no dispel, cleanse or
+//! purge takes it as magic.
 //!
 //! The class is the subject here, not the mechanic. Whether a dispel takes a
 //! magic STUN (it does not — `AuraType::is_magic_dispellable`) is the aura
@@ -47,7 +65,7 @@ use arenasim::states::play_match::class_ai::ally_dispel_scope;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, Combatant, DispelPending,
-    DispelScope, GameRng, TotemElement,
+    DispelScope, DispelType, GameRng, TotemElement,
 };
 use arenasim::states::play_match::effects::process_dispels;
 use arenasim::states::play_match::totems::make_totem_aura;
@@ -55,7 +73,8 @@ use arenasim::states::play_match::traps::{freezing_trap_aura, frost_trap_slow_au
 use arenasim::CharacterClass;
 
 /// The removal class the sim resolves an aura to — the engine's own word for
-/// it, [`Aura::removal_class_name`].
+/// it, [`Aura::removal_class_name`], plus [`Aura::is_untyped`] for the class
+/// that has no word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Sim {
     Magic,
@@ -63,13 +82,15 @@ enum Sim {
     Curse,
     Disease,
     Physical,
+    /// Declared to carry no dispel type (`DispelType::Untyped`).
+    Untyped,
     /// Schoolless and undeclared: the engine names no class.
     Unclassed,
 }
 
-/// Classic's `SpellCategories.DispelType` for the aura.
+/// TBC's `SpellCategories.DispelType` for the aura.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Classic {
+enum Tbc {
     Magic,
     Poison,
     Curse,
@@ -79,14 +100,14 @@ enum Classic {
     NoType,
 }
 
-impl Classic {
+impl Tbc {
     fn agrees_with(self, sim: Sim) -> bool {
         match self {
-            Classic::Magic => sim == Sim::Magic,
-            Classic::Poison => sim == Sim::Poison,
-            Classic::Curse => sim == Sim::Curse,
-            Classic::Disease => sim == Sim::Disease,
-            Classic::NoType => matches!(sim, Sim::Physical | Sim::Unclassed),
+            Tbc::Magic => sim == Sim::Magic,
+            Tbc::Poison => sim == Sim::Poison,
+            Tbc::Curse => sim == Sim::Curse,
+            Tbc::Disease => sim == Sim::Disease,
+            Tbc::NoType => matches!(sim, Sim::Physical | Sim::Untyped | Sim::Unclassed),
         }
     }
 }
@@ -108,26 +129,26 @@ enum Row {
     Aura {
         source: Source,
         sim: Sim,
-        classic: Classic,
-        /// Why the sim departs from Classic. Required exactly when it does.
+        tbc: Tbc,
+        /// Why the sim departs from TBC. Required exactly when it does.
         divergence: Option<&'static str>,
     },
 }
 
-const fn config(sim: Sim, classic: Classic) -> Row {
+const fn config(sim: Sim, tbc: Tbc) -> Row {
     Row::Aura {
         source: Source::Config,
         sim,
-        classic,
+        tbc,
         divergence: None,
     }
 }
 
-const fn config_diverging(sim: Sim, classic: Classic, why: &'static str) -> Row {
+const fn config_diverging(sim: Sim, tbc: Tbc, why: &'static str) -> Row {
     Row::Aura {
         source: Source::Config,
         sim,
-        classic,
+        tbc,
         divergence: Some(why),
     }
 }
@@ -143,72 +164,89 @@ fn totem(element: TotemElement) -> Aura {
     )
 }
 
-const TOTEM_DIVERGENCE: &str = "Classic totem auras carry no dispel type; the sim's pulse buffs \
-     are Nature-school magic, so a purge can take the purgeable ones";
-
-const PALADIN_AURA_DIVERGENCE: &str = "Classic Paladin auras carry no dispel type; the sim's \
-     read as magic from their school";
+/// A totem's buff, as the totem pulses it. TBC gives totem auras no dispel
+/// type (Strength of Earth 25527, Windfury Totem Passive 25582, Flametongue
+/// Totem Passive 25556, Healing Stream 25566).
+const fn totem_row(build: fn() -> Aura) -> Row {
+    Row::Aura {
+        source: Source::Engine(build),
+        sim: Sim::Untyped,
+        tbc: Tbc::NoType,
+        divergence: None,
+    }
+}
 
 /// The table. **No wildcard arm** — a new ability does not compile until its
 /// row is written.
 fn expected(ability: AbilityType) -> Row {
-    use Classic as C;
     use Sim as S;
+    use Tbc as T;
     match ability {
         // ---- Mage ----
-        AbilityType::Frostbolt => config(S::Magic, C::Magic),
-        AbilityType::FrostNova => config(S::Magic, C::Magic),
-        AbilityType::ArcaneIntellect => config(S::Magic, C::Magic),
-        AbilityType::IceBarrier => config(S::Magic, C::Magic),
-        AbilityType::Polymorph => config(S::Magic, C::Magic),
-        AbilityType::FrostArmor => config(S::Magic, C::Magic),
-        AbilityType::MageArmorSpell => config(S::Magic, C::Magic),
-        AbilityType::MoltenArmor => config(S::Magic, C::Magic), // TBC
+        AbilityType::Frostbolt => config(S::Magic, T::Magic),
+        AbilityType::FrostNova => config(S::Magic, T::Magic),
+        AbilityType::ArcaneIntellect => config(S::Magic, T::Magic),
+        AbilityType::IceBarrier => config(S::Magic, T::Magic),
+        AbilityType::Polymorph => config(S::Magic, T::Magic),
+        AbilityType::FrostArmor => config_diverging(
+            S::Magic,
+            T::NoType, // 7301
+            "PENDING RULING (AS-240): TBC gives the Mage armors no dispel type; the sim's \
+             read as magic from their school, so a purge takes them",
+        ),
+        AbilityType::MageArmorSpell => config_diverging(
+            S::Magic,
+            T::NoType, // 27125
+            "PENDING RULING (AS-240): TBC gives the Mage armors no dispel type; the sim's \
+             read as magic from their school, so a purge takes them",
+        ),
+        AbilityType::MoltenArmor => config_diverging(
+            S::Magic,
+            T::NoType, // 30482
+            "PENDING RULING (AS-240): TBC gives the Mage armors no dispel type; the sim's \
+             read as magic from their school, so a purge takes them",
+        ),
 
         // ---- Priest ----
         AbilityType::FlashHeal => Row::NoAura,
         AbilityType::MindBlast => Row::NoAura,
-        AbilityType::PowerWordFortitude => config(S::Magic, C::Magic),
-        AbilityType::PowerWordShield => config(S::Magic, C::Magic),
+        AbilityType::PowerWordFortitude => config(S::Magic, T::Magic),
+        AbilityType::PowerWordShield => config(S::Magic, T::Magic),
         AbilityType::DispelMagic => Row::NoAura,
-        AbilityType::PsychicScream => config_diverging(
-            S::Magic,
-            C::NoType,
-            "Classic gives Psychic Scream (8122) no dispel type; the sim's fears are all \
-             Shadow-school magic, so a dispel frees its victims",
-        ),
+        // 10890. Magic since 2.0.1; the user ruled it dispellable (2026-10-11).
+        AbilityType::PsychicScream => config(S::Magic, T::Magic),
         AbilityType::ManaBurn => Row::NoAura,
 
         // ---- Warrior ----
         AbilityType::HeroicStrike => Row::NoAura,
         AbilityType::Charge => Row::NoAura,
-        AbilityType::Rend => config(S::Physical, C::NoType),
-        AbilityType::MortalStrike => config(S::Physical, C::NoType),
+        AbilityType::Rend => config(S::Physical, T::NoType),
+        AbilityType::MortalStrike => config(S::Physical, T::NoType),
         AbilityType::Pummel => Row::NoAura,
-        AbilityType::BerserkerRage => config(S::Unclassed, C::NoType),
-        AbilityType::BattleShout => config(S::Unclassed, C::NoType),
-        AbilityType::DemoralizingShout => config(S::Unclassed, C::NoType),
-        AbilityType::CommandingShout => config(S::Unclassed, C::NoType), // TBC
+        AbilityType::BerserkerRage => config(S::Unclassed, T::NoType),
+        AbilityType::BattleShout => config(S::Unclassed, T::NoType),
+        AbilityType::DemoralizingShout => config(S::Unclassed, T::NoType),
+        AbilityType::CommandingShout => config(S::Unclassed, T::NoType),
 
         // ---- Rogue ----
         AbilityType::Ambush => Row::NoAura,
         AbilityType::SinisterStrike => Row::NoAura,
-        AbilityType::CheapShot => config(S::Physical, C::NoType),
-        AbilityType::KidneyShot => config(S::Physical, C::NoType),
+        AbilityType::CheapShot => config(S::Physical, T::NoType),
+        AbilityType::KidneyShot => config(S::Physical, T::NoType),
         AbilityType::Kick => Row::NoAura,
-        AbilityType::CripplingPoison => config(S::Poison, C::Poison),
+        AbilityType::CripplingPoison => config(S::Poison, T::Poison),
 
         // ---- Warlock ----
-        AbilityType::Corruption => config(S::Magic, C::Magic),
+        AbilityType::Corruption => config(S::Magic, T::Magic),
         AbilityType::Shadowbolt => Row::NoAura,
-        AbilityType::Fear => config(S::Magic, C::Magic),
-        AbilityType::Immolate => config(S::Magic, C::Magic),
+        AbilityType::Fear => config(S::Magic, T::Magic),
+        AbilityType::Immolate => config(S::Magic, T::Magic),
         AbilityType::DrainLife => Row::NoAura,
-        AbilityType::CurseOfAgony => config(S::Curse, C::Curse),
-        AbilityType::CurseOfWeakness => config(S::Curse, C::Curse),
-        AbilityType::CurseOfTongues => config(S::Curse, C::Curse),
-        AbilityType::UnstableAffliction => config(S::Magic, C::Magic), // TBC
-        AbilityType::DeathCoil => config(S::Magic, C::Magic),
+        AbilityType::CurseOfAgony => config(S::Curse, T::Curse),
+        AbilityType::CurseOfWeakness => config(S::Curse, T::Curse),
+        AbilityType::CurseOfTongues => config(S::Curse, T::Curse),
+        AbilityType::UnstableAffliction => config(S::Magic, T::Magic),
+        AbilityType::DeathCoil => config(S::Magic, T::Magic),
         AbilityType::SpellLock => Row::NoAura,
         AbilityType::DevourMagic => Row::NoAura,
 
@@ -216,107 +254,90 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::FlashOfLight => Row::NoAura,
         AbilityType::HolyLight => Row::NoAura,
         AbilityType::HolyShock => Row::NoAura,
-        AbilityType::HammerOfJustice => config(S::Magic, C::Magic),
+        AbilityType::HammerOfJustice => config(S::Magic, T::Magic),
         AbilityType::PaladinCleanse => Row::NoAura,
-        AbilityType::DivineShield => config(S::Unclassed, C::NoType),
-        AbilityType::DevotionAura => config_diverging(S::Magic, C::NoType, PALADIN_AURA_DIVERGENCE),
-        AbilityType::ShadowResistanceAura => {
-            config_diverging(S::Magic, C::NoType, PALADIN_AURA_DIVERGENCE)
-        }
-        AbilityType::ConcentrationAura => {
-            config_diverging(S::Magic, C::NoType, PALADIN_AURA_DIVERGENCE)
-        }
+        AbilityType::DivineShield => config_diverging(
+            S::Unclassed,
+            T::Magic, // 1020
+            "TBC's Divine Shield is Magic, but only Mass Dispel removes it, and the sim has \
+             no Mass Dispel; no purge takes it (`AuraType::DamageImmunity`)",
+        ),
+        // Paladin auras: no dispel type in TBC, and the user ruled them
+        // unpurgeable (2026-10-11).
+        AbilityType::DevotionAura => config(S::Untyped, T::NoType),
+        AbilityType::ShadowResistanceAura => config(S::Untyped, T::NoType),
+        AbilityType::ConcentrationAura => config(S::Untyped, T::NoType),
 
         // ---- Hunter ----
-        AbilityType::AimedShot => config(S::Physical, C::NoType),
+        AbilityType::AimedShot => config(S::Physical, T::NoType),
         AbilityType::ArcaneShot => Row::NoAura,
-        AbilityType::ConcussiveShot => config_diverging(
-            S::Physical,
-            C::Magic,
-            "Classic's Concussive Shot daze (5116) is Magic; the sim reads an arrow in the \
-             leg as physical, which no dispel takes (`DispelType::Physical`)",
-        ),
-        AbilityType::SerpentSting => config(S::Poison, C::Poison),
+        AbilityType::ConcussiveShot => config(S::Physical, T::NoType), // 5116
+        AbilityType::SerpentSting => config(S::Poison, T::Poison),
         AbilityType::Disengage => Row::NoAura,
         AbilityType::FreezingTrap => Row::Aura {
             source: Source::Engine(|| freezing_trap_aura(Entity::PLACEHOLDER)),
             sim: S::Magic,
-            classic: C::Magic, // Freezing Trap Effect, 3355
+            tbc: T::Magic, // Freezing Trap Effect, 3355
             divergence: None,
         },
         AbilityType::FrostTrap => Row::Aura {
             source: Source::Engine(|| frost_trap_slow_aura(Entity::PLACEHOLDER, 0.5)),
             sim: S::Magic,
-            classic: C::Magic, // Frost Trap Aura, 13810
-            divergence: None,
+            tbc: T::NoType, // Frost Trap Aura, 13810
+            divergence: Some(
+                "PENDING RULING (AS-240): TBC's Frost Trap Aura has no dispel type; the sim's \
+                 slow is Frost-school magic, which a dispel takes",
+            ),
         },
         AbilityType::Flare => Row::NoAura,
 
         // ---- Hunter pets ----
         AbilityType::SpiderWeb => config_diverging(
             S::Magic,
-            C::NoType,
-            "Classic's Web (4167) has no dispel type; the sim's is a Nature-school root, \
-             which a dispel takes",
+            T::NoType, // Web, 4167 (Physical school)
+            "PENDING RULING (AS-240): TBC's Web is a Physical-school root with no dispel \
+             type; the sim's is a Nature-school root, which a dispel takes",
         ),
-        AbilityType::BoarCharge => config(S::Physical, C::NoType),
+        AbilityType::BoarCharge => config(S::Physical, T::NoType),
         AbilityType::MastersCall => Row::NoAura,
 
         // ---- Shaman ----
         AbilityType::LightningBolt => Row::NoAura,
-        AbilityType::FrostShock => config(S::Magic, C::Magic),
+        AbilityType::FrostShock => config(S::Magic, T::Magic),
         AbilityType::LesserHealingWave => Row::NoAura,
         AbilityType::Purge => Row::NoAura,
         AbilityType::WindShear => Row::NoAura,
-        AbilityType::AirTotem => Row::Aura {
-            source: Source::Engine(|| totem(TotemElement::Air)),
-            sim: S::Magic,
-            classic: C::NoType,
-            divergence: Some(TOTEM_DIVERGENCE),
-        },
-        AbilityType::WaterTotem => Row::Aura {
-            source: Source::Engine(|| totem(TotemElement::Water)),
-            sim: S::Magic,
-            classic: C::NoType,
-            divergence: Some(TOTEM_DIVERGENCE),
-        },
-        AbilityType::EarthTotem => Row::Aura {
-            source: Source::Engine(|| totem(TotemElement::Earth)),
-            sim: S::Magic,
-            classic: C::NoType,
-            divergence: Some(TOTEM_DIVERGENCE),
-        },
-        AbilityType::FireTotem => Row::Aura {
-            source: Source::Engine(|| totem(TotemElement::Fire)),
-            sim: S::Magic,
-            classic: C::NoType,
-            divergence: Some(TOTEM_DIVERGENCE),
-        },
+        // Totem buffs: no dispel type in TBC, and the user ruled them
+        // unpurgeable (2026-10-11).
+        AbilityType::AirTotem => totem_row(|| totem(TotemElement::Air)),
+        AbilityType::WaterTotem => totem_row(|| totem(TotemElement::Water)),
+        AbilityType::EarthTotem => totem_row(|| totem(TotemElement::Earth)),
+        AbilityType::FireTotem => totem_row(|| totem(TotemElement::Fire)),
 
         // ---- Druid ----
-        AbilityType::Rejuvenation => config(S::Magic, C::Magic),
-        AbilityType::Lifebloom => config(S::Magic, C::Magic), // TBC
+        AbilityType::Rejuvenation => config(S::Magic, T::Magic),
+        AbilityType::Lifebloom => config(S::Magic, T::Magic),
         AbilityType::Swiftmend => Row::NoAura,
-        AbilityType::Moonfire => config(S::Magic, C::Magic),
-        AbilityType::MarkOfTheWild => config(S::Magic, C::Magic),
-        AbilityType::Innervate => config(S::Magic, C::Magic),
-        AbilityType::EntanglingRoots => config(S::Magic, C::Magic),
+        AbilityType::Moonfire => config(S::Magic, T::Magic),
+        AbilityType::MarkOfTheWild => config(S::Magic, T::Magic),
+        AbilityType::Innervate => config(S::Magic, T::Magic),
+        AbilityType::EntanglingRoots => config(S::Magic, T::Magic),
         AbilityType::Cyclone => config_diverging(
             S::Magic,
-            C::NoType, // TBC
-            "Cyclone takes its class from the Nature school, but no dispel takes it by RULE \
-             (`AuraType::Cyclone` is never a dispel candidate)",
+            T::NoType, // 33786
+            "PENDING RULING (AS-240): Cyclone takes its class from the Nature school, but no \
+             dispel takes it by RULE (`AuraType::Cyclone` is never a dispel candidate)",
         ),
-        AbilityType::TravelForm => config_diverging(
-            S::Magic,
-            C::NoType,
-            "a shapeshift takes its class from the Nature school, but `TravelForm` is no \
-             dispel or purge candidate by type",
-        ),
+        // 783. A shapeshift, not a magic buff: the user ruled nothing purges
+        // or dispels it (2026-10-11).
+        AbilityType::TravelForm => config(S::Untyped, T::NoType),
     }
 }
 
 fn sim_class(aura: &Aura) -> Sim {
+    if aura.is_untyped() {
+        return Sim::Untyped;
+    }
     match aura.removal_class_name() {
         Some("Magic") => Sim::Magic,
         Some("Poison") => Sim::Poison,
@@ -335,6 +356,21 @@ fn config_aura(defs: &AbilityDefinitions, ability: AbilityType) -> Option<Aura> 
         defs.get_unchecked(&ability),
     )
     .map(|pending| pending.aura)
+}
+
+/// The aura an ability lands, built where the table says it is built.
+fn landed_aura(defs: &AbilityDefinitions, ability: AbilityType) -> Aura {
+    match expected(ability) {
+        Row::Aura {
+            source: Source::Engine(build),
+            ..
+        } => build(),
+        Row::Aura {
+            source: Source::Config,
+            ..
+        } => config_aura(defs, ability).expect("tabled as a config aura"),
+        Row::NoAura => panic!("{ability:?} lands no aura"),
+    }
 }
 
 /// Every ability's row matches the aura the engine builds for it.
@@ -392,7 +428,7 @@ fn every_aura_resolves_to_its_tabled_class() {
 /// A row whose classes disagree says why, and a row whose classes agree does
 /// not carry a stale reason.
 #[test]
-fn every_divergence_from_classic_is_explained() {
+fn every_divergence_from_tbc_is_explained() {
     let defs = AbilityDefinitions::default();
     let mut problems = Vec::new();
     let mut divergent = Vec::new();
@@ -400,19 +436,19 @@ fn every_divergence_from_classic_is_explained() {
     for (&ability, _) in defs.iter() {
         let Row::Aura {
             sim,
-            classic,
+            tbc,
             divergence,
             ..
         } = expected(ability)
         else {
             continue;
         };
-        match (classic.agrees_with(sim), divergence) {
+        match (tbc.agrees_with(sim), divergence) {
             (true, Some(_)) => problems.push(format!(
-                "{ability:?}: {sim:?} agrees with Classic {classic:?} but carries a divergence reason"
+                "{ability:?}: {sim:?} agrees with TBC {tbc:?} but carries a divergence reason"
             )),
             (false, None) => problems.push(format!(
-                "{ability:?}: the sim's {sim:?} departs from Classic {classic:?} with no reason given"
+                "{ability:?}: the sim's {sim:?} departs from TBC {tbc:?} with no reason given"
             )),
             (false, Some(_)) => divergent.push(format!("{ability:?}")),
             (true, None) => {}
@@ -426,23 +462,18 @@ fn every_divergence_from_classic_is_explained() {
     assert_eq!(
         divergent,
         [
-            "AirTotem",
-            "ConcentrationAura",
-            "ConcussiveShot",
             "Cyclone",
-            "DevotionAura",
-            "EarthTotem",
-            "FireTotem",
-            "PsychicScream",
-            "ShadowResistanceAura",
+            "DivineShield",
+            "FrostArmor",
+            "FrostTrap",
+            "MageArmorSpell",
+            "MoltenArmor",
             "SpiderWeb",
-            "TravelForm",
-            "WaterTotem",
         ]
     );
 }
 
-/// Classic's poisons are the sim's poisons, and nothing else is. Cleanse is the
+/// TBC's poisons are the sim's poisons, and nothing else is. Cleanse is the
 /// only removal that reaches a poison, so this set is exactly what a Priest's
 /// Dispel Magic and a Felhunter's Devour Magic may not touch.
 #[test]
@@ -459,7 +490,7 @@ fn the_poisons_are_crippling_poison_and_serpent_sting() {
 }
 
 // ---------------------------------------------------------------------------
-// Serpent Sting against every removal, through the real `process_dispels`
+// Removals against real auras, through the real `process_dispels`
 // ---------------------------------------------------------------------------
 
 fn harness() -> App {
@@ -472,20 +503,16 @@ fn harness() -> App {
     app
 }
 
-/// Serpent Sting exactly as the Hunter lands it, on a Warrior, then one removal
-/// of `scope` queued against it. Returns whether the sting survived.
-fn sting_survives(scope: DispelScope, dispeller_class: CharacterClass) -> bool {
-    let defs = AbilityDefinitions::default();
-    let sting =
-        config_aura(&defs, AbilityType::SerpentSting).expect("Serpent Sting applies an aura");
-    assert_eq!(sting.effect_type, AuraType::DamageOverTime);
-
+/// `aura`, worn by a Warrior, then one removal of `scope` queued against it by
+/// a `dispeller_class`. Returns whether an aura named like `aura` survived.
+fn survives(aura: Aura, scope: DispelScope, dispeller_class: CharacterClass) -> bool {
+    let name = aura.ability_name.clone();
     let mut app = harness();
     let victim = app
         .world_mut()
         .spawn((
             Combatant::new(1, 0, CharacterClass::Warrior),
-            ActiveAuras { auras: vec![sting] },
+            ActiveAuras { auras: vec![aura] },
         ))
         .id();
     let dispeller = app
@@ -505,12 +532,16 @@ fn sting_survives(scope: DispelScope, dispeller_class: CharacterClass) -> bool {
     app.world()
         .entity(victim)
         .get::<ActiveAuras>()
-        .is_some_and(|auras| {
-            auras
-                .auras
-                .iter()
-                .any(|a| a.ability_name == "Serpent Sting")
-        })
+        .is_some_and(|auras| auras.auras.iter().any(|a| a.ability_name == name))
+}
+
+/// Serpent Sting exactly as the Hunter lands it, against one removal.
+fn sting_survives(scope: DispelScope, dispeller_class: CharacterClass) -> bool {
+    let defs = AbilityDefinitions::default();
+    let sting =
+        config_aura(&defs, AbilityType::SerpentSting).expect("Serpent Sting applies an aura");
+    assert_eq!(sting.effect_type, AuraType::DamageOverTime);
+    survives(sting, scope, dispeller_class)
 }
 
 #[test]
@@ -542,4 +573,96 @@ fn felhunter_devour_magic_cannot_take_serpent_sting() {
 #[test]
 fn shaman_purge_cannot_take_serpent_sting() {
     assert!(sting_survives(DispelScope::Purge, CharacterClass::Shaman));
+}
+
+/// Both purge shapes the Shaman can queue against `aura`: pinned to its type,
+/// and pinned to its source.
+fn purge_scopes(aura: &Aura) -> [DispelScope; 2] {
+    [
+        DispelScope::Purge(aura.effect_type),
+        DispelScope::PurgeSource {
+            effect: aura.effect_type,
+            source: aura.ability_name.clone(),
+            owner: None,
+        },
+    ]
+}
+
+/// User ruling, 2026-10-11: no purge takes a Paladin aura, a totem's buff or
+/// Travel Form. Each is checked as the engine lands it, through the real
+/// `process_dispels`, against both purge shapes.
+///
+/// The control is the SAME aura with its class put back to the school's
+/// default: that one a purge takes. So each survival is the class at work,
+/// not a purge that could never have reached the aura's type. Travel Form has
+/// no such control: its TYPE is unpurgeable too (`Aura::can_be_purged`), so
+/// it is held by two rules, and its class is pinned by the table above.
+#[test]
+fn purge_cannot_take_a_paladin_aura_a_totem_buff_or_travel_form() {
+    let defs = AbilityDefinitions::default();
+    let rulings = [
+        AbilityType::DevotionAura,
+        AbilityType::ShadowResistanceAura,
+        AbilityType::ConcentrationAura,
+        AbilityType::AirTotem,
+        AbilityType::WaterTotem,
+        AbilityType::EarthTotem,
+        AbilityType::FireTotem,
+        AbilityType::TravelForm,
+    ];
+    let mut wrong = Vec::new();
+    for ability in rulings {
+        let aura = landed_aura(&defs, ability);
+        for scope in purge_scopes(&aura) {
+            if !survives(aura.clone(), scope.clone(), CharacterClass::Shaman) {
+                wrong.push(format!("{ability:?}: {scope:?} took {}", aura.ability_name));
+            }
+            if ability == AbilityType::TravelForm {
+                continue;
+            }
+            let mut as_magic = aura.clone();
+            as_magic.dispel_type = DispelType::Auto;
+            if survives(as_magic, scope.clone(), CharacterClass::Shaman) {
+                wrong.push(format!(
+                    "{ability:?}: control — {scope:?} could not take it even as magic, so the \
+                     check above proves nothing"
+                ));
+            }
+        }
+        // No ally-side removal reaches it either.
+        for dispel in [
+            AbilityType::DispelMagic,
+            AbilityType::PaladinCleanse,
+            AbilityType::DevourMagic,
+        ] {
+            if !survives(
+                aura.clone(),
+                ally_dispel_scope(dispel),
+                CharacterClass::Priest,
+            ) {
+                wrong.push(format!(
+                    "{ability:?}: {dispel:?} took {}",
+                    aura.ability_name
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// User ruling, 2026-10-11: Psychic Scream is dispellable. A Priest's Dispel
+/// Magic takes its fear off an ally, through the real `process_dispels`.
+#[test]
+fn dispel_magic_takes_psychic_scream_off_an_ally() {
+    let defs = AbilityDefinitions::default();
+    let scream = landed_aura(&defs, AbilityType::PsychicScream);
+    assert_eq!(scream.effect_type, AuraType::Fear);
+    assert!(
+        !survives(
+            scream,
+            ally_dispel_scope(AbilityType::DispelMagic),
+            CharacterClass::Priest
+        ),
+        "Dispel Magic left Psychic Scream's fear on the ally"
+    );
 }

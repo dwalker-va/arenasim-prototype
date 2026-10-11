@@ -425,8 +425,9 @@ impl NamedAura {
     /// "cannot be removed", and a Warlock reading the page should see the
     /// difference. The absolute rung is reserved for what genuinely nothing
     /// touches: the unpurgeable self-buffs (Divine Shield, Berserker Rage), a
-    /// proc trinket's physical buff, and the mechanical markers (Weakened
-    /// Soul, Shadow Sight, weapon poisons).
+    /// proc trinket's physical buff, the buffs with no dispel type (the Paladin
+    /// auras, the totem buffs, Travel Form — `Aura::is_untyped`), and the
+    /// mechanical markers (Weakened Soul, Shadow Sight, weapon poisons).
     ///
     /// The buff half is disjoint by construction: a dispel lifts harmful magic
     /// off an ally, a purge strips buffs off an enemy.
@@ -770,7 +771,16 @@ fn engine_entry(
                 magnitude,
                 school: Some(school),
                 break_on_damage: -1.0,
-                dispel_type: DispelType::Auto,
+                // The engine's own constructor decides the class, so the page
+                // cannot disagree with the buff a totem actually pulses.
+                dispel_type: crate::states::play_match::totems::make_totem_aura(
+                    aura_type,
+                    magnitude,
+                    bevy::prelude::Entity::PLACEHOLDER,
+                    school,
+                    element.buff_name(),
+                )
+                .dispel_type,
                 persistence: Persistence::WhileSourceActive("while you stand near the totem"),
                 riders: EngineSpec::no_riders(),
                 provenance: format!(
@@ -1913,8 +1923,16 @@ mod tests {
                 "Crippling Poison (weapon coating)",
                 "Divine Shield",
                 "Shadow Sight",
-                // A shapeshift: no dispel or purge takes it; the Druid ends it.
+                // No dispel type (TBC): no purge takes a Paladin aura, a
+                // totem's buff or a shapeshift.
+                "Concentration Aura",
+                "Devotion Aura",
+                "Flametongue Totem",
+                "Healing Stream Totem",
+                "Shadow Resistance Aura",
+                "Strength of Earth Totem",
                 "Travel Form",
+                "Windfury Totem",
                 "Weakened Soul",
             ]
             .map(String::from),

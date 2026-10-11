@@ -792,6 +792,7 @@
                 aura_type: DamageTakenReduction,
                 duration: 600.0,  // 10 minutes - lasts entire match
                 magnitude: 0.10,  // 10% damage reduction
+                dispel_type: Untyped,  // TBC: a Paladin aura has no dispel type; no purge takes it
             )),
             spell_school: Holy,
         ),
@@ -1205,6 +1206,7 @@
                 aura_type: SpellResistanceBuff,
                 duration: 600.0,
                 magnitude: 30.0,
+                dispel_type: Untyped,  // TBC: a Paladin aura has no dispel type; no purge takes it
             )),
             spell_school: Shadow,
         ),
@@ -1223,6 +1225,7 @@
                 aura_type: LockoutDurationReduction,
                 duration: 600.0,
                 magnitude: 0.50,
+                dispel_type: Untyped,  // TBC: a Paladin aura has no dispel type; no purge takes it
             )),
             spell_school: Holy,
         ),
@@ -1584,6 +1587,7 @@
                 aura_type: TravelForm,
                 duration: 600.0,
                 magnitude: 1.4,  // movement speed multiplier
+                dispel_type: Untyped,  // a shapeshift, not a magic buff: nothing dispels or purges it
             )),
             spell_school: Nature,
         ),
