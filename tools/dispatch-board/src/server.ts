@@ -10,6 +10,8 @@
  *                 logged Release claim)
  *   /api/events   long-poll event feed — what `cli.js wait` blocks on
  *   /api/stream   SSE nudges for the UI's live refresh
+ *   /api/milestones/<name>/replay  launch a guide check's STORED replay in
+ *                 the game client (replay.ts) — the one route that starts a process
  *
  * One process is the point: no cross-process write races, one source of truth.
  */
@@ -21,6 +23,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { Board, BoardError, BoardEvent, PR_URL, SUMMARY_FIELDS, checkVersion } from "./board.js";
 import { buildMcpServer } from "./mcp.js";
 import { liveDaemon, lockPath, packagingIconDir } from "./paths.js";
+import { ReplayLauncher, ReplayOptions, ReplayRefused, resolveGameBinary } from "./replay.js";
 
 /** Actor tag for every write made through the web UI — a user gesture. */
 export const UI_ACTOR = "board";
@@ -105,6 +108,12 @@ export interface DaemonOptions {
   log?: (msg: string) => void;
   /** Where the tab icon is read from; default: the checkout's `packaging/`. */
   iconDir?: string;
+  /**
+   * The replay launcher's settings. `binary` defaults to resolveGameBinary()
+   * (`$DISPATCH_BOARD_GAME_BIN`, else the main checkout's release build) and
+   * `dataDir` to the DB's directory; `spawn` is the tests' seam.
+   */
+  replay?: Partial<ReplayOptions>;
 }
 
 export interface Daemon {
@@ -162,6 +171,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
   board.setMaxListeners(0);
   const host = opts.host ?? "127.0.0.1";
   let port = opts.port;
+  const game = opts.replay?.binary ? { binary: opts.replay.binary, checkout: null } : resolveGameBinary();
+  const replays = new ReplayLauncher({ checkout: game.checkout, dataDir: dirname(opts.dbPath), ...opts.replay, binary: game.binary });
   const allowedHosts = () => [`127.0.0.1:${port}`, `localhost:${port}`];
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -280,7 +291,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       send(res, 200, { milestones: board.listMilestones() });
       return;
     }
-    const msMatch = /^\/api\/milestones\/([^/]+)(?:\/(check|feedback|submit))?$/.exec(path);
+    const msMatch = /^\/api\/milestones\/([^/]+)(?:\/(check|feedback|submit|replay))?$/.exec(path);
     if (req.method === "GET" && msMatch && !msMatch[2]) {
       send(res, 200, board.getMilestone(decodeURIComponent(msMatch[1])));
       return;
@@ -314,6 +325,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           case "submit":
             send(res, 200, board.submitReview(name, b.expected ?? {}, meta));
             return;
+          case "replay": {
+            // The request names a stored check and nothing more: a config or
+            // a command in the body is refused, never merged or run.
+            const extra = Object.keys(b).filter((k) => k !== "key");
+            if (extra.length) {
+              throw new HttpError(400, `a replay request carries only {key}; the config comes from the stored guide (refused: ${extra.join(", ")})`);
+            }
+            const config = board.guideReplay(name, b.key);
+            try {
+              send(res, 200, await replays.launch(name, b.key, config));
+            } catch (e) {
+              if (!(e instanceof ReplayRefused)) throw e;
+              send(res, e.status, { error: e.code, message: e.message });
+            }
+            return;
+          }
         }
       }
       if (cardMatch && cardMatch[2]) {

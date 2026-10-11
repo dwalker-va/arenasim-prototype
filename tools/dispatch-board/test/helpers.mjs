@@ -47,9 +47,9 @@ export function seed(board, { role = "engineer", column = "backlog", pr = null, 
  * Spawn the real daemon on an ephemeral port over a temp DB. Resolves once
  * it is listening; `stop()` sends SIGTERM and waits for exit.
  */
-export async function spawnDaemon(t, extraEnv = {}) {
+export async function spawnDaemon(t, extraEnv = {}, extraArgs = []) {
   const tmp = tempDir();
-  const child = spawn(process.execPath, [CLI, "serve", "--db", tmp.db, "--port", "0"], {
+  const child = spawn(process.execPath, [CLI, "serve", "--db", tmp.db, "--port", "0", ...extraArgs], {
     env: { ...process.env, ...extraEnv },
     stdio: ["ignore", "pipe", "pipe"],
   });

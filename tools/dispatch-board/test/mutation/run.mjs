@@ -30,7 +30,7 @@ const ENV = {
   ...(realBoardPage() ? { DISPATCH_BOARD_FIXTURE: realBoardPage() } : {}),
   ...(realBoardExport() ? { DISPATCH_BOARD_EXPORT_FIXTURE: realBoardExport() } : {}),
 };
-const SUITES = ["board", "race", "daemon", "roundtrip", "ui", "prwork", "milestone", "migration", "review", "guide"];
+const SUITES = ["board", "race", "daemon", "roundtrip", "ui", "prwork", "milestone", "migration", "review", "guide", "replay"];
 
 /** A copy of the package's dist/ui/test under .mutants/<name>/, optionally with one edit applied. */
 function copyTo(name) {
@@ -632,6 +632,117 @@ const MUTANTS = [
     find: ': "<div class=\\"nudge\\" id=\\"noguide\\">No review guide has been written for this milestone yet: the per-card detail follows.</div>" + detail);',
     replace: ": detail);",
     mustFail: ["review page: with no guide yet, the detail is the page, with a note saying so"],
+  },
+  // ---- the replay button (AS-237)
+  {
+    name: "replay-body-carries-only-key",
+    file: "dist/server.js",
+    find: 'const extra = Object.keys(b).filter((k) => k !== "key");',
+    replace: "const extra = [];",
+    mustFail: ["replay endpoint: a body carrying its own config or command is refused"],
+  },
+  {
+    name: "replay-unknown-check-refused",
+    file: "dist/board.js",
+    find: 'throw new BoardError("not_found", `no guide check ${key} on milestone ${name}`);',
+    replace: 'return { team1: ["Mage"], team2: ["Mage"] };',
+    mustFail: [
+      "replay lookup: the stored config, by milestone and guide check key",
+      "replay endpoint: an unknown milestone or check key is refused",
+    ],
+  },
+  {
+    name: "replay-check-without-config-refused",
+    file: "dist/board.js",
+    find: "if (!isObj(c.replay))",
+    replace: "if (false)",
+    mustFail: [
+      "replay lookup: the stored config, by milestone and guide check key",
+      "replay endpoint: an unknown milestone or check key is refused",
+    ],
+  },
+  {
+    name: "replay-argv-exact",
+    file: "dist/replay.js",
+    find: '["--replay", file]',
+    replace: '["--replay", file, "--fullscreen"]',
+    mustFail: [
+      "replay endpoint: argv is exactly [binary, --replay, <file>]",
+      "replay launcher: the real detached spawn runs argv exactly",
+    ],
+  },
+  {
+    name: "replay-file-holds-stored-config",
+    file: "dist/replay.js",
+    find: "writeFileSync(file, `${JSON.stringify(config, null, 2)}\\n`);",
+    replace: 'writeFileSync(file, `${JSON.stringify({ team1: ["Mage"], team2: ["Mage"] })}\\n`);',
+    mustFail: [
+      "replay endpoint: argv is exactly [binary, --replay, <file>], and the file holds the stored config",
+      "review page: ▶ launches the check's replay",
+    ],
+  },
+  {
+    name: "replay-rate-limit",
+    file: "dist/replay.js",
+    find: "t - prev < this.rateLimitMs",
+    replace: "false",
+    mustFail: ["replay endpoint: a second launch of the same check within 2s is ignored"],
+  },
+  {
+    name: "replay-retry-after-failure",
+    file: "dist/replay.js",
+    find: "else\n            this.last.delete(rk);\n        return result;",
+    replace: "else\n            this.last.set(rk, this.now());\n        return result;",
+    mustFail: ["replay endpoint: a launch that died early frees its check for an immediate retry"],
+  },
+  {
+    name: "replay-binary-must-exist",
+    file: "dist/replay.js",
+    find: 'if (problem)\n            throw new ReplayRefused(503, "binary_not_found", problem);',
+    replace: "",
+    mustFail: [
+      "replay endpoint: a missing binary gives the build-first error",
+      "replay daemon: serve takes the binary from --game-bin over $DISPATCH_BOARD_GAME_BIN",
+      "review page: ▶ with no binary says to build first",
+    ],
+  },
+  {
+    name: "replay-early-exit-reported",
+    file: "dist/replay.js",
+    find: 'if (outcome.kind === "exit") {',
+    replace: "if (false) {",
+    mustFail: [
+      "replay endpoint: a game that exits inside the window reports its code and stderr's tail",
+      "replay launcher: the real detached spawn runs argv exactly, and an early exit's stderr comes back",
+      "review page: ▶ launches the check's replay and shows launched, or the error",
+    ],
+  },
+  {
+    name: "replay-stale-warning",
+    file: "dist/replay.js",
+    find: "return moved !== null && statSync(this.opts.binary).mtimeMs < moved;",
+    replace: "return false;",
+    mustFail: ["replay launcher: a binary older than the checkout's HEAD launches with a rebuild warning"],
+  },
+  {
+    name: "replay-flag-over-env",
+    file: "dist/replay.js",
+    find: "if (flag)\n        return { binary: resolve(flag), checkout: null };",
+    replace: "",
+    mustFail: [
+      "replay binary: --game-bin wins over $DISPATCH_BOARD_GAME_BIN",
+      "replay daemon: serve takes the binary from --game-bin over $DISPATCH_BOARD_GAME_BIN",
+    ],
+  },
+  {
+    name: "review-page-replay-error-shown-as-error",
+    file: "ui/review.html",
+    find: 'ok: r.status === 200 && b.status === "launched"',
+    replace: "ok: true",
+    mustFail: [
+      "review page: ▶ launches the check's replay and shows launched, or the error",
+      "review page: ▶ with no binary says to build first",
+    ],
   },
 ];
 

@@ -275,7 +275,7 @@ test("review page: leads with the guide's units, in order, before a collapsed Fu
   assert.deepEqual([...doc.querySelectorAll("#guide .unit .ttl")].map((x) => x.textContent), ["Druid in a root", "Flare readability"]);
   assert.deepEqual([...doc.querySelectorAll('#guide .unit[data-unit="druid-root"] .cards a')].map((x) => x.textContent), ids.slice(0, 2));
   assert.equal(doc.querySelectorAll("#guide input[data-check]").length, 3);
-  assert.equal(doc.querySelectorAll("#guide .chip.replay").length, 1);
+  assert.deepEqual([...doc.querySelectorAll("#guide button[data-replay]")].map((b) => b.dataset.replay), ["guide:druid-root:shift"], "one ▶ per check with a replay");
   // Nothing is removed: every per-card section is inside the detail.
   assert.deepEqual([...detail.querySelectorAll("section > h2")].map((h) => h.textContent), ["What changed", "What to check", "Your decisions", "Balance", "Known gaps and follow-ups", "Feedback"]);
   assert.equal(guide.querySelector("section"), null);

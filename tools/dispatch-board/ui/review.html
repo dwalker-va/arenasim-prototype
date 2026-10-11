@@ -57,7 +57,10 @@ ul.plain li:first-child{border-top:none}
 .unit .sum{margin-top:2px;font-size:13px;white-space:pre-wrap}
 .unit .step{padding:5px 0}
 .chip.changed{background:none;border:1px solid var(--c-input);color:var(--c-input)}
-.chip.replay{background:none;border:1px solid var(--line);color:var(--muted);cursor:help}
+.btn.replay{padding:1px 8px;font-size:12px;margin-left:4px}
+.replayst{margin-left:6px;font:400 11px "IBM Plex Mono",monospace;color:var(--muted)}
+.replayst.err{color:var(--p1)}
+.replaytail{margin:4px 0 0;max-height:9em;overflow:auto;white-space:pre-wrap;font:400 11px "IBM Plex Mono",monospace;color:var(--muted);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
 .nudge{border:1px dashed var(--line);border-radius:8px;padding:8px 12px;color:var(--muted);font-size:13px;margin-top:14px}
 details.detail{margin-top:26px;border-top:1px solid var(--line);padding-top:10px}
 details.detail>summary{cursor:pointer;font:700 15px "Barlow Semi Condensed",sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
@@ -233,6 +236,24 @@ function guideProgress(){
   data.guide.units.forEach(function(u){ u.checks.forEach(function(c){ total++; var t = data.guide.ticks[guideKey(u, c)]; if(t && t.checked) done++; }); });
   return {total: total, done: done};
 }
+// ▶ launches the check's stored replay in the game client. The request names
+// the check and nothing else: the daemon reads the config from the guide.
+var replays = {};   // key -> {busy, ok, msg, tail}: the last launch's outcome, kept across redraws
+function replayButton(key, cfg){
+  var st = replays[key] || {};
+  return " <button class=\"btn replay\" data-replay=\"" + esc(key) + "\" title=\"Watch in the game: " + esc(JSON.stringify(cfg)) + "\"" + (st.busy ? " disabled" : "") + ">▶ replay</button>"
+    + "<span class=\"replayst" + (st.ok === false ? " err" : "") + "\" data-replay-status=\"" + esc(key) + "\">" + esc(st.busy ? "launching…" : st.msg || "") + "</span>"
+    + (st.tail ? "<pre class=\"replaytail\">" + esc(st.tail) + "</pre>" : "");
+}
+function launchReplay(key){
+  if(replays[key] && replays[key].busy) return;
+  replays[key] = {busy: true}; render();
+  api("POST", base() + "/replay", {key: key}).then(function(r){
+    var b = r.body || {};
+    replays[key] = {ok: r.status === 200 && b.status === "launched", msg: b.message || ("launch failed (HTTP " + r.status + ")"), tail: b.stderr_tail || ""};
+    render();
+  }, function(){ replays[key] = {ok: false, msg: "daemon unreachable — not launched"}; render(); });
+}
 function guide(){
   var g = data.guide, p = guideProgress();
   var out = g.units.length ? "" : "<p class=\"muted\">The guide has no units.</p>";
@@ -245,7 +266,7 @@ function guide(){
       var key = guideKey(u, c), t = g.ticks[key] || {checked: false};
       out += "<div class=\"step" + (t.checked ? " done" : "") + "\" data-guide-check=\"" + esc(key) + "\"><input type=\"checkbox\" data-check=\"" + esc(key) + "\"" + (t.checked ? " checked" : "") + (released() ? " disabled" : "") + " aria-label=\"" + esc(c.text) + "\">"
         + "<div class=\"txt\"><span class=\"said\">" + esc(c.text) + "</span>"
-        + (c.replay ? " <span class=\"chip replay\" title=\"" + esc(JSON.stringify(c.replay)) + "\">replay</span>" : "")
+        + (c.replay ? replayButton(key, c.replay) : "")
         + (t.checked ? "<div class=\"who\">checked " + esc(fmt(t.checked_at)) + "</div>" : "") + "</div></div>";
     });
     out += "</div>";
@@ -343,6 +364,7 @@ function render(){
 function wire(){
   var det = document.getElementById("detail");
   if(det) det.ontoggle = function(){ detailOpen = det.open; };
+  app.querySelectorAll("[data-replay]").forEach(function(b){ b.onclick = function(){ launchReplay(b.dataset.replay); }; });
   app.querySelectorAll("[data-open]").forEach(function(b){
     b.onclick = function(){ open[b.dataset.open] = true; render();
       app.querySelectorAll("textarea[data-key]").forEach(function(t){ if(t.dataset.key === b.dataset.open) t.focus(); }); };

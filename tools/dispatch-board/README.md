@@ -84,6 +84,23 @@ awaiting the release) and the archive.
   (a board time no later than the write) and a tick on a check the new guide
   drops: the write clears both, each under its own version, so a check that is
   new or comes back starts unticked. Refused on a released milestone.
+- **Replay button.** A guide check with a `replay` config gets a ▶ on the
+  review page, which POSTs `{key: "guide:<unit>:<check>"}` to
+  `/api/milestones/<name>/replay`. The daemon looks the config up on the stored
+  guide (an unknown milestone or key is 404, a check without a replay 422, and
+  a body carrying anything besides `key` — a config, a command — is refused
+  with 400), writes it to `<db dir>/replays/replay-<time>-<rand>.json` (files
+  over a day old are pruned), and starts the game binary detached, argv exactly
+  `[binary, "--replay", <file>]`, its stderr to a `.stderr.log` beside it. It
+  answers after 2s: `launched` (with a rebuild warning when the default binary
+  is older than the main checkout's HEAD last moved), or `exited` with the code
+  and stderr's tail when the game died inside the window. A missing binary is
+  503 *build first: cargo build --release* — there is no `cargo run` fallback.
+  A second launch of the same check while one is starting, or within 2s of its
+  `launched`, is ignored (429); a launch that failed can be retried at once.
+  The binary is `--game-bin PATH` on `serve`, else `$DISPATCH_BOARD_GAME_BIN`,
+  else `<main checkout>/target/release/arenasim` (the main checkout found the
+  way the DB is).
 - **Ticks and comments** persist, each item under its own version (a comment
   changed in another window is shown, never overwritten). They are not board
   events — nothing acts on them, and the orchestrator's `wait` would otherwise
@@ -120,8 +137,9 @@ node dist/cli.js serve            # default DB: <main checkout>/.dispatch/board.
 
 The daemon must be running before a session starts (or reconnect with `/mcp`
 afterwards): an `http` MCP server that is down simply shows as failed.
-`DISPATCH_BOARD_DB` / `--db` and `DISPATCH_BOARD_PORT` / `--port` override
-the defaults. The default DB is resolved from git's own files to the MAIN
+`DISPATCH_BOARD_DB` / `--db`, `DISPATCH_BOARD_PORT` / `--port` and
+`DISPATCH_BOARD_GAME_BIN` / `--game-bin` (the game the replay button launches)
+override the defaults. The default DB is resolved from git's own files to the MAIN
 checkout, so a daemon started from any worktree opens the same board. A second
 daemon on the same DB refuses to start.
 
@@ -196,7 +214,8 @@ mutant names must pass there, or no kill is counted. The copies live under
 
 ```bash
 npm test                 # the suite: concurrency, rules, round trip, daemon, wake-up, UI drawer (jsdom),
-                         # milestones, the review page and its guide, the schema 1 -> 2 migration
+                         # milestones, the review page and its guide, the replay button (an injected
+                         # spawn or a stub script — never the game), the schema 1 -> 2 migration
 npm run test:mutation    # removes each guard from dist/ and proves the suite fails
 ```
 
