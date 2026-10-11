@@ -61,8 +61,8 @@ use bevy::prelude::*;
 use arenasim::combat::log::CombatLog;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
-use arenasim::states::play_match::class_ai::ally_dispel_scope;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
+use arenasim::states::play_match::class_ai::{ally_dispel_scope, ally_removal};
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, Combatant, DispelPending,
     DispelScope, DispelType, GameRng, TotemElement,
@@ -544,23 +544,10 @@ fn shaman_purge_cannot_take_serpent_sting() {
     assert!(sting_survives(DispelScope::Purge, CharacterClass::Shaman));
 }
 
-/// Both purge shapes the Shaman can queue against `aura`: pinned to its type,
-/// and pinned to its source.
-fn purge_scopes(aura: &Aura) -> [DispelScope; 2] {
-    [
-        DispelScope::Purge(aura.effect_type),
-        DispelScope::PurgeSource {
-            effect: aura.effect_type,
-            source: aura.ability_name.clone(),
-            owner: None,
-        },
-    ]
-}
-
-/// Every way `ability`'s buff could be taken that the rulings forbid: either
-/// purge shape (pinned to its type, pinned to its source) and every ally-side
-/// removal. Checked on the aura as the engine lands it, through the real
-/// `process_dispels`.
+/// Every way `ability`'s buff could be taken that the rulings forbid: a
+/// Shaman's Purge and every ally-side removal. Checked on the aura as the
+/// engine lands it, through the real `process_dispels`. The buff is the
+/// target's only aura, so a purge that could take anything takes it.
 ///
 /// With `control`, also the SAME aura with its class put back to the school's
 /// default, which a purge must take. So a survival is the class at work, not a
@@ -568,18 +555,15 @@ fn purge_scopes(aura: &Aura) -> [DispelScope; 2] {
 fn purge_failures(defs: &AbilityDefinitions, ability: AbilityType, control: bool) -> Vec<String> {
     let aura = landed_aura(defs, ability);
     let mut wrong = Vec::new();
-    for scope in purge_scopes(&aura) {
-        if !survives(aura.clone(), scope.clone(), CharacterClass::Shaman) {
-            wrong.push(format!("{ability:?}: {scope:?} took {}", aura.ability_name));
-        }
-        if !control {
-            continue;
-        }
+    if !survives(aura.clone(), DispelScope::Purge, CharacterClass::Shaman) {
+        wrong.push(format!("{ability:?}: Purge took {}", aura.ability_name));
+    }
+    if control {
         let mut as_magic = aura.clone();
         as_magic.dispel_type = DispelType::Auto;
-        if survives(as_magic, scope.clone(), CharacterClass::Shaman) {
+        if survives(as_magic, DispelScope::Purge, CharacterClass::Shaman) {
             wrong.push(format!(
-                "{ability:?}: control: {scope:?} could not take it even as magic, so the \
+                "{ability:?}: control: Purge could not take it even as magic, so the \
                  check above proves nothing"
             ));
         }
@@ -686,6 +670,27 @@ fn no_dispel_frees_a_web() {
 #[test]
 fn no_dispel_lifts_the_frost_trap_slow() {
     assert_undispellable(AbilityType::FrostTrap);
+}
+
+/// Master's Call clears movement impairments whatever their class, so the
+/// rulings that put the Web and the Frost Trap slow out of every dispel's reach
+/// leave them in its: the Bird still frees its team from both.
+#[test]
+fn masters_call_still_frees_a_web_and_the_frost_trap_slow() {
+    let defs = AbilityDefinitions::default();
+    let scope = ally_removal(AbilityType::MastersCall)
+        .expect("Master's Call frees allies")
+        .scope;
+    for ability in [AbilityType::SpiderWeb, AbilityType::FrostTrap] {
+        assert!(
+            !survives(
+                landed_aura(&defs, ability),
+                scope.clone(),
+                CharacterClass::Hunter
+            ),
+            "Master's Call left {ability:?} on its ally"
+        );
+    }
 }
 
 /// User ruling, 2026-10-11: Psychic Scream is dispellable. A Priest's Dispel

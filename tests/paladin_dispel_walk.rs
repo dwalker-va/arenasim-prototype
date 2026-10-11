@@ -768,7 +768,11 @@ fn a_root_just_beyond_range_draws_a_short_walk_that_cleanses_it() {
     let speed = s.combatant.base_movement_speed;
     let freed = step_until_cleansed(&mut s, 6.0).expect("the root is cleansed");
     assert!(freed.from.distance(s.warrior_pos) <= range);
-    assert!(freed.at <= gap / speed + 0.1, "cleansed after {:.2}s", freed.at);
+    assert!(
+        freed.at <= gap / speed + 0.1,
+        "cleansed after {:.2}s",
+        freed.at
+    );
 }
 
 /// A held-back root farther than a short walk draws no walk: the root would
@@ -778,6 +782,23 @@ fn a_root_far_beyond_range_draws_no_walk() {
     let (mut s, _) = rooted_scene(cleanse_range() + 20.0, AbilityType::FrostNova, 60.0);
     let (_, directive, triggers) = s.posture();
     assert!(directive.is_none());
+    assert!(triggers.iter().all(|t| t != "DispelChase"));
+}
+
+/// A Spider's Web holding a teammate back is PHYSICAL (TBC's Web is a
+/// Physical-school root, AS-240), so Cleanse cannot take it: in Cleanse's reach
+/// the Paladin does not spend the GCD on it, and just beyond its range it draws
+/// no walk. The same scenes with Frost Nova cleanse and walk (above), so it is
+/// the Web's class that stops both, through `DispelScope::takes`.
+#[test]
+fn a_web_holding_a_teammate_back_draws_no_cleanse_and_no_walk() {
+    let (mut s, _) = rooted_scene(10.0, AbilityType::SpiderWeb, 60.0);
+    let (_, chosen) = s.decide();
+    assert_ne!(chosen, cleansed_warrior(&s), "Cleanse chosen for a Web");
+
+    let (mut s, _) = rooted_scene(cleanse_range() + 4.0, AbilityType::SpiderWeb, 60.0);
+    let (_, directive, triggers) = s.posture();
+    assert!(directive.is_none(), "walked toward a Web: {directive:?}");
     assert!(triggers.iter().all(|t| t != "DispelChase"));
 }
 
