@@ -81,30 +81,43 @@ an open, review-ready PR — nothing more.
 
    - *Still banned* — a section listing what PASSED. Tests, lint, byte-identity, local
      verification are table stakes; a PR that ran them needs no evidence section.
-   - *Required* — one or two sentences on what you could NOT verify and the reader must.
-     `screencapture` and `osascript` are permission-blocked on this machine, so an agent
-     genuinely cannot see pixels, and card after card has turned on a judgment only the
-     user can make: whether a bubble replacement reads cleanly, whether an impact feels
-     right, whether a joke lands.
+   - *Required* — what you could NOT verify and the reader must, **only when a person is
+     genuinely needed.** `screencapture` and `osascript` are permission-blocked on this
+     machine, so an agent cannot see pixels.
 
-   Name the thing, say what wrong looks like, say why no test covers it. Two models,
-   adapted from a real card and a real PR:
+   **When a step is written.** Only for something a person must judge or check by eye:
+   whether a visual reads clearly, a feel or timing call, or real-device input (a
+   right-click, a trackpad gesture — what `--ui-script` cannot prove reaches the
+   handler). Never write a step that says "run this and confirm the test's own claim":
+   a machine already checks that, and every such step is one more thing the milestone
+   review asks the user to tick for nothing.
+
+   **Length.** One or two sentences per step: what to look at, and what wrong looks
+   like. Two models:
 
    > Watch a same-role run render as clean sequential replacement — no overdraw, no two
-   > live bubbles on one speaker. The framing is the one thing only the renderer decides.
+   > live bubbles on one speaker.
 
-   > The one 5-beat Opening exchange puts its last beat at 11.5s, 1.5s after the gates —
-   > that is the ruling working as designed, but it is the thing to watch for.
+   > The one 5-beat Opening exchange puts its last beat at 11.5s, 1.5s after the gates;
+   > watch that it does not read as a beat spoken into a fight.
 
-   **Give it a fixed home:** the last line of the description, beginning
-   `**Human testing:**`. Same place every PR, so the user never hunts for it and the
-   Tester has a fixed thing to check.
+   **Replay steps.** When a step is watched in a replay, give its config as data, not
+   prose with JSON pasted in: the replay config JSON (the file `--replay` takes) on its
+   own line, prefixed `replay:`, directly after the step it belongs to, so the milestone
+   review guide can lift it mechanically:
 
-   **"Nothing needs human testing" is a valid answer and must be stated.** A docs-only or
-   headless-only change says so in one line and the reader stops looking; an absent
-   statement is indistinguishable from an author who never thought about it. The fixed
-   home is not a licence for an empty one — a sentence of substance, or an explicit
-   "nothing", never "N/A".
+   ```
+   **Human testing:** Watch the Druid's Travel Form shift read as one clean swap, with no frame where both bodies show.
+   replay: {"team1":["Druid"],"team2":["Warrior"],"map":"BasicArena","random_seed":7}
+   ```
+
+   **Give it a fixed home:** the end of the description, beginning `**Human testing:**`
+   (its `replay:` lines follow it). Same place every PR, so the user never hunts for it
+   and the Tester has a fixed thing to check.
+
+   **When none is needed,** which is most PRs, the line reads exactly
+   `**Human testing:** Nothing needs human testing` — stated, never omitted, never
+   "N/A". An absent line is indistinguishable from an author who never thought about it.
 
 6. **Never** merge the PR, write to the Dispatch board (its MCP tools or its HTTP API), or push to `main`.
 

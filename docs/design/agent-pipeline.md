@@ -266,19 +266,26 @@ core-combat card to run serially.
   `close_milestone` moves every merged card to `done`, and the Release Manager
   bundles them (see Release flow).
 
-**The PR says what to look at.** Every PR ends with a `**Human testing:**` line saying
-what a human has to check and why a machine could not — `screencapture` and `osascript`
-are permission-blocked on this machine, so an agent cannot see pixels, and plenty of
-cards turn on a judgment only the user can make (whether a replacement reads cleanly,
-whether an impact feels right, whether a joke lands). It is the *inverse* of the banned
-Proof/Testing section: that one lists what passed, this one lists what was never
-verified. "Nothing needs human testing" is written out rather than omitted, so a
-genuinely empty eyeball pass is distinguishable from an author who never considered one.
-A qualifying clause may say why ("— headless-only change"), but one that still asks for
-something ("…, but watch the glow") makes the line a step, never a nothing-to-check.
-The Engineer writes it; the Tester verifies the claim before APPROVE; the orchestrator
-copies it into the card's `human_testing`, one step per line, which is how it reaches
-the review checklist. An explicit "Nothing needs human testing" is copied as written:
+**The PR says what to look at — only when a person is needed.** Every PR ends with a
+`**Human testing:**` line. It is the *inverse* of the banned Proof/Testing section: that
+one lists what passed, this one lists what no machine could verify. A step is written
+only for what a person must judge or check by eye — whether a visual reads clearly, a
+feel or timing call, or real-device input — since `screencapture` and `osascript` are
+permission-blocked on this machine and an agent cannot see pixels. A step never asks the
+user to run something and confirm a test's own claim; a machine already checks that.
+Each step is one or two sentences: what to look at, and what wrong looks like. A step
+watched in a replay gives its config as data the milestone review guide can carry: the
+replay config JSON (what `--replay` takes) on its own line directly after the step,
+prefixed `replay:`. Otherwise the line reads `**Human testing:** Nothing needs human
+testing` — written out rather than omitted, so a genuinely empty eyeball pass is
+distinguishable from an author who never considered one. A qualifying clause may say
+why ("— headless-only change"), but one that still asks for something ("…, but watch
+the glow") makes the line a step, never a nothing-to-check.
+The Engineer writes it; the Tester checks it both ways before APPROVE — a "nothing"
+on a diff that changes something visible, and a step asking a person to confirm what a
+test already proves, are each a finding; the orchestrator
+copies it into the card's `human_testing`, one step per line with each `replay:` line
+kept under its step, which is how it reaches the review checklist. An explicit "Nothing needs human testing" is copied as written:
 the page lists that card as having nothing to check, never as a checkbox — and a
 merged card with no `human_testing` at all is flagged as missing its steps. The user tests the milestone from one build of `main` (the
 `review_sha`), not from each card's worktree.
@@ -783,7 +790,8 @@ other costs a result you believed.
   touches (movement probes, registration audit, layout/egui snapshots), and does
   an independent review of the diff (correctness, repo conventions,
   byte-identity constraints, missing registrations) plus a check that the PR's
-  human-testing statement is present and true. Reports a machine-parsed
+  human-testing statement is present, true, and asks a person only for what a
+  person must judge. Reports a machine-parsed
   `VERDICT: APPROVE | REJECT` with a PR URL and FINDINGS; on APPROVE the
   orchestrator merges the PR and marks the card merged, where it waits for the
   milestone review; on REJECT the card goes straight back to In Progress
