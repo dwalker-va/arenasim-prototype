@@ -16,6 +16,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { Board, BoardError, extractStateFromHtml } from "./board.js";
 import { defaultDbPath, defaultPort, liveDaemon } from "./paths.js";
+import { resolveGameBinary } from "./replay.js";
 import { startDaemon } from "./server.js";
 
 interface Args {
@@ -63,7 +64,13 @@ function out(obj: unknown): void {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function cmdServe(a: Args): Promise<void> {
-  const ready = startDaemon({ dbPath: flag(a, "db") ?? defaultDbPath(), port: Number(flag(a, "port") ?? defaultPort()) });
+  // --game-bin wins over $DISPATCH_BOARD_GAME_BIN, which wins over the main checkout's release build.
+  const game = resolveGameBinary(flag(a, "game-bin"));
+  const ready = startDaemon({
+    dbPath: flag(a, "db") ?? defaultDbPath(),
+    port: Number(flag(a, "port") ?? defaultPort()),
+    replay: { binary: game.binary, checkout: game.checkout },
+  });
   // Handlers go in BEFORE the daemon can announce itself: a SIGTERM that
   // arrives the moment it says "serving" must still close it and its lock.
   const stop = () => {
@@ -249,6 +256,8 @@ const HELP = `usage: node dist/cli.js <command>
 
   --db PATH    board database (default: <main checkout>/.dispatch/board.db, or $DISPATCH_BOARD_DB)
   --port N     daemon port (default 7453, or $DISPATCH_BOARD_PORT)
+  --game-bin PATH  serve: the game binary the review page's replay button launches
+               (default: <main checkout>/target/release/arenasim, or $DISPATCH_BOARD_GAME_BIN)
 `;
 
 async function main(): Promise<void> {

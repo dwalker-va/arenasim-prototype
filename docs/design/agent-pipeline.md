@@ -635,7 +635,9 @@ milestone's own `version`; `get_milestone` / `list_milestones` return it).
    `set_review_guide(name, guide: {units}, expected_version)`. Each unit's
    checks say what to watch and what wrong looks like, drawn from the cards'
    `human_testing`; give a check a `replay` config when a seeded headless match
-   shows it. A card with nothing to check still belongs to the unit its change
+   shows it — the page gives that check a ▶ that opens the replay in the game
+   client (the daemon launches the main checkout's `target/release/arenasim`,
+   so build it at `review_sha` before handing the review over). A card with nothing to check still belongs to the unit its change
    is part of.
 5. **Hand it to the user.** `update_milestone(status: "in_review", review_sha:
    <origin/main HEAD>)` — the build the checklist applies to — and give the user

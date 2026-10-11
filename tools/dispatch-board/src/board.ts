@@ -1771,6 +1771,25 @@ export class Board extends EventEmitter {
     return isObj(doc.review_guide) ? (doc.review_guide as unknown as ReviewGuide) : null;
   }
 
+  /**
+   * The replay config stored on one review guide check, looked up by its
+   * review key (`guide:<unit>:<check>`). The only source a replay launch
+   * takes its config from: an unknown milestone or key is not_found, and a
+   * check with no replay config is invalid.
+   */
+  guideReplay(name: string, key: string): Record<string, unknown> {
+    if (typeof key !== "string") invalid("key must be a guide check key: guide:<unit>:<check>");
+    const g = this.guideOf(JSON.parse(this.milestoneRow(name).doc) as Record<string, unknown>);
+    for (const u of g?.units ?? []) {
+      for (const c of u.checks) {
+        if (guideCheckKey(u.id, c.id) !== key) continue;
+        if (!isObj(c.replay)) invalid(`guide check ${key} on milestone ${name} has no replay config`);
+        return c.replay as Record<string, unknown>;
+      }
+    }
+    throw new BoardError("not_found", `no guide check ${key} on milestone ${name}`);
+  }
+
   private reviewItems(name: string): Map<string, ReviewItem> {
     const rows = this.db
       .prepare("SELECT key, version, checked_at, checked_by, draft FROM review_items WHERE milestone = ? ORDER BY rowid")
