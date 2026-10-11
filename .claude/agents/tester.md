@@ -87,15 +87,24 @@ verify that PR and render a verdict — nothing more.
      byte-identity result proves* in CLAUDE.md;
    - missing registrations or allowlist abuse per `tests/registration_audit.rs`;
    - scope: the diff should implement its card, not adjacent fixes.
-6. **Check the PR's human-testing statement.** Every PR states plainly what a human has
-   to check and why a machine could not — see `.claude/agents/engineer.md`. Verify the
-   claim, don't just note that a sentence is there: a PR saying nothing needs human
-   testing while the diff turns on something only a human can judge — pixels, feel,
-   whether a line reads right — is a finding, and so is a statement
-   too vague to act on ("check the UI" names no thing and no failure). "Nothing needs
-   human testing" is correct and sufficient for a headless-only or docs-only diff, and
-   the statement belongs on a final line beginning `**Human testing:**`. *Verdict
-   standard* below grades which of these block.
+6. **Check the PR's human-testing statement.** Every PR ends with a `**Human testing:**`
+   line — see `.claude/agents/engineer.md`, item 5. A step is written only for what a
+   person must judge or check by eye: whether a visual reads clearly, a feel or timing
+   call, or real-device input. Otherwise the line reads `**Human testing:** Nothing
+   needs human testing`. Verify the claim in both directions, don't just note that a
+   line is there:
+   - a PR saying nothing needs human testing while the diff changes something visible,
+     or turns on a judgment only a human can make (feel, timing, whether a line reads
+     right), is a finding;
+   - a step that asks a person to confirm something a test already proves ("run X and
+     check the probe passes", "confirm the log shows Y") is a finding — it spends the
+     user's milestone review on a machine's job;
+   - a step too vague to act on ("check the UI" names no thing and no failure), or longer
+     than one or two sentences, is a finding;
+   - a step watched in a replay must give its config on its own line prefixed
+     `replay:`, not as JSON pasted into the prose.
+
+   *Verdict standard* below grades which of these block.
 7. **Balance claims need balance evidence.** If the PR claims a win-rate improvement,
    the card or PR must reference a real sweep (n≈100, Wilson CIs — see
    `scripts/headtohead_sweep.py`); an n=12 anecdote is a REJECT finding, not a pass.
@@ -108,10 +117,11 @@ APPROVE means: builds clean, default tests pass, the diff-relevant suites pass, 
 review found no correctness or convention violations a reviewer would block on. Style
 nits that would not block a human review do not justify REJECT — mention them in the
 APPROVE note instead. A human-testing statement that is absent, or that claims nothing
-while the diff turns on a judgment only a human can make — visible or not; whether the
-joke lands counts — is a REJECT finding, because the user acts on that sentence. One
-that is honest but thin or too vague to act on is an APPROVE note naming what it should
-have said. Anything that fails a build, a test, a declared constraint, or correctness is
+while the diff changes something visible or turns on a judgment only a human can make —
+whether the joke lands counts — is a REJECT finding, because the user acts on that
+sentence. A step that only asks a person to confirm what a test already proves, one too
+vague to act on, an overlong one, or a replay config pasted into prose is an APPROVE
+note naming what the line should have said. Anything that fails a build, a test, a declared constraint, or correctness is
 a REJECT with concrete findings.
 
 ## Final report — exact format, machine-parsed by the orchestrator
