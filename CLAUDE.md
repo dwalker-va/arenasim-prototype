@@ -1348,7 +1348,8 @@ Input is injected at BEVY's input events (`CursorMoved` / `MouseButtonInput` /
 `ButtonInput<KeyCode>` and bevy_egui's own conversion both run exactly as they
 do for a physical device. Steps: `hover`, `click <id> [left|right]`, `key`,
 `wait`, `assert-state`, `assert-view`, `assert-note`, `assert-no-note`,
-`assert-visible` (drawn AND on screen), `assert-absent` (not drawn at all —
+`await-note <secs> <substring>` (polls on the wall clock for something the
+match produces on its own, e.g. a banter line), `assert-visible` (drawn AND on screen), `assert-absent` (not drawn at all —
 a widget that is merely scrolled out of view FAILS both, distinctly, so a
 negative can never pass for the wrong reason), `assert-enabled`, `dump`.
 
@@ -1456,6 +1457,16 @@ ConfigureMatch and never runs `load_class_icons` there. Anything that assumed
 are idempotent, so the fix is always one line in that state's chain in
 `src/states/mod.rs`. A consumer that provably never paints with the resource
 goes in the audit's `ALLOWLIST` with a justification.
+
+**A registered loader still paints nothing if Bevy looks in the wrong
+directory.** Every asset read — the RON configs and Bevy's `AssetServer` —
+resolves one root, `arenasim::paths::assets_dir()`: the checkout a dev binary
+was built in, or the `assets/` beside an installed one, never the working
+directory. The client builds `DefaultPlugins` with `paths::asset_plugin()`;
+Bevy's default resolves beside the EXECUTABLE whenever cargo is not the
+launcher, so `cargo run` cannot reproduce a blank-icon report and
+`target/release/arenasim` (what the review page's replay button runs) can.
+`tests/asset_root.rs` holds both halves.
 
 ### Continuous integration
 

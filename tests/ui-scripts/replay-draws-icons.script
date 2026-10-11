@@ -1,0 +1,23 @@
+# A replay draws its icons — the aura art on the team frames and the class
+# portraits in banter bubbles — and not their fallbacks (AS-248).
+#
+# Run it the way the review page's replay button does: the BUILT binary,
+# invoked directly, so cargo sets no CARGO_MANIFEST_DIR. `cargo run` cannot
+# reproduce the bug, because Bevy's default asset reader keys on that variable.
+# Any working directory will do; the asset root does not depend on it.
+#
+#   cargo build --release
+#   target/release/arenasim \
+#       --replay tests/ui-scripts/replay-draws-icons.json \
+#       --ui-script tests/ui-scripts/replay-draws-icons.script
+#
+# Both notes are drawn only on the branch that painted the loaded texture
+# (`team_frames::draw_aura_row`, `speech_bubbles::render_speech_bubbles`); the
+# fallback branches note `-missing:` instead.
+
+assert-state PlayMatch
+# Pre-match buffs land during the countdown.
+await-note 30 aura-icon-drawn:
+# The opening kill call names its target by portrait.
+await-note 60 banter-portrait-drawn:
+dump

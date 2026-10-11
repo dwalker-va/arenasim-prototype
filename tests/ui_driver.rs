@@ -351,6 +351,7 @@ assert-state ViewCombatant
 assert-view Ability(MortalStrike)
 assert-note equip-row Ring1 item=SignetOfFocus override=true
 assert-no-note tooltip:Item(BandOfAccuria)
+await-note 30 banter-portrait-drawn: Rogue
 assert-visible equip:restore
 assert-absent pick:BandOfAccuria
 assert-enabled equip:restore false
@@ -389,6 +390,10 @@ dump
             },
             Step::AssertNoNote {
                 needle: "tooltip:Item(BandOfAccuria)".into()
+            },
+            Step::AwaitNote {
+                secs: 30,
+                needle: "banter-portrait-drawn: Rogue".into()
             },
             Step::AssertVisible {
                 id: "equip:restore".into()
@@ -463,6 +468,9 @@ fn every_malformed_step_reports_its_own_line_and_reason() {
             "`true` or `false`",
         ),
         ("assert-note\n", 1, "needs a substring"),
+        ("await-note soon aura\n", 1, "timeout in whole seconds"),
+        ("await-note 0 aura\n", 1, "timeout in whole seconds"),
+        ("await-note 30\n", 1, "needs a substring after its timeout"),
         ("dump now\n", 1, "takes no arguments"),
         ("hover a\n\nkey Nope\n", 3, "unknown key `Nope`"),
     ] {
@@ -501,6 +509,7 @@ fn every_shipped_script_parses() {
         "view-combatant-tooltips.script",
         "equipment-restore-defaults.script",
         "replay-boots-into-the-match.script",
+        "replay-draws-icons.script",
     ];
 
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui-scripts");
@@ -789,6 +798,32 @@ fn only_assertions_expand_to_a_check() {
     }
 }
 
+/// `await-note` polls on the WALL CLOCK; it is not a one-frame `Check`.
+///
+/// It waits on something the game's own clock produces (a banter line, an
+/// aura landing), so routing it to `Check` would read one frame and fail
+/// whenever the note had not happened yet, and an `Idle` would be a frame
+/// count standing in for seconds.
+#[test]
+fn await_note_polls_rather_than_checking_once() {
+    use arenasim::ui::driver::runner::Micro;
+
+    let q = runner::expand(
+        &Step::AwaitNote {
+            secs: 30,
+            needle: "aura-icon-drawn:".into(),
+        },
+        3,
+    );
+    assert_eq!(
+        q.into_iter().collect::<Vec<_>>(),
+        vec![Micro::AwaitNote {
+            secs: 30,
+            needle: "aura-icon-drawn:".into()
+        }]
+    );
+}
+
 /// The assertions that wait for something to ARRIVE retry; the ones satisfied
 /// by ABSENCE never do.
 ///
@@ -913,6 +948,11 @@ const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     ("src/states/encyclopedia/mod.rs", 2),
     ("src/states/encyclopedia/widget.rs", 1),
     ("src/states/main_menu.rs", 1),
+    (
+        "src/states/play_match/rendering/effects/speech_bubbles.rs",
+        2,
+    ),
+    ("src/states/play_match/rendering/team_frames.rs", 2),
     ("src/states/view_combatant_ui.rs", 14),
 ];
 
@@ -958,8 +998,9 @@ fn driver_call_sites() -> Vec<(String, usize, String)> {
 /// Pull out each driver `mark` / `note` call, balanced to its closing paren.
 ///
 /// Works backwards from the function name rather than forwards from a list of
-/// spellings: find `mark(` / `note(`, walk back over the path characters, and
-/// accept when the path ends in `driver::`. That covers `ui_driver::note(`,
+/// spellings: find `mark(` / `note(` (and their `_into(` forms, for draw
+/// sites that hold a painter rather than a `Ui`), walk back over the path
+/// characters, and accept when the path ends in `driver::`. That covers `ui_driver::note(`,
 /// `driver::note(` and `crate::ui::driver::note(` alike — the last of which
 /// the opener-list version could not see at all.
 fn extract_calls(text: &str) -> Vec<(usize, String)> {
@@ -968,7 +1009,7 @@ fn extract_calls(text: &str) -> Vec<(usize, String)> {
     }
 
     let mut calls = Vec::new();
-    for name in ["mark(", "note("] {
+    for name in ["mark(", "note(", "mark_into(", "note_into("] {
         let mut from = 0;
         while let Some(rel) = text[from..].find(name) {
             let start = from + rel;
@@ -1028,6 +1069,7 @@ fn the_call_site_scanner_sees_every_spelling() {
         crate::ui::driver::note(ui, format_args!("b {}", names.join("/")));
         driver::mark(ui, rect, true, format_args!("c"));
         super::super::ui::driver::mark(ui, rect, true, format_args!("d"));
+        ui_driver::note_into(painter.ctx(), format_args!("h {}", names.join("/")));
         // Not driver calls, and must not be collected:
         registry::mark(ctx, rect, true, false, format_args!("e"));
         thing.remark(format_args!("f"));
@@ -1044,8 +1086,8 @@ fn the_call_site_scanner_sees_every_spelling() {
     let texts: Vec<&str> = found.iter().map(|(_, c)| c.as_str()).collect();
     assert_eq!(
         found.len(),
-        4,
-        "expected the four QUALIFIED driver calls and nothing else, got {texts:#?}"
+        5,
+        "expected the five QUALIFIED driver calls and nothing else, got {texts:#?}"
     );
     assert!(
         !texts.iter().any(|c| c.starts_with("note(")),
@@ -1076,7 +1118,11 @@ fn the_call_site_scanner_sees_every_spelling() {
 
     // And the markers flag the known-bad shape in BOTH spellings — the plant
     // that the first version's self-check was missing.
-    for spelling in ["ui_driver::note(", "crate::ui::driver::note("] {
+    for spelling in [
+        "ui_driver::note(",
+        "crate::ui::driver::note(",
+        "ui_driver::note_into(",
+    ] {
         let call = found
             .iter()
             .find(|(_, c)| c.starts_with(spelling))

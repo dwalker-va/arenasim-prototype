@@ -119,6 +119,7 @@ assert-state <GameState>    # the Rust variant name, e.g. ViewCombatant
 assert-view <Topic>         # the encyclopedia's topic, Debug form, or `none`
 assert-note <substring>     # some note from the last drawn frame contains this
 assert-no-note <substring>
+await-note <secs> <substring>  # poll until a frame carries it, up to <secs> wall clock
 assert-visible <id>         # drawn AND on screen
 assert-absent <id>          # not drawn AT ALL
 assert-enabled <id> <true|false>   # reads state, on screen or not
@@ -168,7 +169,10 @@ route in), View Combatant's kit rows, strategic-option icons, equipment rows,
 picker entries and Restore defaults, and the encyclopedia's Back/Home. The
 tooltip probe is a single `note` inside `encyclopedia::widget::link_with`,
 which every linked icon in the client funnels through, so one call covers them
-all.
+all. In a match, the team frames' aura row and the banter bubbles' class
+portraits note `aura-icon-drawn:<key>` / `banter-portrait-drawn:<Class>` when
+the loaded art painted and `…-missing:…` when the fallback did (draw sites
+with only a painter call `ui_driver::note_into(painter.ctx(), …)`).
 
 Ids are conventions, not types: `menu:MATCH`, `class:Warrior`, `slot:t1s0`,
 `slot:t1s0:change`, `kit:MortalStrike`, `strategic:BattleShout`,
