@@ -13,11 +13,14 @@
 //! match played with no aura icons, no class portraits and no banter art — while
 //! the configs, read relative to the working directory, loaded fine and hid it.
 //!
-//! This file reproduces that launch inside the test process — cargo's
-//! variables removed, the working directory moved somewhere with no `assets/`
-//! — before anything resolves a path, then asks Bevy's own reader where it
-//! would look. It is one test on purpose: the environment and the working
-//! directory are process-wide, and `arenasim::paths` resolves them once.
+//! The root is the build's own (`paths::assets_dir` states the order), so
+//! nothing about a run may steer it. This file reproduces a launch that tries
+//! — the working directory moved somewhere with no `assets/`, and an inherited
+//! `CARGO_MANIFEST_DIR` naming a different, complete checkout — before
+//! anything resolves a path, then asks Bevy's own reader where it would look.
+//! It passes wherever the test binary itself was built, including an external
+//! `CARGO_TARGET_DIR`. It is one test on purpose: the environment and the
+//! working directory are process-wide, and `arenasim::paths` resolves once.
 
 use std::path::{Path, PathBuf};
 
@@ -56,10 +59,20 @@ fn missing_under(root: &Path, paths: &[String]) -> Vec<String> {
 fn bevy_and_the_config_loaders_share_one_asset_root_whatever_launched_the_binary() {
     let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-    // The replay button's launch: no cargo in the environment, and a working
-    // directory that holds no `assets/`. Must happen before ANY call into
-    // `arenasim::paths`, which memoizes what it sees.
-    std::env::remove_var("CARGO_MANIFEST_DIR");
+    // A launch nothing about the run can steer: a working directory that holds
+    // no `assets/`, and a `CARGO_MANIFEST_DIR` INHERITED from some other shell
+    // that names a DIFFERENT checkout — a complete one, so reading it would
+    // succeed silently and swap this binary onto another tree's configs (the
+    // A/B-voiding case). Must happen before ANY call into `arenasim::paths`,
+    // which memoizes what it sees.
+    let decoy = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(decoy.path().join("assets/config")).expect("decoy assets");
+    std::fs::copy(
+        checkout.join("assets/config/abilities.ron"),
+        decoy.path().join("assets/config/abilities.ron"),
+    )
+    .expect("decoy abilities.ron");
+    std::env::set_var("CARGO_MANIFEST_DIR", decoy.path());
     std::env::remove_var("BEVY_ASSET_ROOT");
     let elsewhere = tempfile::tempdir().expect("tempdir");
     std::env::set_current_dir(elsewhere.path()).expect("leave the checkout");
@@ -81,15 +94,16 @@ fn bevy_and_the_config_loaders_share_one_asset_root_whatever_launched_the_binary
     );
 
     // Non-vacuity for the reproduction itself: under this environment Bevy's
-    // DEFAULT reader must miss, or this test is not standing where the replay
-    // button stands and the assertion below proves nothing.
+    // DEFAULT reader (which follows the runtime variable to the decoy) must
+    // miss, or this test is not standing where a misdirected launch stands and
+    // the assertion below proves nothing.
     let default_root = FileAssetReader::new("assets").root_path().clone();
     let missed = missing_under(&default_root, &paths);
     assert_eq!(
         missed.len(),
         paths.len(),
-        "Bevy's default reader found assets at {default_root:?} — the test no \
-         longer reproduces a launch without cargo, so it cannot catch the bug"
+        "Bevy's default reader found the HUD assets at {default_root:?} — the \
+         test no longer reproduces a misdirected launch, so it cannot catch the bug"
     );
 
     // The plugin the client is built with: Bevy's reader, rooted by it, finds

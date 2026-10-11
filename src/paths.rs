@@ -117,25 +117,35 @@ fn is_development() -> bool {
     })
 }
 
-/// Root of the game's read-only asset tree, as an absolute path wherever one
-/// can be resolved.
+/// Root of the game's read-only asset tree — an absolute path, resolved once.
 ///
 /// **Every asset read goes through here — the RON configs read straight off
 /// the filesystem, and Bevy's `AssetServer` (icons, models), which the
 /// graphical client configures with [`asset_plugin`].** Two readers with two
-/// rules is the bug this closes: the RON loaders resolved `assets` against the
-/// working directory, while Bevy's reader, left to its default, resolves
-/// against `CARGO_MANIFEST_DIR` or else the executable's own directory. Under
-/// `cargo run` those agree. Launch `target/release/arenasim` directly (the
-/// review page's replay button does) and the configs load from the checkout
-/// while every icon is looked for in `target/release/assets` — a match that
-/// plays correctly with no aura icons, no class portraits and no banter art.
+/// rules was AS-248: the RON loaders resolved `assets` against the working
+/// directory, while Bevy's reader, left to its default, resolves against
+/// `CARGO_MANIFEST_DIR` or else the executable's own directory. Launch
+/// `target/release/arenasim` directly (the review page's replay button does)
+/// and the configs loaded while every icon was looked for in
+/// `target/release/assets`.
 ///
-/// The root does not depend on the working directory: a development binary
-/// reads the assets of the checkout it was built in, an installed one the
-/// `assets/` beside it.
+/// The root is the first ASSET TREE (a directory holding
+/// `config/abilities.ron`) found in this order — see [`resolve_asset_root`]:
+///
+/// 1. `assets/` beside the executable — a packaged build (`Contents/MacOS`
+///    in the `.app`, beside the `.exe` in the zip);
+/// 2. `assets/` in the checkout this binary was COMPILED in — a dev binary
+///    reads its own build's assets wherever it runs from, including out of an
+///    external `CARGO_TARGET_DIR` or copied out of `target/`;
+/// 3. `assets/` in the nearest ancestor of the executable that has one.
+///
+/// Nothing at run time names the root: not the working directory, and never
+/// the runtime `CARGO_MANIFEST_DIR`, which an inherited shell variable can
+/// point at a different checkout and silently swap one arm of an A/B onto
+/// the other's configs. Finding none of the three is fatal, naming every path
+/// tried.
 pub fn assets_dir() -> PathBuf {
-    assets_dir_from(asset_base())
+    asset_root().to_path_buf()
 }
 
 /// Path to one asset, named relative to the asset root
@@ -163,53 +173,57 @@ pub fn asset_plugin() -> bevy::asset::AssetPlugin {
     }
 }
 
-/// The directory the asset tree hangs off, resolved once — `None` only when
-/// neither cargo nor the executable's location says anything.
-fn asset_base() -> Option<&'static Path> {
-    static BASE: OnceLock<Option<PathBuf>> = OnceLock::new();
+/// The checkout this crate was compiled in. Compile-time on purpose: it names
+/// the build, and nothing in the environment of a later run can change it.
+const BUILD_CHECKOUT: &str = env!("CARGO_MANIFEST_DIR");
 
-    BASE.get_or_init(|| {
-        let exe = match std::env::current_exe() {
-            Ok(exe) => Some(exe),
-            Err(e) => {
-                warn!("Could not resolve the executable path ({e}); reading assets relatively");
-                None
-            }
-        };
-        let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from);
-        resolve_asset_base(manifest_dir.as_deref(), exe.as_deref())
+/// The file whose presence makes a directory an asset tree. Every build reads
+/// it at startup, so a directory without it could not run the game anyway.
+const ASSET_TREE_MARKER: &str = "config/abilities.ron";
+
+/// [`assets_dir`]'s resolution, memoized for the process.
+fn asset_root() -> &'static Path {
+    static ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+    ROOT.get_or_init(|| {
+        let exe = std::env::current_exe().ok();
+        resolve_asset_root(exe.as_deref(), Path::new(BUILD_CHECKOUT)).unwrap_or_else(|tried| {
+            panic!(
+                "could not find the game's assets — no `{ASSETS_DIR}/` directory holding \
+                 `{ASSET_TREE_MARKER}`. Tried, in order:\n  {}",
+                tried
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n  ")
+            )
+        })
     })
-    .as_deref()
 }
 
-/// The asset base from the same two signals [`detect_development`] reads, in
-/// the same order:
-///
-/// - `CARGO_MANIFEST_DIR` (`cargo run` / `cargo test`) — the package being run;
-/// - else the checkout the executable sits in (`target/release/arenasim`
-///   invoked directly, by a script or by the review page);
-/// - else the executable's own directory — an installed build, where
-///   `assets/` ships beside the binary (`Contents/MacOS/assets` inside a
-///   `.app`, next to the `.exe` in the unpacked Windows zip);
-/// - and `None` when the executable could not be located at all, which falls
-///   back to a working-directory-relative `assets`.
-fn resolve_asset_base(manifest_dir: Option<&Path>, exe: Option<&Path>) -> Option<PathBuf> {
-    if let Some(dir) = manifest_dir {
-        return Some(dir.to_path_buf());
-    }
-    let exe = exe?;
-    checkout_containing(exe)
-        .or_else(|| exe.parent())
-        .map(Path::to_path_buf)
-}
+/// The asset root for an executable at `exe`, built in `build_checkout`, in
+/// the order [`assets_dir`] documents; `Err` lists every candidate tried.
+fn resolve_asset_root(exe: Option<&Path>, build_checkout: &Path) -> Result<PathBuf, Vec<PathBuf>> {
+    let exe_dir = exe.and_then(Path::parent);
+    let candidates = exe_dir
+        .map(|dir| dir.join(ASSETS_DIR))
+        .into_iter()
+        .chain(std::iter::once(build_checkout.join(ASSETS_DIR)))
+        .chain(
+            exe_dir
+                .into_iter()
+                .flat_map(|dir| dir.ancestors().skip(1))
+                .map(|dir| dir.join(ASSETS_DIR)),
+        );
 
-/// Asset root for a given base — `None` meaning nothing could be resolved,
-/// which keeps a working-directory-relative `assets`.
-fn assets_dir_from(base: Option<&Path>) -> PathBuf {
-    match base {
-        Some(dir) => dir.join(ASSETS_DIR),
-        None => PathBuf::from(ASSETS_DIR),
+    let mut tried = Vec::new();
+    for candidate in candidates {
+        if candidate.join(ASSET_TREE_MARKER).is_file() {
+            return Ok(candidate);
+        }
+        tried.push(candidate);
     }
+    Err(tried)
 }
 
 /// Per-user data directory, or `None` when this is a development build or the
@@ -380,71 +394,100 @@ mod tests {
         assert_eq!(match_log_dir(), PathBuf::from("match_logs"));
     }
 
-    /// Nothing resolvable: the working-directory-relative literal the
-    /// resolver replaced.
-    #[test]
-    fn an_unresolvable_base_reads_assets_relatively() {
-        assert_eq!(assets_dir_from(None), PathBuf::from("assets"));
+    /// A directory that counts as an asset tree.
+    fn plant_assets(dir: &Path) -> PathBuf {
+        let assets = dir.join("assets");
+        std::fs::create_dir_all(assets.join("config")).expect("create assets/config");
+        std::fs::write(assets.join(ASSET_TREE_MARKER), "()").expect("write marker");
+        assets
     }
 
-    /// `target/release/arenasim` invoked directly — no cargo in the
-    /// environment, and the review page's replay button among the callers.
-    /// The assets are the CHECKOUT's, not `target/release/assets`, which is
-    /// where Bevy's default reader looks and found nothing (AS-248).
+    /// A packaged build: `assets/` ships beside the executable, and wins even
+    /// though the build checkout still exists on this machine.
     #[test]
-    fn a_direct_invocation_reads_the_checkouts_assets() {
-        let root = tempfile::tempdir().expect("tempdir");
-        std::fs::write(root.path().join("Cargo.toml"), "[package]\n").expect("write manifest");
-        let exe = root.path().join("target/release/arenasim");
+    fn assets_beside_the_executable_win() {
+        let install = tempfile::tempdir().expect("tempdir");
+        let checkout = tempfile::tempdir().expect("tempdir");
+        let beside = plant_assets(install.path());
+        plant_assets(checkout.path());
+        let exe = install.path().join("arenasim");
+
+        assert_eq!(resolve_asset_root(Some(&exe), checkout.path()), Ok(beside));
+    }
+
+    /// `target/release/arenasim` invoked directly — the review page's replay
+    /// button. Nothing beside it, so the build checkout's assets, not
+    /// `target/release/assets` (AS-248).
+    #[test]
+    fn a_dev_binary_reads_its_build_checkout() {
+        let checkout = tempfile::tempdir().expect("tempdir");
+        let assets = plant_assets(checkout.path());
+        let exe = checkout.path().join("target/release/arenasim");
         std::fs::create_dir_all(exe.parent().unwrap()).expect("create target dir");
 
-        let base = resolve_asset_base(None, Some(&exe));
-        assert_eq!(base.as_deref(), Some(root.path()));
-        assert_eq!(assets_dir_from(base.as_deref()), root.path().join("assets"));
+        assert_eq!(resolve_asset_root(Some(&exe), checkout.path()), Ok(assets));
     }
 
-    /// Cargo names the package, and wins — even over an external target dir,
-    /// which the manifest walk cannot see out of.
+    /// A binary built into an external `CARGO_TARGET_DIR`, or copied out of
+    /// `target/` (a sweep arm), has no checkout above it. It still reads the
+    /// checkout it was built in — not whatever the walk up would find.
     #[test]
-    fn cargo_names_the_asset_base() {
+    fn a_binary_outside_its_checkout_still_reads_its_build_checkout() {
         let checkout = tempfile::tempdir().expect("tempdir");
-        let target = tempfile::tempdir().expect("tempdir");
-        let exe = target.path().join("debug/deps/arenasim-abc123");
+        let assets = plant_assets(checkout.path());
+        let scratch = tempfile::tempdir().expect("tempdir");
+        // A DIFFERENT asset tree above the copied binary, which the walk
+        // would find: the build checkout must outrank it.
+        plant_assets(scratch.path());
+        let exe = scratch.path().join("arms/before/arenasim");
+        std::fs::create_dir_all(exe.parent().unwrap()).expect("create arm dir");
 
-        assert_eq!(
-            resolve_asset_base(Some(checkout.path()), Some(&exe)).as_deref(),
-            Some(checkout.path())
-        );
+        assert_eq!(resolve_asset_root(Some(&exe), checkout.path()), Ok(assets));
     }
 
-    /// An installed build: no manifest above it and no cargo, so the assets
-    /// are the ones shipped beside the executable.
+    /// The build checkout is gone (or the binary moved to another machine):
+    /// fall back to the nearest asset tree above the executable.
     #[test]
-    fn an_installed_build_reads_beside_the_executable() {
-        let root = tempfile::tempdir().expect("tempdir");
-        let exe = root.path().join("ArenaSim.app/Contents/MacOS/arenasim");
+    fn a_missing_build_checkout_falls_back_to_the_walk_up() {
+        let gone = tempfile::tempdir().expect("tempdir");
+        let elsewhere = tempfile::tempdir().expect("tempdir");
+        let assets = plant_assets(elsewhere.path());
+        let exe = elsewhere.path().join("target/release/arenasim");
+        std::fs::create_dir_all(exe.parent().unwrap()).expect("create target dir");
 
-        assert_eq!(
-            resolve_asset_base(None, Some(&exe)).as_deref(),
-            exe.parent()
-        );
-        assert_eq!(resolve_asset_base(None, None), None);
+        assert_eq!(resolve_asset_root(Some(&exe), gone.path()), Ok(assets));
     }
 
-    /// An installed build reads them from beside the executable — inside the
-    /// `.app` or next to the unpacked `.exe`, never from the working directory.
+    /// An empty `assets/` is not an asset tree; neither is a missing one.
+    /// Finding none is an error that names every candidate, in order.
     #[test]
-    fn installed_build_reads_assets_beside_the_executable() {
-        let exe_dir = Path::new("/Applications/ArenaSim.app/Contents/MacOS");
+    fn finding_no_asset_tree_lists_every_path_tried() {
+        let checkout = tempfile::tempdir().expect("tempdir");
+        let install = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(install.path().join("assets")).expect("empty assets dir");
+        let exe = install.path().join("arenasim");
 
+        let tried = resolve_asset_root(Some(&exe), checkout.path()).expect_err("nothing to find");
         assert_eq!(
-            assets_dir_from(Some(exe_dir)),
-            PathBuf::from("/Applications/ArenaSim.app/Contents/MacOS/assets")
+            tried[0],
+            install.path().join("assets"),
+            "beside the executable first"
+        );
+        assert_eq!(
+            tried[1],
+            checkout.path().join("assets"),
+            "then the build checkout"
+        );
+        assert!(
+            tried[2..]
+                .iter()
+                .any(|p| p == &install.path().parent().unwrap().join("assets")),
+            "then the walk up: {tried:?}"
         );
     }
 
-    /// The running test binary sits in the checkout, so the real resolver must
-    /// hand back the checkout's own config, by an absolute path.
+    /// The running test binary resolves its own checkout's config, by an
+    /// absolute path.
     #[test]
     fn the_running_test_binary_reads_the_checkouts_assets() {
         let path = asset_path("config/abilities.ron");

@@ -1460,13 +1460,19 @@ goes in the audit's `ALLOWLIST` with a justification.
 
 **A registered loader still paints nothing if Bevy looks in the wrong
 directory.** Every asset read — the RON configs and Bevy's `AssetServer` —
-resolves one root, `arenasim::paths::assets_dir()`: the checkout a dev binary
-was built in, or the `assets/` beside an installed one, never the working
-directory. The client builds `DefaultPlugins` with `paths::asset_plugin()`;
-Bevy's default resolves beside the EXECUTABLE whenever cargo is not the
-launcher, so `cargo run` cannot reproduce a blank-icon report and
-`target/release/arenasim` (what the review page's replay button runs) can.
-`tests/asset_root.rs` holds both halves.
+resolves one root, `arenasim::paths::assets_dir()`, the first `assets/` holding
+`config/abilities.ron` in this order: beside the executable (a packaged
+build); in the checkout the binary was COMPILED in (compile-time
+`CARGO_MANIFEST_DIR`, so a dev binary reads its own build's assets wherever it
+runs from — an external `CARGO_TARGET_DIR`, a sweep arm copied out of
+`target/`); the nearest ancestor of the executable that has one. None found is
+fatal, listing every path tried. Nothing about the run steers it: not the
+working directory, and never the RUNTIME `CARGO_MANIFEST_DIR`, which an
+inherited shell variable can point at another checkout. The client builds
+`DefaultPlugins` with `paths::asset_plugin()`; Bevy's default resolves beside
+the EXECUTABLE whenever cargo is not the launcher, so `cargo run` cannot
+reproduce a blank-icon report and `target/release/arenasim` (what the review
+page's replay button runs) can. `tests/asset_root.rs` holds both halves.
 
 ### Continuous integration
 
