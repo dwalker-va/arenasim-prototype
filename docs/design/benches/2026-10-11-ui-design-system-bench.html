@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI Design System Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<!--
+  AS-251 bench: the proposed ArenaSim UI tokens and component set, drawn with
+  the game's own face (Rajdhani Bold — the client font stack, ui::fonts) on the
+  proposed colour roles. Every knob emits the Rust constant it would become in
+  src/ui/theme.rs (bottom of the page).
+
+  What this bench can and cannot show, so the sign-off is on something
+  shippable:
+  - egui renders text with its own rasteriser and hinting; Rajdhani here is the
+    same face but browser-rendered, so glyph weight reads ~5-10% lighter than
+    in the client. Sizes are egui points = CSS px at 1x.
+  - Every shape below is something egui can paint: rects with a fill, a 1px
+    stroke and a uniform corner radius; text; images. No gradients, shadows
+    (except egui's own popup shadow), blur or per-corner radii are used.
+  - Class colours and icon art are NOT drawn as textures; icons are flat
+    placeholders, the same as the kittest snapshots draw them.
+-->
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#14141e; --panel:#1e1e2a; --raised:#252538; --line:#3c3c50; --line-hi:#56567a;
+  --accent:#e6cc99; --text:#e6d9bf; --muted:#8e8ea6; --dim:#66667e; --link:#7fb2e5;
+  --select:#33415e; --warn:#dcaa5a; --danger:#cd6e6e;
+  --team1:#6496ff; --team2:#ff6464;
+  --dmg:#ff9664; --heal:#6ed782; --taken:#e66e6e; --kill:#ffcd5a;
+  --buff:#6fae7e; --debuff:#d06a5b;
+  --r-sm:3px; --r-md:6px; --r-lg:10px;
+  --s1:2px; --s2:4px; --s3:8px; --s4:12px; --s5:16px; --s6:24px; --s7:32px; --s8:48px;
+  --t-display:42px; --t-title:30px; --t-h2:20px; --t-h3:16px; --t-body:14px; --t-small:12px; --t-micro:10px;
+  --game:"Rajdhani", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--game);font-weight:700;font-size:var(--t-body)}
+body{padding:16px 16px 48px}
+a{color:var(--link)}
+.wrap{max-width:1240px;margin:0 auto}
+header.page{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:end;justify-content:space-between;margin-bottom:16px}
+h1{font-size:var(--t-title);color:var(--accent);margin:0;letter-spacing:.02em;text-transform:uppercase}
+.lede{color:var(--muted);font-size:var(--t-small);max-width:80ch;line-height:1.45;font-weight:400}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px}
+@media (max-width:960px){.grid{grid-template-columns:1fr}}
+section.block{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);padding:var(--s5);margin-bottom:var(--s5);min-width:0}
+.sec-h{font-size:var(--t-small);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 var(--s4)}
+.note{font-family:var(--mono);font-weight:400;font-size:11px;color:var(--dim);margin-top:var(--s3);line-height:1.5}
+.row{display:flex;flex-wrap:wrap;gap:var(--s3);align-items:center}
+/* swatches */
+.sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:var(--s3)}
+.sw{border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;background:var(--bg)}
+.sw .chip{height:38px}
+.sw .lbl{padding:4px 6px;font-size:12px}
+.sw .lbl code{display:block;font-family:var(--mono);font-weight:400;font-size:10.5px;color:var(--muted)}
+.group-h{color:var(--muted);font-size:var(--t-small);text-transform:uppercase;letter-spacing:.06em;margin:var(--s4) 0 var(--s2)}
+/* type */
+.type-row{display:grid;grid-template-columns:110px minmax(0,1fr);gap:var(--s4);align-items:baseline;border-top:1px solid var(--line);padding:6px 0}
+.type-row:first-child{border-top:0}
+.type-row code{font-family:var(--mono);font-weight:400;font-size:11px;color:var(--muted)}
+/* spacing / radius / icons */
+.scale{display:flex;flex-wrap:wrap;gap:var(--s4);align-items:end}
+.scale .bar{background:var(--accent);height:10px}
+.scale .it{display:flex;flex-direction:column;gap:4px;align-items:flex-start;font-size:11px;color:var(--muted)}
+.rad{width:56px;height:40px;border:1px solid var(--line-hi);background:var(--raised)}
+.ico{background:var(--raised);border:1px solid var(--line)}
+/* components */
+.btn{font-family:var(--game);font-weight:700;font-size:var(--t-body);letter-spacing:.04em;text-transform:uppercase;
+  padding:0 var(--s5);height:32px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--panel);color:var(--text);cursor:pointer}
+.btn:hover{background:var(--raised);border-color:var(--line-hi);color:var(--accent)}
+.btn:active{border-color:var(--accent)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);height:44px;font-size:var(--t-h3);padding:0 var(--s6)}
+.btn.primary:hover{filter:brightness(1.08);color:var(--bg)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--muted)}
+.btn.ghost:hover{color:var(--accent);background:transparent;border-color:transparent}
+.btn.danger{color:var(--danger);border-color:#5a3434}
+.btn.danger:hover{border-color:var(--danger);color:var(--danger)}
+.btn[disabled]{color:var(--dim);background:var(--panel);border-color:var(--line);cursor:not-allowed;filter:none}
+.btn.icon{width:28px;height:28px;padding:0;font-size:var(--t-body)}
+.navc{display:flex;align-items:center;gap:var(--s2)}
+.navc .btn{height:26px;font-size:var(--t-small);padding:0 var(--s3)}
+.screen-h{display:flex;align-items:center;gap:var(--s5);padding:var(--s4) var(--s5);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.screen-h .title{font-size:var(--t-title);color:var(--accent);text-transform:uppercase;letter-spacing:.02em}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);padding:var(--s4)}
+.panel.team1{border-color:var(--team1)} .panel.team2{border-color:var(--team2)}
+.panel-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--s3)}
+.panel-h .t{font-size:var(--t-h2);text-transform:uppercase}
+.tabs{display:flex;gap:var(--s2);border-bottom:1px solid var(--line);padding-bottom:var(--s2)}
+.tab{font-size:var(--t-body);text-transform:uppercase;padding:6px var(--s4);border-radius:var(--r-sm);color:var(--muted);border:1px solid transparent;cursor:pointer}
+.tab:hover{color:var(--accent)}
+.tab.on{color:var(--accent);background:var(--raised);border-color:var(--line-hi)}
+.chip{font-size:var(--t-small);padding:2px var(--s3);border-radius:999px;border:1px solid var(--line);color:var(--muted);cursor:pointer}
+.chip.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.lrow{display:flex;align-items:center;gap:var(--s3);padding:6px var(--s3);border-radius:var(--r-sm);border:1px solid transparent;cursor:pointer}
+.lrow:hover{background:var(--raised);border-color:var(--line-hi)}
+.lrow.sel{background:var(--select);border-color:var(--accent)}
+.lrow .nm{font-size:var(--t-body)} .lrow .sub{font-size:var(--t-small);color:var(--muted);font-weight:400}
+.lrow .meta{margin-left:auto;font-size:var(--t-small);color:var(--dim)}
+.stat{display:flex;justify-content:space-between;font-size:var(--t-small);padding:3px 0}
+.stat .k{color:var(--muted)} .stat .v{color:var(--text)}
+.tip{background:var(--bg);border:1px solid var(--line-hi);border-radius:var(--r-md);padding:var(--s3) var(--s4);max-width:320px;box-shadow:0 4px 12px rgba(0,0,0,.5)}
+.tip .h{font-size:var(--t-h3)} .tip .m{color:var(--muted);font-size:var(--t-small)} .tip .b{font-size:var(--t-small);margin-top:4px;line-height:1.35}
+.tip .hint{color:var(--dim);font-size:var(--t-micro);margin-top:var(--s2);text-transform:uppercase;letter-spacing:.06em}
+.licon{display:inline-flex;align-items:center;gap:6px;color:var(--link);cursor:pointer}
+.licon .i{width:20px;height:20px;background:var(--raised);border:1px solid var(--line)}
+.modal-back{position:relative;background:rgba(10,10,16,.6);border-radius:var(--r-md);padding:var(--s6);display:flex;justify-content:center}
+.modal{background:var(--panel);border:1px solid var(--line-hi);border-radius:var(--r-lg);width:min(360px,100%);box-shadow:0 8px 24px rgba(0,0,0,.6)}
+.modal .mh{padding:var(--s3) var(--s4);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.modal .mh .t{font-size:var(--t-h3);color:var(--accent)}
+.modal .mb{padding:var(--s3)}
+.empty{border:1px dashed var(--line);border-radius:var(--r-md);padding:var(--s6);text-align:center;color:var(--muted)}
+.empty .h{font-size:var(--t-h3);color:var(--text)} .empty .b{font-size:var(--t-small);font-weight:400;margin-top:4px}
+.rbar{height:8px;background:#11111a;border-radius:var(--r-sm);overflow:hidden} .rbar>i{display:block;height:100%}
+.mini-frame{background:#1f1f26;border-left:3px solid #c79c6e;border-radius:var(--r-sm);padding:6px 8px;width:220px}
+.mini-frame .n{color:#fff;font-size:var(--t-small)}
+.knob{display:grid;grid-template-columns:96px minmax(0,1fr) 54px;gap:8px;align-items:center;padding:3px 0;font-size:12px}
+.knob span{color:var(--muted)} .knob output{font-family:var(--mono);font-weight:400;font-size:11px;text-align:right}
+.knob input[type=color]{width:100%;height:22px;background:none;border:1px solid var(--line);border-radius:3px;padding:0}
+pre.emit{background:#0e0e15;border:1px solid var(--line);border-radius:var(--r-md);padding:var(--s4);font-family:var(--mono);font-weight:400;font-size:11.5px;color:var(--text);overflow:auto;max-height:420px;white-space:pre}
+.side{position:sticky;top:12px;align-self:start;display:flex;flex-direction:column;gap:12px}
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:var(--s4)}
+.cmp .cell{border:1px solid var(--line);border-radius:var(--r-sm);padding:var(--s3);background:var(--bg)}
+.cmp .cap{font-size:11px;color:var(--dim);font-family:var(--mono);font-weight:400;margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="page">
+  <div>
+    <h1>UI Design System Bench</h1>
+    <div class="lede">AS-251. The proposed tokens and components for every ArenaSim egui screen, drawn in the client face (Rajdhani Bold) on the proposed colour roles. Move a knob on the right and every component re-renders; the Rust block at the bottom is what <code>src/ui/theme.rs</code> would contain. Companion to <code>docs/design/proposals/2026-10-11-ui-design-system.md</code>.</div>
+  </div>
+  <div class="navc"><button class="btn" id="resetBtn">Reset knobs</button></div>
+</header>
+
+<div class="grid">
+<main>
+
+<section class="block">
+  <h2 class="sec-h">1 · Colour roles</h2>
+  <div id="swatches"></div>
+  <div class="note">Chrome roles are the encyclopedia's palette (src/states/encyclopedia/mod.rs:87-96), which three screens already copy by hand. Data roles come from results_ui.rs:80-85 and encyclopedia/auras.rs:87-88. HUD and FCT colours are NOT here: they stay in the world/HUD layer (colour budget rule).</div>
+</section>
+
+<section class="block">
+  <h2 class="sec-h">2 · Type scale (Rajdhani Bold)</h2>
+  <div id="typeScale"></div>
+  <div class="note">Seven steps replace 23 of the 26 distinct literal sizes in today's screens (9, 10, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 16, 18, 19, 20, 22, 24, 28, 32, 36, 40, 42, 48). The other three are the 72pt main-menu wordmark (its own WORDMARK token) and the HUD's 96/120pt countdown digits, which stay HUD-local.</div>
+</section>
+
+<section class="block">
+  <h2 class="sec-h">3 · Spacing, radius, icon size</h2>
+  <div class="group-h">Spacing</div><div class="scale" id="spaceScale"></div>
+  <div class="group-h">Radius</div><div class="scale" id="radScale"></div>
+  <div class="group-h">Icon size</div><div class="scale" id="iconScale"></div>
+</section>
+
+<section class="block">
+  <h2 class="sec-h">4 · Screen header + navigation cluster</h2>
+  <div class="panel" style="padding:0">
+    <div class="screen-h">
+      <div class="navc"><button class="btn" disabled>&#9664; Back</button><button class="btn">&#127968; Main menu</button></div>
+      <div class="title">Encyclopedia</div>
+    </div>
+    <div style="padding:var(--s4) var(--s5)">
+      <div class="tabs"><span class="tab on">Classes</span><span class="tab">Abilities</span><span class="tab">Buffs &amp; Debuffs</span><span class="tab">Items</span></div>
+    </div>
+  </div>
+  <div class="note">ui::widgets::screen_header(ui, title, nav). Back is disabled, never hidden, at the root; the exit button NAMES its destination (the encyclopedia's rule, mod.rs:418-477). Every screen gets this one header, so Back/Exit live in the same place everywhere.</div>
+</section>
+
+<section class="block">
+  <h2 class="sec-h">5 · Buttons</h2>
+  <div class="row">
+    <button class="btn primary">Start match</button>
+    <button class="btn primary" disabled>Select characters to continue</button>
+    <button class="btn">Secondary</button>
+    <button class="btn ghost">Ghost</button>
+    <button class="btn danger">Remove</button>
+    <button class="btn icon" title="Icon button">&#215;</button>
+    <button class="btn icon">+</button>
+    <button class="btn icon">&#8722;</button>
+  </div>
+  <div class="note">Five variants: Primary (one per screen: the forward action), Secondary (default), Ghost (inline/low-weight), Danger (removes something), Icon (square, glyph only). Disabled is a state of each, not a variant. Hover = raised fill + strong line + accent label (the encyclopedia's widget visuals).</div>
+</section>
+
+<section class="block">
+  <h2 class="sec-h">6 · Panels, list rows, stat rows, chips</h2>
+  <div class="cmp">
+    <div class="panel team1">
+      <div class="panel-h"><span class="t" style="color:var(--team1)">Team 1</span><span class="row"><button class="btn icon">&#8722;</button><span>2</span><button class="btn icon">+</button></span></div>
+      <div class="lrow sel"><span class="ico" style="width:28px;height:28px;border-color:#c79c6e"></span><span><div class="nm" style="color:#c79c6e">Warrior</div><div class="sub">Sturdy melee fighter</div></span><span class="meta">Rage</span></div>
+      <div class="lrow"><span class="ico" style="width:28px;height:28px;border-color:#fff"></span><span><div class="nm">Priest</div><div class="sub">Healer and support</div></span><span class="meta">Mana</span></div>
+      <div class="lrow" style="justify-content:center;color:var(--muted)">+ Add character</div>
+    </div>
+    <div class="panel">
+      <div class="panel-h"><span class="t">Frostbolt</span><span class="chip">Mage</span></div>
+      <div class="stat"><span class="k">Cast time</span><span class="v">1.5 sec</span></div>
+      <div class="stat"><span class="k">Range</span><span class="v">40 yd</span></div>
+      <div class="stat"><span class="k">Cost</span><span class="v">20 Mana</span></div>
+      <div class="stat"><span class="k">Damage</span><span class="v">10 – 15 + 60% of spell power</span></div>
+      <div class="row" style="margin-top:var(--s3)"><span class="chip on">All</span><span class="chip">Fire</span><span class="chip">Frost</span><span class="chip">Arcane</span></div>
+    </div>
+  </div>
+  <div class="note">Panel takes an optional accent stroke (team colour, winner). ListRow has hover and selected states shared by the class picker, the item picker, the sandbox lists and the encyclopedia grids. StatRow is key-muted / value-text, one height.</div>
+</section>
+
+<section class="block">
+  <h2 class="sec-h">7 · Tooltip, linked icon, modal, empty state</h2>
+  <div class="cmp">
+    <div class="cell"><div class="cap">tooltip (one builder, max 320)</div>
+      <div class="tip"><div class="h" style="color:#fff569">Rogue</div><div class="m">Energy · 275 health</div><div class="b">Swift shadow striker</div><div class="hint">Click to open in the encyclopedia</div></div>
+    </div>
+    <div class="cell"><div class="cap">linked icon (existing widget.rs)</div>
+      <div class="row"><span class="licon"><span class="i"></span>Shadow Bolt</span><span class="licon"><span class="i"></span>Corruption</span></div>
+      <div class="cap" style="margin-top:12px">empty state</div>
+      <div class="empty"><div class="h">No matches</div><div class="b">Nothing matches "frostbolt rank 9". Clear the search or a filter.</div></div>
+    </div>
+    <div class="cell" style="grid-column:1/-1"><div class="cap">modal / picker (replaces egui's stock grey Window)</div>
+      <div class="modal-back"><div class="modal">
+        <div class="mh"><span class="t">Select: Trinket 2</span><button class="btn icon">&#215;</button></div>
+        <div class="mb">
+          <div class="lrow"><span><div class="nm">Dragonspine Trophy — +4 AP</div><div class="sub">Chance on a melee hit (15%) to gain +55 attack power for 10s.</div></span></div>
+          <div class="lrow sel"><span><div class="nm" style="color:var(--accent)">Mark of the Champion — +6 AP, +4 SP</div></span></div>
+          <div class="lrow"><span><div class="nm">Whetstone of Fury — +12 HP</div></span></div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <h2 class="sec-h">8 · HUD layer (stays separate)</h2>
+  <div class="row" style="gap:var(--s5);align-items:flex-start">
+    <div class="mini-frame">
+      <div class="n">Warrior</div>
+      <div class="rbar" style="margin-top:4px"><i style="width:62%;background:#00c800"></i></div>
+      <div class="rbar" style="margin-top:3px;height:5px"><i style="width:60%;background:#ff4646"></i></div>
+    </div>
+    <div class="lede" style="max-width:52ch">The in-match HUD keeps its own broadcast rules: labels white, FCT hues reserved (yellow damage, green heal, light-blue absorb), resource colours from one table. It adopts the type scale, spacing and radii, and the shared tooltip, but NOT the menu chrome palette.</div>
+  </div>
+</section>
+
+<section class="block">
+  <h2 class="sec-h">9 · Emitted Rust (src/ui/theme.rs)</h2>
+  <pre class="emit" id="emit"></pre>
+</section>
+
+</main>
+
+<aside class="side">
+  <section class="block" style="margin:0">
+    <h2 class="sec-h">Knobs</h2>
+    <div id="knobs"></div>
+    <div class="note">Colour knobs edit the role, not a screen. Scale knobs multiply the whole ladder.</div>
+  </section>
+</aside>
+</div>
+</div>
+
+<script>
+const COLORS = [
+  // [css var, Rust const, default hex, group, description]
+  ['--bg','BG','#14141e','Chrome','Screen background'],
+  ['--panel','PANEL','#1e1e2a','Chrome','Panel / button fill'],
+  ['--raised','RAISED','#252538','Chrome','Hover, active tab'],
+  ['--line','LINE','#3c3c50','Chrome','Panel stroke, divider'],
+  ['--line-hi','LINE_STRONG','#56567a','Chrome','Hover stroke, tooltip edge'],
+  ['--select','SELECTED','#33415e','Chrome','Selected row fill'],
+  ['--accent','ACCENT','#e6cc99','Text','Titles, active, primary'],
+  ['--text','TEXT','#e6d9bf','Text','Body'],
+  ['--muted','TEXT_MUTED','#8e8ea6','Text','Labels, secondary'],
+  ['--dim','TEXT_DIM','#66667e','Text','Disabled, hints'],
+  ['--link','LINK','#7fb2e5','Text','Navigable names'],
+  ['--warn','WARN','#dcaa5a','State','Warnings'],
+  ['--danger','DANGER','#cd6e6e','State','Destructive, dead'],
+  ['--team1','TEAM_1','#6496ff','Data','Team 1 (the HUD pair)'],
+  ['--team2','TEAM_2','#ff6464','Data','Team 2 (the HUD pair)'],
+  ['--dmg','DAMAGE','#ff9664','Data','Damage done'],
+  ['--heal','HEALING','#6ed782','Data','Healing done'],
+  ['--taken','TAKEN','#e66e6e','Data','Damage taken'],
+  ['--kill','KILLS','#ffcd5a','Data','Killing blows'],
+  ['--buff','BUFF','#6fae7e','Data','Buff'],
+  ['--debuff','DEBUFF','#d06a5b','Data','Debuff'],
+];
+const TYPE = [['--t-display','DISPLAY',42,'Main-menu wordmark, VICTORY banner'],['--t-title','TITLE',30,'Screen title'],['--t-h2','H2',20,'Panel title'],['--t-h3','H3',16,'Section / row title'],['--t-body','BODY',14,'Body, buttons'],['--t-small','SMALL',12,'Labels, stat rows'],['--t-micro','MICRO',10,'Column headers, badges']];
+const SPACE = [['--s1','XXS',2],['--s2','XS',4],['--s3','SM',8],['--s4','MD',12],['--s5','LG',16],['--s6','XL',24],['--s7','XXL',32],['--s8','XXXL',48]];
+const RAD = [['--r-sm','SM',3],['--r-md','MD',6],['--r-lg','LG',10]];
+const ICON = [['XS',16],['SM',20],['MD',24],['LG',36],['XL',48],['HERO',56]];
+const root = document.documentElement;
+const state = {colors:{}, typeMul:1, spaceMul:1, radMul:1};
+function hexToRgb(h){h=h.replace('#','');return [0,2,4].map(i=>parseInt(h.slice(i,i+2),16));}
+function render(){
+  // swatches
+  const groups = {};
+  COLORS.forEach(c=>{(groups[c[3]] ||= []).push(c)});
+  let html='';
+  for (const g in groups){
+    html += `<div class="group-h">${g}</div><div class="sw-grid">`;
+    groups[g].forEach(([v,n,_,__,d])=>{
+      const hex = state.colors[v]; const [r,gg,b]=hexToRgb(hex);
+      html += `<div class="sw"><div class="chip" style="background:${hex}"></div><div class="lbl">${n}<code>${r}, ${gg}, ${b} · ${d}</code></div></div>`;
+    });
+    html += '</div>';
+  }
+  document.getElementById('swatches').innerHTML = html;
+  document.getElementById('typeScale').innerHTML = TYPE.map(([v,n,px,d])=>{
+    const s = Math.round(px*state.typeMul*2)/2;
+    return `<div class="type-row"><code>${n} ${s}</code><span style="font-size:${s}px;color:${n==='DISPLAY'||n==='TITLE'?'var(--accent)':'var(--text)'}">${d}</span></div>`;}).join('');
+  document.getElementById('spaceScale').innerHTML = SPACE.map(([v,n,px])=>{const s=Math.round(px*state.spaceMul);return `<div class="it"><div class="bar" style="width:${s}px"></div>${n} ${s}</div>`}).join('');
+  document.getElementById('radScale').innerHTML = RAD.map(([v,n,px])=>{const s=Math.round(px*state.radMul);return `<div class="it"><div class="rad" style="border-radius:${s}px"></div>${n} ${s}</div>`}).join('');
+  document.getElementById('iconScale').innerHTML = ICON.map(([n,px])=>`<div class="it"><div class="ico" style="width:${px}px;height:${px}px"></div>${n} ${px}</div>`).join('');
+  // apply vars
+  COLORS.forEach(([v])=>root.style.setProperty(v,state.colors[v]));
+  TYPE.forEach(([v,_,px])=>root.style.setProperty(v,(Math.round(px*state.typeMul*2)/2)+'px'));
+  SPACE.forEach(([v,_,px])=>root.style.setProperty(v,Math.round(px*state.spaceMul)+'px'));
+  RAD.forEach(([v,_,px])=>root.style.setProperty(v,Math.round(px*state.radMul)+'px'));
+  emit();
+}
+function emit(){
+  let s = '//! Design tokens — the ONLY place a UI colour, size or gap is chosen.\n//! Generated from docs/design/benches/2026-10-11-ui-design-system-bench.html\n\nuse bevy_egui::egui::Color32;\n\npub mod color {\n    use super::Color32;\n';
+  let last='';
+  COLORS.forEach(([v,n,_,g,d])=>{
+    if (g!==last){s+=`\n    // ${g}\n`; last=g;}
+    const [r,gg,b]=hexToRgb(state.colors[v]);
+    s+=`    pub const ${n}: Color32 = Color32::from_rgb(${r}, ${gg}, ${b}); // ${d}\n`;
+  });
+  s+='}\n\npub mod text {\n';
+  TYPE.forEach(([v,n,px,d])=>{s+=`    pub const ${n}: f32 = ${(Math.round(px*state.typeMul*2)/2).toFixed(1)}; // ${d}\n`});
+  s+='}\n\npub mod space {\n';
+  SPACE.forEach(([v,n,px])=>{s+=`    pub const ${n}: f32 = ${Math.round(px*state.spaceMul).toFixed(1)};\n`});
+  s+='}\n\npub mod radius {\n';
+  RAD.forEach(([v,n,px])=>{s+=`    pub const ${n}: u8 = ${Math.round(px*state.radMul)};\n`});
+  s+='}\n\npub mod icon {\n';
+  ICON.forEach(([n,px])=>{s+=`    pub const ${n}: f32 = ${px.toFixed(1)};\n`});
+  s+='}\n';
+  document.getElementById('emit').textContent = s;
+}
+function buildKnobs(){
+  let h='';
+  COLORS.forEach(([v,n,def])=>{h+=`<label class="knob"><span>${n}</span><input type="color" data-v="${v}" value="${def}"><output>${def}</output></label>`});
+  h+=`<label class="knob"><span>Type ×</span><input type="range" min="0.8" max="1.25" step="0.05" value="1" data-m="typeMul"><output>1.00</output></label>`;
+  h+=`<label class="knob"><span>Space ×</span><input type="range" min="0.5" max="1.5" step="0.25" value="1" data-m="spaceMul"><output>1.00</output></label>`;
+  h+=`<label class="knob"><span>Radius ×</span><input type="range" min="0" max="2" step="0.5" value="1" data-m="radMul"><output>1.00</output></label>`;
+  const k=document.getElementById('knobs'); k.innerHTML=h;
+  k.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',e=>{
+    const t=e.target; const out=t.parentElement.querySelector('output');
+    if (t.dataset.v){state.colors[t.dataset.v]=t.value; out.textContent=t.value;}
+    else {state[t.dataset.m]=parseFloat(t.value); out.textContent=parseFloat(t.value).toFixed(2);}
+    render();
+  }));
+}
+function reset(){COLORS.forEach(([v,_,def])=>state.colors[v]=def); state.typeMul=1;state.spaceMul=1;state.radMul=1; buildKnobs(); render();}
+document.getElementById('resetBtn').addEventListener('click',reset);
+reset();
+</script>
+</body>
+</html>
