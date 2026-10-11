@@ -958,9 +958,9 @@ impl Aura {
     /// [`StackScope::PerCaster`] stacking aura, and `None` for every other
     /// aura, whose identity is its source alone (or its type).
     ///
-    /// Every site that looks a source-keyed aura up — the refresh, the
-    /// already-applied gate, a purge pinned to one buff — compares this as well
-    /// as the source, so they all agree on which instance is which.
+    /// Every site that looks a source-keyed aura up — the refresh and the
+    /// already-applied gate — compares this as well as the source, so they
+    /// agree on which instance is which.
     pub fn stack_owner(&self) -> Option<Entity> {
         match self.stacks {
             Some(AuraStacks {
@@ -1320,8 +1320,9 @@ impl ActiveAuras {
     /// other effect sharing its [`CompoundDebuff`]. Returns the indexed aura.
     ///
     /// Every site that removes ONE aura on purpose — a dispel, a cleanse, a
-    /// purge, a Master's Call — must go through this or
-    /// [`Self::swap_remove_debuff_at`] rather than `Vec::remove` directly.
+    /// purge, a Master's Call — must go through this (a dispel reaches it
+    /// through [`Self::take_one_at`], which takes one stack of a stacked aura)
+    /// or [`Self::swap_remove_debuff_at`] rather than `Vec::remove` directly.
     /// Taking half a debuff off is the bug this pair exists to make
     /// unreachable, and it is invisible from the outside: the frames show one
     /// icon either way, and the surviving half keeps working under the name of
@@ -1335,6 +1336,33 @@ impl ActiveAuras {
         let removed = self.auras.remove(index);
         self.drop_compound_siblings_of(&removed);
         removed
+    }
+
+    /// Take ONE application of the aura at `index`, as a dispel or purge does:
+    /// a STACKING aura holding more than one stack loses one stack and stays
+    /// (duration and tick cadence untouched); anything else is removed whole,
+    /// through [`Self::remove_debuff_at`].
+    ///
+    /// Returns what was taken — for a single stack, a copy of the aura at ONE
+    /// stack, so [`Aura::bloom_heal`] on it is one stack's bloom — and the
+    /// stacks left behind (`0` when the aura is gone). Only a whole removal
+    /// gives back a stat the aura raised: a stat aura's bonus does not scale
+    /// with its stacks (a refresh keeps it), so one stack fewer changes none.
+    pub fn take_one_at(&mut self, index: usize) -> (Aura, u8) {
+        let aura = &mut self.auras[index];
+        match aura.stacks {
+            Some(stacks) if stacks.count > 1 => {
+                let left = stacks.count - 1;
+                aura.stacks = Some(AuraStacks {
+                    count: left,
+                    ..stacks
+                });
+                let mut taken = aura.clone();
+                taken.stacks = Some(AuraStacks { count: 1, ..stacks });
+                (taken, left)
+            }
+            _ => (self.remove_debuff_at(index), 0),
+        }
     }
 
     /// [`Self::remove_debuff_at`] with `Vec::swap_remove` semantics, for the

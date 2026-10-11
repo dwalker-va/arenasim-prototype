@@ -1293,28 +1293,15 @@ pub enum DispelScope {
     Magic,
     /// Paladin Cleanse: harmful magic, or a poison or disease.
     MagicOrPoison,
-    /// Shaman Purge: an enemy's buff of this one type — the type the AI chose
-    /// — that [`Aura::can_be_purged`](super::Aura::can_be_purged).
+    /// Shaman Purge: ANY of an enemy's buffs that
+    /// [`Aura::can_be_purged`](super::Aura::can_be_purged), one picked at
+    /// random by `process_dispels`. The purger decides whether to cast and on
+    /// whom; it never chooses which buff comes off — so the scope names no
+    /// type and no source.
     ///
-    /// Asked PER AURA, not per type. A proc trinket's attack-power buff shares
-    /// its type with Battle Shout, but it is not magic, and a purge pinned to
-    /// the type must still pass it over.
-    Purge(AuraType),
-    /// Shaman Purge pinned to one SOURCE-keyed buff ([`Aura::distinct_by_source`](super::Aura::distinct_by_source)):
-    /// the aura of this type that this ability applied. A source-keyed buff
-    /// is a different buff from a same-type sibling — a Druid's Rejuvenation
-    /// and its Lifebloom are both `HealingOverTime` — so a purge chosen for one
-    /// must not take the other.
-    ///
-    /// `owner` pins it to one CASTER's instance as well, for a per-caster
-    /// stacking aura ([`Aura::stack_owner`](super::Aura::stack_owner)): with
-    /// two Druids' Lifeblooms on one target, the purge takes the one it chose.
-    /// `None` for every other source-keyed buff.
-    PurgeSource {
-        effect: AuraType,
-        source: String,
-        owner: Option<Entity>,
-    },
+    /// Asked PER AURA, so a proc trinket's attack-power buff, which shares its
+    /// type with Battle Shout but is not magic, is never a candidate.
+    Purge,
     /// Master's Call: a movement impairment of one of these types, whatever
     /// its removal class — it clears physical harm as well as magic.
     Impairments(Vec<AuraType>),
@@ -1335,17 +1322,7 @@ impl DispelScope {
         match self {
             DispelScope::Magic => aura.can_be_dispelled(),
             DispelScope::MagicOrPoison => aura.can_be_dispelled() || aura.is_cleansable_poison(),
-            DispelScope::Purge(effect) => aura.effect_type == *effect && aura.can_be_purged(),
-            DispelScope::PurgeSource {
-                effect,
-                source,
-                owner,
-            } => {
-                aura.effect_type == *effect
-                    && aura.ability_name == *source
-                    && aura.stack_owner() == *owner
-                    && aura.can_be_purged()
-            }
+            DispelScope::Purge => aura.can_be_purged(),
             DispelScope::Impairments(effects) => effects.contains(&aura.effect_type),
         }
     }

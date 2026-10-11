@@ -808,14 +808,14 @@ fn start_component_entry(
         }
         AbilityType::DispelMagic | AbilityType::PaladinCleanse | AbilityType::Purge => {
             let target = dummy.unwrap_or(caster);
-            // Purge strips BUFFS under a scope pinned to one type, exactly as
-            // the Shaman AI spawns it (`class_ai/mod.rs`, `[PURGE]`) — the
-            // staged Arcane Intellect is a `MaxManaIncrease`. Under the
+            // Purge strips BUFFS — any purgeable one, picked at random,
+            // exactly as the Shaman AI spawns it (`class_ai/mod.rs`,
+            // `[PURGE]`); the staged Arcane Intellect is one. Under the
             // dispel scope it would match only debuffs, and a Purge would
             // preview nothing.
             let (log_prefix, scope): (&'static str, DispelScope) = match ability {
                 AbilityType::PaladinCleanse => ("[CLEANSE]", DispelScope::MagicOrPoison),
-                AbilityType::Purge => ("[PURGE]", DispelScope::Purge(AuraType::MaxManaIncrease)),
+                AbilityType::Purge => ("[PURGE]", DispelScope::Purge),
                 _ => ("[DISPEL]", DispelScope::Magic),
             };
             commands.spawn((

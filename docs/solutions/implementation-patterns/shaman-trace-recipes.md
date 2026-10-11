@@ -80,8 +80,10 @@ Combat-log combatant ids carry a 1-based `#slot` suffix (e.g. `Team 1 Shaman
 ## Purge target strips
 
 The cast decision is an `action_taken` event for `Purge` (carrying the enemy
-`target_id`); the actual buff removed lands in the combat log with a `[PURGE]`
-note (the strip is resolved by `process_dispels`, one frame later):
+`target_id`). The AI chooses only whom: the buff removed is a random pick among
+the target's purgeable buffs, made by `process_dispels` one frame later, and
+lands in the combat log with a `[PURGE]` note (a stacked aura loses one stack,
+logged `(one stack; N left)`):
 
 ```bash
 # Purge casts and their targets (trace)
@@ -101,6 +103,12 @@ Purge rejections (e.g. no enemy carries a purgeable buff → `NoValidTarget`):
 jq -c 'select(.actor.class == "Shaman")
        | .candidates[] | select(.ability == "Purge" and .status == "rejected")
        | .reason | if type == "object" then keys[0] else . end' $T | sort | uniq -c
+
+# Purges held on their odds (a Lifebloom-heavy target) — the note carries the
+# expected value of the random pick
+jq -r 'select(.actor.class == "Shaman") | .candidates[]?
+       | select(.ability == "Purge") | .reason.PreconditionUnmet.note // empty' $T \
+  | grep '^purge odds' | sort | uniq -c
 ```
 
 ## Wind Shear interrupts (combat-log only — NO trace event)

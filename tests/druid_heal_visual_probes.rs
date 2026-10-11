@@ -244,43 +244,27 @@ fn the_burst_plays_when_lifebloom_runs_out() {
 }
 
 #[test]
-fn the_burst_plays_when_lifebloom_is_purged_or_purged_by_source() {
-    let scopes = |druid: Entity| {
-        [
-            DispelScope::Purge(AuraType::HealingOverTime),
-            DispelScope::PurgeSource {
-                effect: AuraType::HealingOverTime,
-                source: LIFEBLOOM_AURA.to_string(),
-                owner: Some(druid),
-            },
-        ]
-    };
-    for i in 0..2 {
-        let mut world = world(0.0);
-        let (druid, ally) = druid_and_ally(&mut world);
-        let aura = cast(AbilityType::Lifebloom, ally, druid).aura;
-        world
-            .entity_mut(ally)
-            .insert(ActiveAuras { auras: vec![aura] });
-        let shaman = world
-            .spawn(Combatant::new(2, 0, CharacterClass::Shaman))
-            .id();
-        world.spawn(DispelPending {
-            target: ally,
-            dispeller: shaman,
-            log_prefix: "[PURGE]",
-            caster_class: CharacterClass::Shaman,
-            heal_on_success: None,
-            scope: scopes(druid)[i].clone(),
-        });
-        world.run_system_once(process_dispels).unwrap();
-        world.run_system_once(process_blooms).unwrap();
-        assert_eq!(
-            bursts(&mut world),
-            vec![(ally, BloomVisual::GoldBurst)],
-            "scope {i}"
-        );
-    }
+fn the_burst_plays_when_lifebloom_is_purged() {
+    let mut world = world(0.0);
+    let (druid, ally) = druid_and_ally(&mut world);
+    let aura = cast(AbilityType::Lifebloom, ally, druid).aura;
+    world
+        .entity_mut(ally)
+        .insert(ActiveAuras { auras: vec![aura] });
+    let shaman = world
+        .spawn(Combatant::new(2, 0, CharacterClass::Shaman))
+        .id();
+    world.spawn(DispelPending {
+        target: ally,
+        dispeller: shaman,
+        log_prefix: "[PURGE]",
+        caster_class: CharacterClass::Shaman,
+        heal_on_success: None,
+        scope: DispelScope::Purge,
+    });
+    world.run_system_once(process_dispels).unwrap();
+    world.run_system_once(process_blooms).unwrap();
+    assert_eq!(bursts(&mut world), vec![(ally, BloomVisual::GoldBurst)]);
 }
 
 /// The burst site's OWN alive check, pinned directly: a bloom that reaches

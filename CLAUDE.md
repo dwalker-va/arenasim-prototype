@@ -455,14 +455,16 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
   their own Lifebloom on one ally; anything else is **per target** (Classic's
   same-buff rule), so a second Druid's Mark of the Wild refreshes the first.
   `Aura::stack_owner` / `Aura::same_source_as` carry the key, and every lookup
-  of a source-keyed aura goes through them — the refresh, the already-applied
-  gate, and the purge pinned to one buff (`DispelScope::PurgeSource { owner }`).
+  of a source-keyed aura goes through them — the refresh and the already-applied
+  gate.
   Swiftmend eats its caster's own Rejuvenation first, and the Druid AI reads
   only its own heals over time. Two Druids marking in one frame never mark the
   same ally (`marked_this_frame`, the Paladin's `paladin_aura_this_frame` guard).
 - `bloom: Some((heal_base: B, heal_coefficient: C))` makes the aura BLOOM: when it
   ENDS — runs out, or is dispelled or purged — it lands a direct heal of
-  `(B + spell power × C) × stacks` on its bearer (TBC Lifebloom). A refresh does
+  `(B + spell power × C) × stacks` on its bearer (TBC Lifebloom). A dispel or
+  purge takes ONE stack of a stacked aura (`ActiveAuras::take_one_at`), so it
+  blooms for that one stack and leaves the rest. A refresh does
   not bloom it, and neither does its bearer dying. Both endings spawn a
   `BloomPending`; `effects/bloom.rs` `process_blooms` is the one heal site, and
   applies healing reduction and `ArenaDampening`. Logged as `<caster>'s <aura>
@@ -723,8 +725,8 @@ instead of being picked and then refused; with none in reach the cast is
 rejected `LosBlocked` — unless the caster could not have cast anyway, which
 is reported first, in `pre_cast_ok`'s order (`cast_guard::unreached_reason`:
 Travel Form, lockout, silence, cooldown, mana). The choosers: the ally dispels (Dispel Magic, Cleanse,
-Devour Magic, Master's Call), Purge (`select_purge` — the best buff it can
-see), every heal that ranks allies by health (`CombatContext::lowest_health_ally_in_reach`:
+Devour Magic, Master's Call), Purge (`select_purge` — the best odds it can
+see; the buff that comes off is a random pick, never the AI's), every heal that ranks allies by health (`CombatContext::lowest_health_ally_in_reach`:
 Flash Heal, Flash of Light, Holy Light, the Holy Shock heal, Lesser Healing
 Wave, the Druid's emergency heal and top-up Rejuvenation), Holy Shock damage
 (the first enemy within 20yd in sight) and the Shaman's Frost Shock peel (the

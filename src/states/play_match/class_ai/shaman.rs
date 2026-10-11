@@ -134,9 +134,10 @@ pub fn decide_shaman_action(
         return true;
     }
 
-    // P3b: urgent Purge — a buff worth more than the filler nuke (Innervate:
-    // a match's worth of the enemy healer's mana). Asked only when one is in
-    // reach, so the ordinary purge at P6 keeps the trace's one Purge entry.
+    // P3b: urgent Purge — a target carrying a buff worth more than the filler
+    // nuke (Innervate: a match's worth of the enemy healer's mana), when the
+    // random pick is worth the gamble. Asked only when one is in reach, so the
+    // ordinary purge at P6 keeps the trace's one Purge entry.
     if super::select_purge(
         ctx,
         abilities,
@@ -202,7 +203,8 @@ pub fn decide_shaman_action(
         return true;
     }
 
-    // P6: Purge — strip a beneficial aura off an enemy (prefers the healer).
+    // P6: Purge — the enemy with the best odds of a random strip (ties to the
+    // healer), when one carries a buff worth the cast.
     if super::try_purge_enemy(
         commands,
         combat_log,
@@ -1132,5 +1134,95 @@ mod reach_tests {
         let open = reason(&[]);
         assert!(open.get("InsufficientMana").is_some(), "{open}");
         assert_eq!(reason(&pillar()), open, "behind the pillar");
+    }
+
+    /// The Shaman AI never chooses the buff its Purge takes. Driven through
+    /// `try_purge_enemy` itself, at both bars, against a Druid carrying
+    /// Innervate beside a Rejuvenation: the purge it spawns is scoped to every
+    /// purgeable buff (`DispelScope::Purge`), and run through
+    /// `process_dispels` over a range of seeds it takes each of the two —
+    /// Innervate is not a guaranteed strip, whatever the AI valued it at.
+    ///
+    /// Mutant killed: `try_purge_enemy` spawning a scope pinned to the type of
+    /// the target's most valuable buff (Innervate's `ManaRegenIncrease`) — the
+    /// scope assertion fails, and every seed takes Innervate.
+    #[test]
+    fn the_shaman_cannot_choose_the_buff_its_purge_takes() {
+        use super::super::{PURGE_MIN_PRIORITY, PURGE_URGENT_PRIORITY};
+        use crate::states::match_config::CharacterClass::Druid;
+        use crate::states::play_match::effects::process_dispels;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let abilities = AbilityDefinitions::default();
+        for bar in [PURGE_URGENT_PRIORITY, PURGE_MIN_PRIORITY] {
+            let mut taken: Vec<String> = Vec::new();
+            for seed in 0..24u64 {
+                let mut s = ReachScene::new(Shaman, &[(2, Druid, IN_SIGHT, 1.0)]);
+                let (me, druid) = (s.units[0], s.units[1]);
+                let land = |ability| {
+                    AuraPending::from_ability(druid, druid, abilities.get_unchecked(&ability))
+                        .expect("the ability applies an aura")
+                        .aura
+                };
+                let buffs = vec![
+                    land(AbilityType::Innervate),
+                    land(AbilityType::Rejuvenation),
+                ];
+                s.auras.insert(druid, buffs.clone());
+                let trace = s.run(&[], |commands, ctx, combatant, builder| {
+                    super::super::try_purge_enemy(
+                        commands,
+                        &mut CombatLog::default(),
+                        &abilities,
+                        me,
+                        combatant,
+                        CASTER,
+                        None,
+                        ctx,
+                        bar,
+                        builder,
+                    )
+                });
+                assert_eq!(outcome(&trace), chose("Purge", druid), "bar {bar}");
+
+                let spawned: Vec<(Entity, DispelScope)> = s
+                    .world
+                    .query::<&DispelPending>()
+                    .iter(&s.world)
+                    .map(|p| (p.target, p.scope.clone()))
+                    .collect();
+                assert_eq!(spawned.len(), 1, "bar {bar}: one purge");
+                assert_eq!(spawned[0].0, druid);
+                assert_eq!(
+                    spawned[0].1,
+                    DispelScope::Purge,
+                    "bar {bar}: the purge must not be pinned to a buff the AI chose"
+                );
+
+                // The pick itself, through the real removal system.
+                s.world.insert_resource(CombatLog::default());
+                s.world.insert_resource(ArenaDampening::default());
+                s.world.insert_resource(GameRng::from_seed(seed));
+                s.world
+                    .entity_mut(druid)
+                    .insert((Combatant::new(2, 0, Druid), ActiveAuras { auras: buffs }));
+                s.world.run_system_once(process_dispels).unwrap();
+                let left = &s.world.entity(druid).get::<ActiveAuras>().unwrap().auras;
+                assert_eq!(left.len(), 1, "bar {bar} seed {seed}: one buff comes off");
+                taken.push(
+                    ["Innervate", "Rejuvenation"]
+                        .into_iter()
+                        .find(|name| left[0].ability_name != *name)
+                        .unwrap()
+                        .to_string(),
+                );
+            }
+            for name in ["Innervate", "Rejuvenation"] {
+                assert!(
+                    taken.iter().any(|t| t == name),
+                    "bar {bar}: no seed purged {name} — the pick is not random: {taken:?}"
+                );
+            }
+        }
     }
 }

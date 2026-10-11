@@ -109,7 +109,7 @@ pub struct AuraEffect {
     pub compound: Option<CompoundDebuff>,
     /// What a purge that strips THIS aura is worth, when it is not what its
     /// type is worth (`class_ai::purge_priority`). Read per aura instance by
-    /// `class_ai::aura_purge_priority`, so one `ManaRegenIncrease` can be
+    /// `class_ai::purge_pick_value`, so one `ManaRegenIncrease` can be
     /// Innervate (a healer's answer to a dampened fight) and another Mage Armor
     /// (a minor re-buff). `None`, the default, leaves the type's value.
     #[serde(default)]

@@ -293,15 +293,16 @@ fn another_hunters_trap_is_untouched() {
 /// take the Freezing Trap off the ground under the one-trap rule. The Hunter
 /// holds it instead, and the trace says why. Across the whole match no
 /// Freezing Trap is ever replaced by a Frost Trap. Pinned seeds where the hold
-/// fires: the first three of seeds 0-105, in which it fires in five. They were
+/// fires: the first three of seeds 0-105, in which it fires in six. They were
 /// re-pinned from Hunter+Shaman v Warrior+Priest seed 0 when the default
 /// Hunter took up its polearm (AS-195), after which that comp held in none of
-/// 240 seeds, and from 0, 6 and 14 when the traps came onto one shared 15s
+/// 240 seeds, from 0, 6 and 14 when the traps came onto one shared 15s
 /// cooldown (AS-196): the hold now meets only a Freezing Trap still waiting on
-/// the ground a full cooldown after it was thrown.
+/// the ground a full cooldown after it was thrown — and from 1, 6 and 61 when
+/// the Shaman's Purge took a random buff (AS-230), which moved seed 6.
 #[test]
 fn the_hunter_holds_a_frost_trap_that_would_replace_its_freezing_trap() {
-    for seed in [1u64, 6, 61] {
+    for seed in [1u64, 10, 61] {
         let dir = tempfile::tempdir().unwrap();
         let trace_path = dir.path().join("trace.jsonl");
         let log_path = dir.path().join("match.txt");
