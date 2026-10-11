@@ -99,21 +99,23 @@ the protocol reads as it always has:
   "gaps": "<what the card knowingly leaves out>",
   "rulings": [{"t": "ISO", "by": "user", "text": "...", "numbers": {"z": 5.2}}],   (append-only: record_ruling)
   "merge_sha": "<merge commit>", "merged_at": "ISO",                                 (set by mark_merged only)
-  "source": {"milestone": "0.7", "key": "card:AS-7", "card": "AS-7"},                (a review-feedback card's origin)
+  "from_feedback": [{"batch": "FB-3", "comment": "c2", "milestone": "0.7", "outcome": "filed | merged_into"}],   (set by triage_feedback only)
+  "source": {"milestone": "0.7", "key": "card:AS-7", "card": "AS-7"},                (a card auto-filed by a review before batches)
   "activity": [{"t": "ISO", "by": "board | claude | orchestrator | engineer | tester | release-manager | pm | user", "msg": "..."}],
   "created": "ISO", "updated": "ISO" }
 ```
 
-Stored as four tables:
+Stored as these tables:
 
 | Table | Holds |
 |---|---|
 | `cards` | one row per card: the document above minus `activity`, its `version`, and `column`/`role` as indexed generated columns. Every write bumps `version` by one. |
 | `activity` | one row per activity entry, **append-only** (triggers refuse UPDATE and DELETE). |
-| `events` | one row per write — `cursor` (monotonic), `t`, `actor`, `kind` (`created`, `moved`, `edited`, `answered`, `claimed`, `claim_released`, `claim_finished`, `activity`, `body_appended`, `deleted`, `ruling`, `merged`, `cancelled`, `milestone_created`, `milestone_updated`, `milestone_sweep`, `milestone_guide`, `milestone_closed`, `review_submitted`, `migrated`), `card`, `data` (a milestone's name in `data.milestone`). The wake-up feed. |
+| `events` | one row per write — `cursor` (monotonic), `t`, `actor`, `kind` (`created`, `moved`, `edited`, `answered`, `claimed`, `claim_released`, `claim_finished`, `activity`, `body_appended`, `deleted`, `ruling`, `merged`, `cancelled`, `milestone_created`, `milestone_updated`, `milestone_sweep`, `milestone_guide`, `milestone_closed`, `review_submitted`, `feedback_triaged`, `migrated`), `card`, `data` (a milestone's name in `data.milestone`). The wake-up feed. |
 | `meta` | `next_id` and the id prefix — id allocation is the daemon's, so no caller keeps `nextId` — the board id, and `schema` (2; the daemon refuses any other until `migrate` has run). |
-| `milestones` | one row per milestone: `name`, `status` (`open`, `in_review`, `released`), `created`, `released_at`, `tag`, `release_url`, `review_sha`, `sweep`, `submissions`, `first_id`/`end_id` (the card ids issued while it was open), `review_guide` (the review units `set_review_guide` wrote; part of the milestone document, so no schema change), and its own `version`. |
-| `review_items` | one row per review-page tick (a checklist step, or a guide check keyed `guide:<unit>:<check>`) or feedback comment, keyed by milestone and item, each with its own `version`. |
+| `milestones` | one row per milestone: `name`, `status` (`open`, `in_review`, `released`), `created`, `released_at`, `tag`, `release_url`, `review_sha`, `sweep`, `submissions` (rounds submitted before feedback batches, with the cards each auto-filed), `first_id`/`end_id` (the card ids issued while it was open), `review_guide` (the review units `set_review_guide` wrote; part of the milestone document, so no schema change), and its own `version`. |
+| `review_items` | one row per review-page tick (a checklist step, or a guide check keyed `guide:<unit>:<check>`) or feedback comment (also on a guide unit, `guide:<unit>`), keyed by milestone and item, each with its own `version`. |
+| `review_batches` | one row per submitted review: `{id: "FB-<n>", milestone, t, by, comments: [{id, key, target, text, triage}]}` and its own `version`. A comment's `triage` is null (pending) until the orchestrator records `filed` / `merged_into` (with the card) or `no_action` (with a reason). Created on open — no schema change. |
 
 `agent.name` is new: `claim_card` records the spawned agent's name there, so
 the live-claim audit joins claims to live agents mechanically.
@@ -271,12 +273,17 @@ core-combat card to run serially.
   (the milestone sweep, and which cards deferred to it), *Known gaps and
   follow-ups* (each card's `gaps`, and every card filed while the milestone was
   open), and *Feedback*. Ticks and comments persist.
-- **Feedback is the next iteration.** A comment box sits on every change, every
-  checklist step and the milestone as a whole. Submitting the review files
-  each comment as a backlog card on the same milestone at its source's
-  `iteration` + 1 (`source` links it back, with the source's PR as a reference)
-  and records one `review_submitted` event — with no cards when the user had no
-  feedback, which is the approval.
+- **Feedback is one batch, triaged by the orchestrator.** A comment box sits on
+  every guide unit and check, every change, every checklist step and the
+  milestone as a whole, and Submit sits right below the guide. Submitting files
+  **no card**: it saves every comment as one feedback batch on the milestone
+  (each comment keeping what it was written on, as it read then) and records
+  one `review_submitted` event naming the batch — with no comments when the
+  user had no feedback, which is the approval. Comments overlap, and some are
+  already answered, so turning them into work is a judgement, and it is the
+  orchestrator's (*Triage a review* below). The review page shows every past
+  comment with its outcome — the card it became, the card it was merged into,
+  or why it needed nothing — or *pending* until the orchestrator records one.
 - **The release** is cut from `main` after the user approves the milestone:
   `close_milestone` moves every merged card to `done`, and the Release Manager
   bundles them (see Release flow).
@@ -612,10 +619,11 @@ versioned write passes the `version` of the card as you last read it — from
      surfaces it to the user the same way. Never guess whether the release
      happened; the bundled Done cards stay in `done` untouched.
 7. On a `review_submitted` event (the user submitted a milestone review):
-   its `data.cards` are the new feedback cards, already in `backlog` on the
-   milestone at the next iteration — sequence them into `in_progress` like any
-   other work. An empty `data.cards` is the user approving the milestone: close
-   it and release it (see *Running a milestone*).
+   `data.batch` names the feedback batch and `data.comments` counts it. A
+   batch with no comments is the user approving the milestone: close it and
+   release it (see *Running a milestone*). Otherwise triage it (*Triage a
+   review*, below) — the submission filed nothing, and nothing is filed until
+   you do.
 8. Cards the *user* must see promptly (needs_input) warrant a mention in the
    orchestrator session's next visible message.
 
@@ -643,9 +651,9 @@ milestone's own `version`; `get_milestone` / `list_milestones` return it).
    <origin/main HEAD>)` — the build the checklist applies to — and give the user
    the review page, `http://127.0.0.1:7453/milestones/<name>`. Do not restate
    its contents: the page is the review.
-6. **Iterate.** Each submission with feedback files the next iteration's cards
-   (step 7 above); they go through the same pipeline and land in `merged`, and
-   the review page shows them. Before handing the page back, rewrite the guide
+6. **Iterate.** Each submission with feedback is triaged into the next
+   iteration's cards (step 7 above, *Triage a review*); they go through the
+   same pipeline and land in `merged`, and the review page shows them. Before handing the page back, rewrite the guide
    (step 4) from `guide.units` as `get_milestone` returns them: keep every unit
    and check id that still applies, so its tick carries over; set a unit's
    `changed_since` to the `merged_at` of the newest card that changed it, so its
@@ -657,6 +665,35 @@ milestone's own `version`; `get_milestone` / `list_milestones` return it).
    cards for the release bundle; spawn the Release Manager with them (Release
    flow). On `RELEASED`, archive the bundle as usual and record the release on
    the milestone: `update_milestone(tag, release_url)`.
+
+**Triage a review.** A submitted review is one feedback batch, and turning it
+into work is the orchestrator's job — the board files nothing on its own,
+because comments overlap and some need no card at all.
+
+1. **Read the whole batch first.** `get_feedback_batch(id)` (or
+   `list_feedback_batches(pending: true)` to find any left untriaged — check it
+   on startup too). Read every comment against its `target` — the guide unit or
+   check, card, checklist step or milestone it was written on, as the user saw
+   it — before filing anything.
+2. **Merge overlaps.** Comments that describe one problem (a unit comment and
+   a check comment on the same delay; the same complaint on two cards) become
+   one card. Fold a comment into an in-flight card that already covers it
+   rather than filing a duplicate.
+3. **Drop what is already handled.** A comment already fixed on `main`, already
+   answered by the guide or a ruling, or not asking for a change needs no card
+   — record why.
+4. **File only the cards that are needed.** `create_card` on the milestone at
+   the next `iteration`, its body quoting the comments it answers (and the
+   source card's PR as a reference link, where there is one). Ask the user
+   (`needs_input`) only where a comment needs a product decision.
+5. **Record every comment's outcome.** `triage_feedback(id, triage:
+   [{comment, outcome, card?, reason?}], expected_version)`: `filed` with the
+   card it became, `merged_into` with the card that answers it, or `no_action`
+   with a one-line reason. One write can cover the whole batch, and it links
+   each named card back (`from_feedback`). Leave no comment pending: the review
+   page shows the user what became of each one, and *pending* reads as
+   ignored. Then sequence the new cards into `in_progress` like any other
+   work.
 
 **Live-claim audit — every wake, not just startup.** Steps 2a and 3a claim
 before spawning, so a turn interrupted between the two leaves `agent: working`

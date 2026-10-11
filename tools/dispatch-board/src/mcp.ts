@@ -12,7 +12,7 @@
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { AREAS, Board, BoardError, COLUMNS, GUIDE_ID, GUIDE_MAX_CHECKS, GUIDE_MAX_UNITS, ROLES, SWEEP_STATUSES } from "./board.js";
+import { AREAS, Board, BoardError, COLUMNS, GUIDE_ID, GUIDE_MAX_CHECKS, GUIDE_MAX_UNITS, ROLES, SWEEP_STATUSES, TRIAGE_OUTCOMES } from "./board.js";
 
 const actor = z
   .string()
@@ -275,7 +275,7 @@ export function buildMcpServer(board: Board): McpServer {
     "events_since",
     {
       description:
-        "Board events (created, moved, edited, answered, claimed, claim_released, claim_finished, activity, body_appended, deleted, ruling, merged, cancelled, milestone_created, milestone_updated, milestone_sweep, milestone_guide, milestone_closed, review_submitted, migrated) after `cursor`, oldest first. Returns the next cursor to pass. ignore_actors drops your own writes. cursor 0 = from the beginning; `head` gives the current cursor without events. A cursor past `head` is refused (cursor_ahead): it belongs to a re-created board — re-read the board and resume from head.",
+        "Board events (created, moved, edited, answered, claimed, claim_released, claim_finished, activity, body_appended, deleted, ruling, merged, cancelled, milestone_created, milestone_updated, milestone_sweep, milestone_guide, milestone_closed, review_submitted, feedback_triaged, migrated) after `cursor`, oldest first. Returns the next cursor to pass. ignore_actors drops your own writes. cursor 0 = from the beginning; `head` gives the current cursor without events. A cursor past `head` is refused (cursor_ahead): it belongs to a re-created board — re-read the board and resume from head.",
       inputSchema: {
         cursor: z.number().int().min(0),
         ignore_actors: z.array(z.string()).optional(),
@@ -348,7 +348,7 @@ export function buildMcpServer(board: Board): McpServer {
     "get_milestone",
     {
       description:
-        "The milestone review payload, as the review page shows it: the milestone; guide (the review guide set_review_guide wrote — units exactly as stored, and ticks: {\"guide:<unit>:<check>\": {checked, checked_at, checked_by, version}} — or null); what_changed (finished cards by area, with summary, pr, merge_sha); in_flight; cancelled (cards retired with cancel_card, with the reason: they ship nothing and appear in no other section); checklist (every finished card's human-testing steps, ticks, and the SHA/tag it applies to); decisions (every ruling); balance (the milestone sweep, deferred and on-card sweeps); gaps (stated gaps, and cards filed while it was open); feedback (drafts and past submissions).",
+        "The milestone review payload, as the review page shows it: the milestone; guide (the review guide set_review_guide wrote — units exactly as stored, and ticks: {\"guide:<unit>:<check>\": {checked, checked_at, checked_by, version}} — or null); what_changed (finished cards by area, with summary, pr, merge_sha); in_flight; cancelled (cards retired with cancel_card, with the reason: they ship nothing and appear in no other section); checklist (every finished card's human-testing steps, ticks, and the SHA/tag it applies to); decisions (every ruling); balance (the milestone sweep, deferred and on-card sweeps); gaps (stated gaps, and cards filed while it was open); feedback (drafts; batches — every submitted review, each comment with its target and triage, null while pending; and submissions, the auto-filed rounds from before batches).",
       inputSchema: { name: milestoneName },
       annotations: { readOnlyHint: true },
     },
@@ -432,6 +432,57 @@ export function buildMcpServer(board: Board): McpServer {
       },
     },
     async (a) => run(() => board.setReviewGuide(a.name, a.guide, a.expected_version, { actor: a.actor, by: a.by })),
+  );
+
+  const batchId = z.string().regex(/^FB-[1-9]\d*$/).describe("A feedback batch id, e.g. FB-3 (review_submitted's data.batch)");
+
+  server.registerTool(
+    "list_feedback_batches",
+    {
+      description:
+        "Submitted milestone reviews, oldest first, as summaries: id, milestone, t, by, comments (count), pending (comments not yet triaged), version. `pending: true` keeps only batches with an untriaged comment — your to-do list. A batch with 0 comments is the user approving the milestone.",
+      inputSchema: { milestone: milestoneName.optional(), pending: z.boolean().optional() },
+      annotations: { readOnlyHint: true },
+    },
+    async (a) => run(() => board.listFeedbackBatches(a)),
+  );
+
+  server.registerTool(
+    "get_feedback_batch",
+    {
+      description:
+        "One submitted review, whole: {id, milestone, t, by, version, comments: [{id (c1, c2, ...), key, target, text, triage}]}. `target` says what the comment was written on, as it read when submitted: {kind: milestone} | {kind: card, card, title} | {kind: step, card, text} | {kind: guide_unit, unit, title} | {kind: guide_check, unit, check, title, text}. `triage` is null while pending, else {outcome, card?, reason?, t, by}.",
+      inputSchema: { id: batchId },
+      annotations: { readOnlyHint: true },
+    },
+    async (a) => run(() => board.getFeedbackBatch(a.id)),
+  );
+
+  server.registerTool(
+    "triage_feedback",
+    {
+      description:
+        "Record what became of a batch's comments, under the batch's version (a stale version is REFUSED with the batch as it is now). Each entry: {comment, outcome: filed, card} (a card you filed for it), {comment, outcome: merged_into, card} (folded into a card that already covers it — one filed for an overlapping comment, or existing work), or {comment, outcome: no_action, reason} (already fixed, answered, or not wanted). File the cards first (create_card); this write links each named card back to its comments (the card's `from_feedback`, with an activity line). Comments you leave out keep their triage; naming one again re-triages it and moves its link. The review page shows every comment's outcome, and \"pending\" until you record one.",
+      inputSchema: {
+        id: batchId,
+        triage: z
+          .array(
+            z
+              .object({
+                comment: z.string().min(1).describe("The comment's id in the batch: c1, c2, ..."),
+                outcome: z.enum(TRIAGE_OUTCOMES),
+                card: z.string().min(1).optional().describe("filed / merged_into: the card id"),
+                reason: z.string().min(1).optional().describe("Required for no_action: one line on why; optional otherwise"),
+              })
+              .strict(),
+          )
+          .min(1),
+        expected_version: z.number().int().describe("The batch version you read (get_feedback_batch / list_feedback_batches)."),
+        actor,
+        by,
+      },
+    },
+    async (a) => run(() => board.triageFeedback(a.id, a.triage, a.expected_version, { actor: a.actor, by: a.by })),
   );
 
   server.registerTool(
