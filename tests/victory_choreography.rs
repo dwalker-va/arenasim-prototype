@@ -274,9 +274,12 @@ fn assert_three_stand_apart(cfg: &str) -> Seen {
 
 #[test]
 fn three_winners_each_reach_their_own_spot() {
-    // Found with the Rogue stopping 0.22yd from the Priest...
+    // Found with the Rogue stopping 0.22yd from the Priest (seed 1). Once the
+    // Web became physical (AS-240) the Paladin could no longer Cleanse it off
+    // its Priest, and a winner died in seed 1; seed 0 keeps all three alive
+    // and finishes two of them 0.06yd apart, the case the spots exist for...
     assert_three_stand_apart(
-        r#"{"team1":["Rogue","Priest","Paladin"],"team2":["Hunter","Shaman","Warlock"],"map":"BasicArena","random_seed":1}"#,
+        r#"{"team1":["Rogue","Priest","Paladin"],"team2":["Hunter","Shaman","Warlock"],"map":"BasicArena","random_seed":0}"#,
     );
     // ...and, on the pillared Nagrand map, 0.67yd.
     assert_three_stand_apart(
