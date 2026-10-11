@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Class / comp tier lists from an `arenasim --batch` results CSV.
 
-Usage: python3 scripts/comp_tiers.py <results.csv> [--size {2,3}]
+Usage: python3 scripts/comp_tiers.py <results.csv[.gz]> [--size {2,3}]
 
 Without --size, prints the legacy class tiers plus top/bottom comps. With it,
 prints the fuller report the canonical baselines are written from: all-comps
@@ -10,12 +10,16 @@ canary, and (3v3) the dominant-shape watch.
 """
 import argparse
 import csv
+import gzip
 import sys
 from collections import defaultdict
 
 
 def load(p):
-    with open(p) as f:
+    """Rows of a batch results CSV, plain or gzipped (`.csv.gz`, the form the
+    canonical baselines are committed in)."""
+    opener = gzip.open if p.endswith(".gz") else open
+    with opener(p, "rt", newline="") as f:
         return list(csv.DictReader(f))
 
 def class_tiers(rows):

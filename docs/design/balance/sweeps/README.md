@@ -152,3 +152,34 @@ traces are stamped to the second and would collide in parallel. The binary
 must sit in a checkout (a `Cargo.toml` above it): a binary that classifies as
 installed writes its traces to the per-user data directory instead, where
 they collide and the victim column comes back empty.
+
+## `2026-10-10-as164-*` — the 0.7 milestone sweep
+
+Behind `2026-10-10-as164-milestone-sweep.md` (card AS-164), measured at `ea63f4f`.
+The three canonical matrices are plain `gen_sweep.py --full {1,2,3} --n {100,100,50}`
+output, so their JSONL is not committed; the results are committed gzipped as
+`../canonical_*.csv.gz`. `2026-10-10-as164-gen.py <outdir>` writes the rest; the
+committed copies carry the prefix:
+
+- `h2h.jsonl` — TeamPlan head-to-head, PillaredArena, seeds 1-300 (CSV:
+  `../2026-10-10-as164-teamplan-headtohead-n300.csv`).
+- `bisect.jsonl` (its `hunter` and `wmp` cells, seeds 1-200) and `repro0806.jsonl`
+  (the 2026-08-06 cells, seeds 1-100) — the TeamPlan bisect, run on each of
+  `1ade748 1323a25 b175653 e6c0e93 147e95b` built with the AS-235 executor patch.
+  `2026-10-10-as164-bisect-table.py` folds those runs and the head-to-head CSV
+  into `../2026-10-10-as164-teamplan-bisect.csv`; the `1ade748` reproduction is
+  `../2026-10-10-as164-teamplan-repro-1ade748.csv`.
+- `mech_basic.jsonl`, `mech_nagrand.jsonl`, `mech_hunter.jsonl`,
+  `mech_duels.jsonl`, `mech_h2h_hunter.jsonl` — the observed-run panels, run
+  through `tests/milestone_mechanisms.rs`
+  (`MECH_IN=… MECH_OUT=… MECH_LOGS=… cargo test --release --test milestone_mechanisms -- --ignored`);
+  their per-match rows are the `.rows.jsonl.gz` files.
+- `as234-paired.jsonl` — `gen_sweep.py --full 2 --exclude-double-healer --affects Paladin
+  --control-cells 8 --n 50`, run on `e4c01dc` and `ea63f4f`
+  (CSVs: `../2026-10-10-as164-as234-{before-e4c01dc,after-ea63f4f}.csv`).
+
+Analysis: `2026-10-10-as164-analyze.py` (standings, healer grid, interrupts,
+draws, duels, mirrors, head-to-head, bisect, comps, Hunter),
+`2026-10-10-as164-mechanisms.py` (economy, Druid, Hunter traps, duels, the
+head-to-head Hunter cell) and `2026-10-10-as164-as234-slices.py`. Each reads the
+committed `.gz` files directly; the findings doc maps every figure to its command.
