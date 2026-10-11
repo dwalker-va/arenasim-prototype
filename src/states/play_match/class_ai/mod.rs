@@ -42,10 +42,10 @@ use super::ability_config::AbilityDefinitions;
 use super::ai_profile::AiProfile;
 use super::arena_bounds::ArenaBounds;
 use super::components::{
-    ActiveAuras, Aura, AuraType, CastingState, Combatant, DRCategory, DRTracker, DispelPending,
-    DispelScope, PetType,
+    class_base_stats, ActiveAuras, Aura, AuraType, CastingState, Combatant, DRCategory, DRTracker,
+    DispelPending, DispelScope, PetType,
 };
-use super::constants::GCD;
+use super::constants::{GCD, LOW_HP_THRESHOLD, MELEE_RANGE, SAFE_KITING_DISTANCE};
 use super::decision_trace::RejectionReason;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume};
 use super::match_config::CharacterClass;
@@ -1513,6 +1513,72 @@ pub fn ally_dispel_priority(aura: &Aura) -> i32 {
     }
 }
 
+/// The root bar: a magic root that is HOLDING A TEAMMATE BACK
+/// ([`root_holds_back`]) is worth spending a dispel ahead of routine healing.
+/// The dispel is spent BECAUSE of the root; what it removes is still the random
+/// pick among everything its scope takes (`process_dispels`), as for every
+/// ally dispel. The bar sits below the
+/// urgent crowd control ([`URGENT_DISPEL_PRIORITY`]: a rooted teammate still
+/// casts, swings and heals, a sheeped one does nothing) and above the routine
+/// magic dispels (a root that is not holding anyone back, a DoT — the bare
+/// [`dispel_priority`]). A dispel walk carries the healer to one only when the
+/// walk is short and lands with root still to remove ([`owed_dispel`]): a root
+/// lasts 4-8s and breaks at 80 damage, so a long walk would arrive as it ended,
+/// having taken the healer off its post to get there.
+pub const ROOT_DISPEL_PRIORITY: i32 = 85;
+
+/// Whether the root on `ally` is keeping it from doing its job — the situation
+/// that makes a root worth a dispel's GCD ahead of a heal:
+/// - a MELEE teammate ([`CharacterClass::is_melee`]) whose target has stepped
+///   out of its swing range ([`MELEE_RANGE`]) — Frost Nova's whole purpose, the
+///   Mage walking off the Rogue it froze; or
+/// - a RANGED teammate being trained: a visible enemy chaser (a melee class or
+///   a pet) targeting it stands inside [`SAFE_KITING_DISTANCE`], and the root
+///   keeps it from stepping out.
+///
+/// A rooted melee teammate still swinging at its target, or a rooted caster
+/// nobody is on, is not held back: the root costs it nothing yet, so it waits
+/// for the routine dispels. Reads only the caller's perceived view, so an
+/// unseen chaser does not count.
+///
+/// Never the healer itself (`ctx.self_entity`): a root on the healer stays a
+/// routine dispel. A rooted healer still casts, and spending its GCD on its own
+/// root while a teammate needs a heal trades the team's healing for the
+/// healer's footing. The dispel walk skips the healer for the same reason.
+pub fn root_holds_back(ctx: &CombatContext, ally: &CombatantInfo) -> bool {
+    if ally.entity == ctx.self_entity {
+        return false;
+    }
+    if ally.class.is_melee() && !ally.is_pet {
+        return ally
+            .target
+            .and_then(|t| ctx.combatants.get(&t))
+            .is_some_and(|t| t.is_alive && ally.position.distance(t.position) > MELEE_RANGE);
+    }
+    ctx.combatants.values().any(|enemy| {
+        enemy.team != ally.team
+            && enemy.is_alive
+            && enemy.target == Some(ally.entity)
+            && (enemy.is_pet || enemy.class.is_melee())
+            && enemy.position.distance(ally.position) <= SAFE_KITING_DISTANCE
+    })
+}
+
+/// How urgently a healer's ally dispel wants `aura` gone from `ally` in this
+/// situation: [`ally_dispel_priority`], except that a root holding the
+/// teammate back ([`root_holds_back`]) rises to [`ROOT_DISPEL_PRIORITY`].
+pub fn situational_ally_dispel_priority(
+    ctx: &CombatContext,
+    ally: &CombatantInfo,
+    aura: &Aura,
+) -> i32 {
+    if aura.effect_type == AuraType::Root && root_holds_back(ctx, ally) {
+        ROOT_DISPEL_PRIORITY
+    } else {
+        ally_dispel_priority(aura)
+    }
+}
+
 /// Whether a targeted cast of range `range` from `from` reaches a unit at `to`.
 ///
 /// The two gates every targeted cast passes at cast start (`pre_cast_ok`), in
@@ -1589,7 +1655,9 @@ pub fn can_cast_dispel(
 
 /// The teammate a healer should WALK to so that `dispel` can free it: the
 /// nearest living non-pet teammate (never the healer itself) holding crowd
-/// control that `dispel` removes at the urgent bar, which `dispel` does not
+/// control that `dispel` removes at the urgent bar — or, for the Paladin's
+/// Cleanse, a root holding it back within a short walk ([`owed_dispel`]) —
+/// which `dispel` does not
 /// reach from where the healer stands — beyond its range, or in range but out of
 /// sight ([`cast_reach`]). `None` when such a teammate is already reached (the
 /// rotation's urgent dispel frees it where the healer stands), when there is
@@ -1633,6 +1701,17 @@ pub enum OwedDispel {
 /// first, where the healer stands); otherwise the nearest unreached one, entity
 /// order breaking ties. `None` when no teammate holds such crowd control, or the
 /// healer cannot afford the dispel.
+///
+/// Only when nothing is owed at the urgent bar, a dispel whose rotation clears
+/// roots at the root bar ([`clears_held_roots`] — the Paladin's Cleanse) also
+/// owes a ROOT holding a teammate back ([`root_holds_back`]), under two limits
+/// that keep the walk cheap and correct:
+/// - the rotation's own gate for the root bar holds ([`root_dispel_allowed`]),
+///   so the walk is only toward a Cleanse the rotation casts on arrival;
+/// - an unreached root is owed only when the healer gets into range within
+///   [`ROOT_DISPEL_WALK_MAX_SECS`] at its class's base speed AND with a GCD of
+///   the root still left on arrival. A root lasts 4-8s and breaks at 80 damage;
+///   a longer walk takes the healer off its post to arrive as it ends.
 pub fn owed_dispel(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
@@ -1646,21 +1725,63 @@ pub fn owed_dispel(
     if current_mana < def.mana_cost {
         return None;
     }
+    let urgent = |ally: &CombatantInfo| -> bool {
+        ctx.active_auras.get(&ally.entity).is_some_and(|auras| {
+            auras
+                .iter()
+                .any(|a| scope.takes(a) && ally_dispel_priority(a) >= URGENT_DISPEL_PRIORITY)
+        })
+    };
+    if let Some(owed) = owed_by(ctx, def.range, entity, my_pos, urgent) {
+        return Some(owed);
+    }
+    if !clears_held_roots(dispel) || !root_dispel_allowed(ctx) {
+        return None;
+    }
+    let speed = ctx
+        .combatants
+        .get(&entity)
+        .map_or(0.0, |me| class_base_stats(me.class).movement_speed);
+    let held_root = |ally: &CombatantInfo| -> bool {
+        if !root_holds_back(ctx, ally) {
+            return false;
+        }
+        // Seconds to walk into range; zero when already there.
+        let arrival = if speed > 0.0 {
+            (my_pos.distance(ally.position) - def.range).max(0.0) / speed
+        } else {
+            f32::INFINITY
+        };
+        arrival <= ROOT_DISPEL_WALK_MAX_SECS
+            && ctx.active_auras.get(&ally.entity).is_some_and(|auras| {
+                auras.iter().any(|a| {
+                    a.effect_type == AuraType::Root && scope.takes(a) && a.duration >= arrival + GCD
+                })
+            })
+    };
+    owed_by(ctx, def.range, entity, my_pos, held_root)
+}
+
+/// [`owed_dispel`]'s scan over the healer's living non-pet teammates that
+/// `owes` picks out: the first one the dispel reaches, else the nearest
+/// unreached one, entity order breaking ties.
+fn owed_by(
+    ctx: &CombatContext,
+    range: f32,
+    entity: Entity,
+    my_pos: Vec3,
+    owes: impl Fn(&CombatantInfo) -> bool,
+) -> Option<OwedDispel> {
     let mut nearest: Option<(f32, Entity)> = None;
     for ally in ctx.alive_allies() {
         // Never itself, and never a cycloned teammate: no dispel reaches one.
         if ally.entity == entity || ctx.is_cycloned(ally.entity) {
             continue;
         }
-        let urgent = ctx.active_auras.get(&ally.entity).is_some_and(|auras| {
-            auras
-                .iter()
-                .any(|a| scope.takes(a) && ally_dispel_priority(a) >= URGENT_DISPEL_PRIORITY)
-        });
-        if !urgent {
+        if !owes(ally) {
             continue;
         }
-        if cast_reach(ctx, def.range, my_pos, ally.position) == CastReach::Reaches {
+        if cast_reach(ctx, range, my_pos, ally.position) == CastReach::Reaches {
             return Some(OwedDispel::Reached(ally.entity));
         }
         let distance = my_pos.distance(ally.position);
@@ -1670,6 +1791,28 @@ pub fn owed_dispel(
     }
     nearest.map(|(_, e)| OwedDispel::Unreached(e))
 }
+
+/// The dispels whose rotation clears a root holding a teammate back at
+/// [`ROOT_DISPEL_PRIORITY`] — so the only ones a walk may carry to one. The
+/// Paladin's Cleanse; the Priest's rotation has no root tier.
+pub fn clears_held_roots(dispel: AbilityType) -> bool {
+    dispel == AbilityType::PaladinCleanse
+}
+
+/// The gate on the root bar, shared by the rotation and the walk: no living
+/// non-pet teammate (the healer and the rooted one included) is below
+/// [`LOW_HP_THRESHOLD`]. A rooted teammate still casts and swings; a dying one
+/// is the higher-value GCD.
+pub fn root_dispel_allowed(ctx: &CombatContext) -> bool {
+    !ctx
+        .alive_allies()
+        .iter()
+        .any(|a| a.health_pct() < LOW_HP_THRESHOLD)
+}
+
+/// The longest walk, in seconds at the healer's class base speed, that a root
+/// holding a teammate back is worth ([`owed_dispel`]).
+pub const ROOT_DISPEL_WALK_MAX_SECS: f32 = 2.0;
 
 /// The dying-first rule for a dispel owed to `ally`: whether some OTHER living
 /// non-pet teammate than the healer and `ally` is below `urgency_hp_threshold`.
@@ -1751,7 +1894,7 @@ pub fn scan_ally_dispel(
         let highest_priority = ally_auras
             .iter()
             .filter(|aura| scope.takes(aura))
-            .map(ally_dispel_priority)
+            .map(|aura| situational_ally_dispel_priority(ctx, info, aura))
             .max()
             .unwrap_or(-1);
         if highest_priority < min_priority || highest_priority < 0 {
@@ -1791,7 +1934,9 @@ pub fn scan_ally_dispel(
 /// The `min_priority` parameter controls which debuffs are considered:
 /// - 90: Only urgent CC (Polymorph, Freezing Trap's Incapacitate, the Unstable
 ///   Affliction Silence, Fear)
-/// - 50: Include roots and DoTs
+/// - 85 ([`ROOT_DISPEL_PRIORITY`]): also a root holding a teammate back
+///   ([`root_holds_back`])
+/// - 50: Include every root and DoTs
 /// - 20: Include slows (not recommended)
 ///
 /// Only an ally the dispel reaches is a candidate: in range AND in sight

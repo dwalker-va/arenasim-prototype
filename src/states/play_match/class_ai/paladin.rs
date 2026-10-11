@@ -276,6 +276,32 @@ pub fn decide_paladin_action(
         );
     }
 
+    // Priority 3.5: Cleanse - a root holding a teammate back (a melee whose
+    // target walked out of reach, or a ranged teammate being trained; never the
+    // Paladin itself). The root is why the Cleanse is spent; what it removes
+    // is the usual random pick among what Cleanse takes. Below
+    // the urgent crowd control and above the routine dispels
+    // (`ROOT_DISPEL_PRIORITY`); a teammate below `LOW_HP_THRESHOLD` is healed
+    // first, since a rooted teammate still acts and a dying one may not. The
+    // dispel walk owes a root under the same gate (`owed_dispel`).
+    if super::root_dispel_allowed(ctx) {
+        if try_cleanse(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            super::ROOT_DISPEL_PRIORITY,
+            &mut builder,
+        ) {
+            builder.finish();
+            return true;
+        }
+    }
+
     // Priority 4: Hammer of Justice (rotation). Suppressed while the
     // reservation holds (living enemy healer + not PRESSURED) — the cooldown
     // is saved for dips (R8). Released under pressure so self-peel HoJ on
