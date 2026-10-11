@@ -473,18 +473,20 @@ fn the_hold_does_not_keep_a_dispel_walk() {
 // The played repro
 // ---------------------------------------------------------------------------
 
-/// Hunter+Paladin vs Mage+Druid on Nagrand (`TeamPlan`), seed 2: the match the
-/// defect was found in. From 94.16s (combat time) the Mage sits at 40% behind
-/// a pillar edge from the Druid, whose formation point lies on the occluded
-/// side of that edge — so the formation walk takes sight away and the medic
-/// chase gives it back.
+/// The defect was found in Hunter+Paladin vs Mage+Druid on Nagrand
+/// (`TeamPlan`), seed 2: from 94.16s (combat time) the Mage sat at 40% behind
+/// a pillar edge from the Druid, whose formation point lay on the occluded
+/// side of that edge — so the formation walk took sight away and the medic
+/// chase gave it back. That seed stopped reaching the edge when the Druid's
+/// mana governor reserve fell (AS-247); Warrior+Paladin vs Mage+Druid, seed 1,
+/// has the Druid chasing its dying Mage round a pillar from about 50s.
 fn repro_config() -> HeadlessMatchConfig {
     HeadlessMatchConfig {
-        team1: vec!["Hunter".into(), "Paladin".into()],
+        team1: vec!["Warrior".into(), "Paladin".into()],
         team2: vec!["Mage".into(), "Druid".into()],
         map: "PillaredArena".to_string(),
         ai_profile: Some("TeamPlan".to_string()),
-        random_seed: Some(2),
+        random_seed: Some(1),
         ..Default::default()
     }
 }
@@ -545,11 +547,11 @@ fn the_repro_druid_commits_to_one_goal() {
     // Mage back over the urgency threshold and the chase has no teammate.
     let chases_in_window = events
         .iter()
-        .filter(|(t, trig)| *t >= 94.0 && trig == "SeekLos")
+        .filter(|(t, trig)| *t >= 50.0 && trig == "SeekLos")
         .count();
     assert!(
         chases_in_window >= 2,
-        "the repro no longer reaches the pillar edge: {chases_in_window} SeekLos at/after 94s \
+        "the repro no longer reaches the pillar edge: {chases_in_window} SeekLos at/after 50s \
          — re-seed this probe"
     );
 
