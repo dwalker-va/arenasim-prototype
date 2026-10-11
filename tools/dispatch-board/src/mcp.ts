@@ -12,7 +12,7 @@
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { AREAS, Board, BoardError, COLUMNS, ROLES, SWEEP_STATUSES } from "./board.js";
+import { AREAS, Board, BoardError, COLUMNS, GUIDE_ID, GUIDE_MAX_CHECKS, GUIDE_MAX_UNITS, ROLES, SWEEP_STATUSES } from "./board.js";
 
 const actor = z
   .string()
@@ -275,7 +275,7 @@ export function buildMcpServer(board: Board): McpServer {
     "events_since",
     {
       description:
-        "Board events (created, moved, edited, answered, claimed, claim_released, claim_finished, activity, body_appended, deleted, ruling, merged, cancelled, milestone_created, milestone_updated, milestone_sweep, milestone_closed, review_submitted, migrated) after `cursor`, oldest first. Returns the next cursor to pass. ignore_actors drops your own writes. cursor 0 = from the beginning; `head` gives the current cursor without events. A cursor past `head` is refused (cursor_ahead): it belongs to a re-created board — re-read the board and resume from head.",
+        "Board events (created, moved, edited, answered, claimed, claim_released, claim_finished, activity, body_appended, deleted, ruling, merged, cancelled, milestone_created, milestone_updated, milestone_sweep, milestone_guide, milestone_closed, review_submitted, migrated) after `cursor`, oldest first. Returns the next cursor to pass. ignore_actors drops your own writes. cursor 0 = from the beginning; `head` gives the current cursor without events. A cursor past `head` is refused (cursor_ahead): it belongs to a re-created board — re-read the board and resume from head.",
       inputSchema: {
         cursor: z.number().int().min(0),
         ignore_actors: z.array(z.string()).optional(),
@@ -348,7 +348,7 @@ export function buildMcpServer(board: Board): McpServer {
     "get_milestone",
     {
       description:
-        "The milestone review payload, as the review page shows it: the milestone; what_changed (finished cards by area, with summary, pr, merge_sha); in_flight; cancelled (cards retired with cancel_card, with the reason: they ship nothing and appear in no other section); checklist (every finished card's human-testing steps, ticks, and the SHA/tag it applies to); decisions (every ruling); balance (the milestone sweep, deferred and on-card sweeps); gaps (stated gaps, and cards filed while it was open); feedback (drafts and past submissions).",
+        "The milestone review payload, as the review page shows it: the milestone; guide (the review guide set_review_guide wrote — units exactly as stored, and ticks: {\"guide:<unit>:<check>\": {checked, checked_at, checked_by, version}} — or null); what_changed (finished cards by area, with summary, pr, merge_sha); in_flight; cancelled (cards retired with cancel_card, with the reason: they ship nothing and appear in no other section); checklist (every finished card's human-testing steps, ticks, and the SHA/tag it applies to); decisions (every ruling); balance (the milestone sweep, deferred and on-card sweeps); gaps (stated gaps, and cards filed while it was open); feedback (drafts and past submissions).",
       inputSchema: { name: milestoneName },
       annotations: { readOnlyHint: true },
     },
@@ -385,6 +385,53 @@ export function buildMcpServer(board: Board): McpServer {
       inputSchema: { name: milestoneName, summary: z.string().min(1), link: z.string().min(1).optional(), expected_version: milestoneVersion, actor, by },
     },
     async (a) => run(() => board.setMilestoneSweep(a.name, { summary: a.summary, link: a.link }, a.expected_version, { actor: a.actor, by: a.by })),
+  );
+
+  const guideId = z.string().regex(GUIDE_ID).describe("Stable id (1-32 of [A-Za-z0-9._-]); keep it across updates — it keys the check's tick");
+  const guideCheck = z
+    .object({
+      id: guideId,
+      text: z.string().min(1).describe("A short instruction: what to watch and what wrong looks like"),
+      replay: z
+        .record(z.unknown())
+        .nullable()
+        .optional()
+        .describe("Optional: the game's headless/replay match config to watch this in, as structured JSON ({team1, team2, map?, random_seed?, …})"),
+    })
+    .strict();
+  const guideUnit = z
+    .object({
+      id: guideId,
+      title: z.string().min(1).describe("The theme, e.g. \"Druid in a root\""),
+      summary: z.string().min(1).describe("One paragraph: what changed and why it matters"),
+      checks: z.array(guideCheck).min(1).max(GUIDE_MAX_CHECKS),
+      cards: z.array(z.string().min(1)).min(1).describe("The ids of this milestone's cards the unit covers"),
+      changed_since: z
+        .string()
+        .nullable()
+        .optional()
+        .describe(
+          "Mark the unit changed: ticks on its checks made before this board time (YYYY-MM-DDTHH:MM:SS UTC, e.g. the merged_at of the card that changed it) are cleared. Pass the stored value back unchanged to keep later ticks; never in the future.",
+        ),
+    })
+    .strict();
+
+  server.registerTool(
+    "set_review_guide",
+    {
+      description:
+        "Write the milestone's review guide (replaces it): themed review units, each with a one-paragraph summary, 1-3 checks (id, text, optional replay config) and the card ids it covers — the page the user reviews, leading the milestone review. " +
+        "Ticks carry over by unit+check id, except on a unit whose changed_since is after the tick, and on a check the new guide drops; a new check starts unticked. " +
+        "get_milestone returns it as `guide` (units exactly as stored, ticks beside them). Refused on a released milestone.",
+      inputSchema: {
+        name: milestoneName,
+        guide: z.object({ units: z.array(guideUnit).max(GUIDE_MAX_UNITS) }).strict(),
+        expected_version: milestoneVersion,
+        actor,
+        by,
+      },
+    },
+    async (a) => run(() => board.setReviewGuide(a.name, a.guide, a.expected_version, { actor: a.actor, by: a.by })),
   );
 
   server.registerTool(
