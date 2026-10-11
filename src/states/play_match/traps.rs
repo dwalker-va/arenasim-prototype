@@ -42,6 +42,35 @@ pub fn freezing_trap_aura(owner: Entity) -> Aura {
     }
 }
 
+/// The slow a Frost Trap zone holds on an enemy standing in it. The one
+/// definition: `slow_zone_system` pushes it (refreshed each tick, so it carries
+/// a short duration and never diminishes), and `tests/aura_dispel_type_audit.rs`
+/// checks its removal class against Classic's Frost Trap Aura.
+pub fn frost_trap_slow_aura(owner: Entity, magnitude: f32) -> Aura {
+    Aura {
+        effect_type: AuraType::MovementSpeedSlow,
+        duration: 2.0, // Short duration — refreshed each tick while in zone
+        magnitude,
+        tick_interval: 0.0,
+        time_until_next_tick: 0.0,
+        caster: Some(owner),
+        ability_name: "Frost Trap".to_string(),
+        break_on_damage_threshold: -1.0, // Never breaks on damage
+        accumulated_damage: 0.0,
+        fear_direction: (0.0, 0.0),
+        fear_direction_timer: 0.0,
+        spell_school: Some(SpellSchool::Frost),
+        applied_this_frame: false,
+        backlash_damage: None,
+        dr_category_override: None,
+        dispel_type: DispelType::Auto,
+        compound: None,
+        source_item: None,
+        stacks: None,
+        bloom: None,
+    }
+}
+
 /// Classic's rule, from every Hunter trap's tooltip (Freezing Trap 1499 /
 /// 14310, Frost Trap 13809): "Only one trap can be active at a time." Every
 /// trap is a "Summon Object (slot 1)" spell, and the server despawns whatever
@@ -355,54 +384,14 @@ pub fn slow_zone_system(
                         slow.duration = 2.0; // Short duration — refreshed each tick while in zone
                     } else {
                         // Apply new slow aura directly (no DR for zone-managed auras)
-                        auras.auras.push(Aura {
-                            effect_type: AuraType::MovementSpeedSlow,
-                            duration: 2.0,
-                            magnitude: zone.slow_magnitude,
-                            tick_interval: 0.0,
-                            time_until_next_tick: 0.0,
-                            caster: Some(zone.owner),
-                            ability_name: "Frost Trap".to_string(),
-                            break_on_damage_threshold: -1.0, // Never breaks on damage
-                            accumulated_damage: 0.0,
-                            fear_direction: (0.0, 0.0),
-                            fear_direction_timer: 0.0,
-                            spell_school: Some(SpellSchool::Frost),
-                            applied_this_frame: false,
-                            backlash_damage: None,
-                            dr_category_override: None,
-                            dispel_type: DispelType::Auto,
-                            compound: None,
-                            source_item: None,
-                            stacks: None,
-                            bloom: None,
-                        });
+                        auras
+                            .auras
+                            .push(frost_trap_slow_aura(zone.owner, zone.slow_magnitude));
                     }
                 } else {
                     // Target has no ActiveAuras yet — add component with slow
                     commands.entity(target_entity).try_insert(ActiveAuras {
-                        auras: vec![Aura {
-                            effect_type: AuraType::MovementSpeedSlow,
-                            duration: 2.0,
-                            magnitude: zone.slow_magnitude,
-                            tick_interval: 0.0,
-                            time_until_next_tick: 0.0,
-                            caster: Some(zone.owner),
-                            ability_name: "Frost Trap".to_string(),
-                            break_on_damage_threshold: -1.0,
-                            accumulated_damage: 0.0,
-                            fear_direction: (0.0, 0.0),
-                            fear_direction_timer: 0.0,
-                            spell_school: Some(SpellSchool::Frost),
-                            applied_this_frame: false,
-                            backlash_damage: None,
-                            dr_category_override: None,
-                            dispel_type: DispelType::Auto,
-                            compound: None,
-                            source_item: None,
-                            stacks: None,
-                            bloom: None,
-                        }],
+                        auras: vec![frost_trap_slow_aura(zone.owner, zone.slow_magnitude)],
                     });
                 }
             }

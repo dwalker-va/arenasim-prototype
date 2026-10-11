@@ -227,6 +227,26 @@ tests fail if a full-CC type or spell is left unlabelled.
 - Mana Burn is blocked by Cyclone and by Divine Shield alike: a burn that lands
   on either destroys nothing (`[MANA BURN] ... fails: ... is immune`)
 
+### Dispel types (removal classes)
+- Every aura has a removal class (`DispelType`), and the class decides who can
+  take it: Dispel Magic and Devour Magic take MAGIC; Cleanse takes magic and
+  POISON (and disease, of which there is none yet); nothing in the arena takes a
+  CURSE; no dispel, cleanse or purge takes a PHYSICAL effect. Purge takes magic
+  buffs off an enemy
+- The class is derived from the ability's school (Physical school is physical,
+  every other school is magic) unless the RON `applies_aura` declares it. Two
+  families must declare it, because their schools read as magic: the poisons
+  (`dispel_type: Poison` — Crippling Poison and Serpent Sting, so a Priest
+  cannot dispel a sting and a Paladin can cleanse it) and the Warlock's curses
+  (`dispel_type: Curse`)
+- `tests/aura_dispel_type_audit.rs` holds an explicit row per ability: the class
+  the sim resolves, the class Classic's client gives the aura
+  (`SpellCategories.DispelType`), and a written reason wherever the two differ.
+  A new ability does not compile until its row is written. The departures from
+  Classic are listed there with their reasons: Concussive Shot is physical where
+  Classic's is magic, and Psychic Scream, the Spider's Web, the Paladin auras
+  and the totem buffs are magic where Classic's have no dispel type
+
 ### Purge priority (Shaman)
 - Keyed by the aura INSTANCE, not its type (`class_ai::aura_purge_priority`):
   the type's default (`purge_priority`), unless the aura BLOOMS (Lifebloom —

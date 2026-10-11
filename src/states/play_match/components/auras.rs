@@ -174,8 +174,8 @@ pub enum DispelType {
     #[default]
     Auto,
     /// A poison debuff — no dispel touches it; a cleanse does. Crippling Poison
-    /// uses this, and has to declare it because its school (`Nature`) would
-    /// otherwise read as magic.
+    /// and Serpent Sting use this, and have to declare it because their school
+    /// (`Nature`) would otherwise read as magic.
     Poison,
     /// A disease debuff — reserved for future use; same shape as `Poison`,
     /// removed by a cleanse rather than a dispel.
