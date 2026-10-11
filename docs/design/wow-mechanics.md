@@ -228,24 +228,35 @@ tests fail if a full-CC type or spell is left unlabelled.
   on either destroys nothing (`[MANA BURN] ... fails: ... is immune`)
 
 ### Dispel types (removal classes)
+- TBC dispel rules are the guide (user ruling, 2026-10-11); exceptions are
+  the user's, case by case
 - Every aura has a removal class (`DispelType`), and the class decides who can
   take it: Dispel Magic and Devour Magic take MAGIC; Cleanse takes magic and
   POISON (and disease, of which there is none yet); nothing in the arena takes a
-  CURSE; no dispel, cleanse or purge takes a PHYSICAL effect. Purge takes magic
-  buffs off an enemy
+  CURSE; no dispel, cleanse or purge takes a PHYSICAL effect or an UNTYPED one.
+  Purge takes magic buffs off an enemy
+- UNTYPED is TBC's "no dispel type" on a spell with a magic school: the Paladin
+  auras, the totem buffs, the Mage armors, Travel Form, Cyclone and the Frost
+  Trap slow. Nothing removes them, and nothing is meant to
 - The class is derived from the ability's school (Physical school is physical,
-  every other school is magic) unless the RON `applies_aura` declares it. Two
-  families must declare it, because their schools read as magic: the poisons
-  (`dispel_type: Poison` — Crippling Poison and Serpent Sting, so a Priest
-  cannot dispel a sting and a Paladin can cleanse it) and the Warlock's curses
-  (`dispel_type: Curse`)
+  every other school is magic) unless the aura declares it. Declared in the RON
+  `applies_aura`: the poisons (`dispel_type: Poison` — Crippling Poison and
+  Serpent Sting, so a Priest cannot dispel a sting and a Paladin can cleanse
+  it), the Warlock's curses (`dispel_type: Curse`), the Spider's Web
+  (`dispel_type: Physical`; TBC's Web is a Physical-school root, so no dispel
+  frees it, though Master's Call does) and the untyped auras
+  (`dispel_type: Untyped`). The totem buffs and the Frost Trap slow are built
+  in code, and their constructors set it
 - `tests/aura_dispel_type_audit.rs` holds an explicit row per ability: the class
-  the sim resolves, the class Classic's client gives the aura
-  (`SpellCategories.DispelType`), and a written reason wherever the two differ.
-  A new ability does not compile until its row is written. The departures from
-  Classic are listed there with their reasons: Concussive Shot is physical where
-  Classic's is magic, and Psychic Scream, the Spider's Web, the Paladin auras
-  and the totem buffs are magic where Classic's have no dispel type
+  the sim resolves, the class TBC's client gives the aura
+  (`SpellCategories.DispelType` at `DifficultyID` 0, wago.tools build
+  2.5.6.69795), and a written reason wherever the two differ. A new ability
+  does not compile until its row is written. The one departure is Divine
+  Shield: TBC's is Magic, but only Mass Dispel removes it and the sim has none
+- The Classic Era client (1.15.9) is NOT the reference: it reproduces 1.12.
+  Psychic Scream reads DispelType 0 there; patch 2.0.1 made it magic, and TBC
+  reads Magic. Era and TBC also disagree on Concussive Shot, Frost Trap Aura,
+  Divine Shield and the Mage armors
 
 ### Purge (Shaman)
 - **The pick is random; the Shaman never chooses the buff.** A Purge takes one
@@ -280,7 +291,7 @@ tests fail if a full-CC type or spell is left unlabelled.
   physical snares too), each as a whole debuff
 - While shifted: +40% movement speed, immune to Polymorph, no casting and no
   auto-attacks. Not purgeable or dispellable — a shapeshift is not a spell on
-  the Druid
+  the Druid, and it carries no dispel type (`dispel_type: Untyped`)
 - **Leaving the form is free and costs no global cooldown** (WoW's cancel-aura),
   so the Druid can shift out and cast an instant heal on the same beat. The
   form has no timer that matters (600s ceiling); the Druid ends it

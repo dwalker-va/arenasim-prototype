@@ -211,11 +211,27 @@ pub enum DispelType {
     /// abilities qualify, and nothing written about the CLASS should name one —
     /// otherwise every such addition rewrites a tooltip.
     ///
-    /// Derived from the applying ability's `spell_school`, not hand-declared:
-    /// see [`DispelType::for_ability`]. That keeps one fact ("Concussive Shot
-    /// is physical") in one place instead of restating it on the aura, where
-    /// the two copies could disagree.
+    /// Usually derived from the applying ability's `spell_school` rather than
+    /// hand-declared: see [`DispelType::for_ability`]. That keeps one fact
+    /// ("Concussive Shot is physical") in one place instead of restating it on
+    /// the aura, where the two copies could disagree. The Spider's Web is the
+    /// one declaration: a Nature-school pet ability whose TBC aura is a
+    /// Physical-school root.
     Physical,
+    /// NO dispel type: a spell with a magic school that TBC still gives no
+    /// `DispelType` (0), so nothing dispels, cleanses or purges it. The Paladin
+    /// auras, the totem buffs, the Mage armors, Travel Form, Cyclone and the
+    /// Frost Trap slow. They are spells, not wounds, so `Physical` would
+    /// misdescribe them. They are simply not the kind of
+    /// effect a removal takes hold of.
+    ///
+    /// Declared, never derived. The school says Holy or Nature, and the school
+    /// cannot tell Devotion Aura from Power Word: Fortitude. The RON declares
+    /// it (`dispel_type: Untyped`) on a config aura, and an engine constructor
+    /// sets it on an aura built in code (the totem buffs, the Frost Trap
+    /// slow). Unlike `Curse`,
+    /// this is not a class waiting for a server: no removal is meant to take it.
+    Untyped,
 }
 
 impl DispelType {
@@ -242,6 +258,7 @@ impl DispelType {
             DispelType::Disease => DispelType::Disease,
             DispelType::Curse => DispelType::Curse,
             DispelType::Physical => DispelType::Physical,
+            DispelType::Untyped => DispelType::Untyped,
             DispelType::Auto => match school {
                 SpellSchool::Physical => DispelType::Physical,
                 // Schoolless is NOT physical. `SpellSchool::None` means "no
@@ -1057,9 +1074,11 @@ impl Aura {
             // `is_cleansable_poison`); curses come off to curse-removal, which
             // no ability in the arena performs YET — when one lands, this arm
             // is where `Curse` moves out of.
-            DispelType::Poison | DispelType::Disease | DispelType::Curse | DispelType::Physical => {
-                return false
-            }
+            DispelType::Poison
+            | DispelType::Disease
+            | DispelType::Curse
+            | DispelType::Physical
+            | DispelType::Untyped => return false,
             DispelType::Auto => {}
         }
 
@@ -1099,6 +1118,13 @@ impl Aura {
         matches!(self.dispel_type, DispelType::Curse)
     }
 
+    /// Returns true if this aura carries NO dispel type — a Paladin aura, a
+    /// totem's buff, a Mage armor, a shapeshift. No dispel, cleanse or purge takes it, and no
+    /// effect is meant to. See [`DispelType::Untyped`].
+    pub fn is_untyped(&self) -> bool {
+        matches!(self.dispel_type, DispelType::Untyped)
+    }
+
     /// Returns true if this aura is a poison/disease debuff removable by a
     /// cleanse. Mutually exclusive with `can_be_dispelled` (magic).
     pub fn is_cleansable_poison(&self) -> bool {
@@ -1129,6 +1155,9 @@ impl Aura {
             DispelType::Disease => Some("Disease"),
             DispelType::Curse => Some("Curse"),
             DispelType::Physical => Some("Physical"),
+            // No dispel type is the class's whole content; there is no word
+            // for a removal to be served by.
+            DispelType::Untyped => None,
             // `Auto` means "derived from the school", and the only school that
             // derives to anything but magic is Physical — which
             // `DispelType::for_ability` has already turned into the arm above.
@@ -1193,15 +1222,20 @@ impl Aura {
     /// takes MAGIC. A buff that is not magic has nothing on it to strip,
     /// whatever its mechanic: a proc trinket's attack-power buff is the same
     /// `AttackPowerIncrease` as a shout, and is `DispelType::Physical` because
-    /// an item's effect is not a spell (see `ProcConfig::aura`).
+    /// an item's effect is not a spell (see `ProcConfig::aura`). The Paladin
+    /// auras, the totem buffs, the Mage armors and Travel Form are
+    /// `DispelType::Untyped`: TBC gives them no dispel type, so a purge cannot
+    /// take them either.
     pub fn can_be_purged(&self) -> bool {
         // **Exhaustive on purpose — do not add a `_ =>` arm.** A removal class
         // silently falling through to the magic branch is a buff becoming
         // purgeable without anyone deciding it should be.
         match self.dispel_type {
-            DispelType::Poison | DispelType::Disease | DispelType::Curse | DispelType::Physical => {
-                return false
-            }
+            DispelType::Poison
+            | DispelType::Disease
+            | DispelType::Curse
+            | DispelType::Physical
+            | DispelType::Untyped => return false,
             DispelType::Auto => {}
         }
 
@@ -1224,7 +1258,9 @@ impl Aura {
 
             // Beneficial, but DELIBERATELY unpurgeable — see the doc above.
             // Travel Form joins them: a shapeshift is the Druid's own body,
-            // not a spell cast on it, so a purge has nothing to take.
+            // not a spell cast on it. Its class says so as well (`Untyped`,
+            // as TBC gives a shapeshift no dispel type), so it stays on the
+            // Druid by either rule.
             AuraType::DamageImmunity | AuraType::FearImmunity | AuraType::TravelForm => false,
 
             // Mechanical markers, not buffs.
@@ -2228,6 +2264,7 @@ mod tests {
                 DispelType::Poison,
                 DispelType::Disease,
                 DispelType::Curse,
+                DispelType::Untyped,
             ] {
                 let mut a = aura(ty);
                 a.dispel_type = class;

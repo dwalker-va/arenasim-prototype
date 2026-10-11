@@ -1574,6 +1574,12 @@ const ROOT_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
         "PillaredArena",
         2,
     ),
+    // Added when the Web became physical (AS-240): the enemy Paladin could no
+    // longer Cleanse the Druid's Hunter's Web off its own Hunter, which moved
+    // the three Hunter+Druid vs Hunter+Paladin matches and left the probe one
+    // shift and one in-form root short of its floors. This one makes three
+    // shifts through a root, two of them rooted in the form.
+    (&["Rogue", "Druid"], &["Hunter", "Paladin"], "BasicArena", 5),
 ];
 
 /// How late a shift may land after the global cooldown that allows it: the

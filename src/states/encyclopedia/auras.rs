@@ -425,8 +425,10 @@ impl NamedAura {
     /// "cannot be removed", and a Warlock reading the page should see the
     /// difference. The absolute rung is reserved for what genuinely nothing
     /// touches: the unpurgeable self-buffs (Divine Shield, Berserker Rage), a
-    /// proc trinket's physical buff, and the mechanical markers (Weakened
-    /// Soul, Shadow Sight, weapon poisons).
+    /// proc trinket's physical buff, the buffs with no dispel type (the Paladin
+    /// auras, the totem buffs, the Mage armors, Travel Form —
+    /// `Aura::is_untyped`), and the
+    /// mechanical markers (Weakened Soul, Shadow Sight, weapon poisons).
     ///
     /// The buff half is disjoint by construction: a dispel lifts harmful magic
     /// off an ally, a purge strips buffs off an enemy.
@@ -750,7 +752,13 @@ fn engine_entry(
             magnitude: FROST_TRAP_SLOW_MAGNITUDE,
             school: Some(SpellSchool::Frost),
             break_on_damage: -1.0,
-            dispel_type: DispelType::Auto,
+            // The engine's own constructor decides the class, as for the
+            // totem buffs below.
+            dispel_type: crate::states::play_match::traps::frost_trap_slow_aura(
+                bevy::prelude::Entity::PLACEHOLDER,
+                FROST_TRAP_SLOW_MAGNITUDE,
+            )
+            .dispel_type,
             persistence: Persistence::WhileSourceActive("while you stand in the zone"),
             riders: EngineSpec::no_riders(),
             provenance: format!(
@@ -770,7 +778,16 @@ fn engine_entry(
                 magnitude,
                 school: Some(school),
                 break_on_damage: -1.0,
-                dispel_type: DispelType::Auto,
+                // The engine's own constructor decides the class, so the page
+                // cannot disagree with the buff a totem actually pulses.
+                dispel_type: crate::states::play_match::totems::make_totem_aura(
+                    aura_type,
+                    magnitude,
+                    bevy::prelude::Entity::PLACEHOLDER,
+                    school,
+                    element.buff_name(),
+                )
+                .dispel_type,
                 persistence: Persistence::WhileSourceActive("while you stand near the totem"),
                 riders: EngineSpec::no_riders(),
                 provenance: format!(
@@ -1857,8 +1874,8 @@ mod tests {
     /// off this list by taking it out of the CATALOG: the attack-speed effect
     /// is now a rider on the chill, which is dispellable by its face. Note
     /// what did NOT change to achieve that — `is_magic_dispellable` still
-    /// refuses `AttackSpeedSlow`, so the five schoolless `[—]` rows below are
-    /// exactly as they were.
+    /// refuses `AttackSpeedSlow`, so the five schoolless `[—]` rows below (the
+    /// shout and the interrupt lockouts) are exactly as they were.
     #[test]
     fn the_immune_to_dispel_rung_is_pinned() {
         let mut rows: Vec<String> = catalog(&abilities(), &items())
@@ -1880,8 +1897,12 @@ mod tests {
                 "Boar Charge [Physical]",
                 "Cheap Shot [Physical]",
                 "Concussive Shot [Physical]",
-                "Cyclone [Magic]",
+                // Cyclone, the Frost Trap slow and the Web carry no
+                // dispellable class in TBC (user ruling, 2026-10-11): the
+                // first two have no dispel type, the Web is physical.
+                "Cyclone [—]",
                 "Demoralizing Shout [—]",
+                "Frost Trap [—]",
                 "Hammer of Justice [Magic]",
                 "Kick [—]",
                 "Kidney Shot [Physical]",
@@ -1889,6 +1910,7 @@ mod tests {
                 "Pummel [—]",
                 "Rend [Physical]",
                 "Spell Lock [—]",
+                "Web [Physical]",
                 "Wind Shear [—]",
             ]
         );
@@ -1913,8 +1935,19 @@ mod tests {
                 "Crippling Poison (weapon coating)",
                 "Divine Shield",
                 "Shadow Sight",
-                // A shapeshift: no dispel or purge takes it; the Druid ends it.
+                // No dispel type (TBC): no purge takes a Paladin aura, a
+                // totem's buff, a Mage armor or a shapeshift.
+                "Concentration Aura",
+                "Devotion Aura",
+                "Flametongue Totem",
+                "Frost Armor",
+                "Mage Armor",
+                "Molten Armor",
+                "Healing Stream Totem",
+                "Shadow Resistance Aura",
+                "Strength of Earth Totem",
                 "Travel Form",
+                "Windfury Totem",
                 "Weakened Soul",
             ]
             .map(String::from),

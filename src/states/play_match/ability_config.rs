@@ -75,14 +75,19 @@ pub struct AuraEffect {
     /// removes, and anything else applies a magic one whose removability comes
     /// from the aura type.
     ///
-    /// Declare it explicitly for the two families the school gets wrong:
+    /// Declare it explicitly for the families the school gets wrong:
     /// - `Poison` for a poison on a magic-school ability (Crippling Poison and
     ///   Serpent Sting are `Nature`).
-    ///
-    /// `tests/aura_dispel_type_audit.rs` tables every ability's class against
-    /// Classic's, so a missed declaration fails there.
     /// - `Curse` for the Warlock's curses, which are `Shadow` and would
     ///   otherwise read as ordinary dispellable magic.
+    /// - `Untyped` for a spell TBC gives no dispel type at all (the Paladin
+    ///   auras, the Mage armors, Travel Form, Cyclone): no dispel, cleanse or
+    ///   purge takes it.
+    /// - `Physical` for a magic-school ability whose TBC aura is physical (the
+    ///   Spider's Web).
+    ///
+    /// `tests/aura_dispel_type_audit.rs` tables every ability's class against
+    /// TBC's, so a missed declaration fails there.
     ///
     /// See [`DispelType::for_ability`].
     #[serde(default)]
