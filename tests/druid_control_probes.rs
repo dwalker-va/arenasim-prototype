@@ -1580,6 +1580,13 @@ const ROOT_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
     // shift and one in-form root short of its floors. This one makes three
     // shifts through a root, two of them rooted in the form.
     (&["Rogue", "Druid"], &["Hunter", "Paladin"], "BasicArena", 5),
+    // Added when the Druid's mana governor reserve fell to 0.3 (AS-247): the
+    // change moved these seeds and left the probe four emergency heals short
+    // of its floor. Each of these makes one, rooted in the form.
+    (&["Rogue", "Druid"], &["Hunter", "Shaman"], "BasicArena", 7),
+    (&["Rogue", "Druid"], &["Hunter", "Priest"], "BasicArena", 4),
+    (&["Rogue", "Druid"], &["Hunter", "Priest"], "BasicArena", 7),
+    (&["Hunter", "Druid"], &["Hunter", "Shaman"], "BasicArena", 1),
 ];
 
 /// How late a shift may land after the global cooldown that allows it: the
@@ -1690,9 +1697,15 @@ fn a_root_is_broken_on_the_next_global_cooldown() {
             // was shifted then, the emergency heal that went first, and the
             // deadline.
             let mut window: Option<(f32, bool, Option<f32>, f32)> = None;
-            for f in &played.frames {
+            for (i, f) in played.frames.iter().enumerate() {
                 let d = &f.combatants[&druid];
                 let rooted = d.aura_types.contains(&AuraType::Root);
+                // The root is gone by the next frame: it broke or ran out on
+                // this frame's edge.
+                let root_ends_here = played
+                    .frames
+                    .get(i + 1)
+                    .is_none_or(|g| !g.combatants[&druid].aura_types.contains(&AuraType::Root));
                 let shifted = d.aura_types.contains(&AuraType::TravelForm);
                 if shifted && !rooted {
                     if window.take().is_some() {
@@ -1745,10 +1758,19 @@ fn a_root_is_broken_on_the_next_global_cooldown() {
                 // The shift is its next action: nothing else is cast while it
                 // is owed, but the one emergency heal. A cast logged on the
                 // frame the window opened was decided before the Druid could
-                // see it.
+                // see it. Likewise one logged on the frame the root ends: a
+                // root broken by damage can be gone by the Druid's turn on
+                // that frame (Rogue+Druid v Hunter+Shaman #2: the Web breaks
+                // at 41.28s and the Druid, at 21%, Swiftmends itself on the
+                // same frame).
+                let last = if root_ends_here {
+                    f.sim_time - 0.006
+                } else {
+                    f.sim_time + 0.006
+                };
                 let other = casts.iter().find(|(at, spell, _)| {
                     *at > since + 0.006
-                        && *at <= f.sim_time + 0.006
+                        && *at <= last
                         && spell != "Travel Form"
                         && heal.is_none_or(|h| (*at - h).abs() > 0.006)
                 });

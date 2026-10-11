@@ -13,7 +13,13 @@
 //! itself while the walk's teammate is out of reach.
 //!
 //! The rule itself is pinned case by case in `class_ai/druid.rs`
-//! (`reach_tests`); this is the played match.
+//! (`reach_tests`, which alone catches the hold's removal); this is a played
+//! match. The original seed stopped reaching the scene when the Druid's mana
+//! governor reserve fell (AS-247), so the probe plays Warrior+Paladin vs
+//! Mage+Druid, seed 1, where from about 50s of combat the Druid walks to its
+//! dying Mage round a pillar. None of the 400 Nagrand Mage+Druid matches
+//! scanned for the re-seed (ten enemy comps, seeds 0-39) puts a damage cast
+//! ahead of the heal when the hold is removed.
 
 use arenasim::headless::runner::TraceConfig;
 use arenasim::headless::{run_headless_match_observed, HeadlessMatchConfig};
@@ -24,11 +30,11 @@ const HEALS: [&str; 3] = ["Rejuvenation", "Lifebloom", "Swiftmend"];
 
 fn repro_config() -> HeadlessMatchConfig {
     HeadlessMatchConfig {
-        team1: vec!["Hunter".into(), "Paladin".into()],
+        team1: vec!["Warrior".into(), "Paladin".into()],
         team2: vec!["Mage".into(), "Druid".into()],
         map: "PillaredArena".to_string(),
         ai_profile: Some("TeamPlan".to_string()),
-        random_seed: Some(2),
+        random_seed: Some(1),
         ..Default::default()
     }
 }
@@ -81,7 +87,7 @@ fn play() -> Played {
     }
 }
 
-/// From the moment the medic walk starts toward the 40% Mage, the Druid's
+/// From the moment the medic walk starts toward the dying Mage, the Druid's
 /// first cast is a heal on the Mage — not a Moonfire — and the Mage is healed
 /// within two global cooldowns of dropping below the urgency threshold.
 #[test]
@@ -89,7 +95,7 @@ fn the_repro_druid_heals_its_dying_mage_first() {
     let played = play();
     let druid = |e: &&serde_json::Value| e["actor"]["class"] == "Druid";
 
-    // The scenario still happens: the medic walk to the Mage at/after 94s.
+    // The scenario still happens: the medic walk to the Mage at/after 50s.
     let walk = played
         .trace
         .iter()
@@ -98,10 +104,10 @@ fn the_repro_druid_heals_its_dying_mage_first() {
             e["kind"] == "movement_decision"
                 && e["trigger"] == "SeekLos"
                 && e["target"]["entity_id"] == played.mage_id
-                && e["sim_time"].as_f64().unwrap() >= 94.0
+                && e["sim_time"].as_f64().unwrap() >= 50.0
         })
         .expect(
-            "the repro no longer walks the Druid to its dying Mage at 94s — re-seed this probe",
+            "the repro no longer walks the Druid to its dying Mage at 50s — re-seed this probe",
         );
     let walk_at = walk["sim_time"].as_f64().unwrap();
 
