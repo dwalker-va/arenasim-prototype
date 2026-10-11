@@ -59,11 +59,13 @@ fn a_placed_freezing_trap_records_the_enemy_it_was_aimed_at() {
     // enforces. None fields a Rogue: a lane trap thrown for a stealthed enemy
     // cannot name it, and records no aim by design (pinned separately below).
     //
-    // The double-healer comp's seed is 12, the first of seeds 0-39 in which
+    // The double-healer comp's seed is 15, the first of seeds 0-39 in which
     // it throws one: since the traps share one cooldown (AS-196) the Frost
     // Trap peel on the Paladin usually takes it first (seed 0 threw none).
+    // Re-pinned from 12 when the Paladin began Cleansing a Web that holds its
+    // Priest back (AS-234).
     let comps: [(&[&str], &[&str], u64); 3] = [
-        (&["Hunter", "Priest"], &["Priest", "Paladin"], 12),
+        (&["Hunter", "Priest"], &["Priest", "Paladin"], 15),
         (&["Hunter", "Priest"], &["Warrior", "Priest"], 4),
         (&["Hunter"], &["Warrior"], 0),
     ];

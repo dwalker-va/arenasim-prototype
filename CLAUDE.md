@@ -689,6 +689,26 @@ cannot step it back out of range while the GCD runs. Traced as
 candidates are unreachable is traced `LosBlocked` (one in range behind cover) or
 `OutOfRange` with the distance, never `NoValidTarget`.
 
+**Roots (Paladin Cleanse)** — a magic root (Frost Nova, Entangling Roots) that
+is HOLDING A TEAMMATE BACK (`class_ai::root_holds_back`: a melee teammate whose
+target is out of `MELEE_RANGE`, or a ranged one with an enemy melee or pet
+targeting it inside `SAFE_KITING_DISTANCE`; never the Paladin itself, whose
+own root stays a routine dispel) rises to `ROOT_DISPEL_PRIORITY` (85): below
+the urgent bar, above the routine dispels. The root is why the Cleanse is
+spent; what it removes is still the random pick among everything Cleanse takes
+on that teammate. The Paladin's rotation
+spends this Cleanse right after its emergency Holy Shock, ahead of Hammer of
+Justice and its heals, unless a living non-pet teammate (itself and the rooted one
+included) is below `LOW_HP_THRESHOLD` (`class_ai::root_dispel_allowed`). A root
+that is not holding anyone back stays a routine dispel (80). The walk owes such
+a root only when nothing urgent is owed, under the same gate, and only when the
+Paladin reaches Cleanse range within `ROOT_DISPEL_WALK_MAX_SECS` (2s) at its
+base speed with a GCD of the root still left — a root lasts 4-8s and breaks at
+80 damage, so a longer walk arrives as it ends. The Priest's rotation has no
+root tier, so its walk never owes one (`class_ai::clears_held_roots`). The tier
+names no spell: it takes whatever root the Cleanse's scope takes, so a root's
+removal class (`dispel_type`) is what keeps it in or out.
+
 Under `TeamPlan` PRESSURED the team solve walks there instead:
 `team_solve::dispel_goal` hands the same teammate to the healer's `OccupyCover`
 solve as a `DispelGoal`, and while one is owed REACHING it (`C_DISPEL`: in range

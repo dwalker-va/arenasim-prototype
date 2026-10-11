@@ -640,3 +640,175 @@ fn a_paladin_walks_to_a_feared_teammate_and_cleanses_it() {
         "no dispel walk ended in a Cleanse on the walked-to ally"
     );
 }
+
+// ============================================================================
+// Roots (AS-234): Cleanse a root that holds a teammate back
+// ============================================================================
+
+/// The aura `ability` lands on `target`, exactly as the engine builds it from
+/// the shipped `abilities.ron`.
+fn landed(ability: AbilityType, target: Entity) -> Aura {
+    let defs = AbilityDefinitions::default();
+    arenasim::states::play_match::AuraPending::from_ability(
+        target,
+        Entity::from_raw(99),
+        defs.get_unchecked(&ability),
+    )
+    .expect("the ability applies an aura")
+    .aura
+}
+
+/// The scene with the Warrior `distance` down +X carrying the root `ability`
+/// lands, at `hp` of its health, and chasing the enemy Hunter that stands 5yd
+/// past it — out of its swing range, so the root holds it back.
+fn rooted_scene(distance: f32, ability: AbilityType, hp: f32) -> (Scene, Entity) {
+    let mut s = scene(distance, Vec::new());
+    let root = landed(ability, s.warrior);
+    s.active_auras.insert(s.warrior, vec![root]);
+    let hunter = *s
+        .roster
+        .iter()
+        .find(|(_, i)| i.team == 2)
+        .map(|(e, _)| e)
+        .unwrap();
+    let warrior = s.roster.get_mut(&s.warrior).unwrap();
+    warrior.target = Some(hunter);
+    warrior.current_health = hp;
+    (s, hunter)
+}
+
+fn cleansed_warrior(s: &Scene) -> Option<(String, Option<u64>)> {
+    Some(("PaladinCleanse".to_string(), Some(s.warrior.index() as u64)))
+}
+
+/// A Frost-Nova'd Warrior whose target has stepped out of its swing range, in
+/// Cleanse's reach, at 60% health — while the Paladin carries a Corruption of
+/// its own, the routine dispel: the Paladin spends Cleanse on the Warrior,
+/// ahead of the Flash of Light the injury asks for and of the routine dispel.
+///
+/// Mutant killed: drop the root tier (`ROOT_DISPEL_PRIORITY`) from
+/// `decide_paladin_action` — the Paladin heals the Warrior instead.
+#[test]
+fn a_root_holding_a_teammate_back_is_cleansed_ahead_of_a_heal_and_a_routine_dispel() {
+    let (mut s, _) = rooted_scene(10.0, AbilityType::FrostNova, 60.0);
+    s.active_auras
+        .insert(s.paladin, vec![landed(AbilityType::Corruption, s.paladin)]);
+    let (_, chosen) = s.decide();
+    assert_eq!(chosen, cleansed_warrior(&s));
+}
+
+/// The same for Entangling Roots, Magic in Classic like Frost Nova.
+#[test]
+fn entangling_roots_holding_a_teammate_back_is_cleansed() {
+    let (mut s, _) = rooted_scene(10.0, AbilityType::EntanglingRoots, 60.0);
+    let (_, chosen) = s.decide();
+    assert_eq!(chosen, cleansed_warrior(&s));
+}
+
+/// A rooted Warrior still in swing range of its target is not held back: the
+/// Paladin heals it rather than spend the GCD on the root.
+///
+/// Mutant killed: `root_holds_back` answers `true` for every root.
+#[test]
+fn a_root_on_a_teammate_still_swinging_waits_for_the_routine_dispels() {
+    let (mut s, hunter) = rooted_scene(10.0, AbilityType::FrostNova, 60.0);
+    s.roster.get_mut(&hunter).unwrap().position = s.warrior_pos + Vec3::new(2.0, 0.0, 0.0);
+    let (_, chosen) = s.decide();
+    assert_ne!(chosen, cleansed_warrior(&s));
+    assert!(chosen.is_some(), "the Paladin heals instead");
+}
+
+/// A teammate below half health is healed before a root is cleansed — the
+/// rooted one included.
+///
+/// Mutant killed: drop the `root_dispel_allowed` gate from the root tier.
+#[test]
+fn a_dying_teammate_is_healed_before_a_root_is_cleansed() {
+    let (mut s, _) = rooted_scene(10.0, AbilityType::FrostNova, 45.0);
+    let (_, chosen) = s.decide();
+    assert_ne!(chosen, cleansed_warrior(&s));
+}
+
+/// A rooted RANGED teammate is held back when a chaser targeting it stands
+/// within kiting distance — and not when the chaser is farther off.
+#[test]
+fn a_rooted_ranged_teammate_is_cleansed_only_while_it_is_trained() {
+    for (gap, cleansed) in [(4.0, true), (14.0, false)] {
+        let (mut s, hunter) = rooted_scene(10.0, AbilityType::FrostNova, 60.0);
+        s.roster.get_mut(&s.warrior).unwrap().class = CharacterClass::Mage;
+        let chaser = s.roster.get_mut(&hunter).unwrap();
+        chaser.class = CharacterClass::Rogue;
+        chaser.position = s.warrior_pos + Vec3::new(gap, 0.0, 0.0);
+        let (_, chosen) = s.decide();
+        assert_eq!(
+            chosen == cleansed_warrior(&s),
+            cleansed,
+            "a chaser {gap}yd off: chose {chosen:?}"
+        );
+    }
+}
+
+/// A held-back root just beyond Cleanse's range is worth a short walk: the
+/// Paladin walks, traced as a `DispelChase`, and the stepped scene cleanses the
+/// root from inside range within the walk time.
+///
+/// Mutant killed: drop the root branch from `owed_dispel` — no walk.
+#[test]
+fn a_root_just_beyond_range_draws_a_short_walk_that_cleanses_it() {
+    let range = cleanse_range();
+    let gap = 4.0;
+    let (mut s, _) = rooted_scene(range + gap, AbilityType::FrostNova, 60.0);
+    let (_, directive, triggers) = s.posture();
+    assert!(
+        matches!(directive.map(|d| d.goal), Some(MovementGoal::Point(p)) if p == s.warrior_pos)
+    );
+    assert_eq!(triggers, vec!["DispelChase".to_string()]);
+
+    let (mut s, _) = rooted_scene(range + gap, AbilityType::FrostNova, 60.0);
+    let speed = s.combatant.base_movement_speed;
+    let freed = step_until_cleansed(&mut s, 6.0).expect("the root is cleansed");
+    assert!(freed.from.distance(s.warrior_pos) <= range);
+    assert!(freed.at <= gap / speed + 0.1, "cleansed after {:.2}s", freed.at);
+}
+
+/// A held-back root farther than a short walk draws no walk: the root would
+/// end about as the Paladin arrived.
+#[test]
+fn a_root_far_beyond_range_draws_no_walk() {
+    let (mut s, _) = rooted_scene(cleanse_range() + 20.0, AbilityType::FrostNova, 60.0);
+    let (_, directive, triggers) = s.posture();
+    assert!(directive.is_none());
+    assert!(triggers.iter().all(|t| t != "DispelChase"));
+}
+
+/// A root on the Paladin ITSELF stays a routine dispel, even with its own
+/// target beyond its swing range: with its Warrior at 60% it heals the Warrior
+/// rather than spend the GCD Cleansing itself.
+///
+/// Mutant killed: drop the `ctx.self_entity` exclusion from `root_holds_back`
+/// — the Paladin's melee branch qualifies its own root and it Cleanses itself.
+#[test]
+fn a_root_on_the_paladin_itself_waits_while_a_teammate_needs_a_heal() {
+    let mut s = scene(10.0, Vec::new());
+    let hunter = *s
+        .roster
+        .iter()
+        .find(|(_, i)| i.team == 2)
+        .map(|(e, _)| e)
+        .unwrap();
+    // The Paladin's target (the Hunter) stands 15yd off, out of its swing range.
+    assert!(s.roster[&hunter].position.distance(PALADIN_POS) > 2.5);
+    assert_eq!(s.combatant.target, Some(hunter));
+    s.roster.get_mut(&s.paladin).unwrap().target = Some(hunter);
+    s.active_auras
+        .insert(s.paladin, vec![landed(AbilityType::FrostNova, s.paladin)]);
+    s.roster.get_mut(&s.warrior).unwrap().current_health = 60.0;
+
+    let (_, chosen) = s.decide();
+    let paladin = Some(("PaladinCleanse".to_string(), Some(s.paladin.index() as u64)));
+    assert_ne!(chosen, paladin, "the Paladin Cleansed its own root");
+    assert!(
+        matches!(&chosen, Some((a, Some(t))) if a != "PaladinCleanse" && *t == s.warrior.index() as u64),
+        "the Paladin heals its Warrior instead: chose {chosen:?}"
+    );
+}
