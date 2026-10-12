@@ -51,7 +51,10 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   re-derives that from the client data for every cast in the book). Its RON
   flag folds into the same rule (`AbilityConfig::can_be_interrupted`), so every
   interrupter passes it by unspent, tracing the pass as `Uninterruptible`, and
-  `process_interrupts` cuts and locks nothing if one reaches it. Its cast bar is
+  `process_interrupts` cuts and locks nothing if one reaches it. The Hunter's
+  own timing model (`hunter::aimed_shot_has_time`) counts an enemy's interrupt
+  reach only through the same predicate, so it never holds the cast for a
+  Felhunter or Shaman at range. Its cast bar is
   grey (`theme::hud::CAST_BAR_UNINTERRUPTIBLE_*`), and its text says "Cannot
   be interrupted." Loss of control still stops it — a stun, fear, polymorph or
   cyclone cancels any cast in `process_casting` — and that is not an interrupt:
