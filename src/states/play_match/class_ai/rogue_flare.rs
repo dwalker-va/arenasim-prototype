@@ -23,6 +23,7 @@
 //!      keeping the approach lit, and a wait cannot outlast a light that is
 //!      renewed faster than it burns out (Flare's cooldown is half its
 //!      duration).
+//!
 //!   Once committed the Rogue pursues its target plainly until its stealth
 //!   ends or no Flare is lit.
 //!
