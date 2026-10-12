@@ -6,7 +6,8 @@
 //! the higher-value global cooldown, and the walk can carry the healer off the
 //! dying teammate's heal range and sight. The rule is pinned by its scene
 //! tests; this STAGED match (tier 3, `headless::stage`) shows it holds in play,
-//! where no seed bank had put the two on the field at once.
+//! where no seed bank had put the two on the field at once. It plays both
+//! healers that walk to dispel: the Priest and the Paladin.
 
 mod common;
 
@@ -19,6 +20,7 @@ const DYING: f32 = 0.3;
 
 const WARRIOR: Unit = Unit::new(1, 0);
 const MAGE: Unit = Unit::new(1, 1);
+/// The healer: a Priest or a Paladin.
 const PRIEST: Unit = Unit::new(1, 2);
 const ENEMY_MAGE: Unit = Unit::new(2, 0);
 const ENEMY_WARRIOR: Unit = Unit::new(2, 1);
@@ -31,9 +33,9 @@ enum Priest {
     Pressured,
 }
 
-fn config(seed: u64, profile: &str, priest: Priest) -> HeadlessMatchConfig {
+fn config(seed: u64, profile: &str, healer: &str, priest: Priest) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
-        team1: vec!["Warrior".into(), "Mage".into(), "Priest".into()],
+        team1: vec!["Warrior".into(), "Mage".into(), healer.into()],
         team2: vec!["Mage".into(), "Warrior".into()],
         map: "BasicArena".into(),
         ai_profile: Some(profile.into()),
@@ -84,48 +86,53 @@ fn warrior_recovers(played: &Played) -> f32 {
         .map_or(f32::INFINITY, |f| f.sim_time - landed.app)
 }
 
-/// While the Warrior is dying the Priest does not walk to its polymorphed
+/// While the Warrior is dying the healer does not walk to its polymorphed
 /// Mage — no `DispelChase` — and heals the Warrior first. Once the Warrior is
 /// out of danger the walk goes, so it was owed all along. Under both AI
-/// profiles, with the Priest free and pressed: the `Legacy` dispel walk runs
+/// profiles. The Priest plays free and pressed: the `Legacy` dispel walk runs
 /// in both postures under `Legacy` and in FREE under `TeamPlan`, and the team
-/// solve's dispel goal in PRESSURED under `TeamPlan`.
+/// solve's dispel goal in PRESSURED under `TeamPlan`. The Paladin plays free.
 #[test]
-fn the_priest_heals_its_dying_warrior_before_it_walks_to_dispel() {
-    for profile in ["Legacy", "TeamPlan"] {
-        for posture in [Priest::Free, Priest::Pressured] {
+fn the_healer_heals_its_dying_warrior_before_it_walks_to_dispel() {
+    let cases = [
+        ("Priest", Priest::Free),
+        ("Priest", Priest::Pressured),
+        ("Paladin", Priest::Free),
+    ];
+    for (healer, posture) in cases {
+        for profile in ["Legacy", "TeamPlan"] {
             for seed in [1, 2] {
-                let case = format!("{profile} {posture:?} seed {seed}");
-                let played = play(config(seed, profile, posture), stage(posture));
+                let case = format!("{healer} {profile} {posture:?} seed {seed}");
+                let played = play(config(seed, profile, healer, posture), stage(posture));
                 let warrior = entity_id(&played, 1, 0);
                 let mage = entity_id(&played, 1, 1);
-                let priest: Vec<&serde_json::Value> = of_class(played.staged_trace(), "Priest")
+                let events: Vec<&serde_json::Value> = of_class(played.staged_trace(), healer)
                     .filter(|e| e["actor"]["team"] == 1)
                     .collect();
                 let recovered = warrior_recovers(&played);
 
-                let early = priest
+                let early = events
                     .iter()
                     .filter(|e| e["kind"] == "movement_decision" && e["trigger"] == "DispelChase")
                     .map(|e| sim_time(e))
                     .find(|&t| t < recovered);
                 assert!(
                     early.is_none(),
-                    "{case}: the Priest walked to dispel its Mage at {early:?}s while its \
+                    "{case}: the {healer} walked to dispel its Mage at {early:?}s while its \
                      Warrior was still dying (until {recovered:.2}s)"
                 );
 
-                let first = priest
+                let first = events
                     .iter()
                     .find_map(|e| {
                         let ability = e["outcome"]["ability"].as_str()?;
                         Some((ability, e["outcome"]["target_id"].as_u64()))
                     })
-                    .expect("the Priest casts");
+                    .unwrap_or_else(|| panic!("{case}: the {healer} never casts"));
                 assert_eq!(
                     first.1,
                     Some(warrior),
-                    "{case}: the Priest's first cast was {} on {:?}, not a heal on its dying \
+                    "{case}: the {healer}'s first cast was {} on {:?}, not a heal on its dying \
                      Warrior",
                     first.0,
                     first.1
@@ -137,7 +144,7 @@ fn the_priest_heals_its_dying_warrior_before_it_walks_to_dispel() {
                     recovered < 8.0,
                     "{case}: the Warrior never recovered ({recovered})"
                 );
-                let walked = priest
+                let walked = events
                     .iter()
                     .find(|e| {
                         e["kind"] == "movement_decision"
@@ -146,7 +153,7 @@ fn the_priest_heals_its_dying_warrior_before_it_walks_to_dispel() {
                     })
                     .unwrap_or_else(|| {
                         panic!(
-                            "{case}: the Priest never walked to its polymorphed Mage, so the \
+                            "{case}: the {healer} never walked to its polymorphed Mage, so the \
                              dispel walk was never owed on this stage"
                         )
                     });

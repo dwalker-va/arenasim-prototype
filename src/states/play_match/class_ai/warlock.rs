@@ -74,23 +74,12 @@ fn pick_healer_to_fear(kill_target: Entity, ctx: &CombatContext) -> Option<Entit
         // Don't Fear the target we're actively trying to kill.
         .filter(|&healer| healer != kill_target)
         .find(|&healer| {
-            if ctx.entity_is_immune(healer) || ctx.is_dr_immune(healer, DRCategory::Fears) {
-                return false;
-            }
-            // Already stunned/feared/rooted? No value in re-CCing.
-            let already_ccd = ctx
-                .active_auras
-                .get(&healer)
-                .map(|auras| {
-                    auras.iter().any(|a| {
-                        matches!(
-                            a.effect_type,
-                            AuraType::Stun | AuraType::Fear | AuraType::Root
-                        )
-                    })
-                })
-                .unwrap_or(false);
-            !already_ccd
+            // Already held (a teammate's Polymorph, a stun)? No value in
+            // re-CCing. A rooted healer still heals, so a root does not count.
+            !ctx.entity_is_immune(healer)
+                && !ctx.is_dr_immune(healer, DRCategory::Fears)
+                // Fear breaks on damage.
+                && ctx.held_in_hard_cc(healer, super::Incoming::Breaks).is_none()
         })
 }
 
@@ -103,7 +92,7 @@ const DEATH_COIL_PEEL_RADIUS: f32 = 8.0;
 /// A threat is an alive enemy within [`DEATH_COIL_PEEL_RADIUS`] of the Warlock
 /// that is either explicitly targeting it or is a melee class (Warrior/Rogue) —
 /// i.e. something that pins the cloth caster. Excludes targets that are immune,
-/// Fear-DR-immune, or already hard-CC'd (no value in re-CCing). Returns the
+/// Fear-DR-immune, already held or rooted (no value in re-CCing). Returns the
 /// nearest such enemy. The caller still range/cooldown/mana-gates via
 /// `try_death_coil`, so this only answers "is there someone to peel?".
 fn pick_death_coil_peel(me: Entity, my_pos: Vec3, ctx: &CombatContext) -> Option<Entity> {
@@ -127,19 +116,15 @@ fn pick_death_coil_peel(me: Entity, my_pos: Vec3, ctx: &CombatContext) -> Option
             {
                 return false;
             }
-            let already_ccd = ctx
-                .active_auras
-                .get(&info.entity)
-                .map(|auras| {
-                    auras.iter().any(|a| {
-                        matches!(
-                            a.effect_type,
-                            AuraType::Stun | AuraType::Fear | AuraType::Root
-                        )
-                    })
-                })
-                .unwrap_or(false);
-            !already_ccd
+            // Already held — no value in re-CCing it (the horror never breaks
+            // on damage) — or rooted, which already peels a melee off the
+            // Warlock.
+            ctx.held_in_hard_cc(info.entity, super::Incoming::Lasts)
+                .is_none()
+                && !ctx
+                    .active_auras
+                    .get(&info.entity)
+                    .is_some_and(|auras| auras.iter().any(|a| a.effect_type == AuraType::Root))
         })
         .map(|info| (info.entity, info.position.distance(my_pos)))
         .collect();
@@ -725,24 +710,6 @@ fn try_fear(
     let fear = AbilityType::Fear;
     let fear_def = abilities.get_unchecked(&fear);
 
-    let already_ccd_type = ctx.active_auras.get(&target_entity).and_then(|auras| {
-        auras.iter().find_map(|a| {
-            if matches!(
-                a.effect_type,
-                AuraType::Stun | AuraType::Fear | AuraType::Root
-            ) {
-                Some(a.effect_type)
-            } else {
-                None
-            }
-        })
-    });
-
-    if let Some(cc_type) = already_ccd_type {
-        builder.reject(fear, RejectionReason::TargetAlreadyCCd { cc_type });
-        return false;
-    }
-
     let opts = PreCastOpts::default();
     let cleared = match cast_gate(
         fear,
@@ -793,7 +760,8 @@ fn try_fear(
 /// Try to fire Death Coil at a peel target: instant Shadow projectile that, on
 /// impact, deals damage, heals the Warlock for that damage (see
 /// `projectiles.rs`), and applies a 3s never-breaking horror via the def's Fear
-/// aura. Gated through `pre_cast_ok` (range/mana/cooldown/school-lock).
+/// aura. Gated through `pre_cast_ok` (range/mana/cooldown/school-lock, a held
+/// target, and a friendly CC its damage would break).
 fn try_death_coil(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -810,7 +778,12 @@ fn try_death_coil(
     let death_coil = AbilityType::DeathCoil;
     let def = abilities.get_unchecked(&death_coil);
 
-    let opts = PreCastOpts::default();
+    // Its damage would break a friendly Polymorph or Freezing Trap, even one
+    // inside the chain window that no longer counts as a hold.
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     let cleared = match cast_gate(
         death_coil,
         def,

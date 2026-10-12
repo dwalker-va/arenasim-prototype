@@ -186,3 +186,14 @@ draws, duels, mirrors, head-to-head, bisect, comps, Hunter),
 `2026-10-10-as164-mechanisms.py` (economy, Druid, Hunter traps, duels, the
 head-to-head Hunter cell) and `2026-10-10-as164-as234-slices.py`. Each reads the
 committed `.gz` files directly; the findings doc maps every figure to its command.
+
+## `2026-10-12-as285-directional.jsonl.gz`
+
+Behind `2026-10-12-as285-held-cc.md` (card AS-285). 18,000 configs: two
+`gen_sweep.py --full 2 --exclude-double-healer --affects
+Warlock,Rogue,Paladin,Hunter,Mage,Druid --control-cells 8 --n 10` runs, one per
+map (`--extra '{"map":"BasicArena"}' --label-suffix BasicArena`, then
+PillaredArena), concatenated. Gunzip it, run each arm's binary over it with
+`--jobs 4 --trace-mode off`, then `scripts/paired_sweep.py` and
+`2026-10-12-as285-oriented.py` on the two CSVs. `2026-10-12-as285-attribute.py`
+replays the moved matches; run each arm's binary in place, in its own checkout.

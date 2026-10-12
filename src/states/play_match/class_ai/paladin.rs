@@ -107,6 +107,14 @@ pub fn hoj_target_eligible(ctx: &CombatContext, my_team: u8, target: Entity) -> 
         && !ctx.is_dr_immune(target, DRCategory::Stuns)
 }
 
+/// The hold already on `target` that keeps a Hammer of Justice off it
+/// ([`CombatContext::held_in_hard_cc`]; the stun never breaks on damage).
+/// Asked where the stun is CAST, never by the dip's entry or abort: a dip may
+/// walk to a held healer, and stuns it once the hold is about to end.
+fn hoj_held_by(ctx: &CombatContext, target: Entity) -> Option<AuraType> {
+    ctx.held_in_hard_cc(target, super::Incoming::Lasts)
+}
+
 /// DIP target selection (pure over the snapshot): the nearest living enemy
 /// healer that is HoJ-eligible and within `reach` of `my_pos`. Ties resolve
 /// to the first in BTree order (deterministic). `None` when no enemy healer
@@ -1103,7 +1111,9 @@ fn try_hammer_of_justice(
     let enemies_in_range: Vec<(&Entity, CharacterClass, crate::combat::log::CombatantId)> = ctx
         .combatants
         .iter()
-        .filter(|(e, _)| hoj_target_eligible(ctx, combatant.team, **e))
+        .filter(|(e, _)| {
+            hoj_target_eligible(ctx, combatant.team, **e) && hoj_held_by(ctx, **e).is_none()
+        })
         .filter_map(|(e, info)| {
             if my_pos.distance(info.position) <= def.range {
                 Some((e, info.class, info.log_id()))
@@ -1173,6 +1183,10 @@ fn try_dip_hammer_of_justice(
 
     if !hoj_target_eligible(ctx, combatant.team, target) {
         builder.reject(ability, RejectionReason::NoValidTarget);
+        return false;
+    }
+    if let Some(cc_type) = hoj_held_by(ctx, target) {
+        builder.reject(ability, RejectionReason::TargetAlreadyCCd { cc_type });
         return false;
     }
     let info = ctx

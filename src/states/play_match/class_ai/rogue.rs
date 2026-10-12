@@ -146,25 +146,11 @@ pub fn decide_rogue_action(
         KidneyPlan::Fire {
             target: ks_target_entity,
             pos: ks_target_pos,
-            stacking,
         } => {
-            // `stacking` is set only by the opener-extend branch, which
-            // intentionally stacks Kidney onto an about-to-expire Cheap Shot — so
-            // the usual "already stunned" guard must not block it there.
-            let target_already_stunned = ctx
-                .active_auras
-                .get(&ks_target_entity)
-                .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::Stun))
-                .unwrap_or(false);
-
-            if target_already_stunned && !stacking {
-                builder.reject(
-                    kidney_shot,
-                    RejectionReason::TargetAlreadyCCd {
-                        cc_type: AuraType::Stun,
-                    },
-                );
-            } else if ctx.is_dr_immune(ks_target_entity, DRCategory::KidneyShotStun) {
+            // A target already held is refused by the cast gate, unless its
+            // hold is inside the chain window — where the opener-extend
+            // chains Kidney onto its own expiring Cheap Shot.
+            if ctx.is_dr_immune(ks_target_entity, DRCategory::KidneyShotStun) {
                 builder.reject(
                     kidney_shot,
                     RejectionReason::DRImmune {
@@ -251,7 +237,10 @@ pub fn decide_rogue_action(
 /// Buffer (seconds) before a control window expires at which the Rogue chains
 /// the next stun. Firing this early trades ~0.5s of the lockdown for safety
 /// against the target dying / going immune / leaving melee in the final moment.
-const KIDNEY_CHAIN_BUFFER: f32 = 0.5;
+/// It IS the chain window ([`super::CC_CHAIN_WINDOW`]): the cast gate refuses a
+/// stun on a target still held for longer, so the chain fires the moment the
+/// gate lets it.
+const KIDNEY_CHAIN_BUFFER: f32 = super::CC_CHAIN_WINDOW;
 
 /// The planner's verdict for the in-combat Kidney Shot decision.
 enum KidneyPlan {
@@ -263,14 +252,8 @@ enum KidneyPlan {
     /// Hold the stun AND suppress Sinister Strike to pool energy, so Kidney Shot
     /// is affordable the instant its control window lapses (seamless chain).
     Pool(RejectionReason),
-    /// Fire Kidney Shot now on `target`. `stacking` is set only for the
-    /// opener-extend (intentionally stacking onto an expiring Cheap Shot), which
-    /// must bypass the "already stunned" guard.
-    Fire {
-        target: Entity,
-        pos: Vec3,
-        stacking: bool,
-    },
+    /// Fire Kidney Shot now on `target`.
+    Fire { target: Entity, pos: Vec3 },
 }
 
 /// Spellcasting classes — those whose primary threat is interruptible casts, so
@@ -346,7 +329,6 @@ fn plan_kidney_shot(
                         return KidneyPlan::Fire {
                             target: kill,
                             pos: info.position,
-                            stacking: true,
                         };
                     }
                     // Pool through the opener stun so Kidney is guaranteed ready
@@ -377,7 +359,6 @@ fn plan_kidney_shot(
         return KidneyPlan::Fire {
             target: tgt,
             pos: tgt_pos,
-            stacking: false,
         };
     }
 
@@ -410,7 +391,6 @@ fn plan_kidney_shot(
         return KidneyPlan::Fire {
             target: tgt,
             pos: tgt_pos,
-            stacking: false,
         };
     }
 
@@ -421,7 +401,6 @@ fn plan_kidney_shot(
             return KidneyPlan::Fire {
                 target: tgt,
                 pos: tgt_pos,
-                stacking: false,
             };
         }
         // Lockout still denying. Pool energy if a Kidney isn't yet affordable so
@@ -445,7 +424,6 @@ fn plan_kidney_shot(
     KidneyPlan::Fire {
         target: tgt,
         pos: tgt_pos,
-        stacking: false,
     }
 }
 
@@ -826,6 +804,10 @@ fn try_sinister_strike(
 /// 2. If CC target is out of range but kill target is in range, fall back to kill target
 /// 3. If neither is in range, return None
 ///
+/// A candidate already held ([`CombatContext::held_in_hard_cc`]) is passed
+/// over for the next, as one immune is. Kidney Shot's stun never breaks on
+/// damage, so a Fear the Rogue's team is beating on does not hold it off.
+///
 /// A stun on the kill target is still valuable even if not the ideal CC target.
 fn select_melee_cc_target(
     cc_target: Option<Entity>,
@@ -833,8 +815,9 @@ fn select_melee_cc_target(
     my_pos: Vec3,
     ctx: &CombatContext,
 ) -> Option<(Entity, Vec3)> {
+    const STUN: super::Incoming = super::Incoming::Lasts;
     if let Some(cc_entity) = cc_target {
-        if !ctx.entity_is_immune(cc_entity) {
+        if !ctx.entity_is_immune(cc_entity) && ctx.held_in_hard_cc(cc_entity, STUN).is_none() {
             if let Some(info) = ctx.combatants.get(&cc_entity) {
                 if my_pos.distance(info.position) <= MELEE_RANGE {
                     return Some((cc_entity, info.position));
@@ -844,7 +827,7 @@ fn select_melee_cc_target(
     }
 
     if let Some(kill_entity) = kill_target {
-        if !ctx.entity_is_immune(kill_entity) {
+        if !ctx.entity_is_immune(kill_entity) && ctx.held_in_hard_cc(kill_entity, STUN).is_none() {
             if let Some(info) = ctx.combatants.get(&kill_entity) {
                 if my_pos.distance(info.position) <= MELEE_RANGE {
                     return Some((kill_entity, info.position));

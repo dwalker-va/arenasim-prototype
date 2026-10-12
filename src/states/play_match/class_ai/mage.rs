@@ -649,21 +649,9 @@ fn try_polymorph(
         return false;
     }
 
-    // Check if target is already CC'd
-    let already_ccd_type = ctx.active_auras.get(&cc_target).and_then(|auras| {
-        auras.iter().find_map(|a| {
-            if matches!(
-                a.effect_type,
-                AuraType::Stun | AuraType::Fear | AuraType::Root | AuraType::Polymorph
-            ) {
-                Some(a.effect_type)
-            } else {
-                None
-            }
-        })
-    });
-
-    if let Some(cc_type) = already_ccd_type {
+    // Already held (its own Polymorph, a teammate's stun)? No value in
+    // re-CCing it. A rooted target still acts, so a root does not count.
+    if let Some(cc_type) = ctx.held_in_hard_cc(cc_target, super::Incoming::of(def)) {
         builder.reject(ability, RejectionReason::TargetAlreadyCCd { cc_type });
         return false;
     }
