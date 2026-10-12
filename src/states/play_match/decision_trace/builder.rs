@@ -13,10 +13,11 @@ use bevy::prelude::Entity;
 use super::events::{
     AbilityCandidate, AbilityOutcome, ActorView, CandidateStatus, DecisionEvent, EventKind,
     EventPayload, MovementGoalKind, MovementTrigger, NoActionReason, Posture, RejectionReason,
-    TargetCandidate, TargetRejectionReason, TargetView,
+    SituationTag, TargetCandidate, TargetRejectionReason, TargetView,
 };
 use super::DecisionTrace;
 use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::situation::TeamSituation;
 
 /// Builder for one `ability_decision` or `pet_decision` event.
 ///
@@ -35,6 +36,9 @@ pub struct DecisionEventBuilder<'a> {
     /// For hybrid-model dispatches: entity ID of the owner whose AI commanded
     /// this pet ability. `None` for autonomous pet decisions.
     pub(super) pet_dispatched_by: Option<u32>,
+    /// The deciding unit's team situation, stamped on the event. Set by
+    /// `CombatContext::start_ability_decision` (or [`Self::with_situation`]).
+    pub(super) situation: Option<SituationTag>,
 }
 
 pub(super) struct ChosenAction {
@@ -44,6 +48,12 @@ pub(super) struct ChosenAction {
 }
 
 impl<'a> DecisionEventBuilder<'a> {
+    /// Stamp the deciding unit's team situation on the event.
+    pub fn with_situation(mut self, situation: &TeamSituation) -> Self {
+        self.situation = Some(SituationTag::from(situation));
+        self
+    }
+
     /// Record an ability as considered-and-rejected with a typed reason.
     pub fn reject(&mut self, ability: AbilityType, reason: RejectionReason) {
         self.candidates.push(AbilityCandidate {
@@ -127,8 +137,9 @@ impl<'a> DecisionEventBuilder<'a> {
             seed: self.trace.seed,
             ai_profile: self.trace.ai_profile,
             kind: self.kind,
-            actor: self.actor,
+            actor: Some(self.actor),
             target: self.target,
+            situation: self.situation,
             payload,
         };
         self.trace.pending_events.push(event);
@@ -263,8 +274,9 @@ impl<'a> MovementEventBuilder<'a> {
             seed: self.trace.seed,
             ai_profile: self.trace.ai_profile,
             kind: EventKind::MovementDecision,
-            actor: self.actor,
+            actor: Some(self.actor),
             target: self.target,
+            situation: None,
             payload: EventPayload::Movement {
                 posture: decision.posture,
                 previous_posture: decision.previous_posture,
@@ -336,8 +348,9 @@ impl<'a> TargetEventBuilder<'a> {
             seed: self.trace.seed,
             ai_profile: self.trace.ai_profile,
             kind: EventKind::TargetAcquisition,
-            actor: self.actor,
+            actor: Some(self.actor),
             target: None,
+            situation: None,
             payload: EventPayload::Target {
                 previous_target: self.previous_target,
                 new_target: new_target_id,

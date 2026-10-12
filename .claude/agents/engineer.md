@@ -66,6 +66,13 @@ an open, review-ready PR — nothing more.
 
    A balance-relevant change gets a headless sanity match; a claimed balance
    *improvement* needs a real sweep, not n=12 anecdotes.
+
+   **Never re-pin a stale seed.** When your change moves the RNG stream and a
+   seed-pinned probe stops containing its situation, migrate the probe — to a
+   scene test (`class_ai::scene::Scene`), a staged match, or a
+   situation-conditional probe over a seed bank — instead of hunting for a new
+   seed that still reproduces it. The Tester rejects a re-pin (CLAUDE.md, *Test
+   an AI decision*). A new AI decision rule gets a paired scene test.
 5. **Ship as a PR.** **Re-confirm the tree first — the push is the step that loses
    work.** Immediately before pushing, `git -C <abs> branch --show-current` must equal
    your card's branch and `git -C <abs> rev-parse HEAD` must equal the SHA your

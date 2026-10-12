@@ -27,9 +27,10 @@ use crate::states::play_match::decision_trace::{
 };
 use crate::states::play_match::map_geometry::{has_line_of_sight, nearest_standable, EYE_HEIGHT};
 use crate::states::play_match::movement_config::{MovementWeights, SharedMovementConfig};
+use crate::states::play_match::situation::Tempo;
 use crate::states::play_match::team_solve::DISPEL_REACH_MARGIN;
 
-use super::{pressing_when_ahead, CombatContext, CombatantInfo, OwedDispel};
+use super::{CombatContext, CombatantInfo, OwedDispel};
 
 /// Distance ahead at which the position scorer evaluates candidate steps.
 pub(super) const SCORER_LOOKAHEAD: f32 = 2.0;
@@ -94,7 +95,7 @@ fn deny_weights(
         return *weights;
     }
     let suppress = teammate_needs_saving(entity, my_pos, ctx, shared)
-        || pressing_when_ahead(ctx.team_hp_advantage(), shared.press_advantage_margin);
+        || ctx.situation().tempo == Tempo::Pressing;
     apply_cover_suppression(weights, suppress)
 }
 
@@ -1252,6 +1253,7 @@ pub(super) fn start_movement_event_with_target<'t>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::states::play_match::class_ai::pressing_when_ahead;
     use crate::states::play_match::map_geometry::ObstacleVolume;
 
     fn priest_like() -> MovementWeights {

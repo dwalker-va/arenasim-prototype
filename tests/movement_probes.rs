@@ -3124,7 +3124,7 @@ mod paladin_unit {
 }
 
 /// Bucket A unit tests (offensive-punish): the burst-during-CC predicate
-/// (`enemy_healer_is_cced`) and the pure target-swap chooser
+/// (the `enemy_healer_locked` situation) and the pure target-swap chooser
 /// (`select_softer_melee_target`). These pin the new logic deterministically;
 /// the consolidated matrix pass validates the resulting balance.
 mod bucket_a_unit {
@@ -3183,7 +3183,7 @@ mod bucket_a_unit {
         }
     }
 
-    /// Warrior (team 1) vs an enemy Priest (team 2). `enemy_healer_is_cced`
+    /// Warrior (team 1) vs an enemy Priest (team 2). `enemy_healer_locked`
     /// keys off the CAST-PREVENTING CC subset only.
     fn snap_with_healer_aura(aura: Option<Aura>, healer_alive: bool) -> (CombatSnapshot, Entity) {
         let me = Entity::from_raw(1);
@@ -3227,7 +3227,10 @@ mod bucket_a_unit {
         ] {
             let (snap, me) = snap_with_healer_aura(Some(cc_aura(cc)), true);
             assert!(
-                snap.context_for(me).enemy_healer_is_cced(),
+                snap.context_for(me)
+                    .situation()
+                    .enemy_healer_locked
+                    .is_some(),
                 "{:?} on the enemy healer must open a burst window",
                 cc
             );
@@ -3239,14 +3242,20 @@ mod bucket_a_unit {
         // Root does NOT stop a heal — must not open a burst window.
         let (snap, me) = snap_with_healer_aura(Some(cc_aura(AuraType::Root)), true);
         assert!(
-            !snap.context_for(me).enemy_healer_is_cced(),
+            snap.context_for(me)
+                .situation()
+                .enemy_healer_locked
+                .is_none(),
             "Root must not open a burst window"
         );
 
         // No aura at all → healer free → no window.
         let (snap, me) = snap_with_healer_aura(None, true);
         assert!(
-            !snap.context_for(me).enemy_healer_is_cced(),
+            snap.context_for(me)
+                .situation()
+                .enemy_healer_locked
+                .is_none(),
             "free healer → no window"
         );
         assert_eq!(
@@ -3257,7 +3266,10 @@ mod bucket_a_unit {
         // Dead healer → no living healer → no window, no healer.
         let (snap, me) = snap_with_healer_aura(Some(cc_aura(AuraType::Stun)), false);
         assert!(
-            !snap.context_for(me).enemy_healer_is_cced(),
+            snap.context_for(me)
+                .situation()
+                .enemy_healer_locked
+                .is_none(),
             "dead healer → no window"
         );
         assert_eq!(snap.context_for(me).enemy_healer(), None);

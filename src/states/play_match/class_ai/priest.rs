@@ -1190,8 +1190,8 @@ const MANA_BURN_CC_WINDOW_HEALTH_FLOOR: f32 = 0.70;
 const MANA_BURN_SURPLUS_HEALTH_FLOOR: f32 = 0.90;
 
 /// Cast/attack-preventing CC on an entity (Stun/Fear/Polymorph/Incapacitate —
-/// deliberately NOT Root: a rooted caster still casts). Same set as
-/// `CombatContext::enemy_healer_is_cced`.
+/// deliberately NOT Root: a rooted caster still casts). The set
+/// `situation::locks_healer` names, less Cyclone.
 fn attack_prevented_by_cc(ctx: &CombatContext, entity: Entity) -> bool {
     ctx.active_auras.get(&entity).is_some_and(|auras| {
         auras.iter().any(|a| {
@@ -1333,7 +1333,7 @@ fn try_mana_burn(
     // zero-damage burn can never break — burn unless an ally is in real
     // danger. Outside one, require a topped team (90% is Flash Heal's own
     // trigger), i.e. only surplus GCDs.
-    let cc_window = ctx.enemy_healer_is_cced();
+    let cc_window = ctx.situation().enemy_healer_locked.is_some();
     let health_floor = if cc_window {
         MANA_BURN_CC_WINDOW_HEALTH_FLOOR
     } else {

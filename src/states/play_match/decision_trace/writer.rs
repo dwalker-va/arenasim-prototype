@@ -61,7 +61,10 @@ impl TraceWriter {
     }
 
     /// Sort events by `(frame, actor.entity_id, kind)` and write each as a JSONL
-    /// line. Returns the number of events written.
+    /// line. Returns the number of events written. An event with no actor (a
+    /// team's `situation_change`) sorts ahead of every actor in its frame, so a
+    /// frame's situation changes read before the decisions made in it; every
+    /// event with an actor compares exactly as before (the sort is stable).
     ///
     /// Increments `consecutive_failures` on Err and resets it to 0 on Ok.
     /// The flush system reads this counter to detach the writer after
@@ -69,11 +72,16 @@ impl TraceWriter {
     /// per-frame warn spam loop in a broken-writer state (ENOSPC, etc.).
     pub fn flush_events(&mut self, mut events: Vec<DecisionEvent>) -> std::io::Result<usize> {
         events.sort_by(|a, b| {
-            (a.frame, a.actor.entity_id, kind_order(a.kind)).cmp(&(
-                b.frame,
-                b.actor.entity_id,
-                kind_order(b.kind),
-            ))
+            (
+                a.frame,
+                a.actor.as_ref().map(|actor| actor.entity_id),
+                kind_order(a.kind),
+            )
+                .cmp(&(
+                    b.frame,
+                    b.actor.as_ref().map(|actor| actor.entity_id),
+                    kind_order(b.kind),
+                ))
         });
         let count = events.len();
         let result = (|| -> std::io::Result<()> {
@@ -116,6 +124,7 @@ fn kind_order(kind: EventKind) -> u8 {
         EventKind::AbilityDecision => 1,
         EventKind::PetDecision => 2,
         EventKind::MovementDecision => 3,
+        EventKind::SituationChange => 4,
     }
 }
 

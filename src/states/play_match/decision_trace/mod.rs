@@ -29,12 +29,14 @@ pub use builder::{DecisionEventBuilder, MovementEventBuilder, TargetEventBuilder
 pub use events::{
     AbilityCandidate, AbilityOutcome, ActorView, CandidateStatus, DecisionEvent, EventKind,
     EventPayload, MovementGoalKind, MovementTrigger, NoActionReason, Posture, RejectionReason,
-    ResourceKind, TargetCandidate, TargetRejectionReason, TargetView,
+    ResourceKind, SituationChangeKind, SituationName, SituationTag, TargetCandidate,
+    TargetRejectionReason, TargetView, WindowTag,
 };
 pub use writer::{flush_decision_trace_system, TraceWriter};
 
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::class_ai::CombatantInfo;
+use crate::states::play_match::situation::{Tempo, Window};
 
 /// Resource that owns the in-flight trace state for one match. Holds a buffer of
 /// `pending_events` that the flush system drains each frame, plus an optional
@@ -68,6 +70,7 @@ impl DecisionTrace {
             pet_owner: None,
             pet_type: None,
             pet_dispatched_by: None,
+            situation: None,
         }
     }
 
@@ -92,6 +95,7 @@ impl DecisionTrace {
             // `.to_string()` would do for the always-static pet type name.
             pet_type: Some(std::borrow::Cow::Borrowed(pet_type)),
             pet_dispatched_by: None,
+            situation: None,
         }
     }
 
@@ -118,6 +122,7 @@ impl DecisionTrace {
             pet_owner: Some(owner.index()),
             pet_type: Some(std::borrow::Cow::Borrowed(pet_type)),
             pet_dispatched_by: Some(dispatched_by.index()),
+            situation: None,
         }
     }
 
@@ -157,6 +162,55 @@ impl DecisionTrace {
             previous_cc_target: previous_cc_target.map(|e| e.index()),
             candidates: Vec::new(),
         }
+    }
+
+    /// Record a `situation_change` event for a window (`situation.rs`).
+    pub fn record_window_change(
+        &mut self,
+        team: u8,
+        name: SituationName,
+        change: SituationChangeKind,
+        window: &Window,
+    ) {
+        let tag = WindowTag::from(window);
+        self.push_situation_change(EventPayload::SituationChange {
+            team,
+            name,
+            change,
+            subject: Some(tag.subject),
+            since: Some(tag.since),
+            until: tag.until,
+            tempo: None,
+            previous_tempo: None,
+        });
+    }
+
+    /// Record a `situation_change` event for a tempo shift.
+    pub fn record_tempo_change(&mut self, team: u8, previous: Tempo, tempo: Tempo) {
+        self.push_situation_change(EventPayload::SituationChange {
+            team,
+            name: SituationName::Tempo,
+            change: SituationChangeKind::Shift,
+            subject: None,
+            since: None,
+            until: None,
+            tempo: Some(tempo),
+            previous_tempo: Some(previous),
+        });
+    }
+
+    fn push_situation_change(&mut self, payload: EventPayload) {
+        self.pending_events.push(DecisionEvent {
+            frame: self.current_frame,
+            sim_time: self.current_sim_time,
+            seed: self.seed,
+            ai_profile: self.ai_profile,
+            kind: EventKind::SituationChange,
+            actor: None,
+            target: None,
+            situation: None,
+            payload,
+        });
     }
 
     /// Replace the writer (e.g., when starting a new match). Drops any prior

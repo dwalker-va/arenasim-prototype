@@ -29,6 +29,8 @@ pub mod pet_ai;
 pub mod priest;
 pub mod rogue;
 pub mod rogue_flare;
+#[doc(hidden)]
+pub mod scene;
 pub mod shaman;
 pub mod warlock;
 pub mod warrior;
@@ -49,6 +51,7 @@ use super::constants::{GCD, LOW_HP_THRESHOLD, MELEE_RANGE, SAFE_KITING_DISTANCE}
 use super::decision_trace::RejectionReason;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume};
 use super::match_config::CharacterClass;
+use super::situation::{classify_roster, SituationConfig, TeamSituation};
 use super::utils::log_ability_use;
 use super::{is_silenced, is_spell_school_locked};
 use crate::combat::log::CombatLog;
@@ -217,6 +220,8 @@ pub struct CombatContext<'a> {
     pub ai_profile: AiProfile,
     /// The combatant making the decision
     pub self_entity: Entity,
+    /// This unit's team situation — read it through [`Self::situation`].
+    situation: TeamSituation,
 }
 
 impl<'a> CombatContext<'a> {
@@ -266,6 +271,19 @@ impl<'a> CombatContext<'a> {
         } else {
             Cow::Borrowed(roster)
         };
+        // Classified from this context's own data, so a context built anywhere
+        // states the situation's FACTS correctly. It has no clock and no
+        // history, so its window times count from 0 and its tempo reads the
+        // default margin: `decide_abilities` replaces it with the frame's
+        // classification ([`Self::with_situation`]), which has both.
+        let situation = classify_roster(
+            roster,
+            active_auras,
+            observer_team,
+            &TeamSituation::default(),
+            0.0,
+            &SituationConfig::default(),
+        );
         Self {
             combatants,
             roster,
@@ -277,7 +295,22 @@ impl<'a> CombatContext<'a> {
             bounds,
             ai_profile,
             self_entity,
+            situation,
         }
+    }
+
+    /// This context with its team's situation as `decide_abilities` classified
+    /// it for the frame (`situation::update_situations`).
+    pub fn with_situation(mut self, situation: TeamSituation) -> Self {
+        self.situation = situation;
+        self
+    }
+
+    /// The situation this unit's team is in (`situation.rs`): whether the
+    /// enemy healer is locked and until when, and the team's tempo. Read this
+    /// rather than re-deriving a situation at the decision site.
+    pub fn situation(&self) -> &TeamSituation {
+        &self.situation
     }
 
     /// True when a living enemy is in the arena that this unit cannot see —
@@ -382,10 +415,10 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
-    /// The enemy healer — first alive non-pet Priest/Paladin in deterministic
-    /// entity order (BTreeMap), if any. Shared by bucket-A burst-during-CC and
-    /// the Hunter's freezing-trap targeting (which both want "the healer to
-    /// shut down"), replacing per-class `find_enemy_healer` copies.
+    /// The enemy healer — first alive non-pet healer in deterministic entity
+    /// order (BTreeMap), if any. The Hunter's freezing-trap targeting and the
+    /// Priest's Mana Burn read it; whether it is LOCKED is a situation
+    /// ([`Self::situation`]), classified from the same healer.
     pub fn enemy_healer(&self) -> Option<Entity> {
         let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
         self.combatants
@@ -394,28 +427,6 @@ impl<'a> CombatContext<'a> {
                 info.team != my_team && info.is_alive && !info.is_pet && info.class.is_healer()
             })
             .map(|(entity, _)| *entity)
-    }
-
-    /// True when a living enemy healer exists AND is currently unable to cast
-    /// a heal — the bucket-A burst window. This is the CAST-PREVENTING CC
-    /// subset (Stun / Fear / Polymorph / Incapacitate), NOT [`is_ccd`]: a
-    /// rooted healer still heals freely, so Root must not open a burst window.
-    pub fn enemy_healer_is_cced(&self) -> bool {
-        let Some(healer) = self.enemy_healer() else {
-            return false;
-        };
-        self.active_auras.get(&healer).is_some_and(|auras| {
-            auras.iter().any(|a| {
-                matches!(
-                    a.effect_type,
-                    AuraType::Stun
-                        | AuraType::Fear
-                        | AuraType::Polymorph
-                        | AuraType::Incapacitate
-                        | AuraType::Cyclone
-                )
-            })
-        })
     }
 
     /// Get all alive enemies (excluding pets)
@@ -733,7 +744,11 @@ impl<'a> CombatContext<'a> {
         let target_view = target
             .and_then(|t| self.combatants.get(&t))
             .map(|info| TargetView::from_info(info, my_pos));
-        Some(decision_trace.start_ability_decision(actor_view, target_view))
+        Some(
+            decision_trace
+                .start_ability_decision(actor_view, target_view)
+                .with_situation(&self.situation),
+        )
     }
 }
 
