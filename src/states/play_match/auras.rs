@@ -16,7 +16,6 @@ use super::match_config;
 use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use bevy::prelude::*;
-use bevy_egui::egui;
 
 /// Update all active auras - tick down durations and remove expired ones.
 ///
@@ -329,7 +328,7 @@ pub fn apply_pending_auras(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: "Immune".to_string(),
-                    color: egui::Color32::YELLOW,
+                    color: crate::ui::theme::fct::IMMUNE,
                     lifetime: 1.5,
                     vertical_offset: offset_y,
                     is_crit: false,
@@ -386,7 +385,7 @@ pub fn apply_pending_auras(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: "Immune".to_string(),
-                    color: egui::Color32::YELLOW,
+                    color: crate::ui::theme::fct::IMMUNE,
                     lifetime: 1.5,
                     vertical_offset: offset_y,
                     is_crit: false,
@@ -419,7 +418,7 @@ pub fn apply_pending_auras(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: "Immune".to_string(),
-                    color: egui::Color32::YELLOW,
+                    color: crate::ui::theme::fct::IMMUNE,
                     lifetime: 1.5,
                     vertical_offset: offset_y,
                     is_crit: false,
@@ -466,7 +465,7 @@ pub fn apply_pending_auras(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: "Immune".to_string(),
-                    color: egui::Color32::YELLOW,
+                    color: crate::ui::theme::fct::IMMUNE,
                     lifetime: 1.5,
                     vertical_offset: offset_y,
                     is_crit: false,
@@ -505,7 +504,7 @@ pub fn apply_pending_auras(
                         FloatingCombatText {
                             world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                             text: "IMMUNE".to_string(),
-                            color: egui::Color32::YELLOW,
+                            color: crate::ui::theme::fct::IMMUNE,
                             lifetime: 1.5,
                             vertical_offset: offset_y,
                             is_crit: false,
@@ -1224,7 +1223,7 @@ pub fn process_dot_ticks(
             FloatingCombatText {
                 world_position: target_pos + Vec3::new(offset_x, super::FCT_HEIGHT + offset_y, 0.0),
                 text: format!("{:.0}", actual_damage),
-                color: egui::Color32::from_rgb(255, 255, 0), // Yellow for ability damage
+                color: crate::ui::theme::fct::DAMAGE,
                 lifetime: 1.5,
                 vertical_offset: offset_y,
                 is_crit: false, // DoT ticks never crit
@@ -1245,7 +1244,7 @@ pub fn process_dot_ticks(
                     world_position: target_pos
                         + Vec3::new(absorb_offset_x, super::FCT_HEIGHT + absorb_offset_y, 0.0),
                     text: format!("{:.0} absorbed", absorbed),
-                    color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                    color: crate::ui::theme::fct::ABSORB,
                     lifetime: 1.5,
                     vertical_offset: absorb_offset_y,
                     is_crit: false,
@@ -1480,7 +1479,7 @@ pub fn process_hot_ticks(
             FloatingCombatText {
                 world_position: target_pos + Vec3::new(offset_x, super::FCT_HEIGHT + offset_y, 0.0),
                 text: format!("+{:.0}", actual_healing),
-                color: egui::Color32::from_rgb(100, 255, 100), // Green for healing
+                color: crate::ui::theme::fct::HEAL,
                 lifetime: 1.5,
                 vertical_offset: offset_y,
                 is_crit: false, // HoT ticks never crit

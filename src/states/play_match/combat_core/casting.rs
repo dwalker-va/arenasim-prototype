@@ -18,7 +18,6 @@ use super::damage::{
 use super::healing::apply_healing;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use bevy::prelude::*;
-use bevy_egui::egui;
 
 /// Resource regeneration system: Regenerate mana for all combatants.
 ///
@@ -617,7 +616,7 @@ pub fn process_casting(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: format!("{:.0}", actual_damage),
-                    color: egui::Color32::from_rgb(255, 255, 0), // Yellow for abilities
+                    color: crate::ui::theme::fct::DAMAGE,
                     lifetime: 1.5,
                     vertical_offset: offset_y,
                     is_crit: is_crit_damage,
@@ -638,7 +637,7 @@ pub fn process_casting(
                         world_position: text_position
                             + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
                         text: format!("{:.0} absorbed", absorbed),
-                        color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                        color: crate::ui::theme::fct::ABSORB,
                         lifetime: 1.5,
                         vertical_offset: absorb_offset_y,
                         is_crit: false,
@@ -807,7 +806,7 @@ pub fn process_casting(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: format!("+{:.0}", actual_healing),
-                    color: egui::Color32::from_rgb(100, 255, 100), // Green for healing
+                    color: crate::ui::theme::fct::HEAL,
                     lifetime: 1.5,
                     vertical_offset: offset_y,
                     is_crit: is_crit_heal,
@@ -1306,7 +1305,7 @@ pub fn process_channeling(
                     FloatingCombatText {
                         world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                         text: format!("{:.0}", damage),
-                        color: egui::Color32::from_rgb(255, 255, 0), // Yellow for ability damage
+                        color: crate::ui::theme::fct::DAMAGE,
                         lifetime: 1.5,
                         vertical_offset: offset_y,
                         is_crit: false,
@@ -1381,7 +1380,7 @@ pub fn process_channeling(
                         FloatingCombatText {
                             world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                             text: format!("{:.0} absorbed", absorbed),
-                            color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                            color: crate::ui::theme::fct::ABSORB,
                             lifetime: 1.5,
                             vertical_offset: offset_y,
                             is_crit: false,
@@ -1457,7 +1456,7 @@ pub fn process_channeling(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: format!("+{:.0}", effective_healing),
-                    color: egui::Color32::from_rgb(100, 255, 100), // Green for healing
+                    color: crate::ui::theme::fct::HEAL,
                     lifetime: 1.5,
                     vertical_offset: offset_y,
                     is_crit: false,

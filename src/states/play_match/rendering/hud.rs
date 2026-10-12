@@ -9,6 +9,8 @@ use bevy::prelude::*;
 use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
 
+use crate::ui::theme::{self, hud};
+
 // ==============================================================================
 // Zoom Scaling Constants
 // ==============================================================================
@@ -167,9 +169,9 @@ pub fn render_time_controls(
         .title_bar(false)
         .frame(
             egui::Frame::window(&ctx.style())
-                .fill(egui::Color32::from_black_alpha(200)) // Semi-transparent
+                .fill(hud::HUD_PANEL)
                 .stroke(egui::Stroke::NONE),
-        ) // Remove border
+        )
         .show(ctx, |ui| {
             ui.set_width(panel_width);
 
@@ -398,7 +400,7 @@ pub fn render_health_bars(
                     // new collision cases. White on the black outline reads on any
                     // background; yellow/green/light-blue stay reserved for the
                     // damage/heal/absorb floating combat text.
-                    let status_color = egui::Color32::WHITE;
+                    let status_color = hud::HUD_LABEL;
 
                     // STEALTH indicator (if stealthed)
                     if combatant.stealthed {
@@ -445,13 +447,7 @@ pub fn render_health_bars(
                     );
 
                     // Health bar fill (color based on health %)
-                    let health_color = if health_percent > 0.5 {
-                        egui::Color32::from_rgb(0, 200, 0) // Green
-                    } else if health_percent > 0.25 {
-                        egui::Color32::from_rgb(255, 200, 0) // Yellow
-                    } else {
-                        egui::Color32::from_rgb(200, 0, 0) // Red
-                    };
+                    let health_color = hud::health_color(health_percent);
 
                     ui.painter().rect_filled(
                         egui::Rect::from_min_size(
@@ -788,7 +784,7 @@ fn render_status_label(
 ) {
     use egui::emath::GuiRounding;
 
-    let font = egui::FontId::monospace(9.0 * ui_scale);
+    let font = egui::FontId::proportional(theme::text::MICRO * ui_scale);
 
     // Create galley for measuring size
     let galley = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font.clone(), color));
@@ -804,11 +800,11 @@ fn render_status_label(
         for dy in [-outline_offset, 0.0, outline_offset] {
             if dx != 0.0 || dy != 0.0 {
                 let outline_galley = ui.fonts(|f| {
-                    f.layout_no_wrap(text.to_string(), font.clone(), egui::Color32::BLACK)
+                    f.layout_no_wrap(text.to_string(), font.clone(), hud::HUD_LABEL_OUTLINE)
                 });
                 let outline_pos = egui::pos2(center_pos.x + dx, center_pos.y + dy);
                 ui.painter()
-                    .galley(outline_pos, outline_galley, egui::Color32::BLACK);
+                    .galley(outline_pos, outline_galley, hud::HUD_LABEL_OUTLINE);
             }
         }
     }

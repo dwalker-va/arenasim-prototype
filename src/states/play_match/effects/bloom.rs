@@ -18,7 +18,6 @@
 //! A refresh (the aura has not ended), and the bearer dying (nothing to heal).
 
 use bevy::prelude::*;
-use bevy_egui::egui;
 
 use crate::combat::log::CombatLog;
 use crate::states::play_match::combat_core::apply_healing;
@@ -121,7 +120,7 @@ pub fn process_blooms(
             FloatingCombatText {
                 world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                 text: format!("+{:.0}", actual),
-                color: egui::Color32::from_rgb(100, 255, 100), // Green for healing
+                color: crate::ui::theme::fct::HEAL,
                 lifetime: 1.5,
                 vertical_offset: offset_y,
                 is_crit: false, // a bloom never crits

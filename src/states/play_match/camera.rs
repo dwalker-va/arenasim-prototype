@@ -320,7 +320,7 @@ pub fn render_camera_controls(
         .title_bar(false)
         .frame(
             egui::Frame::window(&ctx.style())
-                .fill(egui::Color32::from_black_alpha(150)) // Semi-transparent
+                .fill(crate::ui::theme::hud::HUD_PANEL)
                 .stroke(egui::Stroke::NONE),
         ) // Remove border
         .show(ctx, |ui| {

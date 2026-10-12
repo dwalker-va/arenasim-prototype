@@ -18,7 +18,6 @@ use super::damage::{
 };
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use bevy::prelude::*;
-use bevy_egui::egui;
 
 /// Auto-attack system: Process attacks based on attack speed timers.
 ///
@@ -915,8 +914,8 @@ pub fn combat_auto_attack(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: format!("{:.0}", total_damage),
-                    color: egui::Color32::WHITE, // White for auto-attacks
-                    lifetime: 1.5,               // Display for 1.5 seconds
+                    color: crate::ui::theme::fct::AUTO,
+                    lifetime: 1.5, // Display for 1.5 seconds
                     vertical_offset: offset_y,
                     is_crit: target_was_crit,
                 },
@@ -937,7 +936,7 @@ pub fn combat_auto_attack(
                             world_position: text_position
                                 + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
                             text: format!("{:.0} absorbed", total_absorbed),
-                            color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                            color: crate::ui::theme::fct::ABSORB,
                             lifetime: 1.5,
                             vertical_offset: absorb_offset_y,
                             is_crit: false,

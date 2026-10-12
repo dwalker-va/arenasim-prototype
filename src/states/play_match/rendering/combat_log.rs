@@ -57,7 +57,7 @@ pub fn render_combat_panel(
         .show_separator_line(false)
         .frame(
             egui::Frame::side_top_panel(&ctx.style())
-                .fill(egui::Color32::from_black_alpha(180))
+                .fill(crate::ui::theme::hud::HUD_PANEL)
                 .stroke(egui::Stroke::NONE),
         )
         .show(ctx, |ui| {

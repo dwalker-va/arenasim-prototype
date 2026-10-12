@@ -11,7 +11,6 @@ use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset, pet_com
 use crate::combat::log::CombatLog;
 use bevy::color::LinearRgba;
 use bevy::prelude::*;
-use bevy_egui::egui;
 
 /// Spawn visual meshes for newly created projectiles.
 /// Creates a glowing sphere for the projectiles no bespoke rig draws.
@@ -382,7 +381,7 @@ pub fn process_projectile_hits(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: format!("{:.0}", actual_damage),
-                    color: egui::Color32::from_rgb(255, 255, 0), // Yellow
+                    color: crate::ui::theme::fct::DAMAGE,
                     lifetime: 1.5,
                     vertical_offset: offset_y,
                     is_crit,
@@ -403,7 +402,7 @@ pub fn process_projectile_hits(
                         world_position: text_position
                             + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
                         text: format!("{:.0} absorbed", absorbed),
-                        color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                        color: crate::ui::theme::fct::ABSORB,
                         lifetime: 1.5,
                         vertical_offset: absorb_offset_y,
                         is_crit: false,

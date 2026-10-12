@@ -92,6 +92,10 @@ pub mod color {
 
     /// The tint an image is drawn with to keep its own colours.
     pub const UNTINTED: Color32 = Color32::WHITE;
+
+    /// The empty part of a chrome bar (the kit's `resource_bar`). The HUD's
+    /// bars use [`super::hud::BAR_TRACK`].
+    pub const TRACK: Color32 = Color32::from_rgb(17, 17, 26);
 }
 
 /// Data colours: hue that carries meaning. One table each.
@@ -135,12 +139,85 @@ pub mod data {
 pub mod hud {
     use super::Color32;
 
+    /// Every HUD frame's fill: the team frames, the combat log, Time
+    /// Controls, the camera window. One translucent near-black.
+    /// (13, 13, 20) at alpha 235, premultiplied (egui's unmultiplied
+    /// constructor is not `const`); `hud_panel_is_the_team_frame_fill` pins it.
+    pub const HUD_PANEL: Color32 = Color32::from_rgba_premultiplied(12, 12, 19, 235);
+    /// A team frame's resting edge.
+    pub const HUD_PANEL_EDGE: Color32 = Color32::from_rgb(45, 45, 60);
+
     /// The countdown, Victory, buff borders.
     pub const HUD_GOLD: Color32 = Color32::from_rgb(255, 215, 0);
     /// Every HUD label. White, by the colour-budget rule.
     pub const HUD_LABEL: Color32 = Color32::WHITE;
-    /// The empty part of a resource bar.
-    pub const BAR_TRACK: Color32 = Color32::from_rgb(17, 17, 26);
+    /// The outline drawn under a [`HUD_LABEL`] so it reads on any ground.
+    pub const HUD_LABEL_OUTLINE: Color32 = Color32::BLACK;
+
+    /// The empty part of a team frame's resource bar.
+    pub const BAR_TRACK: Color32 = Color32::from_rgb(20, 20, 30);
+    /// The empty part of a team frame's health bar.
+    pub const HEALTH_TRACK: Color32 = Color32::from_rgb(28, 28, 34);
+    /// The well behind a team frame's aura icon.
+    pub const ICON_WELL: Color32 = Color32::from_rgb(20, 20, 20);
+
+    // Health, by threshold: the team frames and the overhead bar share them.
+    /// Above half health.
+    pub const HEALTH_HIGH: Color32 = Color32::from_rgb(0, 200, 0);
+    /// Above a quarter.
+    pub const HEALTH_MID: Color32 = Color32::from_rgb(255, 200, 0);
+    /// A quarter or less.
+    pub const HEALTH_LOW: Color32 = Color32::from_rgb(200, 0, 0);
+    /// A dead combatant's empty bar.
+    pub const HEALTH_DEAD: Color32 = Color32::from_rgb(60, 60, 60);
+
+    /// A living combatant's health fill at `fraction` of its maximum: the
+    /// one place the thresholds are chosen.
+    pub fn health_color(fraction: f32) -> Color32 {
+        if fraction > 0.5 {
+            HEALTH_HIGH
+        } else if fraction > 0.25 {
+            HEALTH_MID
+        } else {
+            HEALTH_LOW
+        }
+    }
+
+    // Resources.
+    pub const MANA: Color32 = Color32::from_rgb(80, 150, 255);
+    pub const ENERGY: Color32 = Color32::from_rgb(255, 255, 100);
+    pub const RAGE: Color32 = Color32::from_rgb(255, 80, 80);
+
+    // Aura borders on the team frames ([`HUD_GOLD`] for a buff).
+    /// A harmful aura.
+    pub const AURA_DEBUFF: Color32 = Color32::from_rgb(200, 50, 50);
+    /// Hard crowd control: brighter than [`AURA_DEBUFF`].
+    pub const AURA_HARD_CC: Color32 = Color32::from_rgb(255, 60, 60);
+}
+
+/// Floating combat text: the ONLY place its hues are written. Yellow, green
+/// and light-blue are reserved here for damage, healing and absorbs (the
+/// colour-budget rule); nothing else in the game may draw text in them.
+pub mod fct {
+    use super::Color32;
+
+    /// Ability damage, DoT ticks included.
+    pub const DAMAGE: Color32 = Color32::from_rgb(255, 255, 0);
+    /// Auto-attack damage.
+    pub const AUTO: Color32 = Color32::WHITE;
+    /// Every heal: direct, over time, bloom.
+    pub const HEAL: Color32 = Color32::from_rgb(100, 255, 100);
+    /// Damage an absorb shield took.
+    pub const ABSORB: Color32 = Color32::from_rgb(100, 180, 255);
+    /// A hit or effect the target was immune to. Shares the damage yellow:
+    /// it reads as the damage that did not land.
+    pub const IMMUNE: Color32 = DAMAGE;
+    /// A named state the combatant entered: Travel Form, Berserker Rage.
+    pub const STATE: Color32 = Color32::WHITE;
+    /// Divine Shield, the one invulnerability: the HUD's gold.
+    pub const INVULNERABLE: Color32 = super::hud::HUD_GOLD;
+    /// The outline drawn around every floating number.
+    pub const OUTLINE: Color32 = Color32::BLACK;
 }
 
 /// The type scale, in points. Rajdhani Bold unless a call site says otherwise.
@@ -283,6 +360,12 @@ pub fn lighten(c: Color32, amount: f32) -> Color32 {
     Color32::from_rgba_premultiplied(channel(c.r()), channel(c.g()), channel(c.b()), c.a())
 }
 
+/// `c` at unmultiplied alpha `alpha`: how a token fades (floating combat
+/// text in its last half second) without choosing a second colour for it.
+pub fn with_alpha(c: Color32, alpha: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), alpha)
+}
+
 /// A spell school's colour as egui draws it, from the one source,
 /// [`SpellSchool::color_rgb8`].
 pub fn school_color(school: SpellSchool) -> Color32 {
@@ -385,4 +468,19 @@ fn visuals() -> egui::Visuals {
     v.popup_shadow = egui::Shadow::NONE;
 
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `HUD_PANEL` is written premultiplied; it must stay the colour the team
+    /// frames were drawn with, (13, 13, 20) at alpha 235.
+    #[test]
+    fn hud_panel_is_the_team_frame_fill() {
+        assert_eq!(
+            hud::HUD_PANEL,
+            Color32::from_rgba_unmultiplied(13, 13, 20, 235)
+        );
+    }
 }

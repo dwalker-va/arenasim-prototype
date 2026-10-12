@@ -17,7 +17,8 @@ pub struct FloatingCombatText {
     pub world_position: Vec3,
     /// The text to display (damage/healing amount)
     pub text: String,
-    /// Color of the text (white for auto-attacks, yellow for abilities, green for healing)
+    /// Color of the text: always a `ui::theme::fct` token, the one table of
+    /// floating-combat-text hues.
     pub color: egui::Color32,
     /// Time remaining before text disappears (in seconds)
     pub lifetime: f32,

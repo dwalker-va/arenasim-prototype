@@ -32,6 +32,7 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::results_ui::class_color32;
 use crate::ui::driver as ui_driver;
+use crate::ui::theme::hud;
 
 use super::{get_aura_icon_key, is_buff_aura};
 
@@ -462,16 +463,12 @@ fn draw_frame(
     // affordance on changed nothing you could see until you happened to hover a
     // frame — the toggle looked broken, because a control mode that renders no
     // evidence of being on is indistinguishable from one that did not fire.
-    painter.rect_filled(
-        rect,
-        4.0,
-        egui::Color32::from_rgba_unmultiplied(13, 13, 20, 235),
-    );
+    painter.rect_filled(rect, 4.0, hud::HUD_PANEL);
     let border = match call_state {
         FrameCallState::Called => egui::Stroke::new(2.0_f32, CALL_MARK),
         FrameCallState::Hovered => egui::Stroke::new(1.0_f32, CALL_HOVER),
         FrameCallState::Callable => egui::Stroke::new(1.0_f32, CALL_CALLABLE),
-        FrameCallState::Inert => egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(45, 45, 60)),
+        FrameCallState::Inert => egui::Stroke::new(1.0_f32, hud::HUD_PANEL_EDGE),
     };
     // Click flash: a brief lift on the frame you just pressed. Drawn UNDER the
     // border so the call marker stays the brightest thing even mid-press, and
@@ -545,7 +542,7 @@ fn draw_frame(
         egui::Align2::LEFT_CENTER,
         frame.class.name(),
         egui::FontId::proportional(14.0),
-        dimmed(egui::Color32::WHITE),
+        dimmed(hud::HUD_LABEL),
     );
     // Call reticle at the header's trailing edge; the STEALTH tag steps aside
     // for it, since a stealthed combatant is still callable. A DEAD frame never
@@ -594,13 +591,13 @@ fn draw_frame(
     // Resource bar.
     let res_rect =
         egui::Rect::from_min_size(egui::pos2(inner_x, y), egui::vec2(inner_w, RESOURCE_H));
-    let (res_color, _) = resource_colors(frame.resource_type);
+    let res_color = resource_color(frame.resource_type);
     let res_pct = if frame.max_resource > 0.0 {
         (frame.current_resource / frame.max_resource).clamp(0.0, 1.0)
     } else {
         0.0
     };
-    painter.rect_filled(res_rect, 2.0, egui::Color32::from_rgb(20, 20, 30));
+    painter.rect_filled(res_rect, 2.0, hud::BAR_TRACK);
     painter.rect_filled(
         egui::Rect::from_min_size(
             res_rect.min,
@@ -653,16 +650,12 @@ fn draw_hp_bar(
     };
     // Same green/yellow/red thresholds as the overhead sliver.
     let fill = if !frame.alive {
-        egui::Color32::from_rgb(60, 60, 60)
-    } else if hp_pct > 0.5 {
-        egui::Color32::from_rgb(0, 200, 0)
-    } else if hp_pct > 0.25 {
-        egui::Color32::from_rgb(255, 200, 0)
+        hud::HEALTH_DEAD
     } else {
-        egui::Color32::from_rgb(200, 0, 0)
+        hud::health_color(hp_pct)
     };
 
-    painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(28, 28, 34));
+    painter.rect_filled(rect, 2.0, hud::HEALTH_TRACK);
     painter.rect_filled(
         egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * hp_pct, rect.height())),
         2.0,
@@ -694,7 +687,7 @@ fn draw_hp_bar(
                 frame.max_health
             ),
             egui::FontId::proportional(10.0),
-            egui::Color32::WHITE,
+            hud::HUD_LABEL,
         );
     }
 }
@@ -714,14 +707,14 @@ fn draw_aura_row(
         );
 
         let border = if aura.is_hard_cc {
-            egui::Color32::from_rgb(255, 60, 60)
+            hud::AURA_HARD_CC
         } else if aura.is_buff {
-            egui::Color32::from_rgb(255, 215, 0)
+            hud::HUD_GOLD
         } else {
-            egui::Color32::from_rgb(200, 50, 50)
+            hud::AURA_DEBUFF
         };
 
-        painter.rect_filled(icon_rect, 2.0, egui::Color32::from_rgb(20, 20, 20));
+        painter.rect_filled(icon_rect, 2.0, hud::ICON_WELL);
         if let Some(texture_id) = spell_icons.textures.get(&aura.icon_key) {
             painter.image(
                 *texture_id,
@@ -768,14 +761,14 @@ fn draw_aura_row(
             egui::Align2::CENTER_CENTER,
             &text,
             egui::FontId::proportional(9.0),
-            egui::Color32::BLACK,
+            hud::HUD_LABEL_OUTLINE,
         );
         painter.text(
             text_pos,
             egui::Align2::CENTER_CENTER,
             &text,
             egui::FontId::proportional(9.0),
-            egui::Color32::WHITE,
+            hud::HUD_LABEL,
         );
     }
 
@@ -793,20 +786,11 @@ fn draw_aura_row(
     }
 }
 
-fn resource_colors(resource_type: ResourceType) -> (egui::Color32, egui::Color32) {
+fn resource_color(resource_type: ResourceType) -> egui::Color32 {
     match resource_type {
-        ResourceType::Mana => (
-            egui::Color32::from_rgb(80, 150, 255),
-            egui::Color32::from_rgb(150, 150, 200),
-        ),
-        ResourceType::Energy => (
-            egui::Color32::from_rgb(255, 255, 100),
-            egui::Color32::from_rgb(200, 200, 150),
-        ),
-        ResourceType::Rage => (
-            egui::Color32::from_rgb(255, 80, 80),
-            egui::Color32::from_rgb(200, 150, 150),
-        ),
+        ResourceType::Mana => hud::MANA,
+        ResourceType::Energy => hud::ENERGY,
+        ResourceType::Rage => hud::RAGE,
     }
 }
 
