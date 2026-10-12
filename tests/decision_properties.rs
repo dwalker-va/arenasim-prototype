@@ -146,6 +146,8 @@ struct Situation {
     my_aura: SelfLock,
     /// The enemy healer is casting a heal (an interrupt's moment).
     healer_casting: bool,
+    /// The target is mid this cast.
+    target_casting: Option<AbilityType>,
     /// Both enemies are immune to Fear by diminishing returns.
     fear_diminished: bool,
     /// The unit has broken stealth (the Rogue starts every match in it).
@@ -197,6 +199,7 @@ const CALM: Situation = Situation {
     healer_aura: Hold::Free,
     my_aura: SelfLock::Free,
     healer_casting: false,
+    target_casting: None,
     fear_diminished: false,
     opened: false,
     team_plan: false,
@@ -366,6 +369,19 @@ fn situations(class: CharacterClass, bars: &[f32]) -> Vec<Situation> {
     list.push(Situation {
         name: "a caster target, me injured",
         my_health: 0.3,
+        ..caster_target
+    });
+    // The target mid a cast: one no interrupt takes (Aimed Shot, the book's
+    // uninterruptible cast, on a caster target so a Kick would otherwise be
+    // owed), and its pair, an interruptible one.
+    list.push(Situation {
+        name: "a caster target mid an uninterruptible cast",
+        target_casting: Some(AbilityType::AimedShot),
+        ..caster_target
+    });
+    list.push(Situation {
+        name: "a caster target mid an interruptible cast",
+        target_casting: Some(AbilityType::Frostbolt),
         ..caster_target
     });
     list.push(Situation {
@@ -948,6 +964,9 @@ fn build(defs: &AbilityDefinitions, movement: MovementConfig, p: &Point) -> Scen
     }
     if s.healer_casting {
         scene = scene.casting(HEALER, AbilityType::FlashHeal);
+    }
+    if let Some(cast) = s.target_casting {
+        scene = scene.casting(TARGET, cast);
     }
     for (who, alive) in [(ALLY, s.ally_health), (TARGET, s.target_health)] {
         if alive.is_none() {
@@ -2024,4 +2043,74 @@ fn every_peel_tool_is_reached_and_every_peel_is_aimed_at_the_attacker() {
         })
         .collect();
     assert_eq!(peeled, expected, "(class, tool) pairs the grid peels with");
+}
+
+// ---------------------------------------------------------------------------
+// Uninterruptible casts
+// ---------------------------------------------------------------------------
+
+/// Whether a candidate was held for an interrupt: a crowd control the
+/// decision left for Kick to do instead (`plan_kidney_shot`'s hold).
+fn held_for_an_interrupt(reason: &Option<RejectionReason>) -> bool {
+    matches!(
+        reason,
+        Some(RejectionReason::PreconditionUnmet { note }) if note.contains("Kick will interrupt")
+    )
+}
+
+/// The cast the scene's target is mid, and whether an interrupt can take it.
+fn target_cast(r: &Record) -> Option<bool> {
+    r.point
+        .situation
+        .target_casting
+        .map(|cast| grid().defs.get_unchecked(&cast).can_be_interrupted())
+}
+
+/// No decision holds its crowd control for an interrupt when the target's
+/// cast is `uninterruptible` (AS-287): no interrupt will take it, so the CC is
+/// the only thing that stops it. Interrupts themselves are decided outside the
+/// dispatch ([`UNREACHED`]); `tests/uninterruptible_casts.rs` holds them to the
+/// same rule.
+///
+/// Paired inside the grid: the same scenes with an interruptible cast DO hold
+/// for the interrupt somewhere, so the hold this property looks for is real.
+/// Mutant killed: `plan_kidney_shot` ignores the flag, and the Rogue holds
+/// Kidney Shot for a Kick that cannot land.
+#[test]
+fn crowd_control_is_never_held_for_an_interrupt_an_uninterruptible_cast_refuses() {
+    let mut judged = 0;
+    let mut control_holds = 0;
+    let mut v = Vec::new();
+    for r in &grid().records {
+        let Some(interruptible) = target_cast(r) else {
+            continue;
+        };
+        for c in &r.view.candidates {
+            if !held_for_an_interrupt(&c.reason) {
+                judged += usize::from(!interruptible);
+                continue;
+            }
+            if interruptible {
+                control_holds += 1;
+            } else {
+                v.push(format!(
+                    "{} -> held {:?} for an interrupt",
+                    r.point.describe(),
+                    c.ability
+                ));
+            }
+        }
+    }
+    eprintln!(
+        "uninterruptible: judged {judged} candidates; the interruptible pair held {control_holds}"
+    );
+    assert!(judged > 0, "no decision met an uninterruptible cast");
+    assert!(
+        control_holds > 0,
+        "no decision ever held for an interrupt, so this property cannot see one"
+    );
+    assert!(
+        v.is_empty(),
+        "held for an interrupt that cannot land: {v:#?}"
+    );
 }

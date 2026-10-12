@@ -408,13 +408,17 @@ fn plan_kidney_shot(
 
     // 4. Caster (Mage/Priest/Warlock/Paladin): the Kick → hold → Kidney chain.
     let lockout = lockout_on(ctx, tgt);
-    let casting_school = ctx
+    let casting = ctx
         .combatants
         .get(&tgt)
         .and_then(|i| i.casting_ability)
-        .map(|ab| abilities.get_unchecked(&ab).spell_school);
+        .map(|ab| abilities.get_unchecked(&ab));
+    let casting_school = casting.map(|def| def.spell_school);
+    // Kick takes the cast only if it is not `uninterruptible`; against one that
+    // is, the stun is the only denial there is.
     let kick_ready = !combatant.ability_cooldowns.contains_key(&AbilityType::Kick)
-        && my_pos.distance(tgt_pos) <= MELEE_RANGE;
+        && my_pos.distance(tgt_pos) <= MELEE_RANGE
+        && casting.is_none_or(|def| !def.uninterruptible);
 
     if let Some(cast_school) = casting_school {
         // Target is casting right now.

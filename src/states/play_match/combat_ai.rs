@@ -2003,6 +2003,9 @@ pub fn check_interrupts(
     // Wind Shear to prefer interrupting the enemy healer mid-cast.
     casting_combatants: Query<(Entity, &Combatant, &Transform), With<CastingState>>,
     celebration: Option<Res<VictoryCelebration>>,
+    // Where an interrupter passing over an uninterruptible cast is traced.
+    // `Option` so a world that never inserted it still runs.
+    mut decision_trace: Option<ResMut<super::decision_trace::DecisionTrace>>,
 ) {
     // Don't interrupt during victory celebration
     if celebration.is_some() {
@@ -2076,14 +2079,13 @@ pub fn check_interrupts(
             let my_pos = transform.translation;
             let wind_shear_range = abilities.get_unchecked(&AbilityType::WindShear).range;
             let mut best: Option<(Entity, bool, f32)> = None;
+            // The nearest enemy in reach mid an UNINTERRUPTIBLE cast: the cast
+            // Wind Shear passes over, traced below when nothing else is
+            // casting.
+            let mut passed_over: Option<(Entity, f32)> = None;
             for (e, c, t) in casting_combatants.iter() {
                 if c.team == combatant.team || !c.is_alive() {
                     continue;
-                }
-                // Mid a cast Wind Shear can take (cast bar, not interrupted)?
-                match casting_targets.get(e) {
-                    Ok(cs) if class_ai::cast_is_interruptible(cs, &abilities) => {}
-                    _ => continue,
                 }
                 // Skip immune targets (Divine Shield, Cyclone).
                 if is_immune(e) {
@@ -2092,6 +2094,18 @@ pub fn check_interrupts(
                 let dist = my_pos.distance(t.translation);
                 if dist > wind_shear_range {
                     continue;
+                }
+                // Mid a cast Wind Shear can take (cast bar, interruptible, not
+                // already interrupted)?
+                match casting_targets.get(e) {
+                    Ok(cs) if class_ai::cast_is_interruptible(cs, &abilities) => {}
+                    Ok(cs) if class_ai::uninterruptible_cast(cs, &abilities).is_some() => {
+                        if passed_over.is_none_or(|(pe, pd)| dist < pd || (dist == pd && e < pe)) {
+                            passed_over = Some((e, dist));
+                        }
+                        continue;
+                    }
+                    _ => continue,
                 }
                 let is_healer = c.class.is_healer();
                 let replace = match best {
@@ -2110,9 +2124,10 @@ pub fn check_interrupts(
                     best = Some((e, is_healer, dist));
                 }
             }
-            match best {
-                Some((e, _, _)) => e,
-                None => continue,
+            match (best, passed_over) {
+                (Some((e, _, _)), _) => e,
+                (None, Some((e, _))) => e,
+                (None, None) => continue,
             }
         } else {
             let Some(target_entity) = combatant.target else {
@@ -2137,11 +2152,17 @@ pub fn check_interrupts(
         // Check if target is casting or channeling
         let target_ability_name: String;
         let is_interruptable: bool;
+        // An uninterruptible cast (Aimed Shot) the interrupter would otherwise
+        // take: it passes it over, traced once its own gates have cleared.
+        let mut uninterruptible: Option<AbilityType> = None;
 
         if let Ok(cast_state) = casting_targets.get(target_entity) {
-            // Already interrupted, or an instant routed through a zero-length
-            // cast — nothing to interrupt, so the interrupt is not spent.
-            if !class_ai::cast_is_interruptible(cast_state, &abilities) {
+            if let Some(cast) = class_ai::uninterruptible_cast(cast_state, &abilities) {
+                uninterruptible = Some(cast);
+            } else if !class_ai::cast_is_interruptible(cast_state, &abilities) {
+                // Already interrupted, or an instant routed through a
+                // zero-length cast — nothing to interrupt, so the interrupt is
+                // not spent.
                 continue;
             }
             target_ability_name = abilities.get_unchecked(&cast_state.ability).name.clone();
@@ -2181,6 +2202,42 @@ pub fn check_interrupts(
 
         // Check if we can cast the interrupt (range, resources, etc.)
         if !interrupt_ability.can_cast_config(&combatant, target_pos, my_pos, ability_def) {
+            continue;
+        }
+
+        // An uninterruptible cast: no interrupt takes it, so this one is not
+        // spent on it. Traced, since the interrupter could otherwise have used
+        // it here.
+        if let Some(cast) = uninterruptible {
+            if let Some(trace) = decision_trace.as_deref_mut() {
+                let actor = super::decision_trace::ActorView::from_raw(
+                    entity,
+                    combatant.team,
+                    combatant.slot,
+                    combatant.class,
+                    combatant.current_health / combatant.max_health.max(f32::EPSILON),
+                    if combatant.max_mana > 0.0 {
+                        combatant.current_mana / combatant.max_mana
+                    } else {
+                        0.0
+                    },
+                    my_pos,
+                );
+                let target = casting_combatants.get(target_entity).ok().map(|(e, c, _)| {
+                    super::decision_trace::TargetView {
+                        entity_id: e.index(),
+                        class: c.class,
+                        hp_pct: c.current_health / c.max_health.max(f32::EPSILON),
+                        distance,
+                    }
+                });
+                let mut builder = trace.start_ability_decision(actor, target);
+                builder.reject(
+                    interrupt_ability,
+                    super::decision_trace::RejectionReason::Uninterruptible { ability: cast },
+                );
+                builder.finish();
+            }
             continue;
         }
 

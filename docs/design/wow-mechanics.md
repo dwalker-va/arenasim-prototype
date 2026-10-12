@@ -45,6 +45,17 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   interrupt that somehow reaches one is spent and cuts and locks nothing. A
   school lockout already running still blocks an instant of that school.
   Channels stay interruptible.
+- **An `uninterruptible` cast takes no interrupt** (AS-287): Aimed Shot, the
+  one cast-time ability TBC gives `PreventionType` Pacify rather than Silence
+  (`docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py`
+  re-derives that from the client data for every cast in the book). Its RON
+  flag folds into the same rule (`AbilityConfig::can_be_interrupted`), so every
+  interrupter passes it by unspent, tracing the pass as `Uninterruptible`, and
+  `process_interrupts` cuts and locks nothing if one reaches it. Its cast bar is
+  grey (`theme::hud::CAST_BAR_UNINTERRUPTIBLE_*`), and its text says "Cannot
+  be interrupted." Loss of control still stops it — a stun, fear, polymorph or
+  cyclone cancels any cast in `process_casting` — and that is not an interrupt:
+  no school is locked, so the Hunter can Disengage the moment it is free.
 
 ### Auto-Attacks
 - Disabled while casting

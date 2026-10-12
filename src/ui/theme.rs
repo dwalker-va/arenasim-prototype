@@ -193,6 +193,17 @@ pub mod hud {
     pub const AURA_DEBUFF: Color32 = Color32::from_rgb(200, 50, 50);
     /// Hard crowd control: brighter than [`AURA_DEBUFF`].
     pub const AURA_HARD_CC: Color32 = Color32::from_rgb(255, 60, 60);
+
+    // Cast bars.
+    /// A cast bar's fill, WoW's orange: a cast an interrupt can take.
+    pub const CAST_BAR_FILL: Color32 = Color32::from_rgb(255, 180, 50);
+    /// A cast bar's edge, beside [`CAST_BAR_FILL`].
+    pub const CAST_BAR_EDGE: Color32 = Color32::from_rgb(255, 200, 100);
+    /// An UNINTERRUPTIBLE cast's fill (Aimed Shot): WoW's grey bar, the tell
+    /// that no interrupt takes it.
+    pub const CAST_BAR_UNINTERRUPTIBLE_FILL: Color32 = Color32::from_rgb(140, 140, 146);
+    /// An uninterruptible cast's edge, beside [`CAST_BAR_UNINTERRUPTIBLE_FILL`].
+    pub const CAST_BAR_UNINTERRUPTIBLE_EDGE: Color32 = Color32::from_rgb(196, 196, 204);
 }
 
 /// Floating combat text: the ONLY place its hues are written. Yellow, green

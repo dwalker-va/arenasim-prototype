@@ -5,6 +5,7 @@
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::rendering::status_labels::{label_text, overhead_status_labels};
+use crate::ui::theme::hud as hud_theme;
 use bevy::prelude::*;
 use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
@@ -607,14 +608,25 @@ pub fn render_health_bars(
                                 egui::Color32::from_rgb(15, 15, 20),
                             );
 
-                            // Cast bar fill (orange/yellow, WoW-style)
+                            // WoW's convention: an interruptible cast fills
+                            // orange, an uninterruptible one (Aimed Shot) grey.
+                            let (fill, edge) = if ability_def.uninterruptible {
+                                (
+                                    hud_theme::CAST_BAR_UNINTERRUPTIBLE_FILL,
+                                    hud_theme::CAST_BAR_UNINTERRUPTIBLE_EDGE,
+                                )
+                            } else {
+                                (hud_theme::CAST_BAR_FILL, hud_theme::CAST_BAR_EDGE)
+                            };
+
+                            // Cast bar fill
                             ui.painter().rect_filled(
                                 egui::Rect::from_min_size(
                                     cast_bar_pos,
                                     egui::vec2(cast_bar_width * cast_progress, cast_bar_height),
                                 ),
                                 corner_radius,
-                                egui::Color32::from_rgb(255, 180, 50), // Orange
+                                fill,
                             );
 
                             // Cast bar border
@@ -624,10 +636,7 @@ pub fn render_health_bars(
                                     egui::vec2(cast_bar_width, cast_bar_height),
                                 ),
                                 corner_radius,
-                                egui::Stroke::new(
-                                    1.5 * ui_scale,
-                                    egui::Color32::from_rgb(255, 200, 100),
-                                ),
+                                egui::Stroke::new(1.5 * ui_scale, edge),
                                 egui::StrokeKind::Outside,
                             );
 
