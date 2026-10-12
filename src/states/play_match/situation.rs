@@ -406,26 +406,67 @@ impl SituationConfig {
     pub fn for_team(self, team: u8, profile: AiProfile) -> Self {
         let cfg = self.under(profile);
         Self {
-            peel: cfg.peel && !self.withheld.for_team(team).peel,
+            peel: cfg.peel && !self.withheld.for_team(team).denies(&PEEL),
             ..cfg
         }
     }
 }
 
-/// The gated plays one team is denied.
+/// The gated plays one team is denied: one flag per gated [`Play`] variant,
+/// read and written only through the exhaustive matches in [`Self::denies`]
+/// and [`Self::withhold`]. Deleting a gated play is therefore a compile error
+/// here until its flag goes with it, and gating a new one is a compile error
+/// until it answers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PlaySet {
-    pub peel: bool,
+    peel: bool,
 }
 
+impl PlaySet {
+    /// The set that denies exactly `plays`.
+    pub fn of(plays: &[Play]) -> Self {
+        let mut set = Self::default();
+        for play in plays {
+            set.withhold(play);
+        }
+        set
+    }
+
+    /// Deny `play` (a no-op for an ungated one: it cannot be withheld).
+    pub fn withhold(&mut self, play: &Play) {
+        match play {
+            Play::Peel { .. } => self.peel = true,
+            Play::Default | Play::Burst => {}
+        }
+    }
+
+    /// Whether `play` is denied. An ungated play never is.
+    pub fn denies(&self, play: &Play) -> bool {
+        match play {
+            Play::Peel { .. } => self.peel,
+            Play::Default | Play::Burst => false,
+        }
+    }
+}
+
+/// `Play::Peel` as a KIND, for the sets above (a peel's ally does not enter
+/// whether it is withheld).
+pub const PEEL: Play = Play::Peel {
+    ally: Entity::PLACEHOLDER,
+};
+
 /// The gated plays ([`Play::Peel`]) each team is DENIED, for measurement: a
-/// team under `TeamPlan` with its peel withheld is the paired control a play
+/// team under `TeamPlan` with a play withheld is the paired control the play
 /// is measured against — in a tier-4 probe (the same seed bank with the play
 /// off) and in a head-to-head (one side with it, one without, on one seed).
-/// A match config sets it (`team1_withheld_plays` / `team2_withheld_plays`);
-/// the default withholds nothing, so production never reads it. It lives as
-/// long as the plays it names stay gated: a play that graduates or is
-/// deleted (§4.5) takes its field with it.
+///
+/// A MEASUREMENT CONTROL, not a behaviour switch: nothing in the game sets it,
+/// but it is reachable from a headless match's JSON
+/// (`team1_withheld_plays` / `team2_withheld_plays`) and so from `--replay`,
+/// which honours the same config. The default withholds nothing. It lives
+/// only as long as the plays it names stay gated: when a play graduates or is
+/// deleted (§4.5) its flag goes, and with the last gated play this type and
+/// the two config fields are deleted too.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WithheldPlays {
     pub team1: PlaySet,
@@ -443,18 +484,20 @@ impl WithheldPlays {
         }
     }
 
-    /// Parse a config's list of play names (`"Peel"`) into the set it denies.
+    /// Parse a config's list of gated play names (`"Peel"`) into the set it
+    /// denies.
     pub fn parse_set(names: &[String]) -> Result<PlaySet, String> {
         let mut set = PlaySet::default();
         for name in names {
-            match name.as_str() {
-                "Peel" | "peel" => set.peel = true,
+            let play = match name.as_str() {
+                "Peel" | "peel" => PEEL,
                 other => {
                     return Err(format!(
                         "Unknown withheld play: '{other}'. Gated plays: Peel"
                     ))
                 }
-            }
+            };
+            set.withhold(&play);
         }
         Ok(set)
     }
@@ -1170,7 +1213,7 @@ mod tests {
     #[test]
     fn withheld_plays_deny_peel_to_one_team_only() {
         let withheld = WithheldPlays {
-            team2: PlaySet { peel: true },
+            team2: PlaySet::of(&[PEEL]),
             ..Default::default()
         };
         let cfg = SituationConfig {
@@ -1182,7 +1225,7 @@ mod tests {
         assert!(!cfg.for_team(1, AiProfile::Legacy).peel);
         assert_eq!(
             WithheldPlays::parse_set(&["Peel".to_string()]),
-            Ok(PlaySet { peel: true })
+            Ok(PlaySet::of(&[PEEL]))
         );
         assert!(WithheldPlays::parse_set(&["Burst".to_string()]).is_err());
     }

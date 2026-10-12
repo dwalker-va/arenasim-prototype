@@ -43,7 +43,7 @@
 //! `Legacy` but three, which put the unit's team under `TeamPlan` with its
 //! ally dying under attack — the Peel play's situation — so every property
 //! also judges the gated plays' choices
-//! ([`the_grid_reaches_every_class_s_peel`]). The roster is the unit,
+//! ([`every_peel_tool_is_reached_and_every_peel_is_aimed_at_the_attacker`]). The roster is the unit,
 //! an ally, the enemy target and an enemy Priest. The unit's CC target is the
 //! one `acquire_targets` would leave it ([`cc_target`]). About 160,000
 //! scenes, built in one to two seconds in the test profile.
@@ -1952,44 +1952,76 @@ fn never_stacks_hard_cc_on_a_unit_its_team_holds() {
     verdict(Property::CcNotStacked, Scope::Guard, cc_not_stacked());
 }
 
-/// The grid reaches the Peel play: every property above judges its choices.
-/// Under `TeamPlan`, with the ally dying under attack, every class with a
-/// peel tool peels somewhere in the grid — set equality with the classes
-/// `peel_tools` names, so a class whose peel step stops firing, or a new
-/// class that answers with tools and never peels, fails here.
+/// The grid reaches the Peel play, and every peel it makes is a peel, so
+/// every property above also judges the play's choices. Under `TeamPlan`,
+/// with the ally dying under the enemy target's attack:
+///
+/// - the (class, tool) pairs the grid's peels used are exactly the pairs
+///   `peel_tools` names: set equality, so a class whose peel step stops
+///   reaching ANY of its tools — its second as much as its first — fails
+///   here, and so does a step that peels with a tool it does not list;
+/// - every peel is aimed at the ally's attacker (the enemy target; nothing
+///   else in the grid attacks the ally): a targeted peel names it, a
+///   self-centred area (Frost Nova, Psychic Scream) holds it inside its
+///   radius, and a Frost Trap names it and lands within trigger range of it.
+///   A peel step that casts on any other unit fails here;
+/// - no peel is made outside `TeamPlan`.
 #[test]
-fn the_grid_reaches_every_class_s_peel() {
+fn every_peel_tool_is_reached_and_every_peel_is_aimed_at_the_attacker() {
     use arenasim::states::play_match::class_ai::peel::peel_tools;
+    use arenasim::states::play_match::constants::TRAP_TRIGGER_RADIUS;
     use arenasim::states::play_match::decision_trace::PlayStep;
     let g = grid();
-    let mut peeled: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut peeled: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut misaimed = Vec::new();
     for r in &g.records {
         if r.view.situation.and_then(|s| s.play_step) != Some(PlayStep::Peel) {
             continue;
         }
+        let p = &r.point;
         assert!(
-            r.point.situation.team_plan,
+            p.situation.team_plan,
             "a peel outside TeamPlan: {}",
-            r.point.describe()
+            p.describe()
         );
-        let (ability, _) = r.view.chosen.expect("a peel chose something");
-        assert!(
-            peel_tools(r.point.class).contains(&ability),
-            "{ability:?} is not a {:?} peel tool: {}",
-            r.point.class,
-            r.point.describe()
-        );
-        peeled
-            .entry(format!("{:?}", r.point.class))
-            .or_default()
-            .insert(format!("{ability:?}"));
+        let (ability, target) = r.view.chosen.expect("a peel chose something");
+        peeled.insert((format!("{:?}", p.class), format!("{ability:?}")));
+        // The ally's attacker: the enemy target attacks the ally in every
+        // situation the play runs in.
+        assert!(p.situation.target_attacks_ally, "{}", p.describe());
+        let attacker = pos3(TARGET, p);
+        let def = g.defs.get(&ability).unwrap();
+        let aimed = match ability {
+            AbilityType::FrostTrap => {
+                target == Some(TARGET)
+                    && r.view.trap_landings.iter().any(|(_, at)| {
+                        Vec2::new(at.x, at.z).distance(Vec2::new(attacker.x, attacker.z))
+                            <= TRAP_TRIGGER_RADIUS
+                    })
+            }
+            // Centred on the caster, with its `range` as the radius; the
+            // trace names no target.
+            AbilityType::FrostNova | AbilityType::PsychicScream => {
+                target.is_none() && pos3(ME, p).distance(attacker) <= def.range
+            }
+            _ => target == Some(TARGET),
+        };
+        if !aimed {
+            misaimed.push(describe(r, ability, target));
+        }
     }
     eprintln!("peels chosen in the grid: {peeled:?}");
-    let expected: BTreeSet<String> = CharacterClass::all()
+    assert!(
+        misaimed.is_empty(),
+        "peels not aimed at the dying ally's attacker: {misaimed:#?}"
+    );
+    let expected: BTreeSet<(String, String)> = CharacterClass::all()
         .iter()
-        .filter(|c| !peel_tools(**c).is_empty())
-        .map(|c| format!("{c:?}"))
+        .flat_map(|c| {
+            peel_tools(*c)
+                .iter()
+                .map(move |a| (format!("{c:?}"), format!("{a:?}")))
+        })
         .collect();
-    let got: BTreeSet<String> = peeled.keys().cloned().collect();
-    assert_eq!(got, expected, "classes that peel in the grid");
+    assert_eq!(peeled, expected, "(class, tool) pairs the grid peels with");
 }

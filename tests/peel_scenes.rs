@@ -15,7 +15,7 @@ use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::peel::peel_tools;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::decision_trace::{PlayStep, PlayTag};
-use arenasim::states::play_match::situation::PlaySet;
+use arenasim::states::play_match::situation::{PlaySet, PEEL};
 use arenasim::states::play_match::AbilityType;
 
 const ME: &str = "me";
@@ -94,7 +94,7 @@ fn peels_in(
 
     // Control: the play withheld from the team, nothing else changed.
     let without = build(AiProfile::TeamPlan)
-        .withhold(1, PlaySet { peel: true })
+        .withhold(1, PlaySet::of(&[PEEL]))
         .decide(ME);
     let situation = without.situation.expect("a situation");
     assert!(situation.ally_in_danger.is_some());
@@ -144,7 +144,7 @@ fn a_hunter_concusses_the_warrior_on_its_dying_ally_not_the_nearer_melee() {
         s.combatant_mut(ROGUE).stealthed = false;
         s
     };
-    let control = build(AiProfile::TeamPlan).withhold(1, PlaySet { peel: true });
+    let control = build(AiProfile::TeamPlan).withhold(1, PlaySet::of(&[PEEL]));
     assert_eq!(
         control.decide(ME).chose(),
         Some((AbilityType::ConcussiveShot, Some(ROGUE))),
@@ -228,7 +228,7 @@ fn a_warrior_has_no_peel() {
     assert!(peel_tools(Warrior).is_empty());
     let with = scene(Warrior, 6.0, AiProfile::TeamPlan).decide(ME);
     let without = scene(Warrior, 6.0, AiProfile::TeamPlan)
-        .withhold(1, PlaySet { peel: true })
+        .withhold(1, PlaySet::of(&[PEEL]))
         .decide(ME);
     assert_eq!(with.chose(), without.chose(), "{}", describe(&with));
     assert_eq!(with.situation.and_then(|s| s.play_step), None);
