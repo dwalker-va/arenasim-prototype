@@ -54,7 +54,7 @@ use crate::states::play_match::combat_ai::{
 };
 use crate::states::play_match::components::{
     ActiveAuras, Aura, AuraType, Combatant, DRTracker, GameRng, HealerPosture, KitePosture,
-    MeleeResetState, MovementDirective, RogueFlareState,
+    MeleeResetState, MovementDirective, RogueFlareState, Trap, TrapLaunchProjectile, TrapType,
 };
 use crate::states::play_match::decision_trace::{
     AbilityCandidate, AbilityOutcome, CandidateStatus, DecisionTrace, EventKind, EventPayload,
@@ -88,14 +88,17 @@ struct SceneUnit {
     directive: Option<MovementDirective>,
     reset: Option<MeleeResetState>,
     flare: Option<RogueFlareState>,
+    /// The ability the unit is casting or channelling, as its snapshot row
+    /// reports it.
+    casting: Option<AbilityType>,
 }
 
 /// A constructed situation. See the module docs.
 #[doc(hidden)]
 pub struct Scene {
-    /// Owns the units' entity ids, and is the world a decision's `Commands`
-    /// are built against. Commands are discarded, never applied: a scene
-    /// asserts on what was decided, not on its execution.
+    /// Owns the units' entity ids. A decision's `Commands` run in a
+    /// throwaway world with the same ids, never this one: a scene asserts on
+    /// what was decided, and a second `decide` sees the same scene.
     world: World,
     units: Vec<SceneUnit>,
     obstacles: Vec<ObstacleVolume>,
@@ -107,6 +110,8 @@ pub struct Scene {
     /// seconds since the gates alike.
     now: f32,
     gates_opened: bool,
+    /// Each Shaman's live totem durations, by `TotemElement::index()`.
+    totems: BTreeMap<Who, [f32; 4]>,
 }
 
 impl Default for Scene {
@@ -119,16 +124,27 @@ impl Scene {
     /// An empty scene under the shipped `abilities.ron` and `movement.ron`,
     /// with the gates open, on an obstacle-free map, under `Legacy`.
     pub fn new() -> Self {
+        Self::with_config(
+            load_ability_definitions().expect("abilities.ron loads"),
+            load_movement_config().expect("movement.ron loads"),
+        )
+    }
+
+    /// An empty scene, as [`Scene::new`], under the given configs. A grid of
+    /// thousands of scenes loads the shipped files once and passes them here,
+    /// rather than parsing both RON files per scene.
+    pub fn with_config(abilities: AbilityDefinitions, movement: MovementConfig) -> Self {
         Scene {
             world: World::new(),
             units: Vec::new(),
             obstacles: Vec::new(),
             bounds: ArenaBounds::default(),
             ai_profile: AiProfiles::default(),
-            abilities: load_ability_definitions().expect("abilities.ron loads"),
-            movement: load_movement_config().expect("movement.ron loads"),
+            abilities,
+            movement,
             now: 30.0,
             gates_opened: true,
+            totems: BTreeMap::new(),
         }
     }
 
@@ -162,6 +178,7 @@ impl Scene {
             directive: None,
             reset: None,
             flare: None,
+            casting: None,
         });
         self
     }
@@ -257,6 +274,23 @@ impl Scene {
         self
     }
 
+    /// The seconds left on each of `who`'s live totems, indexed by
+    /// `TotemElement::index()` (`0.0`: none of that element is down).
+    pub fn totems(mut self, who: Who, durations: [f32; 4]) -> Self {
+        self.find(who);
+        self.totems.insert(who, durations);
+        self
+    }
+
+    /// `who` is casting (or channelling) `ability`, as the snapshot row of a
+    /// unit with a live `CastingState` reports it. A casting unit does not
+    /// decide (`decide_abilities` skips it), so this is for the units the
+    /// decision reads: an interrupt's target.
+    pub fn casting(mut self, who: Who, ability: AbilityType) -> Self {
+        self.unit_mut(who).casting = Some(ability);
+        self
+    }
+
     /// The healer posture state `who` carries into the decision.
     pub fn healer_posture(mut self, who: Who, posture: HealerPosture) -> Self {
         self.unit_mut(who).healer_posture = Some(posture);
@@ -330,7 +364,9 @@ impl Scene {
             let combatant = self.combatant_of(u);
             combatants.insert(
                 u.entity,
-                CombatantInfo::from_combatant(u.entity, &combatant, &transform, None, None, None),
+                CombatantInfo::from_combatant(
+                    u.entity, &combatant, &transform, u.casting, None, None,
+                ),
             );
             active_auras.insert(u.entity, u.auras.clone());
             dr_trackers.insert(u.entity, DRTracker::default());
@@ -420,7 +456,11 @@ impl Scene {
         )>();
         let posture = posture_query.get_mut(&mut posture_world, unit.entity).ok();
 
-        let empty_totems = BTreeMap::new();
+        let totems: BTreeMap<Entity, [f32; 4]> = self
+            .totems
+            .iter()
+            .map(|(who, durations)| (self.entity(who), *durations))
+            .collect();
         let empty_traps = BTreeMap::new();
         let frame = DispatchFrame {
             abilities: &self.abilities,
@@ -429,7 +469,7 @@ impl Scene {
             now: self.now,
             team1_kill_target: None,
             team2_kill_target: None,
-            totem_durations: &empty_totems,
+            totem_durations: &totems,
             own_freezing_traps: &empty_traps,
             lit_flares: &[],
         };
@@ -437,8 +477,16 @@ impl Scene {
         let auras = ActiveAuras {
             auras: unit.auras.clone(),
         };
+        // The decision's commands run against a third world whose entity ids
+        // match the first, and are applied there once it returns — so what it
+        // SPAWNED (a trap and where it lands) can be read back. Nothing else
+        // reads that world: the scene itself is never changed.
+        let mut exec_world = World::new();
+        for u in &self.units {
+            assert_eq!(exec_world.spawn_empty().id(), u.entity);
+        }
         let mut queue = CommandQueue::default();
-        let mut commands = Commands::new(&mut queue, &self.world);
+        let mut commands = Commands::new(&mut queue, &exec_world);
         let mut combat_log = CombatLog::default();
         let mut game_rng = GameRng::from_seed(0);
         let acted = dispatch_class_decision(
@@ -457,7 +505,21 @@ impl Scene {
             &ctx,
             posture,
         );
-        DecisionView::read(self, unit.entity, acted, &trace)
+        queue.apply(&mut exec_world);
+        let mut view = DecisionView::read(self, unit.entity, acted, &trace);
+        let mut placed = exec_world.query::<(&Trap, &Transform)>();
+        view.trap_landings.extend(
+            placed
+                .iter(&exec_world)
+                .map(|(trap, at)| (trap.trap_type, at.translation)),
+        );
+        let mut thrown = exec_world.query::<&TrapLaunchProjectile>();
+        view.trap_landings.extend(
+            thrown
+                .iter(&exec_world)
+                .map(|launch| (launch.trap_type, launch.landing_position)),
+        );
+        view
     }
 }
 
@@ -480,6 +542,15 @@ pub struct DecisionView {
     /// The chosen ability and its target's name (`None` for an untargeted
     /// or self-only choice the trace records without a target).
     pub chosen: Option<(AbilityType, Option<Who>)>,
+    /// Every ability the decision chose, in order, with its target's name.
+    /// One entry per `action_taken` event: a unit that acts more than once
+    /// in a tick (an instant, then a cast) has more than one, and
+    /// [`Self::chosen`] is the last of them.
+    pub choices: Vec<(AbilityType, Option<Who>)>,
+    /// Every trap the decision put down or threw, and the point it lands on
+    /// (the ground, `y = 0`). A trap's traced target is the enemy it was
+    /// AIMED at; this is where it was cast.
+    pub trap_landings: Vec<(TrapType, Vec3)>,
     /// Every ability the decision considered, in the order it did.
     pub candidates: Vec<AbilityCandidate>,
     /// The movement decisions it made, in order.
@@ -493,6 +564,8 @@ impl DecisionView {
         let mut view = DecisionView {
             acted,
             chosen: None,
+            choices: Vec::new(),
+            trap_landings: Vec::new(),
             candidates: Vec::new(),
             movement: Vec::new(),
             situation: None,
@@ -518,6 +591,7 @@ impl DecisionView {
                     } = outcome
                     {
                         view.chosen = Some((*ability, target_id.map(|id| scene.who(id))));
+                        view.choices.extend(view.chosen);
                     }
                 }
                 (
