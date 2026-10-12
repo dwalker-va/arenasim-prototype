@@ -1206,8 +1206,7 @@ fn held_weapon_models(
     let main = live.or_else(|| drawn(equipment::ItemSlot::MainHand));
     // A Hunter's melee main hand, beside a drawn bow. (With no bow, `main`
     // already fell back to it.)
-    let melee_main_weapon =
-        item(equipment::ItemSlot::MainHand).is_some_and(|item| item.is_weapon);
+    let melee_main_weapon = item(equipment::ItemSlot::MainHand).is_some_and(|item| item.is_weapon);
     let melee_main = (class.melee_beside_ranged() && live.is_some() && melee_main_weapon)
         .then(|| drawn(equipment::ItemSlot::MainHand))
         .flatten();
@@ -2236,7 +2235,11 @@ mod held_weapon_tests {
             assert!(!sets.is_empty(), "{class:?} draws something");
             for (model, set, visibility) in sets {
                 assert_eq!(set, None, "{class:?}'s {model} joined a swap set");
-                assert_ne!(visibility, Visibility::Hidden, "{class:?}'s {model} is hidden");
+                assert_ne!(
+                    visibility,
+                    Visibility::Hidden,
+                    "{class:?}'s {model} is hidden"
+                );
             }
         }
     }

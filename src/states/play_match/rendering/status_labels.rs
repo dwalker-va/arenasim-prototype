@@ -135,8 +135,8 @@ pub fn overhead_status_labels(auras: &[Aura]) -> Vec<(OverheadLabel, &Aura)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::states::play_match::ability_config::load_ability_definitions;
     use crate::states::play_match::abilities::AbilityType;
+    use crate::states::play_match::ability_config::load_ability_definitions;
     use crate::states::play_match::traps::freezing_trap_aura;
     use crate::states::play_match::utils::is_incapacitating;
     use bevy::prelude::Entity;
@@ -225,7 +225,11 @@ mod tests {
     /// Partial control keeps its labels; a snare never has one.
     #[test]
     fn partial_control_is_not_full_and_snares_are_unlabelled() {
-        for t in [AuraType::Root, AuraType::Silence, AuraType::MovementSpeedSlow] {
+        for t in [
+            AuraType::Root,
+            AuraType::Silence,
+            AuraType::MovementSpeedSlow,
+        ] {
             assert!(!is_incapacitating(&t), "{t:?} is not full loss of control");
         }
         assert!(overhead_status_label(&aura(AuraType::MovementSpeedSlow, "")).is_none());
@@ -257,7 +261,10 @@ mod tests {
             .collect();
         labelled.sort();
         given.sort();
-        assert_eq!(given, labelled, "the shuffle must hold every labelled type once");
+        assert_eq!(
+            given, labelled,
+            "the shuffle must hold every labelled type once"
+        );
 
         let stack: Vec<&str> = overhead_status_labels(&shuffled)
             .into_iter()
@@ -277,7 +284,16 @@ mod tests {
             .collect();
         assert_eq!(
             stack,
-            vec!["STUN", "ROOT", "FEAR", "SHEEPED", "INCAPACITATED", "CYCLONE", "SILENCE", "BERSERK"]
+            vec![
+                "STUN",
+                "ROOT",
+                "FEAR",
+                "SHEEPED",
+                "INCAPACITATED",
+                "CYCLONE",
+                "SILENCE",
+                "BERSERK"
+            ]
         );
     }
 
@@ -285,14 +301,20 @@ mod tests {
     /// name it carries.
     #[test]
     fn a_shared_type_shows_only_its_first_aura() {
-        let fear_first = vec![aura(AuraType::Fear, "Fear"), aura(AuraType::Fear, "Death Coil")];
+        let fear_first = vec![
+            aura(AuraType::Fear, "Fear"),
+            aura(AuraType::Fear, "Death Coil"),
+        ];
         let shown: Vec<(&str, &str)> = overhead_status_labels(&fear_first)
             .into_iter()
             .map(|(l, a)| (l.text, a.ability_name.as_str()))
             .collect();
         assert_eq!(shown, vec![("FEAR", "Fear")]);
 
-        let coil_first = vec![aura(AuraType::Fear, "Death Coil"), aura(AuraType::Fear, "Fear")];
+        let coil_first = vec![
+            aura(AuraType::Fear, "Death Coil"),
+            aura(AuraType::Fear, "Fear"),
+        ];
         let shown: Vec<(&str, &str)> = overhead_status_labels(&coil_first)
             .into_iter()
             .map(|(l, a)| (l.text, a.ability_name.as_str()))

@@ -10,8 +10,7 @@ use bevy::prelude::Entity;
 use super::super::banter_config::{load_banter_config, BanterConfig, BanterContext};
 use super::super::match_config::CharacterClass;
 use super::resolver::{
-    cc_target_class, resolve_exchange, BanterCall, BanterCombatant, BanterLineup,
-    ResolvedExchange,
+    cc_target_class, resolve_exchange, BanterCall, BanterCombatant, BanterLineup, ResolvedExchange,
 };
 
 /// Seeds tried per lineup. Enough that every satisfiable entry in a pool of
@@ -137,7 +136,10 @@ fn gated_druid_lines_resolve_only_for_their_speaker_and_target() {
         .iter()
         .filter(|s| s.text.contains("{ability:Cyclone}"))
         .collect();
-    assert!(!cyclones.is_empty(), "the stop-the-Cyclone line never resolved");
+    assert!(
+        !cyclones.is_empty(),
+        "the stop-the-Cyclone line never resolved"
+    );
     for spoken in &cyclones {
         assert_eq!(
             spoken.target,

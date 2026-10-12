@@ -1804,8 +1804,7 @@ pub fn clears_held_roots(dispel: AbilityType) -> bool {
 /// [`LOW_HP_THRESHOLD`]. A rooted teammate still casts and swings; a dying one
 /// is the higher-value GCD.
 pub fn root_dispel_allowed(ctx: &CombatContext) -> bool {
-    !ctx
-        .alive_allies()
+    !ctx.alive_allies()
         .iter()
         .any(|a| a.health_pct() < LOW_HP_THRESHOLD)
 }

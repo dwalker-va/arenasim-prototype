@@ -47,8 +47,8 @@
 use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::match_config::CharacterClass;
+use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::LOW_HP_THRESHOLD;
 use crate::states::play_match::decision_trace::{
@@ -262,7 +262,12 @@ fn skirt_waypoint(
             Vec2::new(dn.x * cos_a - dn.y * sin_a, dn.x * sin_a + dn.y * cos_a),
             Vec2::new(dn.x * cos_a + dn.y * sin_a, -dn.x * sin_a + dn.y * cos_a),
         ]
-        .map(|dir| (from + dir * (tangent_len + WAYPOINT_LEAD), from + dir * tangent_len))
+        .map(|dir| {
+            (
+                from + dir * (tangent_len + WAYPOINT_LEAD),
+                from + dir * tangent_len,
+            )
+        })
     } else {
         let out = (-to_center)
             .try_normalize()
@@ -298,10 +303,7 @@ fn skirt_waypoint(
 /// that ring, or straight out from the centre when it is already inside it —
 /// brought back inside the arena when that lands beyond a wall.
 fn wait(from: Vec2, target: Vec2, covering: &[&LitFlare], bounds: &ArenaBounds) -> FlarePath {
-    let covering_remaining = covering
-        .iter()
-        .map(|f| f.remaining)
-        .fold(0.0_f32, f32::max);
+    let covering_remaining = covering.iter().map(|f| f.remaining).fold(0.0_f32, f32::max);
     let nearest = covering
         .iter()
         .min_by(|a, b| from.distance(a.center).total_cmp(&from.distance(b.center)))
@@ -409,10 +411,10 @@ pub fn evaluate_rogue_flare(
         });
     };
     let mut say = |state: &mut RogueFlareState,
-                        mode: FlareApproach,
-                        trigger: MovementTrigger,
-                        goal_kind: MovementGoalKind,
-                        what: String| {
+                   mode: FlareApproach,
+                   trigger: MovementTrigger,
+                   goal_kind: MovementGoalKind,
+                   what: String| {
         if state.announced != mode {
             state.announced = mode;
             announce(
@@ -442,7 +444,10 @@ pub fn evaluate_rogue_flare(
                 FlareApproach::Skirt,
                 MovementTrigger::FlareSkirt,
                 MovementGoalKind::Point,
-                format!("skirts the Flare toward ({:.0}, {:.0})", waypoint.x, waypoint.y),
+                format!(
+                    "skirts the Flare toward ({:.0}, {:.0})",
+                    waypoint.x, waypoint.y
+                ),
             );
         }
         FlarePath::Wait {
@@ -565,14 +570,26 @@ mod tests {
 
     #[test]
     fn no_flare_is_plain_pursuit() {
-        let plan = plan_flare_path(Vec2::new(-30.0, 0.0), Vec2::new(30.0, 0.0), REACH, &[], &ArenaBounds::default());
+        let plan = plan_flare_path(
+            Vec2::new(-30.0, 0.0),
+            Vec2::new(30.0, 0.0),
+            REACH,
+            &[],
+            &ArenaBounds::default(),
+        );
         assert_eq!(plan, FlarePath::Clear);
     }
 
     #[test]
     fn a_flare_off_the_line_changes_nothing() {
         let f = [flare(0.0, 20.0)];
-        let plan = plan_flare_path(Vec2::new(-30.0, 0.0), Vec2::new(30.0, 0.0), REACH, &f, &ArenaBounds::default());
+        let plan = plan_flare_path(
+            Vec2::new(-30.0, 0.0),
+            Vec2::new(30.0, 0.0),
+            REACH,
+            &f,
+            &ArenaBounds::default(),
+        );
         assert_eq!(plan, FlarePath::Clear);
     }
 
@@ -609,7 +626,11 @@ mod tests {
         let f = [flare(0.0, 0.0)];
         let target = Vec2::new(5.0, 0.0);
         let (path, plan) = walk(Vec2::new(-34.0, 0.0), target, &f);
-        let FlarePath::Wait { at, covering_remaining } = plan else {
+        let FlarePath::Wait {
+            at,
+            covering_remaining,
+        } = plan
+        else {
             panic!("expected a wait, got {plan:?}");
         };
         assert_eq!(covering_remaining, 30.0);
@@ -623,7 +644,13 @@ mod tests {
     #[test]
     fn a_rogue_inside_the_wait_ring_backs_out() {
         let f = [flare(0.0, 0.0)];
-        let plan = plan_flare_path(Vec2::new(-11.0, 0.0), Vec2::new(5.0, 0.0), REACH, &f, &ArenaBounds::default());
+        let plan = plan_flare_path(
+            Vec2::new(-11.0, 0.0),
+            Vec2::new(5.0, 0.0),
+            REACH,
+            &f,
+            &ArenaBounds::default(),
+        );
         let FlarePath::Wait { at, .. } = plan else {
             panic!("expected a wait, got {plan:?}");
         };
@@ -635,7 +662,13 @@ mod tests {
     #[test]
     fn a_spot_lit_by_a_second_flare_is_no_way_in() {
         let f = [flare(0.0, 0.0), flare(19.0, 0.0)];
-        let plan = plan_flare_path(Vec2::new(-30.0, 0.0), Vec2::new(9.5, 0.0), REACH, &f, &ArenaBounds::default());
+        let plan = plan_flare_path(
+            Vec2::new(-30.0, 0.0),
+            Vec2::new(9.5, 0.0),
+            REACH,
+            &f,
+            &ArenaBounds::default(),
+        );
         assert!(matches!(plan, FlarePath::Wait { .. }), "{plan:?}");
     }
 
@@ -795,7 +828,14 @@ mod tests {
         );
         roster.insert(
             HUNTER,
-            info(HUNTER, 1, CharacterClass::Hunter, scene.hunter_pos, 1.0, false),
+            info(
+                HUNTER,
+                1,
+                CharacterClass::Hunter,
+                scene.hunter_pos,
+                1.0,
+                false,
+            ),
         );
         if let Some((health, is_pet)) = scene.ally {
             let class = if is_pet {
@@ -900,7 +940,10 @@ mod tests {
             assert_eq!(frame.triggers, ["FlareSkirt"]);
             assert_eq!(frame.state.unwrap().mode, FlareApproach::Skirt);
             let at = point(frame.directive);
-            assert!(at.y * side < -5.0, "side {side}: went the long way to {at:?}");
+            assert!(
+                at.y * side < -5.0,
+                "side {side}: went the long way to {at:?}"
+            );
         }
     }
 
@@ -1002,7 +1045,11 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(revealed.state, Some(RogueFlareState::default()));
-        assert_eq!(revealed.directive.map(|d| d.goal), Some(FOREIGN.goal), "not ours to clear");
+        assert_eq!(
+            revealed.directive.map(|d| d.goal),
+            Some(FOREIGN.goal),
+            "not ours to clear"
+        );
     }
 
     /// A frame with nothing to play around (no Flare, or only its own team's)
@@ -1019,7 +1066,11 @@ mod tests {
                     ..Default::default()
                 });
                 assert_eq!(frame.state, state, "state touched");
-                assert_eq!(frame.directive.map(|d| d.goal), Some(FOREIGN.goal), "directive touched");
+                assert_eq!(
+                    frame.directive.map(|d| d.goal),
+                    Some(FOREIGN.goal),
+                    "directive touched"
+                );
                 assert!(frame.triggers.is_empty());
             }
         }
@@ -1050,7 +1101,15 @@ mod tests {
         let f = [flare(0.0, 0.0)];
         let target = Vec2::new(-20.0, -3.0);
         let (path, _) = walk(Vec2::new(10.3, 0.0), target, &f);
-        assert!(path.last().unwrap().distance(target) <= REACH + 0.3, "{:?}", path.last());
-        assert!(min_clearance(&path, &f[0]) > 0.0, "{}", min_clearance(&path, &f[0]));
+        assert!(
+            path.last().unwrap().distance(target) <= REACH + 0.3,
+            "{:?}",
+            path.last()
+        );
+        assert!(
+            min_clearance(&path, &f[0]) > 0.0,
+            "{}",
+            min_clearance(&path, &f[0])
+        );
     }
 }

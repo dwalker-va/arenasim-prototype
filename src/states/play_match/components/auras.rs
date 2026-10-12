@@ -1544,14 +1544,12 @@ impl AuraPending {
                 // See `CompoundDebuff`.
                 compound: aura_effect.compound,
                 source_item: None,
-                stacks: aura_effect
-                    .stacking
-                    .map(|stacking| {
-                        AuraStacks::new(
-                            stacking.max_stacks,
-                            StackScope::for_aura(aura_effect.aura_type),
-                        )
-                    }),
+                stacks: aura_effect.stacking.map(|stacking| {
+                    AuraStacks::new(
+                        stacking.max_stacks,
+                        StackScope::for_aura(aura_effect.aura_type),
+                    )
+                }),
                 bloom: aura_effect
                     .bloom
                     .map(|bloom| bloom.heal_base + spell_power * bloom.heal_coefficient),
@@ -1604,14 +1602,12 @@ impl AuraPending {
                 // `CompoundDebuff`.
                 compound: aura_effect.compound,
                 source_item: None,
-                stacks: aura_effect
-                    .stacking
-                    .map(|stacking| {
-                        AuraStacks::new(
-                            stacking.max_stacks,
-                            StackScope::for_aura(aura_effect.aura_type),
-                        )
-                    }),
+                stacks: aura_effect.stacking.map(|stacking| {
+                    AuraStacks::new(
+                        stacking.max_stacks,
+                        StackScope::for_aura(aura_effect.aura_type),
+                    )
+                }),
                 // This constructor takes no spell power, so a bloom is its base.
                 bloom: aura_effect.bloom.map(|bloom| bloom.heal_base),
             },
@@ -1663,14 +1659,12 @@ impl AuraPending {
                 // `CompoundDebuff`.
                 compound: aura_effect.compound,
                 source_item: None,
-                stacks: aura_effect
-                    .stacking
-                    .map(|stacking| {
-                        AuraStacks::new(
-                            stacking.max_stacks,
-                            StackScope::for_aura(aura_effect.aura_type),
-                        )
-                    }),
+                stacks: aura_effect.stacking.map(|stacking| {
+                    AuraStacks::new(
+                        stacking.max_stacks,
+                        StackScope::for_aura(aura_effect.aura_type),
+                    )
+                }),
                 // This constructor takes no spell power, so a bloom is its base.
                 bloom: aura_effect.bloom.map(|bloom| bloom.heal_base),
             },
@@ -2222,7 +2216,11 @@ mod tests {
             AuraType::AttackPowerIncrease,
             AuraType::Absorb,
         ] {
-            assert_eq!(StackScope::for_aura(buff), StackScope::PerTarget, "{buff:?}");
+            assert_eq!(
+                StackScope::for_aura(buff),
+                StackScope::PerTarget,
+                "{buff:?}"
+            );
         }
     }
 
