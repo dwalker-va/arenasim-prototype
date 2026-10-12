@@ -388,6 +388,18 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
 4. **Add AI logic** in the appropriate `class_ai/<class>.rs` file:
    - Implement when to use the ability in the class's `decide_action()` method
    - Use `CombatContext` helpers like `ctx.target_info()`, `ctx.has_aura()`, etc.
+   - **Read a situation; never re-derive one.** A fact more than one decision
+     cares about — the enemy healer is locked (and until when), the team is
+     pressing or trailing — is classified once per frame by
+     `situation::update_situations` (`src/states/play_match/situation.rs`) from
+     the snapshot every unit decides from, and read through `ctx.situation()`.
+     A rule keyed on it reads `ctx.situation().enemy_healer_locked` /
+     `.tempo`, or picks its order with `ctx.situation().play_for(role)`
+     (`Play::Burst` / `Play::Default`, an exhaustive match), and every
+     `ability_decision` in the trace carries the `situation` it saw. A NEW
+     situation goes into `classify` with a `situation_change` transition and a
+     scene test, not into a local predicate at its first reader. Design and
+     roadmap: `docs/design/proposals/2026-10-11-ai-architecture.md`.
    - **Stealth needs no check.** `ctx.combatants` is what the deciding unit can
      PERCEIVE — a stealthed enemy it cannot see is not in it (`CombatContext::new`
      builds the view from `stealth_visible`, the one visibility rule), so decide
@@ -1083,6 +1095,17 @@ jq -c 'select(.actor.class == "Hunter") | .candidates[] | select(.ability == "Ai
 # Target switches over the match (when did Rogue switch from Paladin to Mage?)
 jq -c 'select(.kind == "target_acquisition" and .changed)' $T
 
+# Situations (`situation.rs`). Every ability_decision carries the `situation`
+# its team was in: `tempo` ("even" / "pressing" / "trailing") always, and
+# `enemy_healer_locked` ({subject, since, until} on the sim_time clock) while
+# the enemy healer is in cast-preventing CC. `situation_change` events mark the
+# transitions only (onset / end / extended / shift), carry `team` instead of an
+# `actor`, and sort ahead of the decisions in their frame.
+# Per class, the ability chosen while the enemy healer was locked:
+jq -r 'select(.kind == "ability_decision" and .situation.enemy_healer_locked != null and .outcome.type == "action_taken") | "\(.actor.class) \(.outcome.ability)"' $T | sort | uniq -c
+# Every lock window, per team (a burst window the team could use):
+jq -c 'select(.kind == "situation_change" and .name == "enemy_healer_locked") | {t: .sim_time, team, change, healer: .subject, since, until}' $T
+
 # Who was a trap AIMED at? A trap is placed at a POSITION and springs on the
 # first enemy to reach it, so its victim is not its target and the outcome
 # alone cannot say who the Hunter meant to catch. The chosen event carries the
@@ -1215,6 +1238,37 @@ proximity percentages are over paired samples, not wall-clock time. For dense,
 per-tick position timelines use the probe harness (below) instead. Truncated
 traces (SIGKILL / OOM) are tolerated — the script's `fromjson?` skips the
 partial last line.
+
+### Test an AI decision: scenes first, and never re-pin a seed
+
+**A seed is a proxy for a situation, and proxies drift.** Every
+balance-relevant change moves the RNG stream, which moves which seeds contain
+the situation a seed-pinned probe was written for — and a situational rule that
+merely reorders a priority chain often leaves every match byte-identical, so no
+seed probe or sweep can see it at all. Test the decision where the situation is
+constructed:
+
+- **Scene tests (tier 1, milliseconds)** —
+  `arenasim::states::play_match::class_ai::scene::Scene` builds the units
+  (class, team, position, health, resource, auras, cooldowns, obstacles,
+  profile) and `scene.decide(who)` runs **`combat_ai::dispatch_class_decision`,
+  the same entry point `decide_abilities` runs**, for one tick, returning a typed
+  `DecisionView` (chosen ability and target, every candidate with its
+  `RejectionReason`, the movement decisions, the `situation`). No seed: no
+  class decision draws from `GameRng`. Write each as a **pair** — the situation
+  and its control with its one condition removed — so the test cannot pass
+  vacuously. `tests/situation_scenes.rs` is the worked example.
+- **The tiers above** (decision properties over a scene grid, staged matches,
+  situation-conditional probes over a seed bank) are planned in
+  `docs/design/proposals/2026-10-11-ai-architecture.md` §3.2.
+
+**The migrate-not-re-pin rule (user decision, 2026-10-12).** When a
+seed-pinned probe goes stale — a change moved the RNG stream and the seed no
+longer contains its situation — it is **migrated**, never re-pinned to a fresh
+seed: to a scene test when one tick decides it, to a staged match when it
+needs time (a walk, a chase, an escape), or to a situation-conditional probe
+that finds its windows over a seed bank and asserts a response rate. A fix
+that re-pins a stale probe's seed is not accepted, whoever writes it.
 
 ### Write a movement behavior probe
 

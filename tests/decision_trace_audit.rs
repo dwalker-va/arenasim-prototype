@@ -129,6 +129,11 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
     "ShiftEscape",
 ];
 
+/// `situation_change` names (`SituationName`) and change kinds
+/// (`SituationChangeKind`). Surprise-only, like the lists above.
+const EXPECTED_SITUATION_NAMES: &[&str] = &["enemy_healer_locked", "tempo"];
+const EXPECTED_SITUATION_CHANGES: &[&str] = &["onset", "end", "extended", "shift"];
+
 /// One reference matchup: team configs + seed + label for error messages.
 struct ReferenceMatch {
     label: &'static str,
@@ -276,12 +281,148 @@ fn collect_reasons(path: &PathBuf) -> (HashSet<String>, HashSet<String>, HashSet
     (ability_reasons, target_reasons, movement_triggers)
 }
 
+/// What [`audit_situations`] found in one trace.
+#[derive(Default)]
+struct SituationAudit {
+    names: HashSet<String>,
+    changes: HashSet<String>,
+    /// `enemy_healer_locked` windows opened.
+    lock_onsets: usize,
+    /// Tempo shifts.
+    tempo_shifts: usize,
+    /// `ability_decision` events checked against the replayed windows.
+    decisions_checked: usize,
+    /// ...of which made while the team's enemy healer was locked.
+    decisions_under_lock: usize,
+    problems: Vec<String>,
+}
+
+/// Replay a trace's `situation_change` events per team and check every
+/// `ability_decision` against them: the `situation` a decision carries must be
+/// the one the change events say its team was in. This is the property the
+/// situation layer exists for — the AI and anything reading its trace cannot
+/// disagree about what the situation was.
+///
+/// Changes sort ahead of the decisions in their frame, but one can be
+/// classified mid-frame (an earlier unit's instant CC), after some of that
+/// frame's decisions were made; so a decision in a frame where ITS team's
+/// situation changed is not checked. Every other decision is.
+fn audit_situations(path: &PathBuf, label: &str) -> SituationAudit {
+    use std::collections::BTreeMap;
+    let body = std::fs::read_to_string(path).expect("read trace file");
+    let mut audit = SituationAudit::default();
+    // Per team: (open lock subject, tempo).
+    let mut state: BTreeMap<u64, (Option<u64>, String)> = BTreeMap::new();
+    let mut changed_in_frame: HashSet<(u64, u64)> = HashSet::new();
+    let events: Vec<serde_json::Value> = body
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("parse JSONL line"))
+        .collect();
+    for v in events.iter().filter(|v| v["kind"] == "situation_change") {
+        let team = v["team"]
+            .as_u64()
+            .expect("situation_change carries its team");
+        let frame = v["frame"].as_u64().unwrap();
+        changed_in_frame.insert((team, frame));
+        let name = v["name"].as_str().unwrap_or("").to_string();
+        let change = v["change"].as_str().unwrap_or("").to_string();
+        audit.names.insert(name.clone());
+        audit.changes.insert(change.clone());
+        if v.get("actor").is_some() {
+            audit
+                .problems
+                .push(format!("{label}: a situation_change has an actor: {v}"));
+        }
+        let entry = state.entry(team).or_insert((None, "even".to_string()));
+        match (name.as_str(), change.as_str()) {
+            ("enemy_healer_locked", "onset") => {
+                audit.lock_onsets += 1;
+                entry.0 = v["subject"].as_u64();
+            }
+            ("enemy_healer_locked", "end") => {
+                if entry.0.is_none() {
+                    audit
+                        .problems
+                        .push(format!("{label}: lock ended while none was open: {v}"));
+                }
+                entry.0 = None;
+            }
+            ("enemy_healer_locked", "extended") => {
+                if entry.0 != v["subject"].as_u64() {
+                    audit
+                        .problems
+                        .push(format!("{label}: extended a lock that was not open: {v}"));
+                }
+            }
+            ("tempo", "shift") => {
+                audit.tempo_shifts += 1;
+                let previous = v["previous_tempo"].as_str().unwrap_or("").to_string();
+                if previous != entry.1 {
+                    audit.problems.push(format!(
+                        "{label}: tempo shifted from {previous} but the replay had {}: {v}",
+                        entry.1
+                    ));
+                }
+                entry.1 = v["tempo"].as_str().unwrap_or("").to_string();
+            }
+            _ => {}
+        }
+    }
+    // Second pass, in trace order, with the state as of each event.
+    let mut state: BTreeMap<u64, (Option<u64>, String)> = BTreeMap::new();
+    for v in &events {
+        let frame = v["frame"].as_u64().unwrap();
+        if v["kind"] == "situation_change" {
+            let team = v["team"].as_u64().unwrap();
+            let entry = state.entry(team).or_insert((None, "even".to_string()));
+            match (v["name"].as_str(), v["change"].as_str()) {
+                (Some("enemy_healer_locked"), Some("onset")) => entry.0 = v["subject"].as_u64(),
+                (Some("enemy_healer_locked"), Some("end")) => entry.0 = None,
+                (Some("tempo"), _) => entry.1 = v["tempo"].as_str().unwrap_or("").to_string(),
+                _ => {}
+            }
+            continue;
+        }
+        if v["kind"] != "ability_decision" {
+            continue;
+        }
+        let Some(situation) = v.get("situation") else {
+            audit.problems.push(format!(
+                "{label}: an ability_decision has no situation: {v}"
+            ));
+            continue;
+        };
+        let team = v["actor"]["team"].as_u64().unwrap();
+        if changed_in_frame.contains(&(team, frame)) {
+            continue;
+        }
+        let (lock, tempo) = state
+            .get(&team)
+            .cloned()
+            .unwrap_or((None, "even".to_string()));
+        let carried_lock = situation["enemy_healer_locked"]["subject"].as_u64();
+        let carried_tempo = situation["tempo"].as_str().unwrap_or("");
+        if carried_lock != lock || carried_tempo != tempo {
+            audit.problems.push(format!(
+                "{label}: decision carries lock {carried_lock:?} / tempo {carried_tempo}, \
+                 the change events say {lock:?} / {tempo}: {v}"
+            ));
+        }
+        audit.decisions_checked += 1;
+        if lock.is_some() {
+            audit.decisions_under_lock += 1;
+        }
+    }
+    audit
+}
+
 #[test]
 fn reason_enum_variants_all_emitted_by_reference_matches() {
     let mut all_ability: HashSet<String> = HashSet::new();
     let mut all_target: HashSet<String> = HashSet::new();
     let mut all_movement: HashSet<String> = HashSet::new();
     let mut artifacts: Vec<(String, PathBuf)> = Vec::new();
+    let mut situations = SituationAudit::default();
 
     for matchup in reference_matchups() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -307,6 +448,14 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
         all_ability.extend(ability);
         all_target.extend(target);
         all_movement.extend(movement);
+        let found = audit_situations(&path, matchup.label);
+        situations.names.extend(found.names);
+        situations.changes.extend(found.changes);
+        situations.lock_onsets += found.lock_onsets;
+        situations.tempo_shifts += found.tempo_shifts;
+        situations.decisions_checked += found.decisions_checked;
+        situations.decisions_under_lock += found.decisions_under_lock;
+        situations.problems.extend(found.problems);
         artifacts.push((matchup.label.to_string(), path));
     }
 
@@ -364,6 +513,37 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
         ));
     }
 
+    let surprise_names: Vec<&String> = situations
+        .names
+        .iter()
+        .filter(|n| !EXPECTED_SITUATION_NAMES.contains(&n.as_str()))
+        .collect();
+    let surprise_changes: Vec<&String> = situations
+        .changes
+        .iter()
+        .filter(|c| !EXPECTED_SITUATION_CHANGES.contains(&c.as_str()))
+        .collect();
+    if !surprise_names.is_empty() || !surprise_changes.is_empty() {
+        issues.push(format!(
+            "situation_change names {surprise_names:?} / changes {surprise_changes:?} emitted \
+             but NOT in EXPECTED_SITUATION_NAMES / EXPECTED_SITUATION_CHANGES."
+        ));
+    }
+    issues.extend(situations.problems.iter().take(10).cloned());
+    // Non-vacuity: the reference set must actually lock a healer, shift a
+    // tempo, and make decisions under the lock, or the consistency check above
+    // proved nothing.
+    if situations.lock_onsets == 0
+        || situations.tempo_shifts == 0
+        || situations.decisions_under_lock == 0
+    {
+        issues.push(format!(
+            "situation audit is vacuous: {} lock onsets, {} tempo shifts, {} decisions under \
+             a lock across the reference matches",
+            situations.lock_onsets, situations.tempo_shifts, situations.decisions_under_lock
+        ));
+    }
+
     if !issues.is_empty() {
         panic!(
             "Reason-enum audit failed:\n{}\n\nReference matchups run:\n{}",
@@ -386,6 +566,14 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
         all_ability.len(),
         all_target.len(),
         all_movement.len(),
+    );
+    println!(
+        "Situation audit passed: {} lock onsets, {} tempo shifts; {} decisions matched their \
+         replayed situation, {} of them under a lock.",
+        situations.lock_onsets,
+        situations.tempo_shifts,
+        situations.decisions_checked,
+        situations.decisions_under_lock,
     );
 }
 

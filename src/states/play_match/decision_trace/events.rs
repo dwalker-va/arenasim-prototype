@@ -67,6 +67,7 @@ use serde::{Deserialize, Serialize};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::components::{AuraType, DRCategory};
+use crate::states::play_match::situation::{TeamSituation, Tempo, Window};
 
 /// One AI decision event. Serializes to a single JSONL line.
 #[derive(Serialize, Clone, Debug)]
@@ -82,11 +83,80 @@ pub struct DecisionEvent {
     /// from a mixed corpus is unattributable.
     pub ai_profile: &'static str,
     pub kind: EventKind,
-    pub actor: ActorView,
+    /// The unit that decided. Every kind carries one except
+    /// `situation_change`, which is about a TEAM (its `team` field) and omits
+    /// it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor: Option<ActorView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<TargetView>,
+    /// The situation the deciding unit's team was in (`situation.rs`), on
+    /// every `ability_decision` a class AI makes. Absent on the other kinds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub situation: Option<SituationTag>,
     #[serde(flatten)]
     pub payload: EventPayload,
+}
+
+/// The compact `situation` field of an `ability_decision`: the team's tempo,
+/// always, and the `enemy_healer_locked` window while one is open.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct SituationTag {
+    pub tempo: Tempo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enemy_healer_locked: Option<WindowTag>,
+}
+
+/// A situation window as the trace records it: the subject's entity id and
+/// the window's onset and expected end on the `sim_time` clock.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct WindowTag {
+    pub subject: u32,
+    pub since: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until: Option<f32>,
+}
+
+impl From<&Window> for WindowTag {
+    fn from(window: &Window) -> Self {
+        Self {
+            subject: window.subject.index(),
+            since: window.since,
+            until: window.until,
+        }
+    }
+}
+
+impl From<&TeamSituation> for SituationTag {
+    fn from(situation: &TeamSituation) -> Self {
+        Self {
+            tempo: situation.tempo,
+            enemy_healer_locked: situation.enemy_healer_locked.as_ref().map(WindowTag::from),
+        }
+    }
+}
+
+/// Which situation a `situation_change` event is about.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SituationName {
+    EnemyHealerLocked,
+    Tempo,
+}
+
+/// What happened to the situation. Adding a variant requires updating
+/// `tests/decision_trace_audit.rs::EXPECTED_SITUATION_CHANGES`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SituationChangeKind {
+    /// A window opened — or moved to a new subject, which is a new window.
+    Onset,
+    /// A window closed.
+    End,
+    /// A new CC pushed an open window's `until` later.
+    Extended,
+    /// The team's tempo moved (`tempo` / `previous_tempo` carry both ends).
+    Shift,
 }
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,6 +166,8 @@ pub enum EventKind {
     TargetAcquisition,
     PetDecision,
     MovementDecision,
+    /// A team's situation changed (`situation.rs`). Transitions only.
+    SituationChange,
 }
 
 /// Payload varies by `kind`. Flattened into the parent event JSON object.
@@ -198,6 +270,26 @@ pub enum EventPayload {
         /// byte-identical to pre-LoS traces.
         #[serde(skip_serializing_if = "Option::is_none")]
         los_masked: Option<u16>,
+    },
+    /// One `situation_change` event: a team's situation changed. Disambiguated
+    /// by its REQUIRED `name` + `change` fields, which no other variant has,
+    /// while it lacks the `candidates` / `posture` the others require.
+    SituationChange {
+        team: u8,
+        name: SituationName,
+        change: SituationChangeKind,
+        /// The window's subject (`enemy_healer_locked`: the healer).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        subject: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        since: Option<f32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        until: Option<f32>,
+        /// `tempo` shifts: the tempo after the change, and before it.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tempo: Option<Tempo>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        previous_tempo: Option<Tempo>,
     },
 }
 

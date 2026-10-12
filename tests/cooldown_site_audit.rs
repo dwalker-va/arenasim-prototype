@@ -35,6 +35,10 @@ const COOLDOWN_STARTS: &[(&str, &str)] = &[
         "src/states/play_match/class_ai/druid.rs",
         "decide_druid_action",
     ),
+    // Not a cooldown start: a scene test STAGES a unit with an ability already
+    // part-way through its cooldown (`Scene::cooldown`), as a match would have
+    // left it. Nothing in a match calls it.
+    ("src/states/play_match/class_ai/scene.rs", "cooldown"),
 ];
 
 #[test]

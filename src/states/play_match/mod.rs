@@ -56,6 +56,7 @@ pub mod projectiles;
 pub mod rendering;
 pub mod selection;
 pub mod shadow_sight;
+pub mod situation;
 pub mod systems;
 pub mod team_plan;
 pub mod team_solve;
@@ -736,6 +737,7 @@ pub fn setup_play_match(
     info!("AI profile: {:?}", profile);
     commands.insert_resource(profile);
     commands.insert_resource(team_plan::TeamPlans::default());
+    commands.insert_resource(situation::Situations::default());
 
     // Initialize Shadow Sight state (for stealth stalemate breaking)
     commands.insert_resource(ShadowSightState::default());
@@ -1691,6 +1693,7 @@ pub fn cleanup_play_match(mut commands: Commands, query: Query<Entity, With<Play
     commands.remove_resource::<GameRng>();
     commands.remove_resource::<ai_profile::AiProfiles>();
     commands.remove_resource::<team_plan::TeamPlans>();
+    commands.remove_resource::<situation::Situations>();
     // Remove optional resources (may not exist if match didn't finish)
     commands.remove_resource::<VictoryCelebration>();
 }

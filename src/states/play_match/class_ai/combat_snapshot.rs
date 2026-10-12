@@ -29,6 +29,50 @@ use crate::states::play_match::components::{
 };
 use crate::states::play_match::map_geometry::ObstacleVolume;
 
+impl CombatantInfo {
+    /// The snapshot row for one combatant: its live `Combatant` and
+    /// `Transform`, the ability it is casting or channeling, its `Pet`
+    /// component if it is one, and the pet it owns if it owns one. The one
+    /// place a row is derived from components, shared by
+    /// [`CombatSnapshot::build`] and the scene harness.
+    pub fn from_combatant(
+        entity: Entity,
+        combatant: &Combatant,
+        transform: &Transform,
+        casting_ability: Option<AbilityType>,
+        pet: Option<&Pet>,
+        owned_pet: Option<Entity>,
+    ) -> Self {
+        // Estimated planar velocity: heading (Transform faces travel
+        // direction) × base speed, zeroed while casting/channeling (planted).
+        let velocity = if casting_ability.is_some() {
+            Vec3::ZERO
+        } else {
+            let fwd = transform.rotation * Vec3::Z;
+            Vec3::new(fwd.x, 0.0, fwd.z).normalize_or_zero() * combatant.base_movement_speed
+        };
+        CombatantInfo {
+            entity,
+            team: combatant.team,
+            slot: combatant.slot,
+            class: combatant.class,
+            current_health: combatant.current_health,
+            max_health: combatant.max_health,
+            current_mana: combatant.current_mana,
+            max_mana: combatant.max_mana,
+            position: transform.translation,
+            velocity,
+            is_alive: combatant.is_alive(),
+            stealthed: combatant.stealthed,
+            target: combatant.target,
+            is_pet: pet.is_some(),
+            casting_ability,
+            pet_type: pet.map(|p| p.pet_type),
+            pet: owned_pet,
+        }
+    }
+}
+
 /// Per-frame snapshot of every combatant's stats, auras, and DR state.
 ///
 /// Three maps keyed by `Entity`. Construction is via [`CombatSnapshot::build`];
@@ -143,36 +187,16 @@ impl CombatSnapshot {
              casting_ability: Option<AbilityType>,
              combatants: &mut BTreeMap<Entity, CombatantInfo>,
              ability_cooldowns: &mut BTreeMap<Entity, BTreeMap<AbilityType, f32>>| {
-                let pet_comp = pet_query.get(entity).ok();
-                // Estimated planar velocity: heading (Transform faces travel
-                // direction) × base speed, zeroed while casting/channeling (planted).
-                let velocity = if casting_ability.is_some() {
-                    Vec3::ZERO
-                } else {
-                    let fwd = transform.rotation * Vec3::Z;
-                    Vec3::new(fwd.x, 0.0, fwd.z).normalize_or_zero() * combatant.base_movement_speed
-                };
                 combatants.insert(
                     entity,
-                    CombatantInfo {
+                    CombatantInfo::from_combatant(
                         entity,
-                        team: combatant.team,
-                        slot: combatant.slot,
-                        class: combatant.class,
-                        current_health: combatant.current_health,
-                        max_health: combatant.max_health,
-                        current_mana: combatant.current_mana,
-                        max_mana: combatant.max_mana,
-                        position: transform.translation,
-                        velocity,
-                        is_alive: combatant.is_alive(),
-                        stealthed: combatant.stealthed,
-                        target: combatant.target,
-                        is_pet: pet_comp.is_some(),
+                        combatant,
+                        transform,
                         casting_ability,
-                        pet_type: pet_comp.map(|p| p.pet_type),
-                        pet: owner_to_pet.get(&entity).copied(),
-                    },
+                        pet_query.get(entity).ok(),
+                        owner_to_pet.get(&entity).copied(),
+                    ),
                 );
                 // Clone Combatant.ability_cooldowns (HashMap) into a BTreeMap so
                 // downstream iteration is deterministic.

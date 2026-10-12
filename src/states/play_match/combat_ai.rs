@@ -11,6 +11,7 @@ use super::class_ai;
 use super::components::*;
 use super::constants::{TRAP_ARM_DELAY, TRAP_LAUNCH_SPEED};
 use super::match_config;
+use super::situation::{update_situations, SituationConfig, Situations};
 use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset, log_ability_use};
 use crate::combat::log::CombatLog;
 use bevy::ecs::system::SystemParam;
@@ -47,6 +48,9 @@ pub struct AbilityDispatchExtras<'w, 's> {
     config: Option<Res<'w, match_config::MatchConfig>>,
     /// Lit Flares, so a stealthed Rogue can play around the light it sees.
     flares: Query<'w, 's, (Entity, &'static FlareZone, &'static Transform)>,
+    /// Each team's situation, kept current here (`situation.rs`). `Option` so a
+    /// scene that never inserted it still classifies, with no history.
+    situations: Option<ResMut<'w, Situations>>,
 }
 
 pub fn acquire_targets(
@@ -706,6 +710,560 @@ fn select_cc_target_heuristic(
     scored_targets.first().map(|(entity, _)| *entity)
 }
 
+/// Per-frame inputs every class decision may read, built once by
+/// `decide_abilities` (or by a [`Scene`](class_ai::scene::Scene)).
+#[derive(Clone, Copy)]
+pub struct DispatchFrame<'a> {
+    pub abilities: &'a AbilityDefinitions,
+    pub movement_config: &'a crate::states::play_match::movement_config::MovementConfig,
+    /// Movement pre-passes (postures, the tempo reset, the Flare walk) run
+    /// only once the gates are open.
+    pub gates_opened: bool,
+    /// The posture clock, `Time::elapsed_secs`.
+    pub now: f32,
+    /// Seconds since the gates opened (`ArenaDampening`), the Druid mana
+    /// governor's clock.
+    pub time_since_gates: f32,
+    pub team1_kill_target: Option<usize>,
+    pub team2_kill_target: Option<usize>,
+    /// Per-Shaman live totem durations, indexed by `TotemElement::index()`.
+    pub totem_durations: &'a std::collections::BTreeMap<Entity, [f32; 4]>,
+    /// Per-Hunter Freezing Traps that have not sprung.
+    pub own_freezing_traps:
+        &'a std::collections::BTreeMap<Entity, Vec<class_ai::hunter_dip::LiveTrap>>,
+    /// Every lit Flare with its owner's team, in entity order.
+    pub lit_flares: &'a [(u8, class_ai::rogue_flare::LitFlare)],
+}
+
+/// The accumulators one frame's dispatch shares across units: attacks queued
+/// to land after the loop, the same-frame buff guards, and the instant CC
+/// earlier units landed this frame.
+#[derive(Default)]
+pub struct DispatchAccumulators {
+    pub instant_attacks: Vec<class_ai::QueuedInstantAttack>,
+    pub shielded_this_frame: std::collections::HashSet<Entity>,
+    pub fortified_this_frame: std::collections::HashSet<Entity>,
+    pub battle_shouted_this_frame: std::collections::HashSet<Entity>,
+    pub paladin_aura_this_frame: std::collections::HashSet<Entity>,
+    pub marked_this_frame: std::collections::HashSet<Entity>,
+    pub frost_nova_damage: Vec<class_ai::QueuedAoeDamage>,
+    pub same_frame_cc_queue: Vec<(Entity, Aura)>,
+}
+
+/// One unit's movement-AI state as `decide_abilities`' posture query yields
+/// it: healer posture, kiter posture, standing directive, Warrior tempo reset,
+/// Rogue Flare walk.
+pub type UnitPostures<'a> = (
+    Option<Mut<'a, HealerPosture>>,
+    Option<Mut<'a, KitePosture>>,
+    Option<&'a MovementDirective>,
+    Option<Mut<'a, MeleeResetState>>,
+    Option<Mut<'a, RogueFlareState>>,
+);
+
+/// Where a decision's side effects go.
+pub struct DispatchIo<'r, 'w, 's> {
+    pub commands: &'r mut Commands<'w, 's>,
+    pub combat_log: &'r mut CombatLog,
+    pub game_rng: &'r mut GameRng,
+    pub decision_trace: &'r mut crate::states::play_match::decision_trace::DecisionTrace,
+}
+
+/// One unit's whole class decision for one tick: its movement pre-pass (once
+/// the gates are open), then its class's `decide_<class>_action`. The ONE
+/// entry point: `decide_abilities` calls it for every unit it dispatches, and
+/// a [`Scene`](class_ai::scene::Scene) calls it for the unit under test, so a
+/// scene cannot exercise a path a match never takes.
+///
+/// The match is exhaustive over `CharacterClass`: a new class fails the build
+/// here until it has an arm. Each arm names the per-class accumulators it uses
+/// rather than threading a bag through every class. Returns whether the unit
+/// acted.
+#[allow(clippy::too_many_arguments)]
+pub fn dispatch_class_decision(
+    io: DispatchIo<'_, '_, '_>,
+    frame: &DispatchFrame,
+    acc: &mut DispatchAccumulators,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &class_ai::CombatContext,
+    posture: Option<UnitPostures<'_>>,
+) -> bool {
+    let DispatchIo {
+        commands,
+        combat_log,
+        game_rng,
+        decision_trace,
+    } = io;
+    let DispatchFrame {
+        abilities,
+        movement_config,
+        gates_opened,
+        now,
+        time_since_gates,
+        team1_kill_target,
+        team2_kill_target,
+        totem_durations,
+        own_freezing_traps,
+        lit_flares,
+    } = *frame;
+    let DispatchAccumulators {
+        instant_attacks,
+        shielded_this_frame,
+        fortified_this_frame,
+        battle_shouted_this_frame,
+        paladin_aura_this_frame,
+        marked_this_frame,
+        frost_nova_damage,
+        same_frame_cc_queue,
+    } = acc;
+    match combatant.class {
+        match_config::CharacterClass::Mage => {
+            // Posture evaluation (ENGAGE/KITE, U5) runs BEFORE the ability
+            // pass and OUTSIDE decide_mage_action's GCD short-circuit so the
+            // directive refreshes during a cast. Gated on gates_opened: no
+            // pre-match directives/trace. Casting Mages are excluded by the
+            // `combatants` query filter, so KITE exit can lag one GCD — an
+            // accepted pilot simplification.
+            if gates_opened {
+                if let Some((_healer, mage_posture, directive, _reset, _flare)) = posture {
+                    // Mage: aura-gated KITE (a melee enemy it rooted/slowed).
+                    let cfg = &movement_config.mage;
+                    let entry = class_ai::dps_postures::mage_kite_entry(ctx, entity, my_pos);
+                    let sustain = class_ai::dps_postures::mage_kite_sustain(
+                        ctx,
+                        entity,
+                        my_pos,
+                        cfg.range_band_max,
+                    );
+                    // OOM wand-pull gate: pull to wand range once the Mage
+                    // can't afford a Frostbolt, so its wand auto-attack fires
+                    // instead of idling the mana refractory. Cost read from
+                    // config, never hardcoded.
+                    let wand_gate = Some(class_ai::dps_postures::WandPullGate {
+                        current_mana: combatant.current_mana,
+                        nuke_cost: abilities.get_unchecked(&AbilityType::Frostbolt).mana_cost,
+                    });
+                    class_ai::dps_postures::evaluate_dps_posture(
+                        commands,
+                        entity,
+                        my_pos,
+                        combatant.target,
+                        ctx,
+                        mage_posture.map(bevy::prelude::Mut::into_inner),
+                        directive,
+                        cfg,
+                        movement_config.shared.heal_range,
+                        entry,
+                        sustain,
+                        wand_gate,
+                        // The Mage has no trap.
+                        None,
+                        now,
+                        decision_trace,
+                    );
+                }
+            }
+            class_ai::mage::decide_mage_action(
+                commands,
+                combat_log,
+                game_rng,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                frost_nova_damage,
+                same_frame_cc_queue,
+                decision_trace,
+            )
+        }
+        match_config::CharacterClass::Priest => {
+            // Posture evaluation (healer movement AI, U6/U7) runs BEFORE
+            // the ability pass and OUTSIDE the GCD short-circuit inside
+            // decide_priest_action — directives must refresh while on GCD
+            // (the GCD locks casts, not legs). Gated on gates_opened: no
+            // pre-match directives or trace events. Casting Priests never
+            // get here (query excludes CastingState/ChannelingState), so
+            // posture movement lives in cast gaps only (R12).
+            //
+            // `escape_defer` is `Some(urgency_hp_threshold)` while an
+            // ESCAPE window is live (U7 cast-vs-move urgency): the heal
+            // ladder defers non-critical movement-locking casts for the
+            // window.
+            let mut plan = class_ai::priest::PriestMovementPlan::default();
+            if gates_opened {
+                if let Some((healer_posture, _mage, directive, _reset, _flare)) = posture {
+                    plan = class_ai::priest::evaluate_priest_posture(
+                        commands,
+                        entity,
+                        combatant,
+                        my_pos,
+                        ctx,
+                        abilities,
+                        auras,
+                        healer_posture.map(bevy::prelude::Mut::into_inner),
+                        directive,
+                        movement_config,
+                        now,
+                        decision_trace,
+                    );
+                }
+            }
+            class_ai::priest::decide_priest_action(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                shielded_this_frame,
+                fortified_this_frame,
+                &plan,
+                movement_config,
+                same_frame_cc_queue,
+                decision_trace,
+            )
+        }
+        match_config::CharacterClass::Warrior => {
+            // Tempo-reset movement pre-pass — mirrors the Mage arm:
+            // runs BEFORE the ability pass and OUTSIDE decide_warrior_action's
+            // GCD short-circuit (legs aren't on the GCD), gated on
+            // gates_opened, never for casting/CC'd warriors (query excludes
+            // CastingState; move_to_target ignores the directive under CC).
+            if gates_opened {
+                if let Some((_healer, _mage, directive, reset, _flare)) = posture {
+                    class_ai::warrior::evaluate_warrior_reset(
+                        commands,
+                        entity,
+                        combatant,
+                        my_pos,
+                        auras,
+                        ctx,
+                        reset.map(bevy::prelude::Mut::into_inner),
+                        directive,
+                        &movement_config.melee,
+                        movement_config.shared.press_advantage_margin,
+                        now,
+                        decision_trace,
+                    );
+                }
+            }
+            class_ai::warrior::decide_warrior_action(
+                commands,
+                combat_log,
+                game_rng,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                instant_attacks,
+                battle_shouted_this_frame,
+                decision_trace,
+            )
+        }
+        match_config::CharacterClass::Rogue => {
+            // Flare pre-pass (AS-185): a stealthed Rogue plays around a lit
+            // enemy Flare it can see. Runs before the opener so the walk it
+            // sets is this frame's; gated on gates_opened like the other
+            // movement pre-passes.
+            if gates_opened {
+                if let Some((_healer, _mage, _directive, _reset, flare_state)) = posture {
+                    let current = flare_state.as_deref().copied();
+                    let next = class_ai::rogue_flare::evaluate_rogue_flare(
+                        commands,
+                        combat_log,
+                        entity,
+                        combatant,
+                        my_pos,
+                        ctx,
+                        lit_flares,
+                        current,
+                        now,
+                        decision_trace,
+                    );
+                    // Written only when it changed, so an idle Rogue's
+                    // state is never marked changed.
+                    match flare_state {
+                        Some(mut state) => {
+                            state.set_if_neq(next);
+                        }
+                        None if RogueFlareState::needs_insert(None, &next) => {
+                            commands.entity(entity).try_insert(next);
+                        }
+                        None => {}
+                    }
+                }
+            }
+            class_ai::rogue::decide_rogue_action(
+                commands,
+                combat_log,
+                game_rng,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                ctx,
+                instant_attacks,
+                same_frame_cc_queue,
+                decision_trace,
+            )
+        }
+        match_config::CharacterClass::Warlock => class_ai::warlock::decide_warlock_action(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            decision_trace,
+        ),
+        // Shaman: full healer-posture dispatch (U6). Mirrors the Priest arm
+        // — posture evaluation (FREE/PRESSURED/ESCAPE) runs BEFORE the
+        // ability pass and OUTSIDE the GCD short-circuit so directives
+        // refresh while on GCD; gated on gates_opened; never for casting
+        // Shamans (query excludes CastingState/ChannelingState — R12). The
+        // Shaman reuses the shared HealerPosture query slot. The plan's
+        // `escape_defer` makes the rotation defer non-critical casts during
+        // an ESCAPE window. Per-element totem durations come from the live
+        // Totem query snapshot above.
+        match_config::CharacterClass::Shaman => {
+            let durations = totem_durations.get(&entity).copied().unwrap_or([0.0; 4]);
+            let mut plan = class_ai::caster_healer_posture::CasterHealerPlan::default();
+            if gates_opened {
+                if let Some((healer_posture, _mage, directive, _reset, _flare)) = posture {
+                    plan = class_ai::caster_healer_posture::evaluate_caster_healer_posture(
+                        commands,
+                        entity,
+                        combatant,
+                        my_pos,
+                        ctx,
+                        healer_posture.map(bevy::prelude::Mut::into_inner),
+                        directive,
+                        movement_config,
+                        &movement_config.shaman,
+                        // The Shaman has no shapeshift.
+                        false,
+                        now,
+                        decision_trace,
+                    );
+                }
+            }
+            class_ai::shaman::decide_shaman_action(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                &durations,
+                &plan,
+                movement_config,
+                decision_trace,
+            )
+        }
+        // Druid: the Shaman's caster-healer posture machine on its own
+        // `druid:` block, then a rotation of instants. The posture's
+        // ESCAPE deferral is not threaded into the rotation — every heal
+        // the Druid has is an instant, so there is nothing to defer. The
+        // medic walk's teammate is: while it is out of reach the rotation
+        // holds damage and utility for the heal (`class_ai::druid`).
+        match_config::CharacterClass::Druid => {
+            let mut plan = class_ai::caster_healer_posture::CasterHealerPlan::default();
+            if gates_opened {
+                if let Some((healer_posture, _mage, directive, _reset, _flare)) = posture {
+                    plan = class_ai::caster_healer_posture::evaluate_caster_healer_posture(
+                        commands,
+                        entity,
+                        combatant,
+                        my_pos,
+                        ctx,
+                        healer_posture.map(bevy::prelude::Mut::into_inner),
+                        directive,
+                        movement_config,
+                        &movement_config.druid,
+                        // Travel Form: a shifted Druid runs (ESCAPE).
+                        auras.is_some_and(ActiveAuras::is_shapeshifted),
+                        now,
+                        decision_trace,
+                    );
+                }
+            }
+            class_ai::druid::decide_druid_action(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                movement_config,
+                plan.pressured,
+                plan.medic_walk,
+                gates_opened,
+                time_since_gates,
+                marked_this_frame,
+                decision_trace,
+            )
+        }
+        match_config::CharacterClass::Paladin => {
+            // Posture evaluation (healer movement AI, U8) — mirrors the
+            // Priest arm: runs BEFORE the ability pass and OUTSIDE the
+            // GCD short-circuit, gated on gates_opened, and never for
+            // casting Paladins (query excludes CastingState — R12).
+            //
+            // The returned plan carries the ESCAPE/DIP cast deferral
+            // (Flash of Light / Holy Light are skipped for targets above
+            // the urgency threshold while a window or dip is live) and
+            // the Hammer of Justice gate (reservation for the
+            // enemy-healer dip; `DipCast` on dip arrival).
+            let mut plan = class_ai::paladin::PaladinMovementPlan::default();
+            if gates_opened {
+                if let Some((healer_posture, _mage, directive, _reset, _flare)) = posture {
+                    plan = class_ai::paladin::evaluate_paladin_posture(
+                        commands,
+                        abilities,
+                        entity,
+                        combatant,
+                        my_pos,
+                        auras,
+                        ctx,
+                        healer_posture.map(bevy::prelude::Mut::into_inner),
+                        directive,
+                        movement_config,
+                        now,
+                        decision_trace,
+                    );
+                }
+            }
+            class_ai::paladin::decide_paladin_action(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                paladin_aura_this_frame,
+                same_frame_cc_queue,
+                &plan,
+                decision_trace,
+            )
+        }
+        match_config::CharacterClass::Hunter => {
+            // Hunter movement is the proximity-gated ENGAGE/KITE machine
+            // (the Mage's aura-gating doesn't fit — the Hunter has no
+            // reliable self-root and kites on melee proximity). KITE only
+            // when a melee-DPS threat (Warrior/Rogue) is within closing
+            // range — `melee_within` excludes ranged classes so the Hunter
+            // holds and shoots a caster instead of fleeing it. The ability
+            // AI keeps its own dead/closing/safe band priorities. Same
+            // gates-open + casting-excluded contract as the Mage.
+            // Freezing Trap DIP (committed walk to set a trap on the enemy
+            // healer) is evaluated BEFORE the ENGAGE/KITE machine. While the
+            // dip owns movement (walking toward / arrived at the healer) the
+            // KITE evaluation is skipped so its kite vector doesn't overwrite
+            // the dip's Entity directive. Outside a dip it returns Rotation
+            // and KITE runs unchanged.
+            let mut dip_plan = class_ai::hunter_dip::HunterDipPlan::Rotation;
+            if gates_opened {
+                if let Some((_healer, mut kite_posture, directive, _reset, _flare)) = posture {
+                    let cfg = &movement_config.hunter;
+                    dip_plan = class_ai::hunter_dip::evaluate_hunter_dip(
+                        commands,
+                        abilities,
+                        entity,
+                        combatant,
+                        my_pos,
+                        auras,
+                        ctx,
+                        kite_posture.as_deref_mut(),
+                        directive,
+                        cfg,
+                        now,
+                        decision_trace,
+                    );
+                    if !dip_plan.owns_movement() {
+                        let entry = class_ai::dps_postures::melee_within(
+                            ctx,
+                            entity,
+                            my_pos,
+                            cfg.kite_entry_radius,
+                        );
+                        let sustain = class_ai::dps_postures::melee_within(
+                            ctx,
+                            entity,
+                            my_pos,
+                            cfg.kite_sustain_radius,
+                        );
+                        // While Freezing Trap is ready and an enemy healer
+                        // would be caught cleanly, the kite bends to keep
+                        // it within throw range; on cooldown, unchanged.
+                        let trap_setup = class_ai::hunter_dip::trap_setup(
+                            abilities, entity, combatant, my_pos, auras, ctx,
+                        );
+                        class_ai::dps_postures::evaluate_dps_posture(
+                            commands,
+                            entity,
+                            my_pos,
+                            combatant.target,
+                            ctx,
+                            kite_posture.map(bevy::prelude::Mut::into_inner),
+                            directive,
+                            cfg,
+                            movement_config.shared.heal_range,
+                            entry,
+                            sustain,
+                            // No wand gate: the Hunter has no wand and shoots,
+                            // it doesn't fall back to a wand when OOM.
+                            None,
+                            trap_setup,
+                            now,
+                            decision_trace,
+                        );
+                    }
+                }
+            }
+            let kill_target_index = match combatant.team {
+                1 => team1_kill_target,
+                _ => team2_kill_target,
+            };
+            class_ai::hunter::decide_hunter_action(
+                commands,
+                combat_log,
+                game_rng,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                instant_attacks,
+                dip_plan,
+                &movement_config.hunter.weights,
+                own_freezing_traps
+                    .get(&entity)
+                    .map_or(&[][..], Vec::as_slice),
+                kill_target_index,
+                decision_trace,
+            )
+        }
+    }
+}
+
 /// Check if an entity is currently CC'd (Stun, Fear, Root, or Polymorph).
 fn is_entity_ccd(
     entity: Entity,
@@ -873,44 +1431,52 @@ pub fn decide_abilities(
         extras.ai_profile.map(|p| *p).unwrap_or_default(),
     );
 
-    // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
-    let mut instant_attacks: Vec<class_ai::QueuedInstantAttack> = Vec::new();
+    // The per-frame accumulators the dispatch shares across units:
+    // - instant attacks (Ambush, Sinister Strike, Mortal Strike) and Frost Nova
+    //   damage, queued to land after the loop;
+    // - the targets shielded / fortified / Battle-Shouted / given a Paladin aura
+    //   / sent a Mark of the Wild THIS FRAME, so a second caster of the same
+    //   buff does not spend a cast on one that lands next frame (AuraPending is
+    //   not processed until Phase 1);
+    // - the instant-CC auras earlier combatants landed this frame. Each class AI
+    //   that lands an instant CC (Cheap Shot, Kidney Shot, Hammer of Justice,
+    //   Frost Nova root) pushes the target + aura here. Before the next
+    //   combatant's turn the queue drains into the snapshot via
+    //   `auras::reflect_instant_cc_in_snapshot`, so the target's own self-check
+    //   and any downstream `CombatContext::is_ccd` lookup see the CC in the same
+    //   frame — closing the "Cheap Shot then Kick on same target same frame"
+    //   wasted-interrupt gap.
+    let mut acc = DispatchAccumulators::default();
 
-    // Track targets that have been shielded THIS FRAME to prevent same-frame double-shielding
-    // This handles the case where multiple Priests try to shield the same target before AuraPending is processed
-    let mut shielded_this_frame: std::collections::HashSet<Entity> =
-        std::collections::HashSet::new();
+    let frame = DispatchFrame {
+        abilities: &abilities,
+        movement_config: &movement_config,
+        gates_opened: countdown.gates_opened,
+        now: time.elapsed_secs(),
+        time_since_gates: extras
+            .dampening
+            .as_ref()
+            .map_or(0.0, |d| d.time_since_gates),
+        team1_kill_target: extras.config.as_ref().and_then(|c| c.team1_kill_target),
+        team2_kill_target: extras.config.as_ref().and_then(|c| c.team2_kill_target),
+        totem_durations: &totem_durations,
+        own_freezing_traps: &own_freezing_traps,
+        lit_flares: &lit_flares,
+    };
 
-    // Track targets that have been fortified THIS FRAME to prevent same-frame double-buffing
-    // This handles the case where multiple Priests try to buff the same target before AuraPending is processed
-    let mut fortified_this_frame: std::collections::HashSet<Entity> =
-        std::collections::HashSet::new();
-
-    // Track targets that have received Battle Shout THIS FRAME to prevent duplicate buffs
-    // when multiple Warriors cast Battle Shout before AuraPending is processed
-    let mut battle_shouted_this_frame: std::collections::HashSet<Entity> =
-        std::collections::HashSet::new();
-
-    // Track targets that have received a Paladin aura THIS FRAME to prevent duplicate buffs
-    // when multiple Paladins cast their aura before AuraPending is processed
-    let mut paladin_aura_this_frame: std::collections::HashSet<Entity> =
-        std::collections::HashSet::new();
-
-    // Track allies sent a Mark of the Wild THIS FRAME, so a second Druid does
-    // not spend a cast refreshing a Mark that lands next frame
-    let mut marked_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
-
-    // Queue for Frost Nova damage
-    let mut frost_nova_damage: Vec<class_ai::QueuedAoeDamage> = Vec::new();
-
-    // Queue for instant-CC auras applied by earlier combatants this frame.
-    // Each class AI that lands an instant CC (Cheap Shot, Kidney Shot, Hammer of Justice,
-    // Frost Nova root) pushes the target + aura onto this queue. Before the next combatant's
-    // turn, we drain the queue into `active_auras_map` / `dr_trackers` via
-    // `auras::reflect_instant_cc_in_snapshot` so that the target's own self-check and
-    // any downstream `CombatContext::is_ccd` lookup see the CC in the same frame — closing
-    // the "Cheap Shot then Kick on same target same frame" wasted-interrupt gap.
-    let mut same_frame_cc_queue: Vec<(Entity, Aura)> = Vec::new();
+    // Each team's situation (`situation.rs`), classified from THIS snapshot —
+    // the one every unit below decides from — and re-classified whenever an
+    // earlier unit's instant CC changes it. A scene without the resource gets
+    // the facts, with no history.
+    let situation_cfg = SituationConfig::from_movement(&movement_config);
+    let mut situations = extras.situations.as_deref().copied().unwrap_or_default();
+    update_situations(
+        &mut situations,
+        &snapshot,
+        decision_trace.current_sim_time,
+        &situation_cfg,
+        &mut decision_trace,
+    );
 
     // Charging/Disengaging combatants are CC-immune in the real application path
     // (apply_pending_auras rejects the aura with "Immune (charging)"). Mirror that
@@ -927,7 +1493,8 @@ pub fn decide_abilities(
         // Flush pending same-frame CCs into the per-frame snapshot BEFORE any checks
         // or decisions for this combatant, so that stuns/roots landed earlier this frame
         // are visible to this combatant's incapacitation check and its CombatContext.
-        for (cc_target, cc_aura) in same_frame_cc_queue.drain(..) {
+        let mut reflected = false;
+        for (cc_target, cc_aura) in acc.same_frame_cc_queue.drain(..) {
             let is_cc = matches!(
                 cc_aura.effect_type,
                 AuraType::Fear
@@ -940,7 +1507,20 @@ pub fn decide_abilities(
                 continue; // real path will reject it as "Immune (charging)"
             }
             snapshot.reflect_instant_cc(cc_target, &cc_aura);
+            reflected = true;
         }
+        // A CC an earlier unit just landed can lock the enemy healer for every
+        // unit after it this frame.
+        if reflected {
+            update_situations(
+                &mut situations,
+                &snapshot,
+                decision_trace.current_sim_time,
+                &situation_cfg,
+                &mut decision_trace,
+            );
+        }
+        let situation = situations.for_team(combatant.team);
 
         if !combatant.is_alive() {
             continue;
@@ -982,12 +1562,14 @@ pub fn decide_abilities(
             && !is_cycloned
             && combatant.class == match_config::CharacterClass::Paladin
         {
-            let cc_ctx = snapshot.context_for(entity);
+            let cc_ctx = snapshot.context_for(entity).with_situation(situation);
             let actor_view = cc_ctx
                 .self_info()
                 .map(crate::states::play_match::decision_trace::ActorView::from_info);
             let acted = if let Some(av) = actor_view {
-                let mut builder = decision_trace.start_ability_decision(av, None);
+                let mut builder = decision_trace
+                    .start_ability_decision(av, None)
+                    .with_situation(cc_ctx.situation());
                 let result = class_ai::paladin::try_divine_shield_while_cc(
                     &mut commands,
                     &mut combat_log,
@@ -1016,12 +1598,14 @@ pub fn decide_abilities(
             && !is_cycloned
             && combatant.class == match_config::CharacterClass::Warrior
         {
-            let cc_ctx = snapshot.context_for(entity);
+            let cc_ctx = snapshot.context_for(entity).with_situation(situation);
             let actor_view = cc_ctx
                 .self_info()
                 .map(crate::states::play_match::decision_trace::ActorView::from_info);
             let acted = if let Some(av) = actor_view {
-                let mut builder = decision_trace.start_ability_decision(av, None);
+                let mut builder = decision_trace
+                    .start_ability_decision(av, None)
+                    .with_situation(cc_ctx.situation());
                 let result = class_ai::warrior::try_berserker_rage_while_cc(
                     &mut commands,
                     &mut combat_log,
@@ -1048,491 +1632,34 @@ pub fn decide_abilities(
 
         let my_pos = transform.translation;
 
-        let ctx = snapshot.context_for(entity);
+        let ctx = snapshot.context_for(entity).with_situation(situation);
 
-        // Class AI dispatch. Match is exhaustive over `CharacterClass` —
-        // adding a new class fails the build here until a dispatch arm is
-        // added, replacing the previous silent no-op when a class was
-        // missing from the if-chain.
-        //
-        // Each arm names the per-class accumulators it uses (instant_attacks,
-        // shielded_this_frame, etc.) explicitly rather than threading a bag
-        // through every class.
-        let acted = match combatant.class {
-            match_config::CharacterClass::Mage => {
-                // Posture evaluation (ENGAGE/KITE, U5) runs BEFORE the ability
-                // pass and OUTSIDE decide_mage_action's GCD short-circuit so the
-                // directive refreshes during a cast. Gated on gates_opened: no
-                // pre-match directives/trace. Casting Mages are excluded by the
-                // `combatants` query filter, so KITE exit can lag one GCD — an
-                // accepted pilot simplification.
-                if countdown.gates_opened {
-                    if let Ok((_healer, mage_posture, directive, _reset, _flare)) =
-                        posture_movement.get_mut(entity)
-                    {
-                        // Mage: aura-gated KITE (a melee enemy it rooted/slowed).
-                        let cfg = &movement_config.mage;
-                        let entry = class_ai::dps_postures::mage_kite_entry(&ctx, entity, my_pos);
-                        let sustain = class_ai::dps_postures::mage_kite_sustain(
-                            &ctx,
-                            entity,
-                            my_pos,
-                            cfg.range_band_max,
-                        );
-                        // OOM wand-pull gate: pull to wand range once the Mage
-                        // can't afford a Frostbolt, so its wand auto-attack fires
-                        // instead of idling the mana refractory. Cost read from
-                        // config, never hardcoded.
-                        let wand_gate = Some(class_ai::dps_postures::WandPullGate {
-                            current_mana: combatant.current_mana,
-                            nuke_cost: abilities.get_unchecked(&AbilityType::Frostbolt).mana_cost,
-                        });
-                        class_ai::dps_postures::evaluate_dps_posture(
-                            &mut commands,
-                            entity,
-                            my_pos,
-                            combatant.target,
-                            &ctx,
-                            mage_posture.map(bevy::prelude::Mut::into_inner),
-                            directive,
-                            cfg,
-                            movement_config.shared.heal_range,
-                            entry,
-                            sustain,
-                            wand_gate,
-                            // The Mage has no trap.
-                            None,
-                            time.elapsed_secs(),
-                            &mut decision_trace,
-                        );
-                    }
-                }
-                class_ai::mage::decide_mage_action(
-                    &mut commands,
-                    &mut combat_log,
-                    &mut game_rng,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    auras.as_deref(),
-                    &ctx,
-                    &mut frost_nova_damage,
-                    &mut same_frame_cc_queue,
-                    &mut decision_trace,
-                )
-            }
-            match_config::CharacterClass::Priest => {
-                // Posture evaluation (healer movement AI, U6/U7) runs BEFORE
-                // the ability pass and OUTSIDE the GCD short-circuit inside
-                // decide_priest_action — directives must refresh while on GCD
-                // (the GCD locks casts, not legs). Gated on gates_opened: no
-                // pre-match directives or trace events. Casting Priests never
-                // get here (query excludes CastingState/ChannelingState), so
-                // posture movement lives in cast gaps only (R12).
-                //
-                // `escape_defer` is `Some(urgency_hp_threshold)` while an
-                // ESCAPE window is live (U7 cast-vs-move urgency): the heal
-                // ladder defers non-critical movement-locking casts for the
-                // window.
-                let mut plan = class_ai::priest::PriestMovementPlan::default();
-                if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive, _reset, _flare)) =
-                        posture_movement.get_mut(entity)
-                    {
-                        plan = class_ai::priest::evaluate_priest_posture(
-                            &mut commands,
-                            entity,
-                            &combatant,
-                            my_pos,
-                            &ctx,
-                            &abilities,
-                            auras.as_deref(),
-                            healer_posture.map(bevy::prelude::Mut::into_inner),
-                            directive,
-                            &movement_config,
-                            time.elapsed_secs(),
-                            &mut decision_trace,
-                        );
-                    }
-                }
-                class_ai::priest::decide_priest_action(
-                    &mut commands,
-                    &mut combat_log,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    auras.as_deref(),
-                    &ctx,
-                    &mut shielded_this_frame,
-                    &mut fortified_this_frame,
-                    &plan,
-                    &movement_config,
-                    &mut same_frame_cc_queue,
-                    &mut decision_trace,
-                )
-            }
-            match_config::CharacterClass::Warrior => {
-                // Tempo-reset movement pre-pass — mirrors the Mage arm:
-                // runs BEFORE the ability pass and OUTSIDE decide_warrior_action's
-                // GCD short-circuit (legs aren't on the GCD), gated on
-                // gates_opened, never for casting/CC'd warriors (query excludes
-                // CastingState; move_to_target ignores the directive under CC).
-                if countdown.gates_opened {
-                    if let Ok((_healer, _mage, directive, reset, _flare)) =
-                        posture_movement.get_mut(entity)
-                    {
-                        class_ai::warrior::evaluate_warrior_reset(
-                            &mut commands,
-                            entity,
-                            &combatant,
-                            my_pos,
-                            auras.as_deref(),
-                            &ctx,
-                            reset.map(bevy::prelude::Mut::into_inner),
-                            directive,
-                            &movement_config.melee,
-                            movement_config.shared.press_advantage_margin,
-                            time.elapsed_secs(),
-                            &mut decision_trace,
-                        );
-                    }
-                }
-                class_ai::warrior::decide_warrior_action(
-                    &mut commands,
-                    &mut combat_log,
-                    &mut game_rng,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    auras.as_deref(),
-                    &ctx,
-                    &mut instant_attacks,
-                    &mut battle_shouted_this_frame,
-                    &mut decision_trace,
-                )
-            }
-            match_config::CharacterClass::Rogue => {
-                // Flare pre-pass (AS-185): a stealthed Rogue plays around a lit
-                // enemy Flare it can see. Runs before the opener so the walk it
-                // sets is this frame's; gated on gates_opened like the other
-                // movement pre-passes.
-                if countdown.gates_opened {
-                    if let Ok((_healer, _mage, _directive, _reset, flare_state)) =
-                        posture_movement.get_mut(entity)
-                    {
-                        let current = flare_state.as_deref().copied();
-                        let next = class_ai::rogue_flare::evaluate_rogue_flare(
-                            &mut commands,
-                            &mut combat_log,
-                            entity,
-                            &combatant,
-                            my_pos,
-                            &ctx,
-                            &lit_flares,
-                            current,
-                            time.elapsed_secs(),
-                            &mut decision_trace,
-                        );
-                        // Written only when it changed, so an idle Rogue's
-                        // state is never marked changed.
-                        match flare_state {
-                            Some(mut state) => {
-                                state.set_if_neq(next);
-                            }
-                            None if RogueFlareState::needs_insert(None, &next) => {
-                                commands.entity(entity).try_insert(next);
-                            }
-                            None => {}
-                        }
-                    }
-                }
-                class_ai::rogue::decide_rogue_action(
-                    &mut commands,
-                    &mut combat_log,
-                    &mut game_rng,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    &ctx,
-                    &mut instant_attacks,
-                    &mut same_frame_cc_queue,
-                    &mut decision_trace,
-                )
-            }
-            match_config::CharacterClass::Warlock => class_ai::warlock::decide_warlock_action(
-                &mut commands,
-                &mut combat_log,
-                &abilities,
-                entity,
-                &mut combatant,
-                my_pos,
-                auras.as_deref(),
-                &ctx,
-                &mut decision_trace,
-            ),
-            // Shaman: full healer-posture dispatch (U6). Mirrors the Priest arm
-            // — posture evaluation (FREE/PRESSURED/ESCAPE) runs BEFORE the
-            // ability pass and OUTSIDE the GCD short-circuit so directives
-            // refresh while on GCD; gated on gates_opened; never for casting
-            // Shamans (query excludes CastingState/ChannelingState — R12). The
-            // Shaman reuses the shared HealerPosture query slot. The plan's
-            // `escape_defer` makes the rotation defer non-critical casts during
-            // an ESCAPE window. Per-element totem durations come from the live
-            // Totem query snapshot above.
-            match_config::CharacterClass::Shaman => {
-                let durations = totem_durations.get(&entity).copied().unwrap_or([0.0; 4]);
-                let mut plan = class_ai::caster_healer_posture::CasterHealerPlan::default();
-                if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive, _reset, _flare)) =
-                        posture_movement.get_mut(entity)
-                    {
-                        plan = class_ai::caster_healer_posture::evaluate_caster_healer_posture(
-                            &mut commands,
-                            entity,
-                            &combatant,
-                            my_pos,
-                            &ctx,
-                            healer_posture.map(bevy::prelude::Mut::into_inner),
-                            directive,
-                            &movement_config,
-                            &movement_config.shaman,
-                            // The Shaman has no shapeshift.
-                            false,
-                            time.elapsed_secs(),
-                            &mut decision_trace,
-                        );
-                    }
-                }
-                class_ai::shaman::decide_shaman_action(
-                    &mut commands,
-                    &mut combat_log,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    auras.as_deref(),
-                    &ctx,
-                    &durations,
-                    &plan,
-                    &movement_config,
-                    &mut decision_trace,
-                )
-            }
-            // Druid: the Shaman's caster-healer posture machine on its own
-            // `druid:` block, then a rotation of instants. The posture's
-            // ESCAPE deferral is not threaded into the rotation — every heal
-            // the Druid has is an instant, so there is nothing to defer. The
-            // medic walk's teammate is: while it is out of reach the rotation
-            // holds damage and utility for the heal (`class_ai::druid`).
-            match_config::CharacterClass::Druid => {
-                let mut plan = class_ai::caster_healer_posture::CasterHealerPlan::default();
-                if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive, _reset, _flare)) =
-                        posture_movement.get_mut(entity)
-                    {
-                        plan = class_ai::caster_healer_posture::evaluate_caster_healer_posture(
-                            &mut commands,
-                            entity,
-                            &combatant,
-                            my_pos,
-                            &ctx,
-                            healer_posture.map(bevy::prelude::Mut::into_inner),
-                            directive,
-                            &movement_config,
-                            &movement_config.druid,
-                            // Travel Form: a shifted Druid runs (ESCAPE).
-                            auras.as_deref().is_some_and(ActiveAuras::is_shapeshifted),
-                            time.elapsed_secs(),
-                            &mut decision_trace,
-                        );
-                    }
-                }
-                let time_since_gates = extras
-                    .dampening
-                    .as_ref()
-                    .map_or(0.0, |d| d.time_since_gates);
-                class_ai::druid::decide_druid_action(
-                    &mut commands,
-                    &mut combat_log,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    auras.as_deref(),
-                    &ctx,
-                    &movement_config,
-                    plan.pressured,
-                    plan.medic_walk,
-                    countdown.gates_opened,
-                    time_since_gates,
-                    &mut marked_this_frame,
-                    &mut decision_trace,
-                )
-            }
-            match_config::CharacterClass::Paladin => {
-                // Posture evaluation (healer movement AI, U8) — mirrors the
-                // Priest arm: runs BEFORE the ability pass and OUTSIDE the
-                // GCD short-circuit, gated on gates_opened, and never for
-                // casting Paladins (query excludes CastingState — R12).
-                //
-                // The returned plan carries the ESCAPE/DIP cast deferral
-                // (Flash of Light / Holy Light are skipped for targets above
-                // the urgency threshold while a window or dip is live) and
-                // the Hammer of Justice gate (reservation for the
-                // enemy-healer dip; `DipCast` on dip arrival).
-                let mut plan = class_ai::paladin::PaladinMovementPlan::default();
-                if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive, _reset, _flare)) =
-                        posture_movement.get_mut(entity)
-                    {
-                        plan = class_ai::paladin::evaluate_paladin_posture(
-                            &mut commands,
-                            &abilities,
-                            entity,
-                            &combatant,
-                            my_pos,
-                            auras.as_deref(),
-                            &ctx,
-                            healer_posture.map(bevy::prelude::Mut::into_inner),
-                            directive,
-                            &movement_config,
-                            time.elapsed_secs(),
-                            &mut decision_trace,
-                        );
-                    }
-                }
-                class_ai::paladin::decide_paladin_action(
-                    &mut commands,
-                    &mut combat_log,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    auras.as_deref(),
-                    &ctx,
-                    &mut paladin_aura_this_frame,
-                    &mut same_frame_cc_queue,
-                    &plan,
-                    &mut decision_trace,
-                )
-            }
-            match_config::CharacterClass::Hunter => {
-                // Hunter movement is the proximity-gated ENGAGE/KITE machine
-                // (the Mage's aura-gating doesn't fit — the Hunter has no
-                // reliable self-root and kites on melee proximity). KITE only
-                // when a melee-DPS threat (Warrior/Rogue) is within closing
-                // range — `melee_within` excludes ranged classes so the Hunter
-                // holds and shoots a caster instead of fleeing it. The ability
-                // AI keeps its own dead/closing/safe band priorities. Same
-                // gates-open + casting-excluded contract as the Mage.
-                // Freezing Trap DIP (committed walk to set a trap on the enemy
-                // healer) is evaluated BEFORE the ENGAGE/KITE machine. While the
-                // dip owns movement (walking toward / arrived at the healer) the
-                // KITE evaluation is skipped so its kite vector doesn't overwrite
-                // the dip's Entity directive. Outside a dip it returns Rotation
-                // and KITE runs unchanged.
-                let mut dip_plan = class_ai::hunter_dip::HunterDipPlan::Rotation;
-                if countdown.gates_opened {
-                    if let Ok((_healer, mut kite_posture, directive, _reset, _flare)) =
-                        posture_movement.get_mut(entity)
-                    {
-                        let cfg = &movement_config.hunter;
-                        dip_plan = class_ai::hunter_dip::evaluate_hunter_dip(
-                            &mut commands,
-                            &abilities,
-                            entity,
-                            &combatant,
-                            my_pos,
-                            auras.as_deref(),
-                            &ctx,
-                            kite_posture.as_deref_mut(),
-                            directive,
-                            cfg,
-                            time.elapsed_secs(),
-                            &mut decision_trace,
-                        );
-                        if !dip_plan.owns_movement() {
-                            let entry = class_ai::dps_postures::melee_within(
-                                &ctx,
-                                entity,
-                                my_pos,
-                                cfg.kite_entry_radius,
-                            );
-                            let sustain = class_ai::dps_postures::melee_within(
-                                &ctx,
-                                entity,
-                                my_pos,
-                                cfg.kite_sustain_radius,
-                            );
-                            // While Freezing Trap is ready and an enemy healer
-                            // would be caught cleanly, the kite bends to keep
-                            // it within throw range; on cooldown, unchanged.
-                            let trap_setup = class_ai::hunter_dip::trap_setup(
-                                &abilities,
-                                entity,
-                                &combatant,
-                                my_pos,
-                                auras.as_deref(),
-                                &ctx,
-                            );
-                            class_ai::dps_postures::evaluate_dps_posture(
-                                &mut commands,
-                                entity,
-                                my_pos,
-                                combatant.target,
-                                &ctx,
-                                kite_posture.map(bevy::prelude::Mut::into_inner),
-                                directive,
-                                cfg,
-                                movement_config.shared.heal_range,
-                                entry,
-                                sustain,
-                                // No wand gate: the Hunter has no wand and shoots,
-                                // it doesn't fall back to a wand when OOM.
-                                None,
-                                trap_setup,
-                                time.elapsed_secs(),
-                                &mut decision_trace,
-                            );
-                        }
-                    }
-                }
-                let kill_target_index = extras.config.as_ref().and_then(|c| match combatant.team {
-                    1 => c.team1_kill_target,
-                    _ => c.team2_kill_target,
-                });
-                class_ai::hunter::decide_hunter_action(
-                    &mut commands,
-                    &mut combat_log,
-                    &mut game_rng,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    auras.as_deref(),
-                    &ctx,
-                    &mut instant_attacks,
-                    dip_plan,
-                    &movement_config.hunter.weights,
-                    own_freezing_traps
-                        .get(&entity)
-                        .map_or(&[][..], Vec::as_slice),
-                    kill_target_index,
-                    &mut decision_trace,
-                )
-            }
-        };
+        let acted = dispatch_class_decision(
+            DispatchIo {
+                commands: &mut commands,
+                combat_log: &mut combat_log,
+                game_rng: &mut game_rng,
+                decision_trace: &mut decision_trace,
+            },
+            &frame,
+            &mut acc,
+            entity,
+            &mut combatant,
+            my_pos,
+            auras.as_deref(),
+            &ctx,
+            posture_movement.get_mut(entity).ok(),
+        );
         if acted {
             continue;
         }
     }
+    if let Some(mut stored) = extras.situations {
+        stored.set_if_neq(situations);
+    }
 
     // Process queued instant attacks (Ambush, Sinister Strike, Mortal Strike)
-    for atk in instant_attacks {
+    for atk in acc.instant_attacks {
         let class_ai::QueuedInstantAttack {
             attacker: attacker_entity,
             target: target_entity,
@@ -1709,7 +1836,7 @@ pub fn decide_abilities(
     }
 
     // Process queued Frost Nova damage
-    for aoe in frost_nova_damage {
+    for aoe in acc.frost_nova_damage {
         let class_ai::QueuedAoeDamage {
             caster: caster_entity,
             target: target_entity,

@@ -34,6 +34,7 @@ use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::{pressing_when_ahead, CombatContext};
+use crate::states::play_match::situation::{Play, Role};
 
 /// Shout range constant (applies to all shout variants)
 const SHOUT_RANGE: f32 = 30.0;
@@ -120,13 +121,17 @@ pub fn decide_warrior_action(
         return true;
     }
 
-    // Burst-during-CC (bucket A): while the enemy healer is hard-CC'd and
-    // can't react, land Mortal Strike (the hard hit + Mortal Wounds healing
-    // debuff) BEFORE spending the GCD refreshing the Rend DoT. Outside the
-    // window the normal order holds (Rend, then Mortal Strike). Each ability
-    // is still attempted at most once per tick (the `!burst_window` guard on
-    // the trailing Mortal Strike), keeping the decision trace clean.
-    let burst_window = ctx.enemy_healer_is_cced();
+    // The Burst play (bucket A): while the enemy healer is locked
+    // (`enemy_healer_locked`) and can't react, land Mortal Strike (the hard
+    // hit + Mortal Wounds healing debuff) BEFORE spending the GCD refreshing
+    // the Rend DoT. Under the Default play the normal order holds (Rend, then
+    // Mortal Strike). Each ability is still attempted at most once per tick
+    // (the `!burst_window` guard on the trailing Mortal Strike), keeping the
+    // decision trace clean.
+    let burst_window = match ctx.situation().play_for(Role::MeleeDps) {
+        Play::Burst => true,
+        Play::Default => false,
+    };
 
     if burst_window
         && try_mortal_strike(

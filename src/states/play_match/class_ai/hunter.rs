@@ -34,6 +34,7 @@ use crate::states::play_match::decision_trace::{
     ActorView, DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, TargetView,
 };
 use crate::states::play_match::movement_config::MovementWeights;
+use crate::states::play_match::situation::{Play, Role};
 use crate::states::play_match::traps::replace_previous_trap;
 
 /// Hold Concussive Shot while the target's existing slow has more than this many
@@ -445,15 +446,22 @@ pub fn decide_hunter_action(
 
     // === SAFE RANGE (20+ yards) — Full rotation ===
 
-    // Burst-during-CC: when the enemy healer is hard-CC'd (e.g. our off-target
-    // Freezing Trap just incap'd it) it can't heal the kill target — land the
-    // Aimed Shot burst INSIDE that window instead of dribbling instants. Narrow
-    // priority PREPEND, gated on the healer being CC'd AND the kill target being
-    // someone other than that healer (bursting the healer would break its own
-    // breakable trap). Outside the window the rotation below is the unchanged
-    // order, so non-CC frames are untouched. This is the complement to the trap
-    // rework: the trap creates the healer-down window, this converts it.
-    let burst_window = ctx.enemy_healer_is_cced() && ctx.enemy_healer() != Some(target_entity);
+    // The Burst play: while the enemy healer is locked (`enemy_healer_locked`;
+    // e.g. our off-target Freezing Trap just incap'd it) it can't heal the kill
+    // target — land the Aimed Shot burst INSIDE that window instead of
+    // dribbling instants. Narrow priority PREPEND, gated on the kill target
+    // being someone other than the locked healer (bursting the healer would
+    // break its own breakable trap). Under the Default play the rotation below
+    // is the unchanged order, so non-CC frames are untouched. This is the
+    // complement to the trap rework: the trap creates the healer-down window,
+    // this converts it.
+    let burst_window = match ctx.situation().play_for(Role::RangedDps) {
+        Play::Burst => ctx
+            .situation()
+            .enemy_healer_locked
+            .is_some_and(|lock| lock.subject != target_entity),
+        Play::Default => false,
+    };
     if burst_window
         && distance_to_target >= 20.0
         && try_aimed_shot(
