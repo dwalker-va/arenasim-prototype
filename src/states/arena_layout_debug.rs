@@ -27,6 +27,8 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 
+use crate::ui::theme::{diagram, radius, text};
+
 use super::match_config::ArenaMap;
 use super::play_match::arena_bounds::{outline_half_extents, ArenaBounds, WALL_OFFSET};
 use super::play_match::map_config::MapGeometryConfig;
@@ -117,12 +119,12 @@ pub fn draw_arena_layout(
     let center = rect.center();
     let to_screen = |w: Vec2| egui::pos2(center.x + w.x * scale, center.y + w.y * scale);
 
-    let ink = egui::Color32::from_rgb(214, 220, 236);
-    let dim = egui::Color32::from_rgb(126, 134, 160);
-    let accent = egui::Color32::from_rgb(255, 186, 92);
-    let measure = egui::Color32::from_rgb(120, 210, 180);
+    let ink = diagram::INK;
+    let dim = diagram::DIM;
+    let accent = diagram::CALLOUT;
+    let measure = diagram::MEASURE;
 
-    painter.rect_filled(rect, 6.0, egui::Color32::from_rgb(15, 16, 22));
+    painter.rect_filled(rect, radius::MD, diagram::BG);
 
     // ---- Floor + walls -----------------------------------------------------
     // The floor is filled as a union of CONVEX pieces, then stroked as one
@@ -130,7 +132,7 @@ pub fn draw_arena_layout(
     // cannot fill a concave path correctly (`convex_polygon` on one produces
     // spurious triangles across the concavity) — which would put artifacts in the
     // very picture being used to judge the geometry.
-    let floor_fill = egui::Color32::from_rgb(31, 33, 44);
+    let floor_fill = diagram::FLOOR;
     match bounds {
         ArenaBounds::Octagon { .. } => {
             painter.add(egui::Shape::convex_polygon(
@@ -167,7 +169,7 @@ pub fn draw_arena_layout(
                         to_screen(Vec2::new(0.0, -mouth)),
                         to_screen(Vec2::new(sign * far, mouth)),
                     ),
-                    0.0,
+                    egui::CornerRadius::ZERO,
                     floor_fill,
                 );
             }
@@ -211,14 +213,14 @@ pub fn draw_arena_layout(
             to_screen(Vec2::new(-half.x, 0.0)),
             to_screen(Vec2::new(half.x, 0.0)),
         ],
-        egui::Stroke::new(0.5_f32, egui::Color32::from_rgb(70, 76, 94)),
+        egui::Stroke::new(0.5_f32, diagram::CROSSHAIR),
     );
     painter.line_segment(
         [
             to_screen(Vec2::new(0.0, -half.y)),
             to_screen(Vec2::new(0.0, half.y)),
         ],
-        egui::Stroke::new(0.5_f32, egui::Color32::from_rgb(70, 76, 94)),
+        egui::Stroke::new(0.5_f32, diagram::CROSSHAIR),
     );
 
     // ---- Obstacles ---------------------------------------------------------
@@ -235,8 +237,8 @@ pub fn draw_arena_layout(
                 let verts = prism_vertices_world(center_xz, circumradius, sides, rotation);
                 painter.add(egui::Shape::convex_polygon(
                     verts.iter().map(|v| to_screen(*v)).collect(),
-                    egui::Color32::from_rgb(96, 102, 128),
-                    egui::Stroke::new(1.2_f32, egui::Color32::from_rgb(168, 176, 204)),
+                    diagram::PILLAR,
+                    egui::Stroke::new(1.2_f32, diagram::PILLAR_EDGE),
                 ));
                 pillars.push(Pillar {
                     center: center_xz,
@@ -250,8 +252,8 @@ pub fn draw_arena_layout(
                 painter.circle(
                     to_screen(center_xz),
                     radius * scale,
-                    egui::Color32::from_rgb(96, 102, 128),
-                    egui::Stroke::new(1.2_f32, egui::Color32::from_rgb(168, 176, 204)),
+                    diagram::PILLAR,
+                    egui::Stroke::new(1.2_f32, diagram::PILLAR_EDGE),
                 );
                 pillars.push(Pillar {
                     center: center_xz,
@@ -264,9 +266,9 @@ pub fn draw_arena_layout(
                         to_screen(Vec2::new(min.x, min.z)),
                         to_screen(Vec2::new(max.x, max.z)),
                     ),
-                    0.0,
-                    egui::Color32::from_rgb(96, 102, 128),
-                    egui::Stroke::new(1.2_f32, egui::Color32::from_rgb(168, 176, 204)),
+                    egui::CornerRadius::ZERO,
+                    diagram::PILLAR,
+                    egui::Stroke::new(1.2_f32, diagram::PILLAR_EDGE),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -274,7 +276,7 @@ pub fn draw_arena_layout(
     }
 
     // ---- Measured dimension annotations ------------------------------------
-    let font = egui::FontId::monospace(11.0);
+    let font = egui::FontId::monospace(diagram::LABEL_SIZE);
     let label = |w: Vec2, text: String, color: egui::Color32, anchor: egui::Align2| {
         painter.text(to_screen(w), anchor, text, font.clone(), color);
     };
@@ -386,7 +388,7 @@ pub fn draw_arena_layout(
 
     let extents = bounds.half_extents();
     painter.text(
-        rect.left_top() + egui::vec2(8.0, 6.0),
+        rect.left_top() + diagram::CORNER_INSET,
         egui::Align2::LEFT_TOP,
         format!(
             "{}   [{}]  {}\nwalkable {:.0} x {:.0} yd   {} pillar(s)",
@@ -397,14 +399,14 @@ pub fn draw_arena_layout(
             extents.y * 2.0,
             active.volumes.len(),
         ),
-        egui::FontId::monospace(12.0),
+        egui::FontId::monospace(text::SMALL),
         ink,
     );
     painter.text(
-        rect.right_bottom() + egui::vec2(-8.0, -6.0),
+        rect.right_bottom() - diagram::CORNER_INSET,
         egui::Align2::RIGHT_BOTTOM,
         "+x right, +z down   dashed = walkable bound, solid = wall",
-        egui::FontId::monospace(10.0),
+        egui::FontId::monospace(text::MICRO),
         dim,
     );
 }

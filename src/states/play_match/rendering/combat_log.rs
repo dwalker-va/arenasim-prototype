@@ -6,7 +6,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::configure_match_ui::ClassIcons;
 use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use crate::states::play_match::components::{CombatPanelView, DisplaySettings, SpellIcons};
-use crate::ui::theme::{class_color, color, school_color};
+use crate::ui::theme::{self, class_color, color, data, hud, school_color};
 use crate::ui::widgets::{icon_tile, Tooltip};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -63,7 +63,7 @@ pub fn render_combat_panel(
         .show_separator_line(false)
         .frame(
             egui::Frame::side_top_panel(&ctx.style())
-                .fill(crate::ui::theme::hud::HUD_PANEL)
+                .fill(hud::HUD_PANEL)
                 .stroke(egui::Stroke::NONE),
         )
         .show(ctx, |ui| {
@@ -75,11 +75,11 @@ pub fn render_combat_panel(
                     .selectable_label(
                         log_selected,
                         egui::RichText::new("Combat Log")
-                            .size(14.0)
+                            .size(theme::text::BODY)
                             .color(if log_selected {
-                                egui::Color32::from_rgb(230, 204, 153)
+                                hud::TAB_ACTIVE
                             } else {
-                                egui::Color32::from_rgb(150, 150, 150)
+                                hud::TAB_IDLE
                             }),
                     )
                     .clicked()
@@ -87,7 +87,7 @@ pub fn render_combat_panel(
                     *panel_view = CombatPanelView::CombatLog;
                 }
 
-                ui.add_space(10.0);
+                ui.add_space(hud::space::TAB);
 
                 // Timeline tab
                 let timeline_selected = *panel_view == CombatPanelView::Timeline;
@@ -95,11 +95,11 @@ pub fn render_combat_panel(
                     .selectable_label(
                         timeline_selected,
                         egui::RichText::new("Timeline")
-                            .size(14.0)
+                            .size(theme::text::BODY)
                             .color(if timeline_selected {
-                                egui::Color32::from_rgb(230, 204, 153)
+                                hud::TAB_ACTIVE
                             } else {
-                                egui::Color32::from_rgb(150, 150, 150)
+                                hud::TAB_IDLE
                             }),
                     )
                     .clicked()
@@ -108,9 +108,9 @@ pub fn render_combat_panel(
                 }
             });
 
-            ui.add_space(3.0);
+            ui.add_space(hud::space::RULE);
             ui.separator();
-            ui.add_space(3.0);
+            ui.add_space(hud::space::RULE);
 
             // Render the selected view
             match *panel_view {
@@ -137,12 +137,12 @@ fn render_combat_log_content(ui: &mut egui::Ui, combat_log: &CombatLog) {
             for entry in &combat_log.entries {
                 // Color based on event type
                 let color = match entry.event_type {
-                    CombatLogEventType::Damage => egui::Color32::from_rgb(255, 180, 180),
-                    CombatLogEventType::Healing => egui::Color32::from_rgb(180, 255, 180),
-                    CombatLogEventType::Buff => egui::Color32::from_rgb(180, 220, 255),
-                    CombatLogEventType::Death => egui::Color32::from_rgb(200, 100, 100),
-                    CombatLogEventType::MatchEvent => egui::Color32::from_rgb(200, 200, 100),
-                    _ => egui::Color32::from_rgb(200, 200, 200),
+                    CombatLogEventType::Damage => hud::LOG_DAMAGE,
+                    CombatLogEventType::Healing => hud::LOG_HEALING,
+                    CombatLogEventType::Buff => hud::LOG_BUFF,
+                    CombatLogEventType::Death => hud::LOG_DEATH,
+                    CombatLogEventType::MatchEvent => hud::LOG_MATCH_EVENT,
+                    _ => hud::LOG_OTHER,
                 };
 
                 let timestamp_str = format!("[{:>5.1}s]", entry.timestamp);
@@ -150,10 +150,14 @@ fn render_combat_log_content(ui: &mut egui::Ui, combat_log: &CombatLog) {
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(&timestamp_str)
-                            .size(11.0)
-                            .color(egui::Color32::from_rgb(150, 150, 150)),
+                            .size(hud::text::CAPTION)
+                            .color(hud::LOG_TIMESTAMP),
                     );
-                    ui.label(egui::RichText::new(&entry.message).size(12.0).color(color));
+                    ui.label(
+                        egui::RichText::new(&entry.message)
+                            .size(theme::text::SMALL)
+                            .color(color),
+                    );
                 });
             }
         });
@@ -212,11 +216,11 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, icons: &Ti
     // This prevents layout shifts as abilities are used
     if combatants.is_empty() {
         ui.vertical_centered(|ui| {
-            ui.add_space(20.0);
+            ui.add_space(hud::space::EMPTY);
             ui.label(
                 egui::RichText::new("Waiting for match to start...")
-                    .size(14.0)
-                    .color(egui::Color32::from_rgb(120, 120, 120))
+                    .size(theme::text::BODY)
+                    .color(hud::HINT)
                     .italics(),
             );
         });
@@ -250,9 +254,9 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, icons: &Ti
         for combatant_id in &combatants {
             let short_name = shorten_combatant_name(combatant_id);
             let team_color = if combatant_id.starts_with("Team 1") {
-                egui::Color32::from_rgb(100, 150, 255) // Blue
+                data::TEAM_1
             } else {
-                egui::Color32::from_rgb(255, 100, 100) // Red
+                data::TEAM_2
             };
 
             ui.allocate_ui_with_layout(
@@ -261,7 +265,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, icons: &Ti
                 |ui| {
                     ui.label(
                         egui::RichText::new(short_name)
-                            .size(12.0)
+                            .size(theme::text::SMALL)
                             .color(team_color)
                             .strong(),
                     );
@@ -270,9 +274,9 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, icons: &Ti
         }
     });
 
-    ui.add_space(2.0);
+    ui.add_space(theme::space::XXS);
     ui.separator();
-    ui.add_space(2.0);
+    ui.add_space(theme::space::XXS);
 
     // Scrollable timeline content with always-visible scrollbar
     egui::ScrollArea::vertical()
@@ -295,7 +299,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, icons: &Ti
                     rect.min.x + TIMELINE_TIME_COLUMN_WIDTH + (i as f32 * combatant_column_width);
                 painter.line_segment(
                     [egui::pos2(x, rect.min.y), egui::pos2(x, rect.max.y)],
-                    egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(30)),
+                    egui::Stroke::new(1.0_f32, hud::TIMELINE_COLUMN_RULE),
                 );
             }
 
@@ -310,7 +314,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, icons: &Ti
                         egui::pos2(rect.min.x + TIMELINE_TIME_COLUMN_WIDTH, y),
                         egui::pos2(rect.max.x, y),
                     ],
-                    egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(20)),
+                    egui::Stroke::new(1.0_f32, hud::TIMELINE_TICK_RULE),
                 );
 
                 // Time label on left
@@ -318,8 +322,8 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, icons: &Ti
                     egui::pos2(rect.min.x + 5.0, y + 2.0),
                     egui::Align2::LEFT_TOP,
                     format!("{}s", t as u32),
-                    egui::FontId::proportional(10.0),
-                    egui::Color32::from_rgb(120, 120, 120),
+                    egui::FontId::proportional(theme::text::MICRO),
+                    hud::HINT,
                 );
 
                 t += TIMELINE_TIME_TICK_INTERVAL;
@@ -370,14 +374,14 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, icons: &Ti
 
                     // Border - red if interrupted, white otherwise
                     let border_color = if interrupted {
-                        egui::Color32::from_rgb(255, 60, 60) // Bright red for interrupted
+                        hud::TIMELINE_INTERRUPTED_EDGE
                     } else {
-                        egui::Color32::from_white_alpha(100)
+                        hud::TIMELINE_ICON_EDGE
                     };
                     let border_width: f32 = if interrupted { 2.0 } else { 1.0 };
                     painter.rect_stroke(
                         icon_rect.expand(1.0),
-                        3.0,
+                        theme::radius::SM,
                         egui::Stroke::new(border_width, border_color),
                         egui::StrokeKind::Outside,
                     );
@@ -385,9 +389,9 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, icons: &Ti
                     if let Some(texture_id) = texture {
                         // Draw the spell icon (tinted red if interrupted)
                         let icon_tint = if interrupted {
-                            egui::Color32::from_rgb(255, 150, 150) // Red tint
+                            hud::TIMELINE_INTERRUPTED_TINT
                         } else {
-                            egui::Color32::WHITE
+                            color::UNTINTED
                         };
                         painter.image(
                             *texture_id,

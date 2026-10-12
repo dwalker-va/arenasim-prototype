@@ -32,7 +32,7 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::results_ui::class_color32;
 use crate::ui::driver as ui_driver;
-use crate::ui::theme::hud;
+use crate::ui::theme::{self, hud};
 
 use super::{get_aura_icon_key, is_buff_aura};
 
@@ -145,21 +145,6 @@ const PET_HP_H: f32 = 10.0;
 /// Height of the "TEAM N" caption above a column.
 const COLUMN_LABEL_H: f32 = 16.0;
 
-/// The call marker is deliberately hueless. Every hue in this UI is already
-/// spoken for by gameplay signal — class colors, gold buff borders, red
-/// debuff/CC borders, the green/yellow/red HP thresholds — so the call reads
-/// by *shape* (a reticle) and *value* (a brighter border) instead of claiming
-/// another color.
-const CALL_MARK: egui::Color32 = egui::Color32::from_rgb(236, 238, 248);
-/// Border shown while the pointer is over a clickable frame.
-const CALL_HOVER: egui::Color32 = egui::Color32::from_rgb(150, 154, 172);
-/// Border shown on every clickable frame while the affordance is on.
-///
-/// This is what makes the toggle legible. Brighter than the inert border so
-/// turning calls on visibly arms the column, dimmer than [`CALL_HOVER`] so the
-/// pointer still reads, and far below [`CALL_MARK`] so the actual call stays
-/// the loudest thing on screen. Still hueless, per the note above.
-const CALL_CALLABLE: egui::Color32 = egui::Color32::from_rgb(96, 100, 118);
 const RETICLE_R: f32 = 5.0;
 /// How far the reticle's cross ticks reach past its ring.
 const RETICLE_TICK: f32 = 2.5;
@@ -348,8 +333,8 @@ fn draw_column(
         ),
         egui::Align2::CENTER_CENTER,
         if team == 1 { "TEAM 1" } else { "TEAM 2" },
-        egui::FontId::proportional(11.0),
-        egui::Color32::from_rgb(160, 160, 175),
+        egui::FontId::proportional(hud::text::CAPTION),
+        hud::COLUMN_CAPTION,
     );
 
     let now = ui.input(|i| i.time);
@@ -448,13 +433,7 @@ fn draw_frame(
     spell_icons: &SpellIcons,
 ) {
     let dim = if frame.alive { 1.0 } else { 0.45 };
-    let dimmed = |c: egui::Color32| {
-        egui::Color32::from_rgb(
-            (c.r() as f32 * dim) as u8,
-            (c.g() as f32 * dim) as u8,
-            (c.b() as f32 * dim) as u8,
-        )
-    };
+    let dimmed = |c: egui::Color32| theme::darken(c, dim);
 
     // Frame background + class-colored accent stripe on the arena-facing edge.
     // The border doubles as the call marker and as the affordance's own tell.
@@ -463,11 +442,11 @@ fn draw_frame(
     // affordance on changed nothing you could see until you happened to hover a
     // frame — the toggle looked broken, because a control mode that renders no
     // evidence of being on is indistinguishable from one that did not fire.
-    painter.rect_filled(rect, 4.0, hud::HUD_PANEL);
+    painter.rect_filled(rect, hud::radius::FRAME, hud::HUD_PANEL);
     let border = match call_state {
-        FrameCallState::Called => egui::Stroke::new(2.0_f32, CALL_MARK),
-        FrameCallState::Hovered => egui::Stroke::new(1.0_f32, CALL_HOVER),
-        FrameCallState::Callable => egui::Stroke::new(1.0_f32, CALL_CALLABLE),
+        FrameCallState::Called => egui::Stroke::new(2.0_f32, hud::CALL_MARK),
+        FrameCallState::Hovered => egui::Stroke::new(1.0_f32, hud::CALL_HOVER),
+        FrameCallState::Callable => egui::Stroke::new(1.0_f32, hud::CALL_CALLABLE),
         FrameCallState::Inert => egui::Stroke::new(1.0_f32, hud::HUD_PANEL_EDGE),
     };
     // Click flash: a brief lift on the frame you just pressed. Drawn UNDER the
@@ -476,22 +455,23 @@ fn draw_frame(
     if press > 0.0 {
         painter.rect_filled(
             rect,
-            4.0,
-            egui::Color32::from_rgba_unmultiplied(236, 238, 248, (press * 46.0) as u8),
+            hud::radius::FRAME,
+            theme::with_alpha(hud::CALL_MARK, (press * hud::CALL_PRESS_ALPHA) as u8),
         );
         painter.rect_stroke(
             rect,
-            4.0,
-            egui::Stroke::new(1.0 + press, CALL_MARK.gamma_multiply(press)),
+            hud::radius::FRAME,
+            egui::Stroke::new(1.0 + press, hud::CALL_MARK.gamma_multiply(press)),
             egui::StrokeKind::Outside,
         );
     }
-    painter.rect_stroke(rect, 4.0, border, egui::StrokeKind::Outside);
-    let stripe = egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height()));
-    painter.rect_filled(stripe, 2.0, dimmed(class_color32(frame.class)));
+    painter.rect_stroke(rect, hud::radius::FRAME, border, egui::StrokeKind::Outside);
+    let stripe =
+        egui::Rect::from_min_size(rect.min, egui::vec2(hud::size::FRAME_STRIPE, rect.height()));
+    painter.rect_filled(stripe, hud::radius::BAR, dimmed(class_color32(frame.class)));
 
-    let inner_x = rect.min.x + PAD + 3.0;
-    let inner_w = FRAME_W - 2.0 * PAD - 3.0;
+    let inner_x = rect.min.x + PAD + hud::size::FRAME_STRIPE;
+    let inner_w = FRAME_W - 2.0 * PAD - hud::size::FRAME_STRIPE;
     let mut y = rect.min.y + PAD;
 
     // Compact pet frame: small label + HP sliver only.
@@ -500,8 +480,8 @@ fn draw_frame(
             egui::pos2(inner_x, y + PET_HEADER_H / 2.0),
             egui::Align2::LEFT_CENTER,
             pet_label,
-            egui::FontId::proportional(11.0),
-            dimmed(egui::Color32::from_rgb(200, 200, 210)),
+            egui::FontId::proportional(hud::text::CAPTION),
+            dimmed(hud::FRAME_DETAIL),
         );
         y += PET_HEADER_H + ROW_GAP;
         draw_hp_bar(
@@ -524,24 +504,28 @@ fn draw_frame(
             *texture_id,
             icon_rect,
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            egui::Color32::from_gray((255.0 * dim) as u8),
+            theme::darken(theme::color::UNTINTED, dim),
         );
     } else {
         // Fallback: class-color square with the class initial.
-        painter.rect_filled(icon_rect, 3.0, dimmed(class_color32(frame.class)));
+        painter.rect_filled(
+            icon_rect,
+            theme::radius::SM,
+            dimmed(class_color32(frame.class)),
+        );
         painter.text(
             icon_rect.center(),
             egui::Align2::CENTER_CENTER,
             &frame.class.name()[0..1],
-            egui::FontId::proportional(14.0),
-            egui::Color32::BLACK,
+            egui::FontId::proportional(theme::text::BODY),
+            hud::FRAME_INITIAL,
         );
     }
     painter.text(
         egui::pos2(icon_rect.max.x + 6.0, y + HEADER_H / 2.0 - 1.0),
         egui::Align2::LEFT_CENTER,
         frame.class.name(),
-        egui::FontId::proportional(14.0),
+        egui::FontId::proportional(theme::text::BODY),
         dimmed(hud::HUD_LABEL),
     );
     // Call reticle at the header's trailing edge; the STEALTH tag steps aside
@@ -561,9 +545,9 @@ fn draw_frame(
         tag_right -= reticle_w + 4.0;
     }
     let tag = if !frame.alive {
-        Some(("DEAD", egui::Color32::from_rgb(220, 70, 70)))
+        Some(("DEAD", hud::TAG_DEAD))
     } else if frame.stealthed {
-        Some(("STEALTH", egui::Color32::from_rgb(170, 170, 190)))
+        Some(("STEALTH", hud::TAG_STEALTH))
     } else {
         None
     };
@@ -572,7 +556,7 @@ fn draw_frame(
             egui::pos2(tag_right, y + HEADER_H / 2.0 - 1.0),
             egui::Align2::RIGHT_CENTER,
             text,
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(hud::text::CAPTION),
             color,
         );
     }
@@ -597,13 +581,13 @@ fn draw_frame(
     } else {
         0.0
     };
-    painter.rect_filled(res_rect, 2.0, hud::BAR_TRACK);
+    painter.rect_filled(res_rect, hud::radius::BAR, hud::BAR_TRACK);
     painter.rect_filled(
         egui::Rect::from_min_size(
             res_rect.min,
             egui::vec2(res_rect.width() * res_pct, RESOURCE_H),
         ),
-        2.0,
+        hud::radius::BAR,
         dimmed(res_color),
     );
     y += RESOURCE_H;
@@ -623,7 +607,7 @@ fn draw_frame(
 /// A crosshair reticle: ring plus four outward ticks, drawn geometrically so
 /// it needs no glyph the bundled fonts might not carry.
 fn draw_call_reticle(painter: &egui::Painter, center: egui::Pos2) {
-    let stroke = egui::Stroke::new(1.5_f32, CALL_MARK);
+    let stroke = egui::Stroke::new(1.5_f32, hud::CALL_MARK);
     painter.circle_stroke(center, RETICLE_R, stroke);
     for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
         painter.line_segment(
@@ -655,10 +639,10 @@ fn draw_hp_bar(
         hud::health_color(hp_pct)
     };
 
-    painter.rect_filled(rect, 2.0, hud::HEALTH_TRACK);
+    painter.rect_filled(rect, hud::radius::BAR, hud::HEALTH_TRACK);
     painter.rect_filled(
         egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * hp_pct, rect.height())),
-        2.0,
+        hud::radius::BAR,
         fill,
     );
 
@@ -671,8 +655,8 @@ fn draw_hp_bar(
                     egui::pos2(rect.min.x + rect.width() * hp_pct, rect.min.y),
                     egui::vec2(absorb_w, rect.height()),
                 ),
-                0.0,
-                egui::Color32::from_rgba_unmultiplied(255, 255, 255, (110.0 * dim) as u8),
+                egui::CornerRadius::ZERO,
+                theme::with_alpha(hud::FRAME_ABSORB, (hud::FRAME_ABSORB_ALPHA * dim) as u8),
             );
         }
     }
@@ -686,7 +670,7 @@ fn draw_hp_bar(
                 frame.current_health.max(0.0),
                 frame.max_health
             ),
-            egui::FontId::proportional(10.0),
+            egui::FontId::proportional(theme::text::MICRO),
             hud::HUD_LABEL,
         );
     }
@@ -714,13 +698,13 @@ fn draw_aura_row(
             hud::AURA_DEBUFF
         };
 
-        painter.rect_filled(icon_rect, 2.0, hud::ICON_WELL);
+        painter.rect_filled(icon_rect, hud::radius::BAR, hud::ICON_WELL);
         if let Some(texture_id) = spell_icons.textures.get(&aura.icon_key) {
             painter.image(
                 *texture_id,
                 icon_rect.shrink(1.5),
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
+                theme::color::UNTINTED,
             );
             // Which art actually reached the frame — a `--ui-script` cannot see
             // pixels, and a fallback square is drawn in the same place.
@@ -735,15 +719,15 @@ fn draw_aura_row(
             );
             // Fallback square tinted by buff/debuff so kittest renders read.
             let fallback = if aura.is_buff {
-                egui::Color32::from_rgb(140, 120, 30)
+                hud::AURA_FALLBACK_BUFF
             } else {
-                egui::Color32::from_rgb(120, 40, 40)
+                hud::AURA_FALLBACK_DEBUFF
             };
-            painter.rect_filled(icon_rect.shrink(1.5), 1.0, fallback);
+            painter.rect_filled(icon_rect.shrink(1.5), hud::radius::ICON_FALLBACK, fallback);
         }
         painter.rect_stroke(
             icon_rect,
-            2.0,
+            hud::radius::BAR,
             egui::Stroke::new(1.5_f32, border),
             egui::StrokeKind::Outside,
         );
@@ -757,17 +741,17 @@ fn draw_aura_row(
         };
         let text_pos = icon_rect.center();
         painter.text(
-            text_pos + egui::vec2(1.0, 1.0),
+            text_pos + hud::size::TEXT_SHADOW,
             egui::Align2::CENTER_CENTER,
             &text,
-            egui::FontId::proportional(9.0),
+            egui::FontId::proportional(hud::text::AURA_TIMER),
             hud::HUD_LABEL_OUTLINE,
         );
         painter.text(
             text_pos,
             egui::Align2::CENTER_CENTER,
             &text,
-            egui::FontId::proportional(9.0),
+            egui::FontId::proportional(hud::text::AURA_TIMER),
             hud::HUD_LABEL,
         );
     }
@@ -780,8 +764,8 @@ fn draw_aura_row(
             ),
             egui::Align2::LEFT_CENTER,
             format!("+{}", auras.len() - shown),
-            egui::FontId::proportional(10.0),
-            egui::Color32::from_rgb(200, 200, 210),
+            egui::FontId::proportional(theme::text::MICRO),
+            hud::FRAME_DETAIL,
         );
     }
 }

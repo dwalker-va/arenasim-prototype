@@ -4,6 +4,7 @@
 
 use super::draw_text_with_outline;
 use crate::states::play_match::components::{MatchCountdown, VictoryCelebration};
+use crate::ui::theme::{self, data, hud};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -50,8 +51,8 @@ pub fn render_countdown(
         &painter,
         countdown_pos,
         &format!("{}", seconds_remaining),
-        egui::FontId::proportional(120.0),
-        egui::Color32::from_rgb(255, 215, 0), // Gold color
+        egui::FontId::proportional(hud::text::COUNTDOWN),
+        hud::HUD_GOLD,
         egui::Align2::CENTER_CENTER,
         2.0,
     );
@@ -62,8 +63,8 @@ pub fn render_countdown(
         &painter,
         message_pos,
         "Prepare for battle!",
-        egui::FontId::proportional(32.0),
-        egui::Color32::from_rgb(230, 230, 230),
+        egui::FontId::proportional(hud::text::BANNER),
+        hud::OVERLAY_TEXT,
         egui::Align2::CENTER_CENTER,
         2.0,
     );
@@ -74,8 +75,8 @@ pub fn render_countdown(
         &painter,
         hint_pos,
         "Apply buffs to your team!",
-        egui::FontId::proportional(18.0),
-        egui::Color32::from_rgb(180, 180, 180),
+        egui::FontId::proportional(hud::text::OVERLAY_LINE),
+        hud::OVERLAY_HINT,
         egui::Align2::CENTER_CENTER,
         1.5,
     );
@@ -95,8 +96,8 @@ pub fn render_countdown(
         &painter,
         egui::pos2(team1_x, preview_y),
         "Team 1",
-        egui::FontId::proportional(24.0),
-        egui::Color32::from_rgb(100, 150, 255), // Blue
+        egui::FontId::proportional(hud::text::TEAM),
+        data::TEAM_1,
         egui::Align2::CENTER_CENTER,
         2.0,
     );
@@ -119,15 +120,15 @@ pub fn render_countdown(
             // Icon border
             painter.rect_stroke(
                 icon_rect.expand(2.0),
-                4.0,
-                egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(100, 150, 255)),
+                hud::radius::FRAME,
+                egui::Stroke::new(2.0_f32, data::TEAM_1),
                 egui::StrokeKind::Outside,
             );
             painter.image(
                 texture_id,
                 icon_rect,
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
+                theme::color::UNTINTED,
             );
         }
 
@@ -136,8 +137,8 @@ pub fn render_countdown(
             &painter,
             egui::pos2(team1_x + 10.0, y_offset),
             class.name(),
-            egui::FontId::proportional(18.0),
-            egui::Color32::from_rgb(200, 200, 200),
+            egui::FontId::proportional(hud::text::OVERLAY_LINE),
+            hud::OVERLAY_NAME,
             egui::Align2::LEFT_CENTER,
             1.5,
         );
@@ -148,8 +149,8 @@ pub fn render_countdown(
         &painter,
         egui::pos2(center.x, preview_y + 40.0),
         "VS",
-        egui::FontId::proportional(36.0),
-        egui::Color32::from_rgb(255, 215, 0), // Gold
+        egui::FontId::proportional(hud::text::VS),
+        hud::HUD_GOLD,
         egui::Align2::CENTER_CENTER,
         2.0,
     );
@@ -160,8 +161,8 @@ pub fn render_countdown(
         &painter,
         egui::pos2(team2_x, preview_y),
         "Team 2",
-        egui::FontId::proportional(24.0),
-        egui::Color32::from_rgb(255, 100, 100), // Red
+        egui::FontId::proportional(hud::text::TEAM),
+        data::TEAM_2,
         egui::Align2::CENTER_CENTER,
         2.0,
     );
@@ -180,8 +181,8 @@ pub fn render_countdown(
             &painter,
             egui::pos2(team2_x - 10.0, y_offset),
             class.name(),
-            egui::FontId::proportional(18.0),
-            egui::Color32::from_rgb(200, 200, 200),
+            egui::FontId::proportional(hud::text::OVERLAY_LINE),
+            hud::OVERLAY_NAME,
             egui::Align2::RIGHT_CENTER,
             1.5,
         );
@@ -195,15 +196,15 @@ pub fn render_countdown(
             // Icon border
             painter.rect_stroke(
                 icon_rect.expand(2.0),
-                4.0,
-                egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(255, 100, 100)),
+                hud::radius::FRAME,
+                egui::Stroke::new(2.0_f32, data::TEAM_2),
                 egui::StrokeKind::Outside,
             );
             painter.image(
                 texture_id,
                 icon_rect,
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
+                theme::color::UNTINTED,
             );
         }
     }
@@ -215,8 +216,8 @@ pub fn render_countdown(
         &painter,
         egui::pos2(center.x, map_y),
         &format!("Arena: {}", match_config.map.name()),
-        egui::FontId::proportional(16.0),
-        egui::Color32::from_rgb(150, 150, 150),
+        egui::FontId::proportional(theme::text::H3),
+        hud::OVERLAY_DIM,
         egui::Align2::CENTER_CENTER,
         1.5,
     );
@@ -252,10 +253,10 @@ pub fn render_victory_celebration(
 
     // Victory text based on winner
     let (victory_text, victory_color) = match celebration.winner {
-        Some(1) => ("TEAM 1 WINS!", egui::Color32::from_rgb(100, 150, 255)), // Blue
-        Some(2) => ("TEAM 2 WINS!", egui::Color32::from_rgb(255, 100, 100)), // Red
-        None => ("DRAW!", egui::Color32::from_rgb(200, 200, 100)),           // Yellow
-        _ => ("MATCH OVER", egui::Color32::from_rgb(200, 200, 200)),         // Gray
+        Some(1) => ("TEAM 1 WINS!", data::TEAM_1),
+        Some(2) => ("TEAM 2 WINS!", data::TEAM_2),
+        None => ("DRAW!", hud::RESULT_DRAW),
+        _ => ("MATCH OVER", hud::RESULT_NONE),
     };
 
     // Large victory text
@@ -264,7 +265,7 @@ pub fn render_victory_celebration(
         &painter,
         victory_pos,
         victory_text,
-        egui::FontId::proportional(96.0),
+        egui::FontId::proportional(hud::text::VICTORY),
         victory_color,
         egui::Align2::CENTER_CENTER,
         3.0,
@@ -277,8 +278,8 @@ pub fn render_victory_celebration(
             &painter,
             celebration_pos,
             "Victory!",
-            egui::FontId::proportional(42.0),
-            egui::Color32::from_rgb(255, 215, 0), // Gold
+            egui::FontId::proportional(theme::text::DISPLAY),
+            hud::HUD_GOLD,
             egui::Align2::CENTER_CENTER,
             2.0,
         );
@@ -291,8 +292,8 @@ pub fn render_victory_celebration(
         &painter,
         countdown_pos,
         &format!("Results in {}...", seconds_remaining),
-        egui::FontId::proportional(20.0),
-        egui::Color32::from_rgb(180, 180, 180),
+        egui::FontId::proportional(theme::text::H2),
+        hud::OVERLAY_HINT,
         egui::Align2::CENTER_CENTER,
         1.5,
     );

@@ -8,14 +8,16 @@
 //! * **Chrome** ([`color`]): menus, panels, buttons. Gold on navy, few hues.
 //! * **Data** ([`data`], [`class_color`], [`school_color`]): class, team,
 //!   school, damage/healing/taken. Here hue carries meaning.
-//! * **HUD** ([`hud`]): in-match only, under its own broadcast rules — labels
-//!   stay white, and floating combat text reserves yellow, green and
-//!   light-blue.
+//! * **HUD** ([`hud`], [`fct`]): in-match only, under its own broadcast
+//!   rules — labels stay white, and floating combat text reserves yellow,
+//!   green and light-blue.
 //!
-//! A literal written anywhere else in `src/` is counted by
-//! `tests/ui_token_audit.rs`, whose per-file table only ever moves toward
-//! zero. Need a value the scale lacks? Add the token here, by role, in the
-//! same commit as its first use.
+//! The developer's arena diagram ([`diagram`]) keeps a drafting palette of
+//! its own, outside the three.
+//!
+//! A literal written anywhere else in `src/` fails `tests/ui_token_audit.rs`.
+//! Need a value the scale lacks? Add the token here, by role, in the same
+//! commit as its first use.
 //!
 //! The values and their rationale are in
 //! `docs/design/proposals/2026-10-11-ui-design-system.md` §2.2; the bench
@@ -215,11 +217,225 @@ pub mod hud {
     pub const CHANNEL_BAR_FILL: Color32 = Color32::from_rgb(50, 200, 150);
     /// A channel bar's edge, beside [`CHANNEL_BAR_FILL`].
     pub const CHANNEL_BAR_EDGE: Color32 = Color32::from_rgb(100, 220, 180);
+
+    // The overhead nameplate.
+    /// The empty part of the overhead health sliver.
+    pub const NAMEPLATE_TRACK: Color32 = Color32::from_rgb(30, 30, 30);
+    /// The overhead sliver's edge at healthy HP.
+    pub const NAMEPLATE_EDGE: Color32 = Color32::from_rgb(200, 200, 200);
+    /// An absorb shield laid over the overhead sliver from its right end:
+    /// white at alpha 100, premultiplied (`translucent_tokens_are_their_sources`
+    /// pins it).
+    pub const NAMEPLATE_ABSORB: Color32 = Color32::from_rgba_premultiplied(168, 168, 168, 100);
+    /// The low-HP halo round the overhead sliver; its alpha pulses.
+    pub const LOW_HP_GLOW: Color32 = Color32::from_rgb(255, 50, 50);
+    /// The halo's corner radius, before the HUD's zoom scale.
+    pub const LOW_HP_GLOW_RADIUS: f32 = 4.0;
+
+    /// The overhead sliver's edge below the low-HP threshold: red, pulsing
+    /// brighter with `pulse` (0 = resting, 1 = peak).
+    pub fn low_hp_edge(pulse: f32) -> Color32 {
+        Color32::from_rgb((200.0 + 55.0 * pulse) as u8, 50, 50)
+    }
+
+    // Time Controls and the camera window.
+    /// A caption in a HUD window: the speed label, the toggles, the camera
+    /// window's key list.
+    pub const CAPTION: Color32 = Color32::from_rgb(200, 200, 200);
+    /// The faintest HUD text: a key hint, the timeline's time labels and its
+    /// empty state.
+    pub const HINT: Color32 = Color32::from_rgb(120, 120, 120);
+    /// The speed readout while the match is paused.
+    pub const SPEED_PAUSED: Color32 = Color32::from_rgb(255, 100, 100);
+    /// The speed readout while the match runs.
+    pub const SPEED_RUNNING: Color32 = Color32::from_rgb(100, 255, 100);
+    /// A speed button's fill.
+    pub const SPEED_BUTTON: Color32 = Color32::from_rgb(40, 40, 50);
+    /// The fill of the speed button in force.
+    pub const SPEED_BUTTON_ACTIVE: Color32 = Color32::from_rgb(60, 80, 120);
+    /// The camera window's current mode.
+    pub const CAMERA_MODE: Color32 = Color32::from_rgb(100, 200, 255);
+
+    // The countdown and victory overlays (the countdown digits and "Victory!"
+    // are [`HUD_GOLD`], the team names [`super::data::TEAM_1`] / `TEAM_2`).
+    /// "Prepare for battle!".
+    pub const OVERLAY_TEXT: Color32 = Color32::from_rgb(230, 230, 230);
+    /// An overlay's secondary line: the buff hint, "Results in N...".
+    pub const OVERLAY_HINT: Color32 = Color32::from_rgb(180, 180, 180);
+    /// A class name in the match preview.
+    pub const OVERLAY_NAME: Color32 = Color32::from_rgb(200, 200, 200);
+    /// The arena's name under the match preview.
+    pub const OVERLAY_DIM: Color32 = Color32::from_rgb(150, 150, 150);
+    /// The victory banner for a draw.
+    pub const RESULT_DRAW: Color32 = Color32::from_rgb(200, 200, 100);
+    /// The victory banner when the match ended with no winner on record.
+    pub const RESULT_NONE: Color32 = Color32::from_rgb(200, 200, 200);
+
+    // The team frames.
+    /// The "TEAM N" caption over a column.
+    pub const COLUMN_CAPTION: Color32 = Color32::from_rgb(160, 160, 175);
+    /// A frame's secondary text: a pet's label, the "+N" aura overflow.
+    pub const FRAME_DETAIL: Color32 = Color32::from_rgb(200, 200, 210);
+    /// The class initial on a frame's fallback class square.
+    pub const FRAME_INITIAL: Color32 = Color32::BLACK;
+    /// A dead combatant's header tag.
+    pub const TAG_DEAD: Color32 = Color32::from_rgb(220, 70, 70);
+    /// A stealthed combatant's header tag.
+    pub const TAG_STEALTH: Color32 = Color32::from_rgb(170, 170, 190);
+    /// The absorb segment after a frame's health fill; drawn at
+    /// [`FRAME_ABSORB_ALPHA`] times the frame's dimming.
+    pub const FRAME_ABSORB: Color32 = Color32::WHITE;
+    /// [`FRAME_ABSORB`]'s alpha on a living frame.
+    pub const FRAME_ABSORB_ALPHA: f32 = 110.0;
+    /// A buff's fallback square when its icon is not loaded.
+    pub const AURA_FALLBACK_BUFF: Color32 = Color32::from_rgb(140, 120, 30);
+    /// A debuff's fallback square when its icon is not loaded.
+    pub const AURA_FALLBACK_DEBUFF: Color32 = Color32::from_rgb(120, 40, 40);
+
+    // The kill-target call. Deliberately hueless: every hue on the frames is
+    // already spoken for by gameplay signal — class colours, gold buff
+    // borders, red debuff/CC borders, the green/yellow/red HP thresholds — so
+    // the call reads by SHAPE (a reticle) and VALUE (a brighter border)
+    // instead of claiming another colour.
+    /// The called frame's border and reticle, and the click flash.
+    pub const CALL_MARK: Color32 = Color32::from_rgb(236, 238, 248);
+    /// Border shown while the pointer is over a clickable frame.
+    pub const CALL_HOVER: Color32 = Color32::from_rgb(150, 154, 172);
+    /// Border shown on every clickable frame while the affordance is on.
+    ///
+    /// This is what makes the toggle legible. Brighter than the inert border
+    /// so turning calls on visibly arms the column, dimmer than
+    /// [`CALL_HOVER`] so the pointer still reads, and far below [`CALL_MARK`]
+    /// so the actual call stays the loudest thing on screen.
+    pub const CALL_CALLABLE: Color32 = Color32::from_rgb(96, 100, 118);
+    /// The click flash's peak alpha over [`CALL_MARK`], at the moment of the
+    /// press.
+    pub const CALL_PRESS_ALPHA: f32 = 46.0;
+
+    // The combat panel: its tabs and the combat log.
+    /// The open tab. The chrome's accent: the same "active" as every menu
+    /// tab.
+    pub const TAB_ACTIVE: Color32 = super::color::ACCENT;
+    /// A tab that is not open.
+    pub const TAB_IDLE: Color32 = Color32::from_rgb(150, 150, 150);
+    /// A log line's timestamp.
+    pub const LOG_TIMESTAMP: Color32 = Color32::from_rgb(150, 150, 150);
+    /// A damage line.
+    pub const LOG_DAMAGE: Color32 = Color32::from_rgb(255, 180, 180);
+    /// A healing line.
+    pub const LOG_HEALING: Color32 = Color32::from_rgb(180, 255, 180);
+    /// A buff line.
+    pub const LOG_BUFF: Color32 = Color32::from_rgb(180, 220, 255);
+    /// A death.
+    pub const LOG_DEATH: Color32 = Color32::from_rgb(200, 100, 100);
+    /// A match event: gates, dampening.
+    pub const LOG_MATCH_EVENT: Color32 = Color32::from_rgb(200, 200, 100);
+    /// Every other line.
+    pub const LOG_OTHER: Color32 = Color32::from_rgb(200, 200, 200);
+
+    // The timeline.
+    /// The rule between two combatants' columns: white at linear alpha 30
+    /// (`Color32::from_white_alpha`, which is not `const`; pinned by
+    /// `translucent_tokens_are_their_sources`).
+    pub const TIMELINE_COLUMN_RULE: Color32 = Color32::from_rgba_premultiplied(96, 96, 96, 30);
+    /// A time tick's line across the columns: white at linear alpha 20.
+    pub const TIMELINE_TICK_RULE: Color32 = Color32::from_rgba_premultiplied(79, 79, 79, 20);
+    /// A cast icon's edge: white at linear alpha 100.
+    pub const TIMELINE_ICON_EDGE: Color32 = Color32::from_rgba_premultiplied(168, 168, 168, 100);
+    /// An interrupted cast icon's edge.
+    pub const TIMELINE_INTERRUPTED_EDGE: Color32 = Color32::from_rgb(255, 60, 60);
+    /// The tint an interrupted cast's icon is drawn with.
+    pub const TIMELINE_INTERRUPTED_TINT: Color32 = Color32::from_rgb(255, 150, 150);
+
+    // Speech bubbles.
+    /// A bubble's fill: white at alpha 240, premultiplied.
+    pub const BUBBLE_FILL: Color32 = Color32::from_rgba_premultiplied(248, 248, 248, 240);
+    /// A bubble's edge.
+    pub const BUBBLE_EDGE: Color32 = Color32::BLACK;
+    /// A bubble's words.
+    pub const BUBBLE_TEXT: Color32 = Color32::BLACK;
+    /// The plate drawn for a class portrait whose art is not loaded.
+    pub const BUBBLE_PLATE: Color32 = Color32::from_gray(40);
+    /// The class initial on [`BUBBLE_PLATE`].
+    pub const BUBBLE_PLATE_INITIAL: Color32 = Color32::WHITE;
+    /// The outline drawn for a named ability whose icon is not loaded.
+    pub const BUBBLE_MISSING_ABILITY: Color32 = Color32::DARK_GRAY;
+    /// The outline drawn for a named emoji whose art is not on disk.
+    pub const BUBBLE_MISSING_EMOJI: Color32 = Color32::from_gray(120);
+    /// The outline drawn for a token the vocabulary does not know.
+    pub const BUBBLE_UNKNOWN: Color32 = Color32::RED;
+
+    /// HUD-local type sizes: the steps the HUD draws that are not on the
+    /// [`super::text`] scale. Where a HUD size IS on the scale, the HUD uses
+    /// the scale.
+    pub mod text {
+        /// The countdown digits.
+        pub const COUNTDOWN: f32 = 120.0;
+        /// "TEAM N WINS!".
+        pub const VICTORY: f32 = 96.0;
+        /// The "VS" between the previewed teams.
+        pub const VS: f32 = 36.0;
+        /// "Prepare for battle!".
+        pub const BANNER: f32 = 32.0;
+        /// A team's name over its preview column.
+        pub const TEAM: f32 = 24.0;
+        /// An overlay's secondary line, and a previewed class's name.
+        pub const OVERLAY_LINE: f32 = 18.0;
+        /// A speech bubble's words.
+        pub const BUBBLE: f32 = 18.0;
+        /// The class initial on a speech bubble's portrait plate.
+        pub const BUBBLE_INITIAL: f32 = 13.0;
+        /// A HUD caption: the camera window's key list, a log timestamp, a
+        /// team frame's column caption and tags.
+        pub const CAPTION: f32 = 11.0;
+        /// The seconds left on a team-frame aura icon.
+        pub const AURA_TIMER: f32 = 9.0;
+    }
+
+    /// HUD-local gaps, in points, off the [`super::space`] scale.
+    pub mod space {
+        /// Between the rows of a HUD window.
+        pub const ROW: f32 = 5.0;
+        /// Either side of a HUD window's separator.
+        pub const RULE: f32 = 3.0;
+        /// Between the combat panel's tabs.
+        pub const TAB: f32 = 10.0;
+        /// Above the timeline's empty state.
+        pub const EMPTY: f32 = 20.0;
+    }
+
+    /// HUD-local control dimensions, in points.
+    pub mod size {
+        use bevy_egui::egui::{vec2, Vec2};
+
+        /// The Time Controls pause button.
+        pub const PAUSE_BUTTON: Vec2 = vec2(35.0, 30.0);
+        /// A Time Controls speed button.
+        pub const SPEED_BUTTON: Vec2 = vec2(32.0, 30.0);
+        /// The width of a team frame's class-colour stripe.
+        pub const FRAME_STRIPE: f32 = 3.0;
+        /// How far a team-frame aura timer's shadow sits from its text.
+        pub const TEXT_SHADOW: Vec2 = vec2(1.0, 1.0);
+        /// The space round a speech bubble's content.
+        pub const BUBBLE_PADDING: Vec2 = vec2(12.0, 6.0);
+    }
+
+    /// HUD-local corner radii (egui's `CornerRadius` unit), off the
+    /// [`super::radius`] scale.
+    pub mod radius {
+        /// A team frame, and a class icon's border in the match preview.
+        pub const FRAME: u8 = 4;
+        /// A team-frame bar, its stripe and its aura icons.
+        pub const BAR: u8 = 2;
+        /// The fallback square inside a team-frame aura icon.
+        pub const ICON_FALLBACK: u8 = 1;
+    }
 }
 
 /// Floating combat text: the ONLY place its hues are written. Yellow, green
 /// and light-blue are reserved here for damage, healing and absorbs (the
-/// colour-budget rule); nothing else in the game may draw text in them.
+/// colour-budget rule); nothing else in the game may draw text in them. Its
+/// type sizes live here too.
 pub mod fct {
     use super::Color32;
 
@@ -240,6 +456,46 @@ pub mod fct {
     pub const INVULNERABLE: Color32 = super::hud::HUD_GOLD;
     /// The outline drawn around every floating number.
     pub const OUTLINE: Color32 = Color32::BLACK;
+
+    // Sizes, in points.
+    /// A floating number.
+    pub const NUMBER_SIZE: f32 = 24.0;
+    /// A critical hit's number.
+    pub const CRIT_SIZE: f32 = 32.0;
+    /// The word after an absorbed number.
+    pub const LABEL_SIZE: f32 = 14.0;
+}
+
+/// The annotated arena layout (`states/arena_layout_debug.rs`): a developer's
+/// map-tuning diagram, not a player screen, so it keeps a drafting palette of
+/// its own rather than borrowing the chrome's.
+pub mod diagram {
+    use super::Color32;
+    use bevy_egui::egui::{vec2, Vec2};
+
+    /// The diagram's ground.
+    pub const BG: Color32 = Color32::from_rgb(15, 16, 22);
+    /// The arena floor.
+    pub const FLOOR: Color32 = Color32::from_rgb(31, 33, 44);
+    /// The wall outline and the title.
+    pub const INK: Color32 = Color32::from_rgb(214, 220, 236);
+    /// The walkable bound and the legend.
+    pub const DIM: Color32 = Color32::from_rgb(126, 134, 160);
+    /// The centre crosshair.
+    pub const CROSSHAIR: Color32 = Color32::from_rgb(70, 76, 94);
+    /// A pillar's footprint.
+    pub const PILLAR: Color32 = Color32::from_rgb(96, 102, 128);
+    /// A pillar's edge.
+    pub const PILLAR_EDGE: Color32 = Color32::from_rgb(168, 176, 204);
+    /// A pillar-to-pillar measurement.
+    pub const MEASURE: Color32 = Color32::from_rgb(120, 210, 180);
+    /// A wall-clearance or room-depth measurement.
+    pub const CALLOUT: Color32 = Color32::from_rgb(255, 186, 92);
+
+    /// A dimension label's size, in points.
+    pub const LABEL_SIZE: f32 = 11.0;
+    /// How far the title and the legend sit in from the diagram's corners.
+    pub const CORNER_INSET: Vec2 = vec2(8.0, 6.0);
 }
 
 /// The type scale, in points. Rajdhani Bold unless a call site says otherwise.
@@ -341,6 +597,9 @@ pub mod size {
     pub const BAR: f32 = 8.0;
     /// The widest a tooltip grows before it wraps.
     pub const TOOLTIP_MAX_WIDTH: f32 = 320.0;
+    /// The widest a trinket's proc sentence runs in an item tooltip before it
+    /// wraps.
+    pub const PROC_TEXT_MAX_WIDTH: f32 = 280.0;
     /// A choice tile's width: an [`super::icon::XL`] icon over a two-line
     /// caption.
     pub const CHOICE_TILE: f32 = 104.0;
@@ -504,5 +763,23 @@ mod tests {
             hud::HUD_PANEL,
             Color32::from_rgba_unmultiplied(13, 13, 20, 235)
         );
+    }
+
+    /// Each translucent token is written premultiplied, because egui's
+    /// translucent constructors are not `const`; it must stay the colour its
+    /// constructor makes.
+    #[test]
+    fn translucent_tokens_are_their_sources() {
+        assert_eq!(
+            hud::NAMEPLATE_ABSORB,
+            Color32::from_rgba_unmultiplied(255, 255, 255, 100)
+        );
+        assert_eq!(
+            hud::BUBBLE_FILL,
+            Color32::from_rgba_unmultiplied(255, 255, 255, 240)
+        );
+        assert_eq!(hud::TIMELINE_COLUMN_RULE, Color32::from_white_alpha(30));
+        assert_eq!(hud::TIMELINE_TICK_RULE, Color32::from_white_alpha(20));
+        assert_eq!(hud::TIMELINE_ICON_EDGE, Color32::from_white_alpha(100));
     }
 }

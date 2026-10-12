@@ -179,8 +179,8 @@ pub fn render_time_controls(
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Speed:")
-                        .size(14.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200)),
+                        .size(theme::text::BODY)
+                        .color(hud::CAPTION),
                 );
 
                 let speed_text = if sim_speed.is_paused() {
@@ -197,24 +197,25 @@ pub fn render_time_controls(
 
                 ui.label(
                     egui::RichText::new(speed_text)
-                        .size(14.0)
+                        .size(theme::text::BODY)
                         .color(if sim_speed.is_paused() {
-                            egui::Color32::from_rgb(255, 100, 100)
+                            hud::SPEED_PAUSED
                         } else {
-                            egui::Color32::from_rgb(100, 255, 100)
+                            hud::SPEED_RUNNING
                         })
                         .strong(),
                 );
             });
 
-            ui.add_space(5.0);
+            ui.add_space(hud::space::ROW);
 
             ui.horizontal(|ui| {
                 // Pause button
                 let pause_btn = egui::Button::new(
-                    egui::RichText::new(if sim_speed.is_paused() { "▶" } else { "⏸" }).size(16.0),
+                    egui::RichText::new(if sim_speed.is_paused() { "▶" } else { "⏸" })
+                        .size(theme::text::H3),
                 )
-                .min_size(egui::vec2(35.0, 30.0));
+                .min_size(hud::size::PAUSE_BUTTON);
 
                 if ui.add(pause_btn).clicked() {
                     if sim_speed.is_paused() {
@@ -235,13 +236,14 @@ pub fn render_time_controls(
                         &format!("{}x", speed as u8)
                     };
 
-                    let btn = egui::Button::new(egui::RichText::new(label).size(12.0))
-                        .min_size(egui::vec2(32.0, 30.0))
-                        .fill(if is_active {
-                            egui::Color32::from_rgb(60, 80, 120)
-                        } else {
-                            egui::Color32::from_rgb(40, 40, 50)
-                        });
+                    let btn =
+                        egui::Button::new(egui::RichText::new(label).size(theme::text::SMALL))
+                            .min_size(hud::size::SPEED_BUTTON)
+                            .fill(if is_active {
+                                hud::SPEED_BUTTON_ACTIVE
+                            } else {
+                                hud::SPEED_BUTTON
+                            });
 
                     if ui.add(btn).clicked() {
                         sim_speed.multiplier = speed;
@@ -250,18 +252,18 @@ pub fn render_time_controls(
                 }
             });
 
-            ui.add_space(3.0);
+            ui.add_space(hud::space::RULE);
 
             // Keyboard shortcuts hint
             ui.label(
                 egui::RichText::new("Space=Pause 1-4=Speed")
-                    .size(10.0)
-                    .color(egui::Color32::from_rgb(120, 120, 120)),
+                    .size(theme::text::MICRO)
+                    .color(hud::HINT),
             );
 
-            ui.add_space(5.0);
+            ui.add_space(hud::space::ROW);
             ui.separator();
-            ui.add_space(3.0);
+            ui.add_space(hud::space::RULE);
 
             // Aura icons toggle
             ui.horizontal(|ui| {
@@ -275,8 +277,8 @@ pub fn render_time_controls(
                 }
                 ui.label(
                     egui::RichText::new("Auras [V]")
-                        .size(12.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200)),
+                        .size(theme::text::SMALL)
+                        .color(hud::CAPTION),
                 );
             });
 
@@ -292,8 +294,8 @@ pub fn render_time_controls(
                 }
                 ui.label(
                     egui::RichText::new("Log [L]")
-                        .size(12.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200)),
+                        .size(theme::text::SMALL)
+                        .color(hud::CAPTION),
                 );
             });
 
@@ -309,8 +311,8 @@ pub fn render_time_controls(
                 }
                 ui.label(
                     egui::RichText::new("Calls [K]")
-                        .size(12.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200)),
+                        .size(theme::text::SMALL)
+                        .color(hud::CAPTION),
                 );
             });
         });
@@ -320,17 +322,20 @@ pub fn render_time_controls(
 // Health Bars
 // ==============================================================================
 
-/// Render 2D health, resource, and cast bars above each living combatant's 3D position.
+/// Render the overhead nameplate above each living combatant's 3D position.
 ///
 /// This system uses egui to draw bars in screen space, converting 3D world positions
 /// to 2D screen coordinates. Displays:
-/// - **Health bar** (always): Green/yellow/red based on HP percentage
-/// - **Resource bar** (if applicable): Colored by resource type
-///   - Mana (blue): Mages, Priests - regenerates slowly, starts full
-///   - Energy (yellow): Rogues - regenerates rapidly, starts full
-///   - Rage (red): Warriors - starts at 0, builds from attacks and taking damage
-/// - **Cast bar** (when casting): Orange bar with spell name showing cast progress
-/// - **Channel bar** (when channeling): Green bar that drains down as channel progresses
+/// - **Health sliver** (always): green/yellow/red by HP fraction, with any absorb
+///   shield laid over it from the right, and a pulsing red edge and halo at low HP
+/// - **Status labels** (above the sliver): STEALTH and the crowd-control labels
+///   with their countdowns (`status_labels`)
+/// - **Cast bar** (when casting): orange with the spell's name, grey for an
+///   uninterruptible cast, red while "INTERRUPTED" shows
+/// - **Channel bar** (when channeling): teal, draining as the channel runs
+///
+/// Resources and auras are not drawn here: they live on the team frames
+/// (`team_frames.rs`).
 pub fn render_health_bars(
     mut contexts: EguiContexts,
     abilities: Res<AbilityDefinitions>,
@@ -444,7 +449,7 @@ pub fn render_health_bars(
                     ui.painter().rect_filled(
                         egui::Rect::from_min_size(bar_pos, egui::vec2(bar_width, bar_height)),
                         corner_radius,
-                        egui::Color32::from_rgb(30, 30, 30),
+                        hud::NAMEPLATE_TRACK,
                     );
 
                     // Health bar fill (color based on health %)
@@ -476,17 +481,13 @@ pub fn render_health_bars(
                             // Draw from right edge, going left
                             let absorb_start_x = bar_pos.x + bar_width - absorb_bar_width;
 
-                            // Translucent white overlay
-                            let shield_color =
-                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100);
-
                             ui.painter().rect_filled(
                                 egui::Rect::from_min_size(
                                     egui::pos2(absorb_start_x, bar_pos.y),
                                     egui::vec2(absorb_bar_width, bar_height),
                                 ),
                                 corner_radius,
-                                shield_color,
+                                hud::NAMEPLATE_ABSORB,
                             );
                         }
                     }
@@ -494,11 +495,9 @@ pub fn render_health_bars(
                     // Health bar border (pulsing red if low HP)
                     let is_low_hp = health_percent < LOW_HP_THRESHOLD;
                     let border_color = if is_low_hp {
-                        // Pulsing red border for low HP
-                        let red_intensity = (200.0 + 55.0 * pulse_intensity) as u8;
-                        egui::Color32::from_rgb(red_intensity, 50, 50)
+                        hud::low_hp_edge(pulse_intensity)
                     } else {
-                        egui::Color32::from_rgb(200, 200, 200)
+                        hud::NAMEPLATE_EDGE
                     };
                     let border_width = if is_low_hp {
                         2.0 * ui_scale
@@ -525,10 +524,10 @@ pub fn render_health_bars(
                                     bar_height + glow_expand * 2.0,
                                 ),
                             ),
-                            4.0 * ui_scale,
+                            hud::LOW_HP_GLOW_RADIUS * ui_scale,
                             egui::Stroke::new(
                                 2.0 * ui_scale,
-                                egui::Color32::from_rgba_unmultiplied(255, 50, 50, glow_alpha),
+                                theme::with_alpha(hud::LOW_HP_GLOW, glow_alpha),
                             ),
                             egui::StrokeKind::Outside,
                         );
