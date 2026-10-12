@@ -34,7 +34,16 @@
 //! - **`ally_in_danger`** — a teammate both DYING (below
 //!   `urgency_hp_threshold`) and PRESSURED (an enemy it can see is on it, near
 //!   enough that intent matters). Its [`Window`] names the most injured such
-//!   teammate. The two facts it joins are kept per teammate in
+//!   teammate. It is debounced at both ends. A teammate pressured only from
+//!   the edge of the pressure test (within `danger_edge_margin` of a radius or
+//!   a closing enemy's preferred range) opens a window once it has been in
+//!   danger for `danger_dwell`; one pressured firmly opens it at once. A window
+//!   ends once its teammate has been out of danger for `danger_release` (or
+//!   dies). So an enemy crossing a pressure radius for a frame neither opens a
+//!   window nor splits one in two, and a Warrior on a dying teammate is
+//!   answered on the first frame. Nothing outside
+//!   the `TeamPlan`-gated Peel play reads the window, so the debounce applies
+//!   under both profiles. The two facts it joins are kept per teammate in
 //!   [`TeamSituation::allies`], because the healers' rules read them apart:
 //!   "a teammate is dying" (cover denial, the dispel walk's dying-first rule)
 //!   and "I am pressured" (the posture machine's PRESSURED trigger). The
@@ -68,6 +77,7 @@
 //! | dying | `health_pct < urgency_hp_threshold` | healer cover denial (`teammate_needs_saving`), the dispel walk's dying-first rule (`another_teammate_dying`) |
 //! | pressured | `danger_radius`, `threat_intent_radius` | the healers' PRESSURED trigger |
 //! | tempo | onset `press_advantage_margin`, release `press_release_margin` (`TeamPlan` only) | healer cover denial, the Warrior tempo reset |
+//! | danger window | dwell `danger_dwell` at a `danger_edge_margin` edge, release `danger_release` | the Peel play (`TeamPlan` only) |
 //! | Attrition | dampening at 50% | the Druid's mana governor |
 //!
 //! Neighbours that look alike were deliberately NOT folded in, because doing
@@ -230,6 +240,18 @@ pub struct TeamSituation {
     /// Every living non-pet teammate (the deciding unit included), in entity
     /// order.
     pub allies: SmallVec<[AllyStanding; 3]>,
+    /// Each teammate dying and pressured right now, in entity order, with
+    /// when it became so: the raw fact under `ally_in_danger`, before the
+    /// window's dwell and release ([`SituationConfig::danger_dwell`]).
+    pub in_danger: SmallVec<[(Entity, f32); 3]>,
+    /// When the open `ally_in_danger` window's teammate stopped being in
+    /// danger, while the window's release runs; `None` while it is in
+    /// danger, or no window is open.
+    pub danger_cleared_at: Option<f32>,
+    /// Whether this is a classification at all. Only the default is not: no
+    /// classification has run, so nothing says when a fact began (see
+    /// [`ally_in_danger`]).
+    pub classified: bool,
 }
 
 /// What a unit does about a situation: a named reordering of its own priority
@@ -356,6 +378,16 @@ pub struct SituationConfig {
     /// `shared.threat_intent_radius`: a melee, pet or closing enemy targeting
     /// a teammate from this close pressures it.
     pub threat_intent_radius: f32,
+    /// `shared.danger_dwell`: seconds a teammate stays dying and pressured
+    /// before an `ally_in_danger` window opens on it.
+    pub danger_dwell: f32,
+    /// `shared.danger_release`: seconds a window's teammate stays out of
+    /// danger before the window ends.
+    pub danger_release: f32,
+    /// `shared.danger_edge_margin`: yards inside every pressure boundary at
+    /// which a threat pressures FIRMLY, skipping the dwell
+    /// ([`firmly_pressured`]).
+    pub danger_edge_margin: f32,
     /// Whether the team runs the gated [`Play::Peel`]. Off until
     /// [`Self::under`] puts the team under `TeamPlan`, so a context classified
     /// with the bare thresholds (a test's) never peels.
@@ -379,6 +411,9 @@ impl SituationConfig {
             urgency_hp_threshold: config.shared.urgency_hp_threshold,
             danger_radius: config.shared.danger_radius,
             threat_intent_radius: config.shared.threat_intent_radius,
+            danger_dwell: config.shared.danger_dwell,
+            danger_release: config.shared.danger_release,
+            danger_edge_margin: config.shared.danger_edge_margin,
             peel: false,
             withheld: WithheldPlays::default(),
         }
@@ -543,7 +578,8 @@ pub fn classify_roster(
     cfg: &SituationConfig,
 ) -> TeamSituation {
     let allies = allies(roster, auras, team, cfg);
-    let ally_in_danger = ally_in_danger(roster, &allies, prev, clock.now);
+    let danger = ally_in_danger(roster, auras, &allies, prev, clock.now, cfg);
+    let ally_in_danger = danger.window;
     let danger_attackers = ally_in_danger
         .and_then(|w| roster.get(&w.subject))
         .map(|subject| pressuring(roster, auras, subject, cfg))
@@ -557,6 +593,9 @@ pub fn classify_roster(
         danger_attackers,
         peel_play: cfg.peel,
         allies,
+        in_danger: danger.in_danger,
+        danger_cleared_at: danger.cleared_at,
+        classified: true,
     }
 }
 
@@ -656,38 +695,140 @@ fn pressure_threats<'r>(
 /// `threat`, targeting `subject`, is still beyond its own preferred range of
 /// it: coming in, not holding position.
 fn closing(threat: &CombatantInfo, subject: &CombatantInfo) -> bool {
-    let preferred = match threat.pet_type {
-        Some(pet_type) => pet_type.preferred_range(),
-        None => threat.class.preferred_range(),
-    };
-    threat.distance_to(subject.position) > preferred
+    threat.distance_to(subject.position) > preferred_range(threat)
 }
 
-/// The most injured teammate both dying and pressured, the first in entity
-/// order on a tie. Its onset carries over while the subject stays the same.
+fn preferred_range(threat: &CombatantInfo) -> f32 {
+    match threat.pet_type {
+        Some(pet_type) => pet_type.preferred_range(),
+        None => threat.class.preferred_range(),
+    }
+}
+
+/// `subject` is pressured by a threat that is not at the EDGE of the pressure
+/// test: one that would still pressure it `danger_edge_margin` further
+/// inside every boundary it passes — `danger_radius`, `threat_intent_radius`
+/// and, for a closing threat, its own preferred range. An enemy sitting on a
+/// boundary flips the test frame by frame; one well inside it does not.
+/// Read only by the `ally_in_danger` window's dwell: the pressure test itself
+/// is unchanged.
+fn firmly_pressured(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    subject: &CombatantInfo,
+    cfg: &SituationConfig,
+) -> bool {
+    let margin = cfg.danger_edge_margin;
+    pressure_threats(roster, auras, subject, cfg).any(|threat| {
+        let distance = subject.position.distance(threat.position);
+        distance <= cfg.danger_radius - margin
+            || (distance <= cfg.threat_intent_radius - margin
+                && (threat.is_pet
+                    || threat.class.is_melee()
+                    || threat.distance_to(subject.position) > preferred_range(threat) + margin))
+    })
+}
+
+/// [`ally_in_danger`]'s answer: the window, and the history the next
+/// classification reads ([`TeamSituation::in_danger`],
+/// [`TeamSituation::danger_cleared_at`]).
+struct Danger {
+    window: Option<Window>,
+    in_danger: SmallVec<[(Entity, f32); 3]>,
+    cleared_at: Option<f32>,
+}
+
+/// The `ally_in_danger` window: the most injured teammate both dying and
+/// pressured, the first in entity order on a tie — debounced at both ends.
+///
+/// - **Dwell, at an edge only.** A teammate pressured FIRMLY
+///   ([`firmly_pressured`]: an enemy well inside the pressure test, such as a
+///   Warrior on it) opens its window on the first frame it is dying. One
+///   pressured only from the edge of the test opens its window once it has
+///   been dying and pressured for [`SituationConfig::danger_dwell`], so an
+///   enemy passing a boundary for a frame (a healer stepping across
+///   `threat_intent_radius` or `danger_radius`, or to its preferred range)
+///   opens nothing.
+/// - **Release.** An open window ends only once its teammate has been out of
+///   danger for [`SituationConfig::danger_release`], so a one-frame heal or
+///   step out of a radius neither ends it nor opens a new one when it comes
+///   back. It ends at once when the teammate dies, and gives way at once to
+///   another teammate whose own window could open — its dwell counted from
+///   when ITS danger began, not from when the first window ended.
+///
+/// The window's onset carries over while its teammate stays the same, the
+/// release included. With no history (`prev` is the default: nothing has
+/// been classified), a teammate already in danger is taken to have been so
+/// for the dwell — nothing says when it began. A live match classifies from
+/// its first frame behind the gates, where nobody is dying, so only a
+/// context classified once (a scene's, a test's) ever starts that way.
 fn ally_in_danger(
     roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
     allies: &[AllyStanding],
     prev: &TeamSituation,
     now: f32,
-) -> Option<Window> {
+    cfg: &SituationConfig,
+) -> Danger {
+    let open = prev.ally_in_danger;
+    let in_danger: SmallVec<[(Entity, f32); 3]> = allies
+        .iter()
+        .filter(|a| a.dying && a.pressured)
+        .map(|a| {
+            let since = if prev.classified {
+                prev.in_danger
+                    .iter()
+                    .find(|(e, _)| *e == a.entity)
+                    .map_or(now, |(_, since)| *since)
+            } else {
+                // No history: in danger since before anything was seen.
+                f32::NEG_INFINITY
+            };
+            (a.entity, since)
+        })
+        .collect();
     let mut worst: Option<(Entity, f32)> = None;
-    for ally in allies.iter().filter(|a| a.dying && a.pressured) {
-        let hp = roster.get(&ally.entity)?.health_pct();
+    for &(entity, since) in &in_danger {
+        let Some(info) = roster.get(&entity) else {
+            continue;
+        };
+        let is_open = open.is_some_and(|w| w.subject == entity);
+        if !is_open && now - since < cfg.danger_dwell && !firmly_pressured(roster, auras, info, cfg)
+        {
+            continue;
+        }
+        let hp = info.health_pct();
         if worst.is_none_or(|(_, best)| hp < best) {
-            worst = Some((ally.entity, hp));
+            worst = Some((entity, hp));
         }
     }
-    let (subject, _) = worst?;
-    let since = prev
-        .ally_in_danger
-        .filter(|w| w.subject == subject)
-        .map_or(now, |w| w.since);
-    Some(Window {
-        subject,
-        since,
-        until: None,
-    })
+    if let Some((subject, _)) = worst {
+        let since = open
+            .filter(|w| w.subject == subject)
+            .map_or(now, |w| w.since);
+        return Danger {
+            window: Some(Window {
+                subject,
+                since,
+                until: None,
+            }),
+            in_danger,
+            cleared_at: None,
+        };
+    }
+    // Nobody in danger for the dwell: an open window holds through its
+    // release, while its teammate lives.
+    let held = open
+        .filter(|w| allies.iter().any(|a| a.entity == w.subject))
+        .and_then(|w| {
+            let cleared_at = prev.danger_cleared_at.unwrap_or(now);
+            (now - cleared_at < cfg.danger_release).then_some((w, cleared_at))
+        });
+    Danger {
+        window: held.map(|(w, _)| w),
+        in_danger,
+        cleared_at: held.map(|(_, cleared_at)| cleared_at),
+    }
 }
 
 /// The enemy healer `team` would shut down: the first living, non-pet enemy
@@ -1321,15 +1462,263 @@ mod tests {
         // The onset carries while the subject holds.
         let later = classify_now(&f, &first, 31.0);
         assert_eq!(later.ally_in_danger.unwrap().since, 30.0);
-        // The Rogue pressured too, and lower: a new window on it.
+        // The Rogue firmly pressured too, and lower: a new window on it at
+        // once.
         place(&mut f, healer, 1.0, 0.0, Some(rogue));
         let moved = classify_now(&f, &later, 32.0);
         let window = moved.ally_in_danger.unwrap();
         assert_eq!((window.subject, window.since), (rogue, 32.0));
-        // Healthy again: no window, though still pressured.
+        // Healthy again: no window once the release has run, though still
+        // pressured.
+        let release = SituationConfig::default().danger_release;
         f.roster.get_mut(&warrior).unwrap().current_health = 100.0;
         f.roster.get_mut(&rogue).unwrap().current_health = 100.0;
-        assert_eq!(classify_now(&f, &moved, 33.0).ally_in_danger, None);
+        let releasing = classify_now(&f, &moved, 33.0);
+        assert_eq!(releasing.ally_in_danger.map(|w| w.subject), Some(rogue));
+        assert_eq!(
+            classify_now(&f, &releasing, 33.0 + release + 0.01).ally_in_danger,
+            None
+        );
+    }
+
+    const FRAME: f32 = 1.0 / 60.0;
+
+    /// A frame clock over a fixture's classifications.
+    struct Frames {
+        now: f32,
+        s: TeamSituation,
+    }
+
+    impl Frames {
+        /// Classified history at 30s.
+        fn new(f: &Fixture) -> Self {
+            Self {
+                now: 30.0,
+                s: classify_now(f, &TeamSituation::default(), 30.0),
+            }
+        }
+
+        /// One frame on: the team-1 window.
+        fn step(&mut self, f: &Fixture) -> Option<Window> {
+            self.now += FRAME;
+            self.s = classify_now(f, &self.s, self.now);
+            self.s.ally_in_danger
+        }
+    }
+
+    /// The fixture's enemy Priest 29.5yd from `whom`, targeting it: still
+    /// closing (beyond its 28yd preferred range) inside the 30yd intent
+    /// radius, so it pressures — but from within `danger_edge_margin` of both
+    /// boundaries, so only from the EDGE.
+    fn edge_threat(f: &mut Fixture, whom: Entity) {
+        let at = f.roster[&whom].position;
+        let healer = f.healer;
+        place(f, healer, at.x + 29.5, at.z, Some(whom));
+    }
+
+    fn firm(f: &Fixture, whom: Entity) -> bool {
+        firmly_pressured(
+            &f.roster,
+            &f.auras,
+            &f.roster[&whom],
+            &SituationConfig::default(),
+        )
+    }
+
+    fn loose(f: &Fixture, whom: Entity) -> bool {
+        pressured(
+            &f.roster,
+            &f.auras,
+            &f.roster[&whom],
+            &SituationConfig::default(),
+        )
+    }
+
+    #[test]
+    fn edge_and_firm_pressure_are_told_apart() {
+        let cfg = SituationConfig::default();
+        let mut f = fixture();
+        let (warrior, healer, mage) = (f.warrior, f.healer, f.mage);
+        edge_threat(&mut f, warrior);
+        assert!(loose(&f, warrior) && !firm(&f, warrior));
+        // A caster closing through the 2yd band between its 28yd preferred
+        // range and the 30yd intent radius is never a margin inside both:
+        // anywhere in it, the edge. Well inside the danger radius, firm.
+        for d in [28.25, 29.0, 29.75] {
+            place(&mut f, healer, d, 0.0, Some(warrior));
+            assert!(loose(&f, warrior) && !firm(&f, warrior), "{d}yd");
+        }
+        place(
+            &mut f,
+            healer,
+            cfg.danger_radius - cfg.danger_edge_margin - 0.5,
+            0.0,
+            Some(warrior),
+        );
+        assert!(firm(&f, warrior));
+        // Inside the danger radius by less than the margin: the edge.
+        place(&mut f, healer, cfg.danger_radius - 0.5, 0.0, Some(warrior));
+        assert!(loose(&f, warrior) && !firm(&f, warrior));
+        // A melee 1.5yd off is firm; one half a yard inside the intent
+        // radius is at its edge.
+        place(&mut f, healer, 0.0, 0.0, None);
+        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Rogue;
+        place(&mut f, mage, 1.5, 0.0, Some(warrior));
+        assert!(firm(&f, warrior));
+        place(
+            &mut f,
+            mage,
+            cfg.threat_intent_radius - 0.5,
+            0.0,
+            Some(warrior),
+        );
+        assert!(loose(&f, warrior) && !firm(&f, warrior));
+    }
+
+    /// A teammate firmly pressured opens its window on the first frame it is
+    /// dying: the dwell never delays the answer to a Warrior on a dying ally.
+    #[test]
+    fn firm_pressure_opens_a_window_on_the_first_frame() {
+        let mut f = fixture();
+        let (warrior, mage) = (f.warrior, f.mage);
+        let mut frames = Frames::new(&f);
+        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Warrior;
+        place(&mut f, mage, 1.5, 0.0, Some(warrior));
+        assert_eq!(frames.step(&f), None, "not dying yet");
+        f.roster.get_mut(&warrior).unwrap().current_health = 20.0;
+        let opened = frames.step(&f).expect("opened on the first dying frame");
+        assert_eq!((opened.subject, opened.since), (warrior, frames.now));
+    }
+
+    /// The debounce, frame by frame at 60 Hz, on pressure from the edge: a
+    /// danger shorter than the dwell opens nothing; a window survives a gap
+    /// shorter than the release and keeps its onset; it ends once the release
+    /// has run, and at once when its teammate dies.
+    #[test]
+    fn ally_in_danger_dwells_before_it_opens_and_releases_after_it_clears() {
+        let cfg = SituationConfig::default();
+        assert!(cfg.danger_dwell > 2.0 * FRAME && cfg.danger_release > 2.0 * FRAME);
+        let mut f = fixture();
+        let (warrior, healer) = (f.warrior, f.healer);
+        f.roster.get_mut(&warrior).unwrap().current_health = 20.0;
+        let mut frames = Frames::new(&f);
+        let target = |f: &mut Fixture, whom: Option<Entity>| {
+            f.roster.get_mut(&healer).unwrap().target = whom;
+        };
+        // One frame of edge pressure: nothing opens, then or after.
+        edge_threat(&mut f, warrior);
+        assert_eq!(frames.step(&f), None);
+        target(&mut f, None);
+        for _ in 0..30 {
+            assert_eq!(frames.step(&f), None, "a one-frame danger opened a window");
+        }
+        // Edge pressure that holds opens a window once the dwell has run.
+        target(&mut f, Some(warrior));
+        let start = frames.now + FRAME;
+        let opened = std::iter::repeat_with(|| frames.step(&f))
+            .take(60)
+            .find_map(|w| w)
+            .expect("a held danger opens a window");
+        assert!(opened.since - start >= cfg.danger_dwell - 1e-4);
+        assert!(opened.since - start < cfg.danger_dwell + 2.0 * FRAME);
+        // A one-frame step off it does not end it, nor re-open it.
+        target(&mut f, None);
+        assert_eq!(frames.step(&f), Some(opened));
+        target(&mut f, Some(warrior));
+        assert_eq!(frames.step(&f), Some(opened));
+        // Neither does a one-frame heal over the threshold.
+        f.roster.get_mut(&warrior).unwrap().current_health = 60.0;
+        assert_eq!(frames.step(&f), Some(opened));
+        f.roster.get_mut(&warrior).unwrap().current_health = 20.0;
+        assert_eq!(frames.step(&f), Some(opened));
+        // Healed for good: it holds through the release, then ends.
+        f.roster.get_mut(&warrior).unwrap().current_health = 60.0;
+        let cleared = frames.now + FRAME;
+        let mut ended = None;
+        for _ in 0..60 {
+            if frames.step(&f).is_none() {
+                ended = Some(frames.now);
+                break;
+            }
+        }
+        let ended = ended.expect("a cleared danger ends");
+        assert!(ended - cleared >= cfg.danger_release - 1e-4);
+        assert!(ended - cleared < cfg.danger_release + 2.0 * FRAME);
+        // A teammate that dies ends its window at once.
+        f.roster.get_mut(&warrior).unwrap().current_health = 20.0;
+        for _ in 0..60 {
+            frames.step(&f);
+        }
+        assert!(frames.s.ally_in_danger.is_some());
+        f.roster.get_mut(&warrior).unwrap().is_alive = false;
+        assert_eq!(frames.step(&f), None);
+    }
+
+    /// The takeover: A's window is open, and B — healthier, pressured only
+    /// from the edge — has been in danger for the dwell behind it. When A
+    /// heals over the threshold, or dies, the window names B on that same
+    /// frame: B's dwell counts from when ITS danger began.
+    #[test]
+    fn a_teammate_already_past_its_dwell_takes_over_at_once() {
+        for ending in ["healed", "died"] {
+            let mut f = fixture();
+            let (warrior, rogue, mage) = (f.warrior, f.rogue, f.mage);
+            // A: the Warrior at 20%, a Mage on it at 1yd (firm).
+            f.roster.get_mut(&warrior).unwrap().current_health = 20.0;
+            place(&mut f, mage, 1.0, 0.0, Some(warrior));
+            // B: the Rogue at 40%, 100yd off, the Priest at its edge.
+            place(&mut f, rogue, 100.0, 0.0, None);
+            f.roster.get_mut(&rogue).unwrap().current_health = 40.0;
+            let mut frames = Frames::new(&f);
+            edge_threat(&mut f, rogue);
+            for _ in 0..30 {
+                assert_eq!(frames.step(&f).map(|w| w.subject), Some(warrior));
+            }
+            assert!(
+                frames.s.in_danger.iter().any(|(e, _)| *e == rogue),
+                "B is in danger behind A's window"
+            );
+            match ending {
+                "healed" => f.roster.get_mut(&warrior).unwrap().current_health = 100.0,
+                _ => f.roster.get_mut(&warrior).unwrap().is_alive = false,
+            }
+            let w = frames.step(&f).expect("B takes over");
+            assert_eq!(
+                (w.subject, w.since),
+                (rogue, frames.now),
+                "A {ending}: B must take over on the same frame"
+            );
+        }
+    }
+
+    /// With the dwell and release at zero the window is the raw fact, frame
+    /// for frame: the debounce adds nothing else.
+    #[test]
+    fn a_zero_debounce_is_the_raw_fact() {
+        let cfg = SituationConfig {
+            danger_dwell: 0.0,
+            danger_release: 0.0,
+            ..SituationConfig::default()
+        };
+        let mut f = fixture();
+        let (warrior, healer) = (f.warrior, f.healer);
+        f.roster.get_mut(&warrior).unwrap().current_health = 20.0;
+        let at = |f: &Fixture, prev: &TeamSituation, now: f32| {
+            classify_roster(
+                &f.roster,
+                &f.auras,
+                1,
+                prev,
+                &MatchClock::after_gates(now),
+                &cfg,
+            )
+        };
+        let quiet = at(&f, &TeamSituation::default(), 30.0);
+        edge_threat(&mut f, warrior);
+        let on = at(&f, &quiet, 30.01);
+        assert_eq!(on.ally_in_danger.map(|w| w.since), Some(30.01));
+        f.roster.get_mut(&healer).unwrap().target = None;
+        assert_eq!(at(&f, &on, 30.02).ally_in_danger, None);
     }
 
     #[test]

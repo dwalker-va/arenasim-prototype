@@ -9,12 +9,12 @@
 //! when it is deleted. Each pair below kills exactly that deletion.
 
 use arenasim::states::match_config::CharacterClass::{
-    Druid, Hunter, Mage, Paladin, Priest, Warrior,
+    Druid, Hunter, Mage, Paladin, Priest, Warlock, Warrior,
 };
 use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::druid::mana_reserve;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
-use arenasim::states::play_match::decision_trace::{MovementTrigger, RejectionReason};
+use arenasim::states::play_match::decision_trace::{MovementTrigger, PlayTag, RejectionReason};
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
 use arenasim::states::play_match::movement_config::load_movement_config;
 use arenasim::states::play_match::situation::{
@@ -32,6 +32,7 @@ const ENEMY_WARRIOR: &str = "enemy warrior";
 const ENEMY_PRIEST: &str = "enemy priest";
 const PALADIN: &str = "paladin";
 const DRUID: &str = "druid";
+const ENEMY_WARLOCK: &str = "enemy warlock";
 
 /// Battle Shout's buff, already up, so the Warrior's first priority (shout an
 /// unbuffed ally) is out of the way and the damage chain is what decides.
@@ -702,6 +703,229 @@ fn a_teamplan_team_stops_pressing_below_the_release() {
             .iter()
             .any(|m| m.trigger == MovementTrigger::MeleeReset),
         "released, the Warrior resets again: {}",
+        describe(&view)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The ally-in-danger debounce: firm pressure opens a window on the first
+// frame; pressure only from the edge of the test opens one after
+// `danger_dwell`; a window survives a blip shorter than `danger_release`, and
+// ends once the release has truly run. One frame of the scene is 1/60s.
+// ---------------------------------------------------------------------------
+
+const FRAME: f32 = 1.0 / 60.0;
+
+/// The targeted-Priest scene with its ally dying and the enemy Warrior on it,
+/// both teams under `TeamPlan` (so the Priest's Peel play can answer), at the
+/// sim time `now`.
+fn danger_scene(now: f32) -> Scene {
+    let mut scene = targeted_priest_scene(ALLY)
+        .ai_profile(1, AiProfile::TeamPlan)
+        .ai_profile(2, AiProfile::TeamPlan)
+        .now(now);
+    scene.set_health(ALLY, 0.3);
+    scene
+}
+
+/// Reclassify `scene` at `now` — one more frame of history — and report its
+/// team-1 window as (subject index, onset).
+fn window_at(scene: Scene, now: f32) -> (Scene, Option<(u32, f32)>) {
+    let mut scene = scene.now(now);
+    let w = scene
+        .reclassify()
+        .for_team(1)
+        .ally_in_danger
+        .map(|w| (w.subject.index(), w.since));
+    (scene, w)
+}
+
+#[test]
+fn a_warrior_on_a_dying_ally_opens_a_window_on_the_first_frame() {
+    // History: the ally healthy, the enemy Warrior on it from 13yd — well
+    // inside the pressure test, so FIRM pressure.
+    let now = 30.0;
+    let mut scene = danger_scene(now);
+    scene.set_health(ALLY, 0.9);
+    let (mut scene, w) = window_at(scene, now);
+    assert_eq!(w, None);
+    // The first frame it is dying, the window is open and the Priest's play
+    // is the peel: no dwell.
+    scene.set_health(ALLY, 0.3);
+    let (scene, w) = window_at(scene, now + FRAME);
+    assert_eq!(w, Some((scene.entity(ALLY).index(), now + FRAME)));
+    let view = scene.decide(PRIEST);
+    assert!(
+        matches!(
+            view.situation.and_then(|s| s.play),
+            Some(PlayTag::Peel { .. })
+        ),
+        "{}",
+        describe(&view)
+    );
+}
+
+#[test]
+fn a_one_frame_edge_danger_opens_no_window_and_a_lasting_one_does() {
+    let dwell = load_movement_config()
+        .expect("movement.ron")
+        .shared
+        .danger_dwell;
+    assert!(
+        dwell > 2.0 * FRAME,
+        "movement.ron must give the window a dwell"
+    );
+    // The enemy Warrior is on the Priest; an enemy Warlock targets the ally
+    // from 29.5yd — still closing on it (beyond its 28yd preferred range)
+    // inside the 30yd intent radius, so it pressures, but only from the EDGE
+    // of the test. History: the ally
+    // healthy.
+    let mut now = 30.0;
+    let mut scene = Scene::new()
+        .ai_profile(1, AiProfile::TeamPlan)
+        .ai_profile(2, AiProfile::TeamPlan)
+        .now(now)
+        .unit(PRIEST, 1, Priest)
+        .aura(PRIEST, AuraType::MaxHealthIncrease, 600.0)
+        .unit(ALLY, 1, Warrior)
+        .at(0.0, -10.0)
+        .aura(ALLY, AuraType::MaxHealthIncrease, 600.0)
+        .unit(ENEMY_WARRIOR, 2, Warrior)
+        .at(-8.0, 0.0)
+        .targeting(PRIEST)
+        .unit(ENEMY_WARLOCK, 2, Warlock)
+        .at(0.0, -39.5)
+        .targeting(ALLY);
+    scene.set_health(ALLY, 0.9);
+    let (mut scene, w) = window_at(scene, now);
+    assert_eq!(w, None);
+    let ally = scene.entity(ALLY).index();
+    // One frame dying under it, then healed back: no window, then or after.
+    scene.set_health(ALLY, 0.3);
+    now += FRAME;
+    let (mut scene, w) = window_at(scene, now);
+    assert_eq!(w, None, "an edge danger opened a window on its first frame");
+    scene.set_health(ALLY, 0.9);
+    for _ in 0..30 {
+        now += FRAME;
+        let (s, w) = window_at(scene, now);
+        scene = s;
+        assert_eq!(w, None, "a one-frame danger opened a window");
+    }
+    let view = scene.decide(PRIEST);
+    assert_eq!(
+        view.situation.and_then(|s| s.play),
+        None,
+        "{}",
+        describe(&view)
+    );
+
+    // Control: the same danger held opens a window once the dwell has run,
+    // and the Priest's play is the peel.
+    scene.set_health(ALLY, 0.3);
+    let start = now + FRAME;
+    let mut opened = None;
+    for _ in 0..60 {
+        now += FRAME;
+        let (s, w) = window_at(scene, now);
+        scene = s;
+        if w.is_some() {
+            opened = w;
+            break;
+        }
+    }
+    let (subject, since) = opened.expect("a held danger opens a window");
+    assert_eq!(subject, ally);
+    assert!(
+        since - start >= dwell - 1e-3,
+        "opened after {}s",
+        since - start
+    );
+    assert!(
+        since - start < dwell + 2.0 * FRAME,
+        "opened after {}s",
+        since - start
+    );
+    let view = scene.decide(PRIEST);
+    assert!(
+        matches!(
+            view.situation.and_then(|s| s.play),
+            Some(PlayTag::Peel { .. })
+        ),
+        "{}",
+        describe(&view)
+    );
+}
+
+#[test]
+fn a_one_frame_blip_does_not_end_a_danger_window_and_a_real_release_does() {
+    let release = load_movement_config()
+        .expect("movement.ron")
+        .shared
+        .danger_release;
+    assert!(
+        release > 2.0 * FRAME,
+        "movement.ron must give the window a release"
+    );
+    // A window already open: classified with no history, the standing danger
+    // is a window at once.
+    let mut now = 30.0;
+    let (mut scene, opened) = window_at(danger_scene(now), now);
+    let opened = opened.expect("the standing danger is a window");
+
+    // One frame healed over the threshold, then dying again: the same window,
+    // same onset, throughout.
+    scene.set_health(ALLY, 0.6);
+    now += FRAME;
+    let (mut scene, w) = window_at(scene, now);
+    assert_eq!(w, Some(opened), "a one-frame heal ended the window");
+    scene.set_health(ALLY, 0.3);
+    now += FRAME;
+    let (scene, w) = window_at(scene, now);
+    assert_eq!(w, Some(opened), "the blip split the window in two");
+    // One frame with the Warrior off the ally: the same.
+    let scene = scene.target(ENEMY_WARRIOR, PRIEST);
+    now += FRAME;
+    let (scene, w) = window_at(scene, now);
+    assert_eq!(w, Some(opened), "a one-frame retarget ended the window");
+    let scene = scene.target(ENEMY_WARRIOR, ALLY);
+    now += FRAME;
+    let (mut scene, w) = window_at(scene, now);
+    assert_eq!(w, Some(opened));
+
+    // Healed for good: the window holds through the release, then ends.
+    scene.set_health(ALLY, 0.6);
+    let cleared = now + FRAME;
+    let mut ended = None;
+    for _ in 0..60 {
+        now += FRAME;
+        let (s, w) = window_at(scene, now);
+        scene = s;
+        match w {
+            Some(w) => assert_eq!(w, opened),
+            None => {
+                ended = Some(now);
+                break;
+            }
+        }
+    }
+    let ended = ended.expect("a cleared danger ends its window");
+    assert!(
+        ended - cleared >= release - 1e-3,
+        "ended after {}s",
+        ended - cleared
+    );
+    assert!(
+        ended - cleared < release + 2.0 * FRAME,
+        "ended after {}s",
+        ended - cleared
+    );
+    let view = scene.decide(PRIEST);
+    assert_eq!(view.situation.and_then(|s| s.ally_in_danger), None);
+    assert_eq!(
+        view.situation.and_then(|s| s.play),
+        None,
+        "{}",
         describe(&view)
     );
 }
