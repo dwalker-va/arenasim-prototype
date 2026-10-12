@@ -924,7 +924,13 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         let usable = |turn: &Self, e: &CombatantInfo, category: DRCategory| {
             e.is_alive
                 && Some(e.entity) != kill_target
-                && !turn.ctx.is_ccd(e.entity)
+                && turn
+                    .ctx
+                    .held_in_hard_cc(
+                        e.entity,
+                        super::Incoming::of(turn.abilities.get_unchecked(&AbilityType::Cyclone)),
+                    )
+                    .is_none()
                 && !turn.ctx.is_dr_immune(e.entity, category)
         };
         // Enemies attacking `ally` from within their reach, nearest first.
@@ -1185,7 +1191,13 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         let usable = |turn: &Self, e: &CombatantInfo, category: DRCategory| {
             e.is_alive
                 && Some(e.entity) != kill_target
-                && !turn.ctx.is_ccd(e.entity)
+                && turn
+                    .ctx
+                    .held_in_hard_cc(
+                        e.entity,
+                        super::Incoming::of(turn.abilities.get_unchecked(&AbilityType::Cyclone)),
+                    )
+                    .is_none()
                 && !turn.ctx.is_dr_immune(e.entity, category)
         };
         // 2. Cyclone the enemy healer when the kill is close.

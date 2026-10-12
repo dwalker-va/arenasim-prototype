@@ -60,6 +60,9 @@ pub const SHAPESHIFTED_NOTE: &str = "shapeshifted: nothing is cast in Travel For
 /// >= mana_cost`.
 ///
 /// Guards run in this order so that cheap checks fail fast:
+/// 0. a cast that applies a hold ([`applies_hold`]) on a target already held
+///    ([`CombatContext::held_in_hard_cc`]) — always, not opt-in: no hard CC is
+///    stacked on a unit its team already holds
 /// 1. friendly-CC (opt-in)
 /// 2. friendly-DoTs (opt-in)
 /// 3. target damage immunity (opt-in)
@@ -85,6 +88,13 @@ pub fn pre_cast_ok(
     opts: PreCastOpts,
 ) -> bool {
     if let Some((target_entity, _)) = target {
+        if applies_hold(def)
+            && ctx
+                .held_in_hard_cc(target_entity, super::Incoming::of(def))
+                .is_some()
+        {
+            return false;
+        }
         if opts.check_friendly_cc && ctx.has_friendly_breakable_cc(target_entity) {
             return false;
         }
@@ -117,6 +127,17 @@ pub fn pre_cast_ok(
         // no target segment to test.
         None => caster.current_mana >= def.mana_cost,
     }
+}
+
+/// Does this ability HOLD what it lands on — apply crowd control that stops
+/// its target acting ([`holds`](super::holds))? Read from the ability's own
+/// `applies_aura`, so a new hard-CC ability is gated by [`pre_cast_ok`] with no
+/// change here. A ground-placed cast (a trap) has no target for the gate to
+/// ask about, so its placement asks this of the enemy it is aimed at.
+pub fn applies_hold(def: &AbilityConfig) -> bool {
+    def.applies_aura
+        .as_ref()
+        .is_some_and(|a| super::holds(a.aura_type))
 }
 
 /// The caster's own gates, steps 4-7 of [`pre_cast_ok`]: Travel Form, the
@@ -266,6 +287,12 @@ pub fn classify_pre_cast_failure(
     use crate::states::play_match::decision_trace::RejectionReason;
 
     if let Some((target_entity, _)) = target {
+        if let Some(cc_type) = ctx
+            .held_in_hard_cc(target_entity, super::Incoming::of(def))
+            .filter(|_| applies_hold(def))
+        {
+            return RejectionReason::TargetAlreadyCCd { cc_type };
+        }
         if opts.check_friendly_cc && ctx.has_friendly_breakable_cc(target_entity) {
             return RejectionReason::FriendlyBreakableCC;
         }

@@ -437,6 +437,57 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
+    /// Is `entity` already HELD — under crowd control that stops it acting
+    /// ([`holds`]) for longer than [`CC_CHAIN_WINDOW`]? Returns the holding
+    /// aura's type (the longest-lasting one), for the trace.
+    ///
+    /// The one question every hard-CC chooser asks of the target it would CAST
+    /// on, and the cast gate asks again of every targeted cast that would
+    /// apply a hold ([`cast_guard::pre_cast_ok`]). A chooser that only moves
+    /// the unit (a dip, a trap setup) does not ask: walking to a held healer
+    /// puts the caster in place for when the hold ends.
+    ///
+    /// A fresh hard CC on a held unit spends a cast, a global cooldown and
+    /// diminishing returns on a target that is not acting anyway, and can
+    /// replace a Polymorph the team placed.
+    /// Inside the last [`CC_CHAIN_WINDOW`] the hold is about to end and a new
+    /// one CHAINS onto it instead (the Rogue's Kidney Shot onto its own
+    /// expiring Cheap Shot).
+    ///
+    /// `incoming` is how the CC about to be cast takes damage. One that
+    /// [`Incoming::Lasts`] (a stun, a horror, a Cyclone) is not stacked on a
+    /// hold the team is breaking: a hold that breaks once enough damage
+    /// accumulates (a Fear, a Psychic Scream) does not count while the team is
+    /// attacking its bearer, so the stun becomes the lock that lasts. A hold
+    /// that breaks on ANY damage (a Polymorph, a Freezing Trap) still counts —
+    /// the team holds its damage for it ([`Self::has_friendly_breakable_cc`]).
+    /// One that [`Incoming::Breaks`] itself would only be broken the same way,
+    /// so every hold counts against it.
+    ///
+    /// Asked of enemies, whose crowd control can only be the deciding unit's
+    /// own team's: no hold lands on its caster's side. So the caster is not
+    /// looked up — a hold whose caster has died or left the view holds all the
+    /// same.
+    pub fn held_in_hard_cc(&self, entity: Entity, incoming: Incoming) -> Option<AuraType> {
+        let breaking = incoming == Incoming::Lasts && self.attacked_by_my_team(entity);
+        self.active_auras
+            .get(&entity)?
+            .iter()
+            .filter(|a| holds(a.effect_type) && a.duration > CC_CHAIN_WINDOW)
+            .filter(|a| !(breaking && a.break_on_damage_threshold > 0.0))
+            .max_by(|a, b| a.duration.total_cmp(&b.duration))
+            .map(|a| a.effect_type)
+    }
+
+    /// Does a living member of the deciding unit's team (itself and pets
+    /// included) have `entity` as its target?
+    fn attacked_by_my_team(&self, entity: Entity) -> bool {
+        let my_team = self.self_info().map(|i| i.team);
+        self.combatants
+            .values()
+            .any(|c| Some(c.team) == my_team && c.is_alive && c.target == Some(entity))
+    }
+
     /// The enemy healer — first alive non-pet healer in deterministic entity
     /// order (BTreeMap), if any. The Hunter's freezing-trap targeting and the
     /// Priest's Mana Burn read it; whether it is LOCKED is a situation
@@ -1281,6 +1332,46 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::TravelForm => false,
     }
 }
+
+/// Does this aura HOLD its bearer — stop it acting, so that a second hard
+/// crowd control on it would be wasted? [`is_hard_cc`] less Root: a rooted
+/// unit still casts and swings, so a root makes no stun, fear, polymorph or
+/// cyclone redundant. Derived from the exhaustive [`is_hard_cc`], so a new
+/// hard-CC aura joins it without anyone remembering to.
+///
+/// The one copy of the set: [`CombatContext::held_in_hard_cc`] and the cast
+/// gate ask it of a target, and `situation::locks_healer` (the
+/// `enemy_healer_locked` window) is it.
+pub const fn holds(aura: AuraType) -> bool {
+    is_hard_cc(aura) && !matches!(aura, AuraType::Root)
+}
+
+/// How a hard CC about to be cast takes damage — what
+/// [`CombatContext::held_in_hard_cc`] needs to know of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Incoming {
+    /// It breaks on damage (a Polymorph, a Fear, a Freezing Trap).
+    Breaks,
+    /// It never does (a stun, a horror, a Cyclone).
+    Lasts,
+}
+
+impl Incoming {
+    /// Read off the ability's own aura: a negative `break_on_damage` never
+    /// breaks.
+    pub fn of(def: &crate::states::play_match::ability_config::AbilityConfig) -> Self {
+        match def.applies_aura.as_ref() {
+            Some(a) if a.break_on_damage < 0.0 => Incoming::Lasts,
+            _ => Incoming::Breaks,
+        }
+    }
+}
+
+/// Seconds before a hold ([`holds`]) ends inside which a fresh hard CC may be
+/// cast onto it: it then CHAINS onto the hold rather than stacking on it
+/// ([`CombatContext::held_in_hard_cc`]). The Rogue's Kidney Shot chain onto
+/// its own Cheap Shot fires at exactly this point.
+pub const CC_CHAIN_WINDOW: f32 = 0.5;
 
 /// Does this aura make its holder IMMUNE TO DAMAGE — a target no attacker,
 /// interrupt or Mana Burn should spend a cast on?

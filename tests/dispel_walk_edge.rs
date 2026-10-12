@@ -461,25 +461,16 @@ impl Played {
 /// dying. Before AS-197 the `Legacy` walk yielded only to a dying teammate the
 /// healer could not SEE (the medic chase), so on an open map it walked off a
 /// sighted one: the Priest in `Warrior+Mage+Priest vs Mage+Rogue+Priest`
-/// (BasicArena, seed 4) at 21.5s and 22.1s, and the Paladin in
-/// `Warrior+Warlock+Paladin vs Warlock+Rogue+Paladin` (BasicArena, seed 3) at
-/// 30.8s and 31.4s.
+/// (BasicArena, seed 4) at 21.5s and 22.1s. The Paladin's half is the staged
+/// match in `tests/dispel_walk_dying_first.rs`.
 #[test]
 fn a_healer_does_not_walk_for_a_dispel_while_another_teammate_is_dying() {
-    for (class, team1, team2, seed) in [
-        (
-            CharacterClass::Priest,
-            ["Warrior", "Mage", "Priest"],
-            ["Mage", "Rogue", "Priest"],
-            4,
-        ),
-        (
-            CharacterClass::Paladin,
-            ["Warrior", "Warlock", "Paladin"],
-            ["Warlock", "Rogue", "Paladin"],
-            3,
-        ),
-    ] {
+    for (class, team1, team2, seed) in [(
+        CharacterClass::Priest,
+        ["Warrior", "Mage", "Priest"],
+        ["Mage", "Rogue", "Priest"],
+        4,
+    )] {
         let played = probe(&team1, &team2, "BasicArena", seed);
         let dying = played.dying_while_owed(class);
         assert!(

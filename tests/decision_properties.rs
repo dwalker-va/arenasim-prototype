@@ -1141,12 +1141,6 @@ const KNOWN: &[Known] = &[
         property: Property::InSight,
         abilities: &[AbilityType::HammerOfJustice],
     },
-    // The Death Coil peel horrifies a melee its own team has polymorphed.
-    Known {
-        card: "AS-280",
-        property: Property::FriendlyCcKept,
-        abilities: &[AbilityType::DeathCoil],
-    },
     // Concussive Shot and the Frost Trap peel are aimed at a Divine-Shielded
     // melee, and trap throws land where the Hunter cannot see.
     Known {
@@ -1158,21 +1152,6 @@ const KNOWN: &[Known] = &[
         card: "AS-281",
         property: Property::InSight,
         abilities: &[AbilityType::FrostTrap],
-    },
-    // Hard crowd control cast onto an enemy the team already holds in its
-    // own: the Warlock's Fear on its CC target, the Death Coil peel, the
-    // Rogue's stuns, Hammer of Justice and the Freezing Trap's aim.
-    Known {
-        card: "AS-285",
-        property: Property::CcNotStacked,
-        abilities: &[
-            AbilityType::Fear,
-            AbilityType::DeathCoil,
-            AbilityType::CheapShot,
-            AbilityType::KidneyShot,
-            AbilityType::HammerOfJustice,
-            AbilityType::FreezingTrap,
-        ],
     },
 ];
 
@@ -1670,16 +1649,6 @@ fn never_breaks_a_friendly_breakable_cc() {
     verdict(Property::FriendlyCcKept, Scope::Guard, friendly_cc_kept());
 }
 
-#[test]
-#[ignore = "AS-280"]
-fn death_coil_keeps_a_friendly_polymorph() {
-    verdict(
-        Property::FriendlyCcKept,
-        Scope::Card("AS-280"),
-        friendly_cc_kept(),
-    );
-}
-
 fn not_silenced() -> Finding {
     let g = grid();
     let mut judged = 0;
@@ -1937,14 +1906,4 @@ fn cc_not_stacked() -> Finding {
 #[test]
 fn never_stacks_hard_cc_on_a_unit_its_team_holds() {
     verdict(Property::CcNotStacked, Scope::Guard, cc_not_stacked());
-}
-
-#[test]
-#[ignore = "AS-285"]
-fn hard_cc_waits_for_its_teams_own_to_end() {
-    verdict(
-        Property::CcNotStacked,
-        Scope::Card("AS-285"),
-        cc_not_stacked(),
-    );
 }

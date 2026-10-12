@@ -19,7 +19,7 @@
 use bevy::prelude::*;
 
 use super::super::utils::log_ability_use;
-use super::cast_guard::{cast_gate, pre_cast_ok, PreCastOpts};
+use super::cast_guard::{applies_hold, cast_gate, pre_cast_ok, PreCastOpts};
 use super::hunter_dip::{emit_dip_complete, HunterDipPlan, LiveTrap};
 use super::{CombatContext, CombatantInfo};
 use crate::combat::log::CombatLog;
@@ -837,6 +837,10 @@ fn fallback_trap(
     else {
         return Some(Err(TRAP_HELD_NO_SPRINGER));
     };
+    let trap = super::Incoming::of(abilities.get_unchecked(&AbilityType::FreezingTrap));
+    if ctx.held_in_hard_cc(victim, trap).is_some() {
+        return Some(Err(TRAP_HELD_ALREADY_HELD));
+    }
     if !super::hunter_dip::trap_victim_worth_it(ctx, abilities, entity, victim) {
         return Some(Err(TRAP_HELD_FREEABLE));
     }
@@ -1234,6 +1238,10 @@ pub const TRAP_HELD_UNSEEN: &str = "trap held: an unseen enemy could spring it a
 pub const TRAP_HELD_UNSEEN_KILL_TARGET: &str =
     "trap held: the unseen enemy is the kill target, Flare finds it";
 
+/// Trace note for a fallback Freezing Trap held because the enemy it would
+/// catch is already held by its team's crowd control ([`fallback_trap`]).
+pub const TRAP_HELD_ALREADY_HELD: &str = "trap held: the enemy it would catch is already held";
+
 /// Trace note for a fallback Freezing Trap held because no enemy is predicted
 /// to reach the landing soon after it arms ([`fallback_trap`]).
 pub const TRAP_HELD_NO_SPRINGER: &str = "trap held: no enemy is heading into the lane";
@@ -1515,6 +1523,16 @@ fn try_place_trap_at(
             return false;
         }
     };
+
+    // The gate had no target to ask about, so the trap asks it of the enemy
+    // it is aimed at: no hold is thrown at a unit the team already holds.
+    if let Some(cc_type) = intended
+        .filter(|_| applies_hold(def))
+        .and_then(|victim| ctx.held_in_hard_cc(victim, super::Incoming::of(def)))
+    {
+        builder.reject(ability, RejectionReason::TargetAlreadyCCd { cc_type });
+        return false;
+    }
 
     // Clamp to octagonal arena bounds (midpoint can land outside corners)
     let position = crate::states::play_match::combat_core::clamp_to_arena(&ctx.bounds, position);
@@ -2404,6 +2422,12 @@ fn dispatch_predicates_for_damaging(
     // break a threshold-0 friendly CC (Polymorph, Freezing Trap incap).
     if ability == AbilityType::BoarCharge && ctx.has_friendly_breakable_cc(target_entity) {
         return Some(RejectionReason::FriendlyBreakableCC);
+    }
+    // Boar Charge stuns: never onto a unit the team already holds.
+    if ability == AbilityType::BoarCharge {
+        if let Some(cc_type) = ctx.held_in_hard_cc(target_entity, super::Incoming::of(def)) {
+            return Some(RejectionReason::TargetAlreadyCCd { cc_type });
+        }
     }
 
     None

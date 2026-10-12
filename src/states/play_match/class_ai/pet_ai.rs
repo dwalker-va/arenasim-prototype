@@ -478,6 +478,12 @@ fn pet_command_rejection(
         if ability == AbilityType::BoarCharge && ctx.has_friendly_breakable_cc(target) {
             return Some(RejectionReason::FriendlyBreakableCC);
         }
+        // Boar Charge stuns: never onto a unit the team already holds.
+        if ability == AbilityType::BoarCharge {
+            if let Some(cc_type) = ctx.held_in_hard_cc(target, super::Incoming::of(def)) {
+                return Some(RejectionReason::TargetAlreadyCCd { cc_type });
+            }
+        }
     }
 
     // Master's Call frees a teammate, and no ally-freeing cast goes through a
@@ -1151,6 +1157,10 @@ fn boar_autonomous_dispatch(
     }
     if ctx.has_friendly_breakable_cc(target) {
         builder.reject(ability, RejectionReason::FriendlyBreakableCC);
+        return;
+    }
+    if let Some(cc_type) = ctx.held_in_hard_cc(target, super::Incoming::of(def)) {
+        builder.reject(ability, RejectionReason::TargetAlreadyCCd { cc_type });
         return;
     }
 

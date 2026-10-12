@@ -169,7 +169,14 @@ pub fn decide_priest_action(
         completed_state,
     } = &plan.scream_dip
     {
-        if try_dip_psychic_scream(
+        // The dip may walk to a healer its team holds; the fear waits for the
+        // hold to end (`CombatContext::held_in_hard_cc`) and the dip with it.
+        if let Some(cc_type) = ctx.held_in_hard_cc(*target, super::Incoming::Breaks) {
+            builder.reject(
+                AbilityType::PsychicScream,
+                RejectionReason::TargetAlreadyCCd { cc_type },
+            );
+        } else if try_dip_psychic_scream(
             commands,
             combat_log,
             abilities,

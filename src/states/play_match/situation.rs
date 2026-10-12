@@ -330,17 +330,11 @@ impl SituationConfig {
 
 /// Crowd control that stops a healer casting a heal: Stun, Fear, Polymorph,
 /// Incapacitate, Cyclone. NOT Root: a rooted healer heals freely, so a root
-/// must not open a burst window. The one copy of the set behind
-/// `enemy_healer_locked`.
+/// must not open a burst window. It is the set the hard-CC choosers ask of a
+/// target ([`holds`](super::class_ai::holds)): a healer that is locked is one
+/// no hard CC is spent on.
 pub fn locks_healer(effect: AuraType) -> bool {
-    matches!(
-        effect,
-        AuraType::Stun
-            | AuraType::Fear
-            | AuraType::Polymorph
-            | AuraType::Incapacitate
-            | AuraType::Cyclone
-    )
+    super::class_ai::holds(effect)
 }
 
 /// Classify `team`'s situation from `snapshot`. Pure: the snapshot, the
