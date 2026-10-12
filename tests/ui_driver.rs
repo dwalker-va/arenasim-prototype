@@ -511,6 +511,7 @@ fn every_shipped_script_parses() {
         "replay-boots-into-the-match.script",
         "replay-draws-icons.script",
         "menu-exits.script",
+        "replay-results-exit.script",
     ];
 
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui-scripts");

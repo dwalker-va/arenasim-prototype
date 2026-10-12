@@ -360,7 +360,12 @@ instrumented, so there is nothing to click; this exists because the graphical
 dispatch in `main.rs` is the one thing this card restructured that could have
 broken silently.
 
-All three are checked for parse errors by `cargo test`
+`tests/ui-scripts/replay-results-exit.script` — a replay played to its end:
+the Results screen's one exit sits in its header, names the main menu (a
+replay records no opener), and takes you there. Run it with the same `.json`
+as `replay-boots-into-the-match`.
+
+All of them are checked for parse errors by `cargo test`
 (`the_shipped_scripts_parse`), but running them needs a window, so they are not
 in the suite. Run them by hand after touching View Combatant, the equipment
 panel, the encyclopedia's navigation, `main.rs`'s graphical dispatch, or

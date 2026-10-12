@@ -1,19 +1,30 @@
 //! Results Scene UI - Post-Match Statistics
 //!
-//! Displays match results after a battle concludes:
-//! - Compact winner banner (victor color, match duration)
+//! The Report template (design doc §2.4): the shared screen header — its exit,
+//! the title, the match duration in the trailing slot — then a `DISPLAY`
+//! victory banner, then the data panels:
 //! - Two aligned, face-off team panels (loser panel dimmed)
 //! - Per-combatant rows with a linked class icon, aligned stat columns, a
 //!   relative damage mini-bar, survival tag, and a click-to-expand ability
 //!   breakdown whose bars link on to each ability
 //! - Team Σ TOTAL subtotal row
-//! - Return-to-menu button
+//!
+//! Every colour, size and gap is a `ui::theme` token. The stat columns keep
+//! their own hues — damage, healing, taken, kills — from the theme's DATA
+//! layer, where hue carries meaning.
 //!
 //! ## Data Source
 //! Reads the `MatchResults` resource inserted at match end (winner, duration,
 //! per-combatant `CombatantStats`) plus the `CombatLog` for per-ability
 //! damage/healing, killing blows, and CC time. Icons and tooltip text come from
 //! the encyclopedia's read-only `EncyclopediaData` bundle.
+//!
+//! ## The exit
+//! One exit, in the header: `Nav::Return`, back to whatever started the match
+//! (`ScreenNav::open_match` records it — the main menu today, a run hub
+//! tomorrow), labelled with that screen's name. Esc takes the same path. The
+//! header is drawn with or without results, so the empty screen has the same
+//! way out.
 //!
 //! ## Linked icons
 //! Every class cell and every named ability in a breakdown is a LINK: hovering
@@ -30,15 +41,17 @@
 //! the screen that loop; put it in [`results_ui`] instead.
 //!
 //! The round trip — step into the encyclopedia, come back to the same numbers —
-//! rests on `MatchResults` being discarded only by DONE, and is pinned by
+//! rests on `MatchResults` being discarded only by the exit, and is pinned by
 //! `tests/results_encyclopedia_round_trip.rs`.
 //!
 //! ## UI Structure
 //! ```text
 //! ┌────────────────────────────────────────────────────┐
-//! │  ★ TEAM 1 VICTORY                       ⏱ 1:47       │
+//! │ [◀ MAIN MENU]  MATCH RESULTS                 ⏱ 1:47 │
+//! │────────────────────────────────────────────────────│
+//! │  ★ TEAM 1 VICTORY                                  │
 //! ├──────────────────────────┬─────────────────────────┤
-//! │ TEAM 1         ★ WINNER   │ TEAM 2       (defeated)  │
+//! │ TEAM 1         ★ WINNER   │ TEAM 2         DEFEATED  │
 //! │ CLASS    DMG HEAL TKN  K  │ CLASS   DMG HEAL TKN  K  │
 //! │ ▌🛡Warrior 8.4k  –  3.1k 1 │ ▌❄Mage  4.2k  – 9.0k  0  │
 //! │   ▓▓▓▓▓▓▓▓▓▓▓▓▓     ALIVE │   ▓▓▓▓▓             DEAD │
@@ -59,35 +72,28 @@ use super::{
     GameState,
 };
 use crate::combat::log::CombatLog;
-use crate::ui::widgets::{Button, Nav, Variant};
+use crate::ui::theme::{color, data, icon, radius, size, space, stroke, text};
+use crate::ui::widgets::panel::margin_xy;
+use crate::ui::widgets::{divider, empty_state, panel, panel_header, screen_header, Nav};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-// --- Layout constants (fixed widths keep numeric columns aligned across the
-//     header, every combatant row, and the Σ TOTAL row) ---
+/// The screen's title, in its header.
+const TITLE: &str = "Match Results";
+
+// --- Column widths (fixed, so numeric columns align across the header, every
+//     combatant row, and the Σ TOTAL row). Layout of this one table, not
+//     tokens: no other screen draws these columns. ---
 const W_NAME: f32 = 116.0; // accent stripe + icon + class name
 const W_DMG: f32 = 52.0;
 const W_HEAL: f32 = 52.0;
 const W_TKN: f32 = 52.0;
 const W_K: f32 = 26.0;
 const ROW_HEIGHT: f32 = 22.0;
-/// Gap between the right-aligned stat columns.
-const STAT_GAP: f32 = 12.0;
-
-// --- Palette ---
-const BG: egui::Color32 = egui::Color32::from_rgb(20, 20, 30);
-const PANEL_BG: egui::Color32 = egui::Color32::from_rgb(28, 28, 40);
-const HEADER_GREY: egui::Color32 = egui::Color32::from_rgb(140, 140, 158);
-const DIVIDER: egui::Color32 = egui::Color32::from_rgb(70, 70, 88);
-const C_DMG: egui::Color32 = egui::Color32::from_rgb(255, 150, 100);
-const C_HEAL: egui::Color32 = egui::Color32::from_rgb(110, 215, 130);
-const C_TKN: egui::Color32 = egui::Color32::from_rgb(230, 110, 110);
-const C_KILL: egui::Color32 = egui::Color32::from_rgb(255, 205, 90);
-const C_ALIVE: egui::Color32 = egui::Color32::from_rgb(120, 200, 120);
-const C_DEAD: egui::Color32 = egui::Color32::from_rgb(205, 110, 110);
-/// Near-white text drawn on top of the colored ability-breakdown bars (kept
-/// independent of the bar fill color so it stays legible on a full bar).
-const BAR_TEXT: egui::Color32 = egui::Color32::from_rgb(244, 244, 248);
+/// The width the survival tag ("ALIVE" / "DEAD") keeps beside the mini-bar.
+const W_STATUS: f32 = 46.0;
+/// The widest an ability-breakdown bar grows.
+const W_ABILITY_BAR: f32 = 260.0;
 
 /// Dim factor applied to a defeated team's panel so the victor reads as dominant.
 const DIM_LOSER: f32 = 0.72;
@@ -269,32 +275,50 @@ pub fn draw_results_screen(
     nav: Nav,
 ) -> Option<ResultsAction> {
     let mut links = Links::new(data);
-    let mut done = false;
+    let mut exit = false;
 
     egui::CentralPanel::default()
         .frame(
             egui::Frame::new()
-                .fill(BG)
-                .inner_margin(egui::Margin::same(24)),
+                .fill(color::BG)
+                .inner_margin(margin_xy(space::XL, space::LG)),
         )
         .show(ctx, |ui| {
+            // The shared header, drawn whether or not there are results: the
+            // empty screen needs the same way out. Its exit is the screen's
+            // only one; Esc takes the same path (in `results_ui`).
+            let duration = results.map(|r| r.duration_secs);
+            if screen_header(ui, TITLE, nav, |ui| {
+                if let Some(secs) = duration {
+                    ui.label(
+                        egui::RichText::new(format!("⏱ {}", fmt_duration(secs)))
+                            .size(text::H3)
+                            .color(color::TEXT_MUTED),
+                    );
+                }
+            })
+            .is_some()
+            {
+                exit = true;
+            }
+            ui.add_space(space::LG);
+
             ui.vertical_centered(|ui| {
                 ui.set_max_width(CONTENT_MAX_W);
 
                 let Some(results) = results else {
-                    ui.add_space(40.0);
-                    ui.vertical_centered(|ui| {
-                        ui.heading(
-                            egui::RichText::new("No match results available")
-                                .size(28.0)
-                                .color(C_DEAD),
-                        );
-                    });
+                    empty_state(
+                        ui,
+                        "results:empty",
+                        "No match results available",
+                        "There is no finished match to report on.",
+                        None,
+                    );
                     return;
                 };
 
-                render_banner(ui, results.winner, results.duration_secs);
-                ui.add_space(24.0);
+                render_banner(ui, results.winner);
+                ui.add_space(space::LG);
 
                 // Bar scaling shared across both teams so lengths are comparable.
                 let max_damage = results
@@ -312,91 +336,62 @@ pub fn draw_results_screen(
                 ui.columns(2, |columns| {
                     render_team_panel(
                         &mut columns[0],
-                        "TEAM 1",
+                        "Team 1",
                         1,
                         &results.team1_combatants,
                         combat_log,
                         &mut links,
-                        egui::Color32::from_rgb(90, 140, 230),
+                        data::TEAM_1,
                         results.winner,
                         max_damage,
                         &results.pet_damage_links,
                     );
                     render_team_panel(
                         &mut columns[1],
-                        "TEAM 2",
+                        "Team 2",
                         2,
                         &results.team2_combatants,
                         combat_log,
                         &mut links,
-                        egui::Color32::from_rgb(230, 90, 90),
+                        data::TEAM_2,
                         results.winner,
                         max_damage,
                         &results.pet_damage_links,
                     );
-                });
-
-                ui.add_space(28.0);
-
-                // The exit, naming where it goes.
-                ui.vertical_centered(|ui| {
-                    let label = nav.exit_label();
-                    if Button::new(&label, Variant::Secondary)
-                        .driver_id("nav:exit")
-                        .show(ui)
-                        .clicked()
-                    {
-                        done = true;
-                    }
                 });
             });
         });
 
     // A click on a linked icon wins over the exit: they cannot both happen in one
     // frame, and answering the reader's most specific gesture is the safe order.
-    match (links.clicked, done) {
+    match (links.clicked, exit) {
         (Some(topic), _) => Some(ResultsAction::OpenTopic(topic)),
         (None, true) => Some(ResultsAction::Exit),
         (None, false) => None,
     }
 }
 
-/// Render the top winner banner: victory line (in winner color) + match duration.
-fn render_banner(ui: &mut egui::Ui, winner: Option<u8>, duration_secs: f32) {
-    let (text, color) = match winner {
-        None => ("DRAW".to_string(), egui::Color32::from_rgb(210, 200, 120)),
-        Some(1) => (
-            "TEAM 1 VICTORY".to_string(),
-            egui::Color32::from_rgb(110, 160, 255),
-        ),
-        Some(2) => (
-            "TEAM 2 VICTORY".to_string(),
-            egui::Color32::from_rgb(255, 110, 110),
-        ),
-        Some(_) => ("MATCH COMPLETE".to_string(), HEADER_GREY),
+/// The victory banner: the result at [`text::DISPLAY`], in the winner's team
+/// colour, on a panel edged in the same colour.
+fn render_banner(ui: &mut egui::Ui, winner: Option<u8>) {
+    let (label, tint) = match winner {
+        None => ("DRAW", color::ACCENT),
+        Some(1) => ("TEAM 1 VICTORY", data::TEAM_1),
+        Some(2) => ("TEAM 2 VICTORY", data::TEAM_2),
+        Some(_) => ("MATCH COMPLETE", color::TEXT_MUTED),
     };
     let star = if winner.is_some() { "★ " } else { "" };
 
-    egui::Frame::new()
-        .fill(egui::Color32::from_rgb(26, 26, 38))
-        .corner_radius(8.0)
-        .inner_margin(egui::Margin::symmetric(20, 14))
-        .stroke(egui::Stroke::new(2.0_f32, color))
+    panel(Some(tint))
+        .inner_margin(margin_xy(space::LG, space::MD))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.heading(
-                    egui::RichText::new(format!("{star}{text}"))
-                        .size(40.0)
-                        .color(color),
+                ui.label(
+                    egui::RichText::new(format!("{star}{label}"))
+                        .size(text::DISPLAY)
+                        .color(tint),
                 );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(format!("⏱ {}", fmt_duration(duration_secs)))
-                            .size(22.0)
-                            .color(HEADER_GREY),
-                    );
-                });
             });
         });
 }
@@ -419,71 +414,55 @@ fn render_team_panel(
     let is_loser = winner.is_some() && !is_winner;
     let dimf = if is_loser { DIM_LOSER } else { 1.0 };
 
-    let stroke = if is_winner {
-        egui::Stroke::new(2.0_f32, team_color)
-    } else {
-        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(55, 55, 70))
-    };
+    // The winner's panel is edged in its team colour; every other panel
+    // takes the plain line.
+    panel(is_winner.then_some(team_color)).show(ui, |ui| {
+        // Stretch the panel to fill its column (cells are narrow).
+        ui.set_min_width(ui.available_width());
 
-    egui::Frame::new()
-        .fill(PANEL_BG)
-        .corner_radius(6.0)
-        .inner_margin(egui::Margin::same(14))
-        .stroke(stroke)
-        .show(ui, |ui| {
-            // Stretch the panel to fill its column (cells are narrow).
-            ui.set_min_width(ui.available_width());
-
-            // Title row: team name + winner/defeated tag.
-            ui.horizontal(|ui| {
+        // Title row: team name + winner/defeated tag.
+        panel_header(ui, title, dim(team_color, dimf), |ui| {
+            if is_winner {
                 ui.label(
-                    egui::RichText::new(title)
-                        .size(20.0)
-                        .color(dim(team_color, dimf))
-                        .strong(),
+                    egui::RichText::new("★ WINNER")
+                        .size(text::SMALL)
+                        .color(color::ACCENT),
                 );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if is_winner {
-                        tag(ui, "★ WINNER", egui::Color32::from_rgb(60, 90, 50), C_KILL);
-                    } else if is_loser {
-                        ui.label(
-                            egui::RichText::new("(defeated)")
-                                .size(13.0)
-                                .italics()
-                                .color(dim(HEADER_GREY, dimf)),
-                        );
-                    }
-                });
-            });
-
-            ui.add_space(10.0);
-
-            // Column header row (stats right-aligned to the panel edge).
-            ui.horizontal(|ui| {
-                header_name_cell(ui, "CLASS", dimf);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = STAT_GAP;
-                    header_num_cell(ui, W_K, "K", dimf);
-                    header_num_cell(ui, W_TKN, "TKN", dimf);
-                    header_num_cell(ui, W_HEAL, "HEAL", dimf);
-                    header_num_cell(ui, W_DMG, "DMG", dimf);
-                });
-            });
-            ui.add_space(4.0);
-
-            // Combatant rows. Every row carries the "#slot" suffix, matching the
-            // combat-log ids unconditionally — so a reader cross-referencing the
-            // saved report to this screen always finds the same label, and two
-            // same-class teammates are never ambiguous.
-            for stats in combatants {
-                combatant_block(
-                    ui, stats, team, combat_log, links, max_damage, dimf, pet_links,
+            } else if is_loser {
+                ui.label(
+                    egui::RichText::new("DEFEATED")
+                        .size(text::SMALL)
+                        .color(dim(color::TEXT_MUTED, dimf)),
                 );
             }
-
-            // Σ TOTAL row.
-            total_row(ui, combatants, combat_log, team, dimf, pet_links);
         });
+
+        // Column header row (stats right-aligned to the panel edge).
+        ui.horizontal(|ui| {
+            header_name_cell(ui, "CLASS", dimf);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = space::MD;
+                header_num_cell(ui, W_K, "K", dimf);
+                header_num_cell(ui, W_TKN, "TKN", dimf);
+                header_num_cell(ui, W_HEAL, "HEAL", dimf);
+                header_num_cell(ui, W_DMG, "DMG", dimf);
+            });
+        });
+        ui.add_space(space::XS);
+
+        // Combatant rows. Every row carries the "#slot" suffix, matching the
+        // combat-log ids unconditionally — so a reader cross-referencing the
+        // saved report to this screen always finds the same label, and two
+        // same-class teammates are never ambiguous.
+        for stats in combatants {
+            combatant_block(
+                ui, stats, team, combat_log, links, max_damage, dimf, pet_links,
+            );
+        }
+
+        // Σ TOTAL row.
+        total_row(ui, combatants, combat_log, team, dimf, pet_links);
+    });
 }
 
 /// One combatant: stat row + relative damage mini-bar + expandable breakdown.
@@ -522,32 +501,24 @@ fn combatant_block(
         // screen, so they announce themselves the same way rather than leaving
         // this one to the cursor shape alone.
         if hit.hovered() {
-            paint_hover_stroke(ui.painter(), cell.rect, dim(BAR_TEXT, dimf));
+            paint_hover_stroke(ui.painter(), cell.rect, dim(color::TEXT, dimf));
         }
         links.link(hit, Topic::Class(stats.class));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = STAT_GAP;
-            num_cell(ui, W_K, kills.to_string(), dim(C_KILL, dimf), false);
-            num_cell(
-                ui,
-                W_TKN,
-                fmt_k(stats.damage_taken),
-                dim(C_TKN, dimf),
-                false,
-            );
+            ui.spacing_mut().item_spacing.x = space::MD;
+            num_cell(ui, W_K, kills.to_string(), dim(data::KILLS, dimf));
+            num_cell(ui, W_TKN, fmt_k(stats.damage_taken), dim(data::TAKEN, dimf));
             num_cell(
                 ui,
                 W_HEAL,
                 fmt_opt(stats.healing_done),
-                dim(C_HEAL, dimf),
-                false,
+                dim(data::HEALING, dimf),
             );
             num_cell(
                 ui,
                 W_DMG,
                 fmt_k(stats.damage_dealt),
-                dim(C_DMG, dimf),
-                false,
+                dim(data::DAMAGE, dimf),
             );
         });
     });
@@ -555,23 +526,21 @@ fn combatant_block(
     // Relative damage mini-bar + survival tag.
     let frac = (stats.damage_dealt / max_damage).clamp(0.0, 1.0);
     let (status_text, status_color) = if stats.survived {
-        ("ALIVE", C_ALIVE)
+        ("ALIVE", data::ALIVE)
     } else {
-        ("DEAD", C_DEAD)
+        ("DEAD", data::DEAD)
     };
     ui.horizontal(|ui| {
-        let tag_w = 46.0;
-        let bar_w = (ui.available_width() - tag_w).max(20.0);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(bar_w, 7.0), egui::Sense::hover());
+        let bar_w = (ui.available_width() - W_STATUS).max(W_K);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(bar_w, size::BAR), egui::Sense::hover());
         let painter = ui.painter();
-        painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(38, 38, 50));
-        let fill = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * frac, 7.0));
-        painter.rect_filled(fill, 2.0, dim(C_DMG, dimf * 0.9));
+        painter.rect_filled(rect, radius::SM, color::RAISED);
+        let fill = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * frac, size::BAR));
+        painter.rect_filled(fill, radius::SM, dim(data::DAMAGE, dimf * 0.9));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 egui::RichText::new(status_text)
-                    .size(9.0)
-                    .strong()
+                    .size(text::MICRO)
                     .color(dim(status_color, dimf)),
             );
         });
@@ -580,18 +549,18 @@ fn combatant_block(
     // Expandable ability breakdown.
     egui::CollapsingHeader::new(
         egui::RichText::new("Ability breakdown")
-            .size(10.0)
-            .color(dim(egui::Color32::from_rgb(150, 150, 170), dimf)),
+            .size(text::MICRO)
+            .color(dim(color::TEXT_MUTED, dimf)),
     )
     .id_salt(&cid)
     .show(ui, |ui| {
         render_ability_details(ui, &cid, combat_log, dimf, pet_links, links);
     });
 
-    ui.add_space(8.0);
+    ui.add_space(space::SM);
 }
 
-/// Σ TOTAL subtotal row for a team (divider above, bold values).
+/// Σ TOTAL subtotal row for a team, under a rule.
 fn total_row(
     ui: &mut egui::Ui,
     combatants: &[CombatantStats],
@@ -608,10 +577,8 @@ fn total_row(
         .map(|s| combat_log.killing_blows_including_pets(&stats_log_id(team, s), pet_links))
         .sum();
 
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, dim(DIVIDER, dimf));
-    ui.add_space(5.0);
+    divider(ui);
+    ui.add_space(space::XS);
 
     ui.horizontal(|ui| {
         ui.allocate_ui_with_layout(
@@ -620,18 +587,17 @@ fn total_row(
             |ui| {
                 ui.label(
                     egui::RichText::new("Σ TOTAL")
-                        .size(13.0)
-                        .strong()
-                        .color(dim(egui::Color32::from_rgb(205, 205, 215), dimf)),
+                        .size(text::SMALL)
+                        .color(dim(color::TEXT, dimf)),
                 );
             },
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = STAT_GAP;
-            num_cell(ui, W_K, kills.to_string(), dim(C_KILL, dimf), true);
-            num_cell(ui, W_TKN, fmt_k(tkn), dim(C_TKN, dimf), true);
-            num_cell(ui, W_HEAL, fmt_opt(heal), dim(C_HEAL, dimf), true);
-            num_cell(ui, W_DMG, fmt_k(dmg), dim(C_DMG, dimf), true);
+            ui.spacing_mut().item_spacing.x = space::MD;
+            num_cell(ui, W_K, kills.to_string(), dim(data::KILLS, dimf));
+            num_cell(ui, W_TKN, fmt_k(tkn), dim(data::TAKEN, dimf));
+            num_cell(ui, W_HEAL, fmt_opt(heal), dim(data::HEALING, dimf));
+            num_cell(ui, W_DMG, fmt_k(dmg), dim(data::DAMAGE, dimf));
         });
     });
 }
@@ -645,43 +611,44 @@ fn render_ability_details(
     pet_links: &std::collections::HashMap<String, (String, String)>,
     links: &mut Links,
 ) {
-    ui.add_space(2.0);
+    ui.add_space(space::XXS);
+    let bar_text = dim(color::TEXT, dimf);
 
     let damage = combat_log.damage_by_ability_including_pets(cid, pet_links);
     if !damage.is_empty() {
         ui.label(
             egui::RichText::new("Damage")
-                .size(10.0)
-                .color(dim(C_DMG, dimf)),
+                .size(text::MICRO)
+                .color(dim(data::DAMAGE, dimf)),
         );
-        render_ability_bars(ui, &damage, dim(C_DMG, dimf), dim(BAR_TEXT, dimf), links);
+        render_ability_bars(ui, &damage, dim(data::DAMAGE, dimf), bar_text, links);
     }
 
     let healing = combat_log.healing_by_ability(cid);
     if !healing.is_empty() {
-        ui.add_space(5.0);
+        ui.add_space(space::XS);
         ui.label(
             egui::RichText::new("Healing")
-                .size(10.0)
-                .color(dim(C_HEAL, dimf)),
+                .size(text::MICRO)
+                .color(dim(data::HEALING, dimf)),
         );
-        render_ability_bars(ui, &healing, dim(C_HEAL, dimf), dim(BAR_TEXT, dimf), links);
+        render_ability_bars(ui, &healing, dim(data::HEALING, dimf), bar_text, links);
     }
 
     let cc_received = combat_log.cc_received_seconds(cid);
     if cc_received > 0.0 {
-        ui.add_space(4.0);
+        ui.add_space(space::XS);
         ui.label(
             egui::RichText::new(format!("CC received: {cc_received:.1}s"))
-                .size(10.0)
-                .color(dim(egui::Color32::from_rgb(180, 100, 255), dimf)),
+                .size(text::MICRO)
+                .color(dim(data::CC_RECEIVED, dimf)),
         );
     }
 }
 
 /// Render the top-5 ability contribution bars for one breakdown map.
 ///
-/// `text_color` is kept near-white (not `bar_color`) so the ability name and
+/// `text_color` is the body text colour (not `bar_color`) so the ability name and
 /// amount stay legible on top of a full/near-full colored bar fill.
 fn render_ability_bars(
     ui: &mut egui::Ui,
@@ -690,12 +657,13 @@ fn render_ability_bars(
     text_color: egui::Color32,
     links: &mut Links,
 ) {
-    /// Icon square inside a bar, and the gap either side of it. The slot is
-    /// reserved on EVERY row — including the auto-attack lines that name no
-    /// ability — so the labels stay on one left edge instead of stepping in
-    /// and out with whatever happens to be linkable.
-    const BAR_ICON: f32 = 12.0;
-    const BAR_PAD: f32 = 4.0;
+    // The icon square inside a bar, and the gap either side of it. The slot
+    // is reserved on EVERY row — including the auto-attack lines that name no
+    // ability — so the labels stay on one left edge instead of stepping in
+    // and out with whatever happens to be linkable.
+    let bar_icon = icon::XS;
+    let bar_pad = space::XXS;
+    let bar_height = bar_icon + 2.0 * bar_pad;
 
     // Biggest contribution first, ties broken by NAME. The source is a
     // `HashMap`, whose iteration order varies run to run, so amount alone left
@@ -710,25 +678,25 @@ fn render_ability_bars(
 
     for (ability, &amount) in entries.iter().take(5) {
         let pct = if total > 0.0 { amount / total } else { 0.0 };
-        let width = ui.available_width().min(260.0);
+        let width = ui.available_width().min(W_ABILITY_BAR);
         let topic = links.ability_topic(ability);
         let sense = if topic.is_some() {
             egui::Sense::click()
         } else {
             egui::Sense::hover()
         };
-        let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 16.0), sense);
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(width, bar_height), sense);
         if !ui.is_rect_visible(rect) {
             continue;
         }
         let painter = ui.painter();
-        painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(34, 34, 46));
+        painter.rect_filled(rect, radius::SM, color::RAISED);
         let fill =
             egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * pct, rect.height()));
-        painter.rect_filled(fill, 2.0, bar_color.linear_multiply(0.5));
+        painter.rect_filled(fill, radius::SM, bar_color.linear_multiply(0.5));
         let icon_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.left() + BAR_PAD + BAR_ICON / 2.0, rect.center().y),
-            egui::vec2(BAR_ICON, BAR_ICON),
+            egui::pos2(rect.left() + bar_pad + bar_icon / 2.0, rect.center().y),
+            egui::Vec2::splat(bar_icon),
         );
         if let Some(topic) = topic {
             widget::paint_icon(painter, icon_rect, topic, links.data);
@@ -737,17 +705,17 @@ fn render_ability_bars(
             }
         }
         painter.text(
-            egui::pos2(icon_rect.right() + BAR_PAD, rect.center().y),
+            egui::pos2(icon_rect.right() + space::XS, rect.center().y),
             egui::Align2::LEFT_CENTER,
             ability,
-            egui::FontId::proportional(10.0),
+            egui::FontId::proportional(text::MICRO),
             text_color,
         );
         painter.text(
-            rect.right_center() - egui::vec2(6.0, 0.0),
+            rect.right_center() - egui::vec2(space::SM, 0.0),
             egui::Align2::RIGHT_CENTER,
             format!("{amount:.0} ({:.0}%)", pct * 100.0),
-            egui::FontId::proportional(9.0),
+            egui::FontId::proportional(text::MICRO),
             text_color,
         );
         if let Some(topic) = topic {
@@ -756,7 +724,7 @@ fn render_ability_bars(
     }
 }
 
-/// The 1px outline a hovered LINK wears on this screen.
+/// The hairline outline a hovered LINK wears on this screen.
 ///
 /// One recipe, used by both links the screen offers — the ability bars and the
 /// class cell — so the pair cannot drift into announcing themselves
@@ -765,8 +733,8 @@ fn render_ability_bars(
 fn paint_hover_stroke(painter: &egui::Painter, rect: egui::Rect, text_color: egui::Color32) {
     painter.rect_stroke(
         rect,
-        2.0,
-        egui::Stroke::new(1.0_f32, text_color.gamma_multiply(0.4)),
+        radius::SM,
+        egui::Stroke::new(stroke::HAIRLINE, text_color.gamma_multiply(0.4)),
         egui::StrokeKind::Inside,
     );
 }
@@ -795,30 +763,33 @@ fn name_cell(
     ui: &mut egui::Ui,
     icon: Option<egui::TextureId>,
     name: &str,
-    color: egui::Color32,
+    tint: egui::Color32,
 ) -> egui::Response {
     ui.allocate_ui_with_layout(
         egui::vec2(W_NAME, ROW_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            ui.spacing_mut().item_spacing.x = 5.0;
+            ui.spacing_mut().item_spacing.x = space::XS;
             // Class-color accent stripe.
-            let (stripe, _) =
-                ui.allocate_exact_size(egui::vec2(3.0, ROW_HEIGHT - 6.0), egui::Sense::hover());
-            ui.painter().rect_filled(stripe, 1.0, color);
+            let (stripe, _) = ui.allocate_exact_size(
+                egui::vec2(space::XXS, icon::SM - space::XS),
+                egui::Sense::hover(),
+            );
+            ui.painter().rect_filled(stripe, radius::SM, tint);
             // Icon, or a colored square fallback if not loaded.
-            let (irect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+            let (irect, _) =
+                ui.allocate_exact_size(egui::Vec2::splat(icon::SM), egui::Sense::hover());
             if let Some(tex) = icon {
                 ui.painter().image(
                     tex,
                     irect,
                     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
+                    color::UNTINTED,
                 );
             } else {
-                ui.painter().rect_filled(irect, 3.0, color);
+                ui.painter().rect_filled(irect, radius::SM, tint);
             }
-            ui.label(egui::RichText::new(name).size(14.0).strong().color(color));
+            ui.label(egui::RichText::new(name).size(text::BODY).color(tint));
         },
     )
     .response
@@ -828,55 +799,42 @@ fn name_cell(
 /// paint the text into it (rather than `allocate_ui_with_layout`, which lets
 /// the cell shrink to its content and so misaligns columns when value widths
 /// differ — e.g. a "–" next to "12.3k").
-fn num_cell(ui: &mut egui::Ui, width: f32, text: String, color: egui::Color32, strong: bool) {
+fn num_cell(ui: &mut egui::Ui, width: f32, value: String, tint: egui::Color32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, ROW_HEIGHT), egui::Sense::hover());
-    let pos = rect.right_center();
-    let font = egui::FontId::proportional(14.0);
-    let painter = ui.painter();
-    // Faux-bold for totals: a second pass nudged a fraction of a pixel.
-    if strong {
-        painter.text(
-            pos + egui::vec2(0.6, 0.0),
-            egui::Align2::RIGHT_CENTER,
-            &text,
-            font.clone(),
-            color,
-        );
-    }
-    painter.text(pos, egui::Align2::RIGHT_CENTER, &text, font, color);
-}
-
-fn header_name_cell(ui: &mut egui::Ui, text: &str, dimf: f32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W_NAME, 16.0), egui::Sense::hover());
-    ui.painter().text(
-        rect.left_center(),
-        egui::Align2::LEFT_CENTER,
-        text,
-        egui::FontId::proportional(10.0),
-        dim(HEADER_GREY, dimf),
-    );
-}
-
-fn header_num_cell(ui: &mut egui::Ui, width: f32, text: &str, dimf: f32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 16.0), egui::Sense::hover());
     ui.painter().text(
         rect.right_center(),
         egui::Align2::RIGHT_CENTER,
-        text,
-        egui::FontId::proportional(10.0),
-        dim(HEADER_GREY, dimf),
+        &value,
+        egui::FontId::proportional(text::BODY),
+        tint,
     );
 }
 
-/// Small rounded pill tag (e.g. "★ WINNER").
-fn tag(ui: &mut egui::Ui, text: &str, bg: egui::Color32, fg: egui::Color32) {
-    egui::Frame::new()
-        .fill(bg)
-        .corner_radius(3.0)
-        .inner_margin(egui::Margin::symmetric(6, 2))
-        .show(ui, |ui| {
-            ui.label(egui::RichText::new(text).size(11.0).strong().color(fg));
-        });
+/// The column header row's height.
+const HEADER_ROW_HEIGHT: f32 = 16.0;
+
+fn header_name_cell(ui: &mut egui::Ui, label: &str, dimf: f32) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(W_NAME, HEADER_ROW_HEIGHT), egui::Sense::hover());
+    ui.painter().text(
+        rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(text::MICRO),
+        dim(color::TEXT_MUTED, dimf),
+    );
+}
+
+fn header_num_cell(ui: &mut egui::Ui, width: f32, label: &str, dimf: f32) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(width, HEADER_ROW_HEIGHT), egui::Sense::hover());
+    ui.painter().text(
+        rect.right_center(),
+        egui::Align2::RIGHT_CENTER,
+        label,
+        egui::FontId::proportional(text::MICRO),
+        dim(color::TEXT_MUTED, dimf),
+    );
 }
 
 // --- Pure helpers ---
@@ -916,11 +874,7 @@ fn fmt_duration(secs: f32) -> String {
 
 /// Multiply an RGB color toward black by `f` (1.0 = unchanged, <1 = dimmer).
 fn dim(c: egui::Color32, f: f32) -> egui::Color32 {
-    egui::Color32::from_rgb(
-        (c.r() as f32 * f) as u8,
-        (c.g() as f32 * f) as u8,
-        (c.b() as f32 * f) as u8,
-    )
+    crate::ui::theme::darken(c, f)
 }
 
 /// A class's colour as egui draws it. Defined in `ui::theme`; kept under this

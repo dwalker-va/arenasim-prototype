@@ -98,6 +98,13 @@ pub mod data {
     pub const TAKEN: Color32 = Color32::from_rgb(230, 110, 110);
     /// Killing blows.
     pub const KILLS: Color32 = Color32::from_rgb(255, 205, 90);
+    /// Crowd control received, in seconds.
+    pub const CC_RECEIVED: Color32 = Color32::from_rgb(180, 100, 255);
+
+    /// A combatant who lived to the end of the match.
+    pub const ALIVE: Color32 = Color32::from_rgb(120, 200, 120);
+    /// A combatant who died in it.
+    pub const DEAD: Color32 = Color32::from_rgb(205, 110, 110);
 
     /// A beneficial aura.
     pub const BUFF: Color32 = Color32::from_rgb(111, 174, 126);
@@ -233,6 +240,14 @@ pub fn class_color(class: CharacterClass) -> Color32 {
         (c.green * 255.0) as u8,
         (c.blue * 255.0) as u8,
     )
+}
+
+/// `c` multiplied toward black by `factor` (1.0 = unchanged, below 1 =
+/// darker), alpha kept: how a token is drawn receded — the Results screen's
+/// defeated team — without choosing a second colour for it.
+pub fn darken(c: Color32, factor: f32) -> Color32 {
+    let channel = |v: u8| (v as f32 * factor) as u8;
+    Color32::from_rgba_premultiplied(channel(c.r()), channel(c.g()), channel(c.b()), c.a())
 }
 
 /// A spell school's colour as egui draws it, from the one source,
