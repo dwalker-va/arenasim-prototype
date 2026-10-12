@@ -39,6 +39,10 @@ const COOLDOWN_STARTS: &[(&str, &str)] = &[
     // part-way through its cooldown (`Scene::cooldown`), as a match would have
     // left it. Nothing in a match calls it.
     ("src/states/play_match/class_ai/scene.rs", "cooldown"),
+    // Likewise a staged match (`Stage::cooldown`): the stage writes a cooldown
+    // part-way through, as a match would have left it. Nothing in a match
+    // calls it.
+    ("src/headless/stage.rs", "cooldown"),
 ];
 
 #[test]

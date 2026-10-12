@@ -13,3 +13,4 @@
 #![allow(dead_code)]
 
 pub mod source_audit;
+pub mod staged;

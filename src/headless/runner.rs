@@ -31,6 +31,7 @@ use crate::states::play_match::systems::{
 };
 
 use super::config::HeadlessMatchConfig;
+use super::stage::{land_stage, PendingStage, Stage};
 
 /// Configuration for the AI decision trace, resolved from `--trace-mode` and
 /// passed into `run_headless_match_with`. When `None`, no trace file is
@@ -884,7 +885,7 @@ pub fn run_headless_match_with(
     suppress_log: bool,
     trace_config: Option<TraceConfig>,
 ) -> Result<MatchResult, String> {
-    run_match_impl(config, suppress_log, trace_config, None, None)
+    run_match_impl(config, suppress_log, trace_config, None, None, None)
 }
 
 /// Like `run_headless_match_with`, but injects pre-parsed configs instead of
@@ -896,7 +897,14 @@ pub fn run_headless_match_prepared(
     suppress_log: bool,
     trace_config: Option<TraceConfig>,
 ) -> Result<MatchResult, String> {
-    run_match_impl(config, suppress_log, trace_config, Some(configs), None)
+    run_match_impl(
+        config,
+        suppress_log,
+        trace_config,
+        Some(configs),
+        None,
+        None,
+    )
 }
 
 /// Observed-run variant of [`run_headless_match_with`] for behavior probes.
@@ -926,6 +934,36 @@ where
         trace_config,
         None,
         Some(&mut observer),
+        None,
+    )
+}
+
+/// A STAGED match: [`run_headless_match_observed`], with `stage` landed on the
+/// running match once it is due — on the frame the gates open, or at
+/// [`Stage::after_gates`] — and the match then played forward through the
+/// real schedule. Tier 3 of the AI testing pyramid; see [`super::stage`].
+///
+/// The stage lands between `update_countdown` and every other combat system
+/// of its frame, so nothing runs on a half-built world. An empty stage leaves
+/// the match exactly as its seed plays it (`tests/staged_match.rs` holds the
+/// runner to that, byte for byte).
+pub fn run_headless_match_staged<F>(
+    config: HeadlessMatchConfig,
+    suppress_log: bool,
+    trace_config: Option<TraceConfig>,
+    stage: Stage,
+    mut observer: F,
+) -> Result<MatchResult, String>
+where
+    F: FnMut(&FrameObservation),
+{
+    run_match_impl(
+        config,
+        suppress_log,
+        trace_config,
+        None,
+        Some(&mut observer),
+        Some(stage),
     )
 }
 
@@ -1103,14 +1141,16 @@ fn force_single_threaded_executors(app: &mut App) {
 
 /// Shared implementation behind `run_headless_match_with` (no preload, no
 /// observer), `run_headless_match_prepared` (preloaded configs — batch
-/// runner), and `run_headless_match_observed` (per-frame observer — behavior
-/// probes). One loop, so no path can drift from the canonical one.
+/// runner), `run_headless_match_observed` (per-frame observer — behavior
+/// probes) and `run_headless_match_staged` (a constructed state). One loop, so
+/// no path can drift from the canonical one.
 fn run_match_impl(
     config: HeadlessMatchConfig,
     suppress_log: bool,
     trace_config: Option<TraceConfig>,
     preloaded: Option<&PreloadedConfigs>,
     mut observer: Option<&mut dyn FnMut(&FrameObservation)>,
+    stage: Option<Stage>,
 ) -> Result<MatchResult, String> {
     if !suppress_log {
         println!("Starting headless match simulation...");
@@ -1121,6 +1161,14 @@ fn run_match_impl(
     }
 
     let mut app = build_headless_app(&config, suppress_log, preloaded);
+    if let Some(stage) = stage {
+        app.insert_resource(PendingStage(Some(stage))).add_systems(
+            FixedUpdate,
+            land_stage
+                .after(systems::update_countdown)
+                .before(systems::update_dampening),
+        );
+    }
 
     // Registration guard (debug builds / cargo test only): movement config
     // must be loaded in BOTH the headless runner (here) and the graphical

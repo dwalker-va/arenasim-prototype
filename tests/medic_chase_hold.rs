@@ -18,16 +18,18 @@
 //! - scene tests drive the real posture ticks of every healer machine (Priest,
 //!   Paladin, and the caster-healer machine the Shaman and Druid share) over a
 //!   hand-built scene, frame by frame;
-//! - `the_repro_druid_commits_to_one_goal` plays the match the defect was
-//!   found in and counts the Druid's goal switches per second.
+//! - `the_druid_on_the_pillar_edge_commits_to_one_goal` stages the pillar
+//!   edge the defect was found on (a staged match, tier 3) and counts the
+//!   Druid's goal switches per second.
 
 use std::collections::BTreeMap;
 
 use bevy::ecs::world::CommandQueue;
 use bevy::prelude::*;
 
-use arenasim::headless::runner::TraceConfig;
-use arenasim::headless::{run_headless_match_observed, HeadlessMatchConfig};
+mod common;
+
+use arenasim::headless::HeadlessMatchConfig;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::class_ai::caster_healer_posture::evaluate_caster_healer_posture;
 use arenasim::states::play_match::class_ai::paladin::evaluate_paladin_posture;
@@ -40,6 +42,7 @@ use arenasim::states::play_match::{
     AbilityDefinitions, AbilityType, Aura, Combatant, DispelWalkPhase, HealerPosture,
     MovementConfig, MovementDirective, MovementGoal,
 };
+use common::staged::{of_class, play, sim_time, Played};
 
 const HEALER_POS: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const WARRIOR_POS: Vec3 = Vec3::new(16.0, 1.0, 0.0);
@@ -472,49 +475,62 @@ fn the_hold_does_not_keep_a_dispel_walk() {
 }
 
 // ---------------------------------------------------------------------------
-// The played repro
+// The played guard: a staged match
 // ---------------------------------------------------------------------------
 
-/// The defect was found in Hunter+Paladin vs Mage+Druid on Nagrand
-/// (`TeamPlan`), seed 2: from 94.16s (combat time) the Mage sat at 40% behind
-/// a pillar edge from the Druid, whose formation point lay on the occluded
-/// side of that edge — so the formation walk took sight away and the medic
-/// chase gave it back. That seed stopped reaching the edge when the Druid's
-/// mana governor reserve fell (AS-247); Warrior+Paladin vs Mage+Druid, seed 1,
-/// has the Druid chasing its dying Mage round a pillar from about 50s.
-fn repro_config() -> HeadlessMatchConfig {
-    HeadlessMatchConfig {
-        team1: vec!["Warrior".into(), "Paladin".into()],
-        team2: vec!["Mage".into(), "Druid".into()],
-        map: "PillaredArena".to_string(),
-        ai_profile: Some("TeamPlan".to_string()),
-        random_seed: Some(1),
-        ..Default::default()
+/// The pillar edge the defect was found on, staged (tier 3,
+/// `headless::stage`) rather than reached from a seed's opening: Warrior +
+/// Paladin vs Mage + Druid on Nagrand (`TeamPlan`), round the pillar at
+/// (-40, -20), with the units where the AS-247 repro had them when the Druid
+/// began trading goals. The Mage is held against the pillar's north face by
+/// the Paladin's Hammer of Justice, dying, with the enemy pair on it; the
+/// Druid stands off the pillar's north-east corner, out of sight of it. The
+/// Paladin is the enemy nearest the Mage, so the Druid's formation point
+/// (behind the Mage, away from the Paladin) falls inside the pillar and is
+/// projected onto its east face — the occluded side of that corner. So the
+/// formation walk takes sight away and the medic chase gives it back.
+mod staged {
+    use super::*;
+    use arenasim::headless::{Stage, Unit};
+
+    pub const WARRIOR: Unit = Unit::new(1, 0);
+    pub const PALADIN: Unit = Unit::new(1, 1);
+    pub const MAGE: Unit = Unit::new(2, 0);
+    pub const DRUID: Unit = Unit::new(2, 1);
+
+    pub fn config(seed: u64) -> HeadlessMatchConfig {
+        HeadlessMatchConfig {
+            team1: vec!["Warrior".into(), "Paladin".into()],
+            team2: vec!["Mage".into(), "Druid".into()],
+            map: "PillaredArena".to_string(),
+            ai_profile: Some("TeamPlan".to_string()),
+            team1_kill_target: Some(0),
+            team2_kill_target: Some(0),
+            random_seed: Some(seed),
+            max_duration_secs: 6.0,
+            ..Default::default()
+        }
+    }
+
+    pub fn stage() -> Stage {
+        Stage::new()
+            .place(WARRIOR, -44.5, -15.8)
+            .place(PALADIN, -43.5, -12.9)
+            .place(MAGE, -42.6, -14.1)
+            .health(MAGE, 0.3)
+            .land(MAGE, AbilityType::HammerOfJustice, PALADIN)
+            .cooldown(PALADIN, AbilityType::HammerOfJustice, 60.0)
+            .place(DRUID, -35.8, -15.5)
     }
 }
 
-/// The Druid's movement decisions as `(combat time, trigger)`.
-fn druid_movement(config: HeadlessMatchConfig) -> Vec<(f32, String)> {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let path = tmp.path().to_path_buf();
-    drop(tmp);
-    run_headless_match_observed(
-        config,
-        true,
-        Some(TraceConfig {
-            output_path: path.clone(),
-        }),
-        |_| {},
-    )
-    .expect("headless match");
-    let body = std::fs::read_to_string(&path).expect("read trace");
-    let _ = std::fs::remove_file(&path);
-    body.lines()
-        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-        .filter(|e| e["kind"] == "movement_decision" && e["actor"]["class"] == "Druid")
+/// The Druid's movement decisions from the gates, as `(combat time, trigger)`.
+fn druid_movement(played: &Played) -> Vec<(f32, String)> {
+    of_class(played.staged_trace(), "Druid")
+        .filter(|e| e["kind"] == "movement_decision")
         .map(|e| {
             (
-                e["sim_time"].as_f64().unwrap() as f32,
+                sim_time(e),
                 e["trigger"].as_str().unwrap_or_default().to_string(),
             )
         })
@@ -535,34 +551,34 @@ fn max_switches_per_second(events: &[(f32, String)]) -> usize {
         .unwrap_or(0)
 }
 
-/// The guard. Before the hold the Druid switched goal every frame from 94.16s
-/// to the end of the match — about 60 switches a second. A chase now runs at
-/// least a commit window (0.6s) before the formation point can have the Druid
-/// back, so a chase-formation-chase cycle takes over 0.6s: at most four
-/// switches fit in any second.
+/// The guard. Without the hold the Druid switches goal every frame on the
+/// pillar edge — about 60 switches a second. A chase now runs at least a
+/// commit window (0.6s) before the formation point can have the Druid back, so
+/// a chase-formation-chase cycle takes over 0.6s: at most four switches fit in
+/// any second. Over three seeds: the stage puts the Druid on the edge by
+/// construction, and the seed only moves the rolls.
 #[test]
-fn the_repro_druid_commits_to_one_goal() {
-    let events = druid_movement(repro_config());
+fn the_druid_on_the_pillar_edge_commits_to_one_goal() {
+    for seed in [1, 2, 3] {
+        let played = play(staged::config(seed), staged::stage());
+        let events = druid_movement(&played);
 
-    // The scenario still happens: the Druid chases the Mage round the pillar
-    // edge, more than once, in the repro window — until its heal lifts the
-    // Mage back over the urgency threshold and the chase has no teammate.
-    let chases_in_window = events
-        .iter()
-        .filter(|(t, trig)| *t >= 50.0 && trig == "SeekLos")
-        .count();
-    assert!(
-        chases_in_window >= 2,
-        "the repro no longer reaches the pillar edge: {chases_in_window} SeekLos at/after 50s \
-         — re-seed this probe"
-    );
-
-    let worst = max_switches_per_second(&events);
-    assert!(
-        worst <= 4,
-        "the Druid switched movement goal {worst} times inside one second \
-         (the medic chase and the formation point trading it every frame)"
-    );
+        let worst = max_switches_per_second(&events);
+        assert!(
+            worst <= 4,
+            "seed {seed}: the Druid switched movement goal {worst} times inside one second \
+             (the medic chase and the formation point trading it every frame)"
+        );
+        // Not vacuous: the chase and the formation point do trade the Druid on
+        // the edge, at the hold's cadence, through the match.
+        let chases = events.iter().filter(|(_, t)| t == "SeekLos").count();
+        let formation = events.iter().filter(|(_, t)| t == "FormationShift").count();
+        assert!(
+            chases >= 3 && formation >= 2,
+            "seed {seed}: the stage no longer trades the Druid between the chase and the \
+             formation point ({chases} SeekLos, {formation} FormationShift): {events:?}"
+        );
+    }
 }
 
 /// The window counter itself: a frame-by-frame alternation reads as ~60 a

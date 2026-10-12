@@ -13,7 +13,10 @@ use std::collections::HashMap;
 ///
 /// When a seed is provided (e.g., via headless config), the same seed will
 /// always produce the same match outcome. Without a seed, uses system entropy.
-#[derive(Resource)]
+///
+/// `Clone` copies the stream's position, so a copy draws exactly what the
+/// original would next (a staged match restoring a seeded one's state).
+#[derive(Resource, Clone)]
 pub struct GameRng {
     rng: StdRng,
     /// The seed used to initialize this RNG (if deterministic)
