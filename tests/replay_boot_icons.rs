@@ -25,15 +25,19 @@
 //! on the handle request — which is exactly what goes missing when the loader
 //! is absent from the state's schedule, and exactly what the defect was.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin as BevyStatesPlugin;
 
 use arenasim::combat::CombatPlugin;
 use arenasim::states::configure_match_ui::ClassIconHandles;
-use arenasim::states::play_match::equipment::EquipmentPlugin;
+use arenasim::states::play_match::ability_config::AbilityDefinitions;
+use arenasim::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions};
 use arenasim::states::play_match::{
-    AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin, SpellIconHandles,
+    item_aura_icons, AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin, SpellIconHandles,
+    GENERIC_AURA_ICONS,
 };
 use arenasim::states::{GameState, StatesPlugin};
 
@@ -118,6 +122,14 @@ fn a_replay_match_loads_the_class_icons() {
 /// been loaded here, so "the class icons were missing" is a property of that
 /// one loader's registration rather than of the harness failing to tick the
 /// match chrome at all.
+///
+/// It is also the runtime half of `tests/timeline_icon_audit.rs`: the real
+/// `load_spell_icons` must request every ability's `icon` from
+/// `abilities.ron` under the ability's display name — the key the timeline,
+/// the buff bar and the team frames read the texture back by — and nothing
+/// else besides the generic aura icons and the proc trinkets' art. The key set
+/// is compared for EQUALITY, so a key the loader misspells fails as both a
+/// missing name and a stray one.
 #[test]
 fn a_replay_match_loads_the_spell_icons() {
     let app = boot_into_play_match();
@@ -128,4 +140,56 @@ fn a_replay_match_loads_the_spell_icons() {
         "the spell icon loader never ran in the PlayMatch state — the aura \
          rows on the team frames would be blank too"
     );
+
+    let abilities = app.world().resource::<AbilityDefinitions>();
+    let items = app.world().resource::<ItemDefinitions>();
+    let asset_server = app.world().resource::<AssetServer>();
+
+    // What the loader requested: key -> asset path.
+    let mut requested: BTreeMap<String, String> = BTreeMap::new();
+    for (key, handle) in &handles.handles {
+        let path = asset_server
+            .get_path(handle.id())
+            .map(|p| p.path().to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        assert!(
+            requested.insert(key.clone(), path).is_none(),
+            "the loader requested \"{key}\" twice"
+        );
+    }
+
+    // What it must request, derived independently of the loader: every
+    // ability by its display name, the generic aura icons, and the proc
+    // trinkets' art.
+    let mut expected: BTreeMap<String, String> = abilities
+        .iter()
+        .map(|(_, config)| (config.name.clone(), config.icon.clone()))
+        .collect();
+    for (key, path) in GENERIC_AURA_ICONS {
+        expected.insert(key.to_string(), path.to_string());
+    }
+    for (key, path) in item_aura_icons(items) {
+        expected.insert(key, path);
+    }
+
+    let requested_keys: BTreeSet<&String> = requested.keys().collect();
+    let expected_keys: BTreeSet<&String> = expected.keys().collect();
+    assert_eq!(
+        requested_keys,
+        expected_keys,
+        "the spell icon loader's keys differ from abilities.ron's names (plus \
+         the generic aura and proc trinket keys); missing: {:?}, stray: {:?}",
+        expected_keys
+            .difference(&requested_keys)
+            .collect::<Vec<_>>(),
+        requested_keys
+            .difference(&expected_keys)
+            .collect::<Vec<_>>(),
+    );
+    for (key, path) in &expected {
+        assert_eq!(
+            &requested[key], path,
+            "the loader requested the wrong art for \"{key}\""
+        );
+    }
 }

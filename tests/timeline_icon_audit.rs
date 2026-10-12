@@ -4,11 +4,15 @@
 //! eighteen abilities, so every cast outside it — the whole Shaman, Druid,
 //! Paladin and Hunter kits — showed a grey "??" whenever its art was not
 //! loaded. It now derives the icon from `abilities.ron`'s `icon` field
-//! ([`timeline_icon_path`]), the same field the in-match loader registers
-//! under the ability's name ([`ability_icon_paths`]). This holds that chain
-//! for every ability `abilities.ron` defines: the timeline resolves the name
-//! the log records to the ability, that ability has an icon on disk, and the
-//! loader registers it under the key the timeline reads it back by.
+//! ([`timeline_icon_path`]). For every ability `abilities.ron` defines, this
+//! checks that the timeline resolves the name the log records to that
+//! ability, that the ability has an icon file on disk, and that
+//! [`ability_icon_paths`] — the list `load_spell_icons` loads from — lists it
+//! under the ability's name.
+//!
+//! That the real loader then requests exactly those keys is checked at
+//! runtime, by booting `PlayMatch`, in
+//! `tests/replay_boot_icons.rs::a_replay_match_loads_the_spell_icons`.
 
 use std::collections::BTreeMap;
 
