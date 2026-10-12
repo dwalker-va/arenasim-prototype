@@ -85,6 +85,10 @@ pub enum Micro {
     KeyUp(NamedKey),
     /// Burn `n` further frames.
     Idle(u32),
+    /// Wait until a pointer move would no longer read to egui as the pointer
+    /// RESTING after a click. See [`click_rest_gate`] — a hover's move made
+    /// sooner never gets its tooltip, however long it then waits.
+    AwaitClickRest,
     /// Wait until egui would actually show a tooltip for whatever the pointer
     /// is over. See [`tooltip_gate`] — this is a WALL-CLOCK wait expressed as
     /// a predicate, not a frame count, because every gate egui applies is.
@@ -225,7 +229,12 @@ pub fn expand(step: &Step, settle: u32) -> VecDeque<Micro> {
         // WALL-CLOCK grounds. So: aim, wait for egui's own gates to open,
         // then give the draw a couple of frames to run and be observed. Only
         // that last part is legitimately frame-shaped.
+        //
+        // The move itself waits for the last click to be old enough first:
+        // egui reads a move inside that window as resting after the click,
+        // and that verdict does not age away (AS-289).
         Step::Hover { id } => {
+            q.push_back(Micro::AwaitClickRest);
             q.push_back(Micro::Move { id: id.clone() });
             q.push_back(Micro::SettleForTooltip);
             q.push_back(Micro::Idle(settle));
@@ -340,7 +349,7 @@ fn tooltip_gate(ctx: &egui::Context) -> Result<(), &'static str> {
     if since_scroll < delay {
         return Err("a scroll is still inside tooltip_delay");
     }
-    if since_click < since_move + 0.1 {
+    if since_click < since_move + EGUI_CLICK_REST_SECS {
         return Err("the last click is more recent than the last move (egui suppresses a tooltip right after a click)");
     }
     if only_when_still && !still {
@@ -351,6 +360,29 @@ fn tooltip_gate(ctx: &egui::Context) -> Result<(), &'static str> {
     }
     if delay - since_scroll.min(since_move).min(since_click) > 0.0 {
         return Err("still inside tooltip_delay");
+    }
+    Ok(())
+}
+
+/// How soon after a click egui reads a pointer move as the pointer RESTING
+/// after that click rather than moving on: `Response::should_show_hover_ui`'s
+/// `clicked_more_recently_than_moved` offset, which egui hardcodes.
+const EGUI_CLICK_REST_SECS: f32 = 0.1;
+
+/// Whether a pointer move made now would count, to egui, as a move rather
+/// than as the pointer resting after the last click.
+///
+/// egui withholds a tooltip while `time_since_last_click <
+/// time_since_last_movement + 0.1`. Both clocks advance together, so a move
+/// that lands inside 0.1s of a click shuts that gate for as long as the
+/// pointer then stays put — and a hover is one move, then stillness. Whether
+/// it landed inside the window was a race: View Combatant's
+/// `click slot:t1s0` then `hover kit:...` is a state transition, a settle and
+/// a two-frame rect check, about 0.1s at 60fps. It lost intermittently in a
+/// 1280x720 window (AS-289). Waiting on egui's own clock settles it.
+fn click_rest_gate(ctx: &egui::Context) -> Result<(), &'static str> {
+    if ctx.input(|i| i.pointer.time_since_last_click()) <= EGUI_CLICK_REST_SECS {
+        return Err("the last click is too recent: egui would read the move as resting after it");
     }
     Ok(())
 }
@@ -467,6 +499,21 @@ pub fn run_ui_script(
     match action {
         Micro::Idle(0) => {}
         Micro::Idle(n) => run.queue.push_front(Micro::Idle(n - 1)),
+        Micro::AwaitClickRest => match click_rest_gate(&ctx) {
+            Ok(()) => run.waiting = 0,
+            Err(shut) => {
+                run.waiting += 1;
+                if run.waiting > run.timeout {
+                    let timeout = run.timeout;
+                    run.fail(format!(
+                        "waited {timeout} frames to move the pointer for a hover: {shut}"
+                    ));
+                    commands.entity(window).despawn();
+                    return;
+                }
+                run.queue.push_front(Micro::AwaitClickRest);
+            }
+        },
         Micro::SettleForTooltip => match tooltip_gate(&ctx) {
             Ok(()) => run.waiting = 0,
             Err(shut) => {

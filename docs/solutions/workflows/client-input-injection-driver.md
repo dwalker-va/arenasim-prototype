@@ -318,6 +318,17 @@ poll until the step timeout rather than reading once. The negatives
 (`assert-absent`, `assert-no-note`) deliberately do NOT poll: retrying a
 negative means passing on the frame before the thing appears.
 
+One of those gates also bites the MOVE, not only the wait after it. egui
+withholds a tooltip while `time_since_last_click < time_since_last_movement +
+0.1`, and both clocks advance together, so a move landing within 0.1s of a
+click shuts the gate for as long as the pointer then rests — and `hover` is
+one move, then rest. `click slot:t1s0` then `hover kit:...` is a state
+transition, a settle and the two-frame rect check, about 0.1s at 60fps; in a
+1280x720 window it lost that race intermittently, failing at a different
+class's first hover each run (AS-289). `hover` now starts with
+`AwaitClickRest`, which holds the move until egui's own click clock is past
+0.1s.
+
 All three traps share a shape: the driver observed a state that was still
 changing. When a new assertion is flaky, suspect that before suspecting the
 UI — and check whether your wait and the thing you are waiting for are

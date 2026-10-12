@@ -805,6 +805,10 @@ fn assert_view_refuses_to_answer_outside_the_encyclopedia() {
 /// the user on an idle one.
 ///
 /// If someone "simplifies" `SettleForTooltip` back into an `Idle`, this fails.
+///
+/// The move itself waits too, on egui's click clock: a move inside 0.1s of the
+/// last click reads to egui as resting after that click, and no tooltip
+/// follows however long the pointer then stays (AS-289).
 #[test]
 fn a_hover_waits_on_eguis_gates_rather_than_counting_frames() {
     use arenasim::ui::driver::runner::Micro;
@@ -823,9 +827,13 @@ fn a_hover_waits_on_eguis_gates_rather_than_counting_frames() {
         1,
         "a hover must wait on the tooltip gates: {hover:?}"
     );
+    let at = |want: fn(&Micro) -> bool| hover.iter().position(want);
+    let rest = at(|m| matches!(m, Micro::AwaitClickRest));
+    let aim = at(|m| matches!(m, Micro::Move { .. }));
+    let settle = at(|m| matches!(m, Micro::SettleForTooltip));
     assert!(
-        matches!(hover.front(), Some(Micro::Move { .. })),
-        "aim first, then wait: {hover:?}"
+        rest.is_some() && rest < aim && aim < settle,
+        "wait out the click rest, then aim, then wait on the gates: {hover:?}"
     );
     // The trailing Idle is legitimately frame-shaped: it lets the pass draw
     // and the registry snapshot catch up. It is NOT the wait.
@@ -842,7 +850,9 @@ fn a_hover_waits_on_eguis_gates_rather_than_counting_frames() {
         3,
     );
     assert!(
-        !click.iter().any(|m| matches!(m, Micro::SettleForTooltip)),
+        !click
+            .iter()
+            .any(|m| matches!(m, Micro::SettleForTooltip | Micro::AwaitClickRest)),
         "a click has no tooltip to wait for: {click:?}"
     );
     assert_eq!(
