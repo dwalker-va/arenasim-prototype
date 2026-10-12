@@ -440,11 +440,19 @@ pub fn render_index(
 /// that ever stops holding.
 fn empty_reason(filters: &AbilityFilters) -> String {
     match (filters.class, filters.school) {
+        // The "None" school chip: abilities with no spell school at all.
+        (Some(class), Some(SpellSchool::None)) => format!(
+            "The {} has no abilities without a spell school.",
+            class.name()
+        ),
         (Some(class), Some(school)) => {
             format!("The {} has no {:?} abilities.", class.name(), school)
         }
         (Some(class), None) => format!("The {} has no abilities.", class.name()),
-        (None, Some(school)) => format!("No class has a {:?} ability.", school),
+        (None, Some(SpellSchool::None)) => {
+            "No class has abilities without a spell school.".to_string()
+        }
+        (None, Some(school)) => format!("No class has {:?} abilities.", school),
         (None, None) => "No abilities are defined.".to_string(),
     }
 }
@@ -757,7 +765,23 @@ mod tests {
             class: None,
             school: Some(SpellSchool::Holy),
         };
-        assert_eq!(empty_reason(&school_only), "No class has a Holy ability.");
+        assert_eq!(empty_reason(&school_only), "No class has Holy abilities.");
+        let schoolless = AbilityFilters {
+            class: Some(CharacterClass::Mage),
+            school: Some(SpellSchool::None),
+        };
+        assert_eq!(
+            empty_reason(&schoolless),
+            "The Mage has no abilities without a spell school."
+        );
+        let schoolless_any = AbilityFilters {
+            class: None,
+            school: Some(SpellSchool::None),
+        };
+        assert_eq!(
+            empty_reason(&schoolless_any),
+            "No class has abilities without a spell school."
+        );
     }
     use crate::states::play_match::ability_config::load_ability_definitions;
     use std::collections::HashSet;
