@@ -760,7 +760,8 @@ fn try_fear(
 /// Try to fire Death Coil at a peel target: instant Shadow projectile that, on
 /// impact, deals damage, heals the Warlock for that damage (see
 /// `projectiles.rs`), and applies a 3s never-breaking horror via the def's Fear
-/// aura. Gated through `pre_cast_ok` (range/mana/cooldown/school-lock).
+/// aura. Gated through `pre_cast_ok` (range/mana/cooldown/school-lock, a held
+/// target, and a friendly CC its damage would break).
 fn try_death_coil(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -777,7 +778,12 @@ fn try_death_coil(
     let death_coil = AbilityType::DeathCoil;
     let def = abilities.get_unchecked(&death_coil);
 
-    let opts = PreCastOpts::default();
+    // Its damage would break a friendly Polymorph or Freezing Trap, even one
+    // inside the chain window that no longer counts as a hold.
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
     let cleared = match cast_gate(
         death_coil,
         def,

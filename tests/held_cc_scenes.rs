@@ -227,3 +227,56 @@ fn a_fear_the_team_is_breaking_does_not_hold_but_one_left_alone_does() {
         describe(&left)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Death Coil's damage never breaks a friendly Polymorph, even one ending.
+// ---------------------------------------------------------------------------
+
+/// The Warlock with an enemy Warrior on it, in Death Coil's peel radius.
+fn peel_scene() -> Scene {
+    Scene::new()
+        .unit(WARLOCK, 1, Warlock)
+        .targeting(ENEMY)
+        .unit(ALLY, 1, Warrior)
+        .at(-10.0, 0.0)
+        .unit(ENEMY, 2, Warrior)
+        .at(2.0, 0.0)
+        .targeting(WARLOCK)
+}
+
+#[test]
+fn death_coil_does_not_break_a_friendly_polymorph_inside_the_chain_window() {
+    // The control: the Warrior is free, and is peeled.
+    let free = peel_scene().decide(WARLOCK);
+    assert_eq!(
+        free.chose(),
+        Some((AbilityType::DeathCoil, Some(ENEMY))),
+        "the control peels the free Warrior: {}",
+        describe(&free)
+    );
+
+    // A teammate's Polymorph in its last moments is no longer a hold, but
+    // Death Coil's damage would still break it.
+    let ending = held(
+        peel_scene(),
+        ENEMY,
+        ALLY,
+        AuraType::Polymorph,
+        CC_CHAIN_WINDOW - 0.1,
+    )
+    .decide(WARLOCK);
+    assert_ne!(
+        ending.chose(),
+        Some((AbilityType::DeathCoil, Some(ENEMY))),
+        "Death Coil broke a friendly Polymorph: {}",
+        describe(&ending)
+    );
+    assert!(
+        matches!(
+            ending.rejected(AbilityType::DeathCoil),
+            Some(RejectionReason::FriendlyBreakableCC)
+        ),
+        "the refusal is traced as the friendly CC: {}",
+        describe(&ending)
+    );
+}
