@@ -1,6 +1,6 @@
 # UI design system: one look, one kit, one audit
 
-**Status:** proposal, awaiting the decisions in [§5](#5-decisions-for-the-user). Card AS-251.
+**Status:** approved; decisions recorded in [§5](#5-decisions). Card AS-251.
 **Interactive bench:** [`docs/design/benches/2026-10-11-ui-design-system-bench.html`](../benches/2026-10-11-ui-design-system-bench.html).
 It shows every proposed token and component in the client face. Its knobs emit the
 `src/ui/theme.rs` constants they would become.
@@ -333,7 +333,7 @@ come with it), and has a row in the gallery harness.
 | Component | Shape | Replaces |
 |---|---|---|
 | `screen_header(ui, title, nav, trailing)` | nav cluster, then the title at `TITLE` in `ACCENT`, then a trailing slot, then a `LINE` rule | six back/exit treatments (§1.3) |
-| `Nav` | `Nav::Exit(dest)` draws `◀ DEST`. `Nav::Stacked { can_back, dest }` draws `◀ BACK` + `🏠 DEST`, with Back disabled (never hidden) at the root. Esc runs the same ladder: close modal → clear search → back → exit. | `chrome_button`, five BACK buttons, R5's split Esc logic |
+| `Nav` | `Nav::Exit(dest)` draws `◀ DEST` for a fixed destination. `Nav::Return` is the contextual exit: it leaves to the screen's `return_to`, set by whoever opened it with `open_from(state)` (the encyclopedia's mechanism, generalised), and draws `◀ <return_to.screen_name()>`. `Nav::Stacked { can_back }` draws `◀ BACK` + `🏠 <return_to>`, with Back disabled (never hidden) at the root. Every label names its destination; none is hard-coded. Esc runs the same ladder: close modal → clear search → back → exit. | `chrome_button`, five BACK buttons, R5's split Esc logic |
 | `button(ui, label, Variant)` | `Primary` (gold fill, dark text, one per screen, 44 tall), `Secondary`, `Ghost`, `Danger`, `Icon`. Disabled is a state of each variant. | menu buttons, green Start, DONE, Play, toggles, Reset |
 | `panel(accent)` | `PANEL` fill, 1px `LINE` (or the accent colour), `MD` radius, `MD` margin | `ui.group`, 5 hand-built frames |
 | `panel_header(ui, title, colour, trailing)` | `H2` title + trailing controls | team headers, section headings |
@@ -380,8 +380,10 @@ colours become the HUD pair.
 ![Configure before/after](2026-10-11-ui-design-system/configure_match_before_after.png)
 
 **Results.** A title and an exit like every other screen. The duration moves to the header's
-trailing slot. DONE goes away, because `◀ MAIN MENU` does the same thing and Esc now takes the
-same path (decision D4).
+trailing slot. DONE goes away, because the header exit does the same thing and Esc now takes
+the same path (decision D4). The exit is contextual (`Nav::Return`): it returns to whatever
+opened the match and is labelled with that screen's name. Today that is the main menu, so the
+mockup reads `◀ MAIN MENU`; a future Gauntlet run would return to, and name, its run hub.
 
 ![Results before/after](2026-10-11-ui-design-system/results_before_after.png)
 
@@ -493,6 +495,7 @@ impl GameState {
             GameState::Encyclopedia => Chrome::document(Nav::Stacked),
             GameState::ViewCombatant => Chrome::document(Nav::Exit(GameState::ConfigureMatch)),
             GameState::PlayMatch => Chrome::hud(),
+            GameState::Results => Chrome::report(Nav::Return), // back to whatever opened the match
             // ...
         }
     }
@@ -535,10 +538,10 @@ the files it touches. Sizes: S ≈ half a day, M ≈ a day, L ≈ two or more da
 |---|---|---|---|---|
 | 1 | **Foundations** | `ui::theme` tokens, `ui::install`; `snapshot_font_audit` → `install`; `ui_token_audit` with today's counts frozen; the CLAUDE.md rule. `install` sets fonts only, so this card changes no pixels. | none | M |
 | 2 | **Widget kit + gallery** | `ui::widgets`: button, header/Nav, panel, list_row, stat_rows, tabs, chip, tooltip, modal, empty_state, bars. Move `encyclopedia/widget.rs` link/tooltip pieces (re-exported from the old path). Add `ui_gallery_snapshot`. | new gallery baseline | L |
-| 3 | **Global style + `GameState::chrome()`** | `install` sets the full `Style`. Delete the 7 `set_style` sites. Add `chrome()`/`harness()`. Esc derives from `Nav`, fixing the two Esc defects in §1.5. | every menu baseline, because the stock widgets change | M |
+| 3 | **Global style + `GameState::chrome()`** | `install` sets the full `Style`. Delete the 7 `set_style` sites. Add `chrome()`/`harness()` and `Nav` with its three variants, including the contextual `Nav::Return`, whose `return_to` / `open_from` is lifted from the encyclopedia into a shared per-screen context. Exit labels come from the destination's `screen_name()`. Esc derives from `Nav`, fixing the two Esc defects in §1.5. | every menu baseline, because the stock widgets change | M |
 | 4 | **Encyclopedia** | Swap its local consts for tokens; `screen_header`; its widgets now come from `ui::widgets`. Smallest visual change, since it is the source palette. | 30 encyclopedia PNGs | M |
 | 5 | **Animation sandbox** | Workbench template; selection and hover move to the shared states. | 2 | S |
-| 6 | **Results** | Report template, header + exit, DONE removed (D4), tokens for the data colours. | 4 | M |
+| 6 | **Results** | Report template; header with the contextual `Nav::Return` exit, named for its destination; DONE removed (D4). Starting a match records its opener via `open_from` (main menu today), and the exit and Esc both clear `MatchResults` before leaving. Tokens for the data colours. | 4 | M |
 | 7 | **Configure Match** | Setup template; slot card and picker → `list_row`; picker → `modal`; Primary CTA; team tokens. | 2 | M |
 | 8 | **Main menu** | Hero template; buttons through `button` (hover ring kept as a Hero variant). | 1 | S |
 | 9 | **View Combatant: split** | Extract `draw_view_combatant` + wrapper; new harness; no visual change. | new baseline | M |
@@ -561,27 +564,27 @@ A milestone review can take 1–3 as one unit ("the kit"), and each later screen
 
 ---
 
-## 5. Decisions for the user
+## 5. Decisions
 
-- **D1. Base palette.** Recommended: adopt the encyclopedia's gold-on-navy for all chrome
-  (the bench and every AFTER image). The alternative is to keep per-screen character. That
-  would leave the problem the card names unsolved.
-- **D2. Exit affordance.** Recommended: on flat screens, one named exit (`◀ MAIN MENU`); on
-  the encyclopedia only, `◀ BACK` + `🏠 DEST`. The alternative is the pair everywhere, with
-  Back disabled at the root (image in §2.5).
-- **D3. A lighter weight for prose.** Recommended: add Rajdhani Regular as a named `Body`
-  family for multi-sentence prose (descriptions, procs, tooltip bodies), keeping Bold for
-  everything else. The gallery's last row compares the two. The alternative is all-Bold, as
-  today.
-- **D4. Results' exit.** Recommended: the header's `◀ MAIN MENU`, with the bottom DONE
-  removed. The alternative keeps DONE as the screen's Primary, with no header exit.
-- **D5. Primary button.** Recommended: gold fill, dark text, one per screen. This retires
-  Configure's green Start. The alternative is a gold outline (the sandbox's Play).
-- **D6. HUD scope.** Recommended: the HUD adopts the type, spacing, radius and tooltip tokens
-  and its own `hud`/`fct` colour tables, but **not** the menu chrome palette. The broadcast
-  look and the colour-budget rules stay as they are.
-- **D7. Team colours.** Recommended: the HUD's (100,150,255)/(255,100,100) everywhere. These
-  are the values players see most, since they are the ones the match itself uses.
+- **D1. Base palette.** The encyclopedia's gold-on-navy for all chrome (the bench and every
+  AFTER image).
+- **D2. Exit affordance.** Flat screens have one exit that names its destination
+  (`◀ <DESTINATION>`). The encyclopedia alone has `◀ BACK` + `🏠 <DESTINATION>`.
+- **D3. A lighter weight for prose.** Rajdhani Regular as a named `Body` family for
+  multi-sentence prose (descriptions, procs, tooltip bodies). Everything else stays Bold.
+- **D4. Results' exit.** The header's exit, with the bottom DONE removed.
+  - **Destination:** the exit is contextual (`Nav::Return`). It returns to whatever opened the
+    match, via the encyclopedia's `return_to` / `open_from` mechanism.
+  - **Label:** it names that destination, never a hard-coded `MAIN MENU`.
+  - **Today:** the opener is the main menu, the same destination as today's DONE.
+  - **Future:** a Gauntlet run sets its run hub as the opener, and Results returns there.
+  - **Esc:** takes the same path.
+- **D5. Primary button.** Gold fill, dark text, one per screen. Configure's green Start
+  retires.
+- **D6. HUD scope.** The HUD adopts the type, spacing, radius and tooltip tokens and its own
+  `hud`/`fct` colour tables, but **not** the menu chrome palette. The broadcast look and the
+  colour-budget rules stay as they are.
+- **D7. Team colours.** The HUD's (100,150,255)/(255,100,100) everywhere.
 
 **Human testing:** judge the before/after images in §2.5 and the bench. Do the AFTER screens
 read as one game? Is gold-filled Primary (D5) right for Start? Is Regular prose (D3) legible
