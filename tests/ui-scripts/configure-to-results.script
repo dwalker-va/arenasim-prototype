@@ -1,0 +1,40 @@
+# Set up a match on the Configure Match screen, start it from the footer's
+# Primary button, play it out, and leave Results by its header exit — which
+# names, and returns to, the screen that opened match setup (AS-262).
+#
+# Run:  cargo run --release -- --ui-script tests/ui-scripts/configure-to-results.script
+#
+# The match runs at real speed (the 10s gates, then about 30s of 1v1 combat),
+# hence the long await. Its bound covers the 300s match cap, which ends in
+# Results too, so the script never waits on combat to resolve a particular way.
+
+assert-state MainMenu
+click menu:MATCH
+assert-state ConfigureMatch
+
+# START MATCH is in place but disabled until every slot is filled.
+assert-visible configure:start
+assert-enabled configure:start false
+
+# The picker is the kit modal: its close button closes it without a change.
+click slot:t1s0
+assert-visible class:Warrior
+click configure:picker:close
+assert-absent class:Warrior
+assert-enabled configure:start false
+
+click slot:t1s0
+click class:Warrior
+click slot:t2s0
+click class:Mage
+assert-enabled configure:start true
+
+click configure:start
+assert-state PlayMatch
+
+# Configure was opened from the main menu, so the match's Results return there.
+await-note 360 nav:exit to=MainMenu label=◀ MAIN MENU
+assert-state Results
+assert-visible nav:exit
+click nav:exit
+assert-state MainMenu

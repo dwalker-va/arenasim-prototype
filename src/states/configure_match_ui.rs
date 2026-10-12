@@ -7,14 +7,19 @@
 //! - Start the match when ready
 //!
 //! ## UI Structure
-//! - **Three-column layout**: Team 1 | Arena/Map | Team 2
-//! - **Character Picker Modal**: Popup for selecting classes
-//! - **Dynamic validation**: Start button only enabled when all slots filled
+//! The Setup template (`docs/design/proposals/2026-10-11-ui-design-system.md`
+//! §2.4), built from the widget kit:
+//! - **Header**: the shared `screen_header`, whose exit names the opener
+//! - **Three panel columns**: Team 1 | Arena/Map | Team 2, the team panels
+//!   edged in the team tokens; slots and kill targets are `list_row`s
+//! - **Character picker**: a kit `Modal` of class `list_row`s
+//! - **Docked footer**: the screen's one Primary button, enabled only when
+//!   every slot is filled (`--ui-script` id `configure:start`)
 //!
 //! ## Interaction Flow
-//! 1. User adjusts team sizes with +/- buttons
-//! 2. Clicks empty character slots to open picker modal
-//! 3. Selects class from modal, slot updates
+//! 1. User adjusts team sizes with the − / + buttons
+//! 2. Clicks empty character slots to open the picker
+//! 3. Selects class from the picker, slot updates
 //! 4. Cycles through maps with arrow buttons
 //! 5. Clicks "START MATCH" when all slots filled
 
@@ -28,8 +33,14 @@ use super::{
     match_config::{self, ArenaMap, MatchConfig},
     GameState,
 };
+use crate::states::match_config::CharacterClass;
 use crate::ui::driver as ui_driver;
-use crate::ui::widgets::{nav_cluster, Nav, NavAction};
+use crate::ui::theme::{class_color, color, data, radius, size, space, stroke, text};
+use crate::ui::widgets::panel::margin_xy;
+use crate::ui::widgets::{
+    list_row, panel, panel_header, screen_header, section_label, Button, ListIcon, ListRow, Modal,
+    Nav, NavAction, Variant,
+};
 use bevy::core_pipeline::bloom::Bloom;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
@@ -245,8 +256,34 @@ pub fn configure_match_ui(
     }
 }
 
+/// The screen title, as the header draws it.
+const TITLE: &str = "Configure Match";
+
+/// The call to action's minimum width, so it keeps one size whichever label
+/// it wears (START MATCH, or the prompt to fill the slots).
+const CTA_MIN_WIDTH: f32 = 300.0;
+
+/// A filled slot's Change button's minimum width; the slot row gives up this
+/// much (and a gap) to it, so every row in a column ends at the same x.
+const CHANGE_WIDTH: f32 = 72.0;
+
+/// The widest the arena preview is drawn, whatever the column's width.
+const PREVIEW_MAX_WIDTH: f32 = 230.0;
+
+/// The tallest the character picker's list grows, as a fraction of the
+/// screen, before it scrolls.
+const PICKER_MAX_HEIGHT: f32 = 0.7;
+
+/// The character picker's modal id: its egui id and its `--ui-script` name
+/// (the close `×` registers as `configure:picker:close`).
+const PICKER_ID: &str = "configure:picker";
+
 /// Render the entire Configure Match screen into `ctx`, returning any action
 /// that needs ECS side effects (see [`ConfigureMatchAction`]).
+///
+/// The Setup template: the shared [`screen_header`], three [`panel`] columns
+/// (Team 1, the arena, Team 2), and a docked footer holding the screen's one
+/// Primary button.
 ///
 /// This is deliberately free of Bevy ECS system params (it takes plain
 /// references) so it can be driven directly by an egui harness — see
@@ -265,140 +302,67 @@ pub fn draw_configure_match(
 ) -> Option<ConfigureMatchAction> {
     let mut action: Option<ConfigureMatchAction> = None;
 
-    egui::CentralPanel::default()
+    // The docked footer: shown before the central panel so it claims the
+    // bottom of the screen and the columns take what is left.
+    egui::TopBottomPanel::bottom("configure:footer")
         .frame(
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(20, 20, 30))
-                .inner_margin(egui::Margin {
-                    left: 15,
-                    right: 15,
-                    top: 20,
-                    bottom: 20,
-                }),
+                .fill(color::BG)
+                .inner_margin(margin_xy(space::XL, space::LG)),
         )
         .show(ctx, |ui| {
-            ui.add_space(10.0);
-
-            // The exit, top-left, naming where it goes.
-            let back_rect =
-                egui::Rect::from_min_size(egui::pos2(20.0, 18.0), egui::vec2(240.0, 38.0));
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
-                if nav_cluster(ui, nav).is_some() {
-                    action = Some(ConfigureMatchAction::Exit);
-                }
-            });
-
-            // Title - centered relative to full width
-            ui.vertical_centered(|ui| {
-                ui.heading(
-                    egui::RichText::new("CONFIGURE MATCH")
-                        .size(42.0)
-                        .color(egui::Color32::from_rgb(230, 204, 153)),
-                );
-            });
-
-            ui.add_space(24.0);
-
-            // Main content area with 3 panels
-            // Calculate widths to prevent overflow
-            let screen_width = ctx.screen_rect().width();
-            let margins_and_spacing = 30.0 + 40.0; // Margins + column spacing
-            let content_width = screen_width - margins_and_spacing;
-            let col_width = content_width / 3.0;
-
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 20.0;
-                let panel_width = col_width - 34.0; // account for the framed inner margin + stroke
-
-                // Team 1 column (blue side)
-                team_column_frame(ui, 1, col_width, |ui| {
-                    if let Some(a) =
-                        render_team_panel(ui, config, 1, picker, panel_width, class_icons)
-                    {
-                        action = Some(a);
-                    }
-                });
-
-                // Map column (neutral center) — leads with the VS badge so it
-                // sits between the two team headers.
-                center_column_frame(ui, col_width, |ui| {
-                    render_map_panel(ui, config, panel_width, map_geometry, preview_texture);
-                });
-
-                // Team 2 column (red side)
-                team_column_frame(ui, 2, col_width, |ui| {
-                    if let Some(a) =
-                        render_team_panel(ui, config, 2, picker, panel_width, class_icons)
-                    {
-                        action = Some(a);
-                    }
-                });
-            });
-
-            // Push the action bar to the bottom of the panel so the primary
-            // CTA reads as a docked footer instead of floating in dead space.
-            let footer_height = 96.0;
-            let remaining = ui.available_height();
-            if remaining > footer_height {
-                ui.add_space(remaining - footer_height);
-            } else {
-                ui.add_space(22.0);
-            }
-
-            // Bottom action bar: a full-width separator, then the primary
-            // Start button so it reads as a committed footer action rather
-            // than floating in dead space.
-            let sep_color = egui::Color32::from_rgb(48, 50, 64);
-            let sep_y = ui.cursor().top();
-            let sep_rect = egui::Rect::from_min_max(
-                egui::pos2(ui.max_rect().left(), sep_y),
-                egui::pos2(ui.max_rect().right(), sep_y + 1.0),
-            );
-            ui.painter().rect_filled(sep_rect, 0.0, sep_color);
-            ui.add_space(20.0);
-
             ui.vertical_centered(|ui| {
                 let is_valid = config.is_valid();
-                let button_text = if is_valid {
-                    "START MATCH"
+                let label = if is_valid {
+                    "Start match"
                 } else {
-                    "SELECT CHARACTERS TO CONTINUE"
+                    "Select characters to continue"
                 };
-
-                let (fill, text_color, stroke) = if is_valid {
-                    (
-                        egui::Color32::from_rgb(46, 110, 66),
-                        egui::Color32::from_rgb(235, 248, 235),
-                        egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(96, 176, 116)),
-                    )
-                } else {
-                    (
-                        egui::Color32::from_rgb(38, 40, 52),
-                        egui::Color32::from_rgb(120, 120, 132),
-                        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(56, 58, 72)),
-                    )
-                };
-
-                let button = egui::Button::new(
-                    egui::RichText::new(button_text)
-                        .size(24.0)
-                        .strong()
-                        .color(text_color),
-                )
-                .fill(fill)
-                .stroke(stroke)
-                .corner_radius(8.0)
-                .min_size(egui::vec2(300.0, 54.0));
-
-                if ui.add_enabled(is_valid, button).clicked() {
+                if Button::new(label, Variant::Primary)
+                    .enabled(is_valid)
+                    .min_width(CTA_MIN_WIDTH)
+                    .driver_id("configure:start")
+                    .show(ui)
+                    .clicked()
+                {
                     action = Some(ConfigureMatchAction::StartMatch);
                 }
             });
-
-            ui.add_space(10.0);
         });
 
-    // Character picker modal - shown when active
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::new()
+                .fill(color::BG)
+                .inner_margin(margin_xy(space::XL, space::LG)),
+        )
+        .show(ctx, |ui| {
+            if screen_header(ui, TITLE, nav, |_| {}).is_some() {
+                action = Some(ConfigureMatchAction::Exit);
+            }
+            ui.add_space(space::LG);
+
+            ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.x = space::MD;
+                ui.columns(3, |columns| {
+                    if let Some(a) =
+                        render_team_panel(&mut columns[0], config, 1, picker, class_icons)
+                    {
+                        action = Some(a);
+                    }
+                    panel(None).show(&mut columns[1], |ui| {
+                        ui.set_min_width(ui.available_width());
+                        render_map_panel(ui, config, map_geometry, preview_texture);
+                    });
+                    if let Some(a) =
+                        render_team_panel(&mut columns[2], config, 2, picker, class_icons)
+                    {
+                        action = Some(a);
+                    }
+                });
+            });
+        });
+
     if picker.active {
         render_character_picker_modal(ctx, config, picker, class_icons);
     }
@@ -406,698 +370,334 @@ pub fn draw_configure_match(
     action
 }
 
-/// Wrap a team column in a team-tinted, team-bordered frame so the blue side
-/// and red side read as distinct at a glance (peripheral-vision identity).
-fn team_column_frame(
-    ui: &mut egui::Ui,
-    team: u8,
-    col_width: f32,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    let (fill, stroke) = if team == 1 {
-        (
-            egui::Color32::from_rgb(26, 32, 48),
-            egui::Color32::from_rgb(51, 102, 204),
-        )
+/// The class currently in `team`'s `slot`, if any.
+fn slot_class(config: &MatchConfig, team: u8, slot: usize) -> Option<CharacterClass> {
+    let slots = if team == 1 {
+        &config.team1
     } else {
-        (
-            egui::Color32::from_rgb(46, 28, 32),
-            egui::Color32::from_rgb(204, 51, 51),
-        )
+        &config.team2
     };
-
-    egui::Frame::new()
-        .fill(fill)
-        .stroke(egui::Stroke::new(2.0_f32, stroke.gamma_multiply(0.85)))
-        .corner_radius(10.0)
-        .inner_margin(egui::Margin::same(14))
-        .show(ui, |ui| {
-            ui.vertical(|ui| {
-                ui.set_width(col_width - 28.0);
-                add_contents(ui);
-            });
-        });
+    slots.get(slot).copied().flatten()
 }
 
-/// Wrap the center (map) column in a neutral framed panel to match the two
-/// team columns' visual weight.
-fn center_column_frame(
-    ui: &mut egui::Ui,
-    col_width: f32,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    egui::Frame::new()
-        .fill(egui::Color32::from_rgb(24, 24, 34))
-        .stroke(egui::Stroke::new(
-            1.5_f32,
-            egui::Color32::from_rgb(58, 58, 74),
-        ))
-        .corner_radius(10.0)
-        .inner_margin(egui::Margin::same(14))
-        .show(ui, |ui| {
-            ui.vertical(|ui| {
-                ui.set_width(col_width - 28.0);
-                add_contents(ui);
-            });
-        });
+/// Register a widget whose `--ui-script` id is built from data (a team, a
+/// slot, a class). The kit's `driver_id` takes a `&str`, which would mean
+/// formatting every id on every frame with the driver off; `format_args!`
+/// here costs nothing until [`ui_driver::mark`] finds the driver armed.
+fn mark(ui: &egui::Ui, response: &egui::Response, enabled: bool, id: std::fmt::Arguments<'_>) {
+    ui_driver::mark(ui, response.rect, enabled, id);
 }
 
-/// Render the character picker modal window.
-///
-/// Displays all available character classes with:
-/// - Class icon and name
-/// - Class description
-/// - Hover effects
-/// - Click to select
+/// A team's colour, from the team tokens.
+fn team_color(team: u8) -> egui::Color32 {
+    if team == 1 {
+        data::TEAM_1
+    } else {
+        data::TEAM_2
+    }
+}
+
+/// A class's icon for a [`ListRow`]: its art when loaded, else the shared
+/// fallback tile edged in the class colour.
+fn class_list_icon(class_icons: &ClassIcons, class: CharacterClass) -> ListIcon {
+    ListIcon {
+        texture: class_icons.textures.get(&class).copied(),
+        edge: class_color(class),
+    }
+}
+
+/// The character picker: a kit [`Modal`] listing every class as a
+/// [`list_row`], the slot's current class selected. Clicking a class assigns
+/// it and closes the picker; the `×`, Esc and a click outside close it
+/// without a change.
 fn render_character_picker_modal(
     ctx: &egui::Context,
     config: &mut MatchConfig,
     picker: &mut CharacterPickerState,
     class_icons: &ClassIcons,
 ) {
-    egui::Window::new(format!(
-        "Select Character - Team {} Slot {}",
+    let title = format!(
+        "Select character \u{2014} Team {}, slot {}",
         picker.team,
         picker.slot + 1
-    ))
-    .collapsible(false)
-    .resizable(false)
-    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-    .show(ctx, |ui| {
-        ui.set_min_width(500.0);
+    );
+    let current_class = slot_class(config, picker.team, picker.slot);
+    let max_height = ctx.screen_rect().height() * PICKER_MAX_HEIGHT;
 
-        // The class currently assigned to the slot being edited, so it can
-        // be marked in the list.
-        let current_class = if picker.team == 1 {
-            config.team1.get(picker.slot).copied().flatten()
-        } else {
-            config.team2.get(picker.slot).copied().flatten()
-        };
-
-        // Scroll so the 8-class list never overflows a short window.
+    let response = Modal::new(PICKER_ID, &title).show(ctx, |ui| {
+        let mut chosen = None;
+        // `min_scrolled_height` too: a modal is laid out from the screen's
+        // centre, so the space egui offers below it would otherwise clip the
+        // list to half the screen even when every class fits.
         egui::ScrollArea::vertical()
-            .max_height(560.0)
+            .max_height(max_height)
+            .min_scrolled_height(max_height)
             .auto_shrink([false, true])
             .show(ui, |ui| {
-                for class in match_config::CharacterClass::all() {
-                    let is_current = current_class == Some(*class);
-                    let color = class.color();
-                    let color32 = egui::Color32::from_rgb(
-                        (color.to_srgba().red * 255.0) as u8,
-                        (color.to_srgba().green * 255.0) as u8,
-                        (color.to_srgba().blue * 255.0) as u8,
-                    );
-
-                    // Make entire character option clickable
-                    let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), 70.0),
-                        egui::Sense::click(),
-                    );
-
-                    // Background with hover effect; the current selection reads
-                    // brighter with a full-strength class-colored border.
-                    let bg_color = if is_current {
-                        egui::Color32::from_rgb(58, 70, 84)
-                    } else if response.hovered() {
-                        egui::Color32::from_rgb(64, 77, 89)
-                    } else {
-                        egui::Color32::from_rgb(51, 51, 64)
-                    };
-
-                    // Same reason as the slot cards: a script has to fill a
+                for &class in CharacterClass::all() {
+                    // Same reason as the slot rows: a script has to fill a
                     // slot before it can open View Combatant on it.
-                    ui_driver::mark(ui, rect, true, format_args!("class:{class:?}"));
-
-                    ui.painter().rect_filled(rect, 8.0, bg_color);
-                    ui.painter().rect_stroke(
-                        rect,
-                        8.0,
-                        egui::Stroke::new(
-                            if is_current { 2.5_f32 } else { 2.0_f32 },
-                            if is_current {
-                                color32
-                            } else {
-                                color32.gamma_multiply(0.5)
-                            },
-                        ),
-                        egui::StrokeKind::Outside,
-                    );
-
-                    // Draw content
-                    let content_rect = rect.shrink(12.0);
-                    let mut content_pos = content_rect.left_top();
-                    content_pos.x += 12.0;
-                    content_pos.y = content_rect.center().y;
-
-                    // Class icon
-                    let icon_size = 46.0;
-                    let icon_rect = egui::Rect::from_min_size(
-                        egui::pos2(content_pos.x, content_pos.y - icon_size / 2.0),
-                        egui::vec2(icon_size, icon_size),
-                    );
-
-                    // Draw the actual class icon if loaded, otherwise fall back to colored rectangle
-                    if let Some(&texture_id) = class_icons.textures.get(class) {
-                        ui.painter().image(
-                            texture_id,
-                            icon_rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                        // Add border around the icon
-                        ui.painter().rect_stroke(
-                            icon_rect,
-                            6.0,
-                            egui::Stroke::new(2.0_f32, color32),
-                            egui::StrokeKind::Outside,
-                        );
-                    } else {
-                        // Fallback: colored rectangle placeholder
-                        ui.painter()
-                            .rect_filled(icon_rect, 6.0, color32.gamma_multiply(0.3));
-                        ui.painter().rect_stroke(
-                            icon_rect,
-                            6.0,
-                            egui::Stroke::new(2.0_f32, color32),
-                            egui::StrokeKind::Outside,
-                        );
-                    }
-
-                    // Class text
-                    let text_pos =
-                        egui::pos2(content_pos.x + icon_size + 15.0, content_pos.y - 20.0);
-                    ui.painter().text(
-                        text_pos,
-                        egui::Align2::LEFT_TOP,
-                        class.name(),
-                        egui::FontId::proportional(20.0),
-                        color32,
-                    );
-                    ui.painter().text(
-                        egui::pos2(text_pos.x, text_pos.y + 24.0),
-                        egui::Align2::LEFT_TOP,
-                        class.description(),
-                        egui::FontId::proportional(14.0),
-                        egui::Color32::from_rgb(153, 153, 153),
-                    );
-
-                    // "Selected" marker on the currently-assigned class.
-                    if is_current {
-                        ui.painter().text(
-                            egui::pos2(rect.right() - 16.0, rect.center().y),
-                            egui::Align2::RIGHT_CENTER,
-                            "SELECTED",
-                            egui::FontId::proportional(13.0),
-                            color32,
-                        );
-                    }
-
-                    // Handle click - assign character to slot
+                    let row = ListRow::new(class.name())
+                        .name_color(class_color(class))
+                        .subtitle(class.description())
+                        .icon(class_list_icon(class_icons, class))
+                        .selected(current_class == Some(class));
+                    let response = list_row(ui, row);
+                    mark(ui, &response, true, format_args!("class:{class:?}"));
                     if response.clicked() {
-                        // Through `set_class`, not a direct slot write: changing a
-                        // slot's class drops its equipment overrides, so the new
-                        // class arrives wearing its own defaults instead of the
-                        // previous class's picks silently stripped at resolve.
-                        config.set_class(picker.team, picker.slot, *class);
-                        picker.active = false;
+                        chosen = Some(class);
                     }
-
-                    ui.add_space(12.0);
                 }
             });
-
-        ui.add_space(10.0);
-
-        if ui.button("Cancel").clicked() {
-            picker.active = false;
-        }
+        chosen
     });
+
+    if let Some(class) = response.inner {
+        // Through `set_class`, not a direct slot write: changing a slot's
+        // class drops its equipment overrides, so the new class arrives
+        // wearing its own defaults instead of the previous class's picks
+        // silently stripped at resolve.
+        config.set_class(picker.team, picker.slot, class);
+        picker.active = false;
+    } else if response.close {
+        picker.active = false;
+    }
 }
 
-/// Render a team panel (Team 1 or Team 2).
-///
-/// Shows:
-/// - Team header with size controls (+/-)
-/// - Three character slots (active/inactive based on team size)
+/// Render a team panel (Team 1 or Team 2): a [`panel`] edged in the team's
+/// colour, holding the header with its size controls, the three slots, and
+/// the kill-target priority.
 fn render_team_panel(
     ui: &mut egui::Ui,
     config: &mut MatchConfig,
     team: u8,
     picker: &mut CharacterPickerState,
-    max_width: f32,
     class_icons: &ClassIcons,
 ) -> Option<ConfigureMatchAction> {
-    let mut action: Option<ConfigureMatchAction> = None;
+    let tint = team_color(team);
+    panel(Some(tint))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            let mut action = None;
 
-    let team_color = if team == 1 {
-        egui::Color32::from_rgb(51, 102, 204)
-    } else {
-        egui::Color32::from_rgb(204, 51, 51)
-    };
+            let team_size = if team == 1 {
+                config.team1_size
+            } else {
+                config.team2_size
+            };
 
-    // Get current team data
-    let team_size = if team == 1 {
-        config.team1_size
-    } else {
-        config.team2_size
-    };
-
-    let team_slots: Vec<Option<match_config::CharacterClass>> = if team == 1 {
-        config.team1.clone()
-    } else {
-        config.team2.clone()
-    };
-
-    // Header with team name and size controls
-    ui.horizontal(|ui| {
-        ui.heading(
-            egui::RichText::new(format!("TEAM {}", team))
-                .size(20.0)
-                .color(team_color),
-        );
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Plus button - increase team size
-            if ui
-                .add(egui::Button::new("+").min_size(egui::vec2(25.0, 25.0)))
-                .clicked()
-                && team_size < 3
-            {
-                if team == 1 {
-                    config.set_team1_size(team_size + 1);
-                } else {
-                    config.set_team2_size(team_size + 1);
+            // Header: the team's name, and its size as `−  N  +`.
+            panel_header(ui, &format!("Team {team}"), tint, |ui| {
+                ui.spacing_mut().item_spacing.x = space::XS;
+                let mut new_size = team_size;
+                let (can_grow, can_shrink) = (team_size < 3, team_size > 1);
+                let plus = Button::new("+", Variant::Icon).enabled(can_grow).show(ui);
+                mark(ui, &plus, can_grow, format_args!("size:t{team}:+"));
+                if plus.clicked() {
+                    new_size = team_size + 1;
                 }
-            }
-
-            ui.label(egui::RichText::new(format!("{}", team_size)).size(18.0));
-
-            // Minus button - decrease team size
-            if ui
-                .add(egui::Button::new("-").min_size(egui::vec2(25.0, 25.0)))
-                .clicked()
-                && team_size > 1
-            {
-                if team == 1 {
-                    config.set_team1_size(team_size - 1);
-                } else {
-                    config.set_team2_size(team_size - 1);
+                ui.label(
+                    egui::RichText::new(team_size.to_string())
+                        .size(text::H3)
+                        .color(color::TEXT),
+                );
+                let minus = Button::new("\u{2212}", Variant::Icon)
+                    .enabled(can_shrink)
+                    .show(ui);
+                mark(ui, &minus, can_shrink, format_args!("size:t{team}:-"));
+                if minus.clicked() {
+                    new_size = team_size - 1;
                 }
-            }
-        });
-    });
-
-    ui.add_space(20.0);
-
-    // Character slots (always show 3, but some may be inactive)
-    for slot in 0..3 {
-        let character = team_slots.get(slot).and_then(|c| *c);
-        let is_active = slot < team_size;
-
-        if let Some(a) = render_character_slot(
-            ui,
-            config,
-            team,
-            slot,
-            character,
-            is_active,
-            team_color,
-            picker,
-            max_width,
-            class_icons,
-        ) {
-            action = Some(a);
-        }
-
-        if slot < 2 {
-            ui.add_space(12.0);
-        }
-    }
-
-    ui.add_space(20.0);
-
-    // Kill Target Selection
-    ui.vertical(|ui| {
-        ui.label(
-            egui::RichText::new("Kill Target Priority")
-                .size(16.0)
-                .color(team_color),
-        );
-        ui.add_space(8.0);
-
-        // Get enemy team info
-        let (enemy_team_size, enemy_slots) = if team == 1 {
-            (config.team2_size, config.team2.clone())
-        } else {
-            (config.team1_size, config.team1.clone())
-        };
-
-        let current_kill_target = if team == 1 {
-            config.team1_kill_target
-        } else {
-            config.team2_kill_target
-        };
-
-        // Show enemy characters as kill target options. Selected = filled
-        // team-color chip with light text; unselected = outlined chip so the
-        // whole group reads as toggles, not disabled labels.
-        for slot in 0..enemy_team_size {
-            if let Some(Some(enemy_class)) = enemy_slots.get(slot) {
-                let is_selected = current_kill_target == Some(slot);
-
-                let button_text = format!("{}. {}", slot + 1, enemy_class.name());
-                let (fill, text_color, stroke) = if is_selected {
-                    (
-                        team_color.gamma_multiply(0.9),
-                        egui::Color32::from_rgb(240, 244, 250),
-                        egui::Stroke::new(1.5_f32, team_color),
-                    )
-                } else {
-                    (
-                        egui::Color32::from_rgb(40, 42, 54),
-                        egui::Color32::from_rgb(180, 184, 196),
-                        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(66, 70, 88)),
-                    )
-                };
-
-                let button = egui::Button::new(
-                    egui::RichText::new(button_text)
-                        .size(14.0)
-                        .color(text_color),
-                )
-                .fill(fill)
-                .stroke(stroke)
-                .corner_radius(5.0)
-                .min_size(egui::vec2(max_width, 30.0));
-
-                if ui.add(button).clicked() {
-                    // Toggle selection
-                    if is_selected {
-                        // Deselect
-                        if team == 1 {
-                            config.team1_kill_target = None;
-                        } else {
-                            config.team2_kill_target = None;
-                        }
+                if new_size != team_size {
+                    if team == 1 {
+                        config.set_team1_size(new_size);
                     } else {
-                        // Select this target
-                        if team == 1 {
-                            config.team1_kill_target = Some(slot);
-                        } else {
-                            config.team2_kill_target = Some(slot);
-                        }
+                        config.set_team2_size(new_size);
                     }
                 }
+            });
 
-                if slot < enemy_team_size - 1 {
-                    ui.add_space(4.0);
+            // Character slots (always three; those past the team size are
+            // drawn disabled).
+            for slot in 0..3 {
+                let character = slot_class(config, team, slot);
+                let is_active = slot < team_size;
+                if let Some(a) =
+                    render_character_slot(ui, team, slot, character, is_active, picker, class_icons)
+                {
+                    action = Some(a);
                 }
             }
-        }
 
-        if current_kill_target.is_none() {
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new("No priority - team targets freely")
-                    .size(12.0)
-                    .color(egui::Color32::from_rgb(153, 153, 153)),
-            );
-        }
-    });
+            ui.add_space(space::LG);
+            render_kill_target(ui, config, team);
 
-    action
+            action
+        })
+        .inner
 }
 
-/// Render a single character slot.
+/// The kill-target priority: one row per filled enemy slot, the chosen one
+/// selected. Clicking a row selects it; clicking the selected row clears the
+/// priority.
+fn render_kill_target(ui: &mut egui::Ui, config: &mut MatchConfig, team: u8) {
+    section_label(ui, "Kill target priority");
+
+    let (enemy_team, enemy_size) = if team == 1 {
+        (2, config.team2_size)
+    } else {
+        (1, config.team1_size)
+    };
+    let current = if team == 1 {
+        config.team1_kill_target
+    } else {
+        config.team2_kill_target
+    };
+
+    let mut toggled = None;
+    for slot in 0..enemy_size {
+        let Some(enemy_class) = slot_class(config, enemy_team, slot) else {
+            continue;
+        };
+        let is_selected = current == Some(slot);
+        let label = format!("{}. {}", slot + 1, enemy_class.name());
+        let response = list_row(ui, ListRow::new(&label).selected(is_selected));
+        mark(ui, &response, true, format_args!("target:t{team}s{slot}"));
+        if response.clicked() {
+            toggled = Some(if is_selected { None } else { Some(slot) });
+        }
+    }
+    if let Some(target) = toggled {
+        if team == 1 {
+            config.team1_kill_target = target;
+        } else {
+            config.team2_kill_target = target;
+        }
+    }
+
+    if current.is_none() {
+        ui.add_space(space::XS);
+        ui.label(
+            egui::RichText::new("No priority \u{2014} team targets freely")
+                .size(text::SMALL)
+                .color(color::TEXT_DIM),
+        );
+    }
+}
+
+/// Render a single character slot as a [`list_row`].
 ///
-/// Display varies based on state:
-/// - **Active + Filled**: Shows class icon and name (click to view details)
-/// - **Active + Empty**: Shows "Click to select" prompt (click to open picker)
-/// - **Inactive**: Shows grayed-out dash
+/// - **Active + filled**: the class's icon, name and description; clicking
+///   the row opens View Combatant, and the Change button beside it reopens
+///   the picker.
+/// - **Active + empty**: an invitation to add a character; clicking opens the
+///   picker.
+/// - **Inactive**: a disabled row, past the team's size.
 fn render_character_slot(
     ui: &mut egui::Ui,
-    _config: &mut MatchConfig,
     team: u8,
     slot: usize,
-    character: Option<match_config::CharacterClass>,
+    character: Option<CharacterClass>,
     is_active: bool,
-    team_color: egui::Color32,
     picker: &mut CharacterPickerState,
-    max_width: f32,
     class_icons: &ClassIcons,
 ) -> Option<ConfigureMatchAction> {
-    let bg_color = if is_active {
-        if character.is_some() {
-            egui::Color32::from_rgb(64, 77, 89)
-        } else {
-            egui::Color32::from_rgb(51, 51, 64)
-        }
-    } else {
-        egui::Color32::from_rgb(26, 26, 31)
-    };
-
-    let border_alpha = if is_active { 1.0 } else { 0.3 };
-
-    // Allocate space for the slot
-    let slot_width = max_width.max(50.0);
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(slot_width, 60.0),
-        if is_active {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        },
-    );
-
     // The route into View Combatant, so a UI script can reach the screens the
     // driver actually exists to check. Inert unless `--ui-script` armed it.
-    ui_driver::mark(ui, rect, is_active, format_args!("slot:t{team}s{slot}"));
-
-    // Hover effect for active slots
-    let visual_bg_color = if is_active && response.hovered() {
-        bg_color.linear_multiply(1.2)
-    } else {
-        bg_color
+    let mark_slot = |ui: &egui::Ui, response: &egui::Response| {
+        mark(ui, response, is_active, format_args!("slot:t{team}s{slot}"));
+    };
+    let open_picker = |picker: &mut CharacterPickerState| {
+        picker.active = true;
+        picker.team = team;
+        picker.slot = slot;
     };
 
-    // Draw background and border
-    ui.painter().rect_filled(rect, 8.0, visual_bg_color);
-    ui.painter().rect_stroke(
-        rect,
-        8.0,
-        egui::Stroke::new(2.0_f32, team_color.gamma_multiply(border_alpha)),
-        egui::StrokeKind::Outside,
-    );
-
-    // Draw content based on slot state
-    let content_rect = rect.shrink(12.0);
-    let mut content_pos = content_rect.left_top();
-    content_pos.x += 12.0;
-    content_pos.y = content_rect.center().y;
-
-    if let Some(class) = character {
-        // Filled slot - show class info
-        let color = class.color();
-        let color32 = egui::Color32::from_rgb(
-            (color.to_srgba().red * 255.0) as u8,
-            (color.to_srgba().green * 255.0) as u8,
-            (color.to_srgba().blue * 255.0) as u8,
-        );
-
-        // Class icon
-        let icon_size = 46.0;
-        let icon_rect = egui::Rect::from_min_size(
-            egui::pos2(content_pos.x, content_pos.y - icon_size / 2.0),
-            egui::vec2(icon_size, icon_size),
-        );
-
-        // Draw the actual class icon if loaded, otherwise fall back to colored rectangle
-        if let Some(&texture_id) = class_icons.textures.get(&class) {
-            ui.painter().image(
-                texture_id,
-                icon_rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-            // Add border around the icon
-            ui.painter().rect_stroke(
-                icon_rect,
-                6.0,
-                egui::Stroke::new(2.0_f32, color32),
-                egui::StrokeKind::Outside,
-            );
-        } else {
-            // Fallback: colored rectangle placeholder
-            ui.painter()
-                .rect_filled(icon_rect, 6.0, color32.gamma_multiply(0.3));
-            ui.painter().rect_stroke(
-                icon_rect,
-                6.0,
-                egui::Stroke::new(2.0_f32, color32),
-                egui::StrokeKind::Outside,
-            );
+    match character {
+        Some(class) if is_active => {
+            let mut action = None;
+            ui.horizontal(|ui| {
+                let gap = ui.spacing().item_spacing.x;
+                let row = ListRow::new(class.name())
+                    .name_color(class_color(class))
+                    .subtitle(class.description())
+                    .icon(class_list_icon(class_icons, class))
+                    .meta("View \u{203a}")
+                    .width(ui.available_width() - CHANGE_WIDTH - gap);
+                let response = list_row(ui, row);
+                mark_slot(ui, &response);
+                if response.clicked() {
+                    action = Some(ConfigureMatchAction::ViewCombatant { class, team, slot });
+                }
+                // The change-class affordance, so a script can walk several
+                // classes through one slot rather than needing three.
+                let change = Button::new("Change", Variant::Secondary)
+                    .compact()
+                    .min_width(CHANGE_WIDTH)
+                    .show(ui);
+                mark(
+                    ui,
+                    &change,
+                    true,
+                    format_args!("slot:t{team}s{slot}:change"),
+                );
+                if change.clicked() {
+                    open_picker(picker);
+                }
+            });
+            action
         }
-
-        // Class text
-        let text_pos = egui::pos2(content_pos.x + icon_size + 15.0, content_pos.y - 20.0);
-
-        ui.painter().text(
-            text_pos,
-            egui::Align2::LEFT_TOP,
-            class.name(),
-            egui::FontId::proportional(20.0),
-            color32,
-        );
-
-        ui.painter().text(
-            egui::pos2(text_pos.x, text_pos.y + 24.0),
-            egui::Align2::LEFT_TOP,
-            class.description(),
-            egui::FontId::proportional(14.0),
-            egui::Color32::from_rgb(153, 153, 153),
-        );
-
-        // Add X button in top-right corner to change selection
-        let btn_size = 20.0;
-        let btn_margin = 8.0;
-        let btn_rect = egui::Rect::from_min_size(
-            egui::pos2(
-                rect.right() - btn_size - btn_margin,
-                rect.top() + btn_margin,
-            ),
-            egui::vec2(btn_size, btn_size),
-        );
-
-        // Check if mouse is over the X button
-        let btn_hovered = ui.rect_contains_pointer(btn_rect);
-        // The change-class affordance, so a script can walk several classes
-        // through one slot rather than needing three.
-        ui_driver::mark(
-            ui,
-            btn_rect,
-            true,
-            format_args!("slot:t{team}s{slot}:change"),
-        );
-        let btn_color = if btn_hovered {
-            egui::Color32::from_rgb(200, 80, 80)
-        } else {
-            egui::Color32::from_rgb(120, 120, 120)
-        };
-
-        // Draw X button background
-        ui.painter().rect_filled(
-            btn_rect,
-            4.0,
-            if btn_hovered {
-                egui::Color32::from_rgb(60, 40, 40)
-            } else {
-                egui::Color32::from_rgb(45, 45, 55)
-            },
-        );
-
-        // Draw X
-        ui.painter().text(
-            btn_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "X",
-            egui::FontId::proportional(12.0),
-            btn_color,
-        );
-
-        // Card-hover affordance: signal that clicking the card (anywhere but
-        // the corner button) opens the combatant detail screen. Without this,
-        // the click-to-view action is invisible.
-        if response.hovered() && !btn_hovered {
-            ui.painter().text(
-                egui::pos2(rect.right() - 12.0, rect.bottom() - 10.0),
-                egui::Align2::RIGHT_BOTTOM,
-                "View ›",
-                egui::FontId::proportional(12.0),
-                egui::Color32::from_rgb(170, 176, 190),
-            );
+        _ if is_active => {
+            let row = ListRow::new("+  Add character")
+                .name_color(color::TEXT_MUTED)
+                .subtitle("Choose a class for this slot");
+            let response = list_row(ui, row);
+            mark_slot(ui, &response);
+            if response.clicked() {
+                open_picker(picker);
+            }
+            None
         }
-
-        // Handle X button click - open picker to change selection
-        if btn_hovered && response.clicked() {
-            picker.active = true;
-            picker.team = team;
-            picker.slot = slot;
-            return None; // Don't navigate to View Combatant
-        }
-    } else if is_active {
-        // Empty active slot - inviting prompt with an add glyph.
-        ui.painter().text(
-            content_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "+  Add character",
-            egui::FontId::proportional(18.0),
-            if response.hovered() {
-                egui::Color32::from_rgb(180, 186, 200)
-            } else {
-                egui::Color32::from_rgb(128, 128, 128)
-            },
-        );
-    } else {
-        // Inactive slot - show dash
-        ui.painter().text(
-            content_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "—",
-            egui::FontId::proportional(18.0),
-            egui::Color32::from_rgb(77, 77, 77),
-        );
-    }
-
-    // Handle click on active slots
-    if is_active && response.clicked() {
-        if let Some(class) = character {
-            // Filled slot - navigate to view combatant screen
-            return Some(ConfigureMatchAction::ViewCombatant { class, team, slot });
-        } else {
-            // Empty slot - open picker modal
-            picker.active = true;
-            picker.team = team;
-            picker.slot = slot;
+        _ => {
+            let row = ListRow::new("\u{2014}")
+                .subtitle("Unused at this team size")
+                .enabled(false);
+            let response = list_row(ui, row);
+            mark_slot(ui, &response);
+            None
         }
     }
-
-    None
 }
 
 /// Render the map selection panel (center column).
 ///
 /// Shows, top to bottom:
 /// - A prominent VS badge (aligned with the two team headers — this is the
-///   visual divider between the blue and red sides)
-/// - Arena title
-/// - A top-down schematic preview drawn from the map's real obstacle geometry
+///   visual divider between the two sides)
+/// - Arena caption
+/// - A top-down preview of the selected map
 /// - Map navigation controls (◀ name ▶)
 /// - Map description
 fn render_map_panel(
     ui: &mut egui::Ui,
     config: &mut MatchConfig,
-    max_width: f32,
     map_geometry: &MapGeometryConfig,
     preview_texture: Option<egui::TextureId>,
 ) {
+    let max_width = ui.available_width();
     ui.vertical_centered(|ui| {
         // VS badge — the emotional beat, sitting between the team headers.
-        ui.heading(
+        ui.label(
             egui::RichText::new("VS")
-                .size(48.0)
-                .strong()
-                .color(egui::Color32::from_rgb(230, 204, 153)),
+                .size(text::DISPLAY)
+                .color(color::ACCENT),
         );
-
-        ui.add_space(14.0);
-
         ui.label(
             egui::RichText::new("ARENA")
-                .size(16.0)
-                .color(egui::Color32::from_rgb(180, 168, 140)),
+                .size(text::SMALL)
+                .color(color::TEXT_MUTED),
         );
-
-        ui.add_space(12.0);
+        ui.add_space(space::MD);
 
         // Map preview — real top-down geometry for the selected map.
         //
@@ -1118,98 +718,93 @@ fn render_map_panel(
             let half = outline_half_extents(&bounds.outline(WALL_ARC_SEGMENTS));
             half.x / half.y
         };
-        let preview_width = (max_width * 0.92).min(230.0);
+        let preview_width = max_width.min(PREVIEW_MAX_WIDTH);
         let preview_height = preview_width / preview_aspect;
 
         let (rect, _response) = ui.allocate_exact_size(
             egui::vec2(preview_width, preview_height),
             egui::Sense::hover(),
         );
-        // Backing panel behind the preview.
-        ui.painter()
-            .rect_filled(rect, 8.0, egui::Color32::from_rgb(16, 16, 24));
-        ui.painter().rect_stroke(
+        // Backing well behind the preview.
+        ui.painter().rect(
             rect,
-            8.0,
-            egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(70, 74, 92)),
-            egui::StrokeKind::Outside,
+            radius::MD,
+            color::BG,
+            egui::Stroke::new(stroke::HAIRLINE, color::LINE),
+            egui::StrokeKind::Inside,
         );
         if let Some(tex) = preview_texture {
             // Live 3D render of the arena (fixed-camera offscreen pass).
             ui.painter().image(
                 tex,
-                rect.shrink(3.0),
+                rect.shrink(space::XS),
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
+                color::UNTINTED,
             );
         } else {
             // Fallback: vector top-down schematic (also what the egui harness
             // renders, since Bevy render-to-texture isn't available there).
-            draw_map_preview(ui.painter(), rect.shrink(10.0), config.map, map_geometry);
+            draw_map_preview(
+                ui.painter(),
+                rect.shrink(space::SM),
+                config.map,
+                map_geometry,
+            );
         }
 
-        ui.add_space(16.0);
+        ui.add_space(space::MD);
 
-        // Map selection controls. Laid out in a fixed-width row equal to the
-        // preview width, with exact widget sizes and zero item spacing, so the
-        // row centers under the preview exactly (the enclosing
-        // `vertical_centered` centers the whole allocation). The previous
-        // manual-padding approach drifted because egui's default item spacing
-        // and button padding aren't accounted for in the width math.
-        let button_width = 32.0;
-        let ctrl_h = 30.0;
-        let label_width = preview_width - button_width * 2.0;
-        let mut nav: i32 = 0;
-
+        // Map selection controls: a fixed-width row equal to the preview
+        // width, with exact widget sizes and zero item spacing, so the row
+        // centers under the preview exactly (the enclosing `vertical_centered`
+        // centers the whole allocation).
+        let label_width = preview_width - size::BUTTON_ICON * 2.0;
+        let mut step: i32 = 0;
         ui.allocate_ui_with_layout(
-            egui::vec2(preview_width, ctrl_h),
+            egui::vec2(preview_width, size::BUTTON_ICON),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-
-                if ui
-                    .add_sized([button_width, ctrl_h], egui::Button::new("◀"))
+                if Button::new("\u{25c0}", Variant::Icon)
+                    .driver_id("map:prev")
+                    .show(ui)
                     .clicked()
                 {
-                    nav = -1;
+                    step = -1;
                 }
-
                 ui.allocate_ui_with_layout(
-                    egui::vec2(label_width, ctrl_h),
+                    egui::vec2(label_width, size::BUTTON_ICON),
                     egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
                     |ui| {
                         ui.label(
                             egui::RichText::new(config.map.name())
-                                .size(16.0)
-                                .strong()
-                                .color(egui::Color32::from_rgb(220, 224, 235)),
+                                .size(text::H3)
+                                .color(color::TEXT),
                         );
                     },
                 );
-
-                if ui
-                    .add_sized([button_width, ctrl_h], egui::Button::new("▶"))
+                if Button::new("\u{25b6}", Variant::Icon)
+                    .driver_id("map:next")
+                    .show(ui)
                     .clicked()
                 {
-                    nav = 1;
+                    step = 1;
                 }
             },
         );
 
-        if nav != 0 {
+        if step != 0 {
             let maps = match_config::ArenaMap::all();
             let current_idx = maps.iter().position(|m| *m == config.map).unwrap_or(0);
-            let new_idx = (current_idx as i32 + nav).rem_euclid(maps.len() as i32) as usize;
+            let new_idx = (current_idx as i32 + step).rem_euclid(maps.len() as i32) as usize;
             config.map = maps[new_idx];
         }
 
-        ui.add_space(12.0);
-
-        // Map description
+        ui.add_space(space::SM);
         ui.label(
             egui::RichText::new(config.map.description())
-                .size(12.0)
-                .color(egui::Color32::from_rgb(153, 153, 153)),
+                .size(text::SMALL)
+                .color(color::TEXT_MUTED),
         );
     });
 }
@@ -1220,7 +815,9 @@ fn render_map_panel(
 /// World coordinates come from the map's own `ArenaBounds::outline`.
 /// World x maps to the schematic's horizontal axis and world z to its vertical
 /// axis, preserving aspect. Pure painter work so it renders identically in the
-/// egui harness and the real client.
+/// egui harness and the real client. The floor is a [`color::RAISED`] well
+/// edged in [`color::LINE_STRONG`]; obstacles stand out of it in
+/// [`color::LINE_STRONG`] edged in [`color::TEXT_MUTED`].
 fn draw_map_preview(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -1247,14 +844,14 @@ fn draw_map_preview(
     let floor: Vec<egui::Pos2> = outline.iter().map(|p| to_screen(p.x, p.y)).collect();
     let mut floor_path = egui::epaint::PathShape::closed_line(
         floor,
-        egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(90, 96, 120)),
+        egui::Stroke::new(stroke::HAIRLINE, color::LINE_STRONG),
     );
-    floor_path.fill = egui::Color32::from_rgb(34, 36, 48);
+    floor_path.fill = color::RAISED;
     painter.add(floor_path);
 
     // Obstacles for the selected map.
-    let obstacle_fill = egui::Color32::from_rgb(96, 102, 128);
-    let obstacle_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(150, 156, 180));
+    let obstacle_fill = color::LINE_STRONG;
+    let obstacle_stroke = egui::Stroke::new(stroke::HAIRLINE, color::TEXT_MUTED);
     for volume in &active.volumes {
         match volume {
             ObstacleVolume::Cylinder {
@@ -1271,7 +868,7 @@ fn draw_map_preview(
                 let r = egui::Rect::from_two_pos(to_screen(min.x, min.z), to_screen(max.x, max.z));
                 painter.rect(
                     r,
-                    2.0,
+                    radius::SM,
                     obstacle_fill,
                     obstacle_stroke,
                     egui::StrokeKind::Inside,

@@ -19,7 +19,7 @@
 //! GPU adapter (wgpu), which CI runners may lack.
 //!
 //! Fidelity caveat vs the real client: `egui_kittest` has no Bevy textures, so
-//! the class icons render as class-color fallback squares. Fonts are the
+//! the class icons render as the kit fallback tile, edged in the class colour. Fonts are the
 //! client's own stack (`arenasim::ui::install`), so layout, spacing, color and
 //! type iterate faithfully; pixel-exact icon fidelity still needs the real
 //! client.
@@ -57,7 +57,7 @@ fn mock_config() -> MatchConfig {
 fn configure_match_2v2() {
     let mut config = mock_config();
     let mut picker = CharacterPickerState::default();
-    let icons = ClassIcons::default(); // no textures -> class-color fallback squares
+    let icons = ClassIcons::default(); // no textures -> fallback tiles edged in the class colour
     let map_geometry = MapGeometryConfig::default();
 
     let mut harness = Harness::builder()

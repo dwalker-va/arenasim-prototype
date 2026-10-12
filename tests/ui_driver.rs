@@ -512,6 +512,7 @@ fn every_shipped_script_parses() {
         "replay-draws-icons.script",
         "menu-exits.script",
         "replay-results-exit.script",
+        "configure-to-results.script",
     ];
 
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui-scripts");
@@ -946,7 +947,8 @@ const EAGER_MARKERS: &[&str] = &[
 /// and let it fail when it moves. (A `>=` bound here previously hid a scanner
 /// that found 20 of 21.)
 const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
-    ("src/states/configure_match_ui.rs", 3),
+    // Its one `mark` helper, through which every data-built id registers.
+    ("src/states/configure_match_ui.rs", 1),
     ("src/states/main_menu.rs", 1),
     // Options' Configure Keybindings button, so a script can walk the menus.
     ("src/states/mod.rs", 1),
