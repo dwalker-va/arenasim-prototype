@@ -38,12 +38,12 @@ use arenasim::ui::fonts::body_family;
 use arenasim::ui::theme::{class_color, color, data, icon, school_color, size, space, text};
 use arenasim::ui::widgets::{
     class_icon, empty_state, link, list_row, paint_icon, panel, panel_header, resource_bar,
-    section_label, stat_rows, tooltip_frame, Button, Chip, Header, ListIcon, ListRow, Look, Modal,
-    Nav, Tab, Tooltip, Variant,
+    section_label, stat_rows, tooltip_frame, Button, Checkbox, Chip, Header, ListIcon, ListRow,
+    Look, Modal, Nav, Tab, Tooltip, Variant,
 };
 
 const WIDTH: f32 = 1400.0;
-const HEIGHT: f32 = 1540.0;
+const HEIGHT: f32 = 1520.0;
 /// Each of the page's two columns.
 const COLUMN: f32 = 660.0;
 
@@ -171,6 +171,45 @@ fn left_column(ui: &mut egui::Ui) {
                 }
             });
     });
+
+    section(
+        ui,
+        "Compact buttons: primary / secondary / disabled \u{b7} checkboxes",
+        |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = space::SM;
+                let _ = Button::new("\u{25b6}  Play", Variant::Primary)
+                    .compact()
+                    .show(ui);
+                let _ = Button::new("Pause", Variant::Secondary).compact().show(ui);
+                let _ = Button::new("Pause", Variant::Secondary)
+                    .compact()
+                    .preview(Look::Hovered)
+                    .show(ui);
+                let _ = Button::new("Step", Variant::Secondary)
+                    .compact()
+                    .enabled(false)
+                    .show(ui);
+            });
+            ui.add_space(space::SM);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = space::LG;
+                for (on, look, label) in [
+                    (true, Look::Idle, "On"),
+                    (false, Look::Idle, "Off"),
+                    (false, Look::Hovered, "Hovered"),
+                    (true, Look::Disabled, "Disabled on"),
+                    (false, Look::Disabled, "Disabled off"),
+                ] {
+                    let mut on = on;
+                    let _ = Checkbox::new(&mut on, label)
+                        .enabled(look != Look::Disabled)
+                        .preview(look)
+                        .show(ui);
+                }
+            });
+        },
+    );
 
     section(ui, "Tabs: active / idle / hovered", |ui| {
         ui.horizontal(|ui| {

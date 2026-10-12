@@ -47,7 +47,7 @@
 //! (AS-43), and a Mage who knew only five of her eight spells (AS-72).
 //!
 //! Fidelity caveats vs the real client: kittest has no Bevy textures, so every
-//! `EntryRow::icon` is `None` here and rows draw their framed empty slot rather
+//! `EntryRow::icon` is `None` here and rows draw the kit's fallback tile rather
 //! than a real spell or class icon. Fonts ARE the client's: the harness
 //! installs the same Rajdhani stack the app does. So this guards layout,
 //! spacing, grouping, color and type — not icon fidelity.
@@ -275,9 +275,10 @@ fn animation_sandbox() {
     );
 }
 
-/// Paused with nothing selected and no dummy — exercises the disabled `Play`,
-/// the enabled `Step`, the no-dummy warning that only appears in this state,
-/// and AE3's `needs dummy` greying of every offensive row.
+/// Paused with nothing selected and no dummy — exercises the disabled
+/// transport (`Play`, `Resume` and `Step` all wait on a selection), the
+/// unchecked `Staged` box, the no-dummy warning that only appears in this
+/// state, and AE3's `needs dummy` greying of every offensive row.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn animation_sandbox_paused_no_selection() {

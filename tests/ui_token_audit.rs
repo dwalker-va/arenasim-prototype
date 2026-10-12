@@ -85,12 +85,11 @@ const INSTALL: (&str, usize) = ("src/ui/mod.rs", 1);
 /// One row per file, so a migration card's diff reads as the rows it lowered.
 #[rustfmt::skip]
 const FROZEN: &[(&str, Counts)] = &[
-    ("src/states/animation_sandbox/ui.rs", Counts { colour: 12, size: 10, space: 13, radius: 12, style: 0 }),
     ("src/states/arena_layout_debug.rs", Counts { colour: 14, size: 3, space: 2, radius: 3, style: 0 }),
     ("src/states/configure_match_ui.rs", Counts { colour: 53, size: 20, space: 24, radius: 19, style: 0 }),
     ("src/states/encyclopedia/items.rs", Counts { colour: 2, size: 0, space: 0, radius: 0, style: 0 }),
     ("src/states/main_menu.rs", Counts { colour: 12, size: 5, space: 11, radius: 3, style: 0 }),
-    ("src/states/mod.rs", Counts { colour: 35, size: 25, space: 52, radius: 0, style: 0 }),
+    ("src/states/mod.rs", Counts { colour: 35, size: 23, space: 52, radius: 0, style: 0 }),
     ("src/states/play_match/auras.rs", Counts { colour: 8, size: 0, space: 0, radius: 0, style: 0 }),
     ("src/states/play_match/camera.rs", Counts { colour: 6, size: 5, space: 1, radius: 0, style: 0 }),
     ("src/states/play_match/combat_ai.rs", Counts { colour: 4, size: 0, space: 0, radius: 0, style: 0 }),
@@ -448,4 +447,55 @@ fn the_scanner_catches_every_planted_offender() {
             style: 1,
         }
     );
+}
+
+/// Every checkbox is the kit's ([`arenasim::ui::widgets::Checkbox`]), never
+/// egui's stock one: the stock box takes its corners from the installed
+/// widget style, whose button radius rounds a 16pt box into a circle, so it
+/// reads as a radio button. Lexical, like the ratchet above: it sees the
+/// method form (`ui.checkbox(…)`) and the path form (`egui::Checkbox`,
+/// `egui::widgets::Checkbox`), not a stock `Checkbox` imported bare.
+#[test]
+fn every_checkbox_is_the_kits() {
+    let stock = stock_checkbox_pattern();
+    let offenders: Vec<String> = load_sources(&["src"])
+        .expect("src/ must be readable")
+        .iter()
+        .filter(|f| !f.rel_display().replace('\\', "/").starts_with("src/ui/"))
+        .filter_map(|f| {
+            let n = stock.find_iter(&readable_code(&f.raw)).count();
+            (n > 0).then(|| format!("{} ({n})", f.rel_display()))
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "stock egui checkboxes outside src/ui/ — draw `ui::widgets::checkbox` instead, \
+         so the box is square: {offenders:?}"
+    );
+}
+
+fn stock_checkbox_pattern() -> Regex {
+    Regex::new(r"\.\s*checkbox\s*\(|\begui\s*::\s*(?:widgets\s*::\s*)?Checkbox\b")
+        .expect("checkbox pattern must compile")
+}
+
+/// The checkbox guard's own planted offenders, and the kit's forms it must
+/// let through.
+#[test]
+fn the_checkbox_guard_catches_the_stock_forms() {
+    let stock = stock_checkbox_pattern();
+    for src in [
+        "ui.checkbox(&mut on, \"Loop\")",
+        "ui.add(egui::Checkbox::new(&mut on, \"Loop\"))",
+        "ui.add(egui::widgets::Checkbox::new(&mut on, \"Loop\"))",
+    ] {
+        assert_eq!(stock.find_iter(&readable_code(src)).count(), 1, "`{src}`");
+    }
+    for src in [
+        "checkbox(ui, &mut on, \"Loop\")",
+        "crate::ui::widgets::checkbox(ui, &mut on, \"Loop\")",
+        "Checkbox::new(&mut on, \"Loop\").show(ui)",
+    ] {
+        assert_eq!(stock.find_iter(&readable_code(src)).count(), 0, "`{src}`");
+    }
 }

@@ -263,7 +263,7 @@ pub fn render_time_controls(
             // Aura icons toggle
             ui.horizontal(|ui| {
                 let mut show_auras = display_settings.show_aura_icons;
-                if ui.checkbox(&mut show_auras, "").changed() {
+                if crate::ui::widgets::checkbox(ui, &mut show_auras, "").changed() {
                     display_settings.show_aura_icons = show_auras;
                     info!(
                         "Aura icons toggled to: {}",
@@ -280,7 +280,7 @@ pub fn render_time_controls(
             // Combat log / timeline panel toggle
             ui.horizontal(|ui| {
                 let mut show_panel = display_settings.show_combat_panel;
-                if ui.checkbox(&mut show_panel, "").changed() {
+                if crate::ui::widgets::checkbox(ui, &mut show_panel, "").changed() {
                     display_settings.show_combat_panel = show_panel;
                     info!(
                         "Combat panel toggled to: {}",
@@ -297,7 +297,7 @@ pub fn render_time_controls(
             // Kill-call markers on the team frames toggle
             ui.horizontal(|ui| {
                 let mut show_calls = display_settings.show_call_display;
-                if ui.checkbox(&mut show_calls, "").changed() {
+                if crate::ui::widgets::checkbox(ui, &mut show_calls, "").changed() {
                     display_settings.show_call_display = show_calls;
                     info!(
                         "Call display toggled to: {}",
