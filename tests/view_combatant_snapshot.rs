@@ -1,4 +1,5 @@
-//! Offscreen visual snapshots of the View Combatant screen.
+//! Offscreen visual snapshots of the View Combatant screen, and the check that
+//! every tooltip on it shows at the client's default window size.
 //!
 //! This is the fast visual-iteration loop for `src/states/view_combatant_ui.rs`:
 //! it renders the real `draw_view_combatant` to a PNG via `egui_kittest`
@@ -25,6 +26,7 @@
 //! (`arenasim::ui::install`), so layout, spacing, colour, type and copy
 //! iterate faithfully; icon art still needs the client.
 
+use bevy_egui::egui;
 use egui_kittest::Harness;
 
 use arenasim::states::configure_match_ui::ClassIcons;
@@ -35,6 +37,7 @@ use arenasim::states::view_combatant_ui::{
     draw_view_combatant, EquipmentPickerState, ViewCombatantData, ViewCombatantState,
 };
 use arenasim::states::GameState;
+use arenasim::ui::driver::registry;
 use arenasim::ui::widgets::Nav;
 
 /// Tall enough that the whole sheet — header, stats and kit, the class's
@@ -82,6 +85,212 @@ fn view_combatant_warlock() {
             slot: 1,
         },
     );
+}
+
+// ===========================================================================
+// EVERY TOOLTIP AT THE DEFAULT WINDOW SIZE
+//
+// Not `#[ignore]`d: this lays the screen out in a bare `egui::Context` with
+// the `--ui-script` registry armed — no GPU — so the default `cargo test`
+// holds it.
+// ===========================================================================
+
+/// The client's default window, in points (`GameSettings::default()`:
+/// Windowed, `HD720`).
+const DEFAULT_WINDOW: [f32; 2] = [1280.0, 720.0];
+
+/// One simulated frame. Sixty a second, like the client under vsync; the
+/// waits below are in sim SECONDS, so the rate only sets their resolution.
+const DT: f32 = 1.0 / 60.0;
+
+/// How long any one wait below may run before the test calls it stuck, in
+/// sim seconds. A ceiling, not a settle: each wait ends on its condition.
+const WAIT_LIMIT_SECS: f64 = 10.0;
+
+/// Wheel lines per scrolling frame — what the driver sends.
+const SCROLL_LINES: f32 = 3.0;
+
+/// The View Combatant screen in a bare egui context, driven the way
+/// `--ui-script` drives the client: the same registry, the same aim rule
+/// (`Widget::aim_point`), wheel events to scroll, a pointer move to hover.
+struct Sheet<'a> {
+    ctx: egui::Context,
+    time: f64,
+    view: ViewCombatantState,
+    config: MatchConfig,
+    picker: EquipmentPickerState,
+    data: ViewCombatantData<'a>,
+}
+
+impl Sheet<'_> {
+    fn screen() -> egui::Rect {
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::from(DEFAULT_WINDOW))
+    }
+
+    /// Run one frame with `events`, and return what it registered.
+    fn frame(&mut self, events: Vec<egui::Event>) -> registry::Frame {
+        registry::arm(&self.ctx);
+        self.time += f64::from(DT);
+        let input = egui::RawInput {
+            screen_rect: Some(Self::screen()),
+            time: Some(self.time),
+            predicted_dt: DT,
+            events,
+            ..Default::default()
+        };
+        let (view, config, picker, data) =
+            (&self.view, &mut self.config, &mut self.picker, &self.data);
+        let _ = self.ctx.run(input, |ctx| {
+            let _ = draw_view_combatant(
+                ctx,
+                Some(view),
+                config,
+                picker,
+                data,
+                Nav::Return(GameState::ConfigureMatch),
+            );
+        });
+        registry::snapshot(&self.ctx).expect("armed")
+    }
+
+    /// Scroll `id` into view as the driver does — wheel toward it until it
+    /// can be aimed at and has stopped moving — and return the point to aim at.
+    fn reveal(&mut self, id: &str) -> egui::Pos2 {
+        let start = self.time;
+        let mut last: Option<egui::Rect> = None;
+        let mut events = Vec::new();
+        loop {
+            assert!(
+                self.time - start < WAIT_LIMIT_SECS,
+                "{id} never came wholly into view at {DEFAULT_WINDOW:?}"
+            );
+            let frame = self.frame(std::mem::take(&mut events));
+            let widget = frame
+                .widget(id)
+                .unwrap_or_else(|| panic!("{id} is not drawn"))
+                .clone();
+            match widget.aim_point() {
+                // Aim only at a rect that has stopped moving: egui's scroll
+                // is smooth, and runs on after the last wheel event.
+                Some(point) if last == Some(widget.rect) => return point,
+                Some(_) => last = Some(widget.rect),
+                None => {
+                    last = None;
+                    let screen = Self::screen();
+                    let below = widget.rect.center().y > screen.center().y;
+                    events.push(egui::Event::PointerMoved(screen.center()));
+                    events.push(egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Line,
+                        delta: egui::vec2(0.0, if below { -SCROLL_LINES } else { SCROLL_LINES }),
+                        modifiers: egui::Modifiers::default(),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Hover `id` and wait — on the condition, up to [`WAIT_LIMIT_SECS`] of
+    /// sim time — for a frame whose notes carry `note`.
+    fn hover_shows(&mut self, id: &str, note: &str) {
+        let point = self.reveal(id);
+        let start = self.time;
+        let mut events = vec![egui::Event::PointerMoved(point)];
+        while self.time - start < WAIT_LIMIT_SECS {
+            if self.frame(std::mem::take(&mut events)).has_note(note) {
+                return;
+            }
+        }
+        panic!(
+            "hovering {id} at {point:?} in a {DEFAULT_WINDOW:?} window never showed \
+             its tooltip ({note})"
+        );
+    }
+}
+
+/// Every View Combatant tooltip shows in a 1280x720 window: each kit row,
+/// each pre-match choice tile that is an ability, and each worn item's row,
+/// for every class. Each is scrolled into view and hovered the way
+/// `--ui-script` does it, so a target the driver cannot reach — or reaches
+/// and points off the window, as it did the Warrior's shout tiles straddling
+/// the bottom edge (AS-289) — fails here rather than only in a client run.
+#[test]
+fn every_tooltip_shows_at_the_default_window_size() {
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+
+    for &class in CharacterClass::all() {
+        // Match Setup's default 1v1 with this class in team 1's first slot —
+        // what `view-combatant-tooltips.script` opens.
+        let mut config = MatchConfig::default();
+        config.team1[0] = Some(class);
+        let ctx = egui::Context::default();
+        arenasim::ui::install(&ctx);
+        let mut sheet = Sheet {
+            ctx,
+            time: 0.0,
+            view: ViewCombatantState {
+                class,
+                team: 1,
+                slot: 0,
+            },
+            config,
+            picker: EquipmentPickerState::default(),
+            data: ViewCombatantData {
+                abilities: &abilities,
+                items: &items,
+                default_loadouts: &defaults,
+                class_icons: &class_icons,
+                ability_icons: None,
+                item_icons: None,
+                pet_icons: None,
+            },
+        };
+
+        // A few passes, so anything egui sizes from the previous frame settles.
+        let mut frame = sheet.frame(vec![]);
+        for _ in 0..3 {
+            frame = sheet.frame(vec![]);
+        }
+
+        let targets = hover_targets(&frame);
+        assert!(
+            targets.iter().any(|(id, _)| id.starts_with("kit:"))
+                && targets.iter().any(|(id, _)| id.starts_with("equip:")),
+            "{class:?}: found no kit or equipment rows to hover: {targets:?}"
+        );
+        for (id, note) in targets {
+            sheet.hover_shows(&id, &note);
+        }
+    }
+}
+
+/// Every widget on the sheet with a tooltip, and the note its tooltip body
+/// leaves: `kit:X` and `strategic:X[:eN]` show `Ability(X)`, and a worn item's
+/// `equip:<Slot>` row shows `Item(<id>)`. An empty socket has no tooltip.
+fn hover_targets(frame: &registry::Frame) -> Vec<(String, String)> {
+    let mut targets = Vec::new();
+    for widget in &frame.widgets {
+        let id = widget.id.as_str();
+        if let Some(ability) = id.strip_prefix("kit:") {
+            targets.push((id.to_string(), format!("tooltip:Ability({ability})")));
+        } else if let Some(rest) = id.strip_prefix("strategic:") {
+            let ability = rest.split(':').next().expect("an ability name");
+            targets.push((id.to_string(), format!("tooltip:Ability({ability})")));
+        } else if let Some(slot) = id.strip_prefix("equip:") {
+            let worn = format!("equip-row {slot} item=");
+            let item = frame
+                .notes
+                .iter()
+                .find_map(|n| n.strip_prefix(worn.as_str()))
+                .and_then(|rest| rest.split(' ').next());
+            if let Some(item) = item.filter(|item| *item != "empty") {
+                targets.push((id.to_string(), format!("tooltip:Item({item})")));
+            }
+        }
+    }
+    targets
 }
 
 fn snapshot(name: &str, view: ViewCombatantState) {

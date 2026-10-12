@@ -257,6 +257,18 @@ one wheel line. The click landed on *something*, which is the worst failure
 mode available. `Micro::Move` now requires the target rect to be identical on
 two consecutive frames before it aims.
 
+**And aim only at a rect that is wholly on screen** — `Widget::aim_point`,
+never `visible`. `visible` is egui's `is_rect_visible`: true once any point of
+the rect is inside its clip rect. In a 1280x720 window the Warrior's shout
+tiles sat across the bottom edge, a few points of them showing, so the driver
+aimed at their centre, below the window, hovered nothing and reported no
+tooltip (AS-289). `aim_point` is the centre only once the whole rect is inside
+its clip rect, so a straddling target is scrolled further in first.
+`every_tooltip_shows_at_the_default_window_size` in
+`tests/view_combatant_snapshot.rs` runs that rule against the real screen at
+1280x720 in the default `cargo test`, hovering every kit row, choice tile and
+worn item for every class.
+
 **2. A tooltip is not a function of position, and it is not a function of
 FRAMES.** This one was got wrong twice, and the second time is the more
 useful lesson.

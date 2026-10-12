@@ -48,7 +48,13 @@ fn registry_records_nothing_until_it_is_armed() {
     // armed flag, so it returns `None` for a leaking `mark` too — the first
     // draft of this test asserted on it and a mutation that deleted `mark`'s
     // armed check went UNDETECTED. `raw_frame` is the unguarded store.
-    registry::mark_into(&ctx, rect(), true, true, format_args!("kit:MortalStrike"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        true,
+        egui::Rect::EVERYTHING,
+        format_args!("kit:MortalStrike"),
+    );
     registry::note_into(&ctx, format_args!("tooltip:Ability(MortalStrike)"));
     assert_eq!(
         registry::raw_frame(&ctx),
@@ -63,7 +69,13 @@ fn registry_records_nothing_until_it_is_armed() {
 
     // --- enabled: the identical calls ---
     registry::arm(&ctx);
-    registry::mark_into(&ctx, rect(), true, true, format_args!("kit:MortalStrike"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        true,
+        egui::Rect::EVERYTHING,
+        format_args!("kit:MortalStrike"),
+    );
     registry::note_into(&ctx, format_args!("tooltip:Ability(MortalStrike)"));
 
     let frame = registry::snapshot(&ctx).expect("an armed registry records a frame");
@@ -83,7 +95,13 @@ fn registry_records_nothing_until_it_is_armed() {
 
     // --- disarmed again: back to nothing, and the old frame is dropped ---
     registry::disarm(&ctx);
-    registry::mark_into(&ctx, rect(), true, true, format_args!("kit:MortalStrike"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        true,
+        egui::Rect::EVERYTHING,
+        format_args!("kit:MortalStrike"),
+    );
     assert_eq!(
         registry::raw_frame(&ctx),
         None,
@@ -141,11 +159,23 @@ fn arming_clears_the_previous_frame() {
     let ctx = egui::Context::default();
 
     registry::arm(&ctx);
-    registry::mark_into(&ctx, rect(), true, true, format_args!("old"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        true,
+        egui::Rect::EVERYTHING,
+        format_args!("old"),
+    );
     registry::note_into(&ctx, format_args!("old note"));
 
     registry::arm(&ctx);
-    registry::mark_into(&ctx, rect(), true, true, format_args!("new"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        true,
+        egui::Rect::EVERYTHING,
+        format_args!("new"),
+    );
 
     let frame = registry::snapshot(&ctx).expect("armed");
     assert_eq!(
@@ -164,7 +194,13 @@ fn arming_clears_the_previous_frame() {
 fn a_frame_finds_widgets_and_notes() {
     let ctx = egui::Context::default();
     registry::arm(&ctx);
-    registry::mark_into(&ctx, rect(), false, true, format_args!("equip:restore"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        false,
+        egui::Rect::EVERYTHING,
+        format_args!("equip:restore"),
+    );
     registry::note_into(
         &ctx,
         format_args!("equip-row Ring1 item=SignetOfFocus override=true"),
@@ -194,7 +230,7 @@ fn an_off_screen_widget_registers_but_is_not_visible() {
         &ctx,
         rect(),
         true,
-        false,
+        egui::Rect::NOTHING,
         format_args!("strategic:BattleShout"),
     );
 
@@ -248,6 +284,66 @@ fn mark_takes_visibility_from_eguis_clip_rect() {
     );
     assert!(frame.is_visible("on-screen"));
     assert!(!frame.is_visible("scrolled-off"));
+}
+
+/// A widget straddling the bottom of the viewport is VISIBLE — a few points of
+/// it are on screen — but the driver must not aim at it: its centre is below
+/// the window, so a pointer sent there hovers nothing. That was AS-289: the
+/// Warrior's shout tiles sat across the bottom of a 1280x720 window, and every
+/// hover of one landed off the window.
+///
+/// Run through a real egui pass, so `mark`'s own clip rect decides.
+#[test]
+fn a_widget_straddling_the_viewport_edge_is_visible_but_not_aimed_at() {
+    let ctx = egui::Context::default();
+    registry::arm(&ctx);
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let _ = ctx.run(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let inside = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(20.0, 20.0));
+            // Its top 10 points on screen, its centre 40 points below the window.
+            let straddling =
+                egui::Rect::from_min_size(egui::pos2(10.0, 590.0), egui::vec2(100.0, 100.0));
+            // Taller than the viewport: it can never be wholly shown, so a
+            // centre inside the clip rect has to be enough.
+            let oversized =
+                egui::Rect::from_min_size(egui::pos2(200.0, -100.0), egui::vec2(50.0, 900.0));
+            registry::mark(ui, inside, true, format_args!("inside"));
+            registry::mark(ui, straddling, true, format_args!("straddling"));
+            registry::mark(ui, oversized, true, format_args!("oversized"));
+        });
+    });
+
+    let frame = registry::snapshot(&ctx).expect("armed");
+    let widget = |id: &str| frame.widget(id).expect("registered").clone();
+
+    assert_eq!(
+        widget("inside").aim_point(),
+        Some(egui::pos2(20.0, 20.0)),
+        "a wholly visible widget is aimed at its centre"
+    );
+
+    let straddling = widget("straddling");
+    assert!(straddling.visible, "a few points of it ARE on screen");
+    assert_eq!(
+        straddling.aim_point(),
+        None,
+        "its centre {:?} is off the window, so the driver must scroll first",
+        straddling.rect.center()
+    );
+
+    assert_eq!(
+        widget("oversized").aim_point(),
+        Some(egui::pos2(225.0, 350.0)),
+        "a widget taller than its clip rect is aimed at once its centre is shown"
+    );
 }
 
 // ===========================================================================
@@ -567,6 +663,11 @@ fn frame_with(widgets: Vec<(&str, bool, bool)>, notes: Vec<&str>) -> registry::F
                 rect: rect(),
                 enabled,
                 visible,
+                clip: if visible {
+                    egui::Rect::EVERYTHING
+                } else {
+                    egui::Rect::NOTHING
+                },
             })
             .collect(),
         notes: notes.into_iter().map(|n| n.to_string()).collect(),

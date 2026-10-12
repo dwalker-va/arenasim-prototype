@@ -483,8 +483,12 @@ pub fn run_ui_script(
                 run.queue.push_front(Micro::SettleForTooltip);
             }
         },
+        // Aim only at a point that is ON the widget: `aim_point`, not
+        // `visible`. A tile straddling the bottom of a 1280x720 window is
+        // visible by a few points while its centre is below the window, and
+        // a pointer sent there hovers nothing (AS-289).
         Micro::Move { id } => match frame.widget(&id) {
-            Some(widget) if widget.visible => {
+            Some(widget) if widget.aim_point().is_some() => {
                 // AIM ONLY AT A RECT THAT HAS STOPPED MOVING. The snapshot is
                 // one frame old, and a scroll (egui's is smooth, so it keeps
                 // running for a frame or two after the last wheel event) moves
@@ -518,8 +522,9 @@ pub fn run_ui_script(
                     run.waiting = 0;
                 }
             }
-            // Laid out but clipped: scroll toward it instead of clicking a
-            // coordinate that is showing something else.
+            // Laid out but clipped, wholly or in part: scroll toward it
+            // instead of pointing at a coordinate that is showing something
+            // else, or at no part of the window at all.
             Some(widget) => {
                 let screen = ctx.screen_rect();
                 let below = widget.rect.center().y > screen.center().y;
