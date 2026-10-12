@@ -1,4 +1,4 @@
-//! The button, in five variants.
+//! The button, in six variants.
 //!
 //! * **Primary** — the forward action. Gold fill, dark label, the tallest
 //!   control on the screen; ONE per screen (decision D5).
@@ -6,6 +6,10 @@
 //! * **Ghost** — inline and low-weight: no fill, no edge.
 //! * **Danger** — removes or resets something.
 //! * **Icon** — square, one glyph (`×`, `+`, `−`).
+//! * **Hero** — the Hero template's menu (the main menu): Primary-sized, a
+//!   translucent fill the scene shows through, and a gold ring outside the
+//!   button under the pointer. Every Hero button is at least
+//!   [`size::HERO_BUTTON_WIDTH`] wide, so a menu of them lines up as a column.
 //!
 //! Disabled is a state of every variant, not a variant of its own: a disabled
 //! button stays where it was, dimmed, so nothing reflows under the cursor.
@@ -15,7 +19,7 @@ use bevy_egui::egui;
 use super::{allocate, galley, mark, Look};
 use crate::ui::theme::{color, radius, size, space, stroke, text};
 
-/// Which of the five buttons. See the module docs for when each is right.
+/// Which of the six buttons. See the module docs for when each is right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Variant {
     Primary,
@@ -23,6 +27,7 @@ pub enum Variant {
     Ghost,
     Danger,
     Icon,
+    Hero,
 }
 
 /// What a button paints in one state.
@@ -38,7 +43,7 @@ impl Variant {
             return size::NAV;
         }
         match self {
-            Variant::Primary => size::BUTTON_PRIMARY,
+            Variant::Primary | Variant::Hero => size::BUTTON_PRIMARY,
             Variant::Icon => size::BUTTON_ICON,
             Variant::Secondary | Variant::Ghost | Variant::Danger => size::BUTTON,
         }
@@ -48,6 +53,7 @@ impl Variant {
         match self {
             _ if compact => text::SMALL,
             Variant::Primary => text::H3,
+            Variant::Hero => text::H2,
             _ => text::BODY,
         }
     }
@@ -56,7 +62,7 @@ impl Variant {
     fn pad(self, compact: bool) -> f32 {
         match self {
             _ if compact => space::SM,
-            Variant::Primary => space::XL,
+            Variant::Primary | Variant::Hero => space::XL,
             Variant::Icon => space::XXS,
             Variant::Secondary | Variant::Ghost | Variant::Danger => space::LG,
         }
@@ -76,6 +82,9 @@ impl Variant {
                 p(color::ACCENT_RAISED, color::ACCENT_RAISED, color::ON_ACCENT)
             }
             (Variant::Primary, _) => p(color::ACCENT, color::ACCENT, color::ON_ACCENT),
+
+            (Variant::Hero, Look::Idle) => p(color::HERO_FILL, color::LINE, color::TEXT),
+            (Variant::Hero, _) => p(color::HERO_FILL, color::LINE, color::ACCENT_RAISED),
 
             (Variant::Ghost, Look::Idle) => p(none, none, color::TEXT_MUTED),
             (Variant::Ghost, _) => p(none, none, color::ACCENT),
@@ -167,9 +176,13 @@ impl<'a> Button<'a> {
             _ => self.label.to_uppercase(),
         };
         let measured = galley(ui, label.clone(), text_size, color::TEXT);
+        let min_width = match v {
+            Variant::Hero => self.min_width.max(size::HERO_BUTTON_WIDTH),
+            _ => self.min_width,
+        };
         let width = match v {
             Variant::Icon => height,
-            _ => (measured.size().x + 2.0 * pad).max(self.min_width),
+            _ => (measured.size().x + 2.0 * pad).max(min_width),
         };
 
         let (rect, response, look) =
@@ -177,6 +190,16 @@ impl<'a> Button<'a> {
         mark(ui, rect, self.enabled, self.driver_id);
 
         let paint = v.paint(look);
+        if v == Variant::Hero && look.is_lit() {
+            // The Hero ring sits OUTSIDE the button, so it is painted before
+            // the button's own clipped painter takes over.
+            ui.painter().rect_stroke(
+                rect.expand(space::XXS),
+                radius::MD,
+                egui::Stroke::new(stroke::MARK, color::ACCENT),
+                egui::StrokeKind::Outside,
+            );
+        }
         let painter = ui.painter_at(rect);
         painter.rect(
             rect,

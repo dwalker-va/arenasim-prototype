@@ -76,6 +76,20 @@ pub mod color {
     pub const ON_ACCENT: Color32 = BG;
     /// The dimming laid over a screen behind a modal.
     pub const SCRIM: Color32 = Color32::from_rgba_premultiplied(6, 6, 10, 153);
+
+    // The Hero template: chrome laid over a live 3D scene.
+    /// The light darkening over the whole scene, so bloom does not fight
+    /// the text.
+    pub const SCENE_TINT: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 70);
+    /// The scene's edges, fading to transparent [`super::size::VIGNETTE`]
+    /// inward.
+    pub const SCENE_VIGNETTE: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 150);
+    /// The centred card behind the wordmark and the menu.
+    pub const HERO_CARD: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 120);
+    /// A Hero button's fill: [`PANEL`], translucent so the scene shows
+    /// through.
+    pub const HERO_FILL: Color32 = Color32::from_rgba_premultiplied(24, 24, 33, 200);
+
     /// The tint an image is drawn with to keep its own colours.
     pub const UNTINTED: Color32 = Color32::WHITE;
 }
@@ -226,6 +240,10 @@ pub mod size {
     pub const TOOLTIP_MAX_WIDTH: f32 = 320.0;
     /// The widest a modal grows.
     pub const MODAL_MAX_WIDTH: f32 = 420.0;
+    /// The narrowest a Hero button is drawn, so the menu reads as a column.
+    pub const HERO_BUTTON_WIDTH: f32 = 280.0;
+    /// How far in from a scene's edge its vignette fades out.
+    pub const VIGNETTE: f32 = 180.0;
 }
 
 /// A class's colour as egui draws it, from the one source,
@@ -247,6 +265,14 @@ pub fn class_color(class: CharacterClass) -> Color32 {
 /// defeated team — without choosing a second colour for it.
 pub fn darken(c: Color32, factor: f32) -> Color32 {
     let channel = |v: u8| (v as f32 * factor) as u8;
+    Color32::from_rgba_premultiplied(channel(c.r()), channel(c.g()), channel(c.b()), c.a())
+}
+
+/// `c` moved toward white by `amount` (0.0 = unchanged, 1.0 = white), alpha
+/// kept: how a token is drawn brightened — the Hero wordmark's pulse —
+/// without choosing a second colour for it.
+pub fn lighten(c: Color32, amount: f32) -> Color32 {
+    let channel = |v: u8| (v as f32 + (255 - v) as f32 * amount).round() as u8;
     Color32::from_rgba_premultiplied(channel(c.r()), channel(c.g()), channel(c.b()), c.a())
 }
 

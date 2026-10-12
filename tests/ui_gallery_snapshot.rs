@@ -43,7 +43,7 @@ use arenasim::ui::widgets::{
 };
 
 const WIDTH: f32 = 1400.0;
-const HEIGHT: f32 = 1520.0;
+const HEIGHT: f32 = 1600.0;
 /// Each of the page's two columns.
 const COLUMN: f32 = 660.0;
 
@@ -170,6 +170,17 @@ fn left_column(ui: &mut egui::Ui) {
                     ui.end_row();
                 }
             });
+    });
+
+    // The Hero template's menu button: pressed draws as hovered, and the
+    // ring is the hover state, so idle and hovered are the whole story.
+    section(ui, "Hero buttons (main menu): idle / hovered", |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = space::LG;
+            for look in [Look::Idle, Look::Hovered] {
+                let _ = Button::new("Match", Variant::Hero).preview(look).show(ui);
+            }
+        });
     });
 
     section(
