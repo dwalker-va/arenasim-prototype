@@ -49,6 +49,9 @@ pub struct AbilityDispatchExtras<'w, 's> {
     /// Each team's situation, kept current here (`situation.rs`). `Option` so a
     /// scene that never inserted it still classifies, with no history.
     situations: Option<ResMut<'w, Situations>>,
+    /// The gated plays each team is denied, for measurement. `Option`: absent
+    /// (the graphical client, a scene) withholds nothing.
+    withheld_plays: Option<Res<'w, super::situation::WithheldPlays>>,
 }
 
 pub fn acquire_targets(
@@ -1461,7 +1464,14 @@ pub fn decide_abilities(
     // the one every unit below decides from — and re-classified whenever an
     // earlier unit's instant CC changes it. A scene without the resource gets
     // the facts, with no history.
-    let situation_cfg = SituationConfig::from_movement(&movement_config);
+    let situation_cfg = SituationConfig {
+        withheld: extras
+            .withheld_plays
+            .as_deref()
+            .copied()
+            .unwrap_or_default(),
+        ..SituationConfig::from_movement(&movement_config)
+    };
     let clock = MatchClock {
         now: decision_trace.current_sim_time,
         gates_opened: countdown.gates_opened,

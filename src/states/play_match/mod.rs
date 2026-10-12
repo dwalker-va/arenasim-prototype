@@ -1691,6 +1691,7 @@ pub fn cleanup_play_match(mut commands: Commands, query: Query<Entity, With<Play
     // unaffected by this exit-time cleanup.
     commands.remove_resource::<GameRng>();
     commands.remove_resource::<ai_profile::AiProfiles>();
+    commands.remove_resource::<situation::WithheldPlays>();
     commands.remove_resource::<team_plan::TeamPlans>();
     commands.remove_resource::<situation::Situations>();
     // Remove optional resources (may not exist if match didn't finish)

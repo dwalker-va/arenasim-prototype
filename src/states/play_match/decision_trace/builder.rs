@@ -12,13 +12,13 @@ use bevy::prelude::Entity;
 
 use super::events::{
     AbilityCandidate, AbilityOutcome, ActorView, CandidateStatus, DecisionEvent, EventKind,
-    EventPayload, MovementGoalKind, MovementTrigger, NoActionReason, Posture, RejectionReason,
-    SituationTag, TargetCandidate, TargetRejectionReason, TargetView,
+    EventPayload, MovementGoalKind, MovementTrigger, NoActionReason, PlayStep, PlayTag, Posture,
+    RejectionReason, SituationTag, TargetCandidate, TargetRejectionReason, TargetView,
 };
 use super::DecisionTrace;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::class_ai::cast_guard::Cleared;
-use crate::states::play_match::situation::TeamSituation;
+use crate::states::play_match::situation::{Play, TeamSituation};
 
 /// Builder for one `ability_decision` or `pet_decision` event.
 ///
@@ -53,6 +53,24 @@ impl<'a> DecisionEventBuilder<'a> {
     pub fn with_situation(mut self, situation: &TeamSituation) -> Self {
         self.situation = Some(SituationTag::from(situation));
         self
+    }
+
+    /// Stamp the deciding unit's play on its situation (a no-op on an event
+    /// with no situation, or for `Play::Default`).
+    pub fn with_play(mut self, play: Play) -> Self {
+        if let Some(tag) = self.situation.as_mut() {
+            tag.play = PlayTag::of(play);
+        }
+        self
+    }
+
+    /// Record that the play's own `step` produced this decision's choice
+    /// (`situation.play_step`). Called by the play's step after its cast was
+    /// chosen; a no-op on an event with no situation.
+    pub fn play_step(&mut self, step: PlayStep) {
+        if let Some(tag) = self.situation.as_mut() {
+            tag.play_step = Some(step);
+        }
     }
 
     /// Record an ability as considered-and-rejected with a typed reason.

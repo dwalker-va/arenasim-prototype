@@ -277,6 +277,10 @@ fn build_graphical_app(
                 eprintln!("{e}");
                 std::process::exit(1)
             });
+            let withheld = cfg.withheld_plays().unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(1)
+            });
             let rng = match cfg.random_seed {
                 Some(seed) => arenasim::states::play_match::GameRng::from_seed(seed),
                 None => arenasim::states::play_match::GameRng::default(),
@@ -287,6 +291,7 @@ fn build_graphical_app(
             );
             app.insert_resource(match_config)
                 .insert_resource(profile)
+                .insert_resource(withheld)
                 .insert_resource(rng)
                 .insert_state(GameState::PlayMatch);
         }

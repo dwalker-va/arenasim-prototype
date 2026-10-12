@@ -82,12 +82,12 @@ use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::*;
 use crate::states::play_match::decision_trace::{
-    DecisionEventBuilder, DecisionTrace, RejectionReason,
+    DecisionEventBuilder, DecisionTrace, PlayStep, RejectionReason,
 };
 use crate::states::play_match::movement_config::MovementConfig;
 
 use super::super::utils::log_ability_use;
-use crate::states::play_match::situation::TeamSituation;
+use crate::states::play_match::situation::{Role, TeamSituation};
 
 use super::cast_guard::{
     cast_gate, classify_pre_cast_failure, pre_cast_ok, unreached_reason, Cleared, PreCastOpts,
@@ -645,6 +645,13 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// `mark_waits`: a teammate is dying ([`Self::teammate_dying`]), so Mark
     /// of the Wild was held back from step 1 for step 7.
     fn rotation(&mut self, combatant: &mut Combatant, mark_waits: bool) -> bool {
+        // The Peel play (TeamPlan): a teammate is in danger, so crowd control
+        // on its attacker heads the rotation.
+        if self.try_peel(combatant) {
+            self.builder.play_step(PlayStep::Peel);
+            return true;
+        }
+
         // The escape shift goes on the next global cooldown, behind only the
         // emergency heals (2-3) — and when the shift would break a root or a
         // snare, behind ONE of them: the emergency heal's exemption is one
@@ -819,6 +826,57 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
 
         // 10. Moonfire on the kill target, when it is not already burning.
         self.try_moonfire(combatant, held)
+    }
+
+    /// The Peel play's step ([`super::peel`]): over the attackers of the
+    /// teammate in danger, nearest it first, Cyclone on one that is not a pet
+    /// and not the Druid's own target (a Cyclone makes it immune to the team's
+    /// damage), else Entangling Roots on a melee or pet one
+    /// ([`super::peel::movement_peel_target`]) that is not its own target (its
+    /// damage would break the root) and not immune to damage. Never governed:
+    /// a teammate is dying. A melee or pet chasing a dying teammate is the
+    /// Roots peel AS-245 asked for.
+    fn try_peel(&mut self, combatant: &mut Combatant) -> bool {
+        let Some(call) = super::peel::peel_call(self.ctx, Role::Healer) else {
+            return false;
+        };
+        let kill_target = combatant.target;
+        for &attacker in &call.attackers {
+            let Some(info) = self.ctx.combatants.get(&attacker) else {
+                continue;
+            };
+            let (pos, is_pet) = (info.position, info.is_pet);
+            if Some(attacker) == kill_target {
+                continue;
+            }
+            if !is_pet {
+                if self.ctx.is_dr_immune(attacker, DRCategory::Cyclone) {
+                    self.builder.reject(
+                        AbilityType::Cyclone,
+                        RejectionReason::DRImmune {
+                            category: DRCategory::Cyclone,
+                        },
+                    );
+                } else if self.cast(combatant, AbilityType::Cyclone, attacker, pos) {
+                    return true;
+                }
+            }
+            if super::peel::movement_peel_target(self.ctx, attacker)
+                && !self.ctx.entity_is_immune(attacker)
+            {
+                if self.ctx.is_dr_immune(attacker, DRCategory::Roots) {
+                    self.builder.reject(
+                        AbilityType::EntanglingRoots,
+                        RejectionReason::DRImmune {
+                            category: DRCategory::Roots,
+                        },
+                    );
+                } else if self.cast(combatant, AbilityType::EntanglingRoots, attacker, pos) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Whether a teammate (the Druid included, pets excluded) is DYING: below

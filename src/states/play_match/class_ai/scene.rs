@@ -63,7 +63,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::map_geometry::ObstacleVolume;
 use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
 use crate::states::play_match::situation::{
-    update_situations, MatchClock, SituationConfig, Situations,
+    update_situations, MatchClock, PlaySet, SituationConfig, Situations, WithheldPlays,
 };
 use crate::states::play_match::utils::is_incapacitating;
 
@@ -106,6 +106,8 @@ pub struct Scene {
     obstacles: Vec<ObstacleVolume>,
     bounds: ArenaBounds,
     ai_profile: AiProfiles,
+    /// The gated plays each team is denied ([`Scene::withhold`]).
+    withheld: WithheldPlays,
     abilities: AbilityDefinitions,
     movement: MovementConfig,
     /// The sim clock: the posture clock, the trace's `sim_time` and the
@@ -146,6 +148,7 @@ impl Scene {
             obstacles: Vec::new(),
             bounds: ArenaBounds::default(),
             ai_profile: AiProfiles::default(),
+            withheld: WithheldPlays::default(),
             abilities,
             movement,
             now: 30.0,
@@ -271,6 +274,16 @@ impl Scene {
         match team {
             1 => self.ai_profile.team1 = profile,
             _ => self.ai_profile.team2 = profile,
+        }
+        self
+    }
+
+    /// Deny `team` the gated plays in `plays` (`situation::WithheldPlays`):
+    /// the paired control of a scene that tests a play.
+    pub fn withhold(mut self, team: u8, plays: PlaySet) -> Self {
+        match team {
+            1 => self.withheld.team1 = plays,
+            _ => self.withheld.team2 = plays,
         }
         self
     }
@@ -429,7 +442,10 @@ impl Scene {
             &mut self.situations,
             &snapshot,
             &clock,
-            &SituationConfig::from_movement(&self.movement),
+            &SituationConfig {
+                withheld: self.withheld,
+                ..SituationConfig::from_movement(&self.movement)
+            },
             &mut trace,
         );
         &self.situations
@@ -459,7 +475,10 @@ impl Scene {
             &mut situations,
             &snapshot,
             &clock,
-            &SituationConfig::from_movement(&self.movement),
+            &SituationConfig {
+                withheld: self.withheld,
+                ..SituationConfig::from_movement(&self.movement)
+            },
             &mut trace,
         );
         // The classification's own transitions are not the unit's decision.

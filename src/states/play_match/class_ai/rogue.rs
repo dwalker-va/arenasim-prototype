@@ -30,8 +30,9 @@ use crate::states::play_match::combat_core::{
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
 use crate::states::play_match::decision_trace::{
-    DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason,
+    DecisionEventBuilder, DecisionTrace, NoActionReason, PlayStep, RejectionReason,
 };
+use crate::states::play_match::situation::Role;
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{cast_gate, classify_pre_cast_failure, PreCastOpts};
@@ -113,6 +114,49 @@ pub fn decide_rogue_action(
     if combatant.global_cooldown > 0.0 {
         // Don't emit — no decision produced. Drop the builder (no candidates).
         return false;
+    }
+
+    // The Peel play (TeamPlan): a teammate is in danger, so Kidney Shot on
+    // its attacker heads the chain, ahead of the chain planner's own use of
+    // the stun.
+    if let Some(call) = super::peel::peel_call(ctx, Role::MeleeDps) {
+        let peeled = call.attackers.iter().any(|&attacker| {
+            let Some(pos) = ctx.combatants.get(&attacker).map(|i| i.position) else {
+                return false;
+            };
+            if ctx.is_dr_immune(attacker, DRCategory::KidneyShotStun) {
+                builder.reject(
+                    AbilityType::KidneyShot,
+                    RejectionReason::DRImmune {
+                        category: DRCategory::KidneyShotStun,
+                    },
+                );
+                return false;
+            }
+            if ctx.entity_is_immune(attacker) {
+                builder.reject(AbilityType::KidneyShot, RejectionReason::TargetImmune);
+                return false;
+            }
+            try_kidney_shot(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                attacker,
+                pos,
+                ctx,
+                same_frame_cc_queue,
+                &mut builder,
+            )
+        });
+        if peeled {
+            builder.play_step(PlayStep::Peel);
+            builder.finish();
+            return true;
+        }
     }
 
     // Priority 1: Kidney Shot (melee-range CC), gated by the chain planner.

@@ -1130,6 +1130,15 @@ jq -c 'select(.kind == "situation_change" and .name == "enemy_healer_locked") | 
 jq -c 'select(.kind == "situation_change" and .name == "ally_in_danger") | {t: .sim_time, team, change, ally: .subject, since}' $T
 jq -r 'select(.kind == "ability_decision" and .situation.ally_in_danger != null and .outcome.type == "action_taken") | "\(.actor.class) \(.outcome.ability)"' $T | sort | uniq -c
 
+# Plays. `situation.play` is the deciding unit's play when it is not the
+# default: {"name": "burst"}, or {"name": "peel", "ally": <id>} (TeamPlan
+# only). `situation.play_step == "peel"` marks a choice the Peel play's own
+# step made — crowd control on an attacker of the teammate in danger — rather
+# than the chain below it. Every peel, and what each class peeled with:
+jq -c 'select(.situation.play_step == "peel") | {t: .sim_time, class: .actor.class, ability: .outcome.ability, on: .outcome.target_id, for: .situation.play.ally}' $T
+# Why a unit under the Peel play did NOT peel (its peel tools' rejections):
+jq -r 'select(.situation.play.name == "peel" and .situation.play_step == null) | .actor.class as $c | .candidates[] | select(.status == "rejected") | "\($c) \(.ability) \(.reason | if type == "object" then keys[0] else . end)"' $T | sort | uniq -c | sort -rn
+
 # Who was a trap AIMED at? A trap is placed at a POSITION and springs on the
 # first enemy to reach it, so its victim is not its target and the outcome
 # alone cannot say who the Hunter meant to catch. The chosen event carries the
@@ -1304,6 +1313,22 @@ constructed:
 - **The tiers beyond** (decision properties over a scene grid,
   situation-conditional probes over a seed bank) are planned in
   `docs/design/proposals/2026-10-11-ai-architecture.md` §3.2.
+  `tests/peel_play_probe.rs` is the first situation-conditional probe: it
+  reads its windows off the trace's `situation_change` events, plays the same
+  bank with the play withheld (`team{1,2}_withheld_plays`, a measurement-only
+  config field — `situation::WithheldPlays`), and asserts in units of the
+  bank's own noise (a z), never against a fitted number.
+
+**Plays.** A play is a named reordering of a class's own chain
+(`situation::Play`, chosen by `TeamSituation::play_for`). `Burst` is the
+ported burst window. `Peel` is gated under `TeamPlan`: while
+`ally_in_danger` names a teammate, every OTHER unit on the team puts its peel
+step at the head of its chain — crowd control on one of the teammate's
+`danger_attackers` (`class_ai::peel`; the tools per class are
+`peel::peel_tools`, and the Warrior has none). Every peel goes through the
+cast gate, skips an attacker the team already holds, and a movement peel
+(root, snare) answers only a melee or pet. It graduates or is deleted at the
+0.8 milestone sweep (`docs/design/balance/2026-10-12-as274-peel-play.md`).
 
 **The migrate-not-re-pin rule (user decision, 2026-10-12).** When a
 seed-pinned probe goes stale — a change moved the RNG stream and the seed no

@@ -30,7 +30,8 @@ use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::*;
 use crate::states::play_match::decision_trace::{
-    ActorView, DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, TargetView,
+    ActorView, DecisionEventBuilder, DecisionTrace, NoActionReason, PlayStep, RejectionReason,
+    TargetView,
 };
 use crate::states::play_match::movement_config::MovementWeights;
 use crate::states::play_match::situation::{Play, Role};
@@ -193,6 +194,30 @@ pub fn decide_hunter_action(
                 emit_dip_complete(decision_trace, ctx, target, my_pos);
                 return true;
             }
+        }
+    }
+
+    // The Peel play (TeamPlan): a teammate is in danger, so a snare on its
+    // melee or pet attacker heads the chain — Concussive Shot, else a Frost
+    // Trap thrown onto the attacker. Both are movement peels: an attacker that
+    // need not move to keep hitting (a caster) is not slowed.
+    if let Some(call) = super::peel::peel_call(ctx, Role::RangedDps) {
+        if try_peel_snare(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            &call.attackers,
+            own_traps,
+            &mut builder,
+        ) {
+            builder.play_step(PlayStep::Peel);
+            builder.finish();
+            return true;
         }
     }
 
@@ -465,13 +490,17 @@ pub fn decide_hunter_action(
     // is the unchanged order, so non-CC frames are untouched. This is the
     // complement to the trap rework: the trap creates the healer-down window,
     // this converts it.
-    let burst_window = match ctx.situation().play_for(Role::RangedDps) {
-        Play::Burst => ctx
+    let bursting = match ctx.play(Role::RangedDps) {
+        Play::Burst => true,
+        Play::Default => false,
+        // A peel step that did not fire leaves the chain its fallback orders.
+        Play::Peel { .. } => ctx.situation().fallback_play(Role::RangedDps) == Play::Burst,
+    };
+    let burst_window = bursting
+        && ctx
             .situation()
             .enemy_healer_locked
-            .is_some_and(|lock| lock.subject != target_entity),
-        Play::Default => false,
-    };
+            .is_some_and(|lock| lock.subject != target_entity);
     if burst_window
         && distance_to_target >= 20.0
         && try_aimed_shot(
@@ -1590,6 +1619,71 @@ fn try_place_trap_at(
     combatant.global_cooldown = GCD;
 
     true
+}
+
+/// The Peel play's snare, over `attackers` nearest the teammate first: on the
+/// first melee or pet attacker ([`super::peel::movement_peel_target`]) not
+/// immune and not already slowed, Concussive Shot; when it cannot fire, a
+/// Frost Trap thrown onto the attacker — in sight of the throw, and not over
+/// the Hunter's own live Freezing Trap ([`frost_trap_held_for_freezing`]).
+#[allow(clippy::too_many_arguments)]
+fn try_peel_snare(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    attackers: &[Entity],
+    own_traps: &[LiveTrap],
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    for &attacker in attackers {
+        if !super::peel::movement_peel_target(ctx, attacker)
+            || ctx.entity_is_immune(attacker)
+            || super::peel::slowed(ctx, attacker)
+        {
+            continue;
+        }
+        if try_concussive_shot(
+            commands, combat_log, abilities, entity, combatant, my_pos, auras, attacker, ctx,
+            builder,
+        ) {
+            return true;
+        }
+        let Some(attacker_pos) = ctx.combatants.get(&attacker).map(|i| i.position) else {
+            continue;
+        };
+        if !crate::states::play_match::map_geometry::has_line_of_sight(
+            ctx.obstacles,
+            my_pos,
+            attacker_pos,
+        ) {
+            builder.reject(AbilityType::FrostTrap, RejectionReason::LosBlocked);
+            continue;
+        }
+        if !frost_trap_held_for_freezing(own_traps, combatant, builder)
+            && try_place_trap_at(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                attacker_pos,
+                Some(attacker),
+                TrapType::Frost,
+                auras,
+                ctx,
+                builder,
+            )
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Try Concussive Shot — fires a projectile that slows on arrival.

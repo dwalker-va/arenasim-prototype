@@ -31,9 +31,9 @@ pub use builder::{
 };
 pub use events::{
     AbilityCandidate, AbilityOutcome, ActorView, CandidateStatus, DecisionEvent, EventKind,
-    EventPayload, MovementGoalKind, MovementTrigger, NoActionReason, Posture, RejectionReason,
-    ResourceKind, SituationChangeKind, SituationName, SituationTag, TargetCandidate,
-    TargetRejectionReason, TargetView, WindowTag,
+    EventPayload, MovementGoalKind, MovementTrigger, NoActionReason, PlayStep, PlayTag, Posture,
+    RejectionReason, ResourceKind, SituationChangeKind, SituationName, SituationTag,
+    TargetCandidate, TargetRejectionReason, TargetView, WindowTag,
 };
 pub use writer::{flush_decision_trace_system, TraceWriter};
 

@@ -68,6 +68,14 @@ pub struct HeadlessMatchConfig {
     pub team1_ai_profile: Option<String>,
     #[serde(default)]
     pub team2_ai_profile: Option<String>,
+    /// Gated plays (`"Peel"`) to DENY each team, for measurement: a team
+    /// under `TeamPlan` with a play withheld is the paired control the play
+    /// is measured against (`situation::WithheldPlays`). Empty — the default —
+    /// withholds nothing.
+    #[serde(default)]
+    pub team1_withheld_plays: Vec<String>,
+    #[serde(default)]
+    pub team2_withheld_plays: Vec<String>,
     /// Optional grouping label echoed verbatim into batch-runner output. Lets a
     /// strategy-var sweep keep variants distinct (e.g. "Hunter+Spider vs Mage"
     /// vs "Hunter+Boar vs Mage") when two configs share the same class lists.
@@ -155,6 +163,8 @@ impl Default for HeadlessMatchConfig {
             ai_profile: None,
             team1_ai_profile: None,
             team2_ai_profile: None,
+            team1_withheld_plays: Vec::new(),
+            team2_withheld_plays: Vec::new(),
             team1_rogue_openers: Vec::new(),
             team2_rogue_openers: Vec::new(),
             team1_rogue_poisons: Vec::new(),
@@ -207,6 +217,20 @@ impl HeadlessMatchConfig {
         })
     }
 
+    /// Resolve `team1_withheld_plays` / `team2_withheld_plays` to the
+    /// [`WithheldPlays`](crate::states::play_match::situation::WithheldPlays)
+    /// resource — the one authority, as [`Self::ai_profiles`] is for the
+    /// profiles.
+    pub fn withheld_plays(
+        &self,
+    ) -> Result<crate::states::play_match::situation::WithheldPlays, String> {
+        use crate::states::play_match::situation::WithheldPlays;
+        Ok(WithheldPlays {
+            team1: WithheldPlays::parse_set(&self.team1_withheld_plays)?,
+            team2: WithheldPlays::parse_set(&self.team2_withheld_plays)?,
+        })
+    }
+
     /// Validate the configuration
     // `pub(crate)` so the batch runner can fail fast on a bad config instead of
     // panicking a worker mid-sweep after the matches have been paid for.
@@ -234,6 +258,7 @@ impl HeadlessMatchConfig {
         // resolution can never disagree on which fields exist — the review that
         // added this check found exactly that divergence once already.
         self.ai_profiles()?;
+        self.withheld_plays()?;
 
         // Validate kill targets
         if let Some(target) = self.team1_kill_target {

@@ -214,6 +214,9 @@ pub struct HeadlessMatchState {
     /// Which AI implementation this match runs under. Parsed once at plugin
     /// build so a bad string fails fast rather than at match setup.
     pub ai_profile: crate::states::play_match::ai_profile::AiProfiles,
+    /// The gated plays each team is denied, for measurement
+    /// (`situation::WithheldPlays`). Nothing by default.
+    pub withheld_plays: crate::states::play_match::situation::WithheldPlays,
     /// If true, the per-match `.txt` log file is NOT written. Set by the
     /// matrix runner where 4,900+ logs would just clutter `match_logs/`.
     pub suppress_log: bool,
@@ -258,6 +261,10 @@ impl Plugin for HeadlessPlugin {
                     .config
                     .ai_profiles()
                     .expect("Invalid ai_profile in headless config"),
+                withheld_plays: self
+                    .config
+                    .withheld_plays()
+                    .expect("Invalid withheld play in headless config"),
                 suppress_log: self.suppress_log,
                 result: None,
             })
@@ -321,6 +328,7 @@ fn headless_setup_match(
     let ai_profile = headless_state.ai_profile;
     info!("AI profile: {:?}", ai_profile);
     commands.insert_resource(ai_profile);
+    commands.insert_resource(headless_state.withheld_plays);
     // Team plans — inserted in BOTH modes (dual-registration rule).
     commands.insert_resource(crate::states::play_match::team_plan::TeamPlans::default());
     // Situations — likewise per match, so no window outlives its match.

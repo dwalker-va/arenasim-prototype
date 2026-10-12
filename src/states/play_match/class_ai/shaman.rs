@@ -24,9 +24,10 @@ use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::*;
 use crate::states::play_match::decision_trace::{
-    DecisionEventBuilder, DecisionTrace, RejectionReason,
+    DecisionEventBuilder, DecisionTrace, PlayStep, RejectionReason,
 };
 use crate::states::play_match::movement_config::MovementConfig;
+use crate::states::play_match::situation::Role;
 
 use super::super::utils::{combatant_id, log_ability_use};
 use super::cast_guard::{cast_gate, unreached_reason, PreCastOpts};
@@ -78,6 +79,33 @@ pub fn decide_shaman_action(
     else {
         return false;
     };
+
+    // The Peel play (TeamPlan): a teammate is in danger, so Frost Shock on
+    // its melee or pet attacker (a movement peel) heads the chain — ahead of
+    // the emergency heal, which the next global cooldown still reaches.
+    if let Some(call) = super::peel::peel_call(ctx, Role::Healer) {
+        let peeled = call.attackers.iter().any(|&attacker| {
+            super::peel::movement_peel_target(ctx, attacker)
+                && !super::peel::slowed(ctx, attacker)
+                && frost_shock_on(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    auras,
+                    ctx,
+                    attacker,
+                    &mut builder,
+                )
+        });
+        if peeled {
+            builder.play_step(PlayStep::Peel);
+            builder.finish();
+            return true;
+        }
+    }
 
     // P1: emergency heal — a dying ally is topped off before ANYTHING else
     // (including totem maintenance: never let an ally die to refresh a buff
@@ -420,11 +448,7 @@ fn try_frost_shock(
 ) -> bool {
     let ability = AbilityType::FrostShock;
     let def = abilities.get_unchecked(&ability);
-    let opts = PreCastOpts {
-        check_friendly_cc: true,
-        check_target_immune: true,
-        ..Default::default()
-    };
+    let opts = FROST_SHOCK_OPTS;
 
     let target_entity = match frost_shock_target(ctx, entity, combatant, my_pos, def.range) {
         Ok(target) => target,
@@ -436,6 +460,47 @@ fn try_frost_shock(
             return false;
         }
     };
+    frost_shock_on(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        target_entity,
+        builder,
+    )
+}
+
+/// The options every Frost Shock is gated with: its damage would break a
+/// friendly breakable CC, and it is not spent on a target immune to it.
+const FROST_SHOCK_OPTS: PreCastOpts = PreCastOpts {
+    check_friendly_cc: true,
+    check_friendly_dots: false,
+    check_target_immune: true,
+    bypass_silence: false,
+};
+
+/// Cast Frost Shock on `target_entity` through the cast gate: the rotation's
+/// peel pick, or the Peel play's attacker.
+#[allow(clippy::too_many_arguments)]
+fn frost_shock_on(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    target_entity: Entity,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::FrostShock;
+    let def = abilities.get_unchecked(&ability);
+    let opts = FROST_SHOCK_OPTS;
     let Some(target_info) = ctx.combatants.get(&target_entity) else {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
