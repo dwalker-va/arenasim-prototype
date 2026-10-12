@@ -88,6 +88,8 @@ struct SceneUnit {
     directive: Option<MovementDirective>,
     reset: Option<MeleeResetState>,
     flare: Option<RogueFlareState>,
+    /// The unit's diminishing-returns state.
+    dr: DRTracker,
     /// The ability the unit is casting or channelling, as its snapshot row
     /// reports it.
     casting: Option<AbilityType>,
@@ -178,6 +180,7 @@ impl Scene {
             directive: None,
             reset: None,
             flare: None,
+            dr: DRTracker::default(),
             casting: None,
         });
         self
@@ -282,6 +285,12 @@ impl Scene {
         self
     }
 
+    /// `who`'s diminishing-returns state (default: nothing diminished).
+    pub fn dr_tracker(mut self, who: Who, tracker: DRTracker) -> Self {
+        self.unit_mut(who).dr = tracker;
+        self
+    }
+
     /// `who` is casting (or channelling) `ability`, as the snapshot row of a
     /// unit with a live `CastingState` reports it. A casting unit does not
     /// decide (`decide_abilities` skips it), so this is for the units the
@@ -371,7 +380,7 @@ impl Scene {
                 ),
             );
             active_auras.insert(u.entity, u.auras.clone());
-            dr_trackers.insert(u.entity, DRTracker::default());
+            dr_trackers.insert(u.entity, u.dr.clone());
             ability_cooldowns.insert(
                 u.entity,
                 u.combatant

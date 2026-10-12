@@ -76,10 +76,13 @@ use std::sync::OnceLock;
 
 use bevy::prelude::{Entity, Vec2, Vec3};
 
-use arenasim::states::match_config::{CharacterClass, WarlockCurse};
+use arenasim::states::match_config::{
+    CharacterClass, MageArmor, PaladinAura, RogueOpener, WarlockCurse, WarriorShout,
+};
 use arenasim::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::TrapType;
+use arenasim::states::play_match::components::{DRCategory, DRTracker, DispelType};
 use arenasim::states::play_match::decision_trace::{CandidateStatus, RejectionReason};
 use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume};
 use arenasim::states::play_match::movement_config::{load_movement_config, MovementConfig};
@@ -134,6 +137,8 @@ struct Situation {
     my_aura: SelfLock,
     /// The enemy healer is casting a heal (an interrupt's moment).
     healer_casting: bool,
+    /// Both enemies are immune to Fear by diminishing returns.
+    fear_diminished: bool,
     /// The unit has broken stealth (the Rogue starts every match in it).
     opened: bool,
 }
@@ -180,6 +185,7 @@ const CALM: Situation = Situation {
     healer_aura: Hold::Free,
     my_aura: SelfLock::Free,
     healer_casting: false,
+    fear_diminished: false,
     opened: false,
 };
 
@@ -297,6 +303,12 @@ fn situations(class: CharacterClass, bars: &[f32]) -> Vec<Situation> {
         Situation {
             name: "enemy healer divine shield",
             healer_aura: Hold::DivineShield,
+            ..CALM
+        },
+        Situation {
+            name: "enemies immune to fear by diminishing returns, me injured",
+            fear_diminished: true,
+            my_health: 0.3,
             ..CALM
         },
         Situation {
@@ -423,6 +435,8 @@ struct Point {
     cooldowns: Cooldowns,
     pillar: bool,
     upkeep: Upkeep,
+    /// The class's per-match choice ([`kit_choices`]): 0 is the default.
+    choice: u8,
     situation: Situation,
 }
 
@@ -444,7 +458,7 @@ impl Point {
     fn describe(&self) -> String {
         format!(
             "{:?}: target at {}yd, resource {}, cooldowns {:?}, {}, upkeep {:?}, \
-             situation \"{}\" (me at {}, ally {})",
+             choice {}, situation \"{}\" (me at {}, ally {})",
             self.class,
             self.distance,
             self.resource,
@@ -455,6 +469,7 @@ impl Point {
                 "clear sight"
             },
             self.upkeep,
+            self.choice,
             self.situation.name,
             self.situation.my_health,
             match self.situation.ally_health {
@@ -558,13 +573,20 @@ fn upkeep_auras(
 }
 
 /// The damage over time the class's kit applies, as it stands on a target.
-fn own_dots(defs: &AbilityDefinitions, class: CharacterClass, caster: Entity) -> Vec<Aura> {
+fn own_dots(
+    defs: &AbilityDefinitions,
+    class: CharacterClass,
+    caster: Entity,
+    curse: AbilityType,
+) -> Vec<Aura> {
     kit(defs, class)
         .into_iter()
         .filter_map(|a| {
             let d = defs.get(&a).unwrap();
             let effect = d.applies_aura.as_ref()?;
-            (effect.aura_type == AuraType::DamageOverTime).then(|| Aura {
+            // Of the curses, only the one the loadout prefers is ever placed.
+            let curse_of_another = effect.dispel_type == DispelType::Curse && a != curse;
+            (effect.aura_type == AuraType::DamageOverTime && !curse_of_another).then(|| Aura {
                 effect_type: AuraType::DamageOverTime,
                 duration: 12.0,
                 magnitude: effect.magnitude,
@@ -598,6 +620,35 @@ fn distances(defs: &AbilityDefinitions, class: CharacterClass) -> Vec<f32> {
     edges
 }
 
+/// How many per-match choices the class has: its loadout alternatives (the
+/// shout, the armor, the opener, the aura, the curse — each a match-config
+/// choice, set on `Combatant` at spawn), or for the Shaman, which totem is
+/// left to drop under part upkeep. Choice 0 is the default.
+fn kit_choices(class: CharacterClass) -> u8 {
+    match class {
+        CharacterClass::Warrior
+        | CharacterClass::Mage
+        | CharacterClass::Warlock
+        | CharacterClass::Paladin => 3,
+        CharacterClass::Rogue | CharacterClass::Shaman => 2,
+        CharacterClass::Priest | CharacterClass::Hunter | CharacterClass::Druid => 1,
+    }
+}
+
+/// The situations the non-default choices meet (the default meets every
+/// one), so the grid stays near a second: enough to reach every alternative
+/// both calm and under pressure.
+const CHOICE_SITUATIONS: &[&str] = &[
+    "calm",
+    "ally injured",
+    "me injured",
+    "target low",
+    "a caster target",
+    "a caster target, me injured",
+    "enemy healer polymorphed by my team",
+    "silenced, ally injured",
+];
+
 fn points(
     defs: &AbilityDefinitions,
     movement: &MovementConfig,
@@ -617,15 +668,23 @@ fn points(
                             continue;
                         }
                         for upkeep in [Upkeep::None, Upkeep::Buffs, Upkeep::Full] {
-                            out.push(Point {
-                                class,
-                                distance,
-                                resource,
-                                cooldowns,
-                                pillar,
-                                upkeep,
-                                situation,
-                            });
+                            let alternatives = if CHOICE_SITUATIONS.contains(&situation.name) {
+                                kit_choices(class)
+                            } else {
+                                1
+                            };
+                            for choice in 0..alternatives {
+                                out.push(Point {
+                                    class,
+                                    distance,
+                                    resource,
+                                    cooldowns,
+                                    pillar,
+                                    upkeep,
+                                    choice,
+                                    situation,
+                                });
+                            }
                         }
                     }
                 }
@@ -685,6 +744,55 @@ fn hold(scene: Scene, who: &'static str, hold: Hold) -> Scene {
     }
 }
 
+fn scene_entity(scene: &Scene, who: &'static str) -> Entity {
+    scene.entity(who)
+}
+
+/// The unit's CC target, as `acquire_targets` leaves it. A CC target stays
+/// while it is alive and not immune — so an enemy healer the unit picked
+/// before its ally polymorphed it is still its CC target (the
+/// "polymorphed by my team" situations). Otherwise it is re-picked by
+/// `select_cc_target_heuristic`: among living enemies neither immune nor
+/// already held, the healer scores +100 unless the kill target is a healer
+/// (then the DPS does), a non-kill-target +50, and a tenth of its health up
+/// to +20; ties go to the lower entity.
+fn cc_target(scene: &mut Scene, p: &Point) -> Option<&'static str> {
+    let s = &p.situation;
+    let immune = |who: &str| matches!(hold_of(p, who), Hold::DivineShield | Hold::Cyclone);
+    let held = |who: &str| {
+        matches!(
+            hold_of(p, who),
+            Hold::FriendlyPolymorph | Hold::EnemyPolymorph | Hold::Cyclone
+        )
+    };
+    // The healer was the CC target before the ally's Polymorph landed.
+    if s.healer_aura == Hold::FriendlyPolymorph {
+        return Some(HEALER);
+    }
+    let kill = whom(p);
+    let killing_healer = kill == HEALER;
+    let mut best: Option<(&'static str, i32)> = None;
+    for who in [TARGET, HEALER] {
+        if !alive(p, who) || immune(who) || held(who) {
+            continue;
+        }
+        let is_healer = who == HEALER || s.target_class.is_healer();
+        let mut score = 0;
+        if is_healer != killing_healer {
+            score += 100;
+        }
+        if who != kill {
+            score += 50;
+        }
+        score += (scene.combatant_mut(who).current_health as i32 / 10).min(20);
+        // TARGET is spawned before HEALER, so it wins a tie.
+        if best.is_none_or(|(_, b)| score > b) {
+            best = Some((who, score));
+        }
+    }
+    best.map(|(who, _)| who)
+}
+
 /// Whom the enemy target attacks.
 fn attacked(p: &Point) -> &'static str {
     if p.situation.target_attacks_ally {
@@ -737,13 +845,37 @@ fn build(defs: &AbilityDefinitions, movement: MovementConfig, p: &Point) -> Scen
     if s.opened {
         scene.combatant_mut(ME).stealthed = false;
     }
-    // What `acquire_targets` gives a unit with crowd control in its kit: the
-    // enemy healer as its CC target.
     let healer = scene.entity(HEALER);
-    scene.combatant_mut(ME).cc_target = Some(healer);
-    // What a match gives a Warlock whose config names no curses: the default
-    // curse on each enemy (`parse_warlock_curse_prefs`).
-    scene.combatant_mut(ME).warlock_curse_prefs = vec![WarlockCurse::default(); 2];
+    let cc = cc_target(&mut scene, p);
+    scene.combatant_mut(ME).cc_target = cc.map(|who| scene_entity(&scene, who));
+    // The class's per-match choice. A Warlock whose config names no curses
+    // gets the default curse on each enemy (`parse_warlock_curse_prefs`).
+    {
+        let me = scene.combatant_mut(ME);
+        let k = p.choice as usize;
+        me.warrior_shout = [
+            WarriorShout::BattleShout,
+            WarriorShout::DemoralizingShout,
+            WarriorShout::CommandingShout,
+        ][k % 3];
+        me.mage_armor = [
+            MageArmor::FrostArmor,
+            MageArmor::MageArmor,
+            MageArmor::MoltenArmor,
+        ][k % 3];
+        me.paladin_aura = [
+            PaladinAura::DevotionAura,
+            PaladinAura::ShadowResistanceAura,
+            PaladinAura::ConcentrationAura,
+        ][k % 3];
+        me.rogue_opener = [RogueOpener::CheapShot, RogueOpener::Ambush][k % 2];
+        let curse = [
+            WarlockCurse::Agony,
+            WarlockCurse::Weakness,
+            WarlockCurse::Tongues,
+        ][k % 3];
+        me.warlock_curse_prefs = vec![curse; 2];
+    }
     if s.target_shielded {
         scene = scene.aura_full(
             TARGET,
@@ -758,6 +890,15 @@ fn build(defs: &AbilityDefinitions, movement: MovementConfig, p: &Point) -> Scen
                 ..Default::default()
             },
         );
+    }
+    if s.fear_diminished {
+        let mut tracker = DRTracker::default();
+        while !tracker.is_immune(DRCategory::Fears) {
+            tracker.apply(DRCategory::Fears);
+        }
+        scene = scene
+            .dr_tracker(TARGET, tracker.clone())
+            .dr_tracker(HEALER, tracker);
     }
     if s.healer_casting {
         scene = scene.casting(HEALER, AbilityType::FlashHeal);
@@ -805,16 +946,31 @@ fn build(defs: &AbilityDefinitions, movement: MovementConfig, p: &Point) -> Scen
         // ...and the unit's own damage over time already on its target
         // (never on one its team holds in a Polymorph, which it would break).
         if p.upkeep == Upkeep::Full && hold_of(p, whom(p)) != Hold::FriendlyPolymorph {
-            for aura in own_dots(defs, p.class, scene.entity(ME)) {
+            let curse = scene.combatant_mut(ME).warlock_curse_prefs[0].ability();
+            for aura in own_dots(defs, p.class, scene.entity(ME), curse) {
                 scene = scene.aura_full(whom(p), aura);
             }
         }
-        // A Shaman's upkeep is its totems: all four down in full upkeep, and
-        // only Air and Earth in part, so Water and Fire are still to drop.
+        // ...and its curse on every enemy it spreads to.
+        for enemy in [TARGET, HEALER] {
+            let cursed = enemy == whom(p) || hold_of(p, enemy) == Hold::FriendlyPolymorph;
+            if p.upkeep == Upkeep::Full && !cursed && alive(p, enemy) {
+                let curse = scene.combatant_mut(ME).warlock_curse_prefs[0].ability();
+                for aura in own_dots(defs, p.class, scene.entity(ME), curse) {
+                    if aura.ability_name == defs.get(&curse).unwrap().name {
+                        scene = scene.aura_full(enemy, aura);
+                    }
+                }
+            }
+        }
+        // A Shaman's upkeep is its totems (Air, Water, Earth, Fire): all four
+        // down in full upkeep; in part, Water and Fire still to drop (choice
+        // 0) or only Fire (choice 1).
         if p.class == CharacterClass::Shaman {
-            let totems = match p.upkeep {
-                Upkeep::Full => [60.0; 4],
-                Upkeep::Buffs | Upkeep::None => [60.0, 0.0, 60.0, 0.0],
+            let totems = match (p.upkeep, p.choice) {
+                (Upkeep::Full, _) => [60.0; 4],
+                (_, 0) => [60.0, 0.0, 60.0, 0.0],
+                _ => [60.0, 60.0, 60.0, 0.0],
             };
             scene = scene.totems(ME, totems);
         }
@@ -1027,6 +1183,7 @@ const KNOWN: &[Known] = &[
             AbilityType::AirTotem,
             AbilityType::WaterTotem,
             AbilityType::EarthTotem,
+            AbilityType::FireTotem,
         ],
     },
 ];
@@ -1105,9 +1262,6 @@ enum Unreached {
     /// poison (the auto-attack), a cooldown used from inside crowd control
     /// (`decide_abilities`' CC-break branch).
     DecidedOutside(&'static str),
-    /// One of a set the class picks a single member of per match (an armor,
-    /// a curse, a shout, a Paladin aura); the loadout default is chosen.
-    LoadoutAlternative,
     /// Reachable, but only from a state the grid has no knob for (named).
     NeedsKnob(&'static str),
     /// Never chosen from ANY state: an earlier priority that is always
@@ -1119,7 +1273,6 @@ impl Unreached {
     fn why(&self) -> String {
         match self {
             Unreached::DecidedOutside(site) => format!("decided by {site}, outside the dispatch"),
-            Unreached::LoadoutAlternative => "a loadout alternative".to_string(),
             Unreached::NeedsKnob(knob) => format!("needs a knob: {knob}"),
             Unreached::Shadowed(by) => format!("shadowed by {by}"),
         }
@@ -1147,31 +1300,9 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::BerserkerRage,
         Unreached::DecidedOutside("decide_abilities' CC-break branch, while feared"),
     ),
-    (AbilityType::CommandingShout, Unreached::LoadoutAlternative),
-    (
-        AbilityType::DemoralizingShout,
-        Unreached::LoadoutAlternative,
-    ),
-    (AbilityType::MageArmorSpell, Unreached::LoadoutAlternative),
-    (AbilityType::MoltenArmor, Unreached::LoadoutAlternative),
-    (AbilityType::Ambush, Unreached::LoadoutAlternative),
-    (AbilityType::CurseOfTongues, Unreached::LoadoutAlternative),
-    (AbilityType::CurseOfWeakness, Unreached::LoadoutAlternative),
-    (
-        AbilityType::ConcentrationAura,
-        Unreached::LoadoutAlternative,
-    ),
-    (
-        AbilityType::ShadowResistanceAura,
-        Unreached::LoadoutAlternative,
-    ),
     (
         AbilityType::Flare,
         Unreached::NeedsKnob("an enemy in stealth the Hunter cannot see"),
-    ),
-    (
-        AbilityType::FireTotem,
-        Unreached::NeedsKnob("the Fire totem down while the Water totem is up"),
     ),
     (
         AbilityType::Lifebloom,
@@ -1763,7 +1894,19 @@ fn a_healer_heals_a_dying_ally_before_dealing_damage() {
                 .as_ref()
                 .is_some_and(|a| a.aura_type == AuraType::DamageOverTime);
         // The grid's enemy target attacks the unit or its ally.
-        let peel = t == TARGET
+        let controls = def.applies_aura.as_ref().is_some_and(|a| {
+            matches!(
+                a.aura_type,
+                AuraType::Root
+                    | AuraType::MovementSpeedSlow
+                    | AuraType::Stun
+                    | AuraType::Incapacitate
+                    | AuraType::Fear
+                    | AuraType::Cyclone
+            )
+        });
+        let peel = controls
+            && t == TARGET
             && health_of(&r.point, attacked(&r.point)).is_some_and(|hp| hp < guarantee.bar);
         if damages && !peel {
             v.push(format!(
