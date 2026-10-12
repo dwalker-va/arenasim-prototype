@@ -408,7 +408,7 @@ pub fn render_index(
             ui,
             "enc:abilities-empty",
             "No abilities match these filters.",
-            "No class has an ability of that school.",
+            &empty_reason(filters),
             Some("Clear filters"),
         ) {
             *filters = AbilityFilters::default();
@@ -429,6 +429,24 @@ pub fn render_index(
         });
     }
     clicked
+}
+
+/// Why the filtered grid is empty, said from the filters themselves so it is
+/// true of whatever combination produced it.
+///
+/// Each filter alone always matches something — every class has a kit and the
+/// school chips are [`schools_in_use`] — so in practice it is the class and
+/// school together that come up empty; the other arms keep the sentence true if
+/// that ever stops holding.
+fn empty_reason(filters: &AbilityFilters) -> String {
+    match (filters.class, filters.school) {
+        (Some(class), Some(school)) => {
+            format!("The {} has no {:?} abilities.", class.name(), school)
+        }
+        (Some(class), None) => format!("The {} has no abilities.", class.name()),
+        (None, Some(school)) => format!("No class has a {:?} ability.", school),
+        (None, None) => "No abilities are defined.".to_string(),
+    }
 }
 
 /// Cut a kit-order walk into the class runs it already contains, dropping
@@ -725,6 +743,22 @@ fn scaling_stat_name(stat: ScalingStat) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The empty state names the filters that emptied it — never a sentence
+    /// that is false for the selection on screen.
+    #[test]
+    fn the_empty_state_names_the_filters_that_emptied_it() {
+        let both = AbilityFilters {
+            class: Some(CharacterClass::Warrior),
+            school: Some(SpellSchool::Frost),
+        };
+        assert_eq!(empty_reason(&both), "The Warrior has no Frost abilities.");
+        let school_only = AbilityFilters {
+            class: None,
+            school: Some(SpellSchool::Holy),
+        };
+        assert_eq!(empty_reason(&school_only), "No class has a Holy ability.");
+    }
     use crate::states::play_match::ability_config::load_ability_definitions;
     use std::collections::HashSet;
 

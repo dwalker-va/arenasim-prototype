@@ -179,7 +179,7 @@ pub fn render_index(
             ui,
             "enc:items-empty",
             "No items match these filters.",
-            "Every item is filtered out by slot, type, item level or name.",
+            &empty_reason(filters),
             Some("Clear filters"),
         ) {
             *filters = ItemFilters::default();
@@ -206,6 +206,32 @@ pub fn render_index(
     });
 
     clicked
+}
+
+/// Why the filtered grid is empty, naming only the filters that are set, so
+/// the sentence is true of the selection on screen.
+fn empty_reason(filters: &ItemFilters) -> String {
+    let mut set = Vec::new();
+    if !filters.selected_slots.is_empty() {
+        set.push("slot");
+    }
+    if !filters.selected_armor_types.is_empty() {
+        set.push("type");
+    }
+    if filters.item_level_min != 0 || filters.item_level_max != DEFAULT_ITEM_LEVEL_MAX {
+        set.push("item level");
+    }
+    if filters.name_needle().is_some() {
+        set.push("name");
+    }
+    match set.as_slice() {
+        [] => "No items are defined.".to_string(),
+        [one] => format!("No item matches the {one} filter."),
+        [init @ .., last] => format!(
+            "No item matches the {} and {last} filters together.",
+            init.join(", ")
+        ),
+    }
 }
 
 /// Two-row filter chip-bar.
@@ -557,6 +583,22 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
 mod tests {
     use super::*;
     use crate::states::play_match::equipment::load_item_definitions;
+
+    /// The empty state names only the filters that are set.
+    #[test]
+    fn the_empty_state_names_only_the_filters_that_are_set() {
+        let mut filters = ItemFilters {
+            name_search: "zzz".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(empty_reason(&filters), "No item matches the name filter.");
+        filters.selected_slots.insert(ItemSlotType::Head);
+        filters.selected_armor_types.insert(ArmorType::Cloth);
+        assert_eq!(
+            empty_reason(&filters),
+            "No item matches the slot, type and name filters together."
+        );
+    }
 
     #[test]
     fn every_item_has_a_subtitle_and_is_usable_by_someone() {
