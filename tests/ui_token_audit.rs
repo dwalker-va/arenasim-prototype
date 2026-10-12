@@ -108,7 +108,6 @@ const FROZEN: &[(&str, Counts)] = &[
     ("src/states/play_match/rendering/mod.rs", Counts { colour: 1, size: 0, space: 0, radius: 0, style: 0 }),
     ("src/states/play_match/rendering/overlays.rs", Counts { colour: 19, size: 12, space: 0, radius: 2, style: 0 }),
     ("src/states/play_match/rendering/team_frames.rs", Counts { colour: 38, size: 9, space: 2, radius: 14, style: 0 }),
-    ("src/states/results_ui.rs", Counts { colour: 26, size: 18, space: 18, radius: 11, style: 0 }),
     ("src/states/view_combatant_ui.rs", Counts { colour: 63, size: 44, space: 48, radius: 15, style: 0 }),
 ];
 

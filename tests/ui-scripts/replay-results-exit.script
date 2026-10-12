@@ -1,0 +1,18 @@
+# A match ends on the Results screen, whose one exit is in its header, names
+# where it goes, and takes you there (AS-261).
+#
+# Run:  cargo run --release -- \
+#           --replay tests/ui-scripts/replay-boots-into-the-match.json \
+#           --ui-script tests/ui-scripts/replay-results-exit.script
+#
+# A replay boots straight into the match, so nothing recorded an opener and
+# Results falls back to the main menu. The match itself runs at real speed
+# (about 30s of combat after the 10s gates), hence the long await.
+
+assert-state PlayMatch
+await-note 120 nav:exit to=MainMenu label=◀ MAIN MENU
+assert-state Results
+assert-visible nav:exit
+click nav:exit
+assert-state MainMenu
+dump

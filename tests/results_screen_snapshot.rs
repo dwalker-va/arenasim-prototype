@@ -40,6 +40,16 @@ fn results_screen_2v2() {
     harness.snapshot("results_screen");
 }
 
+/// No `MatchResults` at all: the empty state, under the same header, so the
+/// screen still shows its named exit and not only Esc.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn results_screen_empty() {
+    let mut harness = sized_harness(None, mock_combat_log(), [1500.0, 400.0]);
+    harness.run();
+    harness.snapshot("results_screen_empty");
+}
+
 /// A TOOLTIP-OPEN frame: the pointer is parked on Team 1's class cell, so the
 /// linked-icon contract the Results screen borrowed from the encyclopedia is
 /// what the snapshot actually shows — the class's own tooltip, built by the
@@ -85,7 +95,7 @@ fn results_screen_class_tooltip() {
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn results_screen_ability_links() {
-    let mut harness = sized_harness(mock_results(), mock_combat_log(), [1500.0, 1000.0]);
+    let mut harness = sized_harness(Some(mock_results()), mock_combat_log(), [1500.0, 1000.0]);
     harness.run();
 
     for node in harness.get_all_by_label("Ability breakdown") {
@@ -164,11 +174,16 @@ fn results_screen_value_combos() {
 /// in kittest, so class icons stay the screen's class-color fallback squares
 /// and ability icons render the widget's placeholder tile.
 fn harness(results: MatchResults, log: CombatLog) -> Harness<'static> {
-    sized_harness(results, log, [1500.0, 820.0])
+    sized_harness(Some(results), log, [1500.0, 820.0])
 }
 
-/// [`harness`] at an explicit size, for the views that need more room.
-fn sized_harness(results: MatchResults, log: CombatLog, size: [f32; 2]) -> Harness<'static> {
+/// [`harness`] at an explicit size, for the views that need more room; `None`
+/// draws the screen with no results at all.
+fn sized_harness(
+    results: Option<MatchResults>,
+    log: CombatLog,
+    size: [f32; 2],
+) -> Harness<'static> {
     let items: ItemDefinitions = load_item_definitions().expect("items.ron must load");
     let abilities: AbilityDefinitions =
         load_ability_definitions().expect("abilities.ron must load");
@@ -184,7 +199,7 @@ fn sized_harness(results: MatchResults, log: CombatLog, size: [f32; 2]) -> Harne
         };
         let _ = draw_results_screen(
             ctx,
-            Some(&results),
+            results.as_ref(),
             &log,
             &data,
             Nav::Return(GameState::MainMenu),
