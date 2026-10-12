@@ -341,7 +341,40 @@ pub fn load_hunter_pet_icons(
     info!("Hunter pet icons loaded for view combatant screen");
 }
 
-/// Main UI system for the View Combatant screen.
+/// A user action produced by the View Combatant screen that needs ECS side
+/// effects (a state transition, a resource removal). Every edit that only
+/// mutates `MatchConfig` or the equipment picker is applied inside the pure
+/// draw function; only these bubble out to the Bevy wrapper.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewCombatantAction {
+    /// BACK was clicked: return to Configure Match, dropping
+    /// `ViewCombatantState`.
+    Back,
+    /// A reference surface was clicked: open the encyclopedia on this topic,
+    /// returning here. `ViewCombatantState` is deliberately LEFT IN PLACE — it
+    /// is what makes Back come home to this same team and slot, mid-pick
+    /// picker and all.
+    OpenEncyclopedia(Topic),
+}
+
+/// Everything [`draw_view_combatant`] reads but never writes: the config
+/// definitions and the lazily-loaded icon maps. Plain references, so an egui
+/// harness can build one without a Bevy app.
+pub struct ViewCombatantData<'a> {
+    pub abilities: &'a AbilityDefinitions,
+    pub items: &'a ItemDefinitions,
+    pub default_loadouts: &'a DefaultLoadouts,
+    pub class_icons: &'a ClassIcons,
+    pub ability_icons: Option<&'a AbilityIcons>,
+    pub item_icons: Option<&'a ItemIcons>,
+    pub pet_icons: Option<&'a HunterPetIcons>,
+}
+
+/// Main UI system for the View Combatant screen (Bevy wrapper).
+///
+/// Grabs the egui context and resources, drives the pure
+/// [`draw_view_combatant`] renderer, and applies the returned
+/// [`ViewCombatantAction`] via ECS.
 pub fn view_combatant_ui(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<GameState>>,
@@ -367,13 +400,6 @@ pub fn view_combatant_ui(
         return;
     };
 
-    // Configure dark theme
-    let mut style = (*ctx.style()).clone();
-    style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
-    style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
-    style.interaction.tooltip_delay = 0.0;
-    ctx.set_style(style);
-
     // Handle Back key
     if keybindings.action_just_pressed(GameAction::Back, &keyboard) {
         if view_state.is_some() {
@@ -382,6 +408,59 @@ pub fn view_combatant_ui(
         next_state.set(GameState::ConfigureMatch);
         return;
     }
+
+    let data = ViewCombatantData {
+        abilities: &ability_definitions,
+        items: &item_definitions,
+        default_loadouts: &default_loadouts,
+        class_icons: &class_icons,
+        ability_icons: ability_icons.as_deref(),
+        item_icons: item_icons.as_deref(),
+        pet_icons: pet_icons.as_deref(),
+    };
+
+    match draw_view_combatant(
+        ctx,
+        view_state.as_deref(),
+        &mut match_config,
+        &mut picker_state,
+        &data,
+    ) {
+        Some(ViewCombatantAction::Back) => {
+            commands.remove_resource::<ViewCombatantState>();
+            next_state.set(GameState::ConfigureMatch);
+        }
+        Some(ViewCombatantAction::OpenEncyclopedia(topic)) => {
+            encyclopedia.open_at(topic, GameState::ViewCombatant);
+            next_state.set(GameState::Encyclopedia);
+        }
+        None => {}
+    }
+}
+
+/// Render the entire View Combatant screen into `ctx`, returning any action
+/// that needs ECS side effects (see [`ViewCombatantAction`]).
+///
+/// Deliberately free of Bevy ECS system params (it takes plain references) so
+/// it can be driven directly by an egui harness — see
+/// `tests/view_combatant_snapshot.rs`. Loadout and strategic-option edits are
+/// applied to `match_config` in place, and the equipment picker's open socket
+/// lives in `picker_state`; only navigation bubbles out. `view_state` is
+/// `None` when the screen was entered without a combatant, which draws the
+/// "No combatant selected" message.
+pub fn draw_view_combatant(
+    ctx: &egui::Context,
+    view_state: Option<&ViewCombatantState>,
+    match_config: &mut MatchConfig,
+    picker_state: &mut EquipmentPickerState,
+    data: &ViewCombatantData,
+) -> Option<ViewCombatantAction> {
+    // Configure dark theme
+    let mut style = (*ctx.style()).clone();
+    style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
+    style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
+    style.interaction.tooltip_delay = 0.0;
+    ctx.set_style(style);
 
     // Get the view state or show error
     let Some(view_state) = view_state else {
@@ -397,8 +476,16 @@ pub fn view_combatant_ui(
                     );
                 });
             });
-        return;
+        return None;
     };
+
+    let ability_definitions = data.abilities;
+    let item_definitions = data.items;
+    let default_loadouts = data.default_loadouts;
+    let class_icons = data.class_icons;
+    let ability_icons = data.ability_icons;
+    let item_icons = data.item_icons;
+    let pet_icons = data.pet_icons;
 
     let class = view_state.class;
     // Base stats and the class kit are both DERIVED: `class_base_stats` is the
@@ -457,27 +544,24 @@ pub fn view_combatant_ui(
             .cloned()
             .unwrap_or_default()
     };
-    let resolved_loadout = resolve_equipped_loadout(
-        class,
-        &default_loadouts,
-        &equip_overrides,
-        &item_definitions,
-    );
-    let equip_bonuses = EquipmentBonuses::from_loadout(&resolved_loadout, &item_definitions, class);
+    let resolved_loadout =
+        resolve_equipped_loadout(class, default_loadouts, &equip_overrides, item_definitions);
+    let equip_bonuses = EquipmentBonuses::from_loadout(&resolved_loadout, item_definitions, class);
 
     // Everything the shared encyclopedia widgets need to draw a link and its
     // tooltip. This screen already held every one of these resources.
     let encyclopedia_data = EncyclopediaData {
-        items: &item_definitions,
-        abilities: &ability_definitions,
-        item_icons: item_icons.as_deref(),
-        class_icons: Some(&*class_icons),
-        ability_icons: ability_icons.as_deref(),
+        items: item_definitions,
+        abilities: ability_definitions,
+        item_icons,
+        class_icons: Some(class_icons),
+        ability_icons,
     };
     // Set by whichever reference surface was clicked this frame, and applied
     // once after the frame is drawn — so navigation is one decision at the end
     // rather than a state transition fired from inside a draw closure.
     let mut open_topic: Option<Topic> = None;
+    let mut back_clicked = false;
 
     // Get class color
     let class_color = class.color();
@@ -513,8 +597,7 @@ pub fn view_combatant_ui(
                 egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(80.0, 36.0));
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
                 if ui.button(egui::RichText::new("BACK").size(20.0)).clicked() {
-                    commands.remove_resource::<ViewCombatantState>();
-                    next_state.set(GameState::ConfigureMatch);
+                    back_clicked = true;
                 }
             });
 
@@ -674,9 +757,9 @@ pub fn view_combatant_ui(
                                         ui,
                                         content_width,
                                         opener_panel_height,
-                                        &view_state,
-                                        &mut match_config,
-                                        &ability_icons,
+                                        view_state,
+                                        match_config,
+                                        ability_icons,
                                         &encyclopedia_data,
                                     );
                                 },
@@ -697,8 +780,8 @@ pub fn view_combatant_ui(
                                         content_width,
                                         panel_height,
                                         "BATTLE SHOUT",
-                                        &view_state,
-                                        &ability_icons,
+                                        view_state,
+                                        ability_icons,
                                         &[
                                             ("Battle Shout", WarriorShout::BattleShout),
                                             ("Demoralizing Shout", WarriorShout::DemoralizingShout),
@@ -727,7 +810,7 @@ pub fn view_combatant_ui(
                                                 *v = val;
                                             }
                                         },
-                                        &mut match_config,
+                                        match_config,
                                         &encyclopedia_data,
                                     );
                                 },
@@ -748,8 +831,8 @@ pub fn view_combatant_ui(
                                         content_width,
                                         panel_height,
                                         "MAGE ARMOR",
-                                        &view_state,
-                                        &ability_icons,
+                                        view_state,
+                                        ability_icons,
                                         &[
                                             ("Frost Armor", MageArmor::FrostArmor),
                                             ("Mage Armor", MageArmor::MageArmor),
@@ -778,7 +861,7 @@ pub fn view_combatant_ui(
                                                 *v = val;
                                             }
                                         },
-                                        &mut match_config,
+                                        match_config,
                                         &encyclopedia_data,
                                     );
                                 },
@@ -799,8 +882,8 @@ pub fn view_combatant_ui(
                                         content_width,
                                         panel_height,
                                         "PALADIN AURA",
-                                        &view_state,
-                                        &ability_icons,
+                                        view_state,
+                                        ability_icons,
                                         &[
                                             ("Devotion Aura", PaladinAura::DevotionAura),
                                             (
@@ -832,7 +915,7 @@ pub fn view_combatant_ui(
                                                 *v = val;
                                             }
                                         },
-                                        &mut match_config,
+                                        match_config,
                                         &encyclopedia_data,
                                     );
                                 },
@@ -852,9 +935,9 @@ pub fn view_combatant_ui(
                                         ui,
                                         content_width,
                                         pet_panel_height,
-                                        &view_state,
-                                        &mut match_config,
-                                        &pet_icons,
+                                        view_state,
+                                        match_config,
+                                        pet_icons,
                                     );
                                 },
                             );
@@ -874,10 +957,10 @@ pub fn view_combatant_ui(
                                         ui,
                                         content_width,
                                         curse_panel_height,
-                                        &view_state,
-                                        &mut match_config,
-                                        &ability_icons,
-                                        &class_icons,
+                                        view_state,
+                                        match_config,
+                                        ability_icons,
+                                        class_icons,
                                         &encyclopedia_data,
                                     );
                                 },
@@ -890,28 +973,24 @@ pub fn view_combatant_ui(
                         open_topic = open_topic.or(render_equipment_panel(
                             ui,
                             content_width,
-                            &view_state,
-                            &mut match_config,
-                            &item_definitions,
-                            &default_loadouts,
-                            &mut picker_state,
+                            view_state,
+                            match_config,
+                            item_definitions,
+                            default_loadouts,
+                            picker_state,
                             class,
                             &resolved_loadout,
                             &equip_overrides,
-                            &item_icons,
+                            item_icons,
                         ));
                     });
                 }); // ScrollArea
         });
 
-    // A reference surface was clicked: open the encyclopedia ON that page,
-    // returning here. `ViewCombatantState` is deliberately LEFT IN PLACE —
-    // it is what makes Back come home to this same team and slot, mid-pick
-    // picker and all.
-    if let Some(topic) = open_topic {
-        encyclopedia.open_at(topic, GameState::ViewCombatant);
-        next_state.set(GameState::Encyclopedia);
+    if back_clicked {
+        return Some(ViewCombatantAction::Back);
     }
+    open_topic.map(ViewCombatantAction::OpenEncyclopedia)
 }
 
 /// Render a stat row with integer values and instant tooltip.
@@ -1409,15 +1488,15 @@ const WEAPON_SLOTS: &[ItemSlot] = &[ItemSlot::MainHand, ItemSlot::OffHand, ItemS
 fn render_equipment_panel(
     ui: &mut egui::Ui,
     width: f32,
-    view_state: &Res<ViewCombatantState>,
-    match_config: &mut ResMut<MatchConfig>,
-    items: &Res<ItemDefinitions>,
-    defaults: &Res<DefaultLoadouts>,
+    view_state: &ViewCombatantState,
+    match_config: &mut MatchConfig,
+    items: &ItemDefinitions,
+    defaults: &DefaultLoadouts,
     picker_state: &mut EquipmentPickerState,
     class: CharacterClass,
     resolved: &Loadout,
     overrides: &Loadout,
-    item_icons: &Option<Res<ItemIcons>>,
+    item_icons: Option<&ItemIcons>,
 ) -> Option<Topic> {
     let title_color = egui::Color32::from_rgb(230, 204, 153);
     let subtitle_color = egui::Color32::from_rgb(170, 170, 170);
@@ -1647,8 +1726,7 @@ fn render_equipment_panel(
                 let valid_items = items.selectable_items_for_slot(open_slot, class, resolved);
                 let current_item = resolved.get(&open_slot);
 
-                let picked =
-                    draw_item_picker_list(ui, &valid_items, current_item, item_icons.as_deref());
+                let picked = draw_item_picker_list(ui, &valid_items, current_item, item_icons);
                 selection = picked.equip;
                 if let Some(id) = picked.read {
                     open_topic = open_topic.or(Some(Topic::Item(id)));
@@ -1850,8 +1928,8 @@ fn restore_default_equipment(overrides: &mut Loadout) {
 
 /// The viewed combatant's override map, if its slot exists.
 fn equipment_overrides_mut<'a>(
-    match_config: &'a mut ResMut<MatchConfig>,
-    view_state: &Res<ViewCombatantState>,
+    match_config: &'a mut MatchConfig,
+    view_state: &ViewCombatantState,
 ) -> Option<&'a mut Loadout> {
     if view_state.team == 1 {
         match_config.team1_equipment.get_mut(view_state.slot)
@@ -1863,8 +1941,8 @@ fn equipment_overrides_mut<'a>(
 /// Apply an equipment override for the viewed combatant.
 /// Handles 2H/OH conflicts using shared helpers from equipment.rs.
 fn set_equipment_override(
-    match_config: &mut ResMut<MatchConfig>,
-    view_state: &Res<ViewCombatantState>,
+    match_config: &mut MatchConfig,
+    view_state: &ViewCombatantState,
     slot: ItemSlot,
     id: ItemId,
     items: &ItemDefinitions,
@@ -1915,9 +1993,9 @@ fn render_rogue_opener_panel(
     ui: &mut egui::Ui,
     width: f32,
     height: f32,
-    view_state: &Res<ViewCombatantState>,
-    match_config: &mut ResMut<MatchConfig>,
-    ability_icons: &Option<Res<AbilityIcons>>,
+    view_state: &ViewCombatantState,
+    match_config: &mut MatchConfig,
+    ability_icons: Option<&AbilityIcons>,
     data: &EncyclopediaData,
 ) {
     // Get current opener preference for this combatant
@@ -1974,9 +2052,8 @@ fn render_rogue_opener_panel(
 
                 ui.vertical(|ui| {
                     // Get icon texture
-                    let icon_texture = ability_icons
-                        .as_ref()
-                        .and_then(|icons| icons.textures.get(*icon_key).copied());
+                    let icon_texture =
+                        ability_icons.and_then(|icons| icons.textures.get(*icon_key).copied());
 
                     // Allocate space for the icon button
                     let (rect, response) = ui.allocate_exact_size(
@@ -2072,12 +2149,12 @@ fn render_strategic_option_panel<T>(
     width: f32,
     height: f32,
     title: &str,
-    view_state: &Res<ViewCombatantState>,
-    ability_icons: &Option<Res<AbilityIcons>>,
+    view_state: &ViewCombatantState,
+    ability_icons: Option<&AbilityIcons>,
     options: &[(&str, T)], // (icon_key/ability_name, enum value)
     get_current: impl Fn(&MatchConfig, u8, usize) -> T,
     set_value: impl Fn(&mut MatchConfig, u8, usize, T),
-    match_config: &mut ResMut<MatchConfig>,
+    match_config: &mut MatchConfig,
     data: &EncyclopediaData,
 ) where
     T: Copy + PartialEq + HasNameDescription,
@@ -2114,9 +2191,8 @@ fn render_strategic_option_panel<T>(
                 let border_width: f32 = if is_selected { 3.0 } else { 2.0 };
 
                 ui.vertical(|ui| {
-                    let icon_texture = ability_icons
-                        .as_ref()
-                        .and_then(|icons| icons.textures.get(*icon_key).copied());
+                    let icon_texture =
+                        ability_icons.and_then(|icons| icons.textures.get(*icon_key).copied());
 
                     let (rect, response) = ui.allocate_exact_size(
                         egui::vec2(icon_size, icon_size),
@@ -2247,9 +2323,9 @@ fn render_hunter_pet_panel(
     ui: &mut egui::Ui,
     width: f32,
     height: f32,
-    view_state: &Res<ViewCombatantState>,
-    match_config: &mut ResMut<MatchConfig>,
-    pet_icons: &Option<Res<HunterPetIcons>>,
+    view_state: &ViewCombatantState,
+    match_config: &mut MatchConfig,
+    pet_icons: Option<&HunterPetIcons>,
 ) {
     let current_pet = if view_state.team == 1 {
         match_config
@@ -2306,9 +2382,7 @@ fn render_hunter_pet_panel(
                         egui::Sense::click(),
                     );
 
-                    let icon_texture = pet_icons
-                        .as_ref()
-                        .and_then(|icons| icons.textures.get(pet).copied());
+                    let icon_texture = pet_icons.and_then(|icons| icons.textures.get(pet).copied());
 
                     let painter = ui.painter();
                     if let Some(texture_id) = icon_texture {
@@ -2381,10 +2455,10 @@ fn render_warlock_curse_panel(
     ui: &mut egui::Ui,
     width: f32,
     height: f32,
-    view_state: &Res<ViewCombatantState>,
-    match_config: &mut ResMut<MatchConfig>,
-    ability_icons: &Option<Res<AbilityIcons>>,
-    class_icons: &Res<ClassIcons>,
+    view_state: &ViewCombatantState,
+    match_config: &mut MatchConfig,
+    ability_icons: Option<&AbilityIcons>,
+    class_icons: &ClassIcons,
     data: &EncyclopediaData,
 ) {
     // Clone enemy team composition to avoid borrow conflicts
@@ -2501,9 +2575,8 @@ fn render_warlock_curse_panel(
 
                     ui.vertical(|ui| {
                         // Get icon texture
-                        let icon_texture = ability_icons
-                            .as_ref()
-                            .and_then(|icons| icons.textures.get(*icon_key).copied());
+                        let icon_texture =
+                            ability_icons.and_then(|icons| icons.textures.get(*icon_key).copied());
 
                         // Allocate space for the icon button
                         let (rect, response) = ui.allocate_exact_size(
