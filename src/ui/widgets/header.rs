@@ -19,6 +19,11 @@
 //!
 //! Esc takes the same path as the visible exit: [`Nav::on_escape`]. A screen's
 //! own rungs come first (close a modal, clear a search), then the nav's.
+//!
+//! The cluster's `--ui-script` ids are fixed, `nav:back` and `nav:exit`: a
+//! screen has exactly one header (`GameState::chrome` gives it one exit), so
+//! they cannot collide. Components a screen can draw more than once — a modal,
+//! an empty state — take their id from the caller instead.
 
 use bevy_egui::egui;
 
@@ -104,6 +109,18 @@ pub fn screen_header(
     trailing: impl FnOnce(&mut egui::Ui),
 ) -> Option<NavAction> {
     Header::new(title, nav).show(ui, trailing)
+}
+
+/// The navigation cluster alone, without the title row or the rule: what a
+/// screen whose layout has not yet moved to [`screen_header`] draws in its own
+/// header, so its exit already names its destination and registers as
+/// `nav:exit`.
+pub fn nav_cluster(ui: &mut egui::Ui, nav: Nav) -> Option<NavAction> {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = space::XS;
+        Header::new("", nav).nav_cluster(ui)
+    })
+    .inner
 }
 
 /// The header, configured. [`screen_header`] is the one-line form.
@@ -192,6 +209,15 @@ impl<'a> Header<'a> {
         }
         let exit_label = self.nav.exit_label();
         let exit = self.nav_button(&exit_label).driver_id("nav:exit").show(ui);
+        // What the exit SAYS, for a script to read back: the label is the
+        // claim that it names its destination.
+        crate::ui::driver::note(
+            ui,
+            format_args!(
+                "nav:exit to={:?} label={exit_label}",
+                self.nav.destination()
+            ),
+        );
         if exit.clicked() {
             action = Some(NavAction::Exit(self.nav.destination()));
         }

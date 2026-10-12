@@ -16,6 +16,7 @@
 //! Each widget returns `Some(topic)` on the frame it is clicked; callers bubble
 //! that up as a navigation action.
 
+use crate::ui::fonts::body_family;
 use bevy_egui::egui;
 
 use super::{EncyclopediaData, Topic, DIM, GOLD, LINE, LINE_HI, MUTED, PANEL, PANEL_HI, TEXT};
@@ -333,7 +334,12 @@ pub fn prose_block(ui: &mut egui::Ui, text: &str) {
         .inner_margin(egui::Margin::symmetric(16, 12))
         .show(ui, |ui| {
             ui.set_width(width - 32.0);
-            ui.label(egui::RichText::new(text).size(13.5).color(TEXT));
+            ui.label(
+                egui::RichText::new(text)
+                    .size(13.5)
+                    .family(body_family(ui.ctx()))
+                    .color(TEXT),
+            );
         });
 }
 

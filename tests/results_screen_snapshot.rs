@@ -29,6 +29,8 @@ use arenasim::states::play_match::ability_config::{load_ability_definitions, Abi
 use arenasim::states::play_match::equipment::{load_item_definitions, ItemDefinitions};
 use arenasim::states::play_match::{CombatantStats, MatchResults};
 use arenasim::states::results_ui::{class_link_id, draw_results_screen};
+use arenasim::states::GameState;
+use arenasim::ui::widgets::Nav;
 
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
@@ -180,7 +182,13 @@ fn sized_harness(results: MatchResults, log: CombatLog, size: [f32; 2]) -> Harne
             class_icons: None,
             ability_icons: None,
         };
-        let _ = draw_results_screen(ctx, Some(&results), &log, &data);
+        let _ = draw_results_screen(
+            ctx,
+            Some(&results),
+            &log,
+            &data,
+            Nav::Return(GameState::MainMenu),
+        );
     })
 }
 

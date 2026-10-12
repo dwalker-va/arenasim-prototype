@@ -22,6 +22,7 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin as BevyStatesPlugin;
 
 use arenasim::combat::CombatPlugin;
+use arenasim::states::chrome::ScreenContext;
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin};
 use arenasim::states::{GameState, StatesPlugin};
@@ -182,10 +183,14 @@ fn a_deep_link_from_view_combatant_returns_to_the_same_combatant() {
             &GameState::ViewCombatant,
         );
 
-        // The link, exactly as the screen makes it.
+        // The link, exactly as the screen makes it: land on the topic, then
+        // open the encyclopedia from here (`ScreenNav::open`).
         app.world_mut()
             .resource_mut::<EncyclopediaState>()
-            .open_at(topic, GameState::ViewCombatant);
+            .open_at(topic);
+        app.world_mut()
+            .resource_mut::<ScreenContext>()
+            .open_from(GameState::Encyclopedia, GameState::ViewCombatant);
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
             .set(GameState::Encyclopedia);
@@ -202,26 +207,15 @@ fn a_deep_link_from_view_combatant_returns_to_the_same_combatant() {
             topic
         );
 
-        // Back at the root — the first press, because `open_at` made the page
-        // the root — leaves for wherever the link came from.
-        let mut state = app.world_mut().resource_mut::<EncyclopediaState>();
-        assert!(
-            state.back_key(),
-            "{:?}: Back did not leave at the root",
-            topic
-        );
-        let destination = state.leave();
-        assert_eq!(destination, GameState::ViewCombatant);
-        app.world_mut()
-            .resource_mut::<NextState<GameState>>()
-            .set(destination);
-        for _ in 0..4 {
-            app.update();
-        }
-
+        // Esc at the root — the first press, because `open_at` made the page
+        // the root — leaves for wherever the link came from. A real key
+        // press, through the real wrapper.
+        press_escape(&mut app);
         assert_eq!(
             app.world().resource::<State<GameState>>().get(),
             &GameState::ViewCombatant,
+            "{:?}: Esc at the root did not return to the combatant",
+            topic
         );
         let view = app
             .world()
@@ -235,4 +229,98 @@ fn a_deep_link_from_view_combatant_returns_to_the_same_combatant() {
             topic
         );
     }
+}
+
+/// Press and release the Back key (Esc by default) through Bevy's own input
+/// events, so `ButtonInput` sees it exactly as it sees a keyboard, then let
+/// any transition it asked for land.
+fn press_escape(app: &mut App) {
+    use bevy::input::keyboard::{Key, KeyboardInput};
+    use bevy::input::ButtonState;
+    for state in [ButtonState::Pressed, ButtonState::Released] {
+        app.world_mut().send_event(KeyboardInput {
+            key_code: KeyCode::Escape,
+            logical_key: Key::Escape,
+            state,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+    }
+    for _ in 0..4 {
+        app.update();
+    }
+}
+
+/// Esc in View Combatant leaves for the screen that opened it and drops the
+/// combatant, the same as its exit button.
+#[test]
+fn esc_leaves_view_combatant_for_its_opener() {
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::view_combatant_ui::ViewCombatantState;
+
+    let mut app = boot_app();
+    app.update();
+    app.world_mut().insert_resource(ViewCombatantState {
+        class: CharacterClass::Mage,
+        team: 1,
+        slot: 0,
+    });
+    app.world_mut()
+        .resource_mut::<ScreenContext>()
+        .open_from(GameState::ViewCombatant, GameState::ConfigureMatch);
+    app.world_mut()
+        .resource_mut::<NextState<GameState>>()
+        .set(GameState::ViewCombatant);
+    for _ in 0..4 {
+        app.update();
+    }
+
+    press_escape(&mut app);
+    assert_eq!(
+        app.world().resource::<State<GameState>>().get(),
+        &GameState::ConfigureMatch
+    );
+    assert!(app.world().get_resource::<ViewCombatantState>().is_none());
+}
+
+/// Esc walks every flat menu screen back the way it was opened: Keybindings
+/// to Options, Options to the main menu, and the sandbox and match setup to
+/// the main menu. Each hop is a real key press through the real wrapper.
+#[test]
+fn esc_walks_the_menus_back_the_way_they_were_opened() {
+    let mut app = boot_app();
+    app.update();
+
+    let open = |app: &mut App, screen: GameState, from: GameState| {
+        app.world_mut()
+            .resource_mut::<ScreenContext>()
+            .open_from(screen, from);
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(screen);
+        for _ in 0..4 {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<State<GameState>>().get(), &screen);
+    };
+    let esc_to = |app: &mut App, expected: GameState| {
+        press_escape(app);
+        assert_eq!(app.world().resource::<State<GameState>>().get(), &expected);
+    };
+
+    open(&mut app, GameState::Options, GameState::MainMenu);
+    open(&mut app, GameState::Keybindings, GameState::Options);
+    esc_to(&mut app, GameState::Options);
+    esc_to(&mut app, GameState::MainMenu);
+
+    open(&mut app, GameState::AnimationSandbox, GameState::MainMenu);
+    esc_to(&mut app, GameState::MainMenu);
+
+    open(&mut app, GameState::ConfigureMatch, GameState::MainMenu);
+    esc_to(&mut app, GameState::MainMenu);
+
+    // The main menu has no exit: Esc there does nothing.
+    esc_to(&mut app, GameState::MainMenu);
 }

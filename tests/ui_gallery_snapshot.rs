@@ -328,6 +328,7 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
     section(ui, "Empty state: with an action / without", |ui| {
         let _ = empty_state(
             ui,
+            "gallery_search_empty",
             "No matches",
             "Nothing matches \u{201c}frostbolt rank 9\u{201d}. Clear the search or a filter.",
             Some("Clear filters"),
@@ -335,6 +336,7 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
         ui.add_space(space::MD);
         let _ = empty_state(
             ui,
+            "gallery_slot_empty",
             "No item for this slot",
             "Nothing in the armory fits this socket for this class.",
             None,

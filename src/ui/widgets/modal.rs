@@ -30,16 +30,20 @@ type Footer<'a> = Box<dyn FnOnce(&mut egui::Ui) + 'a>;
 #[must_use = "call `.show(ctx, body)` to draw the modal"]
 pub struct Modal<'a> {
     id: egui::Id,
+    driver_id: String,
     title: &'a str,
     width: f32,
     footer: Option<Footer<'a>>,
 }
 
 impl<'a> Modal<'a> {
-    /// `id_salt` must be unique among the modals a screen can show at once.
-    pub fn new(id_salt: impl std::hash::Hash, title: &'a str) -> Self {
+    /// `id` must be unique among the modals a screen can show at once. It is
+    /// both the modal's egui id and its `--ui-script` name: the close `×`
+    /// registers as `<id>:close`.
+    pub fn new(id: &str, title: &'a str) -> Self {
         Self {
-            id: egui::Id::new(id_salt),
+            id: egui::Id::new(id),
+            driver_id: format!("{id}:close"),
             title,
             width: size::MODAL_MAX_WIDTH,
             footer: None,
@@ -111,7 +115,7 @@ impl<'a> Modal<'a> {
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         close = Button::new("\u{d7}", Variant::Icon)
-                            .driver_id("modal:close")
+                            .driver_id(&self.driver_id)
                             .show(ui)
                             .clicked();
                     });

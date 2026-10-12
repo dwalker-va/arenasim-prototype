@@ -10,6 +10,7 @@
 //! come from item data plus the existing `can_equip` rule, so a new item needs
 //! no code here at all.
 
+use crate::ui::fonts::body_family;
 use bevy_egui::egui;
 use std::collections::HashSet;
 
@@ -319,6 +320,7 @@ pub fn render_detail(ui: &mut egui::Ui, id: ItemId, data: &EncyclopediaData) -> 
         widget::section_heading(ui, "PROC");
         ui.label(
             egui::RichText::new(proc_description(proc))
+                .family(body_family(ui.ctx()))
                 .size(13.5)
                 .color(TEXT),
         );
@@ -548,6 +550,7 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
             ui.set_max_width(280.0);
             ui.label(
                 egui::RichText::new(proc_description(proc))
+                    .family(body_family(ui.ctx()))
                     .size(12.0)
                     .color(PROC_TEXT_COLOR),
             );

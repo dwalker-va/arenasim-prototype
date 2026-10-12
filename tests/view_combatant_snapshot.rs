@@ -35,6 +35,8 @@ use arenasim::states::play_match::equipment::{load_default_loadouts, load_item_d
 use arenasim::states::view_combatant_ui::{
     draw_view_combatant, EquipmentPickerState, ViewCombatantData, ViewCombatantState,
 };
+use arenasim::states::GameState;
+use arenasim::ui::widgets::Nav;
 
 /// Tall enough that the whole sheet — header, stats and kit, the class's
 /// strategic panel and every equipment row — fits without scrolling.
@@ -102,7 +104,14 @@ fn snapshot(name: &str, view: ViewCombatantState) {
             item_icons: None,
             pet_icons: None,
         };
-        let _ = draw_view_combatant(ctx, Some(&view), &mut config, &mut picker, &data);
+        let _ = draw_view_combatant(
+            ctx,
+            Some(&view),
+            &mut config,
+            &mut picker,
+            &data,
+            Nav::Return(GameState::ConfigureMatch),
+        );
     });
 
     harness.run();

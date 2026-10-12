@@ -54,6 +54,7 @@
 //! "never"); it reads `SHADOW_SIGHT_BREAK_ON_DAMAGE` here, so the page follows
 //! the value the orb pickup applies rather than a restatement of it.
 
+use crate::ui::fonts::body_family;
 use bevy_egui::egui;
 
 use crate::states::ability_text::build_aura_description;
@@ -1188,6 +1189,7 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
     ui.add_space(12.0);
     ui.label(
         egui::RichText::new(&entry.description)
+            .family(body_family(ui.ctx()))
             .size(14.0)
             .color(TEXT),
     );
@@ -1316,6 +1318,7 @@ pub fn render_tooltip(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) {
     ui.add_space(4.0);
     ui.label(
         egui::RichText::new(&entry.description)
+            .family(body_family(ui.ctx()))
             .size(12.5)
             .color(TEXT),
     );

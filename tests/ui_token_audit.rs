@@ -27,7 +27,8 @@
 //! * **style** — `set_style(`, `set_visuals(` and `style_mut(` anywhere but
 //!   inside a `.scope(…)` call, the one sanctioned local variation (egui
 //!   restores the style when the scope exits; everything else patches the
-//!   context's one sticky global).
+//!   context's one sticky global). `ui::install`'s own `set_style`, which sets
+//!   that global once, is exempt by count ([`INSTALL`]).
 //!
 //! "A number" means the argument STARTS with a numeric literal, so
 //! `.size(14.0 * scale)` counts and `.size(text::BODY * scale)` does not.
@@ -73,24 +74,30 @@ use std::fmt;
 /// The one file allowed to write UI literals.
 const THEME: &str = "src/ui/theme.rs";
 
+/// The one sanctioned style call: `ui::install` sets the whole `Style` once,
+/// for the client and every harness (design doc §3.2). Exempt by COUNT, not
+/// by file — exactly this many style calls there, and every other literal in
+/// the file still counts.
+const INSTALL: (&str, usize) = ("src/ui/mod.rs", 1);
+
 /// What each file is allowed today, kind by kind. EQUALITY: see the module
 /// docs. Sorted by path; a file absent from the table must count zero.
 /// One row per file, so a migration card's diff reads as the rows it lowered.
 #[rustfmt::skip]
 const FROZEN: &[(&str, Counts)] = &[
-    ("src/states/animation_sandbox/ui.rs", Counts { colour: 16, size: 11, space: 13, radius: 12, style: 1 }),
+    ("src/states/animation_sandbox/ui.rs", Counts { colour: 12, size: 10, space: 13, radius: 12, style: 0 }),
     ("src/states/arena_layout_debug.rs", Counts { colour: 14, size: 3, space: 2, radius: 3, style: 0 }),
-    ("src/states/configure_match_ui.rs", Counts { colour: 58, size: 21, space: 25, radius: 20, style: 1 }),
+    ("src/states/configure_match_ui.rs", Counts { colour: 53, size: 20, space: 24, radius: 19, style: 0 }),
     ("src/states/encyclopedia/abilities.rs", Counts { colour: 0, size: 17, space: 11, radius: 0, style: 0 }),
     ("src/states/encyclopedia/auras.rs", Counts { colour: 2, size: 16, space: 13, radius: 1, style: 0 }),
     ("src/states/encyclopedia/classes.rs", Counts { colour: 0, size: 3, space: 4, radius: 0, style: 0 }),
     ("src/states/encyclopedia/items.rs", Counts { colour: 5, size: 14, space: 9, radius: 0, style: 0 }),
-    ("src/states/encyclopedia/mod.rs", Counts { colour: 10, size: 7, space: 8, radius: 3, style: 1 }),
+    ("src/states/encyclopedia/mod.rs", Counts { colour: 10, size: 7, space: 8, radius: 3, style: 0 }),
     ("src/states/encyclopedia/search.rs", Counts { colour: 0, size: 3, space: 4, radius: 0, style: 0 }),
     ("src/states/encyclopedia/topic.rs", Counts { colour: 1, size: 0, space: 0, radius: 0, style: 0 }),
     ("src/states/encyclopedia/widget.rs", Counts { colour: 0, size: 12, space: 10, radius: 6, style: 0 }),
     ("src/states/main_menu.rs", Counts { colour: 12, size: 5, space: 11, radius: 3, style: 0 }),
-    ("src/states/mod.rs", Counts { colour: 39, size: 27, space: 52, radius: 0, style: 2 }),
+    ("src/states/mod.rs", Counts { colour: 35, size: 25, space: 52, radius: 0, style: 0 }),
     ("src/states/play_match/auras.rs", Counts { colour: 8, size: 0, space: 0, radius: 0, style: 0 }),
     ("src/states/play_match/camera.rs", Counts { colour: 6, size: 5, space: 1, radius: 0, style: 0 }),
     ("src/states/play_match/combat_ai.rs", Counts { colour: 4, size: 0, space: 0, radius: 0, style: 0 }),
@@ -109,8 +116,8 @@ const FROZEN: &[(&str, Counts)] = &[
     ("src/states/play_match/rendering/mod.rs", Counts { colour: 1, size: 0, space: 0, radius: 0, style: 0 }),
     ("src/states/play_match/rendering/overlays.rs", Counts { colour: 19, size: 12, space: 0, radius: 2, style: 0 }),
     ("src/states/play_match/rendering/team_frames.rs", Counts { colour: 38, size: 9, space: 2, radius: 14, style: 0 }),
-    ("src/states/results_ui.rs", Counts { colour: 27, size: 19, space: 19, radius: 11, style: 1 }),
-    ("src/states/view_combatant_ui.rs", Counts { colour: 65, size: 45, space: 48, radius: 15, style: 1 }),
+    ("src/states/results_ui.rs", Counts { colour: 26, size: 18, space: 18, radius: 11, style: 0 }),
+    ("src/states/view_combatant_ui.rs", Counts { colour: 63, size: 44, space: 48, radius: 15, style: 0 }),
 ];
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -245,16 +252,30 @@ fn readable_code(raw: &str) -> String {
     TypeAliases::from_source(&code).expand(&code)
 }
 
-/// Every file under `src/` but the theme, counted.
+/// Every file under `src/` but the theme, counted, with `ui::install`'s own
+/// style call taken off its file's count once it is confirmed to be exactly
+/// [`INSTALL`]'s.
 fn measure() -> BTreeMap<String, Counts> {
     let scanner = Scanner::new();
     let sources: Vec<SourceFile> = load_sources(&["src"]).expect("src/ must be readable");
-    sources
+    let mut measured: BTreeMap<String, Counts> = sources
         .iter()
         .map(|f| (f.rel_display().replace('\\', "/"), f))
         .filter(|(path, _)| path != THEME)
         .map(|(path, f)| (path, scanner.count(&readable_code(&f.raw))))
-        .collect()
+        .collect();
+
+    let (install_path, install_calls) = INSTALL;
+    let install = measured.get_mut(install_path).unwrap_or_else(|| {
+        panic!("{install_path} holds `ui::install`, and it does not exist — the exemption is stale")
+    });
+    assert_eq!(
+        install.style, install_calls,
+        "{install_path} must hold exactly `ui::install`'s {install_calls} style call(s); \
+         a second one there is a patch the install exemption does not cover"
+    );
+    install.style = 0;
+    measured
 }
 
 fn render_table(measured: &BTreeMap<String, Counts>) -> String {

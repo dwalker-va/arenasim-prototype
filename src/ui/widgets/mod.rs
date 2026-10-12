@@ -31,7 +31,7 @@ pub mod tooltip;
 pub use bars::{class_icon, icon_tile, resource_bar};
 pub use button::{button, Button, Variant};
 pub use empty_state::empty_state;
-pub use header::{screen_header, Header, Nav, NavAction};
+pub use header::{nav_cluster, screen_header, Header, Nav, NavAction};
 pub use link::{link, link_with, paint_icon};
 pub use list_row::{list_row, ListIcon, ListRow};
 pub use modal::{Modal, ModalResponse};

@@ -23,14 +23,24 @@ use bevy_egui::egui;
 /// client does not run (`tests/snapshot_font_audit.rs` holds every harness to
 /// it).
 ///
-/// Today it installs the font stack ([`fonts::game_font_definitions`]); the
-/// shared `Style` built from [`theme`] joins it here, and nowhere else.
+/// It installs the font stack ([`fonts::game_font_definitions`]) and the whole
+/// egui `Style` ([`theme::style`]). This is the only `set_style` in the game:
+/// egui keeps one sticky `Style` per context, so a screen that patched it
+/// leaked the patch into every screen reached after it. A screen that needs a
+/// local variation uses `ui.scope(|ui| { ui.style_mut()… })`, which egui
+/// restores on exit (`tests/ui_token_audit.rs` counts any other form).
 ///
-/// Idempotent: `Context::set_fonts` compares against the installed definitions
-/// and does nothing when they already match, so a harness can call this at the
-/// top of its per-frame app closure without rebuilding the atlas every frame.
+/// The theme is pinned to dark, so the style set here is the one in force
+/// whatever the operating system's appearance.
+///
+/// Idempotent and cheap: `Context::set_fonts` compares against the installed
+/// definitions and does nothing when they already match, and the style is a
+/// pointer swap, so a harness can call this at the top of its per-frame app
+/// closure.
 pub fn install(ctx: &egui::Context) {
     ctx.set_fonts(fonts::game_font_definitions());
+    ctx.set_theme(egui::Theme::Dark);
+    ctx.set_style(theme::style());
 }
 
 /// Plugin for UI management.

@@ -9,6 +9,7 @@
 //! (The screen this replaces kept its own copies of both, and both had drifted
 //! — the stats by up to 120 health, the kit by five whole abilities.)
 
+use crate::ui::fonts::body_family;
 use bevy_egui::egui;
 
 use crate::states::match_config::CharacterClass;
@@ -67,6 +68,7 @@ pub fn tooltip(ui: &mut egui::Ui, class: CharacterClass, data: &EncyclopediaData
     );
     ui.label(
         egui::RichText::new(class.description())
+            .family(body_family(ui.ctx()))
             .size(12.0)
             .color(super::MUTED),
     );

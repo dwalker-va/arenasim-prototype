@@ -61,6 +61,8 @@ use arenasim::states::animation_sandbox::ui::{
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
+use arenasim::states::GameState;
+use arenasim::ui::widgets::Nav;
 use egui_kittest::Harness;
 
 /// The class the fixture stages. Its whole kit is drawn, exactly as the panel
@@ -180,6 +182,7 @@ fn view(selected: Option<SandboxEntry>, paused: bool, dummy_enabled: bool) -> Sa
     let relative_speed = if paused { 0.0 } else { watching_speed() };
 
     SandboxView {
+        nav: Nav::Return(GameState::MainMenu),
         caster_class: FIXTURE_CLASS,
         class_icons: CharacterClass::all().iter().map(|c| (*c, None)).collect(),
         dummy_enabled,
