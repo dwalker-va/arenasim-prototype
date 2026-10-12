@@ -8,7 +8,7 @@
 //! [`CombatContext::situation`](super::class_ai::CombatContext::situation).
 //! The design is `docs/design/proposals/2026-10-11-ai-architecture.md` §4.2.
 //!
-//! v0 models two situations:
+//! It models these situations:
 //!
 //! - **`enemy_healer_locked`** — the enemy healer cannot cast a heal: it is
 //!   under a CAST-PREVENTING crowd control ([`locks_healer`]). Its
@@ -16,7 +16,46 @@
 //!   such CC on it runs out.
 //! - **`tempo`** — whether the team is [`Tempo::Pressing`] its health lead,
 //!   [`Tempo::Trailing`], or [`Tempo::Even`] (`press_advantage_margin` in
-//!   `movement.ron`).
+//!   `movement.ron`). It has no hysteresis yet: it flips with every heal and
+//!   hit that crosses the margin, so a play keyed on it needs onset and
+//!   release thresholds first.
+//! - **`phase`** — where the match is in its life: [`MatchPhase::Prematch`]
+//!   behind the gates, [`MatchPhase::Engaged`], then
+//!   [`MatchPhase::Attrition`] once arena dampening reaches half
+//!   ([`ATTRITION_ONSET_SECS`]). The clock under it, `since_gates`, rides
+//!   along: the Druid's mana governor spends its reserve down toward the
+//!   Attrition onset ([`TeamSituation::attrition_remaining`]). The design's
+//!   pre-contact *Opener* phase is not modelled: nothing reads it yet, and
+//!   contact is the `TeamPlan` layer's to define.
+//! - **`ally_in_danger`** — a teammate both DYING (below
+//!   `urgency_hp_threshold`) and PRESSURED (an enemy it can see is on it, near
+//!   enough that intent matters). Its [`Window`] names the most injured such
+//!   teammate. The two facts it joins are kept per teammate in
+//!   [`TeamSituation::allies`], because the healers' rules read them apart:
+//!   "a teammate is dying" (cover denial, the dispel walk's dying-first rule)
+//!   and "I am pressured" (the posture machine's PRESSURED trigger).
+//!
+//! ## Thresholds
+//!
+//! Every threshold is `movement.ron`'s `shared:` block, read into
+//! [`SituationConfig`] — the values the ported sites read before they were
+//! ported, so the port changed none of them:
+//!
+//! | fact | threshold | sites that read it |
+//! |---|---|---|
+//! | dying | `health_pct < urgency_hp_threshold` | healer cover denial (`teammate_needs_saving`), the dispel walk's dying-first rule (`another_teammate_dying`) |
+//! | pressured | `danger_radius`, `threat_intent_radius` | the healers' PRESSURED trigger |
+//! | tempo | `press_advantage_margin` | healer cover denial, the Warrior tempo reset |
+//! | Attrition | dampening at 50% | the Druid's mana governor |
+//!
+//! Neighbours that look alike were deliberately NOT folded in, because doing
+//! so would change behaviour: `LOW_HP_THRESHOLD` (a constant, also 0.5 today,
+//! behind the root-dispel bar and the Paladin's while-CC Divine Shield) would
+//! start following a retune of `urgency_hp_threshold`; the Druid's own
+//! `DRUID_EMERGENCY_HP` (0.45) and `DRUID_URGENT_HP` (0.6) are different
+//! numbers; and the Priest's `attack_prevented_by_cc` leaves Cyclone out of
+//! the set [`locks_healer`] names. Unifying any of them is a behaviour change
+//! with its own card.
 //!
 //! ## Where it is classified, and why there
 //!
@@ -29,6 +68,12 @@
 //! to every later unit in the same frame. A classification taken anywhere else
 //! would disagree with what the decision actually saw.
 //!
+//! A context built anywhere else (`CombatContext::new` alone: a pet's, a
+//! test's) carries NO situation, and reading one from it panics: it has no
+//! frame clock and no `movement.ron` thresholds, so its answer would be
+//! silently wrong. A test classifies one explicitly
+//! (`CombatContext::classified`).
+//!
 //! ## Two properties that keep it safe
 //!
 //! - **Pure and RNG-free.** [`classify`] only reads. Adding the layer changes
@@ -36,18 +81,63 @@
 //! - **Built from what the team perceives.** The enemy healer is chosen with
 //!   the [`stealth_visible`] rule every unit's view applies. Only a Rogue can
 //!   stealth, so a healer is visible to its whole enemy team or to none of it,
-//!   and one classification serves every member.
+//!   and one classification serves every member. A teammate's PRESSURE is
+//!   judged from that teammate's own view (its own Shadow Sight included),
+//!   because an attacker one teammate sees another may not.
 
 use std::collections::BTreeMap;
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 use super::class_ai::combat_snapshot::CombatSnapshot;
 use super::class_ai::{pressing_when_ahead, stealth_visible, team_hp_sums, CombatantInfo};
 use super::components::{Aura, AuraType};
+use super::constants::{DAMPENING_RAMP_SECS, DAMPENING_START_SECS};
 use super::decision_trace::{DecisionTrace, SituationChangeKind, SituationName};
 use super::movement_config::MovementConfig;
+
+/// When the match enters [`MatchPhase::Attrition`], in seconds after the gates:
+/// the moment arena dampening reaches 50%. Heals land at half value or less
+/// from here on, so mana saved past it buys little.
+pub const ATTRITION_ONSET_SECS: f32 = DAMPENING_START_SECS + DAMPENING_RAMP_SECS * 0.5;
+
+/// Where the match is in its life. Serializes snake_case (`"attrition"`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchPhase {
+    /// The gates are closed.
+    #[default]
+    Prematch,
+    /// The gates are open, and dampening has not reached half.
+    Engaged,
+    /// Dampening has reached half ([`ATTRITION_ONSET_SECS`]).
+    Attrition,
+}
+
+/// The clocks a classification reads: the trace's `sim_time` for window
+/// times, and the arena's gate clock for the phase.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MatchClock {
+    /// The decision trace's `sim_time` (window `since` / `until`).
+    pub now: f32,
+    pub gates_opened: bool,
+    /// `ArenaDampening::time_since_gates` (0 until the gates open).
+    pub since_gates: f32,
+}
+
+impl MatchClock {
+    /// `secs` after the gates opened, with the trace clock at the same value
+    /// — the clock a scene or a unit test decides at.
+    pub fn after_gates(secs: f32) -> Self {
+        Self {
+            now: secs,
+            gates_opened: true,
+            since_gates: secs,
+        }
+    }
+}
 
 /// Whether a team is ahead on health, behind, or level — read against
 /// `press_advantage_margin`. Serializes snake_case (`"pressing"`).
@@ -67,21 +157,46 @@ pub enum Tempo {
 /// window joins directly against the events recorded inside it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Window {
-    /// The unit the situation is about (the locked healer).
+    /// The unit the situation is about (the locked healer; the teammate in
+    /// danger).
     pub subject: Entity,
     /// When this window opened. Carried across frames while the subject stays
     /// the same, so it is the ONSET, not the latest frame.
     pub since: f32,
-    /// When it is due to end, if that is known: the longest remaining locking
-    /// CC on the subject. Moves later when a new CC extends the lock.
+    /// When it is due to end, if that is known. A lock's is the longest
+    /// remaining locking CC on the healer, and moves later when a new CC
+    /// extends it; a teammate's danger has none.
     pub until: Option<f32>,
 }
 
+/// One living, non-pet teammate's standing this frame — the two facts
+/// `ally_in_danger` joins, kept apart because rules read them apart.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AllyStanding {
+    pub entity: Entity,
+    /// Below `urgency_hp_threshold`.
+    pub dying: bool,
+    /// An enemy it can see targets it from within `danger_radius` — or from
+    /// within `threat_intent_radius` when that enemy is a melee class, a pet,
+    /// or still closing to its preferred range. A distant caster holding
+    /// position does not pressure, and neither does a melee targeting from
+    /// across the arena.
+    pub pressured: bool,
+}
+
 /// Everything one team's units know about the situation this frame.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TeamSituation {
+    pub phase: MatchPhase,
+    /// Seconds since the gates opened (0 before): the clock under `phase`.
+    pub since_gates: f32,
     pub tempo: Tempo,
     pub enemy_healer_locked: Option<Window>,
+    /// The most injured teammate that is both dying and pressured.
+    pub ally_in_danger: Option<Window>,
+    /// Every living non-pet teammate (the deciding unit included), in entity
+    /// order.
+    pub allies: SmallVec<[AllyStanding; 3]>,
 }
 
 /// What a unit does about a situation: a named reordering of its own priority
@@ -104,6 +219,22 @@ pub enum Role {
 }
 
 impl TeamSituation {
+    /// Teammates below `urgency_hp_threshold`, in entity order.
+    pub fn dying_allies(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.allies.iter().filter(|a| a.dying).map(|a| a.entity)
+    }
+
+    /// Whether teammate `ally` is pressured ([`AllyStanding::pressured`]).
+    pub fn is_pressured(&self, ally: Entity) -> bool {
+        self.allies.iter().any(|a| a.entity == ally && a.pressured)
+    }
+
+    /// How much of the way to [`MatchPhase::Attrition`] is left: 1 at the
+    /// gates, falling linearly to 0 at [`ATTRITION_ONSET_SECS`], and 0 after.
+    pub fn attrition_remaining(&self) -> f32 {
+        (1.0 - self.since_gates / ATTRITION_ONSET_SECS).clamp(0.0, 1.0)
+    }
+
     /// The play `role` runs in this situation. Exhaustive over [`Role`], so a
     /// new role is a compile error here until it answers.
     pub fn play_for(&self, role: Role) -> Play {
@@ -119,7 +250,7 @@ impl TeamSituation {
 /// Inserted per match beside `TeamPlans`; `decide_abilities` keeps it current
 /// (see the module docs for why there). Read it from another system and you
 /// get the previous frame's classification.
-#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Resource, Clone, Debug, Default, PartialEq)]
 pub struct Situations {
     pub teams: [TeamSituation; 2],
 }
@@ -130,17 +261,26 @@ impl Situations {
     pub fn for_team(&self, team: u8) -> TeamSituation {
         team.checked_sub(1)
             .and_then(|i| self.teams.get(i as usize))
-            .copied()
+            .cloned()
             .unwrap_or_default()
     }
 }
 
-/// The thresholds the classifier reads.
+/// The thresholds the classifier reads — all from `movement.ron`'s `shared:`
+/// block (the module docs' threshold table).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SituationConfig {
     /// `shared.press_advantage_margin` in `movement.ron`: the team-HP-fraction
     /// lead at which a team presses (and the deficit at which it trails).
     pub press_advantage_margin: f32,
+    /// `shared.urgency_hp_threshold`: a teammate below it is dying.
+    pub urgency_hp_threshold: f32,
+    /// `shared.danger_radius`: any enemy targeting a teammate from this close
+    /// pressures it.
+    pub danger_radius: f32,
+    /// `shared.threat_intent_radius`: a melee, pet or closing enemy targeting
+    /// a teammate from this close pressures it.
+    pub threat_intent_radius: f32,
 }
 
 impl Default for SituationConfig {
@@ -153,6 +293,9 @@ impl SituationConfig {
     pub fn from_movement(config: &MovementConfig) -> Self {
         Self {
             press_advantage_margin: config.shared.press_advantage_margin,
+            urgency_hp_threshold: config.shared.urgency_hp_threshold,
+            danger_radius: config.shared.danger_radius,
+            threat_intent_radius: config.shared.threat_intent_radius,
         }
     }
 }
@@ -173,13 +316,13 @@ pub fn locks_healer(effect: AuraType) -> bool {
 }
 
 /// Classify `team`'s situation from `snapshot`. Pure: the snapshot, the
-/// previous classification (for each window's onset), the clock, and the
+/// previous classification (for each window's onset), the clocks, and the
 /// thresholds.
 pub fn classify(
     snapshot: &CombatSnapshot,
     team: u8,
     prev: &TeamSituation,
-    now: f32,
+    clock: &MatchClock,
     cfg: &SituationConfig,
 ) -> TeamSituation {
     classify_roster(
@@ -187,25 +330,132 @@ pub fn classify(
         &snapshot.active_auras,
         team,
         prev,
-        now,
+        clock,
         cfg,
     )
 }
 
-/// [`classify`] over the two maps it reads, so a `CombatContext` built without
-/// a snapshot can classify its own view.
-pub(crate) fn classify_roster(
+/// [`classify`] over the two maps it reads, so a context built without a
+/// snapshot (`CombatContext::classified`) can classify its own roster.
+pub fn classify_roster(
     roster: &BTreeMap<Entity, CombatantInfo>,
     auras: &BTreeMap<Entity, Vec<Aura>>,
     team: u8,
     prev: &TeamSituation,
-    now: f32,
+    clock: &MatchClock,
     cfg: &SituationConfig,
 ) -> TeamSituation {
+    let allies = allies(roster, auras, team, cfg);
     TeamSituation {
+        phase: phase(clock),
+        since_gates: clock.since_gates,
         tempo: tempo(roster, team, cfg.press_advantage_margin),
-        enemy_healer_locked: enemy_healer_locked(roster, auras, team, prev, now),
+        enemy_healer_locked: enemy_healer_locked(roster, auras, team, prev, clock.now),
+        ally_in_danger: ally_in_danger(roster, &allies, prev, clock.now),
+        allies,
     }
+}
+
+fn phase(clock: &MatchClock) -> MatchPhase {
+    if !clock.gates_opened {
+        MatchPhase::Prematch
+    } else if clock.since_gates >= ATTRITION_ONSET_SECS {
+        MatchPhase::Attrition
+    } else {
+        MatchPhase::Engaged
+    }
+}
+
+fn has_shadow_sight(auras: &BTreeMap<Entity, Vec<Aura>>, entity: Entity) -> bool {
+    auras
+        .get(&entity)
+        .is_some_and(|list| list.iter().any(|a| a.effect_type == AuraType::ShadowSight))
+}
+
+/// Every living non-pet member of `team`, in entity order, with whether it is
+/// dying and whether it is pressured.
+fn allies(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    team: u8,
+    cfg: &SituationConfig,
+) -> SmallVec<[AllyStanding; 3]> {
+    roster
+        .values()
+        .filter(|info| info.team == team && info.is_alive && !info.is_pet)
+        .map(|info| AllyStanding {
+            entity: info.entity,
+            dying: info.health_pct() < cfg.urgency_hp_threshold,
+            pressured: pressured(roster, auras, info, cfg),
+        })
+        .collect()
+}
+
+/// [`AllyStanding::pressured`], judged from `subject`'s own view: the enemies
+/// [`stealth_visible`] lets IT see, its own Shadow Sight included. Enemy pets
+/// count as threats.
+fn pressured(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    subject: &CombatantInfo,
+    cfg: &SituationConfig,
+) -> bool {
+    let subject_has_shadow_sight = has_shadow_sight(auras, subject.entity);
+    roster
+        .values()
+        .filter(|c| {
+            c.team != subject.team
+                && c.is_alive
+                && c.target == Some(subject.entity)
+                && stealth_visible(
+                    c.stealthed,
+                    subject_has_shadow_sight,
+                    has_shadow_sight(auras, c.entity),
+                )
+        })
+        .any(|threat| {
+            let distance = subject.position.distance(threat.position);
+            distance <= cfg.danger_radius
+                || (distance <= cfg.threat_intent_radius
+                    && (threat.is_pet || threat.class.is_melee() || closing(threat, subject)))
+        })
+}
+
+/// `threat`, targeting `subject`, is still beyond its own preferred range of
+/// it: coming in, not holding position.
+fn closing(threat: &CombatantInfo, subject: &CombatantInfo) -> bool {
+    let preferred = match threat.pet_type {
+        Some(pet_type) => pet_type.preferred_range(),
+        None => threat.class.preferred_range(),
+    };
+    threat.distance_to(subject.position) > preferred
+}
+
+/// The most injured teammate both dying and pressured, the first in entity
+/// order on a tie. Its onset carries over while the subject stays the same.
+fn ally_in_danger(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    allies: &[AllyStanding],
+    prev: &TeamSituation,
+    now: f32,
+) -> Option<Window> {
+    let mut worst: Option<(Entity, f32)> = None;
+    for ally in allies.iter().filter(|a| a.dying && a.pressured) {
+        let hp = roster.get(&ally.entity)?.health_pct();
+        if worst.is_none_or(|(_, best)| hp < best) {
+            worst = Some((ally.entity, hp));
+        }
+    }
+    let (subject, _) = worst?;
+    let since = prev
+        .ally_in_danger
+        .filter(|w| w.subject == subject)
+        .map_or(now, |w| w.since);
+    Some(Window {
+        subject,
+        since,
+        until: None,
+    })
 }
 
 /// The enemy healer `team` would shut down: the first living, non-pet enemy
@@ -218,11 +468,6 @@ pub(crate) fn enemy_healer(
     auras: &BTreeMap<Entity, Vec<Aura>>,
     team: u8,
 ) -> Option<Entity> {
-    let has_shadow_sight = |entity: Entity| {
-        auras
-            .get(&entity)
-            .is_some_and(|list| list.iter().any(|a| a.effect_type == AuraType::ShadowSight))
-    };
     roster
         .values()
         .find(|info| {
@@ -233,7 +478,7 @@ pub(crate) fn enemy_healer(
                 // The observer's own Shadow Sight is per-unit and cannot enter
                 // a team classification; it never matters, because only a
                 // Rogue stealths (see the module docs).
-                && stealth_visible(info.stealthed, false, has_shadow_sight(info.entity))
+                && stealth_visible(info.stealthed, false, has_shadow_sight(auras, info.entity))
         })
         .map(|info| info.entity)
 }
@@ -298,13 +543,13 @@ const UNTIL_EPSILON: f32 = 0.05;
 pub fn update_situations(
     situations: &mut Situations,
     snapshot: &CombatSnapshot,
-    now: f32,
+    clock: &MatchClock,
     cfg: &SituationConfig,
     trace: &mut DecisionTrace,
 ) {
     for (index, team) in [1u8, 2].into_iter().enumerate() {
-        let prev = situations.teams[index];
-        let next = classify(snapshot, team, &prev, now, cfg);
+        let prev = std::mem::take(&mut situations.teams[index]);
+        let next = classify(snapshot, team, &prev, clock, cfg);
         record_transitions(team, &prev, &next, trace);
         situations.teams[index] = next;
     }
@@ -319,10 +564,28 @@ fn record_transitions(
     next: &TeamSituation,
     trace: &mut DecisionTrace,
 ) {
+    if prev.phase != next.phase {
+        trace.record_phase_change(team, prev.phase, next.phase);
+    }
     if prev.tempo != next.tempo {
         trace.record_tempo_change(team, prev.tempo, next.tempo);
     }
-    let change = match (prev.enemy_healer_locked, next.enemy_healer_locked) {
+    if let Some((kind, window)) = window_change(prev.ally_in_danger, next.ally_in_danger) {
+        trace.record_window_change(team, SituationName::AllyInDanger, kind, &window);
+    }
+    if let Some((kind, window)) = window_change(prev.enemy_healer_locked, next.enemy_healer_locked)
+    {
+        trace.record_window_change(team, SituationName::EnemyHealerLocked, kind, &window);
+    }
+}
+
+/// How a window moved between two classifications, if it did: opened, closed,
+/// moved to a new subject (a new window), or had its `until` pushed later.
+fn window_change(
+    prev: Option<Window>,
+    next: Option<Window>,
+) -> Option<(SituationChangeKind, Window)> {
+    match (prev, next) {
         (None, None) => None,
         (None, Some(w)) => Some((SituationChangeKind::Onset, w)),
         (Some(w), None) => Some((SituationChangeKind::End, w)),
@@ -335,9 +598,6 @@ fn record_transitions(
             }
             _ => None,
         },
-    };
-    if let Some((kind, window)) = change {
-        trace.record_window_change(team, SituationName::EnemyHealerLocked, kind, &window);
     }
 }
 
@@ -379,7 +639,10 @@ mod tests {
     struct Fixture {
         roster: BTreeMap<Entity, CombatantInfo>,
         auras: BTreeMap<Entity, Vec<Aura>>,
+        warrior: Entity,
+        rogue: Entity,
         healer: Entity,
+        mage: Entity,
     }
 
     fn fixture() -> Fixture {
@@ -401,7 +664,10 @@ mod tests {
         Fixture {
             roster,
             auras: BTreeMap::new(),
+            warrior,
+            rogue,
             healer,
+            mage,
         }
     }
 
@@ -411,9 +677,16 @@ mod tests {
             &f.auras,
             1,
             prev,
-            now,
+            &MatchClock::after_gates(now),
             &SituationConfig::default(),
         )
+    }
+
+    /// `who` stands at `(x, 0, z)` and targets `whom`.
+    fn place(f: &mut Fixture, who: Entity, x: f32, z: f32, whom: Option<Entity>) {
+        let info = f.roster.get_mut(&who).unwrap();
+        info.position = Vec3::new(x, 0.0, z);
+        info.target = whom;
     }
 
     #[test]
@@ -475,7 +748,7 @@ mod tests {
             &f.auras,
             2,
             &TeamSituation::default(),
-            0.0,
+            &MatchClock::after_gates(0.0),
             &SituationConfig::default(),
         );
         assert_eq!(team2.tempo, Tempo::Trailing);
@@ -490,7 +763,7 @@ mod tests {
     fn transitions_are_recorded_once_each() {
         let mut f = fixture();
         let mut trace = DecisionTrace::default();
-        let quiet = TeamSituation::default();
+        let quiet = classify_now(&f, &TeamSituation::default(), 5.0);
         f.auras.insert(f.healer, vec![cc(AuraType::Fear, 8.0)]);
         let locked = classify_now(&f, &quiet, 5.0);
         record_transitions(1, &quiet, &locked, &mut trace);
@@ -520,6 +793,164 @@ mod tests {
         assert_eq!(
             TeamSituation::default().play_for(Role::MeleeDps),
             Play::Default
+        );
+    }
+
+    #[test]
+    fn dying_is_below_the_urgency_threshold_and_pets_and_the_dead_are_not_allies() {
+        let mut f = fixture();
+        let urgency = SituationConfig::default().urgency_hp_threshold;
+        let (warrior, rogue) = (f.warrior, f.rogue);
+        f.roster.get_mut(&warrior).unwrap().current_health = 100.0 * urgency;
+        f.roster.get_mut(&rogue).unwrap().current_health = 100.0 * urgency - 1.0;
+        let s = classify_now(&f, &TeamSituation::default(), 30.0);
+        assert_eq!(
+            s.dying_allies().collect::<Vec<_>>(),
+            vec![rogue],
+            "strictly below the threshold"
+        );
+        f.roster.get_mut(&rogue).unwrap().is_alive = false;
+        let s = classify_now(&f, &TeamSituation::default(), 30.0);
+        assert_eq!(s.allies.len(), 1, "a dead teammate is not an ally");
+        f.roster.get_mut(&warrior).unwrap().is_pet = true;
+        assert!(classify_now(&f, &TeamSituation::default(), 30.0)
+            .allies
+            .is_empty());
+    }
+
+    #[test]
+    fn pressure_is_proximity_or_a_melee_pet_or_closing_threat_within_intent() {
+        let mut f = fixture();
+        let cfg = SituationConfig::default();
+        let (warrior, healer, mage) = (f.warrior, f.healer, f.mage);
+        // An enemy caster (a Warlock, whose preferred range sits between the
+        // two radii) targets the Warrior from inside the danger radius.
+        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Warlock;
+        place(&mut f, mage, cfg.danger_radius - 1.0, 0.0, Some(warrior));
+        assert!(classify_now(&f, &TeamSituation::default(), 30.0).is_pressured(warrior));
+        // From its own preferred range, beyond the danger radius but inside
+        // the intent radius: a caster holding position does not pressure.
+        let held = CharacterClass::Warlock.preferred_range();
+        assert!(held > cfg.danger_radius && held < cfg.threat_intent_radius);
+        place(&mut f, mage, held, 0.0, Some(warrior));
+        assert!(!classify_now(&f, &TeamSituation::default(), 30.0).is_pressured(warrior));
+        // ...but still closing to it does.
+        place(&mut f, mage, held + 1.0, 0.0, Some(warrior));
+        assert!(classify_now(&f, &TeamSituation::default(), 30.0).is_pressured(warrior));
+        // A melee at the same range pressures; beyond the intent radius
+        // nothing does.
+        place(&mut f, mage, 0.0, 0.0, None);
+        f.roster.get_mut(&healer).unwrap().class = CharacterClass::Paladin;
+        place(&mut f, healer, held, 0.0, Some(warrior));
+        assert!(classify_now(&f, &TeamSituation::default(), 30.0).is_pressured(warrior));
+        place(
+            &mut f,
+            healer,
+            cfg.threat_intent_radius + 1.0,
+            0.0,
+            Some(warrior),
+        );
+        assert!(!classify_now(&f, &TeamSituation::default(), 30.0).is_pressured(warrior));
+    }
+
+    #[test]
+    fn pressure_is_judged_from_the_teammates_own_view() {
+        let mut f = fixture();
+        let (warrior, rogue, mage) = (f.warrior, f.rogue, f.mage);
+        // A stealthed enemy on the Warrior: team 2's Mage, stealthed for the
+        // test (the rule does not care which class stealths).
+        place(&mut f, mage, 1.0, 0.0, Some(warrior));
+        f.roster.get_mut(&mage).unwrap().stealthed = true;
+        let unseen = classify_now(&f, &TeamSituation::default(), 30.0);
+        assert!(!unseen.is_pressured(warrior), "an unseen attacker");
+        // The Warrior's own Shadow Sight reveals it to the Warrior...
+        f.auras
+            .insert(warrior, vec![cc(AuraType::ShadowSight, 10.0)]);
+        assert!(classify_now(&f, &TeamSituation::default(), 30.0).is_pressured(warrior));
+        // ...a teammate's does not.
+        f.auras.remove(&warrior);
+        f.auras.insert(rogue, vec![cc(AuraType::ShadowSight, 10.0)]);
+        assert!(!classify_now(&f, &TeamSituation::default(), 30.0).is_pressured(warrior));
+    }
+
+    #[test]
+    fn ally_in_danger_is_the_most_injured_teammate_both_dying_and_pressured() {
+        let mut f = fixture();
+        let (warrior, rogue, healer, mage) = (f.warrior, f.rogue, f.healer, f.mage);
+        f.roster.get_mut(&warrior).unwrap().current_health = 30.0;
+        f.roster.get_mut(&rogue).unwrap().current_health = 20.0;
+        // Both dying; only the Warrior pressured.
+        place(&mut f, mage, 1.0, 0.0, Some(warrior));
+        let first = classify_now(&f, &TeamSituation::default(), 30.0);
+        let window = first.ally_in_danger.expect("the Warrior is in danger");
+        assert_eq!((window.subject, window.since), (warrior, 30.0));
+        // The onset carries while the subject holds.
+        let later = classify_now(&f, &first, 31.0);
+        assert_eq!(later.ally_in_danger.unwrap().since, 30.0);
+        // The Rogue pressured too, and lower: a new window on it.
+        place(&mut f, healer, 1.0, 0.0, Some(rogue));
+        let moved = classify_now(&f, &later, 32.0);
+        let window = moved.ally_in_danger.unwrap();
+        assert_eq!((window.subject, window.since), (rogue, 32.0));
+        // Healthy again: no window, though still pressured.
+        f.roster.get_mut(&warrior).unwrap().current_health = 100.0;
+        f.roster.get_mut(&rogue).unwrap().current_health = 100.0;
+        assert_eq!(classify_now(&f, &moved, 33.0).ally_in_danger, None);
+    }
+
+    #[test]
+    fn the_phase_follows_the_gates_and_the_attrition_onset() {
+        let f = fixture();
+        let at = |clock: MatchClock| {
+            classify_roster(
+                &f.roster,
+                &f.auras,
+                1,
+                &TeamSituation::default(),
+                &clock,
+                &SituationConfig::default(),
+            )
+        };
+        assert_eq!(at(MatchClock::default()).phase, MatchPhase::Prematch);
+        let engaged = at(MatchClock::after_gates(ATTRITION_ONSET_SECS - 0.1));
+        assert_eq!(engaged.phase, MatchPhase::Engaged);
+        assert!(engaged.attrition_remaining() > 0.0);
+        let attrition = at(MatchClock::after_gates(ATTRITION_ONSET_SECS));
+        assert_eq!(attrition.phase, MatchPhase::Attrition);
+        assert_eq!(attrition.attrition_remaining(), 0.0);
+        assert_eq!(at(MatchClock::after_gates(0.0)).attrition_remaining(), 1.0);
+        assert_eq!(
+            ATTRITION_ONSET_SECS,
+            DAMPENING_START_SECS + DAMPENING_RAMP_SECS * 0.5,
+            "Attrition begins as dampening reaches 50%"
+        );
+    }
+
+    #[test]
+    fn phase_and_danger_transitions_are_recorded() {
+        let mut f = fixture();
+        let mut trace = DecisionTrace::default();
+        let quiet = TeamSituation::default();
+        let (warrior, mage) = (f.warrior, f.mage);
+        f.roster.get_mut(&warrior).unwrap().current_health = 10.0;
+        place(&mut f, mage, 1.0, 0.0, Some(warrior));
+        let danger = classify_now(&f, &quiet, 5.0);
+        record_transitions(1, &quiet, &danger, &mut trace);
+        let names: Vec<(String, String)> = trace
+            .pending_events
+            .iter()
+            .map(|e| {
+                let v = serde_json::to_value(e).unwrap();
+                (v["name"].to_string(), v["change"].to_string())
+            })
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                ("\"phase\"".to_string(), "\"shift\"".to_string()),
+                ("\"tempo\"".to_string(), "\"shift\"".to_string()),
+                ("\"ally_in_danger\"".to_string(), "\"onset\"".to_string()),
+            ]
         );
     }
 }

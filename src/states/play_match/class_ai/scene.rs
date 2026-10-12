@@ -62,7 +62,9 @@ use crate::states::play_match::decision_trace::{
 };
 use crate::states::play_match::map_geometry::ObstacleVolume;
 use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
-use crate::states::play_match::situation::{update_situations, SituationConfig, Situations};
+use crate::states::play_match::situation::{
+    update_situations, MatchClock, SituationConfig, Situations,
+};
 use crate::states::play_match::utils::is_incapacitating;
 
 /// A unit's name in a scene. Names, not indices, so an assertion reads as the
@@ -101,7 +103,8 @@ pub struct Scene {
     ai_profile: AiProfiles,
     abilities: AbilityDefinitions,
     movement: MovementConfig,
-    /// The sim clock: the posture clock and the trace's `sim_time` alike.
+    /// The sim clock: the posture clock, the trace's `sim_time` and the
+    /// seconds since the gates alike.
     now: f32,
     gates_opened: bool,
 }
@@ -247,7 +250,8 @@ impl Scene {
         self
     }
 
-    /// The sim clock at the decision (default 30s, well after the gates).
+    /// The sim clock at the decision (default 30s, well after the gates). It
+    /// is the seconds since the gates too, so it sets the match phase.
     pub fn now(mut self, secs: f32) -> Self {
         self.now = secs;
         self
@@ -365,10 +369,14 @@ impl Scene {
             ..Default::default()
         };
         let mut situations = Situations::default();
+        let clock = MatchClock {
+            gates_opened: self.gates_opened,
+            ..MatchClock::after_gates(self.now)
+        };
         update_situations(
             &mut situations,
             &snapshot,
-            self.now,
+            &clock,
             &SituationConfig::from_movement(&self.movement),
             &mut trace,
         );
@@ -419,7 +427,6 @@ impl Scene {
             movement_config: &self.movement,
             gates_opened: self.gates_opened,
             now: self.now,
-            time_since_gates: self.now,
             team1_kill_target: None,
             team2_kill_target: None,
             totem_durations: &empty_totems,

@@ -40,22 +40,24 @@ pub(super) const SCORER_LOOKAHEAD: f32 = 2.0;
 // ============================================================================
 
 /// Urgency suppression predicate (settled requirement R11 — the AE4
-/// counter): is a living non-pet TEAMMATE (excluding self) below
-/// `urgency_hp_threshold` AND within heal range — someone this healer must save
-/// rather than hide from? Self being low is deliberately NOT a trigger: a low
-/// healer taking cover is correct self-preservation, not abandonment of a dying
-/// ally.
+/// counter): is a TEAMMATE (excluding self) dying — the situation's
+/// [`dying_allies`](crate::states::play_match::situation::TeamSituation::dying_allies),
+/// living, non-pet and below `urgency_hp_threshold` — AND within heal range:
+/// someone this healer must save rather than hide from? Self being low is
+/// deliberately NOT a trigger: a low healer taking cover is correct
+/// self-preservation, not abandonment of a dying ally.
 pub(super) fn teammate_needs_saving(
     entity: Entity,
     my_pos: Vec3,
     ctx: &CombatContext,
     shared: &SharedMovementConfig,
 ) -> bool {
-    ctx.alive_allies().into_iter().any(|a| {
-        a.entity != entity
-            && !a.is_pet
-            && a.health_pct() < shared.urgency_hp_threshold
-            && my_pos.distance(a.position) <= shared.heal_range
+    ctx.situation().dying_allies().any(|ally| {
+        ally != entity
+            && ctx
+                .combatants
+                .get(&ally)
+                .is_some_and(|a| my_pos.distance(a.position) <= shared.heal_range)
     })
 }
 
@@ -211,26 +213,16 @@ pub fn escape_distance_gained(window: f32, base_speed: f32, slow_multiplier: f32
     window * base_speed * slow_multiplier
 }
 
-/// PRESSURED compound trigger (R6): targeted by a VISIBLE enemy
-/// (`enemies_targeting` is stealth-filtered — AE2: no pre-dodging invisible
-/// Rogues; pets included) AND a proximity / intent condition: within the
-/// danger radius, or a melee-class / pet / closing threat within the intent
-/// radius. A distant caster holding position while targeting me does NOT
-/// flip the posture (AE5), and neither does a melee targeting me from across
-/// the arena — pressure requires the threat to be near enough that intent
-/// matters.
-pub(super) fn compound_pressure_trigger(
-    entity: Entity,
-    my_pos: Vec3,
-    ctx: &CombatContext,
-    shared: &SharedMovementConfig,
-) -> bool {
-    ctx.enemies_targeting(entity).iter().any(|t| {
-        let distance = my_pos.distance(t.position);
-        distance <= shared.danger_radius
-            || (distance <= shared.threat_intent_radius
-                && (t.is_pet || t.class.is_melee() || ctx.is_closing(t.entity, entity)))
-    })
+/// PRESSURED compound trigger (R6): the healer is PRESSURED in its team's
+/// situation ([`AllyStanding::pressured`](crate::states::play_match::situation::AllyStanding::pressured)):
+/// targeted by an enemy it can SEE (AE2: no pre-dodging invisible Rogues; pets
+/// included) AND that enemy is within the danger radius, or is a melee class,
+/// a pet or still closing within the intent radius. A distant caster holding
+/// position while targeting me does NOT flip the posture (AE5), and neither
+/// does a melee targeting me from across the arena — pressure requires the
+/// threat to be near enough that intent matters.
+pub(super) fn compound_pressure_trigger(entity: Entity, ctx: &CombatContext) -> bool {
+    ctx.situation().is_pressured(entity)
 }
 
 /// Sticky anchor ally (R6): most-injured living non-pet ally, excluding
@@ -450,7 +442,6 @@ pub(super) fn dispel_chase_override<'c>(
     next: Posture,
     ctx: &'c CombatContext,
     dispel: AbilityType,
-    shared: &SharedMovementConfig,
     state: &HealerPosture,
 ) -> Option<DispelStep<'c>> {
     if !ally_walk_allowed(entity, next, ctx)
@@ -460,7 +451,7 @@ pub(super) fn dispel_chase_override<'c>(
     }
     let owed = super::owed_dispel(ctx, abilities, entity, my_pos, current_mana, dispel)?;
     let (OwedDispel::Reached(ally) | OwedDispel::Unreached(ally)) = owed;
-    if super::another_teammate_dying(ctx, entity, ally, shared.urgency_hp_threshold) {
+    if super::another_teammate_dying(ctx, entity, ally) {
         return None;
     }
     let info = ctx.combatants.get(&ally)?;
@@ -949,7 +940,6 @@ pub(super) fn healer_pressured_tick_shared(
                 my_pos,
                 d.current_mana,
                 d.ability,
-                shared.urgency_hp_threshold,
                 state.solve_dispel,
             )
         })
@@ -1255,6 +1245,7 @@ mod tests {
     use super::*;
     use crate::states::play_match::class_ai::pressing_when_ahead;
     use crate::states::play_match::map_geometry::ObstacleVolume;
+    use crate::states::play_match::situation::{MatchClock, SituationConfig};
 
     fn priest_like() -> MovementWeights {
         MovementWeights {
@@ -1516,7 +1507,8 @@ mod tests {
                 &[],
                 Default::default(),
                 profile,
-            );
+            )
+            .classified(&SituationConfig::default(), MatchClock::after_gates(30.0));
             match dispel_chase_override(
                 &defs,
                 paladin,
@@ -1525,7 +1517,6 @@ mod tests {
                 next,
                 &ctx,
                 cleanse,
-                &SharedMovementConfig::default(),
                 &HealerPosture::new(0.0),
             ) {
                 Some(DispelStep::Walk(ally)) => Some(ally.entity),
@@ -1649,7 +1640,8 @@ mod tests {
                 &[],
                 Default::default(),
                 Default::default(),
-            );
+            )
+            .classified(&SituationConfig::default(), MatchClock::after_gates(30.0));
             let mut state = HealerPosture::new(0.0);
             state.dispel_walk = phase;
             match dispel_chase_override(
@@ -1660,7 +1652,6 @@ mod tests {
                 Posture::Free,
                 &ctx,
                 cleanse,
-                &SharedMovementConfig::default(),
                 &state,
             ) {
                 Some(DispelStep::Walk(ally)) => {

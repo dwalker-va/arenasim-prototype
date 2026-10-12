@@ -33,7 +33,8 @@ use crate::states::play_match::movement_config::MeleeMovementConfig;
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
-use super::{pressing_when_ahead, CombatContext};
+use super::CombatContext;
+use crate::states::play_match::situation::Tempo;
 use crate::states::play_match::situation::{Play, Role};
 
 /// Shout range constant (applies to all shout variants)
@@ -1098,7 +1099,6 @@ pub fn evaluate_warrior_reset(
     reset_state: Option<&mut MeleeResetState>,
     directive: Option<&MovementDirective>,
     cfg: &MeleeMovementConfig,
-    press_margin: f32,
     now: f32,
     decision_trace: &mut DecisionTrace,
 ) {
@@ -1107,8 +1107,9 @@ pub fn evaluate_warrior_reset(
     let state: &mut MeleeResetState = reset_state.unwrap_or(&mut local);
 
     // Press-when-ahead: a team clearly ahead keeps chasing rather than
-    // resetting tempo, so suppress BOTH arming and activation while pressing.
-    let pressing = pressing_when_ahead(ctx.team_hp_advantage(), press_margin);
+    // resetting tempo, so suppress BOTH arming and activation while pressing
+    // (the team situation's tempo, on `press_advantage_margin`).
+    let pressing = ctx.situation().tempo == Tempo::Pressing;
 
     // Arm while under movement CC — the window stays open `reset_window` after
     // the CC ends so the reset actually runs (a rooted warrior can't move, so

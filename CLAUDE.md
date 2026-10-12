@@ -389,17 +389,25 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
    - Implement when to use the ability in the class's `decide_action()` method
    - Use `CombatContext` helpers like `ctx.target_info()`, `ctx.has_aura()`, etc.
    - **Read a situation; never re-derive one.** A fact more than one decision
-     cares about — the enemy healer is locked (and until when), the team is
-     pressing or trailing — is classified once per frame by
-     `situation::update_situations` (`src/states/play_match/situation.rs`) from
-     the snapshot every unit decides from, and read through `ctx.situation()`.
-     A rule keyed on it reads `ctx.situation().enemy_healer_locked` /
-     `.tempo`, or picks its order with `ctx.situation().play_for(role)`
-     (`Play::Burst` / `Play::Default`, an exhaustive match), and every
-     `ability_decision` in the trace carries the `situation` it saw. A NEW
-     situation goes into `classify` with a `situation_change` transition and a
-     scene test, not into a local predicate at its first reader. Design and
-     roadmap: `docs/design/proposals/2026-10-11-ai-architecture.md`.
+     cares about — the match phase, the team pressing or trailing, the enemy
+     healer locked (and until when), a teammate dying, pressured, or both
+     (`ally_in_danger`) — is classified by `situation::update_situations`
+     (`src/states/play_match/situation.rs`) inside `decide_abilities`, from the
+     snapshot every unit decides from: once as the dispatch starts, and again
+     after each instant CC an earlier unit lands that frame. Read it through
+     `ctx.situation()`: `.phase` / `.attrition_remaining()`, `.tempo`,
+     `.enemy_healer_locked`, `.ally_in_danger`, `.dying_allies()`,
+     `.is_pressured(unit)`, or pick an order with `.play_for(role)`
+     (`Play::Burst` / `Play::Default`, an exhaustive match). Every
+     `ability_decision` in the trace carries the `situation` it saw. Its
+     thresholds are `movement.ron`'s `shared:` block, and the table in the
+     module docs names which neighbouring constants were deliberately NOT
+     unified. A context built outside `decide_abilities` (`CombatContext::new`
+     alone — a pet's, a test's) has no situation and `situation()` panics on
+     it; a test classifies one with `.classified(&cfg, MatchClock::...)`. A
+     NEW situation goes into `classify` with a `situation_change` transition
+     and a scene test, not into a local predicate at its first reader. Design
+     and roadmap: `docs/design/proposals/2026-10-11-ai-architecture.md`.
    - **Stealth needs no check.** `ctx.combatants` is what the deciding unit can
      PERCEIVE — a stealthed enemy it cannot see is not in it (`CombatContext::new`
      builds the view from `stealth_visible`, the one visibility rule), so decide
@@ -1096,15 +1104,23 @@ jq -c 'select(.actor.class == "Hunter") | .candidates[] | select(.ability == "Ai
 jq -c 'select(.kind == "target_acquisition" and .changed)' $T
 
 # Situations (`situation.rs`). Every ability_decision carries the `situation`
-# its team was in: `tempo` ("even" / "pressing" / "trailing") always, and
-# `enemy_healer_locked` ({subject, since, until} on the sim_time clock) while
-# the enemy healer is in cast-preventing CC. `situation_change` events mark the
-# transitions only (onset / end / extended / shift), carry `team` instead of an
-# `actor`, and sort ahead of the decisions in their frame.
+# its team was in: `phase` ("prematch" / "engaged" / "attrition") and `tempo`
+# ("even" / "pressing" / "trailing") always; `enemy_healer_locked`
+# ({subject, since, until} on the sim_time clock) while the enemy healer is in
+# cast-preventing CC; `ally_in_danger` ({subject, since}) while a teammate is
+# both dying and pressured. `situation_change` events mark the transitions only
+# (onset / end / extended / shift), carry `team` instead of an `actor`, and
+# sort ahead of the decisions in their frame — so a change classified MID-frame
+# (after an earlier unit's instant CC) prints ahead of that frame's decisions
+# that never saw it. Read a frame with a change in it with care;
+# `decision_trace_audit` skips those frames for that reason.
 # Per class, the ability chosen while the enemy healer was locked:
 jq -r 'select(.kind == "ability_decision" and .situation.enemy_healer_locked != null and .outcome.type == "action_taken") | "\(.actor.class) \(.outcome.ability)"' $T | sort | uniq -c
 # Every lock window, per team (a burst window the team could use):
 jq -c 'select(.kind == "situation_change" and .name == "enemy_healer_locked") | {t: .sim_time, team, change, healer: .subject, since, until}' $T
+# Every teammate-in-danger window, and what each class chose inside one:
+jq -c 'select(.kind == "situation_change" and .name == "ally_in_danger") | {t: .sim_time, team, change, ally: .subject, since}' $T
+jq -r 'select(.kind == "ability_decision" and .situation.ally_in_danger != null and .outcome.type == "action_taken") | "\(.actor.class) \(.outcome.ability)"' $T | sort | uniq -c
 
 # Who was a trap AIMED at? A trap is placed at a POSITION and springs on the
 # first enemy to reach it, so its victim is not its target and the outcome
@@ -1260,15 +1276,18 @@ constructed:
   vacuously. `tests/situation_scenes.rs` is the worked example.
 - **The tiers above** (decision properties over a scene grid, staged matches,
   situation-conditional probes over a seed bank) are planned in
-  `docs/design/proposals/2026-10-11-ai-architecture.md` §3.2.
+  `docs/design/proposals/2026-10-11-ai-architecture.md` §3.2. Staged matches
+  (tier 3) do not exist until AS-273.
 
 **The migrate-not-re-pin rule (user decision, 2026-10-12).** When a
 seed-pinned probe goes stale — a change moved the RNG stream and the seed no
 longer contains its situation — it is **migrated**, never re-pinned to a fresh
 seed: to a scene test when one tick decides it, to a staged match when it
 needs time (a walk, a chase, an escape), or to a situation-conditional probe
-that finds its windows over a seed bank and asserts a response rate. A fix
-that re-pins a stale probe's seed is not accepted, whoever writes it.
+that finds its windows over a seed bank and asserts a response rate. Until
+staged matches land (AS-273), a probe that needs time can only migrate to a
+situation-conditional probe over a seed bank. A fix that re-pins a stale
+probe's seed is not accepted, whoever writes it.
 
 ### Write a movement behavior probe
 

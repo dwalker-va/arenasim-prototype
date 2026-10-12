@@ -27,6 +27,7 @@ use arenasim::states::play_match::decision_trace::DecisionTrace;
 use arenasim::states::play_match::map_geometry::{
     has_line_of_sight, resolve_movement, steer_toward_goal, ObstacleVolume,
 };
+use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
 use arenasim::states::play_match::traps::freezing_trap_aura;
 use arenasim::states::play_match::{
     AbilityDefinitions, AbilityType, ActiveAuras, Aura, Combatant, HealerPosture, MovementConfig,
@@ -137,6 +138,7 @@ fn context<'a>(
         Default::default(),
         Default::default(),
     )
+    .classified(&SituationConfig::default(), MatchClock::after_gates(0.0))
 }
 
 impl Scene {

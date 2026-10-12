@@ -11,7 +11,7 @@ use super::class_ai;
 use super::components::*;
 use super::constants::{TRAP_ARM_DELAY, TRAP_LAUNCH_SPEED};
 use super::match_config;
-use super::situation::{update_situations, SituationConfig, Situations};
+use super::situation::{update_situations, MatchClock, SituationConfig, Situations};
 use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset, log_ability_use};
 use crate::combat::log::CombatLog;
 use bevy::ecs::system::SystemParam;
@@ -38,9 +38,8 @@ pub struct AbilityDispatchExtras<'w, 's> {
     /// see its own traps that have not sprung yet.
     traps: Query<'w, 's, (&'static Trap, &'static Transform)>,
     trap_launches: Query<'w, 's, &'static TrapLaunchProjectile>,
-    /// Arena dampening — read for its `time_since_gates`, the clock the
-    /// Druid's mana governor paces against. `Option` for the same reason as
-    /// `ai_profile`.
+    /// Arena dampening — read for its `time_since_gates`, the clock under the
+    /// situations' match phase. `Option` for the same reason as `ai_profile`.
     dampening: Option<Res<'w, ArenaDampening>>,
     /// The match's configured kill targets, so a Hunter knows whether the
     /// enemy it cannot see is the one its team will converge on. `Option` so
@@ -721,9 +720,6 @@ pub struct DispatchFrame<'a> {
     pub gates_opened: bool,
     /// The posture clock, `Time::elapsed_secs`.
     pub now: f32,
-    /// Seconds since the gates opened (`ArenaDampening`), the Druid mana
-    /// governor's clock.
-    pub time_since_gates: f32,
     pub team1_kill_target: Option<usize>,
     pub team2_kill_target: Option<usize>,
     /// Per-Shaman live totem durations, indexed by `TotemElement::index()`.
@@ -802,7 +798,6 @@ pub fn dispatch_class_decision(
         movement_config,
         gates_opened,
         now,
-        time_since_gates,
         team1_kill_target,
         team2_kill_target,
         totem_durations,
@@ -948,7 +943,6 @@ pub fn dispatch_class_decision(
                         reset.map(bevy::prelude::Mut::into_inner),
                         directive,
                         &movement_config.melee,
-                        movement_config.shared.press_advantage_margin,
                         now,
                         decision_trace,
                     );
@@ -1113,7 +1107,6 @@ pub fn dispatch_class_decision(
                 plan.pressured,
                 plan.medic_walk,
                 gates_opened,
-                time_since_gates,
                 marked_this_frame,
                 decision_trace,
             )
@@ -1453,10 +1446,6 @@ pub fn decide_abilities(
         movement_config: &movement_config,
         gates_opened: countdown.gates_opened,
         now: time.elapsed_secs(),
-        time_since_gates: extras
-            .dampening
-            .as_ref()
-            .map_or(0.0, |d| d.time_since_gates),
         team1_kill_target: extras.config.as_ref().and_then(|c| c.team1_kill_target),
         team2_kill_target: extras.config.as_ref().and_then(|c| c.team2_kill_target),
         totem_durations: &totem_durations,
@@ -1469,11 +1458,19 @@ pub fn decide_abilities(
     // earlier unit's instant CC changes it. A scene without the resource gets
     // the facts, with no history.
     let situation_cfg = SituationConfig::from_movement(&movement_config);
-    let mut situations = extras.situations.as_deref().copied().unwrap_or_default();
+    let clock = MatchClock {
+        now: decision_trace.current_sim_time,
+        gates_opened: countdown.gates_opened,
+        since_gates: extras
+            .dampening
+            .as_ref()
+            .map_or(0.0, |d| d.time_since_gates),
+    };
+    let mut situations = extras.situations.as_deref().cloned().unwrap_or_default();
     update_situations(
         &mut situations,
         &snapshot,
-        decision_trace.current_sim_time,
+        &clock,
         &situation_cfg,
         &mut decision_trace,
     );
@@ -1515,7 +1512,7 @@ pub fn decide_abilities(
             update_situations(
                 &mut situations,
                 &snapshot,
-                decision_trace.current_sim_time,
+                &clock,
                 &situation_cfg,
                 &mut decision_trace,
             );

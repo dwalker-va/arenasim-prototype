@@ -42,6 +42,7 @@ use arenasim::states::play_match::class_ai::{
     self, CombatContext, CombatantInfo, QueuedAoeDamage, QueuedInstantAttack,
 };
 use arenasim::states::play_match::decision_trace::{AbilityOutcome, DecisionTrace, EventPayload};
+use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
 use arenasim::states::play_match::team_solve;
 use arenasim::states::play_match::{
     apply_pending_auras, flare_system, refresh_stacking_aura, slow_zone_system, trap_system,
@@ -379,7 +380,8 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
             &[],
             Default::default(),
             Default::default(),
-        );
+        )
+        .classified(&SituationConfig::default(), MatchClock::after_gates(0.0));
         let self_auras = arenasim::states::play_match::ActiveAuras {
             auras: active_auras.get(&me).cloned().unwrap_or_default(),
         };
@@ -546,7 +548,6 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     false,
                     None,
                     true,
-                    0.0,
                     &mut Default::default(),
                     &mut trace,
                 );

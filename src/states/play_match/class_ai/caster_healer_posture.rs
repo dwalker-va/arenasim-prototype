@@ -92,7 +92,7 @@ pub fn evaluate_caster_healer_posture(
     let shared = &movement.shared;
 
     // PRESSURED compound trigger (shared with the Priest/Paladin).
-    let trigger = compound_pressure_trigger(entity, my_pos, ctx, shared);
+    let trigger = compound_pressure_trigger(entity, ctx);
 
     let prev = state.posture;
 

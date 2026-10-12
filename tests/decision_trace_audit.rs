@@ -131,7 +131,8 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
 
 /// `situation_change` names (`SituationName`) and change kinds
 /// (`SituationChangeKind`). Surprise-only, like the lists above.
-const EXPECTED_SITUATION_NAMES: &[&str] = &["enemy_healer_locked", "tempo"];
+const EXPECTED_SITUATION_NAMES: &[&str] =
+    &["enemy_healer_locked", "ally_in_danger", "tempo", "phase"];
 const EXPECTED_SITUATION_CHANGES: &[&str] = &["onset", "end", "extended", "shift"];
 
 /// One reference matchup: team configs + seed + label for error messages.
@@ -288,13 +289,54 @@ struct SituationAudit {
     changes: HashSet<String>,
     /// `enemy_healer_locked` windows opened.
     lock_onsets: usize,
+    /// `ally_in_danger` windows opened.
+    danger_onsets: usize,
     /// Tempo shifts.
     tempo_shifts: usize,
+    /// Match-phase shifts.
+    phase_shifts: usize,
     /// `ability_decision` events checked against the replayed windows.
     decisions_checked: usize,
     /// ...of which made while the team's enemy healer was locked.
     decisions_under_lock: usize,
+    /// ...of which made while a teammate was in danger.
+    decisions_under_danger: usize,
     problems: Vec<String>,
+}
+
+/// One team's situation as the `situation_change` events replay it.
+#[derive(Clone, Debug, PartialEq)]
+struct Replayed {
+    lock: Option<u64>,
+    danger: Option<u64>,
+    tempo: String,
+    phase: String,
+}
+
+impl Default for Replayed {
+    fn default() -> Self {
+        Replayed {
+            lock: None,
+            danger: None,
+            tempo: "even".to_string(),
+            phase: "prematch".to_string(),
+        }
+    }
+}
+
+impl Replayed {
+    /// Apply one `situation_change` event.
+    fn apply(&mut self, v: &serde_json::Value) {
+        match (v["name"].as_str(), v["change"].as_str()) {
+            (Some("enemy_healer_locked"), Some("onset")) => self.lock = v["subject"].as_u64(),
+            (Some("enemy_healer_locked"), Some("end")) => self.lock = None,
+            (Some("ally_in_danger"), Some("onset")) => self.danger = v["subject"].as_u64(),
+            (Some("ally_in_danger"), Some("end")) => self.danger = None,
+            (Some("tempo"), _) => self.tempo = v["tempo"].as_str().unwrap_or("").to_string(),
+            (Some("phase"), _) => self.phase = v["phase"].as_str().unwrap_or("").to_string(),
+            _ => {}
+        }
+    }
 }
 
 /// Replay a trace's `situation_change` events per team and check every
@@ -311,8 +353,7 @@ fn audit_situations(path: &PathBuf, label: &str) -> SituationAudit {
     use std::collections::BTreeMap;
     let body = std::fs::read_to_string(path).expect("read trace file");
     let mut audit = SituationAudit::default();
-    // Per team: (open lock subject, tempo).
-    let mut state: BTreeMap<u64, (Option<u64>, String)> = BTreeMap::new();
+    let mut state: BTreeMap<u64, Replayed> = BTreeMap::new();
     let mut changed_in_frame: HashSet<(u64, u64)> = HashSet::new();
     let events: Vec<serde_json::Value> = body
         .lines()
@@ -333,54 +374,50 @@ fn audit_situations(path: &PathBuf, label: &str) -> SituationAudit {
                 .problems
                 .push(format!("{label}: a situation_change has an actor: {v}"));
         }
-        let entry = state.entry(team).or_insert((None, "even".to_string()));
+        let entry = state.entry(team).or_default();
         match (name.as_str(), change.as_str()) {
-            ("enemy_healer_locked", "onset") => {
-                audit.lock_onsets += 1;
-                entry.0 = v["subject"].as_u64();
-            }
-            ("enemy_healer_locked", "end") => {
-                if entry.0.is_none() {
-                    audit
-                        .problems
-                        .push(format!("{label}: lock ended while none was open: {v}"));
-                }
-                entry.0 = None;
-            }
-            ("enemy_healer_locked", "extended") => {
-                if entry.0 != v["subject"].as_u64() {
-                    audit
-                        .problems
-                        .push(format!("{label}: extended a lock that was not open: {v}"));
-                }
-            }
+            ("enemy_healer_locked", "onset") => audit.lock_onsets += 1,
+            ("ally_in_danger", "onset") => audit.danger_onsets += 1,
+            ("enemy_healer_locked", "end") if entry.lock.is_none() => audit
+                .problems
+                .push(format!("{label}: lock ended while none was open: {v}")),
+            ("ally_in_danger", "end") if entry.danger.is_none() => audit
+                .problems
+                .push(format!("{label}: danger ended while none was open: {v}")),
+            ("enemy_healer_locked", "extended") if entry.lock != v["subject"].as_u64() => audit
+                .problems
+                .push(format!("{label}: extended a lock that was not open: {v}")),
             ("tempo", "shift") => {
                 audit.tempo_shifts += 1;
-                let previous = v["previous_tempo"].as_str().unwrap_or("").to_string();
-                if previous != entry.1 {
+                let previous = v["previous_tempo"].as_str().unwrap_or("");
+                if previous != entry.tempo {
                     audit.problems.push(format!(
                         "{label}: tempo shifted from {previous} but the replay had {}: {v}",
-                        entry.1
+                        entry.tempo
                     ));
                 }
-                entry.1 = v["tempo"].as_str().unwrap_or("").to_string();
+            }
+            ("phase", "shift") => {
+                audit.phase_shifts += 1;
+                let previous = v["previous_phase"].as_str().unwrap_or("");
+                if previous != entry.phase {
+                    audit.problems.push(format!(
+                        "{label}: phase shifted from {previous} but the replay had {}: {v}",
+                        entry.phase
+                    ));
+                }
             }
             _ => {}
         }
+        entry.apply(v);
     }
     // Second pass, in trace order, with the state as of each event.
-    let mut state: BTreeMap<u64, (Option<u64>, String)> = BTreeMap::new();
+    let mut state: BTreeMap<u64, Replayed> = BTreeMap::new();
     for v in &events {
         let frame = v["frame"].as_u64().unwrap();
         if v["kind"] == "situation_change" {
             let team = v["team"].as_u64().unwrap();
-            let entry = state.entry(team).or_insert((None, "even".to_string()));
-            match (v["name"].as_str(), v["change"].as_str()) {
-                (Some("enemy_healer_locked"), Some("onset")) => entry.0 = v["subject"].as_u64(),
-                (Some("enemy_healer_locked"), Some("end")) => entry.0 = None,
-                (Some("tempo"), _) => entry.1 = v["tempo"].as_str().unwrap_or("").to_string(),
-                _ => {}
-            }
+            state.entry(team).or_default().apply(v);
             continue;
         }
         if v["kind"] != "ability_decision" {
@@ -396,21 +433,24 @@ fn audit_situations(path: &PathBuf, label: &str) -> SituationAudit {
         if changed_in_frame.contains(&(team, frame)) {
             continue;
         }
-        let (lock, tempo) = state
-            .get(&team)
-            .cloned()
-            .unwrap_or((None, "even".to_string()));
-        let carried_lock = situation["enemy_healer_locked"]["subject"].as_u64();
-        let carried_tempo = situation["tempo"].as_str().unwrap_or("");
-        if carried_lock != lock || carried_tempo != tempo {
+        let replayed = state.get(&team).cloned().unwrap_or_default();
+        let carried = Replayed {
+            lock: situation["enemy_healer_locked"]["subject"].as_u64(),
+            danger: situation["ally_in_danger"]["subject"].as_u64(),
+            tempo: situation["tempo"].as_str().unwrap_or("").to_string(),
+            phase: situation["phase"].as_str().unwrap_or("").to_string(),
+        };
+        if carried != replayed {
             audit.problems.push(format!(
-                "{label}: decision carries lock {carried_lock:?} / tempo {carried_tempo}, \
-                 the change events say {lock:?} / {tempo}: {v}"
+                "{label}: decision carries {carried:?}, the change events say {replayed:?}: {v}"
             ));
         }
         audit.decisions_checked += 1;
-        if lock.is_some() {
+        if replayed.lock.is_some() {
             audit.decisions_under_lock += 1;
+        }
+        if replayed.danger.is_some() {
+            audit.decisions_under_danger += 1;
         }
     }
     audit
@@ -452,9 +492,12 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
         situations.names.extend(found.names);
         situations.changes.extend(found.changes);
         situations.lock_onsets += found.lock_onsets;
+        situations.danger_onsets += found.danger_onsets;
         situations.tempo_shifts += found.tempo_shifts;
+        situations.phase_shifts += found.phase_shifts;
         situations.decisions_checked += found.decisions_checked;
         situations.decisions_under_lock += found.decisions_under_lock;
+        situations.decisions_under_danger += found.decisions_under_danger;
         situations.problems.extend(found.problems);
         artifacts.push((matchup.label.to_string(), path));
     }
@@ -530,17 +573,26 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
         ));
     }
     issues.extend(situations.problems.iter().take(10).cloned());
-    // Non-vacuity: the reference set must actually lock a healer, shift a
-    // tempo, and make decisions under the lock, or the consistency check above
-    // proved nothing.
+    // Non-vacuity: the reference set must actually lock a healer, put a
+    // teammate in danger, shift a tempo and a phase, and make decisions under
+    // the lock and the danger, or the consistency check above proved nothing.
     if situations.lock_onsets == 0
+        || situations.danger_onsets == 0
         || situations.tempo_shifts == 0
+        || situations.phase_shifts == 0
         || situations.decisions_under_lock == 0
+        || situations.decisions_under_danger == 0
     {
         issues.push(format!(
-            "situation audit is vacuous: {} lock onsets, {} tempo shifts, {} decisions under \
-             a lock across the reference matches",
-            situations.lock_onsets, situations.tempo_shifts, situations.decisions_under_lock
+            "situation audit is vacuous: {} lock onsets, {} danger onsets, {} tempo shifts, \
+             {} phase shifts, {} decisions under a lock, {} under danger across the reference \
+             matches",
+            situations.lock_onsets,
+            situations.danger_onsets,
+            situations.tempo_shifts,
+            situations.phase_shifts,
+            situations.decisions_under_lock,
+            situations.decisions_under_danger,
         ));
     }
 
@@ -568,12 +620,16 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
         all_movement.len(),
     );
     println!(
-        "Situation audit passed: {} lock onsets, {} tempo shifts; {} decisions matched their \
-         replayed situation, {} of them under a lock.",
+        "Situation audit passed: {} lock onsets, {} danger onsets, {} tempo shifts, {} phase \
+         shifts; {} decisions matched their replayed situation, {} of them under a lock and {} \
+         under danger.",
         situations.lock_onsets,
+        situations.danger_onsets,
         situations.tempo_shifts,
+        situations.phase_shifts,
         situations.decisions_checked,
         situations.decisions_under_lock,
+        situations.decisions_under_danger,
     );
 }
 

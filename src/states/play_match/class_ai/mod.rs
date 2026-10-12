@@ -51,7 +51,7 @@ use super::constants::{GCD, LOW_HP_THRESHOLD, MELEE_RANGE, SAFE_KITING_DISTANCE}
 use super::decision_trace::RejectionReason;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume};
 use super::match_config::CharacterClass;
-use super::situation::{classify_roster, SituationConfig, TeamSituation};
+use super::situation::{classify_roster, MatchClock, SituationConfig, TeamSituation};
 use super::utils::log_ability_use;
 use super::{is_silenced, is_spell_school_locked};
 use crate::combat::log::CombatLog;
@@ -220,8 +220,12 @@ pub struct CombatContext<'a> {
     pub ai_profile: AiProfile,
     /// The combatant making the decision
     pub self_entity: Entity,
+    /// The team whose view this is (a pet decides from a roster it is not in,
+    /// so this is not always `self_entity`'s row).
+    observer_team: u8,
     /// This unit's team situation — read it through [`Self::situation`].
-    situation: TeamSituation,
+    /// `None` until classified: see [`Self::situation`].
+    situation: Option<TeamSituation>,
 }
 
 impl<'a> CombatContext<'a> {
@@ -271,19 +275,6 @@ impl<'a> CombatContext<'a> {
         } else {
             Cow::Borrowed(roster)
         };
-        // Classified from this context's own data, so a context built anywhere
-        // states the situation's FACTS correctly. It has no clock and no
-        // history, so its window times count from 0 and its tempo reads the
-        // default margin: `decide_abilities` replaces it with the frame's
-        // classification ([`Self::with_situation`]), which has both.
-        let situation = classify_roster(
-            roster,
-            active_auras,
-            observer_team,
-            &TeamSituation::default(),
-            0.0,
-            &SituationConfig::default(),
-        );
         Self {
             combatants,
             roster,
@@ -295,22 +286,53 @@ impl<'a> CombatContext<'a> {
             bounds,
             ai_profile,
             self_entity,
-            situation,
+            observer_team,
+            situation: None,
         }
     }
 
     /// This context with its team's situation as `decide_abilities` classified
     /// it for the frame (`situation::update_situations`).
     pub fn with_situation(mut self, situation: TeamSituation) -> Self {
-        self.situation = situation;
+        self.situation = Some(situation);
         self
     }
 
-    /// The situation this unit's team is in (`situation.rs`): whether the
-    /// enemy healer is locked and until when, and the team's tempo. Read this
-    /// rather than re-deriving a situation at the decision site.
+    /// This context with a situation classified from its own roster, at
+    /// `clock`, under `cfg`, with no history (every window opens now). For a
+    /// test or a standalone caller that builds its context outside
+    /// `decide_abilities`: the clock and the thresholds are its to choose,
+    /// and choosing them here is what keeps them from being silently wrong.
+    pub fn classified(self, cfg: &SituationConfig, clock: MatchClock) -> Self {
+        let situation = classify_roster(
+            self.roster,
+            self.active_auras,
+            self.observer_team,
+            &TeamSituation::default(),
+            &clock,
+            cfg,
+        );
+        self.with_situation(situation)
+    }
+
+    /// The situation this unit's team is in (`situation.rs`): the phase, the
+    /// tempo, whether the enemy healer is locked and until when, and which
+    /// teammates are dying or pressured. Read this rather than re-deriving a
+    /// situation at the decision site.
+    ///
+    /// # Panics
+    ///
+    /// On a context nobody classified — one built by [`Self::new`] alone,
+    /// outside `decide_abilities` (a pet's, a test's). Such a context has no
+    /// frame clock and no `movement.ron` thresholds, so any answer would be
+    /// silently wrong; classify it with [`Self::classified`] or
+    /// [`Self::with_situation`].
     pub fn situation(&self) -> &TeamSituation {
-        &self.situation
+        self.situation.as_ref().expect(
+            "situation read from a CombatContext nobody classified: only \
+             decide_abilities classifies (with the frame's clock and \
+             movement.ron); call `classified` or `with_situation` first",
+        )
     }
 
     /// True when a living enemy is in the arena that this unit cannot see —
@@ -744,11 +766,12 @@ impl<'a> CombatContext<'a> {
         let target_view = target
             .and_then(|t| self.combatants.get(&t))
             .map(|info| TargetView::from_info(info, my_pos));
-        Some(
-            decision_trace
+        Some(match &self.situation {
+            Some(situation) => decision_trace
                 .start_ability_decision(actor_view, target_view)
-                .with_situation(&self.situation),
-        )
+                .with_situation(situation),
+            None => decision_trace.start_ability_decision(actor_view, target_view),
+        })
     }
 }
 
@@ -785,12 +808,14 @@ pub fn stealth_visible(
     !enemy_stealthed || observer_has_shadow_sight || enemy_has_shadow_sight
 }
 
-/// Press-when-ahead predicate: own team leads by at least the margin. A plain
-/// `>=` threshold with no hysteresis band — team-HP sums change only on discrete
-/// damage/heal events, so the differential does not strobe frame-to-frame the
-/// way a positional signal would, and a stateful schmitt latch would be dead
-/// weight. Shared by the healer deny postures and the Warrior tempo reset (both
-/// "stop the defensive behavior when clearly ahead"). Pure for unit testing.
+/// Press-when-ahead predicate: own team leads by at least the margin. The test
+/// behind the team situation's `tempo` (`situation.rs`), which the healer deny
+/// postures and the Warrior tempo reset read (both "stop the defensive behavior
+/// when clearly ahead"). A plain `>=` threshold with no hysteresis band: the
+/// team-HP differential changes only on discrete damage/heal events, so it does
+/// not strobe frame-to-frame, but it does flip with every hit and heal that
+/// crosses the margin — a play keyed on tempo needs onset and release
+/// thresholds first. Pure for unit testing.
 pub(crate) fn pressing_when_ahead(advantage: f32, margin: f32) -> bool {
     advantage >= margin
 }
@@ -1828,22 +1853,18 @@ pub fn root_dispel_allowed(ctx: &CombatContext) -> bool {
 /// holding a teammate back is worth ([`owed_dispel`]).
 pub const ROOT_DISPEL_WALK_MAX_SECS: f32 = 2.0;
 
-/// The dying-first rule for a dispel owed to `ally`: whether some OTHER living
-/// non-pet teammate than the healer and `ally` is below `urgency_hp_threshold`.
-/// While one is, no dispel walk runs — the heal is the higher-value GCD (a
-/// teammate in CC loses its actions for the CC's length, a dying one for the
-/// match), and a walk to the CC'd teammate can carry the healer off the dying
-/// one's heal range and sight. The CC'd teammate itself does not count: walking
-/// to it brings it into heal range too. Pets never count (`alive_allies`).
-pub fn another_teammate_dying(
-    ctx: &CombatContext,
-    entity: Entity,
-    ally: Entity,
-    urgency_hp_threshold: f32,
-) -> bool {
-    ctx.alive_allies()
-        .iter()
-        .any(|a| a.entity != entity && a.entity != ally && a.health_pct() < urgency_hp_threshold)
+/// The dying-first rule for a dispel owed to `ally`: whether some OTHER
+/// teammate than the healer and `ally` is dying in the team's situation
+/// ([`TeamSituation::dying_allies`]: living, non-pet, below
+/// `urgency_hp_threshold`). While one is, no dispel walk runs — the heal is the
+/// higher-value GCD (a teammate in CC loses its actions for the CC's length, a
+/// dying one for the match), and a walk to the CC'd teammate can carry the
+/// healer off the dying one's heal range and sight. The CC'd teammate itself
+/// does not count: walking to it brings it into heal range too.
+pub fn another_teammate_dying(ctx: &CombatContext, entity: Entity, ally: Entity) -> bool {
+    ctx.situation()
+        .dying_allies()
+        .any(|a| a != entity && a != ally)
 }
 
 /// What a healer's ally-dispel candidate scan found ([`scan_ally_dispel`]).
@@ -2432,6 +2453,9 @@ pub(crate) mod reach_fixture {
         /// Applied to the fresh caster at the start of every [`Self::run`]:
         /// the caster's own state for a probe (no mana, a cooldown).
         pub prep: Option<fn(&mut Combatant)>,
+        /// The clock the run's situation is classified at (default 20s after
+        /// the gates).
+        pub clock: MatchClock,
         caster: CharacterClass,
     }
 
@@ -2454,6 +2478,7 @@ pub(crate) mod reach_fixture {
                 auras: BTreeMap::new(),
                 combatant: Combatant::new(1, 0, caster),
                 prep: None,
+                clock: MatchClock::after_gates(20.0),
                 caster,
             }
         }
@@ -2482,7 +2507,8 @@ pub(crate) mod reach_fixture {
             let mut trace = DecisionTrace::default();
             let mut queue = bevy::ecs::world::CommandQueue::default();
             {
-                let ctx = ctx(me, &self.roster, &self.auras, obstacles);
+                let ctx = ctx(me, &self.roster, &self.auras, obstacles)
+                    .classified(&SituationConfig::default(), self.clock);
                 let mut commands = Commands::new(&mut queue, &self.world);
                 let mut builder = ctx
                     .start_ability_decision(&mut trace, None, CASTER)

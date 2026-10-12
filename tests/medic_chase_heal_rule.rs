@@ -29,6 +29,7 @@ use arenasim::states::play_match::class_ai::priest::{
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
 use arenasim::states::play_match::decision_trace::DecisionTrace;
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
+use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
 use arenasim::states::play_match::{
     AbilityDefinitions, AbilityType, ActiveAuras, Aura, AuraType, Combatant, MovementConfig,
     MovementDirective, MovementGoal,
@@ -145,6 +146,7 @@ impl Scene {
             Default::default(),
             Default::default(),
         )
+        .classified(&SituationConfig::default(), MatchClock::after_gates(0.0))
     }
 
     /// The walk the posture tick issued, as `(goal point, traced trigger)`.
@@ -234,7 +236,8 @@ impl Scene {
                 &self.obstacles,
                 Default::default(),
                 Default::default(),
-            );
+            )
+            .classified(&SituationConfig::default(), MatchClock::after_gates(0.0));
             let mut commands = Commands::new(&mut queue, &self.world);
             decide_priest_action(
                 &mut commands,

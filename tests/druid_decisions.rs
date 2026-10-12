@@ -19,6 +19,7 @@ use arenasim::states::play_match::class_ai::druid::{
 };
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
 use arenasim::states::play_match::decision_trace::{AbilityOutcome, DecisionTrace, EventPayload};
+use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
 use arenasim::states::play_match::{
     AbilityDefinitions, AbilityType, ActiveAuras, Aura, AuraPending, Combatant, CompoundDebuff,
     MovementConfig,
@@ -127,6 +128,10 @@ fn decide(scene: Scene) -> Option<(AbilityType, &'static str)> {
         &[],
         Default::default(),
         Default::default(),
+    )
+    .classified(
+        &SituationConfig::from_movement(&movement),
+        MatchClock::after_gates(30.0),
     );
     let self_auras = ActiveAuras {
         auras: active_auras[&druid].clone(),
@@ -146,7 +151,6 @@ fn decide(scene: Scene) -> Option<(AbilityType, &'static str)> {
         false,
         None,
         true,
-        30.0,
         &mut Default::default(),
         &mut trace,
     );
@@ -293,6 +297,10 @@ fn same_frame_marks(share: bool) -> Vec<Option<Entity>> {
             &[],
             Default::default(),
             Default::default(),
+        )
+        .classified(
+            &SituationConfig::from_movement(&movement),
+            MatchClock::after_gates(0.0),
         );
         let mut fresh = std::collections::HashSet::new();
         let marked = if share { &mut shared } else { &mut fresh };
@@ -312,7 +320,6 @@ fn same_frame_marks(share: bool) -> Vec<Option<Entity>> {
             false,
             None,
             false,
-            0.0,
             marked,
             &mut trace,
         );

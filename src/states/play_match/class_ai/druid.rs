@@ -61,7 +61,8 @@
 //!
 //! Steps 5-10 answer to the MANA GOVERNOR ([`mana_reserve`]): proactive heals,
 //! control and damage are paid for only out of mana above a reserve that
-//! shrinks as the match heads into dampening. The emergency steps (2, 3), the
+//! shrinks as the match heads into its Attrition phase (the team situation's
+//! [`attrition_remaining`](crate::states::play_match::situation::TeamSituation::attrition_remaining)). The emergency steps (2, 3), the
 //! dying teammate's heals (7), the shift and a peel for a dying ally never ask
 //! it, and neither does a focused
 //! ally who has dropped below [`DRUID_URGENT_HP`].
@@ -86,6 +87,8 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::movement_config::MovementConfig;
 
 use super::super::utils::log_ability_use;
+use crate::states::play_match::situation::TeamSituation;
+
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
 use super::{CombatContext, CombatantInfo};
 
@@ -114,17 +117,14 @@ pub const LIFEBLOOM_DECISION_SECS: f32 = 1.5;
 /// bloom's burst heal more than the rolling ticks: the Druid lets it bloom.
 pub const LIFEBLOOM_BLOOM_HP: f32 = 0.75;
 /// The mana governor's reserve at the gates, as a fraction of the pool. It
-/// shrinks linearly to nothing by [`GOVERNOR_HORIZON_SECS`].
+/// shrinks linearly to nothing by the Attrition onset
+/// ([`ATTRITION_ONSET_SECS`](crate::states::play_match::situation::ATTRITION_ONSET_SECS)).
 ///
 /// A competitive match lasts about a minute, so most of them end with the
 /// reserve still near its starting size. Half the pool there kept the Druid
 /// idle beside a hurt teammate with the mana to heal in hand; 0.3 still holds
 /// a late-game reserve back through the opening minute.
 pub const GOVERNOR_RESERVE_AT_GATES: f32 = 0.3;
-/// When the governor stops holding mana back: the moment arena dampening
-/// reaches 50% (it starts at `DAMPENING_START_SECS` and ramps to 100% over
-/// `DAMPENING_RAMP_SECS`). Mana saved past it buys heals worth half as much.
-pub const GOVERNOR_HORIZON_SECS: f32 = DAMPENING_START_SECS + DAMPENING_RAMP_SECS * 0.5;
 /// A melee attacking the Druid while it is below this HP fraction is reason
 /// enough to shift and open distance, rooted or not.
 pub const DRUID_SHIFT_OPEN_HP: f32 = 0.6;
@@ -278,18 +278,19 @@ pub fn should_leave_form(view: FormView) -> bool {
         && (view.healing_needed || view.enemy_in_reach)
 }
 
-/// The mana the governor holds back `time_since_gates` seconds into the fight:
+/// The mana the governor holds back in `situation`'s match phase:
 /// [`GOVERNOR_RESERVE_AT_GATES`] of the pool at the gates, falling linearly to
-/// zero at [`GOVERNOR_HORIZON_SECS`]. Proactive spending must leave at least
-/// this much behind.
-pub fn mana_reserve(max_mana: f32, time_since_gates: f32) -> f32 {
-    let remaining = (1.0 - time_since_gates / GOVERNOR_HORIZON_SECS).clamp(0.0, 1.0);
-    max_mana * GOVERNOR_RESERVE_AT_GATES * remaining
+/// zero at the Attrition onset
+/// ([`TeamSituation::attrition_remaining`]), when dampening reaches 50% and
+/// mana saved buys heals worth half as much. Proactive spending must leave at
+/// least this much behind.
+pub fn mana_reserve(max_mana: f32, situation: &TeamSituation) -> f32 {
+    max_mana * GOVERNOR_RESERVE_AT_GATES * situation.attrition_remaining()
 }
 
 /// Whether the governor lets a proactive cast of `cost` through.
-fn governor_allows(combatant: &Combatant, cost: f32, time_since_gates: f32) -> bool {
-    combatant.current_mana - cost >= mana_reserve(combatant.max_mana, time_since_gates)
+fn governor_allows(combatant: &Combatant, cost: f32, situation: &TeamSituation) -> bool {
+    combatant.current_mana - cost >= mana_reserve(combatant.max_mana, situation)
 }
 
 /// What the Druid does with Lifebloom on its focused ally this tick.
@@ -433,7 +434,8 @@ fn own_aura<'c>(
 ///
 /// `medic_walk` is the teammate a live medic walk is walking to (the posture
 /// plan's): see the dying-teammate rule in the module docs.
-/// `time_since_gates` feeds the mana governor. `gates_opened` holds every
+/// The mana governor reads the match phase from `ctx.situation()`.
+/// `gates_opened` holds every
 /// combat action until the gates open; only Mark of the Wild is cast before.
 /// `marked_this_frame` holds the allies a Druid has already sent a Mark of the
 /// Wild to this frame, shared by every Druid's turn — see
@@ -452,7 +454,6 @@ pub fn decide_druid_action(
     pressured: bool,
     medic_walk: Option<Entity>,
     gates_opened: bool,
-    time_since_gates: f32,
     marked_this_frame: &mut HashSet<Entity>,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
@@ -561,7 +562,6 @@ pub fn decide_druid_action(
             urgency_hp: movement.shared.urgency_hp_threshold,
             medic_walk,
             pressured,
-            time_since_gates,
             marked_this_frame,
             builder: &mut builder,
         };
@@ -621,7 +621,6 @@ struct DruidTurn<'a, 'b, 'w, 's, 'c> {
     medic_walk: Option<Entity>,
     /// The posture machine's PRESSURED trigger this tick.
     pressured: bool,
-    time_since_gates: f32,
     /// Allies sent a Mark of the Wild this frame, by any Druid.
     marked_this_frame: &'a mut HashSet<Entity>,
     builder: &'a mut DecisionEventBuilder<'b>,
@@ -1392,7 +1391,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         urgent: bool,
     ) -> Option<RejectionReason> {
         let cost = self.abilities.get_unchecked(&ability).mana_cost;
-        (!urgent && !governor_allows(combatant, cost, self.time_since_gates)).then(|| {
+        (!urgent && !governor_allows(combatant, cost, self.ctx.situation())).then(|| {
             RejectionReason::PreconditionUnmet {
                 note: "mana governor: holding the reserve for dampening".to_string(),
             }
@@ -1781,17 +1780,22 @@ mod tests {
     }
 
     #[test]
-    fn the_governor_reserve_shrinks_to_nothing_by_half_dampening() {
-        assert!((mana_reserve(300.0, 0.0) - 90.0).abs() < 1e-3);
-        let halfway = mana_reserve(300.0, GOVERNOR_HORIZON_SECS * 0.5);
+    fn the_governor_reserve_shrinks_to_nothing_by_the_attrition_onset() {
+        use crate::states::play_match::situation::{TeamSituation, ATTRITION_ONSET_SECS};
+        let at = |since_gates: f32| {
+            mana_reserve(
+                300.0,
+                &TeamSituation {
+                    since_gates,
+                    ..Default::default()
+                },
+            )
+        };
+        assert!((at(0.0) - 90.0).abs() < 1e-3);
+        let halfway = at(ATTRITION_ONSET_SECS * 0.5);
         assert!((halfway - 45.0).abs() < 1e-3, "{halfway}");
-        assert_eq!(mana_reserve(300.0, GOVERNOR_HORIZON_SECS), 0.0);
-        assert_eq!(mana_reserve(300.0, GOVERNOR_HORIZON_SECS * 2.0), 0.0);
-        assert_eq!(
-            GOVERNOR_HORIZON_SECS,
-            DAMPENING_START_SECS + DAMPENING_RAMP_SECS * 0.5,
-            "the horizon is the moment dampening reaches 50%"
-        );
+        assert_eq!(at(ATTRITION_ONSET_SECS), 0.0);
+        assert_eq!(at(ATTRITION_ONSET_SECS * 2.0), 0.0);
     }
 }
 
@@ -1806,6 +1810,7 @@ mod reach_tests {
     use crate::states::match_config::CharacterClass::{Druid, Mage, Rogue, Warrior};
     use crate::states::play_match::class_ai::reach_fixture::*;
     use crate::states::play_match::map_geometry::ObstacleVolume;
+    use crate::states::play_match::situation::MatchClock;
 
     /// The Druid with a Warrior `BEHIND` the pillar and a Mage `IN_SIGHT`,
     /// plus one enemy Rogue beside, and attacking, each ally `attacked` names
@@ -1840,6 +1845,7 @@ mod reach_tests {
         let movement = MovementConfig::default();
         let me = s.units[0];
         let mut marked = HashSet::new();
+        s.clock = MatchClock::after_gates(time_since_gates);
         s.run(obstacles, |commands, ctx, combatant, builder| {
             let mut log = CombatLog::default();
             let mut turn = DruidTurn {
@@ -1855,7 +1861,6 @@ mod reach_tests {
                 urgency_hp: movement.shared.urgency_hp_threshold,
                 medic_walk,
                 pressured: false,
-                time_since_gates,
                 marked_this_frame: &mut marked,
                 builder,
             };
@@ -2366,7 +2371,11 @@ mod reach_tests {
     fn under_the_reserve(c: &mut Combatant) {
         // Ten mana over the reserve at [`take`]'s moment: less than any cast
         // costs, so every proactive cast would dip into it.
-        c.current_mana = mana_reserve(c.max_mana, TAKE_SECS) + 10.0;
+        let at_take = crate::states::play_match::situation::TeamSituation {
+            since_gates: TAKE_SECS,
+            ..Default::default()
+        };
+        c.current_mana = mana_reserve(c.max_mana, &at_take) + 10.0;
         c.ability_cooldowns.insert(AbilityType::Innervate, 60.0);
     }
 

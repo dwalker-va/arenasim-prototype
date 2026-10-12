@@ -36,7 +36,7 @@ pub use writer::{flush_decision_trace_system, TraceWriter};
 
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::class_ai::CombatantInfo;
-use crate::states::play_match::situation::{Tempo, Window};
+use crate::states::play_match::situation::{MatchPhase, Tempo, Window};
 
 /// Resource that owns the in-flight trace state for one match. Holds a buffer of
 /// `pending_events` that the flush system drains each frame, plus an optional
@@ -182,6 +182,8 @@ impl DecisionTrace {
             until: tag.until,
             tempo: None,
             previous_tempo: None,
+            phase: None,
+            previous_phase: None,
         });
     }
 
@@ -196,6 +198,24 @@ impl DecisionTrace {
             until: None,
             tempo: Some(tempo),
             previous_tempo: Some(previous),
+            phase: None,
+            previous_phase: None,
+        });
+    }
+
+    /// Record a `situation_change` event for a match-phase shift.
+    pub fn record_phase_change(&mut self, team: u8, previous: MatchPhase, phase: MatchPhase) {
+        self.push_situation_change(EventPayload::SituationChange {
+            team,
+            name: SituationName::Phase,
+            change: SituationChangeKind::Shift,
+            subject: None,
+            since: None,
+            until: None,
+            tempo: None,
+            previous_tempo: None,
+            phase: Some(phase),
+            previous_phase: Some(previous),
         });
     }
 

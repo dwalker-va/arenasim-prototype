@@ -3133,6 +3133,7 @@ mod bucket_a_unit {
     use arenasim::states::match_config::CharacterClass;
     use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
     use arenasim::states::play_match::class_ai::{select_softer_melee_target, CombatantInfo};
+    use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
     use arenasim::states::play_match::{Aura, AuraType, DispelType};
     use bevy::prelude::*;
 
@@ -3228,6 +3229,7 @@ mod bucket_a_unit {
             let (snap, me) = snap_with_healer_aura(Some(cc_aura(cc)), true);
             assert!(
                 snap.context_for(me)
+                    .classified(&SituationConfig::default(), MatchClock::after_gates(0.0))
                     .situation()
                     .enemy_healer_locked
                     .is_some(),
@@ -3243,6 +3245,7 @@ mod bucket_a_unit {
         let (snap, me) = snap_with_healer_aura(Some(cc_aura(AuraType::Root)), true);
         assert!(
             snap.context_for(me)
+                .classified(&SituationConfig::default(), MatchClock::after_gates(0.0))
                 .situation()
                 .enemy_healer_locked
                 .is_none(),
@@ -3253,6 +3256,7 @@ mod bucket_a_unit {
         let (snap, me) = snap_with_healer_aura(None, true);
         assert!(
             snap.context_for(me)
+                .classified(&SituationConfig::default(), MatchClock::after_gates(0.0))
                 .situation()
                 .enemy_healer_locked
                 .is_none(),
@@ -3267,6 +3271,7 @@ mod bucket_a_unit {
         let (snap, me) = snap_with_healer_aura(Some(cc_aura(AuraType::Stun)), false);
         assert!(
             snap.context_for(me)
+                .classified(&SituationConfig::default(), MatchClock::after_gates(0.0))
                 .situation()
                 .enemy_healer_locked
                 .is_none(),
@@ -4576,6 +4581,7 @@ mod u9_seek_reset {
         DecisionTrace, EventPayload, MovementTrigger,
     };
     use arenasim::states::play_match::movement_config::MeleeMovementConfig;
+    use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
     use arenasim::states::play_match::{AbilityType, DispelType};
 
     // ----- ranged seek (Mage) anti-stall, trace-derived -----
@@ -5045,6 +5051,15 @@ mod u9_seek_reset {
             &obstacles,
             Default::default(),
             Default::default(),
+        )
+        // The press gate reads the team situation's tempo, classified on
+        // `press_margin`.
+        .classified(
+            &SituationConfig {
+                press_advantage_margin: press_margin,
+                ..SituationConfig::default()
+            },
+            MatchClock::after_gates(now),
         );
 
         let mut reset_state = MeleeResetState {
@@ -5066,7 +5081,6 @@ mod u9_seek_reset {
                 Some(&mut reset_state),
                 None,
                 &MeleeMovementConfig::default(),
-                press_margin,
                 now,
                 &mut trace,
             );
