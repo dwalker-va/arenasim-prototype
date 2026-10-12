@@ -124,6 +124,10 @@ pub mod data {
     pub const BUFF: Color32 = Color32::from_rgb(111, 174, 126);
     /// A harmful aura.
     pub const DEBUFF: Color32 = Color32::from_rgb(208, 106, 91);
+
+    /// What equipment adds: an item tooltip's stat lines, a stat the worn
+    /// gear raised, a socket holding a pick other than the class default.
+    pub const ITEM_BONUS: Color32 = Color32::from_rgb(100, 255, 100);
 }
 
 /// HUD colours: in-match only (decision D6). The HUD keeps its broadcast look
@@ -238,6 +242,9 @@ pub mod size {
     pub const BAR: f32 = 8.0;
     /// The widest a tooltip grows before it wraps.
     pub const TOOLTIP_MAX_WIDTH: f32 = 320.0;
+    /// A choice tile's width: an [`super::icon::XL`] icon over a two-line
+    /// caption.
+    pub const CHOICE_TILE: f32 = 104.0;
     /// The widest a modal grows.
     pub const MODAL_MAX_WIDTH: f32 = 420.0;
     /// The narrowest a Hero button is drawn, so the menu reads as a column.

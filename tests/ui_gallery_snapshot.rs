@@ -38,12 +38,12 @@ use arenasim::ui::fonts::body_family;
 use arenasim::ui::theme::{class_color, color, data, icon, school_color, size, space, text};
 use arenasim::ui::widgets::{
     class_icon, empty_state, link, list_row, paint_icon, panel, panel_header, resource_bar,
-    section_label, stat_rows, tooltip_frame, Button, Checkbox, Chip, Header, ListIcon, ListRow,
-    Look, Modal, Nav, Tab, Tooltip, Variant,
+    section_label, stat_row, stat_rows, tooltip_frame, Button, Checkbox, Chip, ChoiceTile, Header,
+    ListIcon, ListRow, Look, Modal, Nav, Tab, Tooltip, Variant,
 };
 
 const WIDTH: f32 = 1400.0;
-const HEIGHT: f32 = 1600.0;
+const HEIGHT: f32 = 1800.0;
 /// Each of the page's two columns.
 const COLUMN: f32 = 660.0;
 
@@ -297,6 +297,22 @@ fn left_column(ui: &mut egui::Ui) {
         },
     );
 
+    section(
+        ui,
+        "Choice tiles: selected / idle / hovered / disabled",
+        |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = space::SM;
+                let _ = ChoiceTile::new("Frost Armor").selected(true).show(ui);
+                let _ = ChoiceTile::new("Mage Armor").show(ui);
+                let _ = ChoiceTile::new("Shadow Resistance Aura")
+                    .preview(Look::Hovered)
+                    .show(ui);
+                let _ = ChoiceTile::new("Molten Armor").enabled(false).show(ui);
+            });
+        },
+    );
+
     section(ui, "Panels: plain + stat rows, team accent", |ui| {
         panel(None).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -312,6 +328,8 @@ fn left_column(ui: &mut egui::Ui) {
                     ("Damage", "10 \u{2013} 15 + 60% of spell power"),
                 ],
             );
+            // A value that carries meaning: a stat the worn gear raised.
+            let _ = stat_row(ui, "Attack Power", "312", data::ITEM_BONUS);
         });
         ui.add_space(space::MD);
         panel(Some(data::TEAM_1)).show(ui, |ui| {
@@ -410,17 +428,37 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
                         .show_card(ui, |ui| {
                             let _ = list_row(
                                 ui,
-                                ListRow::new("Dragonspine Trophy \u{2014} +4 AP").subtitle(
-                                    "Chance on a melee hit to gain +55 attack power for 10s.",
-                                ),
+                                ListRow::new("Dragonspine Trophy \u{2014} +4 AP")
+                                    .subtitle(
+                                        "Chance on a melee hit (15%) to gain +55 attack power \
+                                         for 10s. Cannot occur more than once every 45s.",
+                                    )
+                                    .icon(ListIcon {
+                                        texture: None,
+                                        edge: color::LINE,
+                                    })
+                                    .wrap(),
                             );
                             let _ = list_row(
                                 ui,
                                 ListRow::new("Mark of the Champion \u{2014} +6 AP, +4 SP")
                                     .name_color(color::ACCENT)
-                                    .selected(true),
+                                    .icon(ListIcon {
+                                        texture: None,
+                                        edge: color::LINE,
+                                    })
+                                    .selected(true)
+                                    .wrap(),
                             );
-                            let _ = list_row(ui, ListRow::new("Whetstone of Fury \u{2014} +12 HP"));
+                            let _ = list_row(
+                                ui,
+                                ListRow::new("Whetstone of Fury \u{2014} +12 HP")
+                                    .icon(ListIcon {
+                                        texture: None,
+                                        edge: color::LINE,
+                                    })
+                                    .wrap(),
+                            );
                         });
                 });
             });

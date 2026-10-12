@@ -19,6 +19,7 @@
 pub mod bars;
 pub mod button;
 pub mod checkbox;
+pub mod choice;
 pub mod empty_state;
 pub mod header;
 pub mod link;
@@ -32,13 +33,14 @@ pub mod tooltip;
 pub use bars::{class_icon, icon_tile, resource_bar};
 pub use button::{button, Button, Variant};
 pub use checkbox::{checkbox, Checkbox};
+pub use choice::ChoiceTile;
 pub use empty_state::empty_state;
 pub use header::{nav_cluster, screen_header, Header, Nav, NavAction};
 pub use link::{click_hint, link, link_with, paint_icon, secondary_click_chrome_hint};
 pub use list_row::{list_row, ListIcon, ListRow};
 pub use modal::{Modal, ModalResponse};
 pub use panel::{divider, panel, panel_header, section_label};
-pub use stat_rows::stat_rows;
+pub use stat_rows::{stat_row, stat_rows};
 pub use tabs::{chip, tabs, Chip, Tab};
 pub use tooltip::{hint_line, tooltip_frame, Tooltip};
 

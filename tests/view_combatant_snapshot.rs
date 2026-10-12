@@ -21,10 +21,9 @@
 //!
 //! Fidelity caveat, shared with the other egui snapshot loops: kittest has no
 //! Bevy textures, so the class icon is absent and every ability, item and pet
-//! icon renders as its placeholder tile (or, for equipment rows, no icon at
-//! all). Fonts are the client's own stack (`arenasim::ui::install`), so layout,
-//! spacing, colour, type and copy iterate faithfully; icon art still needs the
-//! client.
+//! icon renders as the kit's fallback tile. Fonts are the client's own stack
+//! (`arenasim::ui::install`), so layout, spacing, colour, type and copy
+//! iterate faithfully; icon art still needs the client.
 
 use egui_kittest::Harness;
 
@@ -40,7 +39,7 @@ use arenasim::ui::widgets::Nav;
 
 /// Tall enough that the whole sheet — header, stats and kit, the class's
 /// strategic panel and every equipment row — fits without scrolling.
-const SIZE: [f32; 2] = [1280.0, 1720.0];
+const SIZE: [f32; 2] = [1280.0, 1820.0];
 
 /// A 2v2: Warrior + Priest against Mage + Warlock, so both views below have a
 /// filled enemy team (the Warlock's curse panel draws one row per enemy).
