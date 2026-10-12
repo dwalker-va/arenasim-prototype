@@ -5,22 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gauntlet Prototype</title>
 <!--
-  AS-255: a click-through of one Gauntlet run with talents, from
+  AS-255: a click-through of Gauntlet runs from
   docs/design/proposals/2026-10-11-talents-and-gauntlet.md.
 
   Everything here is MOCK. The "fight" is a scripted stand-in for PlayMatch, not
-  the sim: its outcome is a weighted coin flip (gear, talent points and the
-  answers your Prepare settings give) so the loop can be felt end to end.
+  the sim: its outcome is a coin flip weighted by the two sides' budgets
+  (starting kit + talents + gear) and the answers your Prepare settings give.
 
-  What is real data: the Warlock and Priest trees are the proposal's (section 5),
-  with its tier gates (0/2/4/6 points in the tree), ranks and prerequisites. The
-  draft pool is the proposal's minimum slice (Warlock, Priest, Rogue, Paladin).
-  The Rogue and Paladin trees are not designed yet, so in this prototype their
-  points become item budget, as the proposal does for opponents without a tree.
+  What follows the proposal:
+  - the caps: 2 talent points at the draft, +1 after every match up to 8, and one
+    reward pick per combatant per match up to 6 (section 7.2);
+  - the Warlock and Priest mock trees (section 5), tier gates 0/2/3/5;
+  - the Gauntlet (ilvl 78) and Champion (ilvl 92) tiers, Champion offers only
+    after a win at 1/3, and the Champion trinkets (section 6);
+  - opponents scaling with wins to budget parity, and the six difficulty levels
+    (sections 7.3 and 8);
+  - draft slots and the renown board (section 9). The profile is kept in this
+    browser's localStorage; the menu has prototype-only buttons to record a clear
+    or reset it.
+  The draft pool is the slice's four classes. The Rogue and Paladin trees are not
+  designed yet, so their points become item budget, as for opponents without a tree.
 
   Icons: class and ability art is read from the checkout by relative path (open
-  this file from docs/design/benches/ inside the repo); talent art the repo does
-  not ship falls back to Wowhead's icon CDN, then to initials.
+  this file from docs/design/benches/ inside the repo); art the repo does not ship
+  falls back to Wowhead's icon CDN, then to initials.
 
   The look is deliberately neutral: the screens' visual language belongs to the
   UI design system (AS-251). Judge the FLOW and the decisions, not the styling.
@@ -123,7 +131,7 @@ select{background:var(--panel2);color:var(--text);border:1px solid var(--line);b
 <div class="wrap">
   <header class="top">
     <h1>ArenaSim · Gauntlet prototype</h1>
-    <div class="note">Mock click-through for AS-255. Fights are a scripted stand-in, not the sim. The Warlock and Priest trees are the proposal's. Judge the flow and the decisions, not the styling.</div>
+    <div class="note">Mock click-through for AS-255. Fights are a scripted stand-in, not the sim. Talents, gear tiers, difficulty and renown follow the proposal. Judge the flow and the decisions, not the styling.</div>
   </header>
   <main id="app"></main>
 </div>
@@ -173,9 +181,9 @@ const CHOICES = {
   Priest:[],
 };
 
-// ---- Talent trees (proposal section 5). Tier gates: 0 / 2 / 4 / 6 points in the tree.
+// ---- Talent trees (proposal section 5, mocks). Tier gates: 0 / 2 / 3 / 5 points in the tree.
 // node: [id, name, tier(1-4), column(0-2), maxRank, prereq [id,rank]|null, icon, kind, per-rank text, acts-in-fight threat line|null]
-const GATE = {1:0, 2:2, 3:4, 4:6};
+const GATE = {1:0, 2:2, 3:3, 4:5};
 const TREES = {
   Warlock:{
     Affliction:[
@@ -232,36 +240,123 @@ const TREES = {
 };
 // Reference builds (spend order) that authored opponents are cut from.
 const REF = {
-  Warlock:["ImprovedDrainLife","ImprovedDrainLife","ImprovedCurseOfAgony","ImprovedCurseOfAgony","Nightfall","AmplifyCurse","SiphonLife","Nightfall","ShadowMastery"],
-  Priest:["SpiritualHealing","SpiritualHealing","HolySpecialization","HolySpecialization","Inspiration","BlessedRecovery","HolyNova","Inspiration","SpiritOfRedemption"],
+  Warlock:["ImprovedDrainLife","ImprovedDrainLife","Nightfall","SiphonLife","AmplifyCurse","ShadowMastery","ImprovedCurseOfAgony","Nightfall"],
+  Priest:["SpiritualHealing","SpiritualHealing","Inspiration","HolyNova","HolySpecialization","SpiritOfRedemption","BlessedRecovery","HolySpecialization"],
 };
 const NODE = {};
 for(const cls in TREES) for(const tree in TREES[cls]) for(const n of TREES[cls][tree]) NODE[n[0]] = {id:n[0],name:n[1],tier:n[2],col:n[3],max:n[4],req:n[5],icon:n[6],kind:n[7],text:n[8],threat:n[9],tree,cls};
 
-// ---- Gear rewards ------------------------------------------------------------
-const GEAR = {
-  "plate-ap":[["Warlord's Crown",75,"Head","inv_helmet_72","+18 HP +12 AP +4% crit"],["Warlord's Breastplate",75,"Chest","inv_chest_plate16","+24 HP +10 AP +3% crit"],["Warlord's Spaulders",71,"Shoulders","inv_shoulder_34","+14 HP +8 AP +2% crit"]],
-  "plate-sp":[["Judgement Crown",75,"Head","inv_helmet_05","+18 HP +12 SP +16 mana"],["Judgement Breastplate",75,"Chest","inv_chest_chain_11","+20 HP +10 SP +0.5 regen"],["Judgement Gauntlets",73,"Hands","inv_gauntlets_29","+12 HP +8 SP +1% crit"]],
-  "leather-ap":[["Deathdealer Cowl",73,"Head","inv_helmet_41","+16 HP +12 AP +4% crit"],["Deathdealer Tunic",73,"Chest","inv_chest_cloth_07","+18 HP +10 AP +4% crit"],["Fang of the Viper",73,"Main Hand","inv_sword_48","+6 AP +3% crit"]],
-  "cloth":[["Arcanist Crown",73,"Head","inv_helmet_53","+10 HP +12 SP +20 mana"],["Arcanist Robes",73,"Chest","inv_chest_cloth_03","+12 HP +14 SP +20 mana"],["Arcanist Leggings",73,"Legs","inv_pants_08","+10 HP +10 SP +0.5 regen"],["Wand of the Invoker",71,"Ranged","inv_wand_1h_stratholme_d_01","+8 SP +10 mana"],["Arcanist Mantle",71,"Shoulders","inv_shoulder_02","+8 HP +8 SP +12 mana"]],
-  "acc-ap":[["Cloak of Conquest",70,"Back","inv_misc_cape_17","+12 HP +4 AP +1% crit"],["Pendant of Might",70,"Neck","inv_jewelry_necklace_09","+8 AP +2% crit"]],
-  "acc-sp":[["Cloak of Wisdom",70,"Back","inv_misc_cape_18","+8 HP +6 SP +10 mana"],["Ring of Arcane Insight",70,"Ring","inv_jewelry_ring_40","+8 SP +10 mana"],["Pendant of Clarity",70,"Neck","inv_jewelry_talisman_07","+6 SP +0.5 regen"],["Talisman of Ephemeral Power",70,"Trinket","inv_misc_root_02","+20 HP +1.5 regen"],["Ring of Fortitude",70,"Ring","inv_jewelry_ring_05","+16 HP"]],
+// ---- Gear (proposal section 6) -----------------------------------------------
+// Simplified: one trinket slot, and offers drawn only from the slots where a pick is felt.
+// Budget = item level x 0.75 x slot multiplier. Starting kit 58, Gauntlet 78, Champion 92.
+const ILVL = {start:58, gauntlet:78, champion:92};
+const SLOT_MULT = {Head:1.0, Chest:1.0, Legs:0.875, Shoulders:0.75, Hands:0.75, Feet:0.75, Weapon:1.0, Trinket:0.5625};
+const FELT_SLOTS = Object.keys(SLOT_MULT);
+const KIT_BUDGET = 334;   // a combatant's starting kit, about the default Warlock's
+const ARMOR = { // [stat, Gauntlet set name, Champion set name]
+  Warlock:["SP","Arcanist","Plagueheart"], Priest:["SP","Arcanist","Faith"], Mage:["SP","Arcanist","Netherwind"],
+  Paladin:["SP","Judgement","Redemption"], Rogue:["AP","Deathdealer","Bloodfang"], Warrior:["AP","Warlord's","Dreadnaught"],
+  Hunter:["AP","Giantstalker","Dragonstalker"], Shaman:["SP","Ten Storms","Earthshatter"], Druid:["SP","Wildheart","Stormrage"],
 };
-const SLOTS_PER_COMBATANT = 14, START_ILVL = 57, MAX_WINS = 7, MAX_LOSSES = 3;
-const MAPS = ["Basic Arena","Nagrand Arena","Twin Pillars"];
-// The authored ladder: one or two opponents per tier (index = tier-1).
-const LADDER = [
-  [["Gate Rats",["Warrior","Priest"]]],
-  [["The Dustcloaks",["Rogue","Druid"]]],
-  [["Ashen Pair",["Mage","Shaman"]],["Cinder Pact",["Mage","Priest"]]],
-  [["Thornwatch",["Warlock","Priest"]]],
-  [["Stormhold Duo",["Hunter","Paladin"]],["Greycloaks",["Hunter","Priest"]]],
-  [["The Gilded Fangs",["Rogue","Priest"]]],
-  [["Champions of the Ring",["Warrior","Paladin"]]],
+const SLOT_WORD = {Head:"Crown",Chest:"Robes",Legs:"Leggings",Shoulders:"Mantle",Hands:"Gloves",Feet:"Boots",Weapon:"Weapon",Trinket:"Token"};
+const SLOT_ICON = {Head:"inv_helmet_53",Chest:"inv_chest_cloth_03",Legs:"inv_pants_08",Shoulders:"inv_shoulder_02",Hands:"inv_gauntlets_04",Feet:"inv_boots_cloth_03",Weapon:"inv_staff_06",Trinket:"inv_misc_token_argentdawn2"};
+// Champion trinkets (section 6.3): [name, icon, effect line, who can use it, threat line]
+const CHAMPION_TRINKETS = [
+  ["Medallion of the Alliance","inv_jewelry_trinketpvp_01","On use: breaks every stun, fear, polymorph, root and slow on you. Once a match.","any","Medallion: breaks your first stun or fear"],
+  ["Talisman of Ephemeral Power","inv_misc_stonetablet_11","On use: +40 spell power for 15s. 45s cooldown.","SP","Talisman: a spell power burst at the kill window"],
+  ["Earthstrike","spell_nature_abolishmagic","On use: +70 attack power for 20s. 60s cooldown.","AP","Earthstrike: an attack power burst"],
+  ["Diamond Flask","inv_drink_01","On use: a heal over time and +attack power for 30s. Once a match.","any",null],
+  ["Hand of Justice","inv_jewelry_talisman_01","Equip: +attack power; 5% chance on a melee hit of an extra swing.","AP",null],
+  ["Darkmoon Card: Blue Dragon","inv_misc_ticket_tarot_bluedragon_01","Equip: 5% chance on a cast of +mana regen for 15s.","SP",null],
 ];
-const AI_BY_TIER = ["Legacy","Legacy","Legacy","Legacy","TeamPlan","TeamPlan","TeamPlan"];
+function slotBudget(slot,lvl){return lvl*0.75*SLOT_MULT[slot]}
+function statLine(cls,budget){const st=ARMOR[cls][0];return `+${Math.round(budget*0.6/1.5)} ${st} +${Math.round(budget*0.4)} HP`}
+function currentIlvl(c,slot){const g=c.gear[slot];return g?g.ilvl:ILVL.start}
+function makeOffer(c,slot,tier){
+  const lvl = ILVL[tier], gain = slotBudget(slot,lvl)-slotBudget(slot,currentIlvl(c,slot));
+  const [st,gset,cset] = ARMOR[c.cls];
+  if(tier==="champion" && slot==="Trinket"){
+    const ok = CHAMPION_TRINKETS.filter(t=>(t[3]==="any"||t[3]===st) && !Object.values(c.gear).some(g=>g.name===t[0]));
+    const t = ok[Math.floor(rng()*ok.length)];
+    return {cls:c.cls, slot, tier, ilvl:lvl, gain, name:t[0], icon:t[1], effect:t[2], threat:t[4], stats:statLine(c.cls,slotBudget(slot,lvl))};
+  }
+  return {cls:c.cls, slot, tier, ilvl:lvl, gain, name:`${tier==="champion"?cset:gset} ${SLOT_WORD[slot]}`, icon:SLOT_ICON[slot], effect:null, threat:null, stats:statLine(c.cls,slotBudget(slot,lvl))};
+}
+// Offers for one combatant: Gauntlet gear, plus one Champion offer after a win with the run's chance.
+function offersFor(c,won){
+  const n = 3 + rankOwned("FourthOffer");
+  const out = [];
+  const gauntletSlots = FELT_SLOTS.filter(s=>currentIlvl(c,s)<ILVL.gauntlet);
+  const st = ARMOR[c.cls][0];
+  const trinketsLeft = CHAMPION_TRINKETS.some(t=>(t[3]==="any"||t[3]===st) && !hasItem(c,t[0]));
+  const champSlots = FELT_SLOTS.filter(s=>currentIlvl(c,s)<ILVL.champion && (s!=="Trinket"||trinketsLeft));
+  if(won && rng() < championChance() && champSlots.length){
+    const slot = rng()<0.5 && champSlots.includes("Trinket") ? "Trinket" : champSlots[Math.floor(rng()*champSlots.length)];
+    out.push(makeOffer(c,slot,"champion"));
+  }
+  for(const s of pick(gauntletSlots.filter(s=>!out.some(o=>o.slot===s)), n-out.length)) out.push(makeOffer(c,s,"gauntlet"));
+  return out;
+}
+function gearGain(c){return Object.values(c.gear).reduce((s,g)=>s+g.gainTotal,0)}
+function talentPrice(c){let s=0;for(const id in c.ranks)s+=c.ranks[id]*(NODE[id].tier===4?22:11);return s}
+function budget(c){return KIT_BUDGET + talentPrice(c) + gearGain(c) + (c.gearPts||0)*11}
 
-// ---- Seeded RNG: a run is its seed plus its choices --------------------------
+// ---- Caps, difficulty and the profile (sections 7.2, 8, 9) -----------------------
+const POINT_CAP = 8, PICK_CAP = 6, START_POINTS = 2;
+function pointCap(){return POINT_CAP + rankOwned("DeeperTraining")}
+function pickCap(){return PICK_CAP + rankOwned("DeeperPockets")}
+function championChance(){return 1/3 + 0.10*rankOwned("KeenEye")}
+const LEVELS = [ // [name, extra picks, extra Champion items (99 = all), opponent points rule]
+  ["Novice",-2,-99,"parity"],["Combatant",0,0,"parity"],["Challenger",1,1,"parity"],
+  ["Rival",2,2,"parity"],["Duelist",3,99,"plus1"],["Gladiator",4,99,"full"],
+];
+const RENOWN_BOARD = [ // [id, name, effect, ranks, kind, needs a clear at level index]
+  ["FourthOffer","Fourth offer","4 reward offers instead of 3.",1,"Choice",1],
+  ["ScoutsReport","Scout's report","The briefing shows the next two opponents.",1,"Information",1],
+  ["Reroll","Reroll","Reroll one combatant's offers once per run, per rank.",2,"Choice",1],
+  ["KeenEye","Keen eye","Champion chance after a win +10 percentage points a rank.",2,"Power, small",2],
+  ["HeadStart","Head start","+1 starting talent point (the cap stays 8).",1,"Power, early only",2],
+  ["Quartermaster","Quartermaster","Each combatant starts with one Gauntlet item.",1,"Power, early only",3],
+  ["DeeperTraining","Deeper training","Talent point cap 8 to 9.",1,"Power, at the cap",4],
+  ["DeeperPockets","Deeper pockets","Reward pick cap 6 to 7.",1,"Power, at the cap",4],
+];
+const MAX_DRAFT_SLOTS = 6;
+function freshProfile(){return {clears:[0,0,0,0,0,0], renown:0, board:{}}}
+let P = freshProfile();
+try{ const raw = localStorage.getItem("arenasim-gauntlet-profile"); if(raw) P = Object.assign(freshProfile(), JSON.parse(raw)); }catch(e){}
+function saveProfile(){try{localStorage.setItem("arenasim-gauntlet-profile",JSON.stringify(P))}catch(e){}}
+function totalClears(){return P.clears.slice(1).reduce((a,b)=>a+b,0)}   // Novice clears earn nothing
+function draftSlots(){return Math.min(MAX_DRAFT_SLOTS, 3 + Math.min(3,totalClears()))}
+function rankOwned(id){return P.board[id]||0}
+function levelUnlocked(i){return i<=1 || P.clears[i-1]>0}
+function bestClearAt(i){return P.clears.slice(i).some(n=>n>0)}
+function recordClear(level){
+  const before = {slots:draftSlots(), renown:P.renown};
+  P.clears[level]++;
+  if(level>=1) P.renown += level>=3 ? 2 : 1;
+  saveProfile();
+  return {slotsBefore:before.slots, slotsAfter:draftSlots(), renownGained:P.renown-before.renown, unlocked: level+1<LEVELS.length && P.clears[level]===1 ? LEVELS[level+1][0] : null};
+}
+function buyNode(id){
+  const n = RENOWN_BOARD.find(x=>x[0]===id);
+  if(P.renown<1 || rankOwned(id)>=n[3] || !bestClearAt(n[5])) return;
+  P.board[id]=rankOwned(id)+1; P.renown--; saveProfile(); render();
+}
+
+const MAX_WINS = 7, MAX_LOSSES = 3;
+const MAPS = ["Basic Arena","Nagrand Arena","Twin Pillars"];
+// The authored ladder: one or two opponents per tier (index = tier-1); the AI profile is per opponent.
+const LADDER = [
+  [["Gate Rats",["Warrior","Priest"],"Legacy"]],
+  [["The Dustcloaks",["Rogue","Druid"],"Legacy"]],
+  [["Ashen Pair",["Mage","Shaman"],"Legacy"],["Cinder Pact",["Mage","Priest"],"Legacy"]],
+  [["Thornwatch",["Warlock","Priest"],"TeamPlan"]],
+  [["Stormhold Duo",["Hunter","Paladin"],"Legacy"],["Greycloaks",["Hunter","Priest"],"TeamPlan"]],
+  [["The Gilded Fangs",["Rogue","Priest"],"Legacy"]],
+  [["Champions of the Ring",["Warrior","Paladin"],"Legacy"]],
+];
+
+// ---- Seeded RNG: offers and opponents come from the run seed -----------------------
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
 let rng = Math.random;
 function pick(arr,n){const a=arr.slice(),out=[];while(out.length<n&&a.length){out.push(a.splice(Math.floor(rng()*a.length),1)[0])}return out}
@@ -271,6 +366,7 @@ function hasTree(cls){return !!TREES[cls]}
 function rankOf(c,id){return (c.ranks[id]||0)+(c.pending.filter(p=>p===id).length)}
 function pointsInTree(c,tree){let s=0;for(const id in NODE){if(NODE[id].cls===c.cls&&NODE[id].tree===tree)s+=rankOf(c,id)}return s}
 function spentTotal(c){return Object.values(c.ranks).reduce((a,b)=>a+b,0)}
+function earnedTotal(c){return spentTotal(c)+c.unspent+(c.gearPts||0)}
 function available(c){return c.unspent - c.pending.length}
 // Why a node cannot take a point now, or null if it can.
 function blocker(c,id){
@@ -284,44 +380,56 @@ function blocker(c,id){
 }
 function knows(c,id){return (c.ranks[id]||0)>0}
 function spec(c){
-  if(!hasTree(c.cls)) return {label:spentTotal(c)?`${spentTotal(c)} pts as gear`:"",short:""};
+  if(!hasTree(c.cls)) return {label:(c.gearPts||0)?`${c.gearPts} pts as gear`:"",short:""};
   const trees=Object.keys(TREES[c.cls]);
   const pts=trees.map(t=>{let s=0;for(const id in c.ranks)if(NODE[id].tree===t)s+=c.ranks[id];return s});
   const total=pts.reduce((a,b)=>a+b,0);
   if(!total) return {label:"No talents yet",short:"0/0/0"};
-  const top=trees[pts.indexOf(Math.max(...pts))];
-  return {label:`${top} ${c.cls}`,short:pts.join("/")};
+  const sorted=pts.slice().sort((a,b)=>b-a);
+  const top=trees[pts.indexOf(sorted[0])];
+  const hybrid = sorted[0]===sorted[1];
+  return {label:hybrid?`${trees[pts.indexOf(sorted[0])]}-${trees[pts.lastIndexOf(sorted[1])]} hybrid`:`${top} ${c.cls}`,short:pts.join("/")};
 }
-// The talent nodes that act in a fight (grants, procs, mechanics): the frame icons.
 function actingNodes(c){return Object.keys(c.ranks).filter(id=>c.ranks[id]>0&&["Grant","Proc","Mechanic","Widens choice"].includes(NODE[id].kind))}
-// A combatant's options for a per-match choice, filtered by its talents.
 function optionsFor(c,ch){return ch.opts.filter(o=>!o[1]||knows(c,o[1])).map(o=>o[0])}
+function hasItem(c,name){return Object.values(c.gear).some(g=>g.name===name)}
 
 // ---- State ------------------------------------------------------------------
 let S = null, saved = null;
-function newRun(seed){
+function newRun(seed, level){
   seed = seed ?? Math.floor(Math.random()*1e9);
   rng = mulberry32(seed);
-  const offer = pick(SLICE_POOL,3);   // two healers in a pool of four: any three include one
-  S = {seed, offer, draft:[], team:[], wins:0, losses:0, history:[], prep:{kill:1,cc:0}, screen:"draft", sel:null, offers:null, opp:null};
+  const offer = pick(SLICE_POOL, Math.min(draftSlots(), SLICE_POOL.length));
+  S = {seed, level: level ?? 1, offer, draft:[], team:[], wins:0, losses:0, history:[], prep:{kill:1,cc:0}, screen:"draft", sel:{}, offers:null, opp:null, lastWon:false, rerolls:rankOwned("Reroll"), clearResult:null};
   render();
 }
-function ilvl(c){return (START_ILVL*(SLOTS_PER_COMBATANT-c.upgrades.length)+c.upgrades.reduce((s,u)=>s+u[1],0))/SLOTS_PER_COMBATANT}
 function matchNo(){return S.wins+S.losses+1}
-function opponent(){
-  if(S.opp && S.opp.match===matchNo()) return S.opp;
-  const tier = Math.min(S.wins, 6);
-  const choices = LADDER[tier];
-  // A second opponent of the same tier after a loss at that tier, when the ladder has one.
-  const lostHere = S.history.filter(h=>h.tier===tier&&!h.won).length;
-  const [name,classes] = choices[Math.min(lostHere, choices.length-1)];
-  const pts = tier+1;   // tier t carries t points a combatant
-  const builds = classes.map(cls=>{
-    const c={cls,ranks:{},pending:[],unspent:0};
+function oppPoints(t){const rule=LEVELS[S.level][3];if(rule==="full")return 8;return Math.min(t+1+(rule==="plus1"?1:0),8)}
+function oppGear(t){
+  const lv=LEVELS[S.level];
+  const picks=Math.max(0,t-1+lv[1]);
+  const champs=Math.max(0,Math.min(picks, lv[2]>=99?picks:Math.floor((t-1)/3)+lv[2]));
+  return {picks,champs};
+}
+function opponentAt(tier, lostHere){
+  const choices = LADDER[tier-1];
+  const [name,classes,ai] = choices[Math.min(lostHere, choices.length-1)];
+  const pts = oppPoints(tier), g = oppGear(tier);
+  const builds = classes.map((cls,i)=>{
+    const c={cls,ranks:{},pending:[],unspent:0,gear:{},gearPts:hasTree(cls)?0:pts};
     if(REF[cls]) for(const id of REF[cls].slice(0,pts)) c.ranks[id]=(c.ranks[id]||0)+1;
+    // Their first Champion item is a trinket: the gear a briefing can name.
+    if(g.champs>0){const st=ARMOR[cls][0];const t=CHAMPION_TRINKETS.filter(x=>x[3]==="any"||x[3]===st)[(tier+i)%2];c.gear.Trinket={name:t[0],icon:t[1],effect:t[2],threat:t[4],tier:"champion",ilvl:ILVL.champion,gainTotal:0}}
+    c.oppGearBudget = g.picks*12 + g.champs*10;
     return c;
   });
-  S.opp = {match:matchNo(), tier, name, classes, builds, pts, ai:AI_BY_TIER[tier], map:MAPS[(S.wins+S.losses)%3], ilvl:(START_ILVL + tier*0.8).toFixed(1)};
+  return {tier, name, classes, builds, pts, picks:g.picks, champs:g.champs, ai, map:MAPS[(tier+lostHere)%3]};
+}
+function opponent(){
+  if(S.opp && S.opp.match===matchNo()) return S.opp;
+  const tier = Math.min(S.wins, 6)+1;
+  const lostHere = S.history.filter(h=>h.tier===tier&&!h.won).length;
+  S.opp = Object.assign(opponentAt(tier,lostHere), {match:matchNo()});
   return S.opp;
 }
 function prepFor(c,key){const ch=(CHOICES[c.cls]||[]).find(x=>x.key===key);const opts=optionsFor(c,ch);const v=S.prep[c.cls+"."+key];return opts.includes(v)?v:opts[0]}
@@ -364,6 +472,8 @@ function answersFor(opp){
     if(aura==="Concentration Aura"&&(theirs("Shaman")||theirs("Rogue"))) out.push("Concentration Aura shortens their interrupts' lockouts");
     if(aura==="Devotion Aura"&&melee) out.push("Devotion Aura blunts their melee");
   }
+  const stunners=opp.classes.filter(c=>["Rogue","Paladin","Warlock","Priest","Hunter","Mage","Druid"].includes(c));
+  for(const c of S.team) if(hasItem(c,"Medallion of the Alliance")&&stunners.length) out.push(`Your ${c.cls}'s Medallion breaks their ${stunners[0]}'s crowd control once`);
   return {out,miss};
 }
 
@@ -376,43 +486,61 @@ function classIcon(cls,size=""){
   return `<img class="ico ${size}" style="border-color:${c.col}" alt="${cls}" src="${ICON_ROOT}icons/classes/${cls.toLowerCase()}.png" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'ico ${size}',textContent:'${cls[0]}',style:'background:${c.col}'}))">`;
 }
 function abilityIcon(file){return `<img class="ico sm" alt="" src="${ICON_ROOT}icons/abilities/${file}.jpg" onerror="this.style.visibility='hidden'">`}
-// Talent art: the checkout first, Wowhead's CDN second, initials last.
-function talentIcon(id,size="sm"){
-  const n=NODE[id];
-  return `<img class="ico ${size}" alt="${esc(n.name)}" title="${esc(n.name)}" src="${ICON_ROOT}icons/abilities/${n.icon}.jpg" onerror="if(!this.dataset.cdn){this.dataset.cdn=1;this.src='${CDN}${n.icon}.jpg'}else{this.replaceWith(Object.assign(document.createElement('span'),{className:'ico ${size}',textContent:'${initials(n.name)}',style:'background:#8788EE'}))}">`;
+// Art: the checkout first, Wowhead's CDN second, initials last.
+function artIcon(dir,file,label,size,bg){
+  return `<img class="ico ${size}" alt="${esc(label)}" title="${esc(label)}" src="${ICON_ROOT}icons/${dir}/${file}.jpg" onerror="if(!this.dataset.cdn){this.dataset.cdn=1;this.src='${CDN}${file}.jpg'}else{this.replaceWith(Object.assign(document.createElement('span'),{className:'ico ${size}',textContent:'${initials(label)}',style:'background:${bg}'}))}">`;
 }
-function itemIcon(file){return `<img class="ico" alt="" src="${ICON_ROOT}icons/items/${file}.jpg" onerror="this.style.visibility='hidden'">`}
+function talentIcon(id,size="sm"){return artIcon("abilities",NODE[id].icon,NODE[id].name,size,"#8788EE")}
+function itemIcon(g,size=""){return artIcon("items",g.icon,g.name,size,g.tier==="champion"?"#a335ee":"#0070dd")}
 function pips(){
   let w="",l="";
   for(let i=0;i<MAX_WINS;i++) w+=`<span class="pip ${i<S.wins?"w":""}" title="win ${i+1}"></span>`;
   for(let i=0;i<MAX_LOSSES;i++) l+=`<span class="pip ${i<S.losses?"l":""}" title="loss ${i+1}"></span>`;
-  return `<div class="record"><span>Wins</span><span class="pips">${w}</span><span>Losses</span><span class="pips">${l}</span><span class="note">Match ${matchNo()} · run seed ${S.seed}</span></div>`;
+  return `<div class="record"><span>Wins</span><span class="pips">${w}</span><span>Losses</span><span class="pips">${l}</span><span class="note">Match ${matchNo()} · ${LEVELS[S.level][0]} · run seed ${S.seed}</span></div>`;
 }
 function specLine(c){const s=spec(c);return s.label?`<div class="spec">${esc(s.label)}${s.short?` · ${s.short}`:""}</div>`:""}
+function picksTaken(c){return c.picks}
 function teamStrip(){
   return `<div class="grid g2">${S.team.map(c=>`
     <div class="hstack">${classIcon(c.cls,"lg")}<div style="min-width:0"><div class="title" style="color:${CLASSES[c.cls].col}">${c.cls} ${c.unspent?`<span class="tag pts">${c.unspent} point${c.unspent>1?"s":""} to spend</span>`:""}</div>
     ${specLine(c)}
-    <div class="meta">avg ilvl ${ilvl(c).toFixed(1)} · ${c.upgrades.length} upgrade${c.upgrades.length===1?"":"s"}</div>
-    <div class="row" style="gap:4px;margin-top:4px">${actingNodes(c).map(id=>talentIcon(id)).join("")}${c.upgrades.map(u=>`<img class="ico sm" title="${esc(u[0])}" src="${ICON_ROOT}icons/items/${u[3]}.jpg" alt="">`).join("")}</div></div></div>`).join("")}</div>`;
+    <div class="meta">${earnedTotal(c)}/${pointCap()} points · ${c.picks}/${pickCap()} picks · budget ${Math.round(budget(c))} (+${Math.round(100*(budget(c)/KIT_BUDGET-1))}%)</div>
+    <div class="row" style="gap:4px;margin-top:4px">${actingNodes(c).map(id=>talentIcon(id)).join("")}${Object.values(c.gear).map(g=>itemIcon(g,"sm")).join("")}</div></div></div>`).join("")}</div>`;
 }
-function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",5000)}
-function showReplay(i){toast("In the client this opens the match with --replay. Its whole record: "+S.history[i].replay)}
-function go(screen){S.screen=screen;S.sel=null;render();if(window.scrollTo)window.scrollTo(0,0)}
+function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",6000)}
+function showRecord(i){toast("A version-stamped match record: exact replay on this build; on another build, its stored result and combat log, with a labelled re-simulation. "+S.history[i].record)}
+function go(screen){S.screen=screen;S.sel={};render();if(window.scrollTo)window.scrollTo(0,0)}
 
 // ---- Screens ----------------------------------------------------------------
+let MENU_LEVEL = 1;
 function render(){
-  if(!S){ $app.innerHTML = `<div class="menu"><h2>ArenaSim</h2>
-      ${saved?`<button class="btn primary" onclick="S=saved;saved=null;go('hub')">Continue run (${saved.wins}-${saved.losses})</button>`:""}
-      <button class="btn ${saved?"":"primary"}" onclick="saved=null;newRun()">${saved?"Abandon and start a new run":"Gauntlet"}</button>
-      <button class="btn" disabled title="The existing configure-match sandbox, with a talent panel">Custom Match</button>
-      <button class="btn" disabled>Encyclopedia</button><button class="btn" disabled>Options</button>
-      <p class="note">Gauntlet: draft two classes, grow their talents a point a match, and win as many as you can before your third loss.</p></div>`; return; }
+  if(!S){ $app.innerHTML = menu(); return; }
   ({draft,hub,talents,prepare,fight:drawFight,result,reward,end})[S.screen]();
+}
+function menu(){
+  if(window.__renown) return renown();
+  return `<div class="menu"><h2>ArenaSim</h2>
+      ${saved?`<button class="btn primary" onclick="S=saved;saved=null;go('hub')">Continue run (${saved.wins}-${saved.losses})</button>`:""}
+      <label class="f" style="width:280px">Difficulty<select onchange="MENU_LEVEL=+this.value;render()">${LEVELS.map((l,i)=>`<option value="${i}" ${i===MENU_LEVEL?"selected":""} ${levelUnlocked(i)?"":"disabled"}>${l[0]}${levelUnlocked(i)?"":` (clear ${LEVELS[i-1][0]})`}${P.clears[i]?` · cleared ${P.clears[i]}x`:""}</option>`).join("")}</select></label>
+      <button class="btn ${saved?"":"primary"}" onclick="saved=null;newRun(null,MENU_LEVEL)">${saved?"Abandon and start a new run":"Gauntlet"}</button>
+      <button class="btn" onclick="window.__renown=true;render()">Renown${P.renown?` (${P.renown} to spend)`:""}</button>
+      <button class="btn" disabled title="The configure-match sandbox, with a talent panel">Custom Match</button>
+      <p class="note">Gauntlet: draft two classes, grow them a talent point and a reward pick a match, and win seven before your third loss. Draft slots: ${draftSlots()} (the slice's pool of ${SLICE_POOL.length} caps the offer at ${Math.min(draftSlots(),SLICE_POOL.length)}).</p>
+      <p class="note">Prototype only: <button class="btn" onclick="recordClear(MENU_LEVEL);render();toast('Recorded a clear at '+LEVELS[MENU_LEVEL][0])">Record a clear at ${LEVELS[MENU_LEVEL][0]}</button> <button class="btn" onclick="P=freshProfile();saveProfile();MENU_LEVEL=1;render()">Reset profile</button></p></div>`;
+}
+// The Renown screen: the encyclopedia section's content (section 9.3), plus spending.
+function renown(){
+  return `<h2>Renown</h2><p class="sub">Earned by clearing runs: 1 a clear, 2 at Rival or above. Choice and information first; power only with clears at higher levels. This list is what the encyclopedia's Renown section shows.</p>
+  <div class="grid g2"><div class="panel"><h3>Draft slots</h3>
+    <p>${[3,4,5,6].map(n=>`<span class="tag ${draftSlots()>=n?"pts":""}">${n}</span>`).join(" ")} · one more for each of your first three clears (Combatant or above).</p>
+    <h3 style="margin-top:12px">Titles and difficulty</h3>${LEVELS.map((l,i)=>`<div class="meta">${l[0]}: ${P.clears[i]?`<b style="color:var(--gold)">cleared ${P.clears[i]}x</b>`:levelUnlocked(i)?"unlocked":`locked: clear ${LEVELS[i-1][0]}`}</div>`).join("")}</div>
+  <div class="panel"><h3>Renown board <span class="tag pts">${P.renown} to spend</span></h3>
+    ${RENOWN_BOARD.map(n=>{const own=rankOwned(n[0]),can=P.renown>0&&own<n[3]&&bestClearAt(n[5]);return `<div class="threat"><span style="flex:1"><b>${n[1]}</b> <span class="kind">${n[4]}</span> ${own}/${n[3]}<br><span class="meta">${n[2]} Needs a clear at ${LEVELS[n[5]][0]} or above.</span></span><button class="btn" ${can?"":"disabled"} onclick="buyNode('${n[0]}')">Spend 1</button></div>`}).join("")}</div></div>
+  <div class="actions"><button class="btn primary" onclick="window.__renown=false;render()">Back</button></div>`;
 }
 
 function draft(){
-  $app.innerHTML = `<h2>Draft your team</h2><p class="sub">Pick two of the three offered. The first slice drafts from the four classes with talent trees, so every offer has a healer. Each starts with 1 talent point.</p>
+  $app.innerHTML = `<h2>Draft your team</h2><p class="sub">Pick two of the ${S.offer.length} offered. The first slice drafts from the four classes with talent trees. Each starts with ${START_POINTS+rankOwned("HeadStart")} talent points.</p>
   <div class="grid g3">${S.offer.map(c=>`<button class="card ${S.draft.includes(c)?"sel":""}" onclick="toggleDraft('${c}')">
     <div class="hstack">${classIcon(c,"lg")}<div><div class="title" style="color:${CLASSES[c].col}">${c}</div>
     <div class="meta">${CLASSES[c].role}</div></div></div>
@@ -422,29 +550,37 @@ function draft(){
   <button class="btn primary" ${S.draft.length===2?"":"disabled"} onclick="confirmDraft()">Start run</button></div>`;
 }
 function toggleDraft(c){const i=S.draft.indexOf(c);if(i>=0)S.draft.splice(i,1);else if(S.draft.length<2)S.draft.push(c);render()}
-function confirmDraft(){S.team=S.draft.map(cls=>({cls,upgrades:[],ranks:{},pending:[],unspent:1,gearPts:0}));go("hub")}
+function confirmDraft(){
+  S.team=S.draft.map(cls=>({cls,gear:{},picks:0,ranks:{},pending:[],unspent:START_POINTS+rankOwned("HeadStart"),gearPts:0}));
+  if(rankOwned("Quartermaster")) for(const c of S.team){const o=makeOffer(c,"Chest","gauntlet");c.gear.Chest=Object.assign(o,{gainTotal:o.gain})}
+  go("hub");
+}
 
 function intel(opp){
   const {out,miss} = answersFor(opp);
   const talentThreats = opp.builds.flatMap(b=>actingNodes(b).filter(id=>NODE[id].threat).map(id=>[b.cls,id]));
+  const gearThreats = opp.builds.flatMap(b=>Object.values(b.gear).filter(g=>g.threat).map(g=>[b.cls,g]));
+  const next = rankOwned("ScoutsReport") && opp.tier<7 ? opponentAt(opp.tier+1,0) : null;
   return `<div class="panel"><div class="hstack" style="justify-content:space-between;flex-wrap:wrap">
-    <div><div class="meta">Next opponent · tier ${opp.tier+1} of 7 · ${opp.pts} talent point${opp.pts>1?"s":""} each</div><div class="title" style="font-size:18px;color:var(--t2)">${esc(opp.name)}</div></div>
+    <div><div class="meta">Next opponent · tier ${opp.tier} of 7 · ${opp.pts} points and ${opp.picks} picks each${opp.champs?` (${opp.champs} Champion)`:""}</div><div class="title" style="font-size:18px;color:var(--t2)">${esc(opp.name)}</div></div>
     <div class="row" style="gap:6px">${opp.classes.map(c=>classIcon(c)).join("")}</div></div>
-    <div class="meta" style="margin:6px 0 4px">${opp.classes.join(" + ")} · ${opp.map} · ${opp.ai} AI · avg ilvl ${opp.ilvl}</div>
-    <div class="meta" style="margin-bottom:8px">${opp.builds.map(b=>hasTree(b.cls)?`${b.cls}: ${spec(b).label} ${spec(b).short}`:`${b.cls}: no tree yet, ${opp.pts} pts carried as gear`).join(" · ")}</div>
+    <div class="meta" style="margin:6px 0 4px">${opp.classes.join(" + ")} · ${opp.map} · ${opp.ai} AI</div>
+    <div class="meta" style="margin-bottom:8px">${opp.builds.map(b=>hasTree(b.cls)?`${b.cls}: ${esc(spec(b).label)} ${spec(b).short}`:`${b.cls}: no tree yet, ${opp.pts} pts carried as gear`).join(" · ")}</div>
     ${opp.classes.flatMap(c=>THREATS[c].map(t=>`<div class="threat">${abilityIcon(t[0])}<span><b style="color:${CLASSES[c].col}">${c}:</b> ${t[1]}</span></div>`)).join("")}
     ${talentThreats.map(([c,id])=>`<div class="threat">${talentIcon(id)}<span><b style="color:${CLASSES[c].col}">${c} (talent):</b> ${esc(NODE[id].threat)}</span></div>`).join("")}
+    ${gearThreats.map(([c,g])=>`<div class="threat">${itemIcon(g,"sm")}<span><b style="color:${CLASSES[c].col}">${c} (gear):</b> ${esc(g.threat)}</span></div>`).join("")}
     <div style="margin-top:10px"><div class="meta">Your answers with the current Prepare settings</div>
     ${out.length?out.map(a=>`<div class="answer">+ ${esc(a)}</div>`).join(""):'<div class="note">None yet. Prepare may change that.</div>'}
-    ${miss.map(a=>`<div class="missing">- ${esc(a)}</div>`).join("")}</div></div>`;
+    ${miss.map(a=>`<div class="missing">- ${esc(a)}</div>`).join("")}</div>
+    ${next?`<div class="meta" style="margin-top:10px">Scout's report · after this: ${esc(next.name)} (${next.classes.join(" + ")})</div>`:""}</div>`;
 }
 function hub(){
   const opp = opponent();
   const unspent = S.team.reduce((s,c)=>s+c.unspent,0);
   $app.innerHTML = `<h2>The Gauntlet</h2>${pips()}<div style="height:12px"></div>
   <div class="grid g2"><div class="panel"><div class="meta" style="margin-bottom:8px">Your team</div>${teamStrip()}
-    <p class="note" style="margin-top:12px">Talents are progression: a point a match, spent once, kept for the run. Prepare is strategy: free every match.</p></div>${intel(opp)}</div>
-  <div class="actions"><button class="btn" onclick="saved=S;S=null;render();toast('Run saved. Continue it from the main menu.')">Save and exit</button>
+    <p class="note" style="margin-top:12px">Talents and gear are progression: a point and a pick each match, win or loss, up to ${pointCap()} points and ${pickCap()} picks. Prepare is strategy: free every match.</p></div>${intel(opp)}</div>
+  <div class="actions"><button class="btn" onclick="saved=S;S=null;render();toast('Run saved: its resolved state, not only its seed.')">Save and exit</button>
   <button class="btn ${unspent?"primary":""}" onclick="go('talents')">Talents${unspent?` (${unspent} to spend)`:""}</button>
   <button class="btn ${unspent?"":"primary"}" onclick="go('prepare')">Prepare</button></div>`;
 }
@@ -464,7 +600,7 @@ function treeView(c){
   const trees=Object.keys(TREES[c.cls]);
   return `<div class="panel"><div class="hstack" style="justify-content:space-between;flex-wrap:wrap">
     <h3 style="color:${CLASSES[c.cls].col}">${c.cls} <span class="spec">${esc(spec(c).label)} · ${spec(c).short}</span></h3>
-    <span class="tag pts">${available(c)} unspent${c.pending.length?` · ${c.pending.length} pending`:""}</span></div>
+    <span class="tag pts">${available(c)} unspent${c.pending.length?` · ${c.pending.length} pending`:""} · ${earnedTotal(c)}/${pointCap()} earned</span></div>
     <div class="trees">${trees.map(t=>`<div class="tree"><h4><span>${t}</span><span class="meta">${pointsInTree(c,t)} pts</span></h4>
       ${[1,2,3,4].map(tier=>`<div class="tier">${GATE[tier]?`<span class="gate">${GATE[tier]}+</span>`:""}${TREES[c.cls][t].filter(n=>n[2]===tier).map(n=>nodeBtn(c,n[0])).join("")}</div>`).join("")}
     </div>`).join("")}</div>
@@ -484,7 +620,7 @@ function bankAsGear(cls){const c=S.team.find(t=>t.cls===cls);c.gearPts+=c.unspen
 function lockIn(){for(const c of S.team){for(const id of c.pending){c.ranks[id]=(c.ranks[id]||0)+1;c.unspent--}c.pending=[]}go("hub")}
 function talents(){
   const pending=S.team.reduce((s,c)=>s+c.pending.length,0);
-  $app.innerHTML = `<h2>Talents</h2><p class="sub">One point a match for each combatant, win or loss. Tier gates open at 2, 4 and 6 points in a tree; the capstone is the double-bordered node. Points you lock in stay for the run; unspent points can be banked.</p>
+  $app.innerHTML = `<h2>Talents</h2><p class="sub">${START_POINTS} points at the draft and one after every match, win or loss, up to ${pointCap()}. Tier gates open at 2, 3 and 5 points in a tree; the capstone is the double-bordered node. Eight points buy a capstone and a splash, or tier 3 in two trees. Locked-in points stay for the run.</p>
   <div class="grid">${S.team.map(treeView).join("")}</div>
   <div class="actions"><button class="btn" onclick="for(const c of S.team)c.pending=[];go('hub')">Back</button>
   <button class="btn primary" ${pending?"":"disabled"} onclick="lockIn()">Lock in ${pending} point${pending===1?"":"s"}</button></div>`;
@@ -507,15 +643,15 @@ function prepare(){
   <div class="actions"><button class="btn" onclick="go('hub')">Back</button><button class="btn primary" onclick="startFight()">Fight</button></div>`;
 }
 
-// ---- The mock fight -----------------------------------------------------------
+// ---- The mock fight: a coin flip weighted by budget and answers -------------------
 let F=null, timer=null;
-function power(c){return ilvl(c) + spentTotal(c)*0.9 + (c.gearPts||0)*0.9}
+function oppBudget(o){return KIT_BUDGET + 11*o.pts + (o.pts>=6?11:0) + o.picks*12 + o.champs*10}
 function startFight(){
   const opp = opponent();
-  const mine = S.team.reduce((s,c)=>s+power(c),0)/2;
-  const theirs = +opp.ilvl + opp.pts*0.9;
+  const mine = S.team.reduce((s,c)=>s+budget(c),0)/2;
+  const theirs = oppBudget(opp);
   const ans = answersFor(opp).out.length;
-  const p = Math.max(.12, Math.min(.88, .62 + (mine-theirs)*.05 + ans*.05 - opp.tier*.03 + (S.prep.kill===1?.04:0)));
+  const p = Math.max(.12, Math.min(.9, .58 + (mine-theirs)/theirs*1.2 + ans*.035 + (S.prep.kill===1?.03:0)));
   const win = rng() < p;
   F = {opp, p, win, t:0, called:S.prep.kill, hp:{a:[100,100],b:[100,100]}, log:[], speed:1, calls:0};
   F.log.push(`<b>0.0s</b> Gates open on ${opp.map}.`);
@@ -536,7 +672,10 @@ function tick(){
     `${names.a[0]} casts ${KIT[names.a[0]]} on ${names.b[F.called]}.`,
     `${names.a[1]} casts ${KIT[names.a[1]]}.`,
     `${names.b[1]} casts ${KIT[names.b[1]]}.`];
-  for(const c of S.team) for(const id of actingNodes(c)) if(NODE[id].kind!=="Widens choice") lines.push(`${c.cls}: ${NODE[id].name}.`);
+  for(const c of S.team){
+    for(const id of actingNodes(c)) if(NODE[id].kind!=="Widens choice") lines.push(`${c.cls}: ${NODE[id].name}.`);
+    for(const g of Object.values(c.gear)) if(g.effect) lines.push(`${c.cls} uses ${g.name}.`);
+  }
   F.log.push(`<b>${F.t.toFixed(1)}s</b> ${esc(lines[Math.floor(rng()*lines.length)])}`);
   const done = F.hp[loserSide].some(h=>h<=0) || F.t>=60;
   if(done){
@@ -551,8 +690,8 @@ function callTarget(i){if(!F)return;F.called=i;F.calls++;F.log.push(`<b>${F.t.to
 function drawFight(){
   const frame=(c,hp,enemy,i)=>`<${enemy?"button":"div"} class="frame ${enemy?"enemy":""} ${enemy&&F.called===i?"called":""}" ${enemy?`onclick="callTarget(${i})" title="Click to call this kill target"`:""}>
     ${classIcon(c.cls,"sm")}<span style="width:62px">${c.cls}</span><span class="bar"><i style="width:${hp}%;background:${hp<35?"var(--loss)":"var(--win)"}"></i></span>
-    <span class="row" style="gap:2px">${actingNodes(c).slice(0,4).map(id=>talentIcon(id)).join("")}</span></${enemy?"button":"div"}>`;
-  $app.innerHTML = `<h2>${esc(F.opp.name)} · ${F.opp.map}</h2><p class="sub">Stand-in for PlayMatch. Talent icons on a frame are the nodes that act in the fight. Click an enemy frame to make a kill call.</p>
+    <span class="row" style="gap:2px">${actingNodes(c).slice(0,4).map(id=>talentIcon(id)).join("")}${Object.values(c.gear).filter(g=>g.effect).map(g=>itemIcon(g,"sm")).join("")}</span></${enemy?"button":"div"}>`;
+  $app.innerHTML = `<h2>${esc(F.opp.name)} · ${F.opp.map}</h2><p class="sub">Stand-in for PlayMatch. Icons on a frame are the talents and trinkets that act in the fight. Click an enemy frame to make a kill call.</p>
   <div class="panel"><div class="frames">
     <div><div class="meta" style="color:var(--t1)">Your team</div>${S.team.map((c,i)=>frame(c,F.hp.a[i],false,i)).join("")}</div>
     <div><div class="meta" style="color:var(--t2)">${esc(F.opp.name)}</div>${F.opp.builds.map((c,i)=>frame(c,F.hp.b[i],true,i)).join("")}</div></div>
@@ -562,14 +701,21 @@ function drawFight(){
   const l=document.getElementById("log"); if(l) l.scrollTop=l.scrollHeight;
 }
 const MAP_IDS = {"Basic Arena":"BasicArena","Nagrand Arena":"PillaredArena","Twin Pillars":"TwinPillars"};
+const GAME_VERSION = "0.8.0-proto", CONTENT_HASH = "c0ffee12";
 function finishFight(){
   if(F.win) S.wins++; else S.losses++;
-  const builds = S.team.map(c=>c.ranks);
-  const replay = JSON.stringify({team1:S.team.map(c=>c.cls),team2:F.opp.classes,map:MAP_IDS[F.opp.map],random_seed:S.seed+S.history.length,team1_builds:builds});
-  S.history.push({opp:F.opp.name, classes:F.opp.classes, tier:F.opp.tier, won:F.win, t:F.t, replay, specs:S.team.map(c=>spec(c).short)});
+  const record = JSON.stringify({game_version:GAME_VERSION, content_hash:CONTENT_HASH, team1:S.team.map(c=>c.cls), team2:F.opp.classes, map:MAP_IDS[F.opp.map], random_seed:S.seed+S.history.length, team1_builds:S.team.map(c=>c.ranks), team1_gear:S.team.map(c=>Object.values(c.gear).map(g=>g.name)), kill_calls:F.calls});
+  S.history.push({opp:F.opp.name, classes:F.opp.classes, tier:F.opp.tier, won:F.win, t:F.t, record, specs:S.team.map(c=>spec(c).short)});
   const over = S.wins>=MAX_WINS || S.losses>=MAX_LOSSES;
-  if(!over) for(const c of S.team) c.unspent++;   // a point after every match, win or loss
-  S.opp = null;
+  S.lastWon = F.win;
+  S.gains = {};
+  if(!over) for(const c of S.team){
+    const pt = earnedTotal(c) < pointCap(); if(pt) c.unspent++;
+    const pk = c.picks < pickCap();
+    S.gains[c.cls] = {pt, pk};
+  }
+  if(over && S.wins>=MAX_WINS) S.clearResult = recordClear(S.level);
+  S.opp = null; S.offers = null;
   go("result");
 }
 function result(){
@@ -580,41 +726,47 @@ function result(){
   <div class="panel" style="margin-top:12px"><div class="big ${won?"win":"loss"}">${won?"Victory":"Defeat"}</div>
   <div class="meta">vs ${esc(F.opp.name)} (${F.opp.classes.join(" + ")}) · ${F.t.toFixed(1)}s · ${F.calls} kill call${F.calls===1?"":"s"}</div>
   <p class="note">The real Results screen sits here unchanged: damage, healing, CC breakdown and the combat log, with each combatant's spec under its name.</p>
-  ${over?"":`<div class="panel" style="background:var(--panel2);margin-top:8px"><span class="tag pts">+1 talent point</span> for each combatant, ${won?"for the win":"even for a loss: the same tier comes again with one more point"}.</div>`}
+  ${over?"":S.team.map(c=>{const g=S.gains[c.cls];return `<div class="panel" style="background:var(--panel2);margin-top:8px"><b style="color:${CLASSES[c.cls].col}">${c.cls}</b> ${g.pt?'<span class="tag pts">+1 talent point</span>':'<span class="tag">talent points capped</span>'} ${g.pk?'<span class="tag pts">+1 reward pick</span>':'<span class="tag">reward picks capped</span>'}</div>`}).join("")}
+  ${!over&&won?'<p class="note">A win: Champion items can appear among the offers.</p>':!over?'<p class="note">A loss still pays a point and a pick, and the same tier comes again.</p>':""}
   <div class="panel" style="background:var(--panel2);margin-top:8px"><div class="meta">Later idea · rematch odds</div>
-  Twenty background replays of this matchup: your setup wins about <b>${odds}%</b>. ${won? (odds<45?"You beat the odds.":"A sound setup."): (odds>=55?"That one was the dice.":"The setup was the problem; try another answer.")}</div></div>
-  <div class="actions"><button class="btn" onclick="showReplay(${S.history.length-1})">Watch replay</button>
-  <button class="btn primary" onclick="go('${over?"end":"reward"}')">${over?"Finish run":"Continue run"}</button></div>`;
+  Twenty background re-simulations of this matchup: your setup wins about <b>${odds}%</b>. ${won? (odds<45?"You beat the odds.":"A sound setup."): (odds>=55?"That one was the dice.":"The setup was the problem; try another answer.")}</div></div>
+  <div class="actions"><button class="btn" onclick="showRecord(${S.history.length-1})">Match record</button>
+  <button class="btn primary" onclick="go('${over?"end":S.team.some(c=>S.gains[c.cls].pk)?"reward":"hub"}')">${over?"Finish run":"Continue run"}</button></div>`;
 }
 function reward(){
-  if(!S.offers){
-    const pool = [];
-    for(const c of S.team){
-      const g = CLASSES[c.cls].gear;
-      const acc = ["plate-ap","mail-ap","leather-ap"].includes(g) ? "acc-ap" : "acc-sp";
-      for(const it of GEAR[g].concat(GEAR[acc])) if(!S.team.some(t=>t.upgrades.some(u=>u[0]===it[0]))) pool.push([c.cls,it]);
-    }
-    S.offers = pick(pool,3);
-  }
-  $app.innerHTML = `<h2>Choose a reward</h2><p class="sub">${S.history.at(-1).won?"A win":"Even a loss"} earns one pick of gear. Talent points are not a reward option: they arrive every match.</p>
-  <div class="grid g3">${S.offers.map(([cls,it],i)=>`<button class="card ${S.sel===i?"sel":""}" onclick="S.sel=${i};render()">
-    <div class="hstack">${itemIcon(it[3])}<div><div class="title" style="color:#a335ee">${esc(it[0])}</div><div class="meta">ilvl ${it[1]} · ${it[2]}</div></div></div>
-    <div class="hstack">${classIcon(cls,"sm")}<span class="meta">for your ${cls}</span></div>
-    <div class="delta"><span class="up">${esc(it[4])}</span><br><span class="dn">replaces a starting ${it[2].toLowerCase()} piece (ilvl ${START_ILVL})</span></div></button>`).join("")}</div>
-  <div class="actions"><button class="btn primary" ${S.sel===null||!S.offers.length?"disabled":""} onclick="takeReward()">Take it</button>
-  ${S.offers.length?"":`<button class="btn primary" onclick="go('hub')">Nothing left to offer</button>`}</div>`;
+  if(!S.offers){S.offers={};for(const c of S.team) if(S.gains[c.cls].pk) S.offers[c.cls]=offersFor(c,S.lastWon)}
+  const ready = Object.keys(S.offers).every(cls=>S.sel[cls]!==undefined || !S.offers[cls].length);
+  $app.innerHTML = `<h2>Rewards</h2><p class="sub">One pick for each combatant, up to ${pickCap()}. ${S.lastWon?"After a win, a Champion item (purple) may be offered.":"After a loss, Gauntlet gear only."} The gain is against what the slot holds now.</p>
+  ${S.team.filter(c=>S.offers[c.cls]).map(c=>`<div class="panel" style="margin-bottom:12px"><div class="hstack" style="justify-content:space-between;flex-wrap:wrap"><h3 style="color:${CLASSES[c.cls].col}">${c.cls} · pick ${c.picks+1} of ${pickCap()}</h3>
+    ${S.rerolls>0?`<button class="btn" onclick="S.rerolls--;S.offers['${c.cls}']=offersFor(S.team.find(t=>t.cls==='${c.cls}'),S.lastWon);delete S.sel['${c.cls}'];render()">Reroll (${S.rerolls} left)</button>`:""}</div>
+    <div class="grid g3">${S.offers[c.cls].map((o,i)=>`<button class="card ${S.sel[c.cls]===i?"sel":""}" style="border-color:${S.sel[c.cls]===i?"var(--gold)":o.tier==="champion"?"#a335ee":"#2a5d9a"}" onclick="S.sel['${c.cls}']=${i};render()">
+      <div class="hstack">${itemIcon(o)}<div><div class="title" style="color:${o.tier==="champion"?"#c77dff":"#5aa0ff"}">${esc(o.name)}</div><div class="meta">${o.tier==="champion"?"Champion":"Gauntlet"} · ilvl ${o.ilvl} · ${o.slot}</div></div></div>
+      <div class="delta"><span class="up">+${Math.round(o.gain)} budget on this slot</span> · ${esc(o.stats)}${o.effect?`<br><span style="color:#c77dff">${esc(o.effect)}</span>`:""}</div></button>`).join("")}</div></div>`).join("")}
+  <div class="actions"><button class="btn primary" ${ready?"":"disabled"} onclick="takeRewards()">Take them</button></div>`;
 }
-function takeReward(){const [cls,it]=S.offers[S.sel];S.team.find(c=>c.cls===cls).upgrades.push(it);S.offers=null;go("hub")}
+function takeRewards(){
+  for(const c of S.team){
+    const offers=S.offers[c.cls]; if(!offers||!offers.length) continue;
+    const o=offers[S.sel[c.cls]], prev=c.gear[o.slot];
+    c.gear[o.slot]=Object.assign({},o,{gainTotal:(prev?prev.gainTotal:0)+o.gain});
+    c.picks++;
+  }
+  S.offers=null; go("hub");
+}
 function end(){
+  const cr = S.clearResult;
   $app.innerHTML = `<h2>Run complete</h2>${pips()}
-  <div class="panel" style="margin-top:12px"><div class="big ${S.wins>=MAX_WINS?"win":""}">${S.wins} win${S.wins===1?"":"s"}${S.wins>=MAX_WINS?" · Gauntlet cleared":""}</div>
+  <div class="panel" style="margin-top:12px"><div class="big ${S.wins>=MAX_WINS?"win":""}">${S.wins} win${S.wins===1?"":"s"}${S.wins>=MAX_WINS?` · cleared at ${LEVELS[S.level][0]}`:""}</div>
   ${teamStrip()}</div>
-  <div class="panel" style="margin-top:12px"><div class="meta">What persists: this record, these replays, and the talent paths as saved plans. No power carries into the next run.</div>
+  ${cr?`<div class="panel" style="margin-top:12px"><h3>Renown</h3>
+    <div>${cr.slotsAfter>cr.slotsBefore?`Draft slots ${cr.slotsBefore} → <b>${cr.slotsAfter}</b>. `:""}${cr.renownGained?`+${cr.renownGained} renown to spend. `:"A Novice clear earns no renown. "}${cr.unlocked?`<b>${cr.unlocked}</b> difficulty unlocked. `:""}Title: ${LEVELS[S.level][0]}.</div></div>`:
+    `<div class="panel" style="margin-top:12px"><p class="note">No clear this time: renown and draft slots come from seven wins. Nothing else is lost.</p></div>`}
+  <div class="panel" style="margin-top:12px"><div class="meta">What persists: clears, titles, renown, records and saved talent plans. No run's points or gear carry into the next.</div>
   ${S.team.filter(c=>hasTree(c.cls)).map(c=>`<div style="margin-top:6px"><b style="color:${CLASSES[c.cls].col}">${c.cls}</b> ${esc(spec(c).label)} ${spec(c).short}: ${Object.keys(c.ranks).map(id=>`${esc(NODE[id].name)} ${c.ranks[id]}`).join(", ")}</div>`).join("")}</div>
-  <div class="panel matchlist" style="margin-top:12px"><div class="meta">Every match is a seed, a config and two builds: replayable for a few hundred bytes.</div>
+  <div class="panel matchlist" style="margin-top:12px"><div class="meta">Each match keeps a version-stamped record: exact on this build, a labelled re-simulation on another.</div>
   ${S.history.map((h,i)=>`<div class="m"><span>${i+1}. <span class="${h.won?"win":"loss"}">${h.won?"W":"L"}</span> vs ${esc(h.opp)} (${h.classes.join(" + ")}) · your specs ${h.specs.filter(Boolean).join(", ")}</span>
-  <button class="btn" onclick="showReplay(${i})">Watch replay</button></div>`).join("")}</div>
-  <div class="actions"><button class="btn" onclick="S=null;render()">Main menu</button><button class="btn primary" onclick="newRun()">New run</button></div>`;
+  <button class="btn" onclick="showRecord(${i})">Match record</button></div>`).join("")}</div>
+  <div class="actions"><button class="btn" onclick="S=null;render()">Main menu</button>${P.renown?`<button class="btn" onclick="S=null;window.__renown=true;render()">Spend renown</button>`:""}<button class="btn primary" onclick="newRun(null,S.level)">New run</button></div>`;
 }
 render();
 </script>
