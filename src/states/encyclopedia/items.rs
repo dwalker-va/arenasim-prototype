@@ -23,7 +23,7 @@ use crate::states::play_match::proc_trinkets::proc_description;
 use super::search::SearchEntry;
 use super::widget;
 use super::{EncyclopediaData, Topic};
-use crate::ui::theme::{color, space, text};
+use crate::ui::theme::{color, data, space, text};
 use crate::ui::widgets::{empty_state, Chip};
 
 /// Default upper bound for the item-level filter. No current item exceeds ~75,
@@ -520,10 +520,6 @@ pub fn format_item_stats(item: &ItemConfig) -> String {
     item_stat_parts(item).join(", ")
 }
 
-/// The colour a proc's sentence is drawn in, wherever an item shows it — the
-/// tooltip here and the equipment picker's second line.
-pub const PROC_TEXT_COLOR: egui::Color32 = egui::Color32::from_rgb(170, 170, 170);
-
 /// Render a tooltip showing an item's full stat breakdown.
 pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
     ui.label(
@@ -556,7 +552,7 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
             ui.label(
                 egui::RichText::new(part)
                     .size(text::SMALL)
-                    .color(egui::Color32::from_rgb(100, 255, 100)),
+                    .color(data::ITEM_BONUS),
             );
         }
     }
@@ -573,7 +569,7 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
                 egui::RichText::new(proc_description(proc))
                     .family(body_family(ui.ctx()))
                     .size(text::SMALL)
-                    .color(PROC_TEXT_COLOR),
+                    .color(color::TEXT_MUTED),
             );
         });
     }

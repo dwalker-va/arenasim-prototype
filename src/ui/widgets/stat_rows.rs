@@ -16,20 +16,38 @@ where
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = space::XS;
         for (key, value) in rows {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(key.as_ref())
-                        .size(text::SMALL)
-                        .color(color::TEXT_MUTED),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(value.as_ref())
-                            .size(text::SMALL)
-                            .color(color::TEXT),
-                    );
-                });
-            });
+            stat_row(ui, key.as_ref(), value.as_ref(), color::TEXT);
         }
     });
+}
+
+/// One [`stat_rows`] row on its own, its value in `value_color` — a data
+/// colour when the value carries meaning (a stat equipment raised). Returns
+/// the value's response, so a caller can explain the number on hover.
+///
+/// Rows drawn this way take the block's spacing from the caller; wrap a run
+/// of them in a `ui.scope` with `item_spacing.y` at [`space::XS`], as
+/// [`stat_rows`] does.
+pub fn stat_row(
+    ui: &mut egui::Ui,
+    key: &str,
+    value: &str,
+    value_color: egui::Color32,
+) -> egui::Response {
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(key)
+                .size(text::SMALL)
+                .color(color::TEXT_MUTED),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(value)
+                    .size(text::SMALL)
+                    .color(value_color),
+            )
+        })
+        .inner
+    })
+    .inner
 }

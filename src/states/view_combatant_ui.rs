@@ -7,6 +7,11 @@
 //!
 //! Accessed by clicking a filled character slot in Configure Match.
 //!
+//! The Document template: the shared screen header, then one scrolling column
+//! of kit panels. The class's pre-match choice (opener, shout, armor, aura,
+//! pet, curses) is a row of kit choice tiles, and the item picker is a kit
+//! modal.
+//!
 //! ## Reference lives in the encyclopedia
 //!
 //! This screen EDITS a loadout; it does not document the game. Its reference
@@ -17,9 +22,9 @@
 //!
 //! Where primary click is already the EDIT — equipping an item — the reference
 //! affordance is the SECONDARY click, announced in that panel's own chrome
-//! rather than inside a borrowed tooltip. The strategic-option panels are
-//! radio selects: their icons hover to the same slim summary the kit rows
-//! show, and the kit rows are where every one of those abilities links on.
+//! rather than inside a borrowed tooltip. The pre-match choices are radio
+//! selects: their tiles hover to the same slim summary the kit rows show, and
+//! the kit rows are where every one of those abilities links on.
 
 use super::configure_match_ui::ClassIcons;
 use super::play_match::ability_config::AbilityDefinitions;
@@ -43,7 +48,7 @@ use bevy_egui::{egui, EguiContexts};
 use std::collections::HashMap;
 // Item presentation lives in the encyclopedia's Items section — the loadout
 // editor renders the same tooltip and stat line so the two never drift.
-use super::encyclopedia::items::{format_item_stats, render_item_tooltip, PROC_TEXT_COLOR};
+use super::encyclopedia::items::{format_item_stats, render_item_tooltip};
 use super::play_match::proc_trinkets::proc_description;
 // This screen is a loadout EDITOR, not a reference work: every fact about an
 // ability, item or class it shows is one the encyclopedia already owns, so it
@@ -56,7 +61,12 @@ use super::encyclopedia::{
     abilities as encyclopedia_abilities, widget, EncyclopediaData, EncyclopediaState, Topic,
 };
 use crate::ui::driver as ui_driver;
-use crate::ui::widgets::{nav_cluster, Nav, NavAction};
+use crate::ui::theme::{class_color, color, data, icon, space, text};
+use crate::ui::widgets::panel::margin_xy;
+use crate::ui::widgets::{
+    class_icon, divider, empty_state, icon_tile, list_row, panel, panel_header, screen_header,
+    section_label, stat_row, Button, ChoiceTile, ListIcon, ListRow, Modal, Nav, NavAction, Variant,
+};
 
 /// Tracks which equipment slot has its picker open (if any)
 #[derive(Default)]
@@ -438,16 +448,35 @@ pub fn view_combatant_ui(
     }
 }
 
+/// The screen's title, in the shared header.
+const TITLE: &str = "View Combatant";
+
+/// The widest the sheet grows: the Document template's body measure, wide
+/// enough for two panels side by side.
+const CONTENT_MAX_W: f32 = 820.0;
+
+/// The item picker's `--ui-script` and egui id; its close `×` registers as
+/// `item-picker:close`.
+const ITEM_PICKER_ID: &str = "item-picker";
+
+/// The tallest the item picker's list grows, as a fraction of the screen.
+const PICKER_MAX_HEIGHT: f32 = 0.6;
+
 /// Render the entire View Combatant screen into `ctx`, returning any action
 /// that needs ECS side effects (see [`ViewCombatantAction`]).
+///
+/// The Document template: the shared [`screen_header`], then a scrolling body
+/// at [`CONTENT_MAX_W`] — the class header, stats beside the kit, the class's
+/// pre-match choice, and the equipment sheet — with the item picker as a kit
+/// [`Modal`] over it.
 ///
 /// Deliberately free of Bevy ECS system params (it takes plain references) so
 /// it can be driven directly by an egui harness — see
 /// `tests/view_combatant_snapshot.rs`. Loadout and strategic-option edits are
 /// applied to `match_config` in place, and the equipment picker's open socket
 /// lives in `picker_state`; only navigation bubbles out. `view_state` is
-/// `None` when the screen was entered without a combatant, which draws the
-/// "No combatant selected" message.
+/// `None` when the screen was entered without a combatant, which draws an
+/// empty state under the same header.
 pub fn draw_view_combatant(
     ctx: &egui::Context,
     view_state: Option<&ViewCombatantState>,
@@ -456,38 +485,145 @@ pub fn draw_view_combatant(
     data: &ViewCombatantData,
     nav: Nav,
 ) -> Option<ViewCombatantAction> {
-    // Get the view state or show error
-    let Some(view_state) = view_state else {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(egui::Color32::from_rgb(20, 20, 30)))
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(100.0);
-                    ui.label(
-                        egui::RichText::new("No combatant selected")
-                            .size(24.0)
-                            .color(egui::Color32::from_rgb(200, 100, 100)),
-                    );
-                });
-            });
-        return None;
+    let mut exit = false;
+    // Set by whichever reference surface was clicked this frame, and applied
+    // once after the frame is drawn — so navigation is one decision at the end
+    // rather than a state transition fired from inside a draw closure.
+    let mut open_topic: Option<Topic> = None;
+
+    // Everything the shared encyclopedia widgets need to draw a link and its
+    // tooltip. This screen already held every one of these resources.
+    let encyclopedia_data = EncyclopediaData {
+        items: data.items,
+        abilities: data.abilities,
+        item_icons: data.item_icons,
+        class_icons: Some(data.class_icons),
+        ability_icons: data.ability_icons,
     };
 
-    let ability_definitions = data.abilities;
-    let item_definitions = data.items;
-    let default_loadouts = data.default_loadouts;
-    let class_icons = data.class_icons;
-    let ability_icons = data.ability_icons;
-    let item_icons = data.item_icons;
-    let pet_icons = data.pet_icons;
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::new()
+                .fill(color::BG)
+                .inner_margin(margin_xy(space::XL, space::LG)),
+        )
+        .show(ctx, |ui| {
+            if screen_header(ui, TITLE, nav, |_| {}).is_some() {
+                exit = true;
+            }
+            ui.add_space(space::LG);
 
+            egui::ScrollArea::vertical()
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.set_max_width(CONTENT_MAX_W);
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                            match view_state {
+                                Some(view_state) => {
+                                    open_topic = draw_sheet(
+                                        ui,
+                                        view_state,
+                                        match_config,
+                                        picker_state,
+                                        data,
+                                        &encyclopedia_data,
+                                    );
+                                }
+                                None => {
+                                    empty_state(
+                                        ui,
+                                        "view-combatant:empty",
+                                        "No combatant selected",
+                                        "Open a filled slot from Match Setup to view its combatant.",
+                                        None,
+                                    );
+                                }
+                            }
+                        });
+                    });
+                });
+        });
+
+    // The picker, over the whole screen. Drawn after the sheet so its modal
+    // layer is the topmost.
+    if let (Some(view_state), Some(open_slot)) = (view_state, picker_state.open_slot) {
+        let class = view_state.class;
+        let overrides = equipment_overrides(match_config, view_state);
+        let resolved =
+            resolve_equipped_loadout(class, data.default_loadouts, &overrides, data.items);
+        // Anything already worn in the sibling socket is absent — items are
+        // unique-equipped, so it is not selectable here.
+        let valid_items = data
+            .items
+            .selectable_items_for_slot(open_slot, class, &resolved);
+        let picked = draw_item_picker(
+            ctx,
+            ITEM_PICKER_ID,
+            open_slot,
+            &valid_items,
+            resolved.get(&open_slot),
+            data.item_icons,
+        );
+        if let Some(id) = picked.read {
+            open_topic = open_topic.or(Some(Topic::Item(id)));
+        }
+        if let Some(item_id) = picked.equip {
+            set_equipment_override(
+                match_config,
+                view_state,
+                open_slot,
+                item_id,
+                data.items,
+                data.default_loadouts,
+                class,
+            );
+            picker_state.open_slot = None;
+        } else if picked.close {
+            picker_state.open_slot = None;
+        }
+    }
+
+    if exit {
+        return Some(ViewCombatantAction::Exit);
+    }
+    open_topic.map(ViewCombatantAction::OpenEncyclopedia)
+}
+
+/// The viewed combatant's equipment overrides (empty if its slot is missing).
+fn equipment_overrides(match_config: &MatchConfig, view_state: &ViewCombatantState) -> Loadout {
+    let team = if view_state.team == 1 {
+        &match_config.team1_equipment
+    } else {
+        &match_config.team2_equipment
+    };
+    team.get(view_state.slot).cloned().unwrap_or_default()
+}
+
+/// This combatant's value in a per-slot `MatchConfig` table, or its default.
+fn slot_value<T: Copy + Default>(team1: &[T], team2: &[T], view_state: &ViewCombatantState) -> T {
+    let team = if view_state.team == 1 { team1 } else { team2 };
+    team.get(view_state.slot).copied().unwrap_or_default()
+}
+
+/// The sheet itself: everything under the header for one combatant. Returns
+/// the topic a reference surface asked to open this frame.
+fn draw_sheet(
+    ui: &mut egui::Ui,
+    view_state: &ViewCombatantState,
+    match_config: &mut MatchConfig,
+    picker_state: &mut EquipmentPickerState,
+    data: &ViewCombatantData,
+    encyclopedia_data: &EncyclopediaData,
+) -> Option<Topic> {
+    let mut open_topic: Option<Topic> = None;
     let class = view_state.class;
     // Base stats and the class kit are both DERIVED: `class_base_stats` is the
     // same table `Combatant::new` builds from, and the ability list comes from
     // the `class` attribution on each `abilities.ron` entry. Neither can drift
     // from the sim or silently drop ability N+1.
     let stats = class_base_stats(class);
-    let abilities = ability_definitions.own_abilities_for_class(class);
+    let abilities = data.abilities.own_abilities_for_class(class);
     // The pet whose abilities belong in THIS combatant's kit. View Combatant is
     // a loadout editor, so it shows the pet that is actually configured (the Pet
     // Type panel below is where that choice is made) rather than every pet the
@@ -495,26 +631,17 @@ pub fn draw_view_combatant(
     // `pet_abilities_for_class` instead.
     let active_pet: Option<PetType> = match class {
         CharacterClass::Warlock => Some(PetType::Felhunter),
-        CharacterClass::Hunter => {
-            let hunter_pet = if view_state.team == 1 {
-                match_config
-                    .team1_hunter_pet_types
-                    .get(view_state.slot)
-                    .copied()
-                    .unwrap_or_default()
-            } else {
-                match_config
-                    .team2_hunter_pet_types
-                    .get(view_state.slot)
-                    .copied()
-                    .unwrap_or_default()
-            };
-            Some(match hunter_pet {
+        CharacterClass::Hunter => Some(
+            match slot_value(
+                &match_config.team1_hunter_pet_types,
+                &match_config.team2_hunter_pet_types,
+                view_state,
+            ) {
                 HunterPetType::Spider => PetType::Spider,
                 HunterPetType::Boar => PetType::Boar,
                 HunterPetType::Bird => PetType::Bird,
-            })
-        }
+            },
+        ),
         CharacterClass::Warrior
         | CharacterClass::Mage
         | CharacterClass::Rogue
@@ -525,852 +652,484 @@ pub fn draw_view_combatant(
     };
 
     // Compute equipment bonuses for the stats panel
-    let equip_overrides = if view_state.team == 1 {
-        match_config
-            .team1_equipment
-            .get(view_state.slot)
-            .cloned()
-            .unwrap_or_default()
-    } else {
-        match_config
-            .team2_equipment
-            .get(view_state.slot)
-            .cloned()
-            .unwrap_or_default()
-    };
+    let equip_overrides = equipment_overrides(match_config, view_state);
     let resolved_loadout =
-        resolve_equipped_loadout(class, default_loadouts, &equip_overrides, item_definitions);
-    let equip_bonuses = EquipmentBonuses::from_loadout(&resolved_loadout, item_definitions, class);
+        resolve_equipped_loadout(class, data.default_loadouts, &equip_overrides, data.items);
+    let equip_bonuses = EquipmentBonuses::from_loadout(&resolved_loadout, data.items, class);
 
-    // Everything the shared encyclopedia widgets need to draw a link and its
-    // tooltip. This screen already held every one of these resources.
-    let encyclopedia_data = EncyclopediaData {
-        items: item_definitions,
-        abilities: ability_definitions,
-        item_icons,
-        class_icons: Some(class_icons),
-        ability_icons,
+    open_topic = open_topic.or(render_class_header(ui, class, data, encyclopedia_data));
+    ui.add_space(space::LG);
+
+    // Stats beside the kit, the two panels held to one height.
+    let row_height_id = ui.id().with("vc:stats-kit-height");
+    let held: f32 = ui
+        .ctx()
+        .data(|d| d.get_temp(row_height_id))
+        .unwrap_or_default();
+    let mut natural = [0.0_f32; 2];
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = space::LG;
+        ui.columns(2, |columns| {
+            natural[0] = render_stats_panel(&mut columns[0], &stats, &equip_bonuses, held);
+            let (kit_height, clicked) = render_abilities_panel(
+                &mut columns[1],
+                &abilities,
+                active_pet,
+                held,
+                encyclopedia_data,
+            );
+            natural[1] = kit_height;
+            open_topic = open_topic.or(clicked);
+        });
+    });
+    let tallest = natural[0].max(natural[1]);
+    if tallest != held {
+        ui.ctx().data_mut(|d| d.insert_temp(row_height_id, tallest));
+        ui.ctx().request_repaint();
+    }
+
+    // The class's pre-match choice, if it has one.
+    let ability_icon = |key: &str| {
+        data.ability_icons
+            .and_then(|icons| icons.textures.get(key).copied())
     };
-    // Set by whichever reference surface was clicked this frame, and applied
-    // once after the frame is drawn — so navigation is one decision at the end
-    // rather than a state transition fired from inside a draw closure.
-    let mut open_topic: Option<Topic> = None;
-    let mut back_clicked = false;
+    let pick_section = |ui: &mut egui::Ui| ui.add_space(space::LG);
+    match class {
+        CharacterClass::Rogue => {
+            pick_section(ui);
+            let current = slot_value(
+                &match_config.team1_rogue_openers,
+                &match_config.team2_rogue_openers,
+                view_state,
+            );
+            let options = [
+                (RogueOpener::Ambush, ability_icon("Ambush")),
+                (RogueOpener::CheapShot, ability_icon("Cheap Shot")),
+            ];
+            if let Some(opener) =
+                strategic_option_panel(ui, "Stealth Opener", &options, current, encyclopedia_data)
+            {
+                set_slot_value(
+                    &mut match_config.team1_rogue_openers,
+                    &mut match_config.team2_rogue_openers,
+                    view_state,
+                    opener,
+                );
+            }
+        }
+        CharacterClass::Warrior => {
+            pick_section(ui);
+            let current = slot_value(
+                &match_config.team1_warrior_shouts,
+                &match_config.team2_warrior_shouts,
+                view_state,
+            );
+            let options = [
+                (WarriorShout::BattleShout, ability_icon("Battle Shout")),
+                (
+                    WarriorShout::DemoralizingShout,
+                    ability_icon("Demoralizing Shout"),
+                ),
+                (
+                    WarriorShout::CommandingShout,
+                    ability_icon("Commanding Shout"),
+                ),
+            ];
+            if let Some(shout) =
+                strategic_option_panel(ui, "Battle Shout", &options, current, encyclopedia_data)
+            {
+                set_slot_value(
+                    &mut match_config.team1_warrior_shouts,
+                    &mut match_config.team2_warrior_shouts,
+                    view_state,
+                    shout,
+                );
+            }
+        }
+        CharacterClass::Mage => {
+            pick_section(ui);
+            let current = slot_value(
+                &match_config.team1_mage_armors,
+                &match_config.team2_mage_armors,
+                view_state,
+            );
+            let options = [
+                (MageArmor::FrostArmor, ability_icon("Frost Armor")),
+                (MageArmor::MageArmor, ability_icon("Mage Armor")),
+                (MageArmor::MoltenArmor, ability_icon("Molten Armor")),
+            ];
+            if let Some(armor) =
+                strategic_option_panel(ui, "Mage Armor", &options, current, encyclopedia_data)
+            {
+                set_slot_value(
+                    &mut match_config.team1_mage_armors,
+                    &mut match_config.team2_mage_armors,
+                    view_state,
+                    armor,
+                );
+            }
+        }
+        CharacterClass::Paladin => {
+            pick_section(ui);
+            let current = slot_value(
+                &match_config.team1_paladin_auras,
+                &match_config.team2_paladin_auras,
+                view_state,
+            );
+            let options = [
+                (PaladinAura::DevotionAura, ability_icon("Devotion Aura")),
+                (
+                    PaladinAura::ShadowResistanceAura,
+                    ability_icon("Shadow Resistance Aura"),
+                ),
+                (
+                    PaladinAura::ConcentrationAura,
+                    ability_icon("Concentration Aura"),
+                ),
+            ];
+            if let Some(aura) =
+                strategic_option_panel(ui, "Paladin Aura", &options, current, encyclopedia_data)
+            {
+                set_slot_value(
+                    &mut match_config.team1_paladin_auras,
+                    &mut match_config.team2_paladin_auras,
+                    view_state,
+                    aura,
+                );
+            }
+        }
+        CharacterClass::Hunter => {
+            pick_section(ui);
+            render_hunter_pet_panel(
+                ui,
+                view_state,
+                match_config,
+                data.pet_icons,
+                encyclopedia_data,
+            );
+        }
+        CharacterClass::Warlock => {
+            pick_section(ui);
+            render_warlock_curse_panel(
+                ui,
+                view_state,
+                match_config,
+                data.ability_icons,
+                data.class_icons,
+                encyclopedia_data,
+            );
+        }
+        CharacterClass::Priest | CharacterClass::Shaman | CharacterClass::Druid => {}
+    }
 
-    // Get class color
-    let class_color = class.color();
-    let class_color32 = egui::Color32::from_rgb(
-        (class_color.to_srgba().red * 255.0) as u8,
-        (class_color.to_srgba().green * 255.0) as u8,
-        (class_color.to_srgba().blue * 255.0) as u8,
-    );
+    ui.add_space(space::LG);
+    open_topic = open_topic.or(render_equipment_panel(
+        ui,
+        view_state,
+        match_config,
+        data.items,
+        picker_state,
+        &resolved_loadout,
+        &equip_overrides,
+        data.item_icons,
+    ));
 
-    // Get screen dimensions for responsive layout
-    let screen_width = ctx.screen_rect().width();
+    open_topic
+}
 
-    // Calculate panel dimensions based on screen size
-    // Panels take up ~70% of screen width, split between two columns
-    let content_width = (screen_width * 0.7).clamp(500.0, 700.0);
-    let spacing = 20.0;
-    let panel_width = (content_width - spacing) / 2.0;
+/// Write this combatant's value into a per-slot `MatchConfig` table. A slot
+/// the table does not reach is left alone.
+fn set_slot_value<T>(team1: &mut [T], team2: &mut [T], view_state: &ViewCombatantState, value: T) {
+    let team = if view_state.team == 1 { team1 } else { team2 };
+    if let Some(v) = team.get_mut(view_state.slot) {
+        *v = value;
+    }
+}
 
-    // Fixed heights for consistency
-    let main_panel_height = 220.0;
+/// The class header: a [`panel`] edged in the class colour, holding the
+/// class's icon, its name and its one-line description. Icon and name are
+/// one affordance split in two — either opens the class's encyclopedia page.
+fn render_class_header(
+    ui: &mut egui::Ui,
+    class: CharacterClass,
+    data: &ViewCombatantData,
+    encyclopedia_data: &EncyclopediaData,
+) -> Option<Topic> {
+    let tint = class_color(class);
+    let mut clicked = None;
+    panel(Some(tint)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = space::MD;
+            let (rect, response) =
+                ui.allocate_exact_size(egui::Vec2::splat(icon::HERO), egui::Sense::click());
+            icon_tile(
+                ui.painter(),
+                rect,
+                data.class_icons.textures.get(&class).copied(),
+                tint,
+            );
+            clicked = clicked.or(widget::link(
+                response,
+                Topic::Class(class),
+                encyclopedia_data,
+            ));
 
-    egui::CentralPanel::default()
-        .frame(
-            egui::Frame::new()
-                .fill(egui::Color32::from_rgb(20, 20, 30))
-                .inner_margin(egui::Margin::same(20)),
-        )
-        .show(ctx, |ui| {
-            ui.add_space(10.0);
-
-            // The exit, top-left, naming where it goes.
-            let back_rect =
-                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(240.0, 36.0));
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
-                if nav_cluster(ui, nav).is_some() {
-                    back_clicked = true;
-                }
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = space::XXS;
+                let name = ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(class.name().to_uppercase())
+                            .size(text::H2)
+                            .color(tint),
+                    )
+                    .sense(egui::Sense::click()),
+                );
+                clicked = clicked.or(widget::link(name, Topic::Class(class), encyclopedia_data));
+                widget::prose(ui, class.description(), text::BODY, color::TEXT_MUTED);
             });
-
-            egui::ScrollArea::vertical()
-                .auto_shrink(false)
-                .show(ui, |ui| {
-                    // Title - centered
-                    ui.vertical_centered(|ui| {
-                        ui.heading(
-                            egui::RichText::new("VIEW COMBATANT")
-                                .size(42.0)
-                                .color(egui::Color32::from_rgb(230, 204, 153)),
-                        );
-                    });
-
-                    ui.add_space(30.0);
-
-                    // Class header card - centered, width matches content area
-                    ui.vertical_centered(|ui| {
-                        let header_width = content_width.min(500.0);
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(header_width, 90.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                egui::Frame::new()
-                                    .fill(egui::Color32::from_rgb(35, 35, 45))
-                                    .corner_radius(8.0)
-                                    .inner_margin(egui::Margin::same(15))
-                                    .stroke(egui::Stroke::new(
-                                        2.0_f32,
-                                        class_color32.gamma_multiply(0.6),
-                                    ))
-                                    .show(ui, |ui| {
-                                        ui.set_min_width(header_width - 30.0);
-
-                                        // Class icon — the first half of the header's
-                                        // link to the class's encyclopedia page.
-                                        let icon_size = 54.0;
-                                        if let Some(&texture_id) = class_icons.textures.get(&class)
-                                        {
-                                            let (rect, response) = ui.allocate_exact_size(
-                                                egui::vec2(icon_size, icon_size),
-                                                egui::Sense::click(),
-                                            );
-                                            ui.painter().image(
-                                                texture_id,
-                                                rect,
-                                                egui::Rect::from_min_max(
-                                                    egui::pos2(0.0, 0.0),
-                                                    egui::pos2(1.0, 1.0),
-                                                ),
-                                                egui::Color32::WHITE,
-                                            );
-                                            let border_width: f32 =
-                                                if response.hovered() { 3.0 } else { 2.0 };
-                                            ui.painter().rect_stroke(
-                                                rect,
-                                                6.0,
-                                                egui::Stroke::new(border_width, class_color32),
-                                                egui::StrokeKind::Outside,
-                                            );
-                                            open_topic = open_topic.or(widget::link(
-                                                response,
-                                                Topic::Class(class),
-                                                &encyclopedia_data,
-                                            ));
-                                        }
-
-                                        ui.add_space(20.0);
-
-                                        ui.vertical(|ui| {
-                                            // ...and the second half. Name and icon are
-                                            // one affordance split in two, so either
-                                            // one opens the class page.
-                                            let name = ui.add(
-                                                egui::Label::new(
-                                                    egui::RichText::new(
-                                                        class.name().to_uppercase(),
-                                                    )
-                                                    .size(28.0)
-                                                    .color(class_color32)
-                                                    .strong(),
-                                                )
-                                                .sense(egui::Sense::click()),
-                                            );
-                                            open_topic = open_topic.or(widget::link(
-                                                name,
-                                                Topic::Class(class),
-                                                &encyclopedia_data,
-                                            ));
-                                            ui.add_space(4.0);
-                                            ui.label(
-                                                egui::RichText::new(class.description())
-                                                    .size(16.0)
-                                                    .color(egui::Color32::from_rgb(153, 153, 153)),
-                                            );
-                                        });
-                                    });
-                            },
-                        );
-                    });
-
-                    ui.add_space(25.0);
-
-                    // Center all content
-                    ui.vertical_centered(|ui| {
-                        // Two-column layout for Stats and Abilities
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(content_width, main_panel_height),
-                            egui::Layout::left_to_right(egui::Align::TOP),
-                            |ui| {
-                                // Stats panel
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(panel_width, main_panel_height),
-                                    egui::Layout::top_down(egui::Align::LEFT),
-                                    |ui| {
-                                        render_stats_panel(
-                                            ui,
-                                            &stats,
-                                            &equip_bonuses,
-                                            panel_width,
-                                            main_panel_height,
-                                        );
-                                    },
-                                );
-
-                                ui.add_space(spacing);
-
-                                // Abilities panel
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(panel_width, main_panel_height),
-                                    egui::Layout::top_down(egui::Align::LEFT),
-                                    |ui| {
-                                        open_topic = open_topic.or(render_abilities_panel(
-                                            ui,
-                                            &abilities,
-                                            active_pet,
-                                            panel_width,
-                                            main_panel_height,
-                                            &encyclopedia_data,
-                                        ));
-                                    },
-                                );
-                            },
-                        );
-
-                        // Rogue-specific: Stealth Opener panel
-                        if class == CharacterClass::Rogue {
-                            ui.add_space(15.0);
-
-                            let opener_panel_height = 120.0;
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(content_width, opener_panel_height),
-                                egui::Layout::left_to_right(egui::Align::TOP),
-                                |ui| {
-                                    render_rogue_opener_panel(
-                                        ui,
-                                        content_width,
-                                        opener_panel_height,
-                                        view_state,
-                                        match_config,
-                                        ability_icons,
-                                        &encyclopedia_data,
-                                    );
-                                },
-                            );
-                        }
-
-                        // Warrior-specific: Shout Choice panel
-                        if class == CharacterClass::Warrior {
-                            ui.add_space(15.0);
-
-                            let panel_height = 120.0;
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(content_width, panel_height),
-                                egui::Layout::left_to_right(egui::Align::TOP),
-                                |ui| {
-                                    render_strategic_option_panel(
-                                        ui,
-                                        content_width,
-                                        panel_height,
-                                        "BATTLE SHOUT",
-                                        view_state,
-                                        ability_icons,
-                                        &[
-                                            ("Battle Shout", WarriorShout::BattleShout),
-                                            ("Demoralizing Shout", WarriorShout::DemoralizingShout),
-                                            ("Commanding Shout", WarriorShout::CommandingShout),
-                                        ],
-                                        |mc, team, slot| {
-                                            if team == 1 {
-                                                mc.team1_warrior_shouts
-                                                    .get(slot)
-                                                    .copied()
-                                                    .unwrap_or_default()
-                                            } else {
-                                                mc.team2_warrior_shouts
-                                                    .get(slot)
-                                                    .copied()
-                                                    .unwrap_or_default()
-                                            }
-                                        },
-                                        |mc, team, slot, val| {
-                                            let vec = if team == 1 {
-                                                &mut mc.team1_warrior_shouts
-                                            } else {
-                                                &mut mc.team2_warrior_shouts
-                                            };
-                                            if let Some(v) = vec.get_mut(slot) {
-                                                *v = val;
-                                            }
-                                        },
-                                        match_config,
-                                        &encyclopedia_data,
-                                    );
-                                },
-                            );
-                        }
-
-                        // Mage-specific: Armor Choice panel
-                        if class == CharacterClass::Mage {
-                            ui.add_space(15.0);
-
-                            let panel_height = 120.0;
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(content_width, panel_height),
-                                egui::Layout::left_to_right(egui::Align::TOP),
-                                |ui| {
-                                    render_strategic_option_panel(
-                                        ui,
-                                        content_width,
-                                        panel_height,
-                                        "MAGE ARMOR",
-                                        view_state,
-                                        ability_icons,
-                                        &[
-                                            ("Frost Armor", MageArmor::FrostArmor),
-                                            ("Mage Armor", MageArmor::MageArmor),
-                                            ("Molten Armor", MageArmor::MoltenArmor),
-                                        ],
-                                        |mc, team, slot| {
-                                            if team == 1 {
-                                                mc.team1_mage_armors
-                                                    .get(slot)
-                                                    .copied()
-                                                    .unwrap_or_default()
-                                            } else {
-                                                mc.team2_mage_armors
-                                                    .get(slot)
-                                                    .copied()
-                                                    .unwrap_or_default()
-                                            }
-                                        },
-                                        |mc, team, slot, val| {
-                                            let vec = if team == 1 {
-                                                &mut mc.team1_mage_armors
-                                            } else {
-                                                &mut mc.team2_mage_armors
-                                            };
-                                            if let Some(v) = vec.get_mut(slot) {
-                                                *v = val;
-                                            }
-                                        },
-                                        match_config,
-                                        &encyclopedia_data,
-                                    );
-                                },
-                            );
-                        }
-
-                        // Paladin-specific: Aura Choice panel
-                        if class == CharacterClass::Paladin {
-                            ui.add_space(15.0);
-
-                            let panel_height = 120.0;
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(content_width, panel_height),
-                                egui::Layout::left_to_right(egui::Align::TOP),
-                                |ui| {
-                                    render_strategic_option_panel(
-                                        ui,
-                                        content_width,
-                                        panel_height,
-                                        "PALADIN AURA",
-                                        view_state,
-                                        ability_icons,
-                                        &[
-                                            ("Devotion Aura", PaladinAura::DevotionAura),
-                                            (
-                                                "Shadow Resistance Aura",
-                                                PaladinAura::ShadowResistanceAura,
-                                            ),
-                                            ("Concentration Aura", PaladinAura::ConcentrationAura),
-                                        ],
-                                        |mc, team, slot| {
-                                            if team == 1 {
-                                                mc.team1_paladin_auras
-                                                    .get(slot)
-                                                    .copied()
-                                                    .unwrap_or_default()
-                                            } else {
-                                                mc.team2_paladin_auras
-                                                    .get(slot)
-                                                    .copied()
-                                                    .unwrap_or_default()
-                                            }
-                                        },
-                                        |mc, team, slot, val| {
-                                            let vec = if team == 1 {
-                                                &mut mc.team1_paladin_auras
-                                            } else {
-                                                &mut mc.team2_paladin_auras
-                                            };
-                                            if let Some(v) = vec.get_mut(slot) {
-                                                *v = val;
-                                            }
-                                        },
-                                        match_config,
-                                        &encyclopedia_data,
-                                    );
-                                },
-                            );
-                        }
-
-                        // Hunter-specific: Pet Type panel
-                        if class == CharacterClass::Hunter {
-                            ui.add_space(15.0);
-
-                            let pet_panel_height = 120.0;
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(content_width, pet_panel_height),
-                                egui::Layout::left_to_right(egui::Align::TOP),
-                                |ui| {
-                                    render_hunter_pet_panel(
-                                        ui,
-                                        content_width,
-                                        pet_panel_height,
-                                        view_state,
-                                        match_config,
-                                        pet_icons,
-                                    );
-                                },
-                            );
-                        }
-
-                        // Warlock-specific: Curse Preferences panel
-                        if class == CharacterClass::Warlock {
-                            ui.add_space(15.0);
-
-                            // Curse panel needs enough height for up to 3 enemy slots stacked vertically
-                            let curse_panel_height = 280.0;
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(content_width, curse_panel_height),
-                                egui::Layout::top_down(egui::Align::LEFT),
-                                |ui| {
-                                    render_warlock_curse_panel(
-                                        ui,
-                                        content_width,
-                                        curse_panel_height,
-                                        view_state,
-                                        match_config,
-                                        ability_icons,
-                                        class_icons,
-                                        &encyclopedia_data,
-                                    );
-                                },
-                            );
-                        }
-
-                        ui.add_space(15.0);
-
-                        // Equipment panel (full width, replaces Gear + Talents placeholders)
-                        open_topic = open_topic.or(render_equipment_panel(
-                            ui,
-                            content_width,
-                            view_state,
-                            match_config,
-                            item_definitions,
-                            default_loadouts,
-                            picker_state,
-                            class,
-                            &resolved_loadout,
-                            &equip_overrides,
-                            item_icons,
-                        ));
-                    });
-                }); // ScrollArea
         });
-
-    if back_clicked {
-        return Some(ViewCombatantAction::Exit);
-    }
-    open_topic.map(ViewCombatantAction::OpenEncyclopedia)
+    });
+    clicked
 }
 
-/// Render a stat row with integer values and instant tooltip.
-fn stat_row_int(
-    ui: &mut egui::Ui,
-    label: &str,
-    base: i32,
-    bonus: i32,
-    suffix: &str,
-    neutral: egui::Color32,
-    green: egui::Color32,
-    red: egui::Color32,
-    label_color: egui::Color32,
-) {
-    let effective = base + bonus;
-    let color = if bonus > 0 {
-        green
-    } else if bonus < 0 {
-        red
-    } else {
-        neutral
-    };
-
-    ui.label(egui::RichText::new(label).size(14.0).color(label_color));
-    let response = ui.label(
-        egui::RichText::new(format!("{}{}", effective, suffix))
-            .size(14.0)
-            .color(color),
-    );
-
-    if bonus != 0 && response.hovered() {
-        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with(label), |ui| {
-            ui.label(format!("{} + {} from equipment", base, bonus));
-        });
-    }
-    ui.end_row();
-}
-
-/// Render a stat row with float values and instant tooltip.
-fn stat_row_float(
-    ui: &mut egui::Ui,
-    label: &str,
-    base: f32,
-    bonus: f32,
-    suffix: &str,
-    neutral: egui::Color32,
-    green: egui::Color32,
-    red: egui::Color32,
-    label_color: egui::Color32,
-) {
-    let effective = base + bonus;
-    let color = if bonus > 0.0 {
-        green
+/// The colour a stat's value is drawn in: [`data::ITEM_BONUS`] when the worn
+/// gear raised it, [`color::DANGER`] were it ever to lower it.
+fn bonus_color(bonus: f32) -> egui::Color32 {
+    if bonus > 0.0 {
+        data::ITEM_BONUS
     } else if bonus < 0.0 {
-        red
+        color::DANGER
     } else {
-        neutral
-    };
-
-    ui.label(egui::RichText::new(label).size(14.0).color(label_color));
-    let response = ui.label(
-        egui::RichText::new(format!("{:.1}{}", effective, suffix))
-            .size(14.0)
-            .color(color),
-    );
-
-    if bonus != 0.0 && response.hovered() {
-        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with(label), |ui| {
-            ui.label(format!("{:.1} base + {:.1} from equipment", base, bonus));
-        });
+        color::TEXT
     }
-    ui.end_row();
 }
 
-/// Render the Stats panel with effective totals (base + equipment).
-/// Stats boosted by equipment are green; negative would be red.
-/// Hover tooltip shows the breakdown.
+/// One stats row whose value equipment changed: drawn in [`bonus_color`],
+/// and explained on hover.
+fn bonus_row(ui: &mut egui::Ui, key: &str, value: &str, bonus: f32, explain: impl Fn() -> String) {
+    let response = stat_row(ui, key, value, bonus_color(bonus));
+    if bonus != 0.0 {
+        response.on_hover_text(explain());
+    }
+}
+
+/// Render the Stats panel with effective totals (base + equipment). A stat
+/// the worn gear raised is green, and its hover gives the breakdown. Held to
+/// at least `min_height`; returns the height its content needs.
 fn render_stats_panel(
     ui: &mut egui::Ui,
     stats: &ClassBaseStats,
     equip: &EquipmentBonuses,
-    width: f32,
-    height: f32,
-) {
-    let neutral = egui::Color32::from_rgb(230, 230, 230);
-    let green = egui::Color32::from_rgb(100, 255, 100);
-    let red = egui::Color32::from_rgb(255, 100, 100);
-    let label_color = egui::Color32::from_rgb(170, 170, 170);
+    min_height: f32,
+) -> f32 {
+    panel(None)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            // Held before anything is drawn: egui grows a minimum height
+            // from the cursor, not from the panel's top.
+            ui.set_min_height(min_height);
+            // Measured in a child of its own, so the height held does not
+            // feed back into the next frame's measure.
+            let natural = ui
+                .vertical(|ui| {
+                    panel_header(ui, "Stats", color::ACCENT, |_| {});
 
-    ui.group(|ui| {
-        ui.set_min_width(width - 20.0);
-        ui.set_min_height(height - 20.0);
+                    ui.scope(|ui| {
+                        ui.spacing_mut().item_spacing.y = space::XS;
 
-        ui.label(
-            egui::RichText::new("STATS")
-                .size(18.0)
-                .color(egui::Color32::from_rgb(230, 204, 153))
-                .strong(),
-        );
+                        let health = stats.max_health as i32;
+                        let health_bonus = equip.health as i32;
+                        bonus_row(
+                            ui,
+                            "Health",
+                            &(health + health_bonus).to_string(),
+                            health_bonus as f32,
+                            || format!("{health} + {health_bonus} from equipment"),
+                        );
 
-        ui.add_space(12.0);
+                        // Resource: only mana takes a bonus from gear.
+                        let mana_bonus = if stats.resource_type == ResourceType::Mana {
+                            equip.mana as i32
+                        } else {
+                            0
+                        };
+                        let resource = stats.max_resource as i32;
+                        bonus_row(
+                            ui,
+                            "Resource",
+                            &format!("{} {}", stats.resource_type.name(), resource + mana_bonus),
+                            mana_bonus as f32,
+                            || format!("{resource} + {mana_bonus} from equipment"),
+                        );
 
-        egui::Grid::new("stats_grid")
-            .num_columns(2)
-            .spacing([40.0, 8.0])
-            .show(ui, |ui| {
-                stat_row_int(
-                    ui,
-                    "Health:",
-                    stats.max_health as i32,
-                    equip.health as i32,
-                    "",
-                    neutral,
-                    green,
-                    red,
-                    label_color,
-                );
+                        let ap = stats.attack_power as i32;
+                        let ap_bonus = equip.attack_power as i32;
+                        bonus_row(
+                            ui,
+                            "Attack Power",
+                            &(ap + ap_bonus).to_string(),
+                            ap_bonus as f32,
+                            || format!("{ap} + {ap_bonus} from equipment"),
+                        );
+                        let sp = stats.spell_power as i32;
+                        let sp_bonus = equip.spell_power as i32;
+                        bonus_row(
+                            ui,
+                            "Spell Power",
+                            &(sp + sp_bonus).to_string(),
+                            sp_bonus as f32,
+                            || format!("{sp} + {sp_bonus} from equipment"),
+                        );
 
-                // Resource: show mana bonus if applicable
-                let mana_bonus = if stats.resource_type == ResourceType::Mana {
-                    equip.mana as i32
-                } else {
-                    0
-                };
-                let resource_effective = stats.max_resource as i32 + mana_bonus;
-                let resource_color = if mana_bonus > 0 {
-                    green
-                } else if mana_bonus < 0 {
-                    red
-                } else {
-                    neutral
-                };
-                ui.label(
-                    egui::RichText::new("Resource:")
-                        .size(14.0)
-                        .color(label_color),
-                );
-                let res_response = ui.label(
-                    egui::RichText::new(format!(
-                        "{} {}",
-                        stats.resource_type.name(),
-                        resource_effective
-                    ))
-                    .size(14.0)
-                    .color(resource_color),
-                );
-                if mana_bonus != 0 && res_response.hovered() {
-                    egui::show_tooltip_at_pointer(
-                        ui.ctx(),
-                        ui.layer_id(),
-                        ui.id().with("resource_tooltip"),
-                        |ui| {
-                            ui.label(format!(
-                                "{} + {} from equipment",
-                                stats.max_resource, mana_bonus
-                            ));
-                        },
-                    );
-                }
-                ui.end_row();
-
-                stat_row_int(
-                    ui,
-                    "Attack Power:",
-                    stats.attack_power as i32,
-                    equip.attack_power as i32,
-                    "",
-                    neutral,
-                    green,
-                    red,
-                    label_color,
-                );
-                stat_row_int(
-                    ui,
-                    "Spell Power:",
-                    stats.spell_power as i32,
-                    equip.spell_power as i32,
-                    "",
-                    neutral,
-                    green,
-                    red,
-                    label_color,
-                );
-
-                // Crit chance: every class has a non-zero base (Rogue 10% down to
-                // Priest 4%), so this row always shows. It used to appear only when
-                // equipment granted crit, and then reported the base as 0%.
-                let effective_crit = stats.crit_chance + equip.crit_chance;
-                ui.label(
-                    egui::RichText::new("Crit Chance:")
-                        .size(14.0)
-                        .color(label_color),
-                );
-                let crit_text = format!("{:.1}%", effective_crit * 100.0);
-                let crit_color = if equip.crit_chance > 0.0 {
-                    green
-                } else if equip.crit_chance < 0.0 {
-                    red
-                } else {
-                    neutral
-                };
-                let crit_response =
-                    ui.label(egui::RichText::new(&crit_text).size(14.0).color(crit_color));
-                if equip.crit_chance != 0.0 && crit_response.hovered() {
-                    egui::show_tooltip_at_pointer(
-                        ui.ctx(),
-                        ui.layer_id(),
-                        ui.id().with("crit_tooltip"),
-                        |ui| {
-                            ui.label(format!(
-                                "{:.1}% base + {:.1}% from equipment",
-                                stats.crit_chance * 100.0,
-                                equip.crit_chance * 100.0
-                            ));
-                        },
-                    );
-                }
-                ui.end_row();
-
-                // Mana regen (only show if equipment provides it)
-                if equip.mana_regen > 0.0 {
-                    ui.label(
-                        egui::RichText::new("Mana Regen:")
-                            .size(14.0)
-                            .color(label_color),
-                    );
-                    let regen_text = format!("+{:.1} MP5", equip.mana_regen);
-                    let regen_response =
-                        ui.label(egui::RichText::new(&regen_text).size(14.0).color(green));
-                    if regen_response.hovered() {
-                        egui::show_tooltip_at_pointer(
-                            ui.ctx(),
-                            ui.layer_id(),
-                            ui.id().with("regen_tooltip"),
-                            |ui| {
-                                ui.label(format!("{:.1} from equipment", equip.mana_regen));
+                        // Crit chance: every class has a non-zero base (Rogue 10% down
+                        // to Priest 4%), so this row always shows.
+                        bonus_row(
+                            ui,
+                            "Crit Chance",
+                            &format!("{:.1}%", (stats.crit_chance + equip.crit_chance) * 100.0),
+                            equip.crit_chance,
+                            || {
+                                format!(
+                                    "{:.1}% base + {:.1}% from equipment",
+                                    stats.crit_chance * 100.0,
+                                    equip.crit_chance * 100.0
+                                )
                             },
                         );
-                    }
-                    ui.end_row();
-                }
 
-                // Weapon speed: seconds per swing, straight from the weapon in
-                // the live socket — there is no class speed to compare it to.
-                ui.label(
-                    egui::RichText::new("Weapon Speed:")
-                        .size(14.0)
-                        .color(label_color),
-                );
-                let speed_text = match equip.weapon_speed {
-                    Some(speed) => format!("{:.2}s", speed),
-                    None => "No weapon".to_string(),
-                };
-                ui.label(egui::RichText::new(speed_text).size(14.0).color(neutral));
-                ui.end_row();
+                        // Mana regen (only shown when equipment provides it)
+                        if equip.mana_regen > 0.0 {
+                            bonus_row(
+                                ui,
+                                "Mana Regen",
+                                &format!("+{:.1} MP5", equip.mana_regen),
+                                equip.mana_regen,
+                                || format!("{:.1} from equipment", equip.mana_regen),
+                            );
+                        }
 
-                stat_row_float(
-                    ui,
-                    "Move Speed:",
-                    stats.movement_speed,
-                    equip.move_speed,
-                    "/s",
-                    neutral,
-                    green,
-                    red,
-                    label_color,
-                );
+                        // Weapon speed: seconds per swing, straight from the weapon in
+                        // the live socket — there is no class speed to compare it to.
+                        let speed = match equip.weapon_speed {
+                            Some(speed) => format!("{speed:.2}s"),
+                            None => "No weapon".to_string(),
+                        };
+                        stat_row(ui, "Weapon Speed", &speed, color::TEXT);
 
-                // Armor (only show if equipment provides it, since base is 0)
-                if equip.armor > 0.0 {
-                    let effective_armor = stats.armor + equip.armor;
-                    let reduction_pct = effective_armor / (effective_armor + 5500.0) * 100.0;
-                    ui.label(egui::RichText::new("Armor:").size(14.0).color(label_color));
-                    let armor_text = format!("{:.0}", effective_armor);
-                    let armor_response =
-                        ui.label(egui::RichText::new(&armor_text).size(14.0).color(green));
-                    if armor_response.hovered() {
-                        egui::show_tooltip_at_pointer(
-                            ui.ctx(),
-                            ui.layer_id(),
-                            ui.id().with("armor_tooltip"),
-                            |ui| {
-                                ui.label(format!(
-                                    "{:.0} from equipment ({:.1}% physical reduction)",
-                                    equip.armor, reduction_pct
-                                ));
+                        bonus_row(
+                            ui,
+                            "Move Speed",
+                            &format!("{:.1}/s", stats.movement_speed + equip.move_speed),
+                            equip.move_speed,
+                            || {
+                                format!(
+                                    "{:.1} base + {:.1} from equipment",
+                                    stats.movement_speed, equip.move_speed
+                                )
                             },
                         );
-                    }
-                    ui.end_row();
-                }
 
-                // Spell resistances (only show non-zero values)
-                let resistances: &[(&str, f32, &str)] = &[
-                    ("Fire Resist:", equip.fire_resistance, "fire_res"),
-                    ("Frost Resist:", equip.frost_resistance, "frost_res"),
-                    ("Shadow Resist:", equip.shadow_resistance, "shadow_res"),
-                    ("Arcane Resist:", equip.arcane_resistance, "arcane_res"),
-                    ("Nature Resist:", equip.nature_resistance, "nature_res"),
-                    ("Holy Resist:", equip.holy_resistance, "holy_res"),
-                ];
-                for (label, value, tooltip_id) in resistances {
-                    if *value > 0.0 {
-                        let reduction_pct = value / (value * 5.0 / 3.0 + 300.0) * 100.0;
-                        ui.label(egui::RichText::new(*label).size(14.0).color(label_color));
-                        let res_text = format!("{:.0}", value);
-                        let res_response =
-                            ui.label(egui::RichText::new(&res_text).size(14.0).color(green));
-                        if res_response.hovered() {
-                            egui::show_tooltip_at_pointer(
-                                ui.ctx(),
-                                ui.layer_id(),
-                                ui.id().with(*tooltip_id),
-                                |ui| {
-                                    ui.label(format!(
-                                        "{:.0} from equipment ({:.1}% damage reduction)",
-                                        value, reduction_pct
-                                    ));
+                        // Armor (only shown when equipment provides it, since base is 0)
+                        if equip.armor > 0.0 {
+                            let effective_armor = stats.armor + equip.armor;
+                            let reduction_pct =
+                                effective_armor / (effective_armor + 5500.0) * 100.0;
+                            bonus_row(
+                                ui,
+                                "Armor",
+                                &format!("{effective_armor:.0}"),
+                                equip.armor,
+                                || {
+                                    format!(
+                                "{:.0} from equipment ({reduction_pct:.1}% physical reduction)",
+                                equip.armor
+                            )
                                 },
                             );
                         }
-                        ui.end_row();
-                    }
-                }
-            });
-    });
+
+                        // Spell resistances (only non-zero values)
+                        let resistances: &[(&str, f32)] = &[
+                            ("Fire Resist", equip.fire_resistance),
+                            ("Frost Resist", equip.frost_resistance),
+                            ("Shadow Resist", equip.shadow_resistance),
+                            ("Arcane Resist", equip.arcane_resistance),
+                            ("Nature Resist", equip.nature_resistance),
+                            ("Holy Resist", equip.holy_resistance),
+                        ];
+                        for &(label, value) in resistances {
+                            if value > 0.0 {
+                                let reduction_pct = value / (value * 5.0 / 3.0 + 300.0) * 100.0;
+                                bonus_row(ui, label, &format!("{value:.0}"), value, || {
+                                    format!(
+                                "{value:.0} from equipment ({reduction_pct:.1}% damage reduction)"
+                            )
+                                });
+                            }
+                        }
+                    });
+                })
+                .response
+                .rect
+                .height();
+            natural
+        })
+        .inner
 }
 
-/// Render the Abilities panel.
+/// Render the Abilities panel: the class's kit, then the configured pet's.
 ///
-/// Every row is a click-through to the ability's encyclopedia page; the panel
-/// returns the topic whose row was clicked this frame.
+/// Every row is a click-through to the ability's encyclopedia page. Held to at
+/// least `min_height`; returns the height its content needs, and the topic
+/// whose row was clicked this frame.
 fn render_abilities_panel(
     ui: &mut egui::Ui,
     abilities: &[AbilityType],
     active_pet: Option<PetType>,
-    width: f32,
-    height: f32,
+    min_height: f32,
     data: &EncyclopediaData,
-) -> Option<Topic> {
-    ui.group(|ui| {
-        let mut clicked = None;
+) -> (f32, Option<Topic>) {
+    panel(None)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            // Held before anything is drawn, as in the stats panel.
+            ui.set_min_height(min_height);
+            let mut clicked = None;
+            let natural = ui
+                .vertical(|ui| {
+                    panel_header(ui, "Abilities", color::ACCENT, |_| {});
 
-        ui.set_min_width(width - 20.0);
-        ui.set_min_height(height - 20.0);
+                    ui.scope(|ui| {
+                        ui.spacing_mut().item_spacing.y = space::XXS;
+                        for ability in abilities {
+                            clicked = clicked.or(render_ability_row(ui, *ability, data));
+                        }
 
-        ui.label(
-            egui::RichText::new("ABILITIES")
-                .size(18.0)
-                .color(egui::Color32::from_rgb(230, 204, 153))
-                .strong(),
-        );
-
-        ui.add_space(12.0);
-
-        for ability in abilities {
-            clicked = clicked.or(render_ability_row(ui, *ability, data));
-        }
-
-        // Pet subsection, labeled by the pet that casts them. Before ability
-        // attribution existed these five abilities (Spell Lock, Devour Magic,
-        // Web, Boar Charge, Master's Call) appeared on no class screen at all.
-        if let Some(pet) = active_pet {
-            let pet_abilities = data.abilities.abilities_for_pet(pet);
-            if !pet_abilities.is_empty() {
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new(format!("{} (PET)", pet.name().to_uppercase()))
-                        .size(14.0)
-                        .color(egui::Color32::from_rgb(190, 170, 220))
-                        .strong(),
-                );
-                ui.add_space(6.0);
-                for ability in pet_abilities {
-                    clicked = clicked.or(render_ability_row(ui, ability, data));
-                }
-            }
-        }
-
-        clicked
-    })
-    .inner
+                        // Pet subsection, labelled by the pet that casts them.
+                        if let Some(pet) = active_pet {
+                            let pet_abilities = data.abilities.abilities_for_pet(pet);
+                            if !pet_abilities.is_empty() {
+                                ui.add_space(space::SM);
+                                section_label(ui, &format!("{} (pet)", pet.name()));
+                                for ability in pet_abilities {
+                                    clicked = clicked.or(render_ability_row(ui, ability, data));
+                                }
+                            }
+                        }
+                    });
+                })
+                .response
+                .rect
+                .height();
+            (natural, clicked)
+        })
+        .inner
 }
 
-/// Render one ability row: icon, name, a one-line hover summary, and a click
-/// through to the ability's encyclopedia page.
+/// Render one ability row: a kit [`list_row`] with the ability's icon and
+/// name, a one-line hover summary, and a click through to the ability's
+/// encyclopedia page.
 ///
 /// The display name comes from the loaded `AbilityConfig`, so `abilities.ron`
 /// is the only place an ability is named — and the hover text comes from the
@@ -1382,71 +1141,18 @@ fn render_ability_row(
     data: &EncyclopediaData,
 ) -> Option<Topic> {
     let topic = Topic::Ability(ability);
-    let ability_name = topic.name(data);
-    let icon_texture = topic.icon(data);
-
-    // Allocate space for the row first, as a single clickable area
-    let row_height = 26.0;
-    let available_width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(available_width, row_height),
-        egui::Sense::click(),
+    let name = topic.name(data);
+    let response = list_row(
+        ui,
+        ListRow::new(&name).icon(ListIcon {
+            texture: topic.icon(data),
+            edge: color::LINE,
+        }),
     );
-    ui_driver::mark(ui, rect, true, format_args!("kit:{ability:?}"));
-
-    // Draw content manually using painter
-    let painter = ui.painter();
-    if response.hovered() {
-        painter.rect_filled(
-            rect,
-            3.0,
-            egui::Color32::from_rgba_premultiplied(255, 255, 255, 15),
-        );
-    }
-    let icon_size = 22.0;
-    let icon_rect = egui::Rect::from_min_size(
-        rect.min + egui::vec2(0.0, (row_height - icon_size) / 2.0),
-        egui::vec2(icon_size, icon_size),
-    );
-
-    // Draw icon
-    if let Some(texture_id) = icon_texture {
-        painter.image(
-            texture_id,
-            icon_rect,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            egui::Color32::WHITE,
-        );
-        painter.rect_stroke(
-            icon_rect,
-            3.0,
-            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(80, 80, 100)),
-            egui::StrokeKind::Outside,
-        );
-    } else {
-        painter.rect_filled(icon_rect, 3.0, egui::Color32::from_rgb(50, 50, 65));
-        painter.rect_stroke(
-            icon_rect,
-            3.0,
-            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(80, 80, 100)),
-            egui::StrokeKind::Outside,
-        );
-    }
-
-    // Draw ability name
-    let text_pos = rect.min + egui::vec2(icon_size + 10.0, (row_height - 14.0) / 2.0);
-    painter.text(
-        text_pos,
-        egui::Align2::LEFT_TOP,
-        &ability_name,
-        egui::FontId::proportional(14.0),
-        egui::Color32::from_rgb(220, 220, 220),
-    );
-
-    ui.add_space(4.0);
+    ui_driver::mark(ui, response.rect, true, format_args!("kit:{ability:?}"));
 
     // The SLIM tooltip: name, stat strip, one sentence. The long-form version
-    // this screen used to render is the encyclopedia's page now, one click away.
+    // is the encyclopedia's page, one click away.
     widget::link_with(response, topic, |ui| {
         encyclopedia_abilities::slim_tooltip(ui, ability, data)
     })
@@ -1473,34 +1179,25 @@ const ACCESSORY_SLOTS: &[ItemSlot] = &[
 ];
 const WEAPON_SLOTS: &[ItemSlot] = &[ItemSlot::MainHand, ItemSlot::OffHand, ItemSlot::Ranged];
 
-/// Render the equipment loadout panel — slot list and picker.
+/// Render the equipment sheet — armor down the left, accessories and weapons
+/// down the right — with the whole-set restore in its header.
 ///
-/// LEFT-click is the editor: a slot row opens the picker, a picker row equips.
-/// RIGHT-click is the reference: it opens that item's encyclopedia page, from
-/// the worn row and from the picker alike, so "what is this actually?" never
-/// costs you the pick you were making. Returns the topic to open, if any.
+/// LEFT-click is the editor: a socket row opens the picker. RIGHT-click is the
+/// reference: it opens that item's encyclopedia page, from the worn row and
+/// from the picker alike, so "what is this actually?" never costs you the
+/// pick you were making. Returns the topic to open, if any.
 fn render_equipment_panel(
     ui: &mut egui::Ui,
-    width: f32,
     view_state: &ViewCombatantState,
     match_config: &mut MatchConfig,
     items: &ItemDefinitions,
-    defaults: &DefaultLoadouts,
     picker_state: &mut EquipmentPickerState,
-    class: CharacterClass,
     resolved: &Loadout,
     overrides: &Loadout,
     item_icons: Option<&ItemIcons>,
 ) -> Option<Topic> {
-    let title_color = egui::Color32::from_rgb(230, 204, 153);
-    let subtitle_color = egui::Color32::from_rgb(170, 170, 170);
-    let muted_color = egui::Color32::from_rgb(90, 90, 90);
-    let override_color = egui::Color32::from_rgb(100, 255, 100); // green for overrides
-
-    // Track which slot was clicked to open picker
     let mut clicked_slot: Option<ItemSlot> = None;
     let mut restore_clicked = false;
-    // Track the item whose page a right-click asked for.
     let mut open_topic: Option<Topic> = None;
 
     // The live override map, as one greppable line. `Loadout` is a BTreeMap,
@@ -1513,178 +1210,61 @@ fn render_equipment_panel(
     // into the formatter, which `note` only reaches after its armed check.
     ui_driver::note(ui, format_args!("overrides {{{}}}", OverrideMap(overrides)));
 
-    ui.group(|ui| {
-        ui.set_min_width(width - 20.0);
-
-        // The item tooltips stay as they are (AS-65 decision 4), so the panel's
-        // own chrome is the only place right-click can be announced.
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("EQUIPMENT")
-                    .size(18.0)
-                    .color(title_color)
-                    .strong(),
-            );
-            ui.add_space(10.0);
-            widget::secondary_click_chrome_hint(ui);
+    panel(None).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        panel_header(ui, "Equipment", color::ACCENT, |ui| {
+            // One whole-set restore rather than a per-slot reset. Clearing
+            // every override lands on the RON default exactly as a fresh
+            // match would, and that default is validated unique-equipped at
+            // load — so unlike a single-slot reset, a restore can never
+            // collide with a sibling socket's explicit pick and hand the
+            // conflict to the resolver. Registered whether or not it is
+            // enabled, so `assert-enabled equip:restore false` can pin the
+            // disabled-with-no-overrides state.
+            let restore = Button::new("\u{21a9} Restore defaults", Variant::Secondary)
+                .compact()
+                .enabled(!overrides.is_empty())
+                .driver_id("equip:restore")
+                .show(ui)
+                .on_hover_text("Clear every equipment override for this combatant");
+            restore_clicked = restore.clicked();
         });
+        // The item tooltips stay as they are (AS-65 decision 4), so the
+        // panel's own chrome is the only place right-click can be announced.
+        widget::secondary_click_chrome_hint(ui);
+        ui.add_space(space::SM);
 
-        ui.add_space(12.0);
-
-        // Render slot groups
-        let slot_groups: &[(&str, &[ItemSlot])] = &[
-            ("Armor", ARMOR_SLOTS),
-            ("Accessories", ACCESSORY_SLOTS),
-            ("Weapons", WEAPON_SLOTS),
+        let columns: [&[(&str, &[ItemSlot])]; 2] = [
+            &[("Armor", ARMOR_SLOTS)],
+            &[("Accessories", ACCESSORY_SLOTS), ("Weapons", WEAPON_SLOTS)],
         ];
-
-        for (group_name, slots) in slot_groups {
-            ui.label(
-                egui::RichText::new(*group_name)
-                    .size(13.0)
-                    .color(subtitle_color)
-                    .strong(),
-            );
-            ui.add_space(2.0);
-
-            for slot in *slots {
-                let item_id = resolved.get(slot);
-                let is_override = is_effective_override(*slot, overrides, resolved);
-
-                let (item_name, name_color) = if let Some(id) = item_id {
-                    if let Some(item) = items.get(id) {
-                        let color = if is_override {
-                            override_color
-                        } else {
-                            egui::Color32::from_rgb(220, 220, 220)
-                        };
-                        (item.name.as_str().to_string(), color)
-                    } else {
-                        ("— Unknown —".to_string(), muted_color)
-                    }
-                } else {
-                    ("— Empty —".to_string(), muted_color)
-                };
-
-                let icon_size = 22.0;
-                let row_height = 22.0;
-                let total_width = width - 30.0;
-
-                // Allocate a row for icon + text as a single clickable area
-                let (rect, response) = ui
-                    .allocate_exact_size(egui::vec2(total_width, row_height), egui::Sense::click());
-                ui_driver::mark(ui, rect, true, format_args!("equip:{slot:?}"));
-                // What the row ACTUALLY rendered — the fact the AS-64 repro
-                // turned on, and one a screenshot-blind agent cannot otherwise
-                // read back. `is_override` is the green colouring.
-                match item_id {
-                    Some(id) => ui_driver::note(
-                        ui,
-                        format_args!("equip-row {slot:?} item={id:?} override={is_override}"),
-                    ),
-                    None => ui_driver::note(
-                        ui,
-                        format_args!("equip-row {slot:?} item=empty override={is_override}"),
-                    ),
-                }
-
-                // Highlight on hover
-                if response.hovered() {
-                    ui.painter().rect_filled(
-                        rect,
-                        2.0,
-                        egui::Color32::from_rgba_premultiplied(255, 255, 255, 15),
-                    );
-                }
-
-                let painter = ui.painter();
-
-                // Draw item icon if available
-                let mut text_offset_x = 0.0;
-                if let Some(id) = item_id {
-                    if let Some(icons) = item_icons {
-                        if let Some(&texture_id) = icons.textures.get(id) {
-                            let icon_rect = egui::Rect::from_min_size(
-                                rect.min,
-                                egui::vec2(icon_size, icon_size),
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x = space::LG;
+            ui.columns(2, |cols| {
+                for (col, groups) in cols.iter_mut().zip(columns) {
+                    col.spacing_mut().item_spacing.y = space::XXS;
+                    for (i, (group_name, slots)) in groups.iter().enumerate() {
+                        if i > 0 {
+                            col.add_space(space::MD);
+                        }
+                        section_label(col, group_name);
+                        for slot in *slots {
+                            let row = render_equipment_row(
+                                col, *slot, items, resolved, overrides, item_icons,
                             );
-                            painter.image(
-                                texture_id,
-                                icon_rect,
-                                egui::Rect::from_min_max(
-                                    egui::pos2(0.0, 0.0),
-                                    egui::pos2(1.0, 1.0),
-                                ),
-                                egui::Color32::WHITE,
-                            );
-                            text_offset_x = icon_size + 4.0;
+                            if row.clicked() {
+                                clicked_slot = Some(*slot);
+                            }
+                            if row.secondary_clicked() {
+                                if let Some(id) = resolved.get(slot) {
+                                    open_topic = open_topic.or(Some(Topic::Item(*id)));
+                                }
+                            }
                         }
                     }
                 }
-
-                // Draw text: "Slot: Item Name"
-                let label_text = format!("{}: {}", slot.name(), item_name);
-                let text_pos = rect.min + egui::vec2(text_offset_x, (row_height - 13.0) / 2.0);
-                painter.text(
-                    text_pos,
-                    egui::Align2::LEFT_TOP,
-                    &label_text,
-                    egui::FontId::proportional(13.0),
-                    name_color,
-                );
-
-                if response.clicked() {
-                    clicked_slot = Some(*slot);
-                }
-                if response.secondary_clicked() {
-                    if let Some(id) = item_id {
-                        open_topic = open_topic.or(Some(Topic::Item(*id)));
-                    }
-                }
-
-                // Tooltip on hover
-                if let Some(id) = item_id {
-                    if let Some(item) = items.get(id) {
-                        // The item tooltip is deliberately UNCHANGED (AS-65
-                        // decision 4): the encyclopedia's item page is what
-                        // right-click reaches, not a second stat block here.
-                        response.on_hover_ui(|ui| {
-                            ui_driver::note(ui, format_args!("tooltip:{:?}", Topic::Item(*id)));
-                            render_item_tooltip(ui, item);
-                        });
-                    }
-                }
-            }
-
-            ui.add_space(6.0);
-        }
-
-        // One whole-set restore rather than a per-slot reset. Clearing every
-        // override lands on the RON default exactly as a fresh match would,
-        // and that default is validated unique-equipped at load — so unlike a
-        // single-slot reset, a restore can never collide with a sibling
-        // socket's explicit pick and hand the conflict to the resolver.
-        let restore = ui
-            .add_enabled(
-                !overrides.is_empty(),
-                egui::Button::new(
-                    egui::RichText::new("↩ Restore defaults")
-                        .size(13.0)
-                        .color(egui::Color32::from_rgb(255, 180, 100)),
-                ),
-            )
-            .on_hover_text("Clear every equipment override for this combatant");
-        // Registered whether or not it is enabled, so `assert-enabled
-        // equip:restore false` can pin the disabled-with-no-overrides state.
-        ui_driver::mark(
-            ui,
-            restore.rect,
-            !overrides.is_empty(),
-            format_args!("equip:restore"),
-        );
-        if restore.clicked() {
-            restore_clicked = true;
-        }
+            });
+        });
     });
 
     if restore_clicked {
@@ -1693,169 +1273,178 @@ fn render_equipment_panel(
         }
     }
 
-    // Open picker if a slot was clicked
+    // Open the picker if a socket was clicked; it draws over the whole screen
+    // once the sheet is done.
     if let Some(slot) = clicked_slot {
         picker_state.open_slot = Some(slot);
-    }
-
-    // Render the picker window if open
-    if let Some(open_slot) = picker_state.open_slot {
-        let mut keep_open = true;
-        let mut selection: Option<ItemId> = None;
-
-        egui::Window::new(format!("Select: {}", open_slot.name()))
-            .collapsible(false)
-            .resizable(false)
-            .min_width(300.0)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .open(&mut keep_open)
-            .show(ui.ctx(), |ui| {
-                // The picker is its own window, so it needs the hint of its own.
-                widget::secondary_click_chrome_hint(ui);
-                ui.add_space(4.0);
-
-                // List valid items for this socket and class. Anything already
-                // worn in the sibling socket is absent — items are
-                // unique-equipped, so it is not selectable here.
-                let valid_items = items.selectable_items_for_slot(open_slot, class, resolved);
-                let current_item = resolved.get(&open_slot);
-
-                let picked = draw_item_picker_list(ui, &valid_items, current_item, item_icons);
-                selection = picked.equip;
-                if let Some(id) = picked.read {
-                    open_topic = open_topic.or(Some(Topic::Item(id)));
-                }
-            });
-
-        // Apply selection
-        if let Some(item_id) = selection {
-            set_equipment_override(
-                match_config,
-                view_state,
-                open_slot,
-                item_id,
-                items,
-                defaults,
-                class,
-            );
-            keep_open = false;
-        }
-
-        if !keep_open {
-            picker_state.open_slot = None;
-        }
     }
 
     open_topic
 }
 
-/// What the player did in the equipment picker's list this frame.
+/// One equipment socket: a kit [`list_row`] naming the worn item (green when
+/// it is the player's pick rather than the class default, dim when the socket
+/// is empty), the socket's name at its right-hand end, and the item's tooltip
+/// on hover.
+fn render_equipment_row(
+    ui: &mut egui::Ui,
+    slot: ItemSlot,
+    items: &ItemDefinitions,
+    resolved: &Loadout,
+    overrides: &Loadout,
+    item_icons: Option<&ItemIcons>,
+) -> egui::Response {
+    let item_id = resolved.get(&slot);
+    let item = item_id.and_then(|id| items.get(id));
+    let is_override = is_effective_override(slot, overrides, resolved);
+
+    let (name, name_color) = match (item_id, item) {
+        (Some(_), Some(item)) if is_override => (item.name.as_str(), data::ITEM_BONUS),
+        (Some(_), Some(item)) => (item.name.as_str(), color::TEXT),
+        (Some(_), None) => ("\u{2014} Unknown \u{2014}", color::TEXT_DIM),
+        (None, _) => ("\u{2014} Empty \u{2014}", color::TEXT_DIM),
+    };
+    let texture = item_id.and_then(|id| item_icons.and_then(|icons| icons.textures.get(id)));
+    let response = list_row(
+        ui,
+        ListRow::new(name)
+            .name_color(name_color)
+            .meta(slot.name())
+            .icon(ListIcon {
+                texture: texture.copied(),
+                edge: color::LINE,
+            }),
+    );
+    ui_driver::mark(ui, response.rect, true, format_args!("equip:{slot:?}"));
+    // What the row ACTUALLY rendered — the fact the AS-64 repro turned on, and
+    // one a screenshot-blind agent cannot otherwise read back. `is_override`
+    // is the green colouring.
+    match item_id {
+        Some(id) => ui_driver::note(
+            ui,
+            format_args!("equip-row {slot:?} item={id:?} override={is_override}"),
+        ),
+        None => ui_driver::note(
+            ui,
+            format_args!("equip-row {slot:?} item=empty override={is_override}"),
+        ),
+    }
+
+    match (item_id, item) {
+        // The item tooltip is deliberately UNCHANGED (AS-65 decision 4): the
+        // encyclopedia's item page is what right-click reaches, not a second
+        // stat block here.
+        (Some(id), Some(item)) => response.on_hover_ui(|ui| {
+            ui_driver::note(ui, format_args!("tooltip:{:?}", Topic::Item(*id)));
+            render_item_tooltip(ui, item);
+        }),
+        _ => response,
+    }
+}
+
+/// What the player did in the equipment picker this frame.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ItemPickerAction {
     /// Left-click: equip this item.
     pub equip: Option<ItemId>,
     /// Right-click: open this item's encyclopedia page instead.
     pub read: Option<ItemId>,
+    /// The `×`, Esc or a click outside: close without a change.
+    pub close: bool,
 }
-
-/// Width the picker wraps a proc row's second line at, so a long proc
-/// sentence breaks onto another line instead of widening the window.
-const PICKER_PROC_WRAP: f32 = 360.0;
 
 /// The text of one picker row: `Name  —  stats`, and — for an item carrying a
-/// proc — a second, quieter line saying what the proc does. That line is
-/// `proc_description`, the same sentence the item tooltip and the encyclopedia
-/// print, so the picker cannot describe a trinket a third way. Rows without a
-/// proc are exactly one line, as before.
-pub fn item_picker_row_text(item: &ItemConfig, name_color: egui::Color32) -> egui::text::LayoutJob {
-    let stat_text = format_item_stats(item);
-    let first = if stat_text.is_empty() {
-        item.name.clone()
-    } else {
-        format!("{}  —  {}", item.name, stat_text)
-    };
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &first,
-        0.0,
-        egui::TextFormat {
-            font_id: egui::FontId::proportional(13.0),
-            color: name_color,
-            ..Default::default()
-        },
-    );
-    if let Some(proc) = &item.proc {
-        job.append(
-            &format!("\n{}", proc_description(proc)),
-            0.0,
-            egui::TextFormat {
-                font_id: egui::FontId::proportional(11.5),
-                color: PROC_TEXT_COLOR,
-                ..Default::default()
-            },
-        );
-        job.wrap.max_width = PICKER_PROC_WRAP;
-    }
-    job
+/// proc — the sentence saying what the proc does, for the row's quieter
+/// second line. That line is `proc_description`, the same sentence the item
+/// tooltip and the encyclopedia print, so the picker cannot describe a
+/// trinket a third way. Rows without a proc are exactly one line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemPickerRowText {
+    pub name: String,
+    pub proc_line: Option<String>,
 }
 
-/// The equipment picker's scrolling list of selectable items — the pure draw,
-/// split from the Bevy wrapper so `tests/item_picker_snapshot.rs` can render
-/// it offscreen. `valid_items` is what the socket accepts;
-/// `current` is what it holds now (drawn gold and selected).
+/// The [`ItemPickerRowText`] for `item`.
+pub fn item_picker_row_text(item: &ItemConfig) -> ItemPickerRowText {
+    let stat_text = format_item_stats(item);
+    let name = if stat_text.is_empty() {
+        item.name.clone()
+    } else {
+        format!("{}  \u{2014}  {}", item.name, stat_text)
+    };
+    ItemPickerRowText {
+        name,
+        proc_line: item.proc.as_ref().map(proc_description),
+    }
+}
+
+/// The equipment picker: a kit [`Modal`] titled for `slot`, listing the items
+/// that socket accepts. `id` is the modal's egui and `--ui-script` id (its
+/// `×` registers as `<id>:close`), the caller's to choose. `valid_items` is
+/// what the socket accepts; `current` is what it holds now (drawn selected).
+///
+/// Left-click equips; right-click reads the item's encyclopedia page and
+/// leaves the picker open. The `×`, Esc and a click outside close it.
+pub fn draw_item_picker(
+    ctx: &egui::Context,
+    id: &str,
+    slot: ItemSlot,
+    valid_items: &[(ItemId, &ItemConfig)],
+    current: Option<&ItemId>,
+    item_icons: Option<&ItemIcons>,
+) -> ItemPickerAction {
+    let title = format!("Select: {}", slot.name());
+    let max_height = ctx.screen_rect().height() * PICKER_MAX_HEIGHT;
+    let response = Modal::new(id, &title).show(ctx, |ui| {
+        // The picker is its own layer, so it needs the hint of its own.
+        widget::secondary_click_chrome_hint(ui);
+        ui.add_space(space::XS);
+        draw_item_picker_list(ui, valid_items, current, item_icons, max_height)
+    });
+    ItemPickerAction {
+        close: response.close,
+        ..response.inner
+    }
+}
+
+/// The picker's scrolling list of selectable items, one wrapping kit
+/// [`list_row`] each, at most `max_height` tall.
 pub fn draw_item_picker_list(
     ui: &mut egui::Ui,
     valid_items: &[(ItemId, &ItemConfig)],
     current: Option<&ItemId>,
     item_icons: Option<&ItemIcons>,
+    max_height: f32,
 ) -> ItemPickerAction {
     let mut action = ItemPickerAction::default();
-    let gold = egui::Color32::from_rgb(255, 215, 0);
+    // `min_scrolled_height` too: a modal is laid out from the screen's centre,
+    // so the space egui offers below it would otherwise clip the list to half
+    // the screen even when every item fits.
     egui::ScrollArea::vertical()
-        .max_height(400.0)
+        .max_height(max_height)
+        .min_scrolled_height(max_height)
+        .auto_shrink([false, true])
         .show(ui, |ui| {
-            let picker_icon_size = 22.0;
-
+            ui.spacing_mut().item_spacing.y = space::XXS;
             for (item_id, item) in valid_items {
                 let is_equipped = current == Some(item_id);
-                let name_color = if is_equipped {
-                    gold
-                } else {
-                    egui::Color32::from_rgb(220, 220, 220)
-                };
-
-                // Row with icon + text
-                let response = ui
-                    .horizontal(|ui| {
-                        // Draw item icon if available
-                        if let Some(icons) = item_icons {
-                            if let Some(&texture_id) = icons.textures.get(item_id) {
-                                let (icon_rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(picker_icon_size, picker_icon_size),
-                                    egui::Sense::hover(),
-                                );
-                                ui.painter().image(
-                                    texture_id,
-                                    icon_rect,
-                                    egui::Rect::from_min_max(
-                                        egui::pos2(0.0, 0.0),
-                                        egui::pos2(1.0, 1.0),
-                                    ),
-                                    egui::Color32::WHITE,
-                                );
-                            }
-                        }
-
-                        // Laid out here rather than handed over as a job, so
-                        // the proc line wraps at `PICKER_PROC_WRAP` instead of
-                        // at whatever width the window would grow to.
-                        let galley = ui.fonts(|fonts| {
-                            fonts.layout_job(item_picker_row_text(item, name_color))
-                        });
-                        ui.selectable_label(is_equipped, galley)
+                let text = item_picker_row_text(item);
+                let mut row = ListRow::new(&text.name)
+                    .name_color(if is_equipped {
+                        color::ACCENT
+                    } else {
+                        color::TEXT
                     })
-                    .inner;
-
+                    .icon(ListIcon {
+                        texture: item_icons.and_then(|icons| icons.textures.get(item_id).copied()),
+                        edge: color::LINE,
+                    })
+                    .selected(is_equipped)
+                    .wrap();
+                if let Some(proc_line) = &text.proc_line {
+                    row = row.subtitle(proc_line);
+                }
+                let response = list_row(ui, row);
                 ui_driver::mark(ui, response.rect, true, format_args!("pick:{item_id:?}"));
 
                 if response.clicked() {
@@ -1973,285 +1562,116 @@ fn set_equipment_override(
     }
 }
 
-/// Render the Rogue Stealth Opener selection panel with ability icons.
-///
-/// Its two options ARE abilities, so each icon hovers to the same slim summary
-/// the kit rows show — one builder. Click is the pick and nothing else: the
-/// kit list is where Ambush and Cheap Shot link on to their pages.
-fn render_rogue_opener_panel(
-    ui: &mut egui::Ui,
-    width: f32,
-    height: f32,
-    view_state: &ViewCombatantState,
-    match_config: &mut MatchConfig,
-    ability_icons: Option<&AbilityIcons>,
-    data: &EncyclopediaData,
-) {
-    // Get current opener preference for this combatant
-    let current_opener = if view_state.team == 1 {
-        match_config
-            .team1_rogue_openers
-            .get(view_state.slot)
-            .copied()
-            .unwrap_or_default()
-    } else {
-        match_config
-            .team2_rogue_openers
-            .get(view_state.slot)
-            .copied()
-            .unwrap_or_default()
-    };
-
-    ui.group(|ui| {
-        ui.set_min_width(width - 20.0);
-        ui.set_min_height(height - 20.0);
-
-        ui.label(
-            egui::RichText::new("STEALTH OPENER")
-                .size(18.0)
-                .color(egui::Color32::from_rgb(230, 204, 153))
-                .strong(),
-        );
-
-        ui.add_space(12.0);
-
-        // Opener selection with icons
-        let icon_size = 48.0;
-        let gold = egui::Color32::from_rgb(255, 215, 0);
-        let gray = egui::Color32::from_rgb(80, 80, 90);
-
-        // Track which opener was clicked (if any)
-        let mut clicked_opener: Option<RogueOpener> = None;
-
-        ui.horizontal(|ui| {
-            // Define opener options
-            let openers = [
-                (RogueOpener::Ambush, "Ambush"),
-                (RogueOpener::CheapShot, "Cheap Shot"),
-            ];
-
-            for (i, (opener, icon_key)) in openers.iter().enumerate() {
-                if i > 0 {
-                    ui.add_space(20.0);
-                }
-
-                let is_selected = current_opener == *opener;
-                let border_color = if is_selected { gold } else { gray };
-                let border_width: f32 = if is_selected { 3.0 } else { 2.0 };
-
-                ui.vertical(|ui| {
-                    // Get icon texture
-                    let icon_texture =
-                        ability_icons.and_then(|icons| icons.textures.get(*icon_key).copied());
-
-                    // Allocate space for the icon button
-                    let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(icon_size, icon_size),
-                        egui::Sense::click(),
-                    );
-
-                    // Draw icon or placeholder
-                    let painter = ui.painter();
-                    if let Some(texture_id) = icon_texture {
-                        painter.image(
-                            texture_id,
-                            rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    } else {
-                        painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
-                    }
-
-                    // Draw border
-                    painter.rect_stroke(
-                        rect,
-                        4.0,
-                        egui::Stroke::new(border_width, border_color),
-                        egui::StrokeKind::Outside,
-                    );
-
-                    // Track click
-                    if response.clicked() && !is_selected {
-                        clicked_opener = Some(*opener);
-                    }
-
-                    // Hover says what the opener does — the same slim summary
-                    // the kit rows show, from the same builder.
-                    let ability = opener.ability();
-                    ui_driver::mark(ui, rect, true, format_args!("strategic:{ability:?}"));
-                    response.on_hover_ui(|ui| {
-                        ui_driver::note(ui, format_args!("tooltip:{:?}", Topic::Ability(ability)));
-                        encyclopedia_abilities::slim_tooltip(ui, ability, data)
-                    });
-
-                    // Label below icon
-                    ui.add_space(4.0);
-                    let label_color = if is_selected {
-                        gold
-                    } else {
-                        egui::Color32::from_rgb(180, 180, 180)
-                    };
-                    ui.label(
-                        egui::RichText::new(opener.name())
-                            .size(13.0)
-                            .color(label_color),
-                    );
-                });
-            }
-        });
-
-        // Apply click outside of the loop to avoid borrow issues
-        if let Some(opener) = clicked_opener {
-            if view_state.team == 1 {
-                if let Some(o) = match_config.team1_rogue_openers.get_mut(view_state.slot) {
-                    *o = opener;
-                }
-            } else {
-                if let Some(o) = match_config.team2_rogue_openers.get_mut(view_state.slot) {
-                    *o = opener;
-                }
-            }
-        }
-
-        ui.add_space(8.0);
-
-        // Description of current opener
-        let description = current_opener.description();
-        ui.label(
-            egui::RichText::new(description)
-                .size(13.0)
-                .color(egui::Color32::from_rgb(170, 170, 170))
-                .italics(),
-        );
-    });
+/// One option of a pre-match choice, as its [`ChoiceTile`] shows it.
+struct ChoiceOption<'a> {
+    label: &'a str,
+    texture: Option<egui::TextureId>,
+    /// The ability the option picks, when it is one: its tile hovers to that
+    /// ability's slim summary and registers as `strategic:<Ability>`.
+    ability: Option<AbilityType>,
 }
 
-/// Generic strategic option selection panel for Warrior Shout, Mage Armor, Paladin Aura.
-/// Follows the same visual pattern as the Rogue Opener panel.
+/// One row of [`ChoiceTile`]s, `selected` the chosen one. Returns the index
+/// of a tile clicked this frame, unless it was already chosen.
 ///
-/// Every option is an ability, so every icon hovers to that ability's slim
-/// summary — the one the kit rows show. Click is the pick; the kit list is
-/// where each of these abilities links on to its page.
-fn render_strategic_option_panel<T>(
+/// An option that is an ability hovers to the same slim summary the kit rows
+/// show — one builder. Click is the pick and nothing else: the kit list is
+/// where each of these abilities links on to its page. `enemy_slot` names a
+/// row that is repeated per enemy (the Warlock's curses), so its tiles'
+/// `--ui-script` ids stay distinct: `strategic:<Ability>:e<slot>`.
+fn choice_row(
     ui: &mut egui::Ui,
-    width: f32,
-    height: f32,
-    title: &str,
-    view_state: &ViewCombatantState,
-    ability_icons: Option<&AbilityIcons>,
-    options: &[(&str, T)], // (icon_key/ability_name, enum value)
-    get_current: impl Fn(&MatchConfig, u8, usize) -> T,
-    set_value: impl Fn(&mut MatchConfig, u8, usize, T),
-    match_config: &mut MatchConfig,
+    options: &[ChoiceOption],
+    selected: usize,
+    enemy_slot: Option<usize>,
     data: &EncyclopediaData,
-) where
-    T: Copy + PartialEq + HasNameDescription,
-{
-    let current = get_current(match_config, view_state.team, view_state.slot);
-
-    ui.group(|ui| {
-        ui.set_min_width(width - 20.0);
-        ui.set_min_height(height - 20.0);
-
-        ui.label(
-            egui::RichText::new(title)
-                .size(18.0)
-                .color(egui::Color32::from_rgb(230, 204, 153))
-                .strong(),
-        );
-
-        ui.add_space(12.0);
-
-        let icon_size = 48.0;
-        let gold = egui::Color32::from_rgb(255, 215, 0);
-        let gray = egui::Color32::from_rgb(80, 80, 90);
-
-        let mut clicked_index: Option<usize> = None;
-
-        ui.horizontal(|ui| {
-            for (i, (icon_key, option)) in options.iter().enumerate() {
-                if i > 0 {
-                    ui.add_space(20.0);
+) -> Option<usize> {
+    let mut clicked = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = space::SM;
+        for (i, option) in options.iter().enumerate() {
+            let is_selected = i == selected;
+            let response = ChoiceTile::new(option.label)
+                .texture(option.texture)
+                .selected(is_selected)
+                .show(ui);
+            if response.clicked() && !is_selected {
+                clicked = Some(i);
+            }
+            if let Some(ability) = option.ability {
+                match enemy_slot {
+                    Some(e) => ui_driver::mark(
+                        ui,
+                        response.rect,
+                        true,
+                        format_args!("strategic:{ability:?}:e{e}"),
+                    ),
+                    None => ui_driver::mark(
+                        ui,
+                        response.rect,
+                        true,
+                        format_args!("strategic:{ability:?}"),
+                    ),
                 }
-
-                let is_selected = current == *option;
-                let border_color = if is_selected { gold } else { gray };
-                let border_width: f32 = if is_selected { 3.0 } else { 2.0 };
-
-                ui.vertical(|ui| {
-                    let icon_texture =
-                        ability_icons.and_then(|icons| icons.textures.get(*icon_key).copied());
-
-                    let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(icon_size, icon_size),
-                        egui::Sense::click(),
-                    );
-
-                    let painter = ui.painter();
-                    if let Some(texture_id) = icon_texture {
-                        painter.image(
-                            texture_id,
-                            rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    } else {
-                        painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
-                    }
-
-                    painter.rect_stroke(
-                        rect,
-                        4.0,
-                        egui::Stroke::new(border_width, border_color),
-                        egui::StrokeKind::Outside,
-                    );
-
-                    if response.clicked() && !is_selected {
-                        clicked_index = Some(i);
-                    }
-
-                    let ability = option.ability();
-                    ui_driver::mark(ui, rect, true, format_args!("strategic:{ability:?}"));
-                    response.on_hover_ui(|ui| {
-                        ui_driver::note(ui, format_args!("tooltip:{:?}", Topic::Ability(ability)));
-                        encyclopedia_abilities::slim_tooltip(ui, ability, data)
-                    });
-
-                    ui.add_space(4.0);
-                    let label_color = if is_selected {
-                        gold
-                    } else {
-                        egui::Color32::from_rgb(180, 180, 180)
-                    };
-                    ui.label(
-                        egui::RichText::new(option.name())
-                            .size(13.0)
-                            .color(label_color),
-                    );
+                response.on_hover_ui(|ui| {
+                    ui_driver::note(ui, format_args!("tooltip:{:?}", Topic::Ability(ability)));
+                    encyclopedia_abilities::slim_tooltip(ui, ability, data)
                 });
             }
-        });
-
-        if let Some(idx) = clicked_index {
-            set_value(
-                match_config,
-                view_state.team,
-                view_state.slot,
-                options[idx].1,
-            );
         }
-
-        ui.add_space(8.0);
-
-        let description = current.description();
-        ui.label(
-            egui::RichText::new(description)
-                .size(13.0)
-                .color(egui::Color32::from_rgb(170, 170, 170))
-                .italics(),
-        );
     });
+    clicked
+}
+
+/// A pre-match choice: a [`panel`] titled `title`, one row of tiles, and the
+/// chosen option's description under them. Returns the index of a newly
+/// chosen option.
+fn choice_panel(
+    ui: &mut egui::Ui,
+    title: &str,
+    options: &[ChoiceOption],
+    selected: usize,
+    description: &str,
+    data: &EncyclopediaData,
+) -> Option<usize> {
+    panel(None)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            panel_header(ui, title, color::ACCENT, |_| {});
+            let clicked = choice_row(ui, options, selected, None, data);
+            ui.add_space(space::SM);
+            widget::prose(ui, description, text::BODY, color::TEXT_MUTED);
+            clicked
+        })
+        .inner
+}
+
+/// A pre-match choice whose options are abilities: the Rogue's opener, the
+/// Warrior's shout, the Mage's armor, the Paladin's aura. `options` pairs
+/// each value with its icon. Returns the value newly chosen this frame.
+fn strategic_option_panel<T>(
+    ui: &mut egui::Ui,
+    title: &str,
+    options: &[(T, Option<egui::TextureId>)],
+    current: T,
+    data: &EncyclopediaData,
+) -> Option<T>
+where
+    T: Copy + PartialEq + HasNameDescription,
+{
+    let tiles: Vec<ChoiceOption> = options
+        .iter()
+        .map(|(value, texture)| ChoiceOption {
+            label: value.name(),
+            texture: *texture,
+            ability: Some(value.ability()),
+        })
+        .collect();
+    let selected = options
+        .iter()
+        .position(|(value, _)| *value == current)
+        .unwrap_or_default();
+    choice_panel(ui, title, &tiles, selected, current.description(), data).map(|i| options[i].0)
 }
 
 /// Trait for strategic option enums that have name() and description() methods,
@@ -2262,6 +1682,18 @@ trait HasNameDescription {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn ability(&self) -> AbilityType;
+}
+
+impl HasNameDescription for RogueOpener {
+    fn name(&self) -> &str {
+        self.name()
+    }
+    fn description(&self) -> &str {
+        self.description()
+    }
+    fn ability(&self) -> AbilityType {
+        self.ability()
+    }
 }
 
 impl HasNameDescription for WarriorShout {
@@ -2300,150 +1732,70 @@ impl HasNameDescription for PaladinAura {
     }
 }
 
-/// Render the Hunter Pet Type selection panel.
+/// Render the Hunter Pet Type choice.
 ///
-/// DELIBERATELY NOT a reference surface. Alone among the strategic-option
-/// panels its options are not abilities — Spider, Boar and Bird are pets, and
-/// the encyclopedia has no pet topic to link to. The abilities that choice
+/// DELIBERATELY NOT a reference surface. Alone among the pre-match choices
+/// its options are not abilities — Spider, Boar and Bird are pets, and the
+/// encyclopedia has no pet topic to link to. The abilities that choice
 /// actually buys (Web, Charge, Master's Call) DO get the contract: picking a
 /// pet here swaps the pet subsection of the Abilities panel, whose rows are
 /// already click-throughs.
 fn render_hunter_pet_panel(
     ui: &mut egui::Ui,
-    width: f32,
-    height: f32,
     view_state: &ViewCombatantState,
     match_config: &mut MatchConfig,
     pet_icons: Option<&HunterPetIcons>,
+    data: &EncyclopediaData,
 ) {
-    let current_pet = if view_state.team == 1 {
-        match_config
-            .team1_hunter_pet_types
-            .get(view_state.slot)
-            .copied()
-            .unwrap_or_default()
-    } else {
-        match_config
-            .team2_hunter_pet_types
-            .get(view_state.slot)
-            .copied()
-            .unwrap_or_default()
-    };
+    let current = slot_value(
+        &match_config.team1_hunter_pet_types,
+        &match_config.team2_hunter_pet_types,
+        view_state,
+    );
+    let pets = [
+        HunterPetType::Spider,
+        HunterPetType::Boar,
+        HunterPetType::Bird,
+    ];
+    let tiles: Vec<ChoiceOption> = pets
+        .iter()
+        .map(|pet| ChoiceOption {
+            label: pet.name(),
+            texture: pet_icons.and_then(|icons| icons.textures.get(pet).copied()),
+            ability: None,
+        })
+        .collect();
+    let selected = pets.iter().position(|p| *p == current).unwrap_or_default();
+    let picked = choice_panel(
+        ui,
+        "Pet Type",
+        &tiles,
+        selected,
+        current.description(),
+        data,
+    );
 
-    ui.group(|ui| {
-        ui.set_min_width(width - 20.0);
-        ui.set_min_height(height - 20.0);
-
-        ui.label(
-            egui::RichText::new("PET TYPE")
-                .size(18.0)
-                .color(egui::Color32::from_rgb(230, 204, 153))
-                .strong(),
-        );
-
-        ui.add_space(12.0);
-
-        let icon_size = 48.0;
-        let gold = egui::Color32::from_rgb(255, 215, 0);
-        let gray = egui::Color32::from_rgb(80, 80, 90);
-
-        let mut clicked_pet: Option<HunterPetType> = None;
-
-        ui.horizontal(|ui| {
-            let pets = [
-                HunterPetType::Spider,
-                HunterPetType::Boar,
-                HunterPetType::Bird,
-            ];
-
-            for (i, pet) in pets.iter().enumerate() {
-                if i > 0 {
-                    ui.add_space(20.0);
-                }
-
-                let is_selected = current_pet == *pet;
-                let border_color = if is_selected { gold } else { gray };
-                let border_width: f32 = if is_selected { 3.0 } else { 2.0 };
-
-                ui.vertical(|ui| {
-                    let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(icon_size, icon_size),
-                        egui::Sense::click(),
-                    );
-
-                    let icon_texture = pet_icons.and_then(|icons| icons.textures.get(pet).copied());
-
-                    let painter = ui.painter();
-                    if let Some(texture_id) = icon_texture {
-                        painter.image(
-                            texture_id,
-                            rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    } else {
-                        painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
-                    }
-                    painter.rect_stroke(
-                        rect,
-                        4.0,
-                        egui::Stroke::new(border_width, border_color),
-                        egui::StrokeKind::Outside,
-                    );
-
-                    if response.clicked() && !is_selected {
-                        clicked_pet = Some(*pet);
-                    }
-
-                    ui.add_space(4.0);
-                    let label_color = if is_selected {
-                        gold
-                    } else {
-                        egui::Color32::from_rgb(180, 180, 180)
-                    };
-                    ui.label(
-                        egui::RichText::new(pet.name())
-                            .size(13.0)
-                            .color(label_color),
-                    );
-                });
-            }
-        });
-
-        if let Some(pet) = clicked_pet {
-            let pet_types = if view_state.team == 1 {
-                &mut match_config.team1_hunter_pet_types
-            } else {
-                &mut match_config.team2_hunter_pet_types
-            };
-            while pet_types.len() <= view_state.slot {
-                pet_types.push(HunterPetType::default());
-            }
-            pet_types[view_state.slot] = pet;
+    if let Some(i) = picked {
+        let pet_types = if view_state.team == 1 {
+            &mut match_config.team1_hunter_pet_types
+        } else {
+            &mut match_config.team2_hunter_pet_types
+        };
+        while pet_types.len() <= view_state.slot {
+            pet_types.push(HunterPetType::default());
         }
-
-        ui.add_space(8.0);
-
-        let description = current_pet.description();
-        ui.label(
-            egui::RichText::new(description)
-                .size(13.0)
-                .color(egui::Color32::from_rgb(170, 170, 170))
-                .italics(),
-        );
-    });
+        pet_types[view_state.slot] = pets[i];
+    }
 }
 
-/// Render the Warlock Curse Preferences panel with ability icons.
+/// Render the Warlock Curse Preferences choice: one row of curse tiles per
+/// enemy, under that enemy's class.
 ///
-/// Every curse is an ability, so each icon hovers to that curse's slim summary
-/// — the one the kit rows show. The hand-written stat lines this panel used to
-/// show on hover are gone — they were a third copy of numbers `abilities.ron`
-/// already owns. Click is the pick; the kit list links each curse to its page.
+/// Every curse is an ability, so each tile hovers to that curse's slim
+/// summary — the one the kit rows show. Click is the pick; the kit list links
+/// each curse to its page.
 fn render_warlock_curse_panel(
     ui: &mut egui::Ui,
-    width: f32,
-    height: f32,
     view_state: &ViewCombatantState,
     match_config: &mut MatchConfig,
     ability_icons: Option<&AbilityIcons>,
@@ -2456,9 +1808,6 @@ fn render_warlock_curse_panel(
     } else {
         match_config.team1.clone()
     };
-    let enemy_size = enemy_team.len();
-
-    // Get current curse preferences for this combatant
     let current_prefs = if view_state.team == 1 {
         match_config
             .team1_warlock_curse_prefs
@@ -2473,181 +1822,79 @@ fn render_warlock_curse_panel(
             .unwrap_or_default()
     };
 
-    ui.group(|ui| {
-        ui.set_min_width(width - 20.0);
-        ui.set_min_height(height - 20.0);
+    let curses = [
+        (WarlockCurse::Agony, "Curse of Agony", "Agony"),
+        (WarlockCurse::Weakness, "Curse of Weakness", "Weakness"),
+        (WarlockCurse::Tongues, "Curse of Tongues", "Tongues"),
+    ];
+    let tiles: Vec<ChoiceOption> = curses
+        .iter()
+        .map(|(curse, icon_key, label)| ChoiceOption {
+            label,
+            texture: ability_icons.and_then(|icons| icons.textures.get(*icon_key).copied()),
+            ability: Some(curse.ability()),
+        })
+        .collect();
 
-        ui.label(
-            egui::RichText::new("CURSE PREFERENCES")
-                .size(18.0)
-                .color(egui::Color32::from_rgb(230, 204, 153))
-                .strong(),
+    let mut changed_curse: Option<(usize, WarlockCurse)> = None;
+    panel(None).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        panel_header(ui, "Curse Preferences", color::ACCENT, |_| {});
+        widget::prose(
+            ui,
+            "Select which curse to apply to each enemy target.",
+            text::BODY,
+            color::TEXT_MUTED,
         );
 
-        ui.add_space(8.0);
-
-        ui.label(
-            egui::RichText::new("Select which curse to apply to each enemy target:")
-                .size(12.0)
-                .color(egui::Color32::from_rgb(170, 170, 170)),
-        );
-
-        ui.add_space(8.0);
-
-        // Track which curse was changed
-        let mut changed_curse: Option<(usize, WarlockCurse)> = None;
-
-        let icon_size = 42.0;
-        let gold = egui::Color32::from_rgb(255, 215, 0);
-        let gray = egui::Color32::from_rgb(80, 80, 90);
-
-        // One section per enemy slot
-        for enemy_slot in 0..enemy_size {
-            // Get enemy class for this slot
-            let enemy_class = enemy_team.get(enemy_slot).and_then(|c| *c);
-
-            // Enemy target header with class icon and name
+        for (enemy_slot, enemy_class) in enemy_team.iter().enumerate() {
+            ui.add_space(space::MD);
+            if enemy_slot > 0 {
+                divider(ui);
+                ui.add_space(space::MD);
+            }
+            // The enemy this row curses: its class icon and name.
             ui.horizontal(|ui| {
-                // Small class icon
-                let class_icon_size = 20.0;
-                if let Some(class) = enemy_class {
-                    if let Some(&texture_id) = class_icons.textures.get(&class) {
-                        let (rect, _) = ui.allocate_exact_size(
-                            egui::vec2(class_icon_size, class_icon_size),
-                            egui::Sense::hover(),
-                        );
-                        ui.painter().image(
-                            texture_id,
-                            rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    }
-                    ui.add_space(6.0);
-                    ui.label(
-                        egui::RichText::new(class.name())
-                            .size(14.0)
-                            .color(egui::Color32::from_rgb(200, 180, 140))
-                            .strong(),
-                    );
-                } else {
-                    ui.label(
-                        egui::RichText::new(format!("Enemy Target {}", enemy_slot + 1))
-                            .size(14.0)
-                            .color(egui::Color32::from_rgb(200, 180, 140))
-                            .strong(),
-                    );
-                }
-            });
-
-            ui.add_space(6.0);
-
-            // Get current curse for this enemy
-            let current_curse = current_prefs.get(enemy_slot).copied().unwrap_or_default();
-
-            // Curse options displayed horizontally with labels below each icon
-            let curses = [
-                (WarlockCurse::Agony, "Curse of Agony", "Agony"),
-                (WarlockCurse::Weakness, "Curse of Weakness", "Weakness"),
-                (WarlockCurse::Tongues, "Curse of Tongues", "Tongues"),
-            ];
-
-            ui.horizontal(|ui| {
-                for (i, (curse, icon_key, label)) in curses.iter().enumerate() {
-                    if i > 0 {
-                        ui.add_space(16.0);
-                    }
-
-                    let is_selected = current_curse == *curse;
-                    let border_color = if is_selected { gold } else { gray };
-                    let border_width: f32 = if is_selected { 3.0 } else { 1.0 };
-
-                    ui.vertical(|ui| {
-                        // Get icon texture
-                        let icon_texture =
-                            ability_icons.and_then(|icons| icons.textures.get(*icon_key).copied());
-
-                        // Allocate space for the icon button
-                        let (rect, response) = ui.allocate_exact_size(
-                            egui::vec2(icon_size, icon_size),
-                            egui::Sense::click(),
-                        );
-
-                        // Draw icon or placeholder
-                        let painter = ui.painter();
-                        if let Some(texture_id) = icon_texture {
-                            painter.image(
-                                texture_id,
-                                rect,
-                                egui::Rect::from_min_max(
-                                    egui::pos2(0.0, 0.0),
-                                    egui::pos2(1.0, 1.0),
-                                ),
-                                egui::Color32::WHITE,
-                            );
-                        } else {
-                            painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
-                        }
-
-                        // Draw border
-                        painter.rect_stroke(
-                            rect,
-                            4.0,
-                            egui::Stroke::new(border_width, border_color),
-                            egui::StrokeKind::Outside,
-                        );
-
-                        // Track click
-                        if response.clicked() && !is_selected {
-                            changed_curse = Some((enemy_slot, *curse));
-                        }
-
-                        // Hover, from the shared builder. The hand-written stat
-                        // strings that used to live here said "-20% physical
-                        // damage" next to a config that could change underneath
-                        // them.
-                        let ability = curse.ability();
-                        // One curse row PER ENEMY SLOT, so the id has to name
-                        // the slot or three widgets would share a name.
-                        ui_driver::mark(
+                ui.spacing_mut().item_spacing.x = space::SM;
+                match enemy_class {
+                    Some(class) => {
+                        let _ = class_icon(
                             ui,
-                            rect,
-                            true,
-                            format_args!("strategic:{ability:?}:e{enemy_slot}"),
+                            *class,
+                            class_icons.textures.get(class).copied(),
+                            icon::SM,
                         );
-                        response.on_hover_ui(|ui| {
-                            ui_driver::note(
-                                ui,
-                                format_args!("tooltip:{:?}", Topic::Ability(ability)),
-                            );
-                            encyclopedia_abilities::slim_tooltip(ui, ability, data)
-                        });
-
-                        // Label below icon
-                        ui.add_space(4.0);
-                        let label_color = if is_selected {
-                            gold
-                        } else {
-                            egui::Color32::from_rgb(150, 150, 150)
-                        };
-                        ui.label(egui::RichText::new(*label).size(11.0).color(label_color));
-                    });
+                        ui.label(
+                            egui::RichText::new(class.name())
+                                .size(text::BODY)
+                                .color(class_color(*class)),
+                        );
+                    }
+                    None => {
+                        ui.label(
+                            egui::RichText::new(format!("Enemy Target {}", enemy_slot + 1))
+                                .size(text::BODY)
+                                .color(color::TEXT_MUTED),
+                        );
+                    }
                 }
             });
+            ui.add_space(space::SM);
 
-            // Add separator between targets (but not after the last one)
-            if enemy_slot < enemy_size - 1 {
-                ui.add_space(12.0);
-                ui.separator();
-                ui.add_space(8.0);
+            let current = current_prefs.get(enemy_slot).copied().unwrap_or_default();
+            let selected = curses
+                .iter()
+                .position(|(curse, _, _)| *curse == current)
+                .unwrap_or_default();
+            if let Some(i) = choice_row(ui, &tiles, selected, Some(enemy_slot), data) {
+                changed_curse = Some((enemy_slot, curses[i].0));
             }
         }
-
-        // Apply change outside of the loop to avoid borrow issues
-        if let Some((enemy_slot, curse)) = changed_curse {
-            match_config.set_curse_pref(view_state.team, view_state.slot, enemy_slot, curse);
-        }
     });
+
+    if let Some((enemy_slot, curse)) = changed_curse {
+        match_config.set_curse_pref(view_state.team, view_state.slot, enemy_slot, curse);
+    }
 }
 
 #[cfg(test)]
