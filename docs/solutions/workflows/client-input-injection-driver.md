@@ -365,6 +365,12 @@ the Results screen's one exit sits in its header, names the main menu (a
 replay records no opener), and takes you there. Run it with the same `.json`
 as `replay-boots-into-the-match`.
 
+`tests/ui-scripts/configure-to-results.script` — a match set up and started
+from the client, not a replay: MainMenu → Configure Match (the picker's close
+`×` changes nothing; START MATCH, `configure:start`, is disabled until every
+slot is filled) → a real-speed 1v1 → Results, whose exit names and returns to
+the main menu, the screen that opened match setup.
+
 All of them are checked for parse errors by `cargo test`
 (`the_shipped_scripts_parse`), but running them needs a window, so they are not
 in the suite. Run them by hand after touching View Combatant, the equipment
