@@ -31,6 +31,11 @@ use arenasim::states::configure_match_ui::{
 };
 use arenasim::states::match_config::{ArenaMap, CharacterClass, MatchConfig};
 use arenasim::states::play_match::map_config::MapGeometryConfig;
+use arenasim::states::GameState;
+use arenasim::ui::widgets::Nav;
+
+/// The screen as the main menu opens it: its exit names the main menu.
+const NAV: Nav = Nav::Return(GameState::MainMenu);
 
 /// A representative 2v2 config: Team 1 fully filled (Warrior + Priest), Team 2
 /// with one filled slot (Mage) and one empty slot — so the baseline exercises
@@ -59,8 +64,15 @@ fn configure_match_2v2() {
         .with_size([1500.0, 900.0])
         .build(move |ctx| {
             arenasim::ui::install(ctx);
-            let _ =
-                draw_configure_match(ctx, &mut config, &mut picker, &icons, &map_geometry, None);
+            let _ = draw_configure_match(
+                ctx,
+                &mut config,
+                &mut picker,
+                &icons,
+                &map_geometry,
+                None,
+                NAV,
+            );
         });
 
     harness.run();
@@ -86,8 +98,15 @@ fn configure_match_picker_open() {
         .with_size([1500.0, 900.0])
         .build(move |ctx| {
             arenasim::ui::install(ctx);
-            let _ =
-                draw_configure_match(ctx, &mut config, &mut picker, &icons, &map_geometry, None);
+            let _ = draw_configure_match(
+                ctx,
+                &mut config,
+                &mut picker,
+                &icons,
+                &map_geometry,
+                None,
+                NAV,
+            );
         });
 
     harness.run();

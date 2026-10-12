@@ -16,10 +16,11 @@ use super::super::play_match::ability_config::AbilityDefinitions;
 use super::super::play_match::components::{CameraController, CameraMode, SpellIcons};
 use super::playback::{entries_for_class, EntryFamily, SandboxEntry, SandboxPlayback};
 use super::SandboxConfig;
+use crate::states::chrome::ScreenNav;
+use crate::ui::widgets::{nav_cluster, Nav, NavAction};
 
 // Palette shared with the Armory and main menu, so the sandbox reads as part of
 // the same client rather than a debug panel bolted on.
-const BG_COLOR: egui::Color32 = egui::Color32::from_rgb(20, 20, 30);
 const TITLE_GOLD: egui::Color32 = egui::Color32::from_rgb(230, 204, 153);
 const BUTTON_TEXT: egui::Color32 = egui::Color32::from_rgb(230, 217, 191);
 const MUTED_TEXT: egui::Color32 = egui::Color32::from_rgb(102, 102, 102);
@@ -112,6 +113,8 @@ pub struct EntryRow {
 /// Everything the panel draws from. No Bevy types, so the snapshot harness can
 /// build one by hand.
 pub struct SandboxView {
+    /// The screen's exit: back to whatever opened it.
+    pub nav: Nav,
     pub caster_class: CharacterClass,
     pub class_icons: Vec<(CharacterClass, Option<egui::TextureId>)>,
     pub dummy_enabled: bool,
@@ -136,7 +139,8 @@ pub struct SandboxView {
 /// What the user asked for this frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SandboxAction {
-    Back,
+    /// The exit: leave for whatever opened the sandbox.
+    Exit,
     SetCaster(CharacterClass),
     SetDummyEnabled(bool),
     SetDummyClass(CharacterClass),
@@ -147,38 +151,6 @@ pub enum SandboxAction {
     TogglePause,
     Step,
     SetSpeed(f32),
-}
-
-/// Applies the house palette to egui's widget visuals.
-///
-/// Without this every button, checkbox and toggle renders in egui's defaults —
-/// `rgb(60,60,60)` fills and a cyan accent — inside a carefully themed panel,
-/// which puts TWO different "selected" colours on screen at once.
-fn apply_theme(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
-    let v = &mut style.visuals;
-    v.panel_fill = BG_COLOR;
-    v.window_fill = BG_COLOR;
-    v.selection.bg_fill = SELECTED_BG;
-    v.selection.stroke = egui::Stroke::new(1.0_f32, TITLE_GOLD);
-
-    v.widgets.inactive.weak_bg_fill = TILE_BG;
-    v.widgets.inactive.bg_fill = TILE_BG;
-    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, TILE_FRAME);
-    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0_f32, BUTTON_TEXT);
-
-    v.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(42, 42, 58);
-    v.widgets.hovered.bg_fill = egui::Color32::from_rgb(42, 42, 58);
-    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, TITLE_GOLD);
-    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0_f32, BUTTON_TEXT);
-
-    v.widgets.active.weak_bg_fill = SELECTED_BG;
-    v.widgets.active.bg_fill = SELECTED_BG;
-    v.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, TITLE_GOLD);
-    v.widgets.active.fg_stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
-
-    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0_f32, BUTTON_TEXT);
-    ctx.set_style(style);
 }
 
 /// Section heading, matching the Armory's small-caps gold rules.
@@ -397,19 +369,14 @@ fn progress_track(ui: &mut egui::Ui, view: &SandboxView) {
 /// Draws the sandbox screen. Pure: no Bevy ECS, so the snapshot test can call it.
 pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAction> {
     let mut actions = Vec::new();
-    apply_theme(ctx);
 
     egui::SidePanel::left("sandbox_stage_panel")
         .exact_width(200.0)
         .show(ctx, |ui| {
             ui.add_space(8.0);
-            // U+2190 has no glyph in egui's default font stack and rendered as
-            // a tofu box; U+25C0 mirrors the transport's play triangle.
-            if ui
-                .button(egui::RichText::new("\u{25c0}  BACK").size(15.0))
-                .clicked()
-            {
-                actions.push(SandboxAction::Back);
+            // The exit, naming where it goes.
+            if nav_cluster(ui, view.nav).is_some() {
+                actions.push(SandboxAction::Exit);
             }
             ui.add_space(6.0);
             ui.label(
@@ -723,8 +690,15 @@ pub fn sandbox_ui(
     defs: Res<AbilityDefinitions>,
     spell_icons: Res<SpellIcons>,
     class_icons: Res<ClassIcons>,
-    mut next_state: ResMut<NextState<super::super::GameState>>,
+    mut nav: ScreenNav,
 ) {
+    // Esc takes the exit. It needs no egui context, so it answers on any
+    // frame.
+    if let Some(NavAction::Exit(to)) = nav.escape(false, || false) {
+        nav.leave(to);
+        return;
+    }
+
     let rows = entry_rows(config.caster_class, &defs, |label| {
         spell_icons.textures.get(label).copied()
     });
@@ -735,6 +709,7 @@ pub fn sandbox_ui(
         .unwrap_or((None, Vec::new()));
 
     let view = SandboxView {
+        nav: nav.nav(false).expect("the sandbox has an exit"),
         caster_class: config.caster_class,
         class_icons: CharacterClass::all()
             .iter()
@@ -762,7 +737,7 @@ pub fn sandbox_ui(
 
     for action in actions {
         match action {
-            SandboxAction::Back => next_state.set(super::super::GameState::MainMenu),
+            SandboxAction::Exit => nav.leave(view.nav.destination()),
             SandboxAction::SetCaster(class) => {
                 config.caster_class = class;
                 // The entry list is per-class, so the previous class's selection

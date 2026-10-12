@@ -1411,8 +1411,18 @@ the table is lowered in the same commit, so a migration card's diff shows the
 rows it cleared. **UI pieces come from `ui::widgets`** (button, header and
 `Nav`, panel, list row, tabs, chip, tooltip, modal, …); a component the kit
 lacks is added there, with its row in `tests/ui_gallery_snapshot.rs`, in the
-same commit. The design is
-`docs/design/proposals/2026-10-11-ui-design-system.md`.
+same commit. **The style is installed once:** `ui::install` sets the whole egui
+`Style` (`theme::style()`) for the client and every harness; a screen never
+calls `set_style`/`style_mut` on the context (egui's one sticky global leaked
+each screen's patch into the next), only `ui.scope(|ui| ui.style_mut()…)`. **A
+new screen does not compile until `GameState::chrome()` and `harness()`
+answer for it** (`src/states/chrome.rs`, exhaustive): its template, where its
+exit goes, and the snapshot harness that pins it or why it has none. Exits are
+contextual — a screen returns to whatever opened it, and its exit label names
+that screen. A wrapper moves forward only with `ScreenNav::open` (which records
+the opener) and out with `ScreenNav::leave`, and takes Esc from
+`ScreenNav::escape`, so the key and the visible exit cannot disagree. The design
+is `docs/design/proposals/2026-10-11-ui-design-system.md`.
 
 ### Verify the RUNNING client with a UI script (input injection)
 
@@ -1504,9 +1514,10 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
   then pop, and only exit from the root — so no depth traps the reader.
 - **The exit returns to the CALLING CONTEXT.** The encyclopedia is an
   informational context you enter *from* somewhere, so leaving returns you
-  there. `EncyclopediaState::return_to` (default `MainMenu`) carries it; a new
-  entry point calls `state.open_from(GameState::X)` before the transition and
-  needs to set nothing else. The exit button names the destination, and every
+  there — the rule every screen follows (`ScreenContext`, `src/states/chrome.rs`).
+  A new entry point opens it with `ScreenNav::open(GameState::Encyclopedia)`,
+  which records where it came from (a deep link calls `state.open_at(topic)`
+  first), and needs to set nothing else. The exit button names the destination, and every
   exit path funnels through `leave()`, which clears the search and resets the
   stack so a re-entry is always fresh.
 - `draw_encyclopedia` is pure egui; `encyclopedia_ui` is the Bevy wrapper that

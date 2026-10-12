@@ -461,11 +461,12 @@ fn encyclopedia_aura_detail_source_siblings() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_nav_cluster_deep_link_from_results() {
     let mut state = state_at_root();
-    state.open_at(
-        Topic::Ability(AbilityType::Frostbolt),
+    state.open_at(Topic::Ability(AbilityType::Frostbolt));
+    snapshot_opened_from(
+        "encyclopedia_nav_cluster_deep_link_from_results",
+        state,
         arenasim::states::GameState::Results,
     );
-    snapshot("encyclopedia_nav_cluster_deep_link_from_results", state);
 }
 
 /// The same cluster with BOTH buttons live and a non-main-menu destination:
@@ -475,16 +476,17 @@ fn encyclopedia_nav_cluster_deep_link_from_results() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_nav_cluster_from_view_combatant() {
     let mut state = state_at_root();
-    state.open_at(
-        Topic::Ability(AbilityType::Frostbolt),
-        arenasim::states::GameState::ViewCombatant,
-    );
+    state.open_at(Topic::Ability(AbilityType::Frostbolt));
     state.apply(
         arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Class(
             CharacterClass::Mage,
         ))),
     );
-    snapshot("encyclopedia_nav_cluster_from_view_combatant", state);
+    snapshot_opened_from(
+        "encyclopedia_nav_cluster_from_view_combatant",
+        state,
+        arenasim::states::GameState::ViewCombatant,
+    );
 }
 
 // ============================================================================
@@ -514,7 +516,17 @@ fn state_at(topic: Topic) -> EncyclopediaState {
     state
 }
 
-fn snapshot(name: &'static str, mut state: EncyclopediaState) {
+/// Snapshot `state` as the main menu opened it.
+fn snapshot(name: &'static str, state: EncyclopediaState) {
+    snapshot_opened_from(name, state, arenasim::states::GameState::MainMenu);
+}
+
+/// Snapshot `state` as `return_to` opened it: Home names that screen.
+fn snapshot_opened_from(
+    name: &'static str,
+    mut state: EncyclopediaState,
+    return_to: arenasim::states::GameState,
+) {
     // `Harness::build` takes a 'static closure, so the definitions are moved in
     // rather than borrowed from the caller's frame.
     let items = items();
@@ -529,7 +541,7 @@ fn snapshot(name: &'static str, mut state: EncyclopediaState) {
             class_icons: None,
             ability_icons: None,
         };
-        let _ = draw_encyclopedia(ctx, &mut state, &data);
+        let _ = draw_encyclopedia(ctx, &mut state, &data, return_to);
     });
 
     harness.run();

@@ -64,12 +64,14 @@ pub mod widget;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
+use super::chrome::ScreenNav;
 use super::configure_match_ui::ClassIcons;
 use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::equipment::ItemDefinitions;
 use super::view_combatant_ui::{AbilityIcons, ItemIcons};
 use super::GameState;
 use crate::ui::driver as ui_driver;
+use crate::ui::widgets::NavAction;
 
 pub use abilities::AbilityFilters;
 pub use auras::{AuraArt, AuraId, AuraSource, EngineAura};
@@ -133,7 +135,8 @@ pub enum EncyclopediaAction {
     Navigate(View),
     /// Pop the stack. At the root this means [`Self::Exit`].
     Back,
-    /// Leave the encyclopedia for [`EncyclopediaState::return_to`].
+    /// Leave the encyclopedia for whatever opened it (its `return_to` in
+    /// [`crate::states::chrome::ScreenContext`]).
     Exit,
 }
 
@@ -154,12 +157,6 @@ pub struct EncyclopediaState {
     /// Search registry, built once from the data sources. Empty until
     /// [`Self::rebuild_registry`] runs.
     pub registry: Vec<SearchEntry>,
-    /// The screen to return to when the user leaves. The encyclopedia is an
-    /// INFORMATIONAL CONTEXT entered from somewhere, so its exit puts the
-    /// player back in the context they came from rather than unconditionally
-    /// at the main menu. Set it via [`Self::open_from`]; a new entry point
-    /// needs to set nothing else.
-    return_to: GameState,
 }
 
 /// The view a fresh visit starts on.
@@ -179,51 +176,29 @@ impl Default for EncyclopediaState {
             item_filters: ItemFilters::default(),
             ability_filters: AbilityFilters::default(),
             registry: Vec::new(),
-            // The main menu is the only entry point today, and the sensible
-            // fallback for any caller that forgets to open_from.
-            return_to: GameState::MainMenu,
         }
     }
 }
 
 impl EncyclopediaState {
-    /// Open the encyclopedia from `from`: the Home button and the `Esc`-at-root
-    /// path both return there.
-    ///
-    /// This is the ONE field a new entry point has to set. Call it from
-    /// whatever screen links in, immediately before the
-    /// `GameState::Encyclopedia` transition. Use it when the entry point is a
-    /// plain "open the encyclopedia" affordance (the main menu); a LINKED ICON
-    /// wants [`Self::open_at`], which sets the same field and lands on the
-    /// topic.
-    pub fn open_from(&mut self, from: GameState) {
-        self.return_to = from;
-    }
-
-    /// Open the encyclopedia DIRECTLY at `topic`, returning to `from` when the
-    /// reader leaves — the deep-link entry point every linked icon outside the
-    /// encyclopedia uses.
+    /// Land DIRECTLY on `topic` — the deep-link entry point every linked icon
+    /// outside the encyclopedia uses, just before it opens the screen
+    /// (`ScreenNav::open`, which records where Home and `Esc` return to).
     ///
     /// The topic becomes the ROOT of the navigation stack rather than a page
     /// pushed onto a section index. A deep link is entered from somewhere else,
     /// so "up one level" from it is that somewhere: `Esc` and the named Home
-    /// button both put the reader straight back in `from`, with no section
-    /// index they never asked for sitting in between. Navigating ONWARD from
-    /// the topic still stacks normally, so Back walks back down to it.
-    pub fn open_at(&mut self, topic: Topic, from: GameState) {
+    /// button both put the reader straight back there, with no section index
+    /// they never asked for sitting in between. Navigating ONWARD from the
+    /// topic still stacks normally, so Back walks back down to it.
+    pub fn open_at(&mut self, topic: Topic) {
         self.search.clear();
         self.stack.clear();
         self.stack.push(View::topic(topic));
-        self.return_to = from;
     }
 
-    /// Where the Home affordance will put the player.
-    pub fn return_to(&self) -> GameState {
-        self.return_to
-    }
-
-    /// Leave the encyclopedia: reset the transient view state and hand back the
-    /// screen to transition to.
+    /// Leave the encyclopedia: reset the transient view state, so the next
+    /// visit starts fresh.
     ///
     /// Every exit path funnels through here, so re-entering always lands on a
     /// section index rather than on whatever page — or stale search results —
@@ -234,12 +209,10 @@ impl EncyclopediaState {
     /// first entry, because [`Self::open_at`] makes a deep-linked topic the
     /// root: truncating would strand that page as the landing view of every
     /// later visit.
-    #[must_use]
-    pub fn leave(&mut self) -> GameState {
+    pub fn leave(&mut self) {
         self.search.clear();
         self.stack.clear();
         self.stack.push(root_view());
-        self.return_to
     }
 
     /// The view currently on screen.
@@ -256,8 +229,8 @@ impl EncyclopediaState {
     }
 
     /// Apply a navigation action. Returns `true` when the encyclopedia should
-    /// be left for [`Self::return_to`] — the context it was opened from, which
-    /// is not necessarily the main menu.
+    /// be left for the context it was opened from, which is not necessarily
+    /// the main menu.
     pub fn apply(&mut self, action: EncyclopediaAction) -> bool {
         match action {
             EncyclopediaAction::Navigate(view) => {
@@ -282,19 +255,29 @@ impl EncyclopediaState {
         }
     }
 
-    /// The Back key ladder: clear an active search first, then pop the stack,
-    /// and only leave the screen from the root. Returns `true` on exit, at
-    /// which point the caller must call [`Self::leave`] for the destination.
+    /// The encyclopedia's own rung on the Back key ladder: clear an active
+    /// search. Returns `true` when there was one to clear, which takes the
+    /// key; past it, `Esc` does what the header does (`chrome::escape_ladder`)
+    /// — pop the stack, and only leave from the root.
     ///
     /// The always-visible Home button is the shortcut PAST this ladder, not a
     /// replacement for it: `Esc` still unwinds one level at a time, so no depth
     /// traps the user and no depth exits unexpectedly.
-    pub fn back_key(&mut self) -> bool {
-        if !self.search.trim().is_empty() {
-            self.search.clear();
+    pub fn clear_search(&mut self) -> bool {
+        if self.search.trim().is_empty() {
             return false;
         }
-        self.apply(EncyclopediaAction::Back)
+        self.search.clear();
+        true
+    }
+
+    /// Follow what the Back key asked for: one level up, or out. Returns
+    /// `true` when the encyclopedia should be left.
+    pub fn escape(&mut self, action: NavAction) -> bool {
+        match action {
+            NavAction::Back => self.apply(EncyclopediaAction::Back),
+            NavAction::Exit(_) => true,
+        }
     }
 
     /// Rebuild the search registry from the live data sources.
@@ -327,16 +310,25 @@ pub struct EncyclopediaData<'a> {
 pub fn encyclopedia_ui(
     mut contexts: EguiContexts,
     mut state: ResMut<EncyclopediaState>,
-    mut next_state: ResMut<NextState<GameState>>,
-    keybindings: Res<crate::keybindings::Keybindings>,
-    keyboard: Res<ButtonInput<KeyCode>>,
+    mut nav: ScreenNav,
     item_definitions: Res<ItemDefinitions>,
     ability_definitions: Res<AbilityDefinitions>,
     item_icons: Option<Res<ItemIcons>>,
     class_icons: Option<Res<ClassIcons>>,
     ability_icons: Option<Res<AbilityIcons>>,
 ) {
-    use crate::keybindings::GameAction;
+    // Esc first: it needs no egui context, so it answers on any frame.
+    let return_to = nav
+        .return_to(GameState::Encyclopedia)
+        .expect("the encyclopedia has an exit");
+    let can_back = state.can_go_back();
+    if let Some(action) = nav.escape(can_back, || state.clear_search()) {
+        if state.escape(action) {
+            state.leave();
+            nav.leave(return_to);
+            return;
+        }
+    }
 
     // try_ctx_mut: the context dies with the primary window, and ctx_mut
     // panics on that final frame.
@@ -350,11 +342,6 @@ pub fn encyclopedia_ui(
         state.rebuild_registry(&item_definitions, &ability_definitions);
     }
 
-    if keybindings.action_just_pressed(GameAction::Back, &keyboard) && state.back_key() {
-        next_state.set(state.leave());
-        return;
-    }
-
     let data = EncyclopediaData {
         items: &item_definitions,
         abilities: &ability_definitions,
@@ -363,9 +350,10 @@ pub fn encyclopedia_ui(
         ability_icons: ability_icons.as_deref(),
     };
 
-    if let Some(action) = draw_encyclopedia(ctx, &mut state, &data) {
+    if let Some(action) = draw_encyclopedia(ctx, &mut state, &data, return_to) {
         if state.apply(action) {
-            next_state.set(state.leave());
+            state.leave();
+            nav.leave(return_to);
         }
     }
 }
@@ -375,7 +363,8 @@ pub fn encyclopedia_ui(
 // ============================================================================
 
 /// Render the whole encyclopedia into `ctx`, returning the navigation action
-/// the user requested this frame (if any).
+/// the user requested this frame (if any). `return_to` is the screen that
+/// opened it, which the Home button names.
 ///
 /// Deliberately free of Bevy ECS types so `tests/encyclopedia_snapshot.rs` can
 /// drive it offscreen through `egui_kittest`.
@@ -383,14 +372,8 @@ pub fn draw_encyclopedia(
     ctx: &egui::Context,
     state: &mut EncyclopediaState,
     data: &EncyclopediaData,
+    return_to: GameState,
 ) -> Option<EncyclopediaAction> {
-    let mut style = (*ctx.style()).clone();
-    // Zero-delay tooltips: hovering a linked icon must show its tooltip at
-    // once — that immediacy is the point of the widget.
-    style.interaction.tooltip_delay = 0.0;
-    apply_palette(&mut style.visuals);
-    ctx.set_style(style);
-
     // Split the borrows up front so the search box can be edited in the same
     // pass that reads the registry.
     let EncyclopediaState {
@@ -399,11 +382,10 @@ pub fn draw_encyclopedia(
         item_filters,
         ability_filters,
         registry,
-        return_to,
     } = state;
     let current = *stack.last().expect("encyclopedia nav stack is never empty");
     let can_go_back = stack.len() > 1;
-    let home_label = home_label(*return_to);
+    let home_label = home_label(return_to);
 
     let mut action = None;
 
@@ -678,41 +660,6 @@ fn chrome_button(label: &str, color: egui::Color32) -> egui::Button<'static> {
     .stroke(egui::Stroke::new(1.0_f32, LINE))
 }
 
-/// Push egui's stock widget colours onto the game's palette, so the built-in
-/// widgets the screen still uses (text fields, drag values, buttons, filter
-/// chips) read as part of the same screen instead of stock light-grey egui.
-fn apply_palette(v: &mut egui::Visuals) {
-    v.window_fill = BG;
-    v.panel_fill = BG;
-    // TextEdit / DragValue wells.
-    v.extreme_bg_color = PANEL;
-    // Selected filter chips: dark text on gold, like the mockup's active chip.
-    v.selection.bg_fill = GOLD;
-    v.selection.stroke = egui::Stroke::new(1.0_f32, BG);
-
-    let stroke = |c| egui::Stroke::new(1.0_f32, c);
-    v.widgets.noninteractive.bg_fill = PANEL;
-    v.widgets.noninteractive.weak_bg_fill = PANEL;
-    v.widgets.noninteractive.bg_stroke = stroke(LINE);
-    v.widgets.noninteractive.fg_stroke = stroke(MUTED);
-    v.widgets.inactive.bg_fill = PANEL;
-    v.widgets.inactive.weak_bg_fill = PANEL;
-    v.widgets.inactive.bg_stroke = stroke(LINE);
-    v.widgets.inactive.fg_stroke = stroke(TEXT);
-    v.widgets.hovered.bg_fill = PANEL_HI;
-    v.widgets.hovered.weak_bg_fill = PANEL_HI;
-    v.widgets.hovered.bg_stroke = stroke(LINE_HI);
-    v.widgets.hovered.fg_stroke = stroke(GOLD);
-    v.widgets.active.bg_fill = PANEL_HI;
-    v.widgets.active.weak_bg_fill = PANEL_HI;
-    v.widgets.active.bg_stroke = stroke(GOLD);
-    v.widgets.active.fg_stroke = stroke(GOLD);
-    v.widgets.open.bg_fill = PANEL_HI;
-    v.widgets.open.weak_bg_fill = PANEL_HI;
-    v.widgets.open.bg_stroke = stroke(LINE_HI);
-    v.widgets.open.fg_stroke = stroke(TEXT);
-}
-
 /// A section tab. Painted rather than a `selectable_label` so the tab row reads
 /// as chrome and cannot be confused with the filter chips below it.
 fn tab_button(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
@@ -836,9 +783,24 @@ fn render_topic_page(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::states::chrome::{escape_ladder, ScreenContext};
     use crate::states::match_config::CharacterClass;
     use crate::states::play_match::equipment::ItemId;
     use crate::states::play_match::AbilityType;
+    use crate::ui::widgets::Nav;
+
+    /// One press of the Back key, exactly as the wrapper runs it: the search
+    /// rung, then the ladder the header's nav gives. True when it leaves.
+    fn back_key(state: &mut EncyclopediaState) -> bool {
+        let nav = Nav::Stacked {
+            can_back: state.can_go_back(),
+            return_to: GameState::MainMenu,
+        };
+        match escape_ladder(Some(nav), || state.clear_search()) {
+            Some(action) => state.escape(action),
+            None => false,
+        }
+    }
 
     #[test]
     fn back_pops_the_stack_and_exits_only_at_the_root() {
@@ -881,10 +843,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!state.back_key());
+        assert!(!back_key(&mut state));
         assert!(state.search.is_empty());
         // Only the second press reaches the (root) stack and exits.
-        assert!(state.back_key());
+        assert!(back_key(&mut state));
     }
 
     #[test]
@@ -906,7 +868,7 @@ mod tests {
         assert!(state.can_go_back());
 
         assert!(state.apply(EncyclopediaAction::Exit));
-        assert_eq!(state.leave(), GameState::MainMenu);
+        state.leave();
 
         assert!(state.search.is_empty());
         assert!(!state.can_go_back());
@@ -915,23 +877,24 @@ mod tests {
 
     #[test]
     fn the_home_button_returns_to_the_calling_context() {
+        let return_to = |context: &ScreenContext| {
+            context
+                .return_to(GameState::Encyclopedia)
+                .expect("the encyclopedia has an exit")
+        };
+        let mut context = ScreenContext::default();
+        // Nothing opened it: the declared fallback.
+        assert_eq!(home_label(return_to(&context)), "\u{1f3e0} MAIN MENU");
+
+        // Whoever opens it is where both exit paths go.
+        context.open_from(GameState::Encyclopedia, GameState::ConfigureMatch);
+        assert_eq!(home_label(return_to(&context)), "\u{1f3e0} MATCH SETUP");
+
         let mut state = EncyclopediaState::default();
-        // Default entry point.
-        assert_eq!(state.return_to(), GameState::MainMenu);
-        assert_eq!(home_label(state.return_to()), "\u{1f3e0} MAIN MENU");
-
-        // A future entry point sets one field and both exit paths follow it.
-        state.open_from(GameState::ConfigureMatch);
-        assert_eq!(home_label(state.return_to()), "\u{1f3e0} MATCH SETUP");
-
         // ...the button path,
         assert!(state.apply(EncyclopediaAction::Exit));
-        assert_eq!(state.leave(), GameState::ConfigureMatch);
-
         // ...and the Esc-at-root path.
-        state.open_from(GameState::ViewCombatant);
-        assert!(state.back_key());
-        assert_eq!(state.leave(), GameState::ViewCombatant);
+        assert!(back_key(&mut state));
     }
 
     /// Every return context that exists gets a Home label that names it. The
@@ -948,9 +911,12 @@ mod tests {
             (GameState::ViewCombatant, "\u{1f3e0} COMBATANT"),
         ];
         for (from, label) in expected {
-            let mut state = EncyclopediaState::default();
-            state.open_from(from);
-            assert_eq!(home_label(state.return_to()), label);
+            let mut context = ScreenContext::default();
+            context.open_from(GameState::Encyclopedia, from);
+            assert_eq!(
+                home_label(context.return_to(GameState::Encyclopedia).unwrap()),
+                label
+            );
         }
     }
 
@@ -991,7 +957,7 @@ mod tests {
         assert!(!state.can_go_back(), "a fresh root has no history");
 
         // A deep link is a FRESH stack, so its landing page has none either.
-        state.open_at(Topic::Class(CharacterClass::Mage), GameState::Results);
+        state.open_at(Topic::Class(CharacterClass::Mage));
         assert!(!state.can_go_back());
 
         state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Item(
@@ -1012,7 +978,7 @@ mod tests {
     fn esc_and_the_back_button_walk_the_same_ladder() {
         let route = || {
             let mut state = EncyclopediaState::default();
-            state.open_at(Topic::Class(CharacterClass::Mage), GameState::Results);
+            state.open_at(Topic::Class(CharacterClass::Mage));
             state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Item(
                 ItemId::WandOfTheInvoker,
             ))));
@@ -1023,15 +989,15 @@ mod tests {
         let mut by_button = route();
         for step in 0..2 {
             assert_eq!(
-                by_key.back_key(),
+                back_key(&mut by_key),
                 by_button.apply(EncyclopediaAction::Back),
                 "step {step}: the key and the button disagreed about leaving"
             );
             assert_eq!(by_key.current(), by_button.current(), "step {step}");
             assert_eq!(by_key.can_go_back(), by_button.can_go_back(), "step {step}");
         }
-        assert_eq!(by_key.leave(), GameState::Results);
-        assert_eq!(by_button.leave(), GameState::Results);
+        by_key.leave();
+        by_button.leave();
     }
 
     /// A deep link lands ON the topic and unwinds straight back to the screen
@@ -1045,13 +1011,12 @@ mod tests {
             ..Default::default()
         };
 
-        state.open_at(Topic::Class(CharacterClass::Mage), GameState::Results);
+        state.open_at(Topic::Class(CharacterClass::Mage));
         assert_eq!(
             state.current(),
             View::topic(Topic::Class(CharacterClass::Mage))
         );
         assert!(state.search.is_empty());
-        assert_eq!(home_label(state.return_to()), "\u{1f3e0} RESULTS");
 
         // Onward navigation still stacks, so Back walks back down to the
         // landing topic rather than leaving from the first page.
@@ -1066,8 +1031,8 @@ mod tests {
         );
 
         // At the landing topic, Back IS the way out — to the caller.
-        assert!(state.back_key());
-        assert_eq!(state.leave(), GameState::Results);
+        assert!(back_key(&mut state));
+        state.leave();
 
         // ...and the next visit starts fresh at the root, not on the Mage page.
         assert_eq!(state.current(), View::index(Section::Classes));
@@ -1081,10 +1046,7 @@ mod tests {
     #[test]
     fn a_deep_link_returns_to_its_caller_on_the_first_back() {
         let mut state = EncyclopediaState::default();
-        state.open_at(
-            Topic::Ability(AbilityType::Corruption),
-            GameState::ViewCombatant,
-        );
+        state.open_at(Topic::Ability(AbilityType::Corruption));
 
         assert_eq!(
             state.current(),
@@ -1096,10 +1058,12 @@ mod tests {
             !state.can_go_back(),
             "the linked page is the ROOT of the stack — there is nowhere above it"
         );
-        assert_eq!(home_label(state.return_to()), "\u{1f3e0} COMBATANT");
 
-        assert!(state.back_key(), "Esc at the root leaves the encyclopedia");
-        assert_eq!(state.leave(), GameState::ViewCombatant);
+        assert!(
+            back_key(&mut state),
+            "Esc at the root leaves the encyclopedia"
+        );
+        state.leave();
     }
 
     /// Browsing ONWARD from a deep-linked page still unwinds the route the
@@ -1107,21 +1071,21 @@ mod tests {
     #[test]
     fn browsing_on_from_a_deep_link_unwinds_before_it_leaves() {
         let mut state = EncyclopediaState::default();
-        state.open_at(
-            Topic::Ability(AbilityType::Corruption),
-            GameState::ViewCombatant,
-        );
+        state.open_at(Topic::Ability(AbilityType::Corruption));
         state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Class(
             CharacterClass::Warlock,
         ))));
 
-        assert!(!state.back_key(), "the first Back pops to the ability page");
+        assert!(
+            !back_key(&mut state),
+            "the first Back pops to the ability page"
+        );
         assert_eq!(
             state.current(),
             View::topic(Topic::Ability(AbilityType::Corruption))
         );
-        assert!(state.back_key());
-        assert_eq!(state.leave(), GameState::ViewCombatant);
+        assert!(back_key(&mut state));
+        state.leave();
     }
 
     /// A deep-linked page must not become the LANDING view for the next visit
@@ -1131,13 +1095,9 @@ mod tests {
     #[test]
     fn a_deep_link_does_not_poison_the_next_visit() {
         let mut state = EncyclopediaState::default();
-        state.open_at(
-            Topic::Item(ItemId::WandOfTheInvoker),
-            GameState::ViewCombatant,
-        );
-        assert_eq!(state.leave(), GameState::ViewCombatant);
+        state.open_at(Topic::Item(ItemId::WandOfTheInvoker));
+        state.leave();
 
-        state.open_from(GameState::MainMenu);
         assert_eq!(state.current(), View::index(Section::Classes));
         assert!(!state.can_go_back());
     }
@@ -1202,7 +1162,7 @@ mod tests {
                     class_icons: None,
                     ability_icons: None,
                 };
-                let _ = draw_encyclopedia(ctx, state, &data);
+                let _ = draw_encyclopedia(ctx, state, &data, GameState::MainMenu);
             });
         };
 

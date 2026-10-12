@@ -46,6 +46,7 @@
 //! └──────────────────────────┴─────────────────────────┘
 //! ```
 
+use super::chrome::ScreenNav;
 use super::configure_match_ui::ClassIcons;
 use super::encyclopedia::{widget, EncyclopediaData, EncyclopediaState, Topic};
 use super::match_config::CharacterClass;
@@ -58,6 +59,7 @@ use super::{
     GameState,
 };
 use crate::combat::log::CombatLog;
+use crate::ui::widgets::{Button, Nav, Variant};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -162,8 +164,9 @@ impl<'a> Links<'a> {
 /// wrapper below is the only thing that touches the ECS.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ResultsAction {
-    /// DONE — discard the results and go back to the main menu.
-    Done,
+    /// The exit — discard the results and leave for whatever started the
+    /// match (the main menu today). Esc asks for the same.
+    Exit,
     /// A linked icon was clicked: open this topic in the encyclopedia and come
     /// back here afterwards.
     OpenTopic(Topic),
@@ -184,9 +187,22 @@ pub fn results_ui(
     item_icons: Option<Res<ItemIcons>>,
     ability_icons: Option<Res<AbilityIcons>>,
     mut encyclopedia: ResMut<EncyclopediaState>,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut nav: ScreenNav,
     mut commands: Commands,
 ) {
+    // Esc takes the exit's own path, so it discards the results too. It needs
+    // no egui context, so it answers on any frame.
+    if nav.escape(false, || false).is_some() {
+        apply_results_action(
+            Some(ResultsAction::Exit),
+            &mut encyclopedia,
+            &mut nav,
+            &mut commands,
+        );
+        return;
+    }
+    let screen_nav = nav.nav(false).expect("Results has an exit");
+
     let Some(ctx) = contexts.try_ctx_mut() else {
         return;
     };
@@ -199,35 +215,39 @@ pub fn results_ui(
         ability_icons: ability_icons.as_deref(),
     };
 
-    let action = draw_results_screen(ctx, results.as_deref(), &combat_log, &data);
-    apply_results_action(action, &mut encyclopedia, &mut next_state, &mut commands);
+    let action = draw_results_screen(ctx, results.as_deref(), &combat_log, &data, screen_nav);
+    apply_results_action(action, &mut encyclopedia, &mut nav, &mut commands);
 }
 
 /// Apply the screen's action to the world.
 ///
 /// Split out of [`results_ui`] so a test can drive it with a real `World` and
-/// prove the property the encyclopedia round trip depends on: **only the DONE
-/// path discards [`MatchResults`]**. Nothing else in the app removes that
+/// prove the property the encyclopedia round trip depends on: **only the exit
+/// path discards [`MatchResults`]** (the exit button and Esc both take it). Nothing else in the app removes that
 /// resource, and neither the Results nor the Encyclopedia state has an
 /// `OnEnter`/`OnExit` hook, so a reader who steps into the encyclopedia and
 /// walks back comes home to the same numbers.
 pub fn apply_results_action(
     action: Option<ResultsAction>,
     encyclopedia: &mut EncyclopediaState,
-    next_state: &mut NextState<GameState>,
+    nav: &mut ScreenNav,
     commands: &mut Commands,
 ) {
     match action {
         None => {}
-        Some(ResultsAction::Done) => {
+        Some(ResultsAction::Exit) => {
             commands.remove_resource::<MatchResults>();
-            next_state.set(GameState::MainMenu);
+            let to = nav
+                .return_to(GameState::Results)
+                .expect("Results has an exit");
+            nav.leave(to);
         }
         Some(ResultsAction::OpenTopic(topic)) => {
             // The results are LEFT IN PLACE: the encyclopedia is an
-            // informational detour, and `open_at` records where to come back to.
-            encyclopedia.open_at(topic, GameState::Results);
-            next_state.set(GameState::Encyclopedia);
+            // informational detour, and opening it records where to come
+            // back to.
+            encyclopedia.open_at(topic);
+            nav.open(GameState::Encyclopedia);
         }
     }
 }
@@ -246,15 +266,8 @@ pub fn draw_results_screen(
     results: Option<&MatchResults>,
     combat_log: &CombatLog,
     data: &EncyclopediaData,
+    nav: Nav,
 ) -> Option<ResultsAction> {
-    let mut style = (*ctx.style()).clone();
-    style.visuals.window_fill = BG;
-    style.visuals.panel_fill = BG;
-    // Zero-delay tooltips, matching the encyclopedia: hovering a linked icon
-    // must answer at once — that immediacy is the point of the widget.
-    style.interaction.tooltip_delay = 0.0;
-    ctx.set_style(style);
-
     let mut links = Links::new(data);
     let mut done = false;
 
@@ -325,26 +338,25 @@ pub fn draw_results_screen(
 
                 ui.add_space(28.0);
 
+                // The exit, naming where it goes.
                 ui.vertical_centered(|ui| {
-                    let button = egui::Button::new(
-                        egui::RichText::new("DONE")
-                            .size(22.0)
-                            .color(egui::Color32::from_rgb(230, 242, 230)),
-                    )
-                    .min_size(egui::vec2(200.0, 48.0));
-
-                    if ui.add(button).clicked() {
+                    let label = nav.exit_label();
+                    if Button::new(&label, Variant::Secondary)
+                        .driver_id("nav:exit")
+                        .show(ui)
+                        .clicked()
+                    {
                         done = true;
                     }
                 });
             });
         });
 
-    // A click on a linked icon wins over DONE: they cannot both happen in one
+    // A click on a linked icon wins over the exit: they cannot both happen in one
     // frame, and answering the reader's most specific gesture is the safe order.
     match (links.clicked, done) {
         (Some(topic), _) => Some(ResultsAction::OpenTopic(topic)),
-        (None, true) => Some(ResultsAction::Done),
+        (None, true) => Some(ResultsAction::Exit),
         (None, false) => None,
     }
 }

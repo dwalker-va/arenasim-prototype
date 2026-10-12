@@ -22,6 +22,7 @@
 //! beside it (`docs/design/benches/2026-10-11-ui-design-system-bench.html`)
 //! draws every one of them.
 
+use bevy_egui::egui;
 use bevy_egui::egui::Color32;
 
 use crate::states::match_config::CharacterClass;
@@ -183,6 +184,10 @@ pub mod icon {
 pub mod stroke {
     /// Every panel, row, button and tooltip edge.
     pub const HAIRLINE: f32 = 1.0;
+    /// One dash of a dashed edge (the empty state's outline).
+    pub const DASH: f32 = 4.0;
+    /// The gap between two dashes of a dashed edge.
+    pub const DASH_GAP: f32 = 3.0;
 }
 
 /// Fixed control dimensions, in points: the size a component is drawn at,
@@ -228,4 +233,98 @@ pub fn class_color(class: CharacterClass) -> Color32 {
 pub fn school_color(school: SpellSchool) -> Color32 {
     let (r, g, b) = school.color_rgb8();
     Color32::from_rgb(r, g, b)
+}
+
+/// The whole egui [`egui::Style`] every screen draws under: what stock egui
+/// widgets (a `ui.button`, a checkbox, a `selectable_label`, a text field, a
+/// window, a hover card) look like when a screen does not paint its own.
+///
+/// [`crate::ui::install`] sets it ONCE, for the client and every harness. A
+/// screen never patches it — egui keeps one sticky `Style` per context, so a
+/// patch leaked into every screen reached after it (design doc §1.2, R1). A
+/// genuinely local variation goes in `ui.scope(|ui| { ui.style_mut()… })`,
+/// which egui restores on exit.
+///
+/// The interactive states mirror the kit's Secondary button
+/// ([`crate::ui::widgets::Variant::Secondary`]), so a stock button and a kit
+/// button side by side read as one control. Popups and tooltips take
+/// [`crate::ui::widgets::tooltip_frame`]'s look: [`color::BG`] fill, a
+/// [`color::LINE_STRONG`] edge, [`radius::MD`] corners, the same margin.
+pub fn style() -> egui::Style {
+    let mut style = egui::Style {
+        visuals: visuals(),
+        ..egui::Style::default()
+    };
+
+    // The type scale, for every widget that does not size its own text.
+    use egui::{FontFamily, FontId, TextStyle};
+    let proportional = |size| FontId::new(size, FontFamily::Proportional);
+    style.text_styles = [
+        (TextStyle::Small, proportional(text::SMALL)),
+        (TextStyle::Body, proportional(text::BODY)),
+        (TextStyle::Button, proportional(text::BODY)),
+        (TextStyle::Heading, proportional(text::H2)),
+        (
+            TextStyle::Monospace,
+            FontId::new(text::SMALL, FontFamily::Monospace),
+        ),
+    ]
+    .into();
+
+    // Hover cards: the tooltip frame's margin and width.
+    style.spacing.menu_margin = egui::Margin::symmetric(space::MD as i8, space::SM as i8);
+    style.spacing.tooltip_width = size::TOOLTIP_MAX_WIDTH;
+
+    // One tooltip delay, set once: a linked icon answers the moment it is
+    // hovered — that immediacy is the point of the widget.
+    style.interaction.tooltip_delay = 0.0;
+
+    style
+}
+
+fn visuals() -> egui::Visuals {
+    let line = |c| egui::Stroke::new(stroke::HAIRLINE, c);
+    let state = |fill, edge, label| egui::style::WidgetVisuals {
+        bg_fill: fill,
+        weak_bg_fill: fill,
+        bg_stroke: line(edge),
+        fg_stroke: line(label),
+        corner_radius: radius::MD.into(),
+        expansion: 0.0,
+    };
+
+    let mut v = egui::Visuals::dark();
+    v.widgets = egui::style::Widgets {
+        noninteractive: state(color::PANEL, color::LINE, color::TEXT),
+        inactive: state(color::PANEL, color::LINE, color::TEXT),
+        hovered: state(color::RAISED, color::LINE_STRONG, color::ACCENT),
+        active: state(color::RAISED, color::ACCENT, color::ACCENT),
+        open: state(color::RAISED, color::LINE_STRONG, color::TEXT),
+    };
+    // Selected: the list row's language, a [`color::SELECTED`] fill with an
+    // [`color::ACCENT`] edge and label. Not the chip's gold fill: a stock
+    // selectable label often colours its own text (an item's quality gold, a
+    // class colour), and that text vanishes on gold. Selected text in a field
+    // takes the same pair.
+    v.selection.bg_fill = color::SELECTED;
+    v.selection.stroke = line(color::ACCENT);
+
+    v.hyperlink_color = color::LINK;
+    v.warn_fg_color = color::WARN;
+    v.error_fg_color = color::DANGER;
+
+    // Surfaces.
+    v.panel_fill = color::BG;
+    v.window_fill = color::BG;
+    v.window_stroke = line(color::LINE_STRONG);
+    v.window_corner_radius = radius::LG.into();
+    v.menu_corner_radius = radius::MD.into();
+    // Text fields and other wells; striped rows.
+    v.extreme_bg_color = color::PANEL;
+    v.faint_bg_color = color::PANEL;
+    v.code_bg_color = color::PANEL;
+    // A hover card is flat, like the kit's tooltip frame.
+    v.popup_shadow = egui::Shadow::NONE;
+
+    v
 }

@@ -9,6 +9,7 @@
 //! index, in search and with a full detail page the moment it exists in the
 //! RON — which is the point of the `class` attribution AS-30 added.
 
+use crate::ui::fonts::body_family;
 use bevy_egui::egui;
 
 use crate::states::ability_text::{
@@ -315,6 +316,7 @@ pub fn tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &EncyclopediaData)
     ui.add_space(3.0);
     ui.label(
         egui::RichText::new(mechanics_text(ability, config))
+            .family(body_family(ui.ctx()))
             .size(12.0)
             .color(TEXT),
     );
@@ -347,6 +349,7 @@ pub fn slim_tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &Encyclopedia
     ui.add_space(3.0);
     ui.label(
         egui::RichText::new(summary_sentence(ability, config))
+            .family(body_family(ui.ctx()))
             .size(12.0)
             .color(TEXT),
     );
@@ -484,15 +487,13 @@ fn render_chip_bar(ui: &mut egui::Ui, filters: &mut AbilityFilters, data: &Encyc
         }
         for school in schools_in_use(data.abilities) {
             let active = filters.school == Some(school);
-            let label = egui::RichText::new(format!("{:?}", school))
-                // The chip wears its school's colour, except when selected —
-                // the selection fill is gold, so the label goes dark to stay
-                // legible on it.
-                .color(if active {
-                    super::BG
-                } else {
-                    school_color(school)
-                });
+            // The chip wears its school's colour, except when selected: then
+            // it takes the installed selection's label colour, like every
+            // other selected chip on the row.
+            let mut label = egui::RichText::new(format!("{:?}", school));
+            if !active {
+                label = label.color(school_color(school));
+            }
             if ui.selectable_label(active, label).clicked() {
                 filters.school = Some(school);
             }

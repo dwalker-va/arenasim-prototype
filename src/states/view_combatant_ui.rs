@@ -51,10 +51,12 @@ use super::play_match::proc_trinkets::proc_description;
 // affordance (pointing hand, hover tooltip, "click to open"), and
 // `EncyclopediaState::open_at` makes the target page the root of a fresh stack
 // so the first Back comes straight back here.
+use super::chrome::ScreenNav;
 use super::encyclopedia::{
     abilities as encyclopedia_abilities, widget, EncyclopediaData, EncyclopediaState, Topic,
 };
 use crate::ui::driver as ui_driver;
+use crate::ui::widgets::{nav_cluster, Nav, NavAction};
 
 /// Tracks which equipment slot has its picker open (if any)
 #[derive(Default)]
@@ -347,9 +349,9 @@ pub fn load_hunter_pet_icons(
 /// draw function; only these bubble out to the Bevy wrapper.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ViewCombatantAction {
-    /// BACK was clicked: return to Configure Match, dropping
-    /// `ViewCombatantState`.
-    Back,
+    /// The header exit was clicked: leave for wherever opened the screen
+    /// (Configure Match), dropping `ViewCombatantState`.
+    Exit,
     /// A reference surface was clicked: open the encyclopedia on this topic,
     /// returning here. `ViewCombatantState` is deliberately LEFT IN PLACE — it
     /// is what makes Back come home to this same team and slot, mid-pick
@@ -377,11 +379,9 @@ pub struct ViewCombatantData<'a> {
 /// [`ViewCombatantAction`] via ECS.
 pub fn view_combatant_ui(
     mut contexts: EguiContexts,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut nav: ScreenNav,
     view_state: Option<Res<ViewCombatantState>>,
     mut commands: Commands,
-    keybindings: Res<crate::keybindings::Keybindings>,
-    keyboard: Res<ButtonInput<KeyCode>>,
     class_icons: Res<ClassIcons>,
     ability_icons: Option<Res<AbilityIcons>>,
     item_icons: Option<Res<ItemIcons>>,
@@ -393,21 +393,20 @@ pub fn view_combatant_ui(
     mut picker_state: Local<EquipmentPickerState>,
     mut encyclopedia: ResMut<EncyclopediaState>,
 ) {
-    use crate::keybindings::GameAction;
+    // Esc closes the item picker first, then takes the header's exit. It
+    // needs no egui context, so it answers on any frame.
+    let screen_nav = nav.nav(false).expect("View Combatant has an exit");
+    let escape = nav.escape(false, || picker_state.open_slot.take().is_some());
+    if let Some(NavAction::Exit(to)) = escape {
+        commands.remove_resource::<ViewCombatantState>();
+        nav.leave(to);
+        return;
+    }
 
     // Use try_ctx_mut to avoid panic when context isn't ready
     let Some(ctx) = contexts.try_ctx_mut() else {
         return;
     };
-
-    // Handle Back key
-    if keybindings.action_just_pressed(GameAction::Back, &keyboard) {
-        if view_state.is_some() {
-            commands.remove_resource::<ViewCombatantState>();
-        }
-        next_state.set(GameState::ConfigureMatch);
-        return;
-    }
 
     let data = ViewCombatantData {
         abilities: &ability_definitions,
@@ -425,14 +424,15 @@ pub fn view_combatant_ui(
         &mut match_config,
         &mut picker_state,
         &data,
+        screen_nav,
     ) {
-        Some(ViewCombatantAction::Back) => {
+        Some(ViewCombatantAction::Exit) => {
             commands.remove_resource::<ViewCombatantState>();
-            next_state.set(GameState::ConfigureMatch);
+            nav.leave(screen_nav.destination());
         }
         Some(ViewCombatantAction::OpenEncyclopedia(topic)) => {
-            encyclopedia.open_at(topic, GameState::ViewCombatant);
-            next_state.set(GameState::Encyclopedia);
+            encyclopedia.open_at(topic);
+            nav.open(GameState::Encyclopedia);
         }
         None => {}
     }
@@ -454,14 +454,8 @@ pub fn draw_view_combatant(
     match_config: &mut MatchConfig,
     picker_state: &mut EquipmentPickerState,
     data: &ViewCombatantData,
+    nav: Nav,
 ) -> Option<ViewCombatantAction> {
-    // Configure dark theme
-    let mut style = (*ctx.style()).clone();
-    style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
-    style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
-    style.interaction.tooltip_delay = 0.0;
-    ctx.set_style(style);
-
     // Get the view state or show error
     let Some(view_state) = view_state else {
         egui::CentralPanel::default()
@@ -592,11 +586,11 @@ pub fn draw_view_combatant(
         .show(ctx, |ui| {
             ui.add_space(10.0);
 
-            // Back button - positioned in top-left
+            // The exit, top-left, naming where it goes.
             let back_rect =
-                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(80.0, 36.0));
+                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(240.0, 36.0));
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
-                if ui.button(egui::RichText::new("BACK").size(20.0)).clicked() {
+                if nav_cluster(ui, nav).is_some() {
                     back_clicked = true;
                 }
             });
@@ -988,7 +982,7 @@ pub fn draw_view_combatant(
         });
 
     if back_clicked {
-        return Some(ViewCombatantAction::Back);
+        return Some(ViewCombatantAction::Exit);
     }
     open_topic.map(ViewCombatantAction::OpenEncyclopedia)
 }
@@ -1732,11 +1726,6 @@ fn render_equipment_panel(
                     open_topic = open_topic.or(Some(Topic::Item(id)));
                 }
             });
-
-        // Handle Escape to close
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
-            keep_open = false;
-        }
 
         // Apply selection
         if let Some(item_id) = selection {

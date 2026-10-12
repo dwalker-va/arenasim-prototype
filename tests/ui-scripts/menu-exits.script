@@ -1,0 +1,89 @@
+# Every menu screen shows one exit that names where it goes, and Esc walks
+# back the same way: a picker or modal takes the first press, the screen's
+# exit the next (AS-258).
+#
+# Run:  cargo run --release -- --ui-script tests/ui-scripts/menu-exits.script
+#
+# `nav:exit to=<State> label=<text>` is noted by the exit button itself as it
+# draws, so the label is read back off the frame, not restated here.
+
+assert-state MainMenu
+
+# --- Options and Keybindings ------------------------------------------------
+click menu:OPTIONS
+assert-state Options
+assert-note nav:exit to=MainMenu label=◀ MAIN MENU
+click options:keybindings
+assert-state Keybindings
+assert-note nav:exit to=Options label=◀ OPTIONS
+key Escape
+assert-state Options
+click options:keybindings
+assert-state Keybindings
+click nav:exit
+assert-state Options
+key Escape
+assert-state MainMenu
+click menu:OPTIONS
+assert-state Options
+click nav:exit
+assert-state MainMenu
+
+# --- Animation sandbox ------------------------------------------------------
+click menu:ANIMATIONS
+assert-state AnimationSandbox
+assert-note nav:exit to=MainMenu label=◀ MAIN MENU
+key Escape
+assert-state MainMenu
+click menu:ANIMATIONS
+assert-state AnimationSandbox
+click nav:exit
+assert-state MainMenu
+
+# --- Encyclopedia: Home names the screen that opened it ---------------------
+click menu:ENCYCLOPEDIA
+assert-state Encyclopedia
+key Escape
+assert-state MainMenu
+click menu:ENCYCLOPEDIA
+assert-state Encyclopedia
+click enc:home
+assert-state MainMenu
+
+# --- Match setup and View Combatant -----------------------------------------
+click menu:MATCH
+assert-state ConfigureMatch
+assert-note nav:exit to=MainMenu label=◀ MAIN MENU
+click slot:t1s0
+click class:Warrior
+click slot:t1s0
+assert-state ViewCombatant
+assert-note nav:exit to=ConfigureMatch label=◀ MATCH SETUP
+
+# The item picker takes the first Esc, and the sheet stays.
+click equip:Ring1
+assert-visible pick:SignetOfFocus
+key Escape
+assert-state ViewCombatant
+assert-absent pick:SignetOfFocus
+key Escape
+assert-state ConfigureMatch
+
+click slot:t1s0
+assert-state ViewCombatant
+click nav:exit
+assert-state ConfigureMatch
+
+# The character picker takes the first Esc, and setup stays.
+click slot:t1s0:change
+assert-visible class:Mage
+key Escape
+assert-state ConfigureMatch
+assert-absent class:Mage
+key Escape
+assert-state MainMenu
+
+click menu:MATCH
+assert-state ConfigureMatch
+click nav:exit
+assert-state MainMenu

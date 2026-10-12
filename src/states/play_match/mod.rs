@@ -93,7 +93,6 @@ pub use traps::*;
 pub use utils::*;
 
 use super::match_config::{self, MatchConfig};
-use super::GameState;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use bevy::core_pipeline::bloom::Bloom;
 use bevy::core_pipeline::tonemapping::Tonemapping;
@@ -1703,16 +1702,11 @@ pub fn cleanup_play_match(mut commands: Commands, query: Query<Entity, With<Play
 // ============================================================================
 
 /// Handle player input during the match.
-/// Currently only handles ESC key to return to main menu.
-pub fn update_play_match(
-    keybindings: Res<crate::keybindings::Keybindings>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut next_state: ResMut<NextState<GameState>>,
-) {
-    use crate::keybindings::GameAction;
-
-    if keybindings.action_just_pressed(GameAction::Back, &keyboard) {
-        next_state.set(GameState::MainMenu);
+/// Currently only handles Esc: it abandons the match to whatever started it
+/// (`GameState::chrome`; the main menu today).
+pub fn update_play_match(mut nav: crate::states::chrome::ScreenNav) {
+    if let Some(crate::ui::widgets::NavAction::Exit(to)) = nav.escape(false, || false) {
+        nav.leave(to);
     }
 }
 

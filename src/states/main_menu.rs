@@ -10,6 +10,7 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
+use super::chrome::ScreenNav;
 use super::match_config::CharacterClass;
 use super::play_match::{class_mesh_color, spawn_arena_environment, spawn_arena_sun};
 use super::GameState;
@@ -446,9 +447,8 @@ fn paint_backdrop_scrims(ui: &egui::Ui) {
 pub fn main_menu_ui(
     mut contexts: EguiContexts,
     time: Res<Time>,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut nav: ScreenNav,
     mut commands: Commands,
-    mut encyclopedia: ResMut<crate::states::encyclopedia::EncyclopediaState>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
 ) {
     // Use try_ctx_mut to gracefully handle window close (the context
@@ -460,23 +460,19 @@ pub fn main_menu_ui(
     match draw_main_menu(ctx, time.elapsed_secs()) {
         Some(MenuAction::StartMatch) => {
             info!("Match button pressed - transitioning to ConfigureMatch");
-            next_state.set(GameState::ConfigureMatch);
+            nav.open(GameState::ConfigureMatch);
         }
         Some(MenuAction::Encyclopedia) => {
             info!("Encyclopedia button pressed - transitioning to Encyclopedia");
-            // The encyclopedia is an informational context: it returns you to
-            // whatever screen opened it. Declaring the entry point is the ONE
-            // thing a caller has to do (see `EncyclopediaState::open_from`).
-            encyclopedia.open_from(GameState::MainMenu);
-            next_state.set(GameState::Encyclopedia);
+            nav.open(GameState::Encyclopedia);
         }
         Some(MenuAction::AnimationSandbox) => {
             info!("Animations button pressed - transitioning to AnimationSandbox");
-            next_state.set(GameState::AnimationSandbox);
+            nav.open(GameState::AnimationSandbox);
         }
         Some(MenuAction::Options) => {
             info!("Options button pressed - transitioning to Options");
-            next_state.set(GameState::Options);
+            nav.open(GameState::Options);
         }
         Some(MenuAction::Exit) => {
             info!("Exit button pressed - closing primary window");

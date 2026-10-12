@@ -6,10 +6,10 @@
 //! promise to bring them back to the same numbers. That promise rests on two
 //! facts the type system does not enforce:
 //!
-//! 1. `MatchResults` is discarded on exactly ONE path — the DONE button. If a
-//!    later change discarded it on the way out of the state instead, the reader
-//!    would come back to "No match results available" and the screen would be a
-//!    trap.
+//! 1. `MatchResults` is discarded on exactly ONE path — the screen's exit, which
+//!    its button and Esc both take. If a later change discarded it on the way
+//!    out of the state instead, the reader would come back to "No match
+//!    results available" and the screen would be a trap.
 //! 2. The encyclopedia's `return_to` actually points at `Results`.
 //!
 //! Both are asserted here against a real `App` with the real `StatesPlugin`
@@ -29,6 +29,7 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin as BevyStatesPlugin;
 
 use arenasim::combat::CombatPlugin;
+use arenasim::states::chrome::{ScreenContext, ScreenNav};
 use arenasim::states::configure_match_ui::ClassIconHandles;
 use arenasim::states::encyclopedia::{EncyclopediaState, Topic};
 use arenasim::states::match_config::CharacterClass;
@@ -221,25 +222,16 @@ fn stepping_into_the_encyclopedia_and_back_keeps_the_same_results() {
         "the detour into the encyclopedia discarded the results"
     );
     assert_eq!(
-        app.world().resource::<EncyclopediaState>().return_to(),
-        GameState::Results,
+        app.world()
+            .resource::<ScreenContext>()
+            .return_to(GameState::Encyclopedia),
+        Some(GameState::Results),
         "the encyclopedia does not know where it was opened from"
     );
 
     // Leave the encyclopedia the way the reader does — the Back key at the
     // landing topic, which is the root of a deep link.
-    let destination = {
-        let mut encyclopedia = app.world_mut().resource_mut::<EncyclopediaState>();
-        assert!(encyclopedia.back_key(), "Back at a deep link must leave");
-        encyclopedia.leave()
-    };
-    assert_eq!(destination, GameState::Results);
-    app.world_mut()
-        .resource_mut::<NextState<GameState>>()
-        .set(destination);
-    for _ in 0..4 {
-        app.update();
-    }
+    press_escape(&mut app);
 
     assert_eq!(
         app.world().resource::<State<GameState>>().get(),
@@ -262,17 +254,17 @@ fn stepping_into_the_encyclopedia_and_back_keeps_the_same_results() {
     );
 }
 
-/// The control for the test above: DONE is the one path that DOES discard, so
-/// "the results survived" is a real property of the encyclopedia detour rather
-/// than of a resource nothing ever removes.
+/// The control for the test above: the exit is the one path that DOES
+/// discard, so "the results survived" is a real property of the encyclopedia
+/// detour rather than of a resource nothing ever removes.
 #[test]
-fn done_is_the_only_path_that_discards_the_results() {
+fn the_exit_is_the_only_path_that_discards_the_results() {
     let mut app = boot_app();
     enter_results(&mut app);
 
     app.world_mut()
-        .run_system_once(press_done)
-        .expect("press DONE");
+        .run_system_once(press_exit)
+        .expect("press the exit");
     for _ in 0..4 {
         app.update();
     }
@@ -283,32 +275,93 @@ fn done_is_the_only_path_that_discards_the_results() {
     );
     assert!(
         app.world().get_resource::<MatchResults>().is_none(),
-        "DONE must discard the results"
+        "the exit must discard the results"
     );
+}
+
+/// Esc on Results takes the exit's own path: it leaves for whatever started
+/// the match AND discards the results, rather than skipping the cleanup the
+/// button performs.
+#[test]
+fn esc_on_results_takes_the_exit_and_discards_the_results() {
+    let mut app = boot_app();
+    enter_results(&mut app);
+
+    press_escape(&mut app);
+
+    assert_eq!(
+        app.world().resource::<State<GameState>>().get(),
+        &GameState::MainMenu
+    );
+    assert!(
+        app.world().get_resource::<MatchResults>().is_none(),
+        "Esc must discard the results, as the exit does"
+    );
+}
+
+/// Results returns to whatever started the match, not to a fixed main menu:
+/// starting a match records its context for both the match and its results.
+#[test]
+fn results_return_to_whatever_started_the_match() {
+    let mut app = boot_app();
+    app.update();
+    app.world_mut()
+        .resource_mut::<ScreenContext>()
+        .open_from(GameState::Results, GameState::Encyclopedia);
+    enter_results(&mut app);
+
+    press_escape(&mut app);
+
+    assert_eq!(
+        app.world().resource::<State<GameState>>().get(),
+        &GameState::Encyclopedia,
+        "the exit went somewhere other than the recorded opener"
+    );
+}
+
+/// Press and release the Back key (Esc by default) through Bevy's own input
+/// events, then let any transition it asked for land.
+fn press_escape(app: &mut App) {
+    use bevy::input::keyboard::{Key, KeyboardInput};
+    use bevy::input::ButtonState;
+    for state in [ButtonState::Pressed, ButtonState::Released] {
+        app.world_mut().send_event(KeyboardInput {
+            key_code: KeyCode::Escape,
+            logical_key: Key::Escape,
+            state,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+    }
+    for _ in 0..4 {
+        app.update();
+    }
 }
 
 fn open_mage(
     mut encyclopedia: ResMut<EncyclopediaState>,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut nav: ScreenNav,
     mut commands: Commands,
 ) {
     apply_results_action(
         Some(ResultsAction::OpenTopic(Topic::Class(CharacterClass::Mage))),
         &mut encyclopedia,
-        &mut next_state,
+        &mut nav,
         &mut commands,
     );
 }
 
-fn press_done(
+fn press_exit(
     mut encyclopedia: ResMut<EncyclopediaState>,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut nav: ScreenNav,
     mut commands: Commands,
 ) {
     apply_results_action(
-        Some(ResultsAction::Done),
+        Some(ResultsAction::Exit),
         &mut encyclopedia,
-        &mut next_state,
+        &mut nav,
         &mut commands,
     );
 }

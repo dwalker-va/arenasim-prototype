@@ -18,6 +18,7 @@
 //! 4. Cycles through maps with arrow buttons
 //! 5. Clicks "START MATCH" when all slots filled
 
+use super::chrome::ScreenNav;
 use super::play_match::arena_bounds::{outline_half_extents, ArenaBounds, WALL_OFFSET};
 use super::play_match::map_config::MapGeometryConfig;
 use super::play_match::map_geometry::{prism_vertices_world, ObstacleVolume};
@@ -28,6 +29,7 @@ use super::{
     GameState,
 };
 use crate::ui::driver as ui_driver;
+use crate::ui::widgets::{nav_cluster, Nav, NavAction};
 use bevy::core_pipeline::bloom::Bloom;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
@@ -150,8 +152,8 @@ pub struct CharacterPickerState {
 /// draw function; only these bubble out to the Bevy wrapper.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigureMatchAction {
-    /// Return to the main menu.
-    Back,
+    /// The header exit: leave for wherever opened the screen.
+    Exit,
     /// Begin the match with the current config.
     StartMatch,
     /// Open the View Combatant screen for a filled slot.
@@ -170,39 +172,37 @@ pub enum ConfigureMatchAction {
 pub fn configure_match_ui(
     mut contexts: EguiContexts,
     mut config: ResMut<MatchConfig>,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut nav: ScreenNav,
     mut picker_state: Option<ResMut<CharacterPickerState>>,
     mut commands: Commands,
-    keybindings: Res<crate::keybindings::Keybindings>,
-    keyboard: Res<ButtonInput<KeyCode>>,
     class_icons: Res<ClassIcons>,
     map_geometry: Res<MapGeometryConfig>,
     map_preview: Option<Res<MapPreview>>,
 ) {
-    use crate::keybindings::GameAction;
-
     // Initialize picker state if it doesn't exist
     if picker_state.is_none() {
         commands.insert_resource(CharacterPickerState::default());
+    }
+
+    // Esc closes the character picker first, then takes the header's exit.
+    // It needs no egui context, so it answers on any frame.
+    let screen_nav = nav.nav(false).expect("Configure Match has an exit");
+    let escape = nav.escape(false, || match picker_state.as_deref_mut() {
+        Some(picker) if picker.active => {
+            picker.active = false;
+            true
+        }
+        _ => false,
+    });
+    if let Some(NavAction::Exit(to)) = escape {
+        nav.leave(to);
+        return;
     }
 
     // Use try_ctx_mut to avoid panic when context isn't ready during state transitions
     let Some(ctx) = contexts.try_ctx_mut() else {
         return;
     };
-
-    // Handle Back key - close modal if open, otherwise return to main menu
-    if keybindings.action_just_pressed(GameAction::Back, &keyboard) {
-        if let Some(ref mut picker) = picker_state {
-            if picker.active {
-                picker.active = false;
-            } else {
-                next_state.set(GameState::MainMenu);
-            }
-        } else {
-            next_state.set(GameState::MainMenu);
-        }
-    }
 
     // The pure renderer needs a live picker state; if the resource was only
     // just queued this frame, fall back to a scratch one so the screen still
@@ -228,17 +228,18 @@ pub fn configure_match_ui(
         &class_icons,
         &map_geometry,
         preview_texture,
+        screen_nav,
     ) {
-        Some(ConfigureMatchAction::Back) => {
-            next_state.set(GameState::MainMenu);
+        Some(ConfigureMatchAction::Exit) => {
+            nav.leave(screen_nav.destination());
         }
         Some(ConfigureMatchAction::StartMatch) => {
             info!("Starting match with config: {:?}", *config);
-            next_state.set(GameState::PlayMatch);
+            nav.open_match();
         }
         Some(ConfigureMatchAction::ViewCombatant { class, team, slot }) => {
             commands.insert_resource(ViewCombatantState { class, team, slot });
-            next_state.set(GameState::ViewCombatant);
+            nav.open(GameState::ViewCombatant);
         }
         None => {}
     }
@@ -260,13 +261,8 @@ pub fn draw_configure_match(
     class_icons: &ClassIcons,
     map_geometry: &MapGeometryConfig,
     preview_texture: Option<egui::TextureId>,
+    nav: Nav,
 ) -> Option<ConfigureMatchAction> {
-    // Configure dark theme
-    let mut style = (*ctx.style()).clone();
-    style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
-    style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
-    ctx.set_style(style);
-
     let mut action: Option<ConfigureMatchAction> = None;
 
     egui::CentralPanel::default()
@@ -283,25 +279,12 @@ pub fn draw_configure_match(
         .show(ctx, |ui| {
             ui.add_space(10.0);
 
-            // Back button - custom-painted to match the rest of the (painted)
-            // screen instead of egui's default chrome.
+            // The exit, top-left, naming where it goes.
             let back_rect =
-                egui::Rect::from_min_size(egui::pos2(20.0, 18.0), egui::vec2(96.0, 38.0));
+                egui::Rect::from_min_size(egui::pos2(20.0, 18.0), egui::vec2(240.0, 38.0));
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
-                let back = egui::Button::new(
-                    egui::RichText::new("‹  BACK")
-                        .size(18.0)
-                        .color(egui::Color32::from_rgb(200, 205, 220)),
-                )
-                .fill(egui::Color32::from_rgb(38, 40, 54))
-                .stroke(egui::Stroke::new(
-                    1.0_f32,
-                    egui::Color32::from_rgb(70, 74, 92),
-                ))
-                .corner_radius(6.0)
-                .min_size(egui::vec2(96.0, 38.0));
-                if ui.add(back).clicked() {
-                    action = Some(ConfigureMatchAction::Back);
+                if nav_cluster(ui, nav).is_some() {
+                    action = Some(ConfigureMatchAction::Exit);
                 }
             });
 

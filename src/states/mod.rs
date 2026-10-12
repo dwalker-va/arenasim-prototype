@@ -11,6 +11,7 @@ use bevy_egui::{egui, EguiContexts, EguiPostUpdateSet};
 pub mod ability_text;
 pub mod animation_sandbox;
 pub mod arena_layout_debug;
+pub mod chrome;
 pub mod configure_match_ui;
 pub mod encyclopedia;
 pub mod main_menu;
@@ -48,11 +49,9 @@ pub enum GameState {
 impl GameState {
     /// Human-readable name of the screen this state shows.
     ///
-    /// Used where one screen has to NAME another in its own chrome — the
-    /// encyclopedia's exit button says where it will put you, because the
-    /// encyclopedia is an informational context entered from somewhere and
-    /// leaving it returns you to that somewhere (see
-    /// [`encyclopedia::EncyclopediaState::open_from`]).
+    /// Used where one screen has to NAME another in its own chrome: every
+    /// exit button says where it will put you, because a screen's exit returns
+    /// to whatever opened it (see [`chrome::ScreenContext`]).
     pub fn screen_name(&self) -> &'static str {
         match self {
             GameState::MainMenu => "Main Menu",
@@ -136,6 +135,8 @@ impl Plugin for StatesPlugin {
         app
             // Initialize match config resource
             .init_resource::<MatchConfig>()
+            // Who opened each screen: every contextual exit reads it
+            .init_resource::<chrome::ScreenContext>()
             // Initialize class icon resources
             .init_resource::<configure_match_ui::ClassIcons>()
             .init_resource::<configure_match_ui::ClassIconHandles>()
@@ -1371,21 +1372,24 @@ impl Plugin for StatesPlugin {
 
 fn options_ui(
     mut contexts: EguiContexts,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut nav: chrome::ScreenNav,
     mut settings: ResMut<crate::settings::GameSettings>,
     pending_restart: Res<crate::settings::PendingSettingsRestart>,
 ) {
     // Use try_ctx_mut to gracefully handle window close (the context
     // dies with the primary window; ctx_mut panics on the final frame)
+    // Esc takes the exit. It needs no egui context, so it answers on any
+    // frame.
+    if let Some(crate::ui::widgets::NavAction::Exit(to)) = nav.escape(false, || false) {
+        nav.leave(to);
+        return;
+    }
+    let screen_nav = nav.nav(false).expect("Options has an exit");
+    let mut exit = None;
+
     let Some(ctx) = contexts.try_ctx_mut() else {
         return;
     };
-
-    // Configure style for a dark theme
-    let mut style = (*ctx.style()).clone();
-    style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
-    style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
-    ctx.set_style(style);
 
     egui::CentralPanel::default()
         .frame(
@@ -1401,15 +1405,13 @@ fn options_ui(
         .show(ctx, |ui| {
             ui.add_space(10.0);
 
-            // Back button - positioned in top-left
+            // The exit, top-left, naming where it goes.
             let back_rect = egui::Rect::from_min_size(
                 egui::pos2(20.0, 20.0),
-                egui::vec2(80.0, 36.0)
+                egui::vec2(240.0, 36.0)
             );
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
-                if ui.button(egui::RichText::new("BACK").size(20.0)).clicked() {
-                    next_state.set(GameState::MainMenu);
-                }
+                exit = exit.or(crate::ui::widgets::nav_cluster(ui, screen_nav));
             });
 
             // Title - centered relative to full width
@@ -1626,14 +1628,21 @@ fn options_ui(
 
                                 ui.add_space(20.0);
 
-                                if ui.add(
+                                let keybindings = ui.add(
                                     egui::Button::new(
                                         egui::RichText::new("Configure Keybindings")
                                             .size(18.0)
                                     )
                                     .min_size(egui::vec2(200.0, 36.0))
-                                ).clicked() {
-                                    next_state.set(GameState::Keybindings);
+                                );
+                                crate::ui::driver::mark(
+                                    ui,
+                                    keybindings.rect,
+                                    true,
+                                    format_args!("options:keybindings"),
+                                );
+                                if keybindings.clicked() {
+                                    nav.open(GameState::Keybindings);
                                 }
                             });
 
@@ -1686,6 +1695,10 @@ fn options_ui(
                 );
             });
         });
+
+    if let Some(crate::ui::widgets::NavAction::Exit(to)) = exit {
+        nav.leave(to);
+    }
 }
 
 /// Resource to track keybinding that is currently being rebound
@@ -1698,7 +1711,7 @@ struct RebindingState {
 /// Keybindings configuration UI
 fn keybindings_ui(
     mut contexts: EguiContexts,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut nav: chrome::ScreenNav,
     mut settings: ResMut<crate::settings::GameSettings>,
     mut rebinding_state: Local<Option<RebindingState>>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -1719,15 +1732,18 @@ fn keybindings_ui(
 
     // Use try_ctx_mut to gracefully handle window close (the context
     // dies with the primary window; ctx_mut panics on the final frame)
+    // Esc takes the exit. It needs no egui context, so it answers on any
+    // frame.
+    if let Some(crate::ui::widgets::NavAction::Exit(to)) = nav.escape(false, || false) {
+        nav.leave(to);
+        return;
+    }
+    let screen_nav = nav.nav(false).expect("Keybindings has an exit");
+    let mut exit = None;
+
     let Some(ctx) = contexts.try_ctx_mut() else {
         return;
     };
-
-    // Configure style for a dark theme
-    let mut style = (*ctx.style()).clone();
-    style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
-    style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
-    ctx.set_style(style);
 
     egui::CentralPanel::default()
         .frame(
@@ -1743,13 +1759,11 @@ fn keybindings_ui(
         .show(ctx, |ui| {
             ui.add_space(10.0);
 
-            // Back button - positioned in top-left
+            // The exit, top-left, naming where it goes.
             let back_rect =
-                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(80.0, 36.0));
+                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(240.0, 36.0));
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
-                if ui.button(egui::RichText::new("BACK").size(20.0)).clicked() {
-                    next_state.set(GameState::Options);
-                }
+                exit = exit.or(crate::ui::widgets::nav_cluster(ui, screen_nav));
             });
 
             // Title - centered relative to full width
@@ -1937,6 +1951,10 @@ fn keybindings_ui(
                 );
             });
         });
+
+    if let Some(crate::ui::widgets::NavAction::Exit(to)) = exit {
+        nav.leave(to);
+    }
 
     // Handle key press for rebinding
     if let Some(ref mut rs) = rebinding_state.as_mut() {
