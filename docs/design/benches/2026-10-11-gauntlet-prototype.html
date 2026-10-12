@@ -20,9 +20,12 @@
     after a win at 1/3, and the Champion trinkets (section 6);
   - opponents scaling with wins to budget parity, and the six difficulty levels
     (sections 7.3 and 8);
-  - draft slots and the renown board (section 9). The profile is kept in this
-    browser's localStorage; the menu has prototype-only buttons to record a clear
-    or reset it.
+  - renown abilities awarded when their condition is met (section 9): a small
+    condition vocabulary evaluated at match end (from a mocked match-facts
+    digest) and at run end (from the run record), and the encyclopedia's Renown
+    section showing each ability's effect, condition and state. The profile is
+    kept in this browser's localStorage; the menu has prototype-only buttons to
+    record a clear or reset it.
   The draft pool is the slice's four classes. The Rogue and Paladin trees are not
   designed yet, so their points become item budget, as for opponents without a tree.
 
@@ -284,7 +287,7 @@ function makeOffer(c,slot,tier){
 }
 // Offers for one combatant: Gauntlet gear, plus one Champion offer after a win with the run's chance.
 function offersFor(c,won){
-  const n = 3 + rankOwned("FourthOffer");
+  const n = equipmentChoices();
   const out = [];
   const gauntletSlots = FELT_SLOTS.filter(s=>currentIlvl(c,s)<ILVL.gauntlet);
   const st = ARMOR[c.cls][0];
@@ -303,44 +306,87 @@ function budget(c){return KIT_BUDGET + talentPrice(c) + gearGain(c) + (c.gearPts
 
 // ---- Caps, difficulty and the profile (sections 7.2, 8, 9) -----------------------
 const POINT_CAP = 8, PICK_CAP = 6, START_POINTS = 2;
-function pointCap(){return POINT_CAP + rankOwned("DeeperTraining")}
-function pickCap(){return PICK_CAP + rankOwned("DeeperPockets")}
-function championChance(){return 1/3 + 0.10*rankOwned("KeenEye")}
+function pointCap(){return POINT_CAP}
+function pickCap(){return PICK_CAP}
+function championChance(){return 1/3}
 const LEVELS = [ // [name, extra picks, extra Champion items (99 = all), opponent points rule]
   ["Novice",-2,-99,"parity"],["Combatant",0,0,"parity"],["Challenger",1,1,"parity"],
   ["Rival",2,2,"parity"],["Duelist",3,99,"plus1"],["Gladiator",4,99,"full"],
 ];
-const RENOWN_BOARD = [ // [id, name, effect, ranks, kind, needs a clear at level index]
-  ["FourthOffer","Fourth offer","4 reward offers instead of 3.",1,"Choice",1],
-  ["ScoutsReport","Scout's report","The briefing shows the next two opponents.",1,"Information",1],
-  ["Reroll","Reroll","Reroll one combatant's offers once per run, per rank.",2,"Choice",1],
-  ["KeenEye","Keen eye","Champion chance after a win +10 percentage points a rank.",2,"Power, small",2],
-  ["HeadStart","Head start","+1 starting talent point (the cap stays 8).",1,"Power, early only",2],
-  ["Quartermaster","Quartermaster","Each combatant starts with one Gauntlet item.",1,"Power, early only",3],
-  ["DeeperTraining","Deeper training","Talent point cap 8 to 9.",1,"Power, at the cap",4],
-  ["DeeperPockets","Deeper pockets","Reward pick cap 6 to 7.",1,"Power, at the cap",4],
+// ---- Renown (section 9): abilities AWARDED when their condition is met ------------
+// A condition is a scope plus a list of leaves that must all hold. A leaf is one
+// entry in LEAVES: a predicate over the facts its scope reads, and a prose line.
+// A new renown ability is one RENOWN entry; a new leaf is one LEAVES entry.
+const LEAVES = {
+  // Run scope: reads the run record.
+  Cleared:{scope:"run", test:(r,lvl)=>r.cleared && r.level>=lvl, text:lvl=>`clear a Gauntlet run at ${LEVELS[lvl][0]} or above`},
+  LossesAtMost:{scope:"run", test:(r,n)=>r.losses<=n, text:n=>n===0?"without a loss":`with at most ${n} losses`},
+  TeamIncludes:{scope:"run", test:(r,cls)=>r.team.includes(cls), text:cls=>`with a ${cls} on your team`},
+  HealerCount:{scope:"run", test:(r,n)=>r.team.filter(c=>CLASSES[c].heal).length===n, text:n=>n===0?"with no healer on your team":`with exactly ${n} healer`},
+  NoItemTierEquipped:{scope:"run", test:(r,tier)=>!r.tiersEquipped.includes(tier), text:()=>"without ever equipping a Champion item"},
+  // Match scope: reads the match-facts digest (mocked here; built from the match result and combat log in the game).
+  Won:{scope:"match", test:f=>f.won, text:()=>"win a Gauntlet match"},
+  CameDownToOneVsOne:{scope:"match", test:f=>f.oneVsOne, text:()=>"that comes down to a 1v1"},
+  KillingBlowWhileOffTargetInHardCc:{scope:"match", test:f=>f.cleanKill, text:()=>"landing the killing blow while the other enemy is in hard crowd control"},
+  // Profile scope: reads the history of clears.
+  DistinctClassesCleared:{scope:"profile", test:(p,n)=>new Set(p.history.flatMap(h=>h.team)).size>=n, text:n=>`clear Gauntlet runs with ${n} different classes`, progress:(p,n)=>[new Set(p.history.flatMap(h=>h.team)).size,n]},
+};
+const EFFECTS = {
+  draft:{text:n=>`+${n} draft choice`, ceiling:6, base:3},
+  offers:{text:n=>`+${n} equipment choice`, ceiling:5, base:3},
+  rerolls:{text:n=>`+${n} equipment reroll a run`, ceiling:5, base:0},
+  title:{text:t=>`the title "${t}"`},
+};
+const RENOWN = [ // [id, name, kind, {effect}, scope, [[leaf, arg]...]]
+  ["ArenaCombatant","Arena Combatant","Flagship",{draft:1},"run",[["Cleared",1]]],
+  ["ArenaChallenger","Arena Challenger","Flagship",{offers:1},"run",[["Cleared",2]]],
+  ["ArenaRival","Arena Rival","Flagship",{draft:1},"run",[["Cleared",3]]],
+  ["ArenaDuelist","Arena Duelist","Flagship",{offers:1},"run",[["Cleared",4]]],
+  ["ArenaGladiator","Arena Gladiator","Flagship",{draft:1},"run",[["Cleared",5]]],
+  ["CloakAndDagger","Cloak and Dagger","Objective",{rerolls:1},"run",[["Cleared",1],["TeamIncludes","Rogue"]]],
+  ["AllOffense","All Offense","Objective",{rerolls:1},"run",[["Cleared",1],["HealerCount",0]]],
+  ["Flawless","Flawless","Objective",{rerolls:1,title:"the Flawless"},"run",[["Cleared",1],["LossesAtMost",0]]],
+  ["OpenHanded","Open-Handed","Objective",{rerolls:1},"run",[["Cleared",1],["NoItemTierEquipped","champion"]]],
+  ["LastOneStanding","Last One Standing","Objective",{rerolls:1},"match",[["Won"],["CameDownToOneVsOne"]]],
+  ["CleanKill","Clean Kill","Objective",{title:"the Precise"},"match",[["Won"],["KillingBlowWhileOffTargetInHardCc"]]],
+  ["Versatile","Versatile","Objective",{title:"the Versatile"},"profile",[["DistinctClassesCleared",4]]],
 ];
-const MAX_DRAFT_SLOTS = 6;
-function freshProfile(){return {clears:[0,0,0,0,0,0], renown:0, board:{}}}
+// No condition may reward a double-healer team (section 9.2): checked at load, like the game's validator.
+for(const r of RENOWN){
+  for(const [leaf,arg] of r[5]){ if(!LEAVES[leaf]||LEAVES[leaf].scope!==r[4]) throw new Error(`renown ${r[0]}: leaf ${leaf} is not a ${r[4]} leaf`); if(leaf==="HealerCount"&&arg>1) throw new Error(`renown ${r[0]} rewards a double-healer team`) }
+}
+function conditionText(r){const t=r[5].map(([leaf,arg])=>LEAVES[leaf].text(arg));return t[0].charAt(0).toUpperCase()+t[0].slice(1)+(t.length>1?" "+t.slice(1).join(", "):"")+"."}
+function effectText(e){return Object.entries(e).map(([k,v])=>EFFECTS[k].text(v)).join("; ")}
+function freshProfile(){return {clears:[0,0,0,0,0,0], unlocked:{}, history:[], runs:0}}
 let P = freshProfile();
 try{ const raw = localStorage.getItem("arenasim-gauntlet-profile"); if(raw) P = Object.assign(freshProfile(), JSON.parse(raw)); }catch(e){}
+for(const id in P.unlocked) if(!RENOWN.some(r=>r[0]===id)) delete P.unlocked[id];   // a removed ability is dropped on load
 function saveProfile(){try{localStorage.setItem("arenasim-gauntlet-profile",JSON.stringify(P))}catch(e){}}
-function totalClears(){return P.clears.slice(1).reduce((a,b)=>a+b,0)}   // Novice clears earn nothing
-function draftSlots(){return Math.min(MAX_DRAFT_SLOTS, 3 + Math.min(3,totalClears()))}
-function rankOwned(id){return P.board[id]||0}
+function unlocked(id){return !!P.unlocked[id]}
+function effectTotal(k){return RENOWN.filter(r=>unlocked(r[0])&&r[3][k]).reduce((s,r)=>s+r[3][k],0)}
+function draftSlots(){return Math.min(EFFECTS.draft.ceiling, EFFECTS.draft.base+effectTotal("draft"))}
+function equipmentChoices(){return Math.min(EFFECTS.offers.ceiling, EFFECTS.offers.base+effectTotal("offers"))}
+function rerollsPerRun(){return Math.min(EFFECTS.rerolls.ceiling, effectTotal("rerolls"))}
 function levelUnlocked(i){return i<=1 || P.clears[i-1]>0}
-function bestClearAt(i){return P.clears.slice(i).some(n=>n>0)}
-function recordClear(level){
-  const before = {slots:draftSlots(), renown:P.renown};
-  P.clears[level]++;
-  if(level>=1) P.renown += level>=3 ? 2 : 1;
+// evaluate(scope, facts): award every ability of that scope whose condition now holds. Idempotent.
+function evaluate(scope, facts, where){
+  const got=[];
+  for(const r of RENOWN){
+    if(r[4]!==scope || unlocked(r[0])) continue;
+    if(r[5].every(([leaf,arg])=>LEAVES[leaf].test(facts,arg))){ P.unlocked[r[0]]=where; got.push(r[0]); }
+  }
   saveProfile();
-  return {slotsBefore:before.slots, slotsAfter:draftSlots(), renownGained:P.renown-before.renown, unlocked: level+1<LEVELS.length && P.clears[level]===1 ? LEVELS[level+1][0] : null};
+  return got;
 }
-function buyNode(id){
-  const n = RENOWN_BOARD.find(x=>x[0]===id);
-  if(P.renown<1 || rankOwned(id)>=n[3] || !bestClearAt(n[5])) return;
-  P.board[id]=rankOwned(id)+1; P.renown--; saveProfile(); render();
+// Run end: record the clear, then the run and profile conditions. Awards take effect from the next run.
+function endOfRun(record){
+  P.runs++;
+  const got=[];
+  if(record.cleared){ P.clears[record.level]++; P.history.push({team:record.team, level:record.level}); }
+  got.push(...evaluate("run", record, `run ${P.runs}`));
+  got.push(...evaluate("profile", P, `run ${P.runs}`));
+  saveProfile();
+  return {awards:got, unlockedLevel: record.cleared && record.level+1<LEVELS.length && P.clears[record.level]===1 ? LEVELS[record.level+1][0] : null};
 }
 
 const MAX_WINS = 7, MAX_LOSSES = 3;
@@ -400,7 +446,7 @@ function newRun(seed, level){
   seed = seed ?? Math.floor(Math.random()*1e9);
   rng = mulberry32(seed);
   const offer = pick(SLICE_POOL, Math.min(draftSlots(), SLICE_POOL.length));
-  S = {seed, level: level ?? 1, offer, draft:[], team:[], wins:0, losses:0, history:[], prep:{kill:1,cc:0}, screen:"draft", sel:{}, offers:null, opp:null, lastWon:false, rerolls:rankOwned("Reroll"), clearResult:null};
+  S = {seed, level: level ?? 1, offer, draft:[], team:[], wins:0, losses:0, history:[], prep:{kill:1,cc:0}, screen:"draft", sel:{}, offers:null, opp:null, lastWon:false, rerolls:rerollsPerRun(), runEnd:null, newAwards:[], tiersEquipped:[]};
   render();
 }
 function matchNo(){return S.wins+S.losses+1}
@@ -518,29 +564,32 @@ function render(){
   ({draft,hub,talents,prepare,fight:drawFight,result,reward,end})[S.screen]();
 }
 function menu(){
-  if(window.__renown) return renown();
+  if(window.__ency) return encyclopedia();
   return `<div class="menu"><h2>ArenaSim</h2>
       ${saved?`<button class="btn primary" onclick="S=saved;saved=null;go('hub')">Continue run (${saved.wins}-${saved.losses})</button>`:""}
       <label class="f" style="width:280px">Difficulty<select onchange="MENU_LEVEL=+this.value;render()">${LEVELS.map((l,i)=>`<option value="${i}" ${i===MENU_LEVEL?"selected":""} ${levelUnlocked(i)?"":"disabled"}>${l[0]}${levelUnlocked(i)?"":` (clear ${LEVELS[i-1][0]})`}${P.clears[i]?` · cleared ${P.clears[i]}x`:""}</option>`).join("")}</select></label>
       <button class="btn ${saved?"":"primary"}" onclick="saved=null;newRun(null,MENU_LEVEL)">${saved?"Abandon and start a new run":"Gauntlet"}</button>
-      <button class="btn" onclick="window.__renown=true;render()">Renown${P.renown?` (${P.renown} to spend)`:""}</button>
+      <button class="btn" onclick="window.__ency=true;render()">Encyclopedia: Renown</button>
       <button class="btn" disabled title="The configure-match sandbox, with a talent panel">Custom Match</button>
-      <p class="note">Gauntlet: draft two classes, grow them a talent point and a reward pick a match, and win seven before your third loss. Draft slots: ${draftSlots()} (the slice's pool of ${SLICE_POOL.length} caps the offer at ${Math.min(draftSlots(),SLICE_POOL.length)}).</p>
-      <p class="note">Prototype only: <button class="btn" onclick="recordClear(MENU_LEVEL);render();toast('Recorded a clear at '+LEVELS[MENU_LEVEL][0])">Record a clear at ${LEVELS[MENU_LEVEL][0]}</button> <button class="btn" onclick="P=freshProfile();saveProfile();MENU_LEVEL=1;render()">Reset profile</button></p></div>`;
+      <p class="note">Gauntlet: draft two classes, grow them a talent point and a reward pick a match, and win seven before your third loss. Draft choices: ${draftSlots()} (the slice's pool of ${SLICE_POOL.length} caps the offer at ${Math.min(draftSlots(),SLICE_POOL.length)}); equipment choices: ${equipmentChoices()}; rerolls: ${rerollsPerRun()} a run.</p>
+      <p class="note">Prototype only: <button class="btn" onclick="const r=endOfRun({cleared:true,level:MENU_LEVEL,losses:1,team:['Warlock','Priest'],tiersEquipped:['gauntlet','champion']});render();toast('Recorded a Warlock + Priest clear at '+LEVELS[MENU_LEVEL][0]+(r.awards.length?'. Unlocked: '+r.awards.join(', '):''))">Record a clear at ${LEVELS[MENU_LEVEL][0]}</button> <button class="btn" onclick="P=freshProfile();saveProfile();MENU_LEVEL=1;render()">Reset profile</button></p></div>`;
 }
-// The Renown screen: the encyclopedia section's content (section 9.3), plus spending.
-function renown(){
-  return `<h2>Renown</h2><p class="sub">Earned by clearing runs: 1 a clear, 2 at Rival or above. Choice and information first; power only with clears at higher levels. This list is what the encyclopedia's Renown section shows.</p>
-  <div class="grid g2"><div class="panel"><h3>Draft slots</h3>
-    <p>${[3,4,5,6].map(n=>`<span class="tag ${draftSlots()>=n?"pts":""}">${n}</span>`).join(" ")} · one more for each of your first three clears (Combatant or above).</p>
-    <h3 style="margin-top:12px">Titles and difficulty</h3>${LEVELS.map((l,i)=>`<div class="meta">${l[0]}: ${P.clears[i]?`<b style="color:var(--gold)">cleared ${P.clears[i]}x</b>`:levelUnlocked(i)?"unlocked":`locked: clear ${LEVELS[i-1][0]}`}</div>`).join("")}</div>
-  <div class="panel"><h3>Renown board <span class="tag pts">${P.renown} to spend</span></h3>
-    ${RENOWN_BOARD.map(n=>{const own=rankOwned(n[0]),can=P.renown>0&&own<n[3]&&bestClearAt(n[5]);return `<div class="threat"><span style="flex:1"><b>${n[1]}</b> <span class="kind">${n[4]}</span> ${own}/${n[3]}<br><span class="meta">${n[2]} Needs a clear at ${LEVELS[n[5]][0]} or above.</span></span><button class="btn" ${can?"":"disabled"} onclick="buyNode('${n[0]}')">Spend 1</button></div>`}).join("")}</div></div>
-  <div class="actions"><button class="btn primary" onclick="window.__renown=false;render()">Back</button></div>`;
+// The encyclopedia's Renown section (section 9.5): effect, condition and state for every ability.
+// It is the only place renown is shown; there is no screen to manage it.
+function encyclopedia(){
+  const entry=r=>{const on=unlocked(r[0]);const prog=r[5].map(([l,a])=>LEAVES[l].progress?LEAVES[l].progress(P,a):null).find(Boolean);
+    return `<div class="threat"><span style="flex:1"><b style="color:${on?"var(--gold)":"var(--text)"}">${esc(r[1])}</b> <span class="kind">${r[2]}</span> <span class="tag ${on?"pts":""}">${on?`Unlocked · ${esc(P.unlocked[r[0]])}`:"Locked"}</span><br>
+      <span>Effect: ${esc(effectText(r[3]))}</span><br><span class="meta">Unlocks: ${esc(conditionText(r))}${prog&&!on?` (${prog[0]} of ${prog[1]})`:""}</span></span></div>`};
+  return `<h2>Encyclopedia · Renown</h2><p class="sub">Renown abilities are awarded when their condition is met, and take effect from the next run. Flagship clears grant draft and equipment choices; specific objectives grant rerolls and titles.</p>
+  <div class="panel"><div class="record"><span>Draft choices <b>${draftSlots()}</b>/6</span><span>Equipment choices <b>${equipmentChoices()}</b>/5</span><span>Rerolls <b>${rerollsPerRun()}</b>/5 a run</span><span>Unlocked <b>${RENOWN.filter(r=>unlocked(r[0])).length}</b> of ${RENOWN.length}</span></div></div>
+  <div class="grid g2" style="margin-top:12px"><div class="panel"><h3>Flagship goals</h3>${RENOWN.filter(r=>r[2]==="Flagship").map(entry).join("")}
+    <h3 style="margin-top:12px">Difficulty and titles</h3>${LEVELS.map((l,i)=>`<div class="meta">${l[0]}: ${P.clears[i]?`<b style="color:var(--gold)">cleared ${P.clears[i]}x</b>`:levelUnlocked(i)?"unlocked":`locked: clear ${LEVELS[i-1][0]}`}</div>`).join("")}</div>
+  <div class="panel"><h3>Objectives</h3>${RENOWN.filter(r=>r[2]!=="Flagship").map(entry).join("")}</div></div>
+  <div class="actions"><button class="btn primary" onclick="window.__ency=false;render()">Back</button></div>`;
 }
 
 function draft(){
-  $app.innerHTML = `<h2>Draft your team</h2><p class="sub">Pick two of the ${S.offer.length} offered. The first slice drafts from the four classes with talent trees. Each starts with ${START_POINTS+rankOwned("HeadStart")} talent points.</p>
+  $app.innerHTML = `<h2>Draft your team</h2><p class="sub">Pick two of the ${S.offer.length} offered. The first slice drafts from the four classes with talent trees. Each starts with ${START_POINTS} talent points.</p>
   <div class="grid g3">${S.offer.map(c=>`<button class="card ${S.draft.includes(c)?"sel":""}" onclick="toggleDraft('${c}')">
     <div class="hstack">${classIcon(c,"lg")}<div><div class="title" style="color:${CLASSES[c].col}">${c}</div>
     <div class="meta">${CLASSES[c].role}</div></div></div>
@@ -551,8 +600,7 @@ function draft(){
 }
 function toggleDraft(c){const i=S.draft.indexOf(c);if(i>=0)S.draft.splice(i,1);else if(S.draft.length<2)S.draft.push(c);render()}
 function confirmDraft(){
-  S.team=S.draft.map(cls=>({cls,gear:{},picks:0,ranks:{},pending:[],unspent:START_POINTS+rankOwned("HeadStart"),gearPts:0}));
-  if(rankOwned("Quartermaster")) for(const c of S.team){const o=makeOffer(c,"Chest","gauntlet");c.gear.Chest=Object.assign(o,{gainTotal:o.gain})}
+  S.team=S.draft.map(cls=>({cls,gear:{},picks:0,ranks:{},pending:[],unspent:START_POINTS,gearPts:0}));
   go("hub");
 }
 
@@ -560,7 +608,6 @@ function intel(opp){
   const {out,miss} = answersFor(opp);
   const talentThreats = opp.builds.flatMap(b=>actingNodes(b).filter(id=>NODE[id].threat).map(id=>[b.cls,id]));
   const gearThreats = opp.builds.flatMap(b=>Object.values(b.gear).filter(g=>g.threat).map(g=>[b.cls,g]));
-  const next = rankOwned("ScoutsReport") && opp.tier<7 ? opponentAt(opp.tier+1,0) : null;
   return `<div class="panel"><div class="hstack" style="justify-content:space-between;flex-wrap:wrap">
     <div><div class="meta">Next opponent · tier ${opp.tier} of 7 · ${opp.pts} points and ${opp.picks} picks each${opp.champs?` (${opp.champs} Champion)`:""}</div><div class="title" style="font-size:18px;color:var(--t2)">${esc(opp.name)}</div></div>
     <div class="row" style="gap:6px">${opp.classes.map(c=>classIcon(c)).join("")}</div></div>
@@ -572,7 +619,7 @@ function intel(opp){
     <div style="margin-top:10px"><div class="meta">Your answers with the current Prepare settings</div>
     ${out.length?out.map(a=>`<div class="answer">+ ${esc(a)}</div>`).join(""):'<div class="note">None yet. Prepare may change that.</div>'}
     ${miss.map(a=>`<div class="missing">- ${esc(a)}</div>`).join("")}</div>
-    ${next?`<div class="meta" style="margin-top:10px">Scout's report · after this: ${esc(next.name)} (${next.classes.join(" + ")})</div>`:""}</div>`;
+</div>`;
 }
 function hub(){
   const opp = opponent();
@@ -705,7 +752,12 @@ const GAME_VERSION = "0.8.0-proto", CONTENT_HASH = "c0ffee12";
 function finishFight(){
   if(F.win) S.wins++; else S.losses++;
   const record = JSON.stringify({game_version:GAME_VERSION, content_hash:CONTENT_HASH, team1:S.team.map(c=>c.cls), team2:F.opp.classes, map:MAP_IDS[F.opp.map], random_seed:S.seed+S.history.length, team1_builds:S.team.map(c=>c.ranks), team1_gear:S.team.map(c=>Object.values(c.gear).map(g=>g.name)), kill_calls:F.calls});
-  S.history.push({opp:F.opp.name, classes:F.opp.classes, tier:F.opp.tier, won:F.win, t:F.t, record, specs:S.team.map(c=>spec(c).short)});
+  // MatchFacts, mocked: in the game they are derived from the match result and the combat log's structured events.
+  const ccClasses = ["Warlock","Rogue","Paladin","Priest","Mage","Druid","Hunter"];
+  const facts = {won:F.win, oneVsOne: rng()<0.3, cleanKill: F.win && S.team.some(c=>ccClasses.includes(c.cls)) && rng()<0.25};
+  if(S.forceFacts){Object.assign(facts,S.forceFacts);S.forceFacts=null}
+  S.history.push({opp:F.opp.name, classes:F.opp.classes, tier:F.opp.tier, won:F.win, t:F.t, record, facts, specs:S.team.map(c=>spec(c).short)});
+  S.newAwards = evaluate("match", facts, `run ${P.runs+1}, match ${S.history.length}`);
   const over = S.wins>=MAX_WINS || S.losses>=MAX_LOSSES;
   S.lastWon = F.win;
   S.gains = {};
@@ -714,7 +766,10 @@ function finishFight(){
     const pk = c.picks < pickCap();
     S.gains[c.cls] = {pt, pk};
   }
-  if(over && S.wins>=MAX_WINS) S.clearResult = recordClear(S.level);
+  if(over){
+    const runRecord = {cleared:S.wins>=MAX_WINS, level:S.level, losses:S.losses, team:S.team.map(c=>c.cls), tiersEquipped:S.tiersEquipped, matches:S.history.map(h=>h.facts)};
+    S.runEnd = endOfRun(runRecord);
+  }
   S.opp = null; S.offers = null;
   go("result");
 }
@@ -730,8 +785,12 @@ function result(){
   ${!over&&won?'<p class="note">A win: Champion items can appear among the offers.</p>':!over?'<p class="note">A loss still pays a point and a pick, and the same tier comes again.</p>':""}
   <div class="panel" style="background:var(--panel2);margin-top:8px"><div class="meta">Later idea · rematch odds</div>
   Twenty background re-simulations of this matchup: your setup wins about <b>${odds}%</b>. ${won? (odds<45?"You beat the odds.":"A sound setup."): (odds>=55?"That one was the dice.":"The setup was the problem; try another answer.")}</div></div>
+  ${awardLines(S.newAwards)}
   <div class="actions"><button class="btn" onclick="showRecord(${S.history.length-1})">Match record</button>
   <button class="btn primary" onclick="go('${over?"end":S.team.some(c=>S.gains[c.cls].pk)?"reward":"hub"}')">${over?"Finish run":"Continue run"}</button></div>`;
+}
+function awardLines(ids){
+  return ids.map(id=>{const r=RENOWN.find(x=>x[0]===id);return `<div class="panel" style="background:var(--panel2);margin-top:8px;border-color:var(--gold)"><span class="tag pts">Renown unlocked</span> <b>${esc(r[1])}</b>: ${esc(effectText(r[3]))}, from your next run. <span class="meta">${esc(conditionText(r))}</span></div>`}).join("");
 }
 function reward(){
   if(!S.offers){S.offers={};for(const c of S.team) if(S.gains[c.cls].pk) S.offers[c.cls]=offersFor(c,S.lastWon)}
@@ -749,24 +808,25 @@ function takeRewards(){
     const offers=S.offers[c.cls]; if(!offers||!offers.length) continue;
     const o=offers[S.sel[c.cls]], prev=c.gear[o.slot];
     c.gear[o.slot]=Object.assign({},o,{gainTotal:(prev?prev.gainTotal:0)+o.gain});
+    if(!S.tiersEquipped.includes(o.tier)) S.tiersEquipped.push(o.tier);
     c.picks++;
   }
   S.offers=null; go("hub");
 }
 function end(){
-  const cr = S.clearResult;
+  const re = S.runEnd;
   $app.innerHTML = `<h2>Run complete</h2>${pips()}
   <div class="panel" style="margin-top:12px"><div class="big ${S.wins>=MAX_WINS?"win":""}">${S.wins} win${S.wins===1?"":"s"}${S.wins>=MAX_WINS?` · cleared at ${LEVELS[S.level][0]}`:""}</div>
   ${teamStrip()}</div>
-  ${cr?`<div class="panel" style="margin-top:12px"><h3>Renown</h3>
-    <div>${cr.slotsAfter>cr.slotsBefore?`Draft slots ${cr.slotsBefore} → <b>${cr.slotsAfter}</b>. `:""}${cr.renownGained?`+${cr.renownGained} renown to spend. `:"A Novice clear earns no renown. "}${cr.unlocked?`<b>${cr.unlocked}</b> difficulty unlocked. `:""}Title: ${LEVELS[S.level][0]}.</div></div>`:
-    `<div class="panel" style="margin-top:12px"><p class="note">No clear this time: renown and draft slots come from seven wins. Nothing else is lost.</p></div>`}
-  <div class="panel" style="margin-top:12px"><div class="meta">What persists: clears, titles, renown, records and saved talent plans. No run's points or gear carry into the next.</div>
+  <div class="panel" style="margin-top:12px"><h3>Renown</h3>
+    ${re.awards.length?awardLines(re.awards):`<p class="note">${S.wins>=MAX_WINS?"No new renown this run.":"No clear this time; nothing is lost."} The encyclopedia lists what is still locked.</p>`}
+    ${S.wins>=MAX_WINS?`<p>Title: ${LEVELS[S.level][0]}.${re.unlockedLevel?` <b>${re.unlockedLevel}</b> difficulty unlocked.`:""}</p>`:""}</div>
+  <div class="panel" style="margin-top:12px"><div class="meta">What persists: clears, titles, renown abilities, records and saved talent plans. No run's points or gear carry into the next.</div>
   ${S.team.filter(c=>hasTree(c.cls)).map(c=>`<div style="margin-top:6px"><b style="color:${CLASSES[c.cls].col}">${c.cls}</b> ${esc(spec(c).label)} ${spec(c).short}: ${Object.keys(c.ranks).map(id=>`${esc(NODE[id].name)} ${c.ranks[id]}`).join(", ")}</div>`).join("")}</div>
   <div class="panel matchlist" style="margin-top:12px"><div class="meta">Each match keeps a version-stamped record: exact on this build, a labelled re-simulation on another.</div>
   ${S.history.map((h,i)=>`<div class="m"><span>${i+1}. <span class="${h.won?"win":"loss"}">${h.won?"W":"L"}</span> vs ${esc(h.opp)} (${h.classes.join(" + ")}) · your specs ${h.specs.filter(Boolean).join(", ")}</span>
   <button class="btn" onclick="showRecord(${i})">Match record</button></div>`).join("")}</div>
-  <div class="actions"><button class="btn" onclick="S=null;render()">Main menu</button>${P.renown?`<button class="btn" onclick="S=null;window.__renown=true;render()">Spend renown</button>`:""}<button class="btn primary" onclick="newRun(null,S.level)">New run</button></div>`;
+  <div class="actions"><button class="btn" onclick="S=null;render()">Main menu</button><button class="btn" onclick="S=null;window.__ency=true;render()">Encyclopedia: Renown</button><button class="btn primary" onclick="newRun(null,S.level)">New run</button></div>`;
 }
 render();
 </script>

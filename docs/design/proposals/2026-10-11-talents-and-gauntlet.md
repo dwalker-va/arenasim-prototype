@@ -7,7 +7,8 @@ clicks through whole runs:
 - the talent step and the two-tier gear reward after every match;
 - Prepare against an opponent briefing that scales with your wins;
 - a stand-in fight and the run end;
-- the renown that a cleared run earns for the next one.
+- the renown abilities a match or a run unlocks, and the encyclopedia's Renown section that
+  lists them, locked and unlocked.
 
 Open it from the checkout so the icons resolve. The fight is a scripted coin flip weighted by
 budget and answers, not the sim. The Rogue and Paladin trees are not designed here, so the
@@ -48,13 +49,17 @@ reaches 7 wins or 3 losses. Between fights the player makes three kinds of decis
 - **Difficulty (recommended).** Opponents scale with the player's *wins*, matching in budget a
   player who has not lost; a loss puts the player ahead. Out of the run, six difficulty levels
   named for arena titles move opponent gear first, and points only at the top (§8).
-- **Meta-progression.**
-  - A cleared run adds a draft slot, from 3 up to 6.
-  - Each clear also earns **renown**, spent on a small board of meta rewards: a fourth reward
-    offer, a better Champion chance, a reroll, and one more point and one more pick at the top.
-  - Power rewards unlock only at higher difficulties. A veteran ends about 7% stronger than a
-    newcomer, and difficulty keeps the climb going.
-  - Renown has its own encyclopedia section (§9).
+- **Meta-progression: renown abilities, awarded when a condition is met.**
+  - Nothing is spent and no extra screen is needed.
+  - Flagship goals (a clear at each difficulty) grant the key upticks: more draft choices
+    (3 up to 6) and more equipment choices (3 up to 5).
+  - Specific objectives grant smaller bonuses such as equipment rerolls: clear with a Rogue,
+    clear with no healer, a flawless 7-0, a match won in a 1v1. They are chosen to send the
+    player somewhere new, and never reward a double-healer team.
+  - Renown grants choice, never stats.
+  - A data-driven framework evaluates per-match conditions from a digest of the match result
+    and combat log, and per-run conditions from the run record. A new ability is one RON entry.
+  - The encyclopedia shows each ability's effect, condition and state (§9).
 - **Replays** are exact within a run and a game version. Every record is version-stamped. A
   record from another version keeps its result and combat log, and offers a labelled
   re-simulation, never a promised replay (§10).
@@ -157,8 +162,9 @@ talents to fill.
   can cover it.
 - *Slay the Spire:* borrow a build that lives for one run, and **Ascension**: difficulty
   levels unlocked one at a time by clearing the one below. That is the model for §8.
-- *Hades:* borrow the **Mirror** as a small, bounded meta tree, and **Heat** as opt-in
-  difficulty that pays more. Avoid a Mirror large enough that the first runs are weak by design.
+- *Hades:* borrow the **Fated List of Minor Prophecies**: objectives that pay out on their own
+  when met, which is what renown is (§9). Borrow **Heat** as opt-in difficulty that pays more.
+  Avoid the **Mirror**'s permanent stat power, which makes the first runs weak by design.
 - *WoW arena:* borrow the arena titles (Combatant, Challenger, Rival, Duelist, Gladiator), the
   2v2/3v3 brackets and the fantasy of a comp learned deeply. Avoid gear gaps that decide
   matches, and rating loss as the only stake.
@@ -601,7 +607,7 @@ weights. Four changes come with the tiers:
 6. **Point and rewards.** Each combatant gains **1 talent point** (up to 8) and **picks one
    reward of three** (up to 6), win or loss. Champion offers appear only after a win.
 7. **Run end** at 7 wins or 3 losses: the record, the team with its builds and gear, each
-   match with its record (§10), and the renown earned (§9).
+   match with its record (§10), and any renown ability the run unlocked (§9).
 
 ### 7.2 The caps
 
@@ -686,6 +692,8 @@ game update in the middle of a run therefore changes nothing already decided (§
   - the spread of builds.
 - Each difficulty level is calibrated to a **target clear rate** (§8), measured for a fresh
   profile and for a fully unlocked one.
+- The bot evaluates every renown condition on every run, which gives each ability's **earn
+  rate** before any player sees it (§9.4).
 - **Post-match odds (later):** after a loss, twenty background seeds of the same matchup say
   whether the loss was the dice or the setup.
 
@@ -712,64 +720,179 @@ and the AI profile never moves.
   is fine enough that a level is a real step and coarse enough that the briefing shows it.
 - **A clear at a level earns its title**, kept in the profile and shown in the encyclopedia.
   The highest title is the headline record.
-- **Meta power is unlocked by clears at higher levels** (§9), so farming Novice cannot max out
-  a profile.
+- **The flagship renown abilities are clears at each level** (§9), so a profile grows by
+  climbing, and farming Novice earns nothing.
 
-## 9. Meta-progression
+## 9. Meta-progression: renown
 
-The goal is replay value beyond the draw: reasons to clear a run and to come back, and a
-player who feels stronger, without a newcomer feeling weak by design.
+The goal is replay value beyond the draw. A player should have reasons to clear a run, to come
+back, and to try something different next time, and should feel stronger for it, without a
+newcomer being weak by design.
 
-### 9.1 Draft slots
+**Renown abilities are awarded, not bought.** Each renown ability carries a **condition**, and
+the ability unlocks the moment its condition is met. Nothing is spent and there is no screen to
+manage it: the encyclopedia shows every ability, what it does, what unlocks it, and whether the
+profile has it (§9.5). A spend-it-yourself screen could come later (§9.6).
 
-**Each of the first three clears adds a draft slot: 3, then 4, 5 and 6.** A clear at
-Combatant or above counts. Slots never exceed the classes in the pool, so in the four-class
-slice they stop at 4 and grow again as more classes get trees.
+### 9.1 What renown grants: choice, not stats
 
-### 9.2 Renown and the renown board
+Renown widens the decisions a run offers. It never raises a cap or adds budget, so a veteran's
+edge is better options, and the difficulty ladder (§8) carries the climb.
 
-**Every clear earns 1 renown**, and a clear at Rival or above earns 2. Renown is spent on a
-small board, the Gauntlet's own talent tree.
+| Effect | Base | Ceiling | Earned from |
+|---|---|---|---|
+| **Draft choices** | 3 classes offered | 6 (and never more than the pool) | Flagship goals |
+| **Equipment choices** | 3 reward offers | 5 | Flagship goals |
+| **Equipment rerolls** | 0 a run | 5 a run | Specific objectives |
+| **Titles** | — | — | Clears at each level; some objectives |
 
-| Node | Effect | Ranks | Kind | Needs a clear at |
-|---|---|---|---|---|
-| Fourth offer | 4 reward offers instead of 3 | 1 | Choice | Combatant |
-| Scout's report | The briefing shows the next two opponents | 1 | Information | Combatant |
-| Reroll | Reroll one offer (draft or reward) per run | 2 | Choice | Combatant |
-| Keen eye | Champion chance after a win +10 percentage points (33% → 43%) | 2 | Power, small | Challenger |
-| Head start | +1 starting talent point (the cap stays 8) | 1 | Power, early only | Challenger |
-| Quartermaster | Each combatant starts with one Gauntlet item, chosen at the draft | 1 | Power, early only | Rival |
-| Deeper training | Talent point cap 8 → 9 | 1 | Power, at the cap | Duelist |
-| Deeper pockets | Reward pick cap 6 → 7 | 1 | Power, at the cap | Duelist |
+### 9.2 What earns it: conditions that reward variety
 
-- **Choice and information first, power later.** The first nodes widen decisions, as the
-  draft slots do. Power arrives only with clears at higher levels.
-- **The power is bounded.** Every power node together adds about +11 (a point), +15 (a pick)
-  and +5 (Champion chance) at the cap: **about 7% of a capped combatant.** Head start and
-  Quartermaster speed up the early run but are overtaken by the caps. A veteran is noticeably
-  stronger and can still lose. The difficulty ladder carries the rest of the climb.
-- **Variety unlocks** cost no renown and are earned by playing: new opponent pools, map draws,
-  alternative reference builds as opponent variants, titles.
-- **Data, not code.** Draft-slot rules, renown nodes, titles and difficulty levels live in
-  `gauntlet.ron`, so node N+1 is a RON entry.
+- **Flagship goals grant the key upticks.** A clear at each difficulty level grants one draft
+  choice or one equipment choice, alternating up the ladder: Combatant, a draft choice;
+  Challenger, an equipment choice; Rival, a draft choice; Duelist, an equipment choice;
+  Gladiator, a draft choice.
+- **Specific objectives grant smaller bonuses**, mostly an equipment reroll or a title. They
+  are written to send the player somewhere new: a class, a comp, a style of play. Examples:
+  - **per run:** clear with a Rogue; clear with a team that has no healer; a flawless 7-0 run;
+    clear without ever equipping a Champion item;
+  - **per match:** win a match that comes down to a 1v1; land a killing blow while the
+    off-target is in hard crowd control;
+  - **across runs:** clear with four different classes.
+- **No condition rewards a double-healer team.** The validator rejects any condition that
+  requires two healers, or that a double-healer team meets more easily than any other comp
+  ("clear without taking damage on a healer" would be one).
+- **The specific list is designed later**, in its own card, measured against the bot (§9.4).
+  This section fixes the hooks.
 
-### 9.3 The encyclopedia
+### 9.3 The framework
 
-**A Renown section** (`Topic::Renown`), generated from `gauntlet.ron` like every other
-section. It lists every renown node and each draft slot: what each does, how it is earned,
-whether the profile owns it, and what it needs if not. The difficulty levels and titles get
-pages too, with the profile's clears at each. Champion items and their effects appear in Items
-and Buffs & Debuffs as any item does, with their tier shown.
+**Data.** `assets/config/renown.ron`, loaded and validated like `movement.ron`:
 
-### 9.4 What persists
+```ron
+(
+    abilities: {
+        ClearCombatant: (
+            name: "Arena Combatant", icon: "icons/renown/combatant.jpg",
+            effect: DraftChoices(1),
+            condition: Run(All([ Cleared(min_level: Combatant) ])),
+        ),
+        OpenHanded: (
+            name: "Open-Handed", icon: "...",
+            effect: EquipmentRerolls(1),
+            condition: Run(All([ Cleared(min_level: Combatant), NoItemTierEquipped(2) ])),
+        ),
+        CloakAndDagger: (
+            name: "Cloak and Dagger", icon: "...",
+            effect: EquipmentRerolls(1),
+            condition: Run(All([ Cleared(min_level: Combatant), TeamIncludes(Rogue) ])),
+        ),
+        LastOneStanding: (
+            name: "Last One Standing", icon: "...",
+            effect: EquipmentRerolls(1),
+            condition: Match(All([ Won, CameDownTo(1, 1) ])),
+        ),
+        CleanKill: (
+            name: "Clean Kill", icon: "...",
+            effect: Title("the Precise"),
+            condition: Match(All([ Won, KillingBlowWhileOffTargetIn(HardCc) ])),
+        ),
+    },
+)
+```
 
-A **profile save** under the settings directory:
+**Three scopes, three fact sources.** A condition is a small tree of **leaves** joined by
+`All` / `Any` / `Not`. Its scope says what the leaves read. **No leaf reads raw log text.**
+
+| Scope | Evaluated | Reads | Example leaves |
+|---|---|---|---|
+| `Match` | When a Gauntlet match ends | **`MatchFacts`**, a digest built once from `MatchResult` and the combat log's structured events | `Won`, `CameDownTo(ours, theirs)`, `KillingBlowWhileOffTargetIn(cc)`, `DurationUnder(s)`, `NoDeathsOnTeam` |
+| `Run` | When a Gauntlet run ends | **`RunRecord`**: difficulty, team, record, every match's `MatchFacts`, every reward taken | `Cleared(min_level)`, `LossesAtMost(n)`, `TeamIncludes(class)`, `HealerCount(n)` (n ≤ 1), `NoItemTierEquipped(tier)`, `MatchesWhere(match condition, at_least: n)` |
+| `Profile` | When a run ends | **The profile's history**: past clears with their teams | `DistinctClassesCleared(n)`, `ClearedWithEveryHealer` |
+
+- **`MatchFacts`** holds what conditions need and nothing else. The match and the log already
+  carry most of it: the winner and end reason, each combatant's class and role, its death
+  time and killer (`StructuredEventData::Death`), killing blows (`Damage { is_killing_blow }`)
+  and crowd control applied (`CrowdControl`). From those it derives:
+  - **the living count on each side over time**, from the deaths ("came down to a 1v1": both
+    sides had one living non-pet combatant before the end);
+  - **at each killing blow, the crowd control on the victim's living teammates.**
+  
+  The one missing input is **when crowd control ends early**: a fear broken by damage, or a
+  dispel. Today that is only an `AuraRemoved` message. The framework's first card adds a
+  structured end event, so CC intervals are exact. "Hard CC" uses the AI's own
+  loss-of-control classification (stun, fear, horror, polymorph, incapacitate, cyclone, trap;
+  roots excluded). Pets never count as a side's last combatant.
+- **The `RunRecord`** is the run save (§7.5) plus each match's `MatchFacts`, a few hundred
+  bytes a match. Run conditions can therefore count matches (`MatchesWhere`) without
+  re-reading a log.
+- **Only Gauntlet runs award renown.** Custom Match and replays never do, so nothing is farmed
+  in a sandbox.
+
+**Awarding.**
+- One function, `evaluate(scope, facts, profile) -> Vec<RenownId>`, runs at the two points
+  above. It returns the abilities whose condition holds and that the profile does not have.
+- Awards are idempotent and permanent.
+- **An award takes effect from the next run.** A run's options never change halfway through,
+  which keeps a run's save and its records consistent.
+- The Results or Run-end screen names each new award in one line, linked to its encyclopedia
+  entry.
+
+**Persistence.** The profile save (§9.6) keeps the unlocked set as a `BTreeSet<RenownId>`,
+each with the run and date that earned it, plus the history that `Profile` conditions need.
+- On load, an id that no longer exists is dropped, and a new ability starts locked.
+- A condition that was already met in past history is re-checked against the stored history
+  on load, so adding a `Profile` condition can award it retroactively. `Run` and `Match`
+  conditions are judged only from the day they ship.
+
+**Adding a renown ability costs one RON entry** when its condition is built from leaves that
+already exist. That will be the common case, and the first list is meant to be mostly that.
+- **A new leaf** is one enum variant, one predicate over `MatchFacts`, `RunRecord` or the
+  profile, and one fixture test. The leaf enum is exhaustive, so the condition prose generator
+  and the validator must handle a new leaf before anything compiles.
+- **A new effect** is rarer: an enum variant and the code that applies it at run start.
+- **Validation, in `cargo test`:**
+  - every ability's condition parses and stays in its scope (a `Match` leaf cannot appear in
+    a `Run` condition except inside `MatchesWhere`);
+  - no condition requires two healers;
+  - every effect stays under its ceiling when every ability is unlocked;
+  - every leaf has a fixture that fires on a hand-built `MatchFacts` or `RunRecord` and one
+    that does not.
+
+### 9.4 Measured before it ships
+
+The Gauntlet bot (§7.6) evaluates every condition on every run it plays, so each ability's
+**earn rate** is a measurement before any player sees it. An objective nobody can reach, or one
+everybody reaches by accident, shows up in the calibration report.
+
+### 9.5 The encyclopedia
+
+**A Renown section** (`Topic::Renown`), generated from `renown.ron`. Each entry shows:
+- **its effect**, in words ("+1 equipment reroll per run");
+- **its unlock condition**, as prose generated from the condition tree by one generator, the
+  way `ability_text.rs` writes ability prose ("Clear a Gauntlet run at Combatant or above with a
+  Rogue on your team");
+- **its state:** locked or unlocked, with the run that unlocked it;
+- for `Profile` and counting conditions, **progress** ("3 of 4 classes").
+
+The section opens with the profile's totals: draft choices, equipment choices and rerolls.
+Difficulty levels and titles have pages in the same section. Champion items appear in Items
+and Buffs & Debuffs like any other item, with their tier shown.
+
+### 9.6 What persists, and what could come later
+
+A **profile save** under the settings directory holds:
 - clears and titles per level;
-- draft slots and renown spent;
+- unlocked renown abilities;
+- the clear history that `Profile` conditions read;
 - records (best per class, pair and spec);
-- saved talent plans: a named path through a class's trees that the talent step proposes one
-  click at a time;
+- saved talent plans (a named path through a class's trees that the talent step proposes one
+  click at a time);
 - run history (§10).
+
+**Later, if wanted:** a spend screen. Renown would become a currency and the same abilities
+would be bought instead of awarded. The conditions would still decide what can be bought, so
+the framework above carries over unchanged.
 
 ## 10. Replays and saves across versions
 
@@ -790,7 +913,7 @@ RON configs can change the outcome. So:
   replays. They re-fight in the current sim, so they survive every version by design.
 - **Exact playback across versions** would need a state tape: per-tick positions, casts and
   auras, about 100-200 KB a match, played back by the renderer with no sim. Nothing needs it
-  yet. It becomes worth building if shared replays matter (decision 6).
+  yet. It becomes worth building if shared replays matter (decision 5).
 
 ## 11. A worked run: Warlock and Priest
 
@@ -805,14 +928,24 @@ picks per combatant.
 | 1 | Gate Rats: Warrior + Priest (1, BasicArena) · 2 pts, 0 picks | 2 / 2 | — | Kill the Priest. Weakness on the Warrior, Tongues on the Priest. Felhunter | Win | Gauntlet gloves / Gauntlet chest |
 | 2 | Dustcloaks: Rogue + Druid (2, Nagrand) · 3, 1 | 3 / 3 | Wl: Fel Stamina 2. Pr: Unbreakable Will 2 | Kill the Druid. Agony on the Druid, Weakness on the Rogue | Win | **Medallion** (Champion) / Gauntlet legs |
 | 3 | Ashen Pair: Mage + Shaman (3, TwinPillars) · 4, 2 | 4 / 4 | Wl: Demonic Sacrifice. Pr: Inner Focus | Felhunter to devour Polymorph. Tongues on the Shaman | **Loss** | Gauntlet head / Gauntlet head |
-| 4 | Cinder Pact: Mage + Priest (3, BasicArena) · 4, 2 | 5 / 5 | Wl: Unholy Power. Pr: Spiritual Healing | Kill the Priest; Tongues on it | Win | Gauntlet shoulders / Gauntlet shoulders |
+| 4 | Cinder Pact: Mage + Priest (3, BasicArena) · 4, 2 | 5 / 5 | Wl: Unholy Power. Pr: Spiritual Healing | Kill the Priest; Tongues on it | Win, the Warlock alone against their Mage at the end: **Last One Standing** unlocks | Gauntlet shoulders / Gauntlet shoulders |
 | 5 | Thornwatch: Warlock + Priest (4, Nagrand) · 5, 3 | 6 / 6 | Wl: **Soul Link** (capstone). Pr: Spiritual Healing 2 | Spell Lock their Priest; Tongues on it, Weakness on their Warlock | Win | Gauntlet legs / **Talisman of Ephemeral Power** (Champion) |
 | 6 | Stormhold: Hunter + Paladin (5, Nagrand) · 6, 4 | 7 / 7 | Wl: Improved Drain Life. Pr: Holy Specialization | Felhunter kept: Spell Lock answers the Paladin. Tongues on the Paladin. The briefing notes no slow for the Hunter | Win | **Champion robe** / Gauntlet feet (both at 6: capped) |
 | 7 | Gilded Fangs: Rogue + Priest (6, BasicArena) · 7, 5 | 8 / 8 | Wl: Improved Drain Life 2. Pr: **Holy Nova** | Felhunter kept for Soul Link. Weakness on the Rogue. The Medallion breaks Kidney Shot | Win | — (capped) |
 | 8 | Champions: Warrior + Paladin (7, BasicArena) · 8, 6 | 8 / 8 | — (capped) | **Sacrifice the Felhunter** (+15% Shadow; Soul Link off): two melee will kill it anyway. Weakness on the Warrior | Win | — |
 
-**7-1, cleared at Combatant.** It earns a fourth draft slot, 1 renown, the Combatant title,
-and access to Challenger.
+**7-1, cleared at Combatant.** Two renown abilities unlock, and both take effect from the next
+run:
+- **Last One Standing**, after match 4 (+1 equipment reroll a run);
+- **Arena Combatant**, the flagship for a Combatant clear (a fourth draft choice).
+
+The run also earns the Combatant title and access to Challenger. Three objectives stay locked,
+and the encyclopedia now points at them:
+- **Flawless**: one loss;
+- **Open-Handed**: Champion gear was equipped;
+- **Cloak and Dagger**: no Rogue.
+
+So the next run has a reason to try something different.
 
 - **Warlock 2/6/0, Demonology:** Demonic Embrace 1, Fel Stamina 2, Demonic Sacrifice, Unholy
   Power 1, Soul Link; Improved Drain Life 2. Price 99. Gear: 4 Gauntlet picks and 2 Champion
@@ -850,8 +983,9 @@ the *class pool*, not the system.
 5. **One difficulty, Combatant.** Records are exact within the version, with the version stamp
    and stored combat log from the start (§10).
 
-**Out of the slice:** the other difficulty levels, draft slots beyond 3, renown, the other five
-classes' trees, 3v3, ghosts, daily seeds and post-match odds.
+**Out of the slice:** the other difficulty levels, renown, the other five classes' trees, 3v3,
+ghosts, daily seeds and post-match odds. The slice does keep a `MatchFacts` digest on every
+match record, so renown can later be judged from runs played since then.
 
 **What the slice needs from AS-251 (the UI design system):**
 - a choice card (draft offers and rewards) with a **tier frame** for Gauntlet and Champion;
@@ -900,10 +1034,19 @@ Milestone review: **play three runs.**
 
 **Phase 2: meta-progression and difficulty.**
 - M1 Profile save, clears and titles.
-- M2 Draft slots.
-- M3 Difficulty levels and their calibration (the G5 bot per level, fresh and fully unlocked).
-- M4 The renown board.
-- M5 The encyclopedia's Renown section.
+- M2 Difficulty levels and their calibration (the G5 bot per level, fresh and fully unlocked).
+- M3 The renown framework:
+  - `renown.ron` and its validator;
+  - the condition tree with its `Match`, `Run` and `Profile` leaves, each with fixtures;
+  - `MatchFacts`, plus the structured crowd-control-end log event it needs;
+  - `evaluate` at match and run end;
+  - awards persisted in the profile;
+  - the bot's earn-rate report.
+- M4 Renown effects: draft choices, equipment choices and equipment rerolls, applied at run
+  start, and the flagship clear abilities.
+- M5 The encyclopedia's Renown section, with prose generated from each condition, the
+  locked/unlocked state and progress.
+- M6 The first list of specific objectives, designed and then checked against bot earn rates.
 - Alongside: the other five classes' trees, 3v3 runs, map draws in the briefing, saved talent
   plans, daily seed, run history with re-simulation, post-match odds, and per-match choices for
   the Priest, Shaman and Druid.
@@ -912,7 +1055,7 @@ Milestone review: **play three runs.**
 - Build-aware AI behind an `AiProfile` (the Felhunter as a Soul Link sponge).
 - The later trinkets (Zandalarian Hero Charm, Kiss of the Spider).
 - Ghost opponents.
-- A state tape, if decision 6 calls for one.
+- A state tape, if decision 5 calls for one.
 - The Stable (named combatants carried between runs) and Counter-Pick Trials (authored puzzles
   against a fixed enemy team), which reuse the opponent format.
 
@@ -940,9 +1083,6 @@ Milestone review: **play three runs.**
    Or move them into the trees as capstones, which is more faithful and re-baselines every class?
 4. **TBC sources.** Talents and trinkets may draw on TBC where Classic does not fit (Curse of
    Exhaustion's 30%, Pain Suppression, the Medallion's scope)?
-5. **Meta power.** The renown board's power nodes, one more point and one more pick at
-   Duelist and about 7% in all, as recommended? Or keep meta-progression to choice and variety
-   only, with the difficulty ladder as the whole climb?
-6. **Cross-version replays.** Version-stamped records with a labelled re-simulation, as
+5. **Cross-version replays.** Version-stamped records with a labelled re-simulation, as
    recommended, and a state tape only if shared replays become a goal? Or build the state tape
    so any past match can be watched exactly?
