@@ -1945,33 +1945,55 @@ fn disengage_bends_toward_the_healer_only_when_the_leap_would_lose_it() {
     assert!(behind.dot(away) > 0.0, "still away, got {behind:?}");
 }
 
+/// The shipped ability book with Aimed Shot made interruptible: the
+/// counterfactual that shows what `uninterruptible` changes in the Hunter's own
+/// model of its cast.
+fn defs_with_interruptible_aimed_shot(
+) -> arenasim::states::play_match::ability_config::AbilityDefinitions {
+    use arenasim::states::play_match::ability_config::{AbilitiesConfig, AbilityDefinitions};
+    let path = arenasim::paths::asset_path_str("config/abilities.ron");
+    let mut config: AbilitiesConfig =
+        ron::from_str(&std::fs::read_to_string(path).expect("abilities.ron")).expect("parses");
+    config
+        .abilities
+        .get_mut(&arenasim::states::play_match::AbilityType::AimedShot)
+        .expect("Aimed Shot")
+        .uninterruptible = false;
+    AbilityDefinitions::new(config)
+}
+
 /// Aimed Shot goes before a due Serpent Sting only when it can finish: no
-/// enemy that could stop the 2.5s cast — an interrupt within its own reach, a
-/// melee closing to melee range, or an enemy the Hunter cannot see — gets
-/// there first.
+/// enemy that could stop the 2.5s cast — a melee closing to melee range, an
+/// enemy the Hunter cannot see, or (were the cast interruptible) an interrupt
+/// within its own reach — gets there first.
 #[test]
 fn aimed_shot_waits_for_the_time_to_finish_it() {
     use arenasim::states::play_match::ability_config::AbilityDefinitions;
     use arenasim::states::play_match::class_ai::hunter::aimed_shot_has_time;
 
-    let defs = AbilityDefinitions::default();
+    let shipped = AbilityDefinitions::default();
+    let interruptible = defs_with_interruptible_aimed_shot();
     let hunter = Entity::from_raw(0);
+    let has_time_under =
+        |defs: &AbilityDefinitions, enemies: Vec<CombatantInfo>, auras: Vec<(Entity, Aura)>| {
+            let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
+            for e in enemies {
+                snap.combatants.insert(e.entity, e);
+            }
+            for (e, a) in auras {
+                snap.active_auras.insert(e, vec![a]);
+            }
+            aimed_shot_has_time(
+                defs,
+                hunter,
+                Vec3::ZERO,
+                None,
+                &snap.context_for(hunter),
+                0.0,
+            )
+        };
     let has_time = |enemies: Vec<CombatantInfo>, auras: Vec<(Entity, Aura)>| {
-        let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
-        for e in enemies {
-            snap.combatants.insert(e.entity, e);
-        }
-        for (e, a) in auras {
-            snap.active_auras.insert(e, vec![a]);
-        }
-        aimed_shot_has_time(
-            &defs,
-            hunter,
-            Vec3::ZERO,
-            None,
-            &snap.context_for(hunter),
-            0.0,
-        )
+        has_time_under(&shipped, enemies, auras)
     };
     let at = |i: u32, class: CharacterClass, z: f32, vz: f32| CombatantInfo {
         position: Vec3::new(0.0, 0.0, z),
@@ -1991,18 +2013,28 @@ fn aimed_shot_waits_for_the_time_to_finish_it() {
     assert!(!has_time(vec![at(1, Warrior, 15.0, -7.0)], vec![]));
     // A Rogue 15yd off walking away never arrives.
     assert!(has_time(vec![at(1, Rogue, 15.0, 7.0)], vec![]));
-    // A Felhunter inside Spell Lock's 30yd needs no time at all...
+    // A Felhunter or a Shaman inside Spell Lock's or Wind Shear's 30yd, not
+    // closing, cannot stop an uninterruptible Aimed Shot (AS-287)...
     let felhunter = CombatantInfo {
         position: Vec3::new(0.0, 0.0, 25.0),
         ..pet_info(Entity::from_raw(3), 2, Warlock)
     };
-    assert!(!has_time(vec![felhunter], vec![]));
-    // ...unless it is held in hard CC past the cast.
+    let shaman = at(5, Shaman, 25.0, 0.0);
+    assert!(has_time(vec![felhunter], vec![]));
+    assert!(has_time(vec![shaman], vec![]));
+    // ...though were the cast interruptible, either would need no time at all...
+    assert!(!has_time_under(&interruptible, vec![felhunter], vec![]));
+    assert!(!has_time_under(&interruptible, vec![shaman], vec![]));
+    // ...unless held in hard CC past the cast.
     let trapped = Aura {
         duration: 6.0,
         ..aura_with(AuraType::Incapacitate, Some(hunter), 0.0)
     };
-    assert!(has_time(vec![felhunter], vec![(felhunter.entity, trapped)]));
+    assert!(has_time_under(
+        &interruptible,
+        vec![felhunter],
+        vec![(felhunter.entity, trapped)]
+    ));
     // A Rogue the Hunter cannot see counts as one that could stop it: the
     // Priest beside it is harmless, but the opener waits.
     let stealthed_rogue = CombatantInfo {

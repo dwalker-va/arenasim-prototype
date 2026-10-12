@@ -11,6 +11,10 @@
 //! - **The interrupter's use site** (`check_interrupts`): a Rogue in Kick
 //!   range of a Hunter mid-Aimed-Shot does not use Kick — no interrupt queued,
 //!   no cooldown, no energy — and traces the pass as `Uninterruptible`.
+//! - **Crowd control** (`process_casting`): a stun, polymorph or fear on a
+//!   Hunter mid-Aimed-Shot removes the cast and queues no school lockout.
+//! - **The text**: the ability's page and tooltips say "Cannot be
+//!   interrupted."
 //! - **A staged match**: Rogue on a Hunter mid-Aimed-Shot. Kick is never used
 //!   on it; a Kidney Shot stops it with no lockout; once the stun ends the
 //!   Hunter Disengages, a Physical ability an interrupt would have locked.
@@ -26,12 +30,18 @@ use bevy::prelude::*;
 use arenasim::combat::log::CombatLog;
 use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
 use arenasim::states::match_config::CharacterClass;
+use std::time::Duration;
+
+use arenasim::states::encyclopedia::abilities::{mechanics_text, summary_sentence};
+use arenasim::states::play_match::combat_core::process_casting;
 use arenasim::states::play_match::components::{
-    ActiveAuras, AuraPending, AuraType, CastingState, Combatant, InterruptPending,
+    ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, CastingState, Combatant, GameRng,
+    InterruptPending,
 };
 use arenasim::states::play_match::decision_trace::{
     AbilityOutcome, CandidateStatus, DecisionTrace, EventPayload, RejectionReason,
 };
+use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::systems::{check_interrupts, process_interrupts};
 use arenasim::states::play_match::{AbilityDefinitions, AbilityType};
 use common::staged::{entity_id, play, sim_time};
@@ -191,6 +201,112 @@ fn kick_is_not_spent_on_aimed_shot() {
     assert!(control.kick_on_cooldown);
     assert!(control.energy_spent > 0.0);
     assert!(control.traced.is_none(), "control: nothing passed over");
+}
+
+// ── crowd control ───────────────────────────────────────────────────────────
+
+/// A Hunter mid-`cast`, holding `cc` (or nothing), through one frame of
+/// `process_casting`. Returns (cast still up?, lockouts queued on the Hunter).
+fn cast_under(cast: AbilityType, cc: Option<AuraType>) -> (bool, usize) {
+    let mut world = World::new();
+    world.insert_resource(CombatLog::default());
+    world.insert_resource(ArenaDampening::default());
+    world.insert_resource(GameRng::from_seed(7));
+    let mut time = Time::<()>::default();
+    time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
+    world.insert_resource(time);
+    let defs = AbilityDefinitions::default();
+    let cast_time = defs.get_unchecked(&cast).cast_time;
+    world.insert_resource(defs);
+    world.insert_resource(ActiveMapGeometry {
+        bounds: Default::default(),
+        volumes: Vec::new(),
+        cover_anchors: Vec::new(),
+    });
+    let rogue = world
+        .spawn((
+            Combatant::new(1, 0, CharacterClass::Rogue),
+            Transform::from_xyz(20.0, 0.0, 0.0),
+        ))
+        .id();
+    let auras = cc
+        .map(|effect_type| Aura {
+            effect_type,
+            duration: 3.0,
+            caster: Some(rogue),
+            break_on_damage_threshold: -1.0,
+            ..Default::default()
+        })
+        .into_iter()
+        .collect();
+    let hunter = world
+        .spawn((
+            Combatant::new(2, 0, CharacterClass::Hunter),
+            Transform::default(),
+            CastingState::new(cast, rogue, cast_time),
+            ActiveAuras { auras },
+        ))
+        .id();
+    world.run_system_once(process_casting).unwrap();
+
+    let up = world.get::<CastingState>(hunter).is_some();
+    let mut pending = world.query::<&AuraPending>();
+    let queued = pending
+        .iter(&world)
+        .filter(|p| p.target == hunter && p.aura.effect_type == AuraType::SpellSchoolLockout)
+        .count();
+    let on = world.get::<ActiveAuras>(hunter).map_or(0, |a| {
+        a.auras
+            .iter()
+            .filter(|a| a.effect_type == AuraType::SpellSchoolLockout)
+            .count()
+    });
+    (up, queued + on)
+}
+
+/// Loss of control stops an uninterruptible cast and locks out nothing: a
+/// stun, a polymorph and a fear each remove the Aimed Shot, and no school
+/// lockout is queued or applied on the Hunter. The control: with no crowd
+/// control the cast is still up after the frame.
+///
+/// Mutant killed: `process_casting`'s crowd-control branch queues a Physical
+/// `SpellSchoolLockout` when the cast it stops is uninterruptible.
+#[test]
+fn crowd_control_stops_aimed_shot_and_locks_out_nothing() {
+    assert_eq!(
+        cast_under(UNINTERRUPTIBLE, None),
+        (true, 0),
+        "control: with no crowd control the cast runs on"
+    );
+    for cc in [AuraType::Stun, AuraType::Polymorph, AuraType::Fear] {
+        assert_eq!(
+            cast_under(UNINTERRUPTIBLE, Some(cc)),
+            (false, 0),
+            "{cc:?} stops the Aimed Shot with no lockout"
+        );
+    }
+}
+
+// ── the text ────────────────────────────────────────────────────────────────
+
+/// A flagged ability's page and tooltips say so; an unflagged cast's do not.
+/// Mutant killed: `cast_sentence` returns `None`, or `mechanics_text` stops
+/// composing it, or `summary_sentence` cuts it off the tooltip.
+#[test]
+fn a_flagged_ability_says_it_cannot_be_interrupted() {
+    const SAYS: &str = "Cannot be interrupted.";
+    let defs = AbilityDefinitions::default();
+    for (ability, flagged) in [(UNINTERRUPTIBLE, true), (INTERRUPTIBLE, false)] {
+        let config = defs.get_unchecked(&ability);
+        let page = mechanics_text(ability, config);
+        let tooltip = summary_sentence(ability, config);
+        assert_eq!(page.contains(SAYS), flagged, "{ability:?} page: {page:?}");
+        assert_eq!(
+            tooltip.contains(SAYS),
+            flagged,
+            "{ability:?} tooltip: {tooltip:?}"
+        );
+    }
 }
 
 // ── a staged match ──────────────────────────────────────────────────────────

@@ -1329,23 +1329,26 @@ pub fn aimed_shot_before_sting(
 }
 
 /// Would an Aimed Shot begun `delay` seconds from now finish before an enemy
-/// can stop it? A cast plants the Hunter for its full cast time, and it is
-/// lost to an interrupt, or finishes with a melee already inside the dead zone
-/// of a Hunter who
-/// could not kite it. Each visible enemy, pets included, that could stop it
-/// has a reach — its own kit's interrupt range
-/// ([`interrupt_reach`](super::interrupt_reach): Spell Lock and Wind Shear at
-/// range, Kick and Pummel in melee), or the Hunter's dead zone for a melee
-/// kite-threat. Its time to come within that reach is the gap over its closing
-/// speed (its velocity toward the Hunter); one already within reach leaves no
-/// time, one not closing never arrives, and one held in hard CC past the cast
-/// cannot act. The cast time is read from `AbilityDefinitions`, with the
-/// Hunter's own haste auras applied, and the enemy must not arrive before
-/// `delay` plus the cast time has passed.
+/// can stop it? A cast plants the Hunter for its full cast time, and it
+/// finishes badly with a melee already inside the dead zone of a Hunter who
+/// could not kite it — where the melee's stun or Kidney Shot can stop it
+/// outright. Each visible enemy, pets included, that could stop it has a
+/// reach: the Hunter's dead zone for a melee kite-threat, and — only while
+/// Aimed Shot [`can_be_interrupted`](crate::states::play_match::ability_config::AbilityConfig::can_be_interrupted),
+/// which it cannot as shipped (it is `uninterruptible`) — its own kit's
+/// interrupt range ([`interrupt_reach`](super::interrupt_reach): Spell Lock and
+/// Wind Shear at range, Kick and Pummel in melee). A Felhunter or Shaman at
+/// range therefore does not hold the cast. Its time to come within that reach
+/// is the gap over its closing speed (its velocity toward the Hunter); one
+/// already within reach leaves no time, one not closing never arrives, and one
+/// held in hard CC past the cast cannot act. The cast time is read from
+/// `AbilityDefinitions`, with the Hunter's own haste auras applied, and the
+/// enemy must not arrive before `delay` plus the cast time has passed.
 ///
 /// An enemy the Hunter cannot see ([`CombatContext::enemy_hidden`]) counts as
 /// one that could stop it: a stealthed Rogue's distance and heading are
-/// unknown until it opens, and it opens in melee range.
+/// unknown until it opens, and it opens in melee range with Cheap Shot, which
+/// stops any cast.
 pub fn aimed_shot_has_time(
     abilities: &AbilityDefinitions,
     entity: Entity,
@@ -1357,10 +1360,10 @@ pub fn aimed_shot_has_time(
     if ctx.enemy_hidden() {
         return false;
     }
-    let cast = calculate_cast_time(
-        abilities.get_unchecked(&AbilityType::AimedShot).cast_time,
-        auras,
-    );
+    let def = abilities.get_unchecked(&AbilityType::AimedShot);
+    let cast = calculate_cast_time(def.cast_time, auras);
+    // An interrupt can stop the cast only if the cast takes one.
+    let interruptible = def.can_be_interrupted();
     let done = delay + cast;
     let my_team = ctx.combatants.get(&entity).map_or(u8::MAX, |i| i.team);
     ctx.combatants
@@ -1369,7 +1372,9 @@ pub fn aimed_shot_has_time(
         .all(|e| {
             let melee = (!e.is_pet && super::dps_postures::is_kite_threat(e.class))
                 .then_some(HUNTER_DEAD_ZONE);
-            let Some(reach) = super::interrupt_reach(abilities, e)
+            let Some(reach) = interruptible
+                .then(|| super::interrupt_reach(abilities, e))
+                .flatten()
                 .into_iter()
                 .chain(melee)
                 .reduce(f32::max)
@@ -1774,7 +1779,7 @@ fn try_concussive_shot(
 
 /// Try Aimed Shot (2.5s cast time ranged ability).
 /// Trace note: Aimed Shot held because an enemy is hidden ([`try_aimed_shot`]).
-pub const AIMED_SHOT_HELD_HIDDEN: &str = "an unseen enemy could interrupt the cast";
+pub const AIMED_SHOT_HELD_HIDDEN: &str = "an unseen enemy could stop the cast";
 
 fn try_aimed_shot(
     commands: &mut Commands,
@@ -1796,7 +1801,8 @@ fn try_aimed_shot(
     };
 
     // A 2.5s cast is not begun while an enemy is hidden: a stealthed Rogue
-    // opens in melee range and Kicks it. The same question the opener asks
+    // opens in melee range with Cheap Shot, which stops any cast (Kick cannot
+    // take Aimed Shot, but the stun does). The same question the opener asks
     // ([`aimed_shot_has_time`]), asked wherever Aimed Shot is in the rotation.
     if ctx.enemy_hidden() {
         builder.reject(
