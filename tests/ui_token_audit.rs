@@ -88,7 +88,7 @@ const FROZEN: &[(&str, Counts)] = &[
     ("src/states/encyclopedia/mod.rs", Counts { colour: 10, size: 7, space: 8, radius: 3, style: 1 }),
     ("src/states/encyclopedia/search.rs", Counts { colour: 0, size: 3, space: 4, radius: 0, style: 0 }),
     ("src/states/encyclopedia/topic.rs", Counts { colour: 1, size: 0, space: 0, radius: 0, style: 0 }),
-    ("src/states/encyclopedia/widget.rs", Counts { colour: 1, size: 13, space: 10, radius: 8, style: 0 }),
+    ("src/states/encyclopedia/widget.rs", Counts { colour: 0, size: 12, space: 10, radius: 6, style: 0 }),
     ("src/states/main_menu.rs", Counts { colour: 12, size: 5, space: 11, radius: 3, style: 0 }),
     ("src/states/mod.rs", Counts { colour: 39, size: 27, space: 52, radius: 0, style: 2 }),
     ("src/states/play_match/auras.rs", Counts { colour: 8, size: 0, space: 0, radius: 0, style: 0 }),

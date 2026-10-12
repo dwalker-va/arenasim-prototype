@@ -13,6 +13,7 @@
 pub mod driver;
 pub mod fonts;
 pub mod theme;
+pub mod widgets;
 
 use bevy::prelude::*;
 use bevy_egui::egui;

@@ -1,15 +1,13 @@
-//! The linked-icon widget — the encyclopedia's core invariant.
+//! The encyclopedia's [`Topic`]-aware widgets — tiles, rows, chips and page
+//! furniture — built on the linked icon.
 //!
-//! One shared helper renders any [`Topic`] as an icon (plus an optional label).
-//! Hovering it ALWAYS shows that entity's tooltip; clicking it ALWAYS navigates
-//! to that entity's page. Every icon the encyclopedia draws goes through here,
-//! so there is no way to add a picture of something without also making it
-//! hoverable and reachable.
-//!
-//! Tooltip text is never written here: each arm of [`tooltip`] delegates to the
-//! game's existing builder for that entity kind, so the encyclopedia can never
-//! become a second source of truth that drifts from the tooltips shown
-//! elsewhere in the client.
+//! The linked icon itself ([`link`], [`link_with`], [`tooltip`],
+//! [`paint_icon`]) lives in the shared kit, [`crate::ui::widgets::link`]: any
+//! screen may show something with a page, and hovering it ALWAYS shows that
+//! entity's tooltip while clicking it ALWAYS navigates there. It is re-exported
+//! here so existing callers are unchanged. Every icon the encyclopedia draws
+//! goes through it, so there is no way to add a picture of something without
+//! also making it hoverable and reachable.
 //!
 //! The helpers are written against plain `egui::Ui` and an [`EncyclopediaData`]
 //! reference — no Bevy, no encyclopedia-only state — so another screen can
@@ -21,6 +19,8 @@
 use bevy_egui::egui;
 
 use super::{EncyclopediaData, Topic, DIM, GOLD, LINE, LINE_HI, MUTED, PANEL, PANEL_HI, TEXT};
+
+pub use crate::ui::widgets::link::{link, link_with, paint_icon, tooltip};
 
 /// Side length of the icon on a compact linked icon.
 pub const ICON_SMALL: f32 = 24.0;
@@ -46,66 +46,12 @@ fn fitted(
     ui.fonts(|f| f.layout_job(job))
 }
 
-/// Paint an entity's icon into `rect`, falling back to a neutral placeholder
-/// tile when its icon resource has not been loaded (or does not exist yet).
-pub fn paint_icon(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    topic: Topic,
-    data: &EncyclopediaData,
-) {
-    match topic.icon(data) {
-        Some(texture) => {
-            painter.image(
-                texture,
-                rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-        }
-        None => {
-            painter.rect_filled(rect, 3.0, PANEL_HI);
-            painter.rect_stroke(
-                rect,
-                3.0,
-                egui::Stroke::new(1.0_f32, LINE),
-                egui::StrokeKind::Inside,
-            );
-        }
-    }
-}
-
-/// The entity's tooltip. Delegates to the existing builder for each kind — the
-/// encyclopedia adds only the "click to open" affordance line, which [`link`]
-/// appends via [`click_hint`] so a caller-supplied body gets it too.
-pub fn tooltip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) {
-    ui.set_max_width(320.0);
-    match topic {
-        Topic::Item(id) => match data.items.get(&id) {
-            // The same builder the equipment picker and in-match UI use.
-            Some(item) => super::items::render_item_tooltip(ui, item),
-            None => {
-                ui.label(
-                    egui::RichText::new(topic.name(data))
-                        .size(14.0)
-                        .color(GOLD)
-                        .strong(),
-                );
-            }
-        },
-        Topic::Class(class) => super::classes::tooltip(ui, class, data),
-        // The shared `ability_text` generator — the same prose View Combatant
-        // shows for the same ability.
-        Topic::Ability(ability) => super::abilities::tooltip(ui, ability, data),
-        // The same generated text the aura's own page shows — one builder, one
-        // source of truth.
-        Topic::Aura(id) => super::auras::render_tooltip(ui, id, data),
-    }
-}
-
 /// The affordance line every linked tooltip ends on — the promise that the
 /// thing under the cursor has a page. Written once so a caller that supplies
 /// its OWN tooltip body still makes the same promise in the same words.
+///
+/// [`link_with`] appends it. It stays here, with the encyclopedia it names,
+/// until the encyclopedia adopts the kit's tooltip hint.
 pub fn click_hint(ui: &mut egui::Ui) {
     ui.add_space(4.0);
     ui.label(
@@ -114,40 +60,6 @@ pub fn click_hint(ui: &mut egui::Ui) {
             .color(DIM)
             .italics(),
     );
-}
-
-/// Attach the hover tooltip + click-to-navigate contract to an already-drawn
-/// response. Every widget in this module funnels through it, and so should any
-/// bespoke one a caller draws itself.
-pub fn link(response: egui::Response, topic: Topic, data: &EncyclopediaData) -> Option<Topic> {
-    link_with(response, topic, |ui| tooltip(ui, topic, data))
-}
-
-/// [`link`] with a caller-supplied tooltip BODY.
-///
-/// The contract — pointing-hand cursor, a hover tooltip, the shared
-/// "click to open" hint, and `Some(topic)` on the clicked frame — is identical;
-/// only the text inside differs. This is the seam for a surface whose job is
-/// not to be the article: View Combatant is a loadout editor, so its ability
-/// rows show a one-line gist and link on to the full page rather than
-/// reprinting it in a tooltip.
-pub fn link_with(
-    response: egui::Response,
-    topic: Topic,
-    body: impl FnOnce(&mut egui::Ui),
-) -> Option<Topic> {
-    let response = response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_ui(|ui| {
-            // Every linked icon in the client funnels through here, so ONE
-            // probe reports "this entity's tooltip body actually ran" for all
-            // of them — the encyclopedia's own icons and View Combatant's kit
-            // rows alike. Inert unless `--ui-script` armed the registry.
-            crate::ui::driver::note(ui, format_args!("tooltip:{topic:?}"));
-            body(ui);
-            click_hint(ui);
-        });
-    response.clicked().then_some(topic)
 }
 
 /// The line a panel whose widgets open a page on SECONDARY click puts in its

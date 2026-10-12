@@ -946,7 +946,6 @@ const EAGER_MARKERS: &[&str] = &[
 const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     ("src/states/configure_match_ui.rs", 3),
     ("src/states/encyclopedia/mod.rs", 2),
-    ("src/states/encyclopedia/widget.rs", 1),
     ("src/states/main_menu.rs", 1),
     (
         "src/states/play_match/rendering/effects/speech_bubbles.rs",
@@ -954,6 +953,10 @@ const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     ),
     ("src/states/play_match/rendering/team_frames.rs", 2),
     ("src/states/view_combatant_ui.rs", 14),
+    // The linked icon's tooltip note, moved here from encyclopedia/widget.rs.
+    ("src/ui/widgets/link.rs", 1),
+    // The kit's one `mark` helper, through which every component registers.
+    ("src/ui/widgets/mod.rs", 1),
 ];
 
 /// Every `mark` / `note` call under `src/`, as `(file, line, full call text)`.

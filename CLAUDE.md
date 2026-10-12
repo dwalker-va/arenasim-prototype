@@ -1389,7 +1389,10 @@ never `GREY_142`); a literal written anywhere else in `src/` is counted by
 fails it: use the token for that role, and if the scale lacks one, add it to
 `theme.rs` by role in the same commit. A count that goes down fails it too until
 the table is lowered in the same commit, so a migration card's diff shows the
-rows it cleared. The design is
+rows it cleared. **UI pieces come from `ui::widgets`** (button, header and
+`Nav`, panel, list row, tabs, chip, tooltip, modal, …); a component the kit
+lacks is added there, with its row in `tests/ui_gallery_snapshot.rs`, in the
+same commit. The design is
 `docs/design/proposals/2026-10-11-ui-design-system.md`.
 
 ### Verify the RUNNING client with a UI script (input injection)

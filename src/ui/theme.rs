@@ -49,6 +49,8 @@ pub mod color {
     // Text
     /// Titles, the active state, the primary action.
     pub const ACCENT: Color32 = Color32::from_rgb(230, 204, 153);
+    /// The primary action under the pointer: [`ACCENT`], lifted.
+    pub const ACCENT_RAISED: Color32 = Color32::from_rgb(242, 222, 182);
     /// Body text.
     pub const TEXT: Color32 = Color32::from_rgb(230, 217, 191);
     /// Labels, secondary text.
@@ -63,6 +65,18 @@ pub mod color {
     pub const WARN: Color32 = Color32::from_rgb(220, 170, 90);
     /// Destructive actions, the dead.
     pub const DANGER: Color32 = Color32::from_rgb(205, 110, 110);
+    /// The idle edge of a destructive control: [`DANGER`] held back until
+    /// hover, so a Remove button does not shout from every row.
+    pub const DANGER_LINE: Color32 = Color32::from_rgb(90, 52, 52);
+
+    // Surfaces
+    /// Text and glyphs drawn ON an [`ACCENT`] fill: the Primary button's
+    /// label, an on chip's.
+    pub const ON_ACCENT: Color32 = BG;
+    /// The dimming laid over a screen behind a modal.
+    pub const SCRIM: Color32 = Color32::from_rgba_premultiplied(6, 6, 10, 153);
+    /// The tint an image is drawn with to keep its own colours.
+    pub const UNTINTED: Color32 = Color32::WHITE;
 }
 
 /// Data colours: hue that carries meaning. One table each.
@@ -99,6 +113,8 @@ pub mod hud {
     pub const HUD_GOLD: Color32 = Color32::from_rgb(255, 215, 0);
     /// Every HUD label. White, by the colour-budget rule.
     pub const HUD_LABEL: Color32 = Color32::WHITE;
+    /// The empty part of a resource bar.
+    pub const BAR_TRACK: Color32 = Color32::from_rgb(17, 17, 26);
 }
 
 /// The type scale, in points. Rajdhani Bold unless a call site says otherwise.
@@ -161,6 +177,36 @@ pub mod icon {
     pub const XL: f32 = 48.0;
     /// A detail page's header icon.
     pub const HERO: f32 = 56.0;
+}
+
+/// Stroke widths, in points.
+pub mod stroke {
+    /// Every panel, row, button and tooltip edge.
+    pub const HAIRLINE: f32 = 1.0;
+}
+
+/// Fixed control dimensions, in points: the size a component is drawn at,
+/// as opposed to the [`space`] between components.
+pub mod size {
+    /// A Secondary, Ghost or Danger button's height.
+    pub const BUTTON: f32 = 32.0;
+    /// The Primary button's height: one per screen, and the tallest control
+    /// on it.
+    pub const BUTTON_PRIMARY: f32 = 44.0;
+    /// An Icon button's edge: square, glyph only.
+    pub const BUTTON_ICON: f32 = 28.0;
+    /// A screen header's navigation buttons.
+    pub const NAV: f32 = 26.0;
+    /// A tab.
+    pub const TAB: f32 = 30.0;
+    /// A chip.
+    pub const CHIP: f32 = 22.0;
+    /// A resource bar's thickness.
+    pub const BAR: f32 = 8.0;
+    /// The widest a tooltip grows before it wraps.
+    pub const TOOLTIP_MAX_WIDTH: f32 = 320.0;
+    /// The widest a modal grows.
+    pub const MODAL_MAX_WIDTH: f32 = 420.0;
 }
 
 /// A class's colour as egui draws it, from the one source,
