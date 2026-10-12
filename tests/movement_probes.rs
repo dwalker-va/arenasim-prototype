@@ -4709,113 +4709,62 @@ mod u9_seek_reset {
         max_span
     }
 
+    /// The seeds the R10 anti-stall probe plays. It judges the matches in
+    /// which the enemy healer actually denies the Mage sight — at least three
+    /// Frostbolts refused `LosBlocked` at cast start — so a change that moves
+    /// the RNG stream moves WHICH seeds are occluded, not whether the probe
+    /// judges anything. (Two pinned seeds carried it through eight re-pins
+    /// across seven cards; AS-282 migrated it here.)
+    const OCCLUSION_BANK: std::ops::Range<u64> = 0..40;
+
+    /// The fewest occluded matches the bank must hold.
+    const MIN_OCCLUDED_MATCHES: usize = 4;
+
     /// R10 anti-stall, robust form: whenever the Mage is occluded it REPOSITIONS
     /// (emits SeekLos) and keeps landing Frostbolts — it never stands behind a
     /// pillar refusing to move. Holds regardless of how long the enemy healer
-    /// jukes, so it is the property pinned at both seeds.
-    ///
-    /// Seeds re-pinned (see `scan_mage_occlusion_seeds`): press-when-ahead
-    /// turned the enemy Priest's LoS denial OFF whenever its team leads (retiring
-    /// seeds 3, 7), and the medic chase (fix 1) shifts PillaredArena trajectories
-    /// so the enemy Priest is pulled around pillars toward its dying Warrior,
-    /// retiring seeds 48/54. The leaky-bucket occlusion accumulator then closed
-    /// the pillar gap faster at seed 20, dropping its LosBlocked events below the
-    /// vacuity floor, and the OOM wand fallback shifted seed 24, so seeds 20/24
-    /// were re-pinned to 27/33. Tangent steering then retired 27/33 in turn: the
-    /// pursuing Mage now rounds pillars in a clean arc, so at 27/33 the cast-start
-    /// LosBlocked events collapse below the vacuity floor (the fix working — the
-    /// Mage stops standing occluded). Seeds 13/6 are the remaining seeds where the
-    /// enemy healer still denies sight long enough to drive a real seek: 13 has
-    /// 244 cast-start blocks / 185 seeks / 3.30s longest stall; 6 has 215 / 253 /
-    /// 3.42s. The seek + cast-recovery machinery still fires; only the seed moved.
-    ///
-    /// Re-pinned twice more in short order, by two changes that both land in
-    /// this comp's blast radius and that were measured independently before
-    /// meeting here:
-    ///
-    ///   AS-54 — the Frost Armor chill becoming ONE debuff. Team 1's Mage wears
-    ///   it and team 2's Warrior melees into it, so trajectories moved; 13/6
-    ///   fell below the vacuity floor and were re-pinned to 2/9.
-    ///   AS-87 — caster main-hands, giving the Mage and both Priests +5 spell
-    ///   power. This took 13/6 to ZERO cast-start blocks independently, and
-    ///   re-pinned to 37/42.
-    ///
-    /// On the merged tree NEITHER pair could be assumed, and re-running the
-    /// scanner over both changes together proved it: AS-87's own seed 37 fell
-    /// to ZERO cast-start blocks once AS-54 was under it. The seeds below are
-    /// chosen from that merged-tree scan rather than taken from either branch —
-    /// 9 has 469 cast-start blocks / 74 seeks / 55 casts landed after occlusion
-    /// began / 4.37s longest stall, and 42 survived the merge at 336 / 11 / 2 /
-    /// 3.08s. The seek + cast-recovery machinery still fires; only the seed
-    /// moved.
-    ///
-    /// Re-pinned for AS-115, which re-priced the enemy Warrior's two-hander
-    /// (4 AP -> 11 AP + 3% crit). Seed 9 fell to ZERO cast-start blocks; 42
-    /// held at 336 / 11 / 2 / 3.08s. 9 is replaced by 31 from a re-scan: 902
-    /// cast-start blocks / 67 seeks / 45 casts landed after occlusion began /
-    /// 4.30s longest stall.
-    ///
-    /// Re-pinned for AS-167, weapon speed from item data. Seeds 31 and 42 both
-    /// fell to ZERO cast-start blocks. The first line that differs from `main`
-    /// @ 17cb9f0 at each is the Mage's first Wand Shot (31: 7 -> 9; 42: a
-    /// 14 -> 18 crit): the Wand of Shadows now fires every 1.8s for the same
-    /// DPS, so each shot hits harder and every trajectory after it moves.
-    /// Replaced by 47 and 41 from a re-scan: 47 has 861 cast-start blocks / 74
-    /// seeks / 43 casts landed after occlusion began / 4.28s longest stall; 41
-    /// has 661 / 34 / 20 / 4.82s.
-    ///
-    /// Re-pinned for AS-203, the `Legacy` healer formation point projected out
-    /// of pillars (47 -> 7). Both Priests here used to be sent to points inside
-    /// a pillar, so the comp's trajectories change from the first projected
-    /// frame; at 47 the Mage is never LosBlocked at cast start. The occlusion
-    /// itself survives: 13 of 80 seeds in `scan_mage_occlusion_seeds` pass every
-    /// condition (27 before). Seed 7 has 792 cast-start blocks / 48 seeks / 33
-    /// casts landed after occlusion began / 3.45s longest stall; 41 holds at
-    /// 463 / 92 / 16 / 3.50s.
-    fn assert_mage_repositions_and_casts(seed: u64) {
-        let lines = run_traced_lines(
-            vec!["Mage", "Priest"],
-            vec!["Warrior", "Priest"],
-            seed,
-            "TwinPillars",
-        );
-        let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
-        let casts = mage_frostbolt_times(&lines, "chosen", None);
-        let seeks = mage_seek_count(&lines);
-
-        // Vacuity guard: the scenario must actually exercise LoS denial.
-        assert!(
-            blocked.len() >= 3,
-            "seed {seed}: expected >= 3 Frostbolt LosBlocked events, got {} — not exercising \
-             occlusion",
-            blocked.len()
-        );
-        assert!(
-            seeks >= 1,
-            "seed {seed}: Mage was occluded ({} blocks) but never emitted SeekLos — it stood \
-             still instead of repositioning",
-            blocked.len()
-        );
-        // Recovery: despite heavy occlusion the Mage still lands casts, and at
-        // least one lands after occlusion began (never permanently locked out).
-        let first_block = blocked.iter().cloned().fold(f32::INFINITY, f32::min);
-        let casts_after = casts.iter().filter(|c| **c >= first_block).count();
-        assert!(
-            casts_after >= 1,
-            "seed {seed}: no Frostbolt cast landed after occlusion began ({} blocks) — perpetual \
-             stall",
-            blocked.len()
-        );
-    }
-
+    /// jukes, so it is judged in every occluded match of the bank.
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_7() {
-        assert_mage_repositions_and_casts(7);
-    }
-
-    #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_41() {
-        assert_mage_repositions_and_casts(41);
+    fn mage_repositions_and_casts_despite_occlusion() {
+        let mut occluded = 0;
+        for seed in OCCLUSION_BANK {
+            let lines = run_traced_lines(
+                vec!["Mage", "Priest"],
+                vec!["Warrior", "Priest"],
+                seed,
+                "TwinPillars",
+            );
+            let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
+            // The situation: the scenario actually exercises LoS denial.
+            if blocked.len() < 3 {
+                continue;
+            }
+            occluded += 1;
+            let casts = mage_frostbolt_times(&lines, "chosen", None);
+            let seeks = mage_seek_count(&lines);
+            assert!(
+                seeks >= 1,
+                "seed {seed}: Mage was occluded ({} blocks) but never emitted SeekLos — it stood \
+                 still instead of repositioning",
+                blocked.len()
+            );
+            // Recovery: despite heavy occlusion the Mage still lands casts, and
+            // at least one lands after occlusion began (never permanently locked
+            // out).
+            let first_block = blocked.iter().cloned().fold(f32::INFINITY, f32::min);
+            let casts_after = casts.iter().filter(|c| **c >= first_block).count();
+            assert!(
+                casts_after >= 1,
+                "seed {seed}: no Frostbolt cast landed after occlusion began ({} blocks) — \
+                 perpetual stall",
+                blocked.len()
+            );
+        }
+        assert_min_occurrences(
+            "occluded Mage+Priest vs Warrior+Priest matches in the bank",
+            occluded,
+            MIN_OCCLUDED_MATCHES,
+        );
     }
 
     /// Tight anti-stall bound at a canonical occlusion seed. Absent a persistent
@@ -5562,13 +5511,18 @@ mod los_probes {
     // projectiles that were already launched — a Frostbolt that left the wand
     // before the target broke LoS still travels and lands ("Frostbolt hits").
     //
-    // We assert both from the same match's combat log. Pinned to two seeds of
-    // the reference matchup (Mage+Priest v Warrior+Priest on PillaredArena).
-    // Re-pinned after tangent steering: the pursuing Mage now rounds pillars
-    // cleanly and rarely loses sight mid-cast, so the old seed 3 dropped to 0
-    // completion fizzles. Seeds where a mid-cast juke still breaks LoS at cast
-    // completion remain (see `scan_fizzle_seeds`): seed 6 yields 7 fizzles + 13
-    // impacts, seed 7 yields 3 + 12.
+    // We assert both from the same match's combat log, in every match of a
+    // seed bank of the reference matchup (Mage+Priest v Warrior+Priest on
+    // TwinPillars) where a cast fizzled at completion — so a change that moves
+    // the RNG stream moves WHICH seeds fizzle, not whether the probe judges
+    // anything. (Two pinned seeds carried it through six re-pins; AS-282
+    // migrated it here.)
+
+    /// The seeds [`completion_fizzle_and_projectiles_still_land`] plays.
+    const FIZZLE_BANK: std::ops::Range<u64> = 0..40;
+
+    /// The fewest matches of the bank in which a cast must fizzle at completion.
+    const MIN_FIZZLE_MATCHES: usize = 3;
 
     /// Run one PillaredArena match and return its combat-log text.
     fn pillared_log(seed: u64) -> String {
@@ -5590,13 +5544,11 @@ mod los_probes {
         body
     }
 
-    /// Exploratory seed scan for completion-fizzle re-pinning. Ignored by
-    /// default. A good pin has >= 1 LoS completion fizzle AND >= 1 Frostbolt
-    /// impact.
+    /// Exploratory scan of the completion-fizzle bank. Ignored by default.
     #[test]
     #[ignore]
     fn scan_fizzle_seeds() {
-        for seed in 0u64..40 {
+        for seed in FIZZLE_BANK {
             let log = pillared_log(seed);
             let fizzles = log
                 .lines()
@@ -5621,52 +5573,31 @@ mod los_probes {
 
     #[test]
     fn completion_fizzle_and_projectiles_still_land() {
-        // Seeds re-pinned twice. AS-87 (caster main-hands) took the original
-        // 6/7 to zero fizzles; then AS-54's compound Frost Armor chill, merged
-        // underneath, took AS-87's replacement 37/38 to zero as well — this
-        // comp puts a Mage against a Warrior, so it sits in both blast radii.
-        // 9 and 26 are chosen from a scan of the MERGED tree: 47 and 30 fizzles
-        // against 12 and 15 Frostbolt impacts. See `scan_fizzle_seeds`.
-        // AS-115's re-priced Warrior two-hander then took 26 to zero fizzles
-        // and 9 to one. Re-pinned to 23 and 31 from a re-scan: 49 and 45
-        // fizzles against 8 and 12 Frostbolt impacts.
-        // AS-167 (weapon speed from item data) took 23 and 31 to zero
-        // fizzles; the first line that differs from `main` @ 17cb9f0 is the
-        // Mage's first Wand Shot, 7 -> 9 (the Wand of Shadows fires every 1.8s
-        // for the same DPS). Re-pinned to 36 and 24 from a re-scan: 36 and 35
-        // fizzles against 16 and 16 Frostbolt impacts.
-        // AS-172 (Warriors enter the gates at 0 rage, not 100) took 36 to zero
-        // fizzles; the first line that differs from `main` @ d5f21c1 in this
-        // comp is the Warrior's first swing on the Mage, where a Heroic Strike
-        // the free starting bar paid for becomes a plain Auto Attack. 24 still
-        // holds (27 fizzles, 17 impacts). 36 re-pinned to 1 from a re-scan:
-        // 35 fizzles against 16 Frostbolt impacts.
-        // AS-203 (the `Legacy` healer formation point projected out of
-        // pillars; both Priests here used to stand pressed against one) took
-        // 24 to zero fizzles and 1 to one. Re-pinned to 7 and 18 from a
-        // re-scan: 27 and 20 fizzles against 16 and 14 Frostbolt impacts.
-        // Completion fizzles still occur on 15 of 40 seeds (24 before).
-        for seed in [7u64, 18u64] {
+        let mut fizzled = 0;
+        for seed in FIZZLE_BANK {
             let log = pillared_log(seed);
 
             let fizzles = log
                 .lines()
                 .filter(|l| l.contains("fails to cast") && l.contains("line of sight"))
                 .count();
+            // The situation: an in-flight cast fizzled at completion for LoS (AE2).
+            if fizzles == 0 {
+                continue;
+            }
+            fizzled += 1;
             let impacts = log
                 .lines()
                 .filter(|l| l.contains("Frostbolt hits") || l.contains("Frostbolt CRITS"))
                 .count();
-
-            eprintln!(
-                "U12 completion-fizzle probe seed {seed}: {fizzles} LoS fizzle(s), {impacts} Frostbolt impact(s)"
-            );
-
-            // AE2: at least one in-flight cast fizzled at completion for LoS.
-            assert_min_occurrences(&format!("seed {seed} completion LoS fizzles"), fizzles, 1);
             // AE3: launched projectiles still landed in the same match.
             assert_min_occurrences(&format!("seed {seed} Frostbolt impacts"), impacts, 1);
         }
+        assert_min_occurrences(
+            "matches of the bank with a completion LoS fizzle",
+            fizzled,
+            MIN_FIZZLE_MATCHES,
+        );
     }
 }
 
@@ -5844,8 +5775,8 @@ mod chase_los {
         }
     }
 
-    /// Exploratory seed scan — prints per-seed stats so the pinned seeds below
-    /// can be (re)chosen when trajectories drift. Ignored by default.
+    /// Exploratory seed scan — prints per-seed stats over the bank
+    /// [`juke_bounded_over_the_seed_bank`] judges. Ignored by default.
     #[test]
     #[ignore]
     fn scan_seeds() {
@@ -6137,19 +6068,14 @@ mod juke_chase {
         }
     }
 
-    /// Exploratory seed scan — prints per-seed stats so the pinned seeds below
-    /// can be (re)chosen when trajectories drift. Ignored by default.
+    /// Exploratory seed scan — prints per-seed stats over the bank
+    /// [`juke_bounded_over_the_seed_bank`] judges. Ignored by default.
     #[test]
     #[ignore]
     fn scan_seeds() {
-        for seed in 0u64..60 {
+        for seed in JUKE_BANK {
             let s = measure(seed);
-            let flag =
-                if s.warrior_death.is_some() && s.lone_samples >= 200 && s.total_occluded >= 2.0 {
-                    " <-- CANDIDATE"
-                } else {
-                    ""
-                };
+            let flag = if danced(&s) { " <-- DANCE" } else { "" };
             eprintln!(
                 "seed {seed:2}: winner={:?} dur={:5.1} wdeath={:>6} lone={:4} occl={:5.1} fizz_win={:2}{}",
                 s.winner,
@@ -6163,197 +6089,88 @@ mod juke_chase {
         }
     }
 
-    /// The leaky-bucket chase bounds the mid-cast juke dance: at pinned seeds
-    /// where the Warlock dies early and the surviving Shaman kites a pillar, the
-    /// Mage's fizzle-length occlusion windows during the 2v1 are FEW (the chase
-    /// closes distance so the angular juke stops breaking sight mid-cast), and
-    /// the 2v1 resolves by ELIMINATION well before the dampening cap.
-    fn assert_juke_bounded(seed: u64, max_fizzle_windows: usize) {
-        let s = measure(seed);
+    /// The seeds the juke probe plays. It judges the matches in which the
+    /// dance happens — the Warrior dies first and the lone Shaman breaks the
+    /// Mage's sight for at least a second — so a change that moves the RNG
+    /// stream moves WHICH seeds dance, not whether the probe judges anything.
+    /// (Two pinned seeds carried it until they had been re-picked seven times
+    /// across six cards, no two picks agreeing; AS-282 migrated it here.)
+    const JUKE_BANK: std::ops::Range<u64> = 0..60;
 
-        // Vacuity: the Warrior must die early AND a lone-Shaman dance with real
-        // occlusion must occur, or the bounds below prove nothing.
-        assert!(
-            s.warrior_death.is_some(),
-            "seed {seed}: Warrior never died — no lone-Shaman 2v1 to bound",
-        );
+    /// The fewest dances the bank must hold (10 of 60 on AS-282's `main`).
+    const MIN_DANCES: usize = 4;
+
+    /// The most fizzle-length occlusion windows one dance may hold — 1.5x the
+    /// ~10 a long dance has carried through every re-measurement (12 at most
+    /// in the bank on AS-282's `main`). A regression to the continuous clock,
+    /// or to the pre-steering ooze, leaves many more.
+    const MAX_FIZZLE_WINDOWS: usize = 15;
+
+    /// A dance long enough to give the bound something to catch: a bank whose
+    /// longest dance held fewer windows than this proves nothing about long
+    /// dances, which is what the bound exists for (a pin decayed to 1-2
+    /// windows twice before this rule).
+    const LONG_DANCE_WINDOWS: usize = 6;
+
+    /// Whether the lone-Shaman dance happened in `s`.
+    fn danced(s: &JukeStats) -> bool {
+        s.warrior_death.is_some() && s.lone_samples >= 200 && s.total_occluded >= 1.0
+    }
+
+    /// The leaky-bucket chase bounds the mid-cast juke dance: in every match of
+    /// the bank where the Warrior dies early and the surviving Shaman kites a
+    /// pillar, the Mage's fizzle-length occlusion windows during the 2v1 are
+    /// FEW (the chase closes distance so the angular juke stops breaking sight
+    /// mid-cast), and the 2v1 resolves by ELIMINATION well before the cap.
+    #[test]
+    fn juke_bounded_over_the_seed_bank() {
+        let dances: Vec<(u64, JukeStats)> = JUKE_BANK
+            .map(|seed| (seed, measure(seed)))
+            .filter(|(_, s)| danced(s))
+            .collect();
+
+        // Vacuity: the dance occurs, in enough matches to be a sample, and at
+        // least one of them is long enough for the bound to mean something.
         assert_min_occurrences(
-            &format!("seed {seed} 2v1 (Mage,Shaman) samples"),
-            s.lone_samples,
-            200,
+            "lone-Shaman juke dances in the bank",
+            dances.len(),
+            MIN_DANCES,
         );
+        let longest = dances
+            .iter()
+            .map(|(_, s)| s.fizzle_windows)
+            .max()
+            .unwrap_or(0);
         assert!(
-            s.total_occluded >= 1.0,
-            "seed {seed}: only {:.2}s occlusion in the 2v1 — the juke dance did not start",
-            s.total_occluded,
+            longest >= LONG_DANCE_WINDOWS,
+            "the bank's longest dance held {longest} fizzle-length windows (< \
+             {LONG_DANCE_WINDOWS}) — the bound has nothing to catch",
         );
 
-        // (a) Fizzle proxy bounded — the chase closes the range so few casts
-        // fizzle. The defect match had 7 true fizzles; the proxy ceiling here is
-        // derived from observation with headroom.
-        assert!(
-            s.fizzle_windows <= max_fizzle_windows,
-            "seed {seed}: {} fizzle-length occlusion windows in the 2v1 (> {}) — the leaky-bucket \
-             chase is not closing on the juking Shaman",
-            s.fizzle_windows,
-            max_fizzle_windows,
-        );
-
-        // (b) Resolves by elimination (team 1) well before the cap.
-        assert_eq!(
-            s.winner,
-            Some(1),
-            "seed {seed}: expected team 1 (Mage+Priest) to win by elimination, got {:?}",
-            s.winner,
-        );
-        assert!(
-            s.duration <= 200.0,
-            "seed {seed}: match ran {:.1}s (> 200s) — the lone Shaman was not caught promptly",
-            s.duration,
-        );
+        for (seed, s) in &dances {
+            // (a) Fizzle proxy bounded — the chase closes the range so few casts
+            // fizzle.
+            assert!(
+                s.fizzle_windows <= MAX_FIZZLE_WINDOWS,
+                "seed {seed}: {} fizzle-length occlusion windows in the 2v1 (> \
+                 {MAX_FIZZLE_WINDOWS}) — the leaky-bucket chase is not closing on the juking \
+                 Shaman",
+                s.fizzle_windows,
+            );
+            // (b) Resolves by elimination (team 1) well before the cap.
+            assert_eq!(
+                s.winner,
+                Some(1),
+                "seed {seed}: expected team 1 (Mage+Priest) to win by elimination, got {:?}",
+                s.winner,
+            );
+            assert!(
+                s.duration <= 200.0,
+                "seed {seed}: match ran {:.1}s (> 200s) — the lone Shaman was not caught promptly",
+                s.duration,
+            );
+        }
     }
-
-    #[test]
-    fn juke_bounded_seed_a() {
-        // seed 6 proxy is 10 fizzle-windows; bound 15 leaves headroom and still
-        // catches a regression to the continuous clock (or to the pre-steering
-        // ooze) that would leave many more fizzle-length windows.
-        //
-        // Re-pinned 2026-07-23 (was 8, proxy 4): the "mana charged only on
-        // successful cast completion" fix keeps the Mage's mana healthy through
-        // the whole 2v1, so it sustains ranged Frostbolt casting instead of
-        // bankrupting itself and closing to wand range. Standing at Frostbolt
-        // range keeps it at pillar-occluded angles longer, so the geometric
-        // occlusion proxy rose (4 -> 10) even though the load-bearing assertions
-        // — team-1 elimination win, resolved well before the cap — still hold.
-        //
-        // The seed has moved since (now 46, 10 windows; see `JUKE_SEED_A`);
-        // the bound of 15 is still 1.5x what it observes.
-        assert_juke_bounded(JUKE_SEED_A, 15);
-    }
-
-    #[test]
-    fn juke_bounded_seed_b() {
-        // Re-pinned 2026-09-13 (seed 2 -> 11, bound 24 -> 8) when the Frost
-        // Armor chill became ONE debuff: at seed 2 the lone-Shaman dance no
-        // longer starts at all (0.0s occlusion, below the vacuity floor), so
-        // the old pin proved nothing. This comp is the change's blast radius —
-        // team 1's Mage wears Frost Armor and team 2's Warrior melees it — so
-        // a trajectory shift here is expected, not a chase-logic regression.
-        // Seed 11 is the nearest replacement in character to what seed 2 used
-        // to be (4 fizzle-length windows / ~10.5s occlusion / team-1
-        // elimination win at ~44s, from `scan_seeds`), and the bound keeps the
-        // same roughly-2x headroom the pin has always carried.
-        //
-        // Re-pinned again 2026-09-14 (seed 11 -> 38, bound 8 -> 16) once AS-97
-        // equipped the Shaman's main-hand mace, which moves this comp's OTHER
-        // side. Two cards re-picked this same pin independently from the drifted
-        // seed 2 — AS-54 chose 11, AS-97 chose 34 — and neither pick was measured
-        // on a tree carrying both changes, so the surviving seed was re-derived
-        // from `scan_seeds` there rather than either being taken on faith.
-        //
-        // Seed 11 still PASSES on this tree and both vacuity floors still clear
-        // (3.1s occlusion > 1.0s, 436 lone samples > 200). It was dropped anyway,
-        // because clearing a floor is not the same as testing anything: it fell
-        // from 4 fizzle-length windows to 2 on a single sim change, and 2 against
-        // a bound can only catch a THREEFOLD regression. The proxy this probe is
-        // NAMED for had almost no signal left, and the trend says one more change
-        // takes it to zero.
-        //
-        // Seed 34 — the pick from AS-97's own first pass — was dropped for the
-        // same reason and not because it fails: it PASSES, at 15.0s occlusion and
-        // 1 fizzle window. A pin there would assert nothing about a long dance,
-        // which is the thing this probe exists to bound. A guard that passes
-        // while proving nothing is the failure mode here, not a red test.
-        //
-        // Seed 38 restores the character seed 2 had before it drifted — 40.9s
-        // total occlusion, 11 fizzle-length windows, 4097 lone samples, team-1
-        // elimination win at 98.0s — so the bound has real signal under it again.
-        //
-        // Bound derived from that observed 11, NOT carried over from the 6 it
-        // replaces: the other pin runs at 1.50x (seed 10: observed 10, bound 15),
-        // and 1.5 x 11 = 16.5 rounds down to 16 — 1.45x, a shade tighter than the
-        // convention rather than looser. The assertion is `fizzle_windows <= max`,
-        // so a larger number here is not a looser test: what tightens a bound is
-        // shrinking the gap to what is observed.
-        //
-        // 16 is the tightest value THE CONVENTION GIVES, not the tightest this
-        // seed would tolerate. 13 or 14 would also pass today and nothing here
-        // establishes where the real floor is — the headroom exists to absorb
-        // trajectory wobble from unrelated changes, not because 15 was tested and
-        // failed.
-        //
-        // AS-203 moved B to 54 (10 windows) and its bound to 15 by the same
-        // 1.5x convention; see `JUKE_SEED_B`.
-        assert_juke_bounded(JUKE_SEED_B, 15);
-    }
-
-    // Pinned by `scan_seeds` (run with `--ignored`): seeds where the enemy
-    // Warrior dies before the Shaman, leaving a lone kiting Shaman for the Mage
-    // to chase around a pillar. Re-pinned after tangent steering: at the old pins
-    // 28/23 the pursuing Mage now rounds the pillar cleanly and the mid-cast juke
-    // dance collapses to ~1.4s / 0.0s residual occlusion (below the vacuity
-    // floor) — the fix working. Seeds 6/2 still produce a real lone-Shaman juke
-    // window, now held to a bounded number of fizzle-length windows and resolved
-    // by elimination (numbers as of the 2026-07-23 mana-on-completion fix, which
-    // keeps the Mage casting from range instead of bankrupting to wand):
-    //   seed 6: 25.8s total occlusion, 7 fizzle-length windows, team-1 win at ~84s.
-    // (The geometric fizzle-window PROXY the probe asserts on counts any occluded
-    // run >= a cast length, whether or not a cast completed in it. Numbers as of
-    // 2026-09-13, the Frost Armor compound-debuff change: this comp puts a Mage
-    // wearing Frost Armor against a Warrior, so its trajectories moved and seed 2
-    // stopped producing a dance at all.)
-    //
-    // Numbers again as of AS-97 equipping the Shaman's main-hand mace, which
-    // moves the OTHER side of the same comp. Re-measured on that tree with
-    // `scan_seeds`:
-    //   seed 10: 28.8s total occlusion, 10 fizzle-length windows, 2676 lone samples.
-    //   seed 38: 40.9s total occlusion, 11 fizzle-length windows, team-1 win at ~98.0s.
-    // Seed 11 (AS-54's pick) and seed 34 (AS-97's) both still PASS there, but had
-    // decayed to 2 and 1 fizzle windows respectively — clearing the vacuity floor
-    // while leaving the bound nothing to catch — so B moved to 38, which has the
-    // long-dance character seed 2 had before it drifted.
-    //
-    // A moved off seed 6 for the opposite reason, once the caster main-hands
-    // landed under it as well: seed 6's dance STRETCHED, to 17 fizzle-length
-    // windows against its bound of 15. Seed 10 carries seed 6's old character
-    // (10 windows) so that bound is unchanged.
-    // A: 2676 lone samples / 28.8s occlusion / 10 fizzle-length windows,
-    // against the bound of 15 — the same 10 windows that bound was set around,
-    // which is why it is unchanged.
-    const JUKE_SEED_A: u64 = 46;
-    // B: 40.9s total occlusion / 11 fizzle-length windows against the bound of
-    // 16 — the long-dance character seed 2 carried before it drifted.
-    //
-    // Both were re-derived from `scan_seeds` on a tree carrying every change
-    // under them, rather than taken from any one branch's pick. That is the
-    // only way this pin survives: three cards in a row re-picked it from their
-    // own base, and no two of those picks agreed.
-    //
-    // Re-pinned for AS-172, Warriors entering the gates at 0 rage (38 -> 56).
-    // At seed 38 the dance no longer starts (0.0s occlusion, 684 lone
-    // samples); the first line that differs from `main` @ d5f21c1 in this
-    // comp is the Warrior's first swing, a Heroic Strike the free starting
-    // bar paid for becoming a plain Auto Attack. Seed 56 from a re-scan
-    // carries the same long-dance character: 34.7s total occlusion, 11
-    // fizzle-length windows, 3747 lone samples, team-1 win at 81.5s — the
-    // same 11 windows the bound of 16 was set around, so it is unchanged.
-    // Seed 10 (A) still holds, at 15 windows against its bound of 15.
-    //
-    // Re-pinned for AS-203, the `Legacy` healer formation point projected out
-    // of pillars (A 10 -> 46, B 56 -> 54). The Mage's Priest used to be sent
-    // to a point inside a pillar; with a standable goal the comp's trajectories
-    // change from its first projected frame. At 10 the Warrior no longer dies
-    // (team 2 wins at 53.8s) and at 56 the dance never starts (0.0s
-    // occlusion). The dance itself survives the change: 11 of 60 seeds in
-    // `scan_seeds` are candidates (20 of 60 before). Both replacements carry
-    // the long-dance character the bounds were set around:
-    //   seed 46: 31.8s total occlusion, 10 fizzle-length windows, 2960 lone
-    //            samples, team-1 win at 82.7s (bound 15 = 1.5x, unchanged).
-    //   seed 54: 37.5s total occlusion, 10 fizzle-length windows, 3493 lone
-    //            samples, team-1 win at 91.6s (bound 16 -> 15: the same 1.5x
-    //            convention applied to the 10 windows observed here).
-    const JUKE_SEED_B: u64 = 54;
 }
 
 // ---------------------------------------------------------------------------

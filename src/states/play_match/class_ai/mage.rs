@@ -29,7 +29,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 use bevy::prelude::*;
 
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::cast_guard::{cast_gate, PreCastOpts};
 
 use super::CombatContext;
 
@@ -67,6 +67,8 @@ pub fn decide_mage_action(
         abilities,
         entity,
         combatant,
+        my_pos,
+        auras,
         ctx,
         &mut builder,
     ) {
@@ -81,6 +83,8 @@ pub fn decide_mage_action(
         abilities,
         entity,
         combatant,
+        my_pos,
+        auras,
         ctx,
         &mut builder,
     ) {
@@ -167,6 +171,8 @@ fn try_ice_barrier(
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
@@ -198,28 +204,24 @@ fn try_ice_barrier(
         return false;
     }
 
-    if let Some(remaining) = combatant.ability_cooldowns.get(&ice_barrier) {
-        builder.reject(
-            ice_barrier,
-            RejectionReason::OnCooldown {
-                remaining: *remaining,
-            },
-        );
-        return false;
-    }
+    let cleared = match cast_gate(
+        ice_barrier,
+        barrier_def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ice_barrier, reason);
+            return false;
+        }
+    };
 
-    if combatant.current_mana < barrier_def.mana_cost {
-        builder.reject(
-            ice_barrier,
-            RejectionReason::InsufficientMana {
-                have: combatant.current_mana,
-                need: barrier_def.mana_cost,
-            },
-        );
-        return false;
-    }
-
-    builder.choose(ice_barrier, Some(entity), true);
+    builder.choose(cleared, Some(entity), true);
 
     combatant.current_mana -= barrier_def.mana_cost;
     combatant.start_cooldown(ice_barrier, abilities);
@@ -256,6 +258,8 @@ fn try_mage_armor(
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
@@ -278,18 +282,24 @@ fn try_mage_armor(
 
     let def = abilities.get_unchecked(&ability);
 
-    if combatant.current_mana < def.mana_cost {
-        builder.reject(
-            ability,
-            RejectionReason::InsufficientMana {
-                have: combatant.current_mana,
-                need: def.mana_cost,
-            },
-        );
-        return false;
-    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(entity), true);
+    builder.choose(cleared, Some(entity), true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -365,7 +375,7 @@ fn try_arcane_intellect(
     };
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -375,23 +385,14 @@ fn try_arcane_intellect(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((buff_target, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(buff_target), true);
+    builder.choose(cleared, Some(buff_target), true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -440,17 +441,15 @@ fn try_frost_nova(
     let nova_def = abilities.get_unchecked(&frost_nova);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         frost_nova, nova_def, combatant, my_pos, auras, None, ctx, opts,
     ) {
-        builder.reject(
-            frost_nova,
-            classify_pre_cast_failure(
-                frost_nova, nova_def, combatant, my_pos, auras, None, ctx, opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(frost_nova, reason);
+            return false;
+        }
+    };
 
     let enemies_in_melee_range = ctx.combatants.iter().any(|(_, info)| {
         info.team != combatant.team
@@ -469,7 +468,7 @@ fn try_frost_nova(
         return false;
     }
 
-    builder.choose(frost_nova, None, true);
+    builder.choose(cleared, None, true);
 
     // Caster-side gesture marker (A2) — see the note in `cast_hammer_of_justice`
     // for the spawn contract.
@@ -685,7 +684,7 @@ fn try_polymorph(
         check_friendly_dots: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -695,23 +694,14 @@ fn try_polymorph(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((cc_target, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(cc_target), false);
+    builder.choose(cleared, Some(cc_target), false);
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
@@ -801,7 +791,7 @@ fn try_frostbolt(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -811,23 +801,14 @@ fn try_frostbolt(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(target_entity), false);
+    builder.choose(cleared, Some(target_entity), false);
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);

@@ -1008,6 +1008,7 @@ pub fn dispatch_class_decision(
                 entity,
                 combatant,
                 my_pos,
+                auras,
                 ctx,
                 instant_attacks,
                 same_frame_cc_queue,
@@ -1577,6 +1578,7 @@ pub fn decide_abilities(
                     &abilities,
                     entity,
                     &mut combatant,
+                    transform.translation,
                     auras.as_deref(),
                     &cc_ctx,
                     &mut builder,
@@ -1613,6 +1615,8 @@ pub fn decide_abilities(
                     &abilities,
                     entity,
                     &mut combatant,
+                    transform.translation,
+                    auras.as_deref(),
                     &cc_ctx,
                     &mut builder,
                 );
@@ -2154,8 +2158,15 @@ pub fn check_interrupts(
 
         let ability_def = abilities.get_unchecked(&interrupt_ability);
 
-        // Check if interrupt is on cooldown
-        if combatant.ability_cooldowns.contains_key(&interrupt_ability) {
+        // The interrupter's own gates — a school lockout, a silence, the
+        // cooldown — exactly as `pre_cast_ok` asks them of every other cast.
+        if !class_ai::cast_guard::own_state_ok(
+            interrupt_ability,
+            ability_def,
+            &combatant,
+            all_auras.get(entity).ok(),
+            class_ai::cast_guard::PreCastOpts::default(),
+        ) {
             continue;
         }
 

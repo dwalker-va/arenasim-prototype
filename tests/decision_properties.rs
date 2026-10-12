@@ -1174,23 +1174,6 @@ const KNOWN: &[Known] = &[
             AbilityType::FreezingTrap,
         ],
     },
-    // Casts that skip the caster's own silence and school-lockout gates.
-    Known {
-        card: "AS-282",
-        property: Property::NotSilenced,
-        abilities: &[
-            AbilityType::IceBarrier,
-            AbilityType::FrostArmor,
-            AbilityType::ConcussiveShot,
-            AbilityType::Disengage,
-            AbilityType::FreezingTrap,
-            AbilityType::FrostTrap,
-            AbilityType::AirTotem,
-            AbilityType::WaterTotem,
-            AbilityType::EarthTotem,
-            AbilityType::FireTotem,
-        ],
-    },
 ];
 
 fn known_card(property: Property, ability: AbilityType) -> Option<&'static str> {
@@ -1732,12 +1715,6 @@ fn not_silenced() -> Finding {
 #[test]
 fn never_casts_through_a_silence_lockout_or_shapeshift() {
     verdict(Property::NotSilenced, Scope::Guard, not_silenced());
-}
-
-#[test]
-#[ignore = "AS-282"]
-fn own_state_gates_hold_for_every_cast() {
-    verdict(Property::NotSilenced, Scope::Card("AS-282"), not_silenced());
 }
 
 /// The trace never contradicts the choice: an ability the decision rejected

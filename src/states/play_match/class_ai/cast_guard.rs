@@ -96,20 +96,7 @@ pub fn pre_cast_ok(
         }
     }
 
-    // Nothing is cast in Travel Form: the Druid shifts back first.
-    if auras.is_some_and(ActiveAuras::is_shapeshifted) {
-        return false;
-    }
-
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-
-    if !opts.bypass_silence && def.mana_cost > 0.0 && is_silenced(caster, auras) {
-        return false;
-    }
-
-    if caster.ability_cooldowns.contains_key(&ability) {
+    if !own_state_ok(ability, def, caster, auras, opts) {
         return false;
     }
 
@@ -129,6 +116,131 @@ pub fn pre_cast_ok(
         // themselves during target selection; for genuine self-buffs there is
         // no target segment to test.
         None => caster.current_mana >= def.mana_cost,
+    }
+}
+
+/// The caster's own gates, steps 4-7 of [`pre_cast_ok`]: Travel Form, the
+/// school lockout, silence (unless `opts.bypass_silence`) and the ability's
+/// cooldown. Needs no context, so a cast decided outside the class AI — the
+/// interrupts in `combat_ai::check_interrupts` — asks the same question
+/// `pre_cast_ok` does.
+pub fn own_state_ok(
+    ability: AbilityType,
+    def: &AbilityConfig,
+    caster: &Combatant,
+    auras: Option<&ActiveAuras>,
+    opts: PreCastOpts,
+) -> bool {
+    // Nothing is cast in Travel Form: the Druid shifts back first.
+    !auras.is_some_and(ActiveAuras::is_shapeshifted)
+        && !is_spell_school_locked(def.spell_school, auras)
+        && (opts.bypass_silence || def.mana_cost <= 0.0 || !is_silenced(caster, auras))
+        && !caster.ability_cooldowns.contains_key(&ability)
+}
+
+/// Proof that one ability passed [`pre_cast_ok`] for the caster about to cast
+/// it, and the only way to record that ability as chosen:
+/// [`DecisionEventBuilder::choose`] takes one, and only [`cast_gate`] makes
+/// one. A `try_*` that skips the gate has nothing to hand `choose`, so it does
+/// not compile — and one that never calls `choose` leaves its ability unchosen
+/// everywhere, which `tests/decision_properties.rs`
+/// (`every_kit_ability_is_chosen_or_named`) fails on.
+///
+/// Not `Clone`: a clearance is spent on the one choice it was issued for, and
+/// it carries its ability so the choice cannot name another.
+///
+/// It proves the gate RAN, not that it was handed the right caster. Pass the
+/// caster's own `Combatant` and its own `ActiveAuras` — the silence, the
+/// school lockout and Travel Form are read from them.
+///
+/// A new ability's `try_*` therefore needs nothing extra: it asks
+/// [`cast_gate`] where it would have asked `pre_cast_ok`, rejects with the
+/// `Err` reason, and spends the `Ok` clearance on its `choose`. A cast decided
+/// outside the class AI, with no decision to record (an interrupt), asks
+/// [`own_state_ok`].
+///
+/// The stop site, pinned. A scene with a decision open compiles:
+///
+/// ```
+/// use arenasim::states::match_config::CharacterClass;
+/// use arenasim::states::play_match::abilities::AbilityType;
+/// use arenasim::states::play_match::decision_trace::{ActorView, DecisionTrace, RejectionReason};
+/// use bevy::prelude::{Entity, Vec3};
+///
+/// let mut trace = DecisionTrace::default();
+/// let actor = ActorView::from_raw(
+///     Entity::from_raw(1), 1, 0, CharacterClass::Mage, 1.0, 1.0, Vec3::ZERO,
+/// );
+/// let mut builder = trace.start_ability_decision(actor, None);
+/// builder.reject(AbilityType::IceBarrier, RejectionReason::AlreadyApplied);
+/// builder.finish();
+/// ```
+///
+/// ...but choosing in it without a clearance does not:
+///
+/// ```compile_fail,E0308
+/// use arenasim::states::match_config::CharacterClass;
+/// use arenasim::states::play_match::abilities::AbilityType;
+/// use arenasim::states::play_match::decision_trace::{ActorView, DecisionTrace, RejectionReason};
+/// use bevy::prelude::{Entity, Vec3};
+///
+/// let mut trace = DecisionTrace::default();
+/// let actor = ActorView::from_raw(
+///     Entity::from_raw(1), 1, 0, CharacterClass::Mage, 1.0, 1.0, Vec3::ZERO,
+/// );
+/// let mut builder = trace.start_ability_decision(actor, None);
+/// builder.choose(AbilityType::IceBarrier, None, true);
+/// builder.finish();
+/// ```
+///
+/// ...and nor does forging one:
+///
+/// ```compile_fail,E0451
+/// use arenasim::states::play_match::abilities::AbilityType;
+/// use arenasim::states::play_match::class_ai::cast_guard::Cleared;
+///
+/// let _forged = Cleared { ability: AbilityType::IceBarrier };
+/// ```
+///
+/// [`DecisionEventBuilder::choose`]:
+///     crate::states::play_match::decision_trace::DecisionEventBuilder::choose
+#[must_use = "a clearance is spent by `DecisionEventBuilder::choose`"]
+#[derive(Debug)]
+pub struct Cleared {
+    ability: AbilityType,
+}
+
+impl Cleared {
+    /// The ability this clearance was issued for.
+    pub fn ability(&self) -> AbilityType {
+        self.ability
+    }
+}
+
+/// The cast gate: [`pre_cast_ok`], with its failure classified for the trace
+/// ([`classify_pre_cast_failure`]) and its success as a [`Cleared`] — the
+/// token a choice needs.
+///
+/// `target = None` gates the caster alone (Travel Form, school lockout,
+/// silence, cooldown, mana) and leaves range and sight to the caller, as
+/// `pre_cast_ok` does for a self-cast or a ground-placed one.
+#[allow(clippy::too_many_arguments)]
+pub fn cast_gate(
+    ability: AbilityType,
+    def: &AbilityConfig,
+    caster: &Combatant,
+    caster_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Option<(Entity, Vec3)>,
+    ctx: &CombatContext,
+    opts: PreCastOpts,
+) -> Result<Cleared, crate::states::play_match::decision_trace::RejectionReason> {
+    if pre_cast_ok(ability, def, caster, caster_pos, auras, target, ctx, opts) {
+        Ok(Cleared { ability })
+    } else {
+        Err(classify_pre_cast_failure(
+            ability, def, caster, caster_pos, auras, target, ctx, opts,
+        ))
     }
 }
 

@@ -30,7 +30,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::movement_config::{MovementConfig, SharedMovementConfig};
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
+use super::cast_guard::{cast_gate, pre_cast_ok, unreached_reason, Cleared, PreCastOpts};
 use super::healer_postures::{
     compound_pressure_trigger, dispel_chase_override, dispel_walk_tick, escape_tick,
     escape_window_from, healer_pressured_tick_shared, medic_chase_override, medic_chase_tick,
@@ -354,17 +354,15 @@ fn try_psychic_scream(
     let scream_def = abilities.get_unchecked(&scream);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         scream, scream_def, combatant, my_pos, auras, None, ctx, opts,
     ) {
-        builder.reject(
-            scream,
-            classify_pre_cast_failure(
-                scream, scream_def, combatant, my_pos, auras, None, ctx, opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(scream, reason);
+            return false;
+        }
+    };
 
     // Defensive gate (R9/R10): only fire under genuine pressure, so the panic
     // button is never burned on incidental proximity. `pressured` is the live
@@ -420,6 +418,7 @@ fn try_psychic_scream(
         entity,
         combatant,
         my_pos,
+        cleared,
         same_frame_cc_queue,
         ctx,
         builder,
@@ -474,11 +473,12 @@ fn fire_psychic_scream(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    cleared: Cleared,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) {
-    builder.choose(AbilityType::PsychicScream, None, true);
+    builder.choose(cleared, None, true);
 
     // Self-centered AoE burst visual. The marker is spawned in both modes (like
     // DispelBurst); the mesh + animation are attached only by the
@@ -564,17 +564,15 @@ fn try_dip_psychic_scream(
     let scream_def = abilities.get_unchecked(&scream);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         scream, scream_def, combatant, my_pos, auras, None, ctx, opts,
     ) {
-        builder.reject(
-            scream,
-            classify_pre_cast_failure(
-                scream, scream_def, combatant, my_pos, auras, None, ctx, opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(scream, reason);
+            return false;
+        }
+    };
 
     let targets = scream_targets(ctx, entity, my_pos, scream_def.range);
     if targets.is_empty() {
@@ -590,6 +588,7 @@ fn try_dip_psychic_scream(
         entity,
         combatant,
         my_pos,
+        cleared,
         same_frame_cc_queue,
         ctx,
         builder,
@@ -672,7 +671,7 @@ fn try_fortitude(
     };
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -682,23 +681,14 @@ fn try_fortitude(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((buff_target, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(buff_target), true);
+    builder.choose(cleared, Some(buff_target), true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -831,7 +821,7 @@ fn try_power_word_shield(
     };
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         pw_shield,
         pw_shield_def,
         combatant,
@@ -841,23 +831,14 @@ fn try_power_word_shield(
         ctx,
         opts,
     ) {
-        builder.reject(
-            pw_shield,
-            classify_pre_cast_failure(
-                pw_shield,
-                pw_shield_def,
-                combatant,
-                my_pos,
-                auras,
-                Some((shield_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(pw_shield, reason);
+            return false;
+        }
+    };
 
-    builder.choose(pw_shield, Some(shield_entity), true);
+    builder.choose(cleared, Some(shield_entity), true);
 
     combatant.current_mana -= pw_shield_def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -1011,7 +992,7 @@ fn try_flash_heal(
     }
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -1021,23 +1002,14 @@ fn try_flash_heal(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((heal_target, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(heal_target), false);
+    builder.choose(cleared, Some(heal_target), false);
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
@@ -1116,7 +1088,7 @@ fn try_mind_blast(
         check_target_immune: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -1126,23 +1098,14 @@ fn try_mind_blast(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(target_entity), false);
+    builder.choose(cleared, Some(target_entity), false);
 
     combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
@@ -1388,7 +1351,7 @@ fn try_mana_burn(
         check_target_immune: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -1398,23 +1361,14 @@ fn try_mana_burn(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(target_entity), false);
+    builder.choose(cleared, Some(target_entity), false);
 
     combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;

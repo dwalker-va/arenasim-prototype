@@ -34,7 +34,7 @@ use crate::states::play_match::decision_trace::{
 };
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::cast_guard::{cast_gate, classify_pre_cast_failure, PreCastOpts};
 use super::CombatContext;
 
 /// Rogue AI: Decides and executes abilities for a Rogue combatant.
@@ -46,6 +46,7 @@ pub fn decide_rogue_action(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
@@ -82,6 +83,7 @@ pub fn decide_rogue_action(
                 entity,
                 combatant,
                 my_pos,
+                auras,
                 target_entity,
                 target_pos,
                 ctx,
@@ -95,6 +97,7 @@ pub fn decide_rogue_action(
                 entity,
                 combatant,
                 my_pos,
+                auras,
                 target_entity,
                 target_pos,
                 ctx,
@@ -175,6 +178,7 @@ pub fn decide_rogue_action(
                 entity,
                 combatant,
                 my_pos,
+                auras,
                 ks_target_entity,
                 ks_target_pos,
                 ctx,
@@ -206,7 +210,7 @@ pub fn decide_rogue_action(
                     ks_def,
                     combatant,
                     my_pos,
-                    None,
+                    auras,
                     Some((ks_target_entity, ks_target_pos)),
                     ctx,
                     PreCastOpts::default(),
@@ -233,6 +237,7 @@ pub fn decide_rogue_action(
         entity,
         combatant,
         my_pos,
+        auras,
         target_entity,
         target_pos,
         ctx,
@@ -452,6 +457,7 @@ fn try_ambush(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
     ctx: &CombatContext,
@@ -465,33 +471,24 @@ fn try_ambush(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
         my_pos,
-        None,
+        auras,
         Some((target_entity, target_pos)),
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                None,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.stealthed = false;
@@ -549,6 +546,7 @@ fn try_cheap_shot(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
     ctx: &CombatContext,
@@ -559,33 +557,24 @@ fn try_cheap_shot(
     let def = abilities.get_unchecked(&ability);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
         my_pos,
-        None,
+        auras,
         Some((target_entity, target_pos)),
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                None,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     // Caster-side gesture marker (A2) — see the note in `cast_hammer_of_justice`
     // for the spawn contract. Cheap Shot is instant AND aura-only, so without
@@ -654,6 +643,7 @@ fn try_kidney_shot(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
     ctx: &CombatContext,
@@ -664,33 +654,24 @@ fn try_kidney_shot(
     let def = abilities.get_unchecked(&kidney_shot);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         kidney_shot,
         def,
         combatant,
         my_pos,
-        None,
+        auras,
         Some((target_entity, target_pos)),
         ctx,
         opts,
     ) {
-        builder.reject(
-            kidney_shot,
-            classify_pre_cast_failure(
-                kidney_shot,
-                def,
-                combatant,
-                my_pos,
-                None,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(kidney_shot, reason);
+            return false;
+        }
+    };
 
-    builder.choose(kidney_shot, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     // Caster-side gesture marker (A2) — see the note in `cast_hammer_of_justice`
     // for the spawn contract.
@@ -758,6 +739,7 @@ fn try_sinister_strike(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
     ctx: &CombatContext,
@@ -771,33 +753,24 @@ fn try_sinister_strike(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
         my_pos,
-        None,
+        auras,
         Some((target_entity, target_pos)),
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                None,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;

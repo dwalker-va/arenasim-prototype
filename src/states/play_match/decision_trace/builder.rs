@@ -17,6 +17,7 @@ use super::events::{
 };
 use super::DecisionTrace;
 use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::class_ai::cast_guard::Cleared;
 use crate::states::play_match::situation::TeamSituation;
 
 /// Builder for one `ability_decision` or `pet_decision` event.
@@ -67,7 +68,21 @@ impl<'a> DecisionEventBuilder<'a> {
     /// called multiple times, the last call wins for the outcome but all
     /// chosens remain in the candidate list (caller should ensure single-choose
     /// to match the if-chain semantics).
-    pub fn choose(&mut self, ability: AbilityType, target: Option<Entity>, was_instant: bool) {
+    ///
+    /// Takes the [`Cleared`] the cast gate issued for the ability
+    /// ([`cast_gate`]): nothing is chosen that has not passed the caster's own
+    /// gates — Travel Form, school lockout, silence, cooldown and resource.
+    ///
+    /// [`cast_gate`]: crate::states::play_match::class_ai::cast_guard::cast_gate
+    pub fn choose(&mut self, cleared: Cleared, target: Option<Entity>, was_instant: bool) {
+        self.record_chosen(cleared.ability(), target, was_instant);
+    }
+
+    /// The one writer of a chosen candidate. Private: a cast reaches it through
+    /// [`Self::choose`] (gated), a pet-command dispatch through
+    /// [`DispatchEventBuilder::dispatch`] (an order the pet gates when it
+    /// executes it).
+    fn record_chosen(&mut self, ability: AbilityType, target: Option<Entity>, was_instant: bool) {
         self.candidates.push(AbilityCandidate {
             ability,
             status: CandidateStatus::Chosen,
@@ -143,6 +158,33 @@ impl<'a> DecisionEventBuilder<'a> {
             payload,
         };
         self.trace.pending_events.push(event);
+    }
+}
+
+/// Builder for one hybrid-model DISPATCH: a `pet_decision` event the owner's
+/// AI records when it commands its pet (`dispatched_by` set). A dispatch is
+/// an order, not a cast — the pet AI re-checks the command against the pet's
+/// own live state when it executes it, and casts it through the cast gate
+/// there — so it is recorded with [`Self::dispatch`], which takes no
+/// [`Cleared`]. Nothing but a dispatch can be recorded through this type.
+pub struct DispatchEventBuilder<'a> {
+    pub(super) inner: DecisionEventBuilder<'a>,
+}
+
+impl DispatchEventBuilder<'_> {
+    /// Record the ability as considered-and-rejected with a typed reason.
+    pub fn reject(&mut self, ability: AbilityType, reason: RejectionReason) {
+        self.inner.reject(ability, reason);
+    }
+
+    /// Record the ability as dispatched to the pet, aimed at `target`.
+    pub fn dispatch(&mut self, ability: AbilityType, target: Option<Entity>) {
+        self.inner.record_chosen(ability, target, true);
+    }
+
+    /// Commit the event (see [`DecisionEventBuilder::finish`]).
+    pub fn finish(self) {
+        self.inner.finish();
     }
 }
 

@@ -29,7 +29,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::movement_config::MovementConfig;
 
 use super::super::utils::{combatant_id, log_ability_use};
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
+use super::cast_guard::{cast_gate, unreached_reason, PreCastOpts};
 use super::caster_healer_posture::CasterHealerPlan;
 use super::CombatContext;
 
@@ -127,6 +127,8 @@ pub fn decide_shaman_action(
         entity,
         combatant,
         my_pos,
+        auras,
+        ctx,
         totem_durations,
         &mut builder,
     ) {
@@ -287,7 +289,7 @@ fn try_lesser_healing_wave(
     }
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -297,23 +299,14 @@ fn try_lesser_healing_wave(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((heal_target, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(heal_target), false);
+    builder.choose(cleared, Some(heal_target), false);
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
@@ -449,7 +442,7 @@ fn try_frost_shock(
     };
     let target_pos = target_info.position;
 
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -459,23 +452,14 @@ fn try_frost_shock(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = GCD;
@@ -543,7 +527,7 @@ fn try_lightning_bolt(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -553,23 +537,14 @@ fn try_lightning_bolt(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(target_entity), false);
+    builder.choose(cleared, Some(target_entity), false);
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
@@ -610,6 +585,8 @@ pub(super) fn maintain_totems(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
     totem_durations: &[f32; 4],
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
@@ -629,16 +606,16 @@ pub(super) fn maintain_totems(
 
         let cast = match element {
             TotemElement::Air => try_air_totem(
-                commands, combat_log, abilities, entity, combatant, my_pos, builder,
+                commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
             ),
             TotemElement::Water => try_water_totem(
-                commands, combat_log, abilities, entity, combatant, my_pos, builder,
+                commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
             ),
             TotemElement::Earth => try_earth_totem(
-                commands, combat_log, abilities, entity, combatant, my_pos, builder,
+                commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
             ),
             TotemElement::Fire => try_fire_totem(
-                commands, combat_log, abilities, entity, combatant, my_pos, builder,
+                commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
             ),
         };
         if cast {
@@ -714,7 +691,7 @@ pub(crate) fn totem_spacing_offset(element: TotemElement) -> Vec3 {
 }
 
 /// Cast-and-drop a single totem. Modeled on the Hunter's Frost Trap cast but
-/// with NO projectile: gate on cooldown + mana + GCD, emit the trace
+/// with NO projectile: gate through `cast_gate` (lockout, silence, cooldown, mana), emit the trace
 /// choose/reject, deduct mana, start the cooldown + GCD, and spawn the `Totem`
 /// entity at the Shaman's feet plus the element's spacing offset.
 fn try_totem(
@@ -724,6 +701,8 @@ fn try_totem(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
     element: TotemElement,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
@@ -733,27 +712,25 @@ fn try_totem(
         return false;
     };
 
-    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(
-            ability,
-            RejectionReason::OnCooldown {
-                remaining: *remaining,
-            },
-        );
-        return false;
-    }
-    if combatant.current_mana < def.mana_cost {
-        builder.reject(
-            ability,
-            RejectionReason::InsufficientMana {
-                have: combatant.current_mana,
-                need: def.mana_cost,
-            },
-        );
-        return false;
-    }
+    // Dropped at the Shaman's feet: the gate asks about the Shaman alone.
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, None, true);
+    builder.choose(cleared, None, true);
 
     let team = combatant.team;
     let drop = my_pos + totem_spacing_offset(element);
@@ -807,6 +784,8 @@ fn try_air_totem(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     try_totem(
@@ -816,6 +795,8 @@ fn try_air_totem(
         entity,
         combatant,
         my_pos,
+        auras,
+        ctx,
         TotemElement::Air,
         builder,
     )
@@ -829,6 +810,8 @@ fn try_water_totem(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     try_totem(
@@ -838,6 +821,8 @@ fn try_water_totem(
         entity,
         combatant,
         my_pos,
+        auras,
+        ctx,
         TotemElement::Water,
         builder,
     )
@@ -851,6 +836,8 @@ fn try_earth_totem(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     try_totem(
@@ -860,6 +847,8 @@ fn try_earth_totem(
         entity,
         combatant,
         my_pos,
+        auras,
+        ctx,
         TotemElement::Earth,
         builder,
     )
@@ -873,6 +862,8 @@ fn try_fire_totem(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     try_totem(
@@ -882,6 +873,8 @@ fn try_fire_totem(
         entity,
         combatant,
         my_pos,
+        auras,
+        ctx,
         TotemElement::Fire,
         builder,
     )

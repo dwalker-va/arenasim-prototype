@@ -89,7 +89,9 @@ use crate::states::play_match::movement_config::MovementConfig;
 use super::super::utils::log_ability_use;
 use crate::states::play_match::situation::TeamSituation;
 
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
+use super::cast_guard::{
+    cast_gate, classify_pre_cast_failure, pre_cast_ok, unreached_reason, Cleared, PreCastOpts,
+};
 use super::{CombatContext, CombatantInfo};
 
 /// An ally below this HP fraction is dying: Swiftmend, or the Rejuvenation that
@@ -1125,7 +1127,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         }
         let def = self.abilities.get_unchecked(&ability);
         let opts = PreCastOpts::default();
-        if !pre_cast_ok(
+        let cleared = match cast_gate(
             ability,
             def,
             combatant,
@@ -1135,22 +1137,13 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             self.ctx,
             opts,
         ) {
-            self.builder.reject(
-                ability,
-                classify_pre_cast_failure(
-                    ability,
-                    def,
-                    combatant,
-                    self.my_pos,
-                    self.auras,
-                    None,
-                    self.ctx,
-                    opts,
-                ),
-            );
-            return false;
-        }
-        self.builder.choose(ability, Some(self.entity), true);
+            Ok(cleared) => cleared,
+            Err(reason) => {
+                self.builder.reject(ability, reason);
+                return false;
+            }
+        };
+        self.builder.choose(cleared, Some(self.entity), true);
         combatant.current_mana -= def.mana_cost;
         combatant.global_cooldown = GCD;
         self.log_use(combatant, &def.name, self.entity, "casts");
@@ -1318,12 +1311,12 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             self.builder.reject(ability, Self::held_reason());
             return false;
         }
-        if !self.guard(combatant, ability, target, target_pos) {
+        let Some(cleared) = self.guard(combatant, ability, target, target_pos) else {
             return false;
-        }
+        };
 
         let def = self.abilities.get_unchecked(&ability);
-        self.builder.choose(ability, Some(target), true);
+        self.builder.choose(cleared, Some(target), true);
         combatant.current_mana -= def.mana_cost;
         combatant.global_cooldown = GCD;
         self.log_use(combatant, &def.name, target, "casts");
@@ -1480,11 +1473,11 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         target: Entity,
         target_pos: Vec3,
     ) -> bool {
-        if !self.guard(combatant, ability, target, target_pos) {
+        let Some(cleared) = self.guard(combatant, ability, target, target_pos) else {
             return false;
-        }
+        };
         let def = self.abilities.get_unchecked(&ability);
-        self.builder.choose(ability, Some(target), true);
+        self.builder.choose(cleared, Some(target), true);
         if def.cooldown > 0.0 {
             combatant.start_cooldown(ability, self.abilities);
         }
@@ -1504,36 +1497,24 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         ability: AbilityType,
         target: Entity,
         target_pos: Vec3,
-    ) -> bool {
+    ) -> Option<Cleared> {
         let def = self.abilities.get_unchecked(&ability);
-        let opts = Self::guard_opts(ability);
-        let target = Some((target, target_pos));
-        if pre_cast_ok(
+        match cast_gate(
             ability,
             def,
             combatant,
             self.my_pos,
             self.auras,
-            target,
+            Some((target, target_pos)),
             self.ctx,
-            opts,
+            Self::guard_opts(ability),
         ) {
-            return true;
+            Ok(cleared) => Some(cleared),
+            Err(reason) => {
+                self.builder.reject(ability, reason);
+                None
+            }
         }
-        self.builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                self.my_pos,
-                self.auras,
-                target,
-                self.ctx,
-                opts,
-            ),
-        );
-        false
     }
 
     fn own(&self, target: Entity, ability: AbilityType) -> Option<&Aura> {
