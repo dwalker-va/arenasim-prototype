@@ -14,7 +14,8 @@ use super::chrome::ScreenNav;
 use super::match_config::CharacterClass;
 use super::play_match::{class_mesh_color, spawn_arena_environment, spawn_arena_sun};
 use super::GameState;
-use crate::ui::driver as ui_driver;
+use crate::ui::theme::{self, color, radius, size, space, stroke, text};
+use crate::ui::widgets::{Button, Variant};
 
 // ============================================================================
 // Ambient 3D backdrop scene
@@ -166,163 +167,151 @@ pub enum MenuAction {
     Exit,
 }
 
-/// The menu's buttons, in display order.
+/// The menu's buttons, in display order: label, `--ui-script` id, action.
 ///
-/// Single source of truth: the button loop renders these and
-/// `paint_backdrop_scrims` sizes the scrim from the count, so adding an entry
-/// cannot leave the last button hanging outside the backdrop.
-const MENU_ITEMS: [(&str, MenuAction); 5] = [
-    ("MATCH", MenuAction::StartMatch),
-    ("ENCYCLOPEDIA", MenuAction::Encyclopedia),
-    ("ANIMATIONS", MenuAction::AnimationSandbox),
-    ("OPTIONS", MenuAction::Options),
-    ("EXIT", MenuAction::Exit),
+/// A UI script has to get INTO a screen before it can check anything on it,
+/// so every menu button is opted in to the driver (`menu:MATCH`, …), and the
+/// scripts under `tests/ui-scripts/` click them by these ids.
+const MENU_ITEMS: [(&str, &str, MenuAction); 5] = [
+    ("MATCH", "menu:MATCH", MenuAction::StartMatch),
+    (
+        "ENCYCLOPEDIA",
+        "menu:ENCYCLOPEDIA",
+        MenuAction::Encyclopedia,
+    ),
+    (
+        "ANIMATIONS",
+        "menu:ANIMATIONS",
+        MenuAction::AnimationSandbox,
+    ),
+    ("OPTIONS", "menu:OPTIONS", MenuAction::Options),
+    ("EXIT", "menu:EXIT", MenuAction::Exit),
 ];
 
-/// Vertical distance between successive button centres, in points. Matches the
-/// button height plus the 10pt spacer the loop adds.
-const BUTTON_PITCH: f32 = 73.0;
+/// The card's content width: the menu column with a [`space::XXXL`] gutter
+/// either side, wide enough for the wordmark's rule at the top of its pulse.
+const CARD_WIDTH: f32 = size::HERO_BUTTON_WIDTH + 2.0 * space::XXXL;
 
-/// Draws the main menu. Pure egui — no Bevy ECS types — so the snapshot test
-/// can render it offscreen. `time_secs` drives the title pulse; the test
-/// passes a fixed value for determinism.
+/// The wordmark's pulse, in radians per second (a cycle of about four
+/// seconds). Only brightness and the rule beneath breathe; the glyphs never
+/// lose legibility.
+const PULSE_RATE: f32 = 1.6;
+/// How far toward white the wordmark brightens at the top of its pulse.
+const PULSE_LIGHTEN: f32 = 0.35;
+/// The rule under the wordmark: its half-width at rest, and how much the
+/// pulse adds to it.
+const RULE_HALF_WIDTH: f32 = 130.0;
+const RULE_PULSE_WIDTH: f32 = 45.0;
+/// The rule's opacity at rest, and how much the pulse adds to it.
+const RULE_OPACITY: f32 = 0.35;
+const RULE_PULSE_OPACITY: f32 = 0.43;
+
+/// Draws the main menu on the Hero template: the full-bleed scene (darkened
+/// and vignetted), a centred card holding the wordmark and a vertical menu of
+/// Hero buttons, and the version in the corner.
+///
+/// Pure egui — no Bevy ECS types — so the snapshot test can render it
+/// offscreen. `time_secs` drives the wordmark pulse; the test passes a fixed
+/// value for determinism.
 pub fn draw_main_menu(ctx: &egui::Context, time_secs: f32) -> Option<MenuAction> {
     let mut action = None;
 
     // Transparent panel: the ambient 3D arena scene renders behind the menu
     // (bevy_egui composites egui over the camera output), so the frame has no
-    // fill — readability comes from the painted scrims below.
+    // fill — readability comes from the scene scrims and the card.
     egui::CentralPanel::default()
         .frame(egui::Frame::new())
+        .show(ctx, |ui| paint_scene_scrims(ui));
+
+    egui::Area::new(egui::Id::new("main_menu_card"))
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
-            paint_backdrop_scrims(ui);
+            egui::Frame::new()
+                .fill(color::HERO_CARD)
+                .corner_radius(radius::LG)
+                .inner_margin(egui::Margin::symmetric(space::XXXL as i8, space::XL as i8))
+                .show(ui, |ui| {
+                    ui.set_width(CARD_WIDTH);
+                    ui.vertical_centered(|ui| {
+                        paint_wordmark(ui, time_secs);
+                        ui.add_space(space::SM);
+                        ui.label(
+                            egui::RichText::new("Arena Combat Autobattler")
+                                .size(text::H2)
+                                .color(color::TEXT_MUTED),
+                        );
+                        ui.add_space(space::LG);
+                        paint_class_accent_row(ui);
+                        ui.add_space(space::XL);
 
-            ui.vertical_centered(|ui| {
-                ui.add_space(150.0);
-
-                // Title with a pulsing soft glow: layered offset halo copies
-                // under a solid glyph. Only the halo alpha pulses, so the
-                // title itself never loses legibility.
-                let (title_rect, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), 96.0),
-                    egui::Sense::hover(),
-                );
-                let title_font = egui::FontId::proportional(72.0);
-                // 0..1 over a ~4s cycle
-                let pulse = 0.5 + 0.5 * (time_secs * 1.6).sin();
-                // Crisp pulse, no halo copies (offset-text halos read as
-                // blur): the glyph brightness breathes, and a gold accent
-                // rule under the title widens/brightens in sync.
-                let brighten = |c: u8| (c as f32 + (255 - c) as f32 * 0.35 * pulse).round() as u8;
-                let gold = egui::Color32::from_rgb(brighten(230), brighten(204), brighten(153));
-                let painter = ui.painter();
-                painter.text(
-                    title_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "ARENASIM",
-                    title_font,
-                    gold,
-                );
-                let rule_half_width = 130.0 + 45.0 * pulse;
-                let rule_alpha = (90.0 + 110.0 * pulse) as u8;
-                let rule_y = title_rect.bottom() - 8.0;
-                painter.line_segment(
-                    [
-                        egui::pos2(title_rect.center().x - rule_half_width, rule_y),
-                        egui::pos2(title_rect.center().x + rule_half_width, rule_y),
-                    ],
-                    egui::Stroke::new(
-                        2.0_f32,
-                        egui::Color32::from_rgba_unmultiplied(230, 204, 153, rule_alpha),
-                    ),
-                );
-
-                ui.add_space(10.0);
-
-                // Subtitle
-                ui.label(
-                    egui::RichText::new("Arena Combat Autobattler")
-                        .size(24.0)
-                        .color(egui::Color32::from_rgb(178, 166, 150)),
-                );
-
-                ui.add_space(18.0);
-
-                paint_class_accent_row(ui);
-
-                ui.add_space(42.0);
-
-                // Menu buttons
-                for (label, button_action) in MENU_ITEMS {
-                    if menu_button(ui, label).clicked() {
-                        action = Some(button_action);
-                    }
-                    ui.add_space(10.0);
-                }
-            });
-
-            // Version text in bottom right
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::RIGHT), |ui| {
-                ui.add_space(20.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(20.0);
-                    ui.label(
-                        egui::RichText::new("v0.1.0 - Prototype")
-                            .size(14.0)
-                            .color(egui::Color32::from_rgb(102, 102, 102)),
-                    );
+                        for (i, (label, id, button_action)) in MENU_ITEMS.into_iter().enumerate() {
+                            if i > 0 {
+                                ui.add_space(space::SM);
+                            }
+                            if Button::new(label, Variant::Hero)
+                                .driver_id(id)
+                                .show(ui)
+                                .clicked()
+                            {
+                                action = Some(button_action);
+                            }
+                        }
+                    });
                 });
-            });
+        });
+
+    egui::Area::new(egui::Id::new("main_menu_version"))
+        .anchor(
+            egui::Align2::RIGHT_BOTTOM,
+            egui::vec2(-space::XL, -space::LG),
+        )
+        .interactable(false)
+        .show(ctx, |ui| {
+            ui.label(
+                egui::RichText::new("v0.1.0 - Prototype")
+                    .size(text::BODY)
+                    .color(color::TEXT_DIM),
+            );
         });
 
     action
 }
 
-/// A main-menu button: dark translucent fill with a subtle stroke, and a
-/// gold highlight ring + brightened label on hover. Hover styling is painted
-/// manually (not via global `ctx` style mutation) so it can't leak into
-/// other screens.
-fn menu_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    let button_size = egui::vec2(280.0, 60.0);
-    let response = ui.add_sized(
-        button_size,
-        egui::Button::new(
-            egui::RichText::new(label)
-                .size(28.0)
-                .color(egui::Color32::from_rgb(230, 217, 191)),
-        )
-        .fill(egui::Color32::from_rgba_unmultiplied(24, 24, 36, 200))
-        .stroke(egui::Stroke::new(
-            1.0_f32,
-            egui::Color32::from_rgb(70, 70, 88),
-        )),
+/// The wordmark, crisp, with a pulse: the glyphs brighten toward white and a
+/// gold rule under them widens and brightens in step. (Offset-text halos read
+/// as blur, so there are none.)
+fn paint_wordmark(ui: &mut egui::Ui, time_secs: f32) {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), text::WORDMARK + space::XL),
+        egui::Sense::hover(),
     );
-    if response.hovered() {
-        ui.painter().rect_stroke(
-            response.rect.expand(2.0),
-            6.0,
-            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(230, 204, 153)),
-            egui::StrokeKind::Outside,
-        );
-        // Repaint the label brighter — cheaper than a second widget style.
-        ui.painter().text(
-            response.rect.center(),
-            egui::Align2::CENTER_CENTER,
-            label,
-            egui::FontId::proportional(28.0),
-            egui::Color32::from_rgb(255, 244, 214),
-        );
-    }
-    // A UI script has to get INTO a screen before it can check anything on it,
-    // so the five menu buttons are opted in alongside the widgets under test.
-    // Inert unless `--ui-script` armed the registry.
-    ui_driver::mark(ui, response.rect, true, format_args!("menu:{label}"));
-    response
+    // 0..1 over the pulse cycle.
+    let pulse = 0.5 + 0.5 * (time_secs * PULSE_RATE).sin();
+    let painter = ui.painter();
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "ARENASIM",
+        egui::FontId::proportional(text::WORDMARK),
+        theme::lighten(color::ACCENT, PULSE_LIGHTEN * pulse),
+    );
+    let half_width = RULE_HALF_WIDTH + RULE_PULSE_WIDTH * pulse;
+    let y = rect.bottom() - space::SM;
+    painter.line_segment(
+        [
+            egui::pos2(rect.center().x - half_width, y),
+            egui::pos2(rect.center().x + half_width, y),
+        ],
+        egui::Stroke::new(
+            stroke::MARK,
+            color::ACCENT.gamma_multiply(RULE_OPACITY + RULE_PULSE_OPACITY * pulse),
+        ),
+    );
 }
 
-/// A centered row of small class-colored diamonds under the subtitle — one
-/// per class, using the shared UI class palette. Asset-free (no textures to
-/// plumb into the snapshot harness).
+/// A centred row of small class-coloured diamonds under the subtitle — one
+/// per class, in the UI class palette. Asset-free (no textures to plumb into
+/// the snapshot harness).
 fn paint_class_accent_row(ui: &mut egui::Ui) {
     const CLASSES: [CharacterClass; 9] = [
         CharacterClass::Warrior,
@@ -335,47 +324,48 @@ fn paint_class_accent_row(ui: &mut egui::Ui) {
         CharacterClass::Shaman,
         CharacterClass::Druid,
     ];
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 14.0), egui::Sense::hover());
+    let pitch = space::XXL;
+    let half = space::XS;
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), space::MD),
+        egui::Sense::hover(),
+    );
     let painter = ui.painter();
-    let spacing = 30.0;
-    let start_x = rect.center().x - spacing * (CLASSES.len() as f32 - 1.0) / 2.0;
+    let start_x = rect.center().x - pitch * (CLASSES.len() as f32 - 1.0) / 2.0;
     for (i, class) in CLASSES.iter().enumerate() {
-        let center = egui::pos2(start_x + i as f32 * spacing, rect.center().y);
-        let radius = 5.0;
+        let center = egui::pos2(start_x + i as f32 * pitch, rect.center().y);
         let points = vec![
-            center + egui::vec2(0.0, -radius),
-            center + egui::vec2(radius, 0.0),
-            center + egui::vec2(0.0, radius),
-            center + egui::vec2(-radius, 0.0),
+            center + egui::Vec2::new(0.0, -half),
+            center + egui::Vec2::new(half, 0.0),
+            center + egui::Vec2::new(0.0, half),
+            center + egui::Vec2::new(-half, 0.0),
         ];
         painter.add(egui::Shape::convex_polygon(
             points,
-            super::results_ui::class_color32(*class),
+            theme::class_color(*class),
             egui::Stroke::NONE,
         ));
     }
 }
 
-/// Paints the darkening layers that keep the menu readable over the bright
-/// 3D backdrop: a light full-screen tint, an edge vignette, and a stronger
-/// scrim column behind the title + buttons.
-fn paint_backdrop_scrims(ui: &egui::Ui) {
+/// The Hero template's scene treatment, so the menu reads over the bright 3D
+/// backdrop: a light tint over everything, and an edge vignette.
+fn paint_scene_scrims(ui: &egui::Ui) {
     let screen = ui.max_rect();
     let painter = ui.painter();
 
-    // 1. Global darkening so bloom highlights don't fight the text.
-    painter.rect_filled(screen, 0.0, egui::Color32::from_black_alpha(70));
+    // Bloom highlights must not fight the text.
+    painter.rect_filled(screen, egui::CornerRadius::ZERO, color::SCENE_TINT);
 
-    // 2. Edge vignette: four strips fading from dark at the screen edge to
-    //    transparent ~180px inward, built as one mesh with per-vertex alpha.
-    let edge_color = egui::Color32::from_black_alpha(150);
+    // Four strips fading from dark at the screen edge to transparent
+    // `size::VIGNETTE` inward, one mesh with per-vertex alpha.
+    let edge = color::SCENE_VIGNETTE;
     let clear = egui::Color32::TRANSPARENT;
-    let depth = 180.0;
+    let depth = size::VIGNETTE;
     let mut mesh = egui::Mesh::default();
-    let mut quad = |corners: [egui::Pos2; 4], colors: [egui::Color32; 4]| {
+    let mut quad = |corners: [egui::Pos2; 4]| {
         let base = mesh.vertices.len() as u32;
-        for (pos, color) in corners.into_iter().zip(colors) {
+        for (pos, color) in corners.into_iter().zip([edge, edge, clear, clear]) {
             mesh.vertices.push(egui::epaint::Vertex {
                 pos,
                 uv: egui::epaint::WHITE_UV,
@@ -387,60 +377,31 @@ fn paint_backdrop_scrims(ui: &egui::Ui) {
     };
     let (l, r, t, b) = (screen.left(), screen.right(), screen.top(), screen.bottom());
     // Top, bottom, left, right — outer pair dark, inner pair transparent.
-    quad(
-        [
-            egui::pos2(l, t),
-            egui::pos2(r, t),
-            egui::pos2(r, t + depth),
-            egui::pos2(l, t + depth),
-        ],
-        [edge_color, edge_color, clear, clear],
-    );
-    quad(
-        [
-            egui::pos2(l, b),
-            egui::pos2(r, b),
-            egui::pos2(r, b - depth),
-            egui::pos2(l, b - depth),
-        ],
-        [edge_color, edge_color, clear, clear],
-    );
-    quad(
-        [
-            egui::pos2(l, t),
-            egui::pos2(l, b),
-            egui::pos2(l + depth, b),
-            egui::pos2(l + depth, t),
-        ],
-        [edge_color, edge_color, clear, clear],
-    );
-    quad(
-        [
-            egui::pos2(r, t),
-            egui::pos2(r, b),
-            egui::pos2(r - depth, b),
-            egui::pos2(r - depth, t),
-        ],
-        [edge_color, edge_color, clear, clear],
-    );
+    quad([
+        egui::pos2(l, t),
+        egui::pos2(r, t),
+        egui::pos2(r, t + depth),
+        egui::pos2(l, t + depth),
+    ]);
+    quad([
+        egui::pos2(l, b),
+        egui::pos2(r, b),
+        egui::pos2(r, b - depth),
+        egui::pos2(l, b - depth),
+    ]);
+    quad([
+        egui::pos2(l, t),
+        egui::pos2(l, b),
+        egui::pos2(l + depth, b),
+        egui::pos2(l + depth, t),
+    ]);
+    quad([
+        egui::pos2(r, t),
+        egui::pos2(r, b),
+        egui::pos2(r - depth, b),
+        egui::pos2(r - depth, t),
+    ]);
     painter.add(egui::Shape::mesh(mesh));
-
-    // 3. Center scrim column behind the title + buttons (the menu content is
-    //    laid out from a 150px top spacer down to the last button).
-    //
-    //    The height is DERIVED from the button count, not hardcoded: adding a
-    //    fifth entry to `MENU_ITEMS` previously left the last button hanging
-    //    outside the scrim, because the 540px figure was tuned for four.
-    let extra_buttons = MENU_ITEMS.len() as f32 - 4.0;
-    let column_height = 540.0 + BUTTON_PITCH * extra_buttons;
-    let column = egui::Rect::from_center_size(
-        egui::pos2(
-            screen.center().x,
-            screen.top() + 390.0 + BUTTON_PITCH * extra_buttons / 2.0,
-        ),
-        egui::vec2(480.0, column_height),
-    );
-    painter.rect_filled(column, 16.0, egui::Color32::from_black_alpha(120));
 }
 
 /// Bevy wrapper: draws the menu and applies the chosen action.

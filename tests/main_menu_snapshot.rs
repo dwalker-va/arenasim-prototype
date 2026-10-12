@@ -29,7 +29,7 @@ use egui_kittest::Harness;
 use arenasim::states::main_menu::draw_main_menu;
 
 /// Fixed time for a deterministic title-pulse phase: 0.6s puts the
-/// sin-driven halo near mid-swing so the glow is visible in the baseline.
+/// wordmark pulse near mid-swing, so its brightening shows in the baseline.
 const SNAPSHOT_TIME_SECS: f32 = 0.6;
 
 #[test]

@@ -949,7 +949,6 @@ const EAGER_MARKERS: &[&str] = &[
 const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     // Its one `mark` helper, through which every data-built id registers.
     ("src/states/configure_match_ui.rs", 1),
-    ("src/states/main_menu.rs", 1),
     // Options' Configure Keybindings button, so a script can walk the menus.
     ("src/states/mod.rs", 1),
     (
