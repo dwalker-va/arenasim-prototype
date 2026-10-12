@@ -518,6 +518,13 @@ takes it (`AbilityConfig::has_cast_bar`, read from `cast_time`; see Interrupts i
 `docs/design/wow-mechanics.md`). A heal may also `consumes_aura: Some(<Ability>)`
 — Swiftmend eats the target's Rejuvenation as it lands.
 
+A cast-time ability that no interrupt takes sets `uninterruptible: true` (Aimed
+Shot): interrupters pass it by unspent, its cast bar is grey and its text says
+"Cannot be interrupted." Crowd control still stops it, with no lockout. TBC
+decides which casts those are (`PreventionType` Pacify):
+`docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py` checks the
+whole book's flags against the client data.
+
 **Shared cooldowns** — `cooldown_category: Some(<CooldownCategory>)` puts the
 ability in a cooldown category, after the Classic client's `SpellCategory`:
 using any member puts EVERY member on cooldown (Freezing Trap and Frost Trap are

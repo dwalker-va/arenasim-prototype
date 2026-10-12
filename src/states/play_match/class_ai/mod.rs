@@ -1445,16 +1445,32 @@ pub fn is_priority_interrupt(ability: AbilityType) -> bool {
     matches!(ability, AbilityType::Cyclone)
 }
 
-/// Whether an interrupt can take this cast: it has a cast bar
-/// ([`AbilityConfig::has_cast_bar`](super::ability_config::AbilityConfig::has_cast_bar))
-/// and is not already interrupted. An instant routed through a zero-length
-/// `CastingState` (the Druid's heals, Frost Shock) is no target: every
-/// interrupter's candidate scan (`check_interrupts` for Kick, Pummel and Wind
-/// Shear, the Felhunter's Spell Lock) asks here, so none spends its interrupt
-/// on one, and `process_interrupts` asks again at resolution, where an
-/// interrupt that finds one is spent and does nothing.
+/// Whether an interrupt can take this cast: the ability can be interrupted
+/// ([`AbilityConfig::can_be_interrupted`](super::ability_config::AbilityConfig::can_be_interrupted)
+/// — a cast bar, and not `uninterruptible`) and the cast is not already
+/// interrupted. An instant routed through a zero-length `CastingState` (the
+/// Druid's heals, Frost Shock) is no target, and neither is an uninterruptible
+/// cast (Aimed Shot): every interrupter's candidate scan (`check_interrupts`
+/// for Kick, Pummel and Wind Shear, the Felhunter's Spell Lock) asks here, so
+/// none spends its interrupt on one, and `process_interrupts` asks again at
+/// resolution, where an interrupt that finds one does nothing — no cut, no
+/// lockout.
 pub fn cast_is_interruptible(cast: &CastingState, abilities: &AbilityDefinitions) -> bool {
-    !cast.interrupted && abilities.get_unchecked(&cast.ability).has_cast_bar()
+    !cast.interrupted && abilities.get_unchecked(&cast.ability).can_be_interrupted()
+}
+
+/// Why an interrupter passes over a cast it can see: the cast is
+/// [`uninterruptible`](super::ability_config::AbilityConfig::uninterruptible)
+/// (Aimed Shot). `None` for every other cast — an interruptible one, an
+/// instant routed through a zero-length cast (nothing to trace: no cast bar
+/// was ever up), or one already interrupted. Each interrupter traces a `Some`
+/// as [`RejectionReason::Uninterruptible`].
+pub fn uninterruptible_cast(
+    cast: &CastingState,
+    abilities: &AbilityDefinitions,
+) -> Option<AbilityType> {
+    let def = abilities.get_unchecked(&cast.ability);
+    (!cast.interrupted && def.has_cast_bar() && def.uninterruptible).then_some(cast.ability)
 }
 
 /// An enemy mid-cast that an interrupter can reach: in its interrupt's range,

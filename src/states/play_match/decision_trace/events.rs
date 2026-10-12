@@ -619,6 +619,13 @@ pub enum RejectionReason {
     /// not this). Adding this variant requires updating
     /// `tests/decision_trace_audit.rs::EXPECTED_REJECTION_REASONS`.
     LosBlocked,
+    /// An interrupt (Kick, Pummel, Wind Shear, Spell Lock) passed over an
+    /// enemy mid-cast because the cast is `uninterruptible` (Aimed Shot):
+    /// no interrupt takes it, so the interrupt is not spent on it.
+    Uninterruptible {
+        /// The cast it passed over.
+        ability: AbilityType,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

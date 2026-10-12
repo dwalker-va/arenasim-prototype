@@ -13,7 +13,8 @@ use crate::ui::fonts::body_family;
 use bevy_egui::egui;
 
 use crate::states::ability_text::{
-    build_ability_description, build_aura_description, effect_is_damage_only, requirement_sentence,
+    build_ability_description, build_aura_description, cast_sentence, effect_is_damage_only,
+    requirement_sentence,
 };
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::{ScalingStat, SpellSchool};
@@ -214,6 +215,13 @@ pub fn mechanics_text(ability: AbilityType, config: &AbilityConfig) -> String {
             text.push(' ');
         }
         text.push_str(&sentence);
+    }
+    // A property of the cast ("Cannot be interrupted.") follows the effects.
+    if let Some(cast) = cast_sentence(config) {
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        text.push_str(&cast);
     }
     // Preconditions go LAST: "Stuns the target for 4 sec. Must be stealthed."
     if let Some(requirement) = requirement_sentence(config) {

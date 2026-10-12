@@ -865,6 +865,9 @@
             class: Hunter,
             icon: "icons/abilities/inv_spear_07.jpg",
             cast_time: 2.5,
+            // A Pacify-prevented cast (TBC `PreventionType` 2): no interrupt
+            // takes it, and its cast bar is grey. A stun or fear still stops it.
+            uninterruptible: true,
             range: 35.0,
             min_range: Some(8.0),
             mana_cost: 34.0,

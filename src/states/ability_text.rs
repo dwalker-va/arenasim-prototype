@@ -76,6 +76,24 @@ pub fn requirement_sentence(config: &AbilityConfig) -> Option<String> {
         .then(|| "Must be stealthed.".to_string())
 }
 
+/// A property of the ability's CAST, as a trailing sentence: "Cannot be
+/// interrupted." for an [`uninterruptible`](AbilityConfig::uninterruptible)
+/// one (Aimed Shot). Read from the flag, so the next ability that sets it gets
+/// the sentence with no edit here.
+///
+/// Composed by `encyclopedia::abilities::mechanics_text`, after the aura
+/// sentence and before the precondition — so it reaches the surfaces drawn
+/// from that text: the ability's encyclopedia page, its full tooltip, and the
+/// slim tooltip View Combatant shows (`summary_sentence`, which keeps it:
+/// unlike the precondition it is part of the gist, since whether a cast can be
+/// kicked is a fact a player chooses by). Pinned by
+/// `tests/uninterruptible_casts.rs`.
+pub fn cast_sentence(config: &AbilityConfig) -> Option<String> {
+    config
+        .uninterruptible
+        .then(|| "Cannot be interrupted.".to_string())
+}
+
 /// An ability's EFFECT half, before the aura sentence and the precondition are
 /// composed on top.
 ///

@@ -630,11 +630,11 @@ fn try_spell_lock(
     // This turns the Felhunter's one interrupt per 24s into a heal-denial tool
     // instead of a random interrupt.
     let mut reachable: Vec<(super::InterruptCandidate, bool)> = Vec::new();
+    // An uninterruptible cast in reach (Aimed Shot), which Spell Lock passes
+    // over: traced as the reason when nothing else can be locked.
+    let mut passed_over: Option<AbilityType> = None;
     for (target_entity, target_combatant, cast_state) in casting_targets.iter() {
         if target_combatant.team == my_team || !target_combatant.is_alive() {
-            continue;
-        }
-        if !super::cast_is_interruptible(cast_state, abilities) {
             continue;
         }
         if ctx.entity_is_immune(target_entity) {
@@ -647,6 +647,10 @@ fn try_spell_lock(
                 .unwrap_or(Vec3::ZERO),
         );
         if distance > def.range {
+            continue;
+        }
+        if !super::cast_is_interruptible(cast_state, abilities) {
+            passed_over = passed_over.or(super::uninterruptible_cast(cast_state, abilities));
             continue;
         }
         reachable.push((
@@ -701,7 +705,13 @@ fn try_spell_lock(
         return true;
     }
 
-    builder.reject(ability, RejectionReason::NoValidTarget);
+    builder.reject(
+        ability,
+        match passed_over {
+            Some(cast) => RejectionReason::Uninterruptible { ability: cast },
+            None => RejectionReason::NoValidTarget,
+        },
+    );
     false
 }
 

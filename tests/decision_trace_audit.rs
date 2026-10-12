@@ -81,6 +81,8 @@ const EXPECTED_REJECTION_REASONS: &[&str] = &[
     // Emitted by the cast-start LoS guard when a pillar blocks the
     // caster→target segment; exercised by the PillaredArena reference matchup.
     "LosBlocked",
+    // An interrupter passing over an uninterruptible cast (Aimed Shot).
+    "Uninterruptible",
 ];
 
 /// Variants of `TargetRejectionReason` that production code currently emits.

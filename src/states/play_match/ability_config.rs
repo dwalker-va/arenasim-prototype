@@ -187,6 +187,15 @@ pub struct AbilityConfig {
     /// Cast time in seconds (0.0 = instant)
     #[serde(default)]
     pub cast_time: f32,
+    /// The cast cannot be INTERRUPTED: Kick, Pummel, Spell Lock, Wind Shear
+    /// and every other interrupt pass it by, and its cast bar is grey. Loss of
+    /// control (a stun, fear, polymorph, cyclone, ...) still stops it, which is
+    /// not an interrupt and locks out no school. TBC's rule: a cast an
+    /// interrupt takes has `PreventionType` Silence, and this flag marks one
+    /// with Pacify (Aimed Shot). Read through
+    /// [`AbilityConfig::can_be_interrupted`].
+    #[serde(default)]
+    pub uninterruptible: bool,
     /// Maximum range in units
     pub range: f32,
     /// Minimum range in units (Hunter dead zone). None = no minimum range.
@@ -374,6 +383,15 @@ impl AbilityConfig {
     /// interruptible.
     pub fn has_cast_bar(&self) -> bool {
         self.cast_time > 0.0
+    }
+
+    /// Whether an interrupt can take a cast of this ability in progress: it
+    /// has a cast bar ([`Self::has_cast_bar`]) and is not
+    /// [`uninterruptible`](Self::uninterruptible). The one rule every
+    /// interrupter's scan and `process_interrupts` ask, through
+    /// `class_ai::cast_is_interruptible`.
+    pub fn can_be_interrupted(&self) -> bool {
+        self.has_cast_bar() && !self.uninterruptible
     }
 
     /// Returns true if this is a channeled ability
@@ -673,6 +691,21 @@ impl AbilityDefinitions {
             }
         }
 
+        // `uninterruptible` describes a cast bar. On an instant or a channel it
+        // would be a flag nothing reads, so a RON edit setting it there would
+        // silently no-op.
+        for (ability, def) in &self.definitions {
+            if def.uninterruptible && (!def.has_cast_bar() || def.is_channel()) {
+                panic!(
+                    "abilities.ron: {:?} is `uninterruptible` but has no cast bar to \
+                     interrupt (cast_time {}, channel {}). The flag applies to a cast.",
+                    ability,
+                    def.cast_time,
+                    def.is_channel()
+                );
+            }
+        }
+
         if missing.is_empty() {
             Ok(())
         } else {
@@ -817,6 +850,7 @@ mod tests {
             icon: String::new(),
             description: String::new(),
             cast_time: 0.0,
+            uninterruptible: false,
             range: 40.0,
             min_range: None,
             mana_cost: 0.0,
