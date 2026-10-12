@@ -583,11 +583,25 @@ fn enemy_health_for_lead(lead: f32) -> f32 {
     1.0 - lead / 2.0
 }
 
+/// Each team's tempo after every step of a wobble.
+struct Wobble {
+    team1: Vec<Tempo>,
+    team2: Vec<Tempo>,
+    /// The Warrior's (team 1's) decision at the last, inside-the-band step.
+    view: DecisionView,
+}
+
+/// How many steps of `tempos` changed tempo.
+fn flips(tempos: &[Tempo]) -> usize {
+    tempos.windows(2).filter(|w| w[0] != w[1]).count()
+}
+
 /// Run the rooted-Warrior scene through a lead over the onset, then wobble it
 /// into the band and back over the onset `wobbles` times, reclassifying at
-/// each step, and end inside the band. Returns the tempo after each step and
-/// the Warrior's decision at the last step.
-fn wobble_tempo(profile: AiProfile, wobbles: usize) -> (Vec<Tempo>, DecisionView) {
+/// each step, and end inside the band. Team 1 leads and team 2 trails by the
+/// same amount, each team under its own profile, so one scene shows both
+/// teams' latches side by side.
+fn wobble_tempo(team1: AiProfile, team2: AiProfile, wobbles: usize) -> Wobble {
     let shared = load_movement_config().expect("movement.ron loads").shared;
     let (onset, release) = (shared.press_advantage_margin, shared.press_release_margin);
     assert!(
@@ -599,55 +613,75 @@ fn wobble_tempo(profile: AiProfile, wobbles: usize) -> (Vec<Tempo>, DecisionView
     let over = enemy_health_for_lead(onset + band / 4.0);
     let inside = enemy_health_for_lead(release + band / 2.0);
 
-    let mut scene = rooted_warrior_scene(over).ai_profile(1, profile);
-    let mut tempos = vec![scene.reclassify().for_team(1).tempo];
-    let mut steps = Vec::new();
+    let mut scene = rooted_warrior_scene(over)
+        .ai_profile(1, team1)
+        .ai_profile(2, team2);
+    let tempos = |scene: &mut Scene| {
+        let s = scene.reclassify();
+        (s.for_team(1).tempo, s.for_team(2).tempo)
+    };
+    let mut steps = vec![tempos(&mut scene)];
+    let mut healths = Vec::new();
     for _ in 0..wobbles {
-        steps.extend([inside, over]);
+        healths.extend([inside, over]);
     }
-    steps.push(inside);
-    for h in steps {
+    healths.push(inside);
+    for h in healths {
         scene.set_health(MAGE, h);
         scene.set_health(ENEMY_PRIEST, h);
-        tempos.push(scene.reclassify().for_team(1).tempo);
+        steps.push(tempos(&mut scene));
     }
-    let view = scene.decide(WARRIOR);
-    (tempos, view)
+    Wobble {
+        team1: steps.iter().map(|s| s.0).collect(),
+        team2: steps.iter().map(|s| s.1).collect(),
+        view: scene.decide(WARRIOR),
+    }
+}
+
+/// The Warrior's decision included a tempo reset.
+fn resets(view: &DecisionView) -> bool {
+    view.movement
+        .iter()
+        .any(|m| m.trigger == MovementTrigger::MeleeReset)
 }
 
 #[test]
 fn a_lead_wobbling_inside_the_band_keeps_a_teamplan_team_pressing() {
-    let (tempos, view) = wobble_tempo(AiProfile::TeamPlan, 3);
+    // Team 1 TeamPlan, team 2 Legacy: the band holds team 1 Pressing, and the
+    // Warrior reads the latched tempo and keeps chasing...
+    let w = wobble_tempo(AiProfile::TeamPlan, AiProfile::Legacy, 3);
     assert!(
-        tempos.iter().all(|t| *t == Tempo::Pressing),
-        "TeamPlan tempo flipped inside the band: {tempos:?}"
+        w.team1.iter().all(|t| *t == Tempo::Pressing),
+        "TeamPlan tempo flipped inside the band: {:?}",
+        w.team1
     );
-    assert_eq!(view.situation.map(|s| s.tempo), Some(Tempo::Pressing));
-    assert!(
-        !view
-            .movement
-            .iter()
-            .any(|m| m.trigger == MovementTrigger::MeleeReset),
-        "the Warrior reads the latched tempo and keeps chasing: {}",
-        describe(&view)
-    );
-
-    // Control: Legacy, the same wobble. No band, so it flips at every step,
-    // and inside the band the Warrior resets.
-    let (tempos, view) = wobble_tempo(AiProfile::Legacy, 3);
-    let flips = tempos.windows(2).filter(|w| w[0] != w[1]).count();
+    assert_eq!(w.view.situation.map(|s| s.tempo), Some(Tempo::Pressing));
+    assert!(!resets(&w.view), "{}", describe(&w.view));
+    // ...while, in the same match, the Legacy team has no band: it flips
+    // between Trailing and Even at every step.
     assert_eq!(
-        flips,
-        tempos.len() - 1,
-        "Legacy flips every step: {tempos:?}"
+        flips(&w.team2),
+        w.team2.len() - 1,
+        "the Legacy team of a mixed match flips every step: {:?}",
+        w.team2
     );
-    assert_eq!(view.situation.map(|s| s.tempo), Some(Tempo::Even));
+    assert_eq!(w.team2.last(), Some(&Tempo::Even));
+
+    // Swapped: team 1 Legacy flips every step and its Warrior resets inside
+    // the band, while team 2 under TeamPlan holds Trailing throughout.
+    let w = wobble_tempo(AiProfile::Legacy, AiProfile::TeamPlan, 3);
+    assert_eq!(
+        flips(&w.team1),
+        w.team1.len() - 1,
+        "Legacy flips every step: {:?}",
+        w.team1
+    );
+    assert_eq!(w.view.situation.map(|s| s.tempo), Some(Tempo::Even));
+    assert!(resets(&w.view), "{}", describe(&w.view));
     assert!(
-        view.movement
-            .iter()
-            .any(|m| m.trigger == MovementTrigger::MeleeReset),
-        "{}",
-        describe(&view)
+        w.team2.iter().all(|t| *t == Tempo::Trailing),
+        "a TeamPlan team 2 holds Trailing inside the band: {:?}",
+        w.team2
     );
 }
 

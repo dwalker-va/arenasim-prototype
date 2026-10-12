@@ -55,22 +55,36 @@ on PillaredArena and BasicArena, each in both assignments: team 1 `TeamPlan`
 against team 2 `Legacy`, then the reverse. 6,976 matches per arm. Both arms ran
 the same JSONL. CSVs: `sweeps/2026-10-12-as283-h2h-{noband,band}.csv.gz`.
 
-```
-paired_sweep.py noband.csv band.csv --affects Warrior,Priest,Paladin,Shaman,Druid --tier directional --expect nothing
+**Method: oriented to the TeamPlan side, by hand.** The band acts only on the
+team running `TeamPlan`, which is team 1 in half the rows (`_TL`) and team 2 in
+the other half (`_LT`). A team-1 win rate pooled over both halves nets a
+per-team change out — `paired_sweep.py`'s docstring says so, and its class
+slices (`--affects`) answer a different question — so it is not the instrument
+here. `sweeps/2026-10-12-as283-oriented.py` scores each paired match from the
+TeamPlan side (win, draw, loss), counts the discordant pairs, and tests them
+with an exact two-sided sign test (McNemar's exact form):
 
-CONTROL: 64/64 matches with no affected class on either side are IDENTICAL in winner and duration.
-  ALL reachable      n=6912  before 49.9%  after 49.9%  delta +0.0pt  flips 4 (+2/-2) z=0.00 ns  resolves >=0.1pt
-  CLEAN              n=1152  before 54.6%  after 54.6%  delta +0.0pt  flips 0
-  AGAINST            n=1152  before 45.1%  after 45.1%  delta +0.0pt  flips 0
-  MIRRORED           n=4608  before 49.9%  after 49.9%  delta +0.0pt  flips 4 (+2/-2)
-NON-VACUITY: 6926/6976 decided by elimination (50 draws); 18 moved in winner or duration.
-VERDICT: consistent with no movement.
+```
+2026-10-12-as283-oriented.py h2h-noband.csv.gz h2h-band.csv.gz
+
+CONTROL: 64/64 rows with no affected class identical in winner and duration
+paired matches: 6976; moved in winner or duration: 18
+TeamPlan-side result, noband -> band:
+  B_LT  n= 1744  TeamPlan wins 838 -> 840  discordant 2 (band+ 2 / band- 0)  exact p=0.500
+  B_TL  n= 1744  TeamPlan wins 853 -> 855  discordant 2 (band+ 2 / band- 0)  exact p=0.500
+  P_LT  n= 1744  TeamPlan wins 874 -> 874  discordant 0
+  P_TL  n= 1744  TeamPlan wins 873 -> 873  discordant 0
+  ALL   n= 6976  TeamPlan wins 3438 -> 3442  discordant 4 (band+ 4 / band- 0)  exact p=0.125  corrected z=+1.50
 ```
 
 **No regression.** The band moved 18 of 6,976 matches at all, and changed the
-winner in 4, two each way. The printed floor of 0.1pt is the tool's flip-rate
-formula, applied to a change that almost never flips. Read it as: the change has
-no outcome effect this run could see, not that it was measured to ±0.1pt.
+TeamPlan side's result in 4, all four in the banded arm's favour (+4/-0, exact
+p=0.125, not significant), all on BasicArena. The control is 64/64 identical.
+
+**Resolution floor.** With 4 discordant pairs, even the most lopsided split
+(4-0) gives exact p=0.125 (continuity-corrected McNemar z=1.50), so no imbalance
+among them could reach significance. This run shows no outcome effect it could
+see; it cannot say whether the band is worth a few wins, in either direction.
 
 The effect is that small because only two decisions read tempo. A healer zeroes
 `cover_pull` only while it is PRESSURED on an obstacle map, and a Warrior's tempo
@@ -94,6 +108,6 @@ every decision, and they are what the band is for.
 
 | claim | from |
 |---|---|
-| head-to-head verdict, control, flips | the two `h2h` CSVs and `paired_sweep.py` |
+| head-to-head verdict, control, oriented flips | the two `h2h` CSVs and `sweeps/2026-10-12-as283-oriented.py` |
 | flip-count table | the two `tempo-flips` CSVs |
 | noband arm = main `TeamPlan`, Legacy byte-identity | rebuild: `b07bcd7` and the PR head, plus the arm patch |
