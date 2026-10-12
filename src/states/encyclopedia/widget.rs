@@ -1,13 +1,20 @@
 //! The encyclopedia's [`Topic`]-aware widgets — tiles, rows, chips and page
-//! furniture — built on the linked icon.
+//! furniture — built on the shared kit, [`crate::ui::widgets`].
 //!
 //! The linked icon itself ([`link`], [`link_with`], [`tooltip`],
-//! [`paint_icon`]) lives in the shared kit, [`crate::ui::widgets::link`]: any
-//! screen may show something with a page, and hovering it ALWAYS shows that
-//! entity's tooltip while clicking it ALWAYS navigates there. It is re-exported
-//! here so existing callers are unchanged. Every icon the encyclopedia draws
-//! goes through it, so there is no way to add a picture of something without
-//! also making it hoverable and reachable.
+//! [`paint_icon`]) and its hint lines ([`click_hint`],
+//! [`secondary_click_chrome_hint`]) live in the kit,
+//! [`crate::ui::widgets::link`]: any screen may show something with a page,
+//! and hovering it ALWAYS shows that entity's tooltip while clicking it ALWAYS
+//! navigates there. They are re-exported here so existing callers are
+//! unchanged. Every icon the encyclopedia draws goes through it, so there is no
+//! way to add a picture of something without also making it hoverable and
+//! reachable.
+//!
+//! What stays here is what knows about a [`Topic`]: the tiles, the kit-grid
+//! icon, the class chip and the detail-page header. Everything they paint is a
+//! `ui::theme` token, and the generic pieces (list rows, panels, stat rows)
+//! are the kit's own.
 //!
 //! The helpers are written against plain `egui::Ui` and an [`EncyclopediaData`]
 //! reference — no Bevy, no encyclopedia-only state — so another screen can
@@ -17,18 +24,29 @@
 //! that up as a navigation action.
 
 use crate::ui::fonts::body_family;
+use crate::ui::theme::{color, icon, radius, size, space, stroke, text};
+use crate::ui::widgets::{self as kit, ListIcon, ListRow};
 use bevy_egui::egui;
 
-use super::{EncyclopediaData, Topic, DIM, GOLD, LINE, LINE_HI, MUTED, PANEL, PANEL_HI, TEXT};
+use super::{EncyclopediaData, Topic};
 
-pub use crate::ui::widgets::link::{link, link_with, paint_icon, tooltip};
+pub use crate::ui::widgets::link::{
+    click_hint, link, link_with, paint_icon, secondary_click_chrome_hint, tooltip,
+};
 
-/// Side length of the icon on a compact linked icon.
-pub const ICON_SMALL: f32 = 24.0;
-/// Side length of the icon on a grid tile.
-pub const ICON_TILE: f32 = 36.0;
-/// Side length of the icon in a detail-page header.
-pub const ICON_HEADER: f32 = 56.0;
+/// Width of one cell of a kit grid ([`icon_link`]): room for a two-line
+/// caption under an [`icon::LG`] icon.
+const KIT_CELL_WIDTH: f32 = 86.0;
+
+/// Width reserved at a tile's right-hand end for its badge, so a long name
+/// never runs under it.
+const TILE_BADGE_WIDTH: f32 = 46.0;
+
+/// The widest a prose block grows: sentences, so a measure the eye can track.
+const PROSE_MAX_WIDTH: f32 = 560.0;
+
+/// The widest a stat block grows: two columns of short facts.
+const STAT_BLOCK_MAX_WIDTH: f32 = 430.0;
 
 /// Lay out text that must fit a fixed box: wraps to at most `max_rows` and
 /// ends in an ellipsis rather than spilling past the tile it belongs to.
@@ -47,39 +65,6 @@ fn fitted(
     ui.fonts(|f| f.layout_job(job))
 }
 
-/// The affordance line every linked tooltip ends on — the promise that the
-/// thing under the cursor has a page. Written once so a caller that supplies
-/// its OWN tooltip body still makes the same promise in the same words.
-///
-/// [`link_with`] appends it. It stays here, with the encyclopedia it names,
-/// until the encyclopedia adopts the kit's tooltip hint.
-pub fn click_hint(ui: &mut egui::Ui) {
-    ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new("Click to open in the encyclopedia")
-            .size(11.0)
-            .color(DIM)
-            .italics(),
-    );
-}
-
-/// The line a panel whose widgets open a page on SECONDARY click puts in its
-/// own chrome so right-click is discoverable at all.
-///
-/// The equipment surfaces are the ones that need it: left-click equips, so the
-/// reference affordance there is the right-click, and the item tooltips are the
-/// encyclopedia's own — not this hint's to annotate. Written once, like
-/// [`click_hint`], so the equipment panel and its picker make the same promise
-/// in the same words.
-pub fn secondary_click_chrome_hint(ui: &mut egui::Ui) {
-    ui.label(
-        egui::RichText::new("right-click opens the encyclopedia")
-            .size(11.0)
-            .color(DIM)
-            .italics(),
-    );
-}
-
 /// Compact icon with a wrapped caption underneath — the kit-grid form.
 ///
 /// Every cell is the SAME height whether its caption runs to one line or two,
@@ -87,37 +72,45 @@ pub fn secondary_click_chrome_hint(ui: &mut egui::Ui) {
 /// tall tiles. Captions wrap to two lines and then ellipsize; the tooltip
 /// always has the full name.
 pub fn icon_link(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Option<Topic> {
-    const W: f32 = 86.0;
-    const CAPTION_SIZE: f32 = 11.5;
-    let galley = fitted(ui, topic.name(data), CAPTION_SIZE, TEXT, W - 6.0, 2);
+    let galley = fitted(
+        ui,
+        topic.name(data),
+        text::SMALL,
+        color::TEXT,
+        KIT_CELL_WIDTH - space::SM,
+        2,
+    );
     // Reserve two caption lines unconditionally — the lattice invariant.
-    let two_lines = ui.fonts(|f| f.row_height(&egui::FontId::proportional(CAPTION_SIZE))) * 2.0;
-    let height = ICON_TILE + 6.0 + two_lines + 8.0;
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(W, height), egui::Sense::click());
+    let two_lines = ui.fonts(|f| f.row_height(&egui::FontId::proportional(text::SMALL))) * 2.0;
+    let height = space::XS + icon::LG + space::XS + two_lines + space::SM;
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(KIT_CELL_WIDTH, height), egui::Sense::click());
 
     let painter = ui.painter_at(rect);
     if response.hovered() {
-        painter.rect_filled(rect, 5.0, PANEL_HI);
+        painter.rect_filled(rect, radius::MD, color::RAISED);
     }
     let icon_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.center().x, rect.top() + 4.0 + ICON_TILE / 2.0),
-        egui::vec2(ICON_TILE, ICON_TILE),
+        egui::pos2(rect.center().x, rect.top() + space::XS + icon::LG / 2.0),
+        egui::Vec2::splat(icon::LG),
     );
     paint_icon(&painter, icon_rect, topic, data);
     painter.galley(
         egui::pos2(
             rect.center().x - galley.size().x / 2.0,
-            icon_rect.bottom() + 6.0,
+            icon_rect.bottom() + space::XS,
         ),
         galley,
-        TEXT,
+        color::TEXT,
     );
 
     link(response, topic, data)
 }
 
 /// Wide grid tile: icon, name, one subtitle line, and an optional right-aligned
-/// badge (item level, cooldown, …). The items grid is built from these.
+/// badge (item level, resource, …). The items and classes grids are built from
+/// these. A tile is a panel — fill and edge even at rest — because a grid of
+/// them is the page's content, not a list to pick from.
 pub fn tile(
     ui: &mut egui::Ui,
     topic: Topic,
@@ -126,48 +119,62 @@ pub fn tile(
     width: f32,
     data: &EncyclopediaData,
 ) -> Option<Topic> {
-    const H: f32 = 52.0;
-    const PAD: f32 = 8.0;
-
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, H), egui::Sense::click());
+    let height = icon::LG + 2.0 * space::SM;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
     let painter = ui.painter_at(rect);
 
-    let fill = if response.hovered() { PANEL_HI } else { PANEL };
-    let frame = if response.hovered() { LINE_HI } else { LINE };
-    painter.rect_filled(rect, 5.0, fill);
-    painter.rect_stroke(
+    let (fill, edge) = if response.hovered() {
+        (color::RAISED, color::LINE_STRONG)
+    } else {
+        (color::PANEL, color::LINE)
+    };
+    painter.rect(
         rect,
-        5.0,
-        egui::Stroke::new(1.0_f32, frame),
+        radius::MD,
+        fill,
+        egui::Stroke::new(stroke::HAIRLINE, edge),
         egui::StrokeKind::Inside,
     );
 
     let icon_rect = egui::Rect::from_min_size(
-        egui::pos2(rect.left() + PAD, rect.center().y - ICON_TILE / 2.0),
-        egui::vec2(ICON_TILE, ICON_TILE),
+        egui::pos2(rect.left() + space::SM, rect.center().y - icon::LG / 2.0),
+        egui::Vec2::splat(icon::LG),
     );
     paint_icon(&painter, icon_rect, topic, data);
 
-    // Reserve the badge's width so a long name never runs under it.
-    let badge_w = badge.map(|_| 46.0).unwrap_or(0.0);
-    let text_left = icon_rect.right() + PAD;
-    let text_w = (rect.right() - PAD - badge_w - text_left).max(20.0);
+    let badge_w = badge.map(|_| TILE_BADGE_WIDTH).unwrap_or(0.0);
+    let text_left = icon_rect.right() + space::SM;
+    let text_w = (rect.right() - space::SM - badge_w - text_left).max(space::XL);
 
-    let name = fitted(ui, topic.name(data), 13.5, topic.accent(data), text_w, 2);
-    let sub = fitted(ui, subtitle.to_string(), 11.5, MUTED, text_w, 1);
+    let name = fitted(
+        ui,
+        topic.name(data),
+        text::BODY,
+        topic.accent(data),
+        text_w,
+        2,
+    );
+    let sub = fitted(
+        ui,
+        subtitle.to_string(),
+        text::SMALL,
+        color::TEXT_MUTED,
+        text_w,
+        1,
+    );
     let block_h = name.size().y + sub.size().y;
     let mut y = rect.center().y - block_h / 2.0;
     painter.galley(egui::pos2(text_left, y), name.clone(), topic.accent(data));
     y += name.size().y;
-    painter.galley(egui::pos2(text_left, y), sub, MUTED);
+    painter.galley(egui::pos2(text_left, y), sub, color::TEXT_MUTED);
 
     if let Some(badge) = badge {
         painter.text(
-            egui::pos2(rect.right() - PAD, rect.bottom() - PAD / 2.0),
+            egui::pos2(rect.right() - space::SM, rect.bottom() - space::XS),
             egui::Align2::RIGHT_BOTTOM,
             badge,
-            egui::FontId::proportional(11.0),
-            DIM,
+            egui::FontId::proportional(text::SMALL),
+            color::TEXT_DIM,
         );
     }
 
@@ -175,7 +182,8 @@ pub fn tile(
 }
 
 /// Full-width linked row: icon, name, right-aligned trailing note. Search
-/// results and "applied by" lists use this.
+/// results and "applied by" lists use this — the kit's [`kit::list_row`],
+/// wearing the linked-icon contract.
 pub fn row(
     ui: &mut egui::Ui,
     topic: Topic,
@@ -183,91 +191,52 @@ pub fn row(
     width: f32,
     data: &EncyclopediaData,
 ) -> Option<Topic> {
-    const H: f32 = 30.0;
-    const PAD: f32 = 8.0;
-
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, H), egui::Sense::click());
-    let painter = ui.painter_at(rect);
-    if response.hovered() {
-        painter.rect_filled(rect, 4.0, PANEL_HI);
-    }
-
-    let icon_rect = egui::Rect::from_min_size(
-        egui::pos2(rect.left() + PAD, rect.center().y - ICON_SMALL / 2.0),
-        egui::vec2(ICON_SMALL, ICON_SMALL),
-    );
-    paint_icon(&painter, icon_rect, topic, data);
-
-    // The trailing note keeps its natural width; the name takes what is left.
-    let trail = (!trailing.is_empty()).then(|| {
-        ui.painter()
-            .layout_no_wrap(trailing.to_string(), egui::FontId::proportional(11.5), DIM)
+    let name = topic.name(data);
+    let mut list_row = ListRow::new(&name).width(width).icon(ListIcon {
+        texture: topic.icon(data),
+        edge: color::LINE,
     });
-    let trail_w = trail.as_ref().map(|g| g.size().x + PAD).unwrap_or(0.0);
-
-    let name_left = icon_rect.right() + PAD;
-    let name = fitted(
-        ui,
-        topic.name(data),
-        13.5,
-        TEXT,
-        (rect.right() - PAD - trail_w - name_left).max(20.0),
-        1,
-    );
-    painter.galley(
-        egui::pos2(name_left, rect.center().y - name.size().y / 2.0),
-        name,
-        TEXT,
-    );
-    if let Some(trail) = trail {
-        painter.galley(
-            egui::pos2(
-                rect.right() - PAD - trail.size().x,
-                rect.center().y - trail.size().y / 2.0,
-            ),
-            trail,
-            DIM,
-        );
+    if !trailing.is_empty() {
+        list_row = list_row.meta(trailing);
     }
-
+    let response = kit::list_row(ui, list_row);
     link(response, topic, data)
 }
 
 /// Small pill with an icon and a name — used for the class chips that say who
-/// may use an item.
+/// may use an item, and for an ability's owning class.
 pub fn chip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Option<Topic> {
-    const H: f32 = 28.0;
-    const ICON: f32 = 20.0;
-    const PAD: f32 = 9.0;
-
+    let height = icon::SM + 2.0 * space::XS;
     let galley = ui.painter().layout_no_wrap(
         topic.name(data),
-        egui::FontId::proportional(13.0),
+        egui::FontId::proportional(text::BODY),
         topic.accent(data),
     );
-    let width = 4.0 + ICON + 6.0 + galley.size().x + PAD;
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, H), egui::Sense::click());
+    let width = space::XS + icon::SM + space::SM + galley.size().x + space::MD;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
     let painter = ui.painter_at(rect);
 
-    let frame = if response.hovered() { LINE_HI } else { LINE };
-    if response.hovered() {
-        painter.rect_filled(rect, H / 2.0, PANEL_HI);
-    }
-    painter.rect_stroke(
+    let (fill, edge) = if response.hovered() {
+        (color::RAISED, color::LINE_STRONG)
+    } else {
+        (egui::Color32::TRANSPARENT, color::LINE)
+    };
+    painter.rect(
         rect,
-        H / 2.0,
-        egui::Stroke::new(1.0_f32, frame),
+        height / 2.0,
+        fill,
+        egui::Stroke::new(stroke::HAIRLINE, edge),
         egui::StrokeKind::Inside,
     );
 
     let icon_rect = egui::Rect::from_min_size(
-        egui::pos2(rect.left() + 4.0, rect.center().y - ICON / 2.0),
-        egui::vec2(ICON, ICON),
+        egui::pos2(rect.left() + space::XS, rect.center().y - icon::SM / 2.0),
+        egui::Vec2::splat(icon::SM),
     );
     paint_icon(&painter, icon_rect, topic, data);
     painter.galley(
         egui::pos2(
-            icon_rect.right() + 6.0,
+            icon_rect.right() + space::SM,
             rect.center().y - galley.size().y / 2.0,
         ),
         galley,
@@ -277,6 +246,28 @@ pub fn chip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Option<
     link(response, topic, data)
 }
 
+/// The caption at the head of a filter-chip row (`CLASS`, `SLOT`): small and
+/// dim, so the chips after it carry the row.
+///
+/// Drawn at a chip's height and centred on it, so the caption sits on the
+/// chips' line rather than at the top of the row.
+pub fn chip_row_label(ui: &mut egui::Ui, label: &str) {
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        egui::FontId::proportional(text::SMALL),
+        color::TEXT_DIM,
+    );
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(galley.size().x, size::CHIP),
+        egui::Sense::hover(),
+    );
+    ui.painter().galley(
+        egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0),
+        galley,
+        color::TEXT_DIM,
+    );
+}
+
 // ============================================================================
 // PAGE FURNITURE
 // ============================================================================
@@ -284,92 +275,90 @@ pub fn chip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Option<
 /// Icon + name + subtitle block at the top of a detail page.
 pub fn detail_header(ui: &mut egui::Ui, topic: Topic, subtitle: &str, data: &EncyclopediaData) {
     ui.horizontal(|ui| {
-        let (rect, _) =
-            ui.allocate_exact_size(egui::vec2(ICON_HEADER, ICON_HEADER), egui::Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(icon::HERO), egui::Sense::hover());
         let painter = ui.painter_at(rect);
         paint_icon(&painter, rect, topic, data);
 
-        ui.add_space(6.0);
+        ui.add_space(space::SM);
         ui.vertical(|ui| {
-            ui.add_space(4.0);
+            ui.add_space(space::XS);
             ui.label(
                 egui::RichText::new(topic.name(data))
-                    .size(24.0)
+                    .size(text::H2)
                     .color(topic.accent(data)),
             );
             if !subtitle.is_empty() {
-                ui.label(egui::RichText::new(subtitle).size(13.5).color(MUTED));
+                ui.label(
+                    egui::RichText::new(subtitle)
+                        .size(text::BODY)
+                        .color(color::TEXT_MUTED),
+                );
             }
         });
     });
 }
 
 /// Uppercase section heading inside a page.
-pub fn section_heading(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(16.0);
-    ui.label(egui::RichText::new(text).size(15.0).color(GOLD));
-    ui.add_space(6.0);
+pub fn section_heading(ui: &mut egui::Ui, heading: &str) {
+    ui.add_space(space::LG);
+    ui.label(
+        egui::RichText::new(heading)
+            .size(text::H3)
+            .color(color::ACCENT),
+    );
+    ui.add_space(space::SM);
 }
 
 /// Quieter heading for a subdivision INSIDE a section — the per-pet groups on
 /// a class page. Muted and smaller than [`section_heading`] so the hierarchy
 /// reads at a glance: gold headings are sections, grey ones are their parts.
-pub fn sub_heading(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(12.0);
-    ui.label(egui::RichText::new(text).size(12.5).color(MUTED));
-    ui.add_space(4.0);
+pub fn sub_heading(ui: &mut egui::Ui, heading: &str) {
+    ui.add_space(space::MD);
+    ui.label(
+        egui::RichText::new(heading)
+            .size(text::SMALL)
+            .color(color::TEXT_MUTED),
+    );
+    ui.add_space(space::XS);
+}
+
+/// A run of prose in the prose family (decision D3): a description, a note, a
+/// rule. Labels, names and numbers stay Bold; anything a reader reads as
+/// sentences comes through here.
+pub fn prose(ui: &mut egui::Ui, body: &str, size: f32, text_color: egui::Color32) {
+    ui.label(
+        egui::RichText::new(body)
+            .size(size)
+            .family(body_family(ui.ctx()))
+            .color(text_color),
+    );
 }
 
 /// Panelled block of generated prose — an ability's mechanics text. Wider than
 /// the stat block beside it because it is sentences, not numbers.
-pub fn prose_block(ui: &mut egui::Ui, text: &str) {
-    if text.trim().is_empty() {
+pub fn prose_block(ui: &mut egui::Ui, body: &str) {
+    if body.trim().is_empty() {
         return;
     }
-    let width = ui.available_width().min(560.0);
-    egui::Frame::new()
-        .fill(PANEL)
-        .stroke(egui::Stroke::new(1.0_f32, LINE))
-        .corner_radius(6.0)
-        .inner_margin(egui::Margin::symmetric(16, 12))
-        .show(ui, |ui| {
-            ui.set_width(width - 32.0);
-            ui.label(
-                egui::RichText::new(text)
-                    .size(13.5)
-                    .family(body_family(ui.ctx()))
-                    .color(TEXT),
-            );
-        });
+    let width = ui.available_width().min(PROSE_MAX_WIDTH);
+    kit::panel(None).show(ui, |ui| {
+        ui.set_width(width - 2.0 * space::MD);
+        prose(ui, body, text::BODY, color::TEXT);
+    });
 }
 
-/// Panelled two-column key/value block. Values are right-aligned so numbers
-/// line up down the column.
-pub fn stat_rows(ui: &mut egui::Ui, id: &str, rows: &[(String, String)]) {
+/// Panelled two-column key/value block — the kit's [`kit::stat_rows`] in a
+/// [`kit::panel`]. Values are right-aligned so numbers line up down the
+/// column.
+pub fn stat_rows(ui: &mut egui::Ui, rows: &[(String, String)]) {
     if rows.is_empty() {
         return;
     }
-    egui::Frame::new()
-        .fill(PANEL)
-        .stroke(egui::Stroke::new(1.0_f32, LINE))
-        .corner_radius(6.0)
-        .inner_margin(egui::Margin::symmetric(16, 12))
-        .show(ui, |ui| {
-            ui.set_max_width(430.0);
-            egui::Grid::new(id)
-                .num_columns(2)
-                .min_col_width(150.0)
-                .spacing(egui::vec2(22.0, 5.0))
-                .show(ui, |ui| {
-                    for (key, value) in rows {
-                        ui.label(egui::RichText::new(key).size(13.0).color(MUTED));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(egui::RichText::new(value).size(13.5).color(TEXT));
-                        });
-                        ui.end_row();
-                    }
-                });
-        });
+    let width = ui.available_width().min(STAT_BLOCK_MAX_WIDTH);
+    kit::panel(None).show(ui, |ui| {
+        ui.set_width(width - 2.0 * space::MD);
+        kit::stat_rows(ui, rows.iter().map(|(k, v)| (k, v)));
+    });
 }
 
 #[cfg(test)]

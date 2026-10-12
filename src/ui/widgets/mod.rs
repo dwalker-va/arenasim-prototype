@@ -32,13 +32,13 @@ pub use bars::{class_icon, icon_tile, resource_bar};
 pub use button::{button, Button, Variant};
 pub use empty_state::empty_state;
 pub use header::{nav_cluster, screen_header, Header, Nav, NavAction};
-pub use link::{link, link_with, paint_icon};
+pub use link::{click_hint, link, link_with, paint_icon, secondary_click_chrome_hint};
 pub use list_row::{list_row, ListIcon, ListRow};
 pub use modal::{Modal, ModalResponse};
 pub use panel::{divider, panel, panel_header, section_label};
 pub use stat_rows::stat_rows;
 pub use tabs::{chip, tabs, Chip, Tab};
-pub use tooltip::{tooltip_frame, Tooltip};
+pub use tooltip::{hint_line, tooltip_frame, Tooltip};
 
 use bevy_egui::egui;
 

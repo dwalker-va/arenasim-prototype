@@ -25,7 +25,9 @@ use crate::states::play_match::AbilityType;
 use super::auras::AuraId;
 use super::search::SearchEntry;
 use super::widget;
-use super::{EncyclopediaData, Topic, DIM, MUTED, TEXT};
+use super::{EncyclopediaData, Topic};
+use crate::ui::theme::{color, size, space, text};
+use crate::ui::widgets::{empty_state, Chip};
 
 // ============================================================================
 // FILTERS
@@ -296,29 +298,33 @@ pub fn tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &EncyclopediaData)
     let Some(config) = data.abilities.get(&ability) else {
         ui.label(
             egui::RichText::new(Topic::Ability(ability).name(data))
-                .size(14.0)
-                .color(TEXT),
+                .size(text::BODY)
+                .color(color::TEXT),
         );
         return;
     };
     ui.label(
         egui::RichText::new(&config.name)
-            .size(14.0)
+            .size(text::BODY)
             .color(school_color(config.spell_school))
             .strong(),
     );
     ui.label(
         egui::RichText::new(subtitle(config))
-            .size(12.0)
-            .color(MUTED),
+            .size(text::SMALL)
+            .color(color::TEXT_MUTED),
     );
-    ui.label(egui::RichText::new(cost_line(config)).size(12.0).color(DIM));
-    ui.add_space(3.0);
+    ui.label(
+        egui::RichText::new(cost_line(config))
+            .size(text::SMALL)
+            .color(color::TEXT_DIM),
+    );
+    ui.add_space(space::XXS);
     ui.label(
         egui::RichText::new(mechanics_text(ability, config))
             .family(body_family(ui.ctx()))
-            .size(12.0)
-            .color(TEXT),
+            .size(text::SMALL)
+            .color(color::TEXT),
     );
 }
 
@@ -330,28 +336,32 @@ pub fn tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &EncyclopediaData)
 /// facts this module already owns — which is what the encyclopedia exists to
 /// stop. Same builders, less of them.
 pub fn slim_tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &EncyclopediaData) {
-    ui.set_max_width(320.0);
+    ui.set_max_width(size::TOOLTIP_MAX_WIDTH);
     let Some(config) = data.abilities.get(&ability) else {
         ui.label(
             egui::RichText::new(Topic::Ability(ability).name(data))
-                .size(14.0)
-                .color(TEXT),
+                .size(text::BODY)
+                .color(color::TEXT),
         );
         return;
     };
     ui.label(
         egui::RichText::new(&config.name)
-            .size(14.0)
+            .size(text::BODY)
             .color(school_color(config.spell_school))
             .strong(),
     );
-    ui.label(egui::RichText::new(cost_line(config)).size(12.0).color(DIM));
-    ui.add_space(3.0);
+    ui.label(
+        egui::RichText::new(cost_line(config))
+            .size(text::SMALL)
+            .color(color::TEXT_DIM),
+    );
+    ui.add_space(space::XXS);
     ui.label(
         egui::RichText::new(summary_sentence(ability, config))
             .family(body_family(ui.ctx()))
-            .size(12.0)
-            .color(TEXT),
+            .size(text::SMALL)
+            .color(color::TEXT),
     );
 }
 
@@ -370,7 +380,7 @@ pub fn render_index(
     data: &EncyclopediaData,
 ) -> Option<Topic> {
     render_chip_bar(ui, filters, data);
-    ui.add_space(8.0);
+    ui.add_space(space::SM);
 
     // Grouped by owning class, which is the structure the kit order already
     // has — the index is the eight class kits laid end to end, with their
@@ -388,26 +398,21 @@ pub fn render_index(
     let shown: usize = groups.iter().map(|(_, kit)| kit.len()).sum();
     ui.label(
         egui::RichText::new(format!("{} of {} abilities", shown, total))
-            .size(12.5)
-            .color(DIM),
+            .size(text::SMALL)
+            .color(color::TEXT_DIM),
     );
 
     if shown == 0 {
-        ui.add_space(40.0);
-        ui.vertical_centered(|ui| {
-            ui.label(
-                egui::RichText::new("No abilities match these filters.")
-                    .size(15.0)
-                    .color(MUTED),
-            );
-            ui.add_space(10.0);
-            if ui
-                .button(egui::RichText::new("Clear filters").size(13.0).color(TEXT))
-                .clicked()
-            {
-                *filters = AbilityFilters::default();
-            }
-        });
+        ui.add_space(space::XL);
+        if empty_state(
+            ui,
+            "enc:abilities-empty",
+            "No abilities match these filters.",
+            "No class has an ability of that school.",
+            Some("Clear filters"),
+        ) {
+            *filters = AbilityFilters::default();
+        }
         return None;
     }
 
@@ -415,7 +420,7 @@ pub fn render_index(
     for (class, kit) in groups {
         widget::sub_heading(ui, &class.name().to_uppercase());
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+            ui.spacing_mut().item_spacing = egui::Vec2::splat(space::XS);
             for ability in kit {
                 if let Some(topic) = widget::icon_link(ui, Topic::Ability(ability), data) {
                     clicked = Some(topic);
@@ -458,16 +463,19 @@ fn group_by_class(
 /// an explicit "All" chip so clearing an axis needs no second gesture.
 fn render_chip_bar(ui: &mut egui::Ui, filters: &mut AbilityFilters, data: &EncyclopediaData) {
     ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new("CLASS").size(12.0).color(DIM));
-        if ui
-            .selectable_label(filters.class.is_none(), "All")
+        ui.spacing_mut().item_spacing.x = space::XS;
+        widget::chip_row_label(ui, "CLASS");
+        if Chip::new("All")
+            .on(filters.class.is_none())
+            .show(ui)
             .clicked()
         {
             filters.class = None;
         }
         for class in CharacterClass::all() {
-            if ui
-                .selectable_label(filters.class == Some(*class), class.name())
+            if Chip::new(class.name())
+                .on(filters.class == Some(*class))
+                .show(ui)
                 .clicked()
             {
                 filters.class = Some(*class);
@@ -475,35 +483,34 @@ fn render_chip_bar(ui: &mut egui::Ui, filters: &mut AbilityFilters, data: &Encyc
         }
     });
 
-    ui.add_space(4.0);
+    ui.add_space(space::XS);
 
     ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new("SCHOOL").size(12.0).color(DIM));
-        if ui
-            .selectable_label(filters.school.is_none(), "All")
+        ui.spacing_mut().item_spacing.x = space::XS;
+        widget::chip_row_label(ui, "SCHOOL");
+        if Chip::new("All")
+            .on(filters.school.is_none())
+            .show(ui)
             .clicked()
         {
             filters.school = None;
         }
         for school in schools_in_use(data.abilities) {
-            let active = filters.school == Some(school);
-            // The chip wears its school's colour, except when selected: then
-            // it takes the installed selection's label colour, like every
-            // other selected chip on the row.
-            let mut label = egui::RichText::new(format!("{:?}", school));
-            if !active {
-                label = label.color(school_color(school));
-            }
-            if ui.selectable_label(active, label).clicked() {
+            // The chip wears its school's colour while off; on, it is the
+            // gold pill every on chip is.
+            let label = format!("{:?}", school);
+            if Chip::new(&label)
+                .on(filters.school == Some(school))
+                .label_color(school_color(school))
+                .show(ui)
+                .clicked()
+            {
                 filters.school = Some(school);
             }
         }
 
         ui.separator();
-        if ui
-            .button(egui::RichText::new("Clear").size(12.5).color(TEXT))
-            .clicked()
-        {
+        if Chip::new("Clear").show(ui).clicked() {
             *filters = AbilityFilters::default();
         }
     });
@@ -524,8 +531,8 @@ pub fn render_detail(
     let Some(config) = data.abilities.get(&ability) else {
         ui.label(
             egui::RichText::new("Unknown ability")
-                .size(16.0)
-                .color(MUTED),
+                .size(text::H3)
+                .color(color::TEXT_MUTED),
         );
         return None;
     };
@@ -534,26 +541,26 @@ pub fn render_detail(
 
     // --- Owning class, as a link back the way it came ---
     let mut clicked = None;
-    ui.add_space(10.0);
+    ui.add_space(space::MD);
     ui.horizontal(|ui| {
         if let Some(topic) = widget::chip(ui, Topic::Class(config.class), data) {
             clicked = Some(topic);
         }
         if let Some(pet) = config.pet {
-            ui.add_space(6.0);
+            ui.add_space(space::SM);
             ui.label(
                 egui::RichText::new(format!("Cast by the {}", pet.name()))
-                    .size(12.5)
-                    .color(MUTED),
+                    .size(text::SMALL)
+                    .color(color::TEXT_MUTED),
             );
         }
     });
 
-    ui.add_space(12.0);
+    ui.add_space(space::MD);
     widget::prose_block(ui, &mechanics_text(ability, config));
 
-    ui.add_space(12.0);
-    widget::stat_rows(ui, "encyclopedia_ability_stats", &stat_rows(config));
+    ui.add_space(space::MD);
+    widget::stat_rows(ui, &stat_rows(config));
 
     // --- The aura it applies ---
     //

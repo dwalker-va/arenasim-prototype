@@ -99,11 +99,7 @@ impl<'a> Tooltip<'a> {
         }
         if let Some(hint) = self.hint {
             ui.add_space(space::XS);
-            ui.label(
-                egui::RichText::new(hint.to_uppercase())
-                    .size(text::MICRO)
-                    .color(color::TEXT_DIM),
-            );
+            hint_line(ui, hint);
         }
     }
 
@@ -111,4 +107,17 @@ impl<'a> Tooltip<'a> {
     pub fn attach(self, response: egui::Response) -> egui::Response {
         response.on_hover_ui(|ui| self.ui(ui))
     }
+}
+
+/// The tooltip's hint line on its own: `hint` capitalised, at [`text::MICRO`]
+/// in [`color::TEXT_DIM`]. [`Tooltip::hint`] draws it last in a card; a hover
+/// body built some other way (the linked icon's) ends on it too, and a panel
+/// that needs to say how its widgets open a page uses it as chrome, so every
+/// such promise reads in one voice.
+pub fn hint_line(ui: &mut egui::Ui, hint: &str) {
+    ui.label(
+        egui::RichText::new(hint.to_uppercase())
+            .size(text::MICRO)
+            .color(color::TEXT_DIM),
+    );
 }

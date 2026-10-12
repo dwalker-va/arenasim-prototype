@@ -14,7 +14,11 @@ use bevy_egui::egui;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::equipment::ItemDefinitions;
 
-use super::{EncyclopediaData, Section, Topic, DIM, GOLD, MUTED};
+use super::{EncyclopediaData, Section, Topic};
+use crate::ui::theme::{color, space, text};
+
+/// The widest a result list grows: a name and a note, not a page.
+const RESULTS_MAX_WIDTH: f32 = 560.0;
 
 /// Cap on rendered hits. A bare "a" matches most of the corpus and drawing all
 /// of it is pure cost; the count line says when the list was cut.
@@ -87,15 +91,14 @@ pub fn render_results(
     hits.sort_by_key(|(r, entry)| (entry.topic.section().order(), *r));
 
     if hits.is_empty() {
-        ui.add_space(40.0);
-        ui.vertical_centered(|ui| {
-            ui.label(
-                egui::RichText::new(format!("No matches for “{}”", needle))
-                    .size(15.0)
-                    .color(MUTED)
-                    .italics(),
-            );
-        });
+        ui.add_space(space::XL);
+        crate::ui::widgets::empty_state(
+            ui,
+            "enc:search-empty",
+            &format!("No matches for “{}”", needle),
+            "Search reads every name in the encyclopedia. Try fewer letters, or another spelling.",
+            None,
+        );
         return None;
     }
 
@@ -111,12 +114,12 @@ pub fn render_results(
         } else {
             format!("{} matches", total)
         })
-        .size(12.5)
-        .color(DIM),
+        .size(text::SMALL)
+        .color(color::TEXT_DIM),
     );
-    ui.add_space(8.0);
+    ui.add_space(space::SM);
 
-    let width = ui.available_width().min(560.0);
+    let width = ui.available_width().min(RESULTS_MAX_WIDTH);
     let mut clicked = None;
     for section in Section::all() {
         let group: Vec<&(usize, &SearchEntry)> = hits
@@ -128,16 +131,16 @@ pub fn render_results(
         }
         ui.label(
             egui::RichText::new(section.group_label())
-                .size(12.0)
-                .color(GOLD),
+                .size(text::SMALL)
+                .color(color::ACCENT),
         );
-        ui.add_space(2.0);
+        ui.add_space(space::XXS);
         for (_, entry) in group {
             if let Some(topic) = super::widget::row(ui, entry.topic, &entry.sub, width, data) {
                 clicked = Some(topic);
             }
         }
-        ui.add_space(10.0);
+        ui.add_space(space::MD);
     }
 
     clicked

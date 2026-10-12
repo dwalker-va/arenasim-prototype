@@ -946,7 +946,6 @@ const EAGER_MARKERS: &[&str] = &[
 /// that found 20 of 21.)
 const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     ("src/states/configure_match_ui.rs", 3),
-    ("src/states/encyclopedia/mod.rs", 2),
     ("src/states/main_menu.rs", 1),
     // Options' Configure Keybindings button, so a script can walk the menus.
     ("src/states/mod.rs", 1),

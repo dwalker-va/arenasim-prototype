@@ -22,7 +22,9 @@ use crate::states::play_match::proc_trinkets::proc_description;
 
 use super::search::SearchEntry;
 use super::widget;
-use super::{EncyclopediaData, Topic, DIM, MUTED, TEXT};
+use super::{EncyclopediaData, Topic};
+use crate::ui::theme::{color, space, text};
+use crate::ui::widgets::{empty_state, Chip};
 
 /// Default upper bound for the item-level filter. No current item exceeds ~75,
 /// so 100 leaves headroom without forcing the user to slide a max.
@@ -169,30 +171,25 @@ pub fn render_index(
     });
 
     render_chip_bar(ui, filters, total, filtered.len());
-    ui.add_space(10.0);
+    ui.add_space(space::MD);
 
     if filtered.is_empty() {
-        ui.add_space(50.0);
-        ui.vertical_centered(|ui| {
-            ui.label(
-                egui::RichText::new("No items match these filters.")
-                    .size(15.0)
-                    .color(MUTED),
-            );
-            ui.add_space(10.0);
-            if ui
-                .button(egui::RichText::new("Clear filters").size(13.0).color(TEXT))
-                .clicked()
-            {
-                *filters = ItemFilters::default();
-            }
-        });
+        ui.add_space(space::XL);
+        if empty_state(
+            ui,
+            "enc:items-empty",
+            "No items match these filters.",
+            "Every item is filtered out by slot, type, item level or name.",
+            Some("Clear filters"),
+        ) {
+            *filters = ItemFilters::default();
+        }
         return None;
     }
 
     let mut clicked = None;
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+        ui.spacing_mut().item_spacing = egui::Vec2::splat(space::SM);
         for (id, item) in &filtered {
             let badge = format!("ilvl {}", item.item_level);
             if let Some(topic) = widget::tile(
@@ -215,12 +212,13 @@ pub fn render_index(
 /// Row 1: slot chips. Row 2: armor type + iLvl range + name filter + count + clear.
 fn render_chip_bar(ui: &mut egui::Ui, filters: &mut ItemFilters, total: usize, visible: usize) {
     ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new("SLOT").size(12.0).color(DIM));
+        ui.spacing_mut().item_spacing.x = space::XS;
+        widget::chip_row_label(ui, "SLOT");
         // One chip per slot KIND, straight off `ItemSlotType::all()` — rings and
         // trinkets are one kind each, so there is nothing to collapse here.
         for slot_type in ItemSlotType::all() {
             let active = filters.selected_slots.contains(slot_type);
-            if ui.selectable_label(active, slot_type.name()).clicked() {
+            if Chip::new(slot_type.name()).on(active).show(ui).clicked() {
                 if active {
                     filters.selected_slots.remove(slot_type);
                 } else {
@@ -230,13 +228,14 @@ fn render_chip_bar(ui: &mut egui::Ui, filters: &mut ItemFilters, total: usize, v
         }
     });
 
-    ui.add_space(4.0);
+    ui.add_space(space::XS);
 
     ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new("TYPE").size(12.0).color(DIM));
+        ui.spacing_mut().item_spacing.x = space::XS;
+        widget::chip_row_label(ui, "TYPE");
         for (label, armor_type) in ARMOR_TYPE_CHIPS {
             let active = filters.selected_armor_types.contains(armor_type);
-            if ui.selectable_label(active, *label).clicked() {
+            if Chip::new(label).on(active).show(ui).clicked() {
                 if active {
                     filters.selected_armor_types.remove(armor_type);
                 } else {
@@ -247,7 +246,7 @@ fn render_chip_bar(ui: &mut egui::Ui, filters: &mut ItemFilters, total: usize, v
 
         ui.separator();
 
-        ui.label(egui::RichText::new("iLvl").size(12.0).color(DIM));
+        widget::chip_row_label(ui, "iLvl");
         let min_response = ui.add(
             egui::DragValue::new(&mut filters.item_level_min)
                 .range(0..=DEFAULT_ITEM_LEVEL_MAX)
@@ -281,14 +280,11 @@ fn render_chip_bar(ui: &mut egui::Ui, filters: &mut ItemFilters, total: usize, v
 
         ui.label(
             egui::RichText::new(format!("{} / {} items", visible, total))
-                .size(12.5)
-                .color(DIM),
+                .size(text::SMALL)
+                .color(color::TEXT_DIM),
         );
 
-        if ui
-            .button(egui::RichText::new("Clear").size(12.5).color(TEXT))
-            .clicked()
-        {
+        if Chip::new("Clear").show(ui).clicked() {
             *filters = ItemFilters::default();
         }
     });
@@ -303,14 +299,18 @@ fn render_chip_bar(ui: &mut egui::Ui, filters: &mut ItemFilters, total: usize, v
 pub fn render_detail(ui: &mut egui::Ui, id: ItemId, data: &EncyclopediaData) -> Option<Topic> {
     let topic = Topic::Item(id);
     let Some(item) = data.items.get(&id) else {
-        ui.label(egui::RichText::new("Unknown item").size(16.0).color(MUTED));
+        ui.label(
+            egui::RichText::new("Unknown item")
+                .size(text::H3)
+                .color(color::TEXT_MUTED),
+        );
         return None;
     };
 
     widget::detail_header(ui, topic, &detail_subtitle(item), data);
 
-    ui.add_space(14.0);
-    widget::stat_rows(ui, "encyclopedia_item_stats", &item_stat_rows(item));
+    ui.add_space(space::LG);
+    widget::stat_rows(ui, &item_stat_rows(item));
 
     // A proc is a SENTENCE, so it gets a section of its own rather than a row
     // in the stat table: that table right-aligns its values into a narrow
@@ -318,12 +318,7 @@ pub fn render_detail(ui: &mut egui::Ui, id: ItemId, data: &EncyclopediaData) -> 
     // wrapping.
     if let Some(proc) = &item.proc {
         widget::section_heading(ui, "PROC");
-        ui.label(
-            egui::RichText::new(proc_description(proc))
-                .family(body_family(ui.ctx()))
-                .size(13.5)
-                .color(TEXT),
-        );
+        widget::prose(ui, &proc_description(proc), text::BODY, color::TEXT);
     }
 
     let usable: Vec<CharacterClass> = CharacterClass::all()
@@ -336,7 +331,7 @@ pub fn render_detail(ui: &mut egui::Ui, id: ItemId, data: &EncyclopediaData) -> 
     if !usable.is_empty() {
         widget::section_heading(ui, "USABLE BY");
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+            ui.spacing_mut().item_spacing = egui::Vec2::splat(space::SM);
             for class in usable {
                 if let Some(topic) = widget::chip(ui, Topic::Class(class), data) {
                     clicked = Some(topic);
@@ -507,34 +502,34 @@ pub const PROC_TEXT_COLOR: egui::Color32 = egui::Color32::from_rgb(170, 170, 170
 pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
     ui.label(
         egui::RichText::new(&item.name)
-            .size(14.0)
-            .color(egui::Color32::from_rgb(255, 215, 0))
+            .size(text::BODY)
+            .color(color::ACCENT)
             .strong(),
     );
 
     if item.item_level > 0 {
         ui.label(
             egui::RichText::new(format!("Item Level {}", item.item_level))
-                .size(12.0)
-                .color(egui::Color32::from_rgb(170, 170, 170)),
+                .size(text::SMALL)
+                .color(color::TEXT_MUTED),
         );
     }
 
     if item.armor_type != ArmorType::None {
         ui.label(
             egui::RichText::new(format!("{:?}", item.armor_type))
-                .size(12.0)
-                .color(egui::Color32::from_rgb(170, 170, 170)),
+                .size(text::SMALL)
+                .color(color::TEXT_MUTED),
         );
     }
 
     let stat_parts = item_stat_parts(item);
     if !stat_parts.is_empty() {
-        ui.add_space(4.0);
+        ui.add_space(space::XS);
         for part in &stat_parts {
             ui.label(
                 egui::RichText::new(part)
-                    .size(12.0)
+                    .size(text::SMALL)
                     .color(egui::Color32::from_rgb(100, 255, 100)),
             );
         }
@@ -545,13 +540,13 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
     // is capped so a tooltip wraps the sentence instead of growing a line
     // wide enough to leave the screen.
     if let Some(proc) = &item.proc {
-        ui.add_space(4.0);
+        ui.add_space(space::XS);
         ui.scope(|ui| {
             ui.set_max_width(280.0);
             ui.label(
                 egui::RichText::new(proc_description(proc))
                     .family(body_family(ui.ctx()))
-                    .size(12.0)
+                    .size(text::SMALL)
                     .color(PROC_TEXT_COLOR),
             );
         });
