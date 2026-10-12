@@ -61,7 +61,6 @@ use arenasim::states::animation_sandbox::ui::{
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
-use arenasim::ui::fonts::install_game_fonts;
 use egui_kittest::Harness;
 
 /// The class the fixture stages. Its whole kit is drawn, exactly as the panel
@@ -251,7 +250,7 @@ fn render(name: &str, view: SandboxView) {
     let mut harness = Harness::builder()
         .with_size([1280.0, 800.0])
         .build(move |ctx| {
-            install_game_fonts(ctx);
+            arenasim::ui::install(ctx);
             let _ = draw_sandbox_ui(ctx, &view);
         });
     harness.run();

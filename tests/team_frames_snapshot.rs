@@ -17,7 +17,7 @@
 //! Fidelity caveat (same as the Results screen): kittest has no Bevy
 //! textures, so class icons render as class-color fallback squares and aura
 //! icons as gold/red fallback blocks. Fonts are the client's own stack
-//! (`install_game_fonts`). Layout, spacing, color and type iterate
+//! (`arenasim::ui::install`). Layout, spacing, color and type iterate
 //! faithfully.
 //!
 //! The click tests below are NOT `#[ignore]`d: kittest's renderer is lazy, so
@@ -36,7 +36,6 @@ use arenasim::states::play_match::{
     apply_call_click, column_frame_rects, draw_team_frames, CallClick, CombatantFrame, FrameAura,
     ResourceType, SpellIcons, TeamFramesData,
 };
-use arenasim::ui::fonts::install_game_fonts;
 
 /// The harness viewport, and therefore `ctx.available_rect()` — the rect the
 /// frame layout is measured against.
@@ -174,7 +173,7 @@ fn run_clicks(data: TeamFramesData, pointer: Option<egui::Pos2>) -> Vec<CallClic
     let spell_icons = SpellIcons::default();
 
     let mut harness = Harness::builder().with_size(SCREEN).build(move |ctx| {
-        install_game_fonts(ctx);
+        arenasim::ui::install(ctx);
         if let Some(click) = draw_team_frames(ctx, &data, &class_icons, &spell_icons) {
             sink.borrow_mut().push(click);
         }
@@ -336,7 +335,7 @@ fn team_frames_2v2() {
     let spell_icons = SpellIcons::default(); // no textures -> gold/red fallback blocks
 
     let mut harness = Harness::builder().with_size(SCREEN).build(move |ctx| {
-        install_game_fonts(ctx);
+        arenasim::ui::install(ctx);
         draw_team_frames(ctx, &data, &class_icons, &spell_icons);
     });
 
@@ -366,7 +365,7 @@ fn team_frames_with_calls() {
     let spell_icons = SpellIcons::default();
 
     let mut harness = Harness::builder().with_size(SCREEN).build(move |ctx| {
-        install_game_fonts(ctx);
+        arenasim::ui::install(ctx);
         draw_team_frames(ctx, &data, &class_icons, &spell_icons);
     });
 

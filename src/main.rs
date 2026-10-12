@@ -18,7 +18,6 @@ use arenasim::states::play_match::{
 };
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::ui::driver::{Outcome, UiDriverConfig, UiDriverPlugin};
-use arenasim::ui::fonts::install_game_fonts;
 use arenasim::ui::UiPlugin;
 
 fn main() {
@@ -304,7 +303,7 @@ fn setup_custom_font(mut contexts: EguiContexts) {
     // A missing context here should fail loudly.
     let ctx = contexts.ctx_mut();
 
-    // The stack itself lives in `arenasim::ui::fonts` so the offscreen egui
-    // snapshot harnesses install the SAME fonts the player sees.
-    install_game_fonts(ctx);
+    // `ui::install` is the one call the offscreen egui snapshot harnesses
+    // make too, so they render the SAME look the player sees.
+    arenasim::ui::install(ctx);
 }

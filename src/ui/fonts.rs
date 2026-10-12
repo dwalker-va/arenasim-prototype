@@ -9,6 +9,9 @@
 //! label that only fits under the defaults' metrics, could pass the suite and
 //! be wrong in the game. Anything that changes the stack belongs here so the
 //! harnesses cannot drift from the client again.
+//!
+//! Nothing installs these directly: [`crate::ui::install`] is the one call the
+//! client and every harness make.
 
 use bevy_egui::egui;
 
@@ -42,14 +45,4 @@ pub fn game_font_definitions() -> egui::FontDefinitions {
     proportional.insert(1, "rajdhani_regular".to_owned());
 
     fonts
-}
-
-/// Install [`game_font_definitions`] on `ctx`.
-///
-/// Idempotent: `Context::set_fonts` compares against the installed definitions
-/// and does nothing when they already match, so a snapshot harness can call
-/// this at the top of its per-frame app closure without rebuilding the atlas
-/// every frame.
-pub fn install_game_fonts(ctx: &egui::Context) {
-    ctx.set_fonts(game_font_definitions());
 }

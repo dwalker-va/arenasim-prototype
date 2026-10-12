@@ -22,7 +22,7 @@
 //! Fidelity caveat, shared with the other egui snapshot loops: kittest has no
 //! Bevy textures, so the class icon is absent and every ability, item and pet
 //! icon renders as its placeholder tile (or, for equipment rows, no icon at
-//! all). Fonts are the client's own stack (`install_game_fonts`), so layout,
+//! all). Fonts are the client's own stack (`arenasim::ui::install`), so layout,
 //! spacing, colour, type and copy iterate faithfully; icon art still needs the
 //! client.
 
@@ -35,7 +35,6 @@ use arenasim::states::play_match::equipment::{load_default_loadouts, load_item_d
 use arenasim::states::view_combatant_ui::{
     draw_view_combatant, EquipmentPickerState, ViewCombatantData, ViewCombatantState,
 };
-use arenasim::ui::fonts::install_game_fonts;
 
 /// Tall enough that the whole sheet — header, stats and kit, the class's
 /// strategic panel and every equipment row — fits without scrolling.
@@ -93,7 +92,7 @@ fn snapshot(name: &str, view: ViewCombatantState) {
     let mut picker = EquipmentPickerState::default();
 
     let mut harness = Harness::builder().with_size(SIZE).build(move |ctx| {
-        install_game_fonts(ctx);
+        arenasim::ui::install(ctx);
         let data = ViewCombatantData {
             abilities: &abilities,
             items: &items,

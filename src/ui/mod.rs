@@ -12,8 +12,25 @@
 
 pub mod driver;
 pub mod fonts;
+pub mod theme;
 
 use bevy::prelude::*;
+use bevy_egui::egui;
+
+/// Install the game's look on `ctx`: the ONE call the client's Startup system
+/// and every `egui_kittest` harness make, so a harness cannot render a look the
+/// client does not run (`tests/snapshot_font_audit.rs` holds every harness to
+/// it).
+///
+/// Today it installs the font stack ([`fonts::game_font_definitions`]); the
+/// shared `Style` built from [`theme`] joins it here, and nowhere else.
+///
+/// Idempotent: `Context::set_fonts` compares against the installed definitions
+/// and does nothing when they already match, so a harness can call this at the
+/// top of its per-frame app closure without rebuilding the atlas every frame.
+pub fn install(ctx: &egui::Context) {
+    ctx.set_fonts(fonts::game_font_definitions());
+}
 
 /// Plugin for UI management.
 ///

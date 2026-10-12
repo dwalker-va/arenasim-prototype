@@ -1,4 +1,5 @@
-//! Every egui kittest harness must install the client's font stack.
+//! Every egui kittest harness must install the client's look through
+//! `ui::install`.
 //!
 //! A harness that renders with egui's default fonts produces baselines of a
 //! screen nobody plays: a glyph Rajdhani has no coverage for, or a label that
@@ -9,21 +10,28 @@
 //!
 //! So this audit is the drift guard for the one-definition rule: every Rust
 //! source file in the crate that builds an `egui_kittest` harness must call
-//! `arenasim::ui::fonts::install_game_fonts` at least once per harness it
-//! builds. It reads source text, needs no GPU, and runs in the default
-//! `cargo test`.
+//! `ui::install` — the same call the client's Startup system makes — at least
+//! once per harness it builds. `install` sets the fonts today and the shared
+//! `Style` once `ui::theme` has one, so a harness that skips it cannot picture
+//! either.
+//!
+//! The call is matched in its PATH form (`arenasim::ui::install(` from
+//! `tests/`, `crate::ui::install(` from `src/`): a bare `install(` is too
+//! common a name for a lexical scan to attribute.
+//!
+//! It reads source text, needs no GPU, and runs in the default `cargo test`.
 //!
 //! # Why the scan covers `src/` as well as `tests/`
 //!
-//! The rule enforced here is "every kittest harness installs the game fonts",
+//! The rule enforced here is "every kittest harness calls `ui::install`",
 //! which has no exceptions to remember. The narrower rule — "every harness that
-//! *takes a snapshot* installs them" — asks a reader to know which harnesses
+//! *takes a snapshot* calls it" — asks a reader to know which harnesses
 //! are which, and a harness that takes no snapshot today may grow a
 //! `.snapshot()` call tomorrow, silently baking a baseline of the wrong screen.
 //! `#[cfg(test)]` modules inside `src/` build harnesses too
 //! (`states/encyclopedia/widget.rs` drives the link click-contract through
 //! one), so the scan follows the harnesses rather than the directory. When a
-//! `src/` harness trips this audit the fix is to install the fonts in it — one
+//! `src/` harness trips this audit the fix is to call `ui::install` in it — one
 //! line, and it makes the harness render what the client renders — never an
 //! exemption.
 //!
@@ -38,7 +46,7 @@
 //! never leave. What remains:
 //!
 //! * **Counts, not pairing.** The comparison is a per-file COUNT of harnesses
-//!   against a count of `install_game_fonts(` call sites, so a two-harness file
+//!   against a count of `ui::install(` call sites, so a two-harness file
 //!   whose first closure installed twice and whose second installed not at all
 //!   would pass. Real pairing needs a parser: the textual approximation —
 //!   charging each install to the nearest preceding constructor — would reject
@@ -48,7 +56,7 @@
 //!   a doubled install to appear at all. The counts stay.
 //! * **A harness built somewhere else.** A helper in one file that returns a
 //!   built `Harness` to another counts against the file that builds it, which
-//!   is the file that must install the fonts — but a harness reached through a
+//!   is the file that must call `ui::install` — but a harness reached through a
 //!   trait object or a macro-generated call site is not text this scan can see.
 
 mod common;
@@ -90,14 +98,15 @@ fn harness_constructors() -> Regex {
     .expect("harness-constructor pattern must compile")
 }
 
-/// `install_game_fonts(` as a CALL — the `use` line carries no parenthesis, so
-/// an import is not an installation.
+/// `ui::install(` as a CALL, through any path that ends in `ui::install`
+/// (`arenasim::ui::install(`, `crate::ui::install(`). A `use` line carries no
+/// parenthesis, so an import is not an installation.
 fn install_calls() -> Regex {
-    Regex::new(r"\binstall_game_fonts\s*\(").expect("install-call pattern must compile")
+    Regex::new(r"\bui\s*::\s*install\s*\(").expect("install-call pattern must compile")
 }
 
 #[test]
-fn every_egui_harness_installs_the_client_fonts() {
+fn every_egui_harness_calls_ui_install() {
     let constructors = harness_constructors();
     let installs_re = install_calls();
 
@@ -131,7 +140,7 @@ fn every_egui_harness_installs_the_client_fonts() {
             let name = file.rel_display();
             failures.push(format!(
                 "{name}: builds {harnesses} egui_kittest harness(es) but calls \
-                 install_game_fonts {installs} time(s)"
+                 ui::install {installs} time(s)"
             ));
         }
     }
@@ -143,11 +152,11 @@ fn every_egui_harness_installs_the_client_fonts() {
     );
     assert!(
         failures.is_empty(),
-        "these harnesses render with egui's DEFAULT fonts, so what they measure and picture \
-         is a screen the player never sees. Call \
-         `arenasim::ui::fonts::install_game_fonts(ctx)` — `install_game_fonts(ui.ctx())` for \
-         a `new_ui` harness — as the first statement of each harness's app closure, then \
-         re-bless any baselines it owns:\n  {}",
+        "these harnesses render with egui's DEFAULT look, so what they measure and picture \
+         is a screen the player never sees. Call `arenasim::ui::install(ctx)` — \
+         `arenasim::ui::install(ui.ctx())` for a `new_ui` harness, `crate::ui::install` from \
+         `src/` — as the first statement of each harness's app closure, then re-bless any \
+         baselines it owns:\n  {}",
         failures.join("\n  ")
     );
 }
@@ -217,7 +226,7 @@ fn the_reading_resolves_aliases_and_ignores_prose() {
         raw: r#"
             use egui_kittest::Harness as H;
             fn t() {
-                let mut h = H::new(|ctx| { install_game_fonts(ctx); });
+                let mut h = H::new(|ctx| { arenasim::ui::install(ctx); });
             }
         "#
         .to_string(),
