@@ -86,7 +86,6 @@ const INSTALL: (&str, usize) = ("src/ui/mod.rs", 1);
 #[rustfmt::skip]
 const FROZEN: &[(&str, Counts)] = &[
     ("src/states/arena_layout_debug.rs", Counts { colour: 14, size: 3, space: 2, radius: 3, style: 0 }),
-    ("src/states/mod.rs", Counts { colour: 35, size: 23, space: 52, radius: 0, style: 0 }),
     ("src/states/play_match/auras.rs", Counts { colour: 8, size: 0, space: 0, radius: 0, style: 0 }),
     ("src/states/play_match/camera.rs", Counts { colour: 6, size: 5, space: 1, radius: 0, style: 0 }),
     ("src/states/play_match/combat_ai.rs", Counts { colour: 4, size: 0, space: 0, radius: 0, style: 0 }),

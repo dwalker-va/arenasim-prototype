@@ -1,0 +1,68 @@
+# Options and Keybindings: an option changes, a key rebinds, and Reset to
+# Defaults resets nothing until it is confirmed (AS-266).
+#
+# Run:  cargo run --release -- --ui-script tests/ui-scripts/options-and-keybindings.script
+#
+# Run it at the client's default window (Windowed, 1280 x 720 in settings.ron)
+# as well as at the checked-in size: every control asserted visible below is
+# one a 720p player must reach without scrolling. The script writes
+# settings.ron as it goes (that is the point of a setting); restore it after.
+#
+# `options window=... vsync=...` and `keybind <Action> primary=... secondary=...`
+# are noted by the screens as they draw, so every value is read back off the
+# frame.
+
+assert-state MainMenu
+click menu:OPTIONS
+assert-state Options
+
+# --- every control on screen, without scrolling -----------------------------
+assert-visible options:window:Windowed
+assert-visible options:resolution:HD720
+assert-visible options:vsync:on
+assert-visible options:aura-icons:on
+assert-visible options:keybindings
+
+# --- an option changes, and changes back -------------------------------------
+click options:vsync:off
+assert-note vsync=false
+click options:vsync:on
+assert-note vsync=true
+
+# --- a key rebinds -------------------------------------------------------------
+click options:keybindings
+assert-state Keybindings
+assert-visible keybindings:reset
+assert-note keybind Confirm primary=ENTER
+click keybind:Confirm:Primary
+key Backspace
+assert-note keybind Confirm primary=BACKSPACE
+
+# --- Reset asks first: Cancel resets nothing ---------------------------------
+click keybindings:reset
+assert-visible reset-keybindings:confirm
+assert-visible reset-keybindings:cancel
+click reset-keybindings:cancel
+assert-absent reset-keybindings:confirm
+assert-state Keybindings
+assert-note keybind Confirm primary=BACKSPACE
+
+# --- ...and Esc closes the confirm, resetting nothing, before it leaves ------
+click keybindings:reset
+assert-visible reset-keybindings:confirm
+key Escape
+assert-state Keybindings
+assert-absent reset-keybindings:confirm
+assert-note keybind Confirm primary=BACKSPACE
+
+# --- Confirm resets --------------------------------------------------------------
+click keybindings:reset
+click reset-keybindings:confirm
+assert-absent reset-keybindings:confirm
+assert-note keybind Confirm primary=ENTER
+assert-no-note primary=BACKSPACE
+
+key Escape
+assert-state Options
+key Escape
+assert-state MainMenu
