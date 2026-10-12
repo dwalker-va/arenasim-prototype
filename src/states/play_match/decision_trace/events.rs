@@ -67,7 +67,7 @@ use serde::{Deserialize, Serialize};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::components::{AuraType, DRCategory};
-use crate::states::play_match::situation::{TeamSituation, Tempo, Window};
+use crate::states::play_match::situation::{MatchPhase, TeamSituation, Tempo, Window};
 
 /// One AI decision event. Serializes to a single JSONL line.
 #[derive(Serialize, Clone, Debug)]
@@ -98,13 +98,17 @@ pub struct DecisionEvent {
     pub payload: EventPayload,
 }
 
-/// The compact `situation` field of an `ability_decision`: the team's tempo,
-/// always, and the `enemy_healer_locked` window while one is open.
+/// The compact `situation` field of an `ability_decision`: the match phase and
+/// the team's tempo, always, and the `enemy_healer_locked` and
+/// `ally_in_danger` windows while one is open.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct SituationTag {
+    pub phase: MatchPhase,
     pub tempo: Tempo,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enemy_healer_locked: Option<WindowTag>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ally_in_danger: Option<WindowTag>,
 }
 
 /// A situation window as the trace records it: the subject's entity id and
@@ -130,8 +134,10 @@ impl From<&Window> for WindowTag {
 impl From<&TeamSituation> for SituationTag {
     fn from(situation: &TeamSituation) -> Self {
         Self {
+            phase: situation.phase,
             tempo: situation.tempo,
             enemy_healer_locked: situation.enemy_healer_locked.as_ref().map(WindowTag::from),
+            ally_in_danger: situation.ally_in_danger.as_ref().map(WindowTag::from),
         }
     }
 }
@@ -141,7 +147,9 @@ impl From<&TeamSituation> for SituationTag {
 #[serde(rename_all = "snake_case")]
 pub enum SituationName {
     EnemyHealerLocked,
+    AllyInDanger,
     Tempo,
+    Phase,
 }
 
 /// What happened to the situation. Adding a variant requires updating
@@ -155,7 +163,8 @@ pub enum SituationChangeKind {
     End,
     /// A new CC pushed an open window's `until` later.
     Extended,
-    /// The team's tempo moved (`tempo` / `previous_tempo` carry both ends).
+    /// The team's tempo or the match phase moved (`tempo` /
+    /// `previous_tempo`, or `phase` / `previous_phase`, carry both ends).
     Shift,
 }
 
@@ -278,7 +287,8 @@ pub enum EventPayload {
         team: u8,
         name: SituationName,
         change: SituationChangeKind,
-        /// The window's subject (`enemy_healer_locked`: the healer).
+        /// The window's subject (`enemy_healer_locked`: the healer;
+        /// `ally_in_danger`: the teammate).
         #[serde(skip_serializing_if = "Option::is_none")]
         subject: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -290,6 +300,11 @@ pub enum EventPayload {
         tempo: Option<Tempo>,
         #[serde(skip_serializing_if = "Option::is_none")]
         previous_tempo: Option<Tempo>,
+        /// `phase` shifts: the phase after the change, and before it.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        phase: Option<MatchPhase>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        previous_phase: Option<MatchPhase>,
     },
 }
 

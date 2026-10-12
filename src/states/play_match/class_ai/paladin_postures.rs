@@ -101,7 +101,7 @@ pub fn evaluate_paladin_posture(
 
     // --- PRESSURED triggers (R8) ---
     // Focused: the Priest's compound trigger (R6), shared verbatim.
-    let focused = compound_pressure_trigger(entity, my_pos, ctx, shared);
+    let focused = compound_pressure_trigger(entity, ctx);
     // Healing-heavy (R8, observable + deterministic): a living non-pet team
     // member (self included) is below `healing_heavy_hp` AND a melee/pet
     // enemy is inside the danger radius. The melee-pressure conjunct is
@@ -244,7 +244,6 @@ pub fn evaluate_paladin_posture(
         next,
         ctx,
         AbilityType::PaladinCleanse,
-        shared,
         state,
     ) {
         // Dispel walk (AS-180): a teammate held in urgent crowd control Cleanse

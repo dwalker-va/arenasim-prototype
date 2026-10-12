@@ -69,9 +69,10 @@ an open, review-ready PR — nothing more.
 
    **Never re-pin a stale seed.** When your change moves the RNG stream and a
    seed-pinned probe stops containing its situation, migrate the probe — to a
-   scene test (`class_ai::scene::Scene`), a staged match, or a
-   situation-conditional probe over a seed bank — instead of hunting for a new
-   seed that still reproduces it. The Tester rejects a re-pin (CLAUDE.md, *Test
+   scene test (`class_ai::scene::Scene`) when one tick decides it, otherwise to
+   a situation-conditional probe over a seed bank (staged matches, the third
+   target, do not exist until AS-273) — instead of hunting for a new seed that
+   still reproduces it. The Tester rejects a re-pin (CLAUDE.md, *Test
    an AI decision*). A new AI decision rule gets a paired scene test.
 5. **Ship as a PR.** **Re-confirm the tree first — the push is the step that loses
    work.** Immediately before pushing, `git -C <abs> branch --show-current` must equal

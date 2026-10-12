@@ -1196,7 +1196,6 @@ pub fn dispel_goal(
     my_pos: Vec3,
     current_mana: f32,
     dispel: super::abilities::AbilityType,
-    urgency_hp_threshold: f32,
     walking_to: Option<Entity>,
 ) -> Option<DispelGoal> {
     use super::class_ai::OwedDispel;
@@ -1212,7 +1211,7 @@ pub fn dispel_goal(
             OwedDispel::Reached(ally) if walking_to == Some(ally) => ally,
             OwedDispel::Reached(_) => return None,
         };
-    if super::class_ai::another_teammate_dying(ctx, entity, ally, urgency_hp_threshold) {
+    if super::class_ai::another_teammate_dying(ctx, entity, ally) {
         return None;
     }
     Some(DispelGoal {

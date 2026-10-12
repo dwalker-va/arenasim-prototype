@@ -40,6 +40,7 @@ use arenasim::states::play_match::constants::GCD;
 use arenasim::states::play_match::decision_trace::{AbilityOutcome, DecisionTrace, EventPayload};
 use arenasim::states::play_match::effects::process_travel_form;
 use arenasim::states::play_match::movement_config::load_movement_config;
+use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
 use arenasim::states::play_match::{AbilityDefinitions, AbilityType, MovementConfig, SpellSchool};
 
 // ── shared scaffolding ──────────────────────────────────────────────────────
@@ -543,6 +544,10 @@ fn decide_scene_rooted(
         &[],
         Default::default(),
         Default::default(),
+    )
+    .classified(
+        &SituationConfig::from_movement(&movement),
+        MatchClock::after_gates(60.0),
     );
     let live = ActiveAuras { auras: self_auras };
     let mut queue = CommandQueue::default();
@@ -560,7 +565,6 @@ fn decide_scene_rooted(
         true,
         None,
         true,
-        60.0,
         &mut Default::default(),
         &mut trace,
     );

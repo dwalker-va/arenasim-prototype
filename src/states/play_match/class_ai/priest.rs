@@ -1191,7 +1191,11 @@ const MANA_BURN_SURPLUS_HEALTH_FLOOR: f32 = 0.90;
 
 /// Cast/attack-preventing CC on an entity (Stun/Fear/Polymorph/Incapacitate —
 /// deliberately NOT Root: a rooted caster still casts). The set
-/// `situation::locks_healer` names, less Cyclone.
+/// `situation::locks_healer` names, LESS CYCLONE: a cycloned enemy still
+/// counts as focusing the Priest here, and so still holds its Mana Burn back,
+/// though it can no more act than a feared one. Adding Cyclone would change
+/// what a Priest does beside a Druid that cyclones its attacker, so it is a
+/// behaviour change of its own, not part of the situation port.
 fn attack_prevented_by_cc(ctx: &CombatContext, entity: Entity) -> bool {
     ctx.active_auras.get(&entity).is_some_and(|auras| {
         auras.iter().any(|a| {
@@ -1724,7 +1728,7 @@ pub fn evaluate_priest_posture(
 
     // --- PRESSURED compound trigger (R6) --- see
     // `healer_postures::compound_pressure_trigger` (shared with the Paladin).
-    let trigger = compound_pressure_trigger(entity, my_pos, ctx, shared);
+    let trigger = compound_pressure_trigger(entity, ctx);
 
     let prev = state.posture;
 
@@ -1867,7 +1871,6 @@ pub fn evaluate_priest_posture(
         next,
         ctx,
         AbilityType::DispelMagic,
-        shared,
         state,
     ) {
         // Dispel walk (AS-187, the Paladin's AS-180 walk): a teammate held in

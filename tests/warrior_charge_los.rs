@@ -30,6 +30,7 @@ use arenasim::states::play_match::{
 };
 
 use arenasim::combat::log::CombatLog;
+use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
 
 fn combatant_info(
     entity: Entity,
@@ -162,7 +163,8 @@ fn run_charge_decision(obstacles: Vec<ObstacleVolume>) -> DecisionTrace {
         &obstacles,
         Default::default(),
         Default::default(),
-    );
+    )
+    .classified(&SituationConfig::default(), MatchClock::after_gates(0.0));
 
     let mut instant_attacks: Vec<QueuedInstantAttack> = Vec::new();
     let mut battle_shouted: HashSet<Entity> = HashSet::new();

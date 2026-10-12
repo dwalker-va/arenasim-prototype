@@ -1,4 +1,4 @@
-//! Scene tests for the four decisions that read a situation
+//! Scene tests for the decisions that read a situation
 //! (`src/states/play_match/situation.rs`): each runs the real class dispatch
 //! for one tick in a constructed scene, paired with its control — the same
 //! scene with the situation's one condition removed.
@@ -8,12 +8,18 @@
 //! match byte-identical, so neither the match-level suites nor a sweep notice
 //! when it is deleted. Each pair below kills exactly that deletion.
 
-use arenasim::states::match_config::CharacterClass::{Hunter, Mage, Priest, Warrior};
+use arenasim::states::match_config::CharacterClass::{
+    Druid, Hunter, Mage, Paladin, Priest, Warrior,
+};
+use arenasim::states::play_match::class_ai::druid::mana_reserve;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
-use arenasim::states::play_match::decision_trace::MovementTrigger;
+use arenasim::states::play_match::decision_trace::{MovementTrigger, RejectionReason};
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
-use arenasim::states::play_match::situation::Tempo;
-use arenasim::states::play_match::{AbilityType, AuraType};
+use arenasim::states::play_match::situation::{
+    MatchPhase, TeamSituation, Tempo, ATTRITION_ONSET_SECS,
+};
+use arenasim::states::play_match::traps::freezing_trap_aura;
+use arenasim::states::play_match::{load_ability_definitions, AbilityType, AuraPending, AuraType};
 
 const WARRIOR: &str = "warrior";
 const HUNTER: &str = "hunter";
@@ -22,6 +28,8 @@ const ALLY: &str = "ally";
 const MAGE: &str = "mage";
 const ENEMY_WARRIOR: &str = "enemy warrior";
 const ENEMY_PRIEST: &str = "enemy priest";
+const PALADIN: &str = "paladin";
+const DRUID: &str = "druid";
 
 /// Battle Shout's buff, already up, so the Warrior's first priority (shout an
 /// unbuffed ally) is out of the way and the damage chain is what decides.
@@ -262,6 +270,298 @@ fn a_pressing_healer_stops_pulling_toward_cover() {
     assert_eq!(
         pressing.scorer_term("cover_pull"),
         Some(0.0),
+        "{}",
+        describe(&pressing)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Healer posture: a teammate dying in heal range stops the healer hiding —
+// `cover_pull` is zeroed while the team situation has a dying teammate in
+// reach (`teammate_needs_saving`).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_healer_with_a_dying_teammate_in_reach_stops_pulling_toward_cover() {
+    // Level on health otherwise: the enemy at full, so only the teammate's
+    // health separates the pair (a dying teammate leaves the team trailing,
+    // never pressing).
+    let mut scene = pressured_priest_scene(1.0);
+    scene.set_health(ALLY, 0.3);
+    let dying = scene.decide(PRIEST);
+    assert_eq!(dying.situation.map(|s| s.tempo), Some(Tempo::Trailing));
+    assert!(
+        dying
+            .movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::PressuredEnter),
+        "the scene pressures the Priest: {}",
+        describe(&dying)
+    );
+    assert_eq!(
+        dying.scorer_term("cover_pull"),
+        Some(0.0),
+        "{}",
+        describe(&dying)
+    );
+
+    // Control: the teammate healthy, and the Priest steps into cover.
+    scene.set_health(ALLY, 1.0);
+    let healthy = scene.decide(PRIEST);
+    assert!(
+        healthy.scorer_term("cover_pull").is_some_and(|v| v > 0.0),
+        "{}",
+        describe(&healthy)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Healer posture: the PRESSURED trigger is the situation's `pressured` fact
+// for the healer — an enemy it sees, near enough that intent matters.
+// ---------------------------------------------------------------------------
+
+/// A Priest with an enemy Warrior 8yd off, targeting `whom`.
+fn targeted_priest_scene(whom: &'static str) -> Scene {
+    Scene::new()
+        .unit(PRIEST, 1, Priest)
+        .aura(PRIEST, AuraType::MaxHealthIncrease, 600.0)
+        .unit(ALLY, 1, Warrior)
+        .at(0.0, -10.0)
+        .aura(ALLY, AuraType::MaxHealthIncrease, 600.0)
+        .unit(ENEMY_WARRIOR, 2, Warrior)
+        .at(-8.0, 0.0)
+        .targeting(whom)
+        .unit(MAGE, 2, Mage)
+        .at(-30.0, 10.0)
+}
+
+#[test]
+fn a_healer_an_enemy_closes_on_is_pressured() {
+    let on_me = targeted_priest_scene(PRIEST).decide(PRIEST);
+    assert!(
+        on_me
+            .movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::PressuredEnter),
+        "{}",
+        describe(&on_me)
+    );
+
+    // Control: the same Warrior, the same spot, on the teammate instead.
+    let elsewhere = targeted_priest_scene(ALLY).decide(PRIEST);
+    assert!(
+        !elsewhere
+            .movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::PressuredEnter),
+        "{}",
+        describe(&elsewhere)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The ally-in-danger window: a teammate both dying and pressured, named on
+// the decision a teammate makes.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_dying_teammate_under_attack_is_in_danger() {
+    let mut scene = targeted_priest_scene(ALLY);
+    scene.set_health(ALLY, 0.3);
+    let danger = scene.decide(PRIEST);
+    assert_eq!(
+        danger
+            .situation
+            .and_then(|s| s.ally_in_danger)
+            .map(|w| w.subject),
+        Some(scene.entity(ALLY).index()),
+        "{}",
+        describe(&danger)
+    );
+
+    // Control: dying, but nobody on it.
+    let mut scene = targeted_priest_scene(PRIEST);
+    scene.set_health(ALLY, 0.3);
+    let unpressed = scene.decide(PRIEST);
+    assert_eq!(
+        unpressed.situation.and_then(|s| s.ally_in_danger),
+        None,
+        "{}",
+        describe(&unpressed)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The dispel walk's dying-first rule: no walk to a teammate held in urgent CC
+// while ANOTHER teammate is dying (`another_teammate_dying`).
+// ---------------------------------------------------------------------------
+
+/// A Paladin, a teammate Warrior in a Freezing Trap 40yd off (beyond
+/// Cleanse's 30), and a teammate Mage beside the Paladin at `mage_health`.
+fn trapped_teammate_scene(mage_health: f32) -> Scene {
+    let hunter = Scene::new().unit(HUNTER, 2, Hunter).at(60.0, 30.0);
+    let owner = hunter.entity(HUNTER);
+    hunter
+        .unit(PALADIN, 1, Paladin)
+        .aura(PALADIN, AuraType::MaxHealthIncrease, 600.0)
+        .unit(WARRIOR, 1, Warrior)
+        .at(40.0, 0.0)
+        .aura_full(WARRIOR, freezing_trap_aura(owner))
+        .unit(MAGE, 1, Mage)
+        .at(3.0, 0.0)
+        .health(mage_health)
+}
+
+#[test]
+fn the_dispel_walk_yields_to_another_dying_teammate() {
+    let dying = trapped_teammate_scene(0.3).decide(PALADIN);
+    assert!(
+        !dying
+            .movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::DispelChase),
+        "{}",
+        describe(&dying)
+    );
+
+    // Control: the Mage healthy, and the Paladin walks to the trap.
+    let healthy = trapped_teammate_scene(1.0).decide(PALADIN);
+    assert!(
+        healthy
+            .movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::DispelChase),
+        "{}",
+        describe(&healthy)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The Druid's mana governor: a reserve held back through the Engaged phase,
+// spent down to nothing by the Attrition onset.
+// ---------------------------------------------------------------------------
+
+/// Twenty seconds after the gates: well inside the Engaged phase.
+const ENGAGED_SECS: f32 = 20.0;
+
+/// A Druid with a teammate worth a proactive heal (attacked, at 75%) and one
+/// mana over the governor's reserve at [`ENGAGED_SECS`], deciding at `now`.
+/// Innervate is down, so the pool cannot refill.
+fn governed_druid_scene(now: f32) -> Scene {
+    let defs = load_ability_definitions().expect("abilities.ron loads");
+    let mark = defs
+        .get(&AbilityType::MarkOfTheWild)
+        .expect("Mark of the Wild is defined");
+    let scene = Scene::new().now(now).unit(DRUID, 1, Druid);
+    let druid = scene.entity(DRUID);
+    let scene = scene.unit(ALLY, 1, Warrior).at(5.0, 0.0).health(0.75);
+    let ally = scene.entity(ALLY);
+    let mark_on = |target| {
+        AuraPending::from_ability(target, druid, mark)
+            .expect("Mark of the Wild applies an aura")
+            .aura
+    };
+    let (druid_mark, ally_mark) = (mark_on(druid), mark_on(ally));
+    let mut scene = scene
+        .aura_full(DRUID, druid_mark)
+        .aura_full(ALLY, ally_mark)
+        .cooldown(DRUID, AbilityType::Innervate, 60.0)
+        .unit(ENEMY_WARRIOR, 2, Warrior)
+        .at(6.0, 0.0)
+        .targeting(ALLY)
+        .unit(ENEMY_PRIEST, 2, Priest)
+        .at(0.0, 35.0);
+    // One mana over the Engaged reserve: any proactive cast dips into it
+    // while that reserve is held.
+    let held = TeamSituation {
+        since_gates: ENGAGED_SECS,
+        ..Default::default()
+    };
+    let druid = scene.combatant_mut(DRUID);
+    druid.current_mana = mana_reserve(druid.max_mana, &held) + 1.0;
+    scene
+}
+
+#[test]
+fn the_druid_governor_holds_its_reserve_until_attrition() {
+    let engaged = governed_druid_scene(ENGAGED_SECS).decide(DRUID);
+    assert_eq!(
+        engaged.situation.map(|s| s.phase),
+        Some(MatchPhase::Engaged)
+    );
+    assert!(
+        engaged.candidates.iter().any(|c| matches!(
+            &c.reason,
+            Some(RejectionReason::PreconditionUnmet { note }) if note.starts_with("mana governor")
+        )),
+        "{}",
+        describe(&engaged)
+    );
+    assert_ne!(
+        engaged.chose().map(|(ability, _)| ability),
+        Some(AbilityType::Rejuvenation),
+        "{}",
+        describe(&engaged)
+    );
+
+    // Control: the same Druid, the same mana, once dampening has reached half.
+    let attrition = governed_druid_scene(ATTRITION_ONSET_SECS + 1.0).decide(DRUID);
+    assert_eq!(
+        attrition.situation.map(|s| s.phase),
+        Some(MatchPhase::Attrition)
+    );
+    assert_eq!(
+        attrition.chose(),
+        Some((AbilityType::Rejuvenation, Some(ALLY))),
+        "{}",
+        describe(&attrition)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Warrior tempo reset: a Warrior rooted off its target regroups on its healer
+// — unless its team is pressing, which keeps it chasing.
+// ---------------------------------------------------------------------------
+
+/// A rooted Warrior 15yd from the enemy Mage it targets, Charge down, its
+/// Priest behind it. `enemy_health` sets the tempo.
+fn rooted_warrior_scene(enemy_health: f32) -> Scene {
+    let scene = Scene::new()
+        .unit(WARRIOR, 1, Warrior)
+        .rage(20.0)
+        .targeting(MAGE)
+        .aura(WARRIOR, AuraType::Root, 3.0)
+        .cooldown(WARRIOR, AbilityType::Charge, 10.0)
+        .unit(PRIEST, 1, Priest)
+        .at(-10.0, 0.0)
+        .unit(MAGE, 2, Mage)
+        .at(15.0, 0.0)
+        .health(enemy_health)
+        .unit(ENEMY_PRIEST, 2, Priest)
+        .at(15.0, 20.0)
+        .health(enemy_health);
+    shouted(scene, WARRIOR)
+}
+
+#[test]
+fn a_pressing_warrior_does_not_reset_tempo() {
+    let even = rooted_warrior_scene(1.0).decide(WARRIOR);
+    assert_eq!(even.situation.map(|s| s.tempo), Some(Tempo::Even));
+    assert!(
+        even.movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::MeleeReset),
+        "{}",
+        describe(&even)
+    );
+
+    let pressing = rooted_warrior_scene(0.6).decide(WARRIOR);
+    assert_eq!(pressing.situation.map(|s| s.tempo), Some(Tempo::Pressing));
+    assert!(
+        !pressing
+            .movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::MeleeReset),
         "{}",
         describe(&pressing)
     );

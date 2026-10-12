@@ -22,6 +22,7 @@ use arenasim::states::play_match::class_ai::hunter::decide_hunter_action;
 use arenasim::states::play_match::class_ai::hunter_dip::HunterDipPlan;
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo, QueuedInstantAttack};
 use arenasim::states::play_match::decision_trace::DecisionTrace;
+use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
 use arenasim::states::play_match::{
     AbilityDefinitions, AbilityType, Aura, CastingState, Combatant, FlareZone, GameRng,
     MovementConfig,
@@ -109,7 +110,8 @@ fn decide_at(since_gates: f32) -> Decision {
         &[],
         Default::default(),
         Default::default(),
-    );
+    )
+    .classified(&SituationConfig::default(), MatchClock::after_gates(0.0));
 
     let mut queue = CommandQueue::default();
     let mut commands = Commands::new(&mut queue, &world);
