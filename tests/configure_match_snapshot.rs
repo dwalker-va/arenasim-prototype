@@ -20,7 +20,7 @@
 //!
 //! Fidelity caveat vs the real client: `egui_kittest` has no Bevy textures, so
 //! the class icons render as class-color fallback squares. Fonts are the
-//! client's own stack (`install_game_fonts`), so layout, spacing, color and
+//! client's own stack (`arenasim::ui::install`), so layout, spacing, color and
 //! type iterate faithfully; pixel-exact icon fidelity still needs the real
 //! client.
 
@@ -31,7 +31,6 @@ use arenasim::states::configure_match_ui::{
 };
 use arenasim::states::match_config::{ArenaMap, CharacterClass, MatchConfig};
 use arenasim::states::play_match::map_config::MapGeometryConfig;
-use arenasim::ui::fonts::install_game_fonts;
 
 /// A representative 2v2 config: Team 1 fully filled (Warrior + Priest), Team 2
 /// with one filled slot (Mage) and one empty slot — so the baseline exercises
@@ -59,7 +58,7 @@ fn configure_match_2v2() {
     let mut harness = Harness::builder()
         .with_size([1500.0, 900.0])
         .build(move |ctx| {
-            install_game_fonts(ctx);
+            arenasim::ui::install(ctx);
             let _ =
                 draw_configure_match(ctx, &mut config, &mut picker, &icons, &map_geometry, None);
         });
@@ -86,7 +85,7 @@ fn configure_match_picker_open() {
     let mut harness = Harness::builder()
         .with_size([1500.0, 900.0])
         .build(move |ctx| {
-            install_game_fonts(ctx);
+            arenasim::ui::install(ctx);
             let _ =
                 draw_configure_match(ctx, &mut config, &mut picker, &icons, &map_geometry, None);
         });

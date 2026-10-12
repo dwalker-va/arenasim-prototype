@@ -352,12 +352,9 @@ pub fn slim_tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &Encyclopedia
     );
 }
 
-/// A spell school as an egui colour — the shared `SpellSchool::color_rgb8`
-/// authority, not a second table.
-pub fn school_color(school: SpellSchool) -> egui::Color32 {
-    let (r, g, b) = school.color_rgb8();
-    egui::Color32::from_rgb(r, g, b)
-}
+/// A spell school as an egui colour. Defined in `ui::theme`; re-exported here
+/// for the encyclopedia's existing callers.
+pub use crate::ui::theme::school_color;
 
 // ============================================================================
 // INDEX PAGE

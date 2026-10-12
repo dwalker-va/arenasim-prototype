@@ -1315,11 +1315,11 @@ the same egui version as `bevy_egui` (0.31). Fidelity caveat: kittest has no
 Bevy textures, so class icons render as class-color fallback squares —
 layout/spacing/color iterate faithfully; pixel-exact icon fidelity still needs
 the real client. Fonts are NOT a gap: every harness installs the client's own
-stack by calling `arenasim::ui::fonts::install_game_fonts(ctx)` at the top of
-its app closure (the single definition the client's Startup system also uses),
-so glyph coverage and text metrics match the game. A new harness must call it
-too, or its baselines picture a screen nobody plays —
-`tests/snapshot_font_audit.rs` fails the default `cargo test` if one forgets.
+look by calling `arenasim::ui::install(ctx)` at the top of its app closure (the
+one call the client's Startup system also makes), so glyph coverage and text
+metrics match the game. A new harness must call it too, or its baselines
+picture a screen nobody plays — `tests/snapshot_font_audit.rs` fails the
+default `cargo test` if one forgets.
 **To extend this pattern to another screen**, refactor its UI system the same
 way: split the Bevy wrapper (grabs `EguiContexts` + resources, applies
 actions) from a pure `draw_*(ctx, &data...) -> Action` function, then drive
@@ -1327,6 +1327,16 @@ that function from a kittest harness with mock data.
 `tests/main_menu_snapshot.rs` and `tests/encyclopedia_snapshot.rs` follow it;
 the encyclopedia's harness loads the real `items.ron` and `abilities.ron`
 rather than mock data, so a content change shows up in the snapshot.
+
+**UI values come from `ui::theme`.** A colour, text size, gap, radius or icon
+size is chosen once, in `src/ui/theme.rs`, and named by its role (`TEXT_MUTED`,
+never `GREY_142`); a literal written anywhere else in `src/` is counted by
+`tests/ui_token_audit.rs`, a per-file EQUALITY ratchet. A count that goes up
+fails it: use the token for that role, and if the scale lacks one, add it to
+`theme.rs` by role in the same commit. A count that goes down fails it too until
+the table is lowered in the same commit, so a migration card's diff shows the
+rows it cleared. The design is
+`docs/design/proposals/2026-10-11-ui-design-system.md`.
 
 ### Verify the RUNNING client with a UI script (input injection)
 

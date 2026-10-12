@@ -22,12 +22,11 @@
 //! panel (the ambient arena backdrop is a Bevy render pass), so the menu draws
 //! over egui_kittest's default background — the snapshot guards layout,
 //! typography, and the vignette/scrim, not the 3D scene. Fonts are the
-//! client's own stack (`install_game_fonts`), so the typography is real.
+//! client's own stack (`arenasim::ui::install`), so the typography is real.
 
 use egui_kittest::Harness;
 
 use arenasim::states::main_menu::draw_main_menu;
-use arenasim::ui::fonts::install_game_fonts;
 
 /// Fixed time for a deterministic title-pulse phase: 0.6s puts the
 /// sin-driven halo near mid-swing so the glow is visible in the baseline.
@@ -37,7 +36,7 @@ const SNAPSHOT_TIME_SECS: f32 = 0.6;
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn main_menu() {
     let mut harness = Harness::builder().with_size([1280.0, 800.0]).build(|ctx| {
-        install_game_fonts(ctx);
+        arenasim::ui::install(ctx);
         let _ = draw_main_menu(ctx, SNAPSHOT_TIME_SECS);
     });
 

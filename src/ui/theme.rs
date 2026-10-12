@@ -1,0 +1,185 @@
+//! Design tokens: the ONLY place a UI colour, text size, gap, radius or icon
+//! size is chosen.
+//!
+//! Every value is named by its ROLE, never its look (`TEXT_MUTED`, not
+//! `GREY_142`), and belongs to exactly one of three layers that do not borrow
+//! from each other:
+//!
+//! * **Chrome** ([`color`]): menus, panels, buttons. Gold on navy, few hues.
+//! * **Data** ([`data`], [`class_color`], [`school_color`]): class, team,
+//!   school, damage/healing/taken. Here hue carries meaning.
+//! * **HUD** ([`hud`]): in-match only, under its own broadcast rules — labels
+//!   stay white, and floating combat text reserves yellow, green and
+//!   light-blue.
+//!
+//! A literal written anywhere else in `src/` is counted by
+//! `tests/ui_token_audit.rs`, whose per-file table only ever moves toward
+//! zero. Need a value the scale lacks? Add the token here, by role, in the
+//! same commit as its first use.
+//!
+//! The values and their rationale are in
+//! `docs/design/proposals/2026-10-11-ui-design-system.md` §2.2; the bench
+//! beside it (`docs/design/benches/2026-10-11-ui-design-system-bench.html`)
+//! draws every one of them.
+
+use bevy_egui::egui::Color32;
+
+use crate::states::match_config::CharacterClass;
+use crate::states::play_match::abilities::SpellSchool;
+
+/// Chrome and text colours: the encyclopedia's gold-on-navy palette, renamed
+/// by role.
+pub mod color {
+    use super::Color32;
+
+    // Chrome
+    /// Screen background.
+    pub const BG: Color32 = Color32::from_rgb(20, 20, 30);
+    /// Panel and button fill.
+    pub const PANEL: Color32 = Color32::from_rgb(30, 30, 42);
+    /// Hover, active tab.
+    pub const RAISED: Color32 = Color32::from_rgb(37, 37, 56);
+    /// Panel stroke, divider.
+    pub const LINE: Color32 = Color32::from_rgb(60, 60, 80);
+    /// Hover stroke, tooltip and modal edge.
+    pub const LINE_STRONG: Color32 = Color32::from_rgb(86, 86, 122);
+    /// The current row in a list.
+    pub const SELECTED: Color32 = Color32::from_rgb(51, 65, 94);
+
+    // Text
+    /// Titles, the active state, the primary action.
+    pub const ACCENT: Color32 = Color32::from_rgb(230, 204, 153);
+    /// Body text.
+    pub const TEXT: Color32 = Color32::from_rgb(230, 217, 191);
+    /// Labels, secondary text.
+    pub const TEXT_MUTED: Color32 = Color32::from_rgb(142, 142, 166);
+    /// Disabled text, hints.
+    pub const TEXT_DIM: Color32 = Color32::from_rgb(102, 102, 126);
+    /// Navigable names.
+    pub const LINK: Color32 = Color32::from_rgb(127, 178, 229);
+
+    // State
+    /// Warnings.
+    pub const WARN: Color32 = Color32::from_rgb(220, 170, 90);
+    /// Destructive actions, the dead.
+    pub const DANGER: Color32 = Color32::from_rgb(205, 110, 110);
+}
+
+/// Data colours: hue that carries meaning. One table each.
+pub mod data {
+    use super::Color32;
+
+    /// Team 1. The HUD pair, used everywhere (decision D7); fills derive from
+    /// it by alpha.
+    pub const TEAM_1: Color32 = Color32::from_rgb(100, 150, 255);
+    /// Team 2. The HUD pair, used everywhere (decision D7).
+    pub const TEAM_2: Color32 = Color32::from_rgb(255, 100, 100);
+
+    /// Damage done.
+    pub const DAMAGE: Color32 = Color32::from_rgb(255, 150, 100);
+    /// Healing done.
+    pub const HEALING: Color32 = Color32::from_rgb(110, 215, 130);
+    /// Damage taken.
+    pub const TAKEN: Color32 = Color32::from_rgb(230, 110, 110);
+    /// Killing blows.
+    pub const KILLS: Color32 = Color32::from_rgb(255, 205, 90);
+
+    /// A beneficial aura.
+    pub const BUFF: Color32 = Color32::from_rgb(111, 174, 126);
+    /// A harmful aura.
+    pub const DEBUFF: Color32 = Color32::from_rgb(208, 106, 91);
+}
+
+/// HUD colours: in-match only (decision D6). The HUD keeps its broadcast look
+/// and does not take the chrome palette.
+pub mod hud {
+    use super::Color32;
+
+    /// The countdown, Victory, buff borders.
+    pub const HUD_GOLD: Color32 = Color32::from_rgb(255, 215, 0);
+    /// Every HUD label. White, by the colour-budget rule.
+    pub const HUD_LABEL: Color32 = Color32::WHITE;
+}
+
+/// The type scale, in points. Rajdhani Bold unless a call site says otherwise.
+///
+/// The HUD scales these by its zoom factor (`hud.rs` `ui_scale`); it uses the
+/// same steps multiplied, never sizes of its own.
+pub mod text {
+    /// The main-menu logo, and nothing else.
+    pub const WORDMARK: f32 = 72.0;
+    /// VS, the victory banner.
+    pub const DISPLAY: f32 = 42.0;
+    /// A screen title.
+    pub const TITLE: f32 = 30.0;
+    /// A panel title.
+    pub const H2: f32 = 20.0;
+    /// A section or row title.
+    pub const H3: f32 = 16.0;
+    /// Body text and buttons.
+    pub const BODY: f32 = 14.0;
+    /// Labels, stat rows.
+    pub const SMALL: f32 = 12.0;
+    /// Column headers, badges.
+    pub const MICRO: f32 = 10.0;
+}
+
+/// The spacing scale, in points. A screen's margin is [`XL`](space::XL)
+/// horizontally and [`LG`](space::LG) vertically, on every screen.
+pub mod space {
+    pub const XXS: f32 = 2.0;
+    pub const XS: f32 = 4.0;
+    pub const SM: f32 = 8.0;
+    pub const MD: f32 = 12.0;
+    pub const LG: f32 = 16.0;
+    pub const XL: f32 = 24.0;
+    pub const XXL: f32 = 32.0;
+    pub const XXXL: f32 = 48.0;
+}
+
+/// Corner radii (egui's `CornerRadius` unit).
+pub mod radius {
+    /// Chips, rows, icons.
+    pub const SM: u8 = 3;
+    /// Panels, buttons, tooltips.
+    pub const MD: u8 = 6;
+    /// Modals, team columns.
+    pub const LG: u8 = 10;
+}
+
+/// Icon edge lengths, in points.
+pub mod icon {
+    /// Inline glyph-sized icons.
+    pub const XS: f32 = 16.0;
+    /// Results rows, team-frame auras.
+    pub const SM: f32 = 20.0;
+    /// List rows, the timeline.
+    pub const MD: f32 = 24.0;
+    /// Index tiles.
+    pub const LG: f32 = 36.0;
+    /// Choice tiles, the Configure class icon.
+    pub const XL: f32 = 48.0;
+    /// A detail page's header icon.
+    pub const HERO: f32 = 56.0;
+}
+
+/// A class's colour as egui draws it, from the one source,
+/// [`CharacterClass::color`].
+///
+/// Only the UI layer reads this; the 3D bodies keep their own, deliberately
+/// distinct mesh palette.
+pub fn class_color(class: CharacterClass) -> Color32 {
+    let c = class.color().to_srgba();
+    Color32::from_rgb(
+        (c.red * 255.0) as u8,
+        (c.green * 255.0) as u8,
+        (c.blue * 255.0) as u8,
+    )
+}
+
+/// A spell school's colour as egui draws it, from the one source,
+/// [`SpellSchool::color_rgb8`].
+pub fn school_color(school: SpellSchool) -> Color32 {
+    let (r, g, b) = school.color_rgb8();
+    Color32::from_rgb(r, g, b)
+}

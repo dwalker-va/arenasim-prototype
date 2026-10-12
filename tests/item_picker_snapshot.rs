@@ -28,14 +28,13 @@ use arenasim::states::encyclopedia::widget::secondary_click_chrome_hint;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::equipment::{load_item_definitions, ItemId, ItemSlot};
 use arenasim::states::view_combatant_ui::draw_item_picker_list;
-use arenasim::ui::fonts::install_game_fonts;
 
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn item_picker_trinket_socket() {
     let items = load_item_definitions().expect("items.ron must load");
     let mut harness = Harness::builder().with_size([640.0, 560.0]).build(|ctx| {
-        install_game_fonts(ctx);
+        arenasim::ui::install(ctx);
         let valid = items.selectable_items_for_slot(
             ItemSlot::Trinket2,
             CharacterClass::Warrior,
