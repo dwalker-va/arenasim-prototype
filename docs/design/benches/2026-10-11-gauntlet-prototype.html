@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gauntlet Prototype</title>
+<!--
+  AS-255: a click-through of one Gauntlet run with talents, from
+  docs/design/proposals/2026-10-11-talents-and-gauntlet.md.
+
+  Everything here is MOCK. The "fight" is a scripted stand-in for PlayMatch, not
+  the sim: its outcome is a weighted coin flip (gear, talent points and the
+  answers your Prepare settings give) so the loop can be felt end to end.
+
+  What is real data: the Warlock and Priest trees are the proposal's (section 5),
+  with its tier gates (0/2/4/6 points in the tree), ranks and prerequisites. The
+  draft pool is the proposal's minimum slice (Warlock, Priest, Rogue, Paladin).
+  The Rogue and Paladin trees are not designed yet, so in this prototype their
+  points become item budget, as the proposal does for opponents without a tree.
+
+  Icons: class and ability art is read from the checkout by relative path (open
+  this file from docs/design/benches/ inside the repo); talent art the repo does
+  not ship falls back to Wowhead's icon CDN, then to initials.
+
+  The look is deliberately neutral: the screens' visual language belongs to the
+  UI design system (AS-251). Judge the FLOW and the decisions, not the styling.
+-->
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#13110e; --panel:#1d1a15; --panel2:#27231c; --line:#3c342a;
+  --text:#ece5d8; --muted:#a39886; --gold:#e6b450; --win:#7fbf6a; --loss:#d0614f;
+  --t1:#4f8fe0; --t2:#d8534a;
+  --sans: Georgia, "Times New Roman", serif;
+  --ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px;line-height:1.4}
+body{padding:16px}
+.wrap{max-width:1040px;margin:0 auto}
+header.top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 16px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+header.top h1{font-family:var(--sans);font-size:20px;margin:0;color:var(--gold);letter-spacing:.02em}
+.note{color:var(--muted);font-size:12px;max-width:70ch}
+h2{font-family:var(--sans);font-size:22px;margin:0 0 4px;color:var(--gold)}
+h3{font-family:var(--sans);font-size:16px;margin:0 0 6px}
+.sub{color:var(--muted);margin:0 0 14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0}
+.row{display:flex;flex-wrap:wrap;gap:12px}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+button{font:inherit;cursor:pointer}
+.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:9px 16px;border-radius:6px}
+.btn:hover{border-color:var(--gold)}
+.btn.primary{background:#3a2c12;border-color:var(--gold);color:var(--gold);font-weight:600}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn:focus-visible,.card:focus-visible,.node:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px}
+.card{background:var(--panel2);border:2px solid var(--line);border-radius:8px;padding:12px;text-align:left;color:var(--text);display:flex;flex-direction:column;gap:6px;min-width:0}
+.card:hover{border-color:#6a5a40}
+.card.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+.title{font-weight:600;font-size:15px}
+.meta{color:var(--muted);font-size:12px}
+.tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;border:1px solid var(--line);color:var(--muted)}
+.tag.heal{color:var(--win);border-color:#3f6334}
+.tag.pts{color:var(--gold);border-color:var(--gold)}
+.ico{width:40px;height:40px;border-radius:5px;border:1px solid #000;object-fit:cover;flex:none;background:#333;display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#111;font-size:12px}
+.ico.sm{width:24px;height:24px;border-radius:3px;font-size:9px}
+.ico.lg{width:56px;height:56px}
+.hstack{display:flex;align-items:center;gap:10px;min-width:0}
+.pips{display:flex;gap:4px;align-items:center}
+.pip{width:14px;height:14px;border-radius:50%;border:1px solid var(--line);background:#0c0b09}
+.pip.w{background:var(--win);border-color:var(--win)}
+.pip.l{background:var(--loss);border-color:var(--loss)}
+.record{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;font-size:13px}
+.threat{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line)}
+.threat:first-of-type{border-top:0}
+.answer{color:var(--win)}
+.missing{color:var(--muted)}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:4px;padding:6px;font:inherit;font-size:13px}
+.frames{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.frame{display:flex;align-items:center;gap:8px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);margin-bottom:6px;width:100%;color:var(--text);text-align:left}
+.frame.enemy:hover{border-color:var(--t2)}
+.frame.called{border-color:var(--t2);box-shadow:0 0 0 1px var(--t2) inset}
+.bar{flex:1;height:12px;background:#0c0b09;border-radius:3px;overflow:hidden;min-width:40px}
+.bar>i{display:block;height:100%;background:var(--win);transition:width .25s}
+.log{height:170px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted);background:#0c0b09;border:1px solid var(--line);border-radius:6px;padding:8px}
+.log b{color:var(--text);font-weight:500}
+.big{font-family:var(--sans);font-size:34px;margin:4px 0}
+.win{color:var(--win)} .loss{color:var(--loss)}
+.delta{font-size:12px}
+.delta .up{color:var(--win)} .delta .dn{color:var(--loss)}
+.matchlist .m{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;padding:6px 0;border-top:1px solid var(--line)}
+.toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--gold);padding:10px 14px;border-radius:6px;max-width:calc(100% - 32px);font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all;display:none}
+.menu{display:flex;flex-direction:column;gap:10px;align-items:center;padding:40px 0}
+.menu .btn{width:280px;padding:14px;font-size:16px}
+/* talent trees */
+.trees{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.tree{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px;min-width:0}
+.tree h4{margin:0 0 6px;font-family:var(--sans);font-size:14px;display:flex;justify-content:space-between;gap:6px}
+.tier{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:6px;position:relative}
+.tier .gate{position:absolute;right:0;top:-2px;font-size:10px;color:var(--muted)}
+.node{position:relative;background:#16130f;border:1px solid var(--line);border-radius:6px;padding:4px;color:var(--text);display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0;text-align:center;font-size:11px;line-height:1.2}
+.node .nm{overflow:hidden;text-overflow:ellipsis;width:100%;white-space:nowrap}
+.node .rk{font-size:10px;color:var(--muted)}
+.node.avail{border-color:#6f8f3a}
+.node.avail .rk{color:var(--win)}
+.node.has{border-color:var(--gold)}
+.node.has .rk{color:var(--gold)}
+.node.pending{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset;background:#2a2112}
+.node.locked{opacity:.45}
+.node.cap{border-style:double;border-width:3px}
+.node .req{font-size:9px;color:var(--muted)}
+.detail{margin-top:10px;min-height:54px}
+.spec{font-size:12px;color:var(--gold)}
+.kind{font-size:10px;padding:0 4px;border:1px solid var(--line);border-radius:3px;color:var(--muted)}
+@media (max-width:760px){.trees{grid-template-columns:1fr}}
+@media (max-width:620px){.frames{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>ArenaSim · Gauntlet prototype</h1>
+    <div class="note">Mock click-through for AS-255. Fights are a scripted stand-in, not the sim. The Warlock and Priest trees are the proposal's. Judge the flow and the decisions, not the styling.</div>
+  </header>
+  <main id="app"></main>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+"use strict";
+const ICON_ROOT = "../../../assets/";
+const CDN = "https://wow.zamimg.com/images/wow/icons/large/";
+
+// ---- Classes and their kits (names and icons from the game's own RON) -------
+const CLASSES = {
+  Warrior:{col:"#C69B6D", heal:false, gear:"plate-ap", role:"Melee"},
+  Mage:   {col:"#3FC7EB", heal:false, gear:"cloth",    role:"Ranged caster"},
+  Rogue:  {col:"#FFF468", heal:false, gear:"leather-ap", role:"Melee, stealth"},
+  Priest: {col:"#FFFFFF", heal:true,  gear:"cloth",    role:"Healer"},
+  Warlock:{col:"#8788EE", heal:false, gear:"cloth",    role:"DoT caster, Felhunter"},
+  Paladin:{col:"#F48CBA", heal:true,  gear:"plate-sp", role:"Healer, melee"},
+  Hunter: {col:"#AAD372", heal:false, gear:"mail-ap",  role:"Ranged physical, pet"},
+  Shaman: {col:"#0070DD", heal:true,  gear:"caster-acc", role:"Healer, totems"},
+  Druid:  {col:"#FF7C0A", heal:true,  gear:"caster-acc", role:"Healer, HoTs and control"},
+};
+const SLICE_POOL = ["Warlock","Priest","Rogue","Paladin"];
+const MELEE = ["Warrior","Rogue","Paladin"];
+const THREATS = {
+  Warrior:[["ability_warrior_savageblow","Mortal Strike cuts all healing on its target"],["ability_warrior_charge","Charge closes the gap instantly"]],
+  Mage:[["spell_nature_polymorph","Polymorphs your healer"],["spell_frost_frostnova","Frost Nova roots your melee"]],
+  Rogue:[["ability_cheapshot","Opens from stealth with Cheap Shot"],["ability_rogue_kidneyshot","Chains Kidney Shot for a ~10s stun"]],
+  Priest:[["spell_shadow_psychicscream","Psychic Scream fears anyone close"],["spell_shadow_manaburn","Mana Burns your healer"]],
+  Warlock:[["spell_shadow_possession","Fears your healer"],["spell_shadow_mindrot","Felhunter's Spell Lock silences a caster"]],
+  Paladin:[["spell_holy_sealofmight","Hammer of Justice stuns"],["spell_holy_divineintervention","Divine Shield at low health"]],
+  Hunter:[["spell_frost_chainsofice","Freezing Trap on your healer"],["spell_nature_web","Kites at range: hard to pin down"]],
+  Shaman:[["spell_nature_cyclone","Interrupts your casts"],["spell_nature_purge","Purges your buffs"]],
+  Druid:[["spell_nature_earthbind","Cyclones your damage dealer"],["spell_nature_rejuvenation","Heals over time: hard to burst"]],
+};
+const KIT = {Warrior:"Mortal Strike",Mage:"Frostbolt",Rogue:"Sinister Strike",Priest:"Flash Heal",Warlock:"Corruption",Paladin:"Flash of Light",Hunter:"Arcane Shot",Shaman:"Lightning Bolt",Druid:"Rejuvenation"};
+
+// ---- Per-match strategic choices: inherent to the class, free every match ---
+// `talent` on an option: the option only appears when that talent is learned
+// (a talent WIDENS a per-match menu; it never picks from it).
+const CHOICES = {
+  Warlock:[
+    {key:"curse",label:"Curse on the kill target",opts:[["Curse of Agony"],["Curse of Tongues"],["Curse of Weakness"],["Curse of Exhaustion","CurseOfExhaustion"]]},
+    {key:"demon",label:"Demon",opts:[["Felhunter"],["Sacrifice the Felhunter","DemonicSacrifice"]]},
+  ],
+  Rogue:[{key:"opener",label:"Opener",opts:[["Cheap Shot"],["Ambush"]]}],
+  Paladin:[{key:"aura",label:"Aura",opts:[["Devotion Aura"],["Concentration Aura"],["Shadow Resistance Aura"]]}],
+  Priest:[],
+};
+
+// ---- Talent trees (proposal section 5). Tier gates: 0 / 2 / 4 / 6 points in the tree.
+// node: [id, name, tier(1-4), column(0-2), maxRank, prereq [id,rank]|null, icon, kind, per-rank text, acts-in-fight threat line|null]
+const GATE = {1:0, 2:2, 3:4, 4:6};
+const TREES = {
+  Warlock:{
+    Affliction:[
+      ["ImprovedDrainLife","Improved Drain Life",1,0,2,null,"spell_shadow_lifedrain02","Patch","+15% Drain Life damage and healing per rank.",null],
+      ["ImprovedCurseOfAgony","Improved Curse of Agony",1,2,2,null,"spell_shadow_curseofsargeras","Patch","+10% Curse of Agony damage per rank. Pays only in matches where you choose Agony.",null],
+      ["AmplifyCurse","Amplify Curse",2,0,1,null,"spell_shadow_contagion","Grant","Next Curse of Agony or Weakness is 50% stronger. 45s cooldown.","Amplify Curse: a 50% stronger curse every 45s"],
+      ["Nightfall","Nightfall",2,2,2,null,"spell_shadow_twilight","Proc","5% per rank per Corruption or Drain Life tick: next Shadow Bolt is instant (Shadow Trance).","Nightfall: instant Shadow Bolts out of Corruption"],
+      ["SiphonLife","Siphon Life",3,0,1,null,"spell_shadow_requiem","Grant","DoT: 4 Shadow every 3s for 30s, healed to the Warlock.","Siphon Life heals their Warlock: dispel it"],
+      ["CurseOfExhaustion","Curse of Exhaustion",3,2,1,null,"spell_shadow_grimward","Widens choice","Adds Curse of Exhaustion (30% slow, 12s; TBC magnitude) to your curse choice in Prepare.","Curse of Exhaustion slows your runners"],
+      ["ShadowMastery","Shadow Mastery",4,1,1,["SiphonLife",1],"spell_shadow_shadetruesight","Patch","Capstone: +10% Shadow damage and life drained.",null],
+    ],
+    Demonology:[
+      ["DemonicEmbrace","Demonic Embrace",1,0,2,null,"spell_shadow_metamorphosis","Stats","+11 max health per rank (priced on the item budget).",null],
+      ["FelStamina","Fel Stamina",1,2,2,null,"spell_shadow_antishadow","Pet stats","Felhunter +10% max health per rank.",null],
+      ["UnholyPower","Unholy Power",2,0,2,null,"spell_shadow_shadowworddominate","Pet stats","Felhunter melee +10% per rank.",null],
+      ["MasterDemonologist","Master Demonologist",2,2,1,null,"spell_shadow_shadowpact","Stats","+5 all resistances on the Warlock and the Felhunter while it lives.",null],
+      ["DemonicSacrifice","Demonic Sacrifice",3,1,1,null,"spell_shadow_psychicscream","Widens choice","Adds \"Sacrifice the Felhunter\" to your demon choice: no Felhunter, +15% Shadow damage for the match.","Demonic Sacrifice: may trade the Felhunter for +15% Shadow"],
+      ["SoulLink","Soul Link",4,1,1,["FelStamina",2],"spell_shadow_gathershadows","Mechanic","Capstone: 12% of the Warlock's damage taken goes to the Felhunter while it lives.","Soul Link: their Felhunter soaks the Warlock's damage: kill it first"],
+    ],
+    Destruction:[
+      ["ImprovedShadowBolt","Improved Shadow Bolt",1,0,2,null,"spell_shadow_shadowbolt","Proc","10% per rank on a Shadow Bolt hit: Shadow Vulnerability (+10% Shadow damage taken, 4 hits or 12s).","Shadow Vulnerability windows on your kill target"],
+      ["Bane","Bane",1,2,2,null,"spell_shadow_deathpact","Patch","-0.1s Shadow Bolt and Immolate cast per rank.",null],
+      ["Aftermath","Aftermath",2,0,2,null,"spell_fire_fire","Proc","5% per rank on a Destruction hit: 30% slow for 5s.",null],
+      ["Shadowburn","Shadowburn",2,2,1,null,"spell_shadow_scourgebuild","Grant","Instant Shadow nuke, about 52 damage, 15s cooldown.","Shadowburn: instant burst at low health"],
+      ["ImprovedImmolate","Improved Immolate",3,1,1,null,"spell_fire_immolation","Patch","+25% Immolate initial damage.",null],
+      ["Conflagrate","Conflagrate",4,1,1,["ImprovedImmolate",1],"spell_fire_fireball","Grant","Capstone: consumes the Warlock's Immolate for about 68 Fire. 15s cooldown.","Conflagrate: Fire burst out of Immolate"],
+    ],
+  },
+  Priest:{
+    Discipline:[
+      ["UnbreakableWill","Unbreakable Will",1,0,2,null,"spell_magic_magearmor","Mechanic","10% per rank to resist a stun, fear or silence.","Unbreakable Will: their Priest may resist your fear or stun"],
+      ["ImprovedPWShield","Improved PW: Shield",1,2,2,null,"spell_holy_powerwordshield","Patch","+5% Power Word: Shield absorb per rank.",null],
+      ["MentalAgility","Mental Agility",2,0,2,null,"ability_hibernation","Patch","-5% mana cost of instants per rank.",null],
+      ["Martyrdom","Martyrdom",2,2,1,null,"spell_nature_tranquility","Proc","After a melee or ranged crit taken: 6s of halved lockouts.",null],
+      ["InnerFocus","Inner Focus",3,1,1,null,"spell_frost_windwalkon","Grant","Next spell free and +25% crit. 45s cooldown.","Inner Focus: a free, likely-crit heal on demand"],
+      ["PowerInfusion","Power Infusion",4,1,1,["InnerFocus",1],"spell_holy_powerinfusion","Grant","Capstone: +24 spell power on an ally for 15s. 45s cooldown.","Power Infusion empowers their caster's burst"],
+    ],
+    Holy:[
+      ["HolySpecialization","Holy Specialization",1,0,2,null,"spell_holy_sealofsalvation","Patch","+2.5% crit on Holy spells per rank.",null],
+      ["SpiritualHealing","Spiritual Healing",1,2,2,null,"spell_nature_moonglow","Patch","+5% healing per rank.",null],
+      ["Inspiration","Inspiration",2,0,2,null,"spell_holy_layonhands","Proc","After a heal crit: target +12% armor per rank for 15s.",null],
+      ["BlessedRecovery","Blessed Recovery",2,2,1,null,"spell_holy_blessedrecovery","Proc","After a melee or ranged crit taken: heal 25% of it over 6s.",null],
+      ["HolyNova","Holy Nova",3,1,1,null,"spell_holy_holynova","Grant","Damages enemies and heals allies within 10 yards.","Holy Nova punishes melee standing on their Priest"],
+      ["SpiritOfRedemption","Spirit of Redemption",4,1,1,["SpiritualHealing",2],"inv_enchant_essenceeternallarge","Mechanic","Capstone: on death, heals freely as an untargetable spirit for 8s.","Spirit of Redemption: their Priest heals 8s after dying"],
+    ],
+    Shadow:[
+      ["ImprovedPsychicScream","Improved Psychic Scream",1,0,2,null,"spell_shadow_psychicscream","Patch","-2s Psychic Scream cooldown per rank.",null],
+      ["ImprovedMindBlast","Improved Mind Blast",1,2,2,null,"spell_shadow_unholyfrenzy","Patch","-1s Mind Blast cooldown per rank.",null],
+      ["Blackout","Blackout",2,1,2,null,"spell_shadow_gathershadows","Proc","4% per rank on Mind Blast: 3s stun.","Blackout: Mind Blast can stun"],
+      ["VampiricEmbrace","Vampiric Embrace",3,0,1,null,"spell_shadow_unsummonbuilding","Grant","Debuff: their team heals for 20% of the Priest's Shadow damage to the target.",null],
+      ["Silence","Silence",4,1,1,["Blackout",1],"spell_shadow_impphaseshift","Grant","Capstone: 5s silence, 45s cooldown, 20 yards.","Silence locks your healer for 5s"],
+    ],
+  },
+};
+// Reference builds (spend order) that authored opponents are cut from.
+const REF = {
+  Warlock:["ImprovedDrainLife","ImprovedDrainLife","ImprovedCurseOfAgony","ImprovedCurseOfAgony","Nightfall","AmplifyCurse","SiphonLife","Nightfall","ShadowMastery"],
+  Priest:["SpiritualHealing","SpiritualHealing","HolySpecialization","HolySpecialization","Inspiration","BlessedRecovery","HolyNova","Inspiration","SpiritOfRedemption"],
+};
+const NODE = {};
+for(const cls in TREES) for(const tree in TREES[cls]) for(const n of TREES[cls][tree]) NODE[n[0]] = {id:n[0],name:n[1],tier:n[2],col:n[3],max:n[4],req:n[5],icon:n[6],kind:n[7],text:n[8],threat:n[9],tree,cls};
+
+// ---- Gear rewards ------------------------------------------------------------
+const GEAR = {
+  "plate-ap":[["Warlord's Crown",75,"Head","inv_helmet_72","+18 HP +12 AP +4% crit"],["Warlord's Breastplate",75,"Chest","inv_chest_plate16","+24 HP +10 AP +3% crit"],["Warlord's Spaulders",71,"Shoulders","inv_shoulder_34","+14 HP +8 AP +2% crit"]],
+  "plate-sp":[["Judgement Crown",75,"Head","inv_helmet_05","+18 HP +12 SP +16 mana"],["Judgement Breastplate",75,"Chest","inv_chest_chain_11","+20 HP +10 SP +0.5 regen"],["Judgement Gauntlets",73,"Hands","inv_gauntlets_29","+12 HP +8 SP +1% crit"]],
+  "leather-ap":[["Deathdealer Cowl",73,"Head","inv_helmet_41","+16 HP +12 AP +4% crit"],["Deathdealer Tunic",73,"Chest","inv_chest_cloth_07","+18 HP +10 AP +4% crit"],["Fang of the Viper",73,"Main Hand","inv_sword_48","+6 AP +3% crit"]],
+  "cloth":[["Arcanist Crown",73,"Head","inv_helmet_53","+10 HP +12 SP +20 mana"],["Arcanist Robes",73,"Chest","inv_chest_cloth_03","+12 HP +14 SP +20 mana"],["Arcanist Leggings",73,"Legs","inv_pants_08","+10 HP +10 SP +0.5 regen"],["Wand of the Invoker",71,"Ranged","inv_wand_1h_stratholme_d_01","+8 SP +10 mana"],["Arcanist Mantle",71,"Shoulders","inv_shoulder_02","+8 HP +8 SP +12 mana"]],
+  "acc-ap":[["Cloak of Conquest",70,"Back","inv_misc_cape_17","+12 HP +4 AP +1% crit"],["Pendant of Might",70,"Neck","inv_jewelry_necklace_09","+8 AP +2% crit"]],
+  "acc-sp":[["Cloak of Wisdom",70,"Back","inv_misc_cape_18","+8 HP +6 SP +10 mana"],["Ring of Arcane Insight",70,"Ring","inv_jewelry_ring_40","+8 SP +10 mana"],["Pendant of Clarity",70,"Neck","inv_jewelry_talisman_07","+6 SP +0.5 regen"],["Talisman of Ephemeral Power",70,"Trinket","inv_misc_root_02","+20 HP +1.5 regen"],["Ring of Fortitude",70,"Ring","inv_jewelry_ring_05","+16 HP"]],
+};
+const SLOTS_PER_COMBATANT = 14, START_ILVL = 57, MAX_WINS = 7, MAX_LOSSES = 3;
+const MAPS = ["Basic Arena","Nagrand Arena","Twin Pillars"];
+// The authored ladder: one or two opponents per tier (index = tier-1).
+const LADDER = [
+  [["Gate Rats",["Warrior","Priest"]]],
+  [["The Dustcloaks",["Rogue","Druid"]]],
+  [["Ashen Pair",["Mage","Shaman"]],["Cinder Pact",["Mage","Priest"]]],
+  [["Thornwatch",["Warlock","Priest"]]],
+  [["Stormhold Duo",["Hunter","Paladin"]],["Greycloaks",["Hunter","Priest"]]],
+  [["The Gilded Fangs",["Rogue","Priest"]]],
+  [["Champions of the Ring",["Warrior","Paladin"]]],
+];
+const AI_BY_TIER = ["Legacy","Legacy","Legacy","Legacy","TeamPlan","TeamPlan","TeamPlan"];
+
+// ---- Seeded RNG: a run is its seed plus its choices --------------------------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+let rng = Math.random;
+function pick(arr,n){const a=arr.slice(),out=[];while(out.length<n&&a.length){out.push(a.splice(Math.floor(rng()*a.length),1)[0])}return out}
+
+// ---- Talent rules -------------------------------------------------------------
+function hasTree(cls){return !!TREES[cls]}
+function rankOf(c,id){return (c.ranks[id]||0)+(c.pending.filter(p=>p===id).length)}
+function pointsInTree(c,tree){let s=0;for(const id in NODE){if(NODE[id].cls===c.cls&&NODE[id].tree===tree)s+=rankOf(c,id)}return s}
+function spentTotal(c){return Object.values(c.ranks).reduce((a,b)=>a+b,0)}
+function available(c){return c.unspent - c.pending.length}
+// Why a node cannot take a point now, or null if it can.
+function blocker(c,id){
+  const n=NODE[id];
+  if(rankOf(c,id)>=n.max) return "Max rank";
+  if(available(c)<=0) return "No unspent points";
+  const inTree=pointsInTree(c,n.tree);
+  if(inTree<GATE[n.tier]) return `Needs ${GATE[n.tier]} points in ${n.tree} (has ${inTree})`;
+  if(n.req && rankOf(c,n.req[0])<n.req[1]) return `Needs ${NODE[n.req[0]].name} ${n.req[1]}/${NODE[n.req[0]].max}`;
+  return null;
+}
+function knows(c,id){return (c.ranks[id]||0)>0}
+function spec(c){
+  if(!hasTree(c.cls)) return {label:spentTotal(c)?`${spentTotal(c)} pts as gear`:"",short:""};
+  const trees=Object.keys(TREES[c.cls]);
+  const pts=trees.map(t=>{let s=0;for(const id in c.ranks)if(NODE[id].tree===t)s+=c.ranks[id];return s});
+  const total=pts.reduce((a,b)=>a+b,0);
+  if(!total) return {label:"No talents yet",short:"0/0/0"};
+  const top=trees[pts.indexOf(Math.max(...pts))];
+  return {label:`${top} ${c.cls}`,short:pts.join("/")};
+}
+// The talent nodes that act in a fight (grants, procs, mechanics): the frame icons.
+function actingNodes(c){return Object.keys(c.ranks).filter(id=>c.ranks[id]>0&&["Grant","Proc","Mechanic","Widens choice"].includes(NODE[id].kind))}
+// A combatant's options for a per-match choice, filtered by its talents.
+function optionsFor(c,ch){return ch.opts.filter(o=>!o[1]||knows(c,o[1])).map(o=>o[0])}
+
+// ---- State ------------------------------------------------------------------
+let S = null, saved = null;
+function newRun(seed){
+  seed = seed ?? Math.floor(Math.random()*1e9);
+  rng = mulberry32(seed);
+  const offer = pick(SLICE_POOL,3);   // two healers in a pool of four: any three include one
+  S = {seed, offer, draft:[], team:[], wins:0, losses:0, history:[], prep:{kill:1,cc:0}, screen:"draft", sel:null, offers:null, opp:null};
+  render();
+}
+function ilvl(c){return (START_ILVL*(SLOTS_PER_COMBATANT-c.upgrades.length)+c.upgrades.reduce((s,u)=>s+u[1],0))/SLOTS_PER_COMBATANT}
+function matchNo(){return S.wins+S.losses+1}
+function opponent(){
+  if(S.opp && S.opp.match===matchNo()) return S.opp;
+  const tier = Math.min(S.wins, 6);
+  const choices = LADDER[tier];
+  // A second opponent of the same tier after a loss at that tier, when the ladder has one.
+  const lostHere = S.history.filter(h=>h.tier===tier&&!h.won).length;
+  const [name,classes] = choices[Math.min(lostHere, choices.length-1)];
+  const pts = tier+1;   // tier t carries t points a combatant
+  const builds = classes.map(cls=>{
+    const c={cls,ranks:{},pending:[],unspent:0};
+    if(REF[cls]) for(const id of REF[cls].slice(0,pts)) c.ranks[id]=(c.ranks[id]||0)+1;
+    return c;
+  });
+  S.opp = {match:matchNo(), tier, name, classes, builds, pts, ai:AI_BY_TIER[tier], map:MAPS[(S.wins+S.losses)%3], ilvl:(START_ILVL + tier*0.8).toFixed(1)};
+  return S.opp;
+}
+function prepFor(c,key){const ch=(CHOICES[c.cls]||[]).find(x=>x.key===key);const opts=optionsFor(c,ch);const v=S.prep[c.cls+"."+key];return opts.includes(v)?v:opts[0]}
+function answersFor(opp){
+  const out=[], miss=[];
+  const mine=cls=>S.team.find(t=>t.cls===cls);
+  const theirs=cls=>opp.classes.includes(cls);
+  const melee=opp.classes.filter(c=>MELEE.includes(c)).length;
+  const casters=opp.classes.filter(c=>["Mage","Priest","Warlock","Shaman","Druid","Paladin"].includes(c));
+  const wl=mine("Warlock");
+  if(wl){
+    const demon=prepFor(wl,"demon"), curse=prepFor(wl,"curse");
+    if(demon==="Felhunter"){
+      if(theirs("Mage")) out.push("The Felhunter can devour Polymorph off your healer");
+      if(casters.length) out.push(`Spell Lock answers their ${casters[0]}'s casts`);
+      if(knows(wl,"SoulLink")) out.push("Soul Link: the Felhunter soaks 12% of the damage on your Warlock");
+    } else {
+      out.push("Sacrifice: +15% Shadow damage, and no Felhunter for them to kill");
+      if(knows(wl,"SoulLink")) miss.push("Soul Link is off while the Felhunter is sacrificed");
+    }
+    if(curse==="Curse of Tongues"&&casters.length) out.push("Curse of Tongues slows their healer's casts");
+    if(curse==="Curse of Weakness"&&melee) out.push("Curse of Weakness blunts their melee");
+    if(curse==="Curse of Exhaustion"&&(theirs("Hunter")||theirs("Mage"))) out.push("Curse of Exhaustion pins their kiter down");
+    if(curse==="Curse of Agony"&&knows(wl,"ImprovedCurseOfAgony")) out.push("Improved Curse of Agony: your Agony ticks harder");
+    if((theirs("Hunter")||theirs("Mage"))&&!knows(wl,"CurseOfExhaustion")) miss.push("No slow for their kiter: Curse of Exhaustion is an Affliction talent");
+  }
+  const pr=mine("Priest");
+  if(pr){
+    if(knows(pr,"UnbreakableWill")&&(theirs("Warlock")||theirs("Priest")||theirs("Rogue")||theirs("Paladin"))) out.push("Unbreakable Will: your Priest may shrug off their fear or stun");
+    if(knows(pr,"Silence")&&casters.length) out.push(`Silence can lock their ${casters[0]} at the kill window`);
+    if(knows(pr,"HolyNova")&&melee) out.push("Holy Nova punishes melee on your Priest");
+    if(knows(pr,"PowerInfusion")&&wl) out.push("Power Infusion on your Warlock at the kill window");
+  }
+  const ro=mine("Rogue");
+  if(ro&&prepFor(ro,"opener")==="Cheap Shot") out.push("Cheap Shot into Kidney Shot locks their healer");
+  const pa=mine("Paladin");
+  if(pa){
+    const aura=prepFor(pa,"aura");
+    if(aura==="Shadow Resistance Aura"&&(theirs("Warlock")||theirs("Priest"))) out.push("Shadow Resistance Aura softens their Shadow damage");
+    if(aura==="Concentration Aura"&&(theirs("Shaman")||theirs("Rogue"))) out.push("Concentration Aura shortens their interrupts' lockouts");
+    if(aura==="Devotion Aura"&&melee) out.push("Devotion Aura blunts their melee");
+  }
+  return {out,miss};
+}
+
+// ---- Helpers ----------------------------------------------------------------
+const $app = document.getElementById("app");
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function initials(name){return name.split(/[\s:]+/).filter(Boolean).map(w=>w[0]).join("").slice(0,3)}
+function classIcon(cls,size=""){
+  const c=CLASSES[cls];
+  return `<img class="ico ${size}" style="border-color:${c.col}" alt="${cls}" src="${ICON_ROOT}icons/classes/${cls.toLowerCase()}.png" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'ico ${size}',textContent:'${cls[0]}',style:'background:${c.col}'}))">`;
+}
+function abilityIcon(file){return `<img class="ico sm" alt="" src="${ICON_ROOT}icons/abilities/${file}.jpg" onerror="this.style.visibility='hidden'">`}
+// Talent art: the checkout first, Wowhead's CDN second, initials last.
+function talentIcon(id,size="sm"){
+  const n=NODE[id];
+  return `<img class="ico ${size}" alt="${esc(n.name)}" title="${esc(n.name)}" src="${ICON_ROOT}icons/abilities/${n.icon}.jpg" onerror="if(!this.dataset.cdn){this.dataset.cdn=1;this.src='${CDN}${n.icon}.jpg'}else{this.replaceWith(Object.assign(document.createElement('span'),{className:'ico ${size}',textContent:'${initials(n.name)}',style:'background:#8788EE'}))}">`;
+}
+function itemIcon(file){return `<img class="ico" alt="" src="${ICON_ROOT}icons/items/${file}.jpg" onerror="this.style.visibility='hidden'">`}
+function pips(){
+  let w="",l="";
+  for(let i=0;i<MAX_WINS;i++) w+=`<span class="pip ${i<S.wins?"w":""}" title="win ${i+1}"></span>`;
+  for(let i=0;i<MAX_LOSSES;i++) l+=`<span class="pip ${i<S.losses?"l":""}" title="loss ${i+1}"></span>`;
+  return `<div class="record"><span>Wins</span><span class="pips">${w}</span><span>Losses</span><span class="pips">${l}</span><span class="note">Match ${matchNo()} · run seed ${S.seed}</span></div>`;
+}
+function specLine(c){const s=spec(c);return s.label?`<div class="spec">${esc(s.label)}${s.short?` · ${s.short}`:""}</div>`:""}
+function teamStrip(){
+  return `<div class="grid g2">${S.team.map(c=>`
+    <div class="hstack">${classIcon(c.cls,"lg")}<div style="min-width:0"><div class="title" style="color:${CLASSES[c.cls].col}">${c.cls} ${c.unspent?`<span class="tag pts">${c.unspent} point${c.unspent>1?"s":""} to spend</span>`:""}</div>
+    ${specLine(c)}
+    <div class="meta">avg ilvl ${ilvl(c).toFixed(1)} · ${c.upgrades.length} upgrade${c.upgrades.length===1?"":"s"}</div>
+    <div class="row" style="gap:4px;margin-top:4px">${actingNodes(c).map(id=>talentIcon(id)).join("")}${c.upgrades.map(u=>`<img class="ico sm" title="${esc(u[0])}" src="${ICON_ROOT}icons/items/${u[3]}.jpg" alt="">`).join("")}</div></div></div>`).join("")}</div>`;
+}
+function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",5000)}
+function showReplay(i){toast("In the client this opens the match with --replay. Its whole record: "+S.history[i].replay)}
+function go(screen){S.screen=screen;S.sel=null;render();if(window.scrollTo)window.scrollTo(0,0)}
+
+// ---- Screens ----------------------------------------------------------------
+function render(){
+  if(!S){ $app.innerHTML = `<div class="menu"><h2>ArenaSim</h2>
+      ${saved?`<button class="btn primary" onclick="S=saved;saved=null;go('hub')">Continue run (${saved.wins}-${saved.losses})</button>`:""}
+      <button class="btn ${saved?"":"primary"}" onclick="saved=null;newRun()">${saved?"Abandon and start a new run":"Gauntlet"}</button>
+      <button class="btn" disabled title="The existing configure-match sandbox, with a talent panel">Custom Match</button>
+      <button class="btn" disabled>Encyclopedia</button><button class="btn" disabled>Options</button>
+      <p class="note">Gauntlet: draft two classes, grow their talents a point a match, and win as many as you can before your third loss.</p></div>`; return; }
+  ({draft,hub,talents,prepare,fight:drawFight,result,reward,end})[S.screen]();
+}
+
+function draft(){
+  $app.innerHTML = `<h2>Draft your team</h2><p class="sub">Pick two of the three offered. The first slice drafts from the four classes with talent trees, so every offer has a healer. Each starts with 1 talent point.</p>
+  <div class="grid g3">${S.offer.map(c=>`<button class="card ${S.draft.includes(c)?"sel":""}" onclick="toggleDraft('${c}')">
+    <div class="hstack">${classIcon(c,"lg")}<div><div class="title" style="color:${CLASSES[c].col}">${c}</div>
+    <div class="meta">${CLASSES[c].role}</div></div></div>
+    <div>${CLASSES[c].heal?'<span class="tag heal">Healer</span>':'<span class="tag">Damage</span>'} ${hasTree(c)?`<span class="tag">Trees: ${Object.keys(TREES[c]).join(", ")}</span>`:'<span class="tag">Tree: its own card (prototype converts points to gear)</span>'}</div>
+    <div class="meta">Threatens: ${THREATS[c].map(t=>t[1]).join("; ")}.</div></button>`).join("")}</div>
+  <div class="actions"><button class="btn" onclick="S=null;render()">Back</button>
+  <button class="btn primary" ${S.draft.length===2?"":"disabled"} onclick="confirmDraft()">Start run</button></div>`;
+}
+function toggleDraft(c){const i=S.draft.indexOf(c);if(i>=0)S.draft.splice(i,1);else if(S.draft.length<2)S.draft.push(c);render()}
+function confirmDraft(){S.team=S.draft.map(cls=>({cls,upgrades:[],ranks:{},pending:[],unspent:1,gearPts:0}));go("hub")}
+
+function intel(opp){
+  const {out,miss} = answersFor(opp);
+  const talentThreats = opp.builds.flatMap(b=>actingNodes(b).filter(id=>NODE[id].threat).map(id=>[b.cls,id]));
+  return `<div class="panel"><div class="hstack" style="justify-content:space-between;flex-wrap:wrap">
+    <div><div class="meta">Next opponent · tier ${opp.tier+1} of 7 · ${opp.pts} talent point${opp.pts>1?"s":""} each</div><div class="title" style="font-size:18px;color:var(--t2)">${esc(opp.name)}</div></div>
+    <div class="row" style="gap:6px">${opp.classes.map(c=>classIcon(c)).join("")}</div></div>
+    <div class="meta" style="margin:6px 0 4px">${opp.classes.join(" + ")} · ${opp.map} · ${opp.ai} AI · avg ilvl ${opp.ilvl}</div>
+    <div class="meta" style="margin-bottom:8px">${opp.builds.map(b=>hasTree(b.cls)?`${b.cls}: ${spec(b).label} ${spec(b).short}`:`${b.cls}: no tree yet, ${opp.pts} pts carried as gear`).join(" · ")}</div>
+    ${opp.classes.flatMap(c=>THREATS[c].map(t=>`<div class="threat">${abilityIcon(t[0])}<span><b style="color:${CLASSES[c].col}">${c}:</b> ${t[1]}</span></div>`)).join("")}
+    ${talentThreats.map(([c,id])=>`<div class="threat">${talentIcon(id)}<span><b style="color:${CLASSES[c].col}">${c} (talent):</b> ${esc(NODE[id].threat)}</span></div>`).join("")}
+    <div style="margin-top:10px"><div class="meta">Your answers with the current Prepare settings</div>
+    ${out.length?out.map(a=>`<div class="answer">+ ${esc(a)}</div>`).join(""):'<div class="note">None yet. Prepare may change that.</div>'}
+    ${miss.map(a=>`<div class="missing">- ${esc(a)}</div>`).join("")}</div></div>`;
+}
+function hub(){
+  const opp = opponent();
+  const unspent = S.team.reduce((s,c)=>s+c.unspent,0);
+  $app.innerHTML = `<h2>The Gauntlet</h2>${pips()}<div style="height:12px"></div>
+  <div class="grid g2"><div class="panel"><div class="meta" style="margin-bottom:8px">Your team</div>${teamStrip()}
+    <p class="note" style="margin-top:12px">Talents are progression: a point a match, spent once, kept for the run. Prepare is strategy: free every match.</p></div>${intel(opp)}</div>
+  <div class="actions"><button class="btn" onclick="saved=S;S=null;render();toast('Run saved. Continue it from the main menu.')">Save and exit</button>
+  <button class="btn ${unspent?"primary":""}" onclick="go('talents')">Talents${unspent?` (${unspent} to spend)`:""}</button>
+  <button class="btn ${unspent?"":"primary"}" onclick="go('prepare')">Prepare</button></div>`;
+}
+
+// ---- Talent screen: spend now or bank; pending points can be undone until locked in.
+let TSEL = null;
+function nodeBtn(c,id){
+  const n=NODE[id], r=rankOf(c,id), committed=c.ranks[id]||0, b=blocker(c,id);
+  const cls=["node", n.tier===4?"cap":"", r>committed?"pending":r>0?"has":!b?"avail":"locked"].join(" ");
+  return `<button class="${cls}" style="grid-column:${n.col+1}" onclick="TSEL='${c.cls}:${id}';spendPoint('${c.cls}','${id}')" onmouseenter="TSEL='${c.cls}:${id}';showDetail('${c.cls}')" title="${esc(n.name)}">
+    ${talentIcon(id)}<span class="nm">${esc(n.name)}</span><span class="rk">${r}/${n.max}</span>${n.req?`<span class="req">needs ${esc(NODE[n.req[0]].name)}</span>`:""}</button>`;
+}
+function treeView(c){
+  if(!hasTree(c.cls)) return `<div class="panel"><h3 style="color:${CLASSES[c.cls].col}">${c.cls}</h3>
+    <p class="note">The ${c.cls} trees are designed in their own card. In this prototype its points become item budget, 11 per point, as for an opponent without a tree.</p>
+    <p>${c.gearPts} point${c.gearPts===1?"":"s"} carried as gear (+${c.gearPts*11} budget). ${c.unspent?`<button class="btn primary" onclick="bankAsGear('${c.cls}')">Convert ${c.unspent} point${c.unspent>1?"s":""}</button>`:""}</p></div>`;
+  const trees=Object.keys(TREES[c.cls]);
+  return `<div class="panel"><div class="hstack" style="justify-content:space-between;flex-wrap:wrap">
+    <h3 style="color:${CLASSES[c.cls].col}">${c.cls} <span class="spec">${esc(spec(c).label)} · ${spec(c).short}</span></h3>
+    <span class="tag pts">${available(c)} unspent${c.pending.length?` · ${c.pending.length} pending`:""}</span></div>
+    <div class="trees">${trees.map(t=>`<div class="tree"><h4><span>${t}</span><span class="meta">${pointsInTree(c,t)} pts</span></h4>
+      ${[1,2,3,4].map(tier=>`<div class="tier">${GATE[tier]?`<span class="gate">${GATE[tier]}+</span>`:""}${TREES[c.cls][t].filter(n=>n[2]===tier).map(n=>nodeBtn(c,n[0])).join("")}</div>`).join("")}
+    </div>`).join("")}</div>
+    <div class="detail note" id="detail-${c.cls}">Hover or click a node. Green border: can take a point now.</div>
+    <div class="actions" style="margin-top:8px"><button class="btn" ${c.pending.length?"":"disabled"} onclick="undoPending('${c.cls}')">Undo pending</button></div></div>`;
+}
+function showDetail(cls){
+  if(!TSEL) return;
+  const [tc,id]=TSEL.split(":"); if(tc!==cls) return;
+  const c=S.team.find(t=>t.cls===cls), n=NODE[id], b=blocker(c,id);
+  const el=document.getElementById("detail-"+cls); if(!el) return;
+  el.innerHTML = `<b style="color:var(--text)">${esc(n.name)}</b> <span class="kind">${n.kind}</span> · ${n.tree}, tier ${n.tier} · rank ${rankOf(c,id)}/${n.max}<br>${esc(n.text)}${n.threat?"<br>Acts in the fight: shows on the frame and in the opponent's briefing.":""}<br><span style="color:${b?"var(--loss)":"var(--win)"}">${b?esc(b):"Click to take a point."}</span>`;
+}
+function spendPoint(cls,id){const c=S.team.find(t=>t.cls===cls);if(!blocker(c,id))c.pending.push(id);render();showDetail(cls)}
+function undoPending(cls){const c=S.team.find(t=>t.cls===cls);c.pending=[];render()}
+function bankAsGear(cls){const c=S.team.find(t=>t.cls===cls);c.gearPts+=c.unspent;c.unspent=0;render()}
+function lockIn(){for(const c of S.team){for(const id of c.pending){c.ranks[id]=(c.ranks[id]||0)+1;c.unspent--}c.pending=[]}go("hub")}
+function talents(){
+  const pending=S.team.reduce((s,c)=>s+c.pending.length,0);
+  $app.innerHTML = `<h2>Talents</h2><p class="sub">One point a match for each combatant, win or loss. Tier gates open at 2, 4 and 6 points in a tree; the capstone is the double-bordered node. Points you lock in stay for the run; unspent points can be banked.</p>
+  <div class="grid">${S.team.map(treeView).join("")}</div>
+  <div class="actions"><button class="btn" onclick="for(const c of S.team)c.pending=[];go('hub')">Back</button>
+  <button class="btn primary" ${pending?"":"disabled"} onclick="lockIn()">Lock in ${pending} point${pending===1?"":"s"}</button></div>`;
+}
+
+function prepare(){
+  const opp = opponent();
+  const sel = (on,label,opts,val)=>`<label class="f">${label}<select onchange="${on}">${opts.map(o=>`<option ${o===val?"selected":""}>${esc(o)}</option>`).join("")}</select></label>`;
+  const classSels = S.team.flatMap(c=>(CHOICES[c.cls]||[]).map(ch=>{
+    const opts=optionsFor(c,ch), gated=ch.opts.filter(o=>o[1]&&!knows(c,o[1]));
+    return sel(`S.prep['${c.cls}.${ch.key}']=this.value;render()`,`${c.cls}: ${ch.label}${gated.length?` <span class="note">(${gated.map(o=>`${esc(o[0])}: needs ${esc(NODE[o[1]].name)}`).join("; ")})</span>`:""}`,opts,prepFor(c,ch.key));
+  })).join("");
+  $app.innerHTML = `<h2>Prepare</h2><p class="sub">The class's own choices, free every match. Talents can add options here; they never pick one.</p>
+  <div class="grid g2"><div class="panel grid">
+    ${sel("S.prep.kill=this.selectedIndex;render()","Kill target",opp.classes,opp.classes[S.prep.kill])}
+    ${sel("S.prep.cc=this.selectedIndex;render()","CC target",opp.classes,opp.classes[S.prep.cc])}
+    ${classSels || '<p class="note">No class choices for this team.</p>'}
+    ${S.team.some(c=>c.cls==="Priest")?'<p class="note">The Priest has no per-match choice today (a gap the proposal names, not one for talents to fill).</p>':""}
+  </div>${intel(opp)}</div>
+  <div class="actions"><button class="btn" onclick="go('hub')">Back</button><button class="btn primary" onclick="startFight()">Fight</button></div>`;
+}
+
+// ---- The mock fight -----------------------------------------------------------
+let F=null, timer=null;
+function power(c){return ilvl(c) + spentTotal(c)*0.9 + (c.gearPts||0)*0.9}
+function startFight(){
+  const opp = opponent();
+  const mine = S.team.reduce((s,c)=>s+power(c),0)/2;
+  const theirs = +opp.ilvl + opp.pts*0.9;
+  const ans = answersFor(opp).out.length;
+  const p = Math.max(.12, Math.min(.88, .62 + (mine-theirs)*.05 + ans*.05 - opp.tier*.03 + (S.prep.kill===1?.04:0)));
+  const win = rng() < p;
+  F = {opp, p, win, t:0, called:S.prep.kill, hp:{a:[100,100],b:[100,100]}, log:[], speed:1, calls:0};
+  F.log.push(`<b>0.0s</b> Gates open on ${opp.map}.`);
+  for(const c of S.team){const s=spec(c);F.log.push(`<b>0.0s</b> [TALENTS] ${c.cls}: ${esc(s.label||"none")} ${s.short}`)}
+  go("fight"); tick();
+}
+function tick(){
+  clearTimeout(timer);
+  if(!F||S.screen!=="fight") return;
+  F.t += 1.5;
+  const loserSide = F.win ? "b":"a", winSide = F.win ? "a":"b";
+  const dmg = (side,i,amt)=>{F.hp[side][i]=Math.max(0,F.hp[side][i]-amt)};
+  const kt = loserSide==="b" ? F.called : 1;
+  dmg(loserSide, kt, 6+rng()*9); dmg(winSide, Math.floor(rng()*2), 2+rng()*6);
+  const names = {a:S.team.map(c=>c.cls), b:F.opp.classes};
+  const lines = [
+    `${names.b[0]} casts ${KIT[names.b[0]]} on ${names.a[1]}.`,
+    `${names.a[0]} casts ${KIT[names.a[0]]} on ${names.b[F.called]}.`,
+    `${names.a[1]} casts ${KIT[names.a[1]]}.`,
+    `${names.b[1]} casts ${KIT[names.b[1]]}.`];
+  for(const c of S.team) for(const id of actingNodes(c)) if(NODE[id].kind!=="Widens choice") lines.push(`${c.cls}: ${NODE[id].name}.`);
+  F.log.push(`<b>${F.t.toFixed(1)}s</b> ${esc(lines[Math.floor(rng()*lines.length)])}`);
+  const done = F.hp[loserSide].some(h=>h<=0) || F.t>=60;
+  if(done){
+    if(!F.hp[loserSide].some(h=>h<=0)) F.hp[loserSide][kt]=0;
+    const dead = F.hp[loserSide].findIndex(h=>h<=0);
+    F.log.push(`<b>${F.t.toFixed(1)}s</b> ${names[loserSide][dead]} dies. ${F.win?"Victory.":"Defeat."}`);
+    drawFight(); timer=setTimeout(finishFight,900); return;
+  }
+  drawFight(); timer=setTimeout(tick, 700/F.speed);
+}
+function callTarget(i){if(!F)return;F.called=i;F.calls++;F.log.push(`<b>${F.t.toFixed(1)}s</b> Kill call: ${F.opp.classes[i]}. Your team switches.`);drawFight()}
+function drawFight(){
+  const frame=(c,hp,enemy,i)=>`<${enemy?"button":"div"} class="frame ${enemy?"enemy":""} ${enemy&&F.called===i?"called":""}" ${enemy?`onclick="callTarget(${i})" title="Click to call this kill target"`:""}>
+    ${classIcon(c.cls,"sm")}<span style="width:62px">${c.cls}</span><span class="bar"><i style="width:${hp}%;background:${hp<35?"var(--loss)":"var(--win)"}"></i></span>
+    <span class="row" style="gap:2px">${actingNodes(c).slice(0,4).map(id=>talentIcon(id)).join("")}</span></${enemy?"button":"div"}>`;
+  $app.innerHTML = `<h2>${esc(F.opp.name)} · ${F.opp.map}</h2><p class="sub">Stand-in for PlayMatch. Talent icons on a frame are the nodes that act in the fight. Click an enemy frame to make a kill call.</p>
+  <div class="panel"><div class="frames">
+    <div><div class="meta" style="color:var(--t1)">Your team</div>${S.team.map((c,i)=>frame(c,F.hp.a[i],false,i)).join("")}</div>
+    <div><div class="meta" style="color:var(--t2)">${esc(F.opp.name)}</div>${F.opp.builds.map((c,i)=>frame(c,F.hp.b[i],true,i)).join("")}</div></div>
+    <div class="log" id="log">${F.log.join("<br>")}</div>
+    <div class="actions" style="margin-top:10px"><span class="note" style="margin-right:auto">${F.t.toFixed(1)}s</span>
+    ${[1,2,3].map(s=>`<button class="btn ${F.speed===s?"primary":""}" onclick="F.speed=${s};drawFight()">${s}x</button>`).join("")}</div></div>`;
+  const l=document.getElementById("log"); if(l) l.scrollTop=l.scrollHeight;
+}
+const MAP_IDS = {"Basic Arena":"BasicArena","Nagrand Arena":"PillaredArena","Twin Pillars":"TwinPillars"};
+function finishFight(){
+  if(F.win) S.wins++; else S.losses++;
+  const builds = S.team.map(c=>c.ranks);
+  const replay = JSON.stringify({team1:S.team.map(c=>c.cls),team2:F.opp.classes,map:MAP_IDS[F.opp.map],random_seed:S.seed+S.history.length,team1_builds:builds});
+  S.history.push({opp:F.opp.name, classes:F.opp.classes, tier:F.opp.tier, won:F.win, t:F.t, replay, specs:S.team.map(c=>spec(c).short)});
+  const over = S.wins>=MAX_WINS || S.losses>=MAX_LOSSES;
+  if(!over) for(const c of S.team) c.unspent++;   // a point after every match, win or loss
+  S.opp = null;
+  go("result");
+}
+function result(){
+  const won = F.win;
+  const over = S.wins>=MAX_WINS || S.losses>=MAX_LOSSES;
+  const odds = Math.round(F.p*100);
+  $app.innerHTML = `<h2>Results</h2>${pips()}
+  <div class="panel" style="margin-top:12px"><div class="big ${won?"win":"loss"}">${won?"Victory":"Defeat"}</div>
+  <div class="meta">vs ${esc(F.opp.name)} (${F.opp.classes.join(" + ")}) · ${F.t.toFixed(1)}s · ${F.calls} kill call${F.calls===1?"":"s"}</div>
+  <p class="note">The real Results screen sits here unchanged: damage, healing, CC breakdown and the combat log, with each combatant's spec under its name.</p>
+  ${over?"":`<div class="panel" style="background:var(--panel2);margin-top:8px"><span class="tag pts">+1 talent point</span> for each combatant, ${won?"for the win":"even for a loss: the same tier comes again with one more point"}.</div>`}
+  <div class="panel" style="background:var(--panel2);margin-top:8px"><div class="meta">Later idea · rematch odds</div>
+  Twenty background replays of this matchup: your setup wins about <b>${odds}%</b>. ${won? (odds<45?"You beat the odds.":"A sound setup."): (odds>=55?"That one was the dice.":"The setup was the problem; try another answer.")}</div></div>
+  <div class="actions"><button class="btn" onclick="showReplay(${S.history.length-1})">Watch replay</button>
+  <button class="btn primary" onclick="go('${over?"end":"reward"}')">${over?"Finish run":"Continue run"}</button></div>`;
+}
+function reward(){
+  if(!S.offers){
+    const pool = [];
+    for(const c of S.team){
+      const g = CLASSES[c.cls].gear;
+      const acc = ["plate-ap","mail-ap","leather-ap"].includes(g) ? "acc-ap" : "acc-sp";
+      for(const it of GEAR[g].concat(GEAR[acc])) if(!S.team.some(t=>t.upgrades.some(u=>u[0]===it[0]))) pool.push([c.cls,it]);
+    }
+    S.offers = pick(pool,3);
+  }
+  $app.innerHTML = `<h2>Choose a reward</h2><p class="sub">${S.history.at(-1).won?"A win":"Even a loss"} earns one pick of gear. Talent points are not a reward option: they arrive every match.</p>
+  <div class="grid g3">${S.offers.map(([cls,it],i)=>`<button class="card ${S.sel===i?"sel":""}" onclick="S.sel=${i};render()">
+    <div class="hstack">${itemIcon(it[3])}<div><div class="title" style="color:#a335ee">${esc(it[0])}</div><div class="meta">ilvl ${it[1]} · ${it[2]}</div></div></div>
+    <div class="hstack">${classIcon(cls,"sm")}<span class="meta">for your ${cls}</span></div>
+    <div class="delta"><span class="up">${esc(it[4])}</span><br><span class="dn">replaces a starting ${it[2].toLowerCase()} piece (ilvl ${START_ILVL})</span></div></button>`).join("")}</div>
+  <div class="actions"><button class="btn primary" ${S.sel===null||!S.offers.length?"disabled":""} onclick="takeReward()">Take it</button>
+  ${S.offers.length?"":`<button class="btn primary" onclick="go('hub')">Nothing left to offer</button>`}</div>`;
+}
+function takeReward(){const [cls,it]=S.offers[S.sel];S.team.find(c=>c.cls===cls).upgrades.push(it);S.offers=null;go("hub")}
+function end(){
+  $app.innerHTML = `<h2>Run complete</h2>${pips()}
+  <div class="panel" style="margin-top:12px"><div class="big ${S.wins>=MAX_WINS?"win":""}">${S.wins} win${S.wins===1?"":"s"}${S.wins>=MAX_WINS?" · Gauntlet cleared":""}</div>
+  ${teamStrip()}</div>
+  <div class="panel" style="margin-top:12px"><div class="meta">What persists: this record, these replays, and the talent paths as saved plans. No power carries into the next run.</div>
+  ${S.team.filter(c=>hasTree(c.cls)).map(c=>`<div style="margin-top:6px"><b style="color:${CLASSES[c.cls].col}">${c.cls}</b> ${esc(spec(c).label)} ${spec(c).short}: ${Object.keys(c.ranks).map(id=>`${esc(NODE[id].name)} ${c.ranks[id]}`).join(", ")}</div>`).join("")}</div>
+  <div class="panel matchlist" style="margin-top:12px"><div class="meta">Every match is a seed, a config and two builds: replayable for a few hundred bytes.</div>
+  ${S.history.map((h,i)=>`<div class="m"><span>${i+1}. <span class="${h.won?"win":"loss"}">${h.won?"W":"L"}</span> vs ${esc(h.opp)} (${h.classes.join(" + ")}) · your specs ${h.specs.filter(Boolean).join(", ")}</span>
+  <button class="btn" onclick="showReplay(${i})">Watch replay</button></div>`).join("")}</div>
+  <div class="actions"><button class="btn" onclick="S=null;render()">Main menu</button><button class="btn primary" onclick="newRun()">New run</button></div>`;
+}
+render();
+</script>
+</body>
+</html>
