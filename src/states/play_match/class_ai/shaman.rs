@@ -35,7 +35,7 @@ use super::CombatContext;
 
 /// Emergency heal trigger — a teammate below this HP fraction is healed before
 /// any offense (critical, never deferred during an escape).
-const SHAMAN_EMERGENCY_HP: f32 = 0.40;
+pub const SHAMAN_EMERGENCY_HP: f32 = 0.40;
 /// Sustain heal trigger — a teammate below this HP fraction is topped off only
 /// when the Shaman isn't fleeing (deferred during an ESCAPE window).
 const SHAMAN_SUSTAIN_HP: f32 = 0.70;

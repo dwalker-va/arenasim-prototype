@@ -285,7 +285,9 @@ impl Scene {
     /// `who` is casting (or channelling) `ability`, as the snapshot row of a
     /// unit with a live `CastingState` reports it. A casting unit does not
     /// decide (`decide_abilities` skips it), so this is for the units the
-    /// decision reads: an interrupt's target.
+    /// decision reads. Inside the dispatch only the Rogue's Kidney Shot
+    /// planner reads it; the interrupts themselves are decided by
+    /// `check_interrupts`, outside the dispatch, so no scene chooses one.
     pub fn casting(mut self, who: Who, ability: AbilityType) -> Self {
         self.unit_mut(who).casting = Some(ability);
         self
