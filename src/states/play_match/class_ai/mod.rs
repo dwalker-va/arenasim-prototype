@@ -811,11 +811,10 @@ pub fn stealth_visible(
 /// Press-when-ahead predicate: own team leads by at least the margin. The test
 /// behind the team situation's `tempo` (`situation.rs`), which the healer deny
 /// postures and the Warrior tempo reset read (both "stop the defensive behavior
-/// when clearly ahead"). A plain `>=` threshold with no hysteresis band: the
-/// team-HP differential changes only on discrete damage/heal events, so it does
-/// not strobe frame-to-frame, but it does flip with every hit and heal that
-/// crosses the margin — a play keyed on tempo needs onset and release
-/// thresholds first. Pure for unit testing.
+/// when clearly ahead"). The tempo latch applies it twice, at the onset
+/// (`press_advantage_margin`) and, for a team already pressing or trailing, at
+/// the release (`press_release_margin`, `TeamPlan` only). Pure for unit
+/// testing.
 pub(crate) fn pressing_when_ahead(advantage: f32, margin: f32) -> bool {
     advantage >= margin
 }

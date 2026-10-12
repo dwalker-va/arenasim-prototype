@@ -656,7 +656,8 @@ fractions in 0..1; values below are the shipped defaults):
 - `urgency_hp_threshold: 0.5` — defer non-critical casts during ESCAPE/DIP unless an ally is below this HP fraction
 - `anchor_switch_margin: 0.1` — sticky-anchor switch requires this HP-fraction injury margin
 - `wand_range: 30.0` — wand-range pull target distance (Priest)
-- `press_advantage_margin: 0.2` — team-HP-fraction lead at/above which a team "presses": its healers' `cover_pull` zeroes and the melee tempo reset stays disarmed (denial is reserved for the trailing side)
+- `press_advantage_margin: 0.2` — tempo ONSET: team-HP-fraction lead at/above which a team "presses" (the same deficit makes it trail): its healers' `cover_pull` zeroes and the melee tempo reset stays disarmed (denial is reserved for the trailing side)
+- `press_release_margin: 0.1` — tempo RELEASE: a pressing (trailing) team keeps that tempo until its lead (deficit) falls below this, so a lead wobbling around the onset does not flip it with every hit and heal. `TeamPlan` only (`SituationConfig::under`): a `Legacy` team releases at the onset, unlatched as before, and stays byte-identical. At most `press_advantage_margin` (`validate()`); equal disables the band
 
 **Per-class scorer weights** (`priest.weights:` / `paladin.weights:` —
 `score_directions` term weights; `0.0` disables a term). All terms here are
@@ -672,7 +673,7 @@ with the context-steering mask refactor.
 - `flee` (0.0 for healers + Mage; Hunter 6.0; Druid 6.0, read only in Travel Form) — constant pull away from the nearest threat, NOT proximity-weighted (distance-maximization), so a chased ranged DPS outruns an un-impaired chaser at all ranges. Hunter's `corner_penalty` (8.0) must EXCEED `flee` or the kiter flees into corners.
 - `commitment_bonus` (1.5/1.5) — bonus toward the committed direction during the commit window
 - `los_seek` (0.0 for healers; Mage 2.0 / Hunter 1.0) — reward for candidate steps that have/restore line of sight to the kill target; drives occluded-in-range casters to orbit to a sighted angle instead of idling
-- `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (`press_advantage_margin`)
+- `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (tempo, `press_advantage_margin` / `press_release_margin`)
 - `trap_setup` (Hunter 3.0, 0.0 for everyone else) — while Freezing Trap is ready and an enemy healer would be caught by it (`hunter_dip::trap_setup_healer`), pull toward that healer once a KITE step would leave it beyond throw range (the trap's `range` less its trigger radius); zero inside that range, absent while the trap is on cooldown. Kept below `flee` so the kite still escapes the melee, bent toward the healer. Disengage bends its leap by the same two weights (`hunter_dip::trap_setup_disengage`) and names the healer as the Disengage's `target_id` in the trace when it did; KITE decisions carry the term as a `trap_setup` scorer term
 
 **Medic chase (heal-seeking movement)** — shared across Priest/Paladin/Shaman

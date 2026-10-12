@@ -11,10 +11,12 @@
 use arenasim::states::match_config::CharacterClass::{
     Druid, Hunter, Mage, Paladin, Priest, Warrior,
 };
+use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::druid::mana_reserve;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::decision_trace::{MovementTrigger, RejectionReason};
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
+use arenasim::states::play_match::movement_config::load_movement_config;
 use arenasim::states::play_match::situation::{
     MatchPhase, TeamSituation, Tempo, ATTRITION_ONSET_SECS,
 };
@@ -564,5 +566,108 @@ fn a_pressing_warrior_does_not_reset_tempo() {
             .any(|m| m.trigger == MovementTrigger::MeleeReset),
         "{}",
         describe(&pressing)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Tempo hysteresis: under `TeamPlan` a pressing team keeps pressing while its
+// lead wobbles inside the band between `press_release_margin` and
+// `press_advantage_margin`, and the Warrior reads the latched tempo. `Legacy`
+// has no band, so the same wobble flips it every time.
+// ---------------------------------------------------------------------------
+
+/// The enemy health fraction (both enemies) that gives the rooted-Warrior
+/// scene's team 1 a lead of `lead`: team 1 sits at full health (2.0) and the
+/// enemies sum to 2h, so the lead is 2 - 2h.
+fn enemy_health_for_lead(lead: f32) -> f32 {
+    1.0 - lead / 2.0
+}
+
+/// Run the rooted-Warrior scene through a lead over the onset, then wobble it
+/// into the band and back over the onset `wobbles` times, reclassifying at
+/// each step, and end inside the band. Returns the tempo after each step and
+/// the Warrior's decision at the last step.
+fn wobble_tempo(profile: AiProfile, wobbles: usize) -> (Vec<Tempo>, DecisionView) {
+    let shared = load_movement_config().expect("movement.ron loads").shared;
+    let (onset, release) = (shared.press_advantage_margin, shared.press_release_margin);
+    assert!(
+        release < onset,
+        "movement.ron must give tempo a band: release {release} vs onset {onset}"
+    );
+    // A quarter of the band clear of the onset, and mid-band.
+    let band = onset - release;
+    let over = enemy_health_for_lead(onset + band / 4.0);
+    let inside = enemy_health_for_lead(release + band / 2.0);
+
+    let mut scene = rooted_warrior_scene(over).ai_profile(1, profile);
+    let mut tempos = vec![scene.reclassify().for_team(1).tempo];
+    let mut steps = Vec::new();
+    for _ in 0..wobbles {
+        steps.extend([inside, over]);
+    }
+    steps.push(inside);
+    for h in steps {
+        scene.set_health(MAGE, h);
+        scene.set_health(ENEMY_PRIEST, h);
+        tempos.push(scene.reclassify().for_team(1).tempo);
+    }
+    let view = scene.decide(WARRIOR);
+    (tempos, view)
+}
+
+#[test]
+fn a_lead_wobbling_inside_the_band_keeps_a_teamplan_team_pressing() {
+    let (tempos, view) = wobble_tempo(AiProfile::TeamPlan, 3);
+    assert!(
+        tempos.iter().all(|t| *t == Tempo::Pressing),
+        "TeamPlan tempo flipped inside the band: {tempos:?}"
+    );
+    assert_eq!(view.situation.map(|s| s.tempo), Some(Tempo::Pressing));
+    assert!(
+        !view
+            .movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::MeleeReset),
+        "the Warrior reads the latched tempo and keeps chasing: {}",
+        describe(&view)
+    );
+
+    // Control: Legacy, the same wobble. No band, so it flips at every step,
+    // and inside the band the Warrior resets.
+    let (tempos, view) = wobble_tempo(AiProfile::Legacy, 3);
+    let flips = tempos.windows(2).filter(|w| w[0] != w[1]).count();
+    assert_eq!(
+        flips,
+        tempos.len() - 1,
+        "Legacy flips every step: {tempos:?}"
+    );
+    assert_eq!(view.situation.map(|s| s.tempo), Some(Tempo::Even));
+    assert!(
+        view.movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::MeleeReset),
+        "{}",
+        describe(&view)
+    );
+}
+
+#[test]
+fn a_teamplan_team_stops_pressing_below_the_release() {
+    let shared = load_movement_config().expect("movement.ron loads").shared;
+    let (onset, release) = (shared.press_advantage_margin, shared.press_release_margin);
+    let mut scene = rooted_warrior_scene(enemy_health_for_lead((onset + 1.0) / 2.0))
+        .ai_profile(1, AiProfile::TeamPlan);
+    assert_eq!(scene.reclassify().for_team(1).tempo, Tempo::Pressing);
+    let below = enemy_health_for_lead(release / 2.0);
+    scene.set_health(MAGE, below);
+    scene.set_health(ENEMY_PRIEST, below);
+    assert_eq!(scene.reclassify().for_team(1).tempo, Tempo::Even);
+    let view = scene.decide(WARRIOR);
+    assert!(
+        view.movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::MeleeReset),
+        "released, the Warrior resets again: {}",
+        describe(&view)
     );
 }

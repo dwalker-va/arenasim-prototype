@@ -52,6 +52,11 @@
         // cover, the Warrior stops resetting tempo) so a clearly-winning team
         // seeks the fight instead of LoS-stalling into the dampening endgame.
         press_advantage_margin: 0.2,
+        // Tempo release: a team pressing (or trailing) keeps that tempo until
+        // its lead (or deficit) falls below this. The band up to
+        // press_advantage_margin is tempo's hysteresis. TeamPlan only; Legacy
+        // releases at press_advantage_margin.
+        press_release_margin: 0.1,
     ),
     priest: (
         weights: (
