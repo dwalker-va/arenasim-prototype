@@ -197,3 +197,16 @@ PillaredArena), concatenated. Gunzip it, run each arm's binary over it with
 `--jobs 4 --trace-mode off`, then `scripts/paired_sweep.py` and
 `2026-10-12-as285-oriented.py` on the two CSVs. `2026-10-12-as285-attribute.py`
 replays the moved matches; run each arm's binary in place, in its own checkout.
+
+## `2026-10-12-as279-{basicarena,pillared,twinpillars}.jsonl.gz`
+
+Behind `../2026-10-12-as279-hoj-sight.md` (card AS-279). One
+`gen_sweep.py --full 2 --exclude-double-healer --affects Paladin
+--control-cells 8` run per map (`--extra '{"map":"<Map>"}'`): `--n 10` on
+PillaredArena and TwinPillars (2,830 configs each), `--n 5` on BasicArena
+(1,415, the byte-identity check). Gunzip, run each arm's binary over each with
+`--jobs 4 --trace-mode off`; the CSVs are `2026-10-12-as279-<map>-<arm>.csv.gz`.
+Analysis: `scripts/paired_sweep.py --affects Paladin --tier directional` and
+`2026-10-12-as279-oriented.py` (scored from the Paladin's side). The
+casts-through-a-pillar counts come from arms instrumented by
+`2026-10-12-as279-hoj-sight-counter.py`.

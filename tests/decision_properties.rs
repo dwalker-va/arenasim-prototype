@@ -1197,13 +1197,6 @@ struct Known {
 }
 
 const KNOWN: &[Known] = &[
-    // Rotation and dip Hammer of Justice gate range by hand and never ask
-    // for sight.
-    Known {
-        card: "AS-279",
-        property: Property::InSight,
-        abilities: &[AbilityType::HammerOfJustice],
-    },
     // Concussive Shot and the Frost Trap peel are aimed at a Divine-Shielded
     // melee, and trap throws land where the Hunter cannot see.
     Known {
@@ -1545,12 +1538,6 @@ fn in_sight() -> Finding {
 #[test]
 fn a_targeted_choice_is_in_sight() {
     verdict(Property::InSight, Scope::Guard, in_sight());
-}
-
-#[test]
-#[ignore = "AS-279"]
-fn hammer_of_justice_is_cast_in_sight() {
-    verdict(Property::InSight, Scope::Card("AS-279"), in_sight());
 }
 
 #[test]

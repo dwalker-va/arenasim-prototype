@@ -1107,7 +1107,8 @@ fn try_holy_shock_damage(
 }
 
 /// Try Hammer of Justice on an enemy in melee range (the rotation path —
-/// healer-preferring target selection among in-range eligible enemies).
+/// healer-preferring target selection among eligible enemies the stun
+/// reaches: in range and in sight).
 fn try_hammer_of_justice(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -1124,41 +1125,73 @@ fn try_hammer_of_justice(
     let def = abilities.get_unchecked(&ability);
 
     let opts = PreCastOpts::default();
-    let cleared = match cast_gate(ability, def, combatant, my_pos, auras, None, ctx, opts) {
-        Ok(cleared) => cleared,
-        Err(reason) => {
-            builder.reject(ability, reason);
-            return false;
-        }
-    };
+    if let Err(reason) = cast_gate(ability, def, combatant, my_pos, auras, None, ctx, opts) {
+        builder.reject(ability, reason);
+        return false;
+    }
 
-    // Carry the pet-aware id (hoj_target_eligible already excludes pets, but the
-    // id is resolved via log_id so this can't silently break if that changes);
-    // class is kept only for the healer-preferring pick.
-    let enemies_in_range: Vec<(&Entity, CharacterClass, crate::combat::log::CombatantId)> = ctx
+    // The enemies the stun REACHES (range, then sight — `cast_reach`): an
+    // occluded enemy in range yields to one in sight rather than being picked
+    // and then refused. Carry the pet-aware id (hoj_target_eligible already
+    // excludes pets, but the id is resolved via log_id so this can't silently
+    // break if that changes); class is kept only for the healer-preferring pick.
+    let mut occluded = false;
+    let enemies_in_reach: Vec<(
+        Entity,
+        Vec3,
+        CharacterClass,
+        crate::combat::log::CombatantId,
+    )> = ctx
         .combatants
         .iter()
         .filter(|(e, _)| {
             hoj_target_eligible(ctx, combatant.team, **e) && hoj_held_by(ctx, **e).is_none()
         })
-        .filter_map(|(e, info)| {
-            if my_pos.distance(info.position) <= def.range {
-                Some((e, info.class, info.log_id()))
-            } else {
-                None
-            }
-        })
+        .filter_map(
+            |(e, info)| match super::cast_reach(ctx, def.range, my_pos, info.position) {
+                super::CastReach::Reaches => Some((*e, info.position, info.class, info.log_id())),
+                super::CastReach::LosBlocked => {
+                    occluded = true;
+                    None
+                }
+                super::CastReach::OutOfRange { .. } => None,
+            },
+        )
         .collect();
 
-    let stun_target = enemies_in_range
+    let stun_target = enemies_in_reach
         .iter()
-        .find(|(_, class, _)| class.is_healer())
-        .or_else(|| enemies_in_range.first())
+        .find(|(_, _, class, _)| class.is_healer())
+        .or_else(|| enemies_in_reach.first())
         .cloned();
 
-    let Some((target_entity, _target_class, target_id)) = stun_target else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
+    let Some((target_entity, target_pos, _target_class, target_id)) = stun_target else {
+        builder.reject(
+            ability,
+            if occluded {
+                RejectionReason::LosBlocked
+            } else {
+                RejectionReason::NoValidTarget
+            },
+        );
         return false;
+    };
+
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
     };
 
     cast_hammer_of_justice(
@@ -1168,7 +1201,7 @@ fn try_hammer_of_justice(
         def,
         abilities,
         combatant,
-        *target_entity,
+        target_entity,
         target_id,
         cleared,
         same_frame_cc_queue,
@@ -1180,8 +1213,9 @@ fn try_hammer_of_justice(
 
 /// Try Hammer of Justice on the DIP target (U8). Readiness re-runs the same
 /// `pre_cast_ok` gate as the rotation; the arrival re-check covers
-/// eligibility (dead/immune/DR-immune/stealthed) and range against the
-/// specific dip target instead of the rotation's healer-preferring scan.
+/// eligibility (dead/immune/DR-immune/stealthed), then range and sight through
+/// the cast gate, against the specific dip target instead of the rotation's
+/// healer-preferring scan.
 #[allow(clippy::too_many_arguments)]
 fn try_dip_hammer_of_justice(
     commands: &mut Commands,
@@ -1200,13 +1234,10 @@ fn try_dip_hammer_of_justice(
     let def = abilities.get_unchecked(&ability);
 
     let opts = PreCastOpts::default();
-    let cleared = match cast_gate(ability, def, combatant, my_pos, auras, None, ctx, opts) {
-        Ok(cleared) => cleared,
-        Err(reason) => {
-            builder.reject(ability, reason);
-            return false;
-        }
-    };
+    if let Err(reason) = cast_gate(ability, def, combatant, my_pos, auras, None, ctx, opts) {
+        builder.reject(ability, reason);
+        return false;
+    }
 
     if !hoj_target_eligible(ctx, combatant.team, target) {
         builder.reject(ability, RejectionReason::NoValidTarget);
@@ -1220,17 +1251,23 @@ fn try_dip_hammer_of_justice(
         .combatants
         .get(&target)
         .expect("eligible target is in snapshot");
-    let distance = my_pos.distance(info.position);
-    if distance > def.range {
-        builder.reject(
-            ability,
-            RejectionReason::OutOfRange {
-                distance,
-                max: def.range,
-            },
-        );
-        return false;
-    }
+    // Range, then sight, on the dip target itself.
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target, info.position)),
+        ctx,
+        opts,
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
     cast_hammer_of_justice(
         commands,
