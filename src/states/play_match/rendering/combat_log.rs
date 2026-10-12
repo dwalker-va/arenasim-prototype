@@ -3,7 +3,11 @@
 //! The tabbed combat panel showing combat log events and ability timeline.
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
+use crate::states::configure_match_ui::ClassIcons;
+use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use crate::states::play_match::components::{CombatPanelView, DisplaySettings, SpellIcons};
+use crate::ui::theme::{class_color, color, school_color};
+use crate::ui::widgets::{icon_tile, Tooltip};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -35,6 +39,8 @@ pub fn render_combat_panel(
     combat_log: Res<CombatLog>,
     mut panel_view: ResMut<CombatPanelView>,
     spell_icons: Res<SpellIcons>,
+    class_icons: Res<ClassIcons>,
+    abilities: Res<AbilityDefinitions>,
     display_settings: Res<DisplaySettings>,
 ) {
     // Hidden by default: the log/timeline is a diagnostic tool, not part of
@@ -109,7 +115,15 @@ pub fn render_combat_panel(
             // Render the selected view
             match *panel_view {
                 CombatPanelView::CombatLog => render_combat_log_content(ui, &combat_log),
-                CombatPanelView::Timeline => render_timeline_content(ui, &combat_log, &spell_icons),
+                CombatPanelView::Timeline => render_timeline_content(
+                    ui,
+                    &combat_log,
+                    &TimelineIcons {
+                        spells: &spell_icons,
+                        classes: &class_icons,
+                        abilities: &abilities,
+                    },
+                ),
             }
         });
 }
@@ -145,8 +159,47 @@ fn render_combat_log_content(ui: &mut egui::Ui, combat_log: &CombatLog) {
         });
 }
 
+/// What the timeline draws its icons from.
+struct TimelineIcons<'a> {
+    spells: &'a SpellIcons,
+    classes: &'a ClassIcons,
+    abilities: &'a AbilityDefinitions,
+}
+
+/// The ability a timeline entry names, looked up in `abilities.ron`.
+///
+/// The combat log records a cast by the ability's display name. A few casts
+/// log a variant of it — Holy Shock as "Holy Shock (Heal)" and
+/// "Holy Shock (Damage)" — so a trailing parenthesised variant is dropped
+/// before the lookup. `None` for a name no ability carries.
+pub fn timeline_ability<'a>(
+    logged: &str,
+    abilities: &'a AbilityDefinitions,
+) -> Option<&'a AbilityConfig> {
+    let name = match logged.rfind(" (") {
+        Some(i) if logged.ends_with(')') => &logged[..i],
+        _ => logged,
+    };
+    abilities
+        .iter()
+        .map(|(_, config)| config)
+        .find(|config| config.name == name)
+}
+
+/// The icon a timeline entry draws: its ability's `icon` in `abilities.ron`.
+///
+/// The in-match icon loader (`load_spell_icons`) registers every ability's
+/// `icon` under the ability's name ([`super::ability_icon_paths`]), which is
+/// the key the timeline reads the texture back by, so a new ability's casts
+/// draw its icon with no code change.
+pub fn timeline_icon_path<'a>(logged: &str, abilities: &'a AbilityDefinitions) -> Option<&'a str> {
+    timeline_ability(logged, abilities)
+        .map(|config| config.icon.as_str())
+        .filter(|icon| !icon.is_empty())
+}
+
 /// Render the timeline content (columnar ability visualization).
-fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icons: &SpellIcons) {
+fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, icons: &TimelineIcons) {
     // Get all combatants and sort: Team 1 first, then Team 2
     let mut combatants = combat_log.all_combatants();
     combatants.sort_by(|a, b| {
@@ -309,22 +362,27 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                         egui::vec2(TIMELINE_ICON_SIZE, TIMELINE_ICON_SIZE),
                     );
 
-                    // Try to use spell icon if available
-                    if let Some(texture_id) = spell_icons.textures.get(ability_name) {
-                        // Draw spell icon image with rounded corners (via clipping)
-                        // First draw border - red if interrupted, white otherwise
-                        let border_color = if interrupted {
-                            egui::Color32::from_rgb(255, 60, 60) // Bright red for interrupted
-                        } else {
-                            egui::Color32::from_white_alpha(100)
-                        };
-                        let border_width: f32 = if interrupted { 2.0 } else { 1.0 };
-                        painter.rect_stroke(
-                            icon_rect.expand(1.0),
-                            3.0,
-                            egui::Stroke::new(border_width, border_color),
-                            egui::StrokeKind::Outside,
-                        );
+                    let ability = timeline_ability(ability_name, icons.abilities);
+                    // Keyed by the ability's name, as `load_spell_icons`
+                    // registered its `icon` (see `timeline_icon_path`).
+                    let texture =
+                        ability.and_then(|config| icons.spells.textures.get(&config.name));
+
+                    // Border - red if interrupted, white otherwise
+                    let border_color = if interrupted {
+                        egui::Color32::from_rgb(255, 60, 60) // Bright red for interrupted
+                    } else {
+                        egui::Color32::from_white_alpha(100)
+                    };
+                    let border_width: f32 = if interrupted { 2.0 } else { 1.0 };
+                    painter.rect_stroke(
+                        icon_rect.expand(1.0),
+                        3.0,
+                        egui::Stroke::new(border_width, border_color),
+                        egui::StrokeKind::Outside,
+                    );
+
+                    if let Some(texture_id) = texture {
                         // Draw the spell icon (tinted red if interrupted)
                         let icon_tint = if interrupted {
                             egui::Color32::from_rgb(255, 150, 150) // Red tint
@@ -338,22 +396,20 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                             icon_tint,
                         );
                     } else {
-                        // Fallback: colored rectangle with abbreviation
-                        let icon_color = if interrupted {
-                            egui::Color32::from_rgb(180, 60, 60) // Dark red for interrupted
-                        } else {
-                            get_ability_icon_color(ability_name)
-                        };
-                        painter.rect_filled(icon_rect, 3.0, icon_color);
-
-                        let abbrev = get_ability_abbreviation(ability_name);
-                        painter.text(
-                            icon_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            abbrev,
-                            egui::FontId::proportional(9.0),
-                            egui::Color32::WHITE,
-                        );
+                        // The spell's art is not loaded yet: what the kit's
+                        // `class_icon` draws for the ability's class — painted
+                        // rather than laid out, so the pointer still reaches
+                        // the timeline's own hover — or the neutral tile for a
+                        // name no ability carries.
+                        match ability {
+                            Some(config) => icon_tile(
+                                &painter,
+                                icon_rect,
+                                icons.classes.textures.get(&config.class).copied(),
+                                class_color(config.class),
+                            ),
+                            None => icon_tile(&painter, icon_rect, None, color::LINE),
+                        }
                     }
 
                     // Check hover for tooltip
@@ -366,64 +422,22 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                 }
             }
 
-            // Show tooltip for hovered ability using foreground layer (so it can overflow panel bounds)
+            // The shared hover card, at the pointer: one widget covers the
+            // whole timeline, so the card follows the icon under the pointer.
             if let Some((ability_name, timestamp, interrupted)) = hovered_ability {
-                if let Some(hover_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                    // Format: "{time}s {ability}" with time in yellow
-                    let time_text = format!("{:.1}s", timestamp);
-                    let ability_text = if interrupted {
-                        format!(" {} (Interrupted)", ability_name)
-                    } else {
-                        format!(" {}", ability_name)
-                    };
-                    let full_text = format!("{}{}", time_text, ability_text);
-                    let tooltip_pos = egui::pos2(hover_pos.x + 15.0, hover_pos.y - 10.0);
-
-                    // Use foreground layer painter so tooltip can overflow panel bounds
-                    let foreground_painter = ui.ctx().layer_painter(egui::LayerId::new(
-                        egui::Order::Foreground,
-                        egui::Id::new("timeline_tooltip"),
-                    ));
-
-                    let font = egui::FontId::proportional(12.0);
-                    let time_color = egui::Color32::from_rgb(255, 215, 0); // Gold
-                    let ability_color = egui::Color32::WHITE;
-
-                    // Calculate total size for background
-                    let full_galley = foreground_painter.layout_no_wrap(
-                        full_text,
-                        font.clone(),
-                        egui::Color32::WHITE,
-                    );
-                    let bg_rect = egui::Rect::from_min_size(
-                        tooltip_pos,
-                        full_galley.size() + egui::vec2(8.0, 4.0),
-                    );
-                    foreground_painter.rect_filled(
-                        bg_rect,
-                        3.0,
-                        egui::Color32::from_black_alpha(220),
-                    );
-
-                    // Draw time in yellow
-                    let time_galley =
-                        foreground_painter.layout_no_wrap(time_text, font.clone(), time_color);
-                    let time_width = time_galley.size().x;
-                    foreground_painter.galley(
-                        tooltip_pos + egui::vec2(4.0, 2.0),
-                        time_galley,
-                        time_color,
-                    );
-
-                    // Draw ability name in white (after time)
-                    foreground_painter.text(
-                        tooltip_pos + egui::vec2(4.0 + time_width, 2.0),
-                        egui::Align2::LEFT_TOP,
-                        ability_text,
-                        font,
-                        ability_color,
-                    );
-                }
+                let title_color = timeline_ability(&ability_name, icons.abilities)
+                    .map_or(color::TEXT, |config| school_color(config.spell_school));
+                let meta = if interrupted {
+                    format!("{:.1}s · Interrupted", timestamp)
+                } else {
+                    format!("{:.1}s", timestamp)
+                };
+                response.on_hover_ui_at_pointer(|ui| {
+                    Tooltip::new(&ability_name)
+                        .title_color(title_color)
+                        .meta(&meta)
+                        .ui(ui)
+                });
             }
         });
 }
@@ -445,58 +459,4 @@ fn shorten_combatant_name(name: &str) -> String {
         .replace("Hunter", "Hun")
         .replace("Shaman", "Sha")
         .replace("Druid", "Dru")
-}
-
-/// Get a short abbreviation for an ability name
-fn get_ability_abbreviation(ability: &str) -> &'static str {
-    match ability {
-        "Frostbolt" => "FB",
-        "Frost Nova" => "FN",
-        "Flash Heal" => "FH",
-        "Mind Blast" => "MB",
-        "Power Word: Fortitude" => "PF",
-        "Charge" => "CH",
-        "Rend" => "RD",
-        "Mortal Strike" => "MS",
-        "Heroic Strike" => "HS",
-        "Ambush" => "AM",
-        "Sinister Strike" => "SS",
-        "Kidney Shot" => "KS",
-        "Corruption" => "CO",
-        "Serpent Sting" => "ST",
-        "Shadow Bolt" => "SB",
-        "Fear" => "FE",
-        "Pummel" => "PM",
-        "Kick" => "KI",
-        _ => {
-            // Return first 2 chars as fallback
-            "??"
-        }
-    }
-}
-
-/// Get a color for an ability icon based on its type/school
-fn get_ability_icon_color(ability: &str) -> egui::Color32 {
-    match ability {
-        // Frost (blue)
-        "Frostbolt" | "Frost Nova" => egui::Color32::from_rgb(60, 120, 180),
-        // Holy (yellow/gold)
-        "Flash Heal" | "Power Word: Fortitude" => egui::Color32::from_rgb(200, 180, 80),
-        // Shadow (purple)
-        "Mind Blast" | "Shadow Bolt" | "Corruption" | "Fear" => {
-            egui::Color32::from_rgb(120, 80, 160)
-        }
-        // Physical (brown/orange)
-        "Charge" | "Rend" | "Mortal Strike" | "Heroic Strike" | "Pummel" => {
-            egui::Color32::from_rgb(160, 100, 60)
-        }
-        // Rogue (yellow)
-        "Ambush" | "Sinister Strike" | "Kidney Shot" | "Kick" => {
-            egui::Color32::from_rgb(180, 160, 60)
-        }
-        // Nature (green)
-        "Serpent Sting" => egui::Color32::from_rgb(100, 170, 60),
-        // Default
-        _ => egui::Color32::from_rgb(100, 100, 100),
-    }
 }

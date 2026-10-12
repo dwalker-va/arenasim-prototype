@@ -86,6 +86,22 @@ pub fn item_aura_icons(items: &ItemDefinitions) -> Vec<(String, String)> {
     icons
 }
 
+/// `(key, path)` for every ability with an `icon` in `abilities.ron`, keyed by
+/// the ability's display name — the key `load_spell_icons` registers each
+/// texture under, and the one the timeline, buff bar and team frames read it
+/// back by.
+pub fn ability_icon_paths(abilities: &AbilityDefinitions) -> Vec<(String, String)> {
+    let mut icons: Vec<(String, String)> = abilities
+        .iter()
+        .filter(|(_, config)| !config.icon.is_empty())
+        .map(|(_, config)| (config.name.clone(), config.icon.clone()))
+        .collect();
+    // `AbilityDefinitions` is a HashMap; sort so the load order is not
+    // per-process, as `item_aura_icons` does.
+    icons.sort();
+    icons
+}
+
 /// Whether an icon handle has stopped resolving — LOADED, or FAILED (a missing
 /// file, an undecodable one). The icon loaders wait on this and then register
 /// only what actually loaded, so a single bad icon degrades to "no icon"
@@ -232,11 +248,9 @@ pub fn load_spell_icons(
     // Load handles if not already loaded
     if icon_handles.handles.is_empty() {
         // Load ability icons from data-driven definitions
-        for (_ability_type, config) in ability_definitions.iter() {
-            if !config.icon.is_empty() {
-                let handle: Handle<Image> = asset_server.load(&config.icon);
-                icon_handles.handles.push((config.name.clone(), handle));
-            }
+        for (name, path) in ability_icon_paths(&ability_definitions) {
+            let handle: Handle<Image> = asset_server.load(path);
+            icon_handles.handles.push((name, handle));
         }
         // Load generic aura icons
         for (key, path) in GENERIC_AURA_ICONS {
