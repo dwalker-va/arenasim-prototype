@@ -80,8 +80,8 @@ verify that PR and render a verdict — nothing more.
    - **A re-pinned seed is a REJECT finding** (the migrate-not-re-pin rule,
      CLAUDE.md *Test an AI decision*). A diff that moves a seed-pinned probe to
      a fresh seed because its old seed went stale must instead migrate it — to a
-     scene test, or a situation-conditional probe over a seed bank (a staged
-     match too, once AS-273 lands them). Check every changed seed constant and seed list in `tests/`: a seed
+     scene test, a staged match (`headless::stage`), or a situation-conditional
+     probe over a seed bank. Check every changed seed constant and seed list in `tests/`: a seed
      change in a probe the diff did not otherwise need to touch is the tell.
 5. **Review the diff independently.** Read the changed code, not just the tests:
    - correctness (logic, edge cases, dying-blow/draw semantics, RNG draw-order

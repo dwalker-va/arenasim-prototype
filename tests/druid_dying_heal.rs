@@ -1,152 +1,167 @@
 //! AS-210 — the Druid heals a dying teammate before it casts damage or
-//! utility.
+//! utility, and holds its damage and utility while the medic walk has not
+//! reached that teammate.
 //!
-//! The played match the defect was found in: Hunter+Paladin vs Mage+Druid on
-//! Nagrand (`TeamPlan`), seed 2. At about 94s of combat a Paladin crit drops
-//! the Mage from 57% to 40%, behind a pillar edge from the Druid. The medic
-//! walk starts at once, and sight returns within a fraction of a second — but
-//! the Druid had spent the global cooldown on a Moonfire at the Paladin in the
-//! frames between, so the Mage's heal waited 1.5s and it was never healed
-//! before the match ended. Every Druid spell is an instant on the global
-//! cooldown, so the medic walk's cast deferral, which holds movement-locking
-//! casts, held nothing for it; the Druid now holds its damage and utility
-//! itself while the walk's teammate is out of reach.
+//! The defect was found in a played match: a crit dropped the Druid's Mage
+//! below the urgency line behind a pillar edge, the medic walk started, and
+//! the Druid spent the global cooldown on a Moonfire in the frames before
+//! sight returned — so the Mage's heal waited 1.5s, and it was never healed.
+//! Every Druid spell is an instant on the global cooldown, so the walk's cast
+//! deferral, which holds movement-locking casts, held nothing for it.
 //!
-//! The rule itself is pinned case by case in `class_ai/druid.rs`
-//! (`reach_tests`, which alone catches the hold's removal); this is a played
-//! match. The original seed stopped reaching the scene when the Druid's mana
-//! governor reserve fell (AS-247), so the probe plays Warrior+Paladin vs
-//! Mage+Druid, seed 1, where from about 50s of combat the Druid walks to its
-//! dying Mage round a pillar. None of the 400 Nagrand Mage+Druid matches
-//! scanned for the re-seed (ten enemy comps, seeds 0-39) puts a damage cast
-//! ahead of the heal when the hold is removed.
+//! The rule is pinned case by case in `class_ai/druid.rs` (`reach_tests`).
+//! This is the played guard: a STAGED match (tier 3, `headless::stage`) puts
+//! the scene on the field by construction, so no seed can stop reaching it.
 
-use arenasim::headless::runner::TraceConfig;
-use arenasim::headless::{run_headless_match_observed, HeadlessMatchConfig};
-use arenasim::states::match_config::CharacterClass;
+mod common;
+
+use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
+use arenasim::states::play_match::AbilityType;
+use common::staged::{entity_id, of_class, play, sim_time, Played};
+
+/// Below `urgency_hp_threshold` (0.5), above `DRUID_EMERGENCY_HP` (0.45): the
+/// Mage is dying, but not so low that Swiftmend's steps take the turn first.
+const MAGE_HP: f32 = 0.47;
+
+const MAGE: Unit = Unit::new(2, 0);
+const DRUID: Unit = Unit::new(2, 1);
+const WARRIOR: Unit = Unit::new(1, 0);
+const PALADIN: Unit = Unit::new(1, 1);
 
 /// The Druid's heals.
 const HEALS: [&str; 3] = ["Rejuvenation", "Lifebloom", "Swiftmend"];
 
-fn repro_config() -> HeadlessMatchConfig {
+/// One frame of the fixed 60Hz clock.
+const FRAME: f32 = 1.0 / 60.0;
+
+fn config(seed: u64) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
         team1: vec!["Warrior".into(), "Paladin".into()],
         team2: vec!["Mage".into(), "Druid".into()],
-        map: "PillaredArena".to_string(),
-        ai_profile: Some("TeamPlan".to_string()),
-        random_seed: Some(1),
+        map: "PillaredArena".into(),
+        // The Druid is the enemy's kill target, the Paladin the Druid's.
+        team1_kill_target: Some(1),
+        team2_kill_target: Some(1),
+        random_seed: Some(seed),
+        max_duration_secs: 10.0,
         ..Default::default()
     }
 }
 
-/// The played match: the Mage's `(sim time, HP fraction)` on every frame after
-/// the gates, its trace entity id, and the decision trace's events.
-struct Played {
-    mage_hp: Vec<(f32, f32)>,
-    mage_id: u64,
-    trace: Vec<serde_json::Value>,
+/// The stage, round the pillar at (40, 20) (apothem 5.5yd): the Druid 12yd
+/// west of its centre, the dying Mage 12yd east — 24yd apart, in heal range,
+/// out of sight. The enemy Paladin stands 25yd from the Druid, in sight and in
+/// Moonfire's range; the Warrior is across the bowl, 90yd off.
+///
+/// The enemies are after the Druid, so the Mage is nobody's target and no
+/// one's heal FOCUS: the Druid is, and it carries its own Rejuvenation and a
+/// full Lifebloom stack, so the focus steps (5-6) have nothing to add. The
+/// Mage's heal can then only come from step 7 (the dying teammate's) — which
+/// is what puts it ahead of Moonfire (step 10).
+fn stage() -> Stage {
+    let stage = Stage::new()
+        .place(DRUID, 28.0, 23.0)
+        .place(MAGE, 52.0, 23.0)
+        .health(MAGE, MAGE_HP)
+        .place(PALADIN, 25.0, 45.0)
+        .place(WARRIOR, -45.0, -35.0)
+        .land(DRUID, AbilityType::Rejuvenation, DRUID);
+    (0..3).fold(stage, |s, _| s.land(DRUID, AbilityType::Lifebloom, DRUID))
 }
 
-fn play() -> Played {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let path = tmp.path().to_path_buf();
-    drop(tmp);
-    let mut mage_hp = Vec::new();
-    let mut mage_id = None;
-    run_headless_match_observed(
-        repro_config(),
-        true,
-        Some(TraceConfig {
-            output_path: path.clone(),
-        }),
-        |frame| {
-            if !frame.gates_open {
-                return;
-            }
-            let (entity, mage) = frame
-                .combatants
-                .iter()
-                .find(|(_, c)| c.team == 2 && !c.is_pet && c.class == CharacterClass::Mage)
-                .expect("the Mage");
-            mage_id = Some(entity.index() as u64);
-            if mage.alive {
-                mage_hp.push((frame.sim_time, mage.current_health / mage.max_health));
-            }
-        },
-    )
-    .expect("headless match");
-    let body = std::fs::read_to_string(&path).expect("read trace");
-    let _ = std::fs::remove_file(&path);
-    Played {
-        mage_hp,
-        mage_id: mage_id.expect("the gates opened"),
-        trace: body
-            .lines()
-            .filter_map(|l| serde_json::from_str(l).ok())
-            .collect(),
-    }
+/// What the Druid did from the gates until its first heal on the Mage.
+struct Walk {
+    /// When the medic walk to the Mage started (combat clock).
+    started: f32,
+    /// The Druid's casts from the gates, `(combat time, ability, target)`, up
+    /// to and including its first heal on the Mage.
+    casts: Vec<(f32, String, u64)>,
+    /// The Druid's turns on which Moonfire was held for the walk.
+    held: Vec<f32>,
 }
 
-/// From the moment the medic walk starts toward the dying Mage, the Druid's
-/// first cast is a heal on the Mage — not a Moonfire — and the Mage is healed
-/// within two global cooldowns of dropping below the urgency threshold.
-#[test]
-fn the_repro_druid_heals_its_dying_mage_first() {
-    let played = play();
-    let druid = |e: &&serde_json::Value| e["actor"]["class"] == "Druid";
-
-    // The scenario still happens: the medic walk to the Mage at/after 50s.
-    let walk = played
-        .trace
+fn walk(played: &Played) -> Walk {
+    let mage = entity_id(played, 2, 0);
+    let druid: Vec<&serde_json::Value> = of_class(played.staged_trace(), "Druid").collect();
+    let started = druid
         .iter()
-        .filter(druid)
         .find(|e| {
             e["kind"] == "movement_decision"
                 && e["trigger"] == "SeekLos"
-                && e["target"]["entity_id"] == played.mage_id
-                && e["sim_time"].as_f64().unwrap() >= 50.0
+                && e["target"]["entity_id"] == mage
         })
-        .expect(
-            "the repro no longer walks the Druid to its dying Mage at 50s — re-seed this probe",
+        .map(|e| sim_time(e))
+        .expect("the Druid walks to its dying Mage");
+    let mut casts = Vec::new();
+    let mut held = Vec::new();
+    for e in druid.iter().filter(|e| e["kind"] == "ability_decision") {
+        let moonfire_held = e["candidates"].as_array().into_iter().flatten().any(|c| {
+            c["ability"] == "Moonfire"
+                && c["reason"]["PreconditionUnmet"]["note"]
+                    .as_str()
+                    .is_some_and(|n| n.contains("medic walk"))
+        });
+        if moonfire_held {
+            held.push(sim_time(e));
+        }
+        if let Some(ability) = e["outcome"]["ability"].as_str() {
+            let target = e["outcome"]["target_id"].as_u64().unwrap_or(u64::MAX);
+            casts.push((sim_time(e), ability.to_string(), target));
+            if HEALS.contains(&ability) && target == mage {
+                break;
+            }
+        }
+    }
+    Walk {
+        started,
+        casts,
+        held,
+    }
+}
+
+/// From the gates the medic walk runs to the dying Mage round the pillar. On
+/// every turn of it the Druid holds Moonfire — castable at the Paladin in
+/// sight but for the hold — and casts nothing; on the first turn the hold lets
+/// go, the Mage is in reach and the Druid heals it. So the global cooldown the
+/// hold kept free goes to the heal, and no damage comes first. Over three
+/// seeds: the stage holds the scene by construction, and the seed only moves
+/// the rolls.
+#[test]
+fn the_druid_holds_its_damage_for_the_walk_and_heals_its_dying_mage_first() {
+    for seed in [1, 2, 3] {
+        let played = play(config(seed), stage());
+        let mage = entity_id(&played, 2, 0);
+        let walk = walk(&played);
+
+        assert!(
+            walk.started < 0.1,
+            "seed {seed}: the walk starts at the gates, not at {:.2}s",
+            walk.started
         );
-    let walk_at = walk["sim_time"].as_f64().unwrap();
-
-    let first_cast = played
-        .trace
-        .iter()
-        .filter(druid)
-        .find(|e| {
-            e["kind"] == "ability_decision"
-                && e["sim_time"].as_f64().unwrap() >= walk_at
-                && e["outcome"]["ability"].is_string()
-        })
-        .expect("the Druid casts after the walk starts");
-    let (ability, target) = (
-        first_cast["outcome"]["ability"].as_str().unwrap(),
-        &first_cast["outcome"]["target_id"],
-    );
-    assert!(
-        HEALS.contains(&ability) && *target == played.mage_id,
-        "the Druid's first cast after the medic walk started at {walk_at:.2}s was {ability} \
-         on {target}, not a heal on the dying Mage ({})",
-        played.mage_id
-    );
-
-    // The Mage below the threshold at the walk's start, and healed soon after.
-    let dropped = played
-        .mage_hp
-        .iter()
-        .position(|&(_, hp)| hp < 0.45)
-        .expect("the Mage drops below 45%");
-    let (dropped_at, low) = played.mage_hp[dropped];
-    let healed = played.mage_hp[dropped..]
-        .iter()
-        .find(|&&(_, hp)| hp > low)
-        .map(|&(t, _)| t - dropped_at);
-    assert!(
-        healed.is_some_and(|after| after <= 2.0 * 1.5),
-        "the Mage at {:.0}% was healed {healed:?}s after it dropped, not within two global \
-         cooldowns",
-        low * 100.0
-    );
+        let first = walk.casts.first().expect("the Druid casts after the gates");
+        assert!(
+            HEALS.contains(&first.1.as_str()) && first.2 == mage,
+            "seed {seed}: the Druid's first cast after the gates was {} on {} at {:.2}s, not \
+             a heal on its dying Mage ({mage}): {:?}",
+            first.1,
+            first.2,
+            first.0,
+            walk.casts
+        );
+        // Not vacuous: a walk of a second or more, every turn of it holding a
+        // castable Moonfire.
+        assert!(
+            walk.held.len() >= 60,
+            "seed {seed}: Moonfire was held for the walk on {} turns — this stage no longer \
+             walks the Druid round the pillar with a Moonfire to hold",
+            walk.held.len()
+        );
+        let released = walk.held.last().copied().unwrap_or_default() + FRAME;
+        assert!(
+            (first.0 - released).abs() < FRAME / 2.0,
+            "seed {seed}: the hold let go at {released:.2}s but the Mage's heal came at \
+             {:.2}s",
+            first.0
+        );
+    }
 }

@@ -1274,20 +1274,36 @@ constructed:
   class decision draws from `GameRng`. Write each as a **pair** — the situation
   and its control with its one condition removed — so the test cannot pass
   vacuously. `tests/situation_scenes.rs` is the worked example.
-- **The tiers above** (decision properties over a scene grid, staged matches,
+- **Staged matches (tier 3, under a second each)** — for a behaviour that
+  needs time: a walk, a chase, an escape, a posture cycle.
+  `arenasim::headless::run_headless_match_staged(config, …, stage, observer)`
+  plays a real match whose state the `Stage` builder (`headless::stage`) sets
+  on the frame the gates open: positions, health, resource, targets, auras
+  (`aura` straight in, or `land` through `apply_pending_auras`), cooldowns,
+  posture states, the match clock, or anything else via `world`. Units are
+  named by team and slot (`Unit::new(2, 1)`). The countdown still plays, so
+  the pre-match buffs land; from the gates on, the production schedule plays
+  the staged world under the trace and frame observer. The seed governs only
+  the rolls — the situation holds by construction. `tests/common/staged.rs`
+  plays one and reads it back; `tests/druid_dying_heal.rs`,
+  `tests/medic_chase_hold.rs` and `tests/dispel_walk_dying_first.rs` are worked
+  examples. `tests/staged_match.rs` holds the harness to two claims: an empty
+  stage plays its seed byte for byte, and a stage that writes a seeded match's
+  whole state at a quiet frame T onto a match on ANOTHER seed plays on from T
+  byte-identically to the seeded match. A stage describes state, not things in
+  flight: a projectile, a pending effect or a cast in progress is not in its
+  vocabulary.
+- **The tiers beyond** (decision properties over a scene grid,
   situation-conditional probes over a seed bank) are planned in
-  `docs/design/proposals/2026-10-11-ai-architecture.md` §3.2. Staged matches
-  (tier 3) do not exist until AS-273.
+  `docs/design/proposals/2026-10-11-ai-architecture.md` §3.2.
 
 **The migrate-not-re-pin rule (user decision, 2026-10-12).** When a
 seed-pinned probe goes stale — a change moved the RNG stream and the seed no
 longer contains its situation — it is **migrated**, never re-pinned to a fresh
 seed: to a scene test when one tick decides it, to a staged match when it
 needs time (a walk, a chase, an escape), or to a situation-conditional probe
-that finds its windows over a seed bank and asserts a response rate. Until
-staged matches land (AS-273), a probe that needs time can only migrate to a
-situation-conditional probe over a seed bank. A fix that re-pins a stale
-probe's seed is not accepted, whoever writes it.
+that finds its windows over a seed bank and asserts a response rate. A fix
+that re-pins a stale probe's seed is not accepted, whoever writes it.
 
 ### Write a movement behavior probe
 
