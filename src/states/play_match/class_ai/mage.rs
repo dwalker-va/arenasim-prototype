@@ -24,8 +24,9 @@ use crate::states::play_match::constants::{
     CRIT_DAMAGE_MULTIPLIER, DEFENSIVE_HP_THRESHOLD, GCD, MELEE_RANGE, SAFE_KITING_DISTANCE,
 };
 use crate::states::play_match::decision_trace::{
-    DecisionEventBuilder, DecisionTrace, RejectionReason,
+    DecisionEventBuilder, DecisionTrace, PlayStep, RejectionReason,
 };
+use crate::states::play_match::situation::Role;
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 use bevy::prelude::*;
 
@@ -59,6 +60,45 @@ pub fn decide_mage_action(
     else {
         return false;
     };
+
+    // The Peel play (TeamPlan): a teammate is in danger, so crowd control on
+    // its attacker heads the chain — Frost Nova when one is in reach of the
+    // Nova, else Polymorph.
+    if let Some(call) = super::peel::peel_call(ctx, Role::RangedDps) {
+        let peeled = try_frost_nova(
+            commands,
+            combat_log,
+            game_rng,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            frost_nova_damage,
+            same_frame_cc_queue,
+            NovaTrigger::Peel(&call.attackers),
+            &mut builder,
+        ) || call.attackers.iter().any(|&attacker| {
+            try_polymorph_on(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                attacker,
+                &mut builder,
+            )
+        });
+        if peeled {
+            builder.play_step(PlayStep::Peel);
+            builder.finish();
+            return true;
+        }
+    }
 
     // Priority 1: Ice Barrier (self-shield)
     if try_ice_barrier(
@@ -121,6 +161,7 @@ pub fn decide_mage_action(
         ctx,
         frost_nova_damage,
         same_frame_cc_queue,
+        NovaTrigger::MeleeOnMe,
         &mut builder,
     ) {
         builder.finish();
@@ -421,7 +462,18 @@ fn try_arcane_intellect(
     true
 }
 
-/// Try to cast Frost Nova when enemies are in melee range.
+/// What makes Frost Nova worth casting.
+#[derive(Clone, Copy)]
+enum NovaTrigger<'a> {
+    /// The rotation's: a (non-pet) enemy is in melee range of the Mage.
+    MeleeOnMe,
+    /// The Peel play's: one of these attackers of a teammate in danger is a
+    /// melee or a pet ([`super::peel::movement_peel_target`]) inside the
+    /// Nova's reach.
+    Peel(&'a [Entity]),
+}
+
+/// Try to cast Frost Nova when `trigger` holds.
 /// Returns true if the ability was used.
 fn try_frost_nova(
     commands: &mut Commands,
@@ -435,6 +487,7 @@ fn try_frost_nova(
     ctx: &CombatContext,
     frost_nova_damage: &mut Vec<super::QueuedAoeDamage>,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    trigger: NovaTrigger,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let frost_nova = AbilityType::FrostNova;
@@ -451,21 +504,45 @@ fn try_frost_nova(
         }
     };
 
-    let enemies_in_melee_range = ctx.combatants.iter().any(|(_, info)| {
-        info.team != combatant.team
-            && info.is_alive
-            && !info.is_pet
-            && my_pos.distance(info.position) <= MELEE_RANGE
-    });
-
-    if !enemies_in_melee_range {
-        builder.reject(
-            frost_nova,
-            RejectionReason::PreconditionUnmet {
-                note: "no enemies in melee range".into(),
-            },
-        );
-        return false;
+    match trigger {
+        NovaTrigger::MeleeOnMe => {
+            let enemies_in_melee_range = ctx.combatants.iter().any(|(_, info)| {
+                info.team != combatant.team
+                    && info.is_alive
+                    && !info.is_pet
+                    && my_pos.distance(info.position) <= MELEE_RANGE
+            });
+            if !enemies_in_melee_range {
+                builder.reject(
+                    frost_nova,
+                    RejectionReason::PreconditionUnmet {
+                        note: "no enemies in melee range".into(),
+                    },
+                );
+                return false;
+            }
+        }
+        NovaTrigger::Peel(attackers) => {
+            let in_reach = attackers.iter().any(|&a| {
+                super::peel::movement_peel_target(ctx, a)
+                    && !ctx.entity_is_immune(a)
+                    && ctx
+                        .combatants
+                        .get(&a)
+                        .is_some_and(|info| my_pos.distance(info.position) <= nova_def.range)
+            });
+            if !in_reach {
+                builder.reject(
+                    frost_nova,
+                    RejectionReason::PreconditionUnmet {
+                        note: "peel: no melee or pet attacker of the teammate in danger in \
+                               the Nova's reach"
+                            .into(),
+                    },
+                );
+                return false;
+            }
+        }
     }
 
     builder.choose(cleared, None, true);
@@ -606,13 +683,31 @@ fn try_polymorph(
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
-    let ability = AbilityType::Polymorph;
-    let def = abilities.get_unchecked(&ability);
-
     let Some(cc_target) = combatant.cc_target else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
+        builder.reject(AbilityType::Polymorph, RejectionReason::NoValidTarget);
         return false;
     };
+    try_polymorph_on(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, cc_target, builder,
+    )
+}
+
+/// Try to cast Polymorph on `cc_target`: the rotation's CC target, or the
+/// Peel play's attacker.
+fn try_polymorph_on(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    cc_target: Entity,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::Polymorph;
+    let def = abilities.get_unchecked(&ability);
 
     // Don't polymorph the kill target — any damage will break it immediately.
     if combatant.target == Some(cc_target) {

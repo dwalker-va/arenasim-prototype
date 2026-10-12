@@ -28,8 +28,9 @@ use crate::states::play_match::components::{
 };
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{
-    DecisionEventBuilder, DecisionTrace, RejectionReason,
+    DecisionEventBuilder, DecisionTrace, PlayStep, RejectionReason,
 };
+use crate::states::play_match::situation::Role;
 
 use super::cast_guard::{cast_gate, PreCastOpts};
 
@@ -166,6 +167,62 @@ pub fn decide_warlock_action(
     else {
         return false;
     };
+
+    // The Peel play (TeamPlan): a teammate is in danger, so crowd control on
+    // its attacker heads the chain — Death Coil (an instant horror that never
+    // breaks), else Fear on one the Warlock is not damaging itself.
+    if let Some(call) = super::peel::peel_call(ctx, Role::RangedDps) {
+        let peeled = call.attackers.iter().any(|&attacker| {
+            let Some(info) = ctx.combatants.get(&attacker) else {
+                return false;
+            };
+            let pos = info.position;
+            let coil = if ctx.entity_is_immune(attacker) {
+                builder.reject(AbilityType::DeathCoil, RejectionReason::TargetImmune);
+                false
+            } else if ctx.is_dr_immune(attacker, DRCategory::Horror) {
+                builder.reject(
+                    AbilityType::DeathCoil,
+                    RejectionReason::DRImmune {
+                        category: DRCategory::Horror,
+                    },
+                );
+                false
+            } else {
+                try_death_coil(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    auras,
+                    attacker,
+                    pos,
+                    ctx,
+                    &mut builder,
+                )
+            };
+            coil || try_peel_fear(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                attacker,
+                pos,
+                ctx,
+                &mut builder,
+            )
+        });
+        if peeled {
+            builder.play_step(PlayStep::Peel);
+            builder.finish();
+            return true;
+        }
+    }
 
     // Priority 0: Death Coil peel. A melee attacker on the cloth Warlock is its
     // worst case (the kit otherwise has no instant CC that survives damage — Fear
@@ -691,6 +748,63 @@ fn try_immolate(
     );
 
     true
+}
+
+/// The Peel play's Fear on `attacker`: not on the Warlock's own target (its
+/// damage would break the Fear at once), nor on one immune to damage or to
+/// Fear by diminishing returns; then [`try_fear`].
+#[allow(clippy::too_many_arguments)]
+fn try_peel_fear(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    attacker: Entity,
+    attacker_pos: Vec3,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let fear = AbilityType::Fear;
+    if combatant.target == Some(attacker) {
+        builder.reject(
+            fear,
+            RejectionReason::PreconditionUnmet {
+                note: "peel: the attacker is the Warlock's own target — its damage breaks the \
+                       Fear"
+                    .into(),
+            },
+        );
+        return false;
+    }
+    if ctx.entity_is_immune(attacker) {
+        builder.reject(fear, RejectionReason::TargetImmune);
+        return false;
+    }
+    if ctx.is_dr_immune(attacker, DRCategory::Fears) {
+        builder.reject(
+            fear,
+            RejectionReason::DRImmune {
+                category: DRCategory::Fears,
+            },
+        );
+        return false;
+    }
+    try_fear(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        attacker,
+        attacker_pos,
+        ctx,
+        builder,
+    )
 }
 
 /// Try to cast Fear on target.

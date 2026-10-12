@@ -28,9 +28,10 @@ use crate::states::play_match::constants::{
     HEALTHY_HP_THRESHOLD, HOLY_SHOCK_DAMAGE_RANGE, LOW_HP_THRESHOLD, SAFE_HEAL_MAX_THRESHOLD,
 };
 use crate::states::play_match::decision_trace::{
-    DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
+    DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger, PlayStep,
     Posture as TracePosture, RejectionReason,
 };
+use crate::states::play_match::situation::Role;
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{cast_gate, unreached_reason, Cleared, PreCastOpts};
@@ -167,6 +168,32 @@ pub fn decide_paladin_action(
     else {
         return false;
     };
+
+    // The Peel play (TeamPlan): a teammate is in danger, so Hammer of Justice
+    // on its attacker heads the chain — ahead of the enemy-healer dip the stun
+    // is otherwise reserved for.
+    if let Some(call) = super::peel::peel_call(ctx, Role::Healer) {
+        let peeled = call.attackers.iter().any(|&attacker| {
+            try_peel_hammer_of_justice(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                attacker,
+                same_frame_cc_queue,
+                &mut builder,
+            )
+        });
+        if peeled {
+            builder.play_step(PlayStep::Peel);
+            builder.finish();
+            return true;
+        }
+    }
 
     // Priority 1: Paladin Aura.
     if try_paladin_aura(
@@ -1219,6 +1246,66 @@ fn try_dip_hammer_of_justice(
         builder,
     );
 
+    true
+}
+
+/// The Peel play's Hammer of Justice on `attacker`: eligible
+/// ([`hoj_target_eligible`] — alive, not a pet, not immune, not stun-immune by
+/// diminishing returns), then the cast gate on the attacker itself, which
+/// asks range, sight and the hold rule.
+#[allow(clippy::too_many_arguments)]
+fn try_peel_hammer_of_justice(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    attacker: Entity,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::HammerOfJustice;
+    let def = abilities.get_unchecked(&ability);
+    if !hoj_target_eligible(ctx, combatant.team, attacker) {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return false;
+    }
+    let info = ctx
+        .combatants
+        .get(&attacker)
+        .expect("eligible target is in snapshot");
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((attacker, info.position)),
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
+    cast_hammer_of_justice(
+        commands,
+        combat_log,
+        entity,
+        def,
+        abilities,
+        combatant,
+        attacker,
+        info.log_id(),
+        cleared,
+        same_frame_cc_queue,
+        builder,
+    );
     true
 }
 

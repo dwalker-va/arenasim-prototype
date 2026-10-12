@@ -25,6 +25,7 @@ pub mod hunter_dip;
 pub mod mage;
 pub mod paladin;
 pub(crate) mod paladin_postures;
+pub mod peel;
 pub mod pet_ai;
 pub mod priest;
 pub mod rogue;
@@ -52,7 +53,7 @@ use super::decision_trace::RejectionReason;
 use super::is_spell_school_locked;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume};
 use super::match_config::CharacterClass;
-use super::situation::{classify_roster, MatchClock, SituationConfig, TeamSituation};
+use super::situation::{classify_roster, MatchClock, Play, Role, SituationConfig, TeamSituation};
 use super::utils::log_ability_use;
 use crate::combat::log::CombatLog;
 
@@ -333,6 +334,13 @@ impl<'a> CombatContext<'a> {
              decide_abilities classifies (with the frame's clock and \
              movement.ron); call `classified` or `with_situation` first",
         )
+    }
+
+    /// The play this unit runs as `role` ([`TeamSituation::play_for`]): its
+    /// team's situation, seen from where it stands — a unit never peels for
+    /// itself. Panics where [`Self::situation`] does.
+    pub fn play(&self, role: Role) -> Play {
+        self.situation().play_for(role, self.self_entity)
     }
 
     /// True when a living enemy is in the arena that this unit cannot see —
@@ -813,6 +821,7 @@ impl<'a> CombatContext<'a> {
         my_pos: Vec3,
     ) -> Option<crate::states::play_match::decision_trace::DecisionEventBuilder<'t>> {
         use crate::states::play_match::decision_trace::{ActorView, TargetView};
+        let actor_view_class = self.self_info()?.class;
         let actor_view = ActorView::from_info(self.self_info()?);
         let target_view = target
             .and_then(|t| self.combatants.get(&t))
@@ -820,7 +829,8 @@ impl<'a> CombatContext<'a> {
         Some(match &self.situation {
             Some(situation) => decision_trace
                 .start_ability_decision(actor_view, target_view)
-                .with_situation(situation),
+                .with_situation(situation)
+                .with_play(situation.play_for(Role::of(actor_view_class), self.self_entity)),
             None => decision_trace.start_ability_decision(actor_view, target_view),
         })
     }

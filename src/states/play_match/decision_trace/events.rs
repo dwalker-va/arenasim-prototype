@@ -67,7 +67,7 @@ use serde::{Deserialize, Serialize};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::components::{AuraType, DRCategory};
-use crate::states::play_match::situation::{MatchPhase, TeamSituation, Tempo, Window};
+use crate::states::play_match::situation::{MatchPhase, Play, TeamSituation, Tempo, Window};
 
 /// One AI decision event. Serializes to a single JSONL line.
 #[derive(Serialize, Clone, Debug)]
@@ -109,6 +109,44 @@ pub struct SituationTag {
     pub enemy_healer_locked: Option<WindowTag>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ally_in_danger: Option<WindowTag>,
+    /// The deciding unit's play, when it is not `Default`
+    /// (`situation::Play`): `{"name": "burst"}` or
+    /// `{"name": "peel", "ally": <entity id>}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub play: Option<PlayTag>,
+    /// The play's own step produced the choice — `"peel"` when the decision's
+    /// chosen ability came from the peel step at the head of the chain, not
+    /// from the chain below it. Absent otherwise: a non-default play whose
+    /// step did not fire recorded what its fallback chain chose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub play_step: Option<PlayStep>,
+}
+
+/// A non-default `situation::Play`, as the trace records it.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(tag = "name", rename_all = "snake_case")]
+pub enum PlayTag {
+    Burst,
+    Peel { ally: u32 },
+}
+
+impl PlayTag {
+    /// The tag for `play`; `None` for `Play::Default`.
+    pub fn of(play: Play) -> Option<Self> {
+        match play {
+            Play::Default => None,
+            Play::Burst => Some(PlayTag::Burst),
+            Play::Peel { ally } => Some(PlayTag::Peel { ally: ally.index() }),
+        }
+    }
+}
+
+/// A play's own step, when it produced the choice (`SituationTag::play_step`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayStep {
+    /// The Peel play's crowd control on an attacker of the teammate in danger.
+    Peel,
 }
 
 /// A situation window as the trace records it: the subject's entity id and
@@ -138,6 +176,8 @@ impl From<&TeamSituation> for SituationTag {
             tempo: situation.tempo,
             enemy_healer_locked: situation.enemy_healer_locked.as_ref().map(WindowTag::from),
             ally_in_danger: situation.ally_in_danger.as_ref().map(WindowTag::from),
+            play: None,
+            play_step: None,
         }
     }
 }

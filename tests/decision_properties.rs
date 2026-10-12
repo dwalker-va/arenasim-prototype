@@ -39,7 +39,11 @@
 //! combinations a property needs to be reachable (a heal is only cast on an
 //! injured ally, so "ally cycloned" is also "ally injured") — and put the
 //! unit and its ally just either side of every healer's guaranteed-heal
-//! bar. The Rogue meets each in and out of stealth. The roster is the unit,
+//! bar. The Rogue meets each in and out of stealth. Every situation is under
+//! `Legacy` but three, which put the unit's team under `TeamPlan` with its
+//! ally dying under attack — the Peel play's situation — so every property
+//! also judges the gated plays' choices
+//! ([`every_peel_tool_is_reached_and_every_peel_is_aimed_at_the_attacker`]). The roster is the unit,
 //! an ally, the enemy target and an enemy Priest. The unit's CC target is the
 //! one `acquire_targets` would leave it ([`cc_target`]). About 160,000
 //! scenes, built in one to two seconds in the test profile.
@@ -84,6 +88,7 @@ use arenasim::states::match_config::{
     CharacterClass, MageArmor, PaladinAura, RogueOpener, WarlockCurse, WarriorShout,
 };
 use arenasim::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
+use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::TrapType;
 use arenasim::states::play_match::components::{DRCategory, DRTracker, DispelType};
@@ -145,6 +150,9 @@ struct Situation {
     fear_diminished: bool,
     /// The unit has broken stealth (the Rogue starts every match in it).
     opened: bool,
+    /// The unit's team runs `TeamPlan` — the profile the gated plays (the
+    /// Peel play) run under. `Legacy` otherwise.
+    team_plan: bool,
 }
 
 /// An aura the grid puts on a unit.
@@ -191,6 +199,7 @@ const CALM: Situation = Situation {
     healer_casting: false,
     fear_diminished: false,
     opened: false,
+    team_plan: false,
 };
 
 /// Each healer's guaranteed-heal bar ([`heal_guarantee`]): the grid puts the
@@ -378,6 +387,35 @@ fn situations(class: CharacterClass, bars: &[f32]) -> Vec<Situation> {
         focus_healer: true,
         ..CALM
     });
+    // Under TeamPlan the ally in danger calls the Peel play: the unit's peel
+    // step heads its chain, on the enemy target attacking the ally.
+    for (name, target_class, focus_healer) in [
+        (
+            "ally dying under attack, TeamPlan",
+            CharacterClass::Warrior,
+            false,
+        ),
+        (
+            "focusing the healer, ally dying under attack, TeamPlan",
+            CharacterClass::Warrior,
+            true,
+        ),
+        (
+            "ally dying under a caster's attack, TeamPlan",
+            CharacterClass::Mage,
+            false,
+        ),
+    ] {
+        list.push(Situation {
+            name,
+            ally_health: Some(0.3),
+            target_attacks_ally: true,
+            target_class,
+            focus_healer,
+            team_plan: true,
+            ..CALM
+        });
+    }
     list.push(caster_ally);
     list.push(Situation {
         name: "a mana-using ally, injured",
@@ -825,7 +863,13 @@ fn whom(p: &Point) -> &'static str {
 fn build(defs: &AbilityDefinitions, movement: MovementConfig, p: &Point) -> Scene {
     let s = &p.situation;
     let at = |name| position(name, p);
+    let profile = if s.team_plan {
+        AiProfile::TeamPlan
+    } else {
+        AiProfile::Legacy
+    };
     let mut scene = Scene::with_config(defs.clone(), movement)
+        .ai_profile(1, profile)
         .unit(ME, 1, p.class)
         .at(at(ME).x, at(ME).y)
         .health(s.my_health)
@@ -1906,4 +1950,78 @@ fn cc_not_stacked() -> Finding {
 #[test]
 fn never_stacks_hard_cc_on_a_unit_its_team_holds() {
     verdict(Property::CcNotStacked, Scope::Guard, cc_not_stacked());
+}
+
+/// The grid reaches the Peel play, and every peel it makes is a peel, so
+/// every property above also judges the play's choices. Under `TeamPlan`,
+/// with the ally dying under the enemy target's attack:
+///
+/// - the (class, tool) pairs the grid's peels used are exactly the pairs
+///   `peel_tools` names: set equality, so a class whose peel step stops
+///   reaching ANY of its tools — its second as much as its first — fails
+///   here, and so does a step that peels with a tool it does not list;
+/// - every peel is aimed at the ally's attacker (the enemy target; nothing
+///   else in the grid attacks the ally): a targeted peel names it, a
+///   self-centred area (Frost Nova, Psychic Scream) holds it inside its
+///   radius, and a Frost Trap names it and lands within trigger range of it.
+///   A peel step that casts on any other unit fails here;
+/// - no peel is made outside `TeamPlan`.
+#[test]
+fn every_peel_tool_is_reached_and_every_peel_is_aimed_at_the_attacker() {
+    use arenasim::states::play_match::class_ai::peel::peel_tools;
+    use arenasim::states::play_match::constants::TRAP_TRIGGER_RADIUS;
+    use arenasim::states::play_match::decision_trace::PlayStep;
+    let g = grid();
+    let mut peeled: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut misaimed = Vec::new();
+    for r in &g.records {
+        if r.view.situation.and_then(|s| s.play_step) != Some(PlayStep::Peel) {
+            continue;
+        }
+        let p = &r.point;
+        assert!(
+            p.situation.team_plan,
+            "a peel outside TeamPlan: {}",
+            p.describe()
+        );
+        let (ability, target) = r.view.chosen.expect("a peel chose something");
+        peeled.insert((format!("{:?}", p.class), format!("{ability:?}")));
+        // The ally's attacker: the enemy target attacks the ally in every
+        // situation the play runs in.
+        assert!(p.situation.target_attacks_ally, "{}", p.describe());
+        let attacker = pos3(TARGET, p);
+        let def = g.defs.get(&ability).unwrap();
+        let aimed = match ability {
+            AbilityType::FrostTrap => {
+                target == Some(TARGET)
+                    && r.view.trap_landings.iter().any(|(_, at)| {
+                        Vec2::new(at.x, at.z).distance(Vec2::new(attacker.x, attacker.z))
+                            <= TRAP_TRIGGER_RADIUS
+                    })
+            }
+            // Centred on the caster, with its `range` as the radius; the
+            // trace names no target.
+            AbilityType::FrostNova | AbilityType::PsychicScream => {
+                target.is_none() && pos3(ME, p).distance(attacker) <= def.range
+            }
+            _ => target == Some(TARGET),
+        };
+        if !aimed {
+            misaimed.push(describe(r, ability, target));
+        }
+    }
+    eprintln!("peels chosen in the grid: {peeled:?}");
+    assert!(
+        misaimed.is_empty(),
+        "peels not aimed at the dying ally's attacker: {misaimed:#?}"
+    );
+    let expected: BTreeSet<(String, String)> = CharacterClass::all()
+        .iter()
+        .flat_map(|c| {
+            peel_tools(*c)
+                .iter()
+                .map(move |a| (format!("{c:?}"), format!("{a:?}")))
+        })
+        .collect();
+    assert_eq!(peeled, expected, "(class, tool) pairs the grid peels with");
 }

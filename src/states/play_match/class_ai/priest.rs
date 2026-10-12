@@ -24,10 +24,11 @@ use crate::states::play_match::combat_core::{
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{GCD, WEAKENED_SOUL_DURATION};
 use crate::states::play_match::decision_trace::{
-    DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
+    DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger, PlayStep,
     Posture as TracePosture, RejectionReason,
 };
 use crate::states::play_match::movement_config::{MovementConfig, SharedMovementConfig};
+use crate::states::play_match::situation::Role;
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{cast_gate, pre_cast_ok, unreached_reason, Cleared, PreCastOpts};
@@ -124,6 +125,28 @@ pub fn decide_priest_action(
     else {
         return false;
     };
+
+    // The Peel play (TeamPlan): a teammate is in danger, so Psychic Scream
+    // heads the chain when one of its attackers stands inside the scream.
+    if let Some(call) = super::peel::peel_call(ctx, Role::Healer) {
+        if try_peel_psychic_scream(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            &call.attackers,
+            same_frame_cc_queue,
+            &mut builder,
+        ) {
+            builder.play_step(PlayStep::Peel);
+            builder.finish();
+            return true;
+        }
+    }
 
     // Priority 1: Power Word: Fortitude (buff allies)
     if try_fortitude(
@@ -417,6 +440,69 @@ fn try_psychic_scream(
         return false;
     }
 
+    fire_psychic_scream(
+        commands,
+        combat_log,
+        scream_def,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        cleared,
+        same_frame_cc_queue,
+        ctx,
+        builder,
+    );
+    true
+}
+
+/// The Peel play's Psychic Scream: one of `attackers` (a teammate in danger's,
+/// already free of its team's holds) is fear-eligible and inside the scream
+/// ([`scream_targets`]). Unlike the defensive scream it needs no pressure on
+/// the Priest and does not wait for a heal: the scream IS the answer to the
+/// teammate's danger.
+#[allow(clippy::too_many_arguments)]
+fn try_peel_psychic_scream(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    attackers: &[Entity],
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let scream = AbilityType::PsychicScream;
+    let scream_def = abilities.get_unchecked(&scream);
+    let cleared = match cast_gate(
+        scream,
+        scream_def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(scream, reason);
+            return false;
+        }
+    };
+    let in_scream = scream_targets(ctx, entity, my_pos, scream_def.range);
+    if !attackers.iter().any(|a| in_scream.contains(a)) {
+        builder.reject(
+            scream,
+            RejectionReason::PreconditionUnmet {
+                note: "peel: no attacker of the teammate in danger inside the scream".into(),
+            },
+        );
+        return false;
+    }
     fire_psychic_scream(
         commands,
         combat_log,

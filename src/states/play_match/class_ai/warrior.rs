@@ -130,9 +130,12 @@ pub fn decide_warrior_action(
     // Mortal Strike). Each ability is still attempted at most once per tick
     // (the `!burst_window` guard on the trailing Mortal Strike), keeping the
     // decision trace clean.
-    let burst_window = match ctx.situation().play_for(Role::MeleeDps) {
+    let burst_window = match ctx.play(Role::MeleeDps) {
         Play::Burst => true,
         Play::Default => false,
+        // No peel tool in the kit (no Hamstring or Intimidating Shout,
+        // `peel::peel_tools`): the Warrior runs the chain its fallback orders.
+        Play::Peel { .. } => ctx.situation().fallback_play(Role::MeleeDps) == Play::Burst,
     };
 
     if burst_window

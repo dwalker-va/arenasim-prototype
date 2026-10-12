@@ -37,7 +37,25 @@
 //!   teammate. The two facts it joins are kept per teammate in
 //!   [`TeamSituation::allies`], because the healers' rules read them apart:
 //!   "a teammate is dying" (cover denial, the dispel walk's dying-first rule)
-//!   and "I am pressured" (the posture machine's PRESSURED trigger).
+//!   and "I am pressured" (the posture machine's PRESSURED trigger). The
+//!   enemies doing the pressuring ride along as
+//!   [`TeamSituation::danger_attackers`]: the attackers a peel answers.
+//!
+//! ## Plays
+//!
+//! A [`Play`] is what a unit does about the situation: a named reordering of
+//! its own priority chain ([`TeamSituation::play_for`]).
+//!
+//! - **`Burst`** — a DPS whose enemy healer is locked spends its hard-hitting
+//!   step first. Ungated: it is the ported burst window.
+//! - **`Peel`** — a teammate is in danger, so a unit other than that teammate
+//!   puts its PEEL step at the head of its chain: crowd control on one of the
+//!   teammate's [`danger_attackers`](TeamSituation::danger_attackers)
+//!   (`class_ai::peel`). A NEW behaviour, so it is gated under
+//!   `AiProfile::TeamPlan` ([`SituationConfig::peel`]), and graduates or is
+//!   deleted at the next milestone sweep (the architecture's §4.5).
+//!   [`WithheldPlays`] denies it to one team — the paired control its probe
+//!   and its head-to-head measure it against.
 //!
 //! ## Thresholds
 //!
@@ -201,6 +219,14 @@ pub struct TeamSituation {
     pub enemy_healer_locked: Option<Window>,
     /// The most injured teammate that is both dying and pressured.
     pub ally_in_danger: Option<Window>,
+    /// The enemies pressuring `ally_in_danger`'s subject — the ones that make
+    /// it pressured ([`AllyStanding::pressured`]), judged from its own view —
+    /// nearest to it first (entity order on a tie). Empty while no teammate is
+    /// in danger.
+    pub danger_attackers: SmallVec<[Entity; 4]>,
+    /// Whether this team runs the gated [`Play::Peel`]
+    /// ([`SituationConfig::peel`]).
+    pub peel_play: bool,
     /// Every living non-pet teammate (the deciding unit included), in entity
     /// order.
     pub allies: SmallVec<[AllyStanding; 3]>,
@@ -215,6 +241,12 @@ pub enum Play {
     Default,
     /// The enemy healer cannot answer: spend the hard-hitting step first.
     Burst,
+    /// `ally` is in danger: the PEEL step — crowd control on one of its
+    /// [`danger_attackers`](TeamSituation::danger_attackers) — heads the
+    /// chain. When it does not fire, the chain below it runs as
+    /// [`TeamSituation::fallback_play`] orders it. Gated under
+    /// `AiProfile::TeamPlan`.
+    Peel { ally: Entity },
 }
 
 /// The part a unit plays for its team, as far as choosing a play goes.
@@ -223,6 +255,20 @@ pub enum Role {
     MeleeDps,
     RangedDps,
     Healer,
+}
+
+impl Role {
+    /// The role `class` plays: a healer first (the Paladin is one), then melee
+    /// or ranged.
+    pub fn of(class: crate::states::match_config::CharacterClass) -> Self {
+        if class.is_healer() {
+            Role::Healer
+        } else if class.is_melee() {
+            Role::MeleeDps
+        } else {
+            Role::RangedDps
+        }
+    }
 }
 
 impl TeamSituation {
@@ -242,9 +288,26 @@ impl TeamSituation {
         (1.0 - self.since_gates / ATTRITION_ONSET_SECS).clamp(0.0, 1.0)
     }
 
-    /// The play `role` runs in this situation. Exhaustive over [`Role`], so a
-    /// new role is a compile error here until it answers.
-    pub fn play_for(&self, role: Role) -> Play {
+    /// The play the unit `me`, playing `role`, runs in this situation.
+    ///
+    /// [`Play::Peel`] comes first, for every role: a teammate in danger is
+    /// answered before a burst is spent. Only a team that runs it
+    /// ([`Self::peel_play`]) peels, only for a teammate with an attacker to
+    /// peel, and never the teammate in danger itself — its own defence is its
+    /// chain's. Otherwise [`Self::fallback_play`].
+    pub fn play_for(&self, role: Role, me: Entity) -> Play {
+        match self.ally_in_danger {
+            Some(w) if self.peel_play && w.subject != me && !self.danger_attackers.is_empty() => {
+                Play::Peel { ally: w.subject }
+            }
+            _ => self.fallback_play(role),
+        }
+    }
+
+    /// The play `role` runs when it does not peel: the order of the chain
+    /// below a peel step that did not fire. Exhaustive over [`Role`], so a new
+    /// role is a compile error here until it answers.
+    pub fn fallback_play(&self, role: Role) -> Play {
         match role {
             Role::MeleeDps | Role::RangedDps if self.enemy_healer_locked.is_some() => Play::Burst,
             Role::MeleeDps | Role::RangedDps | Role::Healer => Play::Default,
@@ -293,6 +356,13 @@ pub struct SituationConfig {
     /// `shared.threat_intent_radius`: a melee, pet or closing enemy targeting
     /// a teammate from this close pressures it.
     pub threat_intent_radius: f32,
+    /// Whether the team runs the gated [`Play::Peel`]. Off until
+    /// [`Self::under`] puts the team under `TeamPlan`, so a context classified
+    /// with the bare thresholds (a test's) never peels.
+    pub peel: bool,
+    /// The gated plays each team is denied ([`WithheldPlays`]), applied by
+    /// [`Self::for_team`].
+    pub withheld: WithheldPlays,
 }
 
 impl Default for SituationConfig {
@@ -309,22 +379,127 @@ impl SituationConfig {
             urgency_hp_threshold: config.shared.urgency_hp_threshold,
             danger_radius: config.shared.danger_radius,
             threat_intent_radius: config.shared.threat_intent_radius,
+            peel: false,
+            withheld: WithheldPlays::default(),
         }
     }
 
     /// The thresholds a team under `profile` is classified with. Tempo's
     /// hysteresis band is a behaviour change, so it is gated: `TeamPlan` keeps
     /// the configured release, and `Legacy` releases at the onset — no band,
-    /// which is exactly the unlatched `>=` test it has always run. Every other
-    /// threshold is the same under both.
+    /// which is exactly the unlatched `>=` test it has always run. The Peel
+    /// play is gated the same way: `TeamPlan` runs it, `Legacy` never does.
+    /// Every other threshold is the same under both.
     pub fn under(self, profile: AiProfile) -> Self {
         match profile {
-            AiProfile::TeamPlan => self,
+            AiProfile::TeamPlan => Self { peel: true, ..self },
             AiProfile::Legacy => Self {
                 press_release_margin: self.press_advantage_margin,
+                peel: false,
                 ..self
             },
         }
+    }
+
+    /// The configuration team `team`, under `profile`, is classified with:
+    /// [`Self::under`], less the plays [`Self::withheld`] denies the team.
+    pub fn for_team(self, team: u8, profile: AiProfile) -> Self {
+        let cfg = self.under(profile);
+        Self {
+            peel: cfg.peel && !self.withheld.for_team(team).denies(&PEEL),
+            ..cfg
+        }
+    }
+}
+
+/// The gated plays one team is denied: one flag per gated [`Play`] variant,
+/// read and written only through the exhaustive matches in [`Self::denies`]
+/// and [`Self::withhold`]. Deleting a gated play is therefore a compile error
+/// here until its flag goes with it, and gating a new one is a compile error
+/// until it answers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlaySet {
+    peel: bool,
+}
+
+impl PlaySet {
+    /// The set that denies exactly `plays`.
+    pub fn of(plays: &[Play]) -> Self {
+        let mut set = Self::default();
+        for play in plays {
+            set.withhold(play);
+        }
+        set
+    }
+
+    /// Deny `play` (a no-op for an ungated one: it cannot be withheld).
+    pub fn withhold(&mut self, play: &Play) {
+        match play {
+            Play::Peel { .. } => self.peel = true,
+            Play::Default | Play::Burst => {}
+        }
+    }
+
+    /// Whether `play` is denied. An ungated play never is.
+    pub fn denies(&self, play: &Play) -> bool {
+        match play {
+            Play::Peel { .. } => self.peel,
+            Play::Default | Play::Burst => false,
+        }
+    }
+}
+
+/// `Play::Peel` as a KIND, for the sets above (a peel's ally does not enter
+/// whether it is withheld).
+pub const PEEL: Play = Play::Peel {
+    ally: Entity::PLACEHOLDER,
+};
+
+/// The gated plays ([`Play::Peel`]) each team is DENIED, for measurement: a
+/// team under `TeamPlan` with a play withheld is the paired control the play
+/// is measured against — in a tier-4 probe (the same seed bank with the play
+/// off) and in a head-to-head (one side with it, one without, on one seed).
+///
+/// A MEASUREMENT CONTROL, not a behaviour switch: nothing in the game sets it,
+/// but it is reachable from a headless match's JSON
+/// (`team1_withheld_plays` / `team2_withheld_plays`) and so from `--replay`,
+/// which honours the same config. The default withholds nothing. It lives
+/// only as long as the plays it names stay gated: when a play graduates or is
+/// deleted (§4.5) its flag goes, and with the last gated play this type and
+/// the two config fields are deleted too.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WithheldPlays {
+    pub team1: PlaySet,
+    pub team2: PlaySet,
+}
+
+impl WithheldPlays {
+    /// Team `team`'s withheld plays; team 1's for a team id outside 1..=2,
+    /// matching `AiProfiles::for_team`.
+    pub fn for_team(&self, team: u8) -> PlaySet {
+        if team == 2 {
+            self.team2
+        } else {
+            self.team1
+        }
+    }
+
+    /// Parse a config's list of gated play names (`"Peel"`) into the set it
+    /// denies.
+    pub fn parse_set(names: &[String]) -> Result<PlaySet, String> {
+        let mut set = PlaySet::default();
+        for name in names {
+            let play = match name.as_str() {
+                "Peel" | "peel" => PEEL,
+                other => {
+                    return Err(format!(
+                        "Unknown withheld play: '{other}'. Gated plays: Peel"
+                    ))
+                }
+            };
+            set.withhold(&play);
+        }
+        Ok(set)
     }
 }
 
@@ -368,12 +543,19 @@ pub fn classify_roster(
     cfg: &SituationConfig,
 ) -> TeamSituation {
     let allies = allies(roster, auras, team, cfg);
+    let ally_in_danger = ally_in_danger(roster, &allies, prev, clock.now);
+    let danger_attackers = ally_in_danger
+        .and_then(|w| roster.get(&w.subject))
+        .map(|subject| pressuring(roster, auras, subject, cfg))
+        .unwrap_or_default();
     TeamSituation {
         phase: phase(clock),
         since_gates: clock.since_gates,
         tempo: tempo(roster, team, prev.tempo, cfg),
         enemy_healer_locked: enemy_healer_locked(roster, auras, team, prev, clock.now),
-        ally_in_danger: ally_in_danger(roster, &allies, prev, clock.now),
+        ally_in_danger,
+        danger_attackers,
+        peel_play: cfg.peel,
         allies,
     }
 }
@@ -422,10 +604,38 @@ fn pressured(
     subject: &CombatantInfo,
     cfg: &SituationConfig,
 ) -> bool {
+    pressure_threats(roster, auras, subject, cfg)
+        .next()
+        .is_some()
+}
+
+/// The enemies that make `subject` [pressured](AllyStanding::pressured),
+/// nearest to it first (entity order on a tie): the attackers a peel answers.
+fn pressuring(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    subject: &CombatantInfo,
+    cfg: &SituationConfig,
+) -> SmallVec<[Entity; 4]> {
+    let mut threats: SmallVec<[(f32, Entity); 4]> = pressure_threats(roster, auras, subject, cfg)
+        .map(|threat| (subject.position.distance(threat.position), threat.entity))
+        .collect();
+    // Stable, over entity order: a tie keeps entity order.
+    threats.sort_by(|a, b| a.0.total_cmp(&b.0));
+    threats.into_iter().map(|(_, entity)| entity).collect()
+}
+
+/// [`pressured`]'s rule, as the threats that satisfy it, in entity order.
+fn pressure_threats<'r>(
+    roster: &'r BTreeMap<Entity, CombatantInfo>,
+    auras: &'r BTreeMap<Entity, Vec<Aura>>,
+    subject: &'r CombatantInfo,
+    cfg: &'r SituationConfig,
+) -> impl Iterator<Item = &'r CombatantInfo> + 'r {
     let subject_has_shadow_sight = has_shadow_sight(auras, subject.entity);
     roster
         .values()
-        .filter(|c| {
+        .filter(move |c| {
             c.team != subject.team
                 && c.is_alive
                 && c.target == Some(subject.entity)
@@ -435,7 +645,7 @@ fn pressured(
                     has_shadow_sight(auras, c.entity),
                 )
         })
-        .any(|threat| {
+        .filter(move |threat| {
             let distance = subject.position.distance(threat.position);
             distance <= cfg.danger_radius
                 || (distance <= cfg.threat_intent_radius
@@ -583,8 +793,8 @@ const UNTIL_EPSILON: f32 = 0.05;
 
 /// Re-classify both teams from `snapshot`, store the result in `situations`,
 /// and record every transition as a `situation_change` trace event. Each team
-/// is classified under its own AI profile, the snapshot's
-/// ([`SituationConfig::under`]).
+/// is classified under its own AI profile, the snapshot's, less the plays
+/// `cfg.withheld` denies it ([`SituationConfig::for_team`]).
 ///
 /// `decide_abilities` calls it once on the snapshot it builds, and again after
 /// each same-frame instant CC that snapshot reflects (see the module docs).
@@ -597,7 +807,7 @@ pub fn update_situations(
 ) {
     for (index, team) in [1u8, 2].into_iter().enumerate() {
         let prev = std::mem::take(&mut situations.teams[index]);
-        let cfg = cfg.under(snapshot.ai_profile.for_team(team));
+        let cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
         let next = classify(snapshot, team, &prev, clock, &cfg);
         record_transitions(team, &prev, &next, trace);
         situations.teams[index] = next;
@@ -851,15 +1061,22 @@ mod tests {
     fn legacy_has_no_band() {
         let teamplan = SituationConfig::default().under(AiProfile::TeamPlan);
         let legacy = SituationConfig::default().under(AiProfile::Legacy);
-        assert_eq!(teamplan, SituationConfig::default());
+        assert_eq!(
+            teamplan,
+            SituationConfig {
+                peel: true,
+                ..SituationConfig::default()
+            }
+        );
         assert_eq!(legacy.press_release_margin, legacy.press_advantage_margin);
         assert_eq!(
             legacy,
             SituationConfig {
                 press_release_margin: teamplan.press_advantage_margin,
+                peel: false,
                 ..teamplan
             },
-            "only the release differs"
+            "only the release and the gated Peel play differ"
         );
         // With no band the latch is the plain test from each side, whatever
         // the previous tempo.
@@ -910,13 +1127,107 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert_eq!(locked.play_for(Role::MeleeDps), Play::Burst);
-        assert_eq!(locked.play_for(Role::RangedDps), Play::Burst);
-        assert_eq!(locked.play_for(Role::Healer), Play::Default);
+        let me = Entity::from_raw(9);
+        assert_eq!(locked.play_for(Role::MeleeDps, me), Play::Burst);
+        assert_eq!(locked.play_for(Role::RangedDps, me), Play::Burst);
+        assert_eq!(locked.play_for(Role::Healer, me), Play::Default);
         assert_eq!(
-            TeamSituation::default().play_for(Role::MeleeDps),
+            TeamSituation::default().play_for(Role::MeleeDps, me),
             Play::Default
         );
+    }
+
+    /// Peel heads every role's play while a teammate is in danger with an
+    /// attacker to peel — on a team that runs it, for every unit but that
+    /// teammate — and beats a burst. Each condition removed gives the play
+    /// back to the fallback.
+    #[test]
+    fn peel_answers_a_teammate_in_danger_and_only_on_a_team_that_runs_it() {
+        let ally = Entity::from_raw(1);
+        let attacker = Entity::from_raw(2);
+        let me = Entity::from_raw(3);
+        let danger = TeamSituation {
+            ally_in_danger: Some(Window {
+                subject: ally,
+                since: 0.0,
+                until: None,
+            }),
+            danger_attackers: [attacker].into_iter().collect(),
+            enemy_healer_locked: Some(Window {
+                subject: Entity::from_raw(4),
+                since: 0.0,
+                until: None,
+            }),
+            peel_play: true,
+            ..Default::default()
+        };
+        for role in [Role::MeleeDps, Role::RangedDps, Role::Healer] {
+            assert_eq!(danger.play_for(role, me), Play::Peel { ally }, "{role:?}");
+            assert_eq!(
+                danger.play_for(role, ally),
+                danger.fallback_play(role),
+                "the teammate in danger does not peel for itself"
+            );
+            let gated = TeamSituation {
+                peel_play: false,
+                ..danger.clone()
+            };
+            assert_eq!(gated.play_for(role, me), gated.fallback_play(role));
+            let unattacked = TeamSituation {
+                danger_attackers: SmallVec::new(),
+                ..danger.clone()
+            };
+            assert_eq!(
+                unattacked.play_for(role, me),
+                unattacked.fallback_play(role)
+            );
+        }
+        assert_eq!(danger.fallback_play(Role::MeleeDps), Play::Burst);
+    }
+
+    /// The danger's attackers are the enemies pressuring its subject, nearest
+    /// first; a distant caster holding position is not one.
+    #[test]
+    fn danger_attackers_are_the_pressuring_enemies_nearest_first() {
+        let mut f = fixture();
+        let cfg = SituationConfig::default();
+        let (warrior, healer, mage) = (f.warrior, f.healer, f.mage);
+        f.roster.get_mut(&warrior).unwrap().current_health = 20.0;
+        place(&mut f, warrior, 0.0, 0.0, None);
+        // The Priest at 9yd (inside danger_radius), the Mage at 6yd.
+        place(&mut f, healer, 9.0, 0.0, Some(warrior));
+        place(&mut f, mage, 6.0, 0.0, Some(warrior));
+        let s = classify_now(&f, &TeamSituation::default(), 30.0);
+        assert_eq!(s.ally_in_danger.map(|w| w.subject), Some(f.warrior));
+        assert_eq!(s.danger_attackers.as_slice(), &[f.mage, f.healer]);
+        // The Mage backs off to its own range and holds: no longer pressure.
+        place(&mut f, mage, cfg.danger_radius + 10.0, 0.0, Some(warrior));
+        let s = classify_now(&f, &TeamSituation::default(), 30.0);
+        assert_eq!(s.danger_attackers.as_slice(), &[f.healer]);
+        // Nobody in danger: no attackers.
+        f.roster.get_mut(&f.warrior).unwrap().current_health = 100.0;
+        let s = classify_now(&f, &TeamSituation::default(), 30.0);
+        assert!(s.danger_attackers.is_empty());
+    }
+
+    #[test]
+    fn withheld_plays_deny_peel_to_one_team_only() {
+        let withheld = WithheldPlays {
+            team2: PlaySet::of(&[PEEL]),
+            ..Default::default()
+        };
+        let cfg = SituationConfig {
+            withheld,
+            ..SituationConfig::default()
+        };
+        assert!(cfg.for_team(1, AiProfile::TeamPlan).peel);
+        assert!(!cfg.for_team(2, AiProfile::TeamPlan).peel);
+        assert!(!cfg.for_team(1, AiProfile::Legacy).peel);
+        assert_eq!(
+            WithheldPlays::parse_set(&["Peel".to_string()]),
+            Ok(PlaySet::of(&[PEEL]))
+        );
+        assert!(WithheldPlays::parse_set(&["Burst".to_string()]).is_err());
     }
 
     #[test]

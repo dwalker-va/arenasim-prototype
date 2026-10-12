@@ -77,6 +77,10 @@ verify that PR and render a verdict — nothing more.
      properly gated rather than trusting the PR's claim.
    - A class decision or a situation (`class_ai/`, `situation.rs`) →
      `cargo test --test situation_scenes`, and any scene test the diff adds.
+   - A gated play or its peel steps (`class_ai/peel.rs`, a class's peel step,
+     `situation::Play`) → `cargo test --release --test peel_play_probe --
+     --ignored` (the tier-4 probe, about a minute) beside the default
+     `peel_scenes` and `peel_staged`.
    - **A re-pinned seed is a REJECT finding** (the migrate-not-re-pin rule,
      CLAUDE.md *Test an AI decision*). A diff that moves a seed-pinned probe to
      a fresh seed because its old seed went stale must instead migrate it — to a
