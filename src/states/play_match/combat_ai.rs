@@ -638,7 +638,11 @@ pub fn acquire_targets(
 ///
 /// Special case: If kill_target is a healer, we INVERT healer priority.
 /// When killing the healer, we want to CC the DPS to prevent them from peeling.
-fn select_cc_target_heuristic(
+///
+/// Public (and `#[doc(hidden)]`) only so the decision-property grid picks a
+/// scene's CC target with this function rather than a copy of it.
+#[doc(hidden)]
+pub fn select_cc_target_heuristic(
     enemy_combatants: &[(
         Entity,
         Vec3,

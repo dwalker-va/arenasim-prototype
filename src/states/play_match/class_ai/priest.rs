@@ -946,6 +946,10 @@ fn try_dispel_magic(
     )
 }
 
+/// Flash Heal's trigger: the lowest ally in reach below this health fraction
+/// is healed before Mind Blast or a maintenance dispel.
+pub const FLASH_HEAL_HP: f32 = 0.9;
+
 /// Try to cast Flash Heal on the lowest HP ally.
 ///
 /// Cast-vs-move urgency (R7/AE1): while `escape_defer` is `Some(threshold)`
@@ -971,7 +975,7 @@ fn try_flash_heal(
 
     // Reach (range, then sight) filters before health ranks: an occluded
     // lowest ally yields to the lowest one in sight.
-    let target_info = match ctx.lowest_health_ally_in_reach(0.9, def.range, my_pos) {
+    let target_info = match ctx.lowest_health_ally_in_reach(FLASH_HEAL_HP, def.range, my_pos) {
         Ok(info) => info,
         Err(reason) => {
             builder.reject(
