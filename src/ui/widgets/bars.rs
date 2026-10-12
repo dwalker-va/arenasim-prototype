@@ -3,13 +3,14 @@
 use bevy_egui::egui;
 
 use crate::states::match_config::CharacterClass;
-use crate::ui::theme::{class_color, color, hud, radius, size, stroke};
+use crate::ui::theme::{class_color, color, radius, size, stroke};
 
 /// The whole of a texture, as UV coordinates.
 const FULL_UV: egui::Rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
 
 /// A horizontal bar, `width` long and [`size::BAR`] thick: `fraction` (clamped
-/// to 0..=1) of it filled with `fill` over the [`hud::BAR_TRACK`].
+/// to 0..=1) of it filled with `fill` over the chrome
+/// [`color::TRACK`]. A menu bar: the HUD draws its own.
 pub fn resource_bar(
     ui: &mut egui::Ui,
     fraction: f32,
@@ -19,7 +20,7 @@ pub fn resource_bar(
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, size::BAR), egui::Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, radius::SM, hud::BAR_TRACK);
+    painter.rect_filled(rect, radius::SM, color::TRACK);
     let fraction = fraction.clamp(0.0, 1.0);
     if fraction > 0.0 {
         let mut filled = rect;

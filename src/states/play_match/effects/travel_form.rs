@@ -13,7 +13,6 @@
 //! the break rather than being swept by it.
 
 use bevy::prelude::*;
-use bevy_egui::egui;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::abilities::AbilityType;
@@ -89,7 +88,7 @@ pub fn process_travel_form(
                     FloatingCombatText {
                         world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                         text: "Travel Form".to_string(),
-                        color: egui::Color32::WHITE,
+                        color: crate::ui::theme::fct::STATE,
                         lifetime: 2.0,
                         vertical_offset: offset_y,
                         is_crit: false,

@@ -4,7 +4,6 @@
 //! Holy Shock is unique in that it can be used offensively or defensively.
 
 use bevy::prelude::*;
-use bevy_egui::egui;
 
 use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
@@ -77,7 +76,7 @@ pub fn process_holy_shock_heals(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: format!("+{:.0}", actual_heal),
-                    color: egui::Color32::from_rgb(0, 255, 0), // Green for healing
+                    color: crate::ui::theme::fct::HEAL,
                     lifetime: 1.5,
                     vertical_offset: offset_y,
                     is_crit,
@@ -206,7 +205,7 @@ pub fn process_holy_shock_damage(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: format!("{:.0}", actual_damage),
-                    color: egui::Color32::from_rgb(255, 255, 0), // Yellow for ability damage
+                    color: crate::ui::theme::fct::DAMAGE,
                     lifetime: 1.5,
                     vertical_offset: offset_y,
                     is_crit,
@@ -227,7 +226,7 @@ pub fn process_holy_shock_damage(
                         world_position: text_position
                             + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
                         text: format!("{:.0} absorbed", absorbed),
-                        color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                        color: crate::ui::theme::fct::ABSORB,
                         lifetime: 1.5,
                         vertical_offset: absorb_offset_y,
                         is_crit: false,

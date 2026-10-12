@@ -1,5 +1,6 @@
 use crate::states::play_match::components::*;
 use crate::states::play_match::rendering::whole_physical_pixels;
+use crate::ui::theme;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use egui::emath::GuiRounding;
@@ -79,13 +80,8 @@ pub fn render_floating_combat_text(
                     };
 
                     // Apply alpha to color
-                    let color_with_alpha = egui::Color32::from_rgba_unmultiplied(
-                        fct.color.r(),
-                        fct.color.g(),
-                        fct.color.b(),
-                        alpha,
-                    );
-                    let outline_color = egui::Color32::from_rgba_unmultiplied(0, 0, 0, alpha);
+                    let color_with_alpha = theme::with_alpha(fct.color, alpha);
+                    let outline_color = theme::with_alpha(theme::fct::OUTLINE, alpha);
 
                     // Check if this is absorbed text - render number and label separately
                     if let Some(number_str) = fct.text.strip_suffix(" absorbed") {

@@ -4,7 +4,6 @@
 //! Uses the DivineShieldPending deferred pattern because Paladin AI has immutable aura access.
 
 use bevy::prelude::*;
-use bevy_egui::egui;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::abilities::AbilityType;
@@ -134,7 +133,7 @@ pub fn process_divine_shield(
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: "Divine Shield".to_string(),
-                    color: egui::Color32::from_rgb(255, 215, 0), // Gold
+                    color: crate::ui::theme::fct::INVULNERABLE,
                     lifetime: 2.0,
                     vertical_offset: offset_y,
                     is_crit: false,
