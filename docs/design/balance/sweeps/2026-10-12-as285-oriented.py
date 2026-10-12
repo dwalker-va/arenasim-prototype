@@ -24,8 +24,8 @@ import gzip
 import math
 import sys
 
-# Every class with a hard-CC chooser the change touches.
-AFFECTED = ("Warlock", "Rogue", "Paladin", "Hunter", "Mage", "Druid")
+# Every class whose choices the change touches (the Priest: its scream dip).
+AFFECTED = ("Warlock", "Rogue", "Paladin", "Hunter", "Mage", "Druid", "Priest")
 PARTNER = ("Mage", "Druid")
 CHOOSER = ("Warlock", "Rogue", "Paladin", "Hunter")
 

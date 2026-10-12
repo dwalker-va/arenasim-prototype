@@ -280,3 +280,25 @@ fn death_coil_does_not_break_a_friendly_polymorph_inside_the_chain_window() {
         describe(&ending)
     );
 }
+
+// ---------------------------------------------------------------------------
+// A Fear the team is breaking still holds off a CC that breaks the same way.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_fear_the_team_is_breaking_still_holds_off_a_fear() {
+    // The Warlock's ally is beating on the feared healer. A stun would take
+    // over from that Fear; another Fear would only be broken the same way.
+    let scene = warlock_scene().target(ALLY, HEALER);
+    let breaking = held(scene, HEALER, WARLOCK, AuraType::Fear, 6.0).decide(WARLOCK);
+    assert!(
+        matches!(
+            breaking.rejected(AbilityType::Fear),
+            Some(RejectionReason::TargetAlreadyCCd {
+                cc_type: AuraType::Fear
+            })
+        ),
+        "a Fear the team is breaking still holds off a Fear: {}",
+        describe(&breaking)
+    );
+}

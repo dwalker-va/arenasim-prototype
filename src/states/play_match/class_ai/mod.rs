@@ -1341,7 +1341,8 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
 ///
 /// The one copy of the set: [`CombatContext::held_in_hard_cc`] and the cast
 /// gate ask it of a target, and `situation::locks_healer` (the
-/// `enemy_healer_locked` window) is it.
+/// `enemy_healer_locked` window) and `utils::is_incapacitating` (the engine's
+/// "cannot act" test) are it.
 pub const fn holds(aura: AuraType) -> bool {
     is_hard_cc(aura) && !matches!(aura, AuraType::Root)
 }
