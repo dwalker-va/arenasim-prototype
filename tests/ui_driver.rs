@@ -513,6 +513,7 @@ fn every_shipped_script_parses() {
         "menu-exits.script",
         "replay-results-exit.script",
         "configure-to-results.script",
+        "options-and-keybindings.script",
     ];
 
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui-scripts");
@@ -949,8 +950,11 @@ const EAGER_MARKERS: &[&str] = &[
 const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     // Its one `mark` helper, through which every data-built id registers.
     ("src/states/configure_match_ui.rs", 1),
-    // Options' Configure Keybindings button, so a script can walk the menus.
-    ("src/states/mod.rs", 1),
+    // Each binding's two key buttons, and the note of what each slot holds.
+    ("src/states/keybindings_ui.rs", 2),
+    // The note of every setting's current value; the screen's buttons and
+    // chips register through the kit's `driver_id`.
+    ("src/states/options_ui.rs", 1),
     (
         "src/states/play_match/rendering/effects/speech_bubbles.rs",
         2,

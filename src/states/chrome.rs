@@ -120,9 +120,8 @@ impl GameState {
     pub fn harness(self) -> ScreenHarness {
         match self {
             GameState::MainMenu => ScreenHarness::Snapshot("tests/main_menu_snapshot.rs"),
-            GameState::Options | GameState::Keybindings => ScreenHarness::None(
-                "no pure draw function to drive yet; the split and harness are UI 11/14",
-            ),
+            GameState::Options => ScreenHarness::Snapshot("tests/options_snapshot.rs"),
+            GameState::Keybindings => ScreenHarness::Snapshot("tests/keybindings_snapshot.rs"),
             GameState::ConfigureMatch => {
                 ScreenHarness::Snapshot("tests/configure_match_snapshot.rs")
             }
