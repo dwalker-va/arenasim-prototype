@@ -1,0 +1,11 @@
+--- a/assets/config/movement.ron	2026-10-12 00:29:40
++++ b/assets/config/movement.ron	2026-10-12 00:29:40
+@@ -56,7 +56,7 @@
+         // its lead (or deficit) falls below this. The band up to
+         // press_advantage_margin is tempo's hysteresis. TeamPlan only; Legacy
+         // releases at press_advantage_margin.
+-        press_release_margin: 0.1,
++        press_release_margin: 0.2,
+     ),
+     priest: (
+         weights: (

@@ -114,6 +114,10 @@ pub struct Scene {
     gates_opened: bool,
     /// Each Shaman's live totem durations, by `TotemElement::index()`.
     totems: BTreeMap<Who, [f32; 4]>,
+    /// The previous frame's classification, which a latched situation (tempo)
+    /// and a window's onset carry over from. Empty — no history — until
+    /// [`Scene::reclassify`] runs.
+    situations: Situations,
 }
 
 impl Default for Scene {
@@ -147,6 +151,7 @@ impl Scene {
             now: 30.0,
             gates_opened: true,
             totems: BTreeMap::new(),
+            situations: Situations::default(),
         }
     }
 
@@ -406,8 +411,33 @@ impl Scene {
         }
     }
 
-    /// Run `who`'s whole decision for one tick and report it. The scene is
-    /// not changed: the decision runs on copies, and its commands are
+    /// Classify both teams' situations from the scene as it stands, with the
+    /// previous classification as history — one frame passing — and keep the
+    /// result as the history the next `reclassify` or [`Scene::decide`] reads.
+    /// A scene that never calls it decides with no history.
+    pub fn reclassify(&mut self) -> &Situations {
+        let snapshot = self.snapshot();
+        let mut trace = DecisionTrace {
+            current_sim_time: self.now,
+            ..Default::default()
+        };
+        let clock = MatchClock {
+            gates_opened: self.gates_opened,
+            ..MatchClock::after_gates(self.now)
+        };
+        update_situations(
+            &mut self.situations,
+            &snapshot,
+            &clock,
+            &SituationConfig::from_movement(&self.movement),
+            &mut trace,
+        );
+        &self.situations
+    }
+
+    /// Run `who`'s whole decision for one tick and report it, classifying its
+    /// situation with the scene's history ([`Scene::reclassify`]). The scene
+    /// is not changed: the decision runs on copies, and its commands are
     /// discarded, so a second `decide` sees the same scene.
     pub fn decide(&self, who: Who) -> DecisionView {
         let unit = self.find(who);
@@ -420,7 +450,7 @@ impl Scene {
             current_sim_time: self.now,
             ..Default::default()
         };
-        let mut situations = Situations::default();
+        let mut situations = self.situations.clone();
         let clock = MatchClock {
             gates_opened: self.gates_opened,
             ..MatchClock::after_gates(self.now)

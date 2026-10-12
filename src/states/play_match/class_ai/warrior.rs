@@ -1150,7 +1150,8 @@ pub fn evaluate_warrior_reset(
 
     // Press-when-ahead: a team clearly ahead keeps chasing rather than
     // resetting tempo, so suppress BOTH arming and activation while pressing
-    // (the team situation's tempo, on `press_advantage_margin`).
+    // (the team situation's tempo, latched between `press_advantage_margin`
+    // and `press_release_margin` under TeamPlan).
     let pressing = ctx.situation().tempo == Tempo::Pressing;
 
     // Arm while under movement CC — the window stays open `reset_window` after

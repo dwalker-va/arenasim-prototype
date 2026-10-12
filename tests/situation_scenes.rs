@@ -11,10 +11,12 @@
 use arenasim::states::match_config::CharacterClass::{
     Druid, Hunter, Mage, Paladin, Priest, Warrior,
 };
+use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::druid::mana_reserve;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::decision_trace::{MovementTrigger, RejectionReason};
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
+use arenasim::states::play_match::movement_config::load_movement_config;
 use arenasim::states::play_match::situation::{
     MatchPhase, TeamSituation, Tempo, ATTRITION_ONSET_SECS,
 };
@@ -564,5 +566,142 @@ fn a_pressing_warrior_does_not_reset_tempo() {
             .any(|m| m.trigger == MovementTrigger::MeleeReset),
         "{}",
         describe(&pressing)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Tempo hysteresis: under `TeamPlan` a pressing team keeps pressing while its
+// lead wobbles inside the band between `press_release_margin` and
+// `press_advantage_margin`, and the Warrior reads the latched tempo. `Legacy`
+// has no band, so the same wobble flips it every time.
+// ---------------------------------------------------------------------------
+
+/// The enemy health fraction (both enemies) that gives the rooted-Warrior
+/// scene's team 1 a lead of `lead`: team 1 sits at full health (2.0) and the
+/// enemies sum to 2h, so the lead is 2 - 2h.
+fn enemy_health_for_lead(lead: f32) -> f32 {
+    1.0 - lead / 2.0
+}
+
+/// Each team's tempo after every step of a wobble.
+struct Wobble {
+    team1: Vec<Tempo>,
+    team2: Vec<Tempo>,
+    /// The Warrior's (team 1's) decision at the last, inside-the-band step.
+    view: DecisionView,
+}
+
+/// How many steps of `tempos` changed tempo.
+fn flips(tempos: &[Tempo]) -> usize {
+    tempos.windows(2).filter(|w| w[0] != w[1]).count()
+}
+
+/// Run the rooted-Warrior scene through a lead over the onset, then wobble it
+/// into the band and back over the onset `wobbles` times, reclassifying at
+/// each step, and end inside the band. Team 1 leads and team 2 trails by the
+/// same amount, each team under its own profile, so one scene shows both
+/// teams' latches side by side.
+fn wobble_tempo(team1: AiProfile, team2: AiProfile, wobbles: usize) -> Wobble {
+    let shared = load_movement_config().expect("movement.ron loads").shared;
+    let (onset, release) = (shared.press_advantage_margin, shared.press_release_margin);
+    assert!(
+        release < onset,
+        "movement.ron must give tempo a band: release {release} vs onset {onset}"
+    );
+    // A quarter of the band clear of the onset, and mid-band.
+    let band = onset - release;
+    let over = enemy_health_for_lead(onset + band / 4.0);
+    let inside = enemy_health_for_lead(release + band / 2.0);
+
+    let mut scene = rooted_warrior_scene(over)
+        .ai_profile(1, team1)
+        .ai_profile(2, team2);
+    let tempos = |scene: &mut Scene| {
+        let s = scene.reclassify();
+        (s.for_team(1).tempo, s.for_team(2).tempo)
+    };
+    let mut steps = vec![tempos(&mut scene)];
+    let mut healths = Vec::new();
+    for _ in 0..wobbles {
+        healths.extend([inside, over]);
+    }
+    healths.push(inside);
+    for h in healths {
+        scene.set_health(MAGE, h);
+        scene.set_health(ENEMY_PRIEST, h);
+        steps.push(tempos(&mut scene));
+    }
+    Wobble {
+        team1: steps.iter().map(|s| s.0).collect(),
+        team2: steps.iter().map(|s| s.1).collect(),
+        view: scene.decide(WARRIOR),
+    }
+}
+
+/// The Warrior's decision included a tempo reset.
+fn resets(view: &DecisionView) -> bool {
+    view.movement
+        .iter()
+        .any(|m| m.trigger == MovementTrigger::MeleeReset)
+}
+
+#[test]
+fn a_lead_wobbling_inside_the_band_keeps_a_teamplan_team_pressing() {
+    // Team 1 TeamPlan, team 2 Legacy: the band holds team 1 Pressing, and the
+    // Warrior reads the latched tempo and keeps chasing...
+    let w = wobble_tempo(AiProfile::TeamPlan, AiProfile::Legacy, 3);
+    assert!(
+        w.team1.iter().all(|t| *t == Tempo::Pressing),
+        "TeamPlan tempo flipped inside the band: {:?}",
+        w.team1
+    );
+    assert_eq!(w.view.situation.map(|s| s.tempo), Some(Tempo::Pressing));
+    assert!(!resets(&w.view), "{}", describe(&w.view));
+    // ...while, in the same match, the Legacy team has no band: it flips
+    // between Trailing and Even at every step.
+    assert_eq!(
+        flips(&w.team2),
+        w.team2.len() - 1,
+        "the Legacy team of a mixed match flips every step: {:?}",
+        w.team2
+    );
+    assert_eq!(w.team2.last(), Some(&Tempo::Even));
+
+    // Swapped: team 1 Legacy flips every step and its Warrior resets inside
+    // the band, while team 2 under TeamPlan holds Trailing throughout.
+    let w = wobble_tempo(AiProfile::Legacy, AiProfile::TeamPlan, 3);
+    assert_eq!(
+        flips(&w.team1),
+        w.team1.len() - 1,
+        "Legacy flips every step: {:?}",
+        w.team1
+    );
+    assert_eq!(w.view.situation.map(|s| s.tempo), Some(Tempo::Even));
+    assert!(resets(&w.view), "{}", describe(&w.view));
+    assert!(
+        w.team2.iter().all(|t| *t == Tempo::Trailing),
+        "a TeamPlan team 2 holds Trailing inside the band: {:?}",
+        w.team2
+    );
+}
+
+#[test]
+fn a_teamplan_team_stops_pressing_below_the_release() {
+    let shared = load_movement_config().expect("movement.ron loads").shared;
+    let (onset, release) = (shared.press_advantage_margin, shared.press_release_margin);
+    let mut scene = rooted_warrior_scene(enemy_health_for_lead((onset + 1.0) / 2.0))
+        .ai_profile(1, AiProfile::TeamPlan);
+    assert_eq!(scene.reclassify().for_team(1).tempo, Tempo::Pressing);
+    let below = enemy_health_for_lead(release / 2.0);
+    scene.set_health(MAGE, below);
+    scene.set_health(ENEMY_PRIEST, below);
+    assert_eq!(scene.reclassify().for_team(1).tempo, Tempo::Even);
+    let view = scene.decide(WARRIOR);
+    assert!(
+        view.movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::MeleeReset),
+        "released, the Warrior resets again: {}",
+        describe(&view)
     );
 }

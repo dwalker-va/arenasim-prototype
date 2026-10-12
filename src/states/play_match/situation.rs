@@ -15,10 +15,14 @@
 //!   [`Window`] names the healer, when the lock began and when the longest
 //!   such CC on it runs out.
 //! - **`tempo`** — whether the team is [`Tempo::Pressing`] its health lead,
-//!   [`Tempo::Trailing`], or [`Tempo::Even`] (`press_advantage_margin` in
-//!   `movement.ron`). It has no hysteresis yet: it flips with every heal and
-//!   hit that crosses the margin, so a play keyed on it needs onset and
-//!   release thresholds first.
+//!   [`Tempo::Trailing`], or [`Tempo::Even`]. It is latched with onset and
+//!   release thresholds: a team starts pressing (or trailing) when its lead
+//!   (or deficit) reaches `press_advantage_margin`, and keeps that tempo until
+//!   it falls below `press_release_margin`, so a lead wobbling around the
+//!   onset does not flip it with every hit and heal. The band is a behaviour
+//!   change, so it applies only to a team under `AiProfile::TeamPlan`
+//!   ([`SituationConfig::under`]); a `Legacy` team releases at the onset, as
+//!   it always has.
 //! - **`phase`** — where the match is in its life: [`MatchPhase::Prematch`]
 //!   behind the gates, [`MatchPhase::Engaged`], then
 //!   [`MatchPhase::Attrition`] once arena dampening reaches half
@@ -45,7 +49,7 @@
 //! |---|---|---|
 //! | dying | `health_pct < urgency_hp_threshold` | healer cover denial (`teammate_needs_saving`), the dispel walk's dying-first rule (`another_teammate_dying`) |
 //! | pressured | `danger_radius`, `threat_intent_radius` | the healers' PRESSURED trigger |
-//! | tempo | `press_advantage_margin` | healer cover denial, the Warrior tempo reset |
+//! | tempo | onset `press_advantage_margin`, release `press_release_margin` (`TeamPlan` only) | healer cover denial, the Warrior tempo reset |
 //! | Attrition | dampening at 50% | the Druid's mana governor |
 //!
 //! Neighbours that look alike were deliberately NOT folded in, because doing
@@ -91,6 +95,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
+use super::ai_profile::AiProfile;
 use super::class_ai::combat_snapshot::CombatSnapshot;
 use super::class_ai::{pressing_when_ahead, stealth_visible, team_hp_sums, CombatantInfo};
 use super::components::{Aura, AuraType};
@@ -139,16 +144,18 @@ impl MatchClock {
     }
 }
 
-/// Whether a team is ahead on health, behind, or level — read against
-/// `press_advantage_margin`. Serializes snake_case (`"pressing"`).
+/// Whether a team is ahead on health, behind, or level — latched between
+/// `press_advantage_margin` (onset) and `press_release_margin` (release; see
+/// [`SituationConfig::under`]). Serializes snake_case (`"pressing"`).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Tempo {
     #[default]
     Even,
-    /// Own team's summed health fraction leads by at least the margin.
+    /// Own team's summed health fraction reached the onset lead, and has
+    /// not fallen below the release lead since.
     Pressing,
-    /// The enemy leads by at least the margin.
+    /// The enemy's did.
     Trailing,
 }
 
@@ -270,9 +277,14 @@ impl Situations {
 /// block (the module docs' threshold table).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SituationConfig {
-    /// `shared.press_advantage_margin` in `movement.ron`: the team-HP-fraction
-    /// lead at which a team presses (and the deficit at which it trails).
+    /// `shared.press_advantage_margin` in `movement.ron`: tempo's ONSET, the
+    /// team-HP-fraction lead at which a team starts pressing (and the deficit
+    /// at which it starts trailing).
     pub press_advantage_margin: f32,
+    /// `shared.press_release_margin`: tempo's RELEASE, the lead (deficit)
+    /// below which a pressing (trailing) team stops. Equal to the onset under
+    /// `Legacy` ([`Self::under`]).
+    pub press_release_margin: f32,
     /// `shared.urgency_hp_threshold`: a teammate below it is dying.
     pub urgency_hp_threshold: f32,
     /// `shared.danger_radius`: any enemy targeting a teammate from this close
@@ -293,9 +305,25 @@ impl SituationConfig {
     pub fn from_movement(config: &MovementConfig) -> Self {
         Self {
             press_advantage_margin: config.shared.press_advantage_margin,
+            press_release_margin: config.shared.press_release_margin,
             urgency_hp_threshold: config.shared.urgency_hp_threshold,
             danger_radius: config.shared.danger_radius,
             threat_intent_radius: config.shared.threat_intent_radius,
+        }
+    }
+
+    /// The thresholds a team under `profile` is classified with. Tempo's
+    /// hysteresis band is a behaviour change, so it is gated: `TeamPlan` keeps
+    /// the configured release, and `Legacy` releases at the onset — no band,
+    /// which is exactly the unlatched `>=` test it has always run. Every other
+    /// threshold is the same under both.
+    pub fn under(self, profile: AiProfile) -> Self {
+        match profile {
+            AiProfile::TeamPlan => self,
+            AiProfile::Legacy => Self {
+                press_release_margin: self.press_advantage_margin,
+                ..self
+            },
         }
     }
 }
@@ -349,7 +377,7 @@ pub fn classify_roster(
     TeamSituation {
         phase: phase(clock),
         since_gates: clock.since_gates,
-        tempo: tempo(roster, team, cfg.press_advantage_margin),
+        tempo: tempo(roster, team, prev.tempo, cfg),
         enemy_healer_locked: enemy_healer_locked(roster, auras, team, prev, clock.now),
         ally_in_danger: ally_in_danger(roster, &allies, prev, clock.now),
         allies,
@@ -508,11 +536,21 @@ fn enemy_healer_locked(
     })
 }
 
-/// `team`'s tempo: [`pressing_when_ahead`] on its team-HP-fraction advantage
-/// (own alive non-pet health fractions minus everyone else's, the sum
-/// `CombatContext::team_hp_advantage` takes), and the same test from the
-/// other side for trailing.
-fn tempo(roster: &BTreeMap<Entity, CombatantInfo>, team: u8, margin: f32) -> Tempo {
+/// `team`'s tempo, from its team-HP-fraction advantage (own alive non-pet
+/// health fractions minus everyone else's, the sum
+/// `CombatContext::team_hp_advantage` takes) and its tempo last frame.
+///
+/// A lead (deficit) at the onset presses (trails) whatever came before. Short
+/// of the onset, the previous tempo holds while the lead (deficit) is still at
+/// the release; otherwise the team is even. With the release at the onset —
+/// `Legacy` — the hold never fires, and this is the plain [`pressing_when_ahead`]
+/// test from each side.
+fn tempo(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    team: u8,
+    prev: Tempo,
+    cfg: &SituationConfig,
+) -> Tempo {
     let sums = team_hp_sums(roster);
     let own = sums.get(&team).copied().unwrap_or(0.0);
     let enemy: f32 = sums
@@ -521,9 +559,23 @@ fn tempo(roster: &BTreeMap<Entity, CombatantInfo>, team: u8, margin: f32) -> Tem
         .map(|(_, sum)| *sum)
         .sum();
     let advantage = own - enemy;
-    if pressing_when_ahead(advantage, margin) {
+    latch_tempo(
+        advantage,
+        prev,
+        cfg.press_advantage_margin,
+        cfg.press_release_margin,
+    )
+}
+
+/// [`tempo`]'s latch on a bare advantage: pure, for the band's unit tests.
+fn latch_tempo(advantage: f32, prev: Tempo, onset: f32, release: f32) -> Tempo {
+    if pressing_when_ahead(advantage, onset) {
         Tempo::Pressing
-    } else if pressing_when_ahead(-advantage, margin) {
+    } else if pressing_when_ahead(-advantage, onset) {
+        Tempo::Trailing
+    } else if prev == Tempo::Pressing && pressing_when_ahead(advantage, release) {
+        Tempo::Pressing
+    } else if prev == Tempo::Trailing && pressing_when_ahead(-advantage, release) {
         Tempo::Trailing
     } else {
         Tempo::Even
@@ -536,7 +588,9 @@ fn tempo(roster: &BTreeMap<Entity, CombatantInfo>, team: u8, margin: f32) -> Tem
 const UNTIL_EPSILON: f32 = 0.05;
 
 /// Re-classify both teams from `snapshot`, store the result in `situations`,
-/// and record every transition as a `situation_change` trace event.
+/// and record every transition as a `situation_change` trace event. Each team
+/// is classified under its own AI profile, the snapshot's
+/// ([`SituationConfig::under`]).
 ///
 /// `decide_abilities` calls it once on the snapshot it builds, and again after
 /// each same-frame instant CC that snapshot reflects (see the module docs).
@@ -549,7 +603,8 @@ pub fn update_situations(
 ) {
     for (index, team) in [1u8, 2].into_iter().enumerate() {
         let prev = std::mem::take(&mut situations.teams[index]);
-        let next = classify(snapshot, team, &prev, clock, cfg);
+        let cfg = cfg.under(snapshot.ai_profile.for_team(team));
+        let next = classify(snapshot, team, &prev, clock, &cfg);
         record_transitions(team, &prev, &next, trace);
         situations.teams[index] = next;
     }
@@ -757,6 +812,80 @@ mod tests {
             classify_now(&f, &TeamSituation::default(), 0.0).tempo,
             Tempo::Even
         );
+    }
+
+    #[test]
+    fn tempo_latches_inside_the_band_and_releases_below_it() {
+        let cfg = SituationConfig::default();
+        let (onset, release) = (cfg.press_advantage_margin, cfg.press_release_margin);
+        assert!(release < onset, "the shipped config has a band");
+        let inside = (onset + release) / 2.0;
+        // From each tempo, a lead inside the band keeps it...
+        for prev in [Tempo::Pressing, Tempo::Even, Tempo::Trailing] {
+            let expected = if prev == Tempo::Pressing {
+                Tempo::Pressing
+            } else {
+                Tempo::Even
+            };
+            assert_eq!(latch_tempo(inside, prev, onset, release), expected);
+        }
+        assert_eq!(
+            latch_tempo(-inside, Tempo::Trailing, onset, release),
+            Tempo::Trailing
+        );
+        // ...at the release it still holds; below it, it lets go.
+        assert_eq!(
+            latch_tempo(release, Tempo::Pressing, onset, release),
+            Tempo::Pressing
+        );
+        assert_eq!(
+            latch_tempo(release - 1e-4, Tempo::Pressing, onset, release),
+            Tempo::Even
+        );
+        assert_eq!(
+            latch_tempo(-(release - 1e-4), Tempo::Trailing, onset, release),
+            Tempo::Even
+        );
+        // The onset wins over whatever came before: a swing straight across.
+        assert_eq!(
+            latch_tempo(-onset, Tempo::Pressing, onset, release),
+            Tempo::Trailing
+        );
+    }
+
+    #[test]
+    fn legacy_has_no_band() {
+        let teamplan = SituationConfig::default().under(AiProfile::TeamPlan);
+        let legacy = SituationConfig::default().under(AiProfile::Legacy);
+        assert_eq!(teamplan, SituationConfig::default());
+        assert_eq!(legacy.press_release_margin, legacy.press_advantage_margin);
+        assert_eq!(
+            legacy,
+            SituationConfig {
+                press_release_margin: teamplan.press_advantage_margin,
+                ..teamplan
+            },
+            "only the release differs"
+        );
+        // With no band the latch is the plain test from each side, whatever
+        // the previous tempo.
+        let m = legacy.press_advantage_margin;
+        for advantage in [-0.5, -m, -m + 1e-4, 0.0, m - 1e-4, m, 0.5] {
+            let plain = if pressing_when_ahead(advantage, m) {
+                Tempo::Pressing
+            } else if pressing_when_ahead(-advantage, m) {
+                Tempo::Trailing
+            } else {
+                Tempo::Even
+            };
+            for prev in [Tempo::Pressing, Tempo::Even, Tempo::Trailing] {
+                assert_eq!(
+                    latch_tempo(advantage, prev, m, m),
+                    plain,
+                    "{advantage} {prev:?}"
+                );
+            }
+        }
     }
 
     #[test]

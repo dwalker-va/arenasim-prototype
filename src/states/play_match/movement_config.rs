@@ -155,15 +155,23 @@ pub struct SharedMovementConfig {
     pub anchor_switch_margin: f32,
     /// Wand-range pull target distance (Priest wand range).
     pub wand_range: f32,
-    /// Press-when-ahead margin, in summed team-HP-fraction units: a team
-    /// whose `team_hp_advantage` (own alive-member HP fraction sum minus the
-    /// enemy's) reaches this turns denial OFF — its healers stop pulling into
-    /// cover and its Warrior stops resetting tempo, so a clearly-winning team
-    /// seeks the fight instead of LoS-stalling into the dampening endgame. A
-    /// plain `>=` threshold (no hysteresis band): team-HP sums move only on
-    /// discrete damage/heal events, so the differential does not oscillate
-    /// frame-to-frame the way a positional signal would.
+    /// Press-when-ahead margin — the tempo ONSET threshold, in summed
+    /// team-HP-fraction units: a team whose `team_hp_advantage` (own
+    /// alive-member HP fraction sum minus the enemy's) reaches this turns
+    /// denial OFF — its healers stop pulling into cover and its Warrior stops
+    /// resetting tempo, so a clearly-winning team seeks the fight instead of
+    /// LoS-stalling into the dampening endgame. The same deficit makes it
+    /// trail.
     pub press_advantage_margin: f32,
+    /// The tempo RELEASE threshold, in the same units: a team already
+    /// pressing keeps pressing until its lead falls below this, and a team
+    /// already trailing keeps trailing until its deficit does. The band
+    /// between it and `press_advantage_margin` is tempo's hysteresis, so a
+    /// lead wobbling around the onset does not flip it with every hit and
+    /// heal. Read only under `AiProfile::TeamPlan`; `Legacy` releases at the
+    /// onset (no band). At most `press_advantage_margin`; equal to it disables
+    /// the band.
+    pub press_release_margin: f32,
 }
 
 impl Default for SharedMovementConfig {
@@ -182,6 +190,7 @@ impl Default for SharedMovementConfig {
             anchor_switch_margin: 0.1,
             wand_range: 30.0,
             press_advantage_margin: 0.2,
+            press_release_margin: 0.1,
         }
     }
 }
@@ -548,6 +557,7 @@ impl MovementConfig {
             ("shared.formation_offset", s.formation_offset),
             ("shared.escape_min_window", s.escape_min_window),
             ("shared.anchor_switch_margin", s.anchor_switch_margin),
+            ("shared.press_release_margin", s.press_release_margin),
             (
                 "priest.formation_shift_threshold",
                 self.priest.formation_shift_threshold,
@@ -603,6 +613,14 @@ impl MovementConfig {
             issues.push(format!(
                 "shared.wand_range ({}) must not exceed shared.heal_range ({})",
                 s.wand_range, s.heal_range
+            ));
+        }
+        // Release above onset would invert the band: a team would stop
+        // pressing at a lead that starts it pressing.
+        if s.press_release_margin > s.press_advantage_margin {
+            issues.push(format!(
+                "shared.press_release_margin ({}) must not exceed shared.press_advantage_margin ({})",
+                s.press_release_margin, s.press_advantage_margin
             ));
         }
         if s.directive_ttl < s.commit_window {
@@ -947,6 +965,34 @@ mod tests {
             "issues should name directive_ttl: {:?}",
             issues
         );
+    }
+
+    #[test]
+    fn validate_rejects_a_tempo_release_above_its_onset_and_a_negative_one() {
+        let mut config = MovementConfig::default();
+        config.shared.press_release_margin = config.shared.press_advantage_margin + 0.05;
+        let issues = config
+            .validate()
+            .expect_err("release above onset inverts the band");
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("shared.press_release_margin")),
+            "{issues:?}"
+        );
+        config.shared.press_release_margin = -0.1;
+        let issues = config.validate().expect_err("a negative release");
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("shared.press_release_margin")),
+            "{issues:?}"
+        );
+        // Equal to the onset is allowed: it disables the band.
+        config.shared.press_release_margin = config.shared.press_advantage_margin;
+        config
+            .validate()
+            .expect("release == onset is no band, not an error");
     }
 
     #[test]
