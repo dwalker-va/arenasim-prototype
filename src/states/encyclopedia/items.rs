@@ -23,7 +23,7 @@ use crate::states::play_match::proc_trinkets::proc_description;
 use super::search::SearchEntry;
 use super::widget;
 use super::{EncyclopediaData, Topic};
-use crate::ui::theme::{color, data, space, text};
+use crate::ui::theme::{color, data, size, space, text};
 use crate::ui::widgets::{empty_state, Chip};
 
 /// Default upper bound for the item-level filter. No current item exceeds ~75,
@@ -564,7 +564,7 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
     if let Some(proc) = &item.proc {
         ui.add_space(space::XS);
         ui.scope(|ui| {
-            ui.set_max_width(280.0);
+            ui.set_max_width(size::PROC_TEXT_MAX_WIDTH);
             ui.label(
                 egui::RichText::new(proc_description(proc))
                     .family(body_family(ui.ctx()))

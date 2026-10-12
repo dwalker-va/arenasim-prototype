@@ -86,8 +86,8 @@ pub fn render_floating_combat_text(
                     // Check if this is absorbed text - render number and label separately
                     if let Some(number_str) = fct.text.strip_suffix(" absorbed") {
                         // Render number at 24pt
-                        let number_font = egui::FontId::proportional(24.0);
-                        let label_font = egui::FontId::proportional(14.0);
+                        let number_font = egui::FontId::proportional(theme::fct::NUMBER_SIZE);
+                        let label_font = egui::FontId::proportional(theme::fct::LABEL_SIZE);
 
                         // Calculate positions - number centered, label to the right
                         let number_galley = ui.painter().layout_no_wrap(
@@ -167,7 +167,11 @@ pub fn render_floating_combat_text(
                         );
                     } else {
                         // Regular text - 32pt for crits, 24pt for normal
-                        let font_size = if fct.is_crit { 32.0 } else { 24.0 };
+                        let font_size = if fct.is_crit {
+                            theme::fct::CRIT_SIZE
+                        } else {
+                            theme::fct::NUMBER_SIZE
+                        };
                         let display_text = if fct.is_crit {
                             format!("{}!", fct.text)
                         } else {

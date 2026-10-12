@@ -35,11 +35,6 @@ use bevy_egui::egui;
 // Aura Icon Constants and Helpers
 // ==============================================================================
 
-/// Size of aura icons in pixels
-pub const AURA_ICON_SIZE: f32 = 24.0;
-/// Spacing between aura icons in pixels
-pub const AURA_ICON_SPACING: f32 = 2.0;
-
 /// Generic aura icon keys (used when ability doesn't have a specific icon)
 pub const GENERIC_AURA_ICONS: &[(&str, &str)] = &[
     ("aura_slow", "icons/auras/slow.jpg"),
@@ -345,7 +340,7 @@ pub fn draw_text_with_outline(
             align,
             text,
             font_id.clone(),
-            egui::Color32::BLACK,
+            crate::ui::theme::hud::HUD_LABEL_OUTLINE,
         );
     }
 

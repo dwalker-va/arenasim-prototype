@@ -1,6 +1,7 @@
 use crate::states::play_match::banter::vocab;
 use crate::states::play_match::components::*;
 use crate::ui::driver as ui_driver;
+use crate::ui::theme::{self, data, hud};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use egui::emath::GuiRounding;
@@ -52,7 +53,7 @@ pub fn render_speech_bubbles(
                 let width = match &span {
                     vocab::Span::Text(text) => {
                         ctx.fonts(|f| {
-                            f.layout_no_wrap(text.clone(), font_id.clone(), egui::Color32::BLACK)
+                            f.layout_no_wrap(text.clone(), font_id.clone(), hud::BUBBLE_TEXT)
                         })
                         .size()
                         .x
@@ -68,7 +69,7 @@ pub fn render_speech_bubbles(
         let content_h = BUBBLE_ICON.max(BUBBLE_TEXT_SIZE);
 
         // Tight padding around content
-        let padding = egui::vec2(12.0, 6.0);
+        let padding = hud::size::BUBBLE_PADDING;
         let bubble_size = egui::vec2(content_w, content_h) + padding * 2.0;
         // On a whole physical pixel, so the bubble and its text move as one
         // image instead of each shape rounding a new sub-pixel phase its own
@@ -88,17 +89,13 @@ pub fn render_speech_bubbles(
         ));
 
         // White rounded rectangle background
-        painter.rect_filled(
-            rect,
-            egui::CornerRadius::same(6),
-            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 240),
-        );
+        painter.rect_filled(rect, theme::radius::MD, hud::BUBBLE_FILL);
 
         // Black border
         painter.rect_stroke(
             rect,
-            egui::CornerRadius::same(6),
-            egui::Stroke::new(2.0_f32, egui::Color32::BLACK),
+            theme::radius::MD,
+            egui::Stroke::new(2.0_f32, hud::BUBBLE_EDGE),
             egui::StrokeKind::Outside,
         );
 
@@ -113,7 +110,7 @@ pub fn render_speech_bubbles(
                         egui::Align2::LEFT_CENTER,
                         text,
                         font_id.clone(),
-                        egui::Color32::BLACK,
+                        hud::BUBBLE_TEXT,
                     );
                 }
                 vocab::Span::Class(class, team) => {
@@ -127,7 +124,7 @@ pub fn render_speech_bubbles(
                     // art says the same thing and costs the art nothing.
                     match class_icons.textures.get(class) {
                         Some(texture) => {
-                            painter.image(*texture, icon_rect, UV_FULL, egui::Color32::WHITE);
+                            painter.image(*texture, icon_rect, UV_FULL, theme::color::UNTINTED);
                             // For a `--ui-script`, which sees no pixels: the
                             // portrait art drew, not the initial plate below.
                             ui_driver::note_into(
@@ -142,13 +139,13 @@ pub fn render_speech_bubbles(
                                 ctx,
                                 format_args!("banter-portrait-missing:{class:?}"),
                             );
-                            painter.rect_filled(icon_rect, 3.0, egui::Color32::from_gray(40));
+                            painter.rect_filled(icon_rect, theme::radius::SM, hud::BUBBLE_PLATE);
                             painter.text(
                                 icon_rect.center(),
                                 egui::Align2::CENTER_CENTER,
                                 &class.name()[0..1],
-                                egui::FontId::proportional(13.0),
-                                egui::Color32::WHITE,
+                                egui::FontId::proportional(hud::text::BUBBLE_INITIAL),
+                                hud::BUBBLE_PLATE_INITIAL,
                             );
                         }
                     }
@@ -156,7 +153,7 @@ pub fn render_speech_bubbles(
                     // bleeding into the glyph beside it.
                     painter.rect_stroke(
                         icon_rect,
-                        3.0,
+                        theme::radius::SM,
                         egui::Stroke::new(2.0_f32, team_tint(*team)),
                         egui::StrokeKind::Inside,
                     );
@@ -165,7 +162,7 @@ pub fn render_speech_bubbles(
                     let icon_rect = icon_rect_at(x, mid_y);
                     match spell_icons.textures.get(name) {
                         Some(texture) => {
-                            painter.image(*texture, icon_rect, UV_FULL, egui::Color32::WHITE);
+                            painter.image(*texture, icon_rect, UV_FULL, theme::color::UNTINTED);
                         }
                         // A named ability with no loaded icon is a content
                         // mistake; show a placeholder rather than a gap so it
@@ -173,8 +170,8 @@ pub fn render_speech_bubbles(
                         None => {
                             painter.rect_stroke(
                                 icon_rect,
-                                3.0,
-                                egui::Stroke::new(1.0_f32, egui::Color32::DARK_GRAY),
+                                theme::radius::SM,
+                                egui::Stroke::new(1.0_f32, hud::BUBBLE_MISSING_ABILITY),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -184,7 +181,7 @@ pub fn render_speech_bubbles(
                     let icon_rect = icon_rect_at(x, mid_y);
                     match emoji_icons.textures.get(name) {
                         Some(texture) => {
-                            painter.image(*texture, icon_rect, UV_FULL, egui::Color32::WHITE);
+                            painter.image(*texture, icon_rect, UV_FULL, theme::color::UNTINTED);
                         }
                         // Named art that is not on disk. A dashed-looking
                         // outline rather than nothing, so a typo'd name is
@@ -192,8 +189,8 @@ pub fn render_speech_bubbles(
                         None => {
                             painter.rect_stroke(
                                 icon_rect,
-                                3.0,
-                                egui::Stroke::new(1.0_f32, egui::Color32::from_gray(120)),
+                                theme::radius::SM,
+                                egui::Stroke::new(1.0_f32, hud::BUBBLE_MISSING_EMOJI),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -202,8 +199,8 @@ pub fn render_speech_bubbles(
                 vocab::Span::Unknown => {
                     painter.rect_stroke(
                         icon_rect_at(x, mid_y),
-                        3.0,
-                        egui::Stroke::new(1.0_f32, egui::Color32::RED),
+                        theme::radius::SM,
+                        egui::Stroke::new(1.0_f32, hud::BUBBLE_UNKNOWN),
                         egui::StrokeKind::Inside,
                     );
                 }
@@ -214,7 +211,7 @@ pub fn render_speech_bubbles(
 }
 
 /// Glyph size inside a speech bubble.
-const BUBBLE_TEXT_SIZE: f32 = 18.0;
+const BUBBLE_TEXT_SIZE: f32 = hud::text::BUBBLE;
 /// Icon edge length inside a speech bubble, matched to the glyph size so
 /// portraits and symbols sit on one visual line.
 const BUBBLE_ICON: f32 = 20.0;
@@ -230,13 +227,13 @@ fn icon_rect_at(x: f32, mid_y: f32) -> egui::Rect {
 
 /// The colour of the frame around a team's class portraits.
 ///
-/// Same blue/red the combat-log timeline already uses for team headers, so a
+/// The team pair the combat-log timeline also uses for team headers, so a
 /// portrait in a bubble reads as the same team a reader has seen elsewhere.
 fn team_tint(team: u8) -> egui::Color32 {
     if team == 1 {
-        egui::Color32::from_rgb(100, 150, 255)
+        data::TEAM_1
     } else {
-        egui::Color32::from_rgb(255, 100, 100)
+        data::TEAM_2
     }
 }
 

@@ -1459,12 +1459,10 @@ rather than mock data, so a content change shows up in the snapshot.
 
 **UI values come from `ui::theme`.** A colour, text size, gap, radius or icon
 size is chosen once, in `src/ui/theme.rs`, and named by its role (`TEXT_MUTED`,
-never `GREY_142`); a literal written anywhere else in `src/` is counted by
-`tests/ui_token_audit.rs`, a per-file EQUALITY ratchet. A count that goes up
-fails it: use the token for that role, and if the scale lacks one, add it to
-`theme.rs` by role in the same commit. A count that goes down fails it too until
-the table is lowered in the same commit, so a migration card's diff shows the
-rows it cleared. **UI pieces come from `ui::widgets`** (button, header and
+never `GREY_142`); a literal written anywhere else in `src/` fails
+`tests/ui_token_audit.rs`, which allows none outside the theme. Use the token
+for that role, and if the theme lacks one, add it to `theme.rs` by role in the
+same commit. **UI pieces come from `ui::widgets`** (button, header and
 `Nav`, panel, list row, tabs, chip, tooltip, modal, …); a component the kit
 lacks is added there, with its row in `tests/ui_gallery_snapshot.rs`, in the
 same commit. **The style is installed once:** `ui::install` sets the whole egui

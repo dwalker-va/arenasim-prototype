@@ -1,9 +1,8 @@
-//! UI values come from `ui::theme`: a ratchet on every literal written
-//! anywhere else.
+//! UI values come from `ui::theme`: no literal is written anywhere else.
 //!
 //! The design system (`docs/design/proposals/2026-10-11-ui-design-system.md`
 //! §3.4a) chooses each colour, text size, gap, radius and icon size once, in
-//! `src/ui/theme.rs`, by role. This audit counts what is still chosen
+//! `src/ui/theme.rs`, by role. This audit fails on any value chosen
 //! somewhere else. It reads source text, needs no GPU, and runs in the default
 //! `cargo test`.
 //!
@@ -35,20 +34,12 @@
 //! Bevy `Color` is out of scope by type: world-space effect colours are not
 //! egui's.
 //!
-//! # The ratchet is an EQUALITY
+//! # Zero, everywhere
 //!
-//! [`FROZEN`] records each file's count of each kind. The test fails when a
-//! file's count goes up — a new literal — and ALSO when it goes down without
-//! the table moving with it, so a migration card that clears literals must
-//! lower its rows in the same commit. A `>=` floor would let a row sit above
-//! the truth, and that slack would hide the next literal added in the same
-//! file. A file whose counts reach zero leaves the table. The last migration
-//! card empties it.
-//!
-//! On a failure the message prints the whole table as it stands, ready to
-//! paste — but paste it only for the rows your change was meant to LOWER. A
-//! row that went up is a literal to replace with a token, not a number to
-//! re-freeze.
+//! Every file outside the theme must count zero of every kind, and there is
+//! no per-file allowance. A literal anywhere else is a value to replace with
+//! the `ui::theme` token for its role — add one there, by role, if the theme
+//! lacks it — never a number to allow.
 //!
 //! # Self-reported limitations
 //!
@@ -80,22 +71,6 @@ const THEME: &str = "src/ui/theme.rs";
 /// the file still counts.
 const INSTALL: (&str, usize) = ("src/ui/mod.rs", 1);
 
-/// What each file is allowed today, kind by kind. EQUALITY: see the module
-/// docs. Sorted by path; a file absent from the table must count zero.
-/// One row per file, so a migration card's diff reads as the rows it lowered.
-#[rustfmt::skip]
-const FROZEN: &[(&str, Counts)] = &[
-    ("src/states/arena_layout_debug.rs", Counts { colour: 14, size: 3, space: 2, radius: 3, style: 0 }),
-    ("src/states/play_match/camera.rs", Counts { colour: 5, size: 5, space: 1, radius: 0, style: 0 }),
-    ("src/states/play_match/rendering/combat_log.rs", Counts { colour: 21, size: 7, space: 6, radius: 1, style: 0 }),
-    ("src/states/play_match/rendering/effects/floating_text.rs", Counts { colour: 0, size: 2, space: 0, radius: 0, style: 0 }),
-    ("src/states/play_match/rendering/effects/speech_bubbles.rs", Counts { colour: 14, size: 1, space: 1, radius: 7, style: 0 }),
-    ("src/states/play_match/rendering/hud.rs", Counts { colour: 14, size: 8, space: 6, radius: 1, style: 0 }),
-    ("src/states/play_match/rendering/mod.rs", Counts { colour: 1, size: 0, space: 0, radius: 0, style: 0 }),
-    ("src/states/play_match/rendering/overlays.rs", Counts { colour: 19, size: 12, space: 0, radius: 2, style: 0 }),
-    ("src/states/play_match/rendering/team_frames.rs", Counts { colour: 16, size: 9, space: 2, radius: 14, style: 0 }),
-];
-
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct Counts {
     colour: usize,
@@ -108,10 +83,6 @@ struct Counts {
 impl Counts {
     fn is_zero(&self) -> bool {
         *self == Counts::default()
-    }
-
-    fn total(&self) -> usize {
-        self.colour + self.size + self.space + self.radius + self.style
     }
 }
 
@@ -254,17 +225,8 @@ fn measure() -> BTreeMap<String, Counts> {
     measured
 }
 
-fn render_table(measured: &BTreeMap<String, Counts>) -> String {
-    measured
-        .iter()
-        .filter(|(_, c)| !c.is_zero())
-        .map(|(path, c)| format!("    (\"{path}\", {c:?}),"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 #[test]
-fn ui_literals_match_the_frozen_table() {
+fn no_ui_literal_outside_the_theme() {
     assert!(
         repo_path(THEME).is_file(),
         "{THEME} is the one file exempt from this audit, and it does not exist — \
@@ -272,55 +234,41 @@ fn ui_literals_match_the_frozen_table() {
     );
 
     let measured = measure();
-    let frozen: BTreeMap<&str, Counts> = FROZEN.iter().copied().collect();
-    assert_eq!(frozen.len(), FROZEN.len(), "FROZEN names a file twice");
 
-    let mut failures = Vec::new();
-    for (path, counts) in &measured {
-        let allowed = frozen.get(path.as_str()).copied().unwrap_or_default();
-        if *counts != allowed {
-            failures.push(format!(
-                "{path}\n      frozen   {allowed:?}\n      measured {counts:?}"
-            ));
-        }
-    }
-    for (path, counts) in &frozen {
-        if !measured.contains_key(*path) {
-            failures.push(format!(
-                "{path}: in FROZEN ({counts:?}) but no such file under src/ — remove its row"
-            ));
-        }
-        if counts.is_zero() {
-            failures.push(format!("{path}: a row of zeros — remove it"));
-        }
-    }
-
-    // Non-vacuity: the tree carries hundreds of literals today, and the scan
-    // must see them. When the last migration card empties FROZEN, this floor
-    // goes with it.
-    let total: usize = measured.values().map(Counts::total).sum();
+    // Non-vacuity: the scan must have read the tree, and the scanner must see
+    // the literals the theme itself is made of. A scan that reads nothing, or
+    // whose patterns stopped matching, would pass every file below.
     assert!(
-        total > 0 || FROZEN.is_empty(),
-        "the scan counted nothing in src/ while FROZEN still allows literals — \
+        measured.len() > 100,
+        "the scan read only {} files under src/ — it is not reading the tree",
+        measured.len()
+    );
+    let theme = Scanner::new().count(&readable_code(
+        &std::fs::read_to_string(repo_path(THEME)).expect("the theme must be readable"),
+    ));
+    assert!(
+        theme.colour > 0 && theme.space > 0,
+        "the scanner counts nothing in {THEME} ({theme:?}), which is made of UI literals — \
          the scanner is broken, not the tree"
     );
 
+    let offenders: Vec<String> = measured
+        .iter()
+        .filter(|(_, counts)| !counts.is_zero())
+        .map(|(path, counts)| format!("{path}: {counts:?}"))
+        .collect();
     assert!(
-        failures.is_empty(),
-        "UI literals outside {THEME} no longer match the frozen table.\n\n\
-         A count that went UP is a new literal: use the `ui::theme` token for that role \
-         (add one there, by role, if the scale lacks it) instead of re-freezing the row.\n\
-         A count that went DOWN is progress: lower the row in FROZEN in this same commit.\n\n  \
-         {}\n\nThe table as measured now:\n{}",
-        failures.join("\n  "),
-        render_table(&measured)
+        offenders.is_empty(),
+        "UI literals outside {THEME}. Use the `ui::theme` token for each value's role, \
+         and if the theme lacks one, add it there by role in this same commit:\n  {}",
+        offenders.join("\n  ")
     );
 }
 
 /// The audit is only as good as its scanner, so plant one offender of every
 /// pattern and require each to be caught exactly once — and the sanctioned
 /// and blanked forms to be caught not at all. A regex that stops matching
-/// fails here rather than letting the ratchet pass over nothing.
+/// fails here rather than letting the audit pass over nothing.
 #[test]
 fn the_scanner_catches_every_planted_offender() {
     let scanner = Scanner::new();
@@ -436,7 +384,7 @@ fn the_scanner_catches_every_planted_offender() {
 /// Every checkbox is the kit's ([`arenasim::ui::widgets::Checkbox`]), never
 /// egui's stock one: the stock box takes its corners from the installed
 /// widget style, whose button radius rounds a 16pt box into a circle, so it
-/// reads as a radio button. Lexical, like the ratchet above: it sees the
+/// reads as a radio button. Lexical, like the audit above: it sees the
 /// method form (`ui.checkbox(…)`) and the path form (`egui::Checkbox`,
 /// `egui::widgets::Checkbox`), not a stock `Checkbox` imported bare.
 #[test]

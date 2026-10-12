@@ -3,6 +3,7 @@
 //! Handles camera modes, input, and positioning for the match view.
 
 use super::components::{ArenaCamera, CameraController, CameraMode, Combatant, Pet};
+use crate::ui::theme::{hud, text};
 use bevy::prelude::*;
 use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
@@ -320,7 +321,7 @@ pub fn render_camera_controls(
         .title_bar(false)
         .frame(
             egui::Frame::window(&ctx.style())
-                .fill(crate::ui::theme::hud::HUD_PANEL)
+                .fill(hud::HUD_PANEL)
                 .stroke(egui::Stroke::NONE),
         ) // Remove border
         .show(ctx, |ui| {
@@ -342,12 +343,12 @@ pub fn render_camera_controls(
 
             ui.label(
                 egui::RichText::new(format!("Mode: {}", mode_text))
-                    .size(12.0)
-                    .color(egui::Color32::from_rgb(100, 200, 255))
+                    .size(text::SMALL)
+                    .color(hud::CAMERA_MODE)
                     .strong(),
             );
 
-            ui.add_space(5.0);
+            ui.add_space(hud::space::ROW);
 
             // Controls - dynamically show actual keybindings
             ui.label(
@@ -355,26 +356,26 @@ pub fn render_camera_controls(
                     "{} - Cycle camera mode",
                     keybindings.binding_display(GameAction::CycleCameraMode)
                 ))
-                .size(11.0)
-                .color(egui::Color32::from_rgb(200, 200, 200)),
+                .size(hud::text::CAPTION)
+                .color(hud::CAPTION),
             );
             ui.label(
                 egui::RichText::new(format!(
                     "{} - Reset to center",
                     keybindings.binding_display(GameAction::ResetCamera)
                 ))
-                .size(11.0)
-                .color(egui::Color32::from_rgb(200, 200, 200)),
+                .size(hud::text::CAPTION)
+                .color(hud::CAPTION),
             );
             ui.label(
                 egui::RichText::new("Mouse Wheel - Zoom")
-                    .size(11.0)
-                    .color(egui::Color32::from_rgb(200, 200, 200)),
+                    .size(hud::text::CAPTION)
+                    .color(hud::CAPTION),
             );
             ui.label(
                 egui::RichText::new("Left Click Drag - Rotate/Pitch")
-                    .size(11.0)
-                    .color(egui::Color32::from_rgb(200, 200, 200)),
+                    .size(hud::text::CAPTION)
+                    .color(hud::CAPTION),
             );
         });
 }
