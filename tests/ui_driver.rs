@@ -48,7 +48,13 @@ fn registry_records_nothing_until_it_is_armed() {
     // armed flag, so it returns `None` for a leaking `mark` too — the first
     // draft of this test asserted on it and a mutation that deleted `mark`'s
     // armed check went UNDETECTED. `raw_frame` is the unguarded store.
-    registry::mark_into(&ctx, rect(), true, true, format_args!("kit:MortalStrike"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        true,
+        egui::Rect::EVERYTHING,
+        format_args!("kit:MortalStrike"),
+    );
     registry::note_into(&ctx, format_args!("tooltip:Ability(MortalStrike)"));
     assert_eq!(
         registry::raw_frame(&ctx),
@@ -63,7 +69,13 @@ fn registry_records_nothing_until_it_is_armed() {
 
     // --- enabled: the identical calls ---
     registry::arm(&ctx);
-    registry::mark_into(&ctx, rect(), true, true, format_args!("kit:MortalStrike"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        true,
+        egui::Rect::EVERYTHING,
+        format_args!("kit:MortalStrike"),
+    );
     registry::note_into(&ctx, format_args!("tooltip:Ability(MortalStrike)"));
 
     let frame = registry::snapshot(&ctx).expect("an armed registry records a frame");
@@ -83,7 +95,13 @@ fn registry_records_nothing_until_it_is_armed() {
 
     // --- disarmed again: back to nothing, and the old frame is dropped ---
     registry::disarm(&ctx);
-    registry::mark_into(&ctx, rect(), true, true, format_args!("kit:MortalStrike"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        true,
+        egui::Rect::EVERYTHING,
+        format_args!("kit:MortalStrike"),
+    );
     assert_eq!(
         registry::raw_frame(&ctx),
         None,
@@ -141,11 +159,23 @@ fn arming_clears_the_previous_frame() {
     let ctx = egui::Context::default();
 
     registry::arm(&ctx);
-    registry::mark_into(&ctx, rect(), true, true, format_args!("old"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        true,
+        egui::Rect::EVERYTHING,
+        format_args!("old"),
+    );
     registry::note_into(&ctx, format_args!("old note"));
 
     registry::arm(&ctx);
-    registry::mark_into(&ctx, rect(), true, true, format_args!("new"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        true,
+        egui::Rect::EVERYTHING,
+        format_args!("new"),
+    );
 
     let frame = registry::snapshot(&ctx).expect("armed");
     assert_eq!(
@@ -164,7 +194,13 @@ fn arming_clears_the_previous_frame() {
 fn a_frame_finds_widgets_and_notes() {
     let ctx = egui::Context::default();
     registry::arm(&ctx);
-    registry::mark_into(&ctx, rect(), false, true, format_args!("equip:restore"));
+    registry::mark_into(
+        &ctx,
+        rect(),
+        false,
+        egui::Rect::EVERYTHING,
+        format_args!("equip:restore"),
+    );
     registry::note_into(
         &ctx,
         format_args!("equip-row Ring1 item=SignetOfFocus override=true"),
@@ -194,7 +230,7 @@ fn an_off_screen_widget_registers_but_is_not_visible() {
         &ctx,
         rect(),
         true,
-        false,
+        egui::Rect::NOTHING,
         format_args!("strategic:BattleShout"),
     );
 
@@ -248,6 +284,66 @@ fn mark_takes_visibility_from_eguis_clip_rect() {
     );
     assert!(frame.is_visible("on-screen"));
     assert!(!frame.is_visible("scrolled-off"));
+}
+
+/// A widget straddling the bottom of the viewport is VISIBLE — a few points of
+/// it are on screen — but the driver must not aim at it: its centre is below
+/// the window, so a pointer sent there hovers nothing. That was AS-289: the
+/// Warrior's shout tiles sat across the bottom of a 1280x720 window, and every
+/// hover of one landed off the window.
+///
+/// Run through a real egui pass, so `mark`'s own clip rect decides.
+#[test]
+fn a_widget_straddling_the_viewport_edge_is_visible_but_not_aimed_at() {
+    let ctx = egui::Context::default();
+    registry::arm(&ctx);
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let _ = ctx.run(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let inside = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(20.0, 20.0));
+            // Its top 10 points on screen, its centre 40 points below the window.
+            let straddling =
+                egui::Rect::from_min_size(egui::pos2(10.0, 590.0), egui::vec2(100.0, 100.0));
+            // Taller than the viewport: it can never be wholly shown, so a
+            // centre inside the clip rect has to be enough.
+            let oversized =
+                egui::Rect::from_min_size(egui::pos2(200.0, -100.0), egui::vec2(50.0, 900.0));
+            registry::mark(ui, inside, true, format_args!("inside"));
+            registry::mark(ui, straddling, true, format_args!("straddling"));
+            registry::mark(ui, oversized, true, format_args!("oversized"));
+        });
+    });
+
+    let frame = registry::snapshot(&ctx).expect("armed");
+    let widget = |id: &str| frame.widget(id).expect("registered").clone();
+
+    assert_eq!(
+        widget("inside").aim_point(),
+        Some(egui::pos2(20.0, 20.0)),
+        "a wholly visible widget is aimed at its centre"
+    );
+
+    let straddling = widget("straddling");
+    assert!(straddling.visible, "a few points of it ARE on screen");
+    assert_eq!(
+        straddling.aim_point(),
+        None,
+        "its centre {:?} is off the window, so the driver must scroll first",
+        straddling.rect.center()
+    );
+
+    assert_eq!(
+        widget("oversized").aim_point(),
+        Some(egui::pos2(225.0, 350.0)),
+        "a widget taller than its clip rect is aimed at once its centre is shown"
+    );
 }
 
 // ===========================================================================
@@ -554,8 +650,9 @@ fn every_shipped_script_parses() {
 // THE PURE SEAMS OF THE RUNNER
 //
 // The runner's frame loop needs a window and cannot be unit-tested; it is
-// covered by running the scripts. Its two pure decisions can be, and both
-// carry a fix a later "simplification" could quietly undo.
+// covered by running the scripts. Its pure decisions can be, and each carries
+// a fix a later "simplification" could quietly undo. (`pointer_step`, the
+// third, is driven below and by `tests/view_combatant_snapshot.rs`.)
 // ===========================================================================
 
 fn frame_with(widgets: Vec<(&str, bool, bool)>, notes: Vec<&str>) -> registry::Frame {
@@ -567,6 +664,11 @@ fn frame_with(widgets: Vec<(&str, bool, bool)>, notes: Vec<&str>) -> registry::F
                 rect: rect(),
                 enabled,
                 visible,
+                clip: if visible {
+                    egui::Rect::EVERYTHING
+                } else {
+                    egui::Rect::NOTHING
+                },
             })
             .collect(),
         notes: notes.into_iter().map(|n| n.to_string()).collect(),
@@ -704,6 +806,10 @@ fn assert_view_refuses_to_answer_outside_the_encyclopedia() {
 /// the user on an idle one.
 ///
 /// If someone "simplifies" `SettleForTooltip` back into an `Idle`, this fails.
+///
+/// The move itself waits too, on egui's click clock: a move inside 0.1s of the
+/// last click reads to egui as resting after that click, and no tooltip
+/// follows however long the pointer then stays (AS-289).
 #[test]
 fn a_hover_waits_on_eguis_gates_rather_than_counting_frames() {
     use arenasim::ui::driver::runner::Micro;
@@ -722,9 +828,13 @@ fn a_hover_waits_on_eguis_gates_rather_than_counting_frames() {
         1,
         "a hover must wait on the tooltip gates: {hover:?}"
     );
+    let at = |want: fn(&Micro) -> bool| hover.iter().position(want);
+    let rest = at(|m| matches!(m, Micro::AwaitClickRest));
+    let aim = at(|m| matches!(m, Micro::Move { .. }));
+    let settle = at(|m| matches!(m, Micro::SettleForTooltip));
     assert!(
-        matches!(hover.front(), Some(Micro::Move { .. })),
-        "aim first, then wait: {hover:?}"
+        rest.is_some() && rest < aim && aim < settle,
+        "wait out the click rest, then aim, then wait on the gates: {hover:?}"
     );
     // The trailing Idle is legitimately frame-shaped: it lets the pass draw
     // and the registry snapshot catch up. It is NOT the wait.
@@ -741,7 +851,9 @@ fn a_hover_waits_on_eguis_gates_rather_than_counting_frames() {
         3,
     );
     assert!(
-        !click.iter().any(|m| matches!(m, Micro::SettleForTooltip)),
+        !click
+            .iter()
+            .any(|m| matches!(m, Micro::SettleForTooltip | Micro::AwaitClickRest)),
         "a click has no tooltip to wait for: {click:?}"
     );
     assert_eq!(
@@ -1272,4 +1384,96 @@ fn ui_script_conflicts_with_every_windowless_mode() {
         args(&["arenasim", "--headless", "m.json"]).ui_script_conflict(),
         None
     );
+}
+
+// ===========================================================================
+// THE CLICK-REST WAIT, IN SECONDS
+// ===========================================================================
+
+/// How long after a click the driver's hover holds its pointer move, at a
+/// frame interval of `dt`: egui's click clock, in seconds, on the first frame
+/// `runner::pointer_step` lets `AwaitClickRest` finish, and on the frame before.
+///
+/// A bare `egui::Context` driven at `dt`: one click (press, release) at the
+/// centre of the screen, then `AwaitClickRest` asked once a frame — through
+/// `pointer_step`, the runner's own decision — until it finishes.
+fn click_rest_at(dt: f32) -> (f32, f32) {
+    use arenasim::ui::driver::runner::{Micro, Progress};
+
+    let ctx = egui::Context::default();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let at = screen.center();
+    let mut time = 0.0_f64;
+    let mut pass = |events: Vec<egui::Event>| {
+        time += f64::from(dt);
+        let input = egui::RawInput {
+            screen_rect: Some(screen),
+            time: Some(time),
+            predicted_dt: dt,
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |_| {});
+        });
+    };
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    pass(vec![egui::Event::PointerMoved(at)]);
+    pass(vec![button(true)]);
+    pass(vec![button(false)]);
+    let since_click = || ctx.input(|i| i.pointer.time_since_last_click());
+    assert!(
+        since_click() < dt,
+        "the release must register as a click, or there is nothing to wait out"
+    );
+
+    let mut cursor = at;
+    let mut last_seen = None;
+    let frame = registry::Frame::default();
+    let mut before = since_click();
+    for _ in 0..10_000 {
+        let step = runner::pointer_step(
+            &Micro::AwaitClickRest,
+            &frame,
+            &ctx,
+            &mut cursor,
+            &mut last_seen,
+        )
+        .expect("a pointer action");
+        assert!(step.inject.is_empty(), "the wait moves nothing: {step:?}");
+        if step.progress == Progress::Done {
+            return (since_click(), before);
+        }
+        before = since_click();
+        pass(Vec::new());
+    }
+    panic!("AwaitClickRest never finished at dt={dt}");
+}
+
+/// A hover's pointer move waits until egui's click clock is past 0.1s — at
+/// 240 frames a second and at 20 alike, so the wait is in egui's seconds, not
+/// in frames (a frame-count wait gives one of the two rates a wrong answer).
+///
+/// A move made sooner can read to egui as the pointer resting after the
+/// click, and then no tooltip follows however long it rests (AS-289).
+#[test]
+fn a_hover_waits_out_the_click_rest_in_seconds_at_any_frame_rate() {
+    for dt in [1.0 / 240.0, 1.0 / 20.0] {
+        let (opened, before) = click_rest_at(dt);
+        assert!(
+            opened > 0.1,
+            "at dt={dt} the move was let go {opened}s after the click, inside \
+             egui's 0.1s click rest"
+        );
+        assert!(
+            before <= 0.1 + 1e-4,
+            "at dt={dt} the wait was still shut {before}s after the click, past \
+             the 0.1s it waits for"
+        );
+    }
 }

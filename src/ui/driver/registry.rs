@@ -87,7 +87,37 @@ pub struct Widget {
     /// screen. View Combatant is one long scroll, so a widget can be laid out
     /// and still be nowhere the cursor can reach it. The driver scrolls
     /// toward an invisible target rather than clicking a phantom coordinate.
+    ///
+    /// True as soon as ANY of the rect is inside the clip rect, so a widget
+    /// straddling the bottom of the viewport is visible here while its centre
+    /// is not — aim through [`Widget::aim_point`], never on this flag.
     pub visible: bool,
+    /// The clip rect the widget was drawn under, in egui points:
+    /// [`egui::Rect::NOTHING`] when its `Ui` was not visible at all.
+    pub clip: egui::Rect,
+}
+
+impl Widget {
+    /// Where a pointer can rest on this widget and be over it, or `None` when
+    /// it has to be scrolled further into view first.
+    ///
+    /// That is the rect's centre once the whole rect is inside its clip rect.
+    /// `visible` alone is not enough: a row of tiles straddling the bottom of a
+    /// 1280x720 window is visible by a few points while its centre lies below
+    /// the window, so a pointer sent there hovers nothing (AS-289). A widget
+    /// too big for its clip rect can never be wholly shown, so for one of those
+    /// a centre inside the clip rect is enough.
+    pub fn aim_point(&self) -> Option<egui::Pos2> {
+        let center = self.rect.center();
+        let fits =
+            self.rect.width() <= self.clip.width() && self.rect.height() <= self.clip.height();
+        let shown = if fits {
+            self.clip.contains_rect(self.rect)
+        } else {
+            self.clip.contains(center)
+        };
+        shown.then_some(center)
+    }
 }
 
 /// Everything the last drawn frame reported.
@@ -179,20 +209,28 @@ pub fn mark(ui: &egui::Ui, rect: egui::Rect, enabled: bool, id: std::fmt::Argume
     if !is_armed(ui.ctx()) {
         return;
     }
-    mark_into(ui.ctx(), rect, enabled, ui.is_rect_visible(rect), id);
+    let clip = if ui.is_visible() {
+        ui.clip_rect()
+    } else {
+        egui::Rect::NOTHING
+    };
+    mark_into(ui.ctx(), rect, enabled, clip, id);
 }
 
-/// [`mark`] with visibility supplied — the seam the registry's own tests drive.
+/// [`mark`] with the clip rect supplied — the seam the registry's own tests
+/// drive. The widget is visible when `rect` meets `clip`, which is egui's own
+/// `Ui::is_rect_visible` rule.
 pub fn mark_into(
     ctx: &egui::Context,
     rect: egui::Rect,
     enabled: bool,
-    visible: bool,
+    clip: egui::Rect,
     id: std::fmt::Arguments<'_>,
 ) {
     if !is_armed(ctx) {
         return;
     }
+    let visible = rect.intersects(clip);
     let id = id.to_string();
     ctx.data_mut(|d| {
         d.get_temp_mut_or_default::<Frame>(frame_id())
@@ -202,6 +240,7 @@ pub fn mark_into(
                 rect,
                 enabled,
                 visible,
+                clip,
             });
     });
 }
