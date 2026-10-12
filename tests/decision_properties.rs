@@ -1196,20 +1196,7 @@ struct Known {
     abilities: &'static [AbilityType],
 }
 
-const KNOWN: &[Known] = &[
-    // Concussive Shot and the Frost Trap peel are aimed at a Divine-Shielded
-    // melee, and trap throws land where the Hunter cannot see.
-    Known {
-        card: "AS-281",
-        property: Property::NotImmune,
-        abilities: &[AbilityType::ConcussiveShot, AbilityType::FrostTrap],
-    },
-    Known {
-        card: "AS-281",
-        property: Property::InSight,
-        abilities: &[AbilityType::FrostTrap],
-    },
-];
+const KNOWN: &[Known] = &[];
 
 fn known_card(property: Property, ability: AbilityType) -> Option<&'static str> {
     KNOWN
@@ -1229,7 +1216,9 @@ struct Finding {
 enum Scope {
     /// Everything except the known defects.
     Guard,
-    /// Only the known defects one card carries.
+    /// Only the known defects one card carries. Built only by a card's
+    /// `#[ignore]`d test, so unused while [`KNOWN`] is empty.
+    #[allow(dead_code)]
     Card(&'static str),
 }
 
@@ -1540,12 +1529,6 @@ fn a_targeted_choice_is_in_sight() {
     verdict(Property::InSight, Scope::Guard, in_sight());
 }
 
-#[test]
-#[ignore = "AS-281"]
-fn traps_are_thrown_in_sight_of_their_landing() {
-    verdict(Property::InSight, Scope::Card("AS-281"), in_sight());
-}
-
 /// A chosen ability is off cooldown.
 #[test]
 fn never_chooses_an_ability_on_cooldown() {
@@ -1610,12 +1593,6 @@ fn not_immune() -> Finding {
 #[test]
 fn never_targets_an_immune_or_untargetable_unit() {
     verdict(Property::NotImmune, Scope::Guard, not_immune());
-}
-
-#[test]
-#[ignore = "AS-281"]
-fn hunter_peels_skip_a_divine_shielded_melee() {
-    verdict(Property::NotImmune, Scope::Card("AS-281"), not_immune());
 }
 
 /// Nothing is cast on a dead unit — no heal, no buff, no damage.

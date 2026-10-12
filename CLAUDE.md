@@ -812,7 +812,10 @@ possible. The pet strikes, Spider Web and Boar Charge, ask
 path: the Hunter's dispatch, the pet's own while its Hunter casts, and the
 pet's re-check when it executes a dispatched command
 (`pet_ai::pet_command_rejection`), which also re-checks a Master's Call's
-sight. A no-op on obstacle-free maps (BasicArena stays byte-identical).
+sight. A Hunter trap is thrown at a POINT, so every throw asks sight of
+its landing instead (`hunter::try_place_trap_at`, after range): one a pillar
+hides is held, traced `LosBlocked`, never moved. A no-op on obstacle-free maps
+(BasicArena stays byte-identical).
 
 **Dying teammate first (Druid)** — no RON knob; reuses `urgency_hp_threshold`.
 A teammate below the threshold that the Druid can reach (range, then sight) gets
