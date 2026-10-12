@@ -2112,7 +2112,9 @@ mod tests {
     fn the_default_hunter_swings_its_polearm_beside_its_bow() {
         let items = load_item_definitions().expect("items.ron must load");
         let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
-        let loadout = defaults.get(CharacterClass::Hunter).expect("Hunter default");
+        let loadout = defaults
+            .get(CharacterClass::Hunter)
+            .expect("Hunter default");
         assert_eq!(loadout.get(&ItemSlot::MainHand), Some(&ItemId::Peacemaker));
         assert_eq!(loadout.get(&ItemSlot::OffHand), None);
 
@@ -2165,8 +2167,7 @@ mod tests {
             if class.melee_beside_ranged() {
                 continue;
             }
-            let mut combatant =
-                super::super::components::combatant::Combatant::new(1, 0, *class);
+            let mut combatant = super::super::components::combatant::Combatant::new(1, 0, *class);
             let mut loadout = Loadout::new();
             loadout.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
             loadout.insert(ItemSlot::OffHand, ItemId::SerpentFangDagger);

@@ -847,8 +847,10 @@ pub fn decide_abilities(
         })
         .collect();
     lit_flares.sort_by_key(|(e, _, _)| *e);
-    let lit_flares: Vec<(u8, class_ai::rogue_flare::LitFlare)> =
-        lit_flares.into_iter().map(|(_, team, f)| (team, f)).collect();
+    let lit_flares: Vec<(u8, class_ai::rogue_flare::LitFlare)> = lit_flares
+        .into_iter()
+        .map(|(_, team, f)| (team, f))
+        .collect();
 
     // CombatantInfo is a per-frame snapshot. Mutations to Combatant components
     // during class AI dispatch are not reflected in other entities' views.
@@ -896,8 +898,7 @@ pub fn decide_abilities(
 
     // Track allies sent a Mark of the Wild THIS FRAME, so a second Druid does
     // not spend a cast refreshing a Mark that lands next frame
-    let mut marked_this_frame: std::collections::HashSet<Entity> =
-        std::collections::HashSet::new();
+    let mut marked_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
 
     // Queue for Frost Nova damage
     let mut frost_nova_damage: Vec<class_ai::QueuedAoeDamage> = Vec::new();

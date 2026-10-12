@@ -1682,7 +1682,11 @@ fn a_root_is_broken_on_the_next_global_cooldown() {
             // A heal cast at `at` on `target` is an emergency heal when the
             // world showed the target below the threshold the frame before.
             let emergency = |at: f32, spell: &str, target: &str| {
-                let before = played.frames.iter().take_while(|f| f.sim_time < at - 0.005).last();
+                let before = played
+                    .frames
+                    .iter()
+                    .take_while(|f| f.sim_time < at - 0.005)
+                    .last();
                 (spell == "Swiftmend" || spell == "Rejuvenation")
                     && before.is_some_and(|f| {
                         f.combatants.values().any(|c| {

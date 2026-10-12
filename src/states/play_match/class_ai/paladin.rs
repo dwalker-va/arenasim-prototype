@@ -284,8 +284,8 @@ pub fn decide_paladin_action(
     // (`ROOT_DISPEL_PRIORITY`); a teammate below `LOW_HP_THRESHOLD` is healed
     // first, since a rooted teammate still acts and a dying one may not. The
     // dispel walk owes a root under the same gate (`owed_dispel`).
-    if super::root_dispel_allowed(ctx) {
-        if try_cleanse(
+    if super::root_dispel_allowed(ctx)
+        && try_cleanse(
             commands,
             combat_log,
             abilities,
@@ -296,10 +296,10 @@ pub fn decide_paladin_action(
             ctx,
             super::ROOT_DISPEL_PRIORITY,
             &mut builder,
-        ) {
-            builder.finish();
-            return true;
-        }
+        )
+    {
+        builder.finish();
+        return true;
     }
 
     // Priority 4: Hammer of Justice (rotation). Suppressed while the

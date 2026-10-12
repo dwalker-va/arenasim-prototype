@@ -1106,6 +1106,8 @@ pub fn update_cyclone_funnels(
                 funnel.smoke_acc -= 1.0;
                 funnel.seq = funnel.seq.wrapping_add(1);
                 let s = funnel.seq.wrapping_mul(131);
+                // 3.14 is the transcribed client cone, not an approximation of PI.
+                #[allow(clippy::approx_constant)]
                 let dir = cone_direction(
                     3.14,
                     cc_jitter(s),

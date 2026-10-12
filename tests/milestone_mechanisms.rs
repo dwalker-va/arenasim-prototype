@@ -179,7 +179,9 @@ fn parse_log(log: &str, units: &mut [UnitRow]) {
                     let prefix = format!("{name}'s {kind} triggers on ");
                     if let Some(rest) = body.strip_prefix(&prefix) {
                         let victim = class_of_log_name(rest);
-                        *u.trap_triggers.entry(format!("{key}:{victim}")).or_default() += 1;
+                        *u.trap_triggers
+                            .entry(format!("{key}:{victim}"))
+                            .or_default() += 1;
                     }
                 }
             }
@@ -197,11 +199,7 @@ struct Track {
     next_sample: f32,
 }
 
-fn run_one(
-    cfg: HeadlessMatchConfig,
-    defs: &AbilityDefinitions,
-    log_path: String,
-) -> MatchRow {
+fn run_one(cfg: HeadlessMatchConfig, defs: &AbilityDefinitions, log_path: String) -> MatchRow {
     let mut cfg = cfg;
     cfg.output_path = Some(log_path.clone());
     let label = cfg.label.clone().unwrap_or_default();
@@ -369,14 +367,13 @@ fn milestone_mechanisms() {
         .unwrap_or(6);
     std::fs::create_dir_all(&logs).unwrap();
 
-    let configs: Vec<HeadlessMatchConfig> = std::io::BufReader::new(
-        std::fs::File::open(&input).expect("open MECH_IN"),
-    )
-    .lines()
-    .map(|l| l.unwrap())
-    .filter(|l| !l.trim().is_empty())
-    .map(|l| serde_json::from_str(&l).expect("a HeadlessMatchConfig"))
-    .collect();
+    let configs: Vec<HeadlessMatchConfig> =
+        std::io::BufReader::new(std::fs::File::open(&input).expect("open MECH_IN"))
+            .lines()
+            .map(|l| l.unwrap())
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(&l).expect("a HeadlessMatchConfig"))
+            .collect();
     let total = configs.len();
     let configs = Arc::new(configs);
     let defs = Arc::new(AbilityDefinitions::default());

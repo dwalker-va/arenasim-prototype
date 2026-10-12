@@ -648,8 +648,8 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         // emergency heals (2-3) — and when the shift would break a root or a
         // snare, behind ONE of them: the emergency heal's exemption is one
         // global cooldown, and the shift takes the one after it.
-        let breaks_impairment = shift_trigger(self.shift_view(combatant))
-            == Some(ShiftReason::BreakImpairment);
+        let breaks_impairment =
+            shift_trigger(self.shift_view(combatant)) == Some(ShiftReason::BreakImpairment);
         let shift_first = breaks_impairment && combatant.druid_emergency_heal_spent;
         if shift_first && self.try_travel_form(combatant) {
             return true;

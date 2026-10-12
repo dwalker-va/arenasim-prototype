@@ -558,9 +558,18 @@ fn two_druids_each_keep_their_own_lifebloom_stack() {
     let (druid_a, ally) = druid_and_ally(&mut world);
     let druid_b = second_druid(&mut world);
 
-    land(&mut world, cast(AbilityType::Lifebloom, ally, druid_a, 100.0));
-    land(&mut world, cast(AbilityType::Lifebloom, ally, druid_a, 100.0));
-    land(&mut world, cast(AbilityType::Lifebloom, ally, druid_b, 100.0));
+    land(
+        &mut world,
+        cast(AbilityType::Lifebloom, ally, druid_a, 100.0),
+    );
+    land(
+        &mut world,
+        cast(AbilityType::Lifebloom, ally, druid_a, 100.0),
+    );
+    land(
+        &mut world,
+        cast(AbilityType::Lifebloom, ally, druid_b, 100.0),
+    );
     assert_eq!(
         auras_named(&world, ally, "Lifebloom").len(),
         2,
@@ -578,7 +587,10 @@ fn two_druids_each_keep_their_own_lifebloom_stack() {
             aura.duration = 2.0;
         }
     }
-    land(&mut world, cast(AbilityType::Lifebloom, ally, druid_a, 100.0));
+    land(
+        &mut world,
+        cast(AbilityType::Lifebloom, ally, druid_a, 100.0),
+    );
     let a = lifebloom_of(&world, ally, druid_a);
     let b = lifebloom_of(&world, ally, druid_b);
     assert_eq!(auras_named(&world, ally, "Lifebloom").len(), 2);
@@ -638,8 +650,16 @@ fn each_druids_lifebloom_blooms_separately() {
         .count();
     assert_eq!(blooms, 2, "each Druid's stack blooms on its own");
     let healing = |e: Entity| world.entity(e).get::<Combatant>().unwrap().healing_done;
-    assert_eq!(healing(druid_a), bloom_a, "A's bloom: its 3 stacks, its spell power");
-    assert_eq!(healing(druid_b), bloom_b, "B's bloom: its 1 stack, its spell power");
+    assert_eq!(
+        healing(druid_a),
+        bloom_a,
+        "A's bloom: its 3 stacks, its spell power"
+    );
+    assert_eq!(
+        healing(druid_b),
+        bloom_b,
+        "B's bloom: its 1 stack, its spell power"
+    );
 }
 
 #[test]
@@ -746,7 +766,11 @@ fn swiftmend_eats_its_casters_own_rejuvenation() {
         .iter()
         .map(|a| a.caster)
         .collect();
-    assert_eq!(left, vec![Some(druid_a)], "B's Swiftmend eats B's Rejuvenation");
+    assert_eq!(
+        left,
+        vec![Some(druid_a)],
+        "B's Swiftmend eats B's Rejuvenation"
+    );
 }
 
 /// With no Rejuvenation of its own on the target, Swiftmend eats another
@@ -763,9 +787,9 @@ fn swiftmend_falls_back_to_another_druids_rejuvenation() {
     let (druid_a, ally) = druid_and_ally(&mut world);
     let druid_b = second_druid(&mut world);
     let rejuv_a = cast(AbilityType::Rejuvenation, ally, druid_a, 100.0).aura;
-    world
-        .entity_mut(ally)
-        .insert(ActiveAuras { auras: vec![rejuv_a] });
+    world.entity_mut(ally).insert(ActiveAuras {
+        auras: vec![rejuv_a],
+    });
     world.entity_mut(druid_b).insert(CastingState {
         ability: AbilityType::Swiftmend,
         time_remaining: 0.001,

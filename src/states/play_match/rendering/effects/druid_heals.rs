@@ -201,6 +201,10 @@ pub struct DruidEmitter {
     pub follow: bool,
 }
 
+/// The client's full-sphere `v_range`, as the M2 emitters store it.
+// 3.14 is the transcribed client value, not an approximation of PI.
+#[allow(clippy::approx_constant)]
+const FULL_SPHERE_V_RANGE: f32 = 3.14;
 const WHITE: [u8; 3] = [255, 255, 255];
 const GOLD_RAMP: &[(f32, [u8; 3])] = &[(0.0, [255, 156, 0]), (0.5, [254, 255, 156]), (1.0, WHITE)];
 const FLASH_ALPHA: &[(f32, f32)] = &[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)];
@@ -217,7 +221,7 @@ pub const REJUV_EMITTERS: [DruidEmitter; 3] = [
         offset: Vec2::ZERO,
         area: 0.9,
         speed: 0.0,
-        v_range: 3.14,
+        v_range: FULL_SPHERE_V_RANGE,
         life: 0.3,
         rate: DruidRate::Flat(20.0),
         window: None,
@@ -241,7 +245,7 @@ pub const REJUV_EMITTERS: [DruidEmitter; 3] = [
         offset: Vec2::ZERO,
         area: 0.9,
         speed: 0.0,
-        v_range: 3.14,
+        v_range: FULL_SPHERE_V_RANGE,
         life: 0.3,
         rate: DruidRate::Flat(20.0),
         window: None,
@@ -355,7 +359,7 @@ pub const BLOOM_EMITTERS: [DruidEmitter; 4] = [
         offset: Vec2::new(0.02, 0.0),
         area: 0.0,
         speed: 3.333,
-        v_range: 3.14,
+        v_range: FULL_SPHERE_V_RANGE,
         life: 1.0,
         rate: DruidRate::Flat(10.0),
         window: Some(FIRST_SECOND),
@@ -395,7 +399,7 @@ pub const BLOOM_EMITTERS: [DruidEmitter; 4] = [
         offset: Vec2::ZERO,
         area: 0.0,
         speed: 1.111,
-        v_range: 3.14,
+        v_range: FULL_SPHERE_V_RANGE,
         life: 1.25,
         rate: DruidRate::Flat(16.0),
         window: Some(FIRST_SECOND),

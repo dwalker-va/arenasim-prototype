@@ -857,7 +857,8 @@ mod tests {
                 .filter(|(_, c)| c.name == name)
                 .any(|(_, c)| c.has_cast_bar() || c.is_channel())
         };
-        let is_no = |span: Option<&vocab::Span>| matches!(span, Some(vocab::Span::Emoji(e)) if e == "no");
+        let is_no =
+            |span: Option<&vocab::Span>| matches!(span, Some(vocab::Span::Emoji(e)) if e == "no");
 
         let mut stopped: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for (index, exchange) in config.exchanges.iter().enumerate() {
