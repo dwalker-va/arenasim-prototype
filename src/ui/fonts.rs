@@ -44,5 +44,42 @@ pub fn game_font_definitions() -> egui::FontDefinitions {
     proportional.insert(0, "rajdhani_bold".to_owned());
     proportional.insert(1, "rajdhani_regular".to_owned());
 
+    // The prose family (decision D3): Regular leads, so multi-sentence text
+    // gets the lighter weight the proportional chain can never reach (Bold
+    // covers every Latin glyph, so Regular behind it draws nothing). The rest
+    // of the proportional chain follows as the fallback.
+    let mut body = vec!["rajdhani_regular".to_owned()];
+    body.extend(
+        fonts.families[&egui::FontFamily::Proportional]
+            .iter()
+            .filter(|name| *name != "rajdhani_regular")
+            .cloned(),
+    );
+    fonts.families.insert(body_family_name(), body);
+
     fonts
+}
+
+/// The name of the prose family: Rajdhani Regular, for descriptions, procs
+/// and tooltip bodies. Everything else stays Bold, the game's voice.
+const BODY_FAMILY: &str = "Body";
+
+fn body_family_name() -> egui::FontFamily {
+    egui::FontFamily::Name(BODY_FAMILY.into())
+}
+
+/// The prose family, for [`egui::FontId::new`] or `RichText::family`.
+///
+/// egui panics on a named family that is not installed, and `set_fonts` only
+/// takes effect at the NEXT frame — so on the very first frame after
+/// [`crate::ui::install`] (a fresh harness, the client's first paint) the
+/// family is not there yet. Until it is, this answers the proportional
+/// family, which is what that frame's text is drawn in anyway.
+pub fn body_family(ctx: &egui::Context) -> egui::FontFamily {
+    let body = body_family_name();
+    if ctx.fonts(|f| f.families().contains(&body)) {
+        body
+    } else {
+        egui::FontFamily::Proportional
+    }
 }

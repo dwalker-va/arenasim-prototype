@@ -163,11 +163,13 @@ otherwise recover: which tooltip body actually ran, what colour a row rendered
 in, what the live override map holds.
 
 **Keep the opt-in explicit.** Instrumenting every widget would make the
-registry a maintenance surface and the `dump` output unreadable. What is marked
+registry a maintenance surface and the `dump` output unreadable. Every `ui::widgets` component takes an optional driver id and marks itself
+through the kit's one helper, so a screen built from the kit opts a widget in
+by naming it. What is marked
 today: the main-menu buttons and Configure Match's slot and class tiles (the
 route in), View Combatant's kit rows, strategic-option icons, equipment rows,
 picker entries and Restore defaults, and the encyclopedia's Back/Home. The
-tooltip probe is a single `note` inside `encyclopedia::widget::link_with`,
+tooltip probe is a single `note` inside `ui::widgets::link::link_with`,
 which every linked icon in the client funnels through, so one call covers them
 all. In a match, the team frames' aura row and the banter bubbles' class
 portraits note `aura-icon-drawn:<key>` / `banter-portrait-drawn:<Class>` when
