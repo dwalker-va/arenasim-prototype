@@ -564,7 +564,7 @@ pub fn render_health_bars(
                                     egui::vec2(cast_bar_width, cast_bar_height),
                                 ),
                                 corner_radius,
-                                egui::Color32::from_rgb(150, 20, 20), // Dark red
+                                hud_theme::CAST_BAR_INTERRUPTED_FILL,
                             );
 
                             // Red border
@@ -576,7 +576,7 @@ pub fn render_health_bars(
                                 corner_radius,
                                 egui::Stroke::new(
                                     1.5 * ui_scale,
-                                    egui::Color32::from_rgb(220, 50, 50),
+                                    hud_theme::CAST_BAR_INTERRUPTED_EDGE,
                                 ),
                                 egui::StrokeKind::Outside,
                             );
@@ -591,7 +591,7 @@ pub fn render_health_bars(
                                 egui::Align2::CENTER_CENTER,
                                 "INTERRUPTED",
                                 egui::FontId::proportional(cast_font_size),
-                                egui::Color32::WHITE,
+                                hud_theme::HUD_LABEL,
                             );
                         } else {
                             // Normal cast bar
@@ -605,7 +605,7 @@ pub fn render_health_bars(
                                     egui::vec2(cast_bar_width, cast_bar_height),
                                 ),
                                 corner_radius,
-                                egui::Color32::from_rgb(15, 15, 20),
+                                hud_theme::CAST_BAR_TRACK,
                             );
 
                             // WoW's convention: an interruptible cast fills
@@ -650,7 +650,7 @@ pub fn render_health_bars(
                                 egui::Align2::CENTER_CENTER,
                                 &ability_def.name,
                                 egui::FontId::proportional(cast_font_size),
-                                egui::Color32::WHITE,
+                                hud_theme::HUD_LABEL,
                             );
                         }
 
@@ -682,7 +682,7 @@ pub fn render_health_bars(
                                     egui::vec2(channel_bar_width, channel_bar_height),
                                 ),
                                 corner_radius,
-                                egui::Color32::from_rgb(150, 20, 20),
+                                hud_theme::CAST_BAR_INTERRUPTED_FILL,
                             );
 
                             // Red border
@@ -694,7 +694,7 @@ pub fn render_health_bars(
                                 corner_radius,
                                 egui::Stroke::new(
                                     1.5 * ui_scale,
-                                    egui::Color32::from_rgb(220, 50, 50),
+                                    hud_theme::CAST_BAR_INTERRUPTED_EDGE,
                                 ),
                                 egui::StrokeKind::Outside,
                             );
@@ -709,7 +709,7 @@ pub fn render_health_bars(
                                 egui::Align2::CENTER_CENTER,
                                 "INTERRUPTED",
                                 egui::FontId::proportional(channel_font_size),
-                                egui::Color32::WHITE,
+                                hud_theme::HUD_LABEL,
                             );
                         } else {
                             // Channel bar drains from full to empty (opposite of cast bar)
@@ -722,7 +722,7 @@ pub fn render_health_bars(
                                     egui::vec2(channel_bar_width, channel_bar_height),
                                 ),
                                 corner_radius,
-                                egui::Color32::from_rgb(15, 15, 20),
+                                hud_theme::CAST_BAR_TRACK,
                             );
 
                             // Channel bar fill (green/teal, distinct from orange cast bar)
@@ -735,7 +735,7 @@ pub fn render_health_bars(
                                     ),
                                 ),
                                 corner_radius,
-                                egui::Color32::from_rgb(50, 200, 150), // Teal/green
+                                hud_theme::CHANNEL_BAR_FILL,
                             );
 
                             // Channel bar border
@@ -745,10 +745,7 @@ pub fn render_health_bars(
                                     egui::vec2(channel_bar_width, channel_bar_height),
                                 ),
                                 corner_radius,
-                                egui::Stroke::new(
-                                    1.5 * ui_scale,
-                                    egui::Color32::from_rgb(100, 220, 180),
-                                ),
+                                egui::Stroke::new(1.5 * ui_scale, hud_theme::CHANNEL_BAR_EDGE),
                                 egui::StrokeKind::Outside,
                             );
 
@@ -762,7 +759,7 @@ pub fn render_health_bars(
                                 egui::Align2::CENTER_CENTER,
                                 &ability_def.name,
                                 egui::FontId::proportional(channel_font_size),
-                                egui::Color32::WHITE,
+                                hud_theme::HUD_LABEL,
                             );
                         }
 
