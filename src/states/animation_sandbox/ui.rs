@@ -17,24 +17,27 @@ use super::super::play_match::components::{CameraController, CameraMode, SpellIc
 use super::playback::{entries_for_class, EntryFamily, SandboxEntry, SandboxPlayback};
 use super::SandboxConfig;
 use crate::states::chrome::ScreenNav;
-use crate::ui::widgets::{nav_cluster, Nav, NavAction};
+use crate::ui::theme::{class_color, color, space, text};
+use crate::ui::widgets::panel::margin_xy;
+use crate::ui::widgets::{
+    checkbox, list_row, panel, panel_header, resource_bar, screen_header, section_label, stat_rows,
+    Button, Chip, ListIcon, ListRow, Nav, NavAction, Variant,
+};
 
-// Palette shared with the Armory and main menu, so the sandbox reads as part of
-// the same client rather than a debug panel bolted on.
-const TITLE_GOLD: egui::Color32 = egui::Color32::from_rgb(230, 204, 153);
-const BUTTON_TEXT: egui::Color32 = egui::Color32::from_rgb(230, 217, 191);
-const MUTED_TEXT: egui::Color32 = egui::Color32::from_rgb(102, 102, 102);
-const TILE_FRAME: egui::Color32 = egui::Color32::from_rgb(60, 60, 80);
-const TILE_BG: egui::Color32 = egui::Color32::from_rgb(30, 30, 42);
-const SELECTED_BG: egui::Color32 = egui::Color32::from_rgb(51, 65, 94);
-const WARN_AMBER: egui::Color32 = egui::Color32::from_rgb(220, 170, 90);
-
-/// Edge length of an icon in a list row. The Armory renders the same art at
-/// 64px, so anything much smaller stops being recognisable as a spell.
-const ROW_ICON: f32 = 24.0;
-/// Left inset shared by section headings, icon columns and buttons, so the
-/// panels have ONE left edge instead of three within 34px.
-const PANEL_INSET: f32 = 8.0;
+/// The screen title.
+const TITLE: &str = "Animations";
+/// The Workbench's side panels. The 3D stage shows between them, so they are
+/// as narrow as their contents allow: the left one fits a class name in a
+/// list row and the camera chips on one line, the right one an ability name
+/// beside its `needs dummy` note.
+const STAGE_PANEL_WIDTH: f32 = 220.0;
+const ENTRY_PANEL_WIDTH: f32 = 260.0;
+/// The Pause/Resume button's width. Fixed, because "Resume" is wider than
+/// "Pause", and letting the bar reflow slid Step and the speed chips out
+/// from under the cursor every time you paused.
+const PAUSE_WIDTH: f32 = 76.0;
+/// The progress track's length: the pass and its loop tail together.
+const TRACK_WIDTH: f32 = 160.0;
 
 /// Playback speeds offered in the sandbox.
 ///
@@ -153,465 +156,361 @@ pub enum SandboxAction {
     SetSpeed(f32),
 }
 
-/// Section heading, matching the Armory's small-caps gold rules.
-fn section(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(10.0);
-    ui.label(
-        egui::RichText::new(text)
-            .color(TITLE_GOLD)
-            .size(12.0)
-            .strong(),
-    );
-    ui.add_space(2.0);
+/// A side panel's or the transport's frame: the screen background, so the
+/// panels read as one surface with the header, and the 3D stage as the thing
+/// framed between them.
+fn workbench_frame(x: f32, y: f32) -> egui::Frame {
+    egui::Frame::new()
+        .fill(color::BG)
+        .inner_margin(margin_xy(x, y))
 }
 
-/// Draws an icon into `rect`, or a framed empty slot when there is no texture.
-fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: Option<egui::TextureId>, dim: bool) {
-    match icon {
-        Some(id) => {
-            painter.image(
-                id,
-                rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                if dim {
-                    egui::Color32::from_gray(110)
-                } else {
-                    egui::Color32::WHITE
-                },
-            );
-        }
-        None => {
-            // Draw NOTHING, but keep the space reserved so labels stay on one
-            // column. A framed empty square reads as an unchecked checkbox —
-            // the wrong affordance for a row that fires an action — and the
-            // body animations have no icon by nature, not by failure, so there
-            // is nothing there to stand in for.
-        }
-    }
+/// A section caption, spaced off whatever came before it.
+fn section(ui: &mut egui::Ui, label: &str) {
+    ui.add_space(space::LG);
+    section_label(ui, label);
 }
 
-/// A list row: icon, label, optional right-aligned tag, selection highlight.
-fn icon_row(
-    ui: &mut egui::Ui,
-    icon: Option<egui::TextureId>,
-    label: &str,
-    tag: Option<&str>,
-    selected: bool,
-    enabled: bool,
-) -> egui::Response {
-    let height = ROW_ICON + 6.0;
-    // Inset on BOTH sides, so the left panel's highlight does not bleed into
-    // the panel divider while the right panel's sits 8px clear of it.
-    let width = (ui.available_width() - PANEL_INSET).max(0.0);
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(width, height),
-        if enabled {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        },
-    );
-
-    let painter = ui.painter();
-    if selected {
-        painter.rect_filled(rect, 3.0, SELECTED_BG);
-        painter.rect_stroke(
-            rect,
-            3.0,
-            egui::Stroke::new(1.0_f32, TITLE_GOLD),
-            egui::StrokeKind::Inside,
-        );
-    } else if enabled && response.hovered() {
-        painter.rect_filled(rect, 3.0, TILE_BG);
-    }
-
-    let icon_rect = egui::Rect::from_min_size(
-        egui::pos2(rect.left(), rect.center().y - ROW_ICON / 2.0),
-        egui::vec2(ROW_ICON, ROW_ICON),
-    );
-    paint_icon(painter, icon_rect, icon, !enabled);
-
-    painter.text(
-        egui::pos2(icon_rect.right() + 8.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        egui::FontId::proportional(13.0),
-        if !enabled {
-            MUTED_TEXT
-        } else if selected {
-            egui::Color32::WHITE
-        } else {
-            BUTTON_TEXT
-        },
-    );
-
-    if let Some(tag) = tag {
-        let pill = egui::Rect::from_min_max(
-            egui::pos2(rect.right() - 54.0, rect.center().y - 8.0),
-            egui::pos2(rect.right() - 2.0, rect.center().y + 8.0),
-        );
-        painter.rect_filled(pill, 8.0, TILE_BG);
-        painter.text(
-            pill.center(),
-            egui::Align2::CENTER_CENTER,
-            tag,
-            egui::FontId::proportional(10.0),
-            MUTED_TEXT,
-        );
-    }
-
-    response
-}
-
-/// Compact class picker: a grid of icons rather than a second full-height list.
+/// Progress through the current pass, and the loop tail after it.
 ///
-/// The dummy list is a secondary axis, and as an 8-row list it cost 224px and
-/// pushed everything below it a quarter of the screen whenever it appeared.
-fn class_grid(
-    ui: &mut egui::Ui,
-    classes: &[(CharacterClass, Option<egui::TextureId>)],
-    current: CharacterClass,
-) -> Option<CharacterClass> {
-    const CELL: f32 = 30.0;
-    let mut picked = None;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-        for (class, icon) in classes {
-            let (rect, response) =
-                ui.allocate_exact_size(egui::vec2(CELL, CELL), egui::Sense::click());
-            let painter = ui.painter();
-            let selected = *class == current;
-            if selected {
-                painter.rect_filled(rect, 3.0, SELECTED_BG);
-                painter.rect_stroke(
-                    rect,
-                    3.0,
-                    egui::Stroke::new(1.0_f32, TITLE_GOLD),
-                    egui::StrokeKind::Inside,
-                );
-            } else {
-                // A grid cell takes its affordance from the tile itself, not
-                // from its contents, so it keeps a frame whether or not the
-                // icon resolved. List rows are the opposite — there the frame
-                // reads as a checkbox.
-                painter.rect_filled(
-                    rect,
-                    3.0,
-                    if response.hovered() {
-                        egui::Color32::from_rgb(42, 42, 58)
-                    } else {
-                        TILE_BG
-                    },
-                );
-                painter.rect_stroke(
-                    rect,
-                    3.0,
-                    egui::Stroke::new(1.0_f32, TILE_FRAME),
-                    egui::StrokeKind::Inside,
-                );
-            }
-            paint_icon(painter, rect.shrink(3.0), *icon, false);
-            if response.on_hover_text(format!("{class:?}")).clicked() && !selected {
-                picked = Some(*class);
-            }
-        }
-    });
-    picked
-}
-
-/// Progress track for the current pass.
+/// Two bars rather than one: the tail is its own dimmer segment, because
+/// during it the numeric readout is pinned at the pass duration, which on its
+/// own reads as a hang.
 ///
 /// Display-only, deliberately: these effects are spawn/update/cleanup entity
 /// pipelines with no retained keyframe timeline, so there is nothing to seek
 /// backwards through. Loop plus frame-step covers the inspection need a scrub
 /// would have served.
 fn progress_track(ui: &mut egui::Ui, view: &SandboxView) {
-    let width = 160.0;
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 8.0), egui::Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(rect, 4.0, TILE_BG);
-    painter.rect_stroke(
-        rect,
-        4.0,
-        egui::Stroke::new(1.0_f32, TILE_FRAME),
-        egui::StrokeKind::Inside,
-    );
-
-    if view.duration <= 0.0 {
-        return;
-    }
-
-    let span = view.duration + view.loop_tail;
-    // The tail is drawn as its own dimmer segment: during it the numeric
-    // readout is pinned at the pass duration, which on its own reads as a hang.
-    let tail_start = rect.left() + rect.width() * (view.duration / span);
-    painter.rect_filled(
-        egui::Rect::from_min_max(egui::pos2(tail_start, rect.top()), rect.right_bottom()),
-        0.0,
-        egui::Color32::from_rgb(38, 38, 52),
-    );
-
-    let progress = (view.elapsed / span).clamp(0.0, 1.0);
-    let filled = egui::Rect::from_min_size(
-        rect.left_top(),
-        egui::vec2(rect.width() * progress, rect.height()),
-    );
-    painter.rect_filled(filled, 4.0, TITLE_GOLD.gamma_multiply(0.6));
-    painter.line_segment(
-        [
-            egui::pos2(filled.right(), rect.top() - 2.0),
-            egui::pos2(filled.right(), rect.bottom() + 2.0),
-        ],
-        egui::Stroke::new(2.0_f32, TITLE_GOLD),
-    );
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = space::XXS;
+        let span = view.duration + view.loop_tail;
+        if view.duration <= 0.0 || span <= 0.0 {
+            resource_bar(ui, 0.0, color::ACCENT, TRACK_WIDTH);
+            return;
+        }
+        let usable = TRACK_WIDTH - space::XXS;
+        let pass_width = usable * view.duration / span;
+        resource_bar(ui, view.elapsed / view.duration, color::ACCENT, pass_width);
+        if view.loop_tail > 0.0 {
+            resource_bar(
+                ui,
+                (view.elapsed - view.duration) / view.loop_tail,
+                color::TEXT_DIM,
+                usable - pass_width,
+            );
+        }
+    });
 }
 
-/// Draws the sandbox screen. Pure: no Bevy ECS, so the snapshot test can call it.
+/// Draws the sandbox screen on the Workbench template: the header, the stage
+/// controls on the left, the entry list on the right, and the transport
+/// along the foot of the 3D stage between them. Pure: no Bevy ECS, so the
+/// snapshot test can call it.
 pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAction> {
     let mut actions = Vec::new();
 
-    egui::SidePanel::left("sandbox_stage_panel")
-        .exact_width(200.0)
+    // The screen margin, every screen's: `XL` across, `LG` down. The header's
+    // rule is the panel's bottom edge; the side panels open below it.
+    let mut header_margin = margin_xy(space::XL, space::LG);
+    header_margin.bottom = 0;
+    egui::TopBottomPanel::top("sandbox_header")
+        .frame(
+            egui::Frame::new()
+                .fill(color::BG)
+                .inner_margin(header_margin),
+        )
+        .show_separator_line(false)
         .show(ctx, |ui| {
-            ui.add_space(8.0);
-            // The exit, naming where it goes.
-            if nav_cluster(ui, view.nav).is_some() {
+            if let Some(NavAction::Exit(_)) = screen_header(ui, TITLE, view.nav, |_| {}) {
                 actions.push(SandboxAction::Exit);
             }
-            ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new("ANIMATIONS")
-                    .color(TITLE_GOLD)
-                    .size(20.0)
-                    .strong(),
-            );
+        });
 
-            section(ui, "CASTER");
-            for (class, icon) in &view.class_icons {
-                let selected = view.caster_class == *class;
-                if icon_row(ui, *icon, &format!("{class:?}"), None, selected, true).clicked()
-                    && !selected
-                {
-                    actions.push(SandboxAction::SetCaster(*class));
-                }
-            }
-
-            // CAMERA sits ABOVE the dummy section so its position never moves
-            // when the dummy checkbox is toggled — the presets are reached for
-            // constantly and must stay put.
-            section(ui, "CAMERA");
-            ui.horizontal_wrapped(|ui| {
-                for preset in CameraPreset::ALL {
-                    let active = view.applied_preset == Some(preset);
-                    if ui.selectable_label(active, preset.label()).clicked() {
-                        actions.push(SandboxAction::Preset(preset));
-                    }
-                }
-            });
-            ui.add_space(2.0);
-            ui.label(
-                egui::RichText::new("Drag to orbit \u{00b7} scroll to zoom")
-                    .color(MUTED_TEXT)
-                    .size(11.0),
-            );
-
-            section(ui, "TARGET DUMMY");
-            let mut staged = view.dummy_enabled;
-            if ui.checkbox(&mut staged, "Staged").changed() {
-                actions.push(SandboxAction::SetDummyEnabled(staged));
-            }
-            if view.dummy_enabled {
-                ui.add_space(3.0);
-                if let Some(class) = class_grid(ui, &view.class_icons, view.dummy_class) {
-                    actions.push(SandboxAction::SetDummyClass(class));
-                }
-            } else {
-                // Sits with the control that fixes it, not buried at the far
-                // right of the transport bar.
-                ui.label(
-                    egui::RichText::new(
-                        "Beams, projectiles and impacts\nwill not read without one.",
-                    )
-                    .color(WARN_AMBER)
-                    .size(11.0),
-                );
-            }
+    egui::SidePanel::left("sandbox_stage_panel")
+        .exact_width(STAGE_PANEL_WIDTH)
+        .resizable(false)
+        .frame(workbench_frame(space::LG, 0.0))
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("sandbox_stage_scroll")
+                .show(ui, |ui| stage_controls(ui, view, &mut actions));
         });
 
     egui::SidePanel::right("sandbox_entry_panel")
-        .exact_width(250.0)
+        .exact_width(ENTRY_PANEL_WIDTH)
+        .resizable(false)
+        .frame(workbench_frame(space::LG, 0.0))
         .show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                section(ui, "ABILITIES");
-                for row in view.rows.iter().filter(|r| r.family != EntryFamily::Body) {
-                    let selected = view.selected == Some(row.entry);
-                    let mechanism_playable = row.family.is_playable();
-                    // AE3: a relational entry can't play a complete visual without
-                    // a second unit — disable it while the dummy is off.
-                    let dummy_off = row.needs_dummy && !view.dummy_enabled;
-                    let enabled = mechanism_playable && !dummy_off;
-                    // The `soon` arm is unreachable today and deliberately
-                    // kept: `EntryFamily::is_playable` is true for every family
-                    // except `Unsupported`, so nothing currently lands here. It
-                    // is held for the next unwired mechanism — a family added
-                    // to `EntryFamily` but left out of `is_playable` while its
-                    // start path is built, which is how every mechanism in this
-                    // panel arrived. Deleting it would label that family `n/a`
-                    // under a hover claiming it has no application code, which
-                    // would be false. Keep the two in step: drop this arm only
-                    // together with the hover below.
-                    let tag = if !mechanism_playable {
-                        Some(match row.family {
-                            EntryFamily::Unsupported => "n/a",
-                            _ => "soon",
-                        })
-                    } else if dummy_off {
-                        Some("needs dummy")
-                    } else {
-                        None
-                    };
-                    let response = icon_row(ui, row.icon, &row.label, tag, selected, enabled);
-                    if !mechanism_playable {
-                        response.on_hover_text(match row.family {
-                            EntryFamily::Unsupported => {
-                                "Not previewable: defined as data but with no application code \
-                                 (or no distinct cast visual)."
-                            }
-                            // Pairs with the `soon` tag above: unreachable
-                            // while `is_playable` excludes only `Unsupported`.
-                            _ => "This ability's preview mechanism is not wired yet.",
-                        });
-                    } else if dummy_off {
-                        response.on_hover_text(
-                            "This ability needs a target — turn on Target Dummy to preview it.",
-                        );
-                    } else if response.clicked() {
-                        actions.push(SandboxAction::Select(row.entry, row.family));
-                    }
-                }
-
-                section(ui, "BODY");
-                for row in view.rows.iter().filter(|r| r.family == EntryFamily::Body) {
-                    let selected = view.selected == Some(row.entry);
-                    if icon_row(ui, row.icon, &row.label, None, selected, true).clicked() {
-                        actions.push(SandboxAction::Select(row.entry, row.family));
-                    }
-                }
-
-                // The question being asked in this screen is usually "does the
-                // visual match the data", so the data belongs on it.
-                if let Some(label) = &view.selected_label {
-                    section(ui, "SELECTED");
-                    ui.label(
-                        egui::RichText::new(label)
-                            .color(BUTTON_TEXT)
-                            .size(14.0)
-                            .strong(),
-                    );
-                    ui.add_space(4.0);
-                    for (key, value) in &view.selected_details {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(key).color(MUTED_TEXT).size(12.0));
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.add_space(PANEL_INSET);
-                                    ui.label(
-                                        egui::RichText::new(value).color(BUTTON_TEXT).size(12.0),
-                                    );
-                                },
-                            );
-                        });
-                    }
-                }
-            });
+            if let Some(label) = &view.selected_label {
+                egui::TopBottomPanel::bottom("sandbox_selected")
+                    .frame(egui::Frame::new())
+                    .show_separator_line(false)
+                    .resizable(false)
+                    .show_inside(ui, |ui| selected_details(ui, label, &view.selected_details));
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("sandbox_entry_scroll")
+                .show(ui, |ui| entry_list(ui, view, &mut actions));
         });
 
     egui::TopBottomPanel::bottom("sandbox_transport")
-        .exact_height(36.0)
-        .show(ctx, |ui| {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.add_space(PANEL_INSET);
-                let has_selection = view.selected.is_some();
-
-                // The one verb on the screen, styled so it is findable without
-                // reading — the main menu's button treatment.
-                if ui
-                    .add_enabled(
-                        has_selection,
-                        egui::Button::new(egui::RichText::new("\u{25b6}  Play").color(TITLE_GOLD))
-                            .stroke(egui::Stroke::new(1.0_f32, TITLE_GOLD))
-                            .min_size(egui::vec2(72.0, 22.0)),
-                    )
-                    .clicked()
-                {
-                    actions.push(SandboxAction::Play);
-                }
-
-                // Fixed width: "Resume" is wider than "Pause", and letting the
-                // bar reflow slid Step and the speed chips out from under the
-                // cursor every time you paused.
-                if ui
-                    .add_enabled(
-                        has_selection,
-                        egui::Button::new(if view.paused { "Resume" } else { "Pause" })
-                            .min_size(egui::vec2(72.0, 22.0)),
-                    )
-                    .clicked()
-                {
-                    actions.push(SandboxAction::TogglePause);
-                }
-                if ui
-                    .add_enabled(
-                        has_selection && view.paused,
-                        egui::Button::new("Step").min_size(egui::vec2(52.0, 22.0)),
-                    )
-                    .on_hover_text("Advance one simulation tick")
-                    .clicked()
-                {
-                    actions.push(SandboxAction::Step);
-                }
-
-                ui.separator();
-                let mut looping = view.looping;
-                if ui.checkbox(&mut looping, "Loop").changed() {
-                    actions.push(SandboxAction::SetLooping(looping));
-                }
-
-                ui.separator();
-                ui.label(egui::RichText::new("SPEED").color(MUTED_TEXT).size(12.0));
-                for speed in SPEEDS {
-                    let active = (view.speed - speed).abs() < f32::EPSILON;
-                    if ui.selectable_label(active, format!("{speed}x")).clicked() {
-                        actions.push(SandboxAction::SetSpeed(speed));
-                    }
-                }
-
-                ui.separator();
-                progress_track(ui, view);
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new(if has_selection {
-                        format!(
-                            "{:.2}s / {:.2}s",
-                            view.elapsed.min(view.duration),
-                            view.duration
-                        )
-                    } else {
-                        "\u{2014} / \u{2014}".to_string()
-                    })
-                    .color(if has_selection {
-                        BUTTON_TEXT
-                    } else {
-                        MUTED_TEXT
-                    })
-                    .monospace(),
-                );
-            });
-        });
+        .resizable(false)
+        .frame(workbench_frame(space::LG, space::SM))
+        .show(ctx, |ui| transport(ui, view, &mut actions));
 
     actions
+}
+
+/// The left panel: who is staged, and how the camera sees them.
+fn stage_controls(ui: &mut egui::Ui, view: &SandboxView, actions: &mut Vec<SandboxAction>) {
+    section(ui, "Caster");
+    for (class, icon) in &view.class_icons {
+        let selected = view.caster_class == *class;
+        let row = ListRow::new(class.name())
+            .name_color(class_color(*class))
+            .icon(ListIcon {
+                texture: *icon,
+                edge: class_color(*class),
+            })
+            .selected(selected);
+        if list_row(ui, row).clicked() && !selected {
+            actions.push(SandboxAction::SetCaster(*class));
+        }
+    }
+
+    // CAMERA sits ABOVE the dummy section so its position never moves when
+    // the dummy checkbox is toggled — the presets are reached for constantly
+    // and must stay put.
+    section(ui, "Camera");
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(space::XS, space::XS);
+        for preset in CameraPreset::ALL {
+            let active = view.applied_preset == Some(preset);
+            if Chip::new(preset.label()).on(active).show(ui).clicked() {
+                actions.push(SandboxAction::Preset(preset));
+            }
+        }
+    });
+    ui.add_space(space::XS);
+    ui.label(
+        egui::RichText::new("Drag to orbit \u{00b7} scroll to zoom")
+            .size(text::SMALL)
+            .color(color::TEXT_DIM),
+    );
+
+    section(ui, "Target dummy");
+    let mut staged = view.dummy_enabled;
+    if checkbox(ui, &mut staged, "Staged").changed() {
+        actions.push(SandboxAction::SetDummyEnabled(staged));
+    }
+    ui.add_space(space::XS);
+    if view.dummy_enabled {
+        // A secondary axis, so chips rather than a second full-height list:
+        // as nine list rows it would push everything below it a third of the
+        // screen whenever the dummy was staged.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(space::XS, space::XS);
+            for (class, _) in &view.class_icons {
+                let selected = *class == view.dummy_class;
+                let chip = Chip::new(class.name())
+                    .label_color(class_color(*class))
+                    .on(selected);
+                if chip.show(ui).clicked() && !selected {
+                    actions.push(SandboxAction::SetDummyClass(*class));
+                }
+            }
+        });
+    } else {
+        // Sits with the control that fixes it, not buried at the far right of
+        // the transport bar.
+        ui.label(
+            egui::RichText::new("Beams, projectiles and impacts will not read without one.")
+                .size(text::SMALL)
+                .color(color::WARN),
+        );
+    }
+    ui.add_space(space::LG);
+}
+
+/// The right panel: the staged class's entries, and the data of the one
+/// selected.
+fn entry_list(ui: &mut egui::Ui, view: &SandboxView, actions: &mut Vec<SandboxAction>) {
+    section(ui, "Abilities");
+    for row in view.rows.iter().filter(|r| r.family != EntryFamily::Body) {
+        let selected = view.selected == Some(row.entry);
+        let mechanism_playable = row.family.is_playable();
+        // AE3: a relational entry can't play a complete visual without a
+        // second unit — disable it while the dummy is off.
+        let dummy_off = row.needs_dummy && !view.dummy_enabled;
+        let enabled = mechanism_playable && !dummy_off;
+        // The `soon` arm is unreachable today and deliberately kept:
+        // `EntryFamily::is_playable` is true for every family except
+        // `Unsupported`, so nothing currently lands here. It is held for the
+        // next unwired mechanism — a family added to `EntryFamily` but left
+        // out of `is_playable` while its start path is built, which is how
+        // every mechanism in this panel arrived. Deleting it would label that
+        // family `n/a` under a hover claiming it has no application code,
+        // which would be false. Keep the two in step: drop this arm only
+        // together with the hover below.
+        let tag = if !mechanism_playable {
+            Some(match row.family {
+                EntryFamily::Unsupported => "n/a",
+                _ => "soon",
+            })
+        } else if dummy_off {
+            Some("needs dummy")
+        } else {
+            None
+        };
+        // An ability always has a spell icon, so its slot is always drawn:
+        // the art when it has loaded, the kit's fallback tile until then.
+        let mut list_entry = ListRow::new(&row.label)
+            .icon(ListIcon {
+                texture: row.icon,
+                edge: color::LINE,
+            })
+            .selected(selected)
+            .enabled(enabled);
+        if let Some(tag) = tag {
+            list_entry = list_entry.meta(tag);
+        }
+        let response = list_row(ui, list_entry);
+        if !mechanism_playable {
+            response.on_hover_text(match row.family {
+                EntryFamily::Unsupported => {
+                    "Not previewable: defined as data but with no application code \
+                     (or no distinct cast visual)."
+                }
+                // Pairs with the `soon` tag above: unreachable while
+                // `is_playable` excludes only `Unsupported`.
+                _ => "This ability's preview mechanism is not wired yet.",
+            });
+        } else if dummy_off {
+            response
+                .on_hover_text("This ability needs a target — turn on Target Dummy to preview it.");
+        } else if response.clicked() {
+            actions.push(SandboxAction::Select(row.entry, row.family));
+        }
+    }
+
+    // The body animations have no icon by nature, not by failure, so their
+    // rows draw none rather than a fallback tile standing in for nothing.
+    section(ui, "Body");
+    for row in view.rows.iter().filter(|r| r.family == EntryFamily::Body) {
+        let selected = view.selected == Some(row.entry);
+        if list_row(ui, ListRow::new(&row.label).selected(selected)).clicked() {
+            actions.push(SandboxAction::Select(row.entry, row.family));
+        }
+    }
+
+    ui.add_space(space::LG);
+}
+
+/// The selected entry's data, pinned to the foot of the entry panel so it
+/// stays in view however far the list above it scrolls. The question being
+/// asked in this screen is usually "does the visual match the data", so the
+/// data belongs on it.
+fn selected_details(ui: &mut egui::Ui, label: &str, details: &[(String, String)]) {
+    section(ui, "Selected");
+    panel(None).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        panel_header(ui, label, color::ACCENT, |_| {});
+        stat_rows(
+            ui,
+            details
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
+    });
+    ui.add_space(space::LG);
+}
+
+/// The transport along the foot of the stage: play, pause, step, loop, speed,
+/// and where the pass is.
+fn transport(ui: &mut egui::Ui, view: &SandboxView, actions: &mut Vec<SandboxAction>) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = space::SM;
+        let has_selection = view.selected.is_some();
+
+        // The one verb on the screen: the Primary, at the transport's inline
+        // height.
+        if Button::new("\u{25b6}  Play", Variant::Primary)
+            .compact()
+            .enabled(has_selection)
+            .show(ui)
+            .clicked()
+        {
+            actions.push(SandboxAction::Play);
+        }
+        if Button::new(
+            if view.paused { "Resume" } else { "Pause" },
+            Variant::Secondary,
+        )
+        .compact()
+        .min_width(PAUSE_WIDTH)
+        .enabled(has_selection)
+        .show(ui)
+        .clicked()
+        {
+            actions.push(SandboxAction::TogglePause);
+        }
+        if Button::new("Step", Variant::Secondary)
+            .compact()
+            .enabled(has_selection && view.paused)
+            .show(ui)
+            .on_hover_text("Advance one simulation tick")
+            .clicked()
+        {
+            actions.push(SandboxAction::Step);
+        }
+
+        ui.separator();
+        let mut looping = view.looping;
+        if checkbox(ui, &mut looping, "Loop").changed() {
+            actions.push(SandboxAction::SetLooping(looping));
+        }
+
+        ui.separator();
+        ui.label(
+            egui::RichText::new("SPEED")
+                .size(text::SMALL)
+                .color(color::TEXT_MUTED),
+        );
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x = space::XS;
+            for speed in SPEEDS {
+                let active = (view.speed - speed).abs() < f32::EPSILON;
+                if Chip::new(&format!("{speed}x"))
+                    .on(active)
+                    .show(ui)
+                    .clicked()
+                {
+                    actions.push(SandboxAction::SetSpeed(speed));
+                }
+            }
+        });
+
+        ui.separator();
+        progress_track(ui, view);
+        ui.label(
+            egui::RichText::new(if has_selection {
+                format!(
+                    "{:.2}s / {:.2}s",
+                    view.elapsed.min(view.duration),
+                    view.duration
+                )
+            } else {
+                "\u{2014} / \u{2014}".to_string()
+            })
+            .color(if has_selection {
+                color::TEXT
+            } else {
+                color::TEXT_DIM
+            })
+            .monospace(),
+        );
+    });
 }
 
 /// Ability data worth checking an animation against.

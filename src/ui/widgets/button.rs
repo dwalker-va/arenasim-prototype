@@ -121,8 +121,10 @@ impl<'a> Button<'a> {
         }
     }
 
-    /// The screen header's navigation size: shorter, with a smaller label.
-    pub(super) fn compact(mut self) -> Self {
+    /// The inline size: [`size::NAV`] tall with a [`text::SMALL`] label, for
+    /// a button that sits in a row of chips or a toolbar rather than leading
+    /// a form (the screen header's navigation, a transport bar).
+    pub fn compact(mut self) -> Self {
         self.compact = true;
         self
     }

@@ -1550,12 +1550,10 @@ fn options_ui(
 
                                 // Toggle switch
                                 let vsync_label = if settings.vsync { "On" } else { "Off" };
-                                if ui.add(
-                                    egui::widgets::Checkbox::new(
-                                        &mut settings.vsync,
-                                        egui::RichText::new(vsync_label)
-                                            .size(18.0)
-                                    )
+                                if crate::ui::widgets::checkbox(
+                                    ui,
+                                    &mut settings.vsync,
+                                    vsync_label,
                                 ).changed() {
                                     info!("VSync toggled to: {}", settings.vsync);
                                 }
@@ -1590,12 +1588,10 @@ fn options_ui(
 
                                 // Toggle switch
                                 let aura_label = if settings.show_aura_icons { "On" } else { "Off" };
-                                if ui.add(
-                                    egui::widgets::Checkbox::new(
-                                        &mut settings.show_aura_icons,
-                                        egui::RichText::new(aura_label)
-                                            .size(18.0)
-                                    )
+                                if crate::ui::widgets::checkbox(
+                                    ui,
+                                    &mut settings.show_aura_icons,
+                                    aura_label,
                                 ).changed() {
                                     info!("Show Aura Icons toggled to: {}", settings.show_aura_icons);
                                 }

@@ -188,6 +188,8 @@ pub mod stroke {
     pub const DASH: f32 = 4.0;
     /// The gap between two dashes of a dashed edge.
     pub const DASH_GAP: f32 = 3.0;
+    /// A glyph drawn as strokes: the checkbox's tick.
+    pub const MARK: f32 = 2.0;
 }
 
 /// Fixed control dimensions, in points: the size a component is drawn at,
@@ -206,6 +208,8 @@ pub mod size {
     pub const TAB: f32 = 30.0;
     /// A chip.
     pub const CHIP: f32 = 22.0;
+    /// A checkbox's box: square, whatever the label beside it.
+    pub const CHECKBOX: f32 = 16.0;
     /// A screen-wide search field: a primary control on a Document screen,
     /// sized to say so.
     pub const SEARCH: f32 = 34.0;
@@ -239,8 +243,11 @@ pub fn school_color(school: SpellSchool) -> Color32 {
 }
 
 /// The whole egui [`egui::Style`] every screen draws under: what stock egui
-/// widgets (a `ui.button`, a checkbox, a `selectable_label`, a text field, a
-/// window, a hover card) look like when a screen does not paint its own.
+/// widgets (a `ui.button`, a `selectable_label`, a text field, a window, a
+/// hover card) look like when a screen does not paint its own. Not a
+/// checkbox: the stock one takes these widgets' [`radius::MD`] and draws a
+/// circle, so every checkbox is the kit's ([`crate::ui::widgets::checkbox`]),
+/// held there by `tests/ui_token_audit.rs`.
 ///
 /// [`crate::ui::install`] sets it ONCE, for the client and every harness. A
 /// screen never patches it — egui keeps one sticky `Style` per context, so a

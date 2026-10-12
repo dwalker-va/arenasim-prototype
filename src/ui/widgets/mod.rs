@@ -18,6 +18,7 @@
 
 pub mod bars;
 pub mod button;
+pub mod checkbox;
 pub mod empty_state;
 pub mod header;
 pub mod link;
@@ -30,6 +31,7 @@ pub mod tooltip;
 
 pub use bars::{class_icon, icon_tile, resource_bar};
 pub use button::{button, Button, Variant};
+pub use checkbox::{checkbox, Checkbox};
 pub use empty_state::empty_state;
 pub use header::{nav_cluster, screen_header, Header, Nav, NavAction};
 pub use link::{click_hint, link, link_with, paint_icon, secondary_click_chrome_hint};
