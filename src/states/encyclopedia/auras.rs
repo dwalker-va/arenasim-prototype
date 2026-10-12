@@ -82,11 +82,9 @@ use crate::states::play_match::shadow_sight::{
 
 use super::search::SearchEntry;
 use super::widget;
-use super::{EncyclopediaData, Topic, DIM, MUTED, TEXT};
-
-/// Buff green and debuff red, from the blessed mockup's palette.
-pub(crate) const BUFF: egui::Color32 = egui::Color32::from_rgb(111, 174, 126);
-pub(crate) const DEBUFF: egui::Color32 = egui::Color32::from_rgb(208, 106, 91);
+use super::{EncyclopediaData, Topic};
+use crate::ui::theme::data::{BUFF, DEBUFF};
+use crate::ui::theme::{color, radius, size, space, stroke, text};
 
 /// Cap on an index column's width. Rows are name + mechanic tag, so a column
 /// stretched across half a wide screen leaves a lake of dead space between the
@@ -1099,17 +1097,15 @@ pub fn icon_key(
 pub fn render_index(ui: &mut egui::Ui, data: &EncyclopediaData) -> Option<Topic> {
     let catalog = catalog(data.abilities, data.items);
 
-    ui.label(
-        egui::RichText::new(
-            "Named as players see them on the actor frames — Rend and Corruption are distinct \
-             debuffs, not one “damage over time”. The tag on each row is the shared MECHANIC \
-             underneath.",
-        )
-        .size(13.0)
-        .color(MUTED)
-        .italics(),
+    widget::prose(
+        ui,
+        "Named as players see them on the actor frames — Rend and Corruption are distinct \
+         debuffs, not one “damage over time”. The tag on each row is the shared MECHANIC \
+         underneath.",
+        text::BODY,
+        color::TEXT_MUTED,
     );
-    ui.add_space(12.0);
+    ui.add_space(space::MD);
 
     let mut clicked = None;
     // Buffs and debuffs sit SIDE BY SIDE, each column top-aligned: `ui.columns`
@@ -1127,10 +1123,10 @@ pub fn render_index(ui: &mut egui::Ui, data: &EncyclopediaData) -> Option<Topic>
                 .collect();
             column.label(
                 egui::RichText::new(format!("{}  ({})", label, group.len()))
-                    .size(12.5)
+                    .size(text::SMALL)
                     .color(color),
             );
-            column.add_space(4.0);
+            column.add_space(space::XS);
             for entry in group {
                 if let Some(topic) = widget::row(
                     column,
@@ -1156,16 +1152,20 @@ pub fn render_index(ui: &mut egui::Ui, data: &EncyclopediaData) -> Option<Topic>
 pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> Option<Topic> {
     let catalog = catalog(data.abilities, data.items);
     let Some(entry) = find(&catalog, id) else {
-        ui.label(egui::RichText::new("Unknown aura").size(16.0).color(MUTED));
+        ui.label(
+            egui::RichText::new("Unknown aura")
+                .size(text::H3)
+                .color(color::TEXT_MUTED),
+        );
         return None;
     };
 
     widget::detail_header(ui, Topic::Aura(id), "", data);
-    ui.add_space(8.0);
+    ui.add_space(space::SM);
 
     // --- Badges: polarity, mechanic, how it comes off ---
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+        ui.spacing_mut().item_spacing = egui::Vec2::splat(space::SM);
         let (polarity, color) = if entry.is_buff() {
             ("Buff", BUFF)
         } else {
@@ -1179,43 +1179,39 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
         badge(
             ui,
             &format!("Mechanic — {}", entry.mechanic.display_name()),
-            MUTED,
+            color::TEXT_MUTED,
         )
         .on_hover_text(entry.mechanic.description());
         let (removal, removal_note) = entry.removal();
-        badge(ui, removal, MUTED).on_hover_text(removal_note);
+        badge(ui, removal, color::TEXT_MUTED).on_hover_text(removal_note);
     });
 
-    ui.add_space(12.0);
-    ui.label(
-        egui::RichText::new(&entry.description)
-            .family(body_family(ui.ctx()))
-            .size(14.0)
-            .color(TEXT),
-    );
+    ui.add_space(space::MD);
+    widget::prose(ui, &entry.description, text::BODY, color::TEXT);
     if let Some(provenance) = &entry.provenance {
-        ui.add_space(4.0);
+        ui.add_space(space::XS);
         ui.label(
             egui::RichText::new(provenance)
-                .size(12.0)
-                .color(DIM)
+                .size(text::SMALL)
+                .family(body_family(ui.ctx()))
+                .color(color::TEXT_MUTED)
                 .italics(),
         );
     }
 
-    ui.add_space(12.0);
-    widget::stat_rows(ui, "encyclopedia_aura_stats", &stat_rows(entry));
+    ui.add_space(space::MD);
+    widget::stat_rows(ui, &stat_rows(entry));
 
     // --- Diminishing returns ---
     if let Some(category) = entry.sample.dr_category() {
         widget::section_heading(ui, "DIMINISHING RETURNS");
         ui.label(
             egui::RichText::new(format!("Category: {}", dr_category_name(category)))
-                .size(13.5)
-                .color(TEXT),
+                .size(text::BODY)
+                .color(color::TEXT),
         );
-        ui.add_space(4.0);
-        ui.label(egui::RichText::new(dr_rules_text()).size(12.5).color(MUTED));
+        ui.add_space(space::XS);
+        widget::prose(ui, &dr_rules_text(), text::SMALL, color::TEXT_MUTED);
     }
 
     let mut clicked = None;
@@ -1233,16 +1229,16 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
             // Frost Armor buff's own page was never told the procs exist.
             let kin = source_siblings(&catalog, entry.source, id);
             if !kin.is_empty() {
-                ui.add_space(6.0);
+                ui.add_space(space::SM);
                 ui.label(
                     egui::RichText::new(format!(
                         "{} also applies:",
                         Topic::Ability(ability).name(data)
                     ))
-                    .size(12.5)
-                    .color(MUTED),
+                    .size(text::SMALL)
+                    .color(color::TEXT_MUTED),
                 );
-                ui.add_space(2.0);
+                ui.add_space(space::XXS);
                 for sibling in kin {
                     if let Some(topic) = widget::row(
                         ui,
@@ -1261,8 +1257,9 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
         AuraSource::Mechanic(_) => {
             ui.label(
                 egui::RichText::new(entry.source.mechanic_line().unwrap_or_default())
-                    .size(13.0)
-                    .color(MUTED)
+                    .size(text::BODY)
+                    .family(body_family(ui.ctx()))
+                    .color(color::TEXT_MUTED)
                     .italics(),
             );
         }
@@ -1278,14 +1275,15 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
                 entry.mechanic.display_name().to_uppercase()
             ),
         );
-        ui.label(
-            egui::RichText::new(entry.mechanic.description())
-                .size(12.5)
-                .color(MUTED),
+        widget::prose(
+            ui,
+            entry.mechanic.description(),
+            text::SMALL,
+            color::TEXT_MUTED,
         );
-        ui.add_space(8.0);
+        ui.add_space(space::SM);
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+            ui.spacing_mut().item_spacing = egui::Vec2::splat(space::XS);
             for sibling in siblings {
                 if let Some(topic) = widget::icon_link(ui, Topic::Aura(sibling.id), data) {
                     clicked = Some(topic);
@@ -1300,33 +1298,32 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
 /// The tooltip shown wherever a named aura's icon is hovered.
 pub fn render_tooltip(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) {
     let Some(entry) = entry_of(id, data.abilities, data.items) else {
-        ui.label(egui::RichText::new("Unknown aura").size(14.0).color(MUTED));
+        ui.label(
+            egui::RichText::new("Unknown aura")
+                .size(text::BODY)
+                .color(color::TEXT_MUTED),
+        );
         return;
     };
     let entry = &entry;
     ui.label(
         egui::RichText::new(&entry.name)
-            .size(14.0)
+            .size(text::BODY)
             .color(if entry.is_buff() { BUFF } else { DEBUFF })
             .strong(),
     );
     ui.label(
         egui::RichText::new(entry.subtitle())
-            .size(12.0)
-            .color(MUTED),
+            .size(text::SMALL)
+            .color(color::TEXT_MUTED),
     );
-    ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new(&entry.description)
-            .family(body_family(ui.ctx()))
-            .size(12.5)
-            .color(TEXT),
-    );
+    ui.add_space(space::XS);
+    widget::prose(ui, &entry.description, text::SMALL, color::TEXT);
     for (key, value) in stat_rows(entry) {
         ui.label(
             egui::RichText::new(format!("{}: {}", key, value))
-                .size(11.5)
-                .color(DIM),
+                .size(text::SMALL)
+                .color(color::TEXT_DIM),
         );
     }
 }
@@ -1490,21 +1487,24 @@ fn dr_rules_text() -> String {
 
 /// A small outlined pill. Returns the response so callers can hang a tooltip.
 fn badge(ui: &mut egui::Ui, label: &str, color: egui::Color32) -> egui::Response {
-    let font = egui::FontId::proportional(11.0);
+    let font = egui::FontId::proportional(text::SMALL);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font, color);
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(galley.size().x + 16.0, 21.0),
+        egui::vec2(galley.size().x + 2.0 * space::SM, size::CHIP),
         egui::Sense::hover(),
     );
     let painter = ui.painter_at(rect);
     painter.rect_stroke(
         rect,
-        3.0,
-        egui::Stroke::new(1.0_f32, color),
+        radius::SM,
+        egui::Stroke::new(stroke::HAIRLINE, color),
         egui::StrokeKind::Inside,
     );
     painter.galley(
-        egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0),
+        egui::pos2(
+            rect.left() + space::SM,
+            rect.center().y - galley.size().y / 2.0,
+        ),
         galley,
         color,
     );

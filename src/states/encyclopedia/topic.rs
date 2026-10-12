@@ -177,17 +177,10 @@ impl Topic {
         match self {
             Topic::Ability(ability) => match data.abilities.get(&ability) {
                 Some(config) => super::abilities::school_color(config.spell_school),
-                None => super::GOLD,
+                None => crate::ui::theme::color::ACCENT,
             },
-            Topic::Class(class) => {
-                let c = class.color().to_srgba();
-                egui::Color32::from_rgb(
-                    (c.red * 255.0) as u8,
-                    (c.green * 255.0) as u8,
-                    (c.blue * 255.0) as u8,
-                )
-            }
-            _ => super::GOLD,
+            Topic::Class(class) => crate::ui::theme::class_color(class),
+            _ => crate::ui::theme::color::ACCENT,
         }
     }
 }

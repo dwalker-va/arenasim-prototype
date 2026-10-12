@@ -179,7 +179,7 @@ with only a painter call `ui_driver::note_into(painter.ctx(), …)`).
 Ids are conventions, not types: `menu:MATCH`, `class:Warrior`, `slot:t1s0`,
 `slot:t1s0:change`, `kit:MortalStrike`, `strategic:BattleShout`,
 `strategic:CurseOfTongues:e0`, `equip:Ring1`, `equip:restore`,
-`pick:SignetOfFocus`, `enc:back`, `enc:home`.
+`pick:SignetOfFocus`, `nav:back`, `nav:exit` (every screen header).
 
 ## Inertness, and how it is actually established
 

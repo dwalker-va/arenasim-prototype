@@ -47,7 +47,8 @@ key Escape
 assert-state MainMenu
 click menu:ENCYCLOPEDIA
 assert-state Encyclopedia
-click enc:home
+assert-note nav:exit to=MainMenu label=🏠 MAIN MENU
+click nav:exit
 assert-state MainMenu
 
 # --- Match setup and View Combatant -----------------------------------------

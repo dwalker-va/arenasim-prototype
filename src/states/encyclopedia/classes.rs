@@ -18,6 +18,7 @@ use crate::states::play_match::components::{class_base_stats, ClassBaseStats};
 use super::search::SearchEntry;
 use super::widget;
 use super::{EncyclopediaData, Topic};
+use crate::ui::theme::{color, space, text};
 
 /// Width of a class tile on the index. Wider than an item tile because a class
 /// description is a sentence, not a slot name.
@@ -57,20 +58,20 @@ pub fn subtitle(class: CharacterClass) -> String {
 pub fn tooltip(ui: &mut egui::Ui, class: CharacterClass, data: &EncyclopediaData) {
     ui.label(
         egui::RichText::new(class.name())
-            .size(14.0)
+            .size(text::BODY)
             .color(Topic::Class(class).accent(data))
             .strong(),
     );
     ui.label(
         egui::RichText::new(subtitle(class))
-            .size(12.0)
-            .color(super::DIM),
+            .size(text::SMALL)
+            .color(color::TEXT_DIM),
     );
     ui.label(
         egui::RichText::new(class.description())
             .family(body_family(ui.ctx()))
-            .size(12.0)
-            .color(super::MUTED),
+            .size(text::SMALL)
+            .color(color::TEXT_MUTED),
     );
 }
 
@@ -82,7 +83,7 @@ pub fn tooltip(ui: &mut egui::Ui, class: CharacterClass, data: &EncyclopediaData
 pub fn render_index(ui: &mut egui::Ui, data: &EncyclopediaData) -> Option<Topic> {
     let mut clicked = None;
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+        ui.spacing_mut().item_spacing = egui::Vec2::splat(space::SM);
         for class in CharacterClass::all() {
             let stats = class_base_stats(*class);
             if let Some(topic) = widget::tile(
@@ -114,9 +115,9 @@ pub fn render_detail(
     let topic = Topic::Class(class);
     widget::detail_header(ui, topic, class.description(), data);
 
-    ui.add_space(14.0);
+    ui.add_space(space::LG);
     let stats = class_base_stats(class);
-    widget::stat_rows(ui, "encyclopedia_class_stats", &stat_rows(&stats));
+    widget::stat_rows(ui, &stat_rows(&stats));
 
     let mut clicked = None;
 
@@ -127,7 +128,7 @@ pub fn render_detail(
     widget::section_heading(ui, "ABILITIES");
     let own = data.abilities.own_abilities_for_class(class);
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+        ui.spacing_mut().item_spacing = egui::Vec2::splat(space::XS);
         for ability in &own {
             if let Some(topic) = widget::icon_link(ui, Topic::Ability(*ability), data) {
                 clicked = Some(topic);
@@ -140,7 +141,7 @@ pub fn render_detail(
     for (pet, abilities) in data.abilities.pet_abilities_for_class(class) {
         widget::sub_heading(ui, &format!("PET — {}", pet.name().to_uppercase()));
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+            ui.spacing_mut().item_spacing = egui::Vec2::splat(space::XS);
             for ability in &abilities {
                 if let Some(topic) = widget::icon_link(ui, Topic::Ability(*ability), data) {
                     clicked = Some(topic);

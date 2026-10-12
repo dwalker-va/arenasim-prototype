@@ -127,9 +127,9 @@ assert-view Ability(Corruption)
 # The encyclopedia's own navigation cluster, while we are here: Back is dead at
 # the root of a deep link (the whole point of open_at), and Home names the
 # screen that opened it.
-assert-enabled enc:back false
-assert-visible enc:home
-click enc:home
+assert-enabled nav:back false
+assert-visible nav:exit
+click nav:exit
 assert-state ViewCombatant
 assert-visible kit:Corruption
 

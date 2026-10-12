@@ -70,32 +70,15 @@ use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::equipment::ItemDefinitions;
 use super::view_combatant_ui::{AbilityIcons, ItemIcons};
 use super::GameState;
-use crate::ui::driver as ui_driver;
-use crate::ui::widgets::NavAction;
+use crate::ui::theme::{color, size, space, text};
+use crate::ui::widgets::panel::margin_xy;
+use crate::ui::widgets::{screen_header, Button, Nav, NavAction, Tab, Variant};
 
 pub use abilities::AbilityFilters;
 pub use auras::{AuraArt, AuraId, AuraSource, EngineAura};
 pub use items::ItemFilters;
 pub use search::{build_registry, SearchEntry};
 pub use topic::{Section, Topic};
-
-// ============================================================================
-// THEME
-// ============================================================================
-// The game's existing gold-on-near-black egui palette, extended with the two
-// panel tones and the link blue the blessed encyclopedia mockup uses to
-// separate chrome from content.
-
-pub(crate) const BG: egui::Color32 = egui::Color32::from_rgb(20, 20, 30);
-pub(crate) const PANEL: egui::Color32 = egui::Color32::from_rgb(30, 30, 42);
-pub(crate) const PANEL_HI: egui::Color32 = egui::Color32::from_rgb(37, 37, 56);
-pub(crate) const LINE: egui::Color32 = egui::Color32::from_rgb(60, 60, 80);
-pub(crate) const LINE_HI: egui::Color32 = egui::Color32::from_rgb(86, 86, 122);
-pub(crate) const GOLD: egui::Color32 = egui::Color32::from_rgb(230, 204, 153);
-pub(crate) const TEXT: egui::Color32 = egui::Color32::from_rgb(230, 217, 191);
-pub(crate) const MUTED: egui::Color32 = egui::Color32::from_rgb(142, 142, 166);
-pub(crate) const DIM: egui::Color32 = egui::Color32::from_rgb(102, 102, 126);
-pub(crate) const LINK: egui::Color32 = egui::Color32::from_rgb(127, 178, 229);
 
 // ============================================================================
 // NAVIGATION STATE
@@ -385,85 +368,41 @@ pub fn draw_encyclopedia(
     } = state;
     let current = *stack.last().expect("encyclopedia nav stack is never empty");
     let can_go_back = stack.len() > 1;
-    let home_label = home_label(return_to);
+    let nav = Nav::Stacked {
+        can_back: can_go_back,
+        return_to,
+    };
 
     let mut action = None;
 
+    // The screen margin, every screen's: `XL` across, `LG` down. The chrome
+    // panel's bottom edge sits flush on the content panel's top margin.
+    let mut chrome_margin = margin_xy(space::XL, space::LG);
+    chrome_margin.bottom = 0;
+
     egui::TopBottomPanel::top("encyclopedia_chrome")
-        .frame(egui::Frame::new().fill(BG).inner_margin(egui::Margin {
-            left: 18,
-            right: 18,
-            top: 12,
-            bottom: 0,
-        }))
+        .frame(
+            egui::Frame::new()
+                .fill(color::BG)
+                .inner_margin(chrome_margin),
+        )
         .show(ctx, |ui| {
-            // --- Top bar: [Back][Home] title ---
+            // --- The shared header: [Back][Home] title ---
             //
-            // ONE navigation cluster, top-left, ahead of the title — the
-            // browser toolbar the two buttons were already imitating. Back and
-            // Home are SEPARATE, ALWAYS-VISIBLE affordances answering different
-            // questions ("back one page" and "out of here"), and collapsing
-            // them into one button (round 1 swapped the label the moment you
-            // navigated anywhere) left a reader two pages deep with no
-            // one-click way out. But they are ONE JOB — navigation — so they
-            // sit together: Home used to float alone at the far right, which
-            // split the row's two controls across the full screen width and
-            // made neither read as the other's neighbour.
-            //
-            // Back is disabled rather than hidden at the root, exactly like a
-            // browser with no history: the cluster must not reflow under the
-            // cursor when the stack empties.
-            //
-            // The row is allocated at an EXPLICIT height — the title's own line
-            // height — and laid out with `horizontal_centered`, so the cluster
-            // and the title share one vertical centre. A plain `ui.horizontal`
-            // gives the row only `interact_size.y` (18pt) of cross-axis space,
-            // which the 30pt title overflows: the buttons ended up pinned near
-            // the top of that band while the title sat 8px lower.
-            let title_height = ui
-                .painter()
-                .layout_no_wrap(
-                    TITLE.to_owned(),
-                    egui::FontId::proportional(TITLE_SIZE),
-                    GOLD,
-                )
-                .size()
-                .y;
-            let row_height = title_height.max(ui.spacing().interact_size.y);
-            ui.allocate_ui(egui::vec2(ui.available_width(), row_height), |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.spacing_mut().item_spacing.x = CLUSTER_GAP;
+            // The encyclopedia is the one screen with history, so its header
+            // carries the stacked pair (decision D2): Back is a literal history
+            // pointer, disabled — never hidden — at the root so the cluster
+            // cannot reflow under the cursor; Home leaves for whatever opened
+            // the screen and NAMES it. Two affordances, because "back one page"
+            // and "out of here" are different questions, and collapsing them
+            // left a reader two pages deep with no one-click way out.
+            match screen_header(ui, TITLE, nav, |_| {}) {
+                Some(NavAction::Back) => action = Some(EncyclopediaAction::Back),
+                Some(NavAction::Exit(_)) => action = Some(EncyclopediaAction::Exit),
+                None => {}
+            }
 
-                    let back = ui
-                        .add_enabled(
-                            can_go_back,
-                            chrome_button(BACK_LABEL, if can_go_back { TEXT } else { DIM }),
-                        )
-                        .on_disabled_hover_text("Nothing to go back to");
-                    // Registered even when disabled, so a script can pin
-                    // "Back is dead at the root" rather than only its absence.
-                    ui_driver::mark(ui, back.rect, can_go_back, format_args!("enc:back"));
-                    if back.clicked() {
-                        action = Some(EncyclopediaAction::Back);
-                    }
-
-                    // Home NAMES its destination. Position no longer says where
-                    // "out" goes now that the button sits in the cluster rather
-                    // than alone at the far right, so the label has to — and
-                    // the destination is whatever context opened the
-                    // encyclopedia, not a fixed main menu.
-                    let home = ui.add(chrome_button(&home_label, TEXT));
-                    ui_driver::mark(ui, home.rect, true, format_args!("enc:home"));
-                    if home.clicked() {
-                        action = Some(EncyclopediaAction::Exit);
-                    }
-
-                    ui.add_space(CLUSTER_TITLE_GAP);
-                    ui.label(egui::RichText::new(TITLE).size(TITLE_SIZE).color(GOLD));
-                });
-            });
-
-            ui.add_space(10.0);
+            ui.add_space(space::MD);
 
             // --- Search: a primary control, not an afterthought ---
             // Full-width and tall on its own row. Search is one of the four
@@ -483,21 +422,17 @@ pub fn draw_encyclopedia(
                     // "×" rather than a heavier glyph: egui's default font has
                     // no coverage for most dingbats and draws them as tofu.
                     let has_query = !search.trim().is_empty();
-                    let clear = ui
-                        .add_enabled(
-                            has_query,
-                            egui::Button::new(egui::RichText::new("×").size(19.0).color(MUTED))
-                                .fill(PANEL)
-                                .stroke(egui::Stroke::new(1.0_f32, LINE))
-                                .min_size(egui::vec2(SEARCH_HEIGHT, SEARCH_HEIGHT)),
-                        )
+                    let clear = Button::new("×", Variant::Icon)
+                        .enabled(has_query)
+                        .driver_id("enc:clear-search")
+                        .show(ui)
                         .on_hover_text("Clear search");
                     if clear.clicked() {
                         search.clear();
                     }
-                    ui.add_space(6.0);
+                    ui.add_space(space::SM);
                     ui.add_sized(
-                        [ui.available_width(), SEARCH_HEIGHT],
+                        [ui.available_width(), size::SEARCH],
                         egui::TextEdit::singleline(search)
                             // An ABSOLUTE Id, not egui's positional default.
                             // The search field is the one widget on this screen
@@ -521,30 +456,32 @@ pub fn draw_encyclopedia(
                             .id(egui::Id::new(SEARCH_FIELD_ID))
                             .hint_text(
                                 egui::RichText::new("Search everything…")
-                                    .size(16.0)
-                                    .color(DIM),
+                                    .size(text::H3)
+                                    .color(color::TEXT_DIM),
                             )
-                            .font(egui::FontId::proportional(16.0))
-                            .margin(egui::Margin::symmetric(12, 8)),
+                            .font(egui::FontId::proportional(text::H3))
+                            .margin(margin_xy(space::MD, space::SM)),
                     );
                 });
             });
 
-            ui.add_space(10.0);
+            ui.add_space(space::MD);
 
             // --- Section tabs ---
+            // The kit's tabs: a page picker, never confused with the filter
+            // chips below it, which speak the chip's language instead.
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.spacing_mut().item_spacing.x = space::XS;
                 for section in Section::all() {
                     let on = current.section == *section && search.trim().is_empty();
-                    if tab_button(ui, section.label(), on).clicked() {
+                    if Tab::new(section.label()).active(on).show(ui).clicked() {
                         search.clear();
                         action = Some(EncyclopediaAction::Navigate(View::index(*section)));
                     }
                 }
             });
 
-            ui.add_space(6.0);
+            ui.add_space(space::SM);
 
             // --- Breadcrumbs ---
             ui.horizontal(|ui| {
@@ -552,16 +489,15 @@ pub fn draw_encyclopedia(
                     action = Some(nav);
                 }
             });
-            ui.add_space(6.0);
+            ui.add_space(space::SM);
         });
 
     egui::CentralPanel::default()
-        .frame(egui::Frame::new().fill(BG).inner_margin(egui::Margin {
-            left: 18,
-            right: 18,
-            top: 14,
-            bottom: 12,
-        }))
+        .frame(
+            egui::Frame::new()
+                .fill(color::BG)
+                .inner_margin(margin_xy(space::XL, space::LG)),
+        )
         .show(ctx, |ui| {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
@@ -597,110 +533,12 @@ pub fn draw_encyclopedia(
     action
 }
 
-/// Height of the search field and its clear button. Sized as a primary control.
-const SEARCH_HEIGHT: f32 = 34.0;
-
-/// The screen's title. Its laid-out height also sets the chrome row's height,
-/// so the title and the navigation cluster share a vertical centre no matter
-/// what size the title is given.
-const TITLE: &str = "ENCYCLOPEDIA";
-const TITLE_SIZE: f32 = 30.0;
-
-/// Gap BETWEEN the two cluster buttons — tight, so they read as one control
-/// group rather than two unrelated buttons that happen to be adjacent.
-const CLUSTER_GAP: f32 = 6.0;
-
-/// Gap between the cluster and the title. Wider than [`CLUSTER_GAP`], which is
-/// what makes the pair a cluster: the eye groups by relative spacing.
-const CLUSTER_TITLE_GAP: f32 = 18.0;
-
-/// The Back button's label. The triangle is U+25C0, a GEOMETRIC SHAPE — not an
-/// emoji. egui's font atlas is a single coverage channel, so a colour emoji can
-/// never render as text here (it comes out as tofu or a flat silhouette);
-/// glyphs on this screen must be plain font glyphs or image textures.
-const BACK_LABEL: &str = "\u{25c0} BACK";
-
-/// The Home button's glyph, U+1F3E0 HOUSE BUILDING.
-///
-/// It lives in the emoji block but it is NOT a colour emoji here: egui's
-/// default font stack falls through to NotoEmoji-**Regular**, a MONOCHROME
-/// outline font, so the house arrives as an ordinary single-channel glyph that
-/// tints to the label's colour like any other character. That fallthrough is
-/// the whole reason this codepoint and not U+2302 HOUSE — the "proper"
-/// Miscellaneous Technical one, which nothing in the default stack covers and
-/// which therefore draws as a tofu box (measured, `tests/encyclopedia_snapshot`).
-/// A COLOUR emoji font would still be impossible, per [`BACK_LABEL`]; the
-/// snapshot baselines are what pin the coverage.
-const HOME_GLYPH: &str = "\u{1f3e0}";
+/// The screen's title, as the shared header draws it.
+const TITLE: &str = "Encyclopedia";
 
 /// The search field's absolute egui `Id`. Stable by construction — see the
 /// comment at its `TextEdit`.
 const SEARCH_FIELD_ID: &str = "encyclopedia_search_field";
-
-/// The Home button's label: the house glyph plus the NAME of the screen it
-/// leaves to.
-///
-/// The destination is dynamic — the encyclopedia is an informational context
-/// entered from somewhere, so "out" means the main menu, the match setup, the
-/// results or the combatant sheet depending on who opened it. Naming it is
-/// what makes the button safe to press: in the cluster, position no longer
-/// hints at where it goes.
-fn home_label(return_to: GameState) -> String {
-    format!("{HOME_GLYPH} {}", return_to.screen_name().to_uppercase())
-}
-
-/// A chrome button in the screen's palette — the Back and Home affordances.
-fn chrome_button(label: &str, color: egui::Color32) -> egui::Button<'static> {
-    egui::Button::new(
-        egui::RichText::new(label.to_string())
-            .size(14.0)
-            .color(color),
-    )
-    .fill(PANEL)
-    .stroke(egui::Stroke::new(1.0_f32, LINE))
-}
-
-/// A section tab. Painted rather than a `selectable_label` so the tab row reads
-/// as chrome and cannot be confused with the filter chips below it.
-fn tab_button(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
-    let font = egui::FontId::proportional(14.5);
-    let width = ui
-        .painter()
-        .layout_no_wrap(label.to_string(), font.clone(), MUTED)
-        .size()
-        .x;
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(width + 28.0, 32.0), egui::Sense::click());
-    let painter = ui.painter_at(rect);
-
-    if active {
-        painter.rect_filled(rect, 5.0, PANEL);
-        painter.rect_stroke(
-            rect,
-            5.0,
-            egui::Stroke::new(1.0_f32, LINE),
-            egui::StrokeKind::Inside,
-        );
-    } else if response.hovered() {
-        painter.rect_filled(rect, 5.0, PANEL);
-    }
-    let color = if active {
-        GOLD
-    } else if response.hovered() {
-        TEXT
-    } else {
-        MUTED
-    };
-    painter.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        label,
-        font,
-        color,
-    );
-
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
 
 /// The `Encyclopedia › Section › Entity` trail. Every crumb but the last is a
 /// link back up the hierarchy.
@@ -738,9 +576,13 @@ fn breadcrumbs(
     action
 }
 
-fn crumb(ui: &mut egui::Ui, text: &str, here: bool) -> egui::Response {
-    let color = if here { TEXT } else { LINK };
-    let label = egui::Label::new(egui::RichText::new(text).size(13.5).color(color));
+fn crumb(ui: &mut egui::Ui, label: &str, here: bool) -> egui::Response {
+    let crumb_color = if here { color::TEXT } else { color::LINK };
+    let label = egui::Label::new(
+        egui::RichText::new(label)
+            .size(text::BODY)
+            .color(crumb_color),
+    );
     if here {
         ui.add(label)
     } else {
@@ -750,7 +592,11 @@ fn crumb(ui: &mut egui::Ui, text: &str, here: bool) -> egui::Response {
 }
 
 fn sep(ui: &mut egui::Ui) {
-    ui.label(egui::RichText::new("›").size(13.5).color(DIM));
+    ui.label(
+        egui::RichText::new("›")
+            .size(text::BODY)
+            .color(color::TEXT_DIM),
+    );
 }
 
 /// A section's index page. Returns the topic to open, if one was clicked.
@@ -788,6 +634,16 @@ mod tests {
     use crate::states::play_match::equipment::ItemId;
     use crate::states::play_match::AbilityType;
     use crate::ui::widgets::Nav;
+
+    /// The Home button's label for an encyclopedia opened from `return_to`:
+    /// what the shared header draws for the stacked nav.
+    fn home_label(return_to: GameState) -> String {
+        Nav::Stacked {
+            can_back: false,
+            return_to,
+        }
+        .exit_label()
+    }
 
     /// One press of the Back key, exactly as the wrapper runs it: the search
     /// rung, then the ladder the header's nav gives. True when it leaves.
@@ -935,10 +791,14 @@ mod tests {
     /// never deliver it whatever font is loaded.
     #[test]
     fn the_cluster_glyphs_are_the_codepoints_egui_can_actually_draw() {
-        assert_eq!(BACK_LABEL, "\u{25c0} BACK");
-        assert_eq!(HOME_GLYPH, "\u{1f3e0}");
+        let home = home_label(GameState::MainMenu);
+        assert!(home.starts_with("\u{1f3e0} "), "{home:?}");
+        assert_eq!(
+            Nav::Exit(GameState::MainMenu).exit_label(),
+            "\u{25c0} MAIN MENU"
+        );
 
-        for label in [BACK_LABEL.to_string(), home_label(GameState::MainMenu)] {
+        for label in [Nav::Exit(GameState::MainMenu).exit_label(), home] {
             assert!(
                 !label.contains('\u{fe0f}'),
                 "{label:?} asks for colour presentation, which egui cannot render"
@@ -949,7 +809,7 @@ mod tests {
     /// Back is a literal history pointer, and the cluster shows it DISABLED —
     /// never hidden — when there is no history, so the row cannot reflow under
     /// the cursor. [`EncyclopediaState::can_go_back`] is that enabled flag; the
-    /// draw feeds it straight to `add_enabled`, and the snapshot baselines pin
+    /// draw feeds it straight to the header's `Nav::Stacked`, and the snapshot baselines pin
     /// the rendering.
     #[test]
     fn back_is_disabled_rather_than_absent_when_there_is_no_history() {

@@ -206,6 +206,9 @@ pub mod size {
     pub const TAB: f32 = 30.0;
     /// A chip.
     pub const CHIP: f32 = 22.0;
+    /// A screen-wide search field: a primary control on a Document screen,
+    /// sized to say so.
+    pub const SEARCH: f32 = 34.0;
     /// A resource bar's thickness.
     pub const BAR: f32 = 8.0;
     /// The widest a tooltip grows before it wraps.
