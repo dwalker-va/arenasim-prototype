@@ -650,8 +650,9 @@ fn every_shipped_script_parses() {
 // THE PURE SEAMS OF THE RUNNER
 //
 // The runner's frame loop needs a window and cannot be unit-tested; it is
-// covered by running the scripts. Its two pure decisions can be, and both
-// carry a fix a later "simplification" could quietly undo.
+// covered by running the scripts. Its pure decisions can be, and each carries
+// a fix a later "simplification" could quietly undo. (`pointer_step`, the
+// third, is driven below and by `tests/view_combatant_snapshot.rs`.)
 // ===========================================================================
 
 fn frame_with(widgets: Vec<(&str, bool, bool)>, notes: Vec<&str>) -> registry::Frame {
@@ -1383,4 +1384,96 @@ fn ui_script_conflicts_with_every_windowless_mode() {
         args(&["arenasim", "--headless", "m.json"]).ui_script_conflict(),
         None
     );
+}
+
+// ===========================================================================
+// THE CLICK-REST WAIT, IN SECONDS
+// ===========================================================================
+
+/// How long after a click the driver's hover holds its pointer move, at a
+/// frame interval of `dt`: egui's click clock, in seconds, on the first frame
+/// `runner::pointer_step` lets `AwaitClickRest` finish, and on the frame before.
+///
+/// A bare `egui::Context` driven at `dt`: one click (press, release) at the
+/// centre of the screen, then `AwaitClickRest` asked once a frame — through
+/// `pointer_step`, the runner's own decision — until it finishes.
+fn click_rest_at(dt: f32) -> (f32, f32) {
+    use arenasim::ui::driver::runner::{Micro, Progress};
+
+    let ctx = egui::Context::default();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let at = screen.center();
+    let mut time = 0.0_f64;
+    let mut pass = |events: Vec<egui::Event>| {
+        time += f64::from(dt);
+        let input = egui::RawInput {
+            screen_rect: Some(screen),
+            time: Some(time),
+            predicted_dt: dt,
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |_| {});
+        });
+    };
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    pass(vec![egui::Event::PointerMoved(at)]);
+    pass(vec![button(true)]);
+    pass(vec![button(false)]);
+    let since_click = || ctx.input(|i| i.pointer.time_since_last_click());
+    assert!(
+        since_click() < dt,
+        "the release must register as a click, or there is nothing to wait out"
+    );
+
+    let mut cursor = at;
+    let mut last_seen = None;
+    let frame = registry::Frame::default();
+    let mut before = since_click();
+    for _ in 0..10_000 {
+        let step = runner::pointer_step(
+            &Micro::AwaitClickRest,
+            &frame,
+            &ctx,
+            &mut cursor,
+            &mut last_seen,
+        )
+        .expect("a pointer action");
+        assert!(step.inject.is_empty(), "the wait moves nothing: {step:?}");
+        if step.progress == Progress::Done {
+            return (since_click(), before);
+        }
+        before = since_click();
+        pass(Vec::new());
+    }
+    panic!("AwaitClickRest never finished at dt={dt}");
+}
+
+/// A hover's pointer move waits until egui's click clock is past 0.1s — at
+/// 240 frames a second and at 20 alike, so the wait is in egui's seconds, not
+/// in frames (a frame-count wait gives one of the two rates a wrong answer).
+///
+/// A move made sooner can read to egui as the pointer resting after the
+/// click, and then no tooltip follows however long it rests (AS-289).
+#[test]
+fn a_hover_waits_out_the_click_rest_in_seconds_at_any_frame_rate() {
+    for dt in [1.0 / 240.0, 1.0 / 20.0] {
+        let (opened, before) = click_rest_at(dt);
+        assert!(
+            opened > 0.1,
+            "at dt={dt} the move was let go {opened}s after the click, inside \
+             egui's 0.1s click rest"
+        );
+        assert!(
+            before <= 0.1 + 1e-4,
+            "at dt={dt} the wait was still shut {before}s after the click, past \
+             the 0.1s it waits for"
+        );
+    }
 }

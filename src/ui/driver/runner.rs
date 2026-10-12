@@ -373,14 +373,21 @@ const EGUI_CLICK_REST_SECS: f32 = 0.1;
 /// than as the pointer resting after the last click.
 ///
 /// egui withholds a tooltip while `time_since_last_click <
-/// time_since_last_movement + 0.1`. Both clocks advance together, so a move
-/// that lands inside 0.1s of a click shuts that gate for as long as the
-/// pointer then stays put — and a hover is one move, then stillness. Whether
-/// it landed inside the window was a race: View Combatant's
-/// `click slot:t1s0` then `hover kit:...` is a state transition, a settle and
-/// a two-frame rect check, about 0.1s at 60fps. It lost intermittently in a
-/// 1280x720 window (AS-289). Waiting on egui's own clock settles it.
-fn click_rest_gate(ctx: &egui::Context) -> Result<(), &'static str> {
+/// time_since_last_movement + 0.1`, and dates the last movement to the last
+/// frame on which its 0.1s velocity window still saw the pointer moving. A
+/// hover is one move, then stillness, so a move made within 0.1s of a click
+/// keeps the tooltip back when that window empties before the click is 0.1s
+/// old — which takes a long frame (about 0.08s or more) after the move. The
+/// suppression then lasts for as long as the pointer rests. View Combatant's
+/// `click slot:t1s0` then `hover kit:...` puts the move about 0.1s after the
+/// click at 60fps, and in a 1280x720 window a long frame after it failed the
+/// hover intermittently (AS-289). Waiting until egui's own click clock is
+/// past 0.1s before moving takes the frame timing out of it: the last
+/// movement is then later than that, whatever the frames do.
+///
+/// Pure and `pub`, so `tests/ui_driver.rs` can show the wait is measured in
+/// egui's seconds at any frame rate.
+pub fn click_rest_gate(ctx: &egui::Context) -> Result<(), &'static str> {
     if ctx.input(|i| i.pointer.time_since_last_click()) <= EGUI_CLICK_REST_SECS {
         return Err("the last click is too recent: egui would read the move as resting after it");
     }
@@ -496,134 +503,57 @@ pub fn run_ui_script(
     // its own pass through bevy_egui and egui.
     let action = run.queue.pop_front().expect("queue is non-empty here");
 
+    // The pointer actions — `Move`, `AwaitClickRest`, `SettleForTooltip` —
+    // decide ENTIRELY in `pointer_step`, asked before anything else, which is
+    // pure so the default tests drive this exact code. All the runner does
+    // with them is inject what it asks for and count the wait; there is no
+    // match arm here that could answer one instead.
+    let run = &mut *run;
+    if let Some(PointerStep { progress, inject }) =
+        pointer_step(&action, &frame, &ctx, &mut run.cursor, &mut run.last_seen)
+    {
+        for event in inject {
+            match event {
+                Inject::Pointer { to, delta } => {
+                    cursor_moved.write(CursorMoved {
+                        window,
+                        position: Vec2::new(to.x * scale, to.y * scale),
+                        delta: Some(Vec2::new(delta.x * scale, delta.y * scale)),
+                    });
+                }
+                Inject::Wheel { lines } => {
+                    mouse_wheel.write(MouseWheel {
+                        unit: MouseScrollUnit::Line,
+                        x: 0.0,
+                        y: lines,
+                        window,
+                    });
+                }
+            }
+        }
+        match progress {
+            Progress::Done => run.waiting = 0,
+            Progress::Again { stuck } => {
+                run.waiting += 1;
+                if run.waiting > run.timeout {
+                    let timeout = run.timeout;
+                    run.fail(format!("{stuck} (waited {timeout} frames)"));
+                    commands.entity(window).despawn();
+                    return;
+                }
+                run.queue.push_front(action);
+            }
+        }
+        registry::arm(&ctx);
+        return;
+    }
+
     match action {
         Micro::Idle(0) => {}
         Micro::Idle(n) => run.queue.push_front(Micro::Idle(n - 1)),
-        Micro::AwaitClickRest => match click_rest_gate(&ctx) {
-            Ok(()) => run.waiting = 0,
-            Err(shut) => {
-                run.waiting += 1;
-                if run.waiting > run.timeout {
-                    let timeout = run.timeout;
-                    run.fail(format!(
-                        "waited {timeout} frames to move the pointer for a hover: {shut}"
-                    ));
-                    commands.entity(window).despawn();
-                    return;
-                }
-                run.queue.push_front(Micro::AwaitClickRest);
-            }
-        },
-        Micro::SettleForTooltip => match tooltip_gate(&ctx) {
-            Ok(()) => run.waiting = 0,
-            Err(shut) => {
-                run.waiting += 1;
-                if run.waiting > run.timeout {
-                    let timeout = run.timeout;
-                    run.fail(format!(
-                        "waited {timeout} frames for egui to be willing to show a \
-                         tooltip and it never was: {shut}"
-                    ));
-                    commands.entity(window).despawn();
-                    return;
-                }
-                run.queue.push_front(Micro::SettleForTooltip);
-            }
-        },
-        // Aim only at a point that is ON the widget: `aim_point`, not
-        // `visible`. A tile straddling the bottom of a 1280x720 window is
-        // visible by a few points while its centre is below the window, and
-        // a pointer sent there hovers nothing (AS-289).
-        Micro::Move { id } => match frame.widget(&id) {
-            Some(widget) if widget.aim_point().is_some() => {
-                // AIM ONLY AT A RECT THAT HAS STOPPED MOVING. The snapshot is
-                // one frame old, and a scroll (egui's is smooth, so it keeps
-                // running for a frame or two after the last wheel event) moves
-                // the row out from under the coordinate we read. The first run
-                // of the equipment script clicked Trinket1 because Ring1 had
-                // slid exactly one wheel line — the worst failure mode, since
-                // the click lands on SOMETHING and looks like it worked.
-                let stable = run.last_seen.as_ref() == Some(&(id.clone(), widget.rect));
-                if !stable {
-                    run.last_seen = Some((id.clone(), widget.rect));
-                    run.waiting += 1;
-                    if run.waiting > run.timeout {
-                        let timeout = run.timeout;
-                        run.fail(format!(
-                            "widget `{id}` never stopped moving ({timeout} frames)"
-                        ));
-                        commands.entity(window).despawn();
-                        return;
-                    }
-                    run.queue.push_front(Micro::Move { id });
-                } else {
-                    let target = widget.rect.center();
-                    let delta = target - run.cursor;
-                    run.cursor = target;
-                    cursor_moved.write(CursorMoved {
-                        window,
-                        position: Vec2::new(target.x * scale, target.y * scale),
-                        delta: Some(Vec2::new(delta.x * scale, delta.y * scale)),
-                    });
-                    run.last_seen = None;
-                    run.waiting = 0;
-                }
-            }
-            // Laid out but clipped, wholly or in part: scroll toward it
-            // instead of pointing at a coordinate that is showing something
-            // else, or at no part of the window at all.
-            Some(widget) => {
-                let screen = ctx.screen_rect();
-                let below = widget.rect.center().y > screen.center().y;
-                // The wheel goes to whatever the pointer is over, so park it
-                // mid-screen — over the scroll area, not over the chrome.
-                let park = screen.center();
-                if run.cursor != park {
-                    let delta = park - run.cursor;
-                    run.cursor = park;
-                    cursor_moved.write(CursorMoved {
-                        window,
-                        position: Vec2::new(park.x * scale, park.y * scale),
-                        delta: Some(Vec2::new(delta.x * scale, delta.y * scale)),
-                    });
-                }
-                mouse_wheel.write(MouseWheel {
-                    unit: MouseScrollUnit::Line,
-                    x: 0.0,
-                    // egui's convention matches a real wheel: positive y moves
-                    // the content down, so revealing something BELOW the
-                    // viewport needs a negative delta.
-                    y: if below { -SCROLL_LINES } else { SCROLL_LINES },
-                    window,
-                });
-                run.waiting += 1;
-                if run.waiting > run.timeout {
-                    let timeout = run.timeout;
-                    run.fail(format!(
-                        "widget `{id}` is laid out but never scrolled into view \
-                         ({timeout} frames)"
-                    ));
-                    commands.entity(window).despawn();
-                    return;
-                }
-                run.queue.push_front(Micro::Move { id });
-            }
-            None => {
-                // Not drawn yet. Put the move back and try again next frame.
-                run.waiting += 1;
-                if run.waiting > run.timeout {
-                    let known = describe_widgets(&frame);
-                    let timeout = run.timeout;
-                    run.fail(format!(
-                        "widget `{id}` never appeared ({timeout} frames). \
-                         Registered on the last frame: {known}"
-                    ));
-                    commands.entity(window).despawn();
-                    return;
-                }
-                run.queue.push_front(Micro::Move { id });
-            }
-        },
+        Micro::Move { .. } | Micro::AwaitClickRest | Micro::SettleForTooltip => {
+            unreachable!("pointer_step answered {action:?} above")
+        }
         Micro::Press(button) => {
             mouse_buttons.write(MouseButtonInput {
                 button: mouse_button_of(button),
@@ -702,6 +632,142 @@ pub fn run_ui_script(
     }
 
     registry::arm(&ctx);
+}
+
+/// What a pointer action asks the runner to inject this frame.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Inject {
+    /// Move the pointer to `to` (egui points), `delta` from where it was.
+    Pointer { to: egui::Pos2, delta: egui::Vec2 },
+    /// One wheel event, in lines. egui's convention matches a real wheel:
+    /// positive moves the content down, revealing what is ABOVE.
+    Wheel { lines: f32 },
+}
+
+/// Whether a pointer action is finished.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Progress {
+    /// Finished: go on to the next action.
+    Done,
+    /// Run it again next frame. `stuck` says what it is waiting on, for the
+    /// failure message if it waits past the step timeout.
+    Again { stuck: String },
+}
+
+/// One frame of a pointer action: what to inject, and whether it is done.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PointerStep {
+    pub progress: Progress,
+    pub inject: Vec<Inject>,
+}
+
+/// Decide one frame of a pointer action — `Move`, `AwaitClickRest` or
+/// `SettleForTooltip` — against the last drawn `frame` and egui's input state.
+/// `None` for any other action.
+///
+/// Pure, and `pub` on purpose, like [`evaluate`]: `run_ui_script` only injects
+/// what this returns and counts frames, so the default tests drive the
+/// driver's own aim, scroll and wait decisions over a bare `egui::Context`
+/// rather than a copy of them (`tests/view_combatant_snapshot.rs`,
+/// `tests/ui_driver.rs`). `cursor` is where the synthetic pointer sits, and
+/// `last_seen` the target rect seen on the previous frame.
+pub fn pointer_step(
+    action: &Micro,
+    frame: &Frame,
+    ctx: &egui::Context,
+    cursor: &mut egui::Pos2,
+    last_seen: &mut Option<(String, egui::Rect)>,
+) -> Option<PointerStep> {
+    let done = || PointerStep {
+        progress: Progress::Done,
+        inject: Vec::new(),
+    };
+    let again = |stuck: String, inject: Vec<Inject>| PointerStep {
+        progress: Progress::Again { stuck },
+        inject,
+    };
+    let step = match action {
+        Micro::AwaitClickRest => match click_rest_gate(ctx) {
+            Ok(()) => done(),
+            Err(shut) => again(
+                format!("never free to move the pointer for a hover: {shut}"),
+                Vec::new(),
+            ),
+        },
+        Micro::SettleForTooltip => match tooltip_gate(ctx) {
+            Ok(()) => done(),
+            Err(shut) => again(
+                format!("egui was never willing to show a tooltip: {shut}"),
+                Vec::new(),
+            ),
+        },
+        Micro::Move { id } => match frame.widget(id) {
+            // Aim only at a point that is ON the widget: `aim_point`, not
+            // `visible`. A tile straddling the bottom of a 1280x720 window is
+            // visible by a few points while its centre is below the window,
+            // and a pointer sent there hovers nothing (AS-289).
+            Some(widget) if widget.aim_point().is_some() => {
+                // AIM ONLY AT A RECT THAT HAS STOPPED MOVING. The snapshot is
+                // one frame old, and a scroll (egui's is smooth, so it keeps
+                // running for a frame or two after the last wheel event) moves
+                // the row out from under the coordinate we read. The first run
+                // of the equipment script clicked Trinket1 because Ring1 had
+                // slid exactly one wheel line — the worst failure mode, since
+                // the click lands on SOMETHING and looks like it worked.
+                let seen = (id.clone(), widget.rect);
+                if last_seen.as_ref() != Some(&seen) {
+                    *last_seen = Some(seen);
+                    again(format!("widget `{id}` never stopped moving"), Vec::new())
+                } else {
+                    let to = widget.rect.center();
+                    let delta = to - *cursor;
+                    *cursor = to;
+                    *last_seen = None;
+                    PointerStep {
+                        progress: Progress::Done,
+                        inject: vec![Inject::Pointer { to, delta }],
+                    }
+                }
+            }
+            // Laid out but clipped, wholly or in part: scroll toward it
+            // instead of pointing at a coordinate that is showing something
+            // else, or at no part of the window at all.
+            Some(widget) => {
+                let screen = ctx.screen_rect();
+                let below = widget.rect.center().y > screen.center().y;
+                let mut inject = Vec::new();
+                // The wheel goes to whatever the pointer is over, so park it
+                // mid-screen — over the scroll area, not over the chrome.
+                let park = screen.center();
+                if *cursor != park {
+                    inject.push(Inject::Pointer {
+                        to: park,
+                        delta: park - *cursor,
+                    });
+                    *cursor = park;
+                }
+                // Revealing something BELOW the viewport moves the content up:
+                // a negative delta.
+                inject.push(Inject::Wheel {
+                    lines: if below { -SCROLL_LINES } else { SCROLL_LINES },
+                });
+                again(
+                    format!("widget `{id}` is laid out but never scrolled into view"),
+                    inject,
+                )
+            }
+            // Not drawn yet: try again next frame.
+            None => again(
+                format!(
+                    "widget `{id}` never appeared. Registered on the last frame: {}",
+                    describe_widgets(frame)
+                ),
+                Vec::new(),
+            ),
+        },
+        _ => return None,
+    };
+    Some(step)
 }
 
 /// Evaluate one assertion against the last drawn frame.

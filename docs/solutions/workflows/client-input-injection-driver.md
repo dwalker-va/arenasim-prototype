@@ -265,9 +265,9 @@ aimed at their centre, below the window, hovered nothing and reported no
 tooltip (AS-289). `aim_point` is the centre only once the whole rect is inside
 its clip rect, so a straddling target is scrolled further in first.
 `every_tooltip_shows_at_the_default_window_size` in
-`tests/view_combatant_snapshot.rs` runs that rule against the real screen at
-1280x720 in the default `cargo test`, hovering every kit row, choice tile and
-worn item for every class.
+`tests/view_combatant_snapshot.rs` hovers every kit row, choice tile and worn
+item for every class on the real screen at 1280x720, in the default `cargo
+test`, through the driver's own `pointer_step` (below).
 
 **2. A tooltip is not a function of position, and it is not a function of
 FRAMES.** This one was got wrong twice, and the second time is the more
@@ -320,14 +320,16 @@ negative means passing on the frame before the thing appears.
 
 One of those gates also bites the MOVE, not only the wait after it. egui
 withholds a tooltip while `time_since_last_click < time_since_last_movement +
-0.1`, and both clocks advance together, so a move landing within 0.1s of a
-click shuts the gate for as long as the pointer then rests — and `hover` is
-one move, then rest. `click slot:t1s0` then `hover kit:...` is a state
-transition, a settle and the two-frame rect check, about 0.1s at 60fps; in a
-1280x720 window it lost that race intermittently, failing at a different
-class's first hover each run (AS-289). `hover` now starts with
-`AwaitClickRest`, which holds the move until egui's own click clock is past
-0.1s.
+0.1`, and dates the last movement to the last frame on which its 0.1s velocity
+window still saw the pointer moving. So a move made within 0.1s of a click
+keeps the tooltip back when that window empties before the click is 0.1s old —
+which takes a long frame (about 0.08s or more) after the move — and then for as
+long as the pointer rests, since `hover` is one move, then rest. `click
+slot:t1s0` then `hover kit:...` is a state transition, a settle and the
+two-frame rect check, about 0.1s at 60fps; in a 1280x720 window a long frame
+after it failed the hover intermittently, at a different class's first hover
+each run (AS-289). `hover` now starts with `AwaitClickRest`, which holds the
+move until egui's own click clock is past 0.1s, whatever the frames do.
 
 All three traps share a shape: the driver observed a state that was still
 changing. When a new assertion is flaky, suspect that before suspecting the
@@ -403,14 +405,19 @@ anything under `src/ui/driver/`.
 ## What is covered by a test, and what only by running
 
 `tests/ui_driver.rs` covers the parser, the registry (including both halves of
-inertness), and the runner's two PURE seams: `expand`, which decides what a
-step costs in frames, and `evaluate`, which decides every `assert-*` verb.
+inertness), and the runner's three PURE seams: `expand`, which decides what a
+step costs in frames, `evaluate`, which decides every `assert-*` verb, and
+`pointer_step`, which decides each frame of a pointer action — the aim, the
+scroll-to-reveal, the rect-stability gate and the two waits (`AwaitClickRest`,
+`tooltip_gate`). `run_ui_script` only injects what `pointer_step` returns and
+counts frames, so `tests/view_combatant_snapshot.rs` drives the real decision
+code over a bare `egui::Context`, and `tests/ui_driver.rs` shows the click-rest
+wait is in seconds at 240 and 20 frames a second.
 
-**The runner's frame loop is not covered by any test.** It needs a window, so
-the scroll-to-reveal arm, the rect-stability gate, `tooltip_gate` and the
-event injection itself are established only by running the scripts. Treat a
-change in `run_ui_script` as unverified until all three scripts pass against
-the client.
+**The rest of the frame loop is not covered by any test.** It needs a window,
+so the event injection itself, the timeout counting and the step sequencing are
+established only by running the scripts. Treat a change in `run_ui_script` as
+unverified until the scripts pass against the client.
 
 **And a green script run is evidence about the machine that ran it.** This
 card shipped a frame-count settle that two agents verified green on a loaded

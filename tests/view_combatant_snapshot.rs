@@ -38,6 +38,8 @@ use arenasim::states::view_combatant_ui::{
 };
 use arenasim::states::GameState;
 use arenasim::ui::driver::registry;
+use arenasim::ui::driver::runner::{self, Inject, Micro, PointerStep, Progress};
+use arenasim::ui::driver::script::Step;
 use arenasim::ui::widgets::Nav;
 
 /// Tall enough that the whole sheet — header, stats and kit, the class's
@@ -99,23 +101,32 @@ fn view_combatant_warlock() {
 /// Windowed, `HD720`).
 const DEFAULT_WINDOW: [f32; 2] = [1280.0, 720.0];
 
-/// One simulated frame. Sixty a second, like the client under vsync; the
-/// waits below are in sim SECONDS, so the rate only sets their resolution.
+/// One simulated frame. Sixty a second, like the client under vsync; every
+/// wait the driver makes is in egui's SECONDS, so the rate only sets their
+/// resolution.
 const DT: f32 = 1.0 / 60.0;
 
-/// How long any one wait below may run before the test calls it stuck, in
-/// sim seconds. A ceiling, not a settle: each wait ends on its condition.
+/// How long any one pointer action may wait before the test calls it stuck,
+/// in sim seconds. A ceiling, not a settle: each wait ends on its condition.
 const WAIT_LIMIT_SECS: f64 = 10.0;
 
-/// Wheel lines per scrolling frame — what the driver sends.
-const SCROLL_LINES: f32 = 3.0;
+/// The driver's per-step settle, in frames — `UiDriverConfig`'s default.
+const SETTLE_FRAMES: u32 = 3;
 
-/// The View Combatant screen in a bare egui context, driven the way
-/// `--ui-script` drives the client: the same registry, the same aim rule
-/// (`Widget::aim_point`), wheel events to scroll, a pointer move to hover.
+/// The View Combatant screen in a bare egui context, driven by the
+/// `--ui-script` driver's OWN code: `runner::expand` turns a `hover` into its
+/// actions and `runner::pointer_step` decides each frame of them — the aim,
+/// the scroll, the waits — exactly as `run_ui_script` does in the client.
+/// All this harness adds is the translation of what it injects into egui
+/// events, which bevy_egui does in the client.
 struct Sheet<'a> {
     ctx: egui::Context,
     time: f64,
+    /// What the last pass registered: the driver decides from the frame
+    /// before, as it does in the client.
+    last: registry::Frame,
+    cursor: egui::Pos2,
+    last_seen: Option<(String, egui::Rect)>,
     view: ViewCombatantState,
     config: MatchConfig,
     picker: EquipmentPickerState,
@@ -123,16 +134,15 @@ struct Sheet<'a> {
 }
 
 impl Sheet<'_> {
-    fn screen() -> egui::Rect {
-        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::from(DEFAULT_WINDOW))
-    }
-
-    /// Run one frame with `events`, and return what it registered.
-    fn frame(&mut self, events: Vec<egui::Event>) -> registry::Frame {
+    /// Run one frame with `events`, and keep what it registered.
+    fn frame(&mut self, events: Vec<egui::Event>) {
         registry::arm(&self.ctx);
         self.time += f64::from(DT);
         let input = egui::RawInput {
-            screen_rect: Some(Self::screen()),
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::from(DEFAULT_WINDOW),
+            )),
             time: Some(self.time),
             predicted_dt: DT,
             events,
@@ -150,69 +160,61 @@ impl Sheet<'_> {
                 Nav::Return(GameState::ConfigureMatch),
             );
         });
-        registry::snapshot(&self.ctx).expect("armed")
+        self.last = registry::snapshot(&self.ctx).expect("armed");
     }
 
-    /// Scroll `id` into view as the driver does — wheel toward it until it
-    /// can be aimed at and has stopped moving — and return the point to aim at.
-    fn reveal(&mut self, id: &str) -> egui::Pos2 {
-        let start = self.time;
-        let mut last: Option<egui::Rect> = None;
-        let mut events = Vec::new();
-        loop {
-            assert!(
-                self.time - start < WAIT_LIMIT_SECS,
-                "{id} never came wholly into view at {DEFAULT_WINDOW:?}"
-            );
-            let frame = self.frame(std::mem::take(&mut events));
-            let widget = frame
-                .widget(id)
-                .unwrap_or_else(|| panic!("{id} is not drawn"))
-                .clone();
-            match widget.aim_point() {
-                // Aim only at a rect that has stopped moving: egui's scroll
-                // is smooth, and runs on after the last wheel event.
-                Some(point) if last == Some(widget.rect) => return point,
-                Some(_) => last = Some(widget.rect),
-                None => {
-                    last = None;
-                    let screen = Self::screen();
-                    let below = widget.rect.center().y > screen.center().y;
-                    events.push(egui::Event::PointerMoved(screen.center()));
-                    events.push(egui::Event::MouseWheel {
-                        unit: egui::MouseWheelUnit::Line,
-                        delta: egui::vec2(0.0, if below { -SCROLL_LINES } else { SCROLL_LINES }),
-                        modifiers: egui::Modifiers::default(),
-                    });
+    /// Run a script `hover` of `id` through the driver, then answer what
+    /// `assert-note` would: whether the last drawn frame carries `note`.
+    fn hover_shows(&mut self, id: &str, note: &str) -> bool {
+        let hover = Step::Hover { id: id.to_string() };
+        for action in runner::expand(&hover, SETTLE_FRAMES) {
+            if let Micro::Idle(n) = action {
+                for _ in 0..n {
+                    self.frame(Vec::new());
+                }
+                continue;
+            }
+            let start = self.time;
+            loop {
+                let PointerStep { progress, inject } = runner::pointer_step(
+                    &action,
+                    &self.last,
+                    &self.ctx,
+                    &mut self.cursor,
+                    &mut self.last_seen,
+                )
+                .unwrap_or_else(|| panic!("a hover expanded into {action:?}"));
+                let events = inject
+                    .into_iter()
+                    .map(|event| match event {
+                        Inject::Pointer { to, .. } => egui::Event::PointerMoved(to),
+                        Inject::Wheel { lines } => egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Line,
+                            delta: egui::vec2(0.0, lines),
+                            modifiers: egui::Modifiers::default(),
+                        },
+                    })
+                    .collect();
+                self.frame(events);
+                match progress {
+                    Progress::Done => break,
+                    Progress::Again { stuck } => assert!(
+                        self.time - start < WAIT_LIMIT_SECS,
+                        "hovering {id} in a {DEFAULT_WINDOW:?} window: {stuck}"
+                    ),
                 }
             }
         }
-    }
-
-    /// Hover `id` and wait — on the condition, up to [`WAIT_LIMIT_SECS`] of
-    /// sim time — for a frame whose notes carry `note`.
-    fn hover_shows(&mut self, id: &str, note: &str) {
-        let point = self.reveal(id);
-        let start = self.time;
-        let mut events = vec![egui::Event::PointerMoved(point)];
-        while self.time - start < WAIT_LIMIT_SECS {
-            if self.frame(std::mem::take(&mut events)).has_note(note) {
-                return;
-            }
-        }
-        panic!(
-            "hovering {id} at {point:?} in a {DEFAULT_WINDOW:?} window never showed \
-             its tooltip ({note})"
-        );
+        self.last.has_note(note)
     }
 }
 
 /// Every View Combatant tooltip shows in a 1280x720 window: each kit row,
 /// each pre-match choice tile that is an ability, and each worn item's row,
-/// for every class. Each is scrolled into view and hovered the way
-/// `--ui-script` does it, so a target the driver cannot reach — or reaches
-/// and points off the window, as it did the Warrior's shout tiles straddling
-/// the bottom edge (AS-289) — fails here rather than only in a client run.
+/// for every class. Each is hovered by the `--ui-script` driver's own code,
+/// so a target the driver cannot reach — or reaches and points off the window,
+/// as it did the Warrior's shout tiles straddling the bottom edge (AS-289) —
+/// fails here rather than only in a client run.
 #[test]
 fn every_tooltip_shows_at_the_default_window_size() {
     let abilities = load_ability_definitions().expect("abilities.ron must load");
@@ -230,6 +232,9 @@ fn every_tooltip_shows_at_the_default_window_size() {
         let mut sheet = Sheet {
             ctx,
             time: 0.0,
+            last: registry::Frame::default(),
+            cursor: egui::Pos2::ZERO,
+            last_seen: None,
             view: ViewCombatantState {
                 class,
                 team: 1,
@@ -249,19 +254,24 @@ fn every_tooltip_shows_at_the_default_window_size() {
         };
 
         // A few passes, so anything egui sizes from the previous frame settles.
-        let mut frame = sheet.frame(vec![]);
-        for _ in 0..3 {
-            frame = sheet.frame(vec![]);
+        for _ in 0..4 {
+            sheet.frame(Vec::new());
         }
 
-        let targets = hover_targets(&frame);
+        let targets = hover_targets(&sheet.last);
         assert!(
             targets.iter().any(|(id, _)| id.starts_with("kit:"))
                 && targets.iter().any(|(id, _)| id.starts_with("equip:")),
             "{class:?}: found no kit or equipment rows to hover: {targets:?}"
         );
         for (id, note) in targets {
-            sheet.hover_shows(&id, &note);
+            assert!(
+                sheet.hover_shows(&id, &note),
+                "{class:?}: hovering {id} in a {DEFAULT_WINDOW:?} window showed no \
+                 tooltip ({note}). Pointer at {:?}; notes: {:?}",
+                sheet.cursor,
+                sheet.last.notes
+            );
         }
     }
 }
