@@ -49,11 +49,11 @@ use super::components::{
 };
 use super::constants::{GCD, LOW_HP_THRESHOLD, MELEE_RANGE, SAFE_KITING_DISTANCE};
 use super::decision_trace::RejectionReason;
+use super::is_spell_school_locked;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume};
 use super::match_config::CharacterClass;
 use super::situation::{classify_roster, MatchClock, SituationConfig, TeamSituation};
 use super::utils::log_ability_use;
-use super::{is_silenced, is_spell_school_locked};
 use crate::combat::log::CombatLog;
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
@@ -1998,39 +1998,23 @@ pub fn try_dispel_ally(
 ) -> bool {
     let def = abilities.get_unchecked(&ability_type);
 
-    // Check if spell school is locked out
-    if is_spell_school_locked(def.spell_school, auras) {
-        trace.reject(
-            ability_type,
-            RejectionReason::SilencedOrLocked {
-                school: def.spell_school,
-            },
-        );
-        return false;
-    }
-    // Silence gate (UA backlash). The dispel helper bypasses can_cast_config and
-    // deducts mana directly, so this check must live here — otherwise a silenced
-    // healer would still successfully dispel.
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        trace.reject(
-            ability_type,
-            RejectionReason::SilencedOrLocked {
-                school: def.spell_school,
-            },
-        );
-        return false;
-    }
-
-    if combatant.current_mana < def.mana_cost {
-        trace.reject(
-            ability_type,
-            RejectionReason::InsufficientMana {
-                have: combatant.current_mana,
-                need: def.mana_cost,
-            },
-        );
-        return false;
-    }
+    // The caster's own gates; the ally it reaches is the scan's below.
+    let cleared = match cast_guard::cast_gate(
+        ability_type,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        cast_guard::PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            trace.reject(ability_type, reason);
+            return false;
+        }
+    };
 
     let AllyRemoval { scope, .. } =
         ally_removal(ability_type).expect("the healers' dispels free allies");
@@ -2061,7 +2045,7 @@ pub fn try_dispel_ally(
         return false;
     };
 
-    trace.choose(ability_type, Some(dispel_target), true);
+    trace.choose(cleared, Some(dispel_target), true);
 
     // Execute the ability
     combatant.current_mana -= def.mana_cost;
@@ -2127,7 +2111,7 @@ pub fn try_purge_enemy(
     min_priority: i32,
     trace: &mut crate::states::play_match::decision_trace::DecisionEventBuilder<'_>,
 ) -> bool {
-    use self::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
+    use self::cast_guard::{cast_gate, unreached_reason, PreCastOpts};
 
     let ability = AbilityType::Purge;
     let def = abilities.get_unchecked(&ability);
@@ -2167,7 +2151,7 @@ pub fn try_purge_enemy(
 
     // Universal pre-cast guard (lockout / silence / cooldown / mana / range /
     // target immunity).
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -2177,23 +2161,14 @@ pub fn try_purge_enemy(
         ctx,
         opts,
     ) {
-        trace.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            trace.reject(ability, reason);
+            return false;
+        }
+    };
 
-    trace.choose(ability, Some(target_entity), true);
+    trace.choose(cleared, Some(target_entity), true);
 
     // Execute.
     combatant.current_mana -= def.mana_cost;

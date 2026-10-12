@@ -7,6 +7,7 @@
 use bevy::prelude::*;
 
 use super::super::utils::pet_combatant_id;
+use super::cast_guard::{cast_gate, PreCastOpts};
 use super::CombatContext;
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
@@ -271,46 +272,67 @@ pub fn pet_ai_system(
 
             let ability = command.ability;
             if let Some(def) = abilities.get(&ability) {
-                let rejection =
-                    pet_command_rejection(ability, def, &combatant, my_pos, command.target, &ctx);
-                if let Some(reason) = rejection {
-                    builder.reject(ability, reason);
-                } else {
-                    builder.choose(ability, Some(command.target), true);
-                    match ability {
-                        AbilityType::SpiderWeb => execute_spider_web(
-                            &mut commands,
-                            &mut combat_log,
-                            def,
-                            &abilities,
-                            entity,
-                            &mut combatant,
-                            my_pos,
-                            command.target,
-                        ),
-                        AbilityType::BoarCharge => execute_boar_charge(
-                            &mut commands,
-                            &mut combat_log,
-                            def,
-                            &abilities,
-                            entity,
-                            &mut combatant,
-                            command.target,
-                        ),
-                        AbilityType::MastersCall => execute_masters_call(
-                            &mut commands,
-                            &mut combat_log,
-                            def,
-                            &abilities,
-                            entity,
-                            &mut combatant,
-                            command.target,
-                        ),
-                        _ => {
-                            // Unsupported ability via PetCommand. Drop with no
-                            // execution; the builder's `choose` is already set
-                            // so the trace will record an unintended cast —
-                            // this path should be unreachable in normal flow.
+                // The pet's own gate (its auras, its cooldowns) after the
+                // command's re-check: the dispatch was an order, this is the cast.
+                let gate = match pet_command_rejection(
+                    ability,
+                    def,
+                    &combatant,
+                    my_pos,
+                    command.target,
+                    &ctx,
+                ) {
+                    Some(reason) => Err(reason),
+                    None => cast_gate(
+                        ability,
+                        def,
+                        &combatant,
+                        my_pos,
+                        auras,
+                        None,
+                        &ctx,
+                        PreCastOpts::default(),
+                    ),
+                };
+                match gate {
+                    Err(reason) => builder.reject(ability, reason),
+                    Ok(cleared) => {
+                        builder.choose(cleared, Some(command.target), true);
+                        match ability {
+                            AbilityType::SpiderWeb => execute_spider_web(
+                                &mut commands,
+                                &mut combat_log,
+                                def,
+                                &abilities,
+                                entity,
+                                &mut combatant,
+                                my_pos,
+                                command.target,
+                            ),
+                            AbilityType::BoarCharge => execute_boar_charge(
+                                &mut commands,
+                                &mut combat_log,
+                                def,
+                                &abilities,
+                                entity,
+                                &mut combatant,
+                                command.target,
+                            ),
+                            AbilityType::MastersCall => execute_masters_call(
+                                &mut commands,
+                                &mut combat_log,
+                                def,
+                                &abilities,
+                                entity,
+                                &mut combatant,
+                                command.target,
+                            ),
+                            _ => {
+                                // Unsupported ability via PetCommand. Drop with no
+                                // execution; the builder's `choose` is already set
+                                // so the trace will record an unintended cast —
+                                // this path should be unreachable in normal flow.
+                            }
                         }
                     }
                 }
@@ -359,6 +381,7 @@ pub fn pet_ai_system(
                     entity,
                     &mut combatant,
                     my_pos,
+                    auras,
                     &ctx,
                     &casting_targets,
                     &channeling_targets,
@@ -373,6 +396,7 @@ pub fn pet_ai_system(
                     entity,
                     &mut combatant,
                     my_pos,
+                    auras,
                     pet,
                     &ctx,
                     &mut builder,
@@ -386,6 +410,7 @@ pub fn pet_ai_system(
                     entity,
                     &mut combatant,
                     my_pos,
+                    auras,
                     pet,
                     &ctx,
                     &mut builder,
@@ -399,6 +424,7 @@ pub fn pet_ai_system(
                     entity,
                     &mut combatant,
                     my_pos,
+                    auras,
                     pet,
                     &ctx,
                     &mut builder,
@@ -507,6 +533,7 @@ fn felhunter_ai(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     casting_targets: &Query<(Entity, &Combatant, &CastingState), Without<Pet>>,
     channeling_targets: &Query<
@@ -526,6 +553,7 @@ fn felhunter_ai(
         entity,
         combatant,
         my_pos,
+        auras,
         ctx,
         casting_targets,
         channeling_targets,
@@ -535,7 +563,7 @@ fn felhunter_ai(
     }
 
     try_devour_magic(
-        commands, combat_log, abilities, entity, combatant, my_pos, ctx, builder,
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
     );
 }
 
@@ -557,6 +585,7 @@ fn try_spell_lock(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     casting_targets: &Query<(Entity, &Combatant, &CastingState), Without<Pet>>,
     channeling_targets: &Query<
@@ -568,15 +597,22 @@ fn try_spell_lock(
     let ability = AbilityType::SpellLock;
     let def = abilities.get_unchecked(&ability);
 
-    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(
-            ability,
-            RejectionReason::OnCooldown {
-                remaining: *remaining,
-            },
-        );
-        return false;
-    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
     let my_team = combatant.team;
 
@@ -617,7 +653,7 @@ fn try_spell_lock(
         ));
     }
     if let Some(target_entity) = spell_lock_target(&reachable) {
-        builder.choose(ability, Some(target_entity), true);
+        builder.choose(cleared, Some(target_entity), true);
         execute_spell_lock(
             commands,
             combat_log,
@@ -646,7 +682,7 @@ fn try_spell_lock(
         if distance > def.range {
             continue;
         }
-        builder.choose(ability, Some(target_entity), true);
+        builder.choose(cleared, Some(target_entity), true);
         execute_spell_lock(
             commands,
             combat_log,
@@ -705,21 +741,29 @@ fn try_devour_magic(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::DevourMagic;
     let def = abilities.get_unchecked(&ability);
 
-    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(
-            ability,
-            RejectionReason::OnCooldown {
-                remaining: *remaining,
-            },
-        );
-        return false;
-    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
     // What Devour takes, and whom: the one classification the Hunter's trap AI
     // also asks (`ally_removal`), so the cast and that question cannot drift.
@@ -776,7 +820,7 @@ fn try_devour_magic(
         return false;
     };
 
-    builder.choose(ability, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     combatant.start_cooldown(ability, abilities);
     combatant.global_cooldown = super::super::constants::GCD;
@@ -960,6 +1004,7 @@ fn spider_autonomous_dispatch(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     pet: &Pet,
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
@@ -983,15 +1028,22 @@ fn spider_autonomous_dispatch(
         return;
     }
 
-    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(
-            ability,
-            RejectionReason::OnCooldown {
-                remaining: *remaining,
-            },
-        );
-        return;
-    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return;
+        }
+    };
 
     let Some(owner_info) = ctx.combatants.get(&pet.owner) else {
         builder.reject(ability, RejectionReason::NoValidTarget);
@@ -1022,7 +1074,7 @@ fn spider_autonomous_dispatch(
         }
     }
 
-    builder.choose(ability, Some(target), true);
+    builder.choose(cleared, Some(target), true);
     execute_spider_web(
         commands, combat_log, def, abilities, entity, combatant, my_pos, target,
     );
@@ -1037,6 +1089,7 @@ fn boar_autonomous_dispatch(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     pet: &Pet,
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
@@ -1058,15 +1111,22 @@ fn boar_autonomous_dispatch(
         return;
     }
 
-    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(
-            ability,
-            RejectionReason::OnCooldown {
-                remaining: *remaining,
-            },
-        );
-        return;
-    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return;
+        }
+    };
 
     let Some(owner_info) = ctx.combatants.get(&pet.owner) else {
         builder.reject(ability, RejectionReason::NoValidTarget);
@@ -1094,7 +1154,7 @@ fn boar_autonomous_dispatch(
         return;
     }
 
-    builder.choose(ability, Some(target), true);
+    builder.choose(cleared, Some(target), true);
     execute_boar_charge(
         commands, combat_log, def, abilities, entity, combatant, target,
     );
@@ -1109,6 +1169,7 @@ fn bird_autonomous_dispatch(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     pet: &Pet,
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
@@ -1130,15 +1191,22 @@ fn bird_autonomous_dispatch(
         return;
     }
 
-    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(
-            ability,
-            RejectionReason::OnCooldown {
-                remaining: *remaining,
-            },
-        );
-        return;
-    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return;
+        }
+    };
 
     let owner_needs_cleanse = ctx.active_auras.get(&pet.owner).is_some_and(|auras| {
         auras
@@ -1188,7 +1256,7 @@ fn bird_autonomous_dispatch(
         }
     }
 
-    builder.choose(ability, Some(target), true);
+    builder.choose(cleared, Some(target), true);
     execute_masters_call(
         commands, combat_log, def, abilities, entity, combatant, target,
     );
@@ -1282,6 +1350,7 @@ mod tests {
                 felhunter,
                 &mut combatant,
                 pet_pos,
+                None,
                 &ctx,
                 &mut builder,
             );
@@ -1411,6 +1480,7 @@ mod tests {
                 bird,
                 &mut combatant,
                 bird_pos,
+                None,
                 &Pet {
                     owner: hunter,
                     pet_type: PetType::Bird,
@@ -1632,6 +1702,7 @@ mod tests {
                     pet_entity,
                     &mut combatant,
                     pet_pos,
+                    None,
                     &pet,
                     &ctx,
                     &mut builder,

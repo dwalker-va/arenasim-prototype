@@ -1,10 +1,11 @@
 //! Characterization probe for the "mana charged only on successful cast
 //! completion" fix (`combat_core/casting.rs`).
 //!
-//! Scenario: Mage+Priest vs Warrior+Shaman on TwinPillars, at [`SEED`]. The
-//! Warrior dies early; the rest of the match is the Mage+Priest grinding down a
-//! lone Shaman around the pillars, and the Shaman jukes the Mage's Frostbolts
-//! behind cover repeatedly — the probe counts those fizzles and requires one.
+//! Scenario: Mage+Priest vs Warrior+Shaman on TwinPillars. When the Warrior
+//! dies first, the rest of the match is the Mage+Priest grinding down a lone
+//! Shaman around the pillars, and the Shaman jukes the Mage's Frostbolts behind
+//! cover — the probe judges every match of a seed bank ([`SEED_BANK`]) in which
+//! that happened.
 //!
 //! BEFORE the fix, every juked Frostbolt still cost full mana at completion, so
 //! the Mage bankrupted itself — its mana collapsed to ~0 (measured min mana_pct
@@ -20,20 +21,20 @@
 //! Observed via `run_headless_match_observed`, which is read-only by
 //! construction and proven non-perturbing by the determinism battery.
 
-use arenasim::headless::runner::EndReason;
 use arenasim::headless::{run_headless_match_observed, HeadlessMatchConfig, MatchResult};
 use arenasim::CharacterClass;
 
-/// The pinned match. Seed 1 carried this probe until AS-203 projected the
-/// `Legacy` healer formation point out of pillars: the Priest's trajectory
-/// changed and at 1 the Warrior no longer dies (team 2 wins at 53.0s). A
-/// re-scan with `scan_juke_mana_seeds` also found that on `main` before that
-/// change, seed 1's 2v1 held NO juked Frostbolt at all — its mana floor was
-/// measured across casts the fix is not about — so the probe now requires
-/// one. Seed 46: team-1 kill at 82.7s, a 2960-frame 2v1 with 18 Frostbolts
-/// juked for line of sight, the Mage's mana floor 0.082 against the guard of
-/// 0.04 (seed 1's floor was 0.063).
-const SEED: u64 = 46;
+/// The seeds the probe plays. It judges the matches in which the situation
+/// it is about occurs — the Warrior dies first, and the lone Shaman jukes at
+/// least one of the Mage's Frostbolts — and requires [`MIN_JUKED_MATCHES`] of
+/// them, so a change that moves the RNG stream moves WHICH seeds qualify, not
+/// whether the probe judges anything. (A single pinned seed carried this probe
+/// until it went stale twice: AS-203 moved the Priest's path, and AS-282 the
+/// Mage's Ice Barrier timing under a Frost lockout.)
+const SEED_BANK: std::ops::Range<u64> = 0..60;
+
+/// The fewest juked 2v1 matches the bank must hold (8 on AS-282's `main`).
+const MIN_JUKED_MATCHES: usize = 4;
 
 /// One per-frame sample of the state this probe cares about. The 2v1 window is
 /// found positionally (frames after the Warrior's last-alive frame), so no time
@@ -155,80 +156,74 @@ fn measure(seed: u64) -> Measured {
     }
 }
 
-/// (1) The Mage does not bankrupt itself on juked Frostbolts. Across the lone-
-/// Shaman 2v1 (every frame after the Warrior dies), the Mage's mana stays well
-/// above the near-zero floor the bug produced. An activity guard proves the
-/// window isn't trivially satisfied by a Mage sitting at full mana.
+/// Whether `m` is a match the probe is about: the Warrior died, a sustained
+/// lone-Shaman 2v1 with the Mage alive followed, and the Shaman juked at least
+/// one Frostbolt in it — so the mana floor is measured across the casts the fix
+/// is about.
+fn juked_2v1(m: &Measured) -> bool {
+    m.window_frames.is_some_and(|w| w > 300) && m.window_juke_fizzles >= 1
+}
+
+/// (1) The Mage does not bankrupt itself on juked Frostbolts. In every match
+/// of the bank where the lone Shaman juked the Mage (every frame after the
+/// Warrior dies), the Mage's mana stays well above the near-zero floor the bug
+/// produced. An activity guard proves the floor isn't trivially satisfied by a
+/// Mage sitting at full mana.
 #[test]
 fn mage_mana_survives_juked_frostbolts() {
-    let m = measure(SEED);
-    let result = &m.result;
+    let juked: Vec<(u64, Measured)> = SEED_BANK
+        .map(|seed| (seed, measure(seed)))
+        .filter(|(_, m)| juked_2v1(m))
+        .collect();
 
-    // The match resolves decisively for Team 1 (the Mage+Priest).
-    assert_eq!(result.winner, Some(1), "Team 1 should win seed {SEED}");
-    assert_eq!(
-        result.end_reason,
-        EndReason::Kill,
-        "seed {SEED} should end by kill, not cap"
+    // Vacuity guard: the situation occurs, in enough matches to be a sample.
+    assert!(
+        juked.len() >= MIN_JUKED_MATCHES,
+        "only {} of the bank's matches held a juked lone-Shaman 2v1 (seeds {:?}); \
+         need {MIN_JUKED_MATCHES}",
+        juked.len(),
+        juked.iter().map(|(s, _)| s).collect::<Vec<_>>()
     );
 
-    // Vacuity guard: the lone-Shaman 2v1 with the Mage alive actually occurred.
-    let window_frames = m
-        .window_frames
-        .expect("the Warrior must die, opening the lone-Shaman 2v1");
-    assert!(
-        window_frames > 300,
-        "expected a sustained lone-Shaman 2v1 window with the Mage alive, got {window_frames} frames",
-    );
-    // Vacuity guard: the Shaman actually juked Frostbolts in that window, so
-    // the mana floor below is measured across the casts the fix is about.
-    assert!(
-        m.window_juke_fizzles >= 1,
-        "no Mage Frostbolt fizzled for line of sight in the 2v1 — nothing was juked",
-    );
+    for (seed, m) in &juked {
+        // Load-bearing assertion: the Mage's mana never collapses to near-zero
+        // during the 2v1. The buggy build hit 0.004 here; 0.04 is ten times that.
+        assert!(
+            m.min_window_mana > 0.04,
+            "seed {seed}: Mage mana collapsed during the 2v1 (min mana_pct = {:.3}); the \
+             fizzle-drain bug is back — juked Frostbolts are charging mana again",
+            m.min_window_mana
+        );
+        // Duration sanity only (this endgame is dampening-gated, not
+        // mana-gated — see module docs). Do NOT assert a speedup.
+        assert!(
+            m.result.match_time < 200.0,
+            "seed {seed} should still resolve well under the cap (got {:.1}s)",
+            m.result.match_time
+        );
+    }
 
-    // Load-bearing assertion: the Mage's mana never collapses to near-zero during
-    // the 2v1. The buggy build hit 0.004 here; 0.04 is ten times that.
+    // Activity guard: in some juked match the Mage IS spending mana under
+    // pressure (it dips well below full), so the floor above is a real
+    // "sustained, not idle" band — not trivially true because it never cast.
     assert!(
-        m.min_window_mana > 0.04,
-        "Mage mana collapsed during the 2v1 (min mana_pct = {:.3}); the fizzle-drain \
-         bug is back — juked Frostbolts are charging mana again",
-        m.min_window_mana
-    );
-
-    // Activity guard: the Mage IS spending mana under pressure (it dips well below
-    // full at some point), so the floor above is a real "sustained, not idle" band
-    // — not trivially true because the Mage never cast.
-    assert!(
-        m.min_overall_mana < 0.5,
-        "expected the Mage to actively spend mana (min mana_pct {:.3} implies it barely cast)",
-        m.min_overall_mana
-    );
-
-    // Duration sanity only (this endgame is dampening-gated, not mana-gated — see
-    // module docs). Bound it well under the 300s cap; do NOT assert a speedup.
-    assert!(
-        result.match_time < 200.0,
-        "seed {SEED} should still resolve well under the cap (got {:.1}s)",
-        result.match_time
+        juked.iter().any(|(_, m)| m.min_overall_mana < 0.5),
+        "no juked match saw the Mage spend below half its mana: {:?}",
+        juked
+            .iter()
+            .map(|(s, m)| (s, m.min_overall_mana))
+            .collect::<Vec<_>>()
     );
 }
 
-/// Seed scan for re-pinning `SEED`. Ignored by default. A good pin is a
-/// team-1 kill with a long lone-Shaman window in which the Shaman juked
-/// several Frostbolts.
+/// The bank, match by match. Ignored by default: run it to see which seeds
+/// hold the situation [`mage_mana_survives_juked_frostbolts`] judges.
 #[test]
 #[ignore]
 fn scan_juke_mana_seeds() {
-    for seed in 0u64..60 {
+    for seed in SEED_BANK {
         let m = measure(seed);
-        let good = m.result.winner == Some(1)
-            && m.result.end_reason == EndReason::Kill
-            && m.window_frames.is_some_and(|w| w > 300)
-            && m.window_juke_fizzles >= 1
-            && m.min_window_mana > 0.04
-            && m.min_overall_mana < 0.5
-            && m.result.match_time < 200.0;
+        let good = juked_2v1(&m);
         eprintln!(
             "seed {seed:2}: winner={:?} t={:5.1} window={:>5} juked={:2} min_window_mana={:.3} \
              min_mana={:.3}{}",
@@ -240,7 +235,7 @@ fn scan_juke_mana_seeds() {
             m.window_juke_fizzles,
             m.min_window_mana,
             m.min_overall_mana,
-            if good { " <-- GOOD" } else { "" },
+            if good { " <-- juked 2v1" } else { "" },
         );
     }
 }

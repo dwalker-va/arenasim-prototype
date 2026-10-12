@@ -6,10 +6,52 @@
 
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
+use arenasim::states::play_match::class_ai::cast_guard::{cast_gate, Cleared, PreCastOpts};
+use arenasim::states::play_match::class_ai::CombatContext;
 use arenasim::states::play_match::decision_trace::{
     ActorView, CandidateStatus, DecisionTrace, MovementGoalKind, MovementTrigger, NoActionReason,
     Posture, RejectionReason, ResourceKind, TraceWriter,
 };
+use arenasim::states::play_match::{AbilityDefinitions, Combatant};
+use bevy::prelude::{Entity, Vec3};
+use std::collections::BTreeMap;
+
+/// The clearance a choice needs, earned the only way there is: a Warrior with
+/// rage in hand, on no cooldown, passes the cast gate for `ability`.
+fn cleared(ability: AbilityType) -> Cleared {
+    let defs = AbilityDefinitions::default();
+    let mut warrior = Combatant::new(1, 0, CharacterClass::Warrior);
+    warrior.current_mana = 100.0;
+    let me = Entity::from_raw(7);
+    let (roster, auras, drs, cds) = (
+        BTreeMap::new(),
+        BTreeMap::new(),
+        BTreeMap::new(),
+        BTreeMap::new(),
+    );
+    let ctx = CombatContext::new(
+        me,
+        1,
+        &roster,
+        &auras,
+        &drs,
+        &cds,
+        &[],
+        Default::default(),
+        Default::default(),
+    );
+    cast_gate(
+        ability,
+        defs.get_unchecked(&ability),
+        &warrior,
+        Vec3::ZERO,
+        None,
+        None,
+        &ctx,
+        PreCastOpts::default(),
+    )
+    .expect("a Warrior with rage passes the gate")
+}
 
 fn warrior_actor() -> ActorView {
     ActorView {
@@ -50,7 +92,7 @@ fn builder_happy_path_records_three_rejects_and_one_choose() {
             max: 5.0,
         },
     );
-    builder.choose(AbilityType::HeroicStrike, None, true);
+    builder.choose(cleared(AbilityType::HeroicStrike), None, true);
     builder.finish();
 
     assert_event_count(&trace, 1);
@@ -173,18 +215,18 @@ fn writer_sorts_events_by_frame_then_entity_then_kind() {
 
     trace.current_frame = 50;
     let mut b = trace.start_ability_decision(later.clone(), None);
-    b.choose(AbilityType::HeroicStrike, None, true);
+    b.choose(cleared(AbilityType::HeroicStrike), None, true);
     b.finish();
 
     trace.current_frame = 10;
     let mut b = trace.start_ability_decision(warrior_actor(), None);
-    b.choose(AbilityType::HeroicStrike, None, true);
+    b.choose(cleared(AbilityType::HeroicStrike), None, true);
     b.finish();
 
     trace.current_frame = 10;
     let mut b = trace.start_ability_decision(warrior_actor(), None);
     b.choose(
-        AbilityType::Rend,
+        cleared(AbilityType::Rend),
         Some(bevy::prelude::Entity::from_raw(4)),
         true,
     );
@@ -282,7 +324,7 @@ fn writer_sorts_target_acquisition_before_ability_decision_at_same_frame_and_ent
 
     // Push ability_decision first
     let mut b = trace.start_ability_decision(warrior_actor(), None);
-    b.choose(AbilityType::HeroicStrike, None, true);
+    b.choose(cleared(AbilityType::HeroicStrike), None, true);
     b.finish();
 
     // Push target_acquisition second (same frame, same entity)
@@ -588,7 +630,7 @@ fn movement_payload_roundtrips_to_movement_variant_via_untagged_deserialize() {
     // Movement (it lacks `posture` and carries `candidates`/`outcome`).
     let mut ability_trace = DecisionTrace::default();
     let mut b = ability_trace.start_ability_decision(warrior_actor(), None);
-    b.choose(AbilityType::HeroicStrike, None, true);
+    b.choose(cleared(AbilityType::HeroicStrike), None, true);
     b.finish();
     let ability_json = serde_json::to_string(&ability_trace.pending_events[0]).unwrap();
     let ability_payload: EventPayload = serde_json::from_str(&ability_json).unwrap();
@@ -677,7 +719,7 @@ fn close_writer_drains_pending_and_resets_clock() {
     trace.current_sim_time = 42.5;
 
     let mut b = trace.start_ability_decision(warrior_actor(), None);
-    b.choose(AbilityType::HeroicStrike, None, true);
+    b.choose(cleared(AbilityType::HeroicStrike), None, true);
     b.finish();
 
     assert_eq!(trace.pending_events.len(), 1);

@@ -101,10 +101,18 @@ fn seeded_2v2_matches_its_recorded_identity() {
     // only `DispelChase`, at the same tick), and the first line that differs
     // from `main` @ 0a9a0c0 follows at 20.17s: the team-1 Priest's next Wand
     // Shot into the walking Priest lands two frames earlier.
+    //
+    // Re-recorded for AS-282, every cast through the caster's own gates. Took
+    // this cell to Some(1) @ 42.69952s from Some(1) @ 47.516113s. The first
+    // line that differs from `main` @ b07bcd7 is at 32.45s (log clock): the
+    // Mage's Ice Barrier, cast 0.5s into the 4s Frost lockout the Warrior's
+    // Pummel put on it at 31.95s. Ice Barrier is a Frost spell, so it now waits
+    // for the lockout to end, and the Warrior's Rend tick at 32.83s lands on
+    // the Mage unabsorbed.
     assert_pinned(
         &result,
         Some(1),
-        1_111_363_712,
+        1_110_101_071,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }

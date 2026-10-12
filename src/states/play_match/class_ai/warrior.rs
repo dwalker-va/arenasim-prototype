@@ -32,7 +32,7 @@ use crate::states::play_match::movement_config::MeleeMovementConfig;
 
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::cast_guard::{cast_gate, PreCastOpts};
 use super::CombatContext;
 use crate::states::play_match::situation::Tempo;
 use crate::states::play_match::situation::{Play, Role};
@@ -78,6 +78,7 @@ pub fn decide_warrior_action(
         entity,
         combatant,
         my_pos,
+        auras,
         ctx,
         battle_shouted_this_frame,
         &mut builder,
@@ -197,7 +198,15 @@ pub fn decide_warrior_action(
     }
 
     // Priority 5: Heroic Strike (rage dump)
-    try_heroic_strike(abilities, combatant, target_pos, my_pos, &mut builder);
+    try_heroic_strike(
+        abilities,
+        combatant,
+        target_pos,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
+    );
 
     // No GCD-consuming ability used this tick. Heroic Strike may have queued
     // an attack-bonus without taking a GCD; either way, finish records the
@@ -216,6 +225,7 @@ fn try_shout(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     shouted_this_frame: &mut std::collections::HashSet<Entity>,
     builder: &mut DecisionEventBuilder<'_>,
@@ -228,6 +238,7 @@ fn try_shout(
             entity,
             combatant,
             my_pos,
+            auras,
             ctx,
             shouted_this_frame,
             builder,
@@ -239,6 +250,7 @@ fn try_shout(
             entity,
             combatant,
             my_pos,
+            auras,
             ctx,
             shouted_this_frame,
             builder,
@@ -250,6 +262,7 @@ fn try_shout(
             entity,
             combatant,
             my_pos,
+            auras,
             ctx,
             shouted_this_frame,
             builder,
@@ -266,6 +279,7 @@ fn try_battle_shout(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     shouted_this_frame: &mut std::collections::HashSet<Entity>,
     builder: &mut DecisionEventBuilder<'_>,
@@ -303,19 +317,24 @@ fn try_battle_shout(
         return false;
     }
 
-    if combatant.current_mana < def.mana_cost && def.mana_cost > 0.0 {
-        builder.reject(
-            ability,
-            RejectionReason::InsufficientResource {
-                resource: ResourceKind::Rage,
-                have: combatant.current_mana,
-                need: def.mana_cost,
-            },
-        );
-        return false;
-    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, None, true);
+    builder.choose(cleared, None, true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -360,6 +379,7 @@ fn try_demoralizing_shout(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     shouted_this_frame: &mut std::collections::HashSet<Entity>,
     builder: &mut DecisionEventBuilder<'_>,
@@ -387,19 +407,24 @@ fn try_demoralizing_shout(
         return false;
     }
 
-    if combatant.current_mana < def.mana_cost && def.mana_cost > 0.0 {
-        builder.reject(
-            ability,
-            RejectionReason::InsufficientResource {
-                resource: ResourceKind::Rage,
-                have: combatant.current_mana,
-                need: def.mana_cost,
-            },
-        );
-        return false;
-    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, None, true);
+    builder.choose(cleared, None, true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -445,6 +470,7 @@ fn try_commanding_shout(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     shouted_this_frame: &mut std::collections::HashSet<Entity>,
     builder: &mut DecisionEventBuilder<'_>,
@@ -482,19 +508,24 @@ fn try_commanding_shout(
         return false;
     }
 
-    if combatant.current_mana < def.mana_cost && def.mana_cost > 0.0 {
-        builder.reject(
-            ability,
-            RejectionReason::InsufficientResource {
-                resource: ResourceKind::Rage,
-                have: combatant.current_mana,
-                need: def.mana_cost,
-            },
-        );
-        return false;
-    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, None, true);
+    builder.choose(cleared, None, true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -548,15 +579,22 @@ fn try_charge(
         return false;
     }
 
-    if let Some(remaining) = combatant.ability_cooldowns.get(&charge) {
-        builder.reject(
-            charge,
-            RejectionReason::OnCooldown {
-                remaining: *remaining,
-            },
-        );
-        return false;
-    }
+    let cleared = match cast_gate(
+        charge,
+        charge_def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(charge, reason);
+            return false;
+        }
+    };
 
     // Check if rooted
     let is_rooted = auras
@@ -605,7 +643,7 @@ fn try_charge(
         return false;
     }
 
-    builder.choose(charge, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     // Execute Charge
     combatant.start_cooldown(charge, abilities);
@@ -675,7 +713,7 @@ fn try_rend(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         rend,
         rend_def,
         combatant,
@@ -685,23 +723,14 @@ fn try_rend(
         ctx,
         rend_opts,
     ) {
-        builder.reject(
-            rend,
-            classify_pre_cast_failure(
-                rend,
-                rend_def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                rend_opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(rend, reason);
+            return false;
+        }
+    };
 
-    builder.choose(rend, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     // Execute Rend
     combatant.current_mana -= rend_def.mana_cost;
@@ -764,7 +793,7 @@ fn try_mortal_strike(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         mortal_strike,
         ms_def,
         combatant,
@@ -774,21 +803,12 @@ fn try_mortal_strike(
         ctx,
         ms_opts,
     ) {
-        builder.reject(
-            mortal_strike,
-            classify_pre_cast_failure(
-                mortal_strike,
-                ms_def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                ms_opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(mortal_strike, reason);
+            return false;
+        }
+    };
 
     // Get target info
     let target_info = match ctx.combatants.get(&target_entity) {
@@ -799,7 +819,7 @@ fn try_mortal_strike(
         }
     };
 
-    builder.choose(mortal_strike, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     // Execute Mortal Strike
     combatant.current_mana -= ms_def.mana_cost;
@@ -863,6 +883,8 @@ fn try_heroic_strike(
     combatant: &mut Combatant,
     target_pos: Vec3,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) {
     let ability = AbilityType::HeroicStrike;
@@ -887,6 +909,23 @@ fn try_heroic_strike(
         return;
     }
 
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return;
+        }
+    };
+
     if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         // can_cast_config failed — most likely range. We don't have a direct
         // distance here, but the predicate already short-circuited on the
@@ -900,7 +939,7 @@ fn try_heroic_strike(
         return;
     }
 
-    builder.choose(ability, None, true);
+    builder.choose(cleared, None, true);
 
     // Consume rage and queue bonus damage
     combatant.current_mana -= def.mana_cost;
@@ -933,13 +972,15 @@ pub fn try_berserker_rage_while_cc(
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::BerserkerRage;
-    if abilities.get(&ability).is_none() {
+    let Some(def) = abilities.get(&ability) else {
         return false;
-    }
+    };
 
     // Hard-CC'd in a non-fear way: cannot act at all. Horror also fully locks
     // the Warrior out — only a real Fear leaves the "break out" window open.
@@ -978,28 +1019,29 @@ pub fn try_berserker_rage_while_cc(
         return false;
     }
 
-    if combatant
-        .ability_cooldowns
-        .get(&ability)
-        .copied()
-        .unwrap_or(0.0)
-        > 0.0
-    {
-        let remaining = combatant
-            .ability_cooldowns
-            .get(&ability)
-            .copied()
-            .unwrap_or(0.0);
-        builder.reject(ability, RejectionReason::OnCooldown { remaining });
-        return false;
-    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
     if ctx.has_aura(AuraType::FearImmunity) {
         builder.reject(ability, RejectionReason::AlreadyApplied);
         return false;
     }
 
-    builder.choose(ability, Some(entity), true);
+    builder.choose(cleared, Some(entity), true);
 
     let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
     info!("{} breaks fear with Berserker Rage!", caster_id);

@@ -33,7 +33,7 @@ use crate::states::play_match::decision_trace::{
 };
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, unreached_reason, PreCastOpts};
+use super::cast_guard::{cast_gate, unreached_reason, Cleared, PreCastOpts};
 use super::healer_postures::start_movement_event_with_target;
 
 use super::{CombatContext, CombatantInfo};
@@ -184,6 +184,7 @@ pub fn decide_paladin_action(
         abilities,
         entity,
         combatant,
+        my_pos,
         auras,
         ctx,
         &mut builder,
@@ -419,30 +420,36 @@ pub fn try_divine_shield(
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
+    my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    _ctx: &CombatContext,
+    ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::DivineShield;
-    if abilities.get(&ability).is_none() {
+    let Some(def) = abilities.get(&ability) else {
         return false;
-    }
+    };
 
-    if combatant
-        .ability_cooldowns
-        .get(&ability)
-        .copied()
-        .unwrap_or(0.0)
-        > 0.0
-    {
-        let remaining = combatant
-            .ability_cooldowns
-            .get(&ability)
-            .copied()
-            .unwrap_or(0.0);
-        builder.reject(ability, RejectionReason::OnCooldown { remaining });
-        return false;
-    }
+    // Divine Shield is the one cast a silence does not stop.
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts {
+            bypass_silence: true,
+            ..Default::default()
+        },
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
     if auras.is_some_and(|a| {
         a.auras
@@ -472,7 +479,7 @@ pub fn try_divine_shield(
         return false;
     }
 
-    builder.choose(ability, Some(entity), true);
+    builder.choose(cleared, Some(entity), true);
 
     let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
     info!("{} activates Divine Shield!", caster_id);
@@ -540,30 +547,36 @@ pub fn try_divine_shield_while_cc(
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
+    my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::DivineShield;
-    if abilities.get(&ability).is_none() {
+    let Some(def) = abilities.get(&ability) else {
         return false;
-    }
+    };
 
-    if combatant
-        .ability_cooldowns
-        .get(&ability)
-        .copied()
-        .unwrap_or(0.0)
-        > 0.0
-    {
-        let remaining = combatant
-            .ability_cooldowns
-            .get(&ability)
-            .copied()
-            .unwrap_or(0.0);
-        builder.reject(ability, RejectionReason::OnCooldown { remaining });
-        return false;
-    }
+    // Divine Shield is the one cast a silence does not stop.
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts {
+            bypass_silence: true,
+            ..Default::default()
+        },
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
     if auras.is_some_and(|a| {
         a.auras
@@ -622,7 +635,7 @@ pub fn try_divine_shield_while_cc(
         return false;
     }
 
-    builder.choose(ability, Some(entity), true);
+    builder.choose(cleared, Some(entity), true);
 
     let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
     info!("{} breaks CC with Divine Shield!", caster_id);
@@ -734,7 +747,7 @@ fn try_flash_of_light(
     }
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -744,23 +757,14 @@ fn try_flash_of_light(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(target_entity), false);
+    builder.choose(cleared, Some(target_entity), false);
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
@@ -859,7 +863,7 @@ fn try_holy_light(
     let target_pos = target_info.position;
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -869,23 +873,14 @@ fn try_holy_light(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(target_entity), false);
+    builder.choose(cleared, Some(target_entity), false);
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
@@ -922,13 +917,13 @@ fn try_holy_shock_heal(
     let def = abilities.get_unchecked(&ability);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(ability, def, combatant, my_pos, auras, None, ctx, opts) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(ability, def, combatant, my_pos, auras, None, ctx, opts),
-        );
-        return false;
-    }
+    let cleared = match cast_gate(ability, def, combatant, my_pos, auras, None, ctx, opts) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
     // Reach (range, then sight) filters before health ranks: an occluded
     // emergency yields to the lowest ally in sight, and no heal lands through a
@@ -942,7 +937,7 @@ fn try_holy_shock_heal(
     };
     let target_entity = target_info.entity;
 
-    builder.choose(ability, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -985,11 +980,8 @@ fn try_holy_shock_damage(
     let def = abilities.get_unchecked(&ability);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(ability, def, combatant, my_pos, auras, None, ctx, opts) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(ability, def, combatant, my_pos, auras, None, ctx, opts),
-        );
+    if let Err(reason) = cast_gate(ability, def, combatant, my_pos, auras, None, ctx, opts) {
+        builder.reject(ability, reason);
         return false;
     }
 
@@ -1033,7 +1025,7 @@ fn try_holy_shock_damage(
         check_target_immune: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         def,
         combatant,
@@ -1043,23 +1035,14 @@ fn try_holy_shock_damage(
         ctx,
         target_opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((*target_entity, target_pos)),
-                ctx,
-                target_opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(*target_entity), true);
+    builder.choose(cleared, Some(*target_entity), true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -1106,13 +1089,13 @@ fn try_hammer_of_justice(
     let def = abilities.get_unchecked(&ability);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(ability, def, combatant, my_pos, auras, None, ctx, opts) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(ability, def, combatant, my_pos, auras, None, ctx, opts),
-        );
-        return false;
-    }
+    let cleared = match cast_gate(ability, def, combatant, my_pos, auras, None, ctx, opts) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
     // Carry the pet-aware id (hoj_target_eligible already excludes pets, but the
     // id is resolved via log_id so this can't silently break if that changes);
@@ -1150,6 +1133,7 @@ fn try_hammer_of_justice(
         combatant,
         *target_entity,
         target_id,
+        cleared,
         same_frame_cc_queue,
         builder,
     );
@@ -1179,13 +1163,13 @@ fn try_dip_hammer_of_justice(
     let def = abilities.get_unchecked(&ability);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(ability, def, combatant, my_pos, auras, None, ctx, opts) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(ability, def, combatant, my_pos, auras, None, ctx, opts),
-        );
-        return false;
-    }
+    let cleared = match cast_gate(ability, def, combatant, my_pos, auras, None, ctx, opts) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
     if !hoj_target_eligible(ctx, combatant.team, target) {
         builder.reject(ability, RejectionReason::NoValidTarget);
@@ -1216,6 +1200,7 @@ fn try_dip_hammer_of_justice(
         combatant,
         target,
         info.log_id(),
+        cleared,
         same_frame_cc_queue,
         builder,
     );
@@ -1236,10 +1221,11 @@ fn cast_hammer_of_justice(
     combatant: &mut Combatant,
     target_entity: Entity,
     target_id: crate::combat::log::CombatantId,
+    cleared: Cleared,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     builder: &mut DecisionEventBuilder<'_>,
 ) {
-    builder.choose(AbilityType::HammerOfJustice, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     // Caster-side gesture marker (A2). Hammer of Justice is instant AND
     // aura-only, so it enters neither generic caster hook and would otherwise
@@ -1383,13 +1369,13 @@ fn try_paladin_aura(
     let def = abilities.get_unchecked(&ability);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(ability, def, combatant, my_pos, auras, None, ctx, opts) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(ability, def, combatant, my_pos, auras, None, ctx, opts),
-        );
-        return false;
-    }
+    let cleared = match cast_gate(ability, def, combatant, my_pos, auras, None, ctx, opts) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
     let has_aura = |e: &Entity| -> bool {
         ctx.active_auras
@@ -1439,7 +1425,7 @@ fn try_paladin_aura(
         return false;
     }
 
-    builder.choose(ability, None, true);
+    builder.choose(cleared, None, true);
 
     combatant.global_cooldown = GCD;
 

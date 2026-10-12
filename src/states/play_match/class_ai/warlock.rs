@@ -31,7 +31,7 @@ use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, RejectionReason,
 };
 
-use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::cast_guard::{cast_gate, PreCastOpts};
 
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
@@ -491,7 +491,7 @@ fn try_corruption(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         corruption,
         corruption_def,
         combatant,
@@ -501,23 +501,14 @@ fn try_corruption(
         ctx,
         opts,
     ) {
-        builder.reject(
-            corruption,
-            classify_pre_cast_failure(
-                corruption,
-                corruption_def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(corruption, reason);
+            return false;
+        }
+    };
 
-    builder.choose(corruption, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     combatant.current_mana -= corruption_def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -589,7 +580,7 @@ fn try_unstable_affliction(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ua,
         ua_def,
         combatant,
@@ -599,23 +590,14 @@ fn try_unstable_affliction(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ua,
-            classify_pre_cast_failure(
-                ua,
-                ua_def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ua, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ua, Some(target_entity), false);
+    builder.choose(cleared, Some(target_entity), false);
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(ua_def.cast_time, auras);
@@ -680,7 +662,7 @@ fn try_immolate(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         immolate,
         immolate_def,
         combatant,
@@ -690,23 +672,14 @@ fn try_immolate(
         ctx,
         opts,
     ) {
-        builder.reject(
-            immolate,
-            classify_pre_cast_failure(
-                immolate,
-                immolate_def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(immolate, reason);
+            return false;
+        }
+    };
 
-    builder.choose(immolate, Some(target_entity), false);
+    builder.choose(cleared, Some(target_entity), false);
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(immolate_def.cast_time, auras);
@@ -771,7 +744,7 @@ fn try_fear(
     }
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         fear,
         fear_def,
         combatant,
@@ -781,23 +754,14 @@ fn try_fear(
         ctx,
         opts,
     ) {
-        builder.reject(
-            fear,
-            classify_pre_cast_failure(
-                fear,
-                fear_def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(fear, reason);
+            return false;
+        }
+    };
 
-    builder.choose(fear, Some(target_entity), false);
+    builder.choose(cleared, Some(target_entity), false);
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(fear_def.cast_time, auras);
@@ -847,7 +811,7 @@ fn try_death_coil(
     let def = abilities.get_unchecked(&death_coil);
 
     let opts = PreCastOpts::default();
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         death_coil,
         def,
         combatant,
@@ -857,23 +821,14 @@ fn try_death_coil(
         ctx,
         opts,
     ) {
-        builder.reject(
-            death_coil,
-            classify_pre_cast_failure(
-                death_coil,
-                def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(death_coil, reason);
+            return false;
+        }
+    };
 
-    builder.choose(death_coil, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     let projectile_speed = def.projectile_speed.unwrap_or(40.0);
     commands.spawn((
@@ -936,7 +891,7 @@ fn try_shadowbolt(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         shadowbolt,
         shadowbolt_def,
         combatant,
@@ -946,23 +901,14 @@ fn try_shadowbolt(
         ctx,
         opts,
     ) {
-        builder.reject(
-            shadowbolt,
-            classify_pre_cast_failure(
-                shadowbolt,
-                shadowbolt_def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(shadowbolt, reason);
+            return false;
+        }
+    };
 
-    builder.choose(shadowbolt, Some(target_entity), false);
+    builder.choose(cleared, Some(target_entity), false);
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(shadowbolt_def.cast_time, auras);
@@ -1044,7 +990,7 @@ fn try_drain_life(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         drain_life,
         drain_life_def,
         combatant,
@@ -1054,23 +1000,14 @@ fn try_drain_life(
         ctx,
         opts,
     ) {
-        builder.reject(
-            drain_life,
-            classify_pre_cast_failure(
-                drain_life,
-                drain_life_def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(drain_life, reason);
+            return false;
+        }
+    };
 
-    builder.choose(drain_life, Some(target_entity), false);
+    builder.choose(cleared, Some(target_entity), false);
 
     combatant.current_mana -= drain_life_def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -1220,7 +1157,7 @@ fn try_cast_curse(
         check_friendly_cc: true,
         ..Default::default()
     };
-    if !pre_cast_ok(
+    let cleared = match cast_gate(
         ability,
         ability_def,
         combatant,
@@ -1230,23 +1167,14 @@ fn try_cast_curse(
         ctx,
         opts,
     ) {
-        builder.reject(
-            ability,
-            classify_pre_cast_failure(
-                ability,
-                ability_def,
-                combatant,
-                my_pos,
-                auras,
-                Some((target_entity, target_pos)),
-                ctx,
-                opts,
-            ),
-        );
-        return false;
-    }
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
-    builder.choose(ability, Some(target_entity), true);
+    builder.choose(cleared, Some(target_entity), true);
 
     combatant.current_mana -= ability_def.mana_cost;
     combatant.global_cooldown = GCD;

@@ -10,7 +10,8 @@
 //! let mut builder = decision_trace.start_ability_decision(actor_view, target_view);
 //! // ... call try_* helpers passing &mut builder ...
 //! // Each helper calls builder.reject(ability, reason) at predicate gates
-//! // The winning branch calls builder.choose(ability, target, was_instant)
+//! // The winning branch spends the cast gate's clearance (`cast_gate`):
+//! // builder.choose(cleared, target, was_instant)
 //! builder.finish(); // commits the event; no-ops if no candidates pushed
 //! ```
 //!
@@ -25,7 +26,9 @@ pub mod writer;
 
 use bevy::prelude::*;
 
-pub use builder::{DecisionEventBuilder, MovementEventBuilder, TargetEventBuilder};
+pub use builder::{
+    DecisionEventBuilder, DispatchEventBuilder, MovementEventBuilder, TargetEventBuilder,
+};
 pub use events::{
     AbilityCandidate, AbilityOutcome, ActorView, CandidateStatus, DecisionEvent, EventKind,
     EventPayload, MovementGoalKind, MovementTrigger, NoActionReason, Posture, RejectionReason,
@@ -123,6 +126,23 @@ impl DecisionTrace {
             pet_type: Some(std::borrow::Cow::Borrowed(pet_type)),
             pet_dispatched_by: Some(dispatched_by.index()),
             situation: None,
+        }
+    }
+
+    /// Start the owner's side of a hybrid-model dispatch: the same event as
+    /// [`Self::start_pet_dispatch_decision`], recorded through a
+    /// [`DispatchEventBuilder`], which records an order rather than a cast.
+    /// The pet's execution of the order is the cast, and is gated.
+    pub fn start_pet_command_dispatch(
+        &mut self,
+        actor: ActorView,
+        target: Option<TargetView>,
+        owner: Entity,
+        pet_type: &'static str,
+        dispatched_by: Entity,
+    ) -> DispatchEventBuilder<'_> {
+        DispatchEventBuilder {
+            inner: self.start_pet_dispatch_decision(actor, target, owner, pet_type, dispatched_by),
         }
     }
 

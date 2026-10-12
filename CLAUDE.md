@@ -422,13 +422,20 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
      Rogue, and classifies every ability as an enemy area effect or not (an
      exhaustive match — a new ability must answer it); each area effect must
      be shown catching a stealthed Rogue standing in it.
-   - **AI decision trace** — at each predicate gate that rejects this ability,
-     call `builder.reject(AbilityType::NewAbility, RejectionReason::...)`
-     (use `classify_pre_cast_failure` for `pre_cast_ok` failures). On the
-     success branch, call `builder.choose(ability, target, was_instant)`.
-     This is mechanical instrumentation — no new module-level wiring is
-     needed; the builder is already threaded through every class AI
-     function. See `class_ai/warrior.rs` for the canonical pattern.
+   - **The cast gate, and the AI decision trace** — ask
+     `cast_guard::cast_gate` (the caster's own `Combatant` and its own
+     `ActiveAuras`, never `None` for a caster that has them): `Err` is the
+     typed reason to `builder.reject(AbilityType::NewAbility, reason)`, `Ok`
+     is a `Cleared` to spend on `builder.choose(cleared, target,
+     was_instant)`. `choose` takes nothing else, and only the gate makes a
+     `Cleared`, so a cast cannot be chosen past Travel Form, a school lockout,
+     a silence, its cooldown or its resource — a `try_*` that skips the gate
+     does not compile. A ground-placed or self cast passes `target: None` and
+     checks its own range. Reject at every other predicate gate too. A cast
+     with no decision to record (an interrupt) asks `cast_guard::own_state_ok`;
+     a pet-command DISPATCH (an order the pet gates when it executes it) is
+     recorded through `start_pet_command_dispatch`. See `class_ai/warrior.rs`
+     for the canonical pattern.
 
 5. **Add spell icon** for the ability timeline UI:
    - Download icon: `mcp__wowhead-classic__get_spell_icon("New Ability")` to get the URL

@@ -438,6 +438,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     me,
                     &mut combatant,
                     my_pos,
+                    auras,
                     &ctx,
                     &mut instant_attacks,
                     &mut same_frame_cc,

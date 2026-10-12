@@ -76,11 +76,12 @@ shape (Warrior is the canonical reference):
 5. Each try_* helper:
    - At every predicate gate that returns false: call
      `builder.reject(ability, RejectionReason::...)`.
-   - For pre_cast_ok failures, call
-     `classify_pre_cast_failure(ability, def, ...)` from cast_guard.rs to
-     get the typed reason.
+   - Gate the cast with `cast_gate(ability, def, ...)` from cast_guard.rs:
+     `Err` carries the typed reason to reject with, `Ok` the `Cleared` the
+     success branch needs.
    - On the success branch: call
-     `builder.choose(ability, Some(target), was_instant_bool)`.
+     `builder.choose(cleared, Some(target), was_instant_bool)` — `choose`
+     takes only a `Cleared`, so no cast is chosen past the caster's own gates.
 6. After every priority chain (or branch), `builder.finish()` commits the
    event. Empty builders are dropped — no event emitted (emission gate).
 ```
