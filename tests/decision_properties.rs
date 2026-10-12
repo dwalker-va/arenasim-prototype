@@ -25,8 +25,13 @@
 //!   one fits — from 4yd out);
 //! - **upkeep**: nothing up; the kit's own buffs (and a Shaman's totems)
 //!   up; or those plus its shields and heals over time, and its own damage
-//!   over time on its target — so the decision reaches past "refresh the
-//!   buff" and "apply the DoT".
+//!   over time on its target (and its curse on every enemy) — so the
+//!   decision reaches past "refresh the buff" and "apply the DoT".
+//!
+//! Over a handful of situations the grid also walks each class's per-match
+//! CHOICES ([`kit_choices`]): the shout, the armor, the opener, the Paladin
+//! aura and the curse a match config can give it, and for the Shaman which
+//! totem is still to drop.
 //!
 //! The situations vary health, death, auras, an enemy cast, the classes of
 //! the ally and the target, whom the enemy attacks, a focus on the enemy
@@ -35,10 +40,9 @@
 //! injured ally, so "ally cycloned" is also "ally injured") — and put the
 //! unit and its ally just either side of every healer's guaranteed-heal
 //! bar. The Rogue meets each in and out of stealth. The roster is the unit,
-//! an ally, the enemy target and an enemy Priest; the unit's CC target is
-//! that Priest, and a Warlock carries a match's default curse preferences,
-//! as `acquire_targets` and the match config leave them. About 135,000
-//! scenes, built in about a second in the test profile.
+//! an ally, the enemy target and an enemy Priest. The unit's CC target is the
+//! one `acquire_targets` would leave it ([`cc_target`]). About 160,000
+//! scenes, built in one to two seconds in the test profile.
 //!
 //! The grid draws no randomness: a scene has no seed, and no class DECISION
 //! reads `GameRng` (§3.3). It is computed once per test binary, in parallel
@@ -744,10 +748,6 @@ fn hold(scene: Scene, who: &'static str, hold: Hold) -> Scene {
     }
 }
 
-fn scene_entity(scene: &Scene, who: &'static str) -> Entity {
-    scene.entity(who)
-}
-
 /// The unit's CC target, as `acquire_targets` leaves it. A CC target stays
 /// while it is alive and not immune — so an enemy healer the unit picked
 /// before its ally polymorphed it is still its CC target (the
@@ -847,7 +847,8 @@ fn build(defs: &AbilityDefinitions, movement: MovementConfig, p: &Point) -> Scen
     }
     let healer = scene.entity(HEALER);
     let cc = cc_target(&mut scene, p);
-    scene.combatant_mut(ME).cc_target = cc.map(|who| scene_entity(&scene, who));
+    let cc = cc.map(|who| scene.entity(who));
+    scene.combatant_mut(ME).cc_target = cc;
     // The class's per-match choice. A Warlock whose config names no curses
     // gets the default curse on each enemy (`parse_warlock_curse_prefs`).
     {
