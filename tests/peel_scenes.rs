@@ -233,3 +233,96 @@ fn a_warrior_has_no_peel() {
     assert_eq!(with.chose(), without.chose(), "{}", describe(&with));
     assert_eq!(with.situation.and_then(|s| s.play_step), None);
 }
+
+// ---------------------------------------------------------------------------
+// Area peels answer the ATTACKER, not whoever stands in the area.
+// ---------------------------------------------------------------------------
+
+/// An enemy that is NOT attacking the dying ally, out of stealth and
+/// targeting nobody, inside the deciding unit's area peel; the ally's
+/// attacker outside it.
+const BYSTANDER: &str = "enemy rogue";
+
+/// The deciding unit, under the Peel play (asserted), chooses no AREA peel:
+/// no Frost Nova, Psychic Scream or Frost Trap from its peel step. A peel on
+/// the attacker by a targeted tool (the Mage's Polymorph) is still a peel,
+/// and is allowed.
+fn no_area_peel(scene: Scene, class: CharacterClass) {
+    let view = scene.decide(ME);
+    let situation = view.situation.expect("a situation");
+    assert!(
+        matches!(situation.play, Some(PlayTag::Peel { .. })),
+        "{class:?}: the scene is not under the Peel play: {}",
+        describe(&view)
+    );
+    if situation.play_step == Some(PlayStep::Peel) {
+        let (ability, _) = view.chose().expect("a peel chose something");
+        assert!(
+            !matches!(
+                ability,
+                AbilityType::FrostNova | AbilityType::PsychicScream | AbilityType::FrostTrap
+            ),
+            "{class:?} peeled with {ability:?} with only a bystander in the area and the \
+             attacker outside it: {}",
+            describe(&view)
+        );
+    }
+}
+
+/// `scene(class, x)`, with the bystander Rogue `dy` yards from the unit.
+fn with_bystander(class: CharacterClass, x: f32, dy: f32) -> Scene {
+    let mut s = scene(class, x, AiProfile::TeamPlan)
+        .unit(BYSTANDER, 2, Rogue)
+        .at(x, dy);
+    s.combatant_mut(BYSTANDER).stealthed = false;
+    s
+}
+
+/// The Priest 14.5yd from the Warrior on its ally (outside the 8yd scream),
+/// the Rogue 3yd from the Priest (inside it): no scream.
+#[test]
+fn a_priest_does_not_scream_a_bystander_when_the_attacker_is_outside() {
+    no_area_peel(with_bystander(Priest, -10.0, 3.0), Priest);
+}
+
+/// The Mage 14.5yd from the Warrior (outside the 10yd Nova), the Rogue 5yd
+/// off (inside the Nova, outside melee, so the rotation's own Nova has no
+/// reason to fire): no Nova. It may Polymorph the Warrior instead.
+#[test]
+fn a_mage_does_not_nova_a_bystander_when_the_attacker_is_outside() {
+    no_area_peel(with_bystander(Mage, -10.0, 5.0), Mage);
+}
+
+/// A Frost Trap peel lands on a melee or pet attacker; here the ally's only
+/// attacker is a caster (an enemy Mage 6yd from it, inside `danger_radius`),
+/// which a snare does not answer, and a melee bystander stands 12yd from the
+/// Hunter, in throw and Concussive Shot range: no trap, no snare peel.
+#[test]
+fn a_hunter_does_not_trap_a_bystander_when_the_attacker_needs_no_snare() {
+    const CASTER: &str = "enemy mage";
+    let mut s = Scene::new()
+        .ai_profile(1, AiProfile::TeamPlan)
+        .unit(ME, 1, Hunter)
+        .at(-10.0, 0.0)
+        .targeting(ENEMY_HEALER)
+        .unit(ALLY, 1, Mage)
+        .at(3.0, 0.0)
+        .health(0.3)
+        .targeting(ENEMY_HEALER)
+        .unit(CASTER, 2, Mage)
+        .at(9.0, 0.0)
+        .targeting(ALLY)
+        .unit(ENEMY_HEALER, 2, Priest)
+        .at(-10.0, 30.0)
+        .unit(BYSTANDER, 2, Rogue)
+        .at(-10.0, 12.0);
+    s.combatant_mut(BYSTANDER).stealthed = false;
+    let view = s.decide(ME);
+    let situation = view.situation.expect("a situation");
+    assert!(
+        matches!(situation.play, Some(PlayTag::Peel { .. })),
+        "{}",
+        describe(&view)
+    );
+    assert_eq!(situation.play_step, None, "{}", describe(&view));
+}
