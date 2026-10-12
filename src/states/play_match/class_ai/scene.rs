@@ -328,6 +328,11 @@ impl Scene {
         &mut self.unit_mut(who).combatant
     }
 
+    /// The auras on `who`, as the scene set them.
+    pub fn auras_of(&self, who: Who) -> &[Aura] {
+        &self.find(who).auras
+    }
+
     /// The entity standing for `who`.
     pub fn entity(&self, who: Who) -> Entity {
         self.find(who).entity

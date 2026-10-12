@@ -644,6 +644,9 @@ fn kit_choices(class: CharacterClass) -> u8 {
 /// both calm and under pressure.
 const CHOICE_SITUATIONS: &[&str] = &[
     "calm",
+    "target polymorphed by my team",
+    "target low, divine shield",
+    "target dead",
     "ally injured",
     "me injured",
     "target low",
@@ -748,49 +751,50 @@ fn hold(scene: Scene, who: &'static str, hold: Hold) -> Scene {
     }
 }
 
-/// The unit's CC target, as `acquire_targets` leaves it. A CC target stays
-/// while it is alive and not immune — so an enemy healer the unit picked
-/// before its ally polymorphed it is still its CC target (the
-/// "polymorphed by my team" situations). Otherwise it is re-picked by
-/// `select_cc_target_heuristic`: among living enemies neither immune nor
-/// already held, the healer scores +100 unless the kill target is a healer
-/// (then the DPS does), a non-kill-target +50, and a tenth of its health up
-/// to +20; ties go to the lower entity.
-fn cc_target(scene: &mut Scene, p: &Point) -> Option<&'static str> {
-    let s = &p.situation;
-    let immune = |who: &str| matches!(hold_of(p, who), Hold::DivineShield | Hold::Cyclone);
-    let held = |who: &str| {
-        matches!(
-            hold_of(p, who),
-            Hold::FriendlyPolymorph | Hold::EnemyPolymorph | Hold::Cyclone
-        )
-    };
-    // The healer was the CC target before the ally's Polymorph landed.
-    if s.healer_aura == Hold::FriendlyPolymorph {
-        return Some(HEALER);
+/// The unit's CC target, as `acquire_targets` leaves it.
+///
+/// One rule is the grid's own, and it is `acquire_targets`' validity check
+/// applied to a history the scene cannot hold: a CC target STAYS while it is
+/// alive, visible and not immune, so an enemy healer the unit picked before
+/// its ally polymorphed it is still its CC target (the "enemy healer
+/// polymorphed by my team" situations).
+///
+/// Otherwise the target is re-picked by production's own
+/// `select_cc_target_heuristic`, from the same enemy rows, aura map and
+/// visibility rule `acquire_targets` builds.
+fn cc_target(scene: &mut Scene, p: &Point) -> Option<Entity> {
+    use arenasim::states::play_match::class_ai::{grants_damage_immunity, stealth_visible};
+    use arenasim::states::play_match::combat_ai::select_cc_target_heuristic;
+    if p.situation.healer_aura == Hold::FriendlyPolymorph {
+        return Some(scene.entity(HEALER));
     }
-    let kill = whom(p);
-    let killing_healer = kill == HEALER;
-    let mut best: Option<(&'static str, i32)> = None;
+    let mut auras: std::collections::HashMap<Entity, Vec<Aura>> = Default::default();
+    let mut enemies = Vec::new();
     for who in [TARGET, HEALER] {
-        if !alive(p, who) || immune(who) || held(who) {
+        let entity = scene.entity(who);
+        let on_it = scene.auras_of(who).to_vec();
+        let immune = on_it.iter().any(|a| grants_damage_immunity(a.effect_type));
+        auras.insert(entity, on_it);
+        let c = scene.combatant_mut(who);
+        if !c.is_alive() {
             continue;
         }
-        let is_healer = who == HEALER || s.target_class.is_healer();
-        let mut score = 0;
-        if is_healer != killing_healer {
-            score += 100;
-        }
-        if who != kill {
-            score += 50;
-        }
-        score += (scene.combatant_mut(who).current_health as i32 / 10).min(20);
-        // TARGET is spawned before HEALER, so it wins a tie.
-        if best.is_none_or(|(_, b)| score > b) {
-            best = Some((who, score));
-        }
+        enemies.push((
+            entity,
+            pos3(who, p),
+            c.stealthed,
+            false,
+            c.class,
+            c.current_health,
+            immune,
+            false,
+        ));
     }
-    best.map(|(who, _)| who)
+    // Nobody in the grid holds Shadow Sight.
+    let can_see =
+        |stealthed: bool, enemy_has_sight: bool| stealth_visible(stealthed, false, enemy_has_sight);
+    let kill_target = Some(scene.entity(whom(p)));
+    select_cc_target_heuristic(&enemies, kill_target, &auras, &can_see)
 }
 
 /// Whom the enemy target attacks.
@@ -846,9 +850,6 @@ fn build(defs: &AbilityDefinitions, movement: MovementConfig, p: &Point) -> Scen
         scene.combatant_mut(ME).stealthed = false;
     }
     let healer = scene.entity(HEALER);
-    let cc = cc_target(&mut scene, p);
-    let cc = cc.map(|who| scene.entity(who));
-    scene.combatant_mut(ME).cc_target = cc;
     // The class's per-match choice. A Warlock whose config names no curses
     // gets the default curse on each enemy (`parse_warlock_curse_prefs`).
     {
@@ -986,6 +987,9 @@ fn build(defs: &AbilityDefinitions, movement: MovementConfig, p: &Point) -> Scen
             scene = scene.cooldown(ME, *ability, COOLDOWN_LEFT);
         }
     }
+    // Last, once every aura is on: the CC target reads them.
+    let cc = cc_target(&mut scene, p);
+    scene.combatant_mut(ME).cc_target = cc;
     if let Some(pillar) = pillar(p) {
         scene = scene.obstacles(vec![pillar]);
     }
