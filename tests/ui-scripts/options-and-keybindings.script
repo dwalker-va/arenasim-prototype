@@ -1,5 +1,6 @@
 # Options and Keybindings: an option changes, a key rebinds, and Reset to
-# Defaults resets nothing until it is confirmed (AS-266).
+# Defaults resets nothing until it is confirmed (AS-266). Esc cancels a
+# pending rebind before it leaves (AS-254).
 #
 # Run:  cargo run --release -- --ui-script tests/ui-scripts/options-and-keybindings.script
 #
@@ -62,6 +63,19 @@ assert-absent reset-keybindings:confirm
 assert-note keybind Confirm primary=ENTER
 assert-no-note primary=BACKSPACE
 
+# --- Esc cancels a pending rebind: nothing binds, and the screen stays -------
+# The key pressed after it lands nowhere, so the rebind was cancelled, not
+# left waiting.
+click keybind:Confirm:Primary
+key Escape
+assert-state Keybindings
+assert-note keybind Confirm primary=ENTER
+assert-no-note keybind Confirm primary=ESC secondary
+key Backspace
+assert-note keybind Confirm primary=ENTER
+assert-no-note primary=BACKSPACE
+
+# --- ...and a second Esc leaves ------------------------------------------------
 key Escape
 assert-state Options
 key Escape
