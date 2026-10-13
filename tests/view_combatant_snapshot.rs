@@ -133,7 +133,34 @@ struct Sheet<'a> {
     data: ViewCombatantData<'a>,
 }
 
-impl Sheet<'_> {
+impl<'a> Sheet<'a> {
+    /// The sheet for `class` in team 1's first slot of `config`, laid out at
+    /// scroll 0 and settled.
+    fn open(class: CharacterClass, config: MatchConfig, data: ViewCombatantData<'a>) -> Self {
+        let ctx = egui::Context::default();
+        arenasim::ui::install(&ctx);
+        let mut sheet = Sheet {
+            ctx,
+            time: 0.0,
+            last: registry::Frame::default(),
+            cursor: egui::Pos2::ZERO,
+            last_seen: None,
+            view: ViewCombatantState {
+                class,
+                team: 1,
+                slot: 0,
+            },
+            config,
+            picker: EquipmentPickerState::default(),
+            data,
+        };
+        // A few passes, so anything egui sizes from the previous frame settles.
+        for _ in 0..4 {
+            sheet.frame(Vec::new());
+        }
+        sheet
+    }
+
     /// Run one frame with `events`, and keep what it registered.
     fn frame(&mut self, events: Vec<egui::Event>) {
         registry::arm(&self.ctx);
@@ -227,22 +254,10 @@ fn every_tooltip_shows_at_the_default_window_size() {
         // what `view-combatant-tooltips.script` opens.
         let mut config = MatchConfig::default();
         config.team1[0] = Some(class);
-        let ctx = egui::Context::default();
-        arenasim::ui::install(&ctx);
-        let mut sheet = Sheet {
-            ctx,
-            time: 0.0,
-            last: registry::Frame::default(),
-            cursor: egui::Pos2::ZERO,
-            last_seen: None,
-            view: ViewCombatantState {
-                class,
-                team: 1,
-                slot: 0,
-            },
+        let mut sheet = Sheet::open(
+            class,
             config,
-            picker: EquipmentPickerState::default(),
-            data: ViewCombatantData {
+            ViewCombatantData {
                 abilities: &abilities,
                 items: &items,
                 default_loadouts: &defaults,
@@ -251,12 +266,7 @@ fn every_tooltip_shows_at_the_default_window_size() {
                 item_icons: None,
                 pet_icons: None,
             },
-        };
-
-        // A few passes, so anything egui sizes from the previous frame settles.
-        for _ in 0..4 {
-            sheet.frame(Vec::new());
-        }
+        );
 
         let targets = hover_targets(&sheet.last);
         assert!(
@@ -271,6 +281,89 @@ fn every_tooltip_shows_at_the_default_window_size() {
                  tooltip ({note}). Pointer at {:?}; notes: {:?}",
                 sheet.cursor,
                 sheet.last.notes
+            );
+        }
+    }
+}
+
+/// Every class's pre-match choice is wholly on screen in a 1280x720 window
+/// before the player scrolls: each of its tiles' full rect inside the window
+/// and inside the scroll area's clip. The choice is the decision this screen
+/// exists for (AS-294), so it may not sit below the fold whatever the length
+/// of the kit; the kit rows and the equipment may still scroll.
+///
+/// The Warlock is checked against a full enemy team as well as the default
+/// 1v1, since it draws one row of curse tiles per enemy.
+#[test]
+fn every_pre_match_choice_is_on_screen_at_the_default_window_size() {
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::from(DEFAULT_WINDOW));
+
+    let mut cases: Vec<(CharacterClass, usize)> = CharacterClass::all()
+        .iter()
+        .map(|&class| (class, 1))
+        .collect();
+    cases.push((CharacterClass::Warlock, 3));
+    for (class, enemies) in cases {
+        let mut config = MatchConfig::default();
+        config.set_team1_size(enemies);
+        config.set_team2_size(enemies);
+        config.team1[0] = Some(class);
+        let mut sheet = Sheet::open(
+            class,
+            config,
+            ViewCombatantData {
+                abilities: &abilities,
+                items: &items,
+                default_loadouts: &defaults,
+                class_icons: &class_icons,
+                ability_icons: None,
+                item_icons: None,
+                pet_icons: None,
+            },
+        );
+        sheet.frame(Vec::new());
+
+        let tiles: Vec<&registry::Widget> = sheet
+            .last
+            .widgets
+            .iter()
+            .filter(|w| w.id.starts_with("strategic:") || w.id.starts_with("choice:"))
+            .collect();
+        // Named per class, so a choice that stops drawing — or a class whose
+        // choice is never registered — fails here instead of passing vacuously.
+        let per_row = match class {
+            CharacterClass::Rogue => 2,
+            CharacterClass::Warrior
+            | CharacterClass::Mage
+            | CharacterClass::Paladin
+            | CharacterClass::Hunter
+            | CharacterClass::Warlock => 3,
+            CharacterClass::Priest | CharacterClass::Shaman | CharacterClass::Druid => 0,
+        };
+        let rows = if class == CharacterClass::Warlock {
+            enemies
+        } else {
+            1
+        };
+        assert_eq!(
+            tiles.len(),
+            per_row * rows,
+            "{class:?} vs {enemies} enemies: expected {} choice tiles, found {:?}",
+            per_row * rows,
+            tiles.iter().map(|w| &w.id).collect::<Vec<_>>()
+        );
+        for tile in tiles {
+            assert!(
+                screen.contains_rect(tile.rect) && tile.clip.contains_rect(tile.rect),
+                "{class:?} vs {enemies} enemies: {} at {:?} is not wholly on screen at \
+                 scroll 0 in a {DEFAULT_WINDOW:?} window (scroll area {:?})",
+                tile.id,
+                tile.rect,
+                tile.clip
             );
         }
     }

@@ -61,10 +61,10 @@ use super::encyclopedia::{
     abilities as encyclopedia_abilities, widget, EncyclopediaData, EncyclopediaState, Topic,
 };
 use crate::ui::driver as ui_driver;
-use crate::ui::theme::{class_color, color, data, icon, space, text};
+use crate::ui::theme::{class_color, color, data, icon, size, space, text};
 use crate::ui::widgets::panel::margin_xy;
 use crate::ui::widgets::{
-    class_icon, divider, empty_state, icon_tile, list_row, panel, panel_header, screen_header,
+    class_icon, empty_state, icon_tile, list_row, panel, panel_header, screen_header,
     section_label, stat_row, Button, ChoiceTile, ListIcon, ListRow, Modal, Nav, NavAction, Variant,
 };
 
@@ -466,8 +466,8 @@ const PICKER_MAX_HEIGHT: f32 = 0.6;
 /// that needs ECS side effects (see [`ViewCombatantAction`]).
 ///
 /// The Document template: the shared [`screen_header`], then a scrolling body
-/// at [`CONTENT_MAX_W`] — the class header, stats beside the kit, the class's
-/// pre-match choice, and the equipment sheet — with the item picker as a kit
+/// at [`CONTENT_MAX_W`] — the class header, the class's pre-match choice,
+/// stats beside the kit, and the equipment sheet — with the item picker as a kit
 /// [`Modal`] over it.
 ///
 /// Deliberately free of Bevy ECS system params (it takes plain references) so
@@ -624,32 +624,6 @@ fn draw_sheet(
     // from the sim or silently drop ability N+1.
     let stats = class_base_stats(class);
     let abilities = data.abilities.own_abilities_for_class(class);
-    // The pet whose abilities belong in THIS combatant's kit. View Combatant is
-    // a loadout editor, so it shows the pet that is actually configured (the Pet
-    // Type panel below is where that choice is made) rather than every pet the
-    // class could bring. The encyclopedia, which documents the whole class, uses
-    // `pet_abilities_for_class` instead.
-    let active_pet: Option<PetType> = match class {
-        CharacterClass::Warlock => Some(PetType::Felhunter),
-        CharacterClass::Hunter => Some(
-            match slot_value(
-                &match_config.team1_hunter_pet_types,
-                &match_config.team2_hunter_pet_types,
-                view_state,
-            ) {
-                HunterPetType::Spider => PetType::Spider,
-                HunterPetType::Boar => PetType::Boar,
-                HunterPetType::Bird => PetType::Bird,
-            },
-        ),
-        CharacterClass::Warrior
-        | CharacterClass::Mage
-        | CharacterClass::Rogue
-        | CharacterClass::Priest
-        | CharacterClass::Paladin
-        | CharacterClass::Shaman
-        | CharacterClass::Druid => None,
-    };
 
     // Compute equipment bonuses for the stats panel
     let equip_overrides = equipment_overrides(match_config, view_state);
@@ -658,37 +632,10 @@ fn draw_sheet(
     let equip_bonuses = EquipmentBonuses::from_loadout(&resolved_loadout, data.items, class);
 
     open_topic = open_topic.or(render_class_header(ui, class, data, encyclopedia_data));
-    ui.add_space(space::LG);
 
-    // Stats beside the kit, the two panels held to one height.
-    let row_height_id = ui.id().with("vc:stats-kit-height");
-    let held: f32 = ui
-        .ctx()
-        .data(|d| d.get_temp(row_height_id))
-        .unwrap_or_default();
-    let mut natural = [0.0_f32; 2];
-    ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.x = space::LG;
-        ui.columns(2, |columns| {
-            natural[0] = render_stats_panel(&mut columns[0], &stats, &equip_bonuses, held);
-            let (kit_height, clicked) = render_abilities_panel(
-                &mut columns[1],
-                &abilities,
-                active_pet,
-                held,
-                encyclopedia_data,
-            );
-            natural[1] = kit_height;
-            open_topic = open_topic.or(clicked);
-        });
-    });
-    let tallest = natural[0].max(natural[1]);
-    if tallest != held {
-        ui.ctx().data_mut(|d| d.insert_temp(row_height_id, tallest));
-        ui.ctx().request_repaint();
-    }
-
-    // The class's pre-match choice, if it has one.
+    // The class's pre-match choice, if it has one, straight under the class
+    // header: it is the decision this screen exists for, so it sits above the
+    // fold of the default 1280x720 window whatever the length of the kit.
     let ability_icon = |key: &str| {
         data.ability_icons
             .and_then(|icons| icons.textures.get(key).copied())
@@ -820,6 +767,63 @@ fn draw_sheet(
             );
         }
         CharacterClass::Priest | CharacterClass::Shaman | CharacterClass::Druid => {}
+    }
+
+    // The pet whose abilities belong in THIS combatant's kit. View Combatant is
+    // a loadout editor, so it shows the pet that is actually configured rather
+    // than every pet the class could bring. The Pet Type panel above is where
+    // that choice is made, and this is read after it, so a new pick shows in
+    // the kit on the frame it is clicked. The encyclopedia, which documents the
+    // whole class, uses `pet_abilities_for_class` instead.
+    let active_pet: Option<PetType> = match class {
+        CharacterClass::Warlock => Some(PetType::Felhunter),
+        CharacterClass::Hunter => Some(
+            match slot_value(
+                &match_config.team1_hunter_pet_types,
+                &match_config.team2_hunter_pet_types,
+                view_state,
+            ) {
+                HunterPetType::Spider => PetType::Spider,
+                HunterPetType::Boar => PetType::Boar,
+                HunterPetType::Bird => PetType::Bird,
+            },
+        ),
+        CharacterClass::Warrior
+        | CharacterClass::Mage
+        | CharacterClass::Rogue
+        | CharacterClass::Priest
+        | CharacterClass::Paladin
+        | CharacterClass::Shaman
+        | CharacterClass::Druid => None,
+    };
+
+    ui.add_space(space::LG);
+    // Stats beside the kit, the two panels held to one height.
+    let row_height_id = ui.id().with("vc:stats-kit-height");
+    let held: f32 = ui
+        .ctx()
+        .data(|d| d.get_temp(row_height_id))
+        .unwrap_or_default();
+    let mut natural = [0.0_f32; 2];
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = space::LG;
+        ui.columns(2, |columns| {
+            natural[0] = render_stats_panel(&mut columns[0], &stats, &equip_bonuses, held);
+            let (kit_height, clicked) = render_abilities_panel(
+                &mut columns[1],
+                &abilities,
+                active_pet,
+                held,
+                encyclopedia_data,
+            );
+            natural[1] = kit_height;
+            open_topic = open_topic.or(clicked);
+        });
+    });
+    let tallest = natural[0].max(natural[1]);
+    if tallest != held {
+        ui.ctx().data_mut(|d| d.insert_temp(row_height_id, tallest));
+        ui.ctx().request_repaint();
     }
 
     ui.add_space(space::LG);
@@ -1617,6 +1621,15 @@ fn choice_row(
                     ui_driver::note(ui, format_args!("tooltip:{:?}", Topic::Ability(ability)));
                     encyclopedia_abilities::slim_tooltip(ui, ability, data)
                 });
+            } else {
+                // Not an ability (a Hunter's pet): no tooltip, but the tile
+                // still registers, so a script or a test can find it.
+                ui_driver::mark(
+                    ui,
+                    response.rect,
+                    true,
+                    format_args!("choice:{}", option.label),
+                );
             }
         }
     });
@@ -1847,53 +1860,80 @@ fn render_warlock_curse_panel(
             color::TEXT_MUTED,
         );
 
+        ui.add_space(space::MD);
         for (enemy_slot, enemy_class) in enemy_team.iter().enumerate() {
-            ui.add_space(space::MD);
             if enemy_slot > 0 {
-                divider(ui);
-                ui.add_space(space::MD);
+                ui.add_space(space::SM);
             }
-            // The enemy this row curses: its class icon and name.
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = space::SM;
-                match enemy_class {
-                    Some(class) => {
-                        let _ = class_icon(
-                            ui,
-                            *class,
-                            class_icons.textures.get(class).copied(),
-                            icon::SM,
-                        );
-                        ui.label(
-                            egui::RichText::new(class.name())
-                                .size(text::BODY)
-                                .color(class_color(*class)),
-                        );
-                    }
-                    None => {
-                        ui.label(
-                            egui::RichText::new(format!("Enemy Target {}", enemy_slot + 1))
-                                .size(text::BODY)
-                                .color(color::TEXT_MUTED),
-                        );
-                    }
-                }
-            });
-            ui.add_space(space::SM);
-
             let current = current_prefs.get(enemy_slot).copied().unwrap_or_default();
             let selected = curses
                 .iter()
                 .position(|(curse, _, _)| *curse == current)
                 .unwrap_or_default();
-            if let Some(i) = choice_row(ui, &tiles, selected, Some(enemy_slot), data) {
-                changed_curse = Some((enemy_slot, curses[i].0));
-            }
+            // One row per enemy: who it curses, one tile wide and level with
+            // the tiles' middle, then the curses — so a full enemy team's rows
+            // stay above the fold of a 1280x720 window.
+            // Top-aligned, so the row is exactly one tile tall; the label
+            // centres itself in a tile-tall box of its own.
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                ui.spacing_mut().item_spacing.x = space::SM;
+                let label_box = egui::vec2(size::CHOICE_TILE, ChoiceTile::height(ui));
+                ui.allocate_ui_with_layout(
+                    label_box,
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.set_min_size(label_box);
+                        enemy_label(ui, enemy_slot, *enemy_class, class_icons);
+                    },
+                );
+                if let Some(i) = choice_row(ui, &tiles, selected, Some(enemy_slot), data) {
+                    changed_curse = Some((enemy_slot, curses[i].0));
+                }
+            });
         }
     });
 
     if let Some((enemy_slot, curse)) = changed_curse {
         match_config.set_curse_pref(view_state.team, view_state.slot, enemy_slot, curse);
+    }
+}
+
+/// The enemy a row of curse tiles is for: its class icon and name, or its
+/// slot when the slot is empty.
+fn enemy_label(
+    ui: &mut egui::Ui,
+    enemy_slot: usize,
+    enemy_class: Option<CharacterClass>,
+    class_icons: &ClassIcons,
+) {
+    ui.spacing_mut().item_spacing.x = space::SM;
+    match enemy_class {
+        Some(class) => {
+            let _ = class_icon(
+                ui,
+                class,
+                class_icons.textures.get(&class).copied(),
+                icon::SM,
+            );
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(class.name())
+                        .size(text::BODY)
+                        .color(class_color(class)),
+                )
+                .truncate(),
+            );
+        }
+        None => {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!("Enemy Target {}", enemy_slot + 1))
+                        .size(text::BODY)
+                        .color(color::TEXT_MUTED),
+                )
+                .truncate(),
+            );
+        }
     }
 }
 

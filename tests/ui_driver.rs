@@ -1073,9 +1073,10 @@ const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     ),
     ("src/states/play_match/rendering/team_frames.rs", 2),
     // The four pre-match choices share one tile row (one `strategic:` mark per
-    // spelling, one tooltip note), and the restore button registers through
-    // the kit's `driver_id`.
-    ("src/states/view_combatant_ui.rs", 10),
+    // spelling, one tooltip note, and a `choice:` mark for an option that is
+    // not an ability), and the restore button registers through the kit's
+    // `driver_id`.
+    ("src/states/view_combatant_ui.rs", 11),
     // The header exit's note: what its label says, for a script to read back.
     ("src/ui/widgets/header.rs", 1),
     // The linked icon's tooltip note, moved here from encyclopedia/widget.rs.
