@@ -429,12 +429,7 @@ pub const BURST_EXCEPTIONS: &[BurstException] = &[];
 
 /// [`BURST_EXCEPTIONS`] as a set.
 pub fn burst_exception_classes() -> ClassSet {
-    ClassSet::of(
-        &BURST_EXCEPTIONS
-            .iter()
-            .map(|e| e.class)
-            .collect::<Vec<_>>(),
-    )
+    ClassSet::of(&BURST_EXCEPTIONS.iter().map(|e| e.class).collect::<Vec<_>>())
 }
 
 /// The situation of both teams. Team `t` lives at index `t - 1`.
@@ -1777,9 +1772,16 @@ mod tests {
         let open = classify_now(&f, &quiet, 30.5);
         assert_eq!(open.kill_window.map(|w| w.since), Some(30.5));
         // Healed into the band: held, onset kept.
-        set_hp(&mut f, mage, 100.0 * (cfg.kill_hp_threshold + cfg.kill_hp_release) / 2.0);
+        set_hp(
+            &mut f,
+            mage,
+            100.0 * (cfg.kill_hp_threshold + cfg.kill_hp_release) / 2.0,
+        );
         let held = classify_now(&f, &open, 31.0);
-        assert_eq!(held.kill_window.map(|w| (w.subject, w.since)), Some((mage, 30.5)));
+        assert_eq!(
+            held.kill_window.map(|w| (w.subject, w.since)),
+            Some((mage, 30.5))
+        );
         // ...but the same health with no window open opens nothing.
         assert_eq!(classify_now(&f, &quiet, 31.0).kill_window, None);
         // Above the release: closed.
@@ -1806,7 +1808,9 @@ mod tests {
         // Stealthed, the Priest is not seen: the Mage instead.
         f.roster.get_mut(&healer).unwrap().stealthed = true;
         assert_eq!(
-            classify_now(&f, &quiet, 30.0).kill_window.map(|w| w.subject),
+            classify_now(&f, &quiet, 30.0)
+                .kill_window
+                .map(|w| w.subject),
             Some(mage)
         );
         f.roster.get_mut(&healer).unwrap().stealthed = false;

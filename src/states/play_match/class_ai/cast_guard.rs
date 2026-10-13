@@ -79,8 +79,8 @@ pub const SHAPESHIFTED_NOTE: &str = "shapeshifted: nothing is cast in Travel For
 ///    an out-of-range target fails on range, not LoS. A no-op on maps with no
 ///    obstacles (empty `ctx.obstacles`).
 /// 10. the Burst play's fit ([`fits_window`]): under it, a cast on the kill
-///    window's subject that would land after the window's `until` is not
-///    started. A no-op outside the play (every `Legacy` decision).
+///     window's subject that would land after the window's `until` is not
+///     started. A no-op outside the play (every `Legacy` decision).
 pub fn pre_cast_ok(
     ability: AbilityType,
     def: &AbilityConfig,

@@ -2139,9 +2139,9 @@ fn crowd_control_is_never_held_for_an_interrupt_an_uninterruptible_cast_refuses(
 /// not by the production fit, so a fit that miscounts is caught.
 fn lands_after(r: &Record, ability: AbilityType, target: &str) -> f32 {
     let def = grid().defs.get(&ability).unwrap();
-    let flight = def
-        .projectile_speed
-        .map_or(0.0, |speed| pos3(ME, &r.point).distance(pos3(target, &r.point)) / speed);
+    let flight = def.projectile_speed.map_or(0.0, |speed| {
+        pos3(ME, &r.point).distance(pos3(target, &r.point)) / speed
+    });
     let dot_only = def.damage_base_max <= 0.0
         && def
             .applies_aura
@@ -2187,7 +2187,11 @@ fn every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window
             continue;
         };
         if tag.play == Some(PlayTag::Burst) {
-            assert!(p.situation.team_plan, "a Burst outside TeamPlan: {}", p.describe());
+            assert!(
+                p.situation.team_plan,
+                "a Burst outside TeamPlan: {}",
+                p.describe()
+            );
             let window = tag.kill_window.expect("a Burst names a kill window");
             assert_eq!(
                 window.subject,
@@ -2219,10 +2223,10 @@ fn every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window
                 .count();
         } else {
             assert!(
-                r.view.candidates.iter().all(|c| !matches!(
-                    c.reason,
-                    Some(RejectionReason::OutlastsWindow { .. })
-                )),
+                r.view
+                    .candidates
+                    .iter()
+                    .all(|c| !matches!(c.reason, Some(RejectionReason::OutlastsWindow { .. }))),
                 "a cast fitted to a window outside the Burst play: {}",
                 p.describe()
             );
@@ -2246,8 +2250,14 @@ fn every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window
          `until`, {fitted} casts refused for it"
     );
     assert!(judged > 0 && fitted > 0, "the fit was never exercised");
-    assert!(misaimed.is_empty(), "bursts not aimed at the subject: {misaimed:#?}");
-    assert!(late.is_empty(), "casts on the subject landing after `until`: {late:#?}");
+    assert!(
+        misaimed.is_empty(),
+        "bursts not aimed at the subject: {misaimed:#?}"
+    );
+    assert!(
+        late.is_empty(),
+        "casts on the subject landing after `until`: {late:#?}"
+    );
     let excepted: BTreeSet<String> = BURST_EXCEPTIONS
         .iter()
         .map(|e| format!("{:?}", e.class))

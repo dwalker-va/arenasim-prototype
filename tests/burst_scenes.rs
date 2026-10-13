@@ -78,8 +78,17 @@ fn bursts_in(build: impl Fn(AiProfile) -> Scene, class: CharacterClass, tool: Ab
     assert!(burst_tools(class).contains(&tool), "{class:?} {tool:?}");
     let with = build(AiProfile::TeamPlan).decide(ME);
     let situation = with.situation.expect("a situation");
-    assert!(situation.kill_window.is_some(), "{class:?}: {}", describe(&with));
-    assert_eq!(situation.play, Some(PlayTag::Burst), "{class:?}: {}", describe(&with));
+    assert!(
+        situation.kill_window.is_some(),
+        "{class:?}: {}",
+        describe(&with)
+    );
+    assert_eq!(
+        situation.play,
+        Some(PlayTag::Burst),
+        "{class:?}: {}",
+        describe(&with)
+    );
     assert_eq!(
         with.chose(),
         Some((tool, Some(LOW))),
@@ -89,7 +98,10 @@ fn bursts_in(build: impl Fn(AiProfile) -> Scene, class: CharacterClass, tool: Ab
     assert_eq!(situation.play_step, Some(PlayStep::Burst), "{class:?}");
 
     let without = build(AiProfile::TeamPlan)
-        .withhold(1, PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]))
+        .withhold(
+            1,
+            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+        )
         .decide(ME);
     let situation = without.situation.expect("a situation");
     assert!(situation.kill_window.is_some());
@@ -105,7 +117,11 @@ fn bursts_in(build: impl Fn(AiProfile) -> Scene, class: CharacterClass, tool: Ab
     let legacy = build(AiProfile::Legacy).decide(ME);
     assert_eq!(legacy.situation.and_then(|s| s.play), None);
     assert_eq!(legacy.situation.and_then(|s| s.play_step), None);
-    assert_ne!(legacy.chose(), Some((tool, Some(LOW))), "{class:?} under Legacy");
+    assert_ne!(
+        legacy.chose(),
+        Some((tool, Some(LOW))),
+        "{class:?} under Legacy"
+    );
 }
 
 fn bursts(class: CharacterClass, dist: f32, tool: AbilityType) {
@@ -146,12 +162,25 @@ fn a_warrior_spends_its_held_rage_on_heroic_strike_into_a_kill_window() {
         with_rage(rend_up(s), 40.0)
     };
     let with = build(AiProfile::TeamPlan).decide(ME);
-    assert_eq!(with.chose(), Some((AbilityType::HeroicStrike, None)), "{}", describe(&with));
+    assert_eq!(
+        with.chose(),
+        Some((AbilityType::HeroicStrike, None)),
+        "{}",
+        describe(&with)
+    );
     assert_eq!(with.situation.unwrap().play_step, Some(PlayStep::Burst));
     let without = build(AiProfile::TeamPlan)
-        .withhold(1, PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]))
+        .withhold(
+            1,
+            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+        )
         .decide(ME);
-    assert_ne!(without.chose(), Some((AbilityType::HeroicStrike, None)), "{}", describe(&without));
+    assert_ne!(
+        without.chose(),
+        Some((AbilityType::HeroicStrike, None)),
+        "{}",
+        describe(&without)
+    );
     assert!(matches!(
         without.rejected(AbilityType::HeroicStrike),
         Some(RejectionReason::InsufficientResource { .. })
@@ -218,7 +247,12 @@ fn a_hunter_arcane_shots_into_a_kill_window_with_aimed_shot_down() {
 #[test]
 fn a_hunter_with_an_enemy_close_arcane_shots_rather_than_aimed_shots() {
     let view = scene(Hunter, 15.0, Some(LOCK), AiProfile::TeamPlan).decide(ME);
-    assert_eq!(view.chose(), Some((AbilityType::ArcaneShot, Some(LOW))), "{}", describe(&view));
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::ArcaneShot, Some(LOW))),
+        "{}",
+        describe(&view)
+    );
     assert!(matches!(
         view.rejected(AbilityType::AimedShot),
         Some(RejectionReason::WithinDeadZone { .. })
@@ -245,9 +279,17 @@ fn a_ranged_burst_is_aimed_at_the_subject_not_the_units_target() {
                 .target(ME, OTHER)
         };
         let with = build(AiProfile::TeamPlan).decide(ME);
-        assert_eq!(with.chose(), Some((tool, Some(LOW))), "{class:?}: {}", describe(&with));
+        assert_eq!(
+            with.chose(),
+            Some((tool, Some(LOW))),
+            "{class:?}: {}",
+            describe(&with)
+        );
         let without = build(AiProfile::TeamPlan)
-            .withhold(1, PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]))
+            .withhold(
+                1,
+                PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+            )
             .decide(ME);
         assert!(
             without.choices.iter().all(|(_, t)| *t != Some(LOW)),
@@ -263,7 +305,12 @@ fn a_ranged_burst_is_aimed_at_the_subject_not_the_units_target() {
 fn a_melee_burst_out_of_reach_does_not_fire() {
     let view = scene(Rogue, 6.0, Some(LOCK), AiProfile::TeamPlan).decide(ME);
     assert_eq!(view.situation.unwrap().play, Some(PlayTag::Burst));
-    assert_eq!(view.situation.unwrap().play_step, None, "{}", describe(&view));
+    assert_eq!(
+        view.situation.unwrap().play_step,
+        None,
+        "{}",
+        describe(&view)
+    );
     assert!(matches!(
         view.rejected(AbilityType::SinisterStrike),
         Some(RejectionReason::OutOfRange { .. })
@@ -290,16 +337,27 @@ fn a_frostbolt_that_lands_after_the_window_ends_is_not_started() {
         describe(&short)
     );
     assert!(
-        short.choices.iter().all(|c| *c != (AbilityType::Frostbolt, Some(LOW))),
+        short
+            .choices
+            .iter()
+            .all(|c| *c != (AbilityType::Frostbolt, Some(LOW))),
         "{}",
         describe(&short)
     );
     let long = scene(Mage, 25.0, Some(2.5), AiProfile::TeamPlan).decide(ME);
-    assert_eq!(long.chose(), Some((AbilityType::Frostbolt, Some(LOW))), "{}", describe(&long));
+    assert_eq!(
+        long.chose(),
+        Some((AbilityType::Frostbolt, Some(LOW))),
+        "{}",
+        describe(&long)
+    );
     // The control: with the play withheld nothing is fitted, so the same
     // short window refuses no Frostbolt for it.
     let control = scene(Mage, 25.0, Some(2.0), AiProfile::TeamPlan)
-        .withhold(1, PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]))
+        .withhold(
+            1,
+            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+        )
         .decide(ME);
     assert!(control
         .candidates
@@ -320,7 +378,12 @@ fn an_aimed_shot_that_outlasts_the_window_gives_way_to_arcane_shot() {
         "{}",
         describe(&view)
     );
-    assert_eq!(view.chose(), Some((AbilityType::ArcaneShot, Some(LOW))), "{}", describe(&view));
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::ArcaneShot, Some(LOW))),
+        "{}",
+        describe(&view)
+    );
     assert_eq!(view.situation.unwrap().play_step, Some(PlayStep::Burst));
 }
 
@@ -356,8 +419,10 @@ fn a_warlock_starts_nothing_on_the_subject_that_lands_after_the_window() {
         .collect();
     assert!(late.is_empty(), "{}", describe(&view));
     assert!(
-        view.candidates.iter().any(|c| c.ability == AbilityType::Corruption
-            && matches!(c.reason, Some(RejectionReason::OutlastsWindow { .. }))),
+        view.candidates
+            .iter()
+            .any(|c| c.ability == AbilityType::Corruption
+                && matches!(c.reason, Some(RejectionReason::OutlastsWindow { .. }))),
         "Corruption's first tick is fitted: {}",
         describe(&view)
     );
@@ -385,9 +450,17 @@ fn a_rend_whose_first_tick_outlasts_the_window_is_not_applied() {
     );
     assert_ne!(with.chose(), Some((AbilityType::Rend, Some(LOW))));
     let without = build(AiProfile::TeamPlan)
-        .withhold(1, PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]))
+        .withhold(
+            1,
+            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+        )
         .decide(ME);
-    assert_eq!(without.chose(), Some((AbilityType::Rend, Some(LOW))), "{}", describe(&without));
+    assert_eq!(
+        without.chose(),
+        Some((AbilityType::Rend, Some(LOW))),
+        "{}",
+        describe(&without)
+    );
 }
 
 /// A window with no known end (the enemy Priest out of mana) fits every cast.
@@ -396,9 +469,18 @@ fn a_window_with_no_end_fits_any_cast() {
     let mut s = scene(Mage, 25.0, None, AiProfile::TeamPlan);
     s.combatant_mut(ENEMY_HEALER).current_mana = 0.0;
     let view = s.decide(ME);
-    let window = view.situation.unwrap().kill_window.expect("an OOM healer opens it");
+    let window = view
+        .situation
+        .unwrap()
+        .kill_window
+        .expect("an OOM healer opens it");
     assert_eq!(window.until, None);
-    assert_eq!(view.chose(), Some((AbilityType::Frostbolt, Some(LOW))), "{}", describe(&view));
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::Frostbolt, Some(LOW))),
+        "{}",
+        describe(&view)
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +491,13 @@ fn a_window_with_no_end_fits_any_cast() {
 /// decision is the one the play withheld makes.
 #[test]
 fn no_burst_outside_a_kill_window() {
-    for (class, dist) in [(Warrior, 2.0), (Rogue, 2.0), (Mage, 25.0), (Warlock, 25.0), (Hunter, 25.0)] {
+    for (class, dist) in [
+        (Warrior, 2.0),
+        (Rogue, 2.0),
+        (Mage, 25.0),
+        (Warlock, 25.0),
+        (Hunter, 25.0),
+    ] {
         let free = scene(class, dist, None, AiProfile::TeamPlan).rage_if_warrior(class);
         let view = free.decide(ME);
         let situation = view.situation.expect("a situation");
@@ -418,7 +506,10 @@ fn no_burst_outside_a_kill_window() {
         assert_eq!(situation.play_step, None, "{class:?}");
         let withheld = scene(class, dist, None, AiProfile::TeamPlan)
             .rage_if_warrior(class)
-            .withhold(1, PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]))
+            .withhold(
+                1,
+                PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+            )
             .decide(ME);
         assert_eq!(view.chose(), withheld.chose(), "{class:?}");
     }

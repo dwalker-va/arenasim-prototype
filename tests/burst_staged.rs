@@ -97,8 +97,13 @@ fn the_hunter_bursts_with_a_shot_that_lands_before_the_lock_ends() {
             .find(|e| e["kind"] == "situation_change" && e["name"] == "kill_window")
             .unwrap_or_else(|| panic!("seed {seed}: no kill window opened"));
         assert_eq!(window["subject"].as_u64(), Some(warrior), "seed {seed}");
-        let until = window["until"].as_f64().expect("a lock's window has an end") as f32;
-        assert!((until - start - LOCK).abs() < 0.1, "seed {seed}: until {until}");
+        let until = window["until"]
+            .as_f64()
+            .expect("a lock's window has an end") as f32;
+        assert!(
+            (until - start - LOCK).abs() < 0.1,
+            "seed {seed}: until {until}"
+        );
 
         let burst = of_class(played.staged_trace(), "Hunter")
             .filter(|e| e["kind"] == "ability_decision" && e["actor"]["team"] == 1)
@@ -124,13 +129,17 @@ fn the_hunter_bursts_with_a_shot_that_lands_before_the_lock_ends() {
         );
         let hit = hit_after_stage(&played, "Arcane Shot")
             .unwrap_or_else(|| panic!("seed {seed}: the Arcane Shot never hit"));
-        assert!(hit <= LOCK, "seed {seed}: it hit {hit:.2}s in, after the lock");
+        assert!(
+            hit <= LOCK,
+            "seed {seed}: it hit {hit:.2}s in, after the lock"
+        );
 
         // Control: the play withheld. The lock-window rule starts Aimed Shot,
         // which lands after the lock, and no shot hits inside it.
         let played = play(config(seed, false), stage());
         assert!(
-            of_class(played.staged_trace(), "Hunter").all(|e| e["situation"]["play_step"].is_null()),
+            of_class(played.staged_trace(), "Hunter")
+                .all(|e| e["situation"]["play_step"].is_null()),
             "seed {seed}: a burst with the play withheld"
         );
         let first = of_class(played.staged_trace(), "Hunter")
@@ -143,6 +152,9 @@ fn the_hunter_bursts_with_a_shot_that_lands_before_the_lock_ends() {
         );
         let aimed = hit_after_stage(&played, "Aimed Shot")
             .unwrap_or_else(|| panic!("seed {seed}: the Aimed Shot never hit"));
-        assert!(aimed > LOCK, "seed {seed}: the Aimed Shot hit at {aimed:.2}s");
+        assert!(
+            aimed > LOCK,
+            "seed {seed}: the Aimed Shot hit at {aimed:.2}s"
+        );
     }
 }
