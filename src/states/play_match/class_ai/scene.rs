@@ -320,8 +320,8 @@ impl Scene {
     /// unit with a live `CastingState` reports it. A casting unit does not
     /// decide (`decide_abilities` skips it), so this is for the units the
     /// decision reads. Inside the dispatch only the Rogue's Kidney Shot
-    /// planner reads it; the interrupts themselves are decided by
-    /// `check_interrupts`, outside the dispatch, so no scene chooses one.
+    /// planner reads it; the interrupts themselves are decided outside the
+    /// dispatch, and [`Scene::interrupt`] runs that decision.
     pub fn casting(mut self, who: Who, ability: AbilityType) -> Self {
         self.unit_mut(who).casting = Some(ability);
         self
@@ -486,23 +486,7 @@ impl Scene {
             current_sim_time: self.now,
             ..Default::default()
         };
-        let mut situations = self.situations.clone();
-        let clock = MatchClock {
-            gates_opened: self.gates_opened,
-            ..MatchClock::after_gates(self.now)
-        };
-        update_situations(
-            &mut situations,
-            &snapshot,
-            &clock,
-            &SituationConfig {
-                withheld: self.withheld,
-                ..SituationConfig::from_movement(&self.movement)
-            },
-            &mut trace,
-        );
-        // The classification's own transitions are not the unit's decision.
-        trace.pending_events.clear();
+        let situations = self.classify(&snapshot, &mut trace);
         let ctx = snapshot
             .context_for(unit.entity)
             .with_situation(situations.for_team(unit.combatant.team));
@@ -613,6 +597,125 @@ impl Scene {
                 .map(|launch| (launch.trap_type, launch.landing_position)),
         );
         view
+    }
+}
+
+impl Scene {
+    /// Run `who`'s INTERRUPT decision for one tick and report it: the
+    /// decision `check_interrupts` makes for a Warrior, a Rogue or a Shaman
+    /// once every cast of the frame has started
+    /// ([`interrupt_turn`](super::interrupts::interrupt_turn)), over every
+    /// unit the scene has [`casting`](Scene::casting) — a channel if the
+    /// ability is one. A unit of a class with no interrupt of its own decides
+    /// nothing. The scene is not changed.
+    ///
+    /// Separate from [`Scene::decide`]: a frame runs the class decision first,
+    /// and a unit that begins a cast in it is not asked to interrupt, so the
+    /// two are judged each on the scene as built.
+    pub fn interrupt(&self, who: Who) -> DecisionView {
+        use super::interrupts::interrupt_turn;
+        let unit = self.find(who);
+        let snapshot = self.snapshot();
+        let mut trace = DecisionTrace {
+            current_sim_time: self.now,
+            ..Default::default()
+        };
+        let situations = self.classify(&snapshot, &mut trace);
+        let ctx = snapshot
+            .context_for(unit.entity)
+            .with_situation(situations.for_team(unit.combatant.team));
+        let casts = self.casts();
+        let combatant = self.combatant_of(unit);
+        let auras = ActiveAuras {
+            auras: unit.auras.clone(),
+        };
+        let acted = interrupt_turn(
+            &ctx,
+            &self.abilities,
+            &combatant,
+            unit.position,
+            Some(&auras),
+            &casts,
+            Some(&mut trace),
+        )
+        .is_some();
+        DecisionView::read(self, unit.entity, acted, &trace)
+    }
+
+    /// Whom a Felhunter standing where `who` stands, on `who`'s team, would
+    /// Spell Lock ([`spell_lock_pick`](super::interrupts::spell_lock_pick),
+    /// the Felhunter AI's scan) from every unit the scene has casting: the
+    /// unit's name, or why it locks nobody.
+    pub fn spell_lock(&self, who: Who) -> Result<Who, RejectionReason> {
+        let unit = self.find(who);
+        let snapshot = self.snapshot();
+        let ctx = snapshot.context_for(unit.entity);
+        let casts = self.casts();
+        let casts: Vec<_> = casts.values().copied().collect();
+        super::interrupts::spell_lock_pick(
+            &ctx,
+            &self.abilities,
+            unit.combatant.team,
+            unit.position,
+            &casts,
+        )
+        .map(|e| self.who(e.index()))
+    }
+
+    /// Each team's situation in `snapshot`, classified with the scene's
+    /// history ([`Scene::reclassify`]) as the frame classifies it before any
+    /// unit decides. The classification's own transitions are not a unit's
+    /// decision, so they are left out of `trace`.
+    fn classify(&self, snapshot: &CombatSnapshot, trace: &mut DecisionTrace) -> Situations {
+        let mut situations = self.situations.clone();
+        let clock = MatchClock {
+            gates_opened: self.gates_opened,
+            ..MatchClock::after_gates(self.now)
+        };
+        update_situations(
+            &mut situations,
+            snapshot,
+            &clock,
+            &SituationConfig {
+                withheld: self.withheld,
+                ..SituationConfig::from_movement(&self.movement)
+            },
+            trace,
+        );
+        trace.pending_events.clear();
+        situations
+    }
+
+    /// Every unit the scene has casting, as an interrupter scans it: a
+    /// channel if the ability is one.
+    fn casts(&self) -> BTreeMap<Entity, super::interrupts::EnemyCast> {
+        use super::interrupts::{CastTake, EnemyCast};
+        let mut casts = BTreeMap::new();
+        for u in &self.units {
+            let Some(ability) = u.casting else {
+                continue;
+            };
+            let def = self.abilities.get_unchecked(&ability);
+            let channel = def.is_channel();
+            casts.insert(
+                u.entity,
+                EnemyCast {
+                    entity: u.entity,
+                    team: u.combatant.team,
+                    class: u.combatant.class,
+                    alive: u.combatant.is_alive(),
+                    position: u.position,
+                    ability,
+                    channel,
+                    take: if channel {
+                        CastTake::Takes
+                    } else {
+                        CastTake::of_cast(def, false)
+                    },
+                },
+            );
+        }
+        casts
     }
 }
 

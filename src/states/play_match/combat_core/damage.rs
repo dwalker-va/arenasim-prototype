@@ -241,6 +241,10 @@ pub fn process_interrupts(
     pet_query: Query<&Pet>,
     celebration: Option<Res<VictoryCelebration>>,
     auras_query: Query<&ActiveAuras>,
+    positions: Query<&Transform>,
+    // `Option` so a world with no map (the Animation Sandbox's staged
+    // interrupts) resolves as an open field.
+    map_geometry: Option<Res<super::super::map_config::ActiveMapGeometry>>,
 ) {
     // Don't process interrupts during victory celebration
     if celebration.is_some() {
@@ -248,6 +252,29 @@ pub fn process_interrupts(
     }
 
     for (interrupt_entity, interrupt) in interrupts.iter() {
+        // No interrupt lands on a caster its interrupter cannot see: it was
+        // spent (cooldown and cost, at its use site) and does nothing. Every
+        // interrupter's decision already asks for sight
+        // (`class_ai::interrupts`), and nothing moves between the decision and
+        // here; this keeps any other path that queues an `InterruptPending` to
+        // the same rule.
+        let blind = map_geometry.as_ref().is_some_and(|map| {
+            match (
+                positions.get(interrupt.caster),
+                positions.get(interrupt.target),
+            ) {
+                (Ok(from), Ok(to)) => !super::super::map_geometry::has_line_of_sight(
+                    &map.volumes,
+                    from.translation,
+                    to.translation,
+                ),
+                _ => false,
+            }
+        });
+        if blind {
+            commands.entity(interrupt_entity).despawn();
+            continue;
+        }
         let mut interrupted = false;
 
         // Check if target is casting. A cast already interrupted, or an

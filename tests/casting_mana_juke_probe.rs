@@ -37,9 +37,10 @@ const SEED_BANK: std::ops::Range<u64> = 0..60;
 const MIN_JUKED_MATCHES: usize = 4;
 
 /// One per-frame sample of the state this probe cares about. The 2v1 window is
-/// found positionally (frames after the Warrior's last-alive frame), so no time
-/// stamp is needed here.
+/// found positionally (frames after the Warrior's last-alive frame); the time
+/// stamp places the first juke in it.
 struct Frame {
+    sim_time: f32,
     mage_mana_pct: Option<f32>,
     mage_alive: bool,
     warrior_alive: bool,
@@ -63,7 +64,10 @@ struct Measured {
     /// Frames after the Warrior's death with the Shaman and the Mage alive;
     /// `None` when the Warrior never died.
     window_frames: Option<usize>,
-    /// The Mage's lowest mana fraction over those frames.
+    /// The Mage's lowest mana fraction over those frames, from the first
+    /// Frostbolt the Shaman juked in them on: the casts the fix is about. A
+    /// Mage that spent itself dry on casts that LANDED before any juke (and
+    /// was refilling when the jukes began) says nothing about them.
     min_window_mana: f32,
     /// The Mage's lowest mana fraction over the whole match.
     min_overall_mana: f32,
@@ -106,6 +110,7 @@ fn measure(seed: u64) -> Measured {
             }
         }
         frames.push(Frame {
+            sim_time: frame.sim_time,
             mage_mana_pct: mage.map(|m| m.current_mana / m.max_mana),
             mage_alive: mage.map(|m| m.alive).unwrap_or(false),
             warrior_alive,
@@ -115,6 +120,24 @@ fn measure(seed: u64) -> Measured {
     .expect("observed headless match failed");
     let log = std::fs::read_to_string(&log_path).unwrap_or_default();
     let _ = std::fs::remove_file(&log_path);
+
+    let death_t = log
+        .lines()
+        .find(|l| l.contains("[DEATH]") && l.contains("Team 2 Warrior"))
+        .and_then(log_time);
+    let window_juke_times: Vec<f32> = death_t.map_or(Vec::new(), |d| {
+        log.lines()
+            .filter(|l| {
+                l.contains("Team 1 Mage")
+                    && l.contains("fails to cast Frostbolt")
+                    && l.contains("line of sight")
+            })
+            .filter_map(log_time)
+            .filter(|t| *t >= d)
+            .collect()
+    });
+    let window_juke_fizzles = window_juke_times.len();
+    let first_juke = window_juke_times.first().copied().unwrap_or(f32::INFINITY);
 
     // The 2v1 window: every frame after the Warrior's last alive one, while the
     // Shaman and the Mage are both up.
@@ -132,25 +155,10 @@ fn measure(seed: u64) -> Measured {
             .fold(f32::INFINITY, f32::min)
     };
 
-    let death_t = log
-        .lines()
-        .find(|l| l.contains("[DEATH]") && l.contains("Team 2 Warrior"))
-        .and_then(log_time);
-    let window_juke_fizzles = death_t.map_or(0, |d| {
-        log.lines()
-            .filter(|l| {
-                l.contains("Team 1 Mage")
-                    && l.contains("fails to cast Frostbolt")
-                    && l.contains("line of sight")
-                    && log_time(l).is_some_and(|t| t >= d)
-            })
-            .count()
-    });
-
     Measured {
         result,
         window_frames: warrior_died.then_some(window.len()),
-        min_window_mana: min_mana(&mut window.iter().copied()),
+        min_window_mana: min_mana(&mut window.iter().copied().filter(|f| f.sim_time >= first_juke)),
         min_overall_mana: min_mana(&mut frames.iter()),
         window_juke_fizzles,
     }
@@ -165,9 +173,9 @@ fn juked_2v1(m: &Measured) -> bool {
 }
 
 /// (1) The Mage does not bankrupt itself on juked Frostbolts. In every match
-/// of the bank where the lone Shaman juked the Mage (every frame after the
-/// Warrior dies), the Mage's mana stays well above the near-zero floor the bug
-/// produced. An activity guard proves the floor isn't trivially satisfied by a
+/// of the bank where the lone Shaman juked the Mage (every frame of the 2v1
+/// from the first juke on), the Mage's mana stays well above the near-zero
+/// floor the bug produced. An activity guard proves the floor isn't trivially satisfied by a
 /// Mage sitting at full mana.
 #[test]
 fn mage_mana_survives_juked_frostbolts() {

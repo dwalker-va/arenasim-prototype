@@ -73,6 +73,16 @@ impl CombatantInfo {
     }
 }
 
+/// One combatant as [`CombatSnapshot::from_units`] reads it: its components,
+/// and the ability it is casting or channelling.
+pub struct SnapshotUnit<'a> {
+    pub entity: Entity,
+    pub combatant: &'a Combatant,
+    pub transform: &'a Transform,
+    pub casting: Option<AbilityType>,
+    pub auras: Option<&'a ActiveAuras>,
+}
+
 /// Per-frame snapshot of every combatant's stats, auras, and DR state.
 ///
 /// Three maps keyed by `Entity`. Construction is via [`CombatSnapshot::build`];
@@ -158,94 +168,97 @@ impl CombatSnapshot {
         bounds: ArenaBounds,
         ai_profile: AiProfiles,
     ) -> Self {
-        let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
-        let mut active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
-        let mut ability_cooldowns: BTreeMap<Entity, BTreeMap<AbilityType, f32>> = BTreeMap::new();
-
-        // Build owner→pet reverse lookup once so each combatant's `pet` field
-        // can be populated in O(1) inside the main loop. `Query<&Pet>` does not
-        // yield entity from `.iter()`, so we iterate the queries (which yield
-        // entity) and check pet_query for each. Casting/channeling pets are
-        // included so an owner's `pet` link survives the pet being mid-cast.
-        let mut owner_to_pet: BTreeMap<Entity, Entity> = BTreeMap::new();
-        let all_entities = aura_query
+        let units = aura_query
             .iter()
-            .map(|(entity, _, _, _, _, _)| entity)
-            .chain(casting_auras.iter().map(|(entity, _, _, _, _)| entity))
-            .chain(channeling_auras.iter().map(|(entity, _, _, _, _)| entity));
-        for entity in all_entities {
-            if let Ok(pet) = pet_query.get(entity) {
-                owner_to_pet.insert(pet.owner, entity);
-            }
-        }
-
-        // Shared insert for all three sources: full CombatantInfo + cooldowns.
-        let insert_combatant =
-            |entity: Entity,
-             combatant: &Combatant,
-             transform: &Transform,
-             casting_ability: Option<AbilityType>,
-             combatants: &mut BTreeMap<Entity, CombatantInfo>,
-             ability_cooldowns: &mut BTreeMap<Entity, BTreeMap<AbilityType, f32>>| {
-                combatants.insert(
-                    entity,
-                    CombatantInfo::from_combatant(
+            .map(|(entity, combatant, transform, auras, _, _)| SnapshotUnit {
+                entity,
+                combatant,
+                transform,
+                casting: None,
+                auras,
+            })
+            .chain(
+                casting_auras
+                    .iter()
+                    .map(|(entity, combatant, transform, auras, cast)| SnapshotUnit {
                         entity,
                         combatant,
                         transform,
-                        casting_ability,
-                        pet_query.get(entity).ok(),
-                        owner_to_pet.get(&entity).copied(),
-                    ),
-                );
-                // Clone Combatant.ability_cooldowns (HashMap) into a BTreeMap so
-                // downstream iteration is deterministic.
-                let cooldowns: BTreeMap<AbilityType, f32> = combatant
+                        casting: Some(cast.ability),
+                        auras,
+                    }),
+            )
+            .chain(channeling_auras.iter().map(
+                |(entity, combatant, transform, auras, channel)| SnapshotUnit {
+                    entity,
+                    combatant,
+                    transform,
+                    casting: Some(channel.ability),
+                    auras,
+                },
+            ));
+        Self::from_units(
+            units,
+            pet_query,
+            dr_tracker_query,
+            obstacles,
+            bounds,
+            ai_profile,
+        )
+    }
+
+    /// Build a snapshot from every combatant, each once: the one derivation
+    /// [`Self::build`] and `check_interrupts` share. `units` may come in any
+    /// order — every map is keyed and ordered by entity.
+    pub fn from_units<'a>(
+        units: impl Iterator<Item = SnapshotUnit<'a>>,
+        pet_query: &Query<&Pet>,
+        dr_tracker_query: &Query<(Entity, &DRTracker)>,
+        obstacles: &[ObstacleVolume],
+        bounds: ArenaBounds,
+        ai_profile: AiProfiles,
+    ) -> Self {
+        let units: Vec<SnapshotUnit<'a>> = units.collect();
+        // Owner→pet reverse lookup, so each combatant's `pet` field is set.
+        // Casting/channeling pets are included so an owner's `pet` link
+        // survives the pet being mid-cast.
+        let owner_to_pet: BTreeMap<Entity, Entity> = units
+            .iter()
+            .filter_map(|u| {
+                pet_query
+                    .get(u.entity)
+                    .ok()
+                    .map(|pet| (pet.owner, u.entity))
+            })
+            .collect();
+
+        let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
+        let mut active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
+        let mut ability_cooldowns: BTreeMap<Entity, BTreeMap<AbilityType, f32>> = BTreeMap::new();
+        for u in &units {
+            combatants.insert(
+                u.entity,
+                CombatantInfo::from_combatant(
+                    u.entity,
+                    u.combatant,
+                    u.transform,
+                    u.casting,
+                    pet_query.get(u.entity).ok(),
+                    owner_to_pet.get(&u.entity).copied(),
+                ),
+            );
+            // Clone Combatant.ability_cooldowns (HashMap) into a BTreeMap so
+            // downstream iteration is deterministic.
+            ability_cooldowns.insert(
+                u.entity,
+                u.combatant
                     .ability_cooldowns
                     .iter()
                     .map(|(k, v)| (*k, *v))
-                    .collect();
-                ability_cooldowns.insert(entity, cooldowns);
-            };
-
-        for (entity, combatant, transform, auras_opt, _, _) in aura_query.iter() {
-            insert_combatant(
-                entity,
-                combatant,
-                transform,
-                None,
-                &mut combatants,
-                &mut ability_cooldowns,
+                    .collect(),
             );
-            if let Some(auras) = auras_opt {
-                active_auras.insert(entity, auras.auras.clone());
-            }
-        }
-
-        for (entity, combatant, transform, auras_opt, cast_state) in casting_auras.iter() {
-            insert_combatant(
-                entity,
-                combatant,
-                transform,
-                Some(cast_state.ability),
-                &mut combatants,
-                &mut ability_cooldowns,
-            );
-            if let Some(auras) = auras_opt {
-                active_auras.insert(entity, auras.auras.clone());
-            }
-        }
-        for (entity, combatant, transform, auras_opt, channel_state) in channeling_auras.iter() {
-            insert_combatant(
-                entity,
-                combatant,
-                transform,
-                Some(channel_state.ability),
-                &mut combatants,
-                &mut ability_cooldowns,
-            );
-            if let Some(auras) = auras_opt {
-                active_auras.insert(entity, auras.auras.clone());
+            if let Some(auras) = u.auras {
+                active_auras.insert(u.entity, auras.auras.clone());
             }
         }
 

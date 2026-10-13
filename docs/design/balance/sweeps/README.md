@@ -237,3 +237,15 @@ with `AS281_LANE=0` and `AS281_EXEMPT` set to the placement paths whose sight
 check is skipped: `v1immune` skips every path, `v2fallbackfree` skips
 `fallback` and `v3frostfree` skips `frost_peel,peel_snare`. `lane` is
 `AS281_LANE` unset with no exemption.
+
+## `2026-10-12-as293-{basicarena,twinpillars,pillaredarena}.jsonl.gz`
+
+Behind `../2026-10-12-as293-interrupt-sight.md` (card AS-293). 8,590 configs per
+map, one file per map: `gen_sweep.py --full 2 --exclude-double-healer
+--affects Rogue,Warrior,Shaman,Warlock --control-cells 8 --n 10 --extra
+'{"map":"<Map>"}'`. Gunzip each, run each arm's binary over it with
+`--jobs 5 --trace-mode off` (CSVs: `2026-10-12-as293-<map>-{before,after}.csv.gz`),
+then `scripts/paired_sweep.py --affects Rogue,Warrior,Shaman,Warlock --tier
+directional` and `2026-10-12-as293-oriented.py` on the two CSVs. The
+interrupt counts (`2026-10-12-as293-<map>-<arm>-interrupts.txt`) come from
+arms instrumented by `2026-10-12-as293-interrupt-sight-counter.py`.

@@ -201,9 +201,7 @@ pub fn applies_hold(def: &AbilityConfig) -> bool {
 
 /// The caster's own gates, steps 4-7 of [`pre_cast_ok`]: Travel Form, the
 /// school lockout, silence (unless `opts.bypass_silence`) and the ability's
-/// cooldown. Needs no context, so a cast decided outside the class AI — the
-/// interrupts in `combat_ai::check_interrupts` — asks the same question
-/// `pre_cast_ok` does.
+/// cooldown. Needs no context.
 pub fn own_state_ok(
     ability: AbilityType,
     def: &AbilityConfig,
@@ -235,9 +233,9 @@ pub fn own_state_ok(
 ///
 /// A new ability's `try_*` therefore needs nothing extra: it asks
 /// [`cast_gate`] where it would have asked `pre_cast_ok`, rejects with the
-/// `Err` reason, and spends the `Ok` clearance on its `choose`. A cast decided
-/// outside the class AI, with no decision to record (an interrupt), asks
-/// [`own_state_ok`].
+/// `Err` reason, and spends the `Ok` clearance on its `choose`. So does a cast
+/// decided outside the class dispatch: the interrupts
+/// (`class_ai::interrupts`).
 ///
 /// The stop site, pinned. A scene with a decision open compiles:
 ///

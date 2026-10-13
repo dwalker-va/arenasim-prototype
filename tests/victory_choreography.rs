@@ -22,14 +22,16 @@ use bevy::state::app::StatesPlugin as BevyStatesPlugin;
 use bevy::time::TimeUpdateStrategy;
 
 use arenasim::combat::CombatPlugin;
+use arenasim::states::match_config::ArenaMap;
 use arenasim::states::play_match::components::{
     Celebrating, Combatant, Pet, VictoryCelebration, VisualBody,
 };
 use arenasim::states::play_match::equipment::EquipmentPlugin;
-use arenasim::states::play_match::map_geometry::MOVER_RADIUS;
+use arenasim::states::play_match::map_config::{load_map_geometry_config, ActiveMapGeometry};
+use arenasim::states::play_match::map_geometry::{position_blocked, MOVER_RADIUS};
 use arenasim::states::play_match::{
-    AbilityConfigPlugin, CelebrationMarch, GameRng, MapConfigPlugin, MovementConfigPlugin,
-    CONVERGE_SPACING, PET_HEEL_DISTANCE,
+    ring_spots, AbilityConfigPlugin, CelebrationMarch, GameRng, MapConfigPlugin,
+    MovementConfigPlugin, CONVERGE_SPACING, PET_HEEL_DISTANCE,
 };
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::HeadlessMatchConfig;
@@ -250,7 +252,11 @@ fn a_lone_winner_bounces_where_it_stands() {
 /// each simply stopped on the side it came from, share a spot. Every winner
 /// gets a distinct spot, reaches it, and stands clear of the others.
 fn assert_three_stand_apart(cfg: &str) -> Seen {
-    let seen = run(cfg);
+    assert_three_stand_apart_seen(cfg, run(cfg))
+}
+
+/// [`assert_three_stand_apart`] on a match already played.
+fn assert_three_stand_apart_seen(cfg: &str, seen: Seen) -> Seen {
     assert_eq!(seen.at_decision.len(), 3, "{cfg}: {:?}", seen.at_decision);
     assert_eq!(seen.marches_at_end.len(), 3);
     for (slot, march) in &seen.marches_at_end {
@@ -287,30 +293,110 @@ fn three_winners_each_reach_their_own_spot() {
     );
 }
 
+/// A 3v3 on TwinPillars whose winners' ring slot lands inside a pillar. The
+/// situation is rare in play — one match in 33 that three winners finished
+/// across [`pillar_slot_candidates`] after AS-293 — so a bank over seeds
+/// costs a minute of matches per run; the probe pins one match and FAILS
+/// LOUDLY when it stops holding the situation (`slots_inside_a_pillar`),
+/// rather than passing on a match that no longer has a slot to move.
+/// `scan_pillar_slots` re-finds one.
+const PILLAR_SLOT: &str = r#"{"team1":["Warrior","Rogue","Priest"],"team2":["Mage","Hunter","Shaman"],"map":"TwinPillars","random_seed":1}"#;
+
+/// The 3v3 TwinPillars matches `scan_pillar_slots` plays: six comps, eight
+/// seeds each.
+fn pillar_slot_candidates() -> Vec<String> {
+    let comps = [
+        (
+            ["Warrior", "Mage", "Priest"],
+            ["Warlock", "Paladin", "Rogue"],
+        ),
+        (
+            ["Rogue", "Mage", "Priest"],
+            ["Warrior", "Hunter", "Paladin"],
+        ),
+        (
+            ["Warrior", "Hunter", "Druid"],
+            ["Rogue", "Warlock", "Priest"],
+        ),
+        (
+            ["Mage", "Rogue", "Shaman"],
+            ["Warrior", "Warlock", "Paladin"],
+        ),
+        (
+            ["Hunter", "Warlock", "Priest"],
+            ["Warrior", "Mage", "Druid"],
+        ),
+        (["Warrior", "Rogue", "Priest"], ["Mage", "Hunter", "Shaman"]),
+    ];
+    let mut out = Vec::new();
+    for (a, b) in comps {
+        for seed in 0..8u64 {
+            out.push(format!(
+                r#"{{"team1":{},"team2":{},"map":"TwinPillars","random_seed":{seed}}}"#,
+                serde_json::to_string(&a).unwrap(),
+                serde_json::to_string(&b).unwrap(),
+            ));
+        }
+    }
+    out
+}
+
+/// Re-finds [`PILLAR_SLOT`]: prints every candidate three winners finish and
+/// how many of its ring slots fell inside a pillar. `cargo test --release
+/// --test victory_choreography -- --ignored --nocapture scan_pillar_slots`
+#[test]
+#[ignore]
+fn scan_pillar_slots() {
+    for cfg in pillar_slot_candidates() {
+        let seen = run(&cfg);
+        if seen.at_decision.len() == 3 {
+            println!(
+                "{cfg}: {} slot(s) inside a pillar",
+                slots_inside_a_pillar(&seen)
+            );
+        }
+    }
+}
+
+/// How many of a celebration's ring slots fell inside a TwinPillars pillar
+/// before they were moved: the ring `ring_spots` lays round the meeting point
+/// (`face`) from the winners' approaches, on the map's floor with its pillars
+/// taken away, then asked of the real pillars. Read from the winners'
+/// positions as the celebration began.
+fn slots_inside_a_pillar(seen: &Seen) -> usize {
+    let map = load_map_geometry_config()
+        .expect("maps.ron loads")
+        .active_for(ArenaMap::TwinPillars);
+    let unpillared = ActiveMapGeometry {
+        volumes: Vec::new(),
+        ..map.clone()
+    };
+    let Some((_, first)) = seen.marches_at_end.first() else {
+        return 0;
+    };
+    let mut from = seen.at_decision.clone();
+    from.sort_by_key(|(slot, _)| *slot);
+    let from: Vec<Vec2> = from.iter().map(|(_, p)| Vec2::new(p.x, p.z)).collect();
+    let meet = Vec2::new(first.face.x, first.face.z);
+    ring_spots(meet, &from, &unpillared, first.face.y)
+        .into_iter()
+        .filter(|slot| position_blocked(&map.volumes, Vec3::new(slot.x, first.face.y, slot.y)))
+        .count()
+}
+
 /// A 3v3 on TwinPillars whose winners' ring slot lands inside a pillar: the
 /// slot moves to clear ground, and every winner still reaches its spot.
 #[test]
 fn a_ring_slot_inside_a_pillar_moves_in_a_real_match() {
-    let seen = assert_three_stand_apart(
-        r#"{"team1":["Warrior","Mage","Priest"],"team2":["Warlock","Paladin","Rogue"],"map":"TwinPillars","random_seed":4}"#,
-    );
-    // An unmoved slot sits exactly on the ring round the meeting point
-    // (`face`); a moved one does not.
-    let ring = CONVERGE_SPACING / (2.0 * (std::f32::consts::PI / 3.0).sin());
-    let moved = seen
-        .marches_at_end
-        .iter()
-        .filter(|(_, m)| {
-            let off = Vec2::new(m.goal.x - m.face.x, m.goal.z - m.face.z).length();
-            (off - ring).abs() > 0.01
-        })
-        .count();
-    eprintln!("{moved} of 3 slots moved off the ring");
+    let seen = run(PILLAR_SLOT);
+    assert_eq!(seen.at_decision.len(), 3, "{:?}", seen.at_decision);
+    let inside = slots_inside_a_pillar(&seen);
     assert!(
-        moved >= 1,
-        "no slot needed moving: {:?}",
-        seen.marches_at_end
+        inside >= 1,
+        "no ring slot of {PILLAR_SLOT} falls inside a pillar any more — the probe has \
+         nothing to move; re-find one with `scan_pillar_slots`"
     );
+    assert_three_stand_apart_seen(PILLAR_SLOT, seen);
 }
 
 /// Seed scanner for the probes above: prints each candidate's winners and how

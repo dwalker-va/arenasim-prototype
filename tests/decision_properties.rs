@@ -5,8 +5,10 @@
 //!
 //! Each scene runs the production class dispatch for one tick
 //! ([`Scene::decide`] calls `dispatch_class_decision`, the entry point
-//! `decide_abilities` runs), and each property below is checked against every
-//! ability the decision chose. The classes are trusted with nothing: one grid
+//! `decide_abilities` runs) and the unit's interrupt decision
+//! ([`Scene::interrupt`], the one `check_interrupts` runs for Kick, Pummel and
+//! Wind Shear), and each property below is checked against every ability
+//! either decision chose. The classes are trusted with nothing: one grid
 //! drives all nine, and a property names no class, so a new `try_*` that
 //! forgets a gate fails here without anyone writing a test for it.
 //!
@@ -22,7 +24,7 @@
 //! - **cooldowns**: none, or alternate halves of the kit's cooldown abilities
 //!   cooling down;
 //! - **sight**: clear, or a pillar between the unit and its target (only where
-//!   one fits — from 4yd out);
+//!   one fits between them — from 2yd out, so the melee range edge has one);
 //! - **upkeep**: nothing up; the kit's own buffs (and a Shaman's totems)
 //!   up; or those plus its shields and heals over time, and its own damage
 //!   over time on its target (and its curse on every enemy) — so the
@@ -66,10 +68,8 @@
 //!
 //! # What is not here
 //!
-//! Three kinds of decision are made outside `dispatch_class_decision`, so no
-//! scene reaches them, and [`UNREACHED`] names each:
-//! - the interrupts (Pummel, Kick, Wind Shear) are decided by
-//!   `check_interrupts`;
+//! Two kinds of decision are made outside both, so no scene reaches them, and
+//! [`UNREACHED`] names each:
 //! - a weapon poison is applied by the auto-attack;
 //! - a cooldown used from inside crowd control (Berserker Rage, Divine
 //!   Shield) is decided by `decide_abilities`' CC-break branch.
@@ -758,7 +758,7 @@ fn points(
             for resource in [1.0, 0.15, 0.0] {
                 for cooldowns in [Cooldowns::None, Cooldowns::Even, Cooldowns::Odd] {
                     for pillar in [false, true] {
-                        if pillar && distance < 4.0 {
+                        if pillar && distance < 2.0 {
                             continue;
                         }
                         for upkeep in [Upkeep::None, Upkeep::Buffs, Upkeep::Full] {
@@ -1114,6 +1114,8 @@ fn build(defs: &AbilityDefinitions, movement: MovementConfig, p: &Point) -> Scen
 struct Record {
     point: Point,
     view: DecisionView,
+    /// The unit's interrupt decision in the same scene.
+    interrupt: DecisionView,
     /// The deciding unit's resource and cooldowns, as the scene set them.
     my_resource: f32,
     my_cooldowns: BTreeSet<AbilityType>,
@@ -1145,9 +1147,11 @@ fn grid() -> &'static Grid {
                                 let my_resource = me.current_mana;
                                 let my_cooldowns = me.ability_cooldowns.keys().copied().collect();
                                 let view = scene.decide(ME);
+                                let interrupt = scene.interrupt(ME);
                                 Record {
                                     point,
                                     view,
+                                    interrupt,
                                     my_resource,
                                     my_cooldowns,
                                 }
@@ -1199,13 +1203,19 @@ fn pos3(name: &str, p: &Point) -> Vec3 {
     Vec3::new(xz.x, UNIT_Y, xz.y)
 }
 
-/// Every (scene, choice) pair the grid produced.
+/// A scene's two decisions: its class decision, then its interrupt decision.
+fn decisions(r: &Record) -> [&DecisionView; 2] {
+    [&r.view, &r.interrupt]
+}
+
+/// Every (scene, choice) pair the grid produced, from both decisions.
 fn choices() -> impl Iterator<Item = (&'static Record, AbilityType, Option<&'static str>)> {
     grid().records.iter().flat_map(|r| {
-        r.view
-            .choices
-            .iter()
-            .map(move |(ability, target)| (r, *ability, *target))
+        decisions(r).into_iter().flat_map(move |view| {
+            view.choices
+                .iter()
+                .map(move |(ability, target)| (r, *ability, *target))
+        })
     })
 }
 
@@ -1316,9 +1326,9 @@ fn verdict(property: Property, scope: Scope, finding: Finding) {
 /// someone says why.
 #[derive(Clone, Copy, Debug)]
 enum Unreached {
-    /// Decided outside `dispatch_class_decision`, at the named site, so no
-    /// scene can choose it: the interrupts (`check_interrupts`), a weapon
-    /// poison (the auto-attack), a cooldown used from inside crowd control
+    /// Decided outside `dispatch_class_decision` and the interrupt decision,
+    /// at the named site, so no scene can choose it: a weapon poison (the
+    /// auto-attack), a cooldown used from inside crowd control
     /// (`decide_abilities`' CC-break branch).
     DecidedOutside(&'static str),
     /// Reachable, but only from a state the grid has no knob for (named).
@@ -1339,18 +1349,6 @@ impl Unreached {
 }
 
 const UNREACHED: &[(AbilityType, Unreached)] = &[
-    (
-        AbilityType::Pummel,
-        Unreached::DecidedOutside("check_interrupts"),
-    ),
-    (
-        AbilityType::Kick,
-        Unreached::DecidedOutside("check_interrupts"),
-    ),
-    (
-        AbilityType::WindShear,
-        Unreached::DecidedOutside("check_interrupts"),
-    ),
     (
         AbilityType::CripplingPoison,
         Unreached::DecidedOutside("the auto-attack's weapon poison"),
@@ -1576,6 +1574,57 @@ fn a_targeted_choice_is_in_sight() {
     verdict(Property::InSight, Scope::Guard, in_sight());
 }
 
+/// Every interrupt meets a pillar in the grid: somewhere it is refused for
+/// sight (traced `LosBlocked`) where the same scene without the pillar
+/// interrupts. So [`a_targeted_choice_is_in_sight`] judges every interrupt in
+/// the situation that matters, and the refusal is the pillar's doing. The
+/// interrupts are read from `abilities.ron` (every `is_interrupt` ability a
+/// class casts itself; Spell Lock is its Felhunter's, held to the same rule by
+/// `tests/interrupt_sight.rs`), and compared as a set.
+#[test]
+fn every_interrupt_is_refused_through_a_pillar_its_clear_twin_casts() {
+    let g = grid();
+    let interrupts: BTreeSet<String> = g
+        .defs
+        .iter()
+        .filter(|(_, d)| d.is_interrupt && d.pet.is_none())
+        .map(|(a, _)| format!("{a:?}"))
+        .collect();
+    let twin_key = |p: &Point| {
+        format!(
+            "{:?}",
+            Point {
+                pillar: false,
+                ..*p
+            }
+        )
+    };
+    let clear: BTreeMap<String, &Record> = g
+        .records
+        .iter()
+        .filter(|r| !r.point.pillar)
+        .map(|r| (twin_key(&r.point), r))
+        .collect();
+    let mut met = BTreeSet::new();
+    for r in g.records.iter().filter(|r| r.point.pillar) {
+        for c in &r.interrupt.candidates {
+            if c.status != CandidateStatus::Rejected
+                || !matches!(c.reason, Some(RejectionReason::LosBlocked))
+            {
+                continue;
+            }
+            let twin = clear[&twin_key(&r.point)];
+            if twin.interrupt.choices.iter().any(|(a, _)| *a == c.ability) {
+                met.insert(format!("{:?}", c.ability));
+            }
+        }
+    }
+    assert_eq!(
+        met, interrupts,
+        "every interrupt is refused for sight where its pillar-free twin interrupts"
+    );
+}
+
 /// A chosen ability is off cooldown.
 #[test]
 fn never_chooses_an_ability_on_cooldown() {
@@ -1769,8 +1818,12 @@ fn never_casts_through_a_silence_lockout_or_shapeshift() {
 fn never_chooses_an_ability_its_own_trace_rejected_for_a_caster_reason() {
     let mut judged = 0;
     let mut v = Vec::new();
-    for r in &grid().records {
-        for c in &r.view.candidates {
+    for (r, view) in grid()
+        .records
+        .iter()
+        .flat_map(|r| decisions(r).map(|view| (r, view)))
+    {
+        for c in &view.candidates {
             if c.status != CandidateStatus::Rejected {
                 continue;
             }
@@ -1787,7 +1840,7 @@ fn never_chooses_an_ability_its_own_trace_rejected_for_a_caster_reason() {
                 continue;
             }
             judged += 1;
-            if let Some((_, target)) = r.view.choices.iter().find(|(a, _)| *a == c.ability) {
+            if let Some((_, target)) = view.choices.iter().find(|(a, _)| *a == c.ability) {
                 v.push(format!(
                     "{} (also rejected: {:?})",
                     describe(r, c.ability, *target),
@@ -2082,9 +2135,8 @@ fn target_cast(r: &Record) -> Option<bool> {
 
 /// No decision holds its crowd control for an interrupt when the target's
 /// cast is `uninterruptible` (AS-287): no interrupt will take it, so the CC is
-/// the only thing that stops it. Interrupts themselves are decided outside the
-/// dispatch ([`UNREACHED`]); `tests/uninterruptible_casts.rs` holds them to the
-/// same rule.
+/// the only thing that stops it. The interrupts themselves never choose such a
+/// cast (`tests/uninterruptible_casts.rs`).
 ///
 /// Paired inside the grid: the same scenes with an interruptible cast DO hold
 /// for the interrupt somewhere, so the hold this property looks for is real.
