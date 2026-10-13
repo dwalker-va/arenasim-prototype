@@ -10,7 +10,7 @@
 
   Everything here is MOCK. The "fight" is a scripted stand-in for PlayMatch, not
   the sim: its outcome is a coin flip weighted by the two sides' budgets
-  (starting kit + talents + gear) and the answers your Prepare settings give.
+  (starting kit + talents + gear).
 
   What follows the proposal:
   - the caps: 2 talent points at the draft, +1 after every match up to 8, and one
@@ -18,8 +18,14 @@
   - the Warlock and Priest mock trees (section 5), tier gates 0/2/3/5;
   - the Gauntlet (ilvl 78) and Champion (ilvl 92) tiers, Champion offers only
     after a win at 1/3, and the Champion trinkets (section 6);
-  - opponents scaling with wins to budget parity, and the six difficulty levels
-    (sections 7.3 and 8);
+  - opponents scaling with wins to budget parity, a briefing of each team's key
+    abilities (no advice, no AI profile), and the five difficulty levels
+    (sections 7.3, 7.4 and 8);
+  - the Priest's Form choice, unlocked by the tier-2 Shadowform talent (sections 1, 5.2);
+  - TBC slot multipliers, offers from every slot weighted by multiplier, and the
+    jackpot trinket (section 6);
+  - version-stamped match records: a replay is unavailable once the game version
+    changes (section 10; the menu's prototype-only button simulates an update);
   - renown abilities awarded when their condition is met (section 9): a small
     condition vocabulary evaluated at match end (from a mocked match-facts
     digest) and at run end (from the run record), and the encyclopedia's Renown
@@ -181,7 +187,7 @@ const CHOICES = {
   ],
   Rogue:[{key:"opener",label:"Opener",opts:[["Cheap Shot"],["Ambush"]]}],
   Paladin:[{key:"aura",label:"Aura",opts:[["Devotion Aura"],["Concentration Aura"],["Shadow Resistance Aura"]]}],
-  Priest:[],
+  Priest:[{key:"form",label:"Form",opts:[["Healer"],["Shadowform","Shadowform"]]}],
 };
 
 // ---- Talent trees (proposal section 5, mocks). Tier gates: 0 / 2 / 3 / 5 points in the tree.
@@ -199,16 +205,16 @@ const TREES = {
       ["ShadowMastery","Shadow Mastery",4,1,1,["SiphonLife",1],"spell_shadow_shadetruesight","Patch","Capstone: +10% Shadow damage and life drained.",null],
     ],
     Demonology:[
-      ["DemonicEmbrace","Demonic Embrace",1,0,2,null,"spell_shadow_metamorphosis","Stats","+11 max health per rank (priced on the item budget).",null],
+      ["DemonicEmbrace","Demonic Embrace",1,0,2,null,"spell_shadow_metamorphosis","StatPercent","+3% maximum health per rank, gear included.",null],
       ["FelStamina","Fel Stamina",1,2,2,null,"spell_shadow_antishadow","Pet stats","Felhunter +10% max health per rank.",null],
       ["UnholyPower","Unholy Power",2,0,2,null,"spell_shadow_shadowworddominate","Pet stats","Felhunter melee +10% per rank.",null],
-      ["MasterDemonologist","Master Demonologist",2,2,1,null,"spell_shadow_shadowpact","Stats","+5 all resistances on the Warlock and the Felhunter while it lives.",null],
-      ["DemonicSacrifice","Demonic Sacrifice",3,1,1,null,"spell_shadow_psychicscream","Widens choice","Adds \"Sacrifice the Felhunter\" to your demon choice: no Felhunter, +15% Shadow damage for the match.","Demonic Sacrifice: may trade the Felhunter for +15% Shadow"],
+      ["MasterDemonologist","Master Demonologist",2,2,1,null,"spell_shadow_shadowpact","Mechanic","The Warlock and the Felhunter take 4% less spell damage while it lives: resistance as magnitude.",null],
+      ["DemonicSacrifice","Demonic Sacrifice",3,1,1,null,"spell_shadow_psychicscream","Widens choice","Adds \"Sacrifice the Felhunter\" to your demon choice: no Felhunter, Touch of Shadow (+15% Shadow damage) for the match. No mana effect: that is Life Tap's job.","Demonic Sacrifice: may trade the Felhunter for +15% Shadow"],
       ["SoulLink","Soul Link",4,1,1,["FelStamina",2],"spell_shadow_gathershadows","Mechanic","Capstone: 12% of the Warlock's damage taken goes to the Felhunter while it lives.","Soul Link: their Felhunter soaks the Warlock's damage: kill it first"],
     ],
     Destruction:[
       ["ImprovedShadowBolt","Improved Shadow Bolt",1,0,2,null,"spell_shadow_shadowbolt","Proc","10% per rank on a Shadow Bolt hit: Shadow Vulnerability (+10% Shadow damage taken, 4 hits or 12s).","Shadow Vulnerability windows on your kill target"],
-      ["Bane","Bane",1,2,2,null,"spell_shadow_deathpact","Patch","-0.1s Shadow Bolt and Immolate cast per rank.",null],
+      ["Bane","Bane",1,2,2,null,"spell_shadow_deathpact","Patch","-0.25s Shadow Bolt and Immolate cast per rank: 2.0 to 1.5 at 2/2.",null],
       ["Aftermath","Aftermath",2,0,2,null,"spell_fire_fire","Proc","5% per rank on a Destruction hit: 30% slow for 5s.",null],
       ["Shadowburn","Shadowburn",2,2,1,null,"spell_shadow_scourgebuild","Grant","Instant Shadow nuke, about 52 damage, 15s cooldown.","Shadowburn: instant burst at low health"],
       ["ImprovedImmolate","Improved Immolate",3,1,1,null,"spell_fire_immolation","Patch","+25% Immolate initial damage.",null],
@@ -217,34 +223,38 @@ const TREES = {
   },
   Priest:{
     Discipline:[
-      ["UnbreakableWill","Unbreakable Will",1,0,2,null,"spell_magic_magearmor","Mechanic","10% per rank to resist a stun, fear or silence.","Unbreakable Will: their Priest may resist your fear or stun"],
+      ["UnbreakableWill","Unbreakable Will",1,0,2,null,"spell_magic_magearmor","Mechanic","Stuns, fears and silences on you last 10% shorter per rank: resistance as magnitude, never a roll.","Unbreakable Will: their Priest shakes off CC sooner"],
       ["ImprovedPWShield","Improved PW: Shield",1,2,2,null,"spell_holy_powerwordshield","Patch","+5% Power Word: Shield absorb per rank.",null],
       ["MentalAgility","Mental Agility",2,0,2,null,"ability_hibernation","Patch","-5% mana cost of instants per rank.",null],
-      ["Martyrdom","Martyrdom",2,2,1,null,"spell_nature_tranquility","Proc","After a melee or ranged crit taken: 6s of halved lockouts.",null],
-      ["InnerFocus","Inner Focus",3,1,1,null,"spell_frost_windwalkon","Grant","Next spell free and +25% crit. 45s cooldown.","Inner Focus: a free, likely-crit heal on demand"],
-      ["PowerInfusion","Power Infusion",4,1,1,["InnerFocus",1],"spell_holy_powerinfusion","Grant","Capstone: +24 spell power on an ally for 15s. 45s cooldown.","Power Infusion empowers their caster's burst"],
+      ["InnerFocus","Inner Focus",2,2,1,null,"spell_frost_windwalkon","Grant","Next spell free and +25% crit. 45s cooldown.","Inner Focus: a free, likely-crit heal on demand"],
+      ["ReflectiveShield","Reflective Shield",3,0,1,null,"spell_holy_powerwordshield","Mechanic","30% of the damage your shields absorb is dealt back to the attacker (TBC).","Reflective Shield: hitting a shielded target hurts"],
+      ["PowerInfusion","Power Infusion",3,2,1,null,"spell_holy_powerinfusion","Grant","+24 spell power on an ally for 15s. 45s cooldown.","Power Infusion empowers their caster's burst"],
+      ["PainSuppression","Pain Suppression",4,1,1,["ReflectiveShield",1],"spell_holy_painsupression","Grant","Capstone: an ally takes 40% less damage for 8s. 45s cooldown (TBC).","Pain Suppression: their kill target takes 40% less for 8s"],
     ],
     Holy:[
       ["HolySpecialization","Holy Specialization",1,0,2,null,"spell_holy_sealofsalvation","Patch","+2.5% crit on Holy spells per rank.",null],
       ["SpiritualHealing","Spiritual Healing",1,2,2,null,"spell_nature_moonglow","Patch","+5% healing per rank.",null],
       ["Inspiration","Inspiration",2,0,2,null,"spell_holy_layonhands","Proc","After a heal crit: target +12% armor per rank for 15s.",null],
       ["BlessedRecovery","Blessed Recovery",2,2,1,null,"spell_holy_blessedrecovery","Proc","After a melee or ranged crit taken: heal 25% of it over 6s.",null],
-      ["HolyNova","Holy Nova",3,1,1,null,"spell_holy_holynova","Grant","Damages enemies and heals allies within 10 yards.","Holy Nova punishes melee standing on their Priest"],
-      ["SpiritOfRedemption","Spirit of Redemption",4,1,1,["SpiritualHealing",2],"inv_enchant_essenceeternallarge","Mechanic","Capstone: on death, heals freely as an untargetable spirit for 8s.","Spirit of Redemption: their Priest heals 8s after dying"],
+      ["HolyConcentration","Holy Concentration",3,0,1,null,"spell_holy_fanaticism","StatPercent","+35% mana regeneration, gear included: Holy's longevity.",null],
+      ["HolyNova","Holy Nova",3,2,1,null,"spell_holy_holynova","Grant","Damages enemies and heals allies within 10 yards.","Holy Nova punishes melee standing on their Priest"],
+      ["GuardianSpirit","Guardian Spirit",4,1,1,["HolyConcentration",1],"spell_holy_guardianspirit","Grant","Capstone: +40% healing received for 10s, and the first killing blow in that window is prevented (healed to 30%). 60s cooldown (Wrath).","Guardian Spirit: their kill target survives one killing blow"],
     ],
     Shadow:[
-      ["ImprovedPsychicScream","Improved Psychic Scream",1,0,2,null,"spell_shadow_psychicscream","Patch","-2s Psychic Scream cooldown per rank.",null],
-      ["ImprovedMindBlast","Improved Mind Blast",1,2,2,null,"spell_shadow_unholyfrenzy","Patch","-1s Mind Blast cooldown per rank.",null],
-      ["Blackout","Blackout",2,1,2,null,"spell_shadow_gathershadows","Proc","4% per rank on Mind Blast: 3s stun.","Blackout: Mind Blast can stun"],
-      ["VampiricEmbrace","Vampiric Embrace",3,0,1,null,"spell_shadow_unsummonbuilding","Grant","Debuff: their team heals for 20% of the Priest's Shadow damage to the target.",null],
-      ["Silence","Silence",4,1,1,["Blackout",1],"spell_shadow_impphaseshift","Grant","Capstone: 5s silence, 45s cooldown, 20 yards.","Silence locks your healer for 5s"],
+      ["ImprovedMindBlast","Improved Mind Blast",1,0,2,null,"spell_shadow_unholyfrenzy","Patch","-1s Mind Blast cooldown per rank.",null],
+      ["ImprovedPsychicScream","Improved Psychic Scream",1,2,2,null,"spell_shadow_psychicscream","Patch","-2s Psychic Scream cooldown per rank.",null],
+      ["Shadowform","Shadowform",2,0,1,null,"spell_shadow_shadowform","Widens choice","Adds Shadowform to your Form choice in Prepare: for that whole match, +15% Shadow damage and -15% physical damage taken, and no healing spells.","Shadowform: their Priest may come as a damage dealer"],
+      ["Blackout","Blackout",2,2,2,null,"spell_shadow_gathershadows","Proc","4% per rank on Mind Blast: 3s stun.","Blackout: Mind Blast can stun"],
+      ["MindFlay","Mind Flay",3,0,1,null,"spell_shadow_siphonmana","Grant","Channel: about 30 Shadow over 3s and a 50% slow.",null],
+      ["VampiricEmbrace","Vampiric Embrace",3,2,1,null,"spell_shadow_unsummonbuilding","Grant","Debuff: your team heals for 20% of your Shadow damage to the target.",null],
+      ["Silence","Silence",4,1,1,["Shadowform",1],"spell_shadow_impphaseshift","Grant","Capstone: 5s silence, 45s cooldown, 20 yards. Castable only in Shadowform.","Silence locks your healer for 5s"],
     ],
   },
 };
 // Reference builds (spend order) that authored opponents are cut from.
 const REF = {
   Warlock:["ImprovedDrainLife","ImprovedDrainLife","Nightfall","SiphonLife","AmplifyCurse","ShadowMastery","ImprovedCurseOfAgony","Nightfall"],
-  Priest:["SpiritualHealing","SpiritualHealing","Inspiration","HolyNova","HolySpecialization","SpiritOfRedemption","BlessedRecovery","HolySpecialization"],
+  Priest:["SpiritualHealing","SpiritualHealing","Inspiration","HolyConcentration","HolySpecialization","GuardianSpirit","BlessedRecovery","HolySpecialization"],
 };
 const NODE = {};
 for(const cls in TREES) for(const tree in TREES[cls]) for(const n of TREES[cls][tree]) NODE[n[0]] = {id:n[0],name:n[1],tier:n[2],col:n[3],max:n[4],req:n[5],icon:n[6],kind:n[7],text:n[8],threat:n[9],tree,cls};
@@ -253,24 +263,30 @@ for(const cls in TREES) for(const tree in TREES[cls]) for(const n of TREES[cls][
 // Simplified: one trinket slot, and offers drawn only from the slots where a pick is felt.
 // Budget = item level x 0.75 x slot multiplier. Starting kit 58, Gauntlet 78, Champion 92.
 const ILVL = {start:58, gauntlet:78, champion:92};
-const SLOT_MULT = {Head:1.0, Chest:1.0, Legs:0.875, Shoulders:0.75, Hands:0.75, Feet:0.75, Weapon:1.0, Trinket:0.5625};
+// TBC slot groups (section 6.1): head/chest/legs 1.0; shoulders/hands/waist/feet 0.75; wrists/neck/back/ring 0.5625; trinket 0.70.
+const SLOT_MULT = {Head:1.0, Chest:1.0, Legs:1.0, Shoulders:0.75, Hands:0.75, Waist:0.75, Feet:0.75, Wrists:0.5625, Neck:0.5625, Back:0.5625, Ring:0.5625, Weapon:1.0, Trinket:0.70};
 const FELT_SLOTS = Object.keys(SLOT_MULT);
-const KIT_BUDGET = 334;   // a combatant's starting kit, about the default Warlock's
+// Weighted draw without replacement: a slot is offered in proportion to its multiplier.
+function weightedPick(arr,n,w){const a=arr.slice(),out=[];while(out.length<n&&a.length){const tot=a.reduce((s,x)=>s+w(x),0);let r=rng()*tot,i=0;for(;i<a.length-1;i++){r-=w(a[i]);if(r<0)break}out.push(a.splice(i,1)[0])}return out}
+const KIT_BUDGET = 360;   // a combatant's starting kit, about the default Warlock's once TBC's multipliers re-spend it
 const ARMOR = { // [stat, Gauntlet set name, Champion set name]
   Warlock:["SP","Arcanist","Plagueheart"], Priest:["SP","Arcanist","Faith"], Mage:["SP","Arcanist","Netherwind"],
   Paladin:["SP","Judgement","Redemption"], Rogue:["AP","Deathdealer","Bloodfang"], Warrior:["AP","Warlord's","Dreadnaught"],
   Hunter:["AP","Giantstalker","Dragonstalker"], Shaman:["SP","Ten Storms","Earthshatter"], Druid:["SP","Wildheart","Stormrage"],
 };
-const SLOT_WORD = {Head:"Crown",Chest:"Robes",Legs:"Leggings",Shoulders:"Mantle",Hands:"Gloves",Feet:"Boots",Weapon:"Weapon",Trinket:"Token"};
-const SLOT_ICON = {Head:"inv_helmet_53",Chest:"inv_chest_cloth_03",Legs:"inv_pants_08",Shoulders:"inv_shoulder_02",Hands:"inv_gauntlets_04",Feet:"inv_boots_cloth_03",Weapon:"inv_staff_06",Trinket:"inv_misc_token_argentdawn2"};
+const SLOT_WORD = {Head:"Crown",Chest:"Robes",Legs:"Leggings",Shoulders:"Mantle",Hands:"Gloves",Waist:"Belt",Feet:"Boots",Wrists:"Bindings",Neck:"Pendant",Back:"Cloak",Ring:"Ring",Weapon:"Weapon",Trinket:"Token"};
+const SLOT_ICON = {Head:"inv_helmet_53",Chest:"inv_chest_cloth_03",Legs:"inv_pants_08",Shoulders:"inv_shoulder_02",Hands:"inv_gauntlets_04",Waist:"inv_belt_13",Feet:"inv_boots_cloth_03",Wrists:"inv_bracer_07",Neck:"inv_jewelry_necklace_09",Back:"inv_misc_cape_18",Ring:"inv_jewelry_ring_40",Weapon:"inv_staff_06",Trinket:"inv_misc_token_argentdawn2"};
 // Champion trinkets (section 6.3): [name, icon, effect line, who can use it, threat line]
+// [name, icon, effect, who can use it, briefing line, offer weight]. The jackpot is offered at a quarter of the others' weight.
 const CHAMPION_TRINKETS = [
-  ["Medallion of the Alliance","inv_jewelry_trinketpvp_01","On use: breaks every stun, fear, polymorph, root and slow on you. Once a match.","any","Medallion: breaks your first stun or fear"],
-  ["Talisman of Ephemeral Power","inv_misc_stonetablet_11","On use: +40 spell power for 15s. 45s cooldown.","SP","Talisman: a spell power burst at the kill window"],
-  ["Earthstrike","spell_nature_abolishmagic","On use: +70 attack power for 20s. 60s cooldown.","AP","Earthstrike: an attack power burst"],
-  ["Diamond Flask","inv_drink_01","On use: a heal over time and +attack power for 30s. Once a match.","any",null],
-  ["Hand of Justice","inv_jewelry_talisman_01","Equip: +attack power; 5% chance on a melee hit of an extra swing.","AP",null],
-  ["Darkmoon Card: Blue Dragon","inv_misc_ticket_tarot_bluedragon_01","Equip: 5% chance on a cast of +mana regen for 15s.","SP",null],
+  ["Aegis of the Last Stand","spell_holy_powerwordshield","Below 35% health: an absorb shield of 20% of your maximum health. Once a match.","any","Aegis: shields itself once at low health",0.25],
+  ["Medallion of the Alliance","inv_jewelry_trinketpvp_01","On use: breaks every stun, fear, polymorph, root and slow on you. Once a match.","any","Medallion: breaks one stun or fear",1],
+  ["Talisman of Ephemeral Power","inv_misc_stonetablet_11","On use: +40 spell power for 15s. 45s cooldown.","SP","Talisman: a spell power burst",1],
+  ["Earthstrike","spell_nature_abolishmagic","On use: +70 attack power for 20s. 60s cooldown.","AP","Earthstrike: an attack power burst",1],
+  ["Kiss of the Spider","inv_trinket_naxxramas04","On use: +20% attack speed for 15s (the new haste aura). 60s cooldown.","AP","Kiss of the Spider: an attack speed burst",1],
+  ["Diamond Flask","inv_drink_01","On use: a heal over time and +attack power for 30s. Once a match.","any",null,1],
+  ["Hand of Justice","inv_jewelry_talisman_01","Equip: +attack power; 5% chance on a melee hit of an extra swing (Windfury's mechanism).","AP",null,1],
+  ["Darkmoon Card: Blue Dragon","inv_misc_ticket_tarot_bluedragon_01","Equip: 5% chance on a cast of +mana regen for 15s.","SP",null,1],
 ];
 function slotBudget(slot,lvl){return lvl*0.75*SLOT_MULT[slot]}
 function statLine(cls,budget){const st=ARMOR[cls][0];return `+${Math.round(budget*0.6/1.5)} ${st} +${Math.round(budget*0.4)} HP`}
@@ -280,7 +296,7 @@ function makeOffer(c,slot,tier){
   const [st,gset,cset] = ARMOR[c.cls];
   if(tier==="champion" && slot==="Trinket"){
     const ok = CHAMPION_TRINKETS.filter(t=>(t[3]==="any"||t[3]===st) && !Object.values(c.gear).some(g=>g.name===t[0]));
-    const t = ok[Math.floor(rng()*ok.length)];
+    const t = weightedPick(ok,1,x=>x[5])[0];
     return {cls:c.cls, slot, tier, ilvl:lvl, gain, name:t[0], icon:t[1], effect:t[2], threat:t[4], stats:statLine(c.cls,slotBudget(slot,lvl))};
   }
   return {cls:c.cls, slot, tier, ilvl:lvl, gain, name:`${tier==="champion"?cset:gset} ${SLOT_WORD[slot]}`, icon:SLOT_ICON[slot], effect:null, threat:null, stats:statLine(c.cls,slotBudget(slot,lvl))};
@@ -294,10 +310,10 @@ function offersFor(c,won){
   const trinketsLeft = CHAMPION_TRINKETS.some(t=>(t[3]==="any"||t[3]===st) && !hasItem(c,t[0]));
   const champSlots = FELT_SLOTS.filter(s=>currentIlvl(c,s)<ILVL.champion && (s!=="Trinket"||trinketsLeft));
   if(won && rng() < championChance() && champSlots.length){
-    const slot = rng()<0.5 && champSlots.includes("Trinket") ? "Trinket" : champSlots[Math.floor(rng()*champSlots.length)];
+    const slot = weightedPick(champSlots,1,x=>SLOT_MULT[x])[0];
     out.push(makeOffer(c,slot,"champion"));
   }
-  for(const s of pick(gauntletSlots.filter(s=>!out.some(o=>o.slot===s)), n-out.length)) out.push(makeOffer(c,s,"gauntlet"));
+  for(const s of weightedPick(gauntletSlots.filter(s=>!out.some(o=>o.slot===s)), n-out.length, x=>SLOT_MULT[x])) out.push(makeOffer(c,s,"gauntlet"));
   return out;
 }
 function gearGain(c){return Object.values(c.gear).reduce((s,g)=>s+g.gainTotal,0)}
@@ -310,7 +326,7 @@ function pointCap(){return POINT_CAP}
 function pickCap(){return PICK_CAP}
 function championChance(){return 1/3}
 const LEVELS = [ // [name, extra picks, extra Champion items (99 = all), opponent points rule]
-  ["Novice",-2,-99,"parity"],["Combatant",0,0,"parity"],["Challenger",1,1,"parity"],
+  ["Combatant",0,0,"parity"],["Challenger",1,1,"parity"],
   ["Rival",2,2,"parity"],["Duelist",3,99,"plus1"],["Gladiator",4,99,"full"],
 ];
 // ---- Renown (section 9): abilities AWARDED when their condition is met ------------
@@ -338,15 +354,15 @@ const EFFECTS = {
   title:{text:t=>`the title "${t}"`},
 };
 const RENOWN = [ // [id, name, kind, {effect}, scope, [[leaf, arg]...]]
-  ["ArenaCombatant","Arena Combatant","Flagship",{draft:1},"run",[["Cleared",1]]],
-  ["ArenaChallenger","Arena Challenger","Flagship",{offers:1},"run",[["Cleared",2]]],
-  ["ArenaRival","Arena Rival","Flagship",{draft:1},"run",[["Cleared",3]]],
-  ["ArenaDuelist","Arena Duelist","Flagship",{offers:1},"run",[["Cleared",4]]],
-  ["ArenaGladiator","Arena Gladiator","Flagship",{draft:1},"run",[["Cleared",5]]],
-  ["CloakAndDagger","Cloak and Dagger","Objective",{rerolls:1},"run",[["Cleared",1],["TeamIncludes","Rogue"]]],
-  ["AllOffense","All Offense","Objective",{rerolls:1},"run",[["Cleared",1],["HealerCount",0]]],
-  ["Flawless","Flawless","Objective",{rerolls:1,title:"the Flawless"},"run",[["Cleared",1],["LossesAtMost",0]]],
-  ["OpenHanded","Open-Handed","Objective",{rerolls:1},"run",[["Cleared",1],["NoItemTierEquipped","champion"]]],
+  ["ArenaCombatant","Arena Combatant","Flagship",{draft:1},"run",[["Cleared",0]]],
+  ["ArenaChallenger","Arena Challenger","Flagship",{offers:1},"run",[["Cleared",1]]],
+  ["ArenaRival","Arena Rival","Flagship",{draft:1},"run",[["Cleared",2]]],
+  ["ArenaDuelist","Arena Duelist","Flagship",{offers:1},"run",[["Cleared",3]]],
+  ["ArenaGladiator","Arena Gladiator","Flagship",{draft:1},"run",[["Cleared",4]]],
+  ["CloakAndDagger","Cloak and Dagger","Objective",{rerolls:1},"run",[["Cleared",0],["TeamIncludes","Rogue"]]],
+  ["AllOffense","All Offense","Objective",{rerolls:1},"run",[["Cleared",0],["HealerCount",0]]],
+  ["Flawless","Flawless","Objective",{rerolls:1,title:"the Flawless"},"run",[["Cleared",0],["LossesAtMost",0]]],
+  ["OpenHanded","Open-Handed","Objective",{rerolls:1},"run",[["Cleared",0],["NoItemTierEquipped","champion"]]],
   ["LastOneStanding","Last One Standing","Objective",{rerolls:1},"match",[["Won"],["CameDownToOneVsOne"]]],
   ["CleanKill","Clean Kill","Objective",{title:"the Precise"},"match",[["Won"],["KillingBlowWhileOffTargetInHardCc"]]],
   ["Versatile","Versatile","Objective",{title:"the Versatile"},"profile",[["DistinctClassesCleared",4]]],
@@ -357,7 +373,7 @@ for(const r of RENOWN){
 }
 function conditionText(r){const t=r[5].map(([leaf,arg])=>LEAVES[leaf].text(arg));return t[0].charAt(0).toUpperCase()+t[0].slice(1)+(t.length>1?" "+t.slice(1).join(", "):"")+"."}
 function effectText(e){return Object.entries(e).map(([k,v])=>EFFECTS[k].text(v)).join("; ")}
-function freshProfile(){return {clears:[0,0,0,0,0,0], unlocked:{}, history:[], runs:0}}
+function freshProfile(){return {clears:[0,0,0,0,0], unlocked:{}, history:[], runs:0}}
 let P = freshProfile();
 try{ const raw = localStorage.getItem("arenasim-gauntlet-profile"); if(raw) P = Object.assign(freshProfile(), JSON.parse(raw)); }catch(e){}
 for(const id in P.unlocked) if(!RENOWN.some(r=>r[0]===id)) delete P.unlocked[id];   // a removed ability is dropped on load
@@ -367,7 +383,7 @@ function effectTotal(k){return RENOWN.filter(r=>unlocked(r[0])&&r[3][k]).reduce(
 function draftSlots(){return Math.min(EFFECTS.draft.ceiling, EFFECTS.draft.base+effectTotal("draft"))}
 function equipmentChoices(){return Math.min(EFFECTS.offers.ceiling, EFFECTS.offers.base+effectTotal("offers"))}
 function rerollsPerRun(){return Math.min(EFFECTS.rerolls.ceiling, effectTotal("rerolls"))}
-function levelUnlocked(i){return i<=1 || P.clears[i-1]>0}
+function levelUnlocked(i){return i===0 || P.clears[i-1]>0}
 // evaluate(scope, facts): award every ability of that scope whose condition now holds. Idempotent.
 function evaluate(scope, facts, where){
   const got=[];
@@ -391,15 +407,15 @@ function endOfRun(record){
 
 const MAX_WINS = 7, MAX_LOSSES = 3;
 const MAPS = ["Basic Arena","Nagrand Arena","Twin Pillars"];
-// The authored ladder: one or two opponents per tier (index = tier-1); the AI profile is per opponent.
+// The authored ladder: one or two opponents per tier (index = tier-1). Every opponent runs the default AI.
 const LADDER = [
-  [["Gate Rats",["Warrior","Priest"],"Legacy"]],
-  [["The Dustcloaks",["Rogue","Druid"],"Legacy"]],
-  [["Ashen Pair",["Mage","Shaman"],"Legacy"],["Cinder Pact",["Mage","Priest"],"Legacy"]],
-  [["Thornwatch",["Warlock","Priest"],"TeamPlan"]],
-  [["Stormhold Duo",["Hunter","Paladin"],"Legacy"],["Greycloaks",["Hunter","Priest"],"TeamPlan"]],
-  [["The Gilded Fangs",["Rogue","Priest"],"Legacy"]],
-  [["Champions of the Ring",["Warrior","Paladin"],"Legacy"]],
+  [["Gate Rats",["Warrior","Priest"]]],
+  [["The Dustcloaks",["Rogue","Druid"]]],
+  [["Ashen Pair",["Mage","Shaman"]],["Cinder Pact",["Mage","Priest"]]],
+  [["Thornwatch",["Warlock","Priest"]]],
+  [["Stormhold Duo",["Hunter","Paladin"]],["Greycloaks",["Hunter","Priest"]]],
+  [["The Gilded Fangs",["Rogue","Priest"]]],
+  [["Champions of the Ring",["Warrior","Paladin"]]],
 ];
 
 // ---- Seeded RNG: offers and opponents come from the run seed -----------------------
@@ -446,7 +462,7 @@ function newRun(seed, level){
   seed = seed ?? Math.floor(Math.random()*1e9);
   rng = mulberry32(seed);
   const offer = pick(SLICE_POOL, Math.min(draftSlots(), SLICE_POOL.length));
-  S = {seed, level: level ?? 1, offer, draft:[], team:[], wins:0, losses:0, history:[], prep:{kill:1,cc:0}, screen:"draft", sel:{}, offers:null, opp:null, lastWon:false, rerolls:rerollsPerRun(), runEnd:null, newAwards:[], tiersEquipped:[]};
+  S = {seed, level: level ?? 0, offer, draft:[], team:[], wins:0, losses:0, history:[], prep:{kill:1,cc:0}, screen:"draft", sel:{}, offers:null, opp:null, lastWon:false, rerolls:rerollsPerRun(), runEnd:null, newAwards:[], tiersEquipped:[]};
   render();
 }
 function matchNo(){return S.wins+S.losses+1}
@@ -459,7 +475,7 @@ function oppGear(t){
 }
 function opponentAt(tier, lostHere){
   const choices = LADDER[tier-1];
-  const [name,classes,ai] = choices[Math.min(lostHere, choices.length-1)];
+  const [name,classes] = choices[Math.min(lostHere, choices.length-1)];
   const pts = oppPoints(tier), g = oppGear(tier);
   const builds = classes.map((cls,i)=>{
     const c={cls,ranks:{},pending:[],unspent:0,gear:{},gearPts:hasTree(cls)?0:pts};
@@ -469,7 +485,7 @@ function opponentAt(tier, lostHere){
     c.oppGearBudget = g.picks*12 + g.champs*10;
     return c;
   });
-  return {tier, name, classes, builds, pts, picks:g.picks, champs:g.champs, ai, map:MAPS[(tier+lostHere)%3]};
+  return {tier, name, classes, builds, pts, picks:g.picks, champs:g.champs, map:MAPS[(tier+lostHere)%3]};
 }
 function opponent(){
   if(S.opp && S.opp.match===matchNo()) return S.opp;
@@ -479,49 +495,6 @@ function opponent(){
   return S.opp;
 }
 function prepFor(c,key){const ch=(CHOICES[c.cls]||[]).find(x=>x.key===key);const opts=optionsFor(c,ch);const v=S.prep[c.cls+"."+key];return opts.includes(v)?v:opts[0]}
-function answersFor(opp){
-  const out=[], miss=[];
-  const mine=cls=>S.team.find(t=>t.cls===cls);
-  const theirs=cls=>opp.classes.includes(cls);
-  const melee=opp.classes.filter(c=>MELEE.includes(c)).length;
-  const casters=opp.classes.filter(c=>["Mage","Priest","Warlock","Shaman","Druid","Paladin"].includes(c));
-  const wl=mine("Warlock");
-  if(wl){
-    const demon=prepFor(wl,"demon"), curse=prepFor(wl,"curse");
-    if(demon==="Felhunter"){
-      if(theirs("Mage")) out.push("The Felhunter can devour Polymorph off your healer");
-      if(casters.length) out.push(`Spell Lock answers their ${casters[0]}'s casts`);
-      if(knows(wl,"SoulLink")) out.push("Soul Link: the Felhunter soaks 12% of the damage on your Warlock");
-    } else {
-      out.push("Sacrifice: +15% Shadow damage, and no Felhunter for them to kill");
-      if(knows(wl,"SoulLink")) miss.push("Soul Link is off while the Felhunter is sacrificed");
-    }
-    if(curse==="Curse of Tongues"&&casters.length) out.push("Curse of Tongues slows their healer's casts");
-    if(curse==="Curse of Weakness"&&melee) out.push("Curse of Weakness blunts their melee");
-    if(curse==="Curse of Exhaustion"&&(theirs("Hunter")||theirs("Mage"))) out.push("Curse of Exhaustion pins their kiter down");
-    if(curse==="Curse of Agony"&&knows(wl,"ImprovedCurseOfAgony")) out.push("Improved Curse of Agony: your Agony ticks harder");
-    if((theirs("Hunter")||theirs("Mage"))&&!knows(wl,"CurseOfExhaustion")) miss.push("No slow for their kiter: Curse of Exhaustion is an Affliction talent");
-  }
-  const pr=mine("Priest");
-  if(pr){
-    if(knows(pr,"UnbreakableWill")&&(theirs("Warlock")||theirs("Priest")||theirs("Rogue")||theirs("Paladin"))) out.push("Unbreakable Will: your Priest may shrug off their fear or stun");
-    if(knows(pr,"Silence")&&casters.length) out.push(`Silence can lock their ${casters[0]} at the kill window`);
-    if(knows(pr,"HolyNova")&&melee) out.push("Holy Nova punishes melee on your Priest");
-    if(knows(pr,"PowerInfusion")&&wl) out.push("Power Infusion on your Warlock at the kill window");
-  }
-  const ro=mine("Rogue");
-  if(ro&&prepFor(ro,"opener")==="Cheap Shot") out.push("Cheap Shot into Kidney Shot locks their healer");
-  const pa=mine("Paladin");
-  if(pa){
-    const aura=prepFor(pa,"aura");
-    if(aura==="Shadow Resistance Aura"&&(theirs("Warlock")||theirs("Priest"))) out.push("Shadow Resistance Aura softens their Shadow damage");
-    if(aura==="Concentration Aura"&&(theirs("Shaman")||theirs("Rogue"))) out.push("Concentration Aura shortens their interrupts' lockouts");
-    if(aura==="Devotion Aura"&&melee) out.push("Devotion Aura blunts their melee");
-  }
-  const stunners=opp.classes.filter(c=>["Rogue","Paladin","Warlock","Priest","Hunter","Mage","Druid"].includes(c));
-  for(const c of S.team) if(hasItem(c,"Medallion of the Alliance")&&stunners.length) out.push(`Your ${c.cls}'s Medallion breaks their ${stunners[0]}'s crowd control once`);
-  return {out,miss};
-}
 
 // ---- Helpers ----------------------------------------------------------------
 const $app = document.getElementById("app");
@@ -554,11 +527,12 @@ function teamStrip(){
     <div class="row" style="gap:4px;margin-top:4px">${actingNodes(c).map(id=>talentIcon(id)).join("")}${Object.values(c.gear).map(g=>itemIcon(g,"sm")).join("")}</div></div></div>`).join("")}</div>`;
 }
 function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",6000)}
-function showRecord(i){toast("A version-stamped match record: exact replay on this build; on another build, its stored result and combat log, with a labelled re-simulation. "+S.history[i].record)}
+function replayAvailable(i){return S.history[i].version===GAME_VERSION}
+function showRecord(i){toast(replayAvailable(i)?"In the client this replays the match exactly, from its version-stamped record: "+S.history[i].record:`Replay unavailable: recorded on ${S.history[i].version}, and the game is now ${GAME_VERSION}. The result and combat log are kept.`)}
 function go(screen){S.screen=screen;S.sel={};render();if(window.scrollTo)window.scrollTo(0,0)}
 
 // ---- Screens ----------------------------------------------------------------
-let MENU_LEVEL = 1;
+let MENU_LEVEL = 0;
 function render(){
   if(!S){ $app.innerHTML = menu(); return; }
   ({draft,hub,talents,prepare,fight:drawFight,result,reward,end})[S.screen]();
@@ -572,7 +546,7 @@ function menu(){
       <button class="btn" onclick="window.__ency=true;render()">Encyclopedia: Renown</button>
       <button class="btn" disabled title="The configure-match sandbox, with a talent panel">Custom Match</button>
       <p class="note">Gauntlet: draft two classes, grow them a talent point and a reward pick a match, and win seven before your third loss. Draft choices: ${draftSlots()} (the slice's pool of ${SLICE_POOL.length} caps the offer at ${Math.min(draftSlots(),SLICE_POOL.length)}); equipment choices: ${equipmentChoices()}; rerolls: ${rerollsPerRun()} a run.</p>
-      <p class="note">Prototype only: <button class="btn" onclick="const r=endOfRun({cleared:true,level:MENU_LEVEL,losses:1,team:['Warlock','Priest'],tiersEquipped:['gauntlet','champion']});render();toast('Recorded a Warlock + Priest clear at '+LEVELS[MENU_LEVEL][0]+(r.awards.length?'. Unlocked: '+r.awards.join(', '):''))">Record a clear at ${LEVELS[MENU_LEVEL][0]}</button> <button class="btn" onclick="P=freshProfile();saveProfile();MENU_LEVEL=1;render()">Reset profile</button></p></div>`;
+      <p class="note">Prototype only: <button class="btn" onclick="const r=endOfRun({cleared:true,level:MENU_LEVEL,losses:1,team:['Warlock','Priest'],tiersEquipped:['gauntlet','champion']});render();toast('Recorded a Warlock + Priest clear at '+LEVELS[MENU_LEVEL][0]+(r.awards.length?'. Unlocked: '+r.awards.join(', '):''))">Record a clear at ${LEVELS[MENU_LEVEL][0]}</button> <button class="btn" onclick="P=freshProfile();saveProfile();MENU_LEVEL=0;render()">Reset profile</button> <button class="btn" onclick="GAME_VERSION='0.8.'+(+GAME_VERSION.split('.')[2]+1);render();toast('Simulated a game update to '+GAME_VERSION+'. Replays of earlier matches are now unavailable.')">Simulate a game update</button></p></div>`;
 }
 // The encyclopedia's Renown section (section 9.5): effect, condition and state for every ability.
 // It is the only place renown is shown; there is no screen to manage it.
@@ -604,22 +578,21 @@ function confirmDraft(){
   go("hub");
 }
 
+// The briefing (section 7.4): each enemy's key abilities that may interact, stated as facts. No advice.
+function keyAbilities(b){
+  const out = THREATS[b.cls].slice(0,2).map(t=>({icon:abilityIcon(t[0]), line:t[1]}));
+  for(const id of actingNodes(b).filter(id=>NODE[id].threat).slice(0,1)) out.push({icon:talentIcon(id), line:NODE[id].threat});
+  for(const g of Object.values(b.gear).filter(g=>g.threat).slice(0,1)) out.push({icon:itemIcon(g,"sm"), line:g.threat});
+  return out.slice(0,3);
+}
 function intel(opp){
-  const {out,miss} = answersFor(opp);
-  const talentThreats = opp.builds.flatMap(b=>actingNodes(b).filter(id=>NODE[id].threat).map(id=>[b.cls,id]));
-  const gearThreats = opp.builds.flatMap(b=>Object.values(b.gear).filter(g=>g.threat).map(g=>[b.cls,g]));
   return `<div class="panel"><div class="hstack" style="justify-content:space-between;flex-wrap:wrap">
     <div><div class="meta">Next opponent · tier ${opp.tier} of 7 · ${opp.pts} points and ${opp.picks} picks each${opp.champs?` (${opp.champs} Champion)`:""}</div><div class="title" style="font-size:18px;color:var(--t2)">${esc(opp.name)}</div></div>
     <div class="row" style="gap:6px">${opp.classes.map(c=>classIcon(c)).join("")}</div></div>
-    <div class="meta" style="margin:6px 0 4px">${opp.classes.join(" + ")} · ${opp.map} · ${opp.ai} AI</div>
-    <div class="meta" style="margin-bottom:8px">${opp.builds.map(b=>hasTree(b.cls)?`${b.cls}: ${esc(spec(b).label)} ${spec(b).short}`:`${b.cls}: no tree yet, ${opp.pts} pts carried as gear`).join(" · ")}</div>
-    ${opp.classes.flatMap(c=>THREATS[c].map(t=>`<div class="threat">${abilityIcon(t[0])}<span><b style="color:${CLASSES[c].col}">${c}:</b> ${t[1]}</span></div>`)).join("")}
-    ${talentThreats.map(([c,id])=>`<div class="threat">${talentIcon(id)}<span><b style="color:${CLASSES[c].col}">${c} (talent):</b> ${esc(NODE[id].threat)}</span></div>`).join("")}
-    ${gearThreats.map(([c,g])=>`<div class="threat">${itemIcon(g,"sm")}<span><b style="color:${CLASSES[c].col}">${c} (gear):</b> ${esc(g.threat)}</span></div>`).join("")}
-    <div style="margin-top:10px"><div class="meta">Your answers with the current Prepare settings</div>
-    ${out.length?out.map(a=>`<div class="answer">+ ${esc(a)}</div>`).join(""):'<div class="note">None yet. Prepare may change that.</div>'}
-    ${miss.map(a=>`<div class="missing">- ${esc(a)}</div>`).join("")}</div>
-</div>`;
+    <div class="meta" style="margin:6px 0 8px">${opp.classes.join(" + ")} · ${opp.map} · ${opp.builds.map(b=>hasTree(b.cls)?`${b.cls}: ${esc(spec(b).label)} ${spec(b).short}`:`${b.cls}: ${opp.pts} pts carried as gear`).join(" · ")}</div>
+    <div class="meta">Key abilities that may interact</div>
+    ${opp.builds.flatMap(b=>keyAbilities(b).map(k=>`<div class="threat">${k.icon}<span><b style="color:${CLASSES[b.cls].col}">${b.cls}:</b> ${esc(k.line)}</span></div>`)).join("")}
+    <p class="note" style="margin-top:8px">Facts, not advice: what counters what is your call in Prepare.</p></div>`;
 }
 function hub(){
   const opp = opponent();
@@ -685,24 +658,24 @@ function prepare(){
     ${sel("S.prep.kill=this.selectedIndex;render()","Kill target",opp.classes,opp.classes[S.prep.kill])}
     ${sel("S.prep.cc=this.selectedIndex;render()","CC target",opp.classes,opp.classes[S.prep.cc])}
     ${classSels || '<p class="note">No class choices for this team.</p>'}
-    ${S.team.some(c=>c.cls==="Priest")?'<p class="note">The Priest has no per-match choice today (a gap the proposal names, not one for talents to fill).</p>':""}
+    ${S.team.some(c=>c.cls==="Priest"&&!knows(c,"Shadowform"))?'<p class="note">The Priest\'s Form choice offers Shadowform once the Shadow tree\'s tier-2 talent is learned.</p>':""}
   </div>${intel(opp)}</div>
   <div class="actions"><button class="btn" onclick="go('hub')">Back</button><button class="btn primary" onclick="startFight()">Fight</button></div>`;
 }
 
-// ---- The mock fight: a coin flip weighted by budget and answers -------------------
+// ---- The mock fight: a coin flip weighted by budget ------------------------------
 let F=null, timer=null;
 function oppBudget(o){return KIT_BUDGET + 11*o.pts + (o.pts>=6?11:0) + o.picks*12 + o.champs*10}
 function startFight(){
   const opp = opponent();
   const mine = S.team.reduce((s,c)=>s+budget(c),0)/2;
   const theirs = oppBudget(opp);
-  const ans = answersFor(opp).out.length;
-  const p = Math.max(.12, Math.min(.9, .58 + (mine-theirs)/theirs*1.2 + ans*.035 + (S.prep.kill===1?.03:0)));
+  const p = Math.max(.12, Math.min(.9, .58 + (mine-theirs)/theirs*1.2 + (S.prep.kill===1?.03:0)));
   const win = rng() < p;
   F = {opp, p, win, t:0, called:S.prep.kill, hp:{a:[100,100],b:[100,100]}, log:[], speed:1, calls:0};
   F.log.push(`<b>0.0s</b> Gates open on ${opp.map}.`);
   for(const c of S.team){const s=spec(c);F.log.push(`<b>0.0s</b> [TALENTS] ${c.cls}: ${esc(s.label||"none")} ${s.short}`)}
+  for(const c of S.team) if(c.cls==="Priest" && prepFor(c,"form")==="Shadowform") F.log.push(`<b>0.0s</b> [FORM] Priest: Shadowform for this match. No healing spells.`);
   go("fight"); tick();
 }
 function tick(){
@@ -748,7 +721,7 @@ function drawFight(){
   const l=document.getElementById("log"); if(l) l.scrollTop=l.scrollHeight;
 }
 const MAP_IDS = {"Basic Arena":"BasicArena","Nagrand Arena":"PillaredArena","Twin Pillars":"TwinPillars"};
-const GAME_VERSION = "0.8.0-proto", CONTENT_HASH = "c0ffee12";
+let GAME_VERSION = "0.8.0", CONTENT_HASH = "c0ffee12";   // the menu's prototype-only button simulates an update
 function finishFight(){
   if(F.win) S.wins++; else S.losses++;
   const record = JSON.stringify({game_version:GAME_VERSION, content_hash:CONTENT_HASH, team1:S.team.map(c=>c.cls), team2:F.opp.classes, map:MAP_IDS[F.opp.map], random_seed:S.seed+S.history.length, team1_builds:S.team.map(c=>c.ranks), team1_gear:S.team.map(c=>Object.values(c.gear).map(g=>g.name)), kill_calls:F.calls});
@@ -756,7 +729,7 @@ function finishFight(){
   const ccClasses = ["Warlock","Rogue","Paladin","Priest","Mage","Druid","Hunter"];
   const facts = {won:F.win, oneVsOne: rng()<0.3, cleanKill: F.win && S.team.some(c=>ccClasses.includes(c.cls)) && rng()<0.25};
   if(S.forceFacts){Object.assign(facts,S.forceFacts);S.forceFacts=null}
-  S.history.push({opp:F.opp.name, classes:F.opp.classes, tier:F.opp.tier, won:F.win, t:F.t, record, facts, specs:S.team.map(c=>spec(c).short)});
+  S.history.push({opp:F.opp.name, classes:F.opp.classes, tier:F.opp.tier, won:F.win, t:F.t, record, facts, version:GAME_VERSION, specs:S.team.map(c=>spec(c).short)});
   S.newAwards = evaluate("match", facts, `run ${P.runs+1}, match ${S.history.length}`);
   const over = S.wins>=MAX_WINS || S.losses>=MAX_LOSSES;
   S.lastWon = F.win;
@@ -784,9 +757,9 @@ function result(){
   ${over?"":S.team.map(c=>{const g=S.gains[c.cls];return `<div class="panel" style="background:var(--panel2);margin-top:8px"><b style="color:${CLASSES[c.cls].col}">${c.cls}</b> ${g.pt?'<span class="tag pts">+1 talent point</span>':'<span class="tag">talent points capped</span>'} ${g.pk?'<span class="tag pts">+1 reward pick</span>':'<span class="tag">reward picks capped</span>'}</div>`}).join("")}
   ${!over&&won?'<p class="note">A win: Champion items can appear among the offers.</p>':!over?'<p class="note">A loss still pays a point and a pick, and the same tier comes again.</p>':""}
   <div class="panel" style="background:var(--panel2);margin-top:8px"><div class="meta">Later idea · rematch odds</div>
-  Twenty background re-simulations of this matchup: your setup wins about <b>${odds}%</b>. ${won? (odds<45?"You beat the odds.":"A sound setup."): (odds>=55?"That one was the dice.":"The setup was the problem; try another answer.")}</div></div>
+  Twenty background runs of this matchup on this version: your setup wins about <b>${odds}%</b>. ${won? (odds<45?"You beat the odds.":"A sound setup."): (odds>=55?"That one was the dice.":"The setup was the problem; try another answer.")}</div></div>
   ${awardLines(S.newAwards)}
-  <div class="actions"><button class="btn" onclick="showRecord(${S.history.length-1})">Match record</button>
+  <div class="actions"><button class="btn" onclick="showRecord(${S.history.length-1})">Watch replay</button>
   <button class="btn primary" onclick="go('${over?"end":S.team.some(c=>S.gains[c.cls].pk)?"reward":"hub"}')">${over?"Finish run":"Continue run"}</button></div>`;
 }
 function awardLines(ids){
@@ -823,9 +796,9 @@ function end(){
     ${S.wins>=MAX_WINS?`<p>Title: ${LEVELS[S.level][0]}.${re.unlockedLevel?` <b>${re.unlockedLevel}</b> difficulty unlocked.`:""}</p>`:""}</div>
   <div class="panel" style="margin-top:12px"><div class="meta">What persists: clears, titles, renown abilities, records and saved talent plans. No run's points or gear carry into the next.</div>
   ${S.team.filter(c=>hasTree(c.cls)).map(c=>`<div style="margin-top:6px"><b style="color:${CLASSES[c.cls].col}">${c.cls}</b> ${esc(spec(c).label)} ${spec(c).short}: ${Object.keys(c.ranks).map(id=>`${esc(NODE[id].name)} ${c.ranks[id]}`).join(", ")}</div>`).join("")}</div>
-  <div class="panel matchlist" style="margin-top:12px"><div class="meta">Each match keeps a version-stamped record: exact on this build, a labelled re-simulation on another.</div>
+  <div class="panel matchlist" style="margin-top:12px"><div class="meta">Each match keeps a version-stamped record. Its replay is available while the game version is unchanged; the result and combat log are always kept.</div>
   ${S.history.map((h,i)=>`<div class="m"><span>${i+1}. <span class="${h.won?"win":"loss"}">${h.won?"W":"L"}</span> vs ${esc(h.opp)} (${h.classes.join(" + ")}) · your specs ${h.specs.filter(Boolean).join(", ")}</span>
-  <button class="btn" onclick="showRecord(${i})">Match record</button></div>`).join("")}</div>
+  ${replayAvailable(i)?`<button class="btn" onclick="showRecord(${i})">Watch replay</button>`:`<button class="btn" disabled title="Recorded on ${h.version}">Replay unavailable (${h.version})</button>`}</div>`).join("")}</div>
   <div class="actions"><button class="btn" onclick="S=null;render()">Main menu</button><button class="btn" onclick="S=null;window.__ency=true;render()">Encyclopedia: Renown</button><button class="btn primary" onclick="newRun(null,S.level)">New run</button></div>`;
 }
 render();

@@ -5,13 +5,13 @@
 clicks through whole runs:
 - the difficulty and draft;
 - the talent step and the two-tier gear reward after every match;
-- Prepare against an opponent briefing that scales with your wins;
+- Prepare beside an opponent briefing of the key abilities that may interact, from an opponent that scales with your wins;
 - a stand-in fight and the run end;
 - the renown abilities a match or a run unlocks, and the encyclopedia's Renown section that
   lists them, locked and unlocked.
 
 Open it from the checkout so the icons resolve. The fight is a scripted coin flip weighted by
-budget and answers, not the sim. The Rogue and Paladin trees are not designed here, so the
+budget, not the sim. The Rogue and Paladin trees are not designed here, so the
 prototype turns their points into item budget, as §7.3 does for opponents. The styling is
 neutral, because the look belongs to the UI design system (AS-251). Judge the flow and the
 decisions.
@@ -24,31 +24,48 @@ reaches 7 wins or 3 losses. Between fights the player makes three kinds of decis
 | | Talents | Gear | Class choices |
 |---|---|---|---|
 | Kind | Character progression | Character progression | Per-match strategy |
-| What | WoW talents in three small trees per class | One pick of three after each match; a rarer Champion tier after wins | The class's own options: curse, shout, armor, aura, pet, opener, poison (plus kill and CC target) |
+| What | WoW talents in small trees, three per class where the kit supports three | One pick of three after each match; a rarer Champion tier after wins | The class's own options: curse, shout, armor, aura, pet, opener, poison, the Priest's Form once Shadowform is learned (plus kill and CC target) |
 | Earned | 2 at the draft, +1 after every match, win or loss, **capped at 8** | 1 per combatant after every match, **capped at 6** | Always available |
 | Cost | Locked for the run | Equipped for the run | Free; change them every match |
 | Question | *Who is this character becoming?* | *What do I add to it?* | *What beats the team in front of me?* |
 
 - **The line.** A choice is a talent only if WoW put it in a talent tree. Otherwise it is a
   per-match choice if its best value depends on the opponent, and baseline behaviour if not. A
-  talent may add an option to a per-match menu; it never picks one (§1).
-- **Trees.** Three per class, five to seven nodes each, four tiers. Eight points buy either a
-  capstone and a splash or tier 3 in two trees, so a hybrid is open by the end of a run. Every
-  legal 8-point build costs within one rank of every other, and `cargo test` checks that by
-  enumerating them all (§3, §4). The talent lists in §5 are mocks that fix the shape. Each class's real
-  trees are a card of their own.
+  talent may add an option to a per-match menu; it never picks one. A role change, such as
+  Shadowform, is a per-match choice unlocked early by a talent and held for the whole match
+  (§1).
+- **Trees.**
+  - Three per class, five to seven nodes each, four tiers. A healer whose kit cannot yet carry
+    an offensive tree ships two (the Druid, until a Feral kit exists; §5.3).
+  - Eight points buy either a capstone and a splash or tier 3 in two trees, so a hybrid is
+    open by the end of a run.
+  - Stat talents are percentages of the total, gear included. Resistance talents reduce
+    magnitude and never roll to ignore.
+  - Every legal 8-point build costs within one rank of every other, and `cargo test` checks
+    that by enumerating them all (§3, §4).
+  - The talent lists in §5 are mocks that fix the shape. Each class's real trees are a card of
+    their own.
 - **Gear.**
   - Two reward tiers: a Gauntlet tier re-levelled to ilvl 76-80, and a new Champion tier at
     ilvl 90-94 that is offered only after a win.
-  - Exciting trinkets: on-use stat bursts and a PvP medallion that breaks crowd control.
-  - Six picks per combatant, from the slots where a pick is felt.
-  - Gear and talents each add about 90 budget points by the cap, together about +55% over the
+  - Slot multipliers move to TBC's four groups, an explicit change to the item budget (§6.1).
+  - Exciting trinkets:
+    - on-use stat bursts and haste;
+    - a PvP medallion that breaks crowd control;
+    - a jackpot trinket that shields its wearer at low health once a match.
+  - The Dragonspine Trophy moves to the new haste aura.
+  - Six picks per combatant, from every slot, weighted by multiplier.
+  - Gear and talents each add about 90 budget points by the cap, together about +50% over the
     starting kit (§6).
 - **Both caps are reached before match 7**, the earliest a perfect run can play its last
   match. Losing more never ends a run stronger.
 - **Difficulty (recommended).** Opponents scale with the player's *wins*, matching in budget a
-  player who has not lost; a loss puts the player ahead. Out of the run, six difficulty levels
-  named for arena titles move opponent gear first, and points only at the top (§8).
+  player who has not lost; a loss puts the player ahead.
+  - Out of the run, five difficulty levels named for arena titles move opponent gear first,
+    and points only at the top.
+  - The only commitment is direction: each level clears measurably less often than the one
+    below (§8).
+  - Opponents run the default AI, and the AI profile is never shown.
 - **Meta-progression: renown abilities, awarded when a condition is met.**
   - Nothing is spent and no extra screen is needed.
   - Flagship goals (a clear at each difficulty) grant the key upticks: more draft choices
@@ -60,9 +77,9 @@ reaches 7 wins or 3 losses. Between fights the player makes three kinds of decis
   - A data-driven framework evaluates per-match conditions from a digest of the match result
     and combat log, and per-run conditions from the run record. A new ability is one RON entry.
   - The encyclopedia shows each ability's effect, condition and state (§9).
-- **Replays** are exact within a run and a game version. Every record is version-stamped. A
-  record from another version keeps its result and combat log, and offers a labelled
-  re-simulation, never a promised replay (§10).
+- **Replays** are exact within a game version. Every record is version-stamped. Once the
+  version changes, a match's replay is marked unavailable; its result and combat log stay
+  (§10).
 - **Minimum playable slice:** the Gauntlet with talents and both gear tiers, drafting from the
   four classes that get trees first. Meta-progression and difficulty levels are phase 2 (§12).
 
@@ -86,17 +103,24 @@ AI. The headless config takes them as string arrays. View Combatant draws a pane
 | Mage | Armor | Frost, Mage, Molten | Per-match |
 | Paladin | Aura | Devotion, Shadow Resistance, Concentration | Per-match |
 | Every team | Kill target, CC target | One enemy each | Per-match (not a class choice) |
-| Priest, Shaman, Druid | — | — | No per-match choice today |
+| Priest | Form, **once a talent unlocks Shadowform** | Healer, Shadowform | Per-match (§5.2) |
+| Shaman | Totem loadout (**future**) | One totem per element today, so no choice yet | Per-match, when more totems exist |
+| Druid | — | — | None |
 
-Every one of these is a WoW baseline choice: a curse, a demon, a shout, an armor, an aura, a
-pet, a poison and an opener were all trained, not talented, and all were swapped freely out of
-combat. They stay **pre-match choices**, unchanged in the sim. Their job in the Gauntlet is to
-answer the opponent briefing (§7.4).
-
-Several shipped *abilities* were talents in Classic or TBC: Mortal Strike, Ice Barrier, Holy
-Shock, Swiftmend, Unstable Affliction (TBC), and Corruption's instant cast (Improved
-Corruption). They are baseline today, and the trees leave them baseline so no class loses a
-button. Decision 3 asks whether that holds.
+- **The class's own choices.** A curse, a demon, a shout, an armor, an aura, a pet, a poison
+  and an opener were all WoW baseline choices: trained, not talented, and swapped freely out of
+  combat. They stay **pre-match choices**, unchanged in the sim.
+- **The Shaman's future totem loadout.** The Shaman will get a per-match totem choice once it
+  has more than one totem per element: Windfury Totem for a melee partner, Grace of Air for a
+  caster, and the many unimplemented totems besides. Today it has one totem per element, so
+  there is nothing to choose.
+- **The Druid and Priest.** Neither class has the exclusive, pick-one-of-several kind of
+  option the others carry, so neither has a per-match choice by nature. The Priest gains one
+  through a talent: Shadowform (§5.2).
+- **Shipped abilities that were talents in Classic or TBC stay baseline:** Mortal Strike, Ice
+  Barrier, Holy Shock, Swiftmend, Unstable Affliction and Corruption's instant cast. Unstable
+  Affliction could become a talent later. For now the Warlock is not strong enough for taking
+  it out of the base kit to be appealing.
 
 ### The rule for placing a new choice
 
@@ -108,17 +132,26 @@ Ask three questions, in order.
    choice**. No (one value is best against everyone): it is not a choice at all. Make it
    baseline, or let the AI decide it.
 3. **Check the cost.** A talent is paid for and locked for the run. A per-match choice is
-   free every match and must be something the briefing can argue for or against. A candidate
-   that fails its side's test (a "talent" a player would want to re-pick every match, or a
-   per-match option that is simply better) has been placed wrong.
+   free every match, and the opponent must be able to change the right answer. A candidate
+   that fails its side's test has been placed wrong: a "talent" a player would want to re-pick
+   every match, or a per-match option that is simply better.
 
-Two corollaries keep the line from blurring:
+Three corollaries keep the line from blurring:
 
-- **A talent may widen a per-match menu; it never orders from it.** Curse of Exhaustion
-  (Affliction) adds a fourth curse. Demonic Sacrifice (Demonology) adds "sacrifice the
-  Felhunter at the gates" to the Warlock's demon choice. Sanctity Aura (Classic Retribution)
-  would add a fourth Paladin aura. Which option to take against this opponent stays a
-  per-match decision.
+- **A talent may widen a per-match menu; it never orders from it.**
+  - Curse of Exhaustion (Affliction) adds a fourth curse.
+  - Demonic Sacrifice (Demonology) adds "sacrifice the Felhunter at the gates" to the
+    Warlock's demon choice.
+  - Sanctity Aura (Classic Retribution) would add a fourth Paladin aura.
+  - Which option to take against this opponent stays a per-match decision.
+- **A role change is always a per-match choice, unlocked by a talent, and held for the whole
+  match.** Shadowform turns a healing Priest into a damage dealer. So taking the talent adds
+  "Shadowform" to the Priest's Form choice, and choosing it locks the form for that match:
+  there is no switching in and out.
+  - The talent that unlocks a role change sits **early or mid-tree** (tier 1 or 2), so a run
+    has matches to experiment with it.
+  - The rest of its tree works in either role, unless a node is deliberately locked to the
+    role. Silence is the example: it needs Shadowform and is castable only in it.
 - **A per-match option never ranks up over a run.** There is no "rank 2 Bird". Making one
   answer better is a talent's job (Improved Curse of Agony), and that talent pays only in the
   matches where the player chooses that answer. Progression can *bias* the counter-pick, which
@@ -129,15 +162,12 @@ Two corollaries keep the line from blurring:
 | Candidate | Q1 | Q2 | Side |
 |---|---|---|---|
 | Curse of Exhaustion | Affliction talent | — | Talent that widens the curse menu |
+| Shadowform | Shadow talent | A role, chosen per match | A tier-2 talent that adds Shadowform to the Priest's Form choice |
 | A second Warlock demon (Succubus) | Baseline in WoW | Yes: Seduction vs Spell Lock depends on the enemy | Per-match (the demon choice) |
 | Improved Curse of Agony | Affliction talent | — | Talent; pays when Agony is chosen |
-| Shaman Tremor vs Grounding totem | Baseline | Yes: fear teams vs caster teams | Per-match: the Shaman's missing choice |
-| Priest Shadow Protection | Baseline | Yes: only against Shadow casters | Per-match: a candidate Priest choice |
-| Shadowform | Shadow capstone in WoW | — | Talent, but a role change (no healing), so it is held out of the trees (§5.2) |
-| Inner Fire | Baseline | No: always worth casting | Neither: baseline AI behaviour |
-
-The Priest, Shaman and Druid having no per-match choice is a gap the rule exposes, not one for
-talents to fill.
+| Shaman totem loadout | Baseline | Yes: a melee or a caster partner, Tremor against fear | Per-match, once the Shaman has the totems |
+| Priest Shadow Protection | Baseline | No: always worth casting, if only as purge fodder | Neither: baseline behaviour |
+| Inner Fire | Baseline | No: always worth casting | Neither: baseline behaviour |
 
 ## 2. Reference games: what to borrow, what to avoid
 
@@ -173,14 +203,15 @@ talents to fill.
 - *Football Manager:* borrow the scouting report ("their left back is weak") and watching the
   match to see whether the tactics worked. Avoid spreadsheet depth.
 - *Into the Breach:* borrow **telegraphed intent**. Naming what the enemy will do makes the
-  answer the whole skill. Here it is the opponent briefing.
+  answer the whole skill. Here it is the opponent briefing: the key abilities each team brings,
+  stated as facts (§7.4).
 
 ## 3. The talent system
 
 ### Tree shape
 
 Each class has **three trees**, named as in WoW, each with **five to seven nodes in four
-tiers**.
+tiers**. A class ships two when its kit cannot yet carry the third (§5.3).
 
 | Tier | Opens at (points already in this tree) | Nodes | Ranks per node | Price per rank |
 |---|---|---|---|---|
@@ -224,7 +255,7 @@ ability book.
             name: "Demonic Embrace", class: Warlock, tree: Demonology, tier: 1, column: 0,
             icon: "icons/talents/spell_shadow_metamorphosis.jpg",
             max_rank: 2,
-            per_rank: [ Stats(( max_health: 11.0 )) ],          // computed price: 11 per rank
+            per_rank: [ StatPercent(MaxHealth, 0.03) ],      // +3% of the total, gear included
         ),
         SiphonLife: (
             name: "Siphon Life", class: Warlock, tree: Affliction, tier: 3, column: 0,
@@ -248,9 +279,10 @@ ability book.
 
 **The five effect kinds, cheapest first.** Each is applied once per rank.
 
-1. **`Stats(...)`**: the `ItemConfig` stat fields, folded in the `apply_equipment` pass and
-   **priced by the item budget's own weights**. Flat values, never percentages, so the price
-   is exact and does not depend on the loadout. `PetStats(...)` is the same for a pet.
+1. **`StatPercent(stat, fraction)`**: a percentage of one of the `ItemConfig` stats, applied
+   to the combatant's total after `apply_equipment`, gear included. It is **priced by the item
+   budget's own weights** at the class's reference combatant at mid-run (the starting kit plus
+   three Gauntlet picks). `PetStatPercent(...)` is the same for a pet.
 2. **`Patch(on, field, op)`**: rewrites `AbilityConfig` fields of one ability or one school.
    `field` is an exhaustive `AbilityField` enum; there are no string field names. `op` is
    `Add` or `Mul`, adds before multiplies.
@@ -291,19 +323,20 @@ every existing config, baseline and replay is unchanged.
 
 - Every node is in its own class's tree; tiers, columns and prerequisites are consistent; a
   prerequisite is in the same tree and a lower tier.
-- `Stats`-only nodes have no declared budget (it is computed); every other node declares one.
+- `StatPercent`-only nodes have no declared budget (it is computed at the reference
+  combatant); every other node declares one.
 - **Rank parity:** every rank prices at 11 ±15%, and every capstone at 22 ±15%.
 - **Build parity:** the test enumerates **every legal build** at each point count from 2 to
   8. It fails if the dearest build at a count costs more than one rank (11) above the cheapest.
   The run takes well under a second a class. For the two mock classes:
   - the spread is zero up to 5 points;
   - from 6 points it is exactly one rank, the capstone's premium;
-  - at the cap of 8, the 8,119 Warlock builds and 4,973 Priest builds cost 88-99.
+  - at the cap of 8, the 8,119 Warlock builds and 11,433 Priest builds cost 88-99.
 - A `Grant` names a `talent: true` ability, and each such ability is granted by exactly one
   node.
 
 **What talents are worth.** A capped build is 88-99 budget points. A combatant's starting kit
-is about 334 (the default Warlock), and the run's gear adds about as much again as its talents
+is about 334 (the default Warlock), about 360 once the TBC slot multipliers re-spend it (§6.1), and the run's gear adds about as much again as its talents
 (§6.2).
 
 ## 4. Why trees stay tractable
@@ -320,7 +353,10 @@ legibility) each have an answer.
 - **A granted ability needs one decision rule**, instrumented with `builder.reject` /
   `builder.choose` like any other. A `talent_ai_audit` test fails until every `talent: true`
   ability is reachable from its class's `decide_action`. The mock Warlock trees grant four
-  buttons (Amplify Curse, Siphon Life, Shadowburn, Conflagrate); the Priest's grant five.
+  buttons (Amplify Curse, Siphon Life, Shadowburn, Conflagrate); the Priest's grant eight
+  (Inner Focus, Power Infusion, Pain Suppression, Holy Nova, Guardian Spirit, Mind Flay,
+  Vampiric Embrace, Silence). A role change is the exception: Shadowform needs the Priest's
+  damage-dealer AI (§5.2).
 - **A proc that changes the next cast needs one priority line.** Shadow Trance up means Shadow
   Bolt next.
 - **A widened menu needs nothing new in the AI.** The player picks Curse of Exhaustion in
@@ -351,7 +387,8 @@ No sweep tries to cover 8,119 builds. Four instruments do the work, each sized b
      identical seeds against the reference.
    - The success condition is that no node dominates: none moves its class by more than the
      tier's resolution floor beyond a stat rank of the same price.
-   - `Stats` and plain `Patch` nodes are priced by formula and covered by the reference arms.
+   - `StatPercent` and plain `Patch` nodes are priced by formula and covered by the
+     reference arms.
 4. **The Gauntlet bot** (§7.6) plays runs with random legal builds and with greedy builds. That
    measures the **spread of the build space** directly. If some build wins runs far more often
    than the reference builds, the bot finds it, and its nodes become node arms.
@@ -360,7 +397,7 @@ No sweep tries to cover 8,119 builds. Four instruments do the work, each sized b
 
 **A node must show in the match.** It can be an ability cast (which reaches the timeline), an
 aura with its icon in the buff bar (procs carry `source_talent`), or a logged event. A
-`Stats` or `Patch` node shows before the match instead, in a tooltip that reads the book's
+`StatPercent` or `Patch` node shows before the match instead, in a tooltip that reads the book's
 patched numbers. Nodes that leave no trace in this sim are cut: Classic's Suppression (no
 spell hit roll), Healing Focus and Fel Concentration (no pushback), and every +1% a viewer
 cannot see.
@@ -371,26 +408,47 @@ On top of that, for a viewer:
   with WoW's shorthand ("2/6/0") under it, on the team frames and the Results screen.
 - **Talent icons on the frame:** only the nodes that act in the fight (grants, procs and
   mechanics), at most about four a combatant.
-- **The briefing names the enemy's talents as threats** (§7.4).
+- **The briefing lists the enemy's talents that act in a fight among its key abilities**
+  (§7.4).
 - **A `[TALENTS]` line at spawn**, beside `[EQUIPMENT]`, and the build in the match record.
 
 ## 5. Two worked classes (mocks)
 
 The trees below fix the **shape**: tier sizes, ranks, prices, the five kinds, the footprint
 rule, and how WoW's talents translate. They are not final content. **Each class's real trees
-are defined in a card of their own** (§13), researched against the client's own talent tables
+are defined in a card of their own** (§13), researched against the client's talent tables,
 and held to §1, §3 and §4.
+
+**Sources.**
+- **TBC is the baseline intuition for what the game looks like, not a rulebook.** The trees
+  deviate where that makes a better game. They borrow from later expansions where TBC's own
+  answer is weak (Guardian Spirit, §5.2), and add talents WoW never had where the ability pool
+  calls for them (Wrath and Starfire as Balance talents, §5.3).
+- Classic tooltips below were looked up on the Wowhead Classic MCP. The link is the spell ID
+  it returned, and the value quoted is that rank's.
+- The MCP has no TBC or later data. Rows marked **TBC** or **Wrath** are from memory, and their
+  class card confirms them.
+- **Tier placements and Classic's arrows are from the 1.12 tree layout as remembered**, since
+  the MCP returns spell tooltips, not tree positions. Each class card confirms them from the
+  client's `TalentTab` and `Talent` tables.
 
 **Scale.** Classic rank-max Corruption is 822 damage; ours is 60. So a Classic damage number
 scales by about **0.073**. Cooldowns longer than a match are cut by the Death Coil precedent:
-2 min becomes 30s, 3 min becomes 45s. Where Classic's per-rank value fits our budget, it is
-used unchanged.
+2 min becomes 30s, 3 min becomes 45s.
 
-**Sources.** Every Classic tooltip below was looked up on the Wowhead Classic MCP; the link is
-the spell ID it returned, and the value quoted is that rank's. **Tier placements and Classic's
-arrows are from the 1.12 tree layout as remembered**: the MCP returns spell tooltips, not tree
-positions. Each class card confirms them from the client's `TalentTab` and `Talent` tables.
-**TBC** marks anything taken from TBC.
+**Stat talents are percentages.**
+- A stat talent says "+3% maximum health a rank", in the same terms as Classic's "+15%
+  Stamina". Stamina is, roughly, maximum health in this sim.
+- **The percentage applies to the combatant's total, gear included**, as in WoW. So it grows
+  as the run's gear arrives, and it keeps its meaning if a class's base health is retuned.
+- It is priced at its value on the class's reference combatant at mid-run: the starting kit
+  plus three Gauntlet picks (§3, validation). That slightly overprices it early in a run and
+  underprices it late.
+
+**Resistance is magnitude, never a dice roll.** A talent that resists something makes it
+weaker: a shorter crowd control, less damage taken. It never adds a chance to ignore it
+outright. Unbreakable Will is the example (§5.2). This keeps resistance from the
+game-deciding randomness it has in TBC.
 
 ### 5.1 Warlock
 
@@ -411,37 +469,44 @@ tick for 5 ticks. The Warlock is the 2v2 competitive floor at 40.0%, and its fai
 | 3 | Curse of Exhaustion | 1 | −10% movement for 12s ([18223](https://www.wowhead.com/classic/spell=18223)) | **Adds a fourth curse to the curse menu: 30% slow for 12s (TBC magnitude)** | WidenChoice | A new option in Prepare |
 | 4 | **Shadow Mastery** | 1 | +10% Shadow damage and life drained ([18275](https://www.wowhead.com/classic/spell=18275)) | Same, +10%. **Requires Siphon Life** (Classic's arrow) | Patch | Tooltip; every Shadow number |
 
-Shadow Mastery is the one capstone in these trees that is a number rather than a button;
-Classic put it there. Dark Pact is Classic's other deep Affliction node, but it needs Felhunter
-mana the sim does not model.
+- **Shadow Mastery is the one capstone here that is a number rather than a button**, and
+  Classic put it there.
+- **Unstable Affliction stays in the base kit, not this tree,** for now (§1).
 
 **Demonology** (6 nodes, 9 ranks): the survival tree.
 
 | Tier | Node | Ranks | Classic (verified tooltip) | Here, per rank | Kind | Footprint |
 |---|---|---|---|---|---|---|
-| 1 | Demonic Embrace | 2 | +15% Stamina, −5% Spirit ([18701](https://www.wowhead.com/classic/spell=18701)) | **+11 max HP** (372 → 383 → 394). Applied before the pet spawns, so the Felhunter gains 5 a rank | Stats (price computed) | Health bar; tooltip |
-| 1 | Fel Stamina | 2 | Demon max health +15% ([18752](https://www.wowhead.com/classic/spell=18752)) | Felhunter **+10% max HP** (167 → 184 → 200) | PetStats | Felhunter's bar |
-| 2 | Unholy Power | 2 | Felhunter melee +20% ([18773](https://www.wowhead.com/classic/spell=18773)) | Felhunter melee **+10%** | PetStats | Felhunter's hits |
-| 2 | Master Demonologist | 1 | Felhunter: +0.2 resistances per level, Warlock and demon ([23785](https://www.wowhead.com/classic/spell=23785)) | **+5 all resistances** on both while the Felhunter lives (6 × 5 × 0.4 = 12) | Stats, conditional aura | Aura icon on both |
-| 3 | Demonic Sacrifice | 1 | Sacrifice the demon for a buff; the Felhunter's is 2% mana every 4s ([18788](https://www.wowhead.com/classic/spell=18788)) | **Adds "Sacrifice" to the Warlock's demon choice.** Sacrificed at the gates: **+15% Shadow damage** for the match. The Felhunter's own Classic effect is too weak a trade for losing Spell Lock, so this borrows the Succubus's | WidenChoice + aura | A new option in Prepare; no Felhunter; buff icon |
+| 1 | Demonic Embrace | 2 | +15% Stamina, −5% Spirit ([18701](https://www.wowhead.com/classic/spell=18701)) | **+3% maximum health** a rank, gear included (372 → 383 → 395 on the starting kit). Applied before the pet spawns, so the Felhunter's 0.45 share grows with it | StatPercent | Health bar; tooltip |
+| 1 | Fel Stamina | 2 | Demon max health +15% ([18752](https://www.wowhead.com/classic/spell=18752)) | Felhunter **+10% maximum health** a rank (167 → 184 → 200) | PetStatPercent | Felhunter's bar |
+| 2 | Unholy Power | 2 | Felhunter melee +20% ([18773](https://www.wowhead.com/classic/spell=18773)) | Felhunter melee **+10%** a rank | PetStatPercent | Felhunter's hits |
+| 2 | Master Demonologist | 1 | Felhunter: +0.2 resistances per level, Warlock and demon ([23785](https://www.wowhead.com/classic/spell=23785)) | **Both take 4% less spell damage** while the Felhunter lives: the resistance as magnitude | Mechanic (a damage-taken aura) | Aura icon on both |
+| 3 | Demonic Sacrifice | 1 | Sacrifice the demon for a buff; the Felhunter's is 2% mana every 4s ([18788](https://www.wowhead.com/classic/spell=18788)) | **Adds "Sacrifice" to the Warlock's demon choice.** Sacrificed at the gates, it grants **Touch of Shadow: +15% Shadow damage for the match**. There is deliberately no mana effect: mana is Life Tap's job once that baseline ability ships | WidenChoice + aura | A new option in Prepare; no Felhunter; buff icon |
 | 4 | **Soul Link** | 1 | 30% of damage taken goes to the demon; both deal +3% ([19028](https://www.wowhead.com/classic/spell=19028)) | **12% of the Warlock's damage taken goes to the Felhunter** while it lives. No damage rider: +3% leaves no footprint. **Requires Fel Stamina 2/2** (*here*) | Mechanic | Link aura on both; the Felhunter's bar drops when the Warlock is hit; logged |
 
-At 12%, Soul Link gives the Warlock about +14% effective health until the Felhunter has
-soaked about 50, the price of two ranks. Classic's 30% would be +43%: several capstones' worth.
-**Soul Link and Demonic Sacrifice exclude each other per match**: sacrificing the Felhunter
-turns the link off. A player with both has a real Prepare decision against a melee team that
-will kill the Felhunter anyway.
+- **Soul Link at 12%** gives the Warlock about +14% effective health until the Felhunter has
+  soaked about 50, which is the price of two ranks. Classic's 30% would be +43%, several
+  capstones' worth.
+- **Soul Link and Demonic Sacrifice exclude each other per match:** sacrificing the Felhunter
+  turns the link off. A player with both has a real Prepare decision against a melee team that
+  will kill the Felhunter anyway.
 
 **Destruction** (6 nodes, 9 ranks): the burst tree.
 
 | Tier | Node | Ranks | Classic (verified tooltip) | Here, per rank | Kind | Footprint |
 |---|---|---|---|---|---|---|
 | 1 | Improved Shadow Bolt | 2 | Shadow Bolt crits: +20% Shadow damage taken, 4 hits or 12s ([17803](https://www.wowhead.com/classic/spell=17803)) | **10% per rank** on a Shadow Bolt hit (not a crit: crits are rare at this gear) → Shadow Vulnerability +10%, 4 hits or 12s | Proc | Debuff icon on the target |
-| 1 | Bane | 2 | −0.1s Shadow Bolt and Immolate cast ([17788](https://www.wowhead.com/classic/spell=17788)) | Same, −0.1s (2.0 → 1.9 → 1.8) | Patch | Shorter cast bars |
+| 1 | Bane | 2 | −0.1s Shadow Bolt and Immolate cast ([17788](https://www.wowhead.com/classic/spell=17788)) | **−0.25s** a rank, 2.5 times Classic's step: 2.0 → 1.75 → 1.5 | Patch | Shorter cast bars |
 | 2 | Aftermath | 2 | 2% chance to daze for 5s ([18119](https://www.wowhead.com/classic/spell=18119)) | **5% per rank** on a Destruction hit → 30% slow for 5s | Proc | Slow debuff |
 | 2 | Shadowburn | 1 | Instant 91-104 Shadow, 15s, a shard ([17877](https://www.wowhead.com/classic/spell=17877)) | Instant **10 + 0.35 × SP ≈ 52**, 20yd, 15s, 40 mana, no shard | Grant | Cast |
 | 3 | Improved Immolate | 1 | +5% Immolate initial damage ([17815](https://www.wowhead.com/classic/spell=17815)) | **+25%** (5 ranks folded into one): 35 → 44 | Patch | Tooltip |
 | 4 | **Conflagrate** | 1 | Consumes Immolate: 249-316 Fire, 10s ([17962](https://www.wowhead.com/classic/spell=17962)) | **20 + 0.4 × SP ≈ 68 Fire**, consumes the Warlock's Immolate, 15s, 45 mana. **Requires Improved Immolate** (Classic's arrow) | Grant | Cast; Immolate ends |
+
+**Why Bane is a big step.** The sim does not model juking an interrupt or missing one: every
+combatant with an interrupt kicks a cast it can reach. So a shorter cast buys no escape from
+interrupts. What it buys is damage output: at 2/2 a Shadow Bolt lands every 1.5s instead of
+every 2.0s, a third more Shadow Bolts. Classic's −0.1s a rank would be invisible. Bane's price
+is declared and checked by its node arm (§4).
 
 **Warlocks that read differently at 8 points.**
 
@@ -449,67 +514,145 @@ will kill the Felhunter anyway.
   match calls for it; an Improved Drain Life splash.
 - **Affliction (6/0/2):** Siphon Life and drains keep it alive by attrition; Shadow Trance
   turns a DoT spread into instant Shadow Bolts.
-- **Destruction (0/2/6):** Shadow Vulnerability windows, Conflagrate and Shadowburn as burst.
+- **Destruction (0/2/6):** Shadow Vulnerability windows, faster Shadow Bolts, Conflagrate and
+  Shadowburn as burst.
 - **A hybrid (4/4/0):** Siphon Life *and* Demonic Sacrifice, with no capstone.
 
 ### 5.2 Priest
 
 Default loadout: **342 HP, 280 mana, 117 SP**. Flash Heal averages 17.5 + 0.75 × 117 =
-**105**. Power Word: Shield absorbs 25 + 0.4 × 117 = **72**. The Priest has no per-match
-choice today. Its Shadow tree is written for a healer: the control half of Classic's Shadow,
-without Shadowform.
+**105**. Power Word: Shield absorbs 25 + 0.4 × 117 = **72**.
 
-**Discipline** (6 nodes, 9 ranks): shields and cooldowns.
+**Discipline** (7 nodes, 10 ranks): shields and saves.
 
-| Tier | Node | Ranks | Classic (verified tooltip) | Here, per rank | Kind | Footprint |
+| Tier | Node | Ranks | Source | Here, per rank | Kind | Footprint |
 |---|---|---|---|---|---|---|
-| 1 | Unbreakable Will | 2 | +15% to resist stun, fear and silence ([14791](https://www.wowhead.com/classic/spell=14791)) | **10% per rank** chance to resist a stun, fear or silence | Mechanic (one roll in `apply_pending_auras`) | "Resisted" text; logged |
+| 1 | Unbreakable Will | 2 | +15% chance to resist stun, fear and silence ([14791](https://www.wowhead.com/classic/spell=14791)) | **Stuns, fears and silences on the Priest last 10% shorter** a rank: 20% at 2/2. Resistance as magnitude, not a roll | Mechanic (one duration scale in `apply_pending_auras`) | Shorter CC bars; logged |
 | 1 | Improved Power Word: Shield | 2 | +15% absorb ([14769](https://www.wowhead.com/classic/spell=14769)) | +5% a rank (Classic's per-rank value): 72 → 76 → 79 | Patch | Tooltip; absorb numbers |
 | 2 | Mental Agility | 2 | −10% mana cost of instants ([14783](https://www.wowhead.com/classic/spell=14783)) | −5% a rank on Shield, Scream, Dispel and Fortitude | Patch | Tooltip |
-| 2 | Martyrdom | 1 | Focused Casting for 6s after a melee or ranged crit taken ([14774](https://www.wowhead.com/classic/spell=14774)) | 6s of `LockoutDurationReduction` 0.5 (the Concentration Aura effect). The sim has no pushback, so that half is dropped | Proc (`CritTaken`) | Buff icon |
-| 3 | Inner Focus | 1 | Next spell free, +25% crit, 3 min ([14751](https://www.wowhead.com/classic/spell=14751)) | Same; **45s** | Grant + `NextCastFree` | Cast, buff icon |
-| 4 | **Power Infusion** | 1 | +20% spell damage and healing for 15s, 3 min ([10060](https://www.wowhead.com/classic/spell=10060)) | **+24 SP** (20% of a caster's ~120) on an ally for 15s through `SpellPowerIncrease`; 45s. **Requires Inner Focus** (*here*) | Grant | Cast; buff on the ally |
+| 2 | Inner Focus | 1 | Next spell free, +25% crit, 3 min ([14751](https://www.wowhead.com/classic/spell=14751)) | Same; **45s** | Grant + `NextCastFree` | Cast, buff icon |
+| 3 | Reflective Shield | 1 | **TBC**: 10% a rank (5 ranks) of the damage Power Word: Shield absorbs is dealt back to the attacker | **30%** of the damage the Priest's shields absorb is dealt to the attacker | Mechanic (an absorb rider) | Reflected damage numbers; logged |
+| 3 | Power Infusion | 1 | +20% spell damage and healing for 15s, 3 min ([10060](https://www.wowhead.com/classic/spell=10060)) | **+24 SP** (20% of a caster's ~120) on an ally for 15s through `SpellPowerIncrease`; 45s | Grant | Cast; buff on the ally |
+| 4 | **Pain Suppression** | 1 | **TBC**: −40% damage taken for 8s on an ally, 2 min | Same, **45s**. **Requires Reflective Shield** (*here*) | Grant | Cast; buff on the ally |
 
-TBC's Pain Suppression (−40% damage taken for 8s on an ally) is the alternative capstone, and
-the stronger arena button. Decision 4 covers TBC sources.
+Reflective Shield sits at tier 3, with Pain Suppression behind it, on purpose. Low in the tree
+it would be in every Priest's build: a straight damage gain off the shield it already casts.
+That is a divergence from TBC, where it sat at tier 4 of 9 and most Priests took it.
 
-**Holy** (6 nodes, 9 ranks): bigger heals and a last stand.
+**Holy** (7 nodes, 10 ranks): the healer that lasts. This tree diverges from TBC, where Holy's
+deep talents could not compete with Discipline's.
 
-| Tier | Node | Ranks | Classic (verified tooltip) | Here, per rank | Kind | Footprint |
+| Tier | Node | Ranks | Source | Here, per rank | Kind | Footprint |
 |---|---|---|---|---|---|---|
 | 1 | Holy Specialization | 2 | +5% crit on Holy spells ([15011](https://www.wowhead.com/classic/spell=15011)) | **+2.5% crit** on Holy spells | Patch | Crit heals |
 | 1 | Spiritual Healing | 2 | +10% healing ([15356](https://www.wowhead.com/classic/spell=15356)) | **+5%**: Flash Heal 105 → 110 → 116 | Patch | Heal numbers |
 | 2 | Inspiration | 2 | Target armor +25% for 15s after a heal crit ([15363](https://www.wowhead.com/classic/spell=15363)) | **+12% armor a rank**, 15s, after a heal crit | Proc (`HealCrit`) | Buff on the ally |
 | 2 | Blessed Recovery | 1 | Heal 25% of a melee or ranged crit taken over 6s ([27816](https://www.wowhead.com/classic/spell=27816)) | Same | Proc (`CritTaken`) | HoT icon |
+| 3 | **Holy Concentration** | 1 | Divergence: TBC has no deep mana talent for Holy; the name is Wrath's | **+35% mana regeneration**, always on, gear included | StatPercent | Mana bar; tooltip |
 | 3 | Holy Nova | 1 | 29-34 Holy to enemies, 54-63 heal to party within 10yd, 185 mana ([15237](https://www.wowhead.com/classic/spell=15237), rank 1) | **13-15 damage, 25-29 healing** within 10yd (rank 1's ratio, sized to the budget); 50 mana | Grant | Cast; nova on the field |
-| 4 | **Spirit of Redemption** | 1 | On death, 10s spirit: free heals, untargetable ([20711](https://www.wowhead.com/classic/spell=20711)) | **8s** spirit. **Requires Spiritual Healing 2/2** (*here*) | Mechanic | Spirit form; logged |
+| 4 | **Guardian Spirit** | 1 | **Wrath**: +40% healing received for 10s; if the target would die, it is saved instead and healed for 50% of its maximum health; 3 min | +40% healing received for 10s; **the first killing blow in that window is prevented** and the ally is healed for 30% of its maximum health; **60s**, so once a match. **Requires Holy Concentration** (*here*) | Grant + Mechanic | Cast; buff on the ally; "saved" logged |
 
-**Shadow** (5 nodes, 8 ranks): control for a healer.
+- **The AI's trigger for Guardian Spirit:** cast it on the most endangered ally in reach (self
+  included) when that ally is **below 40% health and taking damage from two or more enemies**,
+  or **below 25% health from any source**. It holds while the ally is immune or hidden by
+  stealth.
+  - Both inputs are already in `CombatContext`: health fraction, and enemies targeting an
+    ally.
+  - The trigger fires early enough that the heal bonus helps, and late enough that the save
+    is likely to matter.
+  - Its node arm measures how often the save actually fires.
+- **Holy Concentration** gives Holy its longevity: a healer that can out-last Discipline's
+  burst saves.
 
-| Tier | Node | Ranks | Classic (verified tooltip) | Here, per rank | Kind | Footprint |
+**Shadow** (7 nodes, 10 ranks): damage tools for a healer, and the way to stop healing.
+
+| Tier | Node | Ranks | Source | Here, per rank | Kind | Footprint |
 |---|---|---|---|---|---|---|
-| 1 | Improved Psychic Scream | 2 | −4s cooldown ([15448](https://www.wowhead.com/classic/spell=15448)) | −2s a rank (Classic's per-rank value): 30 → 28 → 26 | Patch | Tooltip; more Screams |
 | 1 | Improved Mind Blast | 2 | −1s cooldown ([15312](https://www.wowhead.com/classic/spell=15312)) | Same, −1s a rank: 8 → 7 → 6 | Patch | Tooltip |
+| 1 | Improved Psychic Scream | 2 | −4s cooldown ([15448](https://www.wowhead.com/classic/spell=15448)) | −2s a rank (Classic's per-rank value): 30 → 28 → 26 | Patch | Tooltip; more Screams |
+| 2 | **Shadowform** | 1 | +15% Shadow damage, −15% Physical damage taken, no Holy spells ([15473](https://www.wowhead.com/classic/spell=15473)) | **Adds Shadowform to the Priest's Form choice** (§1): chosen in Prepare, held the whole match. In it: +15% Shadow damage, −15% Physical damage taken, no healing spells | WidenChoice | A new option in Prepare; the form on the Priest all match |
 | 2 | Blackout | 2 | 10% chance to stun for 3s on Shadow damage ([15326](https://www.wowhead.com/classic/spell=15326)) | **4% a rank** on Mind Blast, 3s stun | Proc (`SpellHit`) | Stun |
+| 3 | Mind Flay | 1 | 75 Shadow over 3s and −50% movement, channelled, 20yd ([15407](https://www.wowhead.com/classic/spell=15407)) | **Channel: about 30 Shadow over 3s** (Classic's top rank scaled) **and a 50% slow**, 20yd | Grant | Channel; slow on the target |
 | 3 | Vampiric Embrace | 1 | Party healed for 20% of the Priest's Shadow damage to the target, 1 min ([15286](https://www.wowhead.com/classic/spell=15286)) | Same, 60s debuff; heals go through `apply_healing` | Grant | Debuff icon; heals |
-| 4 | **Silence** | 1 | Silence 5s, 45s, 20yd ([15487](https://www.wowhead.com/classic/spell=15487)) | Same. **Requires Blackout** (*here*) | Grant | Cast; silence on the target |
+| 4 | **Silence** | 1 | Silence 5s, 45s, 20yd ([15487](https://www.wowhead.com/classic/spell=15487)) | Same. **Requires Shadowform, and castable only in it**: a healing Priest never silences | Grant | Cast; silence on the target |
 
-Shadowform ([15473](https://www.wowhead.com/classic/spell=15473)) is held out. It forbids Holy
-spells, so it turns a healer into a damage dealer: a role change, not progression, and the AI
-has no Shadow-damage role to switch into.
+**Shadowform as a role.**
+- **Unlocked early.** It is a tier-2 node, so it can be taken with the third point, as early
+  as before match 2. A run has room to try it, and to go back to healing for a match.
+- **The Shadow tree works without it.** Improved Mind Blast, Blackout, Mind Flay and Vampiric
+  Embrace serve a healing Priest too; only Silence is locked to the form.
+- **In Shadowform the Priest casts no heals:** Flash Heal and Holy Nova are out. Power Word:
+  Shield, Dispel Magic and Fortitude stay castable, as they did for Shadow Priests in WoW.
+  The Priest's class card confirms which spells the form allows.
+- **The AI work is the Priest card's largest piece.** A Shadowform Priest needs a damage
+  rotation (Mind Blast, Mind Flay, Mana Burn, Shadow Word: Pain) and a damage dealer's
+  movement instead of the healer posture machine.
+  - **Shadow Word: Pain** is a baseline Priest spell in WoW. By the rule in §1 it is missing
+    from the kit, not a talent, so the Priest card adds it to the base kit.
+  - The form is a player's choice, so it changes no baseline. A sweep measures it as an arm.
 
-**Priests that read differently at 8 points.** *Discipline (6/2/0)* shields, resists the fear
-and hands its partner Power Infusion at the kill window. *Holy (2/6/0)* heals bigger, protects
-with Inspiration and keeps healing for 8s after it dies. *A Discipline-Holy hybrid (4/4/0)*
-carries Inner Focus and Holy Nova, with no capstone.
+**Priests that read differently at 8 points.**
+- *Discipline (6/2/0)* resists crowd control for less time, reflects through its shields and
+  hands an ally Pain Suppression.
+- *Holy (2/6/0)* heals bigger for longer and keeps a dying ally alive with Guardian Spirit.
+- *A Discipline-Shadow Priest (5/0/3)* heals most matches and goes Shadowform for the ones
+  where a second damage dealer wins.
+
+### 5.3 Healers with offensive trees
+
+Every healer is designed today as a healer. Its offensive tree can only build on the damage
+abilities it has, and the role change it allows is a per-match form (§1).
+
+| Class | Offensive tree | Fits today's abilities? | What it holds |
+|---|---|---|---|
+| Priest | Shadow | Yes | Mind Blast, Mana Burn and Psychic Scream exist. Mind Flay, Vampiric Embrace and Silence are grants; Shadowform is the role change (§5.2) |
+| Druid | Balance | Yes, with grants | Moonfire, Entangling Roots and Cyclone exist. **Wrath and Starfire become Balance talent grants**, a divergence (both were baseline in WoW), which gives the Druid ranged damage beyond Moonfire. Moonkin Form, a later per-match form, would be its role change |
+| Druid | Feral | **No: deferred** | Cat and Bear need a melee kit (shapeshift forms, energy or rage, the strikes) that today's Druid does not have; it shifts only to escape. **The Druid ships two trees, Balance and Restoration**, until a Feral kit exists |
+| Paladin | Retribution | Partly | The Paladin already melees. Repentance (incapacitate) fits, and Sanctity Aura widens the aura menu. Seal-based talents wait for seals and Judgement in the kit |
+| Shaman | Elemental | Yes | Lightning Bolt, Frost Shock and Purge exist; Elemental Mastery and Lightning Overload-style procs fit |
+| Shaman | Enhancement | **Deferred** | Stormstrike and its synergies need a melee kit the Shaman does not have |
+
+A tree that waits on a kit is not padded with filler nodes. Its class ships two trees, and
+build parity (§3) is checked over the trees that exist.
 
 ## 6. Gear
 
-### 6.1 Tiers
+### 6.1 Slot multipliers, from TBC
+
+TBC, not Classic, is the source for itemisation philosophy. Its item budget gives every slot a
+multiplier in four groups, which the sim adopts. This **changes the existing
+`slot_budget_multiplier`** in `src/states/play_match/constants.rs`, its unit test, and the
+multiplier list under *Adding a New Item* in `CLAUDE.md`. It is the first gear card, E0 in §13.
+
+| Group | TBC slot modifier | Sim today | Sim after E0 |
+|---|---|---|---|
+| Head, chest, legs | 1.0 | Head, chest 1.0; **legs 0.875** | **1.0** |
+| Shoulders, hands, waist, feet | about 0.77 | Shoulders, hands, feet 0.75; **waist 0.625** | **0.75** |
+| Wrists, neck, back, ring | about 0.56 | Neck, back, ring 0.5625; **wrists 0.5** | **0.5625** |
+| Trinket | about 0.70 | **0.5625** | **0.70** |
+| Two-hander, one-hander, off-hand | 1.0, 0.42, 0.56 | The held-budget model: 1.0, 0.42, 0.5625 | Unchanged (already TBC's shape) |
+| Ranged weapon | about 0.32 | 0.5625 | **Unchanged for now** (decision 3) |
+
+- **The waist goes with shoulders, hands and feet, as in TBC,** not with wrists, neck and
+  rings. TBC's slot modifiers put the waist in the 0.77 group. Back belongs in the
+  wrist/neck/ring group, which was otherwise missing it. TBC's modifiers are from memory, so E0
+  confirms them against TBC items before it changes a number. Decision 3 lists both
+  departures.
+- **Trinkets rise to 0.70.** TBC prices a trinket's slot above the small accessories, because
+  its effect is its value. The Champion trinkets in §6.3 need that room.
+- **What E0 moves.**
+  - Starting-kit legs, waists, wrists and trinkets were authored to the old, lower
+    multipliers. E0 re-spends them to the new ones, which raises every combatant's starting
+    budget by about 25 points (about 7%).
+  - The rise is the same for every class, but not for every stat mix, so it is not
+    byte-identical. **E0 is an AUTHORITY re-baseline**, measured at the milestone sweep.
+  - Every other card in §13 then works from the new multipliers.
+
+### 6.2 Tiers
 
 | Tier (`item_tier`) | Item level | Where it comes from | Gain on the slot it replaces |
 |---|---|---|---|
-| Starting kit (0) | 54-60 | The default loadouts, unchanged | — |
+| Starting kit (0) | 54-60 | The default loadouts | — |
 | **Gauntlet** (1) | **76-80** | The common reward | about +34% |
 | **Champion** (2) | **90-94** | Offered only after a win | about +59%, plus an effect on most trinkets and weapons |
 
@@ -518,78 +661,112 @@ ilvl 69-75 adds about +26% to the one slot it replaces, and the average slot is 
 a combatant. So a pick from it adds about 7 budget points: +7 health, or +5 spell power. A
 reward that small is invisible.
 
-The fix keeps the budget formula and the test, and moves the tiers.
+The fix keeps the budget formula and the test, and moves the tiers:
 - **The existing 69-75 items are re-levelled to 76-80**, with their stats re-spent to the new
-  budget. No default loadout uses them, so no baseline moves; the card checks that no test or
-  probe pins their stats either.
-- **The Champion tier is new content at 90-94.** Its anchor is Kiss of the Spider, a Classic
-  ilvl 85 trinket.
-- **Offers come from the slots where a pick is felt:** the six armor slots with multipliers of
-  0.75-1.0 (head, chest, legs, shoulders, hands, feet), weapons, and trinkets, whose value is
-  their effect. Neck, back, rings, wrists and waist are not offered.
+  budget. No default loadout uses them, so this tier move changes no baseline.
+- **The Champion tier is new content at 90-94.**
 
-| Pick | Typical slot | Starting budget | After the pick | Gain |
-|---|---|---|---|---|
-| Gauntlet head or chest | 1.0 | 43.5 | 58.5 | **+15** |
-| Gauntlet shoulders, hands or feet | 0.75 | 32.6 | 43.9 | **+11** |
-| Champion head or chest | 1.0 | 43.5 | 69.0 | **+26** |
-| Champion trinket | 0.5625 | 24.5 | 38.8 | **+14 and an effect** |
+| Slot group (multiplier) | Starting (ilvl 58) | Gauntlet (78) | Champion (92) |
+|---|---|---|---|
+| Head, chest, legs (1.0) | 43.5 | 58.5 (**+15**) | 69.0 (**+26**) |
+| Shoulders, hands, waist, feet (0.75) | 32.6 | 43.9 (**+11**) | 51.8 (**+19**) |
+| Wrists, neck, back, ring (0.5625) | 24.5 | 32.9 (**+8**) | 38.8 (**+14**) |
+| Trinket (0.70) | 30.5 | 41.0 (**+10**) | 48.3 (**+18**, and an effect) |
 
-### 6.2 How much gear a run hands out
+**Offers come from every slot, weighted by multiplier.** A head, chest or legs offer is nearly
+twice as likely as a wrist or ring offer, so most picks are felt and no slot is left out.
+Trinkets and weapons, whose value is mostly their effect, take the Champion tier's effects.
+
+### 6.3 How much gear a run hands out
 
 - **One pick per combatant after every match**, from three offers. That is two picks per match
   for the team.
-- **At most 6 picks per combatant.** A perfect run takes its sixth after match 6, so the
-  last pick lands before the last match, as the last talent point does.
+- **At most 6 picks per combatant.** A perfect run takes its sixth after match 6, so the last
+  pick lands before the last match, as the last talent point does.
 - **Champion offers come only after a win.** On a win, each combatant's offer of three
-  includes one Champion item with probability 1/3, from the run's own seed. A perfect run
+  includes one Champion item with probability 1/3, drawn from the run's own seed. A perfect run
   expects two Champion picks a combatant. A loss offers Gauntlet gear only. That is the in-run
   reward for winning.
-- **What a capped combatant gains:** about 4 Gauntlet picks (+12 each) and 2 Champion picks
-  (+22 each, plus effects), about **+90**. That is about the same as its talents (88-99).
-  Together they add about +180 to a starting kit of about 334, **roughly +55% by the final
-  match.** Six picks cover six of the ten or so slots offers are drawn from.
+- **What a capped combatant gains.** With offers weighted by multiplier, an average Gauntlet
+  pick adds about 12 and an average Champion pick about 20, plus effects. A capped combatant
+  therefore gains about **+90**, about the same as its talents (88-99). Together they add about
+  +180 to the starting kit, **roughly +50% by the final match.**
 
-### 6.3 Trinkets worth winning
+### 6.4 Trinkets worth winning
 
 Trinkets carry the effects, so the Champion tier is mostly trinkets and weapons. Each new
-effect kind needs one AI rule, not one per item.
+effect *kind* needs one AI rule, never one per item.
 
-| Champion trinket (Classic source) | Classic tooltip | Here | Effect kind |
+| Champion trinket (source) | Source effect | Here | Effect kind |
 |---|---|---|---|
-| **Medallion of the Alliance / Horde** (TBC; Classic's Insignia, [18854](https://www.wowhead.com/classic/item=18854)) | Classic Insignia (Warrior): dispels immobilizing, slowing and stun effects, 5 min | **Breaks every stun, fear, polymorph, root and slow on the wearer; once a match** (TBC's medallion scope) | **On-use: CC break** (new) |
+| **Aegis of the Last Stand** (new: no Classic or TBC original) | — | **When the wearer drops below 35% health, it gains an absorb shield of 20% of its maximum health. Once a match.** No other stats. **The jackpot**: offered at a quarter of the other Champion trinkets' weight | Triggered absorb (new) |
+| **Medallion of the Alliance / Horde** (TBC; Classic's Insignia, [18854](https://www.wowhead.com/classic/item=18854)) | Classic Insignia (Warrior): dispels immobilizing, slowing and stun effects, 5 min | **Breaks every stun, fear, polymorph, root and slow on the wearer; once a match** (TBC's medallion scope) | On-use: CC break (new) |
 | Talisman of Ephemeral Power ([18820](https://www.wowhead.com/classic/item=18820)) | +175 spell damage and healing for 15s, 90s | **+40 SP for 15s, 45s** | On-use: stat burst (new) |
 | Earthstrike ([21180](https://www.wowhead.com/classic/item=21180)) | +280 AP for 20s, 2 min | **+70 AP for 20s, 60s** | On-use: stat burst |
 | Diamond Flask ([20130](https://www.wowhead.com/classic/item=20130)) | 9 health every 5s and +75 Strength for 60s, 6 min | **A heal over time and +AP for 30s; once a match** | On-use: stat burst plus a heal over time |
-| Hand of Justice ([11815](https://www.wowhead.com/classic/item=11815)) | +20 AP; 2% chance on a melee hit of an extra attack | **+AP; 5% chance of an extra swing** | Proc: extra attack (new effect) |
+| Kiss of the Spider ([22954](https://www.wowhead.com/classic/item=22954), ilvl 85) | +1% crit and hit; on use, +20% attack speed for 15s, 2 min | **On use: +20% attack speed for 15s, 60s** | On-use: **haste** (new aura) |
+| Hand of Justice ([11815](https://www.wowhead.com/classic/item=11815)) | +20 AP; 2% chance on a melee hit of an extra attack | **+AP; 5% chance of an extra swing** | Proc: extra attack, **Windfury's mechanism** |
 | Darkmoon Card: Blue Dragon ([19288](https://www.wowhead.com/classic/item=19288)) | 2% chance on a cast: full mana regen while casting for 15s | **5% on a cast: +mana regen for 15s** | Proc (existing machinery) |
 | Zandalarian Hero Charm ([19950](https://www.wowhead.com/classic/item=19950)) | +204 spell damage / +408 healing for 20s, each cast takes 1/12 off, 2 min | **Later:** needs a decaying buff | — |
-| Kiss of the Spider ([22954](https://www.wowhead.com/classic/item=22954), ilvl 85) | +1% crit and hit; on use +20% attack speed for 15s, 2 min | **Later:** needs a haste aura | — |
 
-- **The CC-break AI rule** reuses the shape of the Paladin's while-CC Divine Shield
-  (`divine_shield_while_cc_should_fire`): fire when hard-CC'd with 2s or more left and a
-  teammate low, or when the wearer is the kill target under burst. The trinket answers a
-  briefing threat by name ("their Rogue chains Kidney Shot"), so it is the gear that makes
-  Prepare matter most.
-- **A stat on-use** fires in the kill window (a damage dealer) or when an ally drops low (a
-  healer).
+**The jackpot trinket.**
+- **It is a Champion trinket.** Its budget is a Champion trinket's 48.3, all of it spent on
+  the shield.
+- **It is priced at value times trigger rate:**
+  - On a capped combatant of about 420 health, the shield is about 84.
+  - It is worth its price if it triggers in about 57% of combatant-lives. Dropping below 35%
+    happens in nearly every life that ends in a death and in many that do not.
+  - The Gauntlet bot measures the rate, and E2 sizes the shield (or the threshold) to it.
+- **No AI rule.** It needs no AI decision: the trigger is automatic. Like every new absorb, it
+  applies `ArenaDampening` at its own application site (CLAUDE.md).
+- **It is rare by weight, not by tier.** That makes it the drop a run remembers without
+  making it a separate tier.
 
-### 6.4 How the item budget test fits
+**Hand of Justice and Windfury.** The extra swing *is* Windfury's mechanism. Windfury Totem's
+`WindfuryBuff` already gives a melee ally a chance at an extra attack on its swings, and Hand
+of Justice reuses that path as a trinket proc rather than adding a new effect. Two
+differences:
+- Windfury is a totem aura on nearby allies.
+- Windfury's extra swing carries bonus attack power; Hand of Justice's does not.
 
-The test still prices every item at `item_level × 0.75 × slot multiplier` with the same stat
-weights. Four changes come with the tiers:
+**Haste, and the Dragonspine Trophy.** Kiss of the Spider needs a new haste aura,
+`AttackSpeedIncrease`, the mirror of today's `AttackSpeedSlow`. Once it exists, **the shipped
+Dragonspine Trophy moves to it as well**:
+- Today's trinket procs +55 attack power for 10s.
+- TBC's DST procs haste on melee and ranged hits, so it becomes about +20% attack speed for
+  10s, on its existing chance and internal cooldown.
+- It needs a haste weight in `proc_effect_budget_weight`.
+- `tests/proc_trinket_probes.rs` and the proc-pricing notes in `CLAUDE.md` that cite DST are
+  updated in the same card.
+- No default loadout carries DST, so no baseline moves.
 
-1. **Tier bands.** `item_tier` (already in `ItemConfig`) is validated against its item level
+**AI rules.**
+- **The CC break** reuses the shape of the Paladin's while-CC Divine Shield
+  (`divine_shield_while_cc_should_fire`). It fires when hard-CC'd with 2s or more left and a
+  teammate low, or when the wearer is the kill target under burst.
+- **A stat or haste on-use** fires in the kill window (a damage dealer) or when an ally drops
+  low (a healer).
+
+### 6.5 How the item budget test fits
+
+The test keeps pricing every item at `item_level × 0.75 × slot multiplier`, with the same stat
+weights. Five changes come with this section:
+
+1. **The slot multipliers move to TBC's groups** (§6.1, card E0), changing `constants.rs`,
+   its test and `CLAUDE.md`.
+2. **Tier bands.** `item_tier` (already in `ItemConfig`) is validated against its item level
    band: 0 at 54-60, 1 at 76-80, 2 at 90-94.
-2. **On-use pricing.** An on-use stat effect is priced by its **uses in a median arena life**
+3. **On-use pricing.** An on-use stat effect is priced by its **uses in a median arena life**
    (43s, measured in `tests/proc_trinket_probes.rs`), not by the long-run uptime bound procs
    use. An on-use starts ready, so in a 43s life a 45s cooldown is one use: 15s of +40 SP is
    `1.5 × 40 × 15/43 ≈ 21`. The long-run bound (`15/60`) would charge 15 and underprice it.
-3. **Declared prices** for effects with no stat weight: the CC break and the extra attack. A
-   declared price is sweep-checked, as a talent mechanic is.
-4. **Offer floors** in `gauntlet.ron` validation, not in the item test: an offered item must
-   add at least 30% (Gauntlet) or 55% (Champion) over the starting item in its slot. That
-   keeps a reward from ever being a sidegrade.
+4. **Declared and rate-priced effects.** Effects with no stat weight carry a declared price,
+   sweep-checked like a talent mechanic: the CC break, the extra swing, and haste until it has
+   a weight. A triggered effect such as the jackpot's shield is priced at value × trigger rate,
+   with the rate from the bot.
+5. **Offer floors** live in `gauntlet.ron` validation, not in the item test. An offered item
+   must add at least 30% (Gauntlet) or 55% (Champion) over the starting item in its slot, so a
+   reward is never a sidegrade.
 
 ## 7. The Gauntlet run
 
@@ -601,7 +778,8 @@ weights. Four changes come with the tiers:
 2. **Hub.** The record as pips (wins out of 7, losses out of 3), your team with spec labels and
    gear, and the next opponent's **briefing**.
 3. **Talents.** Spend unspent points, or bank them.
-4. **Prepare.** The per-match choices, pre-filled with last match's, against the briefing.
+4. **Prepare.** The per-match choices, pre-filled with last match's, with the briefing beside
+   them.
 5. **Fight.** PlayMatch exactly as today, kill calls included. Results as today, plus
    **Continue run**.
 6. **Point and rewards.** Each combatant gains **1 talent point** (up to 8) and **picks one
@@ -650,28 +828,29 @@ How opponents are authored and graded:
 - **A class without a tree yet carries its points as item budget**, 11 per point, so opponents
   can be any of the nine classes from the first slice.
 - Opponents are graded by sweep against reference teams.
-- The AI profile is an authored property of each opponent. It is set where that comp is
-  stronger with it, and it is never a difficulty lever. `TeamPlan`'s effect depends on the
-  comp: +25pt for Warlock+Priest, −45pt for Rogue+Priest (n=300, 2026-10-10).
+- **Every opponent runs the game's default AI.** The AI profile is not a per-opponent property
+  and not a difficulty lever. The player never sees it, because it is not information a player
+  can act on. The game is meant to have one AI, not a ladder of them. AI profiles are a
+  development tool for measuring a new behaviour before it graduates into the default.
 
-### 7.4 The per-match choices keep their role: the briefing
+### 7.4 The briefing: what may interact
 
-The briefing shows:
+The briefing is short. It shows:
 
-- the opponent's classes, map, AI profile, **talent points and reward picks**;
-- their **spec labels** ("Affliction Warlock 4/0/0"), the talent icons that act in a fight,
-  and their notable gear (a Medallion, a Talisman);
-- **threat lines** generated from their kit, their per-match choices, their talents and their
-  trinkets: "Siphon Life heals their Warlock: dispel it", "their Rogue's Medallion breaks your
-  first stun";
-- **your answers** with the current Prepare settings, recomputed as you change them: "Curse of
-  Tongues slows their healer's casts", "the Felhunter can devour Polymorph off your healer",
-  and **what is missing**: "no slow for their kiter: Curse of Exhaustion is an Affliction
-  talent".
+- the opponent's classes, the map, and their **talent points and reward picks**;
+- their **spec labels** ("Affliction Warlock 4/0/0");
+- **the key abilities from each team that may interact in this match**, two or three per
+  enemy combatant, each an icon with one line. They are drawn from the enemy's kit, its
+  talents that act in a fight, and its notable trinkets: "Polymorph", "Siphon Life",
+  "Medallion: breaks one stun". Each links to its encyclopedia page.
 
-Talents and gear can make an answer possible (Curse of Exhaustion against a kiting Hunter, a
-Medallion against a stun chain) or better (Improved Curse of Agony). Choosing that answer
-happens in Prepare, every match, for free.
+It deliberately gives **no advice**:
+- **No list of your counters.** A checklist that asks the player to counter everything the
+  opponent does, and ticks each counter off as Prepare is set, would be actionable.
+- **Why it is held off:** who counters whom, and by how much it matters in a real match,
+  drifts with every balance change. The game cannot promise that the advice is good.
+- The key-abilities list states facts that stay true. Prepare stays the player's call, free
+  every match.
 
 ### 7.5 What a run remembers
 
@@ -690,8 +869,8 @@ game update in the middle of a run therefore changes nothing already decided (§
   - the walls in the ladder;
   - the dominant pairs;
   - the spread of builds.
-- Each difficulty level is calibrated to a **target clear rate** (§8), measured for a fresh
-  profile and for a fully unlocked one.
+- Each pair of adjacent difficulty levels is checked for a **measurably lower clear rate** at
+  the higher one (§8), with a fresh profile and with a fully unlocked one.
 - The bot evaluates every renown condition on every run, which gives each ability's **earn
   rate** before any player sees it (§9.4).
 - **Post-match odds (later):** after a loss, twenty background seeds of the same matchup say
@@ -699,29 +878,31 @@ game update in the middle of a run therefore changes nothing already decided (§
 
 ## 8. Difficulty (recommended)
 
-**A ladder of six levels, named for WoW's arena titles, each unlocked by clearing the one
+**A ladder of five levels, named for WoW's arena titles, each unlocked by clearing the one
 below.** The levels move **opponent gear first**, because gear is the lever with the finest
-steps and the one a player can see in the briefing. Points move only at the top two levels,
-and the AI profile never moves.
+steps and the one a player can see in the briefing. Points move only at the top two levels.
+The AI never changes (§7.3).
 
-| Level | Opponent gear, against parity | Opponent points | Unlocked by | Target clear rate (fully unlocked bot) |
-|---|---|---|---|---|
-| Novice | 2 picks fewer, no Champion items | Parity | Always | ~70% |
-| **Combatant** (default) | Parity | Parity | Always | ~40% |
-| Challenger | 1 more pick, 1 more Champion item | Parity | A Combatant clear | ~25% |
-| Rival | 2 more picks, 2 more Champion items | Parity | A Challenger clear | ~15% |
-| Duelist | 3 more picks, all Champion | +1 a tier (still at most 8) | A Rival clear | ~8% |
-| Gladiator | 4 more picks, all Champion | 8 from tier 1 | A Duelist clear | ~3% |
+| Level | Opponent gear, against parity | Opponent points | Unlocked by |
+|---|---|---|---|
+| **Combatant** (default) | Parity | Parity | Always |
+| Challenger | 1 more pick, 1 more Champion item | Parity | A Combatant clear |
+| Rival | 2 more picks, 2 more Champion items | Parity | A Challenger clear |
+| Duelist | 3 more picks, all Champion | +1 a tier (still at most 8) | A Rival clear |
+| Gladiator | 4 more picks, all Champion | 8 from tier 1 | A Duelist clear |
 
-- **The targets are starting values**, set by the calibration card (G-calibration) from bot
-  runs and then held by it. A level whose measured clear rate leaves its band is re-tuned, the
-  way an opponent tier is re-graded.
+- **The rule is direction, not targets.** Each level must have a **measurably lower clear
+  rate** than the one below it. The Gauntlet bot plays the same seeds and policies at two
+  adjacent levels, and the difference has to clear the resolution floor of a DIRECTIONAL
+  paired measurement (`sweep-tiers.md`).
+  - A step that fails the rule is widened.
+  - The game does not commit to any particular clear rate.
 - **Each step is about one pick** (+12 to +25 budget, about 3-5% of a capped combatant). That
   is fine enough that a level is a real step and coarse enough that the briefing shows it.
 - **A clear at a level earns its title**, kept in the profile and shown in the encyclopedia.
   The highest title is the headline record.
 - **The flagship renown abilities are clears at each level** (§9), so a profile grows by
-  climbing, and farming Novice earns nothing.
+  climbing.
 
 ## 9. Meta-progression: renown
 
@@ -897,30 +1078,28 @@ the framework above carries over unchanged.
 ## 10. Replays and saves across versions
 
 **A seed reproduces a match only on the build that played it.** Any change to the sim or the
-RON configs can change the outcome. So:
+RON configs can change the outcome. The case that bites: a player starts a run on version X,
+updates to version Y, and carries on. So:
 
-- **Within a run, records are exact.** A match record is its config (classes, builds, gear,
-  per-match choices, map, seed) plus its kill calls with sim timestamps. That reproduces the
-  match on the same build, which is all an in-run replay needs.
-- **Every record is version-stamped**: the game version and a hash of the RON configs.
-- **A record from another version is never replayed as if it were the same match.** History
-  shows its stored result, damage and healing summary, and **combat log text** (a few KB,
-  kept with the record), so nothing is lost. It offers **Re-simulate in this version**,
-  labelled "the outcome may differ".
-- **The run save stores resolved state, not only a seed** (§7.5), so an update mid-run keeps
-  everything already decided.
+- **A replay is available only while the game version is the one that played the match.**
+  A match record is its config (classes, builds, gear, per-match choices, map, seed) plus its
+  kill calls with sim timestamps. On the same build, that reproduces the match exactly.
+- **Every record is version-stamped** with the game version and a hash of the RON configs.
+  Once the version has moved on, the match's replay shows as **unavailable**, never as a
+  replay that might not match what the player saw.
+- **The record itself is kept.** History still shows the result, the damage and healing
+  summary, and the **combat log text** (a few KB, stored with the record).
+- **The run save stores resolved state, not only a seed** (§7.5), so an update in the middle
+  of a run keeps everything already decided. Only that run's earlier replays go unavailable.
 - **Ghost opponents** (a finished run's team becoming an opponent) are team configs, not
   replays. They re-fight in the current sim, so they survive every version by design.
-- **Exact playback across versions** would need a state tape: per-tick positions, casts and
-  auras, about 100-200 KB a match, played back by the renderer with no sim. Nothing needs it
-  yet. It becomes worth building if shared replays matter (decision 5).
 
 ## 11. A worked run: Warlock and Priest
 
 The player drafts the Warlock and the Priest at **Combatant**. The Warlock heads into
 **Demonology** (the survival tree, against its "dies first" failure) with an Affliction
-splash. The Priest builds a **Discipline-Holy hybrid**. "Them" is the opponent's points and
-picks per combatant.
+splash. The Priest builds **Discipline with a Shadow splash**, and takes Shadowform mid-run to
+try it in a match. "Them" is the opponent's points and picks per combatant.
 
 | # | Opponent (tier, map) · them | Points (Wl/Pr) | Talents taken | Per-match choices | Result | Rewards (Wl / Pr) |
 |---|---|---|---|---|---|---|
@@ -928,11 +1107,11 @@ picks per combatant.
 | 1 | Gate Rats: Warrior + Priest (1, BasicArena) · 2 pts, 0 picks | 2 / 2 | — | Kill the Priest. Weakness on the Warrior, Tongues on the Priest. Felhunter | Win | Gauntlet gloves / Gauntlet chest |
 | 2 | Dustcloaks: Rogue + Druid (2, Nagrand) · 3, 1 | 3 / 3 | Wl: Fel Stamina 2. Pr: Unbreakable Will 2 | Kill the Druid. Agony on the Druid, Weakness on the Rogue | Win | **Medallion** (Champion) / Gauntlet legs |
 | 3 | Ashen Pair: Mage + Shaman (3, TwinPillars) · 4, 2 | 4 / 4 | Wl: Demonic Sacrifice. Pr: Inner Focus | Felhunter to devour Polymorph. Tongues on the Shaman | **Loss** | Gauntlet head / Gauntlet head |
-| 4 | Cinder Pact: Mage + Priest (3, BasicArena) · 4, 2 | 5 / 5 | Wl: Unholy Power. Pr: Spiritual Healing | Kill the Priest; Tongues on it | Win, the Warlock alone against their Mage at the end: **Last One Standing** unlocks | Gauntlet shoulders / Gauntlet shoulders |
-| 5 | Thornwatch: Warlock + Priest (4, Nagrand) · 5, 3 | 6 / 6 | Wl: **Soul Link** (capstone). Pr: Spiritual Healing 2 | Spell Lock their Priest; Tongues on it, Weakness on their Warlock | Win | Gauntlet legs / **Talisman of Ephemeral Power** (Champion) |
-| 6 | Stormhold: Hunter + Paladin (5, Nagrand) · 6, 4 | 7 / 7 | Wl: Improved Drain Life. Pr: Holy Specialization | Felhunter kept: Spell Lock answers the Paladin. Tongues on the Paladin. The briefing notes no slow for the Hunter | Win | **Champion robe** / Gauntlet feet (both at 6: capped) |
-| 7 | Gilded Fangs: Rogue + Priest (6, BasicArena) · 7, 5 | 8 / 8 | Wl: Improved Drain Life 2. Pr: **Holy Nova** | Felhunter kept for Soul Link. Weakness on the Rogue. The Medallion breaks Kidney Shot | Win | — (capped) |
-| 8 | Champions: Warrior + Paladin (7, BasicArena) · 8, 6 | 8 / 8 | — (capped) | **Sacrifice the Felhunter** (+15% Shadow; Soul Link off): two melee will kill it anyway. Weakness on the Warrior | Win | — |
+| 4 | Cinder Pact: Mage + Priest (3, BasicArena) · 4, 2 | 5 / 5 | Wl: Unholy Power. Pr: Improved Mind Blast | Kill the Priest; Tongues on it | Win, the Warlock alone against their Mage at the end: **Last One Standing** unlocks | Gauntlet shoulders / Gauntlet shoulders |
+| 5 | Thornwatch: Warlock + Priest (4, Nagrand) · 5, 3 | 6 / 6 | Wl: **Soul Link** (capstone). Pr: Improved Mind Blast 2 | Spell Lock their Priest; Tongues on it, Weakness on their Warlock | Win | Gauntlet legs / **Talisman of Ephemeral Power** (Champion) |
+| 6 | Stormhold: Hunter + Paladin (5, Nagrand) · 6, 4 | 7 / 7 | Wl: Improved Drain Life. Pr: **Shadowform** | **The Priest goes Shadowform:** −15% physical damage from the Hunter and its pet, and two damage dealers on the Paladin. Felhunter kept to Spell Lock the Paladin's heals. Tongues on the Paladin | Win | **Champion robe** / Gauntlet feet (both at 6: capped) |
+| 7 | Gilded Fangs: Rogue + Priest (6, BasicArena) · 7, 5 | 8 / 8 | Wl: Improved Drain Life 2. Pr: Imp. PW:Shield 2 | **The Priest heals again.** Felhunter kept for Soul Link. Weakness on the Rogue. The Medallion breaks Kidney Shot | Win | — (capped) |
+| 8 | Champions: Warrior + Paladin (7, BasicArena) · 8, 6 | 8 / 8 | — (capped) | The Priest heals. **Sacrifice the Felhunter** (+15% Shadow; Soul Link off): two melee will kill it anyway. Weakness on the Warrior | Win | — |
 
 **7-1, cleared at Combatant.** Two renown abilities unlock, and both take effect from the next
 run:
@@ -947,17 +1126,18 @@ and the encyclopedia now points at them:
 
 So the next run has a reason to try something different.
 
+**Final builds.**
 - **Warlock 2/6/0, Demonology:** Demonic Embrace 1, Fel Stamina 2, Demonic Sacrifice, Unholy
   Power 1, Soul Link; Improved Drain Life 2. Price 99. Gear: 4 Gauntlet picks and 2 Champion
   picks, the Medallion and the robe.
-- **Priest 4/4/0, a hybrid:** Improved PW:Shield 1, Unbreakable Will 2, Inner Focus; Spiritual
-  Healing 2, Holy Specialization 1, Holy Nova. Price 88. Gear: 5 Gauntlet picks and the
-  Talisman.
+- **Priest 5/0/3, Discipline with Shadow:** Improved PW:Shield 2, Unbreakable Will 2, Inner
+  Focus; Improved Mind Blast 2, Shadowform. Price 88. Gear: 5 Gauntlet picks and the Talisman.
 
 What the run shows:
 
-- **Two points at the draft** gave each combatant a coherent start, and the **hybrid** came
-  together at match 7.
+- **Two points at the draft** gave each combatant a coherent start.
+- **Shadowform arrived mid-run, with matches left to use it.** The Priest played match 6 as a
+  damage dealer and healed in matches 7 and 8: the same talent, a different per-match choice.
 - **The loss bought a point and a pick** against the same tier, and the player stayed one
   ahead until the caps closed the gap at the final match.
 - **Both caps were reached before the last two fights.** The final match was budget parity:
@@ -977,11 +1157,12 @@ the *class pool*, not the system.
    first. Two healers in a pool of four means every offer of three has a healer. Six pairs, five
    with a healer.
 3. **Hub** with the briefing, **Talents**, **Prepare**, **Fight**, **Rewards** (Gauntlet and
-   Champion tiers, the Medallion and two stat on-use trinkets), **Run end**, as in §7.1.
+   Champion tiers on TBC's slot multipliers; the Medallion, the jackpot Aegis and two stat
+   on-use trinkets), **Run end**, as in §7.1.
 4. **Opponents** from all nine classes, about 20 in 7 tiers, scaling with wins (§7.3). The five
    classes without trees carry their points as item budget.
-5. **One difficulty, Combatant.** Records are exact within the version, with the version stamp
-   and stored combat log from the start (§10).
+5. **One difficulty, Combatant.** Replays are available within the game version, and every
+   record carries the version stamp and its combat log from the start (§10).
 
 **Out of the slice:** the other difficulty levels, renown, the other five classes' trees, 3v3,
 ghosts, daily seeds and post-match odds. The slice does keep a `MatchFacts` digest on every
@@ -1003,7 +1184,8 @@ Exit from a run means save and leave; abandoning is its own confirmed action.
 
 Cards in dependency order. Each is shippable and keeps `main` green. **Every card before the
 slice leaves the default build empty and the default loadouts unchanged, so `Legacy` and
-BasicArena stay byte-identical and `determinism_pin` holds.**
+BasicArena stay byte-identical and `determinism_pin` holds.** The one exception is E0, the TBC
+slot multipliers: it re-spends the starting kit on purpose, and is an AUTHORITY re-baseline.
 
 **Phase 0: engines and foundations (no new screens).**
 
@@ -1011,21 +1193,22 @@ BasicArena stay byte-identical and `determinism_pin` holds.**
 |---|---|
 | T1 Talent engine | `talents.ron` (trees, tiers, ranks, prerequisites) and a validating loader; `Build` per slot in `MatchConfig` and headless; the `AbilityBook` and the migration of the cast, channel, aura-tick and AI paths; rank and build parity tests; `talent_ai_audit`; the `[TALENTS]` line and the build in the trace header. The general mechanisms the trees need: the `leech` aura field, the proc triggers (`DotTick`, `SpellHit`, `HealCrit`, `CritTaken`) and effects (`NextCastInstant`, `NextCastFree`), `WidenChoice`, and the `Mechanic` hook |
 | T2 Talent panel and encyclopedia | The tree in View Combatant and Custom Match (8 points); `Topic::Talent` and a Talents section; spec labels on frames and Results |
-| **Per class: "define and build class X's trees"** | One card per class, in this order: **Warlock, Priest, Rogue, Paladin** (the slice's four), then Warrior, Mage, Hunter, Shaman, Druid. Each card does five things: research the class's Classic and TBC trees from the client's `TalentTab` / `Talent` tables; write its three trees under §1, §3 and §4 (the mocks in §5 are its starting point for the first two); implement them; write its three reference builds; run a DIRECTIONAL node-arm sweep for its grants, procs and mechanics |
-| E1 Gear tiers | Re-level the 69-75 tier to 76-80 and re-spend its stats; tier bands validated on `item_tier`; Champion tier content (armor and weapons) |
-| E2 Trinkets | `on_use` on items, priced by uses in a median life; the CC-break and extra-attack effects with declared prices; their AI rules; the Medallion, Talisman, Earthstrike, Diamond Flask, Hand of Justice and Blue Dragon |
+| **Per class: "define and build class X's trees"** | One card per class, in this order: **Warlock, Priest, Rogue, Paladin** (the slice's four), then Warrior, Mage, Hunter, Shaman, Druid. Each card does five things: research the class's Classic and TBC trees from the client's `TalentTab` / `Talent` tables, and later expansions where §5 diverges; write its trees under §1, §3, §4 and §5.3 (the mocks in §5 are its starting point for the first two); implement them; write its reference builds; run a DIRECTIONAL node-arm sweep for its grants, procs and mechanics. The **Priest** card also adds Shadow Word: Pain to the base kit, and builds the Form choice and the Shadowform damage-dealer AI. The **Druid** card ships Balance and Restoration, with Wrath and Starfire as Balance grants; Feral waits for a melee kit |
+| E0 Slot multipliers (TBC) | `slot_budget_multiplier` moves to TBC's groups (legs 1.0, waist 0.75, wrists 0.5625, trinket 0.70), after confirming TBC's modifiers; its unit test and the list in `CLAUDE.md` follow. Starting-kit legs, waists, wrists and trinkets are re-spent. **Not byte-identical: an AUTHORITY re-baseline** |
+| E1 Gear tiers | Re-level the 69-75 tier to 76-80 and re-spend its stats; tier bands validated on `item_tier`; Champion tier content (armor and weapons); offers weighted by slot multiplier |
+| E2 Trinkets | `on_use` on items, priced by uses in a median life; the CC-break effect; the extra swing on Windfury's path; the `AttackSpeedIncrease` haste aura with a haste weight, and **the Dragonspine Trophy moved onto it** (with its probe and the `CLAUDE.md` notes); the triggered absorb for the jackpot, priced by trigger rate; their AI rules; the Medallion, Aegis of the Last Stand, Talisman, Earthstrike, Diamond Flask, Kiss of the Spider, Hand of Justice and Blue Dragon |
 | G1 Run model | `RunState` (resolved state plus seed); offers on their own RNG stream; version stamp and stored combat log on every match record |
 | G2 Gauntlet data | `gauntlet.ron`: run rules and caps, opponents by tier with builds and gear (or budget-equivalent gear), reward tables with offer floors; validated at load |
 | G3 Recorded kill calls | Kill calls with sim timestamps in the match record; a replay reproduces the match on the same build |
 | G4 Headless driver | `--gauntlet <seed> --difficulty <level> --policy <name>`, with talent and reward policies |
-| G5 Calibration | DIRECTIONAL: reference-build arms per class, bot runs for the clear rate, wins-per-run, walls, pair dominance and build spread. Output: opponent tiers, reward tables and the Combatant target, in a findings doc |
+| G5 Calibration | DIRECTIONAL: reference-build arms per class, bot runs for the clear rate, wins-per-run, walls, pair dominance and build spread. Output: opponent tiers and reward tables, in a findings doc |
 
 **Phase 1: the minimum playable slice.**
 
 | Card | Delivers |
 |---|---|
 | G6 Entry and draft | Main-menu entry, draft screen, starting a run |
-| G7 Hub, briefing and Prepare | The hub; the briefing with points, picks, talent and trinket threats, and answers and gaps; Prepare reusing the pre-match widgets |
+| G7 Hub, briefing and Prepare | The hub; the briefing with points, picks, specs and each team's key abilities that may interact; Prepare reusing the pre-match widgets |
 | G8 Talent step | The tree screen in a run: spend or bank, locked once spent |
 | G9 Rewards and run end | Per-combatant reward picks with tier frames and the gain shown; run end with builds, gear and records |
 | G10 Save, resume, abandon | Resume after a quit; a confirmed abandon; a UI script drives a short run as a smoke test |
@@ -1034,7 +1217,8 @@ Milestone review: **play three runs.**
 
 **Phase 2: meta-progression and difficulty.**
 - M1 Profile save, clears and titles.
-- M2 Difficulty levels and their calibration (the G5 bot per level, fresh and fully unlocked).
+- M2 Difficulty levels, and the directional check that each clears less often than the one
+  below (the G5 bot per pair of levels, fresh and fully unlocked).
 - M3 The renown framework:
   - `renown.ron` and its validator;
   - the condition tree with its `Match`, `Run` and `Profile` leaves, each with fixtures;
@@ -1048,14 +1232,13 @@ Milestone review: **play three runs.**
   locked/unlocked state and progress.
 - M6 The first list of specific objectives, designed and then checked against bot earn rates.
 - Alongside: the other five classes' trees, 3v3 runs, map draws in the briefing, saved talent
-  plans, daily seed, run history with re-simulation, post-match odds, and per-match choices for
-  the Priest, Shaman and Druid.
+  plans, daily seed, run history, post-match odds, and the Shaman's totem-loadout choice once
+  it has the totems.
 
 **Phase 3: depth.**
 - Build-aware AI behind an `AiProfile` (the Felhunter as a Soul Link sponge).
 - The later trinkets (Zandalarian Hero Charm, Kiss of the Spider).
 - Ghost opponents.
-- A state tape, if decision 5 calls for one.
 - The Stable (named combatants carried between runs) and Counter-Pick Trials (authored puzzles
   against a fixed enemy team), which reuse the opponent format.
 
@@ -1074,15 +1257,14 @@ Milestone review: **play three runs.**
 ## 14. Decisions still open
 
 1. **Respec.** Spent points locked for the run, as recommended? Or a free respec between
-   matches, which blurs talents into per-match choices?
+   matches, which blurs talents into per-match choices? (The Priest's Form is a per-match
+   choice either way.)
 2. **The first slice.** Talents and both gear tiers in the slice with a four-class pool
    (Warlock, Priest, Rogue, Paladin), as recommended? Or all nine classes with gear only, and
    talents as phase 2?
-3. **Baked-in talents.** Mortal Strike, Ice Barrier, Holy Shock, Swiftmend, Unstable
-   Affliction and instant Corruption stay baseline, as recommended, so no class loses a button?
-   Or move them into the trees as capstones, which is more faithful and re-baselines every class?
-4. **TBC sources.** Talents and trinkets may draw on TBC where Classic does not fit (Curse of
-   Exhaustion's 30%, Pain Suppression, the Medallion's scope)?
-5. **Cross-version replays.** Version-stamped records with a labelled re-simulation, as
-   recommended, and a state tape only if shared replays become a goal? Or build the state tape
-   so any past match can be watched exactly?
+3. **Two departures in the slot groups (§6.1).**
+   - **The waist:** with shoulders, hands and feet, as TBC prices it (recommended)? Or with
+     wrists, neck and rings?
+   - **The ranged weapon:** stay at 0.5625 for now (recommended)? Or drop to TBC's 0.32? That
+     would cut every bow and wand budget and re-baseline the Hunter, whose bow is its main
+     lever.
