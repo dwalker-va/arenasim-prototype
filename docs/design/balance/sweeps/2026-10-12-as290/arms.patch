@@ -1,0 +1,720 @@
+diff --git a/src/states/play_match/class_ai/druid.rs b/src/states/play_match/class_ai/druid.rs
+index cff25ad1..a31a81b6 100644
+--- a/src/states/play_match/class_ai/druid.rs
++++ b/src/states/play_match/class_ai/druid.rs
+@@ -849,7 +849,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
+             if Some(attacker) == kill_target {
+                 continue;
+             }
+-            if !is_pet {
++            if !is_pet && call.allows(AbilityType::Cyclone) {
+                 if self.ctx.is_dr_immune(attacker, DRCategory::Cyclone) {
+                     self.builder.reject(
+                         AbilityType::Cyclone,
+@@ -861,7 +861,8 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
+                     return true;
+                 }
+             }
+-            if super::peel::movement_peel_target(self.ctx, attacker)
++            if call.allows(AbilityType::EntanglingRoots)
++                && super::peel::movement_peel_target(self.ctx, attacker)
+                 && !self.ctx.entity_is_immune(attacker)
+             {
+                 if self.ctx.is_dr_immune(attacker, DRCategory::Roots) {
+diff --git a/src/states/play_match/class_ai/hunter.rs b/src/states/play_match/class_ai/hunter.rs
+index b82e553d..e256f7b1 100644
+--- a/src/states/play_match/class_ai/hunter.rs
++++ b/src/states/play_match/class_ai/hunter.rs
+@@ -211,7 +211,7 @@ pub fn decide_hunter_action(
+             my_pos,
+             auras,
+             ctx,
+-            &call.attackers,
++            &call,
+             own_traps,
+             &mut builder,
+         ) {
+@@ -1641,23 +1641,28 @@ fn try_peel_snare(
+     my_pos: Vec3,
+     auras: Option<&ActiveAuras>,
+     ctx: &CombatContext,
+-    attackers: &[Entity],
++    call: &super::peel::PeelCall,
+     own_traps: &[LiveTrap],
+     builder: &mut DecisionEventBuilder<'_>,
+ ) -> bool {
+-    for &attacker in attackers {
++    for &attacker in &call.attackers {
+         if !super::peel::movement_peel_target(ctx, attacker)
+             || ctx.entity_is_immune(attacker)
+             || super::peel::slowed(ctx, attacker)
+         {
+             continue;
+         }
+-        if try_concussive_shot(
+-            commands, combat_log, abilities, entity, combatant, my_pos, auras, attacker, ctx,
+-            builder,
+-        ) {
++        if call.allows(AbilityType::ConcussiveShot)
++            && try_concussive_shot(
++                commands, combat_log, abilities, entity, combatant, my_pos, auras, attacker, ctx,
++                builder,
++            )
++        {
+             return true;
+         }
++        if !call.allows(AbilityType::FrostTrap) {
++            continue;
++        }
+         let Some(attacker_pos) = ctx.combatants.get(&attacker).map(|i| i.position) else {
+             continue;
+         };
+@@ -2178,6 +2183,45 @@ fn dispatch_pet_ability(
+         return;
+     };
+ 
++    // ARM-ONLY (AS-290): pet peel.
++    if std::env::var_os("AS290_PETPEEL").is_some()
++        && ctx.situation.is_some()
++        && matches!(pet_type, PetType::Spider | PetType::Boar)
++    {
++        if let Some(call) = super::peel::peel_call(ctx, Role::RangedDps) {
++            for &attacker in &call.attackers {
++                let fired = match pet_type {
++                    PetType::Spider => {
++                        super::peel::movement_peel_target(ctx, attacker)
++                            && try_dispatch_spider_web(
++                                commands,
++                                abilities,
++                                decision_trace,
++                                hunter_entity,
++                                pet_entity,
++                                pet_info,
++                                attacker,
++                                ctx,
++                            )
++                    }
++                    _ => try_dispatch_boar_charge(
++                        commands,
++                        abilities,
++                        decision_trace,
++                        hunter_entity,
++                        pet_entity,
++                        pet_info,
++                        attacker,
++                        ctx,
++                    ),
++                };
++                if fired {
++                    return;
++                }
++            }
++        }
++    }
++
+     match pet_type {
+         PetType::Spider => {
+             if let Some(target) = target_entity {
+diff --git a/src/states/play_match/class_ai/mage.rs b/src/states/play_match/class_ai/mage.rs
+index 99e5e84f..66322757 100644
+--- a/src/states/play_match/class_ai/mage.rs
++++ b/src/states/play_match/class_ai/mage.rs
+@@ -65,34 +65,37 @@ pub fn decide_mage_action(
+     // its attacker heads the chain — Frost Nova when one is in reach of the
+     // Nova, else Polymorph.
+     if let Some(call) = super::peel::peel_call(ctx, Role::RangedDps) {
+-        let peeled = try_frost_nova(
+-            commands,
+-            combat_log,
+-            game_rng,
+-            abilities,
+-            entity,
+-            combatant,
+-            my_pos,
+-            auras,
+-            ctx,
+-            frost_nova_damage,
+-            same_frame_cc_queue,
+-            NovaTrigger::Peel(&call.attackers),
+-            &mut builder,
+-        ) || call.attackers.iter().any(|&attacker| {
+-            try_polymorph_on(
++        let peeled = (call.allows(AbilityType::FrostNova)
++            && try_frost_nova(
+                 commands,
+                 combat_log,
++                game_rng,
+                 abilities,
+                 entity,
+                 combatant,
+                 my_pos,
+                 auras,
+                 ctx,
+-                attacker,
++                frost_nova_damage,
++                same_frame_cc_queue,
++                NovaTrigger::Peel(&call.attackers),
+                 &mut builder,
+-            )
+-        });
++            ))
++            || (call.allows(AbilityType::Polymorph)
++                && call.attackers.iter().any(|&attacker| {
++                    try_polymorph_on(
++                        commands,
++                        combat_log,
++                        abilities,
++                        entity,
++                        combatant,
++                        my_pos,
++                        auras,
++                        ctx,
++                        attacker,
++                        &mut builder,
++                    )
++                }));
+         if peeled {
+             builder.play_step(PlayStep::Peel);
+             builder.finish();
+diff --git a/src/states/play_match/class_ai/mod.rs b/src/states/play_match/class_ai/mod.rs
+index 112d13a6..cdc1902c 100644
+--- a/src/states/play_match/class_ai/mod.rs
++++ b/src/states/play_match/class_ai/mod.rs
+@@ -338,9 +338,18 @@ impl<'a> CombatContext<'a> {
+ 
+     /// The play this unit runs as `role` ([`TeamSituation::play_for`]): its
+     /// team's situation, seen from where it stands — a unit never peels for
+-    /// itself. Panics where [`Self::situation`] does.
++    /// itself. A unit whose context leaves it no peel tool
++    /// ([`peel::enabled_tools`]: a Warrior, or a gated context,
++    /// [`peel::PEEL_GATES`]) does not run [`Play::Peel`]; it runs its
++    /// fallback play. Panics where [`Self::situation`] does.
+     pub fn play(&self, role: Role) -> Play {
+-        self.situation().play_for(role, self.self_entity)
++        let situation = self.situation();
++        match situation.play_for(role, self.self_entity) {
++            Play::Peel { ally } if peel::enabled_tools(self, ally).is_empty() => {
++                situation.fallback_play(role)
++            }
++            play => play,
++        }
+     }
+ 
+     /// True when a living enemy is in the arena that this unit cannot see —
+@@ -830,7 +839,7 @@ impl<'a> CombatContext<'a> {
+             Some(situation) => decision_trace
+                 .start_ability_decision(actor_view, target_view)
+                 .with_situation(situation)
+-                .with_play(situation.play_for(Role::of(actor_view_class), self.self_entity)),
++                .with_play(self.play(Role::of(actor_view_class))),
+             None => decision_trace.start_ability_decision(actor_view, target_view),
+         })
+     }
+diff --git a/src/states/play_match/class_ai/paladin.rs b/src/states/play_match/class_ai/paladin.rs
+index cbf6a93c..cea91209 100644
+--- a/src/states/play_match/class_ai/paladin.rs
++++ b/src/states/play_match/class_ai/paladin.rs
+@@ -173,21 +173,22 @@ pub fn decide_paladin_action(
+     // on its attacker heads the chain — ahead of the enemy-healer dip the stun
+     // is otherwise reserved for.
+     if let Some(call) = super::peel::peel_call(ctx, Role::Healer) {
+-        let peeled = call.attackers.iter().any(|&attacker| {
+-            try_peel_hammer_of_justice(
+-                commands,
+-                combat_log,
+-                abilities,
+-                entity,
+-                combatant,
+-                my_pos,
+-                auras,
+-                ctx,
+-                attacker,
+-                same_frame_cc_queue,
+-                &mut builder,
+-            )
+-        });
++        let peeled = call.allows(AbilityType::HammerOfJustice)
++            && call.attackers.iter().any(|&attacker| {
++                try_peel_hammer_of_justice(
++                    commands,
++                    combat_log,
++                    abilities,
++                    entity,
++                    combatant,
++                    my_pos,
++                    auras,
++                    ctx,
++                    attacker,
++                    same_frame_cc_queue,
++                    &mut builder,
++                )
++            });
+         if peeled {
+             builder.play_step(PlayStep::Peel);
+             builder.finish();
+diff --git a/src/states/play_match/class_ai/peel.rs b/src/states/play_match/class_ai/peel.rs
+index 5e14248e..097c7c0b 100644
+--- a/src/states/play_match/class_ai/peel.rs
++++ b/src/states/play_match/class_ai/peel.rs
+@@ -37,12 +37,25 @@ use crate::states::play_match::abilities::AbilityType;
+ use crate::states::play_match::components::AuraType;
+ use crate::states::play_match::situation::{Play, Role};
+ 
+-/// The peel a unit owes this tick: the teammate in danger, and the attackers
+-/// it can peel, nearest that teammate first.
++/// The peel a unit owes this tick: the teammate in danger, the attackers it
++/// can peel, nearest that teammate first, and the tools it may peel with.
+ #[derive(Clone, Debug, PartialEq)]
+ pub struct PeelCall {
+     pub ally: Entity,
+     pub attackers: SmallVec<[Entity; 4]>,
++    /// The unit's [`peel_tools`] its context does not gate ([`enabled_tools`]),
++    /// in its peel step's order. Never empty: a unit with none does not run
++    /// the play at all.
++    pub tools: SmallVec<[AbilityType; 2]>,
++}
++
++impl PeelCall {
++    /// Whether the peel step may cast `tool`. Every class's step asks this
++    /// before each tool, so a gated tool is never cast as a peel (the class's
++    /// own chain below may still cast it, for its own reasons).
++    pub fn allows(&self, tool: AbilityType) -> bool {
++        self.tools.contains(&tool)
++    }
+ }
+ 
+ /// The peel the deciding unit owes as `role`: `Some` when its play is
+@@ -52,6 +65,8 @@ pub fn peel_call(ctx: &CombatContext, role: Role) -> Option<PeelCall> {
+     let Play::Peel { ally } = ctx.play(role) else {
+         return None;
+     };
++    // `ctx.play` names Peel only for a unit with a tool its context enables.
++    let tools = enabled_tools(ctx, ally);
+     let attackers: SmallVec<[Entity; 4]> = ctx
+         .situation()
+         .danger_attackers
+@@ -61,7 +76,11 @@ pub fn peel_call(ctx: &CombatContext, role: Role) -> Option<PeelCall> {
+         // `Breaks`: every hold counts, whatever the team is doing to it.
+         .filter(|e| ctx.held_in_hard_cc(*e, Incoming::Breaks).is_none())
+         .collect();
+-    (!attackers.is_empty()).then_some(PeelCall { ally, attackers })
++    (!attackers.is_empty()).then_some(PeelCall {
++        ally,
++        attackers,
++        tools,
++    })
+ }
+ 
+ /// Whether a MOVEMENT peel — a root, a snare — answers `attacker`: it is a
+@@ -101,3 +120,123 @@ pub fn peel_tools(class: CharacterClass) -> &'static [AbilityType] {
+         CharacterClass::Warrior => &[],
+     }
+ }
++
++// ---------------------------------------------------------------------------
++// Context gates
++// ---------------------------------------------------------------------------
++
++/// A context the Peel play is switched off in, because it measured negative
++/// there: a peeling class, narrowed to one of its tools, to one class of
++/// teammate it peels FOR (the teammate in danger), or both. `None` is "any".
++/// Not every behaviour suits every composition, so the play is kept where it
++/// helps and switched off, by name, where it hurts.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct PeelContext {
++    /// The class that would peel.
++    pub peeler: CharacterClass,
++    /// The tool it would peel with; `None` for every tool.
++    pub tool: Option<AbilityType>,
++    /// The class of the teammate in danger; `None` for every teammate.
++    pub ally: Option<CharacterClass>,
++}
++
++impl PeelContext {
++    /// Whether this context takes `tool` from a `peeler` peeling for an `ally`.
++    pub fn covers(&self, peeler: CharacterClass, tool: AbilityType, ally: CharacterClass) -> bool {
++        self.peeler == peeler
++            && self.tool.is_none_or(|t| t == tool)
++            && self.ally.is_none_or(|a| a == ally)
++    }
++}
++
++/// One named exception to the Peel play: the context, and the measurement
++/// that put it there.
++#[derive(Clone, Copy, Debug)]
++pub struct PeelGate {
++    pub context: PeelContext,
++    /// One line: what the measurement read, and where it is recorded.
++    pub measured: &'static str,
++}
++
++/// Every context the Peel play is switched off in. Each entry is a deliberate,
++/// measured exception, re-checked at every milestone sweep
++/// (`docs/design/balance/2026-10-12-as274-peel-play.md`, *Graduate or
++/// delete*): it stays only while it still measures negative, and a context
++/// that turns negative joins it. `tests/peel_gates.rs` names them by set
++/// equality, so adding or removing one is a visible edit there too.
++pub const PEEL_GATES: &[PeelGate] = &[];
++
++/// Whether [`PEEL_GATES`] takes `tool` from a `peeler` peeling for `ally`.
++pub fn gated(peeler: CharacterClass, tool: AbilityType, ally: CharacterClass) -> bool {
++    // ARM-ONLY (AS-290 measurement): AS290_PEEL_GATES overrides the table.
++    if let Some(over) = arm_override() {
++        return over.iter().any(|g| g.covers(peeler, tool, ally));
++    }
++    PEEL_GATES
++        .iter()
++        .any(|g| g.context.covers(peeler, tool, ally))
++}
++
++// ARM-ONLY (AS-290 measurement): "Mage:Polymorph@Hunter;Shaman" -> contexts.
++fn arm_override() -> Option<&'static Vec<PeelContext>> {
++    static OVER: std::sync::OnceLock<Option<Vec<PeelContext>>> = std::sync::OnceLock::new();
++    OVER.get_or_init(|| {
++        let raw = std::env::var("AS290_PEEL_GATES").ok()?;
++        let class = |s: &str| {
++            CharacterClass::all()
++                .iter()
++                .copied()
++                .find(|c| format!("{c:?}") == s)
++                .unwrap_or_else(|| panic!("AS290_PEEL_GATES: unknown class {s}"))
++        };
++        Some(
++            raw.split(';')
++                .filter(|s| !s.is_empty())
++                .map(|item| {
++                    let (rest, ally) = match item.split_once('@') {
++                        Some((r, a)) => (r, Some(class(a))),
++                        None => (item, None),
++                    };
++                    let (peeler, tool) = match rest.split_once(':') {
++                        Some((c, t)) => {
++                            let c = class(c);
++                            let tool = peel_tools(c)
++                                .iter()
++                                .copied()
++                                .find(|a| format!("{a:?}") == t)
++                                .unwrap_or_else(|| panic!("AS290_PEEL_GATES: unknown tool {t}"));
++                            (c, Some(tool))
++                        }
++                        None => (class(rest), None),
++                    };
++                    PeelContext { peeler, tool, ally }
++                })
++                .collect(),
++        )
++    })
++    .as_ref()
++}
++
++/// The tools a `peeler` peels with for an `ally` once its gates apply:
++/// [`peel_tools`] less every tool a [`PEEL_GATES`] entry takes, in the same
++/// order.
++pub fn enabled_peel_tools(
++    peeler: CharacterClass,
++    ally: CharacterClass,
++) -> SmallVec<[AbilityType; 2]> {
++    peel_tools(peeler)
++        .iter()
++        .copied()
++        .filter(|&tool| !gated(peeler, tool, ally))
++        .collect()
++}
++
++/// [`enabled_peel_tools`] for the deciding unit peeling for `ally`; none when
++/// either is not in its view.
++pub fn enabled_tools(ctx: &CombatContext, ally: Entity) -> SmallVec<[AbilityType; 2]> {
++    let class = |e: Entity| ctx.combatants.get(&e).map(|info| info.class);
++    match (class(ctx.self_entity), class(ally)) {
++        (Some(peeler), Some(ally)) => enabled_peel_tools(peeler, ally),
++        _ => SmallVec::new(),
++    }
++}
+diff --git a/src/states/play_match/class_ai/priest.rs b/src/states/play_match/class_ai/priest.rs
+index fce32c65..74175057 100644
+--- a/src/states/play_match/class_ai/priest.rs
++++ b/src/states/play_match/class_ai/priest.rs
+@@ -129,19 +129,21 @@ pub fn decide_priest_action(
+     // The Peel play (TeamPlan): a teammate is in danger, so Psychic Scream
+     // heads the chain when one of its attackers stands inside the scream.
+     if let Some(call) = super::peel::peel_call(ctx, Role::Healer) {
+-        if try_peel_psychic_scream(
+-            commands,
+-            combat_log,
+-            abilities,
+-            entity,
+-            combatant,
+-            my_pos,
+-            auras,
+-            ctx,
+-            &call.attackers,
+-            same_frame_cc_queue,
+-            &mut builder,
+-        ) {
++        if call.allows(AbilityType::PsychicScream)
++            && try_peel_psychic_scream(
++                commands,
++                combat_log,
++                abilities,
++                entity,
++                combatant,
++                my_pos,
++                auras,
++                ctx,
++                &call.attackers,
++                same_frame_cc_queue,
++                &mut builder,
++            )
++        {
+             builder.play_step(PlayStep::Peel);
+             builder.finish();
+             return true;
+diff --git a/src/states/play_match/class_ai/rogue.rs b/src/states/play_match/class_ai/rogue.rs
+index bf161034..87b1407f 100644
+--- a/src/states/play_match/class_ai/rogue.rs
++++ b/src/states/play_match/class_ai/rogue.rs
+@@ -120,38 +120,39 @@ pub fn decide_rogue_action(
+     // its attacker heads the chain, ahead of the chain planner's own use of
+     // the stun.
+     if let Some(call) = super::peel::peel_call(ctx, Role::MeleeDps) {
+-        let peeled = call.attackers.iter().any(|&attacker| {
+-            let Some(pos) = ctx.combatants.get(&attacker).map(|i| i.position) else {
+-                return false;
+-            };
+-            if ctx.is_dr_immune(attacker, DRCategory::KidneyShotStun) {
+-                builder.reject(
+-                    AbilityType::KidneyShot,
+-                    RejectionReason::DRImmune {
+-                        category: DRCategory::KidneyShotStun,
+-                    },
+-                );
+-                return false;
+-            }
+-            if ctx.entity_is_immune(attacker) {
+-                builder.reject(AbilityType::KidneyShot, RejectionReason::TargetImmune);
+-                return false;
+-            }
+-            try_kidney_shot(
+-                commands,
+-                combat_log,
+-                abilities,
+-                entity,
+-                combatant,
+-                my_pos,
+-                auras,
+-                attacker,
+-                pos,
+-                ctx,
+-                same_frame_cc_queue,
+-                &mut builder,
+-            )
+-        });
++        let peeled = call.allows(AbilityType::KidneyShot)
++            && call.attackers.iter().any(|&attacker| {
++                let Some(pos) = ctx.combatants.get(&attacker).map(|i| i.position) else {
++                    return false;
++                };
++                if ctx.is_dr_immune(attacker, DRCategory::KidneyShotStun) {
++                    builder.reject(
++                        AbilityType::KidneyShot,
++                        RejectionReason::DRImmune {
++                            category: DRCategory::KidneyShotStun,
++                        },
++                    );
++                    return false;
++                }
++                if ctx.entity_is_immune(attacker) {
++                    builder.reject(AbilityType::KidneyShot, RejectionReason::TargetImmune);
++                    return false;
++                }
++                try_kidney_shot(
++                    commands,
++                    combat_log,
++                    abilities,
++                    entity,
++                    combatant,
++                    my_pos,
++                    auras,
++                    attacker,
++                    pos,
++                    ctx,
++                    same_frame_cc_queue,
++                    &mut builder,
++                )
++            });
+         if peeled {
+             builder.play_step(PlayStep::Peel);
+             builder.finish();
+diff --git a/src/states/play_match/class_ai/shaman.rs b/src/states/play_match/class_ai/shaman.rs
+index ca0d5c1f..f7779272 100644
+--- a/src/states/play_match/class_ai/shaman.rs
++++ b/src/states/play_match/class_ai/shaman.rs
+@@ -84,22 +84,23 @@ pub fn decide_shaman_action(
+     // its melee or pet attacker (a movement peel) heads the chain — ahead of
+     // the emergency heal, which the next global cooldown still reaches.
+     if let Some(call) = super::peel::peel_call(ctx, Role::Healer) {
+-        let peeled = call.attackers.iter().any(|&attacker| {
+-            super::peel::movement_peel_target(ctx, attacker)
+-                && !super::peel::slowed(ctx, attacker)
+-                && frost_shock_on(
+-                    commands,
+-                    combat_log,
+-                    abilities,
+-                    entity,
+-                    combatant,
+-                    my_pos,
+-                    auras,
+-                    ctx,
+-                    attacker,
+-                    &mut builder,
+-                )
+-        });
++        let peeled = call.allows(AbilityType::FrostShock)
++            && call.attackers.iter().any(|&attacker| {
++                super::peel::movement_peel_target(ctx, attacker)
++                    && !super::peel::slowed(ctx, attacker)
++                    && frost_shock_on(
++                        commands,
++                        combat_log,
++                        abilities,
++                        entity,
++                        combatant,
++                        my_pos,
++                        auras,
++                        ctx,
++                        attacker,
++                        &mut builder,
++                    )
++            });
+         if peeled {
+             builder.play_step(PlayStep::Peel);
+             builder.finish();
+diff --git a/src/states/play_match/class_ai/warlock.rs b/src/states/play_match/class_ai/warlock.rs
+index 40eaafd9..6910a294 100644
+--- a/src/states/play_match/class_ai/warlock.rs
++++ b/src/states/play_match/class_ai/warlock.rs
+@@ -177,7 +177,9 @@ pub fn decide_warlock_action(
+                 return false;
+             };
+             let pos = info.position;
+-            let coil = if ctx.entity_is_immune(attacker) {
++            let coil = if !call.allows(AbilityType::DeathCoil) {
++                false
++            } else if ctx.entity_is_immune(attacker) {
+                 builder.reject(AbilityType::DeathCoil, RejectionReason::TargetImmune);
+                 false
+             } else if ctx.is_dr_immune(attacker, DRCategory::Horror) {
+@@ -203,19 +205,20 @@ pub fn decide_warlock_action(
+                     &mut builder,
+                 )
+             };
+-            coil || try_peel_fear(
+-                commands,
+-                combat_log,
+-                abilities,
+-                entity,
+-                combatant,
+-                my_pos,
+-                auras,
+-                attacker,
+-                pos,
+-                ctx,
+-                &mut builder,
+-            )
++            coil || call.allows(AbilityType::Fear)
++                && try_peel_fear(
++                    commands,
++                    combat_log,
++                    abilities,
++                    entity,
++                    combatant,
++                    my_pos,
++                    auras,
++                    attacker,
++                    pos,
++                    ctx,
++                    &mut builder,
++                )
+         });
+         if peeled {
+             builder.play_step(PlayStep::Peel);
+diff --git a/src/states/play_match/combat_ai.rs b/src/states/play_match/combat_ai.rs
+index 73e15735..2521e8d5 100644
+--- a/src/states/play_match/combat_ai.rs
++++ b/src/states/play_match/combat_ai.rs
+@@ -1489,6 +1489,50 @@ pub fn decide_abilities(
+         &mut decision_trace,
+     );
+ 
++    // ARM-ONLY (AS-290): cancel a cast to peel.
++    if std::env::var_os("AS290_CANCEL").is_some() {
++        for (e, c, tf, _, cast) in casting_auras.iter() {
++            if cast.interrupted || c.global_cooldown > 0.0 {
++                continue;
++            }
++            if !abilities
++                .get(&cast.ability)
++                .is_some_and(|d| d.has_cast_bar())
++            {
++                continue;
++            }
++            let sit = situations.for_team(c.team);
++            let crate::states::play_match::situation::Play::Peel { ally } =
++                sit.play_for(crate::states::play_match::situation::Role::of(c.class), e)
++            else {
++                continue;
++            };
++            let my = tf.translation;
++            let Some(ally_class) = snapshot.combatants.get(&ally).map(|i| i.class) else {
++                continue;
++            };
++            let ready = super::class_ai::peel::enabled_peel_tools(c.class, ally_class)
++                .into_iter()
++                .any(|tool| {
++                    let Some(def) = abilities.get(&tool) else {
++                        return false;
++                    };
++                    !def.has_cast_bar()
++                        && c.ability_cooldowns.get(&tool).copied().unwrap_or(0.0) <= 0.0
++                        && c.current_mana >= def.mana_cost
++                        && sit.danger_attackers.iter().any(|a| {
++                            snapshot
++                                .combatants
++                                .get(a)
++                                .is_some_and(|i| i.is_alive && i.position.distance(my) <= def.range)
++                        })
++                });
++            if ready {
++                commands.entity(e).remove::<CastingState>();
++            }
++        }
++    }
++
+     // Charging/Disengaging combatants are CC-immune in the real application path
+     // (apply_pending_auras rejects the aura with "Immune (charging)"). Mirror that
+     // here so the snapshot reflection doesn't show a phantom CC on an unstoppable
+diff --git a/src/states/play_match/situation.rs b/src/states/play_match/situation.rs
+index ae13d806..f1471bc8 100644
+--- a/src/states/play_match/situation.rs
++++ b/src/states/play_match/situation.rs
+@@ -584,6 +584,20 @@ pub fn classify_roster(
+         .and_then(|w| roster.get(&w.subject))
+         .map(|subject| pressuring(roster, auras, subject, cfg))
+         .unwrap_or_default();
++    // ARM-ONLY (AS-290): keep the attackers through the release.
++    let danger_attackers = if danger_attackers.is_empty()
++        && danger.cleared_at.is_some()
++        && std::env::var_os("AS290_KEEP").is_some()
++        && prev.ally_in_danger.map(|w| w.subject) == ally_in_danger.map(|w| w.subject)
++    {
++        prev.danger_attackers
++            .iter()
++            .copied()
++            .filter(|e| roster.get(e).is_some_and(|i| i.is_alive))
++            .collect()
++    } else {
++        danger_attackers
++    };
+     TeamSituation {
+         phase: phase(clock),
+         since_gates: clock.since_gates,

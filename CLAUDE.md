@@ -1356,8 +1356,26 @@ step at the head of its chain — crowd control on one of the teammate's
 `danger_attackers` (`class_ai::peel`; the tools per class are
 `peel::peel_tools`, and the Warrior has none). Every peel goes through the
 cast gate, skips an attacker the team already holds, and a movement peel
-(root, snare) answers only a melee or pet. It graduates or is deleted at the
-0.8 milestone sweep (`docs/design/balance/2026-10-12-as274-peel-play.md`).
+(root, snare) answers only a melee or pet. The Hunter's Spider and Boar peel
+too, through its pet dispatch (`peel::pet_peel_tool`). It graduates or is
+deleted at the 0.8 milestone sweep (`docs/design/balance/2026-10-12-as274-peel-play.md`),
+judged in the contexts where it is enabled.
+
+**Context gates (user ruling, 2026-10-12).** A play that measures negative in
+a context is not used there: not every behaviour suits every composition. A
+gate is a NAMED entry in the play's own definition — for Peel,
+`peel::PEEL_GATES`, a (peeler class, class of the teammate in danger) pair with
+a one-line justification citing its measurement — never a scattered `if`;
+Burst's `BURST_EXCEPTIONS` is the same rule by class. A gated unit runs its
+fallback play, and the Burst exceptions apply to that fallback
+(`CombatContext::play`). `tests/peel_gates.rs` lists the gates by set
+equality and plays every peeler for every teammate class, so adding or
+removing one fails a default test until the list is edited too. Every gate is
+re-checked at each milestone sweep with the gates lifted for the side under
+test (`team{1,2}_lifted_gates`, a measurement-only config field beside
+`team{1,2}_withheld_plays`): it stays only while it still measures negative,
+and a context that turns negative joins. The bar and the method are in
+`docs/design/balance/2026-10-12-as290-peel-context-gates.md`.
 
 **The migrate-not-re-pin rule (user decision, 2026-10-12).** When a
 seed-pinned probe goes stale — a change moved the RNG stream and the seed no

@@ -253,6 +253,10 @@ pub struct TeamSituation {
     /// Whether this team runs the gated [`Play::Peel`]
     /// ([`SituationConfig::peel`]).
     pub peel_play: bool,
+    /// Whether the Peel play's context gates (`class_ai::peel::PEEL_GATES`)
+    /// are lifted for this team, so it peels in the contexts they switch off:
+    /// a measurement control ([`WithheldPlays::team1_lifted`]), off by default.
+    pub peel_gates_lifted: bool,
     /// Every living non-pet teammate (the deciding unit included), in entity
     /// order.
     pub allies: SmallVec<[AllyStanding; 3]>,
@@ -502,6 +506,10 @@ pub struct SituationConfig {
     /// Whether the team runs the gated [`Play::Burst`] — off until
     /// [`Self::under`] puts it under `TeamPlan`, as [`Self::peel`] is.
     pub burst: bool,
+    /// Whether the Peel play's context gates are lifted for the team
+    /// ([`TeamSituation::peel_gates_lifted`]); set by [`Self::for_team`] from
+    /// [`Self::withheld`].
+    pub peel_gates_lifted: bool,
     /// The gated plays each team is denied ([`WithheldPlays`]), applied by
     /// [`Self::for_team`].
     pub withheld: WithheldPlays,
@@ -530,6 +538,7 @@ impl SituationConfig {
             heal_range: config.shared.heal_range,
             peel: false,
             burst: false,
+            peel_gates_lifted: false,
             withheld: WithheldPlays::default(),
         }
     }
@@ -557,13 +566,15 @@ impl SituationConfig {
     }
 
     /// The configuration team `team`, under `profile`, is classified with:
-    /// [`Self::under`], less the plays [`Self::withheld`] denies the team.
+    /// [`Self::under`], less the plays [`Self::withheld`] denies the team, and
+    /// with the context gates it lifts for the team lifted.
     pub fn for_team(self, team: u8, profile: AiProfile) -> Self {
         let cfg = self.under(profile);
         let denied = self.withheld.for_team(team);
         Self {
             peel: cfg.peel && !denied.denies(&PEEL),
             burst: cfg.burst && !denied.denies(&Play::Burst),
+            peel_gates_lifted: self.withheld.lifted_for_team(team).denies(&PEEL),
             ..cfg
         }
     }
@@ -636,6 +647,12 @@ pub const PEEL: Play = Play::Peel {
 /// nothing. It lives only as long as the plays it names stay gated: when a
 /// play graduates or is deleted (§4.5) its flag goes, and with the last gated
 /// play this type and the config fields are deleted too.
+///
+/// It carries the Peel play's second measurement control too: whether each
+/// team has its CONTEXT GATES lifted (`team1_lifted_gates` /
+/// `team2_lifted_gates`), so Peel runs even in the contexts it is switched
+/// off in (`class_ai::peel::PEEL_GATES`). That is how a milestone sweep
+/// re-checks a gate: the same side with its gates and without, on one seed.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WithheldPlays {
     pub team1: PlaySet,
@@ -644,6 +661,10 @@ pub struct WithheldPlays {
     /// sweep re-checks an exception (`Some(ClassSet::default())` lifts them
     /// all). `None`, the default, keeps the shipped exceptions.
     pub burst_exceptions: Option<ClassSet>,
+    /// The plays whose context gates team 1 has lifted.
+    pub team1_lifted: PlaySet,
+    /// The plays whose context gates team 2 has lifted.
+    pub team2_lifted: PlaySet,
 }
 
 impl WithheldPlays {
@@ -654,6 +675,17 @@ impl WithheldPlays {
             self.team2
         } else {
             self.team1
+        }
+    }
+
+    /// The plays whose context gates team `team` has lifted (a set "denies" a
+    /// play it names; only Peel has context gates); team 1's for a team id
+    /// outside 1..=2.
+    pub fn lifted_for_team(&self, team: u8) -> PlaySet {
+        if team == 2 {
+            self.team2_lifted
+        } else {
+            self.team1_lifted
         }
     }
 
@@ -734,6 +766,7 @@ pub fn classify_roster(
         ally_in_danger,
         danger_attackers,
         peel_play: cfg.peel,
+        peel_gates_lifted: cfg.peel_gates_lifted,
         allies,
         in_danger: danger.in_danger,
         danger_cleared_at: danger.cleared_at,

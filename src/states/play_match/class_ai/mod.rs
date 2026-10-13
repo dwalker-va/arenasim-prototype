@@ -343,12 +343,20 @@ impl<'a> CombatContext<'a> {
 
     /// The play this unit runs as `role` ([`TeamSituation::play_for`]): its
     /// team's situation, seen from where it stands — a unit never peels for
-    /// itself, and a class the Burst play is not used for
-    /// ([`TeamSituation::bursts`]) never bursts. Panics where
-    /// [`Self::situation`] does.
+    /// itself. A unit that does not peel for that teammate
+    /// ([`peel::peels_for`]: a Warrior, which has no peel tool, or a context
+    /// [`peel::PEEL_GATES`] switches off) runs its fallback play instead of
+    /// [`Play::Peel`]; and a class the Burst play is not used for
+    /// ([`TeamSituation::bursts`]) never bursts, whether Burst is its play or
+    /// the fallback a gated peel left it. Panics where [`Self::situation`]
+    /// does.
     pub fn play(&self, role: Role) -> Play {
         let situation = self.situation();
-        match situation.play_for(role, self.self_entity) {
+        let play = match situation.play_for(role, self.self_entity) {
+            Play::Peel { ally } if !peel::peels_for(self, ally) => situation.fallback_play(role),
+            play => play,
+        };
+        match play {
             Play::Burst if !self.self_bursts(situation) => Play::Default,
             play => play,
         }

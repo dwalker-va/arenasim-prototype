@@ -82,6 +82,15 @@ pub struct HeadlessMatchConfig {
     /// re-checks one. Omitted, the shipped exceptions hold.
     #[serde(default)]
     pub burst_exceptions: Option<Vec<String>>,
+    /// Gated plays (`"Peel"`) whose CONTEXT GATES each team has lifted, for
+    /// measurement: the play runs even in the contexts it is switched off in
+    /// (`class_ai::peel::PEEL_GATES`), so a milestone sweep can re-check a
+    /// gate against the same side with it. Empty — the default — lifts
+    /// nothing.
+    #[serde(default)]
+    pub team1_lifted_gates: Vec<String>,
+    #[serde(default)]
+    pub team2_lifted_gates: Vec<String>,
     /// Optional grouping label echoed verbatim into batch-runner output. Lets a
     /// strategy-var sweep keep variants distinct (e.g. "Hunter+Spider vs Mage"
     /// vs "Hunter+Boar vs Mage") when two configs share the same class lists.
@@ -172,6 +181,8 @@ impl Default for HeadlessMatchConfig {
             team1_withheld_plays: Vec::new(),
             team2_withheld_plays: Vec::new(),
             burst_exceptions: None,
+            team1_lifted_gates: Vec::new(),
+            team2_lifted_gates: Vec::new(),
             team1_rogue_openers: Vec::new(),
             team2_rogue_openers: Vec::new(),
             team1_rogue_poisons: Vec::new(),
@@ -224,7 +235,8 @@ impl HeadlessMatchConfig {
         })
     }
 
-    /// Resolve `team1_withheld_plays` / `team2_withheld_plays` to the
+    /// Resolve `team1_withheld_plays` / `team2_withheld_plays` and
+    /// `team1_lifted_gates` / `team2_lifted_gates` to the
     /// [`WithheldPlays`](crate::states::play_match::situation::WithheldPlays)
     /// resource — the one authority, as [`Self::ai_profiles`] is for the
     /// profiles.
@@ -245,6 +257,8 @@ impl HeadlessMatchConfig {
             team1: WithheldPlays::parse_set(&self.team1_withheld_plays)?,
             team2: WithheldPlays::parse_set(&self.team2_withheld_plays)?,
             burst_exceptions,
+            team1_lifted: WithheldPlays::parse_set(&self.team1_lifted_gates)?,
+            team2_lifted: WithheldPlays::parse_set(&self.team2_lifted_gates)?,
         })
     }
 
@@ -729,6 +743,45 @@ impl HeadlessMatchConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `team{1,2}_lifted_gates` reach `WithheldPlays` on their own team, and
+    /// only there: team 1's lifts team 1's Peel gates, team 2's team 2's, and
+    /// neither withholds a play.
+    #[test]
+    fn lifted_gates_reach_their_own_team() {
+        use crate::states::play_match::situation::{PlaySet, PEEL};
+        let parse = |json: &str| {
+            serde_json::from_str::<HeadlessMatchConfig>(json)
+                .unwrap()
+                .withheld_plays()
+                .unwrap()
+        };
+        let peel = PlaySet::of(&[PEEL]);
+        let one = parse(r#"{"team1":["Mage"],"team2":["Warrior"],"team1_lifted_gates":["Peel"]}"#);
+        assert_eq!(
+            (one.lifted_for_team(1), one.lifted_for_team(2)),
+            (peel, PlaySet::default())
+        );
+        let two = parse(r#"{"team1":["Mage"],"team2":["Warrior"],"team2_lifted_gates":["Peel"]}"#);
+        assert_eq!(
+            (two.lifted_for_team(1), two.lifted_for_team(2)),
+            (PlaySet::default(), peel)
+        );
+        for w in [one, two] {
+            assert_eq!(
+                (w.for_team(1), w.for_team(2)),
+                (PlaySet::default(), PlaySet::default())
+            );
+        }
+        let none = parse(r#"{"team1":["Mage"],"team2":["Warrior"]}"#);
+        assert_eq!(none, Default::default());
+        let bad = serde_json::from_str::<HeadlessMatchConfig>(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"team1_lifted_gates":["Pell"]}"#,
+        )
+        .unwrap()
+        .withheld_plays();
+        assert!(bad.is_err());
+    }
 
     /// Scenario 5: the headless map-name parser accepts "TestVerticality".
     #[test]

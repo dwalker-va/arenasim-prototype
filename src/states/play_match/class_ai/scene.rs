@@ -295,6 +295,17 @@ impl Scene {
         self
     }
 
+    /// Lift `team`'s context gates for the gated plays in `plays`
+    /// (`situation::WithheldPlays::team1_lifted`): the paired control of a
+    /// scene that tests a gate.
+    pub fn lift_gates(mut self, team: u8, plays: PlaySet) -> Self {
+        match team {
+            1 => self.withheld.team1_lifted = plays,
+            _ => self.withheld.team2_lifted = plays,
+        }
+        self
+    }
+
     /// The sim clock at the decision (default 30s, well after the gates). It
     /// is the seconds since the gates too, so it sets the match phase.
     pub fn now(mut self, secs: f32) -> Self {

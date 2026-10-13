@@ -17,6 +17,13 @@
 //!   capped at [`SURVIVAL_HORIZON`] (a unit alive at the cap, or at the
 //!   match's end, counts the whole horizon).
 //!
+//! Only the windows the play is ENABLED for are counted: those where a living
+//! teammate of the unit in danger has a peel tool and is not switched off for
+//! that unit's class (`class_ai::peel::PEEL_GATES`). A window only a gated
+//! peeler could answer is not one the play is asked to answer, so it is left
+//! out of both arms alike — which windows count is a property of the comp,
+//! never of the arm — and only an enabled peeler's cast answers one.
+//!
 //! Both are asserted against the SAME bank with the play withheld, in units
 //! of the bank's own noise (a z), never against an absolute number of the
 //! metric (§7: a rate threshold fitted to a number is a seed floor by another
@@ -41,7 +48,7 @@ use std::collections::BTreeMap;
 use arenasim::headless::{FrameObservation, HeadlessMatchConfig};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::ability_config::load_ability_definitions;
-use arenasim::states::play_match::class_ai::peel::peel_tools;
+use arenasim::states::play_match::class_ai::peel::{gated, peel_tools};
 use arenasim::states::play_match::AbilityType;
 use common::staged::{play_seeded, Played};
 
@@ -145,6 +152,16 @@ fn windows(played: &Played) -> Vec<Window> {
             "frame {f0}: the unit in danger is not dying in the observation — the trace \
              frame and the frame observations are out of step"
         );
+        // The peelers the play is enabled for: living teammates, not the unit
+        // in danger, with a peel tool and no gate for its class.
+        let subject_class = at_onset.combatants[&subject].class;
+        let enabled =
+            |class: CharacterClass| !peel_tools(class).is_empty() && !gated(class, subject_class);
+        if !at_onset.combatants.iter().any(|(e, c)| {
+            c.team == team && c.alive && !c.is_pet && *e != subject && enabled(c.class)
+        }) {
+            continue;
+        }
         let attackers: Vec<u64> = at_onset
             .combatants
             .iter()
@@ -168,7 +185,7 @@ fn windows(played: &Played) -> Vec<Window> {
             let Some(ability) = e["outcome"]["ability"].as_str().and_then(ability_of) else {
                 return false;
             };
-            if !peel_tools(class).contains(&ability) {
+            if !enabled(class) || !peel_tools(class).contains(&ability) {
                 return false;
             }
             match e["outcome"]["target_id"].as_u64() {

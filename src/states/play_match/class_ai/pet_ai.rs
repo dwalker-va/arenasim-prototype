@@ -1700,6 +1700,7 @@ mod tests {
                     &roster[&pet_entity],
                     enemy,
                     &ctx,
+                    false,
                 );
                 (sent, candidate(&trace))
             };
@@ -1733,6 +1734,338 @@ mod tests {
                 matches!(recheck(&pillar), Some(RejectionReason::LosBlocked)),
                 "{name}: a command whose sightline closed is refused"
             );
+        }
+    }
+
+    /// The Peel play's pet step (`hunter::try_pet_peel`). The scene: a Hunter
+    /// on team 1 at (-10, 0) targeting the enemy Priest at (-6, 12) — 12yd
+    /// from the pet, in reach of both strikes — its pet at (-6, 0),
+    /// its Mage teammate at (3, 0) at 30% health, and an enemy `attacker` on
+    /// the Mage 1.5yd off, 10.5yd from the pet (beyond Boar Charge's 8yd dead
+    /// zone). Every case also carries an enemy Rogue BYSTANDER, out of stealth
+    /// and targeting nobody, 9yd from the pet — nearer than the attacker, and
+    /// in reach of both strikes — so a pet peel that is not aimed at the
+    /// attacker lands on it instead.
+    mod pet_peel {
+        use super::*;
+        use crate::states::play_match::ai_profile::AiProfile;
+        use crate::states::play_match::situation::{MatchClock, PlaySet, SituationConfig, PEEL};
+
+        const HUNTER: u32 = 1;
+        const PET: u32 = 2;
+        const ALLY: u32 = 3;
+        const ATTACKER: u32 = 4;
+        const HEALER: u32 = 5;
+        const BYSTANDER: u32 = 6;
+
+        struct PetPeel {
+            /// Whether the pet step dispatched.
+            sent: bool,
+            /// Every dispatch event the step traced, as JSON.
+            events: Vec<serde_json::Value>,
+        }
+
+        impl PetPeel {
+            /// The entity id a dispatch was aimed at.
+            fn aimed_at(&self) -> Option<u64> {
+                self.events
+                    .iter()
+                    .find(|e| {
+                        e["candidates"]
+                            .as_array()
+                            .is_some_and(|c| c.iter().any(|c| c["status"] == "chosen"))
+                    })
+                    .and_then(|e| e["outcome"]["target_id"].as_u64())
+            }
+        }
+
+        fn run(
+            pet_type: PetType,
+            attacker_class: CharacterClass,
+            profile: AiProfile,
+            withheld: bool,
+            attacker_aura: Option<AuraType>,
+        ) -> PetPeel {
+            run_via(
+                pet_type,
+                attacker_class,
+                profile,
+                withheld,
+                attacker_aura,
+                false,
+            )
+        }
+
+        /// [`run`], through the Hunter's whole pet dispatch
+        /// (`hunter::dispatch_pet_ability`, with the Hunter's own target the
+        /// enemy Priest) when `dispatch`, or the pet step alone.
+        fn run_via(
+            pet_type: PetType,
+            attacker_class: CharacterClass,
+            profile: AiProfile,
+            withheld: bool,
+            attacker_aura: Option<AuraType>,
+            dispatch: bool,
+        ) -> PetPeel {
+            let e = Entity::from_raw;
+            let unit = |id: u32, team, class, x: f32, z: f32, hp: f32, pet: Option<PetType>| {
+                (
+                    e(id),
+                    CombatantInfo {
+                        entity: e(id),
+                        team,
+                        slot: 0,
+                        class,
+                        current_health: 100.0 * hp,
+                        max_health: 100.0,
+                        current_mana: 100.0,
+                        max_mana: 100.0,
+                        position: Vec3::new(x, 1.0, z),
+                        velocity: Vec3::ZERO,
+                        is_alive: true,
+                        stealthed: false,
+                        target: None,
+                        is_pet: pet.is_some(),
+                        casting_ability: None,
+                        pet_type: pet,
+                        pet: None,
+                    },
+                )
+            };
+            let mut roster: BTreeMap<Entity, CombatantInfo> = [
+                unit(HUNTER, 1, CharacterClass::Hunter, -10.0, 0.0, 1.0, None),
+                unit(
+                    PET,
+                    1,
+                    CharacterClass::Hunter,
+                    -6.0,
+                    0.0,
+                    1.0,
+                    Some(pet_type),
+                ),
+                unit(ALLY, 1, CharacterClass::Mage, 3.0, 0.0, 0.3, None),
+                unit(ATTACKER, 2, attacker_class, 4.5, 0.0, 1.0, None),
+                unit(HEALER, 2, CharacterClass::Priest, -6.0, 12.0, 1.0, None),
+                unit(BYSTANDER, 2, CharacterClass::Rogue, -6.0, -9.0, 1.0, None),
+            ]
+            .into_iter()
+            .collect();
+            roster.get_mut(&e(HUNTER)).unwrap().target = Some(e(HEALER));
+            roster.get_mut(&e(HUNTER)).unwrap().pet = Some(e(PET));
+            roster.get_mut(&e(ATTACKER)).unwrap().target = Some(e(ALLY));
+            let mut auras = BTreeMap::new();
+            if let Some(effect_type) = attacker_aura {
+                auras.insert(
+                    e(ATTACKER),
+                    vec![Aura {
+                        effect_type,
+                        duration: 4.0,
+                        ..Default::default()
+                    }],
+                );
+            }
+            let (dr, cds) = (BTreeMap::new(), BTreeMap::new());
+            let mut cfg = SituationConfig::default();
+            if withheld {
+                cfg.withheld.team1 = PlaySet::of(&[PEEL]);
+            }
+            let ctx = CombatContext::new(
+                e(HUNTER),
+                1,
+                &roster,
+                &auras,
+                &dr,
+                &cds,
+                &[],
+                Default::default(),
+                profile,
+            )
+            .classified(&cfg.for_team(1, profile), MatchClock::after_gates(30.0));
+            let world = World::new();
+            let mut queue = CommandQueue::default();
+            let mut commands = Commands::new(&mut queue, &world);
+            let mut trace = DecisionTrace::default();
+            let abilities = AbilityDefinitions::default();
+            let sent = if dispatch {
+                super::super::super::hunter::dispatch_pet_ability(
+                    &mut commands,
+                    &abilities,
+                    &mut trace,
+                    e(HUNTER),
+                    Some(e(HEALER)),
+                    None,
+                    &ctx,
+                );
+                !trace.pending_events.is_empty()
+            } else {
+                super::super::super::hunter::try_pet_peel(
+                    &mut commands,
+                    &abilities,
+                    &mut trace,
+                    e(HUNTER),
+                    e(PET),
+                    &roster[&e(PET)],
+                    pet_type,
+                    &ctx,
+                )
+            };
+            PetPeel {
+                sent,
+                events: trace
+                    .pending_events
+                    .iter()
+                    .map(|ev| serde_json::to_value(ev).unwrap())
+                    .collect(),
+            }
+        }
+
+        fn peels(pet_type: PetType, attacker: CharacterClass) -> PetPeel {
+            run(pet_type, attacker, AiProfile::TeamPlan, false, None)
+        }
+
+        /// The pet strikes the attacker on the dying ally — not the Hunter's
+        /// target, not the nearer bystander — and the dispatch is traced as
+        /// the Peel play's step; with the play withheld, and under `Legacy`,
+        /// it does not.
+        #[test]
+        fn the_pet_peels_the_attacker_on_a_dying_ally() {
+            for (pet_type, tool) in [
+                (PetType::Spider, AbilityType::SpiderWeb),
+                (PetType::Boar, AbilityType::BoarCharge),
+            ] {
+                assert_eq!(
+                    crate::states::play_match::class_ai::peel::pet_peel_tool(pet_type),
+                    Some(tool)
+                );
+                let with = peels(pet_type, CharacterClass::Warrior);
+                assert!(with.sent, "{pet_type:?}: {:#?}", with.events);
+                assert_eq!(
+                    with.aimed_at(),
+                    Some(Entity::from_raw(ATTACKER).index() as u64),
+                    "{pet_type:?} aims at the attacker: {:#?}",
+                    with.events
+                );
+                let chosen = with
+                    .events
+                    .iter()
+                    .find(|e| e["outcome"]["ability"] == format!("{tool:?}"));
+                let chosen = chosen.unwrap_or_else(|| {
+                    panic!("{pet_type:?} dispatched {tool:?}: {:#?}", with.events)
+                });
+                assert_eq!(chosen["situation"]["play_step"], "peel", "{pet_type:?}");
+                assert!(
+                    chosen["situation"]["play"].is_object(),
+                    "{pet_type:?}: {chosen:#}"
+                );
+
+                let withheld = run(
+                    pet_type,
+                    CharacterClass::Warrior,
+                    AiProfile::TeamPlan,
+                    true,
+                    None,
+                );
+                assert!(
+                    !withheld.sent && withheld.events.is_empty(),
+                    "{pet_type:?} withheld"
+                );
+                let legacy = run(
+                    pet_type,
+                    CharacterClass::Warrior,
+                    AiProfile::Legacy,
+                    false,
+                    None,
+                );
+                assert!(
+                    !legacy.sent && legacy.events.is_empty(),
+                    "{pet_type:?} under Legacy"
+                );
+            }
+        }
+
+        /// The pet step is wired into the Hunter's pet dispatch, AHEAD of its
+        /// ordinary order: through `dispatch_pet_ability`, whose ordinary
+        /// order strikes the Hunter's own target (the enemy Priest, in reach of
+        /// both strikes), the pet strikes the attacker on the dying ally under
+        /// the play, and the Priest with the play withheld — the pair that
+        /// shows the dispatch both reaches the step and is otherwise live.
+        #[test]
+        fn the_hunters_pet_dispatch_runs_the_pet_peel_first() {
+            let priest = Entity::from_raw(HEALER).index() as u64;
+            let attacker = Entity::from_raw(ATTACKER).index() as u64;
+            for pet_type in [PetType::Spider, PetType::Boar] {
+                let with = run_via(
+                    pet_type,
+                    CharacterClass::Warrior,
+                    AiProfile::TeamPlan,
+                    false,
+                    None,
+                    true,
+                );
+                assert_eq!(
+                    with.aimed_at(),
+                    Some(attacker),
+                    "{pet_type:?} under the play: {:#?}",
+                    with.events
+                );
+                let without = run_via(
+                    pet_type,
+                    CharacterClass::Warrior,
+                    AiProfile::TeamPlan,
+                    true,
+                    None,
+                    true,
+                );
+                assert_eq!(
+                    without.aimed_at(),
+                    Some(priest),
+                    "{pet_type:?} withheld: {:#?}",
+                    without.events
+                );
+            }
+        }
+
+        /// The attacker gates. A root (Spider Web) is a MOVEMENT peel: it
+        /// answers a melee attacker and not a caster, which need not move to
+        /// keep hitting — paired with the melee case above. A stun (Boar
+        /// Charge) answers a caster too. Neither strikes an attacker the team
+        /// already holds, or one immune to damage, and neither then turns on
+        /// the bystander.
+        #[test]
+        fn the_pet_peel_answers_only_an_attacker_it_should() {
+            let caster = peels(PetType::Spider, CharacterClass::Mage);
+            assert!(!caster.sent, "a web on a caster: {:#?}", caster.events);
+            assert_eq!(caster.aimed_at(), None);
+            let caster = peels(PetType::Boar, CharacterClass::Mage);
+            assert!(caster.sent, "a charge on a caster: {:#?}", caster.events);
+            assert_eq!(
+                caster.aimed_at(),
+                Some(Entity::from_raw(ATTACKER).index() as u64)
+            );
+
+            for pet_type in [PetType::Spider, PetType::Boar] {
+                for aura in [AuraType::Stun, AuraType::DamageImmunity] {
+                    let r = run(
+                        pet_type,
+                        CharacterClass::Warrior,
+                        AiProfile::TeamPlan,
+                        false,
+                        Some(aura),
+                    );
+                    assert!(
+                        !r.sent,
+                        "{pet_type:?} on an attacker under {aura:?}: {:#?}",
+                        r.events
+                    );
+                    assert_eq!(r.aimed_at(), None, "{pet_type:?}, {aura:?}");
+                }
+            }
+            for pet_type in [PetType::Bird, PetType::Felhunter] {
+                assert_eq!(
+                    crate::states::play_match::class_ai::peel::pet_peel_tool(pet_type),
+                    None
+                );
+            }
         }
     }
 }

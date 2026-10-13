@@ -1,0 +1,260 @@
+//! The Peel play's context gates (`class_ai::peel::PEEL_GATES`): the
+//! peeler-for-teammate contexts the play is switched off in because it
+//! measured negative there (`docs/design/balance/2026-10-12-as290-peel-context-gates.md`).
+//!
+//! Two tests, so that adding or removing a gate is a visible, deliberate edit:
+//!
+//! - [`the_gated_contexts_are_exactly_these`] names every gate by SET
+//!   EQUALITY, and holds each to a measurement line and its findings note;
+//! - [`every_peeler_peels_for_every_teammate_but_the_gated_ones`] plays the
+//!   same scene for every peeling class and every class of teammate in
+//!   danger, and asserts the peel happens exactly where no gate stands — so
+//!   un-gating a gated context, and gating an enabled one, each fail it on
+//!   behaviour, not only on the list. Its control lifts the team's gates
+//!   (`Scene::lift_gates`, the milestone sweep's re-check), and every gated
+//!   context then peels: the gate is what stops it.
+
+use std::collections::BTreeSet;
+
+use arenasim::states::match_config::CharacterClass::{
+    self, Druid, Hunter, Mage, Priest, Rogue, Shaman, Warlock, Warrior,
+};
+use arenasim::states::play_match::ai_profile::AiProfile;
+use arenasim::states::play_match::class_ai::peel::{
+    peel_tools, PeelContext, PEEL_GATES, PEEL_GATES_FINDINGS,
+};
+use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
+use arenasim::states::play_match::decision_trace::{PlayStep, PlayTag};
+use arenasim::states::play_match::situation::{PlaySet, PEEL};
+
+/// Every gate, as (peeler, teammate in danger). Edit this list together with
+/// `PEEL_GATES`, and only on a measurement.
+const GATED: &[(CharacterClass, CharacterClass)] = &[
+    (Mage, Hunter),
+    (Mage, Warlock),
+    (Druid, Hunter),
+    (Druid, Warlock),
+    (Druid, Warrior),
+    (Shaman, Warlock),
+    (Rogue, Hunter),
+    (Rogue, Warrior),
+    (Rogue, Priest),
+];
+
+#[test]
+fn the_gated_contexts_are_exactly_these() {
+    let shipped: BTreeSet<(String, String)> = PEEL_GATES
+        .iter()
+        .map(|g| {
+            (
+                format!("{:?}", g.context.peeler),
+                format!("{:?}", g.context.ally),
+            )
+        })
+        .collect();
+    let named: BTreeSet<(String, String)> = GATED
+        .iter()
+        .map(|(p, a)| (format!("{p:?}"), format!("{a:?}")))
+        .collect();
+    assert_eq!(
+        shipped, named,
+        "PEEL_GATES against the gates this test names"
+    );
+    assert_eq!(
+        PEEL_GATES.len(),
+        GATED.len(),
+        "a context gated twice in PEEL_GATES"
+    );
+    for gate in PEEL_GATES {
+        let PeelContext { peeler, ally } = gate.context;
+        assert!(
+            !peel_tools(peeler).is_empty(),
+            "{peeler:?} has no peel tool to gate"
+        );
+        assert!(
+            gate.measured.contains("pt") && gate.measured.contains("z="),
+            "{peeler:?} for {ally:?}: the gate's line names no measurement: {}",
+            gate.measured
+        );
+    }
+    let note = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEEL_GATES_FINDINGS);
+    let text = std::fs::read_to_string(&note)
+        .unwrap_or_else(|e| panic!("the gates' findings note {}: {e}", note.display()));
+    for (peeler, ally) in GATED {
+        let context = format!("{peeler:?}@{ally:?}");
+        assert!(
+            text.contains(&context),
+            "the findings note does not record {context}"
+        );
+    }
+}
+
+const ME: &str = "me";
+const ALLY: &str = "ally";
+const ATTACKER: &str = "enemy warrior";
+const ENEMY_HEALER: &str = "enemy priest";
+
+/// `tests/peel_scenes.rs`'s scene, with the teammate in danger of class
+/// `ally`: the peeler at `x` (where its tool reaches the attacker), the ally
+/// at (3, 0) at 30% health, an enemy Warrior on it at (4.5, 0), and the enemy
+/// Priest — the peeler's own target — 30yd off.
+fn scene(peeler: CharacterClass, ally: CharacterClass) -> Scene {
+    let x = match peeler {
+        // Beyond the Warlock's own Death Coil self-peel radius, and the
+        // Hunter's dead zone.
+        Warlock | Hunter => -10.0,
+        // In melee with the Warrior.
+        Rogue => 6.0,
+        _ => 0.0,
+    };
+    let mut s = Scene::new()
+        .ai_profile(1, AiProfile::TeamPlan)
+        .unit(ME, 1, peeler)
+        .at(x, 0.0)
+        .targeting(ENEMY_HEALER)
+        .unit(ALLY, 1, ally)
+        .at(3.0, 0.0)
+        .health(0.3)
+        .targeting(ENEMY_HEALER)
+        .unit(ATTACKER, 2, Warrior)
+        .at(4.5, 0.0)
+        .targeting(ALLY)
+        .unit(ENEMY_HEALER, 2, Priest)
+        .at(x, 30.0);
+    s.combatant_mut(ME).stealthed = false;
+    s.combatant_mut(ALLY).stealthed = false;
+    s
+}
+
+fn describe(view: &DecisionView) -> String {
+    format!(
+        "chose {:?}; situation {:?}; candidates {:?}",
+        view.chosen,
+        view.situation,
+        view.candidates
+            .iter()
+            .map(|c| (c.ability, c.status, c.reason.clone()))
+            .collect::<Vec<_>>()
+    )
+}
+
+/// Whether the decision peeled, and that a peel is one of the peeler's tools
+/// aimed at the attacker (or a self-centred area, which names no target).
+fn peeled(peeler: CharacterClass, view: &DecisionView) -> bool {
+    let situation = view.situation.as_ref().expect("a situation");
+    assert!(
+        situation.ally_in_danger.is_some(),
+        "{peeler:?}: no ally in danger: {}",
+        describe(view)
+    );
+    if situation.play_step != Some(PlayStep::Peel) {
+        return false;
+    }
+    let (tool, target) = view.chose().expect("a peel chose something");
+    assert!(
+        peel_tools(peeler).contains(&tool),
+        "{peeler:?} peeled with {tool:?}"
+    );
+    assert!(
+        target.is_none_or(|t| t == ATTACKER),
+        "{peeler:?} peeled {target:?}, not the attacker"
+    );
+    true
+}
+
+/// For every class with a peel tool and every class of teammate in danger:
+/// the peeler peels exactly when the context is not gated, and runs its
+/// fallback play (no `Peel` tag) when it is. With the team's gates lifted,
+/// every context peels — the paired control.
+#[test]
+fn every_peeler_peels_for_every_teammate_but_the_gated_ones() {
+    let mut seen_gated = 0;
+    let mut wrong = Vec::new();
+    for &peeler in CharacterClass::all() {
+        if peel_tools(peeler).is_empty() {
+            continue;
+        }
+        for &ally in CharacterClass::all() {
+            let is_gated = GATED.contains(&(peeler, ally));
+            seen_gated += usize::from(is_gated);
+
+            let view = scene(peeler, ally).decide(ME);
+            let did = peeled(peeler, &view);
+            let tagged = matches!(
+                view.situation.as_ref().and_then(|s| s.play),
+                Some(PlayTag::Peel { .. })
+            );
+            if did == is_gated || tagged == is_gated {
+                wrong.push(format!(
+                    "{peeler:?} for {ally:?} (gated: {is_gated}): peeled {did}, tagged Peel \
+                     {tagged}: {}",
+                    describe(&view)
+                ));
+            }
+
+            let lifted = scene(peeler, ally)
+                .lift_gates(1, PlaySet::of(&[PEEL]))
+                .decide(ME);
+            if !peeled(peeler, &lifted) {
+                wrong.push(format!(
+                    "{peeler:?} for {ally:?}, gates lifted: no peel: {}",
+                    describe(&lifted)
+                ));
+            }
+        }
+    }
+    assert_eq!(
+        seen_gated,
+        GATED.len(),
+        "every gate is reached by the scene"
+    );
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A gated peeler falls back to its fallback play, and the Burst play's
+/// exceptions then apply to THAT: a Mage gated for its dying Hunter, with the
+/// Hunter's attacker low and the enemy Priest stunned (a kill window), runs
+/// the Burst play; with the Mage named a Burst exception it runs the default
+/// chain, not Burst. With its gates lifted it peels instead.
+#[test]
+fn a_gated_peeler_falls_back_to_burst_unless_it_is_excepted() {
+    use arenasim::states::play_match::situation::ClassSet;
+    use arenasim::states::play_match::AuraType;
+    assert!(GATED.contains(&(Mage, Hunter)));
+    let build = || {
+        let mut s = Scene::new()
+            .ai_profile(1, AiProfile::TeamPlan)
+            .unit(ME, 1, Mage)
+            .at(0.0, 0.0)
+            .targeting(ATTACKER)
+            .unit(ALLY, 1, Hunter)
+            .at(-20.0, 0.0)
+            .health(0.3)
+            .targeting(ENEMY_HEALER)
+            .unit(ATTACKER, 2, Warrior)
+            .at(-18.5, 0.0)
+            .health(0.2)
+            .targeting(ALLY)
+            .unit(ENEMY_HEALER, 2, Priest)
+            .at(0.0, 30.0)
+            .aura(ENEMY_HEALER, AuraType::Stun, 4.0);
+        s.combatant_mut(ALLY).stealthed = false;
+        s
+    };
+    let tag = |view: &DecisionView| {
+        let s = view.situation.as_ref().expect("a situation");
+        assert!(s.ally_in_danger.is_some(), "{}", describe(view));
+        assert!(s.kill_window.is_some(), "{}", describe(view));
+        s.play
+    };
+    let gated = build().decide(ME);
+    assert_eq!(tag(&gated), Some(PlayTag::Burst), "{}", describe(&gated));
+    let excepted = build().burst_exceptions(ClassSet::of(&[Mage])).decide(ME);
+    assert_eq!(tag(&excepted), None, "{}", describe(&excepted));
+    let lifted = build().lift_gates(1, PlaySet::of(&[PEEL])).decide(ME);
+    assert!(
+        matches!(tag(&lifted), Some(PlayTag::Peel { .. })),
+        "{}",
+        describe(&lifted)
+    );
+}
