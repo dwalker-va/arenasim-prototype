@@ -1,0 +1,288 @@
+--- a/src/states/play_match/class_ai/hunter.rs	2026-10-12 17:34:42
++++ b/src/states/play_match/class_ai/hunter.rs	2026-10-12 17:34:42
+@@ -42,6 +42,42 @@
+ /// (after ~0.9s projectile travel) lands with no uptime gap and no wasted GCD.
+ const CONCUSSIVE_REFRESH_WINDOW: f32 = 1.0;
+ 
++// AS-281 measurement instrument (stderr only; never read by the sim).
++thread_local! {
++    static AS281_NOW: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
++}
++thread_local! {
++    static AS281_PATH: std::cell::Cell<&'static str> = const { std::cell::Cell::new("-") };
++}
++fn as281_exempt() -> bool {
++    static EXEMPT: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
++    let list = EXEMPT.get_or_init(|| {
++        std::env::var("AS281_EXEMPT")
++            .unwrap_or_default()
++            .split(',')
++            .filter(|s| !s.is_empty())
++            .map(String::from)
++            .collect()
++    });
++    let path = AS281_PATH.with(|c| c.get());
++    list.iter().any(|p| p == path)
++}
++fn as281_lane_on() -> bool {
++    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *ON.get_or_init(|| std::env::var("AS281_LANE").map_or(true, |v| v != "0"))
++}
++fn as281_path(p: &'static str) {
++    AS281_PATH.with(|c| c.set(p));
++}
++fn as281(tag: &str) {
++    eprintln!(
++        "AS281 {:.3} {} {}",
++        AS281_NOW.with(|n| n.get()),
++        tag,
++        AS281_PATH.with(|c| c.get())
++    );
++}
++
+ /// Hunter AI: Decides and executes abilities for a Hunter combatant.
+ pub fn decide_hunter_action(
+     commands: &mut Commands,
+@@ -68,6 +104,7 @@
+ ) -> bool {
+     let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
+     let now = decision_trace.current_sim_time;
++    AS281_NOW.with(|n| n.set(now));
+     let kill_target_hidden = kill_target_index.is_some_and(|i| ctx.kill_target_hidden(i));
+ 
+     let nearest_dist = nearest_distance.unwrap_or(40.0);
+@@ -174,6 +211,10 @@
+             // Same clean-landing rule as every other placement: a lead that
+             // carries the landing onto another enemy waits for the next tick.
+             if victim_springs_it(ctx, combatant.team, target, landing)
++                && {
++                    as281_path("dip");
++                    true
++                }
+                 && try_place_trap_at(
+                     commands,
+                     combat_log,
+@@ -340,6 +381,10 @@
+         // Priority 3: Frost Trap at feet — unless it would replace the
+         // Hunter's own Freezing Trap still waiting to spring.
+         if !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
++            && {
++                as281_path("feet");
++                true
++            }
+             && try_place_trap_at(
+                 commands,
+                 combat_log,
+@@ -434,9 +479,24 @@
+                     .filter(|(e, _)| !ctx.entity_is_immune(*e))
+                     .and_then(|(e, _)| ctx.combatants.get(&e).map(|i| (e, i.position)))
+             });
++        if super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)
++            .or_else(|| {
++                nearest_enemy.and_then(|(e, _)| ctx.combatants.get(&e).map(|i| (e, i.position)))
++            })
++            .is_some_and(|(e, _)| ctx.entity_is_immune(e))
++        {
++            as281("FROST_ANCHOR_IMMUNE");
++        }
++        let as281_redirect = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)
++            .is_some_and(|(e, _)| ctx.entity_is_immune(e))
++            && frost_anchor.is_some();
+         if let Some((frost_anchor_entity, anchor_pos)) = frost_anchor {
+             let midpoint = (my_pos + anchor_pos) / 2.0;
+             if !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
++                && {
++                    as281_path("frost_peel");
++                    true
++                }
+                 && try_place_trap_at(
+                     commands,
+                     combat_log,
+@@ -452,6 +512,9 @@
+                     &mut builder,
+                 )
+             {
++                if as281_redirect {
++                    as281("FROST_REDIRECT_THROWN");
++                }
+                 builder.finish();
+                 return true;
+             }
+@@ -652,7 +715,10 @@
+                     AbilityType::FreezingTrap,
+                     RejectionReason::FriendlyBreakableCC,
+                 );
+-            } else if try_place_trap_at(
++            } else if {
++                as281_path("offtarget");
++                true
++            } && try_place_trap_at(
+                 commands,
+                 combat_log,
+                 abilities,
+@@ -703,7 +769,10 @@
+                 );
+             }
+             Ok(FallbackThrow { lane, victim, .. }) => {
+-                if try_place_trap_at(
++                if {
++                    as281_path("fallback");
++                    true
++                } && try_place_trap_at(
+                     commands,
+                     combat_log,
+                     abilities,
+@@ -860,7 +929,7 @@
+         .get(&candidate)
+         .filter(|info| info.is_alive)?
+         .position;
+-    let lane = (my_pos + candidate_pos) / 2.0;
++    let lane = sighted_lane(ctx.obstacles, my_pos, (my_pos + candidate_pos) / 2.0);
+     if ctx.enemy_hidden() {
+         if kill_target_hidden {
+             return Some(Err(TRAP_HELD_UNSEEN_KILL_TARGET));
+@@ -888,6 +957,46 @@
+         lane,
+         victim: Some(victim),
+     }))
++}
++
++/// How far short of the cover that hides a lane the landing is pulled back to
++/// ([`sighted_lane`]), so the trap lands clear of the pillar's skin.
++const LANE_COVER_MARGIN: f32 = 1.0;
++
++/// Where a LANE throw lands: `lane` itself when the Hunter can see it, else
++/// the farthest point it can see along the line of the throw, short of the
++/// cover that hides the rest by [`LANE_COVER_MARGIN`]. A lane is aimed at no
++/// one — it is a spot on the way between the Hunter and the enemy — so a spot
++/// nearer on the same line is the same decision; every other placement is
++/// aimed at a unit, and a hidden one is held instead
++/// ([`try_place_trap_at`]). Sight along one line from the Hunter is lost at
++/// the first cover it meets and never regained, so a bisection finds the
++/// edge. A no-op with no obstacles.
++fn sighted_lane(
++    obstacles: &[crate::states::play_match::map_geometry::ObstacleVolume],
++    my_pos: Vec3,
++    lane: Vec3,
++) -> Vec3 {
++    use crate::states::play_match::map_geometry::has_line_of_sight;
++    if !as281_lane_on() || has_line_of_sight(obstacles, my_pos, lane) {
++        return lane;
++    }
++    let (mut seen, mut hidden) = (0.0_f32, 1.0_f32);
++    for _ in 0..24 {
++        let t = (seen + hidden) / 2.0;
++        if has_line_of_sight(obstacles, my_pos, my_pos.lerp(lane, t)) {
++            seen = t;
++        } else {
++            hidden = t;
++        }
++    }
++    let length = my_pos.distance(lane);
++    let back = if length > 0.0 {
++        LANE_COVER_MARGIN / length
++    } else {
++        0.0
++    };
++    my_pos.lerp(lane, (seen - back).max(0.0))
+ }
+ 
+ /// Freezing Trap on the enemy healer while a melee is on the Hunter
+@@ -965,7 +1074,10 @@
+             return false;
+         }
+     };
+-    if !try_place_trap_at(
++    if {
++        as281_path("pressure");
++        false
++    } || !try_place_trap_at(
+         commands,
+         combat_log,
+         abilities,
+@@ -1454,6 +1566,11 @@
+                 && slow_remaining(e, ctx).is_none_or(|r| r <= CONCUSSIVE_REFRESH_WINDOW)
+         })
+     };
++    if super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)
++        .is_some_and(|(m, _)| ctx.entity_is_immune(m))
++    {
++        as281("CONC_NEAREST_IMMUNE");
++    }
+     // 1. Nearest melee kite-threat — peel it, moving or not.
+     if let Some((m, _)) =
+         super::dps_postures::nearest_melee_threat_where(ctx, entity, my_pos, |e| {
+@@ -1585,6 +1702,7 @@
+     // Nor at an immune one (Divine Shield, Cyclone): its aura is blocked when
+     // the trap springs on it.
+     if intended.is_some_and(|victim| ctx.entity_is_immune(victim)) {
++        as281(&format!("TRAP_HELD_IMMUNE {:?}", trap_type));
+         builder.reject(ability, RejectionReason::TargetImmune);
+         return false;
+     }
+@@ -1620,8 +1738,14 @@
+     // landing fails on range. Like range, a hidden landing is HELD, not moved:
+     // the landing was chosen for where it lands. Every placement path ends
+     // here, so no picker asks it again. A no-op with no obstacles.
+-    if !crate::states::play_match::map_geometry::has_line_of_sight(ctx.obstacles, my_pos, position)
++    if !as281_exempt()
++        && !crate::states::play_match::map_geometry::has_line_of_sight(
++            ctx.obstacles,
++            my_pos,
++            position,
++        )
+     {
++        as281(&format!("TRAP_HELD_SIGHT {:?}", trap_type));
+         builder.reject(ability, RejectionReason::LosBlocked);
+         return false;
+     }
+@@ -1633,6 +1757,13 @@
+     // the question every trap-targeting diagnosis starts from. `None` for the
+     // Frost Trap dropped at the Hunter's own feet, which aims at nobody, and
+     // for a lane Freezing Trap thrown for an enemy the Hunter cannot see.
++    if intended.is_some_and(|v| ctx.entity_is_immune(v)) {
++        as281("TRAP_AT_IMMUNE");
++    }
++    if !crate::states::play_match::map_geometry::has_line_of_sight(ctx.obstacles, my_pos, position)
++    {
++        as281(&format!("TRAP_UNSEEN {:?}", trap_type));
++    }
+     builder.choose(cleared, intended, true);
+ 
+     spawn_trap(
+@@ -1697,6 +1828,10 @@
+             continue;
+         };
+         if !frost_trap_held_for_freezing(own_traps, combatant, builder)
++            && {
++                as281_path("peel_snare");
++                true
++            }
+             && try_place_trap_at(
+                 commands,
+                 combat_log,
+@@ -1759,6 +1894,9 @@
+     ) {
+         Ok(cleared) => cleared,
+         Err(reason) => {
++            if matches!(reason, RejectionReason::TargetImmune) {
++                as281("CONC_HELD_IMMUNE");
++            }
+             builder.reject(ability, reason);
+             return false;
+         }
+@@ -1771,6 +1909,14 @@
+         return false;
+     }
+ 
++    if ctx.entity_is_immune(target_entity) {
++        as281("WASTED_CONC");
++    }
++    if super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)
++        .is_some_and(|(m, _)| m != target_entity && ctx.entity_is_immune(m))
++    {
++        as281("CONC_REDIRECT");
++    }
+     builder.choose(cleared, Some(target_entity), true);
+ 
+     let projectile_speed = def.projectile_speed.unwrap_or(40.0);
