@@ -1681,6 +1681,9 @@ fn try_peel_snare(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     for &attacker in attackers {
+        // The immune skip is defence in depth: Concussive Shot's gate and the
+        // trap placement each refuse an immune unit too. Here it keeps an
+        // immune attacker out of the trace altogether.
         if !super::peel::movement_peel_target(ctx, attacker)
             || ctx.entity_is_immune(attacker)
             || super::peel::slowed(ctx, attacker)
@@ -1741,7 +1744,8 @@ fn try_concussive_shot(
     };
     let target_pos = target_info.position;
 
-    // An immune target blocks the slow on arrival.
+    // An immune target blocks the slow on arrival. Defence in depth: every
+    // caller's picker already passes over an immune unit.
     let opts = PreCastOpts {
         check_friendly_cc: true,
         check_target_immune: true,

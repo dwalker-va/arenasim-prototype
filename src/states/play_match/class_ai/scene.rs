@@ -333,6 +333,12 @@ impl Scene {
         self
     }
 
+    /// `who`'s DPS posture state — a Hunter's live Freezing Trap dip, say.
+    pub fn kite_posture(mut self, who: Who, posture: KitePosture) -> Self {
+        self.unit_mut(who).kite_posture = Some(posture);
+        self
+    }
+
     // ------------------------------------------------------------------
     // Changing a built scene, for the control half of a pair.
     // ------------------------------------------------------------------

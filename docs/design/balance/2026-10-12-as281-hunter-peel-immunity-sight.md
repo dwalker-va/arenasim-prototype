@@ -2,7 +2,8 @@
 
 Tier: **directional**. Success condition: **nothing moves on BasicArena except
 through the immunity filter**, and a measurement of what trap sight costs on
-the pillar maps (`--expect nothing`, read per map).
+the pillar maps (`--expect nothing`, read per map). Sight is enforced on every
+throw, by the user's ruling, whatever it costs there.
 
 ## The change
 
@@ -19,7 +20,9 @@ the pillar maps (`--expect nothing`, read per map).
   moved. Every placement path ends there: the dip, the Frost Trap at the feet,
   the Frost Trap peel, the off-target, fallback and pressure Freezing Traps, and
   the Peel step. The Peel step's own sight check is gone, because the placement
-  now makes it.
+  now makes it. `tests/hunter_peel_scenes.rs` holds a pillar scene for each
+  path a pillar can hide, and one where the landing is in sight but the victim
+  is not.
 
 ## Arms
 
@@ -56,13 +59,14 @@ exactly one side (n=3,520 per map):
 
 - **BasicArena and Nagrand: no measurable change.** BasicArena moved 43 matches
   and flipped 3. PillaredArena moved 84 and flipped 16, eight each way.
-- **TwinPillars: the Hunter loses about 4.5pt.** The cause is sight, not
-  immunity. This is a direction, not a standing.
+- **TwinPillars: the Hunter loses about 4.5pt, an accepted cost.** The cause
+  is sight, not immunity. This is a direction, not a standing.
 
 ## Where the TwinPillars cost comes from
 
-The after binary was run on TwinPillars with sight switched back off per
-placement path (`AS281_EXEMPT`). Each CSV is
+To attribute the cost, the after binary was run on TwinPillars with sight
+switched back off per placement path (`AS281_EXEMPT`, an instrument switch,
+not a shipped option). Each CSV is
 `sweeps/2026-10-12-as281-variant-<name>-TwinPillars.csv.gz`.
 
 | variant | Hunter side delta | flips |
@@ -84,11 +88,10 @@ placement path (`AS281_EXEMPT`). Each CSV is
   pillar, where the enemy walks, not in throwing. So the shipped rule holds a
   hidden throw everywhere and never moves it, as it already does for range.
 
-The orchestrator ruled that a ground-targeted placement needs sight of its
-point (WoW's rule, and the Trap Launcher model,
-`hunter-traps-trap-launcher-model`). This is what that ruling costs the Hunter
-on TwinPillars. Exempting the lane throw is the one lever that recovers most of
-it, and doing so would be a product call.
+The cost is accepted. The user ruled that every throw needs sight of its
+landing, the lane trap included, as WoW's ground-targeted placement does. The
+value comes back through AS-295, which aims the lane at the enemy's path round
+a pillar, within sight.
 
 ## What changed in the decisions
 
