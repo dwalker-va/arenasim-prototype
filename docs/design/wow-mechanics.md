@@ -45,6 +45,11 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   interrupt that somehow reaches one is spent and cuts and locks nothing. A
   school lockout already running still blocks an instant of that school.
   Channels stay interruptible.
+- **Interrupts need sight** (AS-293): Kick, Pummel, Wind Shear and Spell Lock
+  reach a caster only in range and in line of sight (`class_ai::cast_reach`),
+  so a caster behind a pillar yields to one in sight and is never interrupted
+  through it; `process_interrupts` refuses one that reaches it anyway, spent
+  and cutting nothing.
 - **An `uninterruptible` cast takes no interrupt** (AS-287): Aimed Shot, the
   one cast-time ability TBC gives `PreventionType` Pacify rather than Silence
   (`docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py`

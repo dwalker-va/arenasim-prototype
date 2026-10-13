@@ -431,9 +431,8 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
      `Cleared`, so a cast cannot be chosen past Travel Form, a school lockout,
      a silence, its cooldown or its resource — a `try_*` that skips the gate
      does not compile. A ground-placed or self cast passes `target: None` and
-     checks its own range. Reject at every other predicate gate too. A cast
-     with no decision to record (an interrupt) asks `cast_guard::own_state_ok`;
-     a pet-command DISPATCH (an order the pet gates when it executes it) is
+     checks its own range. Reject at every other predicate gate too. A
+     pet-command DISPATCH (an order the pet gates when it executes it) is
      recorded through `start_pet_command_dispatch`. See `class_ai/warrior.rs`
      for the canonical pattern.
 
@@ -793,8 +792,15 @@ Flash Heal, Flash of Light, Holy Light, the Holy Shock heal, Lesser Healing
 Wave, the Druid's emergency heal and top-up Rejuvenation), Holy Shock damage
 (the first enemy within 20yd in sight), the rotation Hammer of Justice (its
 healer-preferring pick among the enemies it reaches; the dip's arrival asks the
-same, so a dip in range behind a pillar walks on round it) and the Shaman's Frost Shock peel (the
-nearest attacker in sight). The choosers that rank without a range
+same, so a dip in range behind a pillar walks on round it), the Shaman's Frost
+Shock peel (the nearest attacker in sight) and every interrupt
+(`class_ai::interrupts`: Kick, Pummel and Wind Shear, decided in
+`check_interrupts`, and the Felhunter's Spell Lock), whose caster scans rank
+only the casters they reach — the Shaman's healer-first pick, every
+interrupter's Cyclone-first pick, Spell Lock's heal-first pick — and whose
+refusal for sight is traced `LosBlocked`. `process_interrupts` asks sight again
+at resolution: an interrupt that reaches a caster its interrupter cannot see is
+spent and does nothing. The choosers that rank without a range
 filter — Power Word: Shield, Power Word: Fortitude, Mark of the Wild, the
 Druid's heal focus, its Cyclone peel and its step-8 Entangling Roots — drop a
 candidate only SIGHT keeps them off (`class_ai::sight_blocks`) before ranking,

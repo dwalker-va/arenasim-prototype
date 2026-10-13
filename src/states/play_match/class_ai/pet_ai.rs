@@ -620,99 +620,48 @@ fn try_spell_lock(
         }
     };
 
-    let my_team = combatant.team;
-
-    // Collect every interruptible enemy cast in range, then pick the highest-value
-    // one. Spell Lock applies a *school-specific* lockout, so interrupting a heal
-    // locks the healer out of healing — far more valuable than eating a DPS nuke.
+    // Every enemy cast Spell Lock reaches (range, then sight), then the
+    // highest-value one ([`super::interrupts::spell_lock_pick`]). Spell Lock
+    // applies a *school-specific* lockout, so interrupting a heal locks the
+    // healer out of healing — far more valuable than eating a DPS nuke.
     // Priority: an enemy Druid's Cyclone (`super::priority_interrupt_target`,
-    // every interrupter's first pick) > heal cast > any other cast (first-seen).
-    // This turns the Felhunter's one interrupt per 24s into a heal-denial tool
-    // instead of a random interrupt.
-    let mut reachable: Vec<(super::InterruptCandidate, bool)> = Vec::new();
-    // An uninterruptible cast in reach (Aimed Shot), which Spell Lock passes
-    // over: traced as the reason when nothing else can be locked.
-    let mut passed_over: Option<AbilityType> = None;
-    for (target_entity, target_combatant, cast_state) in casting_targets.iter() {
-        if target_combatant.team == my_team || !target_combatant.is_alive() {
-            continue;
+    // every interrupter's first pick) > heal cast > any other cast (first-seen)
+    // > a channel. This turns the Felhunter's one interrupt per 24s into a
+    // heal-denial tool instead of a random interrupt.
+    let position = |e: Entity| {
+        ctx.combatants
+            .get(&e)
+            .map(|i| i.position)
+            .unwrap_or(Vec3::ZERO)
+    };
+    let casts: Vec<super::interrupts::EnemyCast> = casting_targets
+        .iter()
+        .map(|(e, c, cast)| {
+            super::interrupts::EnemyCast::casting(e, c, position(e), cast, abilities)
+        })
+        .chain(channeling_targets.iter().map(|(e, c, channel)| {
+            super::interrupts::EnemyCast::channeling(e, c, position(e), channel)
+        }))
+        .collect();
+    match super::interrupts::spell_lock_pick(ctx, abilities, combatant.team, my_pos, &casts) {
+        Ok(target_entity) => {
+            builder.choose(cleared, Some(target_entity), true);
+            execute_spell_lock(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                target_entity,
+                &def.name,
+            );
+            true
         }
-        if ctx.entity_is_immune(target_entity) {
-            continue;
+        Err(reason) => {
+            builder.reject(ability, reason);
+            false
         }
-        let distance = my_pos.distance(
-            ctx.combatants
-                .get(&target_entity)
-                .map(|i| i.position)
-                .unwrap_or(Vec3::ZERO),
-        );
-        if distance > def.range {
-            continue;
-        }
-        if !super::cast_is_interruptible(cast_state, abilities) {
-            passed_over = passed_over.or(super::uninterruptible_cast(cast_state, abilities));
-            continue;
-        }
-        reachable.push((
-            super::InterruptCandidate {
-                entity: target_entity,
-                ability: cast_state.ability,
-                distance,
-            },
-            abilities.get_unchecked(&cast_state.ability).is_heal(),
-        ));
     }
-    if let Some(target_entity) = spell_lock_target(&reachable) {
-        builder.choose(cleared, Some(target_entity), true);
-        execute_spell_lock(
-            commands,
-            combat_log,
-            abilities,
-            entity,
-            combatant,
-            target_entity,
-            &def.name,
-        );
-        return true;
-    }
-
-    for (target_entity, target_combatant, _) in channeling_targets.iter() {
-        if target_combatant.team == my_team || !target_combatant.is_alive() {
-            continue;
-        }
-        if ctx.entity_is_immune(target_entity) {
-            continue;
-        }
-        let distance = my_pos.distance(
-            ctx.combatants
-                .get(&target_entity)
-                .map(|i| i.position)
-                .unwrap_or(Vec3::ZERO),
-        );
-        if distance > def.range {
-            continue;
-        }
-        builder.choose(cleared, Some(target_entity), true);
-        execute_spell_lock(
-            commands,
-            combat_log,
-            abilities,
-            entity,
-            combatant,
-            target_entity,
-            &def.name,
-        );
-        return true;
-    }
-
-    builder.reject(
-        ability,
-        match passed_over {
-            Some(cast) => RejectionReason::Uninterruptible { ability: cast },
-            None => RejectionReason::NoValidTarget,
-        },
-    );
-    false
 }
 
 pub(crate) fn execute_spell_lock(

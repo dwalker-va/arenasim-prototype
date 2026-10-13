@@ -1,0 +1,4 @@
+4247 AS293 INT Kick in_sight=true
+4072 AS293 INT Pummel in_sight=true
+4237 AS293 INT Spell Lock in_sight=true
+3014 AS293 INT Wind Shear in_sight=true

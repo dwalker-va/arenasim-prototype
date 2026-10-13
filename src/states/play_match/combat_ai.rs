@@ -1988,22 +1988,32 @@ pub fn decide_abilities(
         }
     }
 }
+/// Kick, Pummel and Wind Shear: each living interrupter decides whom to
+/// interrupt ([`class_ai::interrupts::interrupt_turn`] — range, then sight)
+/// and the interrupt is queued for `process_interrupts`. Runs after every cast
+/// of the frame has started, so a cast begun this frame can be cut.
+#[allow(clippy::too_many_arguments)]
 pub fn check_interrupts(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     abilities: Res<AbilityDefinitions>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<CastingState>>,
-    casting_targets: Query<&CastingState>,
     channeling_targets: Query<&ChannelingState>,
-    positions: Query<&Transform>,
     all_auras: Query<&ActiveAuras>,
-    // Casting enemies the interrupter can scan independently of its kill target.
-    // Disjoint from `combatants` (which is `Without<CastingState>`), so this
-    // read-only borrow of `&Combatant` does not conflict. Used by the Shaman's
-    // Wind Shear to prefer interrupting the enemy healer mid-cast.
-    casting_combatants: Query<(Entity, &Combatant, &Transform), With<CastingState>>,
+    // Every unit mid a cast. Disjoint from `combatants` (which is
+    // `Without<CastingState>`), so this read-only borrow of `&Combatant` does
+    // not conflict.
+    casting_combatants: Query<(Entity, &Combatant, &Transform, &CastingState)>,
+    pet_query: Query<&Pet>,
+    dr_tracker_query: Query<(Entity, &DRTracker)>,
+    // `Option` so a world with no map resolves as an open field.
+    map_geometry: Option<Res<super::map_config::ActiveMapGeometry>>,
+    ai_profile: Option<Res<super::ai_profile::AiProfiles>>,
+    // Each team's situation this frame, as `decide_abilities` left it: carried
+    // on every interrupt decision the trace records.
+    situations: Option<Res<super::situation::Situations>>,
     celebration: Option<Res<VictoryCelebration>>,
-    // Where an interrupter passing over an uninterruptible cast is traced.
+    // Where an interrupter's choice, and a cast it passes over, are traced.
     // `Option` so a world that never inserted it still runs.
     mut decision_trace: Option<ResMut<super::decision_trace::DecisionTrace>>,
 ) {
@@ -2011,235 +2021,89 @@ pub fn check_interrupts(
     if celebration.is_some() {
         return;
     }
+    // Nobody casting or channelling: nothing to interrupt.
+    if casting_combatants.is_empty() && channeling_targets.is_empty() {
+        return;
+    }
+
+    // Every unit mid a cast or a channel, in entity order.
+    let mut casts: std::collections::BTreeMap<Entity, class_ai::interrupts::EnemyCast> =
+        std::collections::BTreeMap::new();
+    for (e, c, t, cast) in casting_combatants.iter() {
+        casts.insert(
+            e,
+            class_ai::interrupts::EnemyCast::casting(e, c, t.translation, cast, &abilities),
+        );
+    }
+    for (e, c, t) in combatants.iter() {
+        if let Ok(channel) = channeling_targets.get(e) {
+            casts.insert(
+                e,
+                class_ai::interrupts::EnemyCast::channeling(e, c, t.translation, channel),
+            );
+        }
+    }
+
+    let snapshot = {
+        let units = combatants
+            .iter()
+            .map(
+                |(entity, combatant, transform)| class_ai::combat_snapshot::SnapshotUnit {
+                    entity,
+                    combatant,
+                    transform,
+                    casting: channeling_targets.get(entity).ok().map(|ch| ch.ability),
+                    auras: all_auras.get(entity).ok(),
+                },
+            )
+            .chain(
+                casting_combatants
+                    .iter()
+                    .map(|(entity, combatant, transform, cast)| {
+                        class_ai::combat_snapshot::SnapshotUnit {
+                            entity,
+                            combatant,
+                            transform,
+                            casting: Some(cast.ability),
+                            auras: all_auras.get(entity).ok(),
+                        }
+                    }),
+            );
+        class_ai::combat_snapshot::CombatSnapshot::from_units(
+            units,
+            &pet_query,
+            &dr_tracker_query,
+            map_geometry.as_ref().map_or(&[][..], |m| &m.volumes[..]),
+            map_geometry.as_ref().map(|m| m.bounds).unwrap_or_default(),
+            ai_profile.map(|p| *p).unwrap_or_default(),
+        )
+    };
 
     for (entity, mut combatant, transform) in combatants.iter_mut() {
-        if !combatant.is_alive() {
-            continue;
-        }
-
-        // WoW Mechanic: Cannot use interrupts while stunned, feared, or polymorphed
-        if super::utils::is_incapacitated(all_auras.get(entity).ok()) {
-            continue;
-        }
-
-        // Only Warriors, Rogues, and Shamans have interrupts. Exhaustive, so a
-        // new class has to say whether it interrupts.
-        let interrupt_ability = match combatant.class {
-            match_config::CharacterClass::Warrior => AbilityType::Pummel,
-            match_config::CharacterClass::Rogue => AbilityType::Kick,
-            match_config::CharacterClass::Shaman => AbilityType::WindShear,
-            match_config::CharacterClass::Mage
-            | match_config::CharacterClass::Priest
-            | match_config::CharacterClass::Warlock
-            | match_config::CharacterClass::Paladin
-            | match_config::CharacterClass::Hunter
-            | match_config::CharacterClass::Druid => continue,
-        };
-
-        // Divine Shield or a Cyclone — the AI's one immunity predicate.
-        let is_immune = |e: Entity| {
-            all_auras.get(e).is_ok_and(|a| {
-                a.auras
-                    .iter()
-                    .any(|au| class_ai::grants_damage_immunity(au.effect_type))
-            })
-        };
-
-        // First, the cast every interrupter takes ahead of its usual pick: an
-        // enemy Druid's Cyclone ([`class_ai::priority_interrupt_target`]), from
-        // every enemy mid-cast within this interrupter's reach. Nobody casting
-        // one leaves the usual pick below unchanged.
-        let interrupt_range = abilities.get_unchecked(&interrupt_ability).range;
-        let priority_target = class_ai::priority_interrupt_target(
-            casting_combatants.iter().filter_map(|(e, c, t)| {
-                if c.team == combatant.team || !c.is_alive() || is_immune(e) {
-                    return None;
-                }
-                let cast = casting_targets
-                    .get(e)
-                    .ok()
-                    .filter(|cs| class_ai::cast_is_interruptible(cs, &abilities))?;
-                let distance = transform.translation.distance(t.translation);
-                (distance <= interrupt_range).then_some(class_ai::InterruptCandidate {
-                    entity: e,
-                    ability: cast.ability,
-                    distance,
-                })
-            }),
-        );
-
-        // Then the usual pick. Warriors/Rogues interrupt their current kill
-        // target. The Shaman instead scans for ANY casting enemy in Wind Shear
-        // range, preferring the enemy HEALER mid-cast (then nearest, then lowest
-        // entity id for determinism) so Wind Shear locks enemy heals rather than
-        // only the kill target's casts.
-        let target_entity = if let Some(priority) = priority_target {
-            priority
-        } else if combatant.class == match_config::CharacterClass::Shaman {
-            let my_pos = transform.translation;
-            let wind_shear_range = abilities.get_unchecked(&AbilityType::WindShear).range;
-            let mut best: Option<(Entity, bool, f32)> = None;
-            // The nearest enemy in reach mid an UNINTERRUPTIBLE cast: the cast
-            // Wind Shear passes over, traced below when nothing else is
-            // casting.
-            let mut passed_over: Option<(Entity, f32)> = None;
-            for (e, c, t) in casting_combatants.iter() {
-                if c.team == combatant.team || !c.is_alive() {
-                    continue;
-                }
-                // Skip immune targets (Divine Shield, Cyclone).
-                if is_immune(e) {
-                    continue;
-                }
-                let dist = my_pos.distance(t.translation);
-                if dist > wind_shear_range {
-                    continue;
-                }
-                // Mid a cast Wind Shear can take (cast bar, interruptible, not
-                // already interrupted)?
-                match casting_targets.get(e) {
-                    Ok(cs) if class_ai::cast_is_interruptible(cs, &abilities) => {}
-                    Ok(cs) if class_ai::uninterruptible_cast(cs, &abilities).is_some() => {
-                        if passed_over.is_none_or(|(pe, pd)| dist < pd || (dist == pd && e < pe)) {
-                            passed_over = Some((e, dist));
-                        }
-                        continue;
-                    }
-                    _ => continue,
-                }
-                let is_healer = c.class.is_healer();
-                let replace = match best {
-                    None => true,
-                    Some((be, bh, bd)) => {
-                        if is_healer != bh {
-                            is_healer
-                        } else if dist != bd {
-                            dist < bd
-                        } else {
-                            e < be
-                        }
-                    }
-                };
-                if replace {
-                    best = Some((e, is_healer, dist));
-                }
-            }
-            match (best, passed_over) {
-                (Some((e, _, _)), _) => e,
-                (None, Some((e, _))) => e,
-                (None, None) => continue,
-            }
-        } else {
-            let Some(target_entity) = combatant.target else {
-                continue;
-            };
-            target_entity
-        };
-
-        // Don't waste interrupts on immune targets (Divine Shield, Cyclone)
-        if is_immune(target_entity) {
-            continue;
-        }
-
-        let Ok(target_transform) = positions.get(target_entity) else {
-            continue;
-        };
-
         let my_pos = transform.translation;
-        let target_pos = target_transform.translation;
-        let distance = my_pos.distance(target_pos);
-
-        // Check if target is casting or channeling
-        let target_ability_name: String;
-        let is_interruptable: bool;
-        // An uninterruptible cast (Aimed Shot) the interrupter would otherwise
-        // take: it passes it over, traced once its own gates have cleared.
-        let mut uninterruptible: Option<AbilityType> = None;
-
-        if let Ok(cast_state) = casting_targets.get(target_entity) {
-            if let Some(cast) = class_ai::uninterruptible_cast(cast_state, &abilities) {
-                uninterruptible = Some(cast);
-            } else if !class_ai::cast_is_interruptible(cast_state, &abilities) {
-                // Already interrupted, or an instant routed through a
-                // zero-length cast — nothing to interrupt, so the interrupt is
-                // not spent.
-                continue;
-            }
-            target_ability_name = abilities.get_unchecked(&cast_state.ability).name.clone();
-            is_interruptable = true;
-        } else if let Ok(channel_state) = channeling_targets.get(target_entity) {
-            if channel_state.interrupted {
-                continue; // Already interrupted
-            }
-            target_ability_name = abilities.get_unchecked(&channel_state.ability).name.clone();
-            is_interruptable = true;
-        } else {
-            continue; // Target not casting or channeling
-        }
-
-        if !is_interruptable {
+        let ctx = snapshot.context_for(entity).with_situation(
+            situations
+                .as_deref()
+                .map(|s| s.for_team(combatant.team))
+                .unwrap_or_default(),
+        );
+        let Some((interrupt_ability, target_entity, cast_ability)) =
+            class_ai::interrupts::interrupt_turn(
+                &ctx,
+                &abilities,
+                &combatant,
+                my_pos,
+                all_auras.get(entity).ok(),
+                &casts,
+                decision_trace.as_deref_mut(),
+            )
+        else {
             continue;
-        }
-
-        // Rogues cannot use Kick while stealthed - must break stealth first
-        if interrupt_ability == AbilityType::Kick && combatant.stealthed {
-            continue;
-        }
-
+        };
         let ability_def = abilities.get_unchecked(&interrupt_ability);
-
-        // The interrupter's own gates — a school lockout, a silence, the
-        // cooldown — exactly as `pre_cast_ok` asks them of every other cast.
-        if !class_ai::cast_guard::own_state_ok(
-            interrupt_ability,
-            ability_def,
-            &combatant,
-            all_auras.get(entity).ok(),
-            class_ai::cast_guard::PreCastOpts::default(),
-        ) {
-            continue;
-        }
-
-        // Check if we can cast the interrupt (range, resources, etc.)
-        if !interrupt_ability.can_cast_config(&combatant, target_pos, my_pos, ability_def) {
-            continue;
-        }
-
-        // An uninterruptible cast: no interrupt takes it, so this one is not
-        // spent on it. Traced, since the interrupter could otherwise have used
-        // it here.
-        if let Some(cast) = uninterruptible {
-            if let Some(trace) = decision_trace.as_deref_mut() {
-                let actor = super::decision_trace::ActorView::from_raw(
-                    entity,
-                    combatant.team,
-                    combatant.slot,
-                    combatant.class,
-                    combatant.current_health / combatant.max_health.max(f32::EPSILON),
-                    if combatant.max_mana > 0.0 {
-                        combatant.current_mana / combatant.max_mana
-                    } else {
-                        0.0
-                    },
-                    my_pos,
-                );
-                let target = casting_combatants.get(target_entity).ok().map(|(e, c, _)| {
-                    super::decision_trace::TargetView {
-                        entity_id: e.index(),
-                        class: c.class,
-                        hp_pct: c.current_health / c.max_health.max(f32::EPSILON),
-                        distance,
-                    }
-                });
-                let mut builder = trace.start_ability_decision(actor, target);
-                builder.reject(
-                    interrupt_ability,
-                    super::decision_trace::RejectionReason::Uninterruptible { ability: cast },
-                );
-                builder.finish();
-            }
-            continue;
-        }
+        let target_ability_name = abilities.get_unchecked(&cast_ability).name.clone();
+        let target_pos = casts.get(&target_entity).map_or(my_pos, |c| c.position);
+        let distance = my_pos.distance(target_pos);
 
         // Use the interrupt!
         info!(
