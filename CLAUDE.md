@@ -791,7 +791,9 @@ Devour Magic, Master's Call), Purge (`select_purge` — the best odds it can
 see; the buff that comes off is a random pick, never the AI's), every heal that ranks allies by health (`CombatContext::lowest_health_ally_in_reach`:
 Flash Heal, Flash of Light, Holy Light, the Holy Shock heal, Lesser Healing
 Wave, the Druid's emergency heal and top-up Rejuvenation), Holy Shock damage
-(the first enemy within 20yd in sight) and the Shaman's Frost Shock peel (the
+(the first enemy within 20yd in sight), the rotation Hammer of Justice (its
+healer-preferring pick among the enemies it reaches; the dip's arrival asks the
+same, so a dip in range behind a pillar walks on round it) and the Shaman's Frost Shock peel (the
 nearest attacker in sight). The choosers that rank without a range
 filter — Power Word: Shield, Power Word: Fortitude, Mark of the Wild, the
 Druid's heal focus, its Cyclone peel and its step-8 Entangling Roots — drop a

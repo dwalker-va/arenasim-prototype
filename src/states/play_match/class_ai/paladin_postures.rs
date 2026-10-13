@@ -575,15 +575,18 @@ fn paladin_dip_tick(
         issue(commands);
     }
 
-    // Arrival check: within HoJ range → command the cast. The ability pass
-    // re-checks readiness/eligibility/range (try_dip_hammer_of_justice) and
-    // on success installs `completed_state` (DipComplete → FREE).
+    // Arrival check: the stun REACHES the dip target — in HoJ range AND in
+    // sight (`cast_reach`, the cast gate's own two checks in its order) →
+    // command the cast. Until then the Entity-goal walk above keeps closing,
+    // tangent-steered round any pillar between, so a dip never stands in range
+    // facing cover. The ability pass re-checks readiness/eligibility/reach
+    // (try_dip_hammer_of_justice) and on success installs `completed_state`
+    // (DipComplete → FREE).
     let def = abilities.get_unchecked(&AbilityType::HammerOfJustice);
-    let in_range = ctx
-        .combatants
-        .get(&target)
-        .is_some_and(|t| my_pos.distance(t.position) <= def.range);
-    if in_range {
+    let reaches = ctx.combatants.get(&target).is_some_and(|t| {
+        super::cast_reach(ctx, def.range, my_pos, t.position) == super::CastReach::Reaches
+    });
+    if reaches {
         let mut completed = *state;
         completed.posture = Posture::Free;
         completed.since = now;

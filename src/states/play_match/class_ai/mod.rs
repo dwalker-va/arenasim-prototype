@@ -1746,7 +1746,8 @@ pub fn situational_ally_dispel_priority(
 /// cast: the healers' dispels ([`try_dispel_ally`]), Devour Magic, Master's
 /// Call, Purge ([`select_purge`]), every heal that ranks allies by health
 /// ([`CombatContext::lowest_health_ally_in_reach`]) — and the Psychic Scream gate
-/// that holds for one of them — Holy Shock damage, the Frost Shock peel, and
+/// that holds for one of them — Holy Shock damage, Hammer of Justice (the
+/// rotation's pick and the dip's arrival), the Frost Shock peel, and
 /// — through [`sight_blocks`] — the choosers that rank without a range
 /// filter (Power Word: Shield and Fortitude, Mark of the Wild, the Druid's heal
 /// focus and its Cyclone and Entangling Roots peels); and the walk that carries
