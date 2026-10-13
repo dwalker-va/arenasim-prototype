@@ -631,13 +631,15 @@ multiplier list under *Adding a New Item* in `CLAUDE.md`. It is the first gear c
 | Wrists, neck, back, ring | about 0.56 | Neck, back, ring 0.5625; **wrists 0.5** | **0.5625** |
 | Trinket | about 0.70 | **0.5625** | **0.70** |
 | Two-hander, one-hander, off-hand | 1.0, 0.42, 0.56 | The held-budget model: 1.0, 0.42, 0.5625 | Unchanged (already TBC's shape) |
-| Ranged weapon | about 0.32 | 0.5625 | **Unchanged for now** (decision 3) |
+| Ranged weapon | about 0.32 | 0.5625 | **Unchanged: 0.5625** |
 
 - **The waist goes with shoulders, hands and feet, as in TBC,** not with wrists, neck and
   rings. TBC's slot modifiers put the waist in the 0.77 group. Back belongs in the
-  wrist/neck/ring group, which was otherwise missing it. TBC's modifiers are from memory, so E0
-  confirms them against TBC items before it changes a number. Decision 3 lists both
-  departures.
+  wrist/neck/ring group. TBC's modifiers are from memory, so E0 confirms them against TBC items
+  before it changes a number.
+- **The ranged weapon stays at 0.5625**, the one slot that keeps its current multiplier. TBC's
+  0.32 would cut every bow and wand budget, and the Hunter's bow is its main lever, so moving
+  it would re-baseline the Hunter for no gain to the loop.
 - **Trinkets rise to 0.70.** TBC prices a trinket's slot above the small accessories, because
   its effect is its value. The Champion trinkets in §6.3 need that room.
 - **What E0 moves.**
@@ -799,9 +801,10 @@ weights. Five changes come with this section:
 - **Both caps land before match 7**, the earliest a perfect run can play its last match. By
   then every live run has the same points and picks, so a run with losses never ends stronger
   than a perfect one, and there is no reason to lose.
-- **Spent points stay spent for the run.** That makes the line between a commitment and an
-  answer mechanical: the per-match choices are where the player adapts. Banking a point for a
-  node a few matches away is allowed.
+- **Spent points stay spent for the run; there is no respec.** That makes the line between a
+  commitment and an answer mechanical: the per-match choices, the Priest's Form among them,
+  are where the player adapts. Banking a point for a node a few matches away is allowed, and a
+  point is only final once it is locked in.
 
 ### 7.3 Opponents scale with wins (recommended)
 
@@ -1194,7 +1197,7 @@ slot multipliers: it re-spends the starting kit on purpose, and is an AUTHORITY 
 | T1 Talent engine | `talents.ron` (trees, tiers, ranks, prerequisites) and a validating loader; `Build` per slot in `MatchConfig` and headless; the `AbilityBook` and the migration of the cast, channel, aura-tick and AI paths; rank and build parity tests; `talent_ai_audit`; the `[TALENTS]` line and the build in the trace header. The general mechanisms the trees need: the `leech` aura field, the proc triggers (`DotTick`, `SpellHit`, `HealCrit`, `CritTaken`) and effects (`NextCastInstant`, `NextCastFree`), `WidenChoice`, and the `Mechanic` hook |
 | T2 Talent panel and encyclopedia | The tree in View Combatant and Custom Match (8 points); `Topic::Talent` and a Talents section; spec labels on frames and Results |
 | **Per class: "define and build class X's trees"** | One card per class, in this order: **Warlock, Priest, Rogue, Paladin** (the slice's four), then Warrior, Mage, Hunter, Shaman, Druid. Each card does five things: research the class's Classic and TBC trees from the client's `TalentTab` / `Talent` tables, and later expansions where §5 diverges; write its trees under §1, §3, §4 and §5.3 (the mocks in §5 are its starting point for the first two); implement them; write its reference builds; run a DIRECTIONAL node-arm sweep for its grants, procs and mechanics. The **Priest** card also adds Shadow Word: Pain to the base kit, and builds the Form choice and the Shadowform damage-dealer AI. The **Druid** card ships Balance and Restoration, with Wrath and Starfire as Balance grants; Feral waits for a melee kit |
-| E0 Slot multipliers (TBC) | `slot_budget_multiplier` moves to TBC's groups (legs 1.0, waist 0.75, wrists 0.5625, trinket 0.70), after confirming TBC's modifiers; its unit test and the list in `CLAUDE.md` follow. Starting-kit legs, waists, wrists and trinkets are re-spent. **Not byte-identical: an AUTHORITY re-baseline** |
+| E0 Slot multipliers (TBC) | `slot_budget_multiplier` moves to TBC's groups (legs 1.0, waist 0.75 with shoulders, hands and feet, wrists 0.5625, trinket 0.70; ranged stays 0.5625), after confirming TBC's modifiers; its unit test and the list in `CLAUDE.md` follow. Starting-kit legs, waists, wrists and trinkets are re-spent. **Not byte-identical: an AUTHORITY re-baseline** |
 | E1 Gear tiers | Re-level the 69-75 tier to 76-80 and re-spend its stats; tier bands validated on `item_tier`; Champion tier content (armor and weapons); offers weighted by slot multiplier |
 | E2 Trinkets | `on_use` on items, priced by uses in a median life; the CC-break effect; the extra swing on Windfury's path; the `AttackSpeedIncrease` haste aura with a haste weight, and **the Dragonspine Trophy moved onto it** (with its probe and the `CLAUDE.md` notes); the triggered absorb for the jackpot, priced by trigger rate; their AI rules; the Medallion, Aegis of the Last Stand, Talisman, Earthstrike, Diamond Flask, Kiss of the Spider, Hand of Justice and Blue Dragon |
 | G1 Run model | `RunState` (resolved state plus seed); offers on their own RNG stream; version stamp and stored combat log on every match record |
@@ -1203,7 +1206,9 @@ slot multipliers: it re-spends the starting kit on purpose, and is an AUTHORITY 
 | G4 Headless driver | `--gauntlet <seed> --difficulty <level> --policy <name>`, with talent and reward policies |
 | G5 Calibration | DIRECTIONAL: reference-build arms per class, bot runs for the clear rate, wins-per-run, walls, pair dominance and build spread. Output: opponent tiers and reward tables, in a findings doc |
 
-**Phase 1: the minimum playable slice.**
+**Phase 1: the minimum playable slice.** It ships with talents and both gear tiers on the
+four-class pool, so it needs, from phase 0: T1, T2, the Warlock, Priest, Rogue and Paladin
+tree cards, E0-E2 and G1-G5.
 
 | Card | Delivers |
 |---|---|
@@ -1248,23 +1253,8 @@ Milestone review: **play three runs.**
 > per slot in `MatchConfig` and the headless config, and a per-combatant `AbilityBook` built
 > at spawn, migrating the cast, channel, aura-tick and AI reads. Add the general mechanisms the
 > trees need, the rank and build parity tests, `talent_ai_audit` and the `[TALENTS]` log line.
-> Prove it on the Warlock's Demonology tier 1-2 nodes (Stats and PetStats only).
+> Prove it on the Warlock's Demonology tier 1-2 nodes (StatPercent and PetStatPercent only).
 >
 > **Success condition:** empty build by default, so `Legacy` and BasicArena are
 > byte-identical. A DIRECTIONAL paired sweep of a 4-point Demonology build against none on the
 > Warlock's 2v2 cells says which way and roughly how much it moves the Warlock.
-
-## 14. Decisions still open
-
-1. **Respec.** Spent points locked for the run, as recommended? Or a free respec between
-   matches, which blurs talents into per-match choices? (The Priest's Form is a per-match
-   choice either way.)
-2. **The first slice.** Talents and both gear tiers in the slice with a four-class pool
-   (Warlock, Priest, Rogue, Paladin), as recommended? Or all nine classes with gear only, and
-   talents as phase 2?
-3. **Two departures in the slot groups (§6.1).**
-   - **The waist:** with shoulders, hands and feet, as TBC prices it (recommended)? Or with
-     wrists, neck and rings?
-   - **The ranged weapon:** stay at 0.5625 for now (recommended)? Or drop to TBC's 0.32? That
-     would cut every bow and wand budget and re-baseline the Hunter, whose bow is its main
-     lever.

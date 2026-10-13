@@ -640,7 +640,7 @@ function bankAsGear(cls){const c=S.team.find(t=>t.cls===cls);c.gearPts+=c.unspen
 function lockIn(){for(const c of S.team){for(const id of c.pending){c.ranks[id]=(c.ranks[id]||0)+1;c.unspent--}c.pending=[]}go("hub")}
 function talents(){
   const pending=S.team.reduce((s,c)=>s+c.pending.length,0);
-  $app.innerHTML = `<h2>Talents</h2><p class="sub">${START_POINTS} points at the draft and one after every match, win or loss, up to ${pointCap()}. Tier gates open at 2, 3 and 5 points in a tree; the capstone is the double-bordered node. Eight points buy a capstone and a splash, or tier 3 in two trees. Locked-in points stay for the run.</p>
+  $app.innerHTML = `<h2>Talents</h2><p class="sub">${START_POINTS} points at the draft and one after every match, win or loss, up to ${pointCap()}. Tier gates open at 2, 3 and 5 points in a tree; the capstone is the double-bordered node. Eight points buy a capstone and a splash, or tier 3 in two trees. Locked-in points stay for the run: there is no respec.</p>
   <div class="grid">${S.team.map(treeView).join("")}</div>
   <div class="actions"><button class="btn" onclick="for(const c of S.team)c.pending=[];go('hub')">Back</button>
   <button class="btn primary" ${pending?"":"disabled"} onclick="lockIn()">Lock in ${pending} point${pending===1?"":"s"}</button></div>`;
