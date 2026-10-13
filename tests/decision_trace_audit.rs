@@ -83,6 +83,9 @@ const EXPECTED_REJECTION_REASONS: &[&str] = &[
     "LosBlocked",
     // An interrupter passing over an uninterruptible cast (Aimed Shot).
     "Uninterruptible",
+    // The Burst play's fit: a cast on the kill window's subject that would
+    // land after the window's `until` (TeamPlan only).
+    "OutlastsWindow",
 ];
 
 /// Variants of `TargetRejectionReason` that production code currently emits.
@@ -133,8 +136,13 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
 
 /// `situation_change` names (`SituationName`) and change kinds
 /// (`SituationChangeKind`). Surprise-only, like the lists above.
-const EXPECTED_SITUATION_NAMES: &[&str] =
-    &["enemy_healer_locked", "ally_in_danger", "tempo", "phase"];
+const EXPECTED_SITUATION_NAMES: &[&str] = &[
+    "enemy_healer_locked",
+    "ally_in_danger",
+    "kill_window",
+    "tempo",
+    "phase",
+];
 const EXPECTED_SITUATION_CHANGES: &[&str] = &["onset", "end", "extended", "shift"];
 
 /// One reference matchup: team configs + seed + label for error messages.

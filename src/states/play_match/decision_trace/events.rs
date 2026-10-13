@@ -99,8 +99,8 @@ pub struct DecisionEvent {
 }
 
 /// The compact `situation` field of an `ability_decision`: the match phase and
-/// the team's tempo, always, and the `enemy_healer_locked` and
-/// `ally_in_danger` windows while one is open.
+/// the team's tempo, always, and the `enemy_healer_locked`, `ally_in_danger`
+/// and `kill_window` windows while one is open.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct SituationTag {
     pub phase: MatchPhase,
@@ -109,14 +109,16 @@ pub struct SituationTag {
     pub enemy_healer_locked: Option<WindowTag>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ally_in_danger: Option<WindowTag>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kill_window: Option<WindowTag>,
     /// The deciding unit's play, when it is not `Default`
     /// (`situation::Play`): `{"name": "burst"}` or
     /// `{"name": "peel", "ally": <entity id>}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub play: Option<PlayTag>,
-    /// The play's own step produced the choice — `"peel"` when the decision's
-    /// chosen ability came from the peel step at the head of the chain, not
-    /// from the chain below it. Absent otherwise: a non-default play whose
+    /// The play's own step produced the choice — `"peel"` or `"burst"` when
+    /// the decision's chosen ability came from that play's step at the head of
+    /// the chain, not from the chain below it. Absent otherwise: a non-default play whose
     /// step did not fire recorded what its fallback chain chose.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub play_step: Option<PlayStep>,
@@ -147,6 +149,8 @@ impl PlayTag {
 pub enum PlayStep {
     /// The Peel play's crowd control on an attacker of the teammate in danger.
     Peel,
+    /// The Burst play's hard hitter on the kill window's subject.
+    Burst,
 }
 
 /// A situation window as the trace records it: the subject's entity id and
@@ -176,6 +180,7 @@ impl From<&TeamSituation> for SituationTag {
             tempo: situation.tempo,
             enemy_healer_locked: situation.enemy_healer_locked.as_ref().map(WindowTag::from),
             ally_in_danger: situation.ally_in_danger.as_ref().map(WindowTag::from),
+            kill_window: situation.kill_window.as_ref().map(WindowTag::from),
             play: None,
             play_step: None,
         }
@@ -188,6 +193,7 @@ impl From<&TeamSituation> for SituationTag {
 pub enum SituationName {
     EnemyHealerLocked,
     AllyInDanger,
+    KillWindow,
     Tempo,
     Phase,
 }
@@ -328,7 +334,7 @@ pub enum EventPayload {
         name: SituationName,
         change: SituationChangeKind,
         /// The window's subject (`enemy_healer_locked`: the healer;
-        /// `ally_in_danger`: the teammate).
+        /// `ally_in_danger`: the teammate; `kill_window`: the enemy).
         #[serde(skip_serializing_if = "Option::is_none")]
         subject: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -625,6 +631,16 @@ pub enum RejectionReason {
     Uninterruptible {
         /// The cast it passed over.
         ability: AbilityType,
+    },
+    /// Under the Burst play, a cast on the kill window's subject that would
+    /// land after the window's `until` (the cast gate's fit,
+    /// `cast_guard::fits_window`): its cast time, its flight and — for damage
+    /// over time alone — its first tick, from now.
+    OutlastsWindow {
+        /// When it would land, on the trace's `sim_time` clock.
+        lands_at: f32,
+        /// When the window ends.
+        until: f32,
     },
 }
 

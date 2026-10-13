@@ -159,6 +159,32 @@ pub fn decide_rogue_action(
         }
     }
 
+    // The Burst play (TeamPlan): a kill window is open, so Sinister Strike on
+    // its enemy heads the chain — ahead of the Kidney Shot planner, whose holds
+    // and pooling would otherwise keep the energy back.
+    if let Some(call) = super::burst::burst_call(ctx) {
+        if let Some(pos) = ctx.combatants.get(&call.subject).map(|i| i.position) {
+            if try_sinister_strike(
+                combat_log,
+                game_rng,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                call.subject,
+                pos,
+                ctx,
+                instant_attacks,
+                &mut builder,
+            ) {
+                builder.play_step(PlayStep::Burst);
+                builder.finish();
+                return true;
+            }
+        }
+    }
+
     // Priority 1: Kidney Shot (melee-range CC), gated by the chain planner.
     // The planner decides whether to fire the stun now, hold it (so a Kick or an
     // active school lockout does the denial instead of double-spending), or pool

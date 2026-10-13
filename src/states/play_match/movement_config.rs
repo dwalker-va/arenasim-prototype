@@ -190,6 +190,18 @@ pub struct SharedMovementConfig {
     /// a new one. A teammate that dies ends it at once. `0.0` ends it on the
     /// first frame out.
     pub danger_release: f32,
+    /// The `kill_window`'s ONSET: an enemy below this health fraction is low,
+    /// and opens a kill window while no enemy healer can heal it.
+    pub kill_hp_threshold: f32,
+    /// The `kill_window`'s RELEASE: an open window's enemy stays low until it
+    /// is back above this fraction, so a small heal does not end the window
+    /// and open a new one. At least `kill_hp_threshold`; equal disables the
+    /// band.
+    pub kill_hp_release: f32,
+    /// An enemy healer with less mana than this cannot heal (the cheapest
+    /// heal in the book, Flash of Light, costs 20), and so opens no defence of
+    /// a kill window's enemy.
+    pub kill_oom_mana: f32,
 }
 
 impl Default for SharedMovementConfig {
@@ -212,6 +224,9 @@ impl Default for SharedMovementConfig {
             danger_dwell: 0.1,
             danger_release: 0.1,
             danger_edge_margin: 1.0,
+            kill_hp_threshold: 0.35,
+            kill_hp_release: 0.45,
+            kill_oom_mana: 20.0,
         }
     }
 }
@@ -582,6 +597,7 @@ impl MovementConfig {
             ("shared.danger_dwell", s.danger_dwell),
             ("shared.danger_release", s.danger_release),
             ("shared.danger_edge_margin", s.danger_edge_margin),
+            ("shared.kill_oom_mana", s.kill_oom_mana),
             (
                 "priest.formation_shift_threshold",
                 self.priest.formation_shift_threshold,
@@ -622,6 +638,8 @@ impl MovementConfig {
         let fractions = [
             ("shared.center_bias", s.center_bias),
             ("shared.urgency_hp_threshold", s.urgency_hp_threshold),
+            ("shared.kill_hp_threshold", s.kill_hp_threshold),
+            ("shared.kill_hp_release", s.kill_hp_release),
             ("paladin.healing_heavy_hp", self.paladin.healing_heavy_hp),
             ("priest.healing_heavy_hp", self.priest.healing_heavy_hp),
             ("shaman.healing_heavy_hp", self.shaman.healing_heavy_hp),
@@ -631,6 +649,13 @@ impl MovementConfig {
             if !(0.0..=1.0).contains(&value) {
                 issues.push(format!("{} must be within [0.0, 1.0], got {}", name, value));
             }
+        }
+
+        if s.kill_hp_release < s.kill_hp_threshold {
+            issues.push(format!(
+                "shared.kill_hp_release ({}) must not be below shared.kill_hp_threshold ({})",
+                s.kill_hp_release, s.kill_hp_threshold
+            ));
         }
 
         if s.wand_range > s.heal_range {

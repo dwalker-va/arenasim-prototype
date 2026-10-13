@@ -34,7 +34,7 @@ use crate::states::play_match::decision_trace::{
     TargetView,
 };
 use crate::states::play_match::movement_config::MovementWeights;
-use crate::states::play_match::situation::{Play, Role};
+use crate::states::play_match::situation::Role;
 use crate::states::play_match::traps::replace_previous_trap;
 
 /// Hold Concussive Shot while the target's existing slow has more than this many
@@ -222,6 +222,65 @@ pub fn decide_hunter_action(
     }
 
     let distance_to_target = my_pos.distance(target_info.position);
+
+    // The Burst play (TeamPlan): a kill window is open, so its enemy takes the
+    // Hunter's hard hitters first — Aimed Shot when no enemy is within 20yd to
+    // stop the cast, else Arcane Shot — each only if it lands before the
+    // window's `until` (the cast gate's fit). Not from the dead zone: there
+    // the escape comes first, and no shot reaches.
+    if nearest_dist >= HUNTER_DEAD_ZONE {
+        if let Some(call) = super::burst::burst_call(ctx) {
+            if let Some(subject) = ctx.combatants.get(&call.subject) {
+                let aimed = if nearest_dist >= 20.0 {
+                    try_aimed_shot(
+                        commands,
+                        combat_log,
+                        abilities,
+                        entity,
+                        combatant,
+                        my_pos,
+                        call.subject,
+                        subject,
+                        auras,
+                        ctx,
+                        own_traps,
+                        &mut builder,
+                    )
+                } else {
+                    builder.reject(
+                        AbilityType::AimedShot,
+                        RejectionReason::WithinDeadZone {
+                            distance: nearest_dist,
+                            min: 20.0,
+                        },
+                    );
+                    false
+                };
+                if aimed
+                    || try_arcane_shot(
+                        commands,
+                        combat_log,
+                        game_rng,
+                        abilities,
+                        entity,
+                        combatant,
+                        my_pos,
+                        call.subject,
+                        subject,
+                        ctx,
+                        instant_attacks,
+                        auras,
+                        own_traps,
+                        &mut builder,
+                    )
+                {
+                    builder.play_step(PlayStep::Burst);
+                    builder.finish();
+                    return true;
+                }
+            }
+        }
+    }
 
     // === DEAD ZONE (<8 yards) — Escape priority ===
     if nearest_dist < HUNTER_DEAD_ZONE {
@@ -489,27 +548,16 @@ pub fn decide_hunter_action(
 
     // === SAFE RANGE (20+ yards) — Full rotation ===
 
-    // The Burst play: while the enemy healer is locked (`enemy_healer_locked`;
-    // e.g. our off-target Freezing Trap just incap'd it) it can't heal the kill
-    // target — land the Aimed Shot burst INSIDE that window instead of
-    // dribbling instants. Narrow priority PREPEND, gated on the kill target
-    // being someone other than the locked healer (bursting the healer would
-    // break its own breakable trap). Under the Default play the rotation below
-    // is the unchanged order, so non-CC frames are untouched. This is the
-    // complement to the trap rework: the trap creates the healer-down window,
-    // this converts it.
-    let bursting = match ctx.play(Role::RangedDps) {
-        Play::Burst => true,
-        Play::Default => false,
-        // A peel step that did not fire leaves the chain its fallback orders.
-        Play::Peel { .. } => ctx.situation().fallback_play(Role::RangedDps) == Play::Burst,
-    };
-    let burst_window = bursting
+    // The lock window (`CombatContext::lock_window`, `Legacy`'s rule, which
+    // the Burst play replaces): while the enemy healer is locked, Aimed Shot
+    // on the kill target goes first — unless the kill target IS the locked
+    // healer, whose breakable trap the shot would break.
+    let lock_window = ctx.lock_window()
         && ctx
             .situation()
             .enemy_healer_locked
             .is_some_and(|lock| lock.subject != target_entity);
-    if burst_window
+    if lock_window
         && distance_to_target >= 20.0
         && try_aimed_shot(
             commands,

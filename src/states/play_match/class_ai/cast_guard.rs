@@ -13,7 +13,8 @@ use bevy::prelude::*;
 use super::CombatContext;
 use crate::states::play_match::abilities::{is_silenced, is_spell_school_locked, AbilityType};
 use crate::states::play_match::ability_config::AbilityConfig;
-use crate::states::play_match::components::{ActiveAuras, Combatant};
+use crate::states::play_match::combat_core::calculate_cast_time;
+use crate::states::play_match::components::{ActiveAuras, AuraType, Combatant};
 use crate::states::play_match::map_geometry::has_line_of_sight;
 
 /// Opt-in guards layered on top of the universal pre-cast checks.
@@ -77,6 +78,9 @@ pub const SHAPESHIFTED_NOTE: &str = "shapeshifted: nothing is cast in Travel For
 ///    self-targeted / ground-placed casts). Runs AFTER `can_cast_config` so
 ///    an out-of-range target fails on range, not LoS. A no-op on maps with no
 ///    obstacles (empty `ctx.obstacles`).
+/// 10. the Burst play's fit ([`fits_window`]): under it, a cast on the kill
+///     window's subject that would land after the window's `until` is not
+///     started. A no-op outside the play (every `Legacy` decision).
 pub fn pre_cast_ok(
     ability: AbilityType,
     def: &AbilityConfig,
@@ -120,12 +124,67 @@ pub fn pre_cast_ok(
             // from the caster's origin to the target's origin (both ~center of
             // mass at y≈1.0). Empty obstacle lists → always clear (no-op).
             has_line_of_sight(ctx.obstacles, caster_pos, target_pos)
+                && fits_window(def, caster_pos, auras, target, ctx).is_ok()
         }
         // Self-targeted / no-target casts intentionally skip range AND
         // line-of-sight. Callers like Frost Nova or Paladin Aura enforce range
         // themselves during target selection; for genuine self-buffs there is
         // no target segment to test.
         None => caster.current_mana >= def.mana_cost,
+    }
+}
+
+/// When a cast of `def`, begun now from `caster_pos` at a target standing at
+/// `target_pos`, first lands: its cast time (as `calculate_cast_time` slows
+/// it), its flight at its `projectile_speed`, and — for a cast whose only
+/// damage is over time (Rend, Corruption, a curse, Serpent Sting) — its first
+/// tick. A cast that deals nothing lands when it arrives.
+pub fn lands_after(
+    def: &AbilityConfig,
+    caster_pos: Vec3,
+    target_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+) -> f32 {
+    let cast = calculate_cast_time(def.cast_time, auras);
+    let flight = def
+        .projectile_speed
+        .filter(|speed| *speed > 0.0)
+        .map_or(0.0, |speed| caster_pos.distance(target_pos) / speed);
+    let first_tick = def
+        .applies_aura
+        .as_ref()
+        .filter(|a| a.aura_type == AuraType::DamageOverTime && def.damage_base_max <= 0.0)
+        .map_or(0.0, |a| a.tick_interval);
+    cast + flight + first_tick
+}
+
+/// The Burst play's until-aware fit: under the play
+/// ([`CombatContext::burst_window`]), a cast on the kill window's subject must
+/// land ([`lands_after`]) no later than the window's `until`. `Err((lands_at,
+/// until))` when it would not. Always `Ok` for any other cast: a target other
+/// than the subject, a window with no known `until`, or no Burst play at all
+/// — so it changes nothing outside the play.
+pub fn fits_window(
+    def: &AbilityConfig,
+    caster_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Option<(Entity, Vec3)>,
+    ctx: &CombatContext,
+) -> Result<(), (f32, f32)> {
+    let Some((entity, target_pos)) = target else {
+        return Ok(());
+    };
+    let Some(window) = ctx.burst_window().filter(|w| w.subject == entity) else {
+        return Ok(());
+    };
+    let (Some(until), Some(now)) = (window.until, ctx.situation_now()) else {
+        return Ok(());
+    };
+    let lands_at = now + lands_after(def, caster_pos, target_pos, auras);
+    if lands_at <= until {
+        Ok(())
+    } else {
+        Err((lands_at, until))
     }
 }
 
@@ -386,6 +445,9 @@ pub fn classify_pre_cast_failure(
             // check so the predicate order stays lockstep with pre_cast_ok.
             if !has_line_of_sight(ctx.obstacles, caster_pos, target_pos) {
                 return RejectionReason::LosBlocked;
+            }
+            if let Err((lands_at, until)) = fits_window(def, caster_pos, auras, target, ctx) {
+                return RejectionReason::OutlastsWindow { lands_at, until };
             }
         }
         None => {

@@ -54,7 +54,9 @@ an open, review-ready PR — nothing more.
    - movement / posture / AI (`class_ai/`, `combat_core/movement.rs`, `movement.ron`,
      `healer_postures`) → `movement_probes`, plus `camp_sweep` for team positioning;
    - a gated play or a class's peel step (`class_ai/peel.rs`, `situation::Play`)
-     → `peel_play_probe -- --ignored` (release);
+     → `peel_play_probe -- --ignored` (release); the Burst play or a class's
+     burst step (`class_ai/burst.rs`, `cast_guard::fits_window`) →
+     `burst_play_probe -- --ignored` (release);
    - new or moved systems under `src/states/play_match/` → `registration_audit`
      (in the default run — confirm it actually passed);
    - map geometry (`maps.ron`) → `arena_layout_snapshot -- --ignored`;

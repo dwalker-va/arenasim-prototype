@@ -63,7 +63,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::map_geometry::ObstacleVolume;
 use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
 use crate::states::play_match::situation::{
-    update_situations, MatchClock, PlaySet, SituationConfig, Situations, WithheldPlays,
+    update_situations, ClassSet, MatchClock, PlaySet, SituationConfig, Situations, WithheldPlays,
 };
 use crate::states::play_match::utils::is_incapacitating;
 
@@ -285,6 +285,13 @@ impl Scene {
             1 => self.withheld.team1 = plays,
             _ => self.withheld.team2 = plays,
         }
+        self
+    }
+
+    /// The classes that do not run the Burst play, in place of the shipped
+    /// `situation::BURST_EXCEPTIONS` (`WithheldPlays::burst_exceptions`).
+    pub fn burst_exceptions(mut self, classes: ClassSet) -> Self {
+        self.withheld.burst_exceptions = Some(classes);
         self
     }
 
