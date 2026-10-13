@@ -251,6 +251,72 @@ pub fn decide_warlock_action(
         }
     }
 
+    // The Burst play (TeamPlan): a kill window is open, so its enemy takes
+    // Death Coil (damage, and a horror that never breaks) and then Shadow Bolt
+    // — each only if it lands before the window's `until` (the cast gate's
+    // fit). No Shadow Bolt while being kited: the cast would be interrupted.
+    if let Some(call) = super::burst::burst_call(ctx) {
+        if let Some(pos) = ctx.combatants.get(&call.subject).map(|i| i.position) {
+            let burst = if ctx.entity_is_immune(call.subject) {
+                builder.reject(AbilityType::DeathCoil, RejectionReason::TargetImmune);
+                builder.reject(AbilityType::Shadowbolt, RejectionReason::TargetImmune);
+                false
+            } else {
+                let coil = if ctx.is_dr_immune(call.subject, DRCategory::Horror) {
+                    builder.reject(
+                        AbilityType::DeathCoil,
+                        RejectionReason::DRImmune {
+                            category: DRCategory::Horror,
+                        },
+                    );
+                    false
+                } else {
+                    try_death_coil(
+                        commands,
+                        combat_log,
+                        abilities,
+                        entity,
+                        combatant,
+                        my_pos,
+                        auras,
+                        call.subject,
+                        pos,
+                        ctx,
+                        &mut builder,
+                    )
+                };
+                coil || if being_kited {
+                    builder.reject(
+                        AbilityType::Shadowbolt,
+                        RejectionReason::PreconditionUnmet {
+                            note: "being kited — cast would be interrupted".into(),
+                        },
+                    );
+                    false
+                } else {
+                    try_shadowbolt(
+                        commands,
+                        combat_log,
+                        abilities,
+                        entity,
+                        combatant,
+                        my_pos,
+                        auras,
+                        call.subject,
+                        pos,
+                        ctx,
+                        &mut builder,
+                    )
+                }
+            };
+            if burst {
+                builder.play_step(PlayStep::Burst);
+                builder.finish();
+                return true;
+            }
+        }
+    }
+
     let enemy_has_dispeller = ctx
         .alive_enemies()
         .iter()

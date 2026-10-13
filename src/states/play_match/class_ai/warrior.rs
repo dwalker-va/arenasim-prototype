@@ -25,7 +25,7 @@ use crate::states::play_match::constants::{
 };
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
-    NoActionReason, Posture as TracePosture, RejectionReason, ResourceKind,
+    NoActionReason, PlayStep, Posture as TracePosture, RejectionReason, ResourceKind,
 };
 use crate::states::play_match::map_geometry::has_line_of_sight;
 use crate::states::play_match::movement_config::MeleeMovementConfig;
@@ -35,7 +35,6 @@ use crate::states::play_match::utils::{combatant_id, log_ability_use};
 use super::cast_guard::{cast_gate, PreCastOpts};
 use super::CombatContext;
 use crate::states::play_match::situation::Tempo;
-use crate::states::play_match::situation::{Play, Role};
 
 /// Shout range constant (applies to all shout variants)
 const SHOUT_RANGE: f32 = 30.0;
@@ -123,22 +122,57 @@ pub fn decide_warrior_action(
         return true;
     }
 
-    // The Burst play (bucket A): while the enemy healer is locked
-    // (`enemy_healer_locked`) and can't react, land Mortal Strike (the hard
-    // hit + Mortal Wounds healing debuff) BEFORE spending the GCD refreshing
-    // the Rend DoT. Under the Default play the normal order holds (Rend, then
-    // Mortal Strike). Each ability is still attempted at most once per tick
-    // (the `!burst_window` guard on the trailing Mortal Strike), keeping the
-    // decision trace clean.
-    let burst_window = match ctx.play(Role::MeleeDps) {
-        Play::Burst => true,
-        Play::Default => false,
-        // No peel tool in the kit (no Hamstring or Intimidating Shout,
-        // `peel::peel_tools`): the Warrior runs the chain its fallback orders.
-        Play::Peel { .. } => ctx.situation().fallback_play(Role::MeleeDps) == Play::Burst,
-    };
+    // The Burst play (TeamPlan): a kill window is open, so Mortal Strike on
+    // its enemy heads the chain, then — when that enemy is the one the
+    // Warrior's swings land on — a Heroic Strike that spends the rage the
+    // chain otherwise holds back for the next Mortal Strike.
+    if let Some(call) = super::burst::burst_call(ctx) {
+        if let Some(subject_pos) = ctx.combatants.get(&call.subject).map(|i| i.position) {
+            if try_mortal_strike(
+                commands,
+                combat_log,
+                game_rng,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                call.subject,
+                subject_pos,
+                ctx,
+                instant_attacks,
+                &mut builder,
+            ) {
+                builder.play_step(PlayStep::Burst);
+                builder.finish();
+                return true;
+            }
+            if call.subject == target_entity
+                && try_heroic_strike(
+                    abilities,
+                    combatant,
+                    target_pos,
+                    my_pos,
+                    auras,
+                    ctx,
+                    0.0,
+                    &mut builder,
+                )
+            {
+                builder.play_step(PlayStep::Burst);
+                builder.finish();
+                return false;
+            }
+        }
+    }
 
-    if burst_window
+    // The lock window (`CombatContext::lock_window`, `Legacy`'s rule, which
+    // the Burst play replaces): while the enemy healer is locked, Mortal
+    // Strike goes ahead of the Rend refresh. Each ability is still attempted
+    // at most once per tick (the `!lock_window` guard on the trailing Mortal
+    // Strike), keeping the decision trace clean.
+    let lock_window = ctx.lock_window();
+    if lock_window
         && try_mortal_strike(
             commands,
             combat_log,
@@ -177,9 +211,9 @@ pub fn decide_warrior_action(
         return true;
     }
 
-    // Priority 4: Mortal Strike (normal-order attempt — skipped when the burst
-    // window already attempted it above).
-    if !burst_window
+    // Priority 4: Mortal Strike (skipped when the lock window already
+    // attempted it above).
+    if !lock_window
         && try_mortal_strike(
             commands,
             combat_log,
@@ -208,6 +242,7 @@ pub fn decide_warrior_action(
         my_pos,
         auras,
         ctx,
+        RAGE_RESERVE,
         &mut builder,
     );
 
@@ -881,6 +916,10 @@ fn try_mortal_strike(
 
 /// Try to queue Heroic Strike for next auto-attack.
 /// This doesn't consume a GCD, just queues bonus damage.
+/// Queue Heroic Strike on the next swing when the rage covers it plus
+/// `reserve` — the rage the caller holds back for Mortal Strike
+/// ([`RAGE_RESERVE`] in the chain; none under the Burst play). Returns whether
+/// it was chosen.
 fn try_heroic_strike(
     abilities: &AbilityDefinitions,
     combatant: &mut Combatant,
@@ -888,28 +927,29 @@ fn try_heroic_strike(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    reserve: f32,
     builder: &mut DecisionEventBuilder<'_>,
-) {
+) -> bool {
     let ability = AbilityType::HeroicStrike;
     let def = abilities.get_unchecked(&ability);
 
     // Don't queue if one is already pending
     if combatant.next_attack_bonus_damage > 0.0 {
         builder.reject(ability, RejectionReason::AlreadyApplied);
-        return;
+        return false;
     }
 
     // Only use if we have enough rage for Heroic Strike AND reserve
-    if combatant.current_mana < (def.mana_cost + RAGE_RESERVE) {
+    if combatant.current_mana < (def.mana_cost + reserve) {
         builder.reject(
             ability,
             RejectionReason::InsufficientResource {
                 resource: ResourceKind::Rage,
                 have: combatant.current_mana,
-                need: def.mana_cost + RAGE_RESERVE,
+                need: def.mana_cost + reserve,
             },
         );
-        return;
+        return false;
     }
 
     let cleared = match cast_gate(
@@ -925,7 +965,7 @@ fn try_heroic_strike(
         Ok(cleared) => cleared,
         Err(reason) => {
             builder.reject(ability, reason);
-            return;
+            return false;
         }
     };
 
@@ -939,7 +979,7 @@ fn try_heroic_strike(
                 note: "can_cast_config failed (range/mana/stealth)".into(),
             },
         );
-        return;
+        return false;
     }
 
     builder.choose(cleared, None, true);
@@ -956,6 +996,7 @@ fn try_heroic_strike(
         combatant.class.name(),
         bonus_damage
     );
+    true
 }
 
 /// Try to use Berserker Rage while incapacitated (fear break path).

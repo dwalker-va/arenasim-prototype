@@ -49,14 +49,27 @@
 //!   and "I am pressured" (the posture machine's PRESSURED trigger). The
 //!   enemies doing the pressuring ride along as
 //!   [`TeamSituation::danger_attackers`]: the attackers a peel answers.
+//! - **`kill_window`** — an enemy is LOW (below `kill_hp_threshold`, held
+//!   until it is back above `kill_hp_release`) and nothing on its side can
+//!   heal it: every living enemy healer is locked ([`locks_healer`]), out of
+//!   mana (below `kill_oom_mana`), or cannot reach it (beyond `heal_range`
+//!   or out of sight). A team with no living healer can heal nothing. Its
+//!   [`Window`] names the most injured such enemy; its `until` is when the
+//!   first healer that is only LOCKED comes free — `None` when no healer's
+//!   return is known (out of mana, out of reach, or none at all).
 //!
 //! ## Plays
 //!
 //! A [`Play`] is what a unit does about the situation: a named reordering of
 //! its own priority chain ([`TeamSituation::play_for`]).
 //!
-//! - **`Burst`** — a DPS whose enemy healer is locked spends its hard-hitting
-//!   step first. Ungated: it is the ported burst window.
+//! - **`Burst`** — a kill window is open, so a DPS puts its BURST step at the
+//!   head of its chain: its hard hitters on the window's subject
+//!   (`class_ai::burst`), each cast only if it lands before the window's
+//!   `until` (the cast gate's fit, `class_ai::cast_guard`). A NEW behaviour,
+//!   gated under `AiProfile::TeamPlan` ([`SituationConfig::burst`]) like Peel;
+//!   withheld for measurement the same way, and not run by the classes
+//!   [`BURST_EXCEPTIONS`] names.
 //! - **`Peel`** — a teammate is in danger, so a unit other than that teammate
 //!   puts its PEEL step at the head of its chain: crowd control on one of the
 //!   teammate's [`danger_attackers`](TeamSituation::danger_attackers)
@@ -78,6 +91,7 @@
 //! | pressured | `danger_radius`, `threat_intent_radius` | the healers' PRESSURED trigger |
 //! | tempo | onset `press_advantage_margin`, release `press_release_margin` (`TeamPlan` only) | healer cover denial, the Warrior tempo reset |
 //! | danger window | dwell `danger_dwell` at a `danger_edge_margin` edge, release `danger_release` | the Peel play (`TeamPlan` only) |
+//! | kill window | low below `kill_hp_threshold`, released above `kill_hp_release`; a healer out of mana below `kill_oom_mana`, out of reach beyond `heal_range` | the Burst play (`TeamPlan` only) |
 //! | Attrition | dampening at 50% | the Druid's mana governor |
 //!
 //! Neighbours that look alike were deliberately NOT folded in, because doing
@@ -129,7 +143,9 @@ use super::class_ai::{pressing_when_ahead, stealth_visible, team_hp_sums, Combat
 use super::components::{Aura, AuraType};
 use super::constants::{DAMPENING_RAMP_SECS, DAMPENING_START_SECS};
 use super::decision_trace::{DecisionTrace, SituationChangeKind, SituationName};
+use super::map_geometry::{has_line_of_sight, ObstacleVolume};
 use super::movement_config::MovementConfig;
+use crate::states::match_config::CharacterClass;
 
 /// When the match enters [`MatchPhase::Attrition`], in seconds after the gates:
 /// the moment arena dampening reaches 50%. Heals land at half value or less
@@ -252,6 +268,18 @@ pub struct TeamSituation {
     /// classification has run, so nothing says when a fact began (see
     /// [`ally_in_danger`]).
     pub classified: bool,
+    /// The most injured enemy that is low and that no enemy healer can heal
+    /// (the module docs' `kill_window`).
+    pub kill_window: Option<Window>,
+    /// Whether this team runs the gated [`Play::Burst`]
+    /// ([`SituationConfig::burst`]).
+    pub burst_play: bool,
+    /// The classes of this team that do NOT burst ([`BURST_EXCEPTIONS`], or
+    /// the measurement override [`WithheldPlays::burst_exceptions`]).
+    pub burst_exceptions: ClassSet,
+    /// The trace's `sim_time` this was classified at: the clock a window's
+    /// `until` is on, which a cast is fitted against.
+    pub now: f32,
 }
 
 /// What a unit does about a situation: a named reordering of its own priority
@@ -261,7 +289,9 @@ pub struct TeamSituation {
 pub enum Play {
     /// The class's ordinary priority order.
     Default,
-    /// The enemy healer cannot answer: spend the hard-hitting step first.
+    /// A kill window is open: the BURST step — the class's hard hitters on
+    /// the window's subject, each only if it lands before the window's
+    /// `until` — heads the chain. Gated under `AiProfile::TeamPlan`.
     Burst,
     /// `ally` is in danger: the PEEL step — crowd control on one of its
     /// [`danger_attackers`](TeamSituation::danger_attackers) — heads the
@@ -327,14 +357,84 @@ impl TeamSituation {
     }
 
     /// The play `role` runs when it does not peel: the order of the chain
-    /// below a peel step that did not fire. Exhaustive over [`Role`], so a new
-    /// role is a compile error here until it answers.
+    /// below a peel step that did not fire. A DPS on a team that runs it
+    /// ([`Self::burst_play`]) bursts while a kill window is open. Exhaustive
+    /// over [`Role`], so a new role is a compile error here until it answers.
+    ///
+    /// Per role, not per class: a class [`Self::burst_exceptions`] names is
+    /// answered by [`Self::bursts`], which every reader of the play asks
+    /// (`CombatContext::play`, `CombatContext::burst_window`).
     pub fn fallback_play(&self, role: Role) -> Play {
         match role {
-            Role::MeleeDps | Role::RangedDps if self.enemy_healer_locked.is_some() => Play::Burst,
+            Role::MeleeDps | Role::RangedDps if self.burst_play && self.kill_window.is_some() => {
+                Play::Burst
+            }
             Role::MeleeDps | Role::RangedDps | Role::Healer => Play::Default,
         }
     }
+
+    /// Whether a unit of `class` runs the Burst play this team runs: not one
+    /// of [`Self::burst_exceptions`].
+    pub fn bursts(&self, class: CharacterClass) -> bool {
+        self.burst_play && !self.burst_exceptions.contains(class)
+    }
+}
+
+/// A set of classes, as a bit per [`CharacterClass::all`] entry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ClassSet(u16);
+
+impl ClassSet {
+    /// The set of exactly `classes`.
+    pub fn of(classes: &[CharacterClass]) -> Self {
+        Self(classes.iter().fold(0, |bits, c| bits | Self::bit(*c)))
+    }
+
+    fn bit(class: CharacterClass) -> u16 {
+        let index = CharacterClass::all()
+            .iter()
+            .position(|c| *c == class)
+            .expect("every class is in CharacterClass::all");
+        1 << index
+    }
+
+    pub fn contains(&self, class: CharacterClass) -> bool {
+        self.0 & Self::bit(class) != 0
+    }
+
+    /// Its classes, in [`CharacterClass::all`] order.
+    pub fn classes(&self) -> impl Iterator<Item = CharacterClass> + '_ {
+        CharacterClass::all()
+            .iter()
+            .copied()
+            .filter(|c| self.contains(*c))
+    }
+}
+
+/// A DPS class the Burst play is NOT used for, and the measurement that put it
+/// here. The ruling (2026-10-12): a play that measures negative in a context
+/// is not used there; each exception is named here, with its finding, and is
+/// re-checked at each milestone sweep by running the head-to-head with the
+/// exceptions lifted (`"burst_exceptions": []` in a headless config, read into
+/// [`WithheldPlays::burst_exceptions`]).
+#[derive(Clone, Copy, Debug)]
+pub struct BurstException {
+    pub class: CharacterClass,
+    /// The measurement that put it here: the findings note and its row.
+    pub finding: &'static str,
+}
+
+/// The classes the Burst play is not used for (see [`BurstException`]).
+pub const BURST_EXCEPTIONS: &[BurstException] = &[];
+
+/// [`BURST_EXCEPTIONS`] as a set.
+pub fn burst_exception_classes() -> ClassSet {
+    ClassSet::of(
+        &BURST_EXCEPTIONS
+            .iter()
+            .map(|e| e.class)
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// The situation of both teams. Team `t` lives at index `t - 1`.
@@ -388,10 +488,25 @@ pub struct SituationConfig {
     /// which a threat pressures FIRMLY, skipping the dwell
     /// ([`firmly_pressured`]).
     pub danger_edge_margin: f32,
+    /// `shared.kill_hp_threshold`: an enemy below this health fraction is
+    /// low, and can open a kill window.
+    pub kill_hp_threshold: f32,
+    /// `shared.kill_hp_release`: a kill window's subject stays low until it
+    /// is back above this fraction.
+    pub kill_hp_release: f32,
+    /// `shared.kill_oom_mana`: an enemy healer with less mana than this
+    /// cannot heal.
+    pub kill_oom_mana: f32,
+    /// `shared.heal_range`: an enemy healer farther than this from a unit
+    /// cannot heal it.
+    pub heal_range: f32,
     /// Whether the team runs the gated [`Play::Peel`]. Off until
     /// [`Self::under`] puts the team under `TeamPlan`, so a context classified
     /// with the bare thresholds (a test's) never peels.
     pub peel: bool,
+    /// Whether the team runs the gated [`Play::Burst`] — off until
+    /// [`Self::under`] puts it under `TeamPlan`, as [`Self::peel`] is.
+    pub burst: bool,
     /// The gated plays each team is denied ([`WithheldPlays`]), applied by
     /// [`Self::for_team`].
     pub withheld: WithheldPlays,
@@ -414,7 +529,12 @@ impl SituationConfig {
             danger_dwell: config.shared.danger_dwell,
             danger_release: config.shared.danger_release,
             danger_edge_margin: config.shared.danger_edge_margin,
+            kill_hp_threshold: config.shared.kill_hp_threshold,
+            kill_hp_release: config.shared.kill_hp_release,
+            kill_oom_mana: config.shared.kill_oom_mana,
+            heal_range: config.shared.heal_range,
             peel: false,
+            burst: false,
             withheld: WithheldPlays::default(),
         }
     }
@@ -423,14 +543,19 @@ impl SituationConfig {
     /// hysteresis band is a behaviour change, so it is gated: `TeamPlan` keeps
     /// the configured release, and `Legacy` releases at the onset — no band,
     /// which is exactly the unlatched `>=` test it has always run. The Peel
-    /// play is gated the same way: `TeamPlan` runs it, `Legacy` never does.
-    /// Every other threshold is the same under both.
+    /// and Burst plays are gated the same way: `TeamPlan` runs them, `Legacy`
+    /// never does. Every other threshold is the same under both.
     pub fn under(self, profile: AiProfile) -> Self {
         match profile {
-            AiProfile::TeamPlan => Self { peel: true, ..self },
+            AiProfile::TeamPlan => Self {
+                peel: true,
+                burst: true,
+                ..self
+            },
             AiProfile::Legacy => Self {
                 press_release_margin: self.press_advantage_margin,
                 peel: false,
+                burst: false,
                 ..self
             },
         }
@@ -440,10 +565,20 @@ impl SituationConfig {
     /// [`Self::under`], less the plays [`Self::withheld`] denies the team.
     pub fn for_team(self, team: u8, profile: AiProfile) -> Self {
         let cfg = self.under(profile);
+        let denied = self.withheld.for_team(team);
         Self {
-            peel: cfg.peel && !self.withheld.for_team(team).denies(&PEEL),
+            peel: cfg.peel && !denied.denies(&PEEL),
+            burst: cfg.burst && !denied.denies(&Play::Burst),
             ..cfg
         }
+    }
+
+    /// The classes that do not burst: [`BURST_EXCEPTIONS`], unless the
+    /// measurement override [`WithheldPlays::burst_exceptions`] names others.
+    pub fn burst_exceptions(&self) -> ClassSet {
+        self.withheld
+            .burst_exceptions
+            .unwrap_or_else(burst_exception_classes)
     }
 }
 
@@ -455,6 +590,7 @@ impl SituationConfig {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PlaySet {
     peel: bool,
+    burst: bool,
 }
 
 impl PlaySet {
@@ -471,7 +607,8 @@ impl PlaySet {
     pub fn withhold(&mut self, play: &Play) {
         match play {
             Play::Peel { .. } => self.peel = true,
-            Play::Default | Play::Burst => {}
+            Play::Burst => self.burst = true,
+            Play::Default => {}
         }
     }
 
@@ -479,7 +616,8 @@ impl PlaySet {
     pub fn denies(&self, play: &Play) -> bool {
         match play {
             Play::Peel { .. } => self.peel,
-            Play::Default | Play::Burst => false,
+            Play::Burst => self.burst,
+            Play::Default => false,
         }
     }
 }
@@ -490,22 +628,27 @@ pub const PEEL: Play = Play::Peel {
     ally: Entity::PLACEHOLDER,
 };
 
-/// The gated plays ([`Play::Peel`]) each team is DENIED, for measurement: a
-/// team under `TeamPlan` with a play withheld is the paired control the play
-/// is measured against — in a tier-4 probe (the same seed bank with the play
-/// off) and in a head-to-head (one side with it, one without, on one seed).
+/// The gated plays ([`Play::Peel`], [`Play::Burst`]) each team is DENIED, for
+/// measurement: a team under `TeamPlan` with a play withheld is the paired
+/// control the play is measured against — in a tier-4 probe (the same seed
+/// bank with the play off) and in a head-to-head (one side with it, one
+/// without, on one seed).
 ///
 /// A MEASUREMENT CONTROL, not a behaviour switch: nothing in the game sets it,
 /// but it is reachable from a headless match's JSON
-/// (`team1_withheld_plays` / `team2_withheld_plays`) and so from `--replay`,
-/// which honours the same config. The default withholds nothing. It lives
-/// only as long as the plays it names stay gated: when a play graduates or is
-/// deleted (§4.5) its flag goes, and with the last gated play this type and
-/// the two config fields are deleted too.
+/// (`team1_withheld_plays` / `team2_withheld_plays`, `burst_exceptions`) and
+/// so from `--replay`, which honours the same config. The default withholds
+/// nothing. It lives only as long as the plays it names stay gated: when a
+/// play graduates or is deleted (§4.5) its flag goes, and with the last gated
+/// play this type and the config fields are deleted too.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WithheldPlays {
     pub team1: PlaySet,
     pub team2: PlaySet,
+    /// Replaces [`BURST_EXCEPTIONS`] for both teams when set: how a milestone
+    /// sweep re-checks an exception (`Some(ClassSet::default())` lifts them
+    /// all). `None`, the default, keeps the shipped exceptions.
+    pub burst_exceptions: Option<ClassSet>,
 }
 
 impl WithheldPlays {
@@ -519,16 +662,17 @@ impl WithheldPlays {
         }
     }
 
-    /// Parse a config's list of gated play names (`"Peel"`) into the set it
-    /// denies.
+    /// Parse a config's list of gated play names (`"Peel"`, `"Burst"`) into
+    /// the set it denies.
     pub fn parse_set(names: &[String]) -> Result<PlaySet, String> {
         let mut set = PlaySet::default();
         for name in names {
             let play = match name.as_str() {
                 "Peel" | "peel" => PEEL,
+                "Burst" | "burst" => Play::Burst,
                 other => {
                     return Err(format!(
-                        "Unknown withheld play: '{other}'. Gated plays: Peel"
+                        "Unknown withheld play: '{other}'. Gated plays: Peel, Burst"
                     ))
                 }
             };
@@ -560,6 +704,7 @@ pub fn classify(
     classify_roster(
         &snapshot.combatants,
         &snapshot.active_auras,
+        &snapshot.obstacles,
         team,
         prev,
         clock,
@@ -567,11 +712,13 @@ pub fn classify(
     )
 }
 
-/// [`classify`] over the two maps it reads, so a context built without a
-/// snapshot (`CombatContext::classified`) can classify its own roster.
+/// [`classify`] over what it reads — the roster, its auras and the map's
+/// obstacles — so a context built without a snapshot
+/// (`CombatContext::classified`) can classify its own roster.
 pub fn classify_roster(
     roster: &BTreeMap<Entity, CombatantInfo>,
     auras: &BTreeMap<Entity, Vec<Aura>>,
+    obstacles: &[ObstacleVolume],
     team: u8,
     prev: &TeamSituation,
     clock: &MatchClock,
@@ -596,7 +743,108 @@ pub fn classify_roster(
         in_danger: danger.in_danger,
         danger_cleared_at: danger.cleared_at,
         classified: true,
+        kill_window: kill_window(roster, auras, obstacles, team, prev, clock.now, cfg),
+        burst_play: cfg.burst,
+        burst_exceptions: cfg.burst_exceptions(),
+        now: clock.now,
     }
+}
+
+/// When `healer` (an enemy healer, alive) can next heal `subject`:
+/// `Some(Some(t))` — it is only LOCKED, and the longest locking CC on it runs
+/// out at `t`; `Some(None)` — it cannot, and when it can again is not known
+/// (out of mana, out of reach, out of sight); `None` — it can heal now.
+fn healer_returns_at(
+    healer: &CombatantInfo,
+    subject: &CombatantInfo,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    obstacles: &[ObstacleVolume],
+    now: f32,
+    cfg: &SituationConfig,
+) -> Option<Option<f32>> {
+    let out_of_mana = healer.current_mana < cfg.kill_oom_mana;
+    let out_of_reach = healer.entity != subject.entity
+        && (healer.position.distance(subject.position) > cfg.heal_range
+            || !has_line_of_sight(obstacles, healer.position, subject.position));
+    if out_of_mana || out_of_reach {
+        return Some(None);
+    }
+    auras
+        .get(&healer.entity)?
+        .iter()
+        .filter(|a| locks_healer(a.effect_type))
+        .map(|a| a.duration)
+        .reduce(f32::max)
+        .map(|remaining| Some(now + remaining))
+}
+
+/// The `kill_window`: the most injured enemy of `team` (entity order on a
+/// tie) that is LOW and that no living enemy healer can heal — see the module
+/// docs. Low is `kill_hp_threshold` to open, and `kill_hp_release` to hold an
+/// open window's subject. The subject is one the team can SEE (a stealthed
+/// enemy is no kill window), and not a pet.
+///
+/// `until` is the earliest time a healer that is only locked comes free; a
+/// healer whose return is not known adds no deadline, and with none known
+/// the window has no `until`. The onset carries while the subject holds.
+fn kill_window(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    obstacles: &[ObstacleVolume],
+    team: u8,
+    prev: &TeamSituation,
+    now: f32,
+    cfg: &SituationConfig,
+) -> Option<Window> {
+    let open = prev.kill_window;
+    let healers: SmallVec<[&CombatantInfo; 2]> = roster
+        .values()
+        .filter(|i| i.team != team && i.is_alive && !i.is_pet && i.class.is_healer())
+        .collect();
+    let mut best: Option<(f32, Window)> = None;
+    for subject in roster.values().filter(|i| {
+        i.team != team
+            && i.is_alive
+            && !i.is_pet
+            && stealth_visible(i.stealthed, false, has_shadow_sight(auras, i.entity))
+    }) {
+        let is_open = open.is_some_and(|w| w.subject == subject.entity);
+        let bar = if is_open {
+            cfg.kill_hp_release
+        } else {
+            cfg.kill_hp_threshold
+        };
+        let hp = subject.health_pct();
+        if hp >= bar {
+            continue;
+        }
+        let mut until: Option<f32> = None;
+        let mut healable = false;
+        for healer in &healers {
+            match healer_returns_at(healer, subject, auras, obstacles, now, cfg) {
+                None => healable = true,
+                Some(Some(t)) => until = Some(until.map_or(t, |u: f32| u.min(t))),
+                Some(None) => {}
+            }
+        }
+        if healable {
+            continue;
+        }
+        if best.is_none_or(|(best_hp, _)| hp < best_hp) {
+            let since = open
+                .filter(|w| w.subject == subject.entity)
+                .map_or(now, |w| w.since);
+            best = Some((
+                hp,
+                Window {
+                    subject: subject.entity,
+                    since,
+                    until,
+                },
+            ));
+        }
+    }
+    best.map(|(_, w)| w)
 }
 
 fn phase(clock: &MatchClock) -> MatchPhase {
@@ -977,6 +1225,9 @@ fn record_transitions(
     {
         trace.record_window_change(team, SituationName::EnemyHealerLocked, kind, &window);
     }
+    if let Some((kind, window)) = window_change(prev.kill_window, next.kill_window) {
+        trace.record_window_change(team, SituationName::KillWindow, kind, &window);
+    }
 }
 
 /// How a window moved between two classifications, if it did: opened, closed,
@@ -1075,6 +1326,7 @@ mod tests {
         classify_roster(
             &f.roster,
             &f.auras,
+            &[],
             1,
             prev,
             &MatchClock::after_gates(now),
@@ -1146,6 +1398,7 @@ mod tests {
         let team2 = classify_roster(
             &f.roster,
             &f.auras,
+            &[],
             2,
             &TeamSituation::default(),
             &MatchClock::after_gates(0.0),
@@ -1206,6 +1459,7 @@ mod tests {
             teamplan,
             SituationConfig {
                 peel: true,
+                burst: true,
                 ..SituationConfig::default()
             }
         );
@@ -1215,9 +1469,10 @@ mod tests {
             SituationConfig {
                 press_release_margin: teamplan.press_advantage_margin,
                 peel: false,
+                burst: false,
                 ..teamplan
             },
-            "only the release and the gated Peel play differ"
+            "only the release and the gated plays differ"
         );
         // With no band the latch is the plain test from each side, whatever
         // the previous tempo.
@@ -1258,24 +1513,76 @@ mod tests {
         assert_eq!(changes, vec!["\"onset\"", "\"end\""]);
     }
 
+    /// Burst answers a kill window, for a DPS on a team that runs the play.
+    /// Each condition removed gives the Default play back: no window, a team
+    /// that does not run it, a healer. A locked enemy healer alone — the
+    /// situation the retired lock-window rules answered — is not a Burst.
     #[test]
-    fn only_melee_and_ranged_dps_burst() {
-        let locked = TeamSituation {
-            enemy_healer_locked: Some(Window {
-                subject: Entity::from_raw(1),
-                since: 0.0,
-                until: None,
-            }),
+    fn only_melee_and_ranged_dps_burst_and_only_into_a_kill_window() {
+        let window = Window {
+            subject: Entity::from_raw(1),
+            since: 0.0,
+            until: None,
+        };
+        let open = TeamSituation {
+            kill_window: Some(window),
+            burst_play: true,
             ..Default::default()
         };
         let me = Entity::from_raw(9);
-        assert_eq!(locked.play_for(Role::MeleeDps, me), Play::Burst);
-        assert_eq!(locked.play_for(Role::RangedDps, me), Play::Burst);
-        assert_eq!(locked.play_for(Role::Healer, me), Play::Default);
-        assert_eq!(
-            TeamSituation::default().play_for(Role::MeleeDps, me),
-            Play::Default
+        assert_eq!(open.play_for(Role::MeleeDps, me), Play::Burst);
+        assert_eq!(open.play_for(Role::RangedDps, me), Play::Burst);
+        assert_eq!(open.play_for(Role::Healer, me), Play::Default);
+        let gated = TeamSituation {
+            burst_play: false,
+            ..open.clone()
+        };
+        assert_eq!(gated.play_for(Role::MeleeDps, me), Play::Default);
+        let closed = TeamSituation {
+            kill_window: None,
+            enemy_healer_locked: Some(window),
+            ..open.clone()
+        };
+        assert_eq!(closed.play_for(Role::RangedDps, me), Play::Default);
+    }
+
+    /// A class [`BURST_EXCEPTIONS`] (or the measurement override) names does
+    /// not burst; every other class of a team that runs the play does.
+    #[test]
+    fn a_burst_exception_names_a_class_that_does_not_burst() {
+        let cfg = SituationConfig {
+            withheld: WithheldPlays {
+                burst_exceptions: Some(ClassSet::of(&[CharacterClass::Hunter])),
+                ..Default::default()
+            },
+            ..SituationConfig::default()
+        }
+        .for_team(1, AiProfile::TeamPlan);
+        let f = fixture();
+        let s = classify_roster(
+            &f.roster,
+            &f.auras,
+            &[],
+            1,
+            &TeamSituation::default(),
+            &MatchClock::after_gates(30.0),
+            &cfg,
         );
+        assert!(!s.bursts(CharacterClass::Hunter));
+        assert!(s.bursts(CharacterClass::Warrior));
+        // The shipped exceptions, unless overridden.
+        assert_eq!(
+            SituationConfig::default().burst_exceptions(),
+            burst_exception_classes()
+        );
+        let lifted = SituationConfig {
+            withheld: WithheldPlays {
+                burst_exceptions: Some(ClassSet::default()),
+                ..Default::default()
+            },
+            ..SituationConfig::default()
+        };
+        assert_eq!(lifted.burst_exceptions(), ClassSet::default());
     }
 
     /// Peel heads every role's play while a teammate is in danger with an
@@ -1294,12 +1601,13 @@ mod tests {
                 until: None,
             }),
             danger_attackers: [attacker].into_iter().collect(),
-            enemy_healer_locked: Some(Window {
+            kill_window: Some(Window {
                 subject: Entity::from_raw(4),
                 since: 0.0,
                 until: None,
             }),
             peel_play: true,
+            burst_play: true,
             ..Default::default()
         };
         for role in [Role::MeleeDps, Role::RangedDps, Role::Healer] {
@@ -1368,7 +1676,206 @@ mod tests {
             WithheldPlays::parse_set(&["Peel".to_string()]),
             Ok(PlaySet::of(&[PEEL]))
         );
-        assert!(WithheldPlays::parse_set(&["Burst".to_string()]).is_err());
+        assert!(WithheldPlays::parse_set(&["Default".to_string()]).is_err());
+    }
+
+    #[test]
+    fn withheld_plays_deny_burst_to_one_team_only() {
+        let cfg = SituationConfig {
+            withheld: WithheldPlays {
+                team1: PlaySet::of(&[Play::Burst]),
+                ..Default::default()
+            },
+            ..SituationConfig::default()
+        };
+        assert!(!cfg.for_team(1, AiProfile::TeamPlan).burst);
+        assert!(cfg.for_team(1, AiProfile::TeamPlan).peel, "Peel stays");
+        assert!(cfg.for_team(2, AiProfile::TeamPlan).burst);
+        assert!(!cfg.for_team(2, AiProfile::Legacy).burst);
+        assert_eq!(
+            WithheldPlays::parse_set(&["Burst".to_string(), "Peel".to_string()]),
+            Ok(PlaySet::of(&[Play::Burst, PEEL]))
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // kill_window
+    // -----------------------------------------------------------------------
+
+    fn set_hp(f: &mut Fixture, who: Entity, hp: f32) {
+        f.roster.get_mut(&who).unwrap().current_health = hp;
+    }
+
+    /// The Mage (team 2's DPS) low at 20%, its Priest 10yd off: the window
+    /// opens on the Mage only when the Priest cannot heal it — and each way
+    /// it cannot is its own pair.
+    #[test]
+    fn a_kill_window_is_a_low_enemy_its_healer_cannot_heal() {
+        let mut f = fixture();
+        let (healer, mage) = (f.healer, f.mage);
+        set_hp(&mut f, mage, 20.0);
+        place(&mut f, mage, 0.0, 0.0, None);
+        place(&mut f, healer, 10.0, 0.0, None);
+        let quiet = TeamSituation::default();
+        // Free and in reach: no window.
+        assert_eq!(classify_now(&f, &quiet, 30.0).kill_window, None);
+        // Locked: a window until the lock ends.
+        f.auras.insert(healer, vec![cc(AuraType::Polymorph, 4.0)]);
+        let w = classify_now(&f, &quiet, 30.0)
+            .kill_window
+            .expect("a locked healer opens a kill window");
+        assert_eq!((w.subject, w.since, w.until), (mage, 30.0, Some(34.0)));
+        // A root does not lock: no window.
+        f.auras.insert(healer, vec![cc(AuraType::Root, 4.0)]);
+        assert_eq!(classify_now(&f, &quiet, 30.0).kill_window, None);
+        f.auras.clear();
+        // Out of mana: a window with no known end.
+        let cfg = SituationConfig::default();
+        f.roster.get_mut(&healer).unwrap().current_mana = cfg.kill_oom_mana - 1.0;
+        let w = classify_now(&f, &quiet, 30.0).kill_window.expect("OOM");
+        assert_eq!((w.subject, w.until), (mage, None));
+        f.roster.get_mut(&healer).unwrap().current_mana = cfg.kill_oom_mana;
+        assert_eq!(classify_now(&f, &quiet, 30.0).kill_window, None);
+        // Out of heal range: a window; at the range, none.
+        place(&mut f, healer, cfg.heal_range + 0.5, 0.0, None);
+        assert!(classify_now(&f, &quiet, 30.0).kill_window.is_some());
+        place(&mut f, healer, cfg.heal_range - 0.5, 0.0, None);
+        assert_eq!(classify_now(&f, &quiet, 30.0).kill_window, None);
+        // Out of sight behind a pillar: a window.
+        let pillar = ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(5.0, 0.0),
+            radius: 1.5,
+            base_y: -1.0,
+            height: 10.0,
+        };
+        place(&mut f, healer, 10.0, 0.0, None);
+        let behind = classify_roster(
+            &f.roster,
+            &f.auras,
+            &[pillar],
+            1,
+            &quiet,
+            &MatchClock::after_gates(30.0),
+            &cfg,
+        );
+        assert_eq!(behind.kill_window.map(|w| w.subject), Some(mage));
+    }
+
+    /// Low is below `kill_hp_threshold` to open, and an open window holds its
+    /// subject until it is back above `kill_hp_release`, keeping its onset.
+    #[test]
+    fn the_kill_window_opens_below_its_threshold_and_releases_above_its_release() {
+        let cfg = SituationConfig::default();
+        assert!(cfg.kill_hp_release > cfg.kill_hp_threshold, "a band ships");
+        let mut f = fixture();
+        let (healer, mage) = (f.healer, f.mage);
+        f.auras.insert(healer, vec![cc(AuraType::Stun, 6.0)]);
+        set_hp(&mut f, mage, 100.0 * cfg.kill_hp_threshold);
+        let quiet = classify_now(&f, &TeamSituation::default(), 30.0);
+        assert_eq!(quiet.kill_window, None, "strictly below the threshold");
+        set_hp(&mut f, mage, 100.0 * cfg.kill_hp_threshold - 1.0);
+        let open = classify_now(&f, &quiet, 30.5);
+        assert_eq!(open.kill_window.map(|w| w.since), Some(30.5));
+        // Healed into the band: held, onset kept.
+        set_hp(&mut f, mage, 100.0 * (cfg.kill_hp_threshold + cfg.kill_hp_release) / 2.0);
+        let held = classify_now(&f, &open, 31.0);
+        assert_eq!(held.kill_window.map(|w| (w.subject, w.since)), Some((mage, 30.5)));
+        // ...but the same health with no window open opens nothing.
+        assert_eq!(classify_now(&f, &quiet, 31.0).kill_window, None);
+        // Above the release: closed.
+        set_hp(&mut f, mage, 100.0 * cfg.kill_hp_release + 1.0);
+        assert_eq!(classify_now(&f, &held, 31.5).kill_window, None);
+    }
+
+    /// The window names the MOST injured qualifying enemy, never a pet or an
+    /// enemy the team cannot see; a healer that is itself low and locked is
+    /// one (it cannot heal itself), and one that is free is not.
+    #[test]
+    fn the_kill_window_names_the_most_injured_enemy_it_can_see() {
+        let cfg = SituationConfig::default();
+        let mut f = fixture();
+        let (healer, mage) = (f.healer, f.mage);
+        set_hp(&mut f, mage, 30.0);
+        set_hp(&mut f, healer, 10.0);
+        let quiet = TeamSituation::default();
+        // The Priest free: it heals itself and the Mage.
+        assert_eq!(classify_now(&f, &quiet, 30.0).kill_window, None);
+        f.auras.insert(healer, vec![cc(AuraType::Fear, 3.0)]);
+        let w = classify_now(&f, &quiet, 30.0).kill_window.unwrap();
+        assert_eq!((w.subject, w.until), (healer, Some(33.0)));
+        // Stealthed, the Priest is not seen: the Mage instead.
+        f.roster.get_mut(&healer).unwrap().stealthed = true;
+        assert_eq!(
+            classify_now(&f, &quiet, 30.0).kill_window.map(|w| w.subject),
+            Some(mage)
+        );
+        f.roster.get_mut(&healer).unwrap().stealthed = false;
+        // A pet is never the subject.
+        f.roster.get_mut(&healer).unwrap().is_pet = true;
+        set_hp(&mut f, mage, 100.0);
+        let s = classify_now(&f, &quiet, 30.0);
+        assert_eq!(
+            s.kill_window.map(|w| w.subject),
+            None,
+            "no non-pet enemy is low ({})",
+            cfg.kill_hp_threshold
+        );
+    }
+
+    /// A team with no living healer heals nothing: a low enemy is a kill
+    /// window with no known end. A second healer that can still heal closes
+    /// it; with both locked, `until` is the first to come free.
+    #[test]
+    fn every_enemy_healer_must_be_unable_and_until_is_the_first_to_return() {
+        let mut f = fixture();
+        let (healer, mage, rogue) = (f.healer, f.mage, f.rogue);
+        set_hp(&mut f, mage, 20.0);
+        f.roster.get_mut(&healer).unwrap().is_alive = false;
+        let quiet = TeamSituation::default();
+        let w = classify_now(&f, &quiet, 30.0).kill_window.unwrap();
+        assert_eq!((w.subject, w.until), (mage, None));
+        // Two enemy healers: the Priest (alive again) and the Rogue's slot
+        // moved to team 2 as a Druid.
+        f.roster.get_mut(&healer).unwrap().is_alive = true;
+        {
+            let druid = f.roster.get_mut(&rogue).unwrap();
+            druid.team = 2;
+            druid.class = CharacterClass::Druid;
+        }
+        f.auras.insert(healer, vec![cc(AuraType::Stun, 5.0)]);
+        assert_eq!(
+            classify_now(&f, &quiet, 30.0).kill_window,
+            None,
+            "the free Druid heals"
+        );
+        f.auras.insert(rogue, vec![cc(AuraType::Polymorph, 2.0)]);
+        let w = classify_now(&f, &quiet, 30.0).kill_window.unwrap();
+        assert_eq!(w.until, Some(32.0), "the Druid comes free first");
+    }
+
+    #[test]
+    fn kill_window_transitions_are_recorded() {
+        let mut f = fixture();
+        let mut trace = DecisionTrace::default();
+        let (healer, mage) = (f.healer, f.mage);
+        let quiet = classify_now(&f, &TeamSituation::default(), 5.0);
+        set_hp(&mut f, mage, 10.0);
+        f.auras.insert(healer, vec![cc(AuraType::Stun, 3.0)]);
+        let open = classify_now(&f, &quiet, 5.0);
+        record_transitions(1, &quiet, &open, &mut trace);
+        let names: Vec<(String, String)> = trace
+            .pending_events
+            .iter()
+            .map(|e| {
+                let v = serde_json::to_value(e).unwrap();
+                (v["name"].to_string(), v["change"].to_string())
+            })
+            .filter(|(n, _)| n == "\"kill_window\"")
+            .collect();
+        assert_eq!(
+            names,
+            vec![("\"kill_window\"".to_string(), "\"onset\"".to_string())]
+        );
     }
 
     #[test]
@@ -1707,6 +2214,7 @@ mod tests {
             classify_roster(
                 &f.roster,
                 &f.auras,
+                &[],
                 1,
                 prev,
                 &MatchClock::after_gates(now),
@@ -1728,6 +2236,7 @@ mod tests {
             classify_roster(
                 &f.roster,
                 &f.auras,
+                &[],
                 1,
                 &TeamSituation::default(),
                 &clock,

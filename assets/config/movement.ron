@@ -66,6 +66,14 @@
         danger_dwell: 0.1,
         danger_release: 0.1,
         danger_edge_margin: 1.0,
+        // kill_window: an enemy below kill_hp_threshold (health fraction)
+        // that no enemy healer can heal — every one locked, out of mana
+        // (below kill_oom_mana) or out of heal_range / sight. An open
+        // window's enemy stays low until back above kill_hp_release. Read
+        // only by the TeamPlan Burst play.
+        kill_hp_threshold: 0.35,
+        kill_hp_release: 0.45,
+        kill_oom_mana: 20.0,
     ),
     priest: (
         weights: (

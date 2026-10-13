@@ -100,6 +100,28 @@ pub fn decide_mage_action(
         }
     }
 
+    // The Burst play (TeamPlan): a kill window is open, so Frostbolt on its
+    // enemy heads the chain — only if it lands before the window's `until`
+    // (the cast gate's fit).
+    if let Some(call) = super::burst::burst_call(ctx) {
+        if try_frostbolt_on(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            call.subject,
+            &mut builder,
+        ) {
+            builder.play_step(PlayStep::Burst);
+            builder.finish();
+            return true;
+        }
+    }
+
     // Priority 1: Ice Barrier (self-shield)
     if try_ice_barrier(
         commands,
@@ -826,13 +848,39 @@ fn try_frostbolt(
     ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
-    let ability = AbilityType::Frostbolt;
-    let def = abilities.get_unchecked(&ability);
-
     let Some(target_entity) = combatant.target else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
+        builder.reject(AbilityType::Frostbolt, RejectionReason::NoValidTarget);
         return false;
     };
+    try_frostbolt_on(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        target_entity,
+        builder,
+    )
+}
+
+/// Try to cast Frostbolt on `target_entity`.
+fn try_frostbolt_on(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    target_entity: Entity,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::Frostbolt;
+    let def = abilities.get_unchecked(&ability);
 
     let Some(target_info) = ctx.combatants.get(&target_entity) else {
         builder.reject(ability, RejectionReason::NoValidTarget);

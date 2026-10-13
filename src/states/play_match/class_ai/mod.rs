@@ -14,6 +14,7 @@
 //! Shared helpers like `CombatContext`, `CombatantInfo`, and healer utilities
 //! live in this module and are used by all class AI files.
 
+pub mod burst;
 pub mod cast_guard;
 pub mod caster_healer_posture;
 pub mod combat_snapshot;
@@ -53,7 +54,9 @@ use super::decision_trace::RejectionReason;
 use super::is_spell_school_locked;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume};
 use super::match_config::CharacterClass;
-use super::situation::{classify_roster, MatchClock, Play, Role, SituationConfig, TeamSituation};
+use super::situation::{
+    classify_roster, MatchClock, Play, Role, SituationConfig, TeamSituation, Window,
+};
 use super::utils::log_ability_use;
 use crate::combat::log::CombatLog;
 
@@ -308,6 +311,7 @@ impl<'a> CombatContext<'a> {
         let situation = classify_roster(
             self.roster,
             self.active_auras,
+            self.obstacles,
             self.observer_team,
             &TeamSituation::default(),
             &clock,
@@ -338,9 +342,54 @@ impl<'a> CombatContext<'a> {
 
     /// The play this unit runs as `role` ([`TeamSituation::play_for`]): its
     /// team's situation, seen from where it stands — a unit never peels for
-    /// itself. Panics where [`Self::situation`] does.
+    /// itself, and a class the Burst play is not used for
+    /// ([`TeamSituation::bursts`]) never bursts. Panics where
+    /// [`Self::situation`] does.
     pub fn play(&self, role: Role) -> Play {
-        self.situation().play_for(role, self.self_entity)
+        let situation = self.situation();
+        match situation.play_for(role, self.self_entity) {
+            Play::Burst if !self.self_bursts(situation) => Play::Default,
+            play => play,
+        }
+    }
+
+    fn self_bursts(&self, situation: &TeamSituation) -> bool {
+        self.self_info()
+            .is_some_and(|info| situation.bursts(info.class))
+    }
+
+    /// The kill window this unit is bursting into: `Some` when its chain runs
+    /// under the Burst play — its play is Burst, or it is a Peel whose chain
+    /// below the peel step falls back to Burst — and its class bursts.
+    /// `None` on a context nobody classified (a pet's): unlike
+    /// [`Self::situation`] it does not panic, because the cast gate asks it of
+    /// every targeted cast ([`cast_guard::fits_window`]).
+    pub fn burst_window(&self) -> Option<Window> {
+        let situation = self.situation.as_ref()?;
+        let role = Role::of(self.self_info()?.class);
+        (situation.fallback_play(role) == Play::Burst && self.self_bursts(situation))
+            .then_some(situation.kill_window)
+            .flatten()
+    }
+
+    /// The lock-window rule, as `Legacy` has always run it: a DPS whose enemy
+    /// healer is locked (`enemy_healer_locked`) reorders its chain toward its
+    /// hard hitter (the Warrior's Mortal Strike ahead of Rend, the Hunter's
+    /// Aimed Shot ahead of its rotation). The Burst play REPLACES it: a unit
+    /// that runs the play ([`TeamSituation::bursts`]) never runs this, so it
+    /// runs only under `Legacy`, with the play withheld, or for a class the
+    /// play's exceptions name. Kept rather than deleted because deleting it
+    /// moves `Legacy` (22 of 3,600 matches of the AS-275 byte-identity
+    /// batch). Panics where [`Self::situation`] does.
+    pub fn lock_window(&self) -> bool {
+        let situation = self.situation();
+        !self.self_bursts(situation) && situation.enemy_healer_locked.is_some()
+    }
+
+    /// The clock this unit's situation was classified at (the trace's
+    /// `sim_time`); `None` on a context nobody classified.
+    pub fn situation_now(&self) -> Option<f32> {
+        self.situation.as_ref().map(|s| s.now)
     }
 
     /// True when a living enemy is in the arena that this unit cannot see —
@@ -830,7 +879,7 @@ impl<'a> CombatContext<'a> {
             Some(situation) => decision_trace
                 .start_ability_decision(actor_view, target_view)
                 .with_situation(situation)
-                .with_play(situation.play_for(Role::of(actor_view_class), self.self_entity)),
+                .with_play(self.play(Role::of(actor_view_class))),
             None => decision_trace.start_ability_decision(actor_view, target_view),
         })
     }

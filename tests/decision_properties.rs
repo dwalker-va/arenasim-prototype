@@ -40,10 +40,13 @@
 //! injured ally, so "ally cycloned" is also "ally injured") — and put the
 //! unit and its ally just either side of every healer's guaranteed-heal
 //! bar. The Rogue meets each in and out of stealth. Every situation is under
-//! `Legacy` but three, which put the unit's team under `TeamPlan` with its
-//! ally dying under attack — the Peel play's situation — so every property
-//! also judges the gated plays' choices
-//! ([`every_peel_tool_is_reached_and_every_peel_is_aimed_at_the_attacker`]). The roster is the unit,
+//! `Legacy` but six, which put the unit's team under `TeamPlan`: three with
+//! its ally dying under attack — the Peel play's situation — and three with
+//! its target low and the enemy healer locked for 6s, locked for 1s, or free
+//! — the Burst play's kill window, short and long, and its control — so
+//! every property also judges the gated plays' choices
+//! ([`every_peel_tool_is_reached_and_every_peel_is_aimed_at_the_attacker`],
+//! [`every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window`]). The roster is the unit,
 //! an ally, the enemy target and an enemy Priest. The unit's CC target is the
 //! one `acquire_targets` would leave it ([`cc_target`]). About 160,000
 //! scenes, built in one to two seconds in the test profile.
@@ -169,7 +172,15 @@ enum Hold {
     EnemyPolymorph,
     /// A Polymorph from the deciding unit's OWN team (breaks on any damage).
     FriendlyPolymorph,
+    /// A 1s stun from the deciding unit's OWN team (never breaks): a lock
+    /// whose end is close, which a cast with a cast time cannot fit into.
+    FriendlyStun,
 }
+
+/// How long [`Hold::FriendlyStun`] has left.
+const SHORT_LOCK: f32 = 1.0;
+/// How long a [`Hold::FriendlyPolymorph`] has left.
+const POLYMORPH_LEFT: f32 = 6.0;
 
 /// A cast lock on the deciding unit that does not incapacitate it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -403,6 +414,28 @@ fn situations(class: CharacterClass, bars: &[f32]) -> Vec<Situation> {
         focus_healer: true,
         ..CALM
     });
+    // Under TeamPlan a low target its healer cannot heal is a kill window,
+    // and a DPS bursts into it: a long lock, a short one (only what lands
+    // inside a second fits), and the control with the healer free.
+    for (name, healer_aura) in [
+        (
+            "target low, enemy healer polymorphed by my team, TeamPlan",
+            Hold::FriendlyPolymorph,
+        ),
+        (
+            "target low, enemy healer stunned for 1s, TeamPlan",
+            Hold::FriendlyStun,
+        ),
+        ("target low, enemy healer free, TeamPlan", Hold::Free),
+    ] {
+        list.push(Situation {
+            name,
+            target_health: Some(0.15),
+            healer_aura,
+            team_plan: true,
+            ..CALM
+        });
+    }
     // Under TeamPlan the ally in danger calls the Peel play: the unit's peel
     // step heads its chain, on the enemy target attacking the ally.
     for (name, target_class, focus_healer) in [
@@ -777,7 +810,7 @@ fn pillar(p: &Point) -> Option<ObstacleVolume> {
 fn hold(scene: Scene, who: &'static str, hold: Hold) -> Scene {
     let polymorph = |caster: Entity| Aura {
         effect_type: AuraType::Polymorph,
-        duration: 6.0,
+        duration: POLYMORPH_LEFT,
         break_on_damage_threshold: 0.0,
         caster: Some(caster),
         ability_name: "Polymorph".into(),
@@ -801,6 +834,20 @@ fn hold(scene: Scene, who: &'static str, hold: Hold) -> Scene {
         Hold::EnemyPolymorph => {
             let caster = scene.entity(HEALER);
             scene.aura_full(who, polymorph(caster))
+        }
+        Hold::FriendlyStun => {
+            let caster = scene.entity(ALLY);
+            scene.aura_full(
+                who,
+                Aura {
+                    effect_type: AuraType::Stun,
+                    duration: SHORT_LOCK,
+                    break_on_damage_threshold: -1.0,
+                    caster: Some(caster),
+                    ability_name: "Kidney Shot".into(),
+                    ..Default::default()
+                },
+            )
         }
     }
 }
@@ -1918,8 +1965,11 @@ fn cc_not_stacked() -> Finding {
             continue;
         }
         judged += 1;
-        // The grid's only own-team hard CC is the ally's Polymorph.
-        if hold_of(&r.point, t) == Hold::FriendlyPolymorph {
+        // The grid's own-team hard CC: the ally's Polymorph, and its stun.
+        if matches!(
+            hold_of(&r.point, t),
+            Hold::FriendlyPolymorph | Hold::FriendlyStun
+        ) {
             violations.push((ability, describe(r, ability, target)));
         }
     }
@@ -2077,4 +2127,153 @@ fn crowd_control_is_never_held_for_an_interrupt_an_uninterruptible_cast_refuses(
         v.is_empty(),
         "held for an interrupt that cannot land: {v:#?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The Burst play
+// ---------------------------------------------------------------------------
+
+/// When a cast of `ability` by the unit at `r`'s target first lands, seconds
+/// from the decision: its cast time, its flight, and for a cast whose only
+/// damage is over time its first tick. Computed here from `abilities.ron`,
+/// not by the production fit, so a fit that miscounts is caught.
+fn lands_after(r: &Record, ability: AbilityType, target: &str) -> f32 {
+    let def = grid().defs.get(&ability).unwrap();
+    let flight = def
+        .projectile_speed
+        .map_or(0.0, |speed| pos3(ME, &r.point).distance(pos3(target, &r.point)) / speed);
+    let dot_only = def.damage_base_max <= 0.0
+        && def
+            .applies_aura
+            .as_ref()
+            .is_some_and(|a| a.aura_type == AuraType::DamageOverTime);
+    let first_tick = if dot_only {
+        def.applies_aura.as_ref().unwrap().tick_interval
+    } else {
+        0.0
+    };
+    def.cast_time + flight + first_tick
+}
+
+/// The grid reaches the Burst play, and every burst it makes is a burst, so
+/// every property above also judges the play's choices:
+///
+/// - the (class, tool) pairs the grid's bursts used are exactly the pairs
+///   `burst_tools` names for the classes the play runs for (every DPS but
+///   `BURST_EXCEPTIONS`): set equality, so a class whose burst step stops
+///   reaching ANY of its tools fails here, and so does a step that bursts with
+///   a tool it does not list;
+/// - every burst is aimed at the kill window's subject (the grid's low target):
+///   a targeted burst names it; Heroic Strike, which rides the next swing,
+///   names none and is allowed only on a unit whose target it is;
+/// - under the play, NO choice on the subject — the burst step's or the chain's
+///   below it — lands after the window's `until` (a 1s lock lets few casts
+///   in), and the play refuses some cast for exactly that somewhere;
+/// - no burst outside `TeamPlan`, outside a kill window, or by a healer.
+#[test]
+fn every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window() {
+    use arenasim::states::play_match::class_ai::burst::burst_tools;
+    use arenasim::states::play_match::decision_trace::{PlayStep, PlayTag};
+    use arenasim::states::play_match::situation::BURST_EXCEPTIONS;
+    let g = grid();
+    let mut burst: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut misaimed = Vec::new();
+    let mut late = Vec::new();
+    let mut fitted = 0;
+    let mut judged = 0;
+    for r in &g.records {
+        let p = &r.point;
+        let Some(tag) = r.view.situation else {
+            continue;
+        };
+        if tag.play == Some(PlayTag::Burst) {
+            assert!(p.situation.team_plan, "a Burst outside TeamPlan: {}", p.describe());
+            let window = tag.kill_window.expect("a Burst names a kill window");
+            assert_eq!(
+                window.subject,
+                grid_entity(r, TARGET),
+                "the kill window's subject is the low target: {}",
+                p.describe()
+            );
+            assert!(!p.class.is_healer(), "a healer bursts: {}", p.describe());
+            // The fit: every choice on the subject lands by `until`.
+            let until = window.until.expect("the grid's locks have an end");
+            for (ability, target) in &r.view.choices {
+                if *target != Some(TARGET) {
+                    continue;
+                }
+                judged += 1;
+                let lands_at = 30.0 + lands_after(r, *ability, TARGET);
+                if lands_at > until + 1e-3 {
+                    late.push(format!(
+                        "{} (lands {lands_at:.2}, until {until:.2})",
+                        describe(r, *ability, *target)
+                    ));
+                }
+            }
+            fitted += r
+                .view
+                .candidates
+                .iter()
+                .filter(|c| matches!(c.reason, Some(RejectionReason::OutlastsWindow { .. })))
+                .count();
+        } else {
+            assert!(
+                r.view.candidates.iter().all(|c| !matches!(
+                    c.reason,
+                    Some(RejectionReason::OutlastsWindow { .. })
+                )),
+                "a cast fitted to a window outside the Burst play: {}",
+                p.describe()
+            );
+        }
+        if tag.play_step != Some(PlayStep::Burst) {
+            continue;
+        }
+        assert_eq!(tag.play, Some(PlayTag::Burst), "{}", p.describe());
+        let (ability, target) = r.view.chosen.expect("a burst chose something");
+        burst.insert((format!("{:?}", p.class), format!("{ability:?}")));
+        let aimed = match ability {
+            AbilityType::HeroicStrike => target.is_none() && whom(p) == TARGET,
+            _ => target == Some(TARGET),
+        };
+        if !aimed {
+            misaimed.push(describe(r, ability, target));
+        }
+    }
+    eprintln!(
+        "bursts chosen in the grid: {burst:?}; {judged} choices on a subject judged against \
+         `until`, {fitted} casts refused for it"
+    );
+    assert!(judged > 0 && fitted > 0, "the fit was never exercised");
+    assert!(misaimed.is_empty(), "bursts not aimed at the subject: {misaimed:#?}");
+    assert!(late.is_empty(), "casts on the subject landing after `until`: {late:#?}");
+    let excepted: BTreeSet<String> = BURST_EXCEPTIONS
+        .iter()
+        .map(|e| format!("{:?}", e.class))
+        .collect();
+    let expected: BTreeSet<(String, String)> = CharacterClass::all()
+        .iter()
+        .filter(|c| !excepted.contains(&format!("{c:?}")))
+        .flat_map(|c| {
+            burst_tools(*c)
+                .iter()
+                .map(move |a| (format!("{c:?}"), format!("{a:?}")))
+        })
+        .collect();
+    assert_eq!(burst, expected, "(class, tool) pairs the grid bursts with");
+}
+
+/// The entity id the trace gives `who` in `r`'s scene.
+fn grid_entity(r: &Record, who: &str) -> u32 {
+    let _ = r;
+    // Every scene adds its units in the same order (`build`): the unit, its
+    // ally, the target, the enemy healer — entity ids 0..4.
+    match who {
+        ME => 0,
+        ALLY => 1,
+        TARGET => 2,
+        HEALER => 3,
+        _ => unreachable!(),
+    }
 }

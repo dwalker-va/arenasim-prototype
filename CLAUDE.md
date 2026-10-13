@@ -1332,8 +1332,19 @@ constructed:
   bank's own noise (a z), never against a fitted number.
 
 **Plays.** A play is a named reordering of a class's own chain
-(`situation::Play`, chosen by `TeamSituation::play_for`). `Burst` is the
-ported burst window. `Peel` is gated under `TeamPlan`: while
+(`situation::Play`, chosen by `TeamSituation::play_for`). `Burst` is gated
+under `TeamPlan`: while `kill_window` names an enemy (low, below
+`kill_hp_threshold`, and beyond every enemy healer's help — locked, out of
+mana, or out of reach), every DPS puts its burst step at the head of its
+chain — its `burst::burst_tools` on that enemy — and the cast gate refuses
+any cast on it that would land after the window's `until`
+(`cast_guard::fits_window`, traced `OutlastsWindow`). Classes it measured
+negative for are named in `situation::BURST_EXCEPTIONS`; a sweep re-checks
+them with `"burst_exceptions": []` in the headless config. Under `Legacy` (or
+with the play withheld) the old lock-window reorder runs instead
+(`CombatContext::lock_window`), because deleting it moves `Legacy`. Findings
+and the graduate criterion: `docs/design/balance/2026-10-12-as275-burst-play.md`.
+`Peel` is gated under `TeamPlan`: while
 `ally_in_danger` names a teammate, every OTHER unit on the team puts its peel
 step at the head of its chain — crowd control on one of the teammate's
 `danger_attackers` (`class_ai::peel`; the tools per class are
