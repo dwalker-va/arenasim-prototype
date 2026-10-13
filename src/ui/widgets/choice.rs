@@ -23,6 +23,11 @@ use crate::ui::theme::{color, icon, radius, size, space, stroke, text};
 /// The most lines a tile's caption runs to before it ends in an ellipsis.
 const CAPTION_ROWS: usize = 2;
 
+/// The caption's font.
+fn caption_font() -> egui::FontId {
+    egui::FontId::proportional(text::SMALL)
+}
+
 /// A choice tile, configured. Draw it with [`ChoiceTile::show`].
 #[must_use = "call `.show(ui)` to draw the tile"]
 pub struct ChoiceTile<'a> {
@@ -75,12 +80,19 @@ impl<'a> ChoiceTile<'a> {
         self
     }
 
+    /// How tall every tile is drawn in `ui`, whatever its label: the icon and
+    /// two caption lines. For a caller lining something up beside a row of
+    /// them.
+    pub fn height(ui: &egui::Ui) -> f32 {
+        // Two caption lines are reserved whatever the label: the lattice.
+        let caption_h = ui.fonts(|f| f.row_height(&caption_font())) * CAPTION_ROWS as f32;
+        space::SM + icon::XL + space::XS + caption_h + space::SM
+    }
+
     pub fn show(self, ui: &mut egui::Ui) -> egui::Response {
         let caption_w = size::CHOICE_TILE - 2.0 * space::XS;
-        let font = egui::FontId::proportional(text::SMALL);
-        // Two caption lines are reserved whatever the label: the lattice.
-        let caption_h = ui.fonts(|f| f.row_height(&font)) * CAPTION_ROWS as f32;
-        let height = space::SM + icon::XL + space::XS + caption_h + space::SM;
+        let font = caption_font();
+        let height = Self::height(ui);
 
         let (rect, response, look) = allocate(
             ui,
