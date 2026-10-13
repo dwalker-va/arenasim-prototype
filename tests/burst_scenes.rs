@@ -9,6 +9,10 @@
 //! `until` [`LOCK`] seconds out. The deciding unit targets the Warrior unless
 //! the test says otherwise.
 //!
+//! The Chain play is withheld throughout: the Priest's stun is inside its
+//! horizon, and these scenes judge the Burst play alone. The burst step
+//! below a chain step that does not fire is `tests/chain_scenes.rs`'s.
+//!
 //! The negative cases: no burst outside a kill window (the Priest free), none
 //! by a healer, none by a class the exceptions name; and no cast on the
 //! window's subject that would land after `until` — neither from the burst
@@ -21,7 +25,7 @@ use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::burst::burst_tools;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::decision_trace::{PlayStep, PlayTag, RejectionReason};
-use arenasim::states::play_match::situation::{ClassSet, PlaySet};
+use arenasim::states::play_match::situation::{ClassSet, PlaySet, CHAIN};
 use arenasim::states::play_match::{AbilityType, AuraType};
 
 const ME: &str = "me";
@@ -38,6 +42,7 @@ const LOCK: f32 = 4.0;
 fn scene(class: CharacterClass, dist: f32, lock: Option<f32>, profile: AiProfile) -> Scene {
     let mut s = Scene::new()
         .ai_profile(1, profile)
+        .withhold(1, PlaySet::of(&[CHAIN]))
         .unit(ME, 1, class)
         .at(0.0, 0.0)
         .targeting(LOW)
@@ -100,7 +105,7 @@ fn bursts_in(build: impl Fn(AiProfile) -> Scene, class: CharacterClass, tool: Ab
     let without = build(AiProfile::TeamPlan)
         .withhold(
             1,
-            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst, CHAIN]),
         )
         .decide(ME);
     let situation = without.situation.expect("a situation");
@@ -172,7 +177,7 @@ fn a_warrior_spends_its_held_rage_on_heroic_strike_into_a_kill_window() {
     let without = build(AiProfile::TeamPlan)
         .withhold(
             1,
-            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst, CHAIN]),
         )
         .decide(ME);
     assert_ne!(
@@ -288,7 +293,7 @@ fn a_ranged_burst_is_aimed_at_the_subject_not_the_units_target() {
         let without = build(AiProfile::TeamPlan)
             .withhold(
                 1,
-                PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+                PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst, CHAIN]),
             )
             .decide(ME);
         assert!(
@@ -356,7 +361,7 @@ fn a_frostbolt_that_lands_after_the_window_ends_is_not_started() {
     let control = scene(Mage, 25.0, Some(2.0), AiProfile::TeamPlan)
         .withhold(
             1,
-            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst, CHAIN]),
         )
         .decide(ME);
     assert!(control
@@ -452,7 +457,7 @@ fn a_rend_whose_first_tick_outlasts_the_window_is_not_applied() {
     let without = build(AiProfile::TeamPlan)
         .withhold(
             1,
-            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+            PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst, CHAIN]),
         )
         .decide(ME);
     assert_eq!(
@@ -508,7 +513,7 @@ fn no_burst_outside_a_kill_window() {
             .rage_if_warrior(class)
             .withhold(
                 1,
-                PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst]),
+                PlaySet::of(&[arenasim::states::play_match::situation::Play::Burst, CHAIN]),
             )
             .decide(ME);
         assert_eq!(view.chose(), withheld.chose(), "{class:?}");

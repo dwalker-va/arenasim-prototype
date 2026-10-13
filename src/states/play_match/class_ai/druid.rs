@@ -658,6 +658,15 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             return true;
         }
 
+        // The Chain play (TeamPlan): the lock on the enemy healer is about to
+        // end, so Cyclone hands off onto it, landing in its last moments — or
+        // the global cooldown is held for that moment. The play does not run
+        // while a teammate is dying (`TeamSituation::play_for`).
+        if let Some(handed) = self.try_chain(combatant) {
+            self.builder.play_step(PlayStep::Chain);
+            return handed;
+        }
+
         // The escape shift goes on the next global cooldown, behind only the
         // emergency heals (2-3) — and when the shift would break a root or a
         // snare, behind ONE of them: the emergency heal's exemption is one
@@ -883,6 +892,27 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             }
         }
         false
+    }
+
+    /// The Chain play's step ([`super::chain`]): `Some(true)` when Cyclone
+    /// was handed off onto the locked enemy healer, `Some(false)` when the
+    /// global cooldown is held for a hand-off still to come, `None` when the
+    /// rotation goes on.
+    fn try_chain(&mut self, combatant: &mut Combatant) -> Option<bool> {
+        let call = super::chain::chain_call(self.ctx)?;
+        let plan = super::chain::plan(
+            self.ctx,
+            self.abilities,
+            combatant,
+            self.my_pos,
+            self.auras,
+            &call,
+            self.builder,
+        );
+        let pos = self.ctx.combatants.get(&call.subject)?.position;
+        let handed = plan.due.contains(&AbilityType::Cyclone)
+            && self.cast(combatant, AbilityType::Cyclone, call.subject, pos);
+        (handed || plan.hold).then_some(handed)
     }
 
     /// Whether a teammate (the Druid included, pets excluded) is DYING: below

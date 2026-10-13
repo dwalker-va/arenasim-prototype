@@ -63,7 +63,9 @@ pub const SHAPESHIFTED_NOTE: &str = "shapeshifted: nothing is cast in Travel For
 /// Guards run in this order so that cheap checks fail fast:
 /// 0. a cast that applies a hold ([`applies_hold`]) on a target already held
 ///    ([`CombatContext::held_in_hard_cc`]) — always, not opt-in: no hard CC is
-///    stacked on a unit its team already holds
+///    stacked on a unit its team already holds. Under the Chain play a
+///    hand-off onto the lock's subject is judged where it lands
+///    ([`hold_lands_after`])
 /// 1. friendly-CC (opt-in)
 /// 2. friendly-DoTs (opt-in)
 /// 3. target damage immunity (opt-in)
@@ -94,11 +96,35 @@ pub fn pre_cast_ok(
     if let Some((target_entity, _)) = target {
         if applies_hold(def)
             && ctx
-                .held_in_hard_cc(target_entity, super::Incoming::of(def))
+                .held_in_hard_cc_at(
+                    target_entity,
+                    super::Incoming::of(def),
+                    hold_lands_after(def, caster_pos, auras, target, ctx),
+                )
                 .is_some()
         {
             return false;
         }
+    }
+    pre_cast_ok_but_hold(ability, def, caster, caster_pos, auras, target, ctx, opts)
+}
+
+/// [`pre_cast_ok`] without its step 0, the hold rule: every other gate, in
+/// the same order. The Chain play asks it of a hand-off that is not due yet
+/// (`class_ai::chain`) — the lock it will chain onto is what refuses it now,
+/// and the question is whether everything else would let it go when it is.
+#[allow(clippy::too_many_arguments)]
+pub fn pre_cast_ok_but_hold(
+    ability: AbilityType,
+    def: &AbilityConfig,
+    caster: &Combatant,
+    caster_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Option<(Entity, Vec3)>,
+    ctx: &CombatContext,
+    opts: PreCastOpts,
+) -> bool {
+    if let Some((target_entity, _)) = target {
         if opts.check_friendly_cc && ctx.has_friendly_breakable_cc(target_entity) {
             return false;
         }
@@ -185,6 +211,28 @@ pub fn fits_window(
         Ok(())
     } else {
         Err((lands_at, until))
+    }
+}
+
+/// How far ahead the hold rule looks for a cast of `def` on `target`
+/// ([`super::CombatContext::held_in_hard_cc_at`]): under the Chain play, a
+/// hand-off onto the subject of the lock being handed off is judged at the
+/// moment it LANDS ([`lands_after`]) — a 1.5s Polymorph begun to land in the
+/// lock's last moments starts while more than the chain window is left.
+/// Every other cast is judged now (0), as the hold rule always has: so this
+/// changes nothing outside the play.
+pub fn hold_lands_after(
+    def: &AbilityConfig,
+    caster_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Option<(Entity, Vec3)>,
+    ctx: &CombatContext,
+) -> f32 {
+    match target {
+        Some((entity, target_pos)) if ctx.chain_window().is_some_and(|w| w.subject == entity) => {
+            lands_after(def, caster_pos, target_pos, auras)
+        }
+        _ => 0.0,
     }
 }
 
@@ -345,7 +393,11 @@ pub fn classify_pre_cast_failure(
 
     if let Some((target_entity, _)) = target {
         if let Some(cc_type) = ctx
-            .held_in_hard_cc(target_entity, super::Incoming::of(def))
+            .held_in_hard_cc_at(
+                target_entity,
+                super::Incoming::of(def),
+                hold_lands_after(def, caster_pos, auras, target, ctx),
+            )
             .filter(|_| applies_hold(def))
         {
             return RejectionReason::TargetAlreadyCCd { cc_type };

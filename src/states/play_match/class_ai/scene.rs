@@ -306,6 +306,13 @@ impl Scene {
         self
     }
 
+    /// The classes that do not run the Chain play, in place of the shipped
+    /// `situation::CHAIN_EXCEPTIONS` (`WithheldPlays::chain_exceptions`).
+    pub fn chain_exceptions(mut self, classes: ClassSet) -> Self {
+        self.withheld.chain_exceptions = Some(classes);
+        self
+    }
+
     /// The sim clock at the decision (default 30s, well after the gates). It
     /// is the seconds since the gates too, so it sets the match phase.
     pub fn now(mut self, secs: f32) -> Self {

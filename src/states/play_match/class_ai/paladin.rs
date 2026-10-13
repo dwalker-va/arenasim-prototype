@@ -195,6 +195,40 @@ pub fn decide_paladin_action(
         }
     }
 
+    // The Chain play (TeamPlan): the lock on the enemy healer is about to
+    // end, so Hammer of Justice hands off onto it, landing in its last
+    // moments — or the global cooldown is held for that moment.
+    if let Some(call) = super::chain::chain_call(ctx) {
+        let plan = super::chain::plan(
+            ctx,
+            abilities,
+            combatant,
+            my_pos,
+            auras,
+            &call,
+            &mut builder,
+        );
+        let handed = plan.due.contains(&AbilityType::HammerOfJustice)
+            && try_peel_hammer_of_justice(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                call.subject,
+                same_frame_cc_queue,
+                &mut builder,
+            );
+        if handed || plan.hold {
+            builder.play_step(PlayStep::Chain);
+            builder.finish();
+            return handed;
+        }
+    }
+
     // Priority 1: Paladin Aura.
     if try_paladin_aura(
         commands,
@@ -1286,10 +1320,11 @@ fn try_dip_hammer_of_justice(
     true
 }
 
-/// The Peel play's Hammer of Justice on `attacker`: eligible
-/// ([`hoj_target_eligible`] — alive, not a pet, not immune, not stun-immune by
-/// diminishing returns), then the cast gate on the attacker itself, which
-/// asks range, sight and the hold rule.
+/// The Peel play's Hammer of Justice on `attacker` — and the Chain play's on
+/// the locked enemy it hands off onto: eligible ([`hoj_target_eligible`] —
+/// alive, not a pet, not immune, not stun-immune by diminishing returns),
+/// then the cast gate on that enemy itself, which asks range, sight and the
+/// hold rule.
 #[allow(clippy::too_many_arguments)]
 fn try_peel_hammer_of_justice(
     commands: &mut Commands,

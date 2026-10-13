@@ -159,6 +159,47 @@ pub fn decide_rogue_action(
         }
     }
 
+    // The Chain play (TeamPlan): the lock on the enemy healer is about to
+    // end, so Kidney Shot hands off onto it, landing in its last moments — or
+    // the global cooldown (and the energy) is held for that moment.
+    if let Some(call) = super::chain::chain_call(ctx) {
+        let plan = super::chain::plan(
+            ctx,
+            abilities,
+            combatant,
+            my_pos,
+            auras,
+            &call,
+            &mut builder,
+        );
+        let handed = plan.due.contains(&AbilityType::KidneyShot)
+            && ctx
+                .combatants
+                .get(&call.subject)
+                .map(|i| i.position)
+                .is_some_and(|pos| {
+                    try_kidney_shot(
+                        commands,
+                        combat_log,
+                        abilities,
+                        entity,
+                        combatant,
+                        my_pos,
+                        auras,
+                        call.subject,
+                        pos,
+                        ctx,
+                        same_frame_cc_queue,
+                        &mut builder,
+                    )
+                });
+        if handed || plan.hold {
+            builder.play_step(PlayStep::Chain);
+            builder.finish();
+            return handed;
+        }
+    }
+
     // The Burst play (TeamPlan): a kill window is open, so Sinister Strike on
     // its enemy heads the chain — ahead of the Kidney Shot planner, whose holds
     // and pooling would otherwise keep the energy back.

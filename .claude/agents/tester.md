@@ -82,7 +82,10 @@ verify that PR and render a verdict — nothing more.
      --ignored` (the tier-4 probe, about a minute) beside the default
      `peel_scenes` and `peel_staged`; for the Burst play or a burst step
      (`class_ai/burst.rs`, `cast_guard::fits_window`), `burst_play_probe --
-     --ignored` beside the default `burst_scenes` and `burst_staged`.
+     --ignored` beside the default `burst_scenes` and `burst_staged`; for the
+     Chain play or a chain step (`class_ai/chain.rs`,
+     `cast_guard::hold_lands_after`), `cc_lifecycle_probe -- --ignored` beside
+     the default `chain_scenes` and `chain_staged`.
    - **A re-pinned seed is a REJECT finding** (the migrate-not-re-pin rule,
      CLAUDE.md *Test an AI decision*). A diff that moves a seed-pinned probe to
      a fresh seed because its old seed went stale must instead migrate it — to a
