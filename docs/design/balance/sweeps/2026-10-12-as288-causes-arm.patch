@@ -1,0 +1,170 @@
+--- a/src/states/play_match/situation.rs
++++ b/src/states/play_match/situation.rs
+@@ -548,6 +548,9 @@
+         .and_then(|w| roster.get(&w.subject))
+         .map(|subject| pressuring(roster, auras, subject, cfg))
+         .unwrap_or_default();
++    if AID_PROBE.load(std::sync::atomic::Ordering::Relaxed) {
++        aid_probe(roster, auras, team, prev, ally_in_danger, &allies, clock.now, cfg);
++    }
+     TeamSituation {
+         phase: phase(clock),
+         since_gates: clock.since_gates,
+@@ -557,7 +560,108 @@
+         danger_attackers,
+         peel_play: cfg.peel,
+         allies,
++    }
++}
++
++/// AS-288 measurement instrument (not shipped): when set, every
++/// `ally_in_danger` onset and end is logged to [`AID_LOG`] with why.
++pub static AID_PROBE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++pub static AID_LOG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
++
++/// Log `on|now|team|subject|trigger@hp|prev subject` for an onset, and
++/// `end|now|team|subject|length secs|cause` for an end or a switch away.
++#[allow(clippy::too_many_arguments)]
++fn aid_probe(
++    roster: &BTreeMap<Entity, CombatantInfo>,
++    auras: &BTreeMap<Entity, Vec<Aura>>,
++    team: u8,
++    prev: &TeamSituation,
++    next: Option<Window>,
++    allies: &[AllyStanding],
++    now: f32,
++    cfg: &SituationConfig,
++) {
++    let mut log = AID_LOG.lock().unwrap();
++    let prev_w = prev.ally_in_danger;
++    if let Some(n) = next {
++        if prev_w.is_none_or(|p| p.subject != n.subject) {
++            let trig = match prev.allies.iter().find(|a| a.entity == n.subject) {
++                None => "new",
++                Some(a) if !a.dying && !a.pressured => "both",
++                Some(a) if !a.dying => "hp_drop",
++                Some(a) if !a.pressured => "pressure_gain",
++                Some(_) => "switch_from_other",
++            };
++            let hp = roster.get(&n.subject).map_or(0.0, |s| s.health_pct());
++            log.push(format!(
++                "on|{now}|{team}|{}|{trig}@{hp:.3}|{}",
++                n.subject.index(),
++                prev_w.map_or(-1, |p| p.subject.index() as i64)
++            ));
++        }
+     }
++    let Some(p) = prev_w else { return };
++    if next.is_some_and(|n| n.subject == p.subject) {
++        return;
++    }
++    let standing = allies.iter().find(|a| a.entity == p.subject);
++    let reason: String = match (roster.get(&p.subject), standing) {
++        (None, _) | (_, None) => "died".into(),
++        (Some(_), Some(st)) if st.dying && st.pressured => "switch".into(),
++        (Some(s), Some(st)) => {
++            let mut parts = Vec::new();
++            if !st.dying {
++                parts.push(format!("healed({:.3})", s.health_pct()));
++            }
++            if !st.pressured {
++                let why: Vec<String> = prev
++                    .danger_attackers
++                    .iter()
++                    .map(|a| match roster.get(a) {
++                        None => "gone".to_string(),
++                        Some(c) if !c.is_alive => "attacker_dead".into(),
++                        Some(c) if c.target != Some(p.subject) => match c.target {
++                            None => "target_none".into(),
++                            Some(t) => match roster.get(&t) {
++                                Some(tc) if tc.team == c.team => "target_own_team".into(),
++                                Some(_) => "target_other_enemy".into(),
++                                None => "target_unknown".into(),
++                            },
++                        },
++                        Some(c) => {
++                            let seen = stealth_visible(
++                                c.stealthed,
++                                has_shadow_sight(auras, s.entity),
++                                has_shadow_sight(auras, c.entity),
++                            );
++                            let d = s.position.distance(c.position);
++                            let k = if c.is_pet {
++                                "Pet".to_string()
++                            } else {
++                                format!("{:?}", c.class)
++                            };
++                            if !seen {
++                                "stealth".into()
++                            } else if d > cfg.threat_intent_radius {
++                                format!("beyond_intent:{k}({d:.1})")
++                            } else if d > cfg.danger_radius {
++                                format!("not_closing:{k}({d:.1})")
++                            } else {
++                                "other".into()
++                            }
++                        }
++                    })
++                    .collect();
++                parts.push(format!("unpressured[{}]", why.join(",")));
++            }
++            parts.join("+")
++        }
++    };
++    log.push(format!(
++        "end|{now}|{team}|{}|{}|{reason}",
++        p.subject.index(),
++        now - p.since
++    ));
+ }
+ 
+ fn phase(clock: &MatchClock) -> MatchPhase {
+--- /dev/null
++++ b/tests/aid_causes.rs
+@@ -0,0 +1,46 @@
++//! AS-288 measurement instrument (not shipped): the `ally_in_danger` bank of
++//! `tests/ally_in_danger_windows.rs`, with every onset and end's cause logged
++//! by `situation::aid_probe`. Writes `probe|<profile>|<map>|<comp>|<seed>|...`
++//! lines to `$AID_OUT`; `2026-10-12-as288-causes.py` reduces them.
++mod common;
++use arenasim::headless::HeadlessMatchConfig;
++use arenasim::states::play_match::situation::{AID_LOG, AID_PROBE};
++use common::staged::play_seeded;
++use std::io::Write;
++
++const COMPS: &[(&[&str], &[&str])] = &[
++    (&["Mage", "Priest"], &["Warrior", "Druid"]),
++    (&["Warlock", "Shaman"], &["Rogue", "Priest"]),
++    (&["Hunter", "Paladin"], &["Warrior", "Mage"]),
++    (&["Rogue", "Druid"], &["Hunter", "Priest"]),
++    (&["Warrior", "Shaman"], &["Rogue", "Warlock"]),
++    (&["Paladin", "Mage"], &["Warrior", "Hunter"]),
++    (&["Warrior", "Druid"], &["Hunter", "Shaman"]),
++];
++
++#[test]
++#[ignore]
++fn aid_causes() {
++    let mut f = std::fs::File::create(std::env::var("AID_OUT").expect("AID_OUT")).unwrap();
++    AID_PROBE.store(true, std::sync::atomic::Ordering::Relaxed);
++    for profile in ["Legacy", "TeamPlan"] {
++        for map in ["PillaredArena", "BasicArena"] {
++            for (ci, (t1, t2)) in COMPS.iter().enumerate() {
++                for seed in 1..9u64 {
++                    AID_LOG.lock().unwrap().clear();
++                    play_seeded(HeadlessMatchConfig {
++                        team1: t1.iter().map(|s| s.to_string()).collect(),
++                        team2: t2.iter().map(|s| s.to_string()).collect(),
++                        map: map.to_string(),
++                        random_seed: Some(seed),
++                        ai_profile: Some(profile.to_string()),
++                        ..Default::default()
++                    });
++                    for l in AID_LOG.lock().unwrap().drain(..) {
++                        writeln!(f, "probe|{profile}|{map}|{ci}|{seed}|{l}").unwrap();
++                    }
++                }
++            }
++        }
++    }
++}

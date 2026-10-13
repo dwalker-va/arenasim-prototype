@@ -57,6 +57,15 @@
         // press_advantage_margin is tempo's hysteresis. TeamPlan only; Legacy
         // releases at press_advantage_margin.
         press_release_margin: 0.1,
+        // ally_in_danger debounce. A teammate pressured only from within
+        // danger_edge_margin (yards) of a pressure boundary must be dying and
+        // pressured for danger_dwell (seconds) before its window opens; one
+        // pressured firmly opens it at once. A window ends once its teammate
+        // has been out of danger for danger_release (its death ends it at
+        // once). Filters an enemy crossing a pressure radius for a frame.
+        danger_dwell: 0.1,
+        danger_release: 0.1,
+        danger_edge_margin: 1.0,
     ),
     priest: (
         weights: (

@@ -172,6 +172,24 @@ pub struct SharedMovementConfig {
     /// onset (no band). At most `press_advantage_margin`; equal to it disables
     /// the band.
     pub press_release_margin: f32,
+    /// The `ally_in_danger` window's ONSET dwell, in seconds: a teammate
+    /// pressured only from the edge of the pressure test (see
+    /// `danger_edge_margin`) must stay dying and pressured this long before a
+    /// window opens on it, so an enemy passing the edge of a pressure radius
+    /// for a frame opens nothing. `0.0` opens on the first frame.
+    pub danger_dwell: f32,
+    /// Yards: a threat pressures FIRMLY when it is at least this far inside
+    /// every boundary of the pressure test it passes (`danger_radius`,
+    /// `threat_intent_radius`, a closing threat's preferred range). A
+    /// teammate pressured firmly skips `danger_dwell`. `0.0` makes every
+    /// threat firm (no dwell).
+    pub danger_edge_margin: f32,
+    /// The `ally_in_danger` window's RELEASE delay, in seconds: an open
+    /// window ends only once its teammate has been out of danger this long,
+    /// so a one-frame heal or step out of a radius does not end it and open
+    /// a new one. A teammate that dies ends it at once. `0.0` ends it on the
+    /// first frame out.
+    pub danger_release: f32,
 }
 
 impl Default for SharedMovementConfig {
@@ -191,6 +209,9 @@ impl Default for SharedMovementConfig {
             wand_range: 30.0,
             press_advantage_margin: 0.2,
             press_release_margin: 0.1,
+            danger_dwell: 0.1,
+            danger_release: 0.1,
+            danger_edge_margin: 1.0,
         }
     }
 }
@@ -558,6 +579,9 @@ impl MovementConfig {
             ("shared.escape_min_window", s.escape_min_window),
             ("shared.anchor_switch_margin", s.anchor_switch_margin),
             ("shared.press_release_margin", s.press_release_margin),
+            ("shared.danger_dwell", s.danger_dwell),
+            ("shared.danger_release", s.danger_release),
+            ("shared.danger_edge_margin", s.danger_edge_margin),
             (
                 "priest.formation_shift_threshold",
                 self.priest.formation_shift_threshold,
