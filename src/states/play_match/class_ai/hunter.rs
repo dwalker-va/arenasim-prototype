@@ -421,10 +421,18 @@ pub fn decide_hunter_action(
         // melee threat exists. The traps share one cooldown, so this peel locks
         // the Freezing Trap out for as long; the pressure trap above was tried
         // first and could not land cleanly. Keeping the cooldown for it
-        // instead froze more healers but lost more fights (AS-196).
+        // instead froze more healers but lost more fights (AS-196). An immune
+        // unit (Divine Shield, Cyclone) takes no slow, so it is no anchor: the
+        // peel passes to the nearest melee that is not, and the fallback to
+        // the nearest enemy only when that enemy is not.
         let frost_anchor =
-            super::dps_postures::nearest_melee_threat(ctx, entity, my_pos).or_else(|| {
-                nearest_enemy.and_then(|(e, _)| ctx.combatants.get(&e).map(|i| (e, i.position)))
+            super::dps_postures::nearest_melee_threat_where(ctx, entity, my_pos, |e| {
+                !ctx.entity_is_immune(e)
+            })
+            .or_else(|| {
+                nearest_enemy
+                    .filter(|(e, _)| !ctx.entity_is_immune(*e))
+                    .and_then(|(e, _)| ctx.combatants.get(&e).map(|i| (e, i.position)))
             });
         if let Some((frost_anchor_entity, anchor_pos)) = frost_anchor {
             let midpoint = (my_pos + anchor_pos) / 2.0;
@@ -1421,7 +1429,9 @@ fn slow_remaining(target: Entity, ctx: &CombatContext) -> Option<f32> {
 ///     slow is wasted on a stationary/casting caster (uses the snapshot
 ///     `velocity`, which is zero while casting/channeling).
 ///
-/// A candidate is skipped if it is out of range, already slowed with more than
+/// A candidate is skipped if it is immune ([`CombatContext::entity_is_immune`]:
+/// the slow would be blocked on arrival — the nearest melee that is NOT immune
+/// is the one peeled), out of range, already slowed with more than
 /// `CONCUSSIVE_REFRESH_WINDOW` left (hold; refresh only just before it expires so
 /// there's no uptime gap), or under a friendly break-on-damage CC (a no-op here
 /// since Concussive deals no damage, but kept as a guard).
@@ -1437,6 +1447,7 @@ fn concussive_target(
         ctx.combatants.get(&e).is_some_and(|i| {
             let d = my_pos.distance(i.position);
             i.is_alive
+                && !ctx.entity_is_immune(e)
                 && d >= min_range
                 && d <= max_range
                 && !ctx.has_friendly_breakable_cc(e)
@@ -1444,7 +1455,11 @@ fn concussive_target(
         })
     };
     // 1. Nearest melee kite-threat — peel it, moving or not.
-    if let Some((m, _)) = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos) {
+    if let Some((m, _)) =
+        super::dps_postures::nearest_melee_threat_where(ctx, entity, my_pos, |e| {
+            !ctx.entity_is_immune(e)
+        })
+    {
         if castable(m) {
             return Some(m);
         }
@@ -1567,6 +1582,12 @@ fn try_place_trap_at(
         builder.reject(ability, RejectionReason::TargetAlreadyCCd { cc_type });
         return false;
     }
+    // Nor at an immune one (Divine Shield, Cyclone): its aura is blocked when
+    // the trap springs on it.
+    if intended.is_some_and(|victim| ctx.entity_is_immune(victim)) {
+        builder.reject(ability, RejectionReason::TargetImmune);
+        return false;
+    }
 
     // Clamp to octagonal arena bounds (midpoint can land outside corners)
     let position = crate::states::play_match::combat_core::clamp_to_arena(&ctx.bounds, position);
@@ -1589,6 +1610,19 @@ fn try_place_trap_at(
                 max: def.range,
             },
         );
+        return false;
+    }
+
+    // A throw needs sight of where it lands, as a ground-targeted placement
+    // does: no trap is thrown into or behind a pillar. Measured to the landing
+    // at the height of the point it was aimed at (a unit's centre, a lane
+    // between two, the Hunter's own feet), after range so an out-of-range
+    // landing fails on range. Like range, a hidden landing is HELD, not moved:
+    // the landing was chosen for where it lands. Every placement path ends
+    // here, so no picker asks it again. A no-op with no obstacles.
+    if !crate::states::play_match::map_geometry::has_line_of_sight(ctx.obstacles, my_pos, position)
+    {
+        builder.reject(ability, RejectionReason::LosBlocked);
         return false;
     }
 
@@ -1629,8 +1663,9 @@ fn try_place_trap_at(
 /// The Peel play's snare, over `attackers` nearest the teammate first: on the
 /// first melee or pet attacker ([`super::peel::movement_peel_target`]) not
 /// immune and not already slowed, Concussive Shot; when it cannot fire, a
-/// Frost Trap thrown onto the attacker — in sight of the throw, and not over
-/// the Hunter's own live Freezing Trap ([`frost_trap_held_for_freezing`]).
+/// Frost Trap thrown onto the attacker — in sight of its landing
+/// ([`try_place_trap_at`]), and not over the Hunter's own live Freezing Trap
+/// ([`frost_trap_held_for_freezing`]).
 #[allow(clippy::too_many_arguments)]
 fn try_peel_snare(
     commands: &mut Commands,
@@ -1646,6 +1681,9 @@ fn try_peel_snare(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     for &attacker in attackers {
+        // The immune skip is defence in depth: Concussive Shot's gate and the
+        // trap placement each refuse an immune unit too. Here it keeps an
+        // immune attacker out of the trace altogether.
         if !super::peel::movement_peel_target(ctx, attacker)
             || ctx.entity_is_immune(attacker)
             || super::peel::slowed(ctx, attacker)
@@ -1661,14 +1699,6 @@ fn try_peel_snare(
         let Some(attacker_pos) = ctx.combatants.get(&attacker).map(|i| i.position) else {
             continue;
         };
-        if !crate::states::play_match::map_geometry::has_line_of_sight(
-            ctx.obstacles,
-            my_pos,
-            attacker_pos,
-        ) {
-            builder.reject(AbilityType::FrostTrap, RejectionReason::LosBlocked);
-            continue;
-        }
         if !frost_trap_held_for_freezing(own_traps, combatant, builder)
             && try_place_trap_at(
                 commands,
@@ -1714,8 +1744,11 @@ fn try_concussive_shot(
     };
     let target_pos = target_info.position;
 
+    // An immune target blocks the slow on arrival. Defence in depth: every
+    // caller's picker already passes over an immune unit.
     let opts = PreCastOpts {
         check_friendly_cc: true,
+        check_target_immune: true,
         ..Default::default()
     };
     let cleared = match cast_gate(

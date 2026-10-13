@@ -210,3 +210,30 @@ Analysis: `scripts/paired_sweep.py --affects Paladin --tier directional` and
 `2026-10-12-as279-oriented.py` (scored from the Paladin's side). The
 casts-through-a-pillar counts come from arms instrumented by
 `2026-10-12-as279-hoj-sight-counter.py`.
+
+## `2026-10-12-as281-<map>.jsonl.gz`
+
+Behind `2026-10-12-as281-hunter-peel-immunity-sight.md` (card AS-281). Four
+inputs of 4,240 configs, each a `gen_sweep.py --full 2 --exclude-double-healer
+--affects Hunter --control-cells 8 --n 10` run with `--extra
+'{"map":"<map>"}'`. The maps are BasicArena, TwinPillars and PillaredArena,
+plus `PillaredTeamPlan`, which is PillaredArena with `"ai_profile":"TeamPlan"`.
+
+Build each arm with its instrument patch,
+`2026-10-12-as281-instrument-{before,after}.patch`, applied to `hunter.rs`.
+Then run each input with stderr kept:
+`AS281_LANE=0 <binary> --batch <map>.jsonl --out <arm>_<map>.csv --jobs 6
+2> <arm>_<map>.raw`.
+
+The analysis steps:
+
+- `scripts/paired_sweep.py` runs per map.
+- `2026-10-12-as281-hunter-side.py` scores the Hunter's side.
+- `2026-10-12-as281-event-counts.py` counts the instrument's events.
+- `2026-10-12-as281-attribute.py` replays the moved BasicArena matches.
+
+The four `variant-*-TwinPillars` CSVs are the after binary run on TwinPillars
+with `AS281_LANE=0` and `AS281_EXEMPT` set to the placement paths whose sight
+check is skipped: `v1immune` skips every path, `v2fallbackfree` skips
+`fallback` and `v3frostfree` skips `frost_peel,peel_snare`. `lane` is
+`AS281_LANE` unset with no exemption.

@@ -210,10 +210,22 @@ pub fn nearest_melee_threat(
     me: Entity,
     my_pos: Vec3,
 ) -> Option<(Entity, Vec3)> {
+    nearest_melee_threat_where(ctx, me, my_pos, |_| true)
+}
+
+/// [`nearest_melee_threat`] among the threats `keep` accepts — the nearest
+/// one a snare would land on, say, passing over an immune one nearer.
+pub fn nearest_melee_threat_where(
+    ctx: &CombatContext,
+    me: Entity,
+    my_pos: Vec3,
+    keep: impl Fn(Entity) -> bool,
+) -> Option<(Entity, Vec3)> {
     let team = self_team(ctx, me);
     ctx.combatants
         .values()
         .filter(|i| !i.is_pet && i.team != team && i.is_alive && is_kite_threat(i.class))
+        .filter(|i| keep(i.entity))
         .min_by(|a, b| {
             a.position
                 .distance(my_pos)

@@ -1,0 +1,141 @@
+--- a/src/states/play_match/class_ai/hunter.rs	2026-10-12 17:34:36
++++ b/src/states/play_match/class_ai/hunter.rs	2026-10-12 17:34:36
+@@ -41,6 +41,25 @@
+ /// seconds left; refresh only inside this window before expiry so the new slow
+ /// (after ~0.9s projectile travel) lands with no uptime gap and no wasted GCD.
+ const CONCUSSIVE_REFRESH_WINDOW: f32 = 1.0;
++
++// AS-281 measurement instrument (stderr only; never read by the sim).
++thread_local! {
++    static AS281_NOW: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
++}
++thread_local! {
++    static AS281_PATH: std::cell::Cell<&'static str> = const { std::cell::Cell::new("-") };
++}
++fn as281_path(p: &'static str) {
++    AS281_PATH.with(|c| c.set(p));
++}
++fn as281(tag: &str) {
++    eprintln!(
++        "AS281 {:.3} {} {}",
++        AS281_NOW.with(|n| n.get()),
++        tag,
++        AS281_PATH.with(|c| c.get())
++    );
++}
+ 
+ /// Hunter AI: Decides and executes abilities for a Hunter combatant.
+ pub fn decide_hunter_action(
+@@ -68,6 +87,7 @@
+ ) -> bool {
+     let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
+     let now = decision_trace.current_sim_time;
++    AS281_NOW.with(|n| n.set(now));
+     let kill_target_hidden = kill_target_index.is_some_and(|i| ctx.kill_target_hidden(i));
+ 
+     let nearest_dist = nearest_distance.unwrap_or(40.0);
+@@ -174,7 +194,7 @@
+             // Same clean-landing rule as every other placement: a lead that
+             // carries the landing onto another enemy waits for the next tick.
+             if victim_springs_it(ctx, combatant.team, target, landing)
+-                && try_place_trap_at(
++                && { as281_path("dip"); true } && try_place_trap_at(
+                     commands,
+                     combat_log,
+                     abilities,
+@@ -340,7 +360,7 @@
+         // Priority 3: Frost Trap at feet — unless it would replace the
+         // Hunter's own Freezing Trap still waiting to spring.
+         if !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
+-            && try_place_trap_at(
++            && { as281_path("feet"); true } && try_place_trap_at(
+                 commands,
+                 combat_log,
+                 abilities,
+@@ -426,10 +446,13 @@
+             super::dps_postures::nearest_melee_threat(ctx, entity, my_pos).or_else(|| {
+                 nearest_enemy.and_then(|(e, _)| ctx.combatants.get(&e).map(|i| (e, i.position)))
+             });
++        if frost_anchor.is_some_and(|(e, _)| ctx.entity_is_immune(e)) {
++            as281("FROST_ANCHOR_IMMUNE");
++        }
+         if let Some((frost_anchor_entity, anchor_pos)) = frost_anchor {
+             let midpoint = (my_pos + anchor_pos) / 2.0;
+             if !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
+-                && try_place_trap_at(
++                && { as281_path("frost_peel"); true } && try_place_trap_at(
+                     commands,
+                     combat_log,
+                     abilities,
+@@ -644,7 +667,7 @@
+                     AbilityType::FreezingTrap,
+                     RejectionReason::FriendlyBreakableCC,
+                 );
+-            } else if try_place_trap_at(
++            } else if { as281_path("offtarget"); true } && try_place_trap_at(
+                 commands,
+                 combat_log,
+                 abilities,
+@@ -695,7 +718,7 @@
+                 );
+             }
+             Ok(FallbackThrow { lane, victim, .. }) => {
+-                if try_place_trap_at(
++                if { as281_path("fallback"); true } && try_place_trap_at(
+                     commands,
+                     combat_log,
+                     abilities,
+@@ -957,7 +980,7 @@
+             return false;
+         }
+     };
+-    if !try_place_trap_at(
++    if { as281_path("pressure"); false } || !try_place_trap_at(
+         commands,
+         combat_log,
+         abilities,
+@@ -1443,6 +1466,11 @@
+                 && slow_remaining(e, ctx).is_none_or(|r| r <= CONCUSSIVE_REFRESH_WINDOW)
+         })
+     };
++    if super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)
++        .is_some_and(|(m, _)| ctx.entity_is_immune(m))
++    {
++        as281("CONC_NEAREST_IMMUNE");
++    }
+     // 1. Nearest melee kite-threat — peel it, moving or not.
+     if let Some((m, _)) = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos) {
+         if castable(m) {
+@@ -1599,6 +1627,13 @@
+     // the question every trap-targeting diagnosis starts from. `None` for the
+     // Frost Trap dropped at the Hunter's own feet, which aims at nobody, and
+     // for a lane Freezing Trap thrown for an enemy the Hunter cannot see.
++    if intended.is_some_and(|v| ctx.entity_is_immune(v)) {
++        as281("TRAP_AT_IMMUNE");
++    }
++    if !crate::states::play_match::map_geometry::has_line_of_sight(ctx.obstacles, my_pos, position)
++    {
++        as281(&format!("TRAP_UNSEEN {:?}", trap_type));
++    }
+     builder.choose(cleared, intended, true);
+ 
+     spawn_trap(
+@@ -1670,7 +1705,7 @@
+             continue;
+         }
+         if !frost_trap_held_for_freezing(own_traps, combatant, builder)
+-            && try_place_trap_at(
++            && { as281_path("peel_snare"); true } && try_place_trap_at(
+                 commands,
+                 combat_log,
+                 abilities,
+@@ -1742,6 +1777,9 @@
+         return false;
+     }
+ 
++    if ctx.entity_is_immune(target_entity) {
++        as281("WASTED_CONC");
++    }
+     builder.choose(cleared, Some(target_entity), true);
+ 
+     let projectile_speed = def.projectile_speed.unwrap_or(40.0);
