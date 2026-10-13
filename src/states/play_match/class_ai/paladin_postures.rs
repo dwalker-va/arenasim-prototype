@@ -23,9 +23,10 @@ use crate::states::play_match::movement_config::{MovementConfig, SharedMovementC
 
 use super::cast_guard::{pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
-    compound_pressure_trigger, dispel_chase_override, dispel_walk_tick, escape_tick,
-    escape_window_from, healer_pressured_tick_shared, medic_chase_override, medic_chase_tick,
-    release_ally_walk, start_movement_event, start_movement_event_with_target, HealerDispel,
+    compound_pressure_onset, compound_pressure_trigger, dispel_chase_override, dispel_walk_tick,
+    escape_tick, escape_window_from, healer_pressured_tick_shared, medic_chase_override,
+    medic_chase_tick, release_ally_walk, start_movement_event, start_movement_event_with_target,
+    take_cover_tick, HealerDispel,
 };
 use super::paladin::{
     dip_target_candidate, hoj_target_eligible, rotation_hoj_allowed, HojPlan, PaladinMovementPlan,
@@ -132,6 +133,11 @@ pub fn evaluate_paladin_posture(
     // self, so require an ally other than us).
     let has_teammate = allies.iter().any(|a| a.entity != entity);
     let trigger = (focused || healing_heavy) && has_teammate;
+    // The onset half of the PRESSURED hysteresis (AS-249): FREE and a dip
+    // enter only on the onset test (`compound_pressure_onset`), and the plain
+    // trigger above holds the posture.
+    let focused_onset = compound_pressure_onset(entity, ctx);
+    let onset = (focused_onset || healing_heavy) && has_teammate;
 
     let prev = state.posture;
 
@@ -173,11 +179,11 @@ pub fn evaluate_paladin_posture(
         // teammate-HP abort (urgency threshold, below the healing-heavy
         // threshold) is the HP-based exit; after the abort lands in FREE,
         // healing-heavy flips the posture to PRESSURED on the next tick.
-        Posture::Dip if focused => Posture::Pressured,
+        Posture::Dip if focused_onset => Posture::Pressured,
         Posture::Dip if dip_aborts => Posture::Free,
         Posture::Dip => Posture::Dip,
         // FREE: pressure first, then the dip opportunity.
-        _ if trigger => Posture::Pressured,
+        _ if onset => Posture::Pressured,
         _ if dip_entry.is_some() => Posture::Dip,
         _ => Posture::Free,
     };
@@ -220,7 +226,25 @@ pub fn evaluate_paladin_posture(
     // a Flash of Light on a less-hurt ally in sight would root the Paladin
     // short of the dying one, so it defers, while a heal on a dying ally in
     // sight (and the instant Holy Shock) fires.
-    if let Some(ally) =
+    if let Some(walking) = take_cover_tick(
+        commands,
+        entity,
+        my_pos,
+        next,
+        ctx,
+        state,
+        directive,
+        shared,
+        now,
+        decision_trace,
+    ) {
+        // A healer left alone against two or more enemies takes cover
+        // (`TeamPlan`'s TakeCover play): the one positioning authority while it
+        // lasts, and casts that would root it in the open wait until it is in.
+        if walking {
+            plan.cast_defer = Some(shared.urgency_hp_threshold);
+        }
+    } else if let Some(ally) =
         medic_chase_override(entity, my_pos, next, ctx, shared, state, directive, now)
     {
         medic_chase_tick(

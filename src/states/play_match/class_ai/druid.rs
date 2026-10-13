@@ -631,19 +631,25 @@ struct DruidTurn<'a, 'b, 'w, 's, 'c> {
 impl DruidTurn<'_, '_, '_, '_, '_> {
     /// The whole turn: the pre-match buff (step 1), then, once the gates are
     /// open, the rotation. A dying teammate moves Mark of the Wild behind its
-    /// heals (step 7).
+    /// heals (step 7), and so does a shift owed to break a root or snare: that
+    /// shift takes the next global cooldown, and a Mark the Shaman purged is
+    /// not worth the seconds rooted under a chaser.
     fn take(&mut self, combatant: &mut Combatant, gates_opened: bool) -> bool {
         let dying = gates_opened && self.teammate_dying();
-        (!dying && self.try_mark_of_the_wild(combatant, false))
-            || (gates_opened && self.rotation(combatant, dying))
+        let shift_owed = gates_opened
+            && shift_trigger(self.shift_view(combatant)) == Some(ShiftReason::BreakImpairment);
+        let mark_waits = dying || shift_owed;
+        (!mark_waits && self.try_mark_of_the_wild(combatant, false))
+            || (gates_opened && self.rotation(combatant, mark_waits))
     }
 
     /// Steps 2-10 — everything after the pre-match buff. Every heal is an
     /// instant, so an ESCAPE window has nothing to defer: the Druid heals on
     /// the run.
     ///
-    /// `mark_waits`: a teammate is dying ([`Self::teammate_dying`]), so Mark
-    /// of the Wild was held back from step 1 for step 7.
+    /// `mark_waits`: a teammate is dying ([`Self::teammate_dying`]), or a
+    /// shift is owed to break a root or snare, so Mark of the Wild was held
+    /// back from step 1 for step 7.
     fn rotation(&mut self, combatant: &mut Combatant, mark_waits: bool) -> bool {
         // The Peel play (TeamPlan): a teammate is in danger, so crowd control
         // on its attacker heads the rotation.

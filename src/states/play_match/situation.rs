@@ -57,6 +57,10 @@
 //!   [`Window`] names the most injured such enemy; its `until` is when the
 //!   first healer that is only LOCKED comes free — `None` when no healer's
 //!   return is known (out of mana, out of reach, or none at all).
+//! - **`last_stand`** — the team's last living non-pet unit, while two or
+//!   more living non-pet enemies it can see stand against it. Its [`Window`]
+//!   names that unit; its onset is when its last teammate fell (or the second
+//!   enemy came into view). Pets count on neither side.
 //!
 //! ## Plays
 //!
@@ -78,6 +82,13 @@
 //!   deleted at the next milestone sweep (the architecture's §4.5).
 //!   [`WithheldPlays`] denies it to one team — the paired control its probe
 //!   and its head-to-head measure it against.
+//! - **`TakeCover`** — the team is in its `last_stand` and the unit is a
+//!   healer, so it breaks the enemy casters' line of sight behind cover
+//!   instead of standing in the open (`team_solve::last_stand_cover`, driven
+//!   from the healers' posture machines). A MOVEMENT play: the chain is the
+//!   ordinary one. A NEW behaviour, gated under `AiProfile::TeamPlan`
+//!   ([`SituationConfig::take_cover`]) and withheld for measurement like the
+//!   others; inert on a map with nothing to hide behind.
 //!
 //! ## Thresholds
 //!
@@ -88,7 +99,8 @@
 //! | fact | threshold | sites that read it |
 //! |---|---|---|
 //! | dying | `health_pct < urgency_hp_threshold` | healer cover denial (`teammate_needs_saving`), the dispel walk's dying-first rule (`another_teammate_dying`) |
-//! | pressured | `danger_radius`, `threat_intent_radius` | the healers' PRESSURED trigger |
+//! | pressured | `danger_radius`, `threat_intent_radius` | the healers' PRESSURED trigger (its hold) |
+//! | pressure onset | the same, a closing threat `danger_edge_margin` inside both its edges | the healers' PRESSURED onset |
 //! | tempo | onset `press_advantage_margin`, release `press_release_margin` (`TeamPlan` only) | healer cover denial, the Warrior tempo reset |
 //! | danger window | dwell `danger_dwell` at a `danger_edge_margin` edge, release `danger_release` | the Peel play (`TeamPlan` only) |
 //! | kill window | low below `kill_hp_threshold`, released above `kill_hp_release`; a healer out of mana below `kill_oom_mana`, out of reach beyond `heal_range` | the Burst play (`TeamPlan` only) |
@@ -233,6 +245,16 @@ pub struct AllyStanding {
     /// position does not pressure, and neither does a melee targeting from
     /// across the arena.
     pub pressured: bool,
+    /// Pressured with the CLOSING branch given width ([`pressure_onset`]): a
+    /// caster or ranged enemy counts as closing only `danger_edge_margin`
+    /// inside both of that branch's edges — its own preferred range and
+    /// `threat_intent_radius`. The ONSET of a healer's PRESSURED posture reads
+    /// this and its hold reads [`Self::pressured`]. The branch is 2yd wide for
+    /// a 28yd caster, so a caster pursuing a healer to its preferred range
+    /// used to flip the posture on for a frame, the hold then backed the
+    /// healer off for `pressured_hold`, and its formation point walked it
+    /// straight back in: a ~3s bob across the caster's 30yd ring (AS-249).
+    pub pressure_onset: bool,
 }
 
 /// Everything one team's units know about the situation this frame.
@@ -284,6 +306,12 @@ pub struct TeamSituation {
     /// The trace's `sim_time` this was classified at: the clock a window's
     /// `until` is on, which a cast is fitted against.
     pub now: f32,
+    /// The team's last living non-pet unit, while it faces two or more living
+    /// non-pet enemies it can see (the module docs' `last_stand`).
+    pub last_stand: Option<Window>,
+    /// Whether this team runs the gated [`Play::TakeCover`]
+    /// ([`SituationConfig::take_cover`]).
+    pub cover_play: bool,
 }
 
 /// What a unit does about a situation: a named reordering of its own priority
@@ -303,6 +331,12 @@ pub enum Play {
     /// [`TeamSituation::fallback_play`] orders it. Gated under
     /// `AiProfile::TeamPlan`.
     Peel { ally: Entity },
+    /// The unit is its team's [`last_stand`](TeamSituation::last_stand), and
+    /// a healer: it breaks the enemy casters' line of sight behind cover
+    /// instead of standing in the open (`team_solve::last_stand_cover`). A
+    /// MOVEMENT play — the healer's chain is its ordinary one. Gated under
+    /// `AiProfile::TeamPlan`.
+    TakeCover,
 }
 
 /// The part a unit plays for its team, as far as choosing a play goes.
@@ -338,6 +372,15 @@ impl TeamSituation {
         self.allies.iter().any(|a| a.entity == ally && a.pressured)
     }
 
+    /// Whether teammate `ally` meets the ONSET of pressure
+    /// ([`AllyStanding::pressure_onset`]): the entry half of the healers'
+    /// PRESSURED hysteresis.
+    pub fn is_pressure_onset(&self, ally: Entity) -> bool {
+        self.allies
+            .iter()
+            .any(|a| a.entity == ally && a.pressure_onset)
+    }
+
     /// How much of the way to [`MatchPhase::Attrition`] is left: 1 at the
     /// gates, falling linearly to 0 at [`ATTRITION_ONSET_SECS`], and 0 after.
     pub fn attrition_remaining(&self) -> f32 {
@@ -355,6 +398,12 @@ impl TeamSituation {
         match self.ally_in_danger {
             Some(w) if self.peel_play && w.subject != me && !self.danger_attackers.is_empty() => {
                 Play::Peel { ally: w.subject }
+            }
+            _ if role == Role::Healer
+                && self.cover_play
+                && self.last_stand.is_some_and(|w| w.subject == me) =>
+            {
+                Play::TakeCover
             }
             _ => self.fallback_play(role),
         }
@@ -510,6 +559,9 @@ pub struct SituationConfig {
     /// ([`TeamSituation::peel_gates_lifted`]); set by [`Self::for_team`] from
     /// [`Self::withheld`].
     pub peel_gates_lifted: bool,
+    /// Whether the team runs the gated [`Play::TakeCover`] — off until
+    /// [`Self::under`] puts it under `TeamPlan`, as [`Self::peel`] is.
+    pub take_cover: bool,
     /// The gated plays each team is denied ([`WithheldPlays`]), applied by
     /// [`Self::for_team`].
     pub withheld: WithheldPlays,
@@ -539,6 +591,7 @@ impl SituationConfig {
             peel: false,
             burst: false,
             peel_gates_lifted: false,
+            take_cover: false,
             withheld: WithheldPlays::default(),
         }
     }
@@ -554,12 +607,14 @@ impl SituationConfig {
             AiProfile::TeamPlan => Self {
                 peel: true,
                 burst: true,
+                take_cover: true,
                 ..self
             },
             AiProfile::Legacy => Self {
                 press_release_margin: self.press_advantage_margin,
                 peel: false,
                 burst: false,
+                take_cover: false,
                 ..self
             },
         }
@@ -575,6 +630,7 @@ impl SituationConfig {
             peel: cfg.peel && !denied.denies(&PEEL),
             burst: cfg.burst && !denied.denies(&Play::Burst),
             peel_gates_lifted: self.withheld.lifted_for_team(team).denies(&PEEL),
+            take_cover: cfg.take_cover && !denied.denies(&Play::TakeCover),
             ..cfg
         }
     }
@@ -597,6 +653,7 @@ impl SituationConfig {
 pub struct PlaySet {
     peel: bool,
     burst: bool,
+    take_cover: bool,
 }
 
 impl PlaySet {
@@ -614,6 +671,7 @@ impl PlaySet {
         match play {
             Play::Peel { .. } => self.peel = true,
             Play::Burst => self.burst = true,
+            Play::TakeCover => self.take_cover = true,
             Play::Default => {}
         }
     }
@@ -623,6 +681,7 @@ impl PlaySet {
         match play {
             Play::Peel { .. } => self.peel,
             Play::Burst => self.burst,
+            Play::TakeCover => self.take_cover,
             Play::Default => false,
         }
     }
@@ -697,9 +756,10 @@ impl WithheldPlays {
             let play = match name.as_str() {
                 "Peel" | "peel" => PEEL,
                 "Burst" | "burst" => Play::Burst,
+                "TakeCover" | "take_cover" => Play::TakeCover,
                 other => {
                     return Err(format!(
-                        "Unknown withheld play: '{other}'. Gated plays: Peel, Burst"
+                        "Unknown withheld play: '{other}'. Gated plays: Peel, Burst, TakeCover"
                     ))
                 }
             };
@@ -775,7 +835,48 @@ pub fn classify_roster(
         burst_play: cfg.burst,
         burst_exceptions: cfg.burst_exceptions(),
         now: clock.now,
+        last_stand: last_stand(roster, auras, team, prev, clock.now),
+        cover_play: cfg.take_cover,
     }
+}
+
+/// The `last_stand` window: `team`'s only living non-pet unit, while two or
+/// more living non-pet enemies it can see ([`stealth_visible`], its own Shadow
+/// Sight included) stand against it. Pets do not count on either side: a
+/// Hunter and its pet are one enemy, and a lone Hunter with its pet is still
+/// alone. The onset carries while the subject holds.
+fn last_stand(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    team: u8,
+    prev: &TeamSituation,
+    now: f32,
+) -> Option<Window> {
+    let mut alive = roster
+        .values()
+        .filter(|i| i.team == team && i.is_alive && !i.is_pet);
+    let last = alive.next()?;
+    if alive.next().is_some() {
+        return None;
+    }
+    let sight = has_shadow_sight(auras, last.entity);
+    let enemies = roster
+        .values()
+        .filter(|c| {
+            c.team != team
+                && c.is_alive
+                && !c.is_pet
+                && stealth_visible(c.stealthed, sight, has_shadow_sight(auras, c.entity))
+        })
+        .count();
+    (enemies >= 2).then(|| Window {
+        subject: last.entity,
+        since: prev
+            .last_stand
+            .filter(|w| w.subject == last.entity)
+            .map_or(now, |w| w.since),
+        until: None,
+    })
 }
 
 /// When `healer` (an enemy healer, alive) can next heal `subject`:
@@ -906,6 +1007,7 @@ fn allies(
             entity: info.entity,
             dying: info.health_pct() < cfg.urgency_hp_threshold,
             pressured: pressured(roster, auras, info, cfg),
+            pressure_onset: pressure_onset(roster, auras, info, cfg),
         })
         .collect()
 }
@@ -1002,6 +1104,28 @@ fn firmly_pressured(
                 && (threat.is_pet
                     || threat.class.is_melee()
                     || threat.distance_to(subject.position) > preferred_range(threat) + margin))
+    })
+}
+
+/// [`AllyStanding::pressure_onset`]: [`pressured`], except that a threat
+/// pressuring `subject` only by CLOSING must close `danger_edge_margin` inside
+/// that branch's two edges — beyond its preferred range by the margin, and
+/// within `threat_intent_radius` less it. The proximity branch and the
+/// melee-or-pet branch are unchanged, so a melee or pet onsets exactly where
+/// it always has.
+fn pressure_onset(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    subject: &CombatantInfo,
+    cfg: &SituationConfig,
+) -> bool {
+    let margin = cfg.danger_edge_margin;
+    pressure_threats(roster, auras, subject, cfg).any(|threat| {
+        let distance = subject.position.distance(threat.position);
+        distance <= cfg.danger_radius
+            || (distance <= cfg.threat_intent_radius && (threat.is_pet || threat.class.is_melee()))
+            || (distance <= cfg.threat_intent_radius - margin
+                && threat.distance_to(subject.position) > preferred_range(threat) + margin)
     })
 }
 
@@ -1256,6 +1380,9 @@ fn record_transitions(
     if let Some((kind, window)) = window_change(prev.kill_window, next.kill_window) {
         trace.record_window_change(team, SituationName::KillWindow, kind, &window);
     }
+    if let Some((kind, window)) = window_change(prev.last_stand, next.last_stand) {
+        trace.record_window_change(team, SituationName::LastStand, kind, &window);
+    }
 }
 
 /// How a window moved between two classifications, if it did: opened, closed,
@@ -1488,6 +1615,7 @@ mod tests {
             SituationConfig {
                 peel: true,
                 burst: true,
+                take_cover: true,
                 ..SituationConfig::default()
             }
         );
@@ -1498,6 +1626,7 @@ mod tests {
                 press_release_margin: teamplan.press_advantage_margin,
                 peel: false,
                 burst: false,
+                take_cover: false,
                 ..teamplan
             },
             "only the release and the gated plays differ"
@@ -1990,6 +2119,132 @@ mod tests {
         f.auras.remove(&warrior);
         f.auras.insert(rogue, vec![cc(AuraType::ShadowSight, 10.0)]);
         assert!(!classify_now(&f, &TeamSituation::default(), 30.0).is_pressured(warrior));
+    }
+
+    /// The onset of pressure gives the closing branch width: a caster closing
+    /// from inside `danger_edge_margin` of its preferred range, or from the
+    /// last margin inside `threat_intent_radius`, holds the posture but does
+    /// not start it. Proximity, melee and pets onset exactly where they
+    /// pressure.
+    #[test]
+    fn pressure_onset_gives_the_closing_branch_width_and_nothing_else() {
+        let mut f = fixture();
+        let cfg = SituationConfig::default();
+        let m = cfg.danger_edge_margin;
+        let (warrior, healer, mage) = (f.warrior, f.healer, f.mage);
+        let at = |f: &Fixture| {
+            let s = classify_now(f, &TeamSituation::default(), 30.0);
+            (s.is_pressured(warrior), s.is_pressure_onset(warrior))
+        };
+        // A Hunter, whose preferred range (25) leaves a closing band with a
+        // middle (26..29), so all three of its parts can be shown.
+        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Hunter;
+        let pref = CharacterClass::Hunter.preferred_range();
+        place(&mut f, mage, pref + m * 0.5, 0.0, Some(warrior));
+        assert_eq!(
+            at(&f),
+            (true, false),
+            "closing, at the preferred-range edge"
+        );
+        place(&mut f, mage, pref + m + 1.0, 0.0, Some(warrior));
+        assert_eq!(at(&f), (true, true), "closing, firmly inside both edges");
+        place(
+            &mut f,
+            mage,
+            cfg.threat_intent_radius - m * 0.5,
+            0.0,
+            Some(warrior),
+        );
+        assert_eq!(at(&f), (true, false), "closing, at the intent-radius edge");
+        // A 28yd caster's band is 2yd wide: it never onsets by closing.
+        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Shaman;
+        for d in [28.5, 29.0, 29.5, 30.0] {
+            place(&mut f, mage, d, 0.0, Some(warrior));
+            assert_eq!(at(&f), (true, false), "a 28yd caster closing at {d}");
+        }
+        // Inside the danger radius, at its very edge: onset unchanged.
+        place(&mut f, mage, cfg.danger_radius, 0.0, Some(warrior));
+        assert_eq!(at(&f), (true, true), "proximity");
+        // A melee at the intent radius's very edge: onset unchanged.
+        place(&mut f, mage, 0.0, 0.0, None);
+        f.roster.get_mut(&healer).unwrap().class = CharacterClass::Rogue;
+        place(&mut f, healer, cfg.threat_intent_radius, 0.0, Some(warrior));
+        assert_eq!(at(&f), (true, true), "melee");
+    }
+
+    /// `last_stand`: a team's only living non-pet unit, against two or more
+    /// living non-pet enemies it can see. The onset carries; pets count on
+    /// neither side; a teammate alive, one enemy, or an enemy it cannot see
+    /// end it.
+    #[test]
+    fn last_stand_is_the_last_unit_against_two_it_can_see() {
+        let mut f = fixture();
+        let (warrior, rogue, healer) = (f.warrior, f.rogue, f.healer);
+        let s = classify_now(&f, &TeamSituation::default(), 10.0);
+        assert_eq!(s.last_stand, None, "two a side");
+        f.roster.get_mut(&rogue).unwrap().is_alive = false;
+        let s = classify_now(&f, &TeamSituation::default(), 10.0);
+        let w = s.last_stand.expect("the Warrior is alone against two");
+        assert_eq!((w.subject, w.since, w.until), (warrior, 10.0, None));
+        let later = classify_now(&f, &s, 12.0);
+        assert_eq!(
+            later.last_stand.map(|w| w.since),
+            Some(10.0),
+            "the onset carries"
+        );
+        // A pet on the Warrior's side is not a teammate.
+        f.roster.get_mut(&rogue).unwrap().is_alive = true;
+        f.roster.get_mut(&rogue).unwrap().is_pet = true;
+        assert!(classify_now(&f, &s, 12.0).last_stand.is_some(), "a pet");
+        // An enemy it cannot see does not count, nor does one that is dead.
+        f.roster.get_mut(&healer).unwrap().stealthed = true;
+        assert_eq!(classify_now(&f, &s, 12.0).last_stand, None, "unseen");
+        f.roster.get_mut(&healer).unwrap().stealthed = false;
+        f.roster.get_mut(&healer).unwrap().is_alive = false;
+        assert_eq!(classify_now(&f, &s, 12.0).last_stand, None, "one enemy");
+    }
+
+    /// TakeCover is a healer's play, on a team that runs it, for its last
+    /// stand only.
+    #[test]
+    fn take_cover_is_the_last_healers_play_under_the_gate() {
+        let me = Entity::from_raw(1);
+        let other = Entity::from_raw(2);
+        let standing = TeamSituation {
+            last_stand: Some(Window {
+                subject: me,
+                since: 0.0,
+                until: None,
+            }),
+            cover_play: true,
+            ..Default::default()
+        };
+        assert_eq!(standing.play_for(Role::Healer, me), Play::TakeCover);
+        assert_eq!(standing.play_for(Role::RangedDps, me), Play::Default);
+        assert_eq!(standing.play_for(Role::Healer, other), Play::Default);
+        let ungated = TeamSituation {
+            cover_play: false,
+            ..standing.clone()
+        };
+        assert_eq!(ungated.play_for(Role::Healer, me), Play::Default);
+        // The gate: TeamPlan runs it, Legacy never does, and a withheld team
+        // does not.
+        let cfg = SituationConfig::default();
+        assert!(cfg.under(AiProfile::TeamPlan).take_cover);
+        assert!(!cfg.under(AiProfile::Legacy).take_cover);
+        let withheld = SituationConfig {
+            withheld: WithheldPlays {
+                team1: PlaySet::of(&[Play::TakeCover]),
+                ..Default::default()
+            },
+            ..cfg
+        };
+        assert!(!withheld.for_team(1, AiProfile::TeamPlan).take_cover);
+        assert!(withheld.for_team(2, AiProfile::TeamPlan).take_cover);
+        assert_eq!(
+            WithheldPlays::parse_set(&["TakeCover".to_string()]),
+            Ok(PlaySet::of(&[Play::TakeCover]))
+        );
     }
 
     #[test]

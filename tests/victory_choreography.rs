@@ -250,12 +250,8 @@ fn a_lone_winner_bounces_where_it_stands() {
 
 /// Three winners who finish the match on the same side of the arena would, if
 /// each simply stopped on the side it came from, share a spot. Every winner
-/// gets a distinct spot, reaches it, and stands clear of the others.
-fn assert_three_stand_apart(cfg: &str) -> Seen {
-    assert_three_stand_apart_seen(cfg, run(cfg))
-}
-
-/// [`assert_three_stand_apart`] on a match already played.
+/// gets a distinct spot, reaches it, and stands clear of the others — asserted
+/// on a match already played.
 fn assert_three_stand_apart_seen(cfg: &str, seen: Seen) -> Seen {
     assert_eq!(seen.at_decision.len(), 3, "{cfg}: {:?}", seen.at_decision);
     assert_eq!(seen.marches_at_end.len(), 3);
@@ -278,29 +274,64 @@ fn assert_three_stand_apart_seen(cfg: &str, seen: Seen) -> Seen {
     seen
 }
 
+/// The 3v3s the three-winner probe plays, each over its own seeds:
+/// it judges every match of a comp that three winners finish. Found with the
+/// Rogue stopping 0.22yd from the Priest, and on the pillared Nagrand map
+/// 0.67yd apart. Pinned to one seed each until AS-240 and then AS-249 took a
+/// winner out of them; a match three winners finish is the situation, so the
+/// probe finds its matches rather than naming them. The Nagrand comp is one
+/// whose winners usually all survive (the pinned Hunter+Mage+Priest comp
+/// finished with three in none of eight seeds after AS-249).
+const THREE_WINNER_COMPS: [(&str, &str, &str, std::ops::Range<u64>); 2] = [
+    (
+        r#"["Rogue","Priest","Paladin"]"#,
+        r#"["Hunter","Shaman","Warlock"]"#,
+        "BasicArena",
+        0..3,
+    ),
+    (
+        r#"["Warrior","Mage","Priest"]"#,
+        r#"["Rogue","Warlock","Druid"]"#,
+        "PillaredArena",
+        0..3,
+    ),
+];
+
 #[test]
 fn three_winners_each_reach_their_own_spot() {
-    // Found with the Rogue stopping 0.22yd from the Priest (seed 1). Once the
-    // Web became physical (AS-240) the Paladin could no longer Cleanse it off
-    // its Priest, and a winner died in seed 1; seed 0 keeps all three alive
-    // and finishes two of them 0.06yd apart, the case the spots exist for...
-    assert_three_stand_apart(
-        r#"{"team1":["Rogue","Priest","Paladin"],"team2":["Hunter","Shaman","Warlock"],"map":"BasicArena","random_seed":0}"#,
-    );
-    // ...and, on the pillared Nagrand map, 0.67yd.
-    assert_three_stand_apart(
-        r#"{"team1":["Hunter","Mage","Priest"],"team2":["Warrior","Rogue","Shaman"],"map":"PillaredArena","random_seed":4}"#,
-    );
+    for (team1, team2, map, seeds) in THREE_WINNER_COMPS {
+        let mut judged = 0;
+        for seed in seeds.clone() {
+            let cfg = format!(
+                r#"{{"team1":{team1},"team2":{team2},"map":"{map}","random_seed":{seed}}}"#
+            );
+            let seen = run(&cfg);
+            if seen.at_decision.len() != 3 {
+                continue;
+            }
+            assert_three_stand_apart_seen(&cfg, seen);
+            judged += 1;
+        }
+        assert!(
+            judged >= 1,
+            "{team1} vs {team2} on {map}: three winners finished none of seeds {seeds:?}"
+        );
+    }
 }
 
-/// A 3v3 on TwinPillars whose winners' ring slot lands inside a pillar. The
-/// situation is rare in play — one match in 33 that three winners finished
-/// across [`pillar_slot_candidates`] after AS-293 — so a bank over seeds
-/// costs a minute of matches per run; the probe pins one match and FAILS
-/// LOUDLY when it stops holding the situation (`slots_inside_a_pillar`),
-/// rather than passing on a match that no longer has a slot to move.
-/// `scan_pillar_slots` re-finds one.
-const PILLAR_SLOT: &str = r#"{"team1":["Warrior","Rogue","Priest"],"team2":["Mage","Hunter","Shaman"],"map":"TwinPillars","random_seed":1}"#;
+/// A 3v3 on TwinPillars whose winners' ring slot can land inside a pillar,
+/// over a few seeds: the probe judges every match three winners finish with a
+/// slot inside a pillar, and needs one. Pinned to one seed until AS-249's
+/// healer positioning took a winner out of it; a small bank of the same comp
+/// holds the situation (seeds 0 and 3 of 0-3 after AS-249). `scan_pillar_slots`
+/// prints the wider candidates.
+const PILLAR_SLOT_COMP: (&str, &str) = (
+    r#"["Warrior","Rogue","Priest"]"#,
+    r#"["Mage","Hunter","Shaman"]"#,
+);
+
+/// The seeds [`PILLAR_SLOT_COMP`] plays.
+const PILLAR_SLOT_SEEDS: std::ops::Range<u64> = 0..4;
 
 /// The 3v3 TwinPillars matches `scan_pillar_slots` plays: six comps, eight
 /// seeds each.
@@ -341,7 +372,7 @@ fn pillar_slot_candidates() -> Vec<String> {
     out
 }
 
-/// Re-finds [`PILLAR_SLOT`]: prints every candidate three winners finish and
+/// Widens [`PILLAR_SLOT_COMP`]: prints every candidate three winners finish and
 /// how many of its ring slots fell inside a pillar. `cargo test --release
 /// --test victory_choreography -- --ignored --nocapture scan_pillar_slots`
 #[test]
@@ -388,15 +419,25 @@ fn slots_inside_a_pillar(seen: &Seen) -> usize {
 /// slot moves to clear ground, and every winner still reaches its spot.
 #[test]
 fn a_ring_slot_inside_a_pillar_moves_in_a_real_match() {
-    let seen = run(PILLAR_SLOT);
-    assert_eq!(seen.at_decision.len(), 3, "{:?}", seen.at_decision);
-    let inside = slots_inside_a_pillar(&seen);
+    let (team1, team2) = PILLAR_SLOT_COMP;
+    let mut judged = 0;
+    for seed in PILLAR_SLOT_SEEDS {
+        let cfg = format!(
+            r#"{{"team1":{team1},"team2":{team2},"map":"TwinPillars","random_seed":{seed}}}"#
+        );
+        let seen = run(&cfg);
+        if seen.at_decision.len() != 3 || slots_inside_a_pillar(&seen) == 0 {
+            continue;
+        }
+        assert_three_stand_apart_seen(&cfg, seen);
+        judged += 1;
+    }
     assert!(
-        inside >= 1,
-        "no ring slot of {PILLAR_SLOT} falls inside a pillar any more — the probe has \
-         nothing to move; re-find one with `scan_pillar_slots`"
+        judged >= 1,
+        "no ring slot of {team1} vs {team2} falls inside a pillar in seeds \
+         {PILLAR_SLOT_SEEDS:?} — the probe has nothing to move; widen it with \
+         `scan_pillar_slots`"
     );
-    assert_three_stand_apart_seen(PILLAR_SLOT, seen);
 }
 
 /// Seed scanner for the probes above: prints each candidate's winners and how

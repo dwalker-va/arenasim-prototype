@@ -27,7 +27,7 @@ use crate::states::play_match::decision_trace::{
 };
 use crate::states::play_match::map_geometry::{has_line_of_sight, nearest_standable, EYE_HEIGHT};
 use crate::states::play_match::movement_config::{MovementWeights, SharedMovementConfig};
-use crate::states::play_match::situation::Tempo;
+use crate::states::play_match::situation::{Play, Role, Tempo};
 use crate::states::play_match::team_solve::DISPEL_REACH_MARGIN;
 
 use super::{CombatContext, CombatantInfo, OwedDispel};
@@ -223,6 +223,34 @@ pub fn escape_distance_gained(window: f32, base_speed: f32, slow_multiplier: f32
 /// threat to be near enough that intent matters.
 pub(super) fn compound_pressure_trigger(entity: Entity, ctx: &CombatContext) -> bool {
     ctx.situation().is_pressured(entity)
+}
+
+/// The ONSET half of the PRESSURED hysteresis under `Legacy`
+/// ([`AllyStanding::pressure_onset`](crate::states::play_match::situation::AllyStanding::pressure_onset)):
+/// [`compound_pressure_trigger`], with its closing-caster branch given width.
+/// A FREE healer enters PRESSURED only on this; once PRESSURED it stays while
+/// the plain trigger holds.
+///
+/// Without the gap, a caster targeting the healer counted as "closing" only
+/// between its preferred range (28yd) and `threat_intent_radius` (30yd): a
+/// healer whose formation point lay past the caster walked in, entered
+/// PRESSURED for a frame's worth of closing, backed off for `pressured_hold`,
+/// exited, and walked back in — a ~3s in-and-out bob that also carried it away
+/// from its teammate (AS-249).
+///
+/// `TeamPlan` enters on the plain trigger, as before: there PRESSURED is the
+/// team solve's (`OccupyCover`), which holds the healer in cover within reach
+/// of its ally rather than backing it off and letting go, and a closing caster
+/// is what hands the healer to it. Measured (AS-249, `scan_nagrand_teamplan`,
+/// seeds 1-12): with the gap under `TeamPlan` too, the healer lost sight of its
+/// Warrior on a median 30% of frames against 16% before — the solve spent
+/// less time keeping the line it exists to keep.
+pub(super) fn compound_pressure_onset(entity: Entity, ctx: &CombatContext) -> bool {
+    if ctx.ai_profile.is_team_plan() {
+        compound_pressure_trigger(entity, ctx)
+    } else {
+        ctx.situation().is_pressure_onset(entity)
+    }
 }
 
 /// Sticky anchor ally (R6): most-injured living non-pet ally, excluding
@@ -596,6 +624,114 @@ fn ally_walk_allowed(entity: Entity, next: Posture, ctx: &CombatContext) -> bool
     !(ctx.ai_profile.is_team_plan() && next == Posture::Pressured)
 }
 
+// ============================================================================
+// TakeCover (the last-stand play, AS-249)
+// ============================================================================
+
+/// The spot a cover walk must be within (XZ yards) to count as arrived: the
+/// rotation stops deferring its casts for the walk inside it.
+const COVER_ARRIVED: f32 = 1.0;
+
+/// A re-solved cover spot farther than this (XZ yards) from the last one is a
+/// new spot, and is traced as one.
+const COVER_RETARGET: f32 = 3.0;
+
+/// Seconds a healer that has reached its cover holds it before it re-solves,
+/// while no enemy stands inside `danger_radius` of it: longer than a
+/// Frostbolt's 1.5s cast. Re-solving every `commit_window` (0.6s) stepped a
+/// lone healer out of every cast a ranged enemy began on it the moment it was
+/// seen — a perfect juke no caster could ever land through, which held a
+/// Mage+Priest against a lone Shaman to a draw at the cap (AS-249).
+const COVER_HOLD_SECS: f32 = 2.0;
+
+/// The `TeamPlan` TakeCover play's movement (`situation::Play::TakeCover`): a
+/// healer left alone against two or more enemies walks to the spot
+/// [`team_solve::last_stand_cover`](crate::states::play_match::team_solve::last_stand_cover)
+/// picks — behind cover from the enemy casters, as far out of the closers'
+/// reach as that cover allows — and holds it, re-solving once per commit
+/// window as the enemies move.
+///
+/// Runs in FREE and PRESSURED, where it is the healer's one positioning
+/// authority: a lone healer has no formation to keep, no teammate to chase
+/// and no dispel to walk to. An ESCAPE window or a dip is a committed script
+/// and keeps the legs until it ends.
+///
+/// Returns `Some(walking)` while the play drives the position — `walking` is
+/// `true` until the healer reaches its spot, and its rotation defers the casts
+/// that would root it short of cover meanwhile — and `None` when it does not:
+/// `Legacy`, a healer with a teammate, fewer than two enemies, or a map with
+/// nothing to hide behind (so BasicArena is untouched under both profiles).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn take_cover_tick(
+    commands: &mut Commands,
+    entity: Entity,
+    my_pos: Vec3,
+    next: Posture,
+    ctx: &CombatContext,
+    state: &mut HealerPosture,
+    directive: Option<&MovementDirective>,
+    shared: &SharedMovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+) -> Option<bool> {
+    let live = !ctx.obstacles.is_empty()
+        && matches!(next, Posture::Free | Posture::Pressured)
+        && ctx.play(Role::Healer) == Play::TakeCover;
+    if !live {
+        if state.cover_spot.take().is_some() {
+            // Hand the legs back: the posture's own tick re-issues its goal.
+            commands.entity(entity).remove::<MovementDirective>();
+        }
+        return None;
+    }
+    let my_xz = Vec2::new(my_pos.x, my_pos.z);
+    let committed = state.cover_spot.is_some()
+        && directive.is_some_and(|d| now < d.committed_until && now < d.expires);
+    if !committed {
+        let world = crate::states::play_match::team_solve::world_from_context(
+            ctx,
+            shared.heal_range,
+            shared.danger_radius,
+            None,
+        );
+        let spot = crate::states::play_match::team_solve::last_stand_cover(entity, &world)
+            .unwrap_or(my_xz);
+        let holding = spot.distance(my_xz) <= COVER_ARRIVED
+            && ctx
+                .visible_enemies_within(entity, my_pos, shared.danger_radius)
+                .is_empty();
+        let commit = if holding {
+            COVER_HOLD_SECS
+        } else {
+            shared.commit_window
+        };
+        commands.entity(entity).try_insert(MovementDirective {
+            goal: MovementGoal::Point(Vec3::new(spot.x, my_pos.y, spot.y)),
+            expires: now + shared.directive_ttl.max(commit),
+            committed_until: now + commit,
+        });
+        let retarget = state
+            .cover_spot
+            .is_none_or(|last| last.distance(spot) > COVER_RETARGET);
+        if retarget {
+            if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+                builder.direction_change(
+                    next.into(),
+                    MovementTrigger::TakeCover,
+                    MovementGoalKind::Point,
+                );
+                builder.finish();
+            }
+        }
+        state.cover_spot = Some(spot);
+    }
+    Some(
+        state
+            .cover_spot
+            .is_some_and(|spot| spot.distance(my_xz) > COVER_ARRIVED),
+    )
+}
+
 /// Issue/refresh the medic-chase directive toward `ally`'s live position and
 /// emit the `SeekLos` movement event (reusing the attacker-chase convention:
 /// SeekLos trigger + Point goal + the ally in the target view). Re-targets the
@@ -782,6 +918,9 @@ pub(super) fn escape_tick(
         anchor: anchor_info.map(|i| AnchorConstraint {
             pos: i.position,
             heal_range: shared.heal_range,
+            // An escape window is a committed run from an impaired melee, not
+            // positioning: it keeps the plain ladder.
+            close_when_out: false,
         }),
         formation_point: None,
         // No wand pull during an escape — repulsion must dominate, and a
@@ -1127,6 +1266,11 @@ pub(super) fn healer_pressured_tick_shared(
         anchor: anchor_info.map(|i| AnchorConstraint {
             pos: i.position,
             heal_range: shared.heal_range,
+            // A teammate the enemy is focusing is one the healer must not be
+            // pushed out of reach of: out of reach, close on it rather than
+            // flee freely (AS-249). An unfocused teammate needs no heal yet,
+            // and the healer's own escape keeps the plain ladder.
+            close_when_out: !ctx.enemies_targeting(i.entity).is_empty(),
         }),
         formation_point: None,
         wand_target,
