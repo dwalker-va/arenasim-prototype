@@ -5329,56 +5329,65 @@ mod u10_press {
         }
     }
 
-    /// F4 endgame guard: the healer-heavy comp RESOLVES by elimination — never
-    /// the 300s cap draw — at the pinned seeds, and seed 30 does so at ~92s,
-    /// PAST the 75s dampening onset (a real attrition endgame that still
-    /// terminates because the leader presses instead of LoS-stalling). The
-    /// deep-dampening example was seed 5 (~85s), but tangent steering shortened
-    /// seed 5's endgame to ~48s (the pressing team closes on the pillar-dancing
-    /// loser faster); seed 2 then carried it (92.7s) until AS-154 took
-    /// Immolate's burst off `game_rng`, which re-randomised this Warlock comp
-    /// and brought seed 2 in to 61.0s. Seed 30 (92.2s kill, a GOOD row in
-    /// `scan_press_seeds`) carried the past-75s assertion until AS-167 (weapon
-    /// speed from item data) brought it in to 41.5s; the first line that
-    /// differs from `main` @ 17cb9f0 is the Warlock's first Wand Shot into a
-    /// shield, 7 -> 9 absorbed (the Wand of Shadows fires every 1.8s for the
-    /// same DPS). Seed 9 (90.8s kill, a GOOD row in the re-scan) carries it
-    /// now. The AE sweep owns the aggregate draw-rate; this pins the mechanism
-    /// end-to-end.
+    /// The seeds the endgame guard plays: the same bank `scan_press_seeds`
+    /// prints. (Pinned seeds carried it until the past-75s one had been
+    /// re-picked four times; AS-293 migrated it here.)
+    const PRESS_BANK: std::ops::Range<u64> = 0..40;
+
+    /// The most matches of the bank that may run to the cap (1 of 40 on
+    /// `main` @ 68b9a0c, and after AS-293).
+    const MAX_CAPPED: usize = 2;
+
+    /// The fewest kills past the 75s dampening onset the bank must hold (5 on
+    /// `main` @ 68b9a0c, 4 after AS-293).
+    const MIN_DEEP_KILLS: usize = 2;
+
+    /// F4 endgame guard: the healer-heavy comp RESOLVES by elimination — not
+    /// the 300s cap draw — and some of those resolutions are real attrition
+    /// endgames, ending past the 75s dampening onset because the leader
+    /// presses instead of LoS-stalling. Judged over the bank: at most
+    /// [`MAX_CAPPED`] matches run to the cap, and at least [`MIN_DEEP_KILLS`]
+    /// end by a kill past 75s. The AE sweep owns the aggregate draw-rate.
+    ///
+    /// An endgame guard, not a guard on the press: with
+    /// `press_advantage_margin` at 1.0 (no team ever presses) every match of
+    /// the bank still ends by a kill, dampening deciding it (measured after
+    /// AS-293). The press itself is
+    /// [`leading_healer_stops_denying_trailing_healer_keeps_denying`]'s.
     #[test]
     fn press_comp_resolves_before_cap() {
-        for seed in [2u64, 5u64, 9u64] {
+        let mut capped = Vec::new();
+        let mut deep_kills = Vec::new();
+        for seed in PRESS_BANK {
             let s = measure(seed);
-            assert_eq!(
-                s.end_reason,
-                EndReason::Kill,
-                "seed {seed}: match ended by {} at {:.1}s — a clearly-ahead team should press to \
-                 a kill, not stall into the cap",
-                s.end_reason.as_str(),
-                s.match_time,
-            );
-            assert!(
-                s.match_time < 300.0,
-                "seed {seed}: match ran the full {:.1}s cap",
-                s.match_time,
-            );
+            if s.end_reason != EndReason::Kill {
+                capped.push((seed, s.end_reason.as_str(), s.match_time));
+            } else if s.match_time > 75.0 {
+                deep_kills.push(seed);
+            }
         }
-        // Seed 9 specifically resolves deep into dampening (past 75s).
         assert!(
-            measure(9).match_time > 75.0,
-            "seed 9 should resolve past the 75s dampening onset (real attrition endgame)",
+            capped.len() <= MAX_CAPPED,
+            "{} of the bank's matches ended without a kill (> {MAX_CAPPED}): {capped:?} — a \
+             clearly-ahead team should press to a kill, not stall into the cap",
+            capped.len(),
+        );
+        assert_min_occurrences(
+            "kills past the 75s dampening onset in the bank",
+            deep_kills.len(),
+            MIN_DEEP_KILLS,
         );
     }
 
-    /// Exploratory scan for press-comp re-pinning: prints end/time and the
-    /// press-property counts per seed so the pinned pair can be (re)chosen when
-    /// trajectories drift. Ignored by default. A good pin has end=kill,
+    /// Exploratory scan over [`PRESS_BANK`]: prints end/time and the
+    /// press-property counts per seed (and lets the press-property pins be
+    /// re-chosen when trajectories drift). Ignored by default. A good pin has end=kill,
     /// leader_decisions>=3, leader_cover_positive==0, trailer_denials>=3; the
     /// ">75s" pin additionally needs match_time>75.
     #[test]
     #[ignore]
     fn scan_press_seeds() {
-        for seed in 0u64..40 {
+        for seed in PRESS_BANK {
             let s = measure(seed);
             let good = s.end_reason == EndReason::Kill
                 && s.leader_decisions >= 3
@@ -5776,138 +5785,111 @@ mod chase_los {
     }
 
     /// Exploratory seed scan — prints per-seed stats over the bank
-    /// [`juke_bounded_over_the_seed_bank`] judges. Ignored by default.
+    /// [`chase_bounds_lone_shaman_over_the_seed_bank`] judges. Ignored by
+    /// default.
     #[test]
     #[ignore]
     fn scan_seeds() {
-        for seed in 0u64..40 {
+        for seed in CHASE_BANK {
             let s = measure(seed);
             eprintln!(
-                "seed {seed:2}: winner={:?} dur={:5.1} wdeath={:>6} lone={:4} occl_total={:5.1} max_win={:5.2}",
+                "seed {seed:2}: winner={:?} dur={:5.1} wdeath={:>6} lone={:4} occl_total={:5.1} max_win={:5.2}{}",
                 s.winner,
                 s.duration,
                 s.warrior_death.map(|t| format!("{t:.1}")).unwrap_or_else(|| "none".into()),
                 s.lone_samples,
                 s.total_occluded,
                 s.max_occluded_window,
+                if hugged(&s) { " <-- HUG" } else { "" },
             );
         }
     }
 
-    /// The occlusion-timeout chase bounds the lone-Shaman endgame. At pinned
-    /// seeds where the Warrior dies early and the surviving Shaman hugs a pillar,
-    /// the Mage's longest continuous occluded window is bounded (roughly the
-    /// timeout plus the walk-to-sight travel time) and the match resolves by
-    /// ELIMINATION well before the cap — not by drawing out to the dampening
-    /// endgame the way the pre-fix orbit-only kiter did.
-    fn assert_chase_bounds_lone_shaman(seed: u64) {
-        let s = measure(seed);
+    /// The seeds the chase probe plays. It judges the matches in which the
+    /// pillar-hug happens — the Warrior dies early and the lone Shaman keeps
+    /// the Mage out of sight for 2s or more — so a change that moves the RNG
+    /// stream moves WHICH seeds hug, not whether the probe judges anything.
+    /// (Two pinned seeds carried it until they had been re-picked five times;
+    /// AS-293 migrated it here.)
+    const CHASE_BANK: std::ops::Range<u64> = 0..40;
 
-        // Vacuity: the Warrior must actually die early AND a lone-Shaman
-        // occlusion endgame must occur, or the bound below proves nothing.
-        assert!(
-            s.warrior_death.is_some(),
-            "seed {seed}: Warrior never died — no lone-Shaman endgame to bound",
-        );
-        assert_min_occurrences(
-            &format!("seed {seed} lone-Shaman samples"),
-            s.lone_samples,
-            300,
-        );
-        assert!(
-            s.total_occluded >= 2.0,
-            "seed {seed}: only {:.2}s total occlusion after Warrior death — not exercising the \
-             pillar-hug stall",
-            s.total_occluded,
-        );
+    /// The fewest pillar-hugs the bank must hold (6 of 40 on `main` @
+    /// 68b9a0c, 7 after AS-293).
+    const MIN_HUGS: usize = 4;
 
-        // The fix bounds the stall. Budget: seek_chase_timeout (3.5s) arms the
-        // chase, then the kiter walks ~20yd to regain sight (a few seconds at
-        // base speed), so ~15s is a comfortable ceiling that a re-opened stall
-        // (which ran the full match) would blow past.
-        assert!(
-            s.max_occluded_window <= 15.0,
-            "seed {seed}: Mage's longest continuous occluded-from-Shaman window was {:.2}s \
-             (> 15s) — the occlusion-timeout chase is not catching the pillar-hugger",
-            s.max_occluded_window,
-        );
+    /// A hug long enough to give the bound something to catch: a bank whose
+    /// deepest hug kept the Mage out of sight for less than this proves
+    /// nothing about the stall the chase exists to end (the deepest on `main`
+    /// @ 68b9a0c held 34.6s).
+    const DEEP_HUG_SECS: f32 = 10.0;
 
-        // Resolves by elimination, well before the cap.
-        assert_eq!(
-            s.winner,
-            Some(1),
-            "seed {seed}: expected team 1 (Mage+Priest) to win by elimination, got {:?}",
-            s.winner,
-        );
-        assert!(
-            s.duration <= 200.0,
-            "seed {seed}: match ran {:.1}s (> 200s) — the lone Shaman was not caught promptly",
-            s.duration,
-        );
-
-        // No-clip: rounding the pillar via the tangent arc must never carry the
-        // Mage inside a pillar footprint (radius 2.5). resolve_movement is the
-        // backstop; steering keeps the mover comfortably off the surface.
-        assert!(
-            s.mage_min_pillar_dist >= 2.5 - 0.01,
-            "seed {seed}: Mage came within {:.3}yd of a pillar center (< radius 2.5) while \
-             rounding — a movement branch bypassed collision resolution",
-            s.mage_min_pillar_dist,
-        );
+    /// Whether the lone-Shaman pillar-hug happened in `s`.
+    fn hugged(s: &ChaseStats) -> bool {
+        s.warrior_death.is_some() && s.lone_samples >= 300 && s.total_occluded >= 2.0
     }
 
+    /// The occlusion-timeout chase bounds the lone-Shaman endgame. In every
+    /// match of the bank where the Warrior dies early and the surviving Shaman
+    /// hugs a pillar, the Mage's longest continuous occluded window is bounded
+    /// (roughly the timeout plus the walk-to-sight travel time), the match
+    /// resolves by ELIMINATION well before the cap — not by drawing out to the
+    /// dampening endgame the way the pre-fix orbit-only kiter did — and the
+    /// Mage never enters a pillar rounding it.
     #[test]
-    fn chase_bounds_lone_shaman_endgame_seed_a() {
-        assert_chase_bounds_lone_shaman(SEED_A);
-    }
+    fn chase_bounds_lone_shaman_over_the_seed_bank() {
+        let hugs: Vec<(u64, ChaseStats)> = CHASE_BANK
+            .map(|seed| (seed, measure(seed)))
+            .filter(|(_, s)| hugged(s))
+            .collect();
 
-    #[test]
-    fn chase_bounds_lone_shaman_endgame_seed_b() {
-        assert_chase_bounds_lone_shaman(SEED_B);
-    }
+        // Vacuity: the hug occurs, in enough matches to be a sample, and at
+        // least one of them is deep enough for the bound to mean something.
+        assert_min_occurrences("lone-Shaman pillar-hugs in the bank", hugs.len(), MIN_HUGS);
+        let deepest = hugs
+            .iter()
+            .map(|(_, s)| s.total_occluded)
+            .fold(0.0f32, f32::max);
+        assert!(
+            deepest >= DEEP_HUG_SECS,
+            "the bank's deepest hug kept the Mage out of sight {deepest:.1}s (< \
+             {DEEP_HUG_SECS}s) — the bound has nothing to catch",
+        );
 
-    // Pinned by `scan_seeds` (run with `--ignored`): seeds where the Warrior
-    // dies early and the surviving Shaman hugs a pillar into a long occlusion
-    // endgame. Re-pinned after tangent steering: at the old pins 26/23 the
-    // pursuing Mage now rounds the pillar in a clean arc and catches the lone
-    // Shaman with ZERO residual occlusion (0.00s total) — the pillar-hug is fully
-    // defeated, which is the fix working but leaves nothing for the occlusion
-    // bound to measure. Seeds 1/6 are the remaining seeds where the Shaman kites
-    // effectively enough to still accrue deep occlusion, now held in bounded
-    // windows and resolved by elimination:
-    //   seed 1: team-1 elimination at ~108s, 29.9s total occlusion, 7.33s longest window.
-    //   seed 6: team-1 elimination at ~105s, 23.5s total occlusion, 6.30s longest window.
-    //
-    // Re-pinned for AS-167, weapon speed from item data (6 -> 13). At seed 6
-    // the Warrior no longer dies (team 2 wins at 35.2s), so there is no
-    // lone-Shaman endgame. The first line that differs from `main` @ 17cb9f0
-    // is the Mage's first Wand Shot, 7 -> 9 (the Wand of Shadows fires every
-    // 1.8s for the same DPS). Seed 1 still holds (3.6s total occlusion, 1.35s
-    // longest window, team-1 win at 41.9s). Seed 13 from a re-scan: team-1
-    // elimination at 103.0s, 52.4s total occlusion, 6.07s longest window.
-    //
-    // Re-pinned for AS-172, Warriors entering the gates at 0 rage (1 -> 2).
-    // At seed 1 the Mage now catches the lone Shaman with 0.0s occlusion, so
-    // the pillar-hug the bound exists for never happens. The first line that
-    // differs from `main` @ d5f21c1 in this comp is the Warrior's first
-    // swing, a Heroic Strike the free starting bar paid for becoming a plain
-    // Auto Attack. Seed 13 still holds (18.4s total occlusion, 6.70s longest
-    // window). Seed 2 from a re-scan: team-1 elimination at 89.5s, 42.7s
-    // total occlusion, 5.55s longest window.
-    //
-    // Re-pinned for AS-203, the `Legacy` healer formation point projected out
-    // of pillars (2/13 -> 23/38). The Mage's Priest used to be sent to a point
-    // inside a pillar and stood pressed against it; with a standable goal its
-    // trajectory changes from its first projected frame, and at 2 and 13 the
-    // Mage now catches the lone Shaman with 0.0s occlusion. The pillar-hug
-    // still happens on its own: 6 of 40 seeds in `scan_seeds` carry 2s or
-    // more of lone-Shaman occlusion (12 of 40 before).
-    //   seed 23: team-1 elimination at 72.5s, 34.6s total occlusion, 5.27s
-    //            longest window.
-    //   seed 38: team-1 elimination at 53.4s, 16.9s total occlusion, 6.92s
-    //            longest window.
-    const SEED_A: u64 = 23;
-    const SEED_B: u64 = 38;
+        for (seed, s) in &hugs {
+            // The fix bounds the stall. Budget: seek_chase_timeout (3.5s) arms
+            // the chase, then the kiter walks ~20yd to regain sight (a few
+            // seconds at base speed), so ~15s is a comfortable ceiling that a
+            // re-opened stall (which ran the full match) would blow past.
+            assert!(
+                s.max_occluded_window <= 15.0,
+                "seed {seed}: Mage's longest continuous occluded-from-Shaman window was {:.2}s \
+                 (> 15s) — the occlusion-timeout chase is not catching the pillar-hugger",
+                s.max_occluded_window,
+            );
+            // Resolves by elimination, well before the cap.
+            assert_eq!(
+                s.winner,
+                Some(1),
+                "seed {seed}: expected team 1 (Mage+Priest) to win by elimination, got {:?}",
+                s.winner,
+            );
+            assert!(
+                s.duration <= 200.0,
+                "seed {seed}: match ran {:.1}s (> 200s) — the lone Shaman was not caught promptly",
+                s.duration,
+            );
+            // No-clip: rounding the pillar via the tangent arc must never carry
+            // the Mage inside a pillar footprint (radius 2.5). resolve_movement
+            // is the backstop; steering keeps the mover comfortably off the
+            // surface.
+            assert!(
+                s.mage_min_pillar_dist >= 2.5 - 0.01,
+                "seed {seed}: Mage came within {:.3}yd of a pillar center (< radius 2.5) while \
+                 rounding — a movement branch bypassed collision resolution",
+                s.mage_min_pillar_dist,
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -5982,6 +5964,9 @@ mod juke_chase {
         /// Matched (Mage, Shaman) samples during the 2v1 (Warrior dead, both
         /// still alive) — vacuity for "the lone-Shaman dance occurred".
         lone_samples: usize,
+        /// Sim-seconds the 2v1 lasted: from its first matched sample to its
+        /// last.
+        lone_secs: f32,
         /// Total occluded sim-seconds during the 2v1 (vacuity: dance started).
         total_occluded: f32,
         /// Count of contiguous occluded runs >= FIZZLE_WINDOW during the 2v1 —
@@ -6026,6 +6011,7 @@ mod juke_chase {
         let mut fizzle_windows = 0usize;
         let mut run_start: Option<f32> = None;
         let mut prev_t: Option<f32> = None;
+        let mut lone_span: Option<(f32, f32)> = None;
         let (mut i, mut j) = (0usize, 0usize);
         while i < mage_s.len() && j < shaman_s.len() {
             let (tm, pm) = mage_s[i];
@@ -6033,6 +6019,7 @@ mod juke_chase {
             if tm == ts {
                 if tm > death_t {
                     lone_samples += 1;
+                    lone_span = Some(lone_span.map_or((tm, tm), |(first, _)| (first, tm)));
                     if !sees(&obstacles, pm, ps) {
                         if let Some(pt) = prev_t {
                             total_occluded += tm - pt;
@@ -6063,6 +6050,7 @@ mod juke_chase {
             duration: result.match_time,
             warrior_death,
             lone_samples,
+            lone_secs: lone_span.map_or(0.0, |(first, last)| last - first),
             total_occluded,
             fizzle_windows,
         }
@@ -6077,13 +6065,15 @@ mod juke_chase {
             let s = measure(seed);
             let flag = if danced(&s) { " <-- DANCE" } else { "" };
             eprintln!(
-                "seed {seed:2}: winner={:?} dur={:5.1} wdeath={:>6} lone={:4} occl={:5.1} fizz_win={:2}{}",
+                "seed {seed:2}: winner={:?} dur={:5.1} wdeath={:>6} lone={:4} occl={:5.1} fizz_win={:2} \
+                 per_min={:4.1}{}",
                 s.winner,
                 s.duration,
                 s.warrior_death.map(|t| format!("{t:.1}")).unwrap_or_else(|| "none".into()),
                 s.lone_samples,
                 s.total_occluded,
                 s.fizzle_windows,
+                fizzle_rate(&s),
                 flag,
             );
         }
@@ -6100,11 +6090,23 @@ mod juke_chase {
     /// The fewest dances the bank must hold (10 of 60 on AS-282's `main`).
     const MIN_DANCES: usize = 4;
 
-    /// The most fizzle-length occlusion windows one dance may hold — 1.5x the
-    /// ~10 a long dance has carried through every re-measurement (12 at most
-    /// in the bank on AS-282's `main`). A regression to the continuous clock,
-    /// or to the pre-steering ooze, leaves many more.
-    const MAX_FIZZLE_WINDOWS: usize = 15;
+    /// The most fizzle-length occlusion windows a dance may hold per minute of
+    /// the 2v1 — about 1.5x the most any dance in the bank has carried (11.0 per
+    /// minute on `main` @ 68b9a0c, 10.5 after AS-293). A RATE, because what the
+    /// chase bounds is how often the juke breaks a cast, not how long the lone
+    /// Shaman lives: a dance that runs twice as long, healing through it, holds
+    /// twice the windows at the same rate.
+    ///
+    /// Not a guard on the leaky bucket itself: with `seek_chase_decay` at 1.0
+    /// (continuous-only arming) every dance in the bank stays inside this
+    /// bound after AS-293, as every dance stayed inside the per-dance count
+    /// this replaces on `main` @ 68b9a0c.
+    const MAX_FIZZLE_WINDOWS_PER_MIN: f32 = 16.0;
+
+    /// Fizzle-length occlusion windows per minute of the 2v1.
+    fn fizzle_rate(s: &JukeStats) -> f32 {
+        s.fizzle_windows as f32 * 60.0 / s.lone_secs.max(f32::EPSILON)
+    }
 
     /// A dance long enough to give the bound something to catch: a bank whose
     /// longest dance held fewer windows than this proves nothing about long
@@ -6151,11 +6153,13 @@ mod juke_chase {
             // (a) Fizzle proxy bounded — the chase closes the range so few casts
             // fizzle.
             assert!(
-                s.fizzle_windows <= MAX_FIZZLE_WINDOWS,
-                "seed {seed}: {} fizzle-length occlusion windows in the 2v1 (> \
-                 {MAX_FIZZLE_WINDOWS}) — the leaky-bucket chase is not closing on the juking \
-                 Shaman",
+                fizzle_rate(s) <= MAX_FIZZLE_WINDOWS_PER_MIN,
+                "seed {seed}: {} fizzle-length occlusion windows in a {:.1}s 2v1 ({:.1} per \
+                 minute, > {MAX_FIZZLE_WINDOWS_PER_MIN}) — the leaky-bucket chase is not \
+                 closing on the juking Shaman",
                 s.fizzle_windows,
+                s.lone_secs,
+                fizzle_rate(s),
             );
             // (b) Resolves by elimination (team 1) well before the cap.
             assert_eq!(
@@ -6190,11 +6194,12 @@ mod juke_chase {
 // from its focused Warrior partner (the reported Mage+Paladin vs Shaman+Warlock
 // comp keeps too tight a formation to produce the window reliably). For each
 // (healer, ally) pair we find windows where the ally is BELOW the urgency
-// threshold AND occluded from its healer, and assert the time to the healer's
-// next successful heal (an HP increase on the ally — there is no passive HP
-// regen, so any rise is a landed heal) is bounded: the medic chase walks the
-// healer around the pillar within a few seconds, so a heal follows promptly
-// instead of the ally dying occluded.
+// threshold AND occluded from its healer, and assert the longest such window
+// is bounded: the medic chase walks the healer around the pillar within a few
+// seconds. The scan also prints the time to the healer's next successful heal
+// (an HP increase on the ally — there is no passive HP regen, so any rise is a
+// landed heal), which the window bounds but an enemy interrupt or burst can
+// still delay.
 mod medic_chase {
     use super::*;
 
@@ -6427,12 +6432,13 @@ mod medic_chase {
         }
     }
 
-    /// Exploratory seed scan — prints per-seed, per-pair medic stats so the
-    /// pinned seeds can be (re)chosen when trajectories drift. Ignored by default.
+    /// Exploratory seed scan — prints per-seed, per-pair medic stats over the
+    /// bank [`medic_bounds_distressed_ally_over_the_seed_bank`] judges. Ignored
+    /// by default.
     #[test]
     #[ignore]
     fn scan_seeds() {
-        for seed in 0u64..30 {
+        for seed in MEDIC_BANK {
             let s = measure(seed);
             let fmt = |p: &PairStats| {
                 format!(
@@ -6456,167 +6462,72 @@ mod medic_chase {
         }
     }
 
+    /// The seeds the medic probe plays. It judges the matches in which the
+    /// team-1 Priest is pillar-separated from its Warrior while the Warrior is
+    /// below the urgency threshold for at least a second in all, so a change
+    /// that moves the RNG stream moves WHICH seeds hold the situation, not
+    /// whether the probe judges anything. (Two pinned seeds carried it until
+    /// they had been re-picked six times; AS-293 migrated it here.)
+    const MEDIC_BANK: std::ops::Range<u64> = 0..30;
+
+    /// Occluded-distress frames (60 = one second) a match must hold to be
+    /// judged.
+    const DISTRESS_FRAMES: usize = 60;
+
+    /// The fewest judged matches the bank must hold (19 of 30 on `main` @
+    /// 68b9a0c, 15 after AS-293).
+    const MIN_DISTRESSED: usize = 8;
+
+    /// A match deep enough in distress to give the bound something to catch:
+    /// five seconds of it (the deepest on `main` @ 68b9a0c held 916 frames).
+    const DEEP_DISTRESS_FRAMES: usize = 300;
+
     /// The medic chase bounds how long a healer stays occluded from a DYING
-    /// ally. At pinned seeds where the team-1 Priest is repeatedly
-    /// pillar-separated from its focused Warrior (sub-urgency AND out of sight),
-    /// we assert: the window actually occurred (vacuity), the longest contiguous
-    /// occluded-distress window is bounded (the chase walks the Priest around
-    /// the pillar to regain sight within a few seconds — not the tens of seconds
-    /// an un-chasing formation-follower would take), the ally is never LOST while
-    /// occluded in these windows, and — when the ensuing heal's HP rise is
-    /// visible (not fully masked by simultaneous incoming damage) — it lands
-    /// within the heal bound.
-    fn assert_medic_bounds_distressed_ally(seed: u64) {
-        let s = measure(seed);
-        let p = &s.priest;
+    /// ally. In every match of the bank where the team-1 Priest is
+    /// pillar-separated from its Warrior while the Warrior is below the
+    /// urgency threshold, the longest contiguous occluded-distress window is
+    /// bounded: the chase walks the Priest around the pillar to regain sight
+    /// within a few seconds, not the tens of seconds an un-chasing
+    /// formation-follower would take. The bound is the walk's; whether the
+    /// heal that follows lands in time is not, because an enemy interrupt,
+    /// purge or burst decides that too (`scan_seeds` prints it per match).
+    #[test]
+    fn medic_bounds_distressed_ally_over_the_seed_bank() {
+        let distressed: Vec<(u64, PairStats)> = MEDIC_BANK
+            .map(|seed| (seed, measure(seed).priest))
+            .filter(|(_, p)| p.distress_frames >= DISTRESS_FRAMES)
+            .collect();
 
-        // Vacuity: a substantial occluded-distress window must have occurred, or
-        // the bounds below prove nothing. 60 frames = 1s of cumulative distress.
+        // Vacuity: the situation occurs, in enough matches to be a sample,
+        // and at least one of them deep enough for the bound to mean something.
         assert_min_occurrences(
-            &format!("seed {seed} Priest occluded-distress frames"),
-            p.distress_frames,
-            60,
+            "matches with a pillar-separated, distressed Warrior in the bank",
+            distressed.len(),
+            MIN_DISTRESSED,
         );
-
-        // The medic chase regains sight promptly. Observed longest windows at the
-        // pinned seeds are ~3-5s; 8s is a comfortable ceiling that a regression
-        // removing the chase (a formation-follower drifting into sight only
-        // incidentally) would blow past.
+        let deepest = distressed
+            .iter()
+            .map(|(_, p)| p.distress_frames)
+            .max()
+            .unwrap_or(0);
         assert!(
-            p.max_window <= 8.0,
-            "seed {seed}: Priest's longest occluded-from-dying-Warrior window was {:.2}s \
-             (> 8s) — the medic chase is not regaining sight of the dying ally",
-            p.max_window,
+            deepest >= DEEP_DISTRESS_FRAMES,
+            "the bank's deepest distress held {deepest} frames (< {DEEP_DISTRESS_FRAMES}) — \
+             the bound has nothing to catch",
         );
 
-        // No ally lost while occluded in a distress window — the chase reached
-        // healing position before the Warrior died in every such window.
-        assert_eq!(
-            p.died_before_heal, 0,
-            "seed {seed}: {} occluded-distress window(s) ended in the Warrior's death \
-             before a heal landed — the medic chase was too slow",
-            p.died_before_heal,
-        );
-
-        // When the landed heal's HP rise is visible, it follows promptly.
-        if let Some(tth) = p.worst_time_to_heal {
+        for (seed, p) in &distressed {
+            // Observed longest windows across the bank are ~2-6s; 8s is a
+            // comfortable ceiling that a regression removing the chase (a
+            // formation-follower drifting into sight only incidentally) would
+            // blow past.
             assert!(
-                tth <= 10.0,
-                "seed {seed}: worst time from occluded-distress onset to a landed heal was \
-                 {tth:.2}s (> 10s)",
+                p.max_window <= 8.0,
+                "seed {seed}: Priest's longest occluded-from-dying-Warrior window was {:.2}s \
+                 (> 8s) — the medic chase is not regaining sight of the dying ally",
+                p.max_window,
             );
         }
-    }
-
-    // Pinned by `scan_seeds` (run with `--ignored`): seeds where the team-1
-    // Priest is repeatedly pillar-separated from its focused Warrior, producing
-    // deep occluded-distress vacuity. Re-pinned after tangent steering (the medic
-    // `MovementGoal::Entity` chase now rounds pillars in a clean arc, so it
-    // regains sight FASTER — longest windows dropped and the old pins 27/2 either
-    // flipped outcome or shortened): the prior seed 27 now resolves as a team-2
-    // win where the focused Warrior is bursted down inside sub-0.4s occlusion
-    // flickers (8 died-before-heal), so it no longer isolates a medic-movement
-    // window. Observed (with steering):
-    //   seed 13: 375 distress frames, 4.83s longest window, heal at 3.30s, 0 lost.
-    //   seed 26: 235 distress frames, 3.50s longest window, heal at 6.55s, 0 lost.
-    //
-    // Re-pinned again for AS-87 (caster main-hands: the Priest here gains +5
-    // spell power, the enemy Shaman gains nothing, so this comp is a one-sided
-    // healer buff). 13 went vacuous outright — 0 distress frames, because the
-    // Warrior no longer drops below the urgency threshold while occluded — and
-    // 26 collapsed from 20 short windows into a single 308-frame one whose heal
-    // lands at 11.20s, past the ceiling.
-    //
-    // That is recalibration, not a slower chase, and the scan says so directly:
-    // the CHASE bound this probe exists to defend (longest contiguous occluded
-    // window <= 8s) is not breached on ANY of 30 seeds on EITHER binary, and its
-    // maximum falls slightly (5.40s -> 5.20s). What rose is the NUMBER of
-    // occluded-distress windows — the fraction of the match spent in one roughly
-    // doubles, 0.029 -> 0.061 excluding three seeds that now run to the cap —
-    // because a stronger Priest keeps its Warrior ALIVE at low HP instead of
-    // letting it die. Excluding those capped seeds, allies stopped dying before
-    // a heal landed on all but one seed (5 seeds -> 1). More rescues to perform,
-    // not slower rescues.
-    //
-    // Observed after AS-87:
-    //   seed 8: 587 distress frames, 5.20s longest window, heal at 4.00s, 0 lost.
-    //   seed 9: 412 distress frames, 1.98s longest window, heal at 4.12s, 0 lost.
-    //
-    // Re-pinned for AS-115, which re-priced BOTH Warriors' two-hander (4 AP ->
-    // 11 AP + 3% crit). Seed 9's longest window stayed short (2.17s) but its
-    // first visible heal slid to 21.22s. The same 30-seed scan on both binaries
-    // says the chase itself did not slow. The longest occluded window stays
-    // under the 8s bound on every seed, and its maximum falls (5.20s -> 4.68s).
-    // A visible heal already missed the 10s ceiling on 2 of 30 seeds on `main`
-    // (12, 26), and misses it on 4 now (2, 3, 9, 23). That heal-visibility
-    // clause is the one a harder-hitting enemy Warrior can mask.
-    //
-    // Observed after AS-115:
-    //   seed 8:  363 distress frames, 2.37s longest window, no visible heal, 0 lost.
-    //   seed 14: 353 distress frames, 4.68s longest window, heal at 5.22s, 0 lost.
-    //
-    // Re-pinned for AS-167, weapon speed from item data (8/14 -> 22/10). Seed
-    // 8 went to 0 distress frames and 14 to 53 (with 7 allies lost inside
-    // sub-0.2s flickers). The first line that differs from `main` @ 17cb9f0 at
-    // both is the two Warriors' opening swings, 11 -> 46: each Arcanite
-    // Reaper now swings every 3.8s at its two-hander DPS, so a Warrior drops
-    // below the urgency threshold in bigger, rarer steps. The chase bound
-    // itself holds across the 30-seed re-scan: the longest occluded window is
-    // under 8s on every seed, though its maximum rises from 4.68s to 6.73s
-    // (seed 6, which ends with its Warrior dead after a visible-heal-less
-    // window, outside the pins).
-    //
-    // Observed after AS-167:
-    //   seed 22: 362 distress frames, 2.98s longest window, heal at 7.82s, 0 lost.
-    //   seed 10: 370 distress frames, 3.63s longest window, heal at 7.72s, 0 lost.
-    //
-    // Re-pinned for AS-172, Warriors entering the gates at 0 rage (22/10 ->
-    // 3/9). Both went to 0 distress frames. The first line that differs from
-    // `main` @ d5f21c1 at both is team 2's Warrior's first swing on team 1's
-    // Warrior, a Heroic Strike the free starting bar paid for becoming a plain
-    // Auto Attack, and the trajectories part from there. The chase bound holds across the 30-seed re-scan:
-    // the longest occluded window is under 8s on every seed (maximum 5.53s,
-    // seed 9, down from 6.73s).
-    //
-    // Observed after AS-172:
-    //   seed 3: 271 distress frames, 3.37s longest window, heal at 5.08s, 0 lost.
-    //   seed 9: 422 distress frames, 5.53s longest window, heal at 8.80s, 0 lost.
-    //
-    // Re-pinned for AS-203, the `Legacy` healer formation point projected out
-    // of pillars (A 3 -> 6). The Priest's goal is now a spot it can stand on,
-    // so the match diverges from its first projected frame. At 3 the Warrior
-    // now dies with two occluded-distress windows behind it, and that was
-    // read before re-seeding, not re-seeded away. Neither is a slow chase:
-    //   - the first window closes in 0.53s, the medic walk regaining sight,
-    //     and the Priest's Power Word: Shield lands on the Warrior at once —
-    //     an absorb, which this probe's HP-rise heal detector cannot see;
-    //   - the second opens when the Warrior, at 11% HP, Charges the lone
-    //     Shaman in the middle of the Priest's Flash Heal. The heal fizzles for
-    //     line of sight, the Warrior chases the kiting Shaman ~45yd away, and
-    //     dies to it 4.7s after the Charge, the Priest walking after it at its own
-    //     speed and ~20% mana.
-    // The chase bound the probe exists for still holds across the 30-seed
-    // re-scan, with less headroom. The Priest's longest occluded window is
-    // under 8s on every seed, but its maximum rises from 5.27s (seed 9) to
-    // 6.63s (seed 20), so the headroom falls from ~2.7s to ~1.4s. Seed 20 now
-    // also loses its Warrior twice before a visible heal. Seeds where a
-    // Warrior dies before a visible heal go 7 -> 9 of 30 (`main` @ 16c2a3c
-    // against this change); the two new ones are 3 and 20.
-    //
-    // Observed after AS-203:
-    //   seed 6: 238 distress frames, 2.90s longest window, heal at 5.95s, 0 lost.
-    //   seed 9: 406 distress frames, 5.27s longest window, heal at 7.40s, 0 lost.
-    const MEDIC_SEED_A: u64 = 6;
-    const MEDIC_SEED_B: u64 = 9;
-
-    #[test]
-    fn medic_bounds_distressed_ally_seed_a() {
-        assert_medic_bounds_distressed_ally(MEDIC_SEED_A);
-    }
-
-    #[test]
-    fn medic_bounds_distressed_ally_seed_b() {
-        assert_medic_bounds_distressed_ally(MEDIC_SEED_B);
     }
 }
 
