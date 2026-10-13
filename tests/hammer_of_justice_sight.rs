@@ -8,8 +8,10 @@
 
 use arenasim::states::match_config::CharacterClass::{Paladin, Priest, Warrior};
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
-use arenasim::states::play_match::components::{Aura, AuraType, HealerPosture, Posture};
-use arenasim::states::play_match::decision_trace::RejectionReason;
+use arenasim::states::play_match::components::{
+    Aura, AuraType, HealerPosture, MovementDirective, MovementGoal, Posture,
+};
+use arenasim::states::play_match::decision_trace::{MovementTrigger, RejectionReason};
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
 use arenasim::states::play_match::AbilityType;
 use bevy::prelude::Vec2;
@@ -95,9 +97,12 @@ fn rotation_hammer_of_justice_needs_sight() {
 }
 
 /// The dip: the Paladin is mid-dip on the enemy Priest, 9.9yd off — in
-/// range. An ally is with it, healthy, so nothing aborts the dip.
-fn dip_scene(obstacles: Vec<ObstacleVolume>) -> Scene {
+/// range. An ally is with it, healthy, so nothing aborts the dip. `walking`:
+/// it carries its dip walk (the `Entity` directive the dip issued) into the
+/// tick; otherwise it comes in without one, as after a short CC killed it.
+fn dip_scene(obstacles: Vec<ObstacleVolume>, walking: bool) -> Scene {
     let now = 20.0;
+    let dip_until = now + 4.0;
     let scene = Scene::new()
         .now(now)
         .unit(ME, 1, Paladin)
@@ -112,48 +117,122 @@ fn dip_scene(obstacles: Vec<ObstacleVolume>) -> Scene {
         .targeting(ALLY)
         .aura_full(ME, devotion_aura())
         .obstacles(obstacles);
+    let healer = scene.entity(HEALER);
     let mut posture = HealerPosture::new(now - 1.0);
     posture.posture = Posture::Dip;
-    posture.dip_target = Some(scene.entity(HEALER));
-    posture.dip_until = now + 4.0;
-    scene.healer_posture(ME, posture)
+    posture.dip_target = Some(healer);
+    posture.dip_until = dip_until;
+    let scene = scene.healer_posture(ME, posture);
+    if walking {
+        scene.directive(
+            ME,
+            MovementDirective {
+                goal: MovementGoal::Entity(healer),
+                expires: dip_until,
+                committed_until: dip_until,
+            },
+        )
+    } else {
+        scene
+    }
 }
 
 #[test]
 fn dip_hammer_of_justice_needs_sight() {
-    let open = dip_scene(Vec::new()).decide(ME);
+    for walking in [true, false] {
+        let open = dip_scene(Vec::new(), walking).decide(ME);
+        assert_eq!(
+            open.chose(),
+            Some((AbilityType::HammerOfJustice, Some(HEALER))),
+            "walking={walking}: the dip has reached the healer: {}",
+            describe(&open)
+        );
+        assert!(
+            open.movement
+                .iter()
+                .any(|m| m.trigger == MovementTrigger::DipComplete),
+            "walking={walking}: the stun completes the dip: {:?}",
+            open.movement
+        );
+        assert!(
+            open.directive.is_none(),
+            "walking={walking}: a completed dip stops its walk: {:?}",
+            open.directive
+        );
+
+        // In range behind the pillar, the dip has not arrived: the stun stays
+        // reserved for it, and the Paladin leaves the tick still walking AT
+        // the healer (the walk is tangent-steered round the pillar) — not
+        // holding in range facing cover, and not handing over a cast that
+        // cannot land.
+        let blocked_scene = dip_scene(pillar(), walking);
+        let healer = blocked_scene.entity(HEALER);
+        let blocked = blocked_scene.decide(ME);
+        assert_ne!(
+            blocked.chose().map(|(ability, _)| ability),
+            Some(AbilityType::HammerOfJustice),
+            "walking={walking}: a pillar between: {}",
+            describe(&blocked)
+        );
+        assert!(
+            matches!(
+                blocked.rejected(AbilityType::HammerOfJustice),
+                Some(RejectionReason::PreconditionUnmet { note })
+                    if note == "HoJ reserved for enemy-healer dip"
+            ),
+            "walking={walking}: the dip has not arrived: {}",
+            describe(&blocked)
+        );
+        assert_eq!(
+            blocked.directive.map(|d| d.goal),
+            Some(MovementGoal::Entity(healer)),
+            "walking={walking}: the dip walks on at the healer"
+        );
+    }
+}
+
+/// The rotation's fallback: a PRESSURED Paladin (pressure releases the stun
+/// from the dip reservation) with the enemy Priest 9yd off and an enemy
+/// Warrior on it 6yd off, both in range. With nothing between, the stun goes
+/// to the healer; with a pillar between the Paladin and the healer, it falls
+/// back to the Warrior it can see rather than being refused.
+fn pressured_scene(obstacles: Vec<ObstacleVolume>) -> Scene {
+    let now = 20.0;
+    let mut posture = HealerPosture::new(now - 0.5);
+    posture.posture = Posture::Pressured;
+    posture.hold_until = now + 1.0;
+    Scene::new()
+        .now(now)
+        .unit(ME, 1, Paladin)
+        .targeting(WARRIOR)
+        .unit(ALLY, 1, Warrior)
+        .at(-3.0, 0.0)
+        .targeting(WARRIOR)
+        .unit(HEALER, 2, Priest)
+        .at(9.0, 0.0)
+        .unit(WARRIOR, 2, Warrior)
+        .at(0.0, 6.0)
+        .targeting(ME)
+        .aura_full(ME, devotion_aura())
+        .healer_posture(ME, posture)
+        .obstacles(obstacles)
+}
+
+#[test]
+fn rotation_hammer_of_justice_falls_back_to_an_enemy_in_sight() {
+    let open = pressured_scene(Vec::new()).decide(ME);
     assert_eq!(
         open.chose(),
         Some((AbilityType::HammerOfJustice, Some(HEALER))),
-        "the dip has reached the healer: {}",
+        "nothing between: the healer first: {}",
         describe(&open)
     );
 
-    // In range behind the pillar, the dip has not arrived: the stun stays
-    // reserved for it and the walk goes on round the pillar, rather than the
-    // dip handing over a cast that cannot land.
-    let blocked = dip_scene(pillar()).decide(ME);
-    assert_ne!(
-        blocked.chose().map(|(ability, _)| ability),
-        Some(AbilityType::HammerOfJustice),
-        "a pillar between: {}",
+    let blocked = pressured_scene(pillar()).decide(ME);
+    assert_eq!(
+        blocked.chose(),
+        Some((AbilityType::HammerOfJustice, Some(WARRIOR))),
+        "the healer behind a pillar: the Warrior in sight: {}",
         describe(&blocked)
-    );
-    assert!(
-        matches!(
-            blocked.rejected(AbilityType::HammerOfJustice),
-            Some(RejectionReason::PreconditionUnmet { note })
-                if note == "HoJ reserved for enemy-healer dip"
-        ),
-        "the dip is still walking: {}",
-        describe(&blocked)
-    );
-    assert!(
-        blocked
-            .movement
-            .iter()
-            .all(|m| m.posture == arenasim::states::play_match::decision_trace::Posture::Dip),
-        "the dip neither completes nor aborts: {:?}",
-        blocked.movement
     );
 }

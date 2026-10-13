@@ -326,6 +326,13 @@ impl Scene {
         self
     }
 
+    /// The movement directive `who` carries into the decision: a walk already
+    /// under way.
+    pub fn directive(mut self, who: Who, directive: MovementDirective) -> Self {
+        self.unit_mut(who).directive = Some(directive);
+        self
+    }
+
     // ------------------------------------------------------------------
     // Changing a built scene, for the control half of a pair.
     // ------------------------------------------------------------------
@@ -546,9 +553,16 @@ impl Scene {
         // match the first, and are applied there once it returns — so what it
         // SPAWNED (a trap and where it lands) can be read back. Nothing else
         // reads that world: the scene itself is never changed.
+        // The deciding unit enters it holding its own directive, so what the
+        // decision does to it (replace, remove, or leave alone) reads back as
+        // the directive it holds after the tick.
         let mut exec_world = World::new();
         for u in &self.units {
-            assert_eq!(exec_world.spawn_empty().id(), u.entity);
+            let mut e = exec_world.spawn_empty();
+            assert_eq!(e.id(), u.entity);
+            if let (true, Some(d)) = (u.entity == unit.entity, u.directive) {
+                e.insert(d);
+            }
         }
         let mut queue = CommandQueue::default();
         let mut commands = Commands::new(&mut queue, &exec_world);
@@ -572,6 +586,7 @@ impl Scene {
         );
         queue.apply(&mut exec_world);
         let mut view = DecisionView::read(self, unit.entity, acted, &trace);
+        view.directive = exec_world.get::<MovementDirective>(unit.entity).copied();
         let mut placed = exec_world.query::<(&Trap, &Transform)>();
         view.trap_landings.extend(
             placed
@@ -622,6 +637,11 @@ pub struct DecisionView {
     pub movement: Vec<MovementView>,
     /// The `situation` its `ability_decision` carried.
     pub situation: Option<SituationTag>,
+    /// The movement directive the unit holds once the decision's commands
+    /// have run: the one it came in with ([`Scene::directive`]), unless the
+    /// decision replaced or removed it. A tick that refreshes nothing leaves
+    /// no movement event in the trace, so this is how a walk is seen to go on.
+    pub directive: Option<MovementDirective>,
 }
 
 impl DecisionView {
@@ -634,6 +654,7 @@ impl DecisionView {
             candidates: Vec::new(),
             movement: Vec::new(),
             situation: None,
+            directive: None,
         };
         let mine = trace.pending_events.iter().filter(|e| {
             e.actor
