@@ -4,7 +4,8 @@
 //! The Document template: the shared [`screen_header`], whose trailing slot
 //! holds Reset to Defaults (a `Danger` button, so it sits on screen at any
 //! window size), then a scrolling body of one panel per action category.
-//! Clicking a key arms a rebind; the next key pressed takes that slot. Reset
+//! Clicking a key arms a rebind; the next key pressed takes that slot, except
+//! the Back key (Esc by default), which cancels the rebind instead. Reset
 //! opens a confirm [`Modal`] and resets nothing until it is confirmed.
 //!
 //! [`draw_keybindings`] is pure egui, driven by `tests/keybindings_snapshot.rs`;
@@ -65,6 +66,15 @@ pub struct KeybindingsUiState {
     pub confirm_reset: bool,
 }
 
+impl KeybindingsUiState {
+    /// The screen's own Esc rungs, first to last: cancel a pending rebind,
+    /// then close the reset confirm. True when one took the key; once both
+    /// are spent, Esc leaves the screen.
+    pub fn escape_rung(&mut self) -> bool {
+        self.rebinding.take().is_some() || std::mem::take(&mut self.confirm_reset)
+    }
+}
+
 /// What the screen asks its wrapper to do this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeybindingsAction {
@@ -82,9 +92,11 @@ pub fn keybindings_ui(
     mut state: Local<KeybindingsUiState>,
     keyboard: Res<ButtonInput<KeyCode>>,
 ) {
-    // Esc closes the reset confirm first, then takes the header's exit. It
-    // needs no egui context, so it answers on any frame.
-    let escape = nav.escape(false, || std::mem::take(&mut state.confirm_reset));
+    // Esc cancels a pending rebind, then closes the reset confirm, then takes
+    // the header's exit. It runs before the rebind reads the keyboard, so the
+    // Back key is never captured as a binding. It needs no egui context, so it
+    // answers on any frame.
+    let escape = nav.escape(false, || state.escape_rung());
     if let Some(NavAction::Exit(to)) = escape {
         *state = KeybindingsUiState::default();
         nav.leave(to);
@@ -325,4 +337,34 @@ fn binding_row(
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_cancels_a_pending_rebind_before_anything_else() {
+        let mut state = KeybindingsUiState {
+            rebinding: Some(Rebind {
+                action: GameAction::Confirm,
+                slot: KeySlot::Primary,
+            }),
+            confirm_reset: false,
+        };
+        assert!(state.escape_rung(), "the first Esc cancels the rebind");
+        assert_eq!(state, KeybindingsUiState::default());
+        assert!(!state.escape_rung(), "the second Esc is the exit's");
+    }
+
+    #[test]
+    fn escape_closes_the_reset_confirm_then_leaves() {
+        let mut state = KeybindingsUiState {
+            rebinding: None,
+            confirm_reset: true,
+        };
+        assert!(state.escape_rung());
+        assert_eq!(state, KeybindingsUiState::default());
+        assert!(!state.escape_rung());
+    }
 }
