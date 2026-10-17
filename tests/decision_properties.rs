@@ -96,6 +96,7 @@ use arenasim::states::play_match::ability_config::{
 };
 use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
+use arenasim::states::play_match::class_ai::CC_CHAIN_WINDOW;
 use arenasim::states::play_match::components::TrapType;
 use arenasim::states::play_match::components::{DRCategory, DRTracker, DispelType};
 use arenasim::states::play_match::decision_trace::{CandidateStatus, RejectionReason};
@@ -178,12 +179,22 @@ enum Hold {
     /// A 1s stun from the deciding unit's OWN team (never breaks): a lock
     /// whose end is close, which a cast with a cast time cannot fit into.
     FriendlyStun,
+    /// A stun from the deciding unit's OWN team with this many seconds left:
+    /// a lock the Chain play hands off from ([`HANDOFF_NOW`] for an instant
+    /// hand-off, [`HANDOFF_CAST`] for a 1.5s cast).
+    FriendlyStunEnding(f32),
 }
 
 /// How long [`Hold::FriendlyStun`] has left.
 const SHORT_LOCK: f32 = 1.0;
 /// How long a [`Hold::FriendlyPolymorph`] has left.
 const POLYMORPH_LEFT: f32 = 6.0;
+/// A lock ending in time for an instant hand-off to land in its last
+/// moments.
+const HANDOFF_NOW: f32 = 0.2;
+/// A lock ending in time for a 1.5s cast begun now to land in its last
+/// moments.
+const HANDOFF_CAST: f32 = 1.7;
 
 /// A cast lock on the deciding unit that does not incapacitate it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -439,6 +450,26 @@ fn situations(class: CharacterClass, bars: &[f32]) -> Vec<Situation> {
             ..CALM
         });
     }
+    // Under TeamPlan a lock the team holds that is about to end calls the
+    // Chain play: the target's stun ending now (an instant hand-off lands in
+    // its last moments) and the enemy healer's ending in a cast's time (a
+    // 1.5s hand-off does).
+    // The target is a caster on the ally, so no Death Coil self-peel
+    // (a melee, or a unit training the Warlock) takes the Warlock's turn.
+    list.push(Situation {
+        name: "target stunned by my team, ending now, TeamPlan",
+        target_aura: Hold::FriendlyStunEnding(HANDOFF_NOW),
+        target_class: CharacterClass::Mage,
+        target_attacks_ally: true,
+        team_plan: true,
+        ..CALM
+    });
+    list.push(Situation {
+        name: "enemy healer stunned by my team, ending in a cast, TeamPlan",
+        healer_aura: Hold::FriendlyStunEnding(HANDOFF_CAST),
+        team_plan: true,
+        ..CALM
+    });
     // Under TeamPlan the ally in danger calls the Peel play: the unit's peel
     // step heads its chain, on the enemy target attacking the ally.
     for (name, target_class, focus_healer) in [
@@ -685,6 +716,8 @@ fn upkeep_auras(
                 break_on_damage_threshold: -1.0,
                 caster: Some(caster),
                 ability_name: d.name.clone(),
+                // A compound buff (Mark of the Wild) is known by its face.
+                compound: effect.compound,
                 ..Default::default()
             })
         })
@@ -863,13 +896,17 @@ fn hold(scene: Scene, who: &'static str, hold: Hold) -> Scene {
             let caster = scene.entity(HEALER);
             scene.aura_full(who, polymorph(caster))
         }
-        Hold::FriendlyStun => {
+        Hold::FriendlyStun | Hold::FriendlyStunEnding(_) => {
             let caster = scene.entity(ALLY);
+            let duration = match hold {
+                Hold::FriendlyStunEnding(left) => left,
+                _ => SHORT_LOCK,
+            };
             scene.aura_full(
                 who,
                 Aura {
                     effect_type: AuraType::Stun,
-                    duration: SHORT_LOCK,
+                    duration,
                     break_on_damage_threshold: -1.0,
                     caster: Some(caster),
                     ability_name: "Kidney Shot".into(),
@@ -2100,11 +2137,16 @@ fn cc_not_stacked() -> Finding {
             continue;
         }
         judged += 1;
-        // The grid's own-team hard CC: the ally's Polymorph, and its stun.
-        if matches!(
-            hold_of(&r.point, t),
-            Hold::FriendlyPolymorph | Hold::FriendlyStun
-        ) {
+        // The grid's own-team hard CC: the ally's Polymorph, and its stuns. A
+        // lock landing inside a hold's last `CC_CHAIN_WINDOW` CHAINS onto it
+        // (the Chain play's hand-off); one landing earlier stacks.
+        let left = match hold_of(&r.point, t) {
+            Hold::FriendlyPolymorph => POLYMORPH_LEFT,
+            Hold::FriendlyStun => SHORT_LOCK,
+            Hold::FriendlyStunEnding(left) => left,
+            Hold::Free | Hold::DivineShield | Hold::Cyclone | Hold::EnemyPolymorph => continue,
+        };
+        if left - lands_after(r, ability, t) > CC_CHAIN_WINDOW {
             violations.push((ability, describe(r, ability, target)));
         }
     }
@@ -2114,7 +2156,8 @@ fn cc_not_stacked() -> Finding {
 /// Hard crowd control — a stun, fear, polymorph, incapacitate or cyclone —
 /// is never cast on an enemy the deciding unit's own team already holds in
 /// one: the cast is wasted, and it spends diminishing returns on a target
-/// that is not acting anyway.
+/// that is not acting anyway. A lock that LANDS inside the hold's last
+/// `CC_CHAIN_WINDOW` chains onto it instead, and is not stacked.
 #[test]
 fn never_stacks_hard_cc_on_a_unit_its_team_holds() {
     verdict(Property::CcNotStacked, Scope::Guard, cc_not_stacked());
@@ -2341,7 +2384,13 @@ fn every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window
         let Some(tag) = r.view.situation else {
             continue;
         };
-        if tag.play == Some(PlayTag::Burst) {
+        // The chain runs under the Burst play — its play is Burst, or its play
+        // is Chain with a kill window open and Burst below the chain step.
+        let bursting = tag.play == Some(PlayTag::Burst)
+            || (matches!(tag.play, Some(PlayTag::Chain { .. }))
+                && tag.kill_window.is_some()
+                && !p.class.is_healer());
+        if bursting {
             assert!(
                 p.situation.team_plan,
                 "a Burst outside TeamPlan: {}",
@@ -2389,7 +2438,11 @@ fn every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window
         if tag.play_step != Some(PlayStep::Burst) {
             continue;
         }
-        assert_eq!(tag.play, Some(PlayTag::Burst), "{}", p.describe());
+        assert!(
+            bursting,
+            "a burst step outside the Burst play: {}",
+            p.describe()
+        );
         let (ability, target) = r.view.chosen.expect("a burst chose something");
         burst.insert((format!("{:?}", p.class), format!("{ability:?}")));
         let aimed = match ability {
@@ -2427,6 +2480,115 @@ fn every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window
         })
         .collect();
     assert_eq!(burst, expected, "(class, tool) pairs the grid bursts with");
+}
+
+// ---------------------------------------------------------------------------
+// The Chain play
+// ---------------------------------------------------------------------------
+
+/// The grid reaches the Chain play, and every hand-off it makes is one, so
+/// every property above also judges the play's choices (the hold rule's
+/// at-landing form among them, [`never_stacks_hard_cc_on_a_unit_its_team_holds`]):
+///
+/// - the (class, tool) pairs the grid's hand-offs used are exactly the pairs
+///   `chain_tools` names for the classes the play runs for (every class but
+///   `CHAIN_EXCEPTIONS`): set equality, so a class whose chain step stops
+///   reaching ANY of its tools fails here, and so does a step that hands off
+///   with a tool it does not list;
+/// - every hand-off is aimed at the lock it chains onto (the window's
+///   subject), and LANDS — its cast time and its flight, computed here from
+///   `abilities.ron` — in that lock's last `HANDOFF_LEAD`: not after it, and
+///   not earlier;
+/// - a chain step that chose nothing held the global cooldown: the unit cast
+///   nothing at all;
+/// - no Chain play, and no chain step, outside `TeamPlan`.
+#[test]
+fn every_chain_tool_is_reached_aimed_at_the_lock_and_landed_in_its_last_moments() {
+    use arenasim::states::play_match::class_ai::chain::{chain_tools, HANDOFF_LEAD};
+    use arenasim::states::play_match::decision_trace::{PlayStep, PlayTag};
+    use arenasim::states::play_match::situation::CHAIN_EXCEPTIONS;
+    let g = grid();
+    let mut handed: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut misaimed = Vec::new();
+    let mut mistimed = Vec::new();
+    let mut holds = 0;
+    for r in &g.records {
+        let p = &r.point;
+        let Some(tag) = r.view.situation else {
+            continue;
+        };
+        let chaining = matches!(tag.play, Some(PlayTag::Chain { .. }));
+        if chaining || tag.play_step == Some(PlayStep::Chain) {
+            assert!(
+                p.situation.team_plan,
+                "a Chain outside TeamPlan: {}",
+                p.describe()
+            );
+        }
+        if tag.play_step != Some(PlayStep::Chain) {
+            continue;
+        }
+        assert!(
+            chaining,
+            "a chain step outside the Chain play: {}",
+            p.describe()
+        );
+        let window = tag
+            .lock_ending
+            .expect("a Chain names the lock it hands off from");
+        let Some((ability, target)) = r.view.chosen else {
+            assert!(
+                r.view.choices.is_empty(),
+                "a chain step that held cast something: {}",
+                p.describe()
+            );
+            holds += 1;
+            continue;
+        };
+        handed.insert((format!("{:?}", p.class), format!("{ability:?}")));
+        let subject = [TARGET, HEALER]
+            .into_iter()
+            .find(|who| grid_entity(r, who) == window.subject)
+            .expect("the grid's locks are on the target or the enemy healer");
+        if target != Some(subject) {
+            misaimed.push(describe(r, ability, target));
+            continue;
+        }
+        let until = window.until.expect("a lock has an end");
+        let lands_at = 30.0 + lands_after(r, ability, subject);
+        if lands_at > until + 1e-3 || lands_at < until - HANDOFF_LEAD - 1e-3 {
+            mistimed.push(format!(
+                "{} (lands {lands_at:.2}, until {until:.2})",
+                describe(r, ability, target)
+            ));
+        }
+    }
+    eprintln!("hand-offs chosen in the grid: {handed:?}; {holds} global cooldowns held");
+    assert!(
+        misaimed.is_empty(),
+        "hand-offs not aimed at the lock: {misaimed:#?}"
+    );
+    assert!(
+        mistimed.is_empty(),
+        "hand-offs not landing in the lock's last moments: {mistimed:#?}"
+    );
+    let excepted: BTreeSet<String> = CHAIN_EXCEPTIONS
+        .iter()
+        .map(|e| format!("{:?}", e.class))
+        .collect();
+    let expected: BTreeSet<(String, String)> = CharacterClass::all()
+        .iter()
+        .filter(|c| !excepted.contains(&format!("{c:?}")))
+        .flat_map(|c| {
+            chain_tools(*c)
+                .iter()
+                .map(move |a| (format!("{c:?}"), format!("{a:?}")))
+        })
+        .collect();
+    assert_eq!(
+        handed, expected,
+        "(class, tool) pairs the grid hands off with"
+    );
 }
 
 /// The entity id the trace gives `who` in `r`'s scene.

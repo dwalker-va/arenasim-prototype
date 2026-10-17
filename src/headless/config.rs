@@ -68,7 +68,7 @@ pub struct HeadlessMatchConfig {
     pub team1_ai_profile: Option<String>,
     #[serde(default)]
     pub team2_ai_profile: Option<String>,
-    /// Gated plays (`"Peel"`, `"Burst"`) to DENY each team, for measurement:
+    /// Gated plays (`"Peel"`, `"Burst"`, `"Chain"`) to DENY each team, for measurement:
     /// a team under `TeamPlan` with a play withheld is the paired control the
     /// play is measured against (`situation::WithheldPlays`). Empty — the
     /// default — withholds nothing.
@@ -91,6 +91,11 @@ pub struct HeadlessMatchConfig {
     pub team1_lifted_gates: Vec<String>,
     #[serde(default)]
     pub team2_lifted_gates: Vec<String>,
+    /// The classes that do not run the Chain play, for measurement: replaces
+    /// the shipped `situation::CHAIN_EXCEPTIONS` for both teams, as
+    /// `burst_exceptions` does for the Burst play.
+    #[serde(default)]
+    pub chain_exceptions: Option<Vec<String>>,
     /// Optional grouping label echoed verbatim into batch-runner output. Lets a
     /// strategy-var sweep keep variants distinct (e.g. "Hunter+Spider vs Mage"
     /// vs "Hunter+Boar vs Mage") when two configs share the same class lists.
@@ -183,6 +188,7 @@ impl Default for HeadlessMatchConfig {
             burst_exceptions: None,
             team1_lifted_gates: Vec::new(),
             team2_lifted_gates: Vec::new(),
+            chain_exceptions: None,
             team1_rogue_openers: Vec::new(),
             team2_rogue_openers: Vec::new(),
             team1_rogue_poisons: Vec::new(),
@@ -244,21 +250,24 @@ impl HeadlessMatchConfig {
         &self,
     ) -> Result<crate::states::play_match::situation::WithheldPlays, String> {
         use crate::states::play_match::situation::WithheldPlays;
-        let burst_exceptions = match &self.burst_exceptions {
-            None => None,
-            Some(names) => Some(crate::states::play_match::situation::ClassSet::of(
-                &names
-                    .iter()
-                    .map(|n| Self::parse_class(n))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
+        let class_set = |names: &Option<Vec<String>>| -> Result<_, String> {
+            Ok(match names {
+                None => None,
+                Some(names) => Some(crate::states::play_match::situation::ClassSet::of(
+                    &names
+                        .iter()
+                        .map(|n| Self::parse_class(n))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )),
+            })
         };
         Ok(WithheldPlays {
             team1: WithheldPlays::parse_set(&self.team1_withheld_plays)?,
             team2: WithheldPlays::parse_set(&self.team2_withheld_plays)?,
-            burst_exceptions,
             team1_lifted: WithheldPlays::parse_set(&self.team1_lifted_gates)?,
             team2_lifted: WithheldPlays::parse_set(&self.team2_lifted_gates)?,
+            burst_exceptions: class_set(&self.burst_exceptions)?,
+            chain_exceptions: class_set(&self.chain_exceptions)?,
         })
     }
 

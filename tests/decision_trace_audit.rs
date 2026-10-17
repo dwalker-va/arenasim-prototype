@@ -86,6 +86,9 @@ const EXPECTED_REJECTION_REASONS: &[&str] = &[
     // The Burst play's fit: a cast on the kill window's subject that would
     // land after the window's `until` (TeamPlan only).
     "OutlastsWindow",
+    // The Chain play's timing: a hand-off that would not land in the last
+    // moments of the lock it chains onto (TeamPlan only).
+    "MissesHandoff",
 ];
 
 /// Variants of `TargetRejectionReason` that production code currently emits.

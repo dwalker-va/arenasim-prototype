@@ -100,6 +100,39 @@ pub fn decide_mage_action(
         }
     }
 
+    // The Chain play (TeamPlan): the lock on the enemy healer is about to
+    // end, so Polymorph hands off onto it, landing in its last moments — or
+    // the global cooldown is held for that moment.
+    if let Some(call) = super::chain::chain_call(ctx) {
+        let plan = super::chain::plan(
+            ctx,
+            abilities,
+            combatant,
+            my_pos,
+            auras,
+            &call,
+            &mut builder,
+        );
+        let handed = plan.due.contains(&AbilityType::Polymorph)
+            && try_polymorph_on(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                call.subject,
+                &mut builder,
+            );
+        if handed || plan.hold {
+            builder.play_step(PlayStep::Chain);
+            builder.finish();
+            return handed;
+        }
+    }
+
     // The Burst play (TeamPlan): a kill window is open, so Frostbolt on its
     // enemy heads the chain — only if it lands before the window's `until`
     // (the cast gate's fit).
@@ -768,7 +801,11 @@ fn try_polymorph_on(
 
     // Already held (its own Polymorph, a teammate's stun)? No value in
     // re-CCing it. A rooted target still acts, so a root does not count.
-    if let Some(cc_type) = ctx.held_in_hard_cc(cc_target, super::Incoming::of(def)) {
+    // A Chain play hand-off is judged where it lands (`hold_lands_after`).
+    let lands_after =
+        super::cast_guard::hold_lands_after(def, my_pos, auras, Some((cc_target, target_pos)), ctx);
+    if let Some(cc_type) = ctx.held_in_hard_cc_at(cc_target, super::Incoming::of(def), lands_after)
+    {
         builder.reject(ability, RejectionReason::TargetAlreadyCCd { cc_type });
         return false;
     }

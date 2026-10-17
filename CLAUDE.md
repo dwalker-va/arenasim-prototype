@@ -1411,9 +1411,10 @@ a context is not used there: not every behaviour suits every composition. A
 gate is a NAMED entry in the play's own definition — for Peel,
 `peel::PEEL_GATES`, a (peeler class, class of the teammate in danger) pair with
 a one-line justification citing its measurement — never a scattered `if`;
-Burst's `BURST_EXCEPTIONS` is the same rule by class. A gated unit runs its
-fallback play, and the Burst exceptions apply to that fallback
-(`CombatContext::play`). `tests/peel_gates.rs` lists the gates by set
+Burst's `BURST_EXCEPTIONS` is the same rule by class. A gated unit runs the play
+it would without the peel (`TeamSituation::play_without_peel`: a last-stand
+healer's TakeCover, then Chain while a lock is ending, else the fallback), then Chain's and Burst's exceptions apply
+to that, in that order (`CombatContext::play`). `tests/peel_gates.rs` lists the gates by set
 equality and plays every peeler for every teammate class, so adding or
 removing one fails a default test until the list is edited too. Every gate is
 re-checked at each milestone sweep with the gates lifted for the side under
@@ -1421,6 +1422,25 @@ test (`team{1,2}_lifted_gates`, a measurement-only config field beside
 `team{1,2}_withheld_plays`): it stays only while it still measures negative,
 and a context that turns negative joins. The bar and the method are in
 `docs/design/balance/2026-10-12-as290-peel-context-gates.md`.
+
+`Chain` is gated under `TeamPlan`, between Peel and Burst: while the team's
+hold on an enemy (`lock_ending`: the soonest-ending stun, fear, polymorph,
+incapacitate or cyclone on a visible enemy) ends within
+`CHAIN_HORIZON_SECS`, every unit with a hand-off (`chain::chain_tools` —
+Hammer of Justice, Kidney Shot, Fear, Death Coil, Polymorph, Cyclone) puts
+its chain step at the head of its chain: the hand-off goes when it would
+LAND in the lock's last `HANDOFF_LEAD` (cast time and flight, as the Burst
+fit counts them), and the unit holds its global cooldown when that moment is
+within one. Under the play the hold rule judges a hand-off where it lands
+(`cast_guard::hold_lands_after`). A hand-off never deals damage onto a lock
+that breaks on damage, never puts a breakable or shielding CC on an enemy
+the team is hitting, and a healer does not chain while a teammate is dying.
+A gated peeler still chains. Classes it measured negative for go in
+`situation::CHAIN_EXCEPTIONS`
+(re-checked with `"chain_exceptions": []`). It is scored on lockout, not win
+rate alone: `tests/cc_lifecycle_probe.rs` measures denied, healer-locked and
+counterplay-free seconds and the longest lockout per arm. Findings and the
+graduate criterion: `docs/design/balance/2026-10-12-as276-chain-play.md`.
 
 **The migrate-not-re-pin rule (user decision, 2026-10-12).** When a
 seed-pinned probe goes stale — a change moved the RNG stream and the seed no

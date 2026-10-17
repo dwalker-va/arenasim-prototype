@@ -211,6 +211,30 @@ fn every_peeler_peels_for_every_teammate_but_the_gated_ones() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// A Mage gated for its dying Hunter, the Hunter's attacker low and in a kill
+/// window, the enemy Priest stunned for `stun` seconds.
+fn gated_mage_scene(stun: f32) -> Scene {
+    use arenasim::states::play_match::AuraType;
+    let mut s = Scene::new()
+        .ai_profile(1, AiProfile::TeamPlan)
+        .unit(ME, 1, Mage)
+        .at(0.0, 0.0)
+        .targeting(ATTACKER)
+        .unit(ALLY, 1, Hunter)
+        .at(-20.0, 0.0)
+        .health(0.3)
+        .targeting(ENEMY_HEALER)
+        .unit(ATTACKER, 2, Warrior)
+        .at(-18.5, 0.0)
+        .health(0.2)
+        .targeting(ALLY)
+        .unit(ENEMY_HEALER, 2, Priest)
+        .at(0.0, 30.0)
+        .aura(ENEMY_HEALER, AuraType::Stun, stun);
+    s.combatant_mut(ALLY).stealthed = false;
+    s
+}
+
 /// A gated peeler falls back to its fallback play, and the Burst play's
 /// exceptions then apply to THAT: a Mage gated for its dying Hunter, with the
 /// Hunter's attacker low and the enemy Priest stunned (a kill window), runs
@@ -219,28 +243,11 @@ fn every_peeler_peels_for_every_teammate_but_the_gated_ones() {
 #[test]
 fn a_gated_peeler_falls_back_to_burst_unless_it_is_excepted() {
     use arenasim::states::play_match::situation::ClassSet;
-    use arenasim::states::play_match::AuraType;
     assert!(GATED.contains(&(Mage, Hunter)));
-    let build = || {
-        let mut s = Scene::new()
-            .ai_profile(1, AiProfile::TeamPlan)
-            .unit(ME, 1, Mage)
-            .at(0.0, 0.0)
-            .targeting(ATTACKER)
-            .unit(ALLY, 1, Hunter)
-            .at(-20.0, 0.0)
-            .health(0.3)
-            .targeting(ENEMY_HEALER)
-            .unit(ATTACKER, 2, Warrior)
-            .at(-18.5, 0.0)
-            .health(0.2)
-            .targeting(ALLY)
-            .unit(ENEMY_HEALER, 2, Priest)
-            .at(0.0, 30.0)
-            .aura(ENEMY_HEALER, AuraType::Stun, 4.0);
-        s.combatant_mut(ALLY).stealthed = false;
-        s
-    };
+    // The stun outlasts the Chain play's horizon, so no lock is ending: this
+    // pins Peel's gate against Burst's exceptions alone (the Chain between
+    // them is the next test's).
+    let build = || gated_mage_scene(6.0);
     let tag = |view: &DecisionView| {
         let s = view.situation.as_ref().expect("a situation");
         assert!(s.ally_in_danger.is_some(), "{}", describe(view));
@@ -251,6 +258,52 @@ fn a_gated_peeler_falls_back_to_burst_unless_it_is_excepted() {
     assert_eq!(tag(&gated), Some(PlayTag::Burst), "{}", describe(&gated));
     let excepted = build().burst_exceptions(ClassSet::of(&[Mage])).decide(ME);
     assert_eq!(tag(&excepted), None, "{}", describe(&excepted));
+    let lifted = build().lift_gates(1, PlaySet::of(&[PEEL])).decide(ME);
+    assert!(
+        matches!(tag(&lifted), Some(PlayTag::Peel { .. })),
+        "{}",
+        describe(&lifted)
+    );
+}
+
+/// The composition order of `CombatContext::play`: Peel's gate, then Chain,
+/// then Burst's exceptions. A gated peeler runs the play it would without the
+/// peel (`TeamSituation::play_without_peel`), so with the enemy Priest's stun
+/// ending inside the Chain play's horizon the gated Mage CHAINS (onto the
+/// Priest); named a Chain exception it falls to the Burst play (the kill
+/// window); named a Burst exception too, to the default chain. With its gates
+/// lifted it peels, ahead of all of them.
+#[test]
+fn a_gated_peeler_still_chains_when_a_lock_is_ending() {
+    use arenasim::states::play_match::situation::ClassSet;
+    assert!(GATED.contains(&(Mage, Hunter)));
+    let build = || gated_mage_scene(1.7);
+    let priest = build().entity(ENEMY_HEALER).index();
+    let tag = |view: &DecisionView| {
+        let s = view.situation.as_ref().expect("a situation");
+        assert!(s.ally_in_danger.is_some(), "{}", describe(view));
+        assert!(s.kill_window.is_some(), "{}", describe(view));
+        s.play
+    };
+    let gated = build().decide(ME);
+    assert_eq!(
+        tag(&gated),
+        Some(PlayTag::Chain { subject: priest }),
+        "{}",
+        describe(&gated)
+    );
+    let no_chain = build().chain_exceptions(ClassSet::of(&[Mage])).decide(ME);
+    assert_eq!(
+        tag(&no_chain),
+        Some(PlayTag::Burst),
+        "{}",
+        describe(&no_chain)
+    );
+    let neither = build()
+        .chain_exceptions(ClassSet::of(&[Mage]))
+        .burst_exceptions(ClassSet::of(&[Mage]))
+        .decide(ME);
+    assert_eq!(tag(&neither), None, "{}", describe(&neither));
     let lifted = build().lift_gates(1, PlaySet::of(&[PEEL])).decide(ME);
     assert!(
         matches!(tag(&lifted), Some(PlayTag::Peel { .. })),

@@ -251,6 +251,67 @@ pub fn decide_warlock_action(
         }
     }
 
+    // The Chain play (TeamPlan): the lock on the enemy healer is about to
+    // end, so Fear (else Death Coil) hands off onto it, landing in its last
+    // moments — or the global cooldown is held for that moment.
+    if let Some(call) = super::chain::chain_call(ctx) {
+        let plan = super::chain::plan(
+            ctx,
+            abilities,
+            combatant,
+            my_pos,
+            auras,
+            &call,
+            &mut builder,
+        );
+        let pos = ctx.combatants.get(&call.subject).map(|i| i.position);
+        let handed = pos.is_some_and(|pos| {
+            plan.due.iter().any(|&tool| match tool {
+                AbilityType::Fear if being_kited => {
+                    builder.reject(
+                        tool,
+                        RejectionReason::PreconditionUnmet {
+                            note: "being kited — cast would be interrupted".into(),
+                        },
+                    );
+                    false
+                }
+                AbilityType::Fear => try_peel_fear(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    auras,
+                    call.subject,
+                    pos,
+                    ctx,
+                    &mut builder,
+                ),
+                AbilityType::DeathCoil => try_death_coil(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    auras,
+                    call.subject,
+                    pos,
+                    ctx,
+                    &mut builder,
+                ),
+                _ => false,
+            })
+        });
+        if handed || plan.hold {
+            builder.play_step(PlayStep::Chain);
+            builder.finish();
+            return handed;
+        }
+    }
+
     // The Burst play (TeamPlan): a kill window is open, so its enemy takes
     // Death Coil (damage, and a horror that never breaks) and then Shadow Bolt
     // — each only if it lands before the window's `until` (the cast gate's

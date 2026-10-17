@@ -17,6 +17,7 @@
 pub mod burst;
 pub mod cast_guard;
 pub mod caster_healer_posture;
+pub mod chain;
 pub mod combat_snapshot;
 pub mod dps_postures;
 pub mod druid;
@@ -343,22 +344,55 @@ impl<'a> CombatContext<'a> {
 
     /// The play this unit runs as `role` ([`TeamSituation::play_for`]): its
     /// team's situation, seen from where it stands — a unit never peels for
-    /// itself. A unit that does not peel for that teammate
-    /// ([`peel::peels_for`]: a Warrior, which has no peel tool, or a context
-    /// [`peel::PEEL_GATES`] switches off) runs its fallback play instead of
-    /// [`Play::Peel`]; and a class the Burst play is not used for
-    /// ([`TeamSituation::bursts`]) never bursts, whether Burst is its play or
-    /// the fallback a gated peel left it. Panics where [`Self::situation`]
-    /// does.
+    /// itself. Three mappings, in this order:
+    ///
+    /// 1. Peel's gate: a unit that does not peel for that teammate
+    ///    ([`peel::peels_for`]: a Warrior, which has no peel tool, or a context
+    ///    [`peel::PEEL_GATES`] switches off) runs the play it would without a
+    ///    peel ([`TeamSituation::play_without_peel`]) — a Chain while a lock is
+    ///    ending, else the fallback;
+    /// 2. Chain's: a class with nothing to hand off ([`chain::chain_tools`]) or
+    ///    that the Chain play is not used for ([`TeamSituation::chains`]) runs
+    ///    the fallback instead of [`Play::Chain`];
+    /// 3. Burst's: a class the Burst play is not used for
+    ///    ([`TeamSituation::bursts`]) never bursts, whether Burst is its play or
+    ///    the fallback a gate left it.
+    ///
+    /// Panics where [`Self::situation`] does.
     pub fn play(&self, role: Role) -> Play {
         let situation = self.situation();
         let play = match situation.play_for(role, self.self_entity) {
-            Play::Peel { ally } if !peel::peels_for(self, ally) => situation.fallback_play(role),
+            Play::Peel { ally } if !peel::peels_for(self, ally) => {
+                situation.play_without_peel(role, self.self_entity)
+            }
+            play => play,
+        };
+        let play = match play {
+            Play::Chain { .. } if !self.self_chains(situation) => situation.fallback_play(role),
             play => play,
         };
         match play {
             Play::Burst if !self.self_bursts(situation) => Play::Default,
             play => play,
+        }
+    }
+
+    fn self_chains(&self, situation: &TeamSituation) -> bool {
+        self.self_info().is_some_and(|info| {
+            situation.chains(info.class) && !chain::chain_tools(info.class).is_empty()
+        })
+    }
+
+    /// The lock this unit is handing off from: `Some` when its play is
+    /// [`Play::Chain`] ([`TeamSituation::chain_window`]). `None` on a context
+    /// nobody classified (a pet's): like [`Self::burst_window`] it does not
+    /// panic, because the cast gate asks it of every targeted hold.
+    pub fn chain_window(&self) -> Option<Window> {
+        let situation = self.situation.as_ref()?;
+        let role = Role::of(self.self_info()?.class);
+        match self.play(role) {
+            Play::Chain { .. } => situation.chain_window(),
+            _ => None,
         }
     }
 
@@ -535,11 +569,27 @@ impl<'a> CombatContext<'a> {
     /// looked up — a hold whose caster has died or left the view holds all the
     /// same.
     pub fn held_in_hard_cc(&self, entity: Entity, incoming: Incoming) -> Option<AuraType> {
+        self.held_in_hard_cc_at(entity, incoming, 0.0)
+    }
+
+    /// [`Self::held_in_hard_cc`], asked of the moment a cast begun now LANDS,
+    /// `lands_after` seconds from now: a hold counts only if more than
+    /// [`CC_CHAIN_WINDOW`] of it will be left then. The Chain play's hand-off
+    /// asks it this way ([`cast_guard::hold_lands_after`]), so a 1.5s cast
+    /// started to land in a lock's last moments is not refused at its start
+    /// for the lock it will chain onto. With `lands_after` 0 it is
+    /// [`Self::held_in_hard_cc`] exactly.
+    pub fn held_in_hard_cc_at(
+        &self,
+        entity: Entity,
+        incoming: Incoming,
+        lands_after: f32,
+    ) -> Option<AuraType> {
         let breaking = incoming == Incoming::Lasts && self.attacked_by_my_team(entity);
         self.active_auras
             .get(&entity)?
             .iter()
-            .filter(|a| holds(a.effect_type) && a.duration > CC_CHAIN_WINDOW)
+            .filter(|a| holds(a.effect_type) && a.duration - lands_after > CC_CHAIN_WINDOW)
             .filter(|a| !(breaking && a.break_on_damage_threshold > 0.0))
             .max_by(|a, b| a.duration.total_cmp(&b.duration))
             .map(|a| a.effect_type)
@@ -547,7 +597,7 @@ impl<'a> CombatContext<'a> {
 
     /// Does a living member of the deciding unit's team (itself and pets
     /// included) have `entity` as its target?
-    fn attacked_by_my_team(&self, entity: Entity) -> bool {
+    pub fn attacked_by_my_team(&self, entity: Entity) -> bool {
         let my_team = self.self_info().map(|i| i.team);
         self.combatants
             .values()

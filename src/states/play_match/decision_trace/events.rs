@@ -113,6 +113,11 @@ pub struct SituationTag {
     pub kill_window: Option<WindowTag>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_stand: Option<WindowTag>,
+    /// The lock a chain hands off from (`TeamSituation::chain_window`):
+    /// present only while the team runs the Chain play and the lock ends
+    /// within its horizon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock_ending: Option<WindowTag>,
     /// The deciding unit's play, when it is not `Default`
     /// (`situation::Play`): `{"name": "burst"}` or
     /// `{"name": "peel", "ally": <entity id>}`.
@@ -133,6 +138,7 @@ pub enum PlayTag {
     Burst,
     Peel { ally: u32 },
     TakeCover,
+    Chain { subject: u32 },
 }
 
 impl PlayTag {
@@ -143,6 +149,9 @@ impl PlayTag {
             Play::Burst => Some(PlayTag::Burst),
             Play::Peel { ally } => Some(PlayTag::Peel { ally: ally.index() }),
             Play::TakeCover => Some(PlayTag::TakeCover),
+            Play::Chain { subject } => Some(PlayTag::Chain {
+                subject: subject.index(),
+            }),
         }
     }
 }
@@ -155,6 +164,9 @@ pub enum PlayStep {
     Peel,
     /// The Burst play's hard hitter on the kill window's subject.
     Burst,
+    /// The Chain play's hand-off: crowd control on the locked enemy healer,
+    /// landing in its lock's last moments.
+    Chain,
 }
 
 /// A situation window as the trace records it: the subject's entity id and
@@ -186,6 +198,7 @@ impl From<&TeamSituation> for SituationTag {
             ally_in_danger: situation.ally_in_danger.as_ref().map(WindowTag::from),
             kill_window: situation.kill_window.as_ref().map(WindowTag::from),
             last_stand: situation.last_stand.as_ref().map(WindowTag::from),
+            lock_ending: situation.chain_window().as_ref().map(WindowTag::from),
             play: None,
             play_step: None,
         }
@@ -653,6 +666,16 @@ pub enum RejectionReason {
         /// When it would land, on the trace's `sim_time` clock.
         lands_at: f32,
         /// When the window ends.
+        until: f32,
+    },
+    /// Under the Chain play, a hand-off that would not land in the lock's
+    /// last moments (`class_ai::chain`): before `until - HANDOFF_LEAD`, which
+    /// spends the new lock alongside the old one, or after `until`, which
+    /// leaves the subject free in between.
+    MissesHandoff {
+        /// When it would land, on the trace's `sim_time` clock.
+        lands_at: f32,
+        /// When the lock it would chain onto ends.
         until: f32,
     },
 }

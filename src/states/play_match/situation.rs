@@ -61,6 +61,12 @@
 //!   more living non-pet enemies it can see stand against it. Its [`Window`]
 //!   names that unit; its onset is when its last teammate fell (or the second
 //!   enemy came into view). Pets count on neither side.
+//! - **`lock_ending`** — of the visible enemies the team holds
+//!   ([`locks_healer`]'s set: a stun, a fear or horror, a polymorph, an
+//!   incapacitate, a cyclone), the one whose hold ends SOONEST, the healer
+//!   on a tie. Its `until` is when the longest hold on that enemy runs out.
+//!   The lock the Chain play hands off from; nothing else reads it, and it
+//!   is traced only under that play (`situation.lock_ending`).
 //!
 //! ## Plays
 //!
@@ -89,6 +95,15 @@
 //!   ordinary one. A NEW behaviour, gated under `AiProfile::TeamPlan`
 //!   ([`SituationConfig::take_cover`]) and withheld for measurement like the
 //!   others; inert on a map with nothing to hide behind.
+//! - **`Chain`** — a lock the team holds is about to end (`lock_ending`
+//!   within [`CHAIN_HORIZON_SECS`]), so a unit with a hand-off puts its
+//!   CHAIN step between a peel and a burst: its own crowd control on the
+//!   locked enemy, landing in the lock's last moments, or its global
+//!   cooldown held for that moment (`class_ai::chain`). A healer does not
+//!   chain while a teammate of its own is dying. A NEW behaviour, gated
+//!   under `AiProfile::TeamPlan` ([`SituationConfig::chain`]); withheld for
+//!   measurement the same way, and not run by the classes
+//!   [`CHAIN_EXCEPTIONS`] names.
 //!
 //! ## Thresholds
 //!
@@ -312,6 +327,15 @@ pub struct TeamSituation {
     /// Whether this team runs the gated [`Play::TakeCover`]
     /// ([`SituationConfig::take_cover`]).
     pub cover_play: bool,
+    /// The enemy whose hold by this team ends soonest — the lock a chain
+    /// hands off from (the module docs' `lock_ending`).
+    pub lock_ending: Option<Window>,
+    /// Whether this team runs the gated [`Play::Chain`]
+    /// ([`SituationConfig::chain`]).
+    pub chain_play: bool,
+    /// The classes of this team that do NOT chain ([`CHAIN_EXCEPTIONS`], or
+    /// the measurement override [`WithheldPlays::chain_exceptions`]).
+    pub chain_exceptions: ClassSet,
 }
 
 /// What a unit does about a situation: a named reordering of its own priority
@@ -337,6 +361,15 @@ pub enum Play {
     /// MOVEMENT play — the healer's chain is its ordinary one. Gated under
     /// `AiProfile::TeamPlan`.
     TakeCover,
+    /// The team's lock on the enemy `subject` ([`TeamSituation::lock_ending`])
+    /// ends within [`CHAIN_HORIZON_SECS`]: the CHAIN step — a hand-off of the
+    /// class's own crowd control onto the subject, landing in the lock's last
+    /// moments
+    /// (`class_ai::chain`) — heads the chain. When it does not fire, or
+    /// holds the global cooldown for a hand-off still to come, the chain
+    /// below runs as [`TeamSituation::fallback_play`] orders it. Gated under
+    /// `AiProfile::TeamPlan`.
+    Chain { subject: Entity },
 }
 
 /// The part a unit plays for its team, as far as choosing a play goes.
@@ -393,20 +426,62 @@ impl TeamSituation {
     /// answered before a burst is spent. Only a team that runs it
     /// ([`Self::peel_play`]) peels, only for a teammate with an attacker to
     /// peel, and never the teammate in danger itself — its own defence is its
-    /// chain's. Otherwise [`Self::fallback_play`].
+    /// chain's.
+    ///
+    /// Otherwise [`Self::play_without_peel`]: a last-stand healer's
+    /// [`Play::TakeCover`], then [`Play::Chain`] while a lock the team holds
+    /// is about to end, then [`Self::fallback_play`].
     pub fn play_for(&self, role: Role, me: Entity) -> Play {
         match self.ally_in_danger {
             Some(w) if self.peel_play && w.subject != me && !self.danger_attackers.is_empty() => {
                 Play::Peel { ally: w.subject }
             }
+            _ => self.play_without_peel(role, me),
+        }
+    }
+
+    /// The play the unit `me`, playing `role`, runs when it does not peel —
+    /// no teammate in danger, or a peel its context gates off
+    /// (`class_ai::peel::peels_for`). The ONE place both the ungated and the
+    /// gated-peel paths take, so a gated peeler still chains. In order:
+    ///
+    /// 1. [`Play::TakeCover`] — `me` is a healer and its team's
+    ///    [`last_stand`](Self::last_stand): alone against two or more, it hides
+    ///    rather than holding a global cooldown for a hand-off (a last stand
+    ///    has no teammate to make a lock it could extend);
+    /// 2. [`Play::Chain`] while a lock is ending ([`Self::chain_window`]; a
+    ///    healer only while no teammate of its own is dying);
+    /// 3. else [`Self::fallback_play`].
+    pub fn play_without_peel(&self, role: Role, me: Entity) -> Play {
+        match self.chain_window() {
             _ if role == Role::Healer
                 && self.cover_play
                 && self.last_stand.is_some_and(|w| w.subject == me) =>
             {
                 Play::TakeCover
             }
+            Some(w) if role != Role::Healer || self.dying_allies().next().is_none() => {
+                Play::Chain { subject: w.subject }
+            }
             _ => self.fallback_play(role),
         }
+    }
+
+    /// The lock a chain hands off from: [`Self::lock_ending`], on a team that
+    /// runs [`Play::Chain`] ([`Self::chain_play`]), while its `until` is no
+    /// more than [`CHAIN_HORIZON_SECS`] away.
+    pub fn chain_window(&self) -> Option<Window> {
+        self.lock_ending.filter(|w| {
+            self.chain_play
+                && w.until
+                    .is_some_and(|until| until - self.now <= CHAIN_HORIZON_SECS)
+        })
+    }
+
+    /// Whether a unit of `class` runs the Chain play this team runs: not one
+    /// of [`Self::chain_exceptions`].
+    pub fn chains(&self, class: CharacterClass) -> bool {
+        self.chain_play && !self.chain_exceptions.contains(class)
     }
 
     /// The play `role` runs when it does not peel: the order of the chain
@@ -483,6 +558,33 @@ pub const BURST_EXCEPTIONS: &[BurstException] = &[];
 /// [`BURST_EXCEPTIONS`] as a set.
 pub fn burst_exception_classes() -> ClassSet {
     ClassSet::of(&BURST_EXCEPTIONS.iter().map(|e| e.class).collect::<Vec<_>>())
+}
+
+/// How long before the lock on the enemy healer ends the Chain play runs
+/// ([`TeamSituation::chain_window`]). It covers the slowest hand-off in the
+/// kit — a 1.5s cast slowed by Curse of Tongues, 2.25s — landing in the
+/// lock's last moments, plus the global cooldown held for it
+/// (`class_ai::chain`). Earlier than this nothing can be handed off yet, so
+/// the unit runs its fallback play.
+pub const CHAIN_HORIZON_SECS: f32 = 4.0;
+
+/// A class the Chain play is NOT used for, and the measurement that put it
+/// here: the same ruling, and the same re-check at each milestone sweep, as
+/// [`BurstException`] (`"chain_exceptions": []` in a headless config, read
+/// into [`WithheldPlays::chain_exceptions`]).
+#[derive(Clone, Copy, Debug)]
+pub struct ChainException {
+    pub class: CharacterClass,
+    /// The measurement that put it here: the findings note and its row.
+    pub finding: &'static str,
+}
+
+/// The classes the Chain play is not used for (see [`ChainException`]).
+pub const CHAIN_EXCEPTIONS: &[ChainException] = &[];
+
+/// [`CHAIN_EXCEPTIONS`] as a set.
+pub fn chain_exception_classes() -> ClassSet {
+    ClassSet::of(&CHAIN_EXCEPTIONS.iter().map(|e| e.class).collect::<Vec<_>>())
 }
 
 /// The situation of both teams. Team `t` lives at index `t - 1`.
@@ -562,6 +664,9 @@ pub struct SituationConfig {
     /// Whether the team runs the gated [`Play::TakeCover`] — off until
     /// [`Self::under`] puts it under `TeamPlan`, as [`Self::peel`] is.
     pub take_cover: bool,
+    /// Whether the team runs the gated [`Play::Chain`] — off until
+    /// [`Self::under`] puts it under `TeamPlan`, as [`Self::peel`] is.
+    pub chain: bool,
     /// The gated plays each team is denied ([`WithheldPlays`]), applied by
     /// [`Self::for_team`].
     pub withheld: WithheldPlays,
@@ -592,6 +697,7 @@ impl SituationConfig {
             burst: false,
             peel_gates_lifted: false,
             take_cover: false,
+            chain: false,
             withheld: WithheldPlays::default(),
         }
     }
@@ -608,6 +714,7 @@ impl SituationConfig {
                 peel: true,
                 burst: true,
                 take_cover: true,
+                chain: true,
                 ..self
             },
             AiProfile::Legacy => Self {
@@ -615,6 +722,7 @@ impl SituationConfig {
                 peel: false,
                 burst: false,
                 take_cover: false,
+                chain: false,
                 ..self
             },
         }
@@ -631,6 +739,7 @@ impl SituationConfig {
             burst: cfg.burst && !denied.denies(&Play::Burst),
             peel_gates_lifted: self.withheld.lifted_for_team(team).denies(&PEEL),
             take_cover: cfg.take_cover && !denied.denies(&Play::TakeCover),
+            chain: cfg.chain && !denied.denies(&CHAIN),
             ..cfg
         }
     }
@@ -641,6 +750,14 @@ impl SituationConfig {
         self.withheld
             .burst_exceptions
             .unwrap_or_else(burst_exception_classes)
+    }
+
+    /// The classes that do not chain: [`CHAIN_EXCEPTIONS`], unless the
+    /// measurement override [`WithheldPlays::chain_exceptions`] names others.
+    pub fn chain_exceptions(&self) -> ClassSet {
+        self.withheld
+            .chain_exceptions
+            .unwrap_or_else(chain_exception_classes)
     }
 }
 
@@ -654,6 +771,7 @@ pub struct PlaySet {
     peel: bool,
     burst: bool,
     take_cover: bool,
+    chain: bool,
 }
 
 impl PlaySet {
@@ -672,6 +790,7 @@ impl PlaySet {
             Play::Peel { .. } => self.peel = true,
             Play::Burst => self.burst = true,
             Play::TakeCover => self.take_cover = true,
+            Play::Chain { .. } => self.chain = true,
             Play::Default => {}
         }
     }
@@ -682,6 +801,7 @@ impl PlaySet {
             Play::Peel { .. } => self.peel,
             Play::Burst => self.burst,
             Play::TakeCover => self.take_cover,
+            Play::Chain { .. } => self.chain,
             Play::Default => false,
         }
     }
@@ -693,7 +813,13 @@ pub const PEEL: Play = Play::Peel {
     ally: Entity::PLACEHOLDER,
 };
 
-/// The gated plays ([`Play::Peel`], [`Play::Burst`]) each team is DENIED, for
+/// `Play::Chain` as a KIND, for the sets above (a chain's subject does not
+/// enter whether it is withheld).
+pub const CHAIN: Play = Play::Chain {
+    subject: Entity::PLACEHOLDER,
+};
+
+/// The gated plays ([`Play::Peel`], [`Play::Burst`], [`Play::Chain`]) each team is DENIED, for
 /// measurement: a team under `TeamPlan` with a play withheld is the paired
 /// control the play is measured against — in a tier-4 probe (the same seed
 /// bank with the play off) and in a head-to-head (one side with it, one
@@ -724,6 +850,9 @@ pub struct WithheldPlays {
     pub team1_lifted: PlaySet,
     /// The plays whose context gates team 2 has lifted.
     pub team2_lifted: PlaySet,
+    /// Replaces [`CHAIN_EXCEPTIONS`] for both teams when set, as
+    /// [`Self::burst_exceptions`] does for the Burst play.
+    pub chain_exceptions: Option<ClassSet>,
 }
 
 impl WithheldPlays {
@@ -748,7 +877,7 @@ impl WithheldPlays {
         }
     }
 
-    /// Parse a config's list of gated play names (`"Peel"`, `"Burst"`) into
+    /// Parse a config's list of gated play names (`"Peel"`, `"Burst"`, `"Chain"`) into
     /// the set it denies.
     pub fn parse_set(names: &[String]) -> Result<PlaySet, String> {
         let mut set = PlaySet::default();
@@ -757,9 +886,11 @@ impl WithheldPlays {
                 "Peel" | "peel" => PEEL,
                 "Burst" | "burst" => Play::Burst,
                 "TakeCover" | "take_cover" => Play::TakeCover,
+                "Chain" | "chain" => CHAIN,
                 other => {
                     return Err(format!(
-                        "Unknown withheld play: '{other}'. Gated plays: Peel, Burst, TakeCover"
+                        "Unknown withheld play: '{other}'. Gated plays: Peel, Burst, TakeCover, \
+                         Chain"
                     ))
                 }
             };
@@ -837,6 +968,9 @@ pub fn classify_roster(
         now: clock.now,
         last_stand: last_stand(roster, auras, team, prev, clock.now),
         cover_play: cfg.take_cover,
+        lock_ending: lock_ending(roster, auras, team, prev, clock.now),
+        chain_play: cfg.chain,
+        chain_exceptions: cfg.chain_exceptions(),
     }
 }
 
@@ -1256,6 +1390,49 @@ pub(crate) fn enemy_healer(
         .map(|info| info.entity)
 }
 
+/// The `lock_ending` window: of the visible, living enemies (not pets) of
+/// `team` that its team holds ([`locks_healer`]: the hard crowd control that
+/// stops a unit acting), the one whose hold ends SOONEST — `until` is when the
+/// longest such crowd control on it runs out. A tie goes to a healer, then to
+/// entity order. The onset carries while the subject holds.
+fn lock_ending(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    team: u8,
+    prev: &TeamSituation,
+    now: f32,
+) -> Option<Window> {
+    let mut best: Option<(f32, bool, Entity)> = None;
+    for info in roster.values().filter(|i| {
+        i.team != team
+            && i.is_alive
+            && !i.is_pet
+            && stealth_visible(i.stealthed, false, has_shadow_sight(auras, i.entity))
+    }) {
+        let Some(remaining) = auras.get(&info.entity).and_then(|list| {
+            list.iter()
+                .filter(|a| locks_healer(a.effect_type))
+                .map(|a| a.duration)
+                .reduce(f32::max)
+        }) else {
+            continue;
+        };
+        let healer = info.class.is_healer();
+        let better = best.is_none_or(|(r, h, _)| remaining < r || (remaining == r && healer && !h));
+        if better {
+            best = Some((remaining, healer, info.entity));
+        }
+    }
+    best.map(|(remaining, _, subject)| Window {
+        subject,
+        since: prev
+            .lock_ending
+            .filter(|w| w.subject == subject)
+            .map_or(now, |w| w.since),
+        until: Some(now + remaining),
+    })
+}
+
 fn enemy_healer_locked(
     roster: &BTreeMap<Entity, CombatantInfo>,
     auras: &BTreeMap<Entity, Vec<Aura>>,
@@ -1616,6 +1793,7 @@ mod tests {
                 peel: true,
                 burst: true,
                 take_cover: true,
+                chain: true,
                 ..SituationConfig::default()
             }
         );
@@ -1627,6 +1805,7 @@ mod tests {
                 peel: false,
                 burst: false,
                 take_cover: false,
+                chain: false,
                 ..teamplan
             },
             "only the release and the gated plays differ"
@@ -1852,6 +2031,141 @@ mod tests {
         assert_eq!(
             WithheldPlays::parse_set(&["Burst".to_string(), "Peel".to_string()]),
             Ok(PlaySet::of(&[Play::Burst, PEEL]))
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // lock_ending and the Chain play
+    // -----------------------------------------------------------------------
+
+    /// The lock a chain hands off from is the enemy whose hold ends
+    /// SOONEST; its `until` is the longest hold on that enemy; a tie goes to
+    /// the healer; a root holds nothing; the onset carries while the subject
+    /// holds.
+    #[test]
+    fn lock_ending_is_the_enemy_hold_that_ends_soonest() {
+        let mut f = fixture();
+        let none = classify_now(&f, &TeamSituation::default(), 30.0);
+        assert_eq!(none.lock_ending, None);
+        f.auras.insert(f.mage, vec![cc(AuraType::Root, 1.0)]);
+        assert_eq!(classify_now(&f, &none, 30.0).lock_ending, None, "a root");
+        f.auras.insert(
+            f.mage,
+            vec![cc(AuraType::Stun, 1.0), cc(AuraType::Polymorph, 2.0)],
+        );
+        f.auras.insert(f.healer, vec![cc(AuraType::Fear, 3.0)]);
+        let s = classify_now(&f, &none, 30.0);
+        assert_eq!(
+            s.lock_ending,
+            Some(Window {
+                subject: f.mage,
+                since: 30.0,
+                until: Some(32.0),
+            }),
+            "the Mage's longest hold, 2s, ends before the Priest's 3s"
+        );
+        let later = classify_now(&f, &s, 31.0);
+        assert_eq!(later.lock_ending.map(|w| w.since), Some(30.0));
+        f.auras.insert(f.healer, vec![cc(AuraType::Fear, 2.0)]);
+        // The healer AFTER the other enemy in entity order, so entity order
+        // alone would pick the other one.
+        f.roster.get_mut(&f.healer).unwrap().class = CharacterClass::Mage;
+        f.roster.get_mut(&f.mage).unwrap().class = CharacterClass::Priest;
+        assert_eq!(
+            classify_now(&f, &none, 30.0).lock_ending.map(|w| w.subject),
+            Some(f.mage),
+            "a tie goes to the healer"
+        );
+        // Its own team's hold is no lock it hands off from.
+        f.auras.clear();
+        f.auras.insert(f.warrior, vec![cc(AuraType::Stun, 1.0)]);
+        assert_eq!(classify_now(&f, &none, 30.0).lock_ending, None);
+    }
+
+    /// The Chain play heads the play of every role — a healer's only while no
+    /// teammate of its own is dying — once the lock is within the horizon of
+    /// its end, on a team that runs it, ahead of a burst and behind a peel.
+    #[test]
+    fn chain_hands_off_a_lock_ending_within_the_horizon() {
+        let subject = Entity::from_raw(1);
+        let me = Entity::from_raw(3);
+        let lock = |until: f32| Window {
+            subject,
+            since: 0.0,
+            until: Some(until),
+        };
+        let ending = TeamSituation {
+            lock_ending: Some(lock(30.0 + CHAIN_HORIZON_SECS)),
+            now: 30.0,
+            chain_play: true,
+            burst_play: true,
+            kill_window: Some(lock(31.0)),
+            ..Default::default()
+        };
+        for role in [Role::MeleeDps, Role::RangedDps, Role::Healer] {
+            assert_eq!(
+                ending.play_for(role, me),
+                Play::Chain { subject },
+                "{role:?}"
+            );
+        }
+        assert_eq!(ending.fallback_play(Role::MeleeDps), Play::Burst);
+        let far = TeamSituation {
+            lock_ending: Some(lock(30.01 + CHAIN_HORIZON_SECS)),
+            ..ending.clone()
+        };
+        assert_eq!(far.play_for(Role::RangedDps, me), Play::Burst);
+        assert_eq!(far.play_for(Role::Healer, me), Play::Default);
+        let gated = TeamSituation {
+            chain_play: false,
+            ..ending.clone()
+        };
+        assert_eq!(gated.play_for(Role::Healer, me), Play::Default);
+        let dying = TeamSituation {
+            allies: [AllyStanding {
+                entity: me,
+                dying: true,
+                pressured: false,
+                pressure_onset: false,
+            }]
+            .into_iter()
+            .collect(),
+            ..ending.clone()
+        };
+        assert_eq!(dying.play_for(Role::Healer, me), Play::Default);
+        assert_eq!(dying.play_for(Role::MeleeDps, me), Play::Chain { subject });
+        let danger = TeamSituation {
+            ally_in_danger: Some(lock(0.0)),
+            danger_attackers: [Entity::from_raw(2)].into_iter().collect(),
+            peel_play: true,
+            ..ending.clone()
+        };
+        assert_eq!(
+            danger.play_for(Role::MeleeDps, me),
+            Play::Peel { ally: subject }
+        );
+    }
+
+    #[test]
+    fn withheld_plays_deny_chain_to_one_team_only() {
+        let cfg = SituationConfig {
+            withheld: WithheldPlays {
+                team2: PlaySet::of(&[CHAIN]),
+                ..Default::default()
+            },
+            ..SituationConfig::default()
+        };
+        assert!(cfg.for_team(1, AiProfile::TeamPlan).chain);
+        assert!(!cfg.for_team(2, AiProfile::TeamPlan).chain);
+        assert!(cfg.for_team(2, AiProfile::TeamPlan).burst, "Burst stays");
+        assert!(!cfg.for_team(1, AiProfile::Legacy).chain);
+        assert_eq!(
+            WithheldPlays::parse_set(&["Chain".to_string()]),
+            Ok(PlaySet::of(&[CHAIN]))
+        );
+        assert_eq!(
+            SituationConfig::default().chain_exceptions(),
+            chain_exception_classes()
         );
     }
 
@@ -2244,6 +2558,54 @@ mod tests {
         assert_eq!(
             WithheldPlays::parse_set(&["TakeCover".to_string()]),
             Ok(PlaySet::of(&[Play::TakeCover]))
+        );
+    }
+
+    /// TakeCover and Chain: a last-stand healer with a lock ending takes
+    /// cover rather than chaining — in `play_for` and in `play_without_peel`,
+    /// the path a gated peeler takes — and chains once the cover play is
+    /// gated off. Any other unit chains.
+    #[test]
+    fn a_last_stand_healer_takes_cover_ahead_of_a_chain() {
+        let me = Entity::from_raw(1);
+        let other = Entity::from_raw(2);
+        let subject = Entity::from_raw(3);
+        let standing = TeamSituation {
+            last_stand: Some(Window {
+                subject: me,
+                since: 0.0,
+                until: None,
+            }),
+            cover_play: true,
+            lock_ending: Some(Window {
+                subject,
+                since: 0.0,
+                until: Some(31.0),
+            }),
+            now: 30.0,
+            chain_play: true,
+            ..Default::default()
+        };
+        assert_eq!(standing.play_for(Role::Healer, me), Play::TakeCover);
+        assert_eq!(
+            standing.play_without_peel(Role::Healer, me),
+            Play::TakeCover
+        );
+        assert_eq!(
+            standing.play_for(Role::Healer, other),
+            Play::Chain { subject }
+        );
+        assert_eq!(
+            standing.play_for(Role::MeleeDps, me),
+            Play::Chain { subject }
+        );
+        let uncovered = TeamSituation {
+            cover_play: false,
+            ..standing.clone()
+        };
+        assert_eq!(
+            uncovered.play_for(Role::Healer, me),
+            Play::Chain { subject }
         );
     }
 
