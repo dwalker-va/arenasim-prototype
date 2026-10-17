@@ -394,6 +394,30 @@ the card changed since you read it: the refusal carries the current card —
 re-apply your change to that version. `claim_refused` means another claim holds the card:
 do not spawn. `gate_refused` means a non-pm card is missing its own `pr`.
 
+### Merging: rebase only when it buys something
+
+Cards run in parallel. A PR does not rebase just because main moved.
+
+- **Default.** When `git merge-tree` against current main is clean, the Tester runs the
+  default `cargo test` once on that merged tree, and the orchestrator merges with a
+  merge commit (`gh pr merge --merge --match-head-commit <full sha>`). Nothing is
+  re-swept.
+- **Rebase only for one of two reasons:**
+  - a textual conflict;
+  - the change that just landed touches the mechanism this PR measures: the same
+    decision function, situation or play.
+
+  The orchestrator makes that call at merge time and records which reason applied in
+  the card's activity. After a rebase, re-run the gates and the byte-identity checks.
+  Re-measure only for the second reason.
+- **A sweep taken on an older base is still DIRECTIONAL evidence.** The combined effect
+  of a milestone's changes belongs to the milestone sweep. Re-sweeping each card on
+  every new base is not the job of its PR.
+- **A dependency that remains goes on the board, not in the orchestrator's head.** The
+  waiting card gets a `links` entry naming the card it waits on, plus one activity line
+  saying why. Where cards keep colliding in one seam, fix the seam so that work there
+  can run in parallel (for example, the play pipeline). Don't serialize the cards.
+
 ### Waking the orchestrator
 
 A user gesture in the web UI (drag, edit, answer) — or another session's write
@@ -803,11 +827,11 @@ Rule 4's file read and `EnterWorktree` are the two halves of this and neither
 substitutes for the other: the read is guard-immune but tells you **only where you
 are**, and `EnterWorktree` is the one that gets you out.
 
-*Last resort, only when committing locally would switch a branch out from under
-another session's live work:* push through the GitHub Git Data API (blobs → tree →
-commit → ref update), then verify by reading the commit back off GitHub. One Engineer
-has already had to. It **bypasses local hooks and authors through the `gh`
-credentials**, so it is the last option and never the convenient one.
+**When local git stays refused, report BLOCKED. Never route around it.** Building a
+commit through the GitHub Git Data API skips local hooks, authors through the `gh`
+credentials, and is a guard bypass. Auto mode flagged one Engineer that did this
+(AS-291), so it is not an option. Report `NEEDS_INPUT` with the refusal text. The
+orchestrator then re-spawns the agent or fixes the pin (AS-345).
 
 **Scope.** This section is about *losing commits*. The same flap has a second
 consequence — a headless run reading another tree's **assets** and silently measuring
