@@ -1,0 +1,41 @@
+diff --git a/src/states/play_match/class_ai/peel.rs b/src/states/play_match/class_ai/peel.rs
+index 7aa0218f..38147d37 100644
+--- a/src/states/play_match/class_ai/peel.rs
++++ b/src/states/play_match/class_ai/peel.rs
+@@ -210,6 +210,9 @@ pub const PEEL_GATES: &[PeelGate] = &[
+ /// Whether [`PEEL_GATES`] switches the play off for a `peeler` peeling for an
+ /// `ally`.
+ pub fn gated(peeler: CharacterClass, ally: CharacterClass) -> bool {
++    if extra_gates().contains(&(peeler, ally)) {
++        return true;
++    }
+     PEEL_GATES
+         .iter()
+         .any(|g| g.context == PeelContext { peeler, ally })
+@@ -228,3 +231,26 @@ pub fn peels_for(ctx: &CombatContext, ally: Entity) -> bool {
+     }
+     ctx.situation().peel_gates_lifted || class(ally).is_none_or(|ally| !gated(peeler, ally))
+ }
++
++// ARM-ONLY (AS-290 re-selection on the Burst base).
++fn extra_gates() -> &'static Vec<(CharacterClass, CharacterClass)> {
++    static EXTRA: std::sync::OnceLock<Vec<(CharacterClass, CharacterClass)>> =
++        std::sync::OnceLock::new();
++    EXTRA.get_or_init(|| {
++        let class = |s: &str| {
++            *CharacterClass::all()
++                .iter()
++                .find(|c| format!("{c:?}") == s)
++                .unwrap_or_else(|| panic!("unknown class {s}"))
++        };
++        std::env::var("AS290_EXTRA_GATES")
++            .unwrap_or_default()
++            .split(';')
++            .filter(|s| !s.is_empty())
++            .map(|item| {
++                let (p, a) = item.split_once('@').expect("Peeler@Ally");
++                (class(p), class(a))
++            })
++            .collect()
++    })
++}

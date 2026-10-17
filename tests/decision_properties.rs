@@ -42,11 +42,12 @@
 //! injured ally, so "ally cycloned" is also "ally injured") — and put the
 //! unit and its ally just either side of every healer's guaranteed-heal
 //! bar. The Rogue meets each in and out of stealth. Every situation is under
-//! `Legacy` but six, which put the unit's team under `TeamPlan`: three with
-//! its ally dying under attack — the Peel play's situation — and three with
-//! its target low and the enemy healer locked for 6s, locked for 1s, or free
-//! — the Burst play's kill window, short and long, and its control — so
-//! every property also judges the gated plays' choices
+//! `Legacy` but eight, which put the unit's team under `TeamPlan`: five with
+//! its ally dying under attack — the Peel play's situation, with a Warrior, a
+//! Mage or a Hunter ally, since the play is gated by the ally's class — and
+//! three with its target low and the enemy healer locked for 6s, locked for
+//! 1s, or free — the Burst play's kill window, short and long, and its
+//! control — so every property also judges the gated plays' choices
 //! ([`every_peel_tool_is_reached_and_every_peel_is_aimed_at_the_attacker`],
 //! [`every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window`]). The roster is the unit,
 //! an ally, the enemy target and an enemy Priest. The unit's CC target is the
@@ -461,6 +462,31 @@ fn situations(class: CharacterClass, bars: &[f32]) -> Vec<Situation> {
             target_attacks_ally: true,
             target_class,
             focus_healer,
+            team_plan: true,
+            ..CALM
+        });
+    }
+    // The play is gated by the class of the teammate in danger
+    // (`class_ai::peel::PEEL_GATES`), so the grid also puts a Mage (gated for
+    // no peeler) and a Hunter (gated for several) in danger, with the unit on
+    // the enemy healer: its own target is not the attacker, which a peel that
+    // breaks on damage passes over.
+    for (name, ally_class) in [
+        (
+            "focusing the healer, a Mage ally dying under attack, TeamPlan",
+            CharacterClass::Mage,
+        ),
+        (
+            "focusing the healer, a Hunter ally dying under attack, TeamPlan",
+            CharacterClass::Hunter,
+        ),
+    ] {
+        list.push(Situation {
+            name,
+            ally_class,
+            ally_health: Some(0.3),
+            target_attacks_ally: true,
+            focus_healer: true,
             team_plan: true,
             ..CALM
         });
@@ -2051,20 +2077,33 @@ fn never_stacks_hard_cc_on_a_unit_its_team_holds() {
 ///   self-centred area (Frost Nova, Psychic Scream) holds it inside its
 ///   radius, and a Frost Trap names it and lands within trigger range of it.
 ///   A peel step that casts on any other unit fails here;
-/// - no peel is made outside `TeamPlan`.
+/// - no peel is made outside `TeamPlan`;
+/// - no peel is made in a context `PEEL_GATES` switches off (a peeler for a
+///   teammate of a gated class), and the grid does reach such contexts under
+///   the play's situation: `tests/peel_gates.rs` names the gates.
 #[test]
 fn every_peel_tool_is_reached_and_every_peel_is_aimed_at_the_attacker() {
-    use arenasim::states::play_match::class_ai::peel::peel_tools;
+    use arenasim::states::play_match::class_ai::peel::{gated, peel_tools};
     use arenasim::states::play_match::constants::TRAP_TRIGGER_RADIUS;
     use arenasim::states::play_match::decision_trace::PlayStep;
     let g = grid();
     let mut peeled: BTreeSet<(String, String)> = BTreeSet::new();
     let mut misaimed = Vec::new();
+    let mut gated_scenes = 0;
+    let mut gated_peels = Vec::new();
     for r in &g.records {
+        let p = &r.point;
+        let in_danger = p.situation.team_plan
+            && p.situation.target_attacks_ally
+            && r.view.situation.is_some_and(|s| s.ally_in_danger.is_some());
+        let is_gated = gated(p.class, p.situation.ally_class);
+        gated_scenes += usize::from(in_danger && is_gated);
         if r.view.situation.and_then(|s| s.play_step) != Some(PlayStep::Peel) {
             continue;
         }
-        let p = &r.point;
+        if is_gated {
+            gated_peels.push(p.describe());
+        }
         assert!(
             p.situation.team_plan,
             "a peel outside TeamPlan: {}",
@@ -2096,7 +2135,15 @@ fn every_peel_tool_is_reached_and_every_peel_is_aimed_at_the_attacker() {
             misaimed.push(describe(r, ability, target));
         }
     }
-    eprintln!("peels chosen in the grid: {peeled:?}");
+    eprintln!("peels chosen in the grid: {peeled:?}; gated scenes in danger: {gated_scenes}");
+    assert!(
+        gated_scenes > 0,
+        "the grid never puts a gated context under the play"
+    );
+    assert!(
+        gated_peels.is_empty(),
+        "peels in a gated context: {gated_peels:#?}"
+    );
     assert!(
         misaimed.is_empty(),
         "peels not aimed at the dying ally's attacker: {misaimed:#?}"

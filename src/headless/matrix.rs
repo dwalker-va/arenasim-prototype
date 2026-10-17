@@ -269,6 +269,8 @@ fn build_config(
         team1_withheld_plays: Vec::new(),
         team2_withheld_plays: Vec::new(),
         burst_exceptions: None,
+        team1_lifted_gates: Vec::new(),
+        team2_lifted_gates: Vec::new(),
         // Recorded per match so a re-run from this config reproduces the sweep.
         ai_profile: Some(profile.name().to_string()),
         team1: vec![team1.name().to_string()],

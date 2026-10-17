@@ -200,6 +200,20 @@ impl DispatchEventBuilder<'_> {
         self.inner.record_chosen(ability, target, true);
     }
 
+    /// Stamp the owner's team situation and play on the event: a dispatch
+    /// made by a play's step (the Hunter's pet peel).
+    pub fn with_play(self, situation: &TeamSituation, play: Play) -> Self {
+        Self {
+            inner: self.inner.with_situation(situation).with_play(play),
+        }
+    }
+
+    /// Record that the play's own `step` produced this dispatch
+    /// ([`DecisionEventBuilder::play_step`]).
+    pub fn play_step(&mut self, step: PlayStep) {
+        self.inner.play_step(step);
+    }
+
     /// Commit the event (see [`DecisionEventBuilder::finish`]).
     pub fn finish(self) {
         self.inner.finish();

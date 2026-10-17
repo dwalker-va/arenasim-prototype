@@ -2237,7 +2237,7 @@ fn try_serpent_sting(
 /// Route pet-dispatch helpers based on the pet's PetType. Hunter has exactly
 /// one pet (Spider, Boar, or Bird) per match; Felhunter belongs to Warlock and
 /// is not Hunter-dispatched.
-fn dispatch_pet_ability(
+pub(super) fn dispatch_pet_ability(
     commands: &mut Commands,
     abilities: &AbilityDefinitions,
     decision_trace: &mut DecisionTrace,
@@ -2259,6 +2259,19 @@ fn dispatch_pet_ability(
         return;
     };
 
+    if try_pet_peel(
+        commands,
+        abilities,
+        decision_trace,
+        hunter_entity,
+        pet_entity,
+        pet_info,
+        pet_type,
+        ctx,
+    ) {
+        return;
+    }
+
     match pet_type {
         PetType::Spider => {
             if let Some(target) = target_entity {
@@ -2271,6 +2284,7 @@ fn dispatch_pet_ability(
                     pet_info,
                     target,
                     ctx,
+                    false,
                 );
             }
         }
@@ -2285,6 +2299,7 @@ fn dispatch_pet_ability(
                     pet_info,
                     target,
                     ctx,
+                    false,
                 );
             }
         }
@@ -2307,9 +2322,94 @@ fn dispatch_pet_ability(
     }
 }
 
-/// Try to dispatch Spider Web onto the Hunter's current target. Snapshot
+/// The Peel play's pet step (`peel::pet_peel_tool`): while the Hunter runs
+/// the play, its Spider webs the first of the teammate's attackers that is a
+/// melee or pet ([`super::peel::movement_peel_target`]: a root answers only an
+/// attacker that has to move) and not immune, or its Boar charges the first
+/// attacker not immune. The dispatch is traced with the Hunter's situation and
+/// `situation.play_step = "peel"`. A pet with no peel tool, or no attacker it
+/// can strike, leaves the dispatch to its ordinary order.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn try_pet_peel(
+    commands: &mut Commands,
+    abilities: &AbilityDefinitions,
+    decision_trace: &mut DecisionTrace,
+    hunter_entity: Entity,
+    pet_entity: Entity,
+    pet_info: &CombatantInfo,
+    pet_type: PetType,
+    ctx: &CombatContext,
+) -> bool {
+    let Some(tool) = super::peel::pet_peel_tool(pet_type) else {
+        return false;
+    };
+    let Some(call) = super::peel::peel_call(ctx, Role::RangedDps) else {
+        return false;
+    };
+    call.attackers.iter().any(|&attacker| {
+        if ctx.entity_is_immune(attacker) {
+            return false;
+        }
+        match tool {
+            AbilityType::SpiderWeb => {
+                super::peel::movement_peel_target(ctx, attacker)
+                    && try_dispatch_spider_web(
+                        commands,
+                        abilities,
+                        decision_trace,
+                        hunter_entity,
+                        pet_entity,
+                        pet_info,
+                        attacker,
+                        ctx,
+                        true,
+                    )
+            }
+            _ => try_dispatch_boar_charge(
+                commands,
+                abilities,
+                decision_trace,
+                hunter_entity,
+                pet_entity,
+                pet_info,
+                attacker,
+                ctx,
+                true,
+            ),
+        }
+    })
+}
+
+/// Start the trace event of a Hunter-dispatched pet ability; a `peel`
+/// dispatch carries the Hunter's situation and play.
+fn start_pet_dispatch<'t>(
+    decision_trace: &'t mut DecisionTrace,
+    hunter_entity: Entity,
+    pet_info: &CombatantInfo,
+    target_info: &CombatantInfo,
+    default_name: &'static str,
+    ctx: &CombatContext,
+    peel: bool,
+) -> crate::states::play_match::decision_trace::DispatchEventBuilder<'t> {
+    let builder = decision_trace.start_pet_command_dispatch(
+        ActorView::from_info(pet_info),
+        Some(TargetView::from_info(target_info, pet_info.position)),
+        hunter_entity,
+        pet_info.pet_type.map_or(default_name, |pt| pt.name()),
+        hunter_entity,
+    );
+    if peel {
+        builder.with_play(ctx.situation(), ctx.play(Role::RangedDps))
+    } else {
+        builder
+    }
+}
+
+/// Try to dispatch Spider Web onto `target_entity`: the Hunter's current
+/// target, or (`peel`) an attacker of a teammate in danger. Snapshot
 /// heuristics only — pet AI re-validates at execution time. Emits a
 /// pet_decision trace event with `dispatched_by: Some(hunter_entity)`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn try_dispatch_spider_web(
     commands: &mut Commands,
     abilities: &AbilityDefinitions,
@@ -2319,6 +2419,7 @@ pub(super) fn try_dispatch_spider_web(
     pet_info: &CombatantInfo,
     target_entity: Entity,
     ctx: &CombatContext,
+    peel: bool,
 ) -> bool {
     let ability = AbilityType::SpiderWeb;
     let Some(def) = abilities.get(&ability) else {
@@ -2328,15 +2429,14 @@ pub(super) fn try_dispatch_spider_web(
         return false;
     };
 
-    let pet_pos = pet_info.position;
-    let actor_view = ActorView::from_info(pet_info);
-    let target_view = TargetView::from_info(target_info, pet_pos);
-    let mut builder = decision_trace.start_pet_command_dispatch(
-        actor_view,
-        Some(target_view),
+    let mut builder = start_pet_dispatch(
+        decision_trace,
         hunter_entity,
-        pet_info.pet_type.map_or("Spider", |pt| pt.name()),
-        hunter_entity,
+        pet_info,
+        target_info,
+        "Spider",
+        ctx,
+        peel,
     );
 
     if let Some(reason) = dispatch_predicates_for_damaging(
@@ -2365,6 +2465,9 @@ pub(super) fn try_dispatch_spider_web(
     }
 
     builder.dispatch(ability, Some(target_entity));
+    if peel {
+        builder.play_step(PlayStep::Peel);
+    }
     builder.finish();
 
     commands.entity(pet_entity).try_insert(PetCommand {
@@ -2375,7 +2478,9 @@ pub(super) fn try_dispatch_spider_web(
     true
 }
 
-/// Try to dispatch Boar Charge onto the Hunter's current target.
+/// Try to dispatch Boar Charge onto `target_entity`: the Hunter's current
+/// target, or (`peel`) an attacker of a teammate in danger.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn try_dispatch_boar_charge(
     commands: &mut Commands,
     abilities: &AbilityDefinitions,
@@ -2385,6 +2490,7 @@ pub(super) fn try_dispatch_boar_charge(
     pet_info: &CombatantInfo,
     target_entity: Entity,
     ctx: &CombatContext,
+    peel: bool,
 ) -> bool {
     let ability = AbilityType::BoarCharge;
     let Some(def) = abilities.get(&ability) else {
@@ -2394,15 +2500,14 @@ pub(super) fn try_dispatch_boar_charge(
         return false;
     };
 
-    let pet_pos = pet_info.position;
-    let actor_view = ActorView::from_info(pet_info);
-    let target_view = TargetView::from_info(target_info, pet_pos);
-    let mut builder = decision_trace.start_pet_command_dispatch(
-        actor_view,
-        Some(target_view),
+    let mut builder = start_pet_dispatch(
+        decision_trace,
         hunter_entity,
-        pet_info.pet_type.map_or("Boar", |pt| pt.name()),
-        hunter_entity,
+        pet_info,
+        target_info,
+        "Boar",
+        ctx,
+        peel,
     );
 
     if let Some(reason) = dispatch_predicates_for_damaging(
@@ -2420,6 +2525,9 @@ pub(super) fn try_dispatch_boar_charge(
     }
 
     builder.dispatch(ability, Some(target_entity));
+    if peel {
+        builder.play_step(PlayStep::Peel);
+    }
     builder.finish();
 
     commands.entity(pet_entity).try_insert(PetCommand {
