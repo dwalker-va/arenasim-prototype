@@ -56,9 +56,8 @@ fn run_trace(cfg: HeadlessMatchConfig) -> String {
 #[test]
 fn a_placed_freezing_trap_records_the_enemy_it_was_aimed_at() {
     // Three comps so the assertion spans the branches that place a Freezing
-    // Trap: the dip cast and opportunistic off-target drop on a healer (both
-    // double-healer and single-healer), and the peel on a melee. A comp is only
-    // useful here if it actually throws one, which the non-vacuity floor below
+    // Trap: the dip cast on a healer (against both a double-healer and a
+    // single-healer team), and the peel on a melee. A comp is only useful here if it actually throws one, which the non-vacuity floor below
     // enforces. None fields a Rogue: a lane trap thrown for a stealthed enemy
     // cannot name it, and records no aim by design (pinned separately below).
     //

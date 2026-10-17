@@ -1,0 +1,233 @@
+diff --git a/src/states/play_match/class_ai/hunter.rs b/src/states/play_match/class_ai/hunter.rs
+index 1aec3776..762512d7 100644
+--- a/src/states/play_match/class_ai/hunter.rs
++++ b/src/states/play_match/class_ai/hunter.rs
+@@ -42,6 +42,68 @@ use crate::states::play_match::traps::replace_previous_trap;
+ /// (after ~0.9s projectile travel) lands with no uptime gap and no wasted GCD.
+ const CONCUSSIVE_REFRESH_WINDOW: f32 = 1.0;
+ 
++/// AS-295 measurement instrument (stderr only; never read by the sim).
++pub mod as295 {
++    use bevy::prelude::Entity;
++    use std::cell::{Cell, RefCell};
++    use std::collections::BTreeMap;
++    thread_local! {
++        static PENDING: RefCell<BTreeMap<u64, (&'static str, Option<u64>, f32)>> =
++            const { RefCell::new(BTreeMap::new()) };
++        pub static NOW: Cell<f32> = const { Cell::new(0.0) };
++        pub static PATH: Cell<&'static str> = const { Cell::new("-") };
++        pub static COUNT_TICK: Cell<bool> = const { Cell::new(false) };
++    }
++    /// `AS295_MODE`: `ship` (default), `off` (no route lane: main's
++    /// behaviour), `unseen` (no route lane, and the fallback lane is exempt
++    /// from the sight rule: the pre-AS-281 lane).
++    pub fn mode() -> &'static str {
++        static MODE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
++        match MODE
++            .get_or_init(|| std::env::var("AS295_MODE").unwrap_or_else(|_| "ship".into()))
++            .as_str()
++        {
++            "off" => "off",
++            "unseen" => "unseen",
++            _ => "ship",
++        }
++    }
++    pub fn throw(owner: Entity, path: &'static str, intended: Option<Entity>) {
++        let now = NOW.with(|n| n.get());
++        eprintln!("AS295 THROW {path}");
++        PENDING.with(|p| {
++            if let Some(old) = p
++                .borrow_mut()
++                .insert(owner.to_bits(), (path, intended.map(|e| e.to_bits()), now))
++            {
++                eprintln!("AS295 OUTCOME {} replaced - - -", old.0);
++            }
++        });
++    }
++    pub fn outcome(owner: Entity, what: &str, victim: Option<Entity>, victim_name: &str) {
++        let now = NOW.with(|n| n.get());
++        PENDING.with(|p| {
++            if let Some((path, intended, at)) = p.borrow_mut().remove(&owner.to_bits()) {
++                let on = match (intended, victim) {
++                    (Some(i), Some(v)) if i == v.to_bits() => "intended",
++                    (_, Some(_)) => "other",
++                    _ => "-",
++                };
++                eprintln!(
++                    "AS295 OUTCOME {path} {what} {on} {:.2} {}",
++                    now - at,
++                    victim_name.replace(' ', "_")
++                );
++            }
++        });
++    }
++    pub fn tick(what: &str) {
++        if COUNT_TICK.with(|c| c.get()) {
++            eprintln!("AS295 TICK {what}");
++        }
++    }
++}
++
+ /// Hunter AI: Decides and executes abilities for a Hunter combatant.
+ pub fn decide_hunter_action(
+     commands: &mut Commands,
+@@ -68,6 +130,8 @@ pub fn decide_hunter_action(
+ ) -> bool {
+     let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
+     let now = decision_trace.current_sim_time;
++    as295::NOW.with(|n| n.set(now));
++    as295::PATH.with(|p| p.set("-"));
+     let kill_target_hidden = kill_target_index.is_some_and(|i| ctx.kill_target_hidden(i));
+ 
+     let nearest_dist = nearest_distance.unwrap_or(40.0);
+@@ -173,6 +237,7 @@ pub fn decide_hunter_action(
+                 super::hunter_dip::trap_lead_landing(ctx, target, my_pos).unwrap_or(my_pos);
+             // Same clean-landing rule as every other placement: a lead that
+             // carries the landing onto another enemy waits for the next tick.
++            as295::PATH.with(|p| p.set("dip"));
+             if victim_springs_it(ctx, combatant.team, target, landing)
+                 && try_place_trap_at(
+                     commands,
+@@ -679,6 +744,13 @@ pub fn decide_hunter_action(
+         my_pos,
+     );
+     // With an off-target the trap is held for the dip.
++    as295::COUNT_TICK.with(|c| {
++        c.set(
++            !combatant
++                .ability_cooldowns
++                .contains_key(&AbilityType::FreezingTrap),
++        )
++    });
+     let fallback = off_target.is_none().then(|| {
+         fallback_trap(
+             ctx,
+@@ -690,6 +762,7 @@ pub fn decide_hunter_action(
+             kill_target_hidden,
+         )
+     });
++    as295::COUNT_TICK.with(|c| c.set(false));
+     if let Some(fallback) = fallback.flatten() {
+         match fallback {
+             // Two-way CC guard (R8/R9): never throw Freezing Trap where the
+@@ -713,7 +786,24 @@ pub fn decide_hunter_action(
+                     RejectionReason::FriendlyBreakableCC,
+                 );
+             }
+-            Ok(FallbackThrow { lane, victim, .. }) => {
++            Ok(FallbackThrow {
++                lane,
++                victim,
++                via_route,
++            }) => {
++                as295::PATH.with(|p| {
++                    p.set(if via_route {
++                        "route"
++                    } else if crate::states::play_match::map_geometry::has_line_of_sight(
++                        ctx.obstacles,
++                        my_pos,
++                        crate::states::play_match::combat_core::clamp_to_arena(&ctx.bounds, lane),
++                    ) {
++                        "lane"
++                    } else {
++                        "lane_unseen"
++                    })
++                });
+                 if try_place_trap_at(
+                     commands,
+                     combat_log,
+@@ -810,6 +900,7 @@ pub fn decide_hunter_action(
+ struct FallbackThrow {
+     lane: Vec3,
+     victim: Option<Entity>,
++    via_route: bool,
+ }
+ 
+ /// The fallback Freezing Trap, when there is no off-target to CC — a
+@@ -890,7 +981,7 @@ fn fallback_trap(
+         if super::hunter_dip::unseen_victim_would_be_freed(ctx, abilities, entity, my_team) {
+             return held(TRAP_HELD_UNSEEN);
+         }
+-        return Some(Ok(FallbackThrow { lane, victim: None }));
++        return Some(Ok(FallbackThrow { lane, victim: None, via_route: false }));
+     }
+     // Cover hides the lane: land it instead on an enemy's route round that
+     // cover, where the Hunter can see it (`hunter_lane`). With no such route
+@@ -905,6 +996,13 @@ fn fallback_trap(
+     let route = lane_hidden
+         .then(|| super::hunter_lane::route_lane(ctx, abilities, my_team, my_pos))
+         .flatten();
++    as295::tick(match (lane_hidden, route.is_some()) {
++        (false, _) => "seen",
++        (true, true) => "hidden_route",
++        (true, false) => "hidden_none",
++    });
++    let route = route.filter(|_| as295::mode() == "ship");
++    let via_route = route.is_some();
+     let (lane, victim) = match route {
+         Some(route) => route,
+         None => {
+@@ -935,6 +1033,7 @@ fn fallback_trap(
+     Some(Ok(FallbackThrow {
+         lane,
+         victim: Some(victim),
++        via_route,
+     }))
+ }
+ 
+@@ -1013,6 +1112,7 @@ fn try_pressure_trap(
+             return false;
+         }
+     };
++    as295::PATH.with(|p| p.set("pressure"));
+     if !try_place_trap_at(
+         commands,
+         combat_log,
+@@ -1668,7 +1768,9 @@ fn try_place_trap_at(
+     // landing fails on range. Like range, a hidden landing is HELD, not moved:
+     // the landing was chosen for where it lands. Every placement path ends
+     // here, so no picker asks it again. A no-op with no obstacles.
+-    if !crate::states::play_match::map_geometry::has_line_of_sight(ctx.obstacles, my_pos, position)
++    let exempt = as295::mode() == "unseen" && as295::PATH.with(|p| p.get()) == "lane_unseen";
++    if !exempt
++        && !crate::states::play_match::map_geometry::has_line_of_sight(ctx.obstacles, my_pos, position)
+     {
+         builder.reject(ability, RejectionReason::LosBlocked);
+         return false;
+@@ -1681,6 +1783,9 @@ fn try_place_trap_at(
+     // the question every trap-targeting diagnosis starts from. `None` for the
+     // Frost Trap dropped at the Hunter's own feet, which aims at nobody, and
+     // for a lane Freezing Trap thrown for an enemy the Hunter cannot see.
++    if trap_type == TrapType::Freezing {
++        as295::throw(entity, as295::PATH.with(|p| p.get()), intended);
++    }
+     builder.choose(cleared, intended, true);
+ 
+     spawn_trap(
+diff --git a/src/states/play_match/traps.rs b/src/states/play_match/traps.rs
+index e7cdb38c..679c743e 100644
+--- a/src/states/play_match/traps.rs
++++ b/src/states/play_match/traps.rs
+@@ -184,6 +184,9 @@ pub fn trap_system(
+                     trap.trap_type.name()
+                 ),
+             );
++            if trap.trap_type == TrapType::Freezing {
++                crate::states::play_match::class_ai::hunter::as295::outcome(trap.owner, "expired", None, "-");
++            }
+             commands.entity(trap_entity).despawn();
+             continue;
+         }
+@@ -251,6 +254,12 @@ pub fn trap_system(
+             match trap.trap_type {
+                 TrapType::Freezing => {
+                     // Apply Incapacitate aura via AuraPending
++                    crate::states::play_match::class_ai::hunter::as295::outcome(
++                        trap.owner,
++                        "sprung",
++                        Some(target_entity),
++                        &target_name,
++                    );
+                     commands.spawn((
+                         AuraPending {
+                             target: target_entity,

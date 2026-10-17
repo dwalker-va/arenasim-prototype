@@ -449,8 +449,8 @@ pub struct DpsMovementConfig {
     pub kite_sustain_radius: f32,
     /// Freezing Trap DIP budget (Hunter only): max seconds the Hunter will walk
     /// toward an out-of-range enemy healer to set a trap on it, before aborting.
-    /// `0.0` disables the dip entirely (the Hunter still places opportunistic
-    /// in-range traps on the healer). Mirrors the Paladin/Priest `dip_budget`.
+    /// `0.0` disables the dip entirely (the Hunter still throws the pressure
+    /// trap on the healer). Mirrors the Paladin/Priest `dip_budget`.
     /// Ignored by the Mage.
     pub dip_budget: f32,
     /// Occlusion-timeout direct chase: seconds an ENGAGE kiter may stay

@@ -264,6 +264,21 @@ Behind `2026-10-13-as249-healer-positioning.md` (card AS-249). Two sweeps:
   per arm), results `2026-10-13-as249-cover.csv.gz`, analysed by
   `2026-10-13-as249-cover.py`.
 
+## `2026-10-17-as295-*`
+
+Behind `../2026-10-17-as295-lane-trap-route.md` (card AS-295). 4,240 configs
+per map, one file per map: `gen_sweep.py --full 2 --exclude-double-healer
+--affects Hunter --control-cells 8 --n 10 --extra '{"map":"<Map>"}'`. Run by
+`main` @ `2368e2b9` (`-before-<Map>.csv.gz`) and the branch
+(`-after-<Map>.csv.gz`) with `--trace-mode off`, then
+`scripts/paired_sweep.py --affects Hunter --tier directional` and
+`2026-10-12-as281-hunter-side.py` on the two CSVs.
+`-variant-unseen-TwinPillars.csv.gz` is the branch with
+`2026-10-17-as295-instrument.patch` applied and `AS295_MODE=unseen` (main's
+lane, exempt from the sight rule). The instrument writes stderr only; keep it
+(`2> <arm>.raw`) and read it with `2026-10-17-as295-lane-counts.py`, whose
+output is `2026-10-17-as295-lane-counts.txt`.
+
 ## `2026-10-17-as325-*`
 
 Behind `../2026-10-17-as325-mana-burn-cc-window.md` (card AS-325). Two paired
