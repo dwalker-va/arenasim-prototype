@@ -58,8 +58,24 @@ use std::collections::HashMap;
 
 // --- The blessed spec -------------------------------------------------------
 //
-// Constant NAMES are the AS-132 workshop's emitted names and are part of the
-// spec; the values are the blessed workshop defaults (2026-09-21).
+// Every constant in this block is an emission of the AS-132 bench: the Hit
+// Reaction Workshop,
+// https://claude.ai/code/artifact/52b3c5e4-e0c1-4762-ba69-b77cb2451547,
+// VERSION 1789955333-894f, blessed at its defaults on 2026-09-21. Each name
+// and value here matches that version's `emit()` output (`SPARK_COUNT` ships
+// as `u32` where the bench writes `usize`), so check a constant against that
+// version, not against whatever the artifact shows today. The NAMES are part
+// of the spec. The bench's wand constants (`WAND_MISSILE_SPEED` ..
+// `WAND_FLICK_SECS`) live in `wand_attack.rs`. The one constant beside this
+// block that the bench did not emit is under its own heading below.
+//
+// Two bench names do not ship as constants, because a `const bool` nothing
+// reads is dead code; a probe in `tests/hit_reaction_visual_probes.rs` pins
+// each behaviour instead:
+// * `MELEE_IMPACT_ENABLED = true` — `only_physical_autos_throw_sparks`: a
+//   melee auto (and a Shot) throws a full `SPARK_COUNT` burst, a wand none.
+// * `WAND_FLINCH_ON_HIT = true` — `every_landed_auto_flinches_its_victim`:
+//   the wand row is the wand flinch.
 //
 // BUDGET: this is the highest-frequency visual in the game, and the blessed
 // values are deliberately quiet. Do not "improve" the intensities.
@@ -133,8 +149,13 @@ pub const SPARK_FLASH_INTENSITY: f32 = 0.7;
 /// (research §1.3).
 pub const SPARK_CRIT_SCALE: f32 = 1.5;
 
+// --- Blessed by ruling, not by the bench ------------------------------------
+
 /// Spatial scale for a burst on a PET victim, so the flourish matches the
 /// smaller body.
+///
+/// NOT a bench emission: the AS-132 bench emits no pet spark scale. It was added
+/// at build time, and its value was blessed by user ruling on 2026-10-13.
 pub const PET_SPARK_SPATIAL_SCALE: f32 = 0.75;
 
 // --- Derived shape knobs (not from the bench) -------------------------------
