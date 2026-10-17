@@ -1147,11 +1147,9 @@ fn can_cast_heal(
         return false;
     };
     let auras = ctx.active_auras.get(&info.entity);
-    let silenced = auras.is_some_and(|a| {
-        a.iter()
-            .any(|aura| aura.effect_type == super::components::AuraType::Silence)
-    });
-    if silenced {
+    // Every heal is Silence-prevented and costs mana
+    // (`AbilityConfig::silence_stops`), so the caster's half decides it.
+    if super::abilities::silence_holds(info.class.uses_mana(), auras.map(Vec::as_slice)) {
         return false;
     }
     // `is_spell_school_locked` takes `ActiveAuras`; the context stores the aura

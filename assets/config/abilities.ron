@@ -1151,7 +1151,9 @@
             class: Hunter,
             pet: Some(Bird),
             // Master's Call (53271) arrives in Wrath; that client gives it no
-            // SpellCategories row, so PreventionType 0.
+            // SpellCategories row, so PreventionType 0. Its triggered effect
+            // spells (54216, 62305) read Pacify, but prevention gates the
+            // spell begun, and a triggered spell skips the caster checks.
             prevention: None,
             icon: "icons/abilities/ability_hunter_masterscall.jpg",
             cast_time: 0.0,

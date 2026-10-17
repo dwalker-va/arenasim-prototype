@@ -82,7 +82,9 @@ EXPLICIT = {
     "MastersCall": (
         WRATH_BUILD,
         ["53271"],
-        "Master's Call arrives in Wrath; that client is the first to have it",
+        "Master's Call arrives in Wrath; that client is the first to have it."
+        " 53271 is the spell the Hunter begins; its triggered effects (54216,"
+        " 62305) read Pacify, but prevention gates the spell begun",
     ),
     "WindShear": (
         WRATH_BUILD,

@@ -34,6 +34,13 @@ spells it reads them from instead:
 | Master's Call | None | 53271, Wrath Classic 3.80.2.70315 (no row) |
 | Wind Shear | Silence | 57994, Wrath Classic 3.80.2.70315 |
 
+Master's Call is read from 53271, the spell the Hunter casts, not from the two
+effect spells it triggers (54216 on the pet, 62305 on the ally), which both
+read `Pacify`. `PreventionType` gates the spell a caster BEGINS: the server
+checks it with the caster's other auras when a cast starts, and a spell
+triggered by another spell's effect skips those checks. So 53271's value is the
+one that says whether a silenced or pacified Hunter can use Master's Call.
+
 ## Arms
 
 - **before**: `a2448a85`, which is main.

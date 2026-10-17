@@ -9,14 +9,20 @@
 //! Pacify), and a silenced Druid still shifts (Travel Form is None).
 //!
 //! - **The book**: exactly those six mana-costing abilities are ones a silence
-//!   does not stop.
+//!   does not stop; and among Silence-prevented abilities, exactly the free
+//!   ones. A silence stops nothing for a rage or energy user.
+//! - **The AI's view**: a silenced Priest can neither dispel nor heal, as the
+//!   dispel walk and the team solve ask it.
 //! - **A cast in progress** (`process_casting`): a silenced Hunter's Aimed
 //!   Shot runs on; the same frame's silence removes a Mage's Frostbolt.
+//! - **A channel in progress** (`process_channeling`): a silence stops a Drain
+//!   Life; unsilenced, it runs on.
 //! - **Starting a cast** (`pre_cast_ok`, through each class AI): staged
 //!   matches in which a silenced Hunter begins an Aimed Shot, a silenced
 //!   Hunter with Aimed Shot on cooldown fires an instant shot, and a silenced,
-//!   rooted Druid shifts into Travel Form — each beside a Silence spell the
-//!   same silence refuses.
+//!   rooted Druid shifts into Travel Form. Each asserts that the acting unit
+//!   carries its silence throughout, and the Hunter's scenes also show the
+//!   same silence refusing a silenced Mage its Frostbolt.
 
 mod common;
 
@@ -29,12 +35,14 @@ use bevy::prelude::*;
 use arenasim::combat::log::CombatLog;
 use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
 use arenasim::states::match_config::CharacterClass;
-use arenasim::states::play_match::ability_config::Prevention;
+use arenasim::states::play_match::ability_config::{AbilityConfig, Prevention};
 use arenasim::states::play_match::class_ai::cast_guard::{own_state_ok, PreCastOpts};
-use arenasim::states::play_match::combat_core::process_casting;
+use arenasim::states::play_match::combat_core::{process_casting, process_channeling};
 use arenasim::states::play_match::components::{
-    ActiveAuras, ArenaDampening, Aura, AuraType, CastingState, Combatant, GameRng, ResourceType,
+    ActiveAuras, ArenaDampening, Aura, AuraType, CastingState, ChannelingState, Combatant, GameRng,
+    ResourceType,
 };
+use arenasim::states::play_match::constants::PET_SLOT_BASE;
 use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::{AbilityDefinitions, AbilityType};
 use common::staged::{entity_id, play, sim_time, Played};
@@ -110,6 +118,182 @@ fn a_silence_stops_every_mana_ability_but_the_pacify_shots_and_travel_form() {
     }
 }
 
+/// The caster `def` is cast by: a combatant of its class, or for a pet
+/// ability the pet, built from an owner of its class as the match builds it.
+fn caster_of(def: &AbilityConfig) -> Combatant {
+    let owner = Combatant::new(1, 0, def.class);
+    match def.pet {
+        Some(pet) => Combatant::new_pet(1, PET_SLOT_BASE, pet, &owner),
+        None => owner,
+    }
+}
+
+/// A silence never stops a FREE ability, even a Silence-prevented one: among
+/// the Silence-prevented abilities of a mana user (pets included), the ones a
+/// silenced caster may still use are exactly the ones that cost no mana — the
+/// Paladin's three auras and Divine Shield, the Mage's three armors, the
+/// Felhunter's Spell Lock and Devour Magic, and the Spider's Web. Every
+/// mana-costing one is refused, for the silence alone. That free exemption is
+/// the sim's own rule (`AbilityConfig::silence_stops`), not TBC's.
+///
+/// Divine Shield is in the set for its cost alone: this asks the guard with
+/// default options. The Paladin AI also casts it past a silence by a separate
+/// bypass (`PreCastOpts::bypass_silence`), which this test does not ask and
+/// which would let it through even if it cost mana.
+///
+/// Mutant killed: `silence_stops` drops its mana condition (the set comes back
+/// empty).
+#[test]
+fn a_silence_never_stops_a_free_ability() {
+    let defs = AbilityDefinitions::default();
+    let silenced = ActiveAuras {
+        auras: vec![silence(SILENCE_SECS)],
+    };
+    let mut free = BTreeSet::new();
+    let mut stopped = BTreeSet::new();
+    for (ability, def) in defs.iter() {
+        if def.prevention != Prevention::Silence {
+            continue;
+        }
+        let caster = caster_of(def);
+        if caster.resource_type != ResourceType::Mana {
+            continue;
+        }
+        let opts = PreCastOpts::default();
+        assert!(
+            own_state_ok(*ability, def, &caster, None, opts),
+            "{ability:?}: the unsilenced control is refused"
+        );
+        if own_state_ok(*ability, def, &caster, Some(&silenced), opts) {
+            free.insert(*ability);
+        } else {
+            stopped.insert(*ability);
+        }
+    }
+    let expected: BTreeSet<_> = [
+        AbilityType::DevotionAura,
+        AbilityType::ConcentrationAura,
+        AbilityType::ShadowResistanceAura,
+        AbilityType::DivineShield,
+        AbilityType::FrostArmor,
+        AbilityType::MageArmorSpell,
+        AbilityType::MoltenArmor,
+        AbilityType::SpellLock,
+        AbilityType::DevourMagic,
+        AbilityType::SpiderWeb,
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        free, expected,
+        "the Silence abilities a silence does not stop"
+    );
+    for ability in &free {
+        assert_eq!(defs.get_unchecked(ability).mana_cost, 0.0, "{ability:?}");
+    }
+    for ability in &stopped {
+        assert!(defs.get_unchecked(ability).mana_cost > 0.0, "{ability:?}");
+    }
+    assert!(
+        stopped.len() > 30,
+        "only {} abilities were stopped",
+        stopped.len()
+    );
+}
+
+/// A silence stops nothing for a caster that does not use mana: the caster's
+/// half of the rule (`abilities::silence_holds`). No Warrior or Rogue ability
+/// is one a silence stops (each is Pacify, None or free), so the guard is
+/// asked of every ability a silence DOES stop, for a silenced Warrior and
+/// Rogue: none is refused, where a silenced Mage is refused each.
+///
+/// Mutant killed: `silence_holds` ignores whether the caster uses mana.
+#[test]
+fn a_silence_stops_nothing_for_a_rage_or_energy_user() {
+    let defs = AbilityDefinitions::default();
+    let silenced = ActiveAuras {
+        auras: vec![silence(SILENCE_SECS)],
+    };
+    let opts = PreCastOpts::default();
+    let mage = Combatant::new(1, 0, CharacterClass::Mage);
+    let mut asked = 0;
+    for (ability, def) in defs.iter().filter(|(_, d)| d.silence_stops()) {
+        assert!(
+            !own_state_ok(*ability, def, &mage, Some(&silenced), opts),
+            "control: {ability:?} passes a silenced Mage"
+        );
+        for class in [CharacterClass::Warrior, CharacterClass::Rogue] {
+            let caster = Combatant::new(1, 0, class);
+            assert_ne!(caster.resource_type, ResourceType::Mana);
+            assert!(
+                own_state_ok(*ability, def, &caster, Some(&silenced), opts),
+                "{ability:?}: a silenced {class:?} is refused it"
+            );
+        }
+        asked += 1;
+    }
+    assert!(asked > 30, "only {asked} abilities asked");
+}
+
+/// The AI's two context-level silence checks — whether a healer can cast its
+/// dispel (`class_ai::can_cast_dispel`, the dispel walk's gate) and whether it
+/// can land a heal (`team_solve`'s `can_cast_heal`, read as
+/// `SolveUnit::can_cast_heal`) — both refuse a silenced Priest, and both pass
+/// the same Priest unsilenced.
+///
+/// Mutant killed: `can_cast_dispel` ignores the silence. Mutant killed:
+/// `can_cast_heal` ignores the silence.
+#[test]
+fn a_silenced_priest_can_neither_dispel_nor_heal_in_the_ais_view() {
+    use arenasim::states::play_match::class_ai::can_cast_dispel;
+    use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
+    use arenasim::states::play_match::class_ai::CombatantInfo;
+    use arenasim::states::play_match::team_solve::world_from_context;
+    use std::collections::BTreeMap;
+
+    let defs = AbilityDefinitions::default();
+    let view = |silenced: bool| -> (bool, bool) {
+        let mut world = World::new();
+        let priest = world.spawn_empty().id();
+        let combatant = Combatant::new(1, 0, CharacterClass::Priest);
+        let auras = if silenced {
+            vec![silence(SILENCE_SECS)]
+        } else {
+            Vec::new()
+        };
+        let snapshot = CombatSnapshot {
+            combatants: BTreeMap::from([(
+                priest,
+                CombatantInfo::from_combatant(
+                    priest,
+                    &combatant,
+                    &Transform::default(),
+                    None,
+                    None,
+                    None,
+                ),
+            )]),
+            active_auras: BTreeMap::from([(priest, auras)]),
+            dr_trackers: BTreeMap::new(),
+            ability_cooldowns: BTreeMap::new(),
+            obstacles: Vec::new(),
+            bounds: Default::default(),
+            ai_profile: Default::default(),
+        };
+        let ctx = snapshot.context_for(priest);
+        let dispel = can_cast_dispel(&ctx, &defs, priest, AbilityType::DispelMagic);
+        let heal = world_from_context(&ctx, 40.0, 30.0, None)
+            .units
+            .iter()
+            .find(|u| u.entity == priest)
+            .expect("the Priest is a solve unit")
+            .can_cast_heal;
+        (dispel, heal)
+    };
+    assert_eq!(view(true), (false, false), "the silenced Priest");
+    assert_eq!(view(false), (true, true), "control: the Priest unsilenced");
+}
+
 // ── a cast in progress ──────────────────────────────────────────────────────
 
 /// A `class` caster mid-`cast`, silenced, through one frame of
@@ -174,6 +358,76 @@ fn a_silence_lets_an_aimed_shot_in_progress_run_on_and_stops_a_frostbolt() {
         silenced_mid(CharacterClass::Mage, AbilityType::Frostbolt),
         (false, true),
         "control: the silence stops a Frostbolt"
+    );
+}
+
+/// A Warlock mid-Drain-Life, silenced or not, through one frame of
+/// `process_channeling`. Returns whether the channel is still up, and whether
+/// the log says the silence interrupted it.
+fn channeling_through(silenced: bool) -> (bool, bool) {
+    let mut world = World::new();
+    world.insert_resource(CombatLog::default());
+    world.insert_resource(ArenaDampening::default());
+    let mut time = Time::<()>::default();
+    time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
+    world.insert_resource(time);
+    let defs = AbilityDefinitions::default();
+    let drain = defs.get_unchecked(&AbilityType::DrainLife).clone();
+    world.insert_resource(defs);
+    let target = world
+        .spawn((
+            Combatant::new(2, 0, CharacterClass::Warrior),
+            Transform::from_xyz(20.0, 0.0, 0.0),
+        ))
+        .id();
+    let auras = if silenced {
+        vec![silence(SILENCE_SECS)]
+    } else {
+        Vec::new()
+    };
+    let caster = world
+        .spawn((
+            Combatant::new(1, 0, CharacterClass::Warlock),
+            Transform::default(),
+            ChannelingState {
+                ability: AbilityType::DrainLife,
+                duration_remaining: drain.channel_duration.expect("Drain Life is a channel"),
+                time_until_next_tick: drain.channel_tick_interval,
+                tick_interval: drain.channel_tick_interval,
+                target,
+                interrupted: false,
+                interrupted_display_time: 0.0,
+                ticks_applied: 0,
+            },
+            ActiveAuras { auras },
+        ))
+        .id();
+    world.run_system_once(process_channeling).unwrap();
+    let up = world.get::<ChannelingState>(caster).is_some();
+    let logged = world
+        .resource::<CombatLog>()
+        .entries
+        .iter()
+        .any(|e| e.message.contains("Drain Life interrupted by Silence"));
+    (up, logged)
+}
+
+/// A silence stops a Drain Life channel in progress, and logs it; the same
+/// channel unsilenced runs on.
+///
+/// Mutant killed: `process_channeling` never stops a channel for a silence
+/// (its `silence_stops()` call unwired).
+#[test]
+fn a_silence_stops_a_drain_life_channel_in_progress() {
+    assert_eq!(
+        channeling_through(true),
+        (false, true),
+        "the silence stops the Drain Life channel"
+    );
+    assert_eq!(
+        channeling_through(false),
+        (true, false),
+        "control: the unsilenced channel runs on"
     );
 }
 
@@ -275,6 +529,36 @@ fn hunter_v_mage(aimed_ready: bool) -> Stage {
     }
 }
 
+/// The non-pet unit of `team` carries its staged Silence on every frame of the
+/// window the decisions are read over ([`silenced_decisions`]): the unit's own
+/// control that it was silenced while it acted, read from its state, so it
+/// holds whatever order its rotation asks its abilities in. Fails when the
+/// stage's silence on that unit is removed.
+fn assert_carries_silence(played: &Played, team: u8) {
+    let landed = played.landed().app;
+    let window: Vec<_> = played
+        .staged_frames()
+        .filter(|f| f.sim_time < landed + SILENCE_SECS - 0.5)
+        .collect();
+    assert!(
+        window.len() > 60 * 7,
+        "only {} frames in the window",
+        window.len()
+    );
+    for frame in window {
+        let unit = frame
+            .combatants
+            .values()
+            .find(|c| c.team == team && c.slot == 0 && !c.is_pet)
+            .expect("the unit");
+        assert!(
+            unit.aura_types.contains(&AuraType::Silence),
+            "team {team}'s unit is not silenced at {:.2}s",
+            frame.sim_time
+        );
+    }
+}
+
 /// The Mage, silenced in every scene, refuses Frostbolt for the silence and
 /// casts nothing a silence stops: the control that the silence is live.
 fn assert_mage_held(played: &Played) {
@@ -296,7 +580,8 @@ fn assert_mage_held(played: &Played) {
 /// Mutant killed: the pre-cast guard refuses a silenced caster any
 /// mana-costing ability (the Hunter never begins it). Mutant killed:
 /// `process_casting` stops a cast for a silence on `mana_cost` alone (it never
-/// completes).
+/// completes). Mutant killed: the stage does not silence the Hunter (it does
+/// not carry the silence).
 #[test]
 fn a_silenced_hunter_begins_an_aimed_shot_and_it_lands() {
     let played = play(config("Hunter", "Mage"), hunter_v_mage(true));
@@ -321,13 +606,16 @@ fn a_silenced_hunter_begins_an_aimed_shot_and_it_lands() {
         "the Aimed Shot never landed while the Hunter was silenced:\n{}",
         log.join("\n")
     );
+    assert_carries_silence(&played, 1);
     assert_mage_held(&played);
 }
 
 /// With Aimed Shot on cooldown, a silenced Hunter fires its instant shots.
 ///
 /// Mutant killed: the pre-cast guard refuses a silenced caster any
-/// mana-costing ability (no shot is chosen, and each is refused).
+/// mana-costing ability (no shot is chosen, and each is refused). Mutant
+/// killed: the stage does not silence the Hunter (it does not carry the
+/// silence).
 #[test]
 fn a_silenced_hunter_fires_an_instant_shot() {
     let played = play(config("Hunter", "Mage"), hunter_v_mage(false));
@@ -347,14 +635,17 @@ fn a_silenced_hunter_fires_an_instant_shot() {
     for shot in SHOTS {
         assert!(!refused.contains(shot), "{shot} refused for the silence");
     }
+    assert_carries_silence(&played, 1);
     assert_mage_held(&played);
 }
 
 /// A silenced, rooted Druid with a Warrior on it shifts into Travel Form,
-/// though the silence refuses its spells.
+/// carrying the silence throughout, and casts nothing else.
 ///
 /// Mutant killed: the pre-cast guard refuses a silenced caster any
-/// mana-costing ability (Travel Form is refused for the silence).
+/// mana-costing ability (Travel Form is refused for the silence). Mutant
+/// killed: the stage does not silence the Druid (it does not carry the
+/// silence).
 #[test]
 fn a_silenced_rooted_druid_shifts_into_travel_form() {
     let stage = Stage::new()
@@ -388,10 +679,7 @@ fn a_silenced_rooted_druid_shifts_into_travel_form() {
         !refused.contains("TravelForm"),
         "Travel Form refused for the silence"
     );
-    assert!(
-        !refused.is_empty(),
-        "control: the silence refused the Druid nothing"
-    );
+    assert_carries_silence(&played, 1);
     assert!(
         cast.iter().all(|a| *a == "TravelForm"),
         "control: the silenced Druid cast {cast:?}"

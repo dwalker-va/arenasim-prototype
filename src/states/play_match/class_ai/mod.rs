@@ -1861,7 +1861,11 @@ pub fn can_cast_dispel(
         return false;
     };
     let auras = ctx.active_auras.get(&entity);
-    if auras.is_some_and(|a| a.iter().any(|aura| aura.effect_type == AuraType::Silence)) {
+    let uses_mana = ctx
+        .combatants
+        .get(&entity)
+        .is_some_and(|c| c.class.uses_mana());
+    if def.silence_stops() && super::abilities::silence_holds(uses_mana, auras.map(Vec::as_slice)) {
         return false;
     }
     // `is_spell_school_locked` takes `ActiveAuras`; the context stores the aura
