@@ -1867,7 +1867,8 @@ pub fn cast_reach(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> Cast
 ///
 /// For the choosers that rank their candidates without a range filter — Power
 /// Word: Shield, Power Word: Fortitude, Mark of the Wild, the Druid's heal
-/// focus and its Cyclone and Entangling Roots peel picks. They drop such a
+/// focus, its Cyclone and Entangling Roots peel picks, and its step-8 Cyclone's
+/// enemy healer. They drop such a
 /// candidate before ranking, so an occluded best pick yields to the best one
 /// in sight, while a best pick beyond range is still
 /// picked and refused exactly as it always was. On an obstacle-free map this is

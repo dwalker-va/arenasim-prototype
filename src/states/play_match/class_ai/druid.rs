@@ -1298,10 +1298,22 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         let kill_close = kill_target
             .and_then(|t| self.ctx.combatants.get(&t))
             .is_some_and(|t| t.is_alive && t.health_pct() < DRUID_CYCLONE_KILL_HP);
+        // The enemy healer, reach-first: a usable one that only sight keeps
+        // the Cyclone off ([`super::sight_blocks`]) yields to the next enemy
+        // healer. On an obstacle-free map this is the first enemy healer, as
+        // it always was.
+        let cyclone_range = self.abilities.get_unchecked(&AbilityType::Cyclone).range;
+        let mut healer_occluded = false;
         let healer = self
             .ctx
-            .enemy_healer()
-            .and_then(|h| self.ctx.combatants.get(&h))
+            .alive_enemies()
+            .into_iter()
+            .filter(|e| e.class.is_healer())
+            .find(|h| {
+                let blocked = super::sight_blocks(self.ctx, cyclone_range, self.my_pos, h.position);
+                healer_occluded |= blocked && usable(self, h, DRCategory::Cyclone);
+                !blocked
+            })
             .filter(|h| usable(self, h, DRCategory::Cyclone))
             .map(|h| (h.entity, h.position));
         match healer {
@@ -1313,6 +1325,22 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
                 if self.governed_cast(combatant, AbilityType::Cyclone, healer, healer_pos, false) {
                     return true;
                 }
+            }
+            // Every enemy healer is behind cover. The Cyclone waits for sight:
+            // nothing else it could land serves a kill that needs the HEALER
+            // gone. The refusal names what a cast would have met first — the
+            // hold, the governor, the Druid's own state, then sight.
+            None if kill_close && healer_occluded => {
+                let cyclone = AbilityType::Cyclone;
+                let reason = if held {
+                    Self::held_reason()
+                } else {
+                    self.governor_refusal(combatant, cyclone, false)
+                        .unwrap_or_else(|| {
+                            self.unreached(combatant, cyclone, RejectionReason::LosBlocked)
+                        })
+                };
+                self.builder.reject(cyclone, reason);
             }
             _ if !cyclone_peel.picked && !cyclone_peel.occluded => {
                 self.builder.reject(
@@ -1436,6 +1464,14 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     /// Moonfire on the kill target: governed, and skipped while its DoT is
     /// still up or the target is under our own breakable crowd control — and
     /// while `held` ([`Self::held_for_medic_walk`]).
+    ///
+    /// A kill target behind cover is waited for, never swapped for an enemy in
+    /// sight: Moonfire's DoT on anyone else arms the team's friendly-DoT guards
+    /// on that enemy for nine seconds (`CombatContext::has_friendly_dots_on_target`
+    /// — Polymorph, the Hunter's traps and the Chain play's hand-offs all stand
+    /// down for it), while on the kill target, which the team is damaging
+    /// anyway, it costs no crowd control. The guard refuses it `LosBlocked`,
+    /// after the governor and the Druid's own state.
     fn try_moonfire(&mut self, combatant: &mut Combatant, held: bool) -> bool {
         let ability = AbilityType::Moonfire;
         let Some(target) = combatant.target else {
@@ -2325,6 +2361,195 @@ mod reach_tests {
         );
         let behind = control_reason_without_mana(&mut s, &pillar(), None, "EntanglingRoots");
         assert_eq!(behind, open);
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-208: the Cyclone on the enemy healer chooses among enemy healers in
+    // sight, and otherwise waits for sight, as Moonfire waits for its kill
+    // target
+    // ------------------------------------------------------------------------
+
+    /// The kill target, low enough that the kill is close, in sight of the
+    /// Druid and clear of every enemy healer.
+    const KILL: Vec3 = Vec3::new(-10.0, 1.0, 0.0);
+
+    /// The Druid, then an enemy at each of `enemies` (in order), then an enemy
+    /// Warrior at [`KILL`] on `kill_hp` — the Druid's kill target.
+    fn healer_scene(enemies: &[(CharacterClass, Vec3)], kill_hp: f32) -> ReachScene {
+        let mut units: Vec<_> = enemies.iter().map(|&(c, p)| (2, c, p, 1.0)).collect();
+        units.push((2, Warrior, KILL, kill_hp));
+        ReachScene::new(Druid, &units)
+    }
+
+    /// One control step with the Warrior as the Druid's kill target, `prep`
+    /// applied to the Druid first, and the rest held for the medic walk when
+    /// `held`.
+    fn control_on_kill(
+        s: &mut ReachScene,
+        obstacles: &[ObstacleVolume],
+        prep: fn(&mut Combatant),
+        held: bool,
+    ) -> DecisionTrace {
+        let kill = *s.units.last().unwrap();
+        turn(s, obstacles, 20.0, None, |t, c| {
+            c.target = Some(kill);
+            prep(c);
+            let peel = t.try_cyclone_peel(c, None);
+            peel.cast || t.try_control(c, None, held, peel)
+        })
+    }
+
+    /// [`control_on_kill`] by a fresh Druid, not held.
+    fn control_on_kill_fresh(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
+        control_on_kill(s, obstacles, |_| {}, false)
+    }
+
+    /// With two enemy healers, the first one behind the pillar yields to the
+    /// one in sight.
+    #[test]
+    fn the_healer_cyclone_falls_back_to_an_enemy_healer_in_sight() {
+        let mut s = healer_scene(
+            &[
+                (CharacterClass::Priest, BEHIND),
+                (CharacterClass::Paladin, IN_SIGHT),
+            ],
+            0.3,
+        );
+        let (priest, paladin) = (s.units[1], s.units[2]);
+        assert_eq!(
+            outcome(&control_on_kill_fresh(&mut s, &[])),
+            chose("Cyclone", priest),
+            "no pillar: the first enemy healer"
+        );
+        assert_eq!(
+            outcome(&control_on_kill_fresh(&mut s, &pillar())),
+            chose("Cyclone", paladin),
+            "the occluded Priest yields to the Paladin in sight"
+        );
+    }
+
+    /// A lone enemy healer behind the pillar is not swapped for anyone else —
+    /// not for the enemy Rogue standing in sight, in Cyclone's range: the
+    /// Cyclone waits for sight, refused `LosBlocked`. The control: with the
+    /// kill not yet close, the healer is not the Cyclone's business at all.
+    #[test]
+    fn the_healer_cyclone_waits_for_sight_of_a_lone_healer() {
+        let enemies = [
+            (CharacterClass::Priest, BEHIND),
+            (CharacterClass::Rogue, IN_SIGHT),
+        ];
+        let mut s = healer_scene(&enemies, 0.3);
+        let priest = s.units[1];
+        assert_eq!(
+            outcome(&control_on_kill_fresh(&mut s, &[])),
+            chose("Cyclone", priest),
+            "no pillar: cycloned"
+        );
+        let trace = control_on_kill_fresh(&mut s, &pillar());
+        assert_eq!(
+            outcome(&trace),
+            None,
+            "no Cyclone through the pillar, and none on the Rogue in sight"
+        );
+        assert_eq!(candidate(&trace, "Cyclone")["reason"], "LosBlocked");
+
+        let mut s = healer_scene(&enemies, 0.9);
+        let trace = control_on_kill_fresh(&mut s, &pillar());
+        assert!(
+            candidate(&trace, "Cyclone")["reason"]
+                .get("PreconditionUnmet")
+                .is_some(),
+            "kill not close: {}",
+            candidate(&trace, "Cyclone")
+        );
+    }
+
+    /// Moonfire goes on the kill target; behind the pillar it waits for it,
+    /// refused `LosBlocked`, though an enemy Rogue stands in sight.
+    #[test]
+    fn moonfire_waits_for_sight_of_its_kill_target() {
+        let mut s = ReachScene::new(
+            Druid,
+            &[(2, Warrior, BEHIND, 1.0), (2, Rogue, IN_SIGHT, 1.0)],
+        );
+        let kill = s.units[1];
+        let moonfire = |s: &mut ReachScene, obstacles: &[ObstacleVolume]| {
+            turn(s, obstacles, 20.0, None, |t, c| {
+                c.target = Some(kill);
+                t.try_moonfire(c, false)
+            })
+        };
+        assert_eq!(
+            outcome(&moonfire(&mut s, &[])),
+            chose("Moonfire", kill),
+            "no pillar: the kill target"
+        );
+        let trace = moonfire(&mut s, &pillar());
+        assert_eq!(outcome(&trace), None, "the Rogue in sight is not moonfired");
+        assert_eq!(candidate(&trace, "Moonfire")["reason"], "LosBlocked");
+    }
+
+    /// The healer Cyclone's traced refusal with `prep` applied to the Druid
+    /// and `held`, over a lone enemy Priest at `healer` with the kill close.
+    fn healer_cyclone_reason(
+        healer: Vec3,
+        obstacles: &[ObstacleVolume],
+        prep: fn(&mut Combatant),
+        held: bool,
+    ) -> serde_json::Value {
+        let mut s = healer_scene(&[(CharacterClass::Priest, healer)], 0.3);
+        candidate(&control_on_kill(&mut s, obstacles, prep, held), "Cyclone")["reason"].clone()
+    }
+
+    /// A Druid short of mana is refused the healer Cyclone by the governor
+    /// first, whether the healer is in sight or behind the pillar.
+    #[test]
+    fn an_occluded_healer_cyclone_still_reports_the_governor() {
+        let no_mana: fn(&mut Combatant) = |c| c.current_mana = 0.0;
+        let open = healer_cyclone_reason(BEHIND, &[], no_mana, false);
+        assert_eq!(
+            open["PreconditionUnmet"]["note"],
+            "mana governor: holding the reserve for dampening"
+        );
+        assert_eq!(
+            healer_cyclone_reason(BEHIND, &pillar(), no_mana, false),
+            open,
+            "behind the pillar"
+        );
+    }
+
+    /// A Druid whose own state refuses the Cyclone (here, a cooldown on it) is
+    /// refused for that state, whether the healer is in sight or behind the
+    /// pillar: sight cannot hide the caster's own state.
+    #[test]
+    fn an_occluded_healer_cyclone_still_reports_the_druids_own_state() {
+        let on_cooldown: fn(&mut Combatant) = |c| {
+            c.ability_cooldowns.insert(AbilityType::Cyclone, 3.0);
+        };
+        let open = healer_cyclone_reason(BEHIND, &[], on_cooldown, false);
+        assert!(open.get("OnCooldown").is_some(), "{open}");
+        assert_eq!(
+            healer_cyclone_reason(BEHIND, &pillar(), on_cooldown, false),
+            open,
+            "behind the pillar"
+        );
+    }
+
+    /// While the medic walk holds the Druid's damage and utility, the healer
+    /// Cyclone is refused for the hold, whether the healer is in sight or
+    /// behind the pillar — never `LosBlocked`.
+    #[test]
+    fn an_occluded_healer_cyclone_is_refused_for_the_medic_walk_hold() {
+        let open = healer_cyclone_reason(BEHIND, &[], |_| {}, true);
+        assert_eq!(
+            open,
+            serde_json::to_value(DruidTurn::held_reason()).unwrap()
+        );
+        assert_eq!(
+            healer_cyclone_reason(BEHIND, &pillar(), |_| {}, true),
+            open,
+            "behind the pillar"
+        );
     }
 
     /// A Druid with Swiftmend on cooldown is refused it for the cooldown,
