@@ -63,7 +63,8 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::map_geometry::ObstacleVolume;
 use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
 use crate::states::play_match::situation::{
-    update_situations, ClassSet, MatchClock, PlaySet, SituationConfig, Situations, WithheldPlays,
+    update_situations, ExceptionSet, MatchClock, Play, PlaySet, SituationConfig, Situations,
+    WithheldPlays,
 };
 use crate::states::play_match::utils::is_incapacitating;
 
@@ -288,28 +289,25 @@ impl Scene {
         self
     }
 
-    /// The classes that do not run the Burst play, in place of the shipped
-    /// `situation::BURST_EXCEPTIONS` (`WithheldPlays::burst_exceptions`).
-    pub fn burst_exceptions(mut self, classes: ClassSet) -> Self {
-        self.withheld.burst_exceptions = Some(classes);
-        self
-    }
-
-    /// Lift `team`'s context gates for the gated plays in `plays`
-    /// (`situation::WithheldPlays::team1_lifted`): the paired control of a
-    /// scene that tests a gate.
-    pub fn lift_gates(mut self, team: u8, plays: PlaySet) -> Self {
-        match team {
-            1 => self.withheld.team1_lifted = plays,
-            _ => self.withheld.team2_lifted = plays,
+    /// Lift every exception of each gated play in `plays` for `team`
+    /// (`situation::WithheldPlays::team1_exceptions`): the paired control of
+    /// a scene that tests an exception or a context gate.
+    pub fn lift(mut self, team: u8, plays: PlaySet) -> Self {
+        for id in plays.ids() {
+            self.withheld.exceptions_mut(team).lift(id);
         }
         self
     }
 
-    /// The classes that do not run the Chain play, in place of the shipped
-    /// `situation::CHAIN_EXCEPTIONS` (`WithheldPlays::chain_exceptions`).
-    pub fn chain_exceptions(mut self, classes: ClassSet) -> Self {
-        self.withheld.chain_exceptions = Some(classes);
+    /// Run `exceptions` in place of the gated `play`'s shipped exceptions
+    /// table, for both teams (`situation::WithheldPlays::team1_exceptions`).
+    /// A class set is each class in any context.
+    pub fn exceptions(mut self, play: Play, exceptions: impl Into<ExceptionSet>) -> Self {
+        let id = play.id().expect("only a gated play has exceptions");
+        let exceptions = exceptions.into();
+        for team in [1, 2] {
+            self.withheld.exceptions_mut(team).set(id, exceptions);
+        }
         self
     }
 

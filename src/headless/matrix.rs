@@ -268,6 +268,8 @@ fn build_config(
         team2_ai_profile: None,
         team1_withheld_plays: Vec::new(),
         team2_withheld_plays: Vec::new(),
+        team1_exceptions: Default::default(),
+        team2_exceptions: Default::default(),
         burst_exceptions: None,
         team1_lifted_gates: Vec::new(),
         team2_lifted_gates: Vec::new(),
