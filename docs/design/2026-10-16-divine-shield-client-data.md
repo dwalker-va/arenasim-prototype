@@ -204,7 +204,10 @@ caster's hands. The halo fall takes the literal reading, `DS_HALO_MODE = DeathOn
   the cards' material (unlit, additive). The glints spin through a new
   `ParticleFacing::Spin`, using the shared star sprite.
 - **Caster.** Kit 417 plays the Holy launch off `DivineShieldPending`, which both AI paths
-  and the animation sandbox spawn (`spawn_instant_cast_hands`). Divine Shield stays out of
-  `InstantAbilityFired`, because the sandbox previews it through its pending component.
+  and the animation sandbox spawn. `spawn_divine_shield_cast_hands` reads it at the head of
+  the fixed tick, before Phase 1's `process_divine_shield` consumes it. That is the one
+  point where a pending the AI queued in Phase 2 and one the sandbox queued in `Update`
+  are both still alive. Divine Shield stays out of `InstantAbilityFired`, because the
+  sandbox previews it through its pending component.
 - **The sphere** no longer draws Divine Shield. Ice Barrier is its last user.
 - **Textures** are generated from the measured profiles. No client art ships.

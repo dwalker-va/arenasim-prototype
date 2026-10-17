@@ -24,8 +24,8 @@ pub fn update_shield_bubbles(
         combatants_with_bubbles.insert(bubble.combatant);
     }
 
-    // Track which combatants need bubbles: (entity, position, spell_school, is_immunity)
-    let mut combatants_needing_bubbles: Vec<(Entity, Vec3, SpellSchool, bool)> = Vec::new();
+    // Track which combatants need bubbles: (entity, position, spell_school)
+    let mut combatants_needing_bubbles: Vec<(Entity, Vec3, SpellSchool)> = Vec::new();
     let mut combatants_with_shield: HashSet<Entity> = HashSet::new();
 
     for (entity, transform, auras) in combatants.iter() {
@@ -53,7 +53,6 @@ pub fn update_shield_bubbles(
                             entity,
                             transform.translation,
                             spell_school,
-                            false,
                         ));
                     }
                     break; // Only need one absorb aura to spawn bubble
@@ -63,30 +62,22 @@ pub fn update_shield_bubbles(
     }
 
     // Spawn bubbles for combatants that need them
-    for (combatant_entity, position, spell_school, is_immunity) in combatants_needing_bubbles {
-        // Color based on spell school and immunity status
+    for (combatant_entity, position, spell_school) in combatants_needing_bubbles {
+        // Color based on spell school
         // Emissive uses LinearRgba with pre-scaled values (2x for glow effect)
-        let (base_color, emissive) = if is_immunity {
-            // Divine Shield: bright gold, more opaque and glowing
-            (
-                Color::srgba(1.0, 0.85, 0.3, 0.4),
-                LinearRgba::new(3.0, 2.5, 0.8, 1.0),
-            )
-        } else {
-            match spell_school {
-                SpellSchool::Frost => (
-                    Color::srgba(0.4, 0.7, 1.0, 0.25),   // Light blue, translucent
-                    LinearRgba::new(0.4, 1.0, 2.0, 1.0), // Blue glow (2x scaled)
-                ),
-                SpellSchool::Holy => (
-                    Color::srgba(1.0, 0.95, 0.7, 0.25),  // Golden/white, translucent
-                    LinearRgba::new(2.0, 1.8, 1.0, 1.0), // Golden glow (2x scaled)
-                ),
-                _ => (
-                    Color::srgba(0.8, 0.8, 0.8, 0.25), // Default grey
-                    LinearRgba::new(1.0, 1.0, 1.0, 1.0),
-                ),
-            }
+        let (base_color, emissive) = match spell_school {
+            SpellSchool::Frost => (
+                Color::srgba(0.4, 0.7, 1.0, 0.25),   // Light blue, translucent
+                LinearRgba::new(0.4, 1.0, 2.0, 1.0), // Blue glow (2x scaled)
+            ),
+            SpellSchool::Holy => (
+                Color::srgba(1.0, 0.95, 0.7, 0.25),  // Golden/white, translucent
+                LinearRgba::new(2.0, 1.8, 1.0, 1.0), // Golden glow (2x scaled)
+            ),
+            _ => (
+                Color::srgba(0.8, 0.8, 0.8, 0.25), // Default grey
+                LinearRgba::new(1.0, 1.0, 1.0, 1.0),
+            ),
         };
 
         // Use unit sphere stretched into egg shape to encompass combatant
@@ -103,13 +94,7 @@ pub fn update_shield_bubbles(
 
         // Stretch sphere into tall narrow ellipsoid like WoW's shield bubble
         // Combatant transform is at capsule center (~y=1.0), so no Y offset needed
-        // Divine Shield bubble is 1.3x larger than absorb shields
-        let scale_factor = if is_immunity { 1.3 } else { 1.0 };
-        let transform = Transform::from_translation(position).with_scale(Vec3::new(
-            0.9 * scale_factor,
-            1.4 * scale_factor,
-            0.9 * scale_factor,
-        ));
+        let transform = Transform::from_translation(position).with_scale(Vec3::new(0.9, 1.4, 0.9));
 
         commands.spawn((
             Mesh3d(mesh),
@@ -118,7 +103,6 @@ pub fn update_shield_bubbles(
             ShieldBubble {
                 combatant: combatant_entity,
                 spell_school,
-                is_immunity,
             },
             PlayMatchEntity,
         ));
@@ -133,9 +117,7 @@ pub fn update_shield_bubbles(
 }
 
 /// System to update shield bubble positions to follow their combatants.
-/// Immunity bubbles (Divine Shield) get a gentle pulse animation.
 pub fn follow_shield_bubbles(
-    time: Res<Time>,
     combatants: Query<&Transform, With<Combatant>>,
     mut bubbles: Query<(&ShieldBubble, &mut Transform), Without<Combatant>>,
 ) {
@@ -143,14 +125,6 @@ pub fn follow_shield_bubbles(
         if let Ok(combatant_transform) = combatants.get(bubble.combatant) {
             // Combatant transform is at capsule center, so use directly
             bubble_transform.translation = combatant_transform.translation;
-
-            // Immunity bubbles pulse gently (scale oscillation)
-            if bubble.is_immunity {
-                let pulse = 1.0 + 0.05 * (time.elapsed_secs() * 3.0).sin();
-                let base = 1.3; // Immunity base scale factor
-                bubble_transform.scale =
-                    Vec3::new(0.9 * base * pulse, 1.4 * base * pulse, 0.9 * base * pulse);
-            }
         }
     }
 }
