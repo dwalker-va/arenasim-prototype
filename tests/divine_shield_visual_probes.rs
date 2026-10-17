@@ -26,15 +26,15 @@ use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraType, ClientParticle, Combatant, DivineShieldPending, HealCastHand,
-    HealCastKind, ParticleFacing, PwShieldCard, PwShieldVisual, PwsLayer, PwsPhase, ShieldBubble,
-    ShieldKind, VisualBody,
+    HealCastKind, ParticleFacing, PwShieldCard, PwShieldVisual, PwsLayer, PwsPhase, ShieldKind,
+    VisualBody,
 };
 use arenasim::states::play_match::systems::process_divine_shield;
 use arenasim::states::play_match::{
     animate_client_particles, ds_halo_on, ds_sparkle_rate, particle_rotation,
     place_pw_shield_cards, shield_card_extent, shield_layer_rgb, spawn_divine_shield_cast_hands,
-    update_pw_shield_visuals, update_shield_bubbles, HaloMode, DIVINE_SHIELD_AURA_NAME,
-    DS_HALO_MODE, DS_SPARKLE_HEIGHT, PWS_CLIENT_TO_RIG, PW_SHIELD_AURA_NAME,
+    update_pw_shield_visuals, HaloMode, DIVINE_SHIELD_AURA_NAME, DS_HALO_MODE, DS_SPARKLE_HEIGHT,
+    PWS_CLIENT_TO_RIG, PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -63,12 +63,7 @@ impl Harness {
         app.insert_resource(AbilityDefinitions::default());
         app.add_systems(
             Update,
-            (
-                update_shield_bubbles,
-                update_pw_shield_visuals,
-                animate_client_particles,
-            )
-                .chain(),
+            (update_pw_shield_visuals, animate_client_particles).chain(),
         );
         app.add_systems(
             PostUpdate,
@@ -331,8 +326,6 @@ fn divine_shield_wears_the_client_cards_not_the_sphere() {
     let paladin = h.paladin(BODY);
     h.give(paladin, divine_shield());
     h.run_to(paladin, ShieldKind::DivineShield, PwsPhase::Loop, 0.1);
-    let mut q = h.app.world_mut().query::<&ShieldBubble>();
-    assert_eq!(q.iter(h.app.world()).count(), 0, "a sphere was drawn");
     let mut layers: Vec<PwsLayer> = h
         .cards(paladin, ShieldKind::DivineShield)
         .iter()
@@ -418,6 +411,7 @@ fn the_bubble_fills_the_body_blue_where_pws_is_hollow() {
                     c.rgb
                 ),
                 PwsLayer::Rim | PwsLayer::StreakB => assert!(is_gold(c.rgb), "{:?}", c.rgb),
+                PwsLayer::Icicles | PwsLayer::Glint => panic!("Divine Shield wears no icicles"),
             }
         }
         // The rim keeps PW:S's hollow and clears the body.
@@ -718,6 +712,7 @@ fn the_bubble_spends_only_its_client_blues() {
             PwsLayer::Rim | PwsLayer::StreakB => assert_eq!(ds, pws, "{layer:?}"),
             PwsLayer::StreakA => assert_eq!(ds, [0.318, 0.91, 1.0]),
             PwsLayer::FillOuter | PwsLayer::FillInner => assert_eq!(ds, [0.318, 0.396, 1.0]),
+            PwsLayer::Icicles | PwsLayer::Glint => unreachable!("not a Divine Shield layer"),
         }
     }
 }

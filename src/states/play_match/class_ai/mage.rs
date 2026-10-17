@@ -337,6 +337,21 @@ fn try_ice_barrier(
         commands.spawn(aura_pending);
     }
 
+    // The Frost launch on the Mage's hands (client kit 207). Ice Barrier never
+    // has a `CastingState`, so the marker is its only route to a caster
+    // gesture. Spawned on the committed-use branch in BOTH modes (headless
+    // never reads it; the match-exit `PlayMatchEntity` sweep reclaims it), per
+    // `cosmetic-marker-cross-mode-spawn-parity.md`.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: Some(entity),
+            ability: ice_barrier,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
+
     info!(
         "Team {} {} casts Ice Barrier",
         combatant.team,

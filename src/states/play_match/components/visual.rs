@@ -233,20 +233,10 @@ impl DeathAnimation {
     }
 }
 
-/// Component for shield bubble visual effects.
-/// Attached to a sphere entity that visually represents an absorb shield around a combatant.
-#[derive(Component)]
-pub struct ShieldBubble {
-    /// The combatant entity this bubble belongs to
-    pub combatant: Entity,
-    /// The spell school of the shield (affects color: Frost = blue, Holy = gold)
-    pub spell_school: SpellSchool,
-}
-
 /// Lifecycle phase of a [`PwShieldVisual`]: the three sequences the client's
-/// two shield models share, `holydivineshield_state_base.m2` (Power Word:
-/// Shield) and `divineshield_low_base.m2` (Divine Shield)
-/// (`rendering/effects/pw_shield.rs`).
+/// three shield models share, `holydivineshield_state_base.m2` (Power Word:
+/// Shield), `divineshield_low_base.m2` (Divine Shield) and
+/// `iceshield_state.m2` (Ice Barrier) (`rendering/effects/pw_shield.rs`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PwsPhase {
     /// Sequence 0, 700 ms: the 200 ms delay, then the tall full-strength pop.
@@ -258,20 +248,28 @@ pub enum PwsPhase {
     Death,
 }
 
-/// Which client shield a [`PwShieldVisual`] draws. The two models share their
-/// skeleton, cards and timing; Divine Shield adds a blue fill, recolours
+/// Which client shield a [`PwShieldVisual`] draws. The three models share their
+/// skeleton, cards and timing. Divine Shield adds a blue fill, recolours
 /// streak A cyan and throws off sparkles
-/// (`docs/design/2026-10-16-divine-shield-client-data.md`).
+/// (`docs/design/2026-10-16-divine-shield-client-data.md`); Ice Barrier dresses
+/// the cards frost blue at its own weights and adds icicles, a glint and a
+/// falling frost mist (`docs/design/2026-10-17-ice-barrier-client-data.md`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum ShieldKind {
     /// `holydivineshield_state_base.m2` (fdid 166342): hollow, all gold.
     PowerWordShield,
     /// `divineshield_low_base.m2` (fdid 165961): filled blue-white, sparkling.
     DivineShield,
+    /// `iceshield_state.m2` (fdid 166392): bright frost blue, icicles, mist.
+    IceBarrier,
 }
 
 impl ShieldKind {
-    pub const ALL: [ShieldKind; 2] = [ShieldKind::PowerWordShield, ShieldKind::DivineShield];
+    pub const ALL: [ShieldKind; 3] = [
+        ShieldKind::PowerWordShield,
+        ShieldKind::DivineShield,
+        ShieldKind::IceBarrier,
+    ];
 
     /// The cards this shield wears, in draw order.
     pub fn layers(self) -> &'static [PwsLayer] {
@@ -283,6 +281,13 @@ impl ShieldKind {
                 PwsLayer::Rim,
                 PwsLayer::StreakA,
                 PwsLayer::StreakB,
+            ],
+            ShieldKind::IceBarrier => &[
+                PwsLayer::Rim,
+                PwsLayer::StreakA,
+                PwsLayer::StreakB,
+                PwsLayer::Icicles,
+                PwsLayer::Glint,
             ],
         }
     }
@@ -315,16 +320,22 @@ pub struct PwShieldVisual {
 pub enum PwsLayer {
     /// `genericglow2b1`: the gold outline with a hard inner edge.
     Rim,
-    /// `shockwave10d`: about 17 radial streaks (yellow on PW:S, cyan on
-    /// Divine Shield).
+    /// About 17 radial streaks, `shockwave10d` (yellow on PW:S, cyan on
+    /// Divine Shield); on Ice Barrier the bright `shockwave10b` ring.
     StreakA,
-    /// `shockwave10b`: about 15 streaks, flickering against A.
+    /// About 15 streaks flickering against A, `shockwave10b`; on Ice Barrier
+    /// the `shockwave10d` ring.
     StreakB,
     /// Divine Shield only, bone 3: `genericglow64`, a filled blue disc on the
     /// rim-sized card.
     FillOuter,
     /// Divine Shield only, bone 2: the same blue disc on the streak-sized card.
     FillInner,
+    /// Ice Barrier only, bone 3: `ice3b_b` on submeshes 3-5, the icicle
+    /// clusters at the shoulders and knees, a flat mesh on the card.
+    Icicles,
+    /// Ice Barrier only: the icicles' sphere-mapped second pass.
+    Glint,
 }
 
 impl PwsLayer {
@@ -348,6 +359,22 @@ pub struct DivineShieldEmitters {
     pub halo_carry: f32,
     /// Particles emitted so far: the jitter seed of the next one.
     pub emitted: u32,
+}
+
+/// The frost-mist emitter on an Ice Barrier rig. Fractional puffs carry from
+/// frame to frame.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct IceBarrierEmitters {
+    pub mist_carry: f32,
+    /// Puffs emitted so far: the jitter seed of the next one.
+    pub emitted: u32,
+}
+
+/// On Ice Barrier's glint card: the camera yaw its view-dependent sheen was
+/// last written for, so its mesh is rewritten only when the view turns.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct GlintSheen {
+    pub yaw: f32,
 }
 
 /// Component that stores the original mesh handle for a combatant.
@@ -1028,6 +1055,11 @@ pub enum HealCastKind {
     /// cyan motes, star twinkles and a brief ring disc on each hand. The
     /// client gives it no precast loop, so it only ever plays as a launch.
     Arcane,
+    /// Ice Barrier's cast kit 207, `ice_precast_high_hand.m2`: a 1000 ms
+    /// one-shot deep-blue glow and pulsing ring on each hand, with sparks
+    /// (`docs/design/2026-10-17-ice-barrier-client-data.md`). Ice Barrier is
+    /// an instant, so it only ever plays as a launch.
+    Frost,
 }
 
 impl HealCastKind {
@@ -1063,14 +1095,18 @@ impl HealCastKind {
             | AbilityType::Cyclone
             | AbilityType::TravelForm => Some(HealCastKind::Nature),
             AbilityType::Moonfire => Some(HealCastKind::Arcane),
+            // Kit 207 is Ice Barrier's whole cast side. Like PW:S it has no
+            // `CastingState`, so its hands fire off `InstantAbilityFired`.
+            AbilityType::IceBarrier => Some(HealCastKind::Frost),
             _ => None,
         }
     }
 
     /// Whether the family has a precast loop for a hard cast to wind up
-    /// through. Arcane has none in the client.
+    /// through. Arcane has none in the client; Frost has one (kit 199), but
+    /// Ice Barrier is an instant, so it never plays.
     pub fn has_precast(self) -> bool {
-        !matches!(self, HealCastKind::Arcane)
+        !matches!(self, HealCastKind::Arcane | HealCastKind::Frost)
     }
 }
 
@@ -1138,6 +1174,12 @@ pub enum HealCastPieceRole {
     ArcaneStar { index: u32 },
     /// Moonfire's `teleporttarget` ring disc, the kit's first 300 ms (P2).
     ArcaneRing,
+    /// Ice Barrier's deep-blue `blue_glow2` card (`ice_precast_high_hand.m2`).
+    FrostGlow,
+    /// Ice Barrier's `shockwave10` ring, pulsing with the glow.
+    FrostRing,
+    /// One of Ice Barrier's sparks circling the hand.
+    FrostSpark { index: u32 },
 }
 
 #[derive(Component)]
@@ -1370,11 +1412,10 @@ pub enum AuraApplyOwner {
     Polymorph,
     /// Freezing Trap's ice block (`ice_block.rs`).
     IceBlock,
-    /// The shields: the sphere for the other absorbs (`shield_bubbles.rs`),
-    /// the client cards of Power Word: Shield and Divine Shield
-    /// (`pw_shield.rs`), and Weakened Soul, which only ever lands WITH
-    /// Power Word: Shield.
-    ShieldBubble,
+    /// The shields: the client cards of Power Word: Shield, Divine Shield
+    /// and Ice Barrier (`pw_shield.rs`), and Weakened Soul, which only ever
+    /// lands WITH Power Word: Shield.
+    Shields,
     /// Berserker Rage's mask (`berserk.rs`).
     BerserkMask,
     /// Curse of Weakness / Curse of Tongues apply apparitions — the only
@@ -1461,7 +1502,7 @@ impl AuraApplyRoute {
             AuraType::Polymorph => AuraApplyRoute::Owned(AuraApplyOwner::Polymorph),
             AuraType::Incapacitate => AuraApplyRoute::Owned(AuraApplyOwner::IceBlock),
             AuraType::Absorb | AuraType::DamageImmunity | AuraType::WeakenedSoul => {
-                AuraApplyRoute::Owned(AuraApplyOwner::ShieldBubble)
+                AuraApplyRoute::Owned(AuraApplyOwner::Shields)
             }
             AuraType::FearImmunity => AuraApplyRoute::Owned(AuraApplyOwner::BerserkMask),
             AuraType::DamageReduction | AuraType::CastTimeIncrease => {
@@ -2233,7 +2274,8 @@ impl InstantAbilityFired {
             // Instant AND aura-only: applied inline in class AI, entering
             // neither generic caster hook (A2). Power Word: Shield's marker
             // carries its Holy launch hands (`spawn_instant_cast_hands`).
-            | CheapShot | KidneyShot | HammerOfJustice | FrostNova | PowerWordShield
+            // Ice Barrier's carries its Frost launch hands the same way.
+            | CheapShot | KidneyShot | HammerOfJustice | FrostNova | PowerWordShield | IceBarrier
             // The melee interrupts: spawned at the committed-use site in
             // combat_ai.rs's interrupt system (roadmap B). Wind Shear is
             // deliberately absent — the Shaman has no weapon sockets and its

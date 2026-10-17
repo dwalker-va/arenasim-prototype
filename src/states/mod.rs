@@ -671,14 +671,10 @@ impl Plugin for StatesPlugin {
                 play_match::cleanup_expired_floating_text,
                 play_match::animate_shadow_sight_orbs, // Pulsing orb animation
                 play_match::animate_orb_consumption,   // Orb pickup shrink/move animation
-                // The shields, nested to keep the outer tuple within Bevy's
-                // 20-item limit: the sphere (Ice Barrier, Divine Shield) and
-                // Power Word: Shield's client cards (placed in PostUpdate).
-                (
-                    play_match::update_shield_bubbles, // Spawn/despawn shield bubbles
-                    play_match::follow_shield_bubbles, // Update bubble positions
-                    play_match::update_pw_shield_visuals, // Power Word: Shield lifecycle
-                ),
+                // The client shields (Power Word: Shield, Divine Shield, Ice
+                // Barrier): their lifecycle and emitters; the cards are placed
+                // in PostUpdate.
+                play_match::update_pw_shield_visuals,
                 // Polymorph BEFORE Fear, chained so a sync point flushes
                 // PolymorphedVisual before Fear evaluates its
                 // `Without<PolymorphedVisual>` filter. A unit hit by both on the
@@ -1345,7 +1341,7 @@ impl Plugin for StatesPlugin {
         )
         // Selection ring follow & cleanup — runs after combat resolution
         // so the ring tracks post-movement positions on the same frame
-        // (matches the `follow_shield_bubbles` pattern).
+        // (as every follower of a unit does).
         .add_systems(
             Update,
             play_match::follow_selection_ring

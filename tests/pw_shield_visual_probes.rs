@@ -22,12 +22,12 @@ use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraType, CastEnding, CastEndingKind, Combatant, HealCastHand, HealCastKind,
-    InstantAbilityFired, LandedCast, PwShieldCard, PwShieldVisual, PwsLayer, PwsPhase,
-    ShieldBubble, VisualBody,
+    InstantAbilityFired, LandedCast, PwShieldCard, PwShieldVisual, PwsLayer, PwsPhase, ShieldKind,
+    VisualBody,
 };
 use arenasim::states::play_match::{
     place_pw_shield_cards, pws_card_extent, spawn_instant_cast_hands, update_pw_shield_visuals,
-    update_shield_bubbles, PWS_CLIENT_TO_RIG, PWS_RIM_QUAD, PWS_STREAK_QUAD, PW_SHIELD_AURA_NAME,
+    PWS_CLIENT_TO_RIG, PWS_RIM_QUAD, PWS_STREAK_QUAD, PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -52,7 +52,7 @@ impl Harness {
         app.init_asset::<Image>();
         app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
         app.insert_resource(AbilityDefinitions::default());
-        app.add_systems(Update, (update_shield_bubbles, update_pw_shield_visuals));
+        app.add_systems(Update, update_pw_shield_visuals);
         app.add_systems(
             PostUpdate,
             place_pw_shield_cards.before(TransformSystem::TransformPropagate),
@@ -502,23 +502,23 @@ fn every_card_centre_sits_above_the_body_centre() {
     }
 }
 
-/// Ice Barrier keeps the sphere; Power Word: Shield never draws one.
+/// Each absorb wears its own client model: Power Word: Shield its gold cards,
+/// Ice Barrier its frost ones, never each other's.
 #[test]
-fn only_power_word_shield_leaves_the_sphere() {
+fn each_absorb_wears_its_own_model() {
     let (mut h, pws, _) = standard_harness();
     let (ice, _) = h.bearer(Vec3::new(4.0, 1.0, 0.0));
     h.give(pws, PW_SHIELD_AURA_NAME);
     h.give(ice, "Ice Barrier");
     h.tick(3);
-    let mut q = h.app.world_mut().query::<&ShieldBubble>();
-    let owners: Vec<Entity> = q.iter(h.app.world()).map(|b| b.combatant).collect();
-    assert_eq!(owners, vec![ice], "the sphere is Ice Barrier's alone");
-    assert_eq!(h.rigs().len(), 1);
-    assert_eq!(
-        h.rigs()[0].bearer,
-        pws,
-        "Ice Barrier must not get the cards"
-    );
+    let mut worn: Vec<(Entity, ShieldKind)> = h.rigs().iter().map(|r| (r.bearer, r.kind)).collect();
+    worn.sort_by_key(|(e, _)| *e);
+    let mut want = vec![
+        (pws, ShieldKind::PowerWordShield),
+        (ice, ShieldKind::IceBarrier),
+    ];
+    want.sort_by_key(|(e, _)| *e);
+    assert_eq!(worn, want);
 }
 
 // --- the caster's hands -------------------------------------------------------

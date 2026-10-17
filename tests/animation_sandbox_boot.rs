@@ -348,6 +348,90 @@ fn every_interrupt_entry_cuts_a_cast_and_heroic_strike_swings_its_blow() {
     }
 }
 
+/// Ice Barrier previews through the real registration: the entry lands the
+/// absorb on the Mage itself, which wears the client's five cards (placed, not
+/// just spawned) and sheds its frost mist, and the Mage's two hands flash the
+/// Frost launch exactly once (the zero-length cast and the marker both land,
+/// and only the marker may draw the hands).
+#[test]
+fn ice_barrier_previews_its_cards_mist_and_both_hands() {
+    use arenasim::states::animation_sandbox::playback::{
+        EntryFamily, SandboxEntry, SandboxPlayback,
+    };
+    use arenasim::states::animation_sandbox::SandboxConfig;
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::components::{
+        ClientParticle, HealCastHand, HealCastKind, PwShieldCard, PwShieldVisual, ShieldKind,
+    };
+    use bevy::time::TimeUpdateStrategy;
+    use std::time::Duration;
+
+    let mut app = boot_app();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+        16,
+    )));
+    app.update();
+    app.insert_resource(SandboxConfig {
+        caster_class: CharacterClass::Mage,
+        ..Default::default()
+    });
+    app.world_mut()
+        .resource_mut::<NextState<GameState>>()
+        .set(GameState::AnimationSandbox);
+    for _ in 0..4 {
+        app.update();
+    }
+    {
+        let mut playback = app.world_mut().resource_mut::<SandboxPlayback>();
+        playback.select(
+            SandboxEntry::Ability(AbilityType::IceBarrier),
+            EntryFamily::Residue,
+        );
+        playback.restart_requested = true;
+    }
+    let (mut most_hands, mut cards_seen, mut placed, mut mist) = (0, 0, false, 0);
+    let mut caster = None;
+    for _ in 0..60 {
+        app.update();
+        let mut hands = app.world_mut().query::<&HealCastHand>();
+        let now: Vec<(HealCastKind, Entity)> = hands
+            .iter(app.world())
+            .map(|h| (h.kind, h.caster))
+            .collect();
+        assert!(
+            now.iter().all(|(k, _)| *k == HealCastKind::Frost),
+            "{now:?}"
+        );
+        if let Some((_, c)) = now.first() {
+            caster = Some(*c);
+        }
+        most_hands = most_hands.max(now.len());
+        let mut cards = app.world_mut().query::<(&PwShieldCard, &Transform)>();
+        let scales: Vec<f32> = cards.iter(app.world()).map(|(_, t)| t.scale.y).collect();
+        cards_seen = cards_seen.max(scales.len());
+        placed |= scales.iter().any(|s| *s > 1.0);
+        let mut puffs = app.world_mut().query::<&ClientParticle>();
+        mist = mist.max(puffs.iter(app.world()).count());
+    }
+    assert_eq!(
+        most_hands, 2,
+        "the Frost launch must flash both hands, once"
+    );
+    assert_eq!(cards_seen, 5, "the Mage must wear the five cards");
+    assert!(placed, "the cards were spawned but never placed");
+    assert!(mist > 5, "the barrier shed no frost mist ({mist} puffs)");
+    let mut rigs = app.world_mut().query::<&PwShieldVisual>();
+    let rig = *rigs.iter(app.world()).next().expect("no barrier");
+    assert_eq!(rig.kind, ShieldKind::IceBarrier);
+    let bearer = rig.bearer;
+    assert_eq!(
+        Some(bearer),
+        caster,
+        "the barrier is not on the casting Mage"
+    );
+}
+
 /// Power Word: Shield previews through the real registration: the entry lands
 /// the absorb on the dummy, which wears the client's three cards (placed, not
 /// just spawned), and the Priest's two hands flash the Holy launch exactly
