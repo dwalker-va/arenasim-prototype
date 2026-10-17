@@ -1,8 +1,10 @@
 # Ice Barrier — client data and the gap (AS-358)
 
 Research for AS-358: what the Classic and TBC clients draw for Ice Barrier, and how
-that differs from the `ShieldBubble` sphere we draw for it. The bench is
-[`benches/2026-10-17-ice-barrier-bench.html`](benches/2026-10-17-ice-barrier-bench.html).
+that differs from the `ShieldBubble` sphere we drew for it. The signed-off bench is
+[`benches/2026-10-17-ice-barrier-bench.html`](benches/2026-10-17-ice-barrier-bench.html)
+(published at https://claude.ai/artifact/6StjLsouEtbtmBHqjR2fHP, blessed version
+`1792216804-7aa7`), and §8 records what shipped.
 The method and the shape follow AS-344's
 [`2026-10-16-pws-client-data.md`](2026-10-16-pws-client-data.md). The two models share a
 skeleton, so this note leans on that one and records only what differs.
@@ -204,25 +206,60 @@ where they cross the body edge, and the bench shows this. The rim and streaks cl
 body, so the ring itself stays legible. Pushing the icicles away from blue toward white is
 a possible trim, but it would depart from the client. The bench leaves it as is.
 
-## 7. Notes for the implementation (phase 3, after sign-off)
+## 7. Where the design pressed
 
-- **Reuse `pw_shield.rs`'s machinery.** The cards are the same quads, bones and tracks, so
-  the card rig, the `VisualBody` anchor and the draw-order proof apply unchanged. The
-  icicles live on bone 3, so they can be one more billboard card with a generated
-  texture, centred like the streak cards: its centre sits above the body centre on the
-  same vertical, so the AS-344 sort proof covers it.
-- **The mist is world-space trailing particles** (emitter flag `0x80`, model space, is
-  not set). It needs its own small emitter. It is the one piece that outlives the aura, so
-  the lifecycle must let the last puffs finish after the cards despawn, and end at once on
-  the bearer's death, as PW:S does.
+These points were open while the bench was built. §8 records how each one was settled.
+
+- **The mist is world-space trailing particles.** Emitter flag `0x80` (model space) is
+  not set. The mist is also the one piece that outlives the aura.
 - **Coexistence with PW:S.** A Mage can wear both absorbs (`auras.rs` allows different
-  absorbs together). The client then draws two near-identical ring sets, gold and blue, on
-  one unit. The renderer should let both stand rather than pick one.
-- **The `ShieldBubble` absorb arm loses its last user.** With PW:S and Ice Barrier both on
-  their own models, the absorb branch draws nothing that ships. Divine Shield (the
-  immunity branch) is AS-359's.
-- **Hands.** If kept, Ice Barrier gets an `InstantAbilityFired` marker (as PW:S does) and
-  a new Frost family on `HealCastKind`, launch-only like `Arcane`. That is the same routing
-  PW:S uses, so it stays consistent. It also makes the Mage the first class with a Frost
-  hand vocabulary, which Frostbolt and Frost Nova would not share until a later card
-  routes them.
+  absorbs together). The client then draws two near-identical ring sets, gold and blue,
+  on one unit.
+- **The `ShieldBubble` sphere loses its last user.** Power Word: Shield (AS-344),
+  Divine Shield (AS-359) and Ice Barrier each wear their own client model. They are the
+  only absorbs and the only immunity in the book.
+
+## 8. What shipped
+
+The user signed off on the bench at its defaults: artifact
+`6StjLsouEtbtmBHqjR2fHP`, version `1792216804-7aa7`.
+
+- **Layers.** Every layer is kept at the client's values: the rim, both streak rings,
+  the icicles, the glint, the frost mist, the birth pop and the death swell.
+- **Ending.** A break, an expiry, a purge and the bearer's death all play the client's
+  single swell-and-fade. The mist stops spawning 767 ms into it, and the puffs already
+  falling outlive the cards and then clear.
+- **One rig, three kinds.** Ice Barrier is the third `ShieldKind` on the shield rig in
+  `rendering/effects/pw_shield.rs`, beside Power Word: Shield and Divine Shield. It
+  shares their lifecycle, billboard, `VisualBody` anchor and draw-order proof (re-run
+  here for all five cards).
+  - Its knobs are `IB_TUNING`, plus its own weight tracks and colours. The `IB_*`
+    constants carry the bench's numeric knobs under the same names, every multiplier
+    at 1.0.
+  - The layer toggles have no constants, as on AS-344 and AS-359, because every layer
+    is kept. The bench's break shatter was declined, so it was not built.
+- **Ice Barrier's own pieces** are in `rendering/effects/ice_barrier.rs`.
+  - The icicles and the glint are flat meshes on a card centred at the streak cards'
+    centre. Their colour is in the vertices (`ice3b_b`'s measured light and deep blue).
+  - The glint's sheen turns with the camera's yaw about the Mage. That is the bench's
+    stand-in for the client's sphere map.
+  - The mist is world-space `ClientParticle`s, rolling as they fall, on four
+    procedural puff shapes.
+- **Textures.** The streak and rim cards wear the same generated textures as PW:S. They
+  are the same client files, measured once by AS-344. This card's re-measurement, which
+  the bench drew, differs by at most 0.03 in alpha at any radius. Ice Barrier's streak
+  A is the `shockwave10b` ring and its B the `10d`, the other way round from PW:S's.
+- **Caster.** The Mage AI spawns `InstantAbilityFired` for Ice Barrier. A new
+  launch-only `HealCastKind::Frost` plays kit 207 on both hands for 1 s:
+  - the deep-blue glow card and ring, pulsing on the 533 ms loop;
+  - four sparks per hand.
+
+  This is the Mage's first hand effect. Its other casts are unchanged.
+- **The sphere is retired.** `shield_bubbles.rs` and its `ShieldBubble` component are
+  gone, and the aura router's owner for absorbs and immunities is now `Shields`. A
+  future absorb has no fallback: `lands_silently_audit` fails until it is given a
+  visual.
+- **Colour.** Client blue as measured, and the icicles keep their client colours. §6
+  explains why the floating-combat-text overlap is congruent rather than a new spend.
+- **No client art ships.** Every texture is generated from the measured profiles and
+  positions.

@@ -1745,7 +1745,9 @@ mod tests {
         assert_eq!(mech(FrostShock), EntryFamily::Cast);
         assert!(mech(FrostShock).is_playable());
         // Representative mechanism buckets.
-        assert_eq!(mech(IceBarrier), EntryFamily::Cast); // self buff
+        assert_eq!(mech(FrostArmor), EntryFamily::Cast); // self buff
+                                                         // Ice Barrier's hands play off its marker, as Power Word: Shield's do.
+        assert_eq!(mech(IceBarrier), EntryFamily::Residue);
         assert_eq!(mech(Corruption), EntryFamily::Cast); // offensive aura
         assert_eq!(mech(EarthTotem), EntryFamily::Entity); // drop
         assert_eq!(mech(FreezingTrap), EntryFamily::Entity); // drop

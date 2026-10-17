@@ -33,7 +33,7 @@ Every visual effect in the codebase follows a **three-system lifecycle**:
 2. **Update system** — Animates (fade, scale, follow target) each frame
 3. **Cleanup system** — Despawns when lifetime expires
 
-This pattern has been applied to: `SchoolImpact` (the shared school-coloured landing, which absorbed the old `SpellImpactEffect`), `ShieldBubble`, `FlameParticle`, `DrainLifeBeam`, `HealImpact` (which replaced the retired `HealingLightColumn` — client data showed no Classic heal lands as a column), and `DispelBurst`.
+This pattern has been applied to: `SchoolImpact` (the shared school-coloured landing, which absorbed the old `SpellImpactEffect`), `FlameParticle`, `DrainLifeBeam`, `HealImpact` (which replaced the retired `HealingLightColumn` — client data showed no Classic heal lands as a column), and `DispelBurst`.
 
 ## The Pattern (5 Steps)
 
@@ -201,7 +201,7 @@ Combat systems (in `systems.rs`) run in both modes. Visual systems (in `src/stat
 
 ### 7. Name Components After Their Visual Shape
 
-Convention: `ShieldBubble`, `DrainLifeBeam`, `DispelBurst` — not `HealingEffect` or `DispelAnimation`. The name should describe what the spectator sees.
+Convention: `DrainLifeBeam`, `DispelBurst`, `PwShieldCard` — not `HealingEffect` or `DispelAnimation`. The name should describe what the spectator sees.
 
 ### 8. Emissive Values Need 2x+ Scaling
 
@@ -242,7 +242,6 @@ table-stored render components from visual systems, and are AS-216.
 |-------------|-----------|----------|---------|
 | Priest (dispel) | `srgba(0.85, 0.85, 1.0, 0.5)` | `LinearRgba(2.0, 2.0, 2.8, 1.0)` | DispelBurst |
 | Paladin (dispel) | `srgba(1.0, 0.9, 0.6, 0.5)` | `LinearRgba(2.5, 2.0, 1.0, 1.0)` | DispelBurst |
-| Frost (shield) | `srgba(0.4, 0.7, 1.0, 0.25)` | varies | ShieldBubble |
 | Any school (impact) | `SpellSchool::color()` (Physical: hueless — its tan is the floor colour) | `impact_style(school).emissive` × colour | SchoolImpact |
 
 ## File Checklist
