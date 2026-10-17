@@ -261,7 +261,12 @@ test("wake-up: a re-created board behind the same port is printed, not delivered
   for (let i = 0; i < 3; i++) await call(client, "create_card", { title: `old ${i}`, role: "engineer", actor: "pm" });
   const w = runWait(["--follow", "--since", "3", "--port", String(d.port)]);
   t.after(() => w.child.kill());
-  await sleep(300);
+  // The waiter learns its board on first contact: wait until it has, by seeing
+  // it deliver one event from the old board (a fixed sleep lost that race on a loaded box).
+  const c0 = (await call(client, "list_cards", {})).value[0];
+  await call(client, "append_activity", { id: c0.id, msg: "the waiter has this board", actor: "pm" });
+  for (let i = 0; i < 100 && !/"activity"/.test(w.stdoutSoFar()); i++) await sleep(100);
+  assert.match(w.stdoutSoFar(), /"activity"/, "the waiter never made first contact with the old board");
   await d.stop();
 
   // A different database on the same port, which already has MORE events than
