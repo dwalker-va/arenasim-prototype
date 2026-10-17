@@ -1404,8 +1404,8 @@ gate is a NAMED entry in the play's own definition — for Peel,
 `peel::PEEL_GATES`, a (peeler class, class of the teammate in danger) pair with
 a one-line justification citing its measurement — never a scattered `if`;
 Burst's `BURST_EXCEPTIONS` is the same rule by class. A gated unit runs the play
-it would without the peel (`TeamSituation::play_without_peel`: Chain while a
-lock is ending, else the fallback), then Chain's and Burst's exceptions apply
+it would without the peel (`TeamSituation::play_without_peel`: a last-stand
+healer's TakeCover, then Chain while a lock is ending, else the fallback), then Chain's and Burst's exceptions apply
 to that, in that order (`CombatContext::play`). `tests/peel_gates.rs` lists the gates by set
 equality and plays every peeler for every teammate class, so adding or
 removing one fails a default test until the list is edited too. Every gate is
