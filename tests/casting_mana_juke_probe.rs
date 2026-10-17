@@ -31,7 +31,7 @@ use arenasim::CharacterClass;
 /// whether the probe judges anything. (A single pinned seed carried this probe
 /// until it went stale twice: AS-203 moved the Priest's path, and AS-282 the
 /// Mage's Ice Barrier timing under a Frost lockout.)
-const SEED_BANK: std::ops::Range<u64> = 0..60;
+const SEED_BANK: std::ops::Range<u64> = 0..90;
 
 /// The fewest juked 2v1 matches the bank must hold (8 on AS-282's `main`).
 const MIN_JUKED_MATCHES: usize = 4;

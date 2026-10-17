@@ -19,7 +19,7 @@ use bevy::prelude::*;
 
 use arenasim::combat::log::CombatLog;
 use arenasim::headless::runner::TraceConfig;
-use arenasim::headless::{run_headless_match_with, HeadlessMatchConfig};
+use arenasim::headless::HeadlessMatchConfig;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::class_ai::hunter::{spawn_trap, FROST_TRAP_HELD_FOR_FREEZING};
 use arenasim::states::play_match::{
@@ -288,42 +288,67 @@ fn another_hunters_trap_is_untouched() {
 // The AI holds a Frost Trap that would replace its own Freezing Trap
 // ----------------------------------------------------------------------------
 
-/// Hunter+Shaman v Rogue+Priest, BasicArena: the Rogue is on the Hunter while
-/// its Freezing Trap still waits to spring, so a Frost Trap dropped then would
-/// take the Freezing Trap off the ground under the one-trap rule. The Hunter
-/// holds it instead, and the trace says why. Across the whole match no
-/// Freezing Trap is ever replaced by a Frost Trap. Pinned seeds where the hold
-/// fires: the first three of seeds 0-105, in which it fires in six. They were
-/// re-pinned from Hunter+Shaman v Warrior+Priest seed 0 when the default
-/// Hunter took up its polearm (AS-195), after which that comp held in none of
-/// 240 seeds, from 0, 6 and 14 when the traps came onto one shared 15s
-/// cooldown (AS-196): the hold now meets only a Freezing Trap still waiting on
-/// the ground a full cooldown after it was thrown — and from 1, 6 and 61 when
-/// the Shaman's Purge took a random buff (AS-230), which moved seed 6.
+/// Hunter+Shaman v Warrior+Priest, STAGED (tier 3): the Hunter's armed
+/// Freezing Trap waits on the ground 40yd off, both traps are off their shared
+/// cooldown, the Warrior is on the Hunter and the enemy Priest is out of throw
+/// range. A Frost Trap dropped at its feet
+/// would take the Freezing Trap off the ground under the one-trap rule. The
+/// Hunter holds it instead, and the trace says why; no Freezing Trap is ever
+/// replaced by a Frost Trap.
+///
+/// The seeded matches this replaced (Hunter+Shaman v Rogue+Priest at three
+/// pinned seeds, re-pinned four times since AS-195) moved off the situation
+/// once more with AS-249's healer positioning: it now held in one seed of
+/// 0-119. A stage holds it by construction.
 #[test]
 fn the_hunter_holds_a_frost_trap_that_would_replace_its_freezing_trap() {
-    for seed in [1u64, 10, 61] {
+    use arenasim::headless::{Stage, Unit};
+
+    const HUNTER: Unit = Unit::new(1, 0);
+    const SHAMAN: Unit = Unit::new(1, 1);
+    const WARRIOR: Unit = Unit::new(2, 0);
+    const PRIEST: Unit = Unit::new(2, 1);
+    for seed in [1u64, 2] {
         let dir = tempfile::tempdir().unwrap();
         let trace_path = dir.path().join("trace.jsonl");
         let log_path = dir.path().join("match.txt");
         let cfg = HeadlessMatchConfig {
             team1: vec!["Hunter".into(), "Shaman".into()],
-            team2: vec!["Rogue".into(), "Priest".into()],
-            max_duration_secs: 180.0,
+            team2: vec!["Warrior".into(), "Priest".into()],
+            max_duration_secs: 8.0,
             random_seed: Some(seed),
             output_path: Some(log_path.to_string_lossy().into_owned()),
             ..Default::default()
         };
-        run_headless_match_with(
+        let stage = Stage::new()
+            .place(HUNTER, -30.0, 0.0)
+            .place(WARRIOR, -28.5, 0.0)
+            .target(WARRIOR, HUNTER)
+            .place(SHAMAN, -22.0, 10.0)
+            // Beyond the pressure trap's 30yd throw, so the Hunter's Freezing
+            // Trap answer to the Warrior is not a fresh one on the Priest.
+            .place(PRIEST, 30.0, 10.0)
+            .world(|world| {
+                let owner = HUNTER.entity(world);
+                world.spawn((
+                    Trap {
+                        arm_timer: 0.0,
+                        ..Trap::placed(TrapType::Freezing, 1, owner)
+                    },
+                    Transform::from_translation(Vec3::new(10.0, 0.0, -15.0)),
+                ));
+            });
+        arenasim::headless::run_headless_match_staged(
             cfg,
             false,
             Some(TraceConfig {
                 output_path: trace_path.clone(),
             }),
+            stage,
+            |_| {},
         )
         .expect("headless match");
         let trace = std::fs::read_to_string(&trace_path).unwrap();
-
         let held = trace
             .lines()
             .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
@@ -336,14 +361,9 @@ fn the_hunter_holds_a_frost_trap_that_would_replace_its_freezing_trap() {
             .count();
         assert!(
             held > 0,
-            "seed {seed}: the guard never held a Frost Trap: the probe is vacuous"
+            "seed {seed}: the guard never held a Frost Trap: the stage no longer sets it up"
         );
-
         let log = std::fs::read_to_string(&log_path).unwrap();
-        assert!(
-            log.contains("Frost Trap"),
-            "seed {seed}: no Frost Trap in the match: the probe is vacuous"
-        );
         assert!(
             !log.contains("Freezing Trap is replaced by its Frost Trap"),
             "seed {seed}: a Frost Trap replaced the Hunter's own Freezing Trap"

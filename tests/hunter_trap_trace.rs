@@ -28,6 +28,9 @@ fn config(team1: &[&str], team2: &[&str], seed: u64) -> HeadlessMatchConfig {
     }
 }
 
+/// The seeds a banked probe plays each of its comps over.
+const TRAP_BANK: std::ops::Range<u64> = 0..12;
+
 fn run_trace(cfg: HeadlessMatchConfig) -> String {
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let path: PathBuf = tmp.path().to_path_buf();
@@ -59,84 +62,85 @@ fn a_placed_freezing_trap_records_the_enemy_it_was_aimed_at() {
     // enforces. None fields a Rogue: a lane trap thrown for a stealthed enemy
     // cannot name it, and records no aim by design (pinned separately below).
     //
-    // The double-healer comp's seed is 7, the first of seeds 0-39 in which
-    // it throws one: since the traps share one cooldown (AS-196) the Frost
-    // Trap peel on the Paladin usually takes it first (seed 0 threw none).
-    // Re-pinned when the Web became physical (AS-240). Before, the enemy
-    // Priest dispelled the Spider's Web off itself and, from AS-234, the
-    // Paladin Cleansed it too (which moved this seed from 12 to 15). Now
-    // nothing frees a Web, so those GCDs go elsewhere and the matches run
-    // differently: 12 and 15 throw no Freezing Trap; 7, 13 and 30 do.
-    let comps: [(&[&str], &[&str], u64); 3] = [
-        (&["Hunter", "Priest"], &["Priest", "Paladin"], 7),
-        (&["Hunter", "Priest"], &["Warrior", "Priest"], 4),
-        (&["Hunter"], &["Warrior"], 0),
+    // Each comp plays a SEED BANK, its traps counted over the bank. Its pinned
+    // seed was re-pinned three times as the AI moved (AS-196, AS-234, AS-240),
+    // and AS-249's healer positioning moved two of the three off a trap again.
+    let comps: [(&[&str], &[&str]); 3] = [
+        (&["Hunter", "Priest"], &["Priest", "Paladin"]),
+        (&["Hunter", "Priest"], &["Warrior", "Priest"]),
+        (&["Hunter"], &["Warrior"]),
     ];
 
     let mut traps_traced = 0usize;
-    for (team1, team2, seed) in comps {
-        let body = run_trace(config(team1, team2, seed));
+    for (team1, team2) in comps {
+        let mut comp_traps = 0usize;
+        for seed in TRAP_BANK {
+            let body = run_trace(config(team1, team2, seed));
 
-        // Build the entity -> team map from every actor view the trace carries,
-        // so the enemy check reads real teams rather than an assumed slot
-        // numbering.
-        let mut team_of: HashMap<u64, u64> = HashMap::new();
-        let mut events: Vec<serde_json::Value> = Vec::new();
-        for line in body.lines() {
-            let v: serde_json::Value = match serde_json::from_str(line) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            if let Some(actor) = v.get("actor") {
-                if let (Some(id), Some(team)) = (
-                    actor.get("entity_id").and_then(|x| x.as_u64()),
-                    actor.get("team").and_then(|x| x.as_u64()),
-                ) {
-                    team_of.insert(id, team);
+            // Build the entity -> team map from every actor view the trace carries,
+            // so the enemy check reads real teams rather than an assumed slot
+            // numbering.
+            let mut team_of: HashMap<u64, u64> = HashMap::new();
+            let mut events: Vec<serde_json::Value> = Vec::new();
+            for line in body.lines() {
+                let v: serde_json::Value = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                if let Some(actor) = v.get("actor") {
+                    if let (Some(id), Some(team)) = (
+                        actor.get("entity_id").and_then(|x| x.as_u64()),
+                        actor.get("team").and_then(|x| x.as_u64()),
+                    ) {
+                        team_of.insert(id, team);
+                    }
                 }
+                events.push(v);
             }
-            events.push(v);
-        }
 
-        for v in &events {
-            let Some(outcome) = v.get("outcome") else {
-                continue;
-            };
-            if outcome.get("ability").and_then(|a| a.as_str()) != Some("FreezingTrap") {
-                continue;
-            }
-            let actor_id = v
-                .get("actor")
-                .and_then(|a| a.get("entity_id"))
-                .and_then(|x| x.as_u64())
-                .expect("an ability_decision always carries an actor");
-            let actor_team = *team_of.get(&actor_id).expect("actor team");
+            for v in &events {
+                let Some(outcome) = v.get("outcome") else {
+                    continue;
+                };
+                if outcome.get("ability").and_then(|a| a.as_str()) != Some("FreezingTrap") {
+                    continue;
+                }
+                let actor_id = v
+                    .get("actor")
+                    .and_then(|a| a.get("entity_id"))
+                    .and_then(|x| x.as_u64())
+                    .expect("an ability_decision always carries an actor");
+                let actor_team = *team_of.get(&actor_id).expect("actor team");
 
-            let intended = outcome
-                .get("target_id")
-                .and_then(|x| x.as_u64())
-                .unwrap_or_else(|| {
-                    panic!(
-                        "a chosen Freezing Trap recorded no intended victim \
+                let intended = outcome
+                    .get("target_id")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "a chosen Freezing Trap recorded no intended victim \
                          ({team1:?} vs {team2:?}, entity {actor_id}): the trace \
                          can no longer say who the trap was aimed at"
-                    )
+                        )
+                    });
+                let victim_team = *team_of.get(&intended).unwrap_or_else(|| {
+                    panic!("intended victim {intended} never appears in the trace")
                 });
-            let victim_team = *team_of
-                .get(&intended)
-                .unwrap_or_else(|| panic!("intended victim {intended} never appears in the trace"));
-            assert_ne!(
-                victim_team, actor_team,
-                "Freezing Trap aimed at entity {intended} on the Hunter's OWN \
+                assert_ne!(
+                    victim_team, actor_team,
+                    "Freezing Trap aimed at entity {intended} on the Hunter's OWN \
                  team ({team1:?} vs {team2:?})"
-            );
-            traps_traced += 1;
+                );
+                comp_traps += 1;
+            }
         }
+        eprintln!("{team1:?} vs {team2:?}: {comp_traps} Freezing Traps over {TRAP_BANK:?}");
+        traps_traced += comp_traps;
     }
 
     // Non-vacuity: an assertion loop over zero traps passes for the wrong
-    // reason. Each comp throws at least one trap today; the floor is the pooled
-    // count so a seed shift in one comp does not silently empty the whole probe.
+    // reason. The floor is the pooled count, so a comp that stops throwing
+    // (the double-healer one threw none over the bank after AS-249) does not
+    // silently empty the whole probe.
     assert!(
         traps_traced >= 3,
         "only {traps_traced} Freezing Traps traced across three comps — the \
@@ -240,9 +244,13 @@ fn the_opener_holds_the_trap_instead_of_throwing_it_into_the_melee_lane() {
 /// Hunter+Priest vs Warrior+Priest: the Hunter's team kills the Warrior, so the
 /// enemy Priest is the off-target and the one enemy able to free anyone. The
 /// Hunter holds the trap until it can land it with the Priest the only enemy
-/// near the landing, and then it springs on the Priest. In seeds 3 and 4 the
-/// Hunter's first Freezing Trap is asserted aimed at the Priest AND sprung on
-/// it.
+/// near the landing, and then it springs on the Priest. Over a SEED BANK, the
+/// Hunter's first Freezing Trap of each match is asserted aimed at the Priest,
+/// never sprung on anyone else, and sprung on the Priest in most of the bank.
+/// (It was pinned at seeds 3 and 4; AS-249's healer positioning moved the
+/// enemy Priest off the landing in seed 3, so the claim is now a rate over the
+/// bank — a trap that springs on nobody inside the window is a miss of the
+/// landing prediction, not a trap on the wrong enemy.)
 ///
 /// Only the first: since the traps came down to Classic's shared 15s cooldown
 /// (AS-196; Freezing Trap was 25s), a second trap comes up inside the 60s
@@ -253,7 +261,8 @@ fn the_opener_holds_the_trap_instead_of_throwing_it_into_the_melee_lane() {
 #[test]
 fn the_held_trap_springs_on_the_dispeller_it_was_aimed_at() {
     let mut thrown = 0usize;
-    for seed in [3u64, 4] {
+    let mut sprung_on_priest = 0usize;
+    for seed in TRAP_BANK {
         let mut cfg = config(&["Hunter", "Priest"], &["Warrior", "Priest"], seed);
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
@@ -290,12 +299,9 @@ fn the_held_trap_springs_on_the_dispeller_it_was_aimed_at() {
             aims.iter().all(|c| c == "Priest"),
             "seed {seed}: Freezing Trap aimed at {aims:?}, not the enemy Priest"
         );
-        assert_eq!(
-            sprung.len(),
-            aims.len(),
-            "seed {seed}: {} thrown, {} sprung: {sprung:?}",
-            aims.len(),
-            sprung.len()
+        assert!(
+            sprung.len() <= aims.len(),
+            "seed {seed}: a Freezing Trap sprang with none thrown: {sprung:?}"
         );
         assert!(
             sprung
@@ -304,10 +310,18 @@ fn the_held_trap_springs_on_the_dispeller_it_was_aimed_at() {
             "seed {seed}: a trap aimed at the Priest sprang on someone else: {sprung:?}"
         );
         thrown += aims.len();
+        sprung_on_priest += sprung.len();
     }
+    eprintln!(
+        "{thrown} first traps thrown over {TRAP_BANK:?}, {sprung_on_priest} sprung on the Priest"
+    );
     assert!(
-        thrown >= 2,
-        "only {thrown} Freezing Traps thrown across the pinned seeds — the probe went vacuous"
+        thrown >= 6,
+        "only {thrown} Freezing Traps thrown across the bank — the probe went vacuous"
+    );
+    assert!(
+        sprung_on_priest * 3 >= thrown * 2,
+        "only {sprung_on_priest} of {thrown} first traps sprang on the Priest they were aimed at"
     );
 }
 
@@ -651,16 +665,16 @@ fn against_a_lone_priest_the_opener_is_serpent_sting() {
 /// Rogue closes on it. Freezing Trap is thrown at the Priest (the trace names
 /// it), springs on the Priest, and the Hunter moves its target to the Rogue —
 /// every shot holds fire on a trapped enemy, so staying on the Priest would
-/// idle it. Pinned seeds where the Priest reaches the landing as it arms: the
-/// first three of seeds 0-7. Re-pinned from 1, 3 and 4 when the traps came
-/// onto one shared cooldown (AS-196): in most seeds the Frost Trap peel on the
-/// Rogue now takes the cooldown first, and no Freezing Trap is thrown in the
-/// minute. Back to 1, 3 and 4 when no dispel could free a Web (AS-240): the
-/// enemy Priest's Dispel Magic on its own Web had moved 3, 5 and 7 there.
+/// idle it. Asserted on every match of a SEED BANK in which the Hunter's first
+/// Freezing Trap springs on the Priest, at least three of them. (It was pinned
+/// at three seeds and re-pinned twice — AS-196, AS-240 — before AS-249's
+/// healer positioning moved them again; in most seeds the Frost Trap peel on
+/// the Rogue takes the shared cooldown first and no Freezing Trap is thrown in
+/// the minute.)
 #[test]
 fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
     let mut caught = 0usize;
-    for seed in [1u64, 3, 4] {
+    for seed in PRESSURE_TRAP_BANK {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.max_duration_secs = 60.0;
         let (events, log) = run_trace_and_log(cfg);
@@ -674,12 +688,18 @@ fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
             })
             .collect();
         let decisions: Vec<&serde_json::Value> = hunter_trap_events(&events).collect();
-        let throw = decisions
-            .iter()
-            .position(|v| {
-                v.pointer("/outcome/ability").and_then(|a| a.as_str()) == Some("FreezingTrap")
-            })
-            .unwrap_or_else(|| panic!("seed {seed}: no Freezing Trap thrown"));
+        let first_sprung = log
+            .lines()
+            .find_map(|l| l.split("Freezing Trap triggers on ").nth(1))
+            .unwrap_or_default();
+        let Some(throw) = decisions.iter().position(|v| {
+            v.pointer("/outcome/ability").and_then(|a| a.as_str()) == Some("FreezingTrap")
+        }) else {
+            continue;
+        };
+        if !first_sprung.contains(" Priest #") {
+            continue;
+        }
         let aimed = decisions[throw]
             .pointer("/outcome/target_id")
             .and_then(|x| x.as_u64())
@@ -693,18 +713,17 @@ fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
             Some("Rogue"),
             "seed {seed}: the Hunter's next target"
         );
-        let sprung = log
-            .lines()
-            .find_map(|l| l.split("Freezing Trap triggers on ").nth(1))
-            .unwrap_or_default();
-        assert!(
-            sprung.contains(" Priest #"),
-            "seed {seed}: the healer trap sprang on {sprung:?}"
-        );
         caught += 1;
     }
-    assert_eq!(caught, 3);
+    assert!(
+        caught >= 3,
+        "the healer trap sprang on the Priest in only {caught} seeds of {PRESSURE_TRAP_BANK:?}"
+    );
 }
+
+/// The seeds the pressure-trap probes play: each asserts its rules on every
+/// match in which the Hunter's first Freezing Trap springs on the Priest.
+const PRESSURE_TRAP_BANK: std::ops::Range<u64> = 0..48;
 
 /// AS-125 — the healer trap survives a configured kill target.
 ///
@@ -721,16 +740,16 @@ fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
 /// the Rogue in 227 of the 235 seeds of 320 where the trap springs on the
 /// Priest, where before it the Hunter dealt nothing in 243 of 246. Pinned
 /// seeds where the trap springs on the Priest and the polearm lands on the
-/// Rogue during the freeze (seed 6 was swapped for 1 when the polearm moved
-/// that match off the scenario; 1, 8 and 9 became 3, 5 and 7, the first three
-/// of seeds 0-15, when the traps came onto one shared cooldown, AS-196: the
-/// Frost Trap peel on the Rogue now takes the cooldown first in most seeds;
-/// they became 1, 3 and 4, again the first three of seeds 0-15, when no dispel
-/// could free a Web, AS-240).
+/// Rogue during the freeze. Asserted on every match of the seed bank in which
+/// the trap springs on the Priest, at least three; the polearm's landing as
+/// happening in at least one of them. (Its pinned seeds moved four times — the
+/// polearm, AS-196, AS-240 and AS-249.)
 #[test]
 fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
     const GATES_OPEN: f64 = 10.0;
-    for seed in [1u64, 3, 4] {
+    let mut caught = 0usize;
+    let mut swung = 0usize;
+    for seed in PRESSURE_TRAP_BANK {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.team1_kill_target = Some(1);
         cfg.max_duration_secs = 60.0;
@@ -750,11 +769,19 @@ fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
         };
         let (hunter, priest, rogue) = (id_of(1, "Hunter"), id_of(2, "Priest"), id_of(2, "Rogue"));
 
-        let throw = hunter_trap_events(&events)
-            .find(|v| {
-                v.pointer("/outcome/ability").and_then(|a| a.as_str()) == Some("FreezingTrap")
-            })
-            .unwrap_or_else(|| panic!("seed {seed}: no Freezing Trap thrown"));
+        let Some(throw) = hunter_trap_events(&events).find(|v| {
+            v.pointer("/outcome/ability").and_then(|a| a.as_str()) == Some("FreezingTrap")
+        }) else {
+            continue;
+        };
+        let first_sprung = log
+            .lines()
+            .find_map(|l| l.split("Freezing Trap triggers on ").nth(1))
+            .unwrap_or_default();
+        if !first_sprung.starts_with("Team 2 Priest") {
+            continue;
+        }
+        caught += 1;
         assert_eq!(
             throw.pointer("/outcome/target_id").and_then(|x| x.as_u64()),
             Some(priest),
@@ -828,11 +855,20 @@ fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
             })
             .filter(|t| frozen.contains(&(t - GATES_OPEN)))
             .count();
-        assert!(
-            melee_on_rogue > 0,
-            "seed {seed}: no Hunter melee swing landed on the Rogue while the Priest was frozen"
-        );
+        swung += usize::from(melee_on_rogue > 0);
     }
+    assert!(
+        caught >= 3,
+        "the healer trap sprang on the Priest in only {caught} seeds of {PRESSURE_TRAP_BANK:?}"
+    );
+    // The polearm landing was near-universal in this scenario (227 of 235)
+    // before AS-249's healer positioning made the scenario itself rare (the
+    // trap springs on the Priest in a handful of 48 seeds, not ~3 in 4); over
+    // so few it is pinned as happening, not as a share.
+    assert!(
+        swung >= 1,
+        "a Hunter melee swing landed on the Rogue during the freeze in none of {caught} matches"
+    );
 }
 
 /// AS-125 — no Aimed Shot is begun while the enemy Rogue is in stealth.

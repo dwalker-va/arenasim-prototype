@@ -582,30 +582,40 @@ fn a_paladin_rounds_a_pillar_to_cleanse_a_trapped_teammate() {
 // End to end: a headless match
 // ============================================================================
 
-/// The walk in a real match. In `Mage+Priest vs Rogue+Paladin` the Priest's
-/// Psychic Scream fears the Rogue away from its Paladin, beyond Cleanse's
-/// range; the Paladin walks and cleanses it. (No Hunter on the other side: a
-/// Hunter's Flare reveals the Rogue before it reaches the Priest, and the
-/// Scream this probe needs never comes.) Asserted over seeds rather than
-/// pinned to one, with a floor so the probe cannot pass by never walking: at
-/// least one walk (a `DispelChase` run toward an ally, begun beyond range by
-/// construction) must end with a Cleanse on that same ally, which the rotation
-/// only casts from within range.
+/// The walk in a real match, STAGED (tier 3): `Mage+Priest vs Rogue+Paladin`,
+/// the Rogue feared by the Priest's Psychic Scream 40yd from its Paladin,
+/// beyond Cleanse's range. The Paladin walks and cleanses it: a walk (a
+/// `DispelChase` run toward an ally, begun beyond range by construction) ends
+/// with a Cleanse on that same ally, which the rotation only casts from within
+/// range. The seeded matches this replaced (the Priest's Scream landing on its
+/// own, seeds 1 and 3) lost the situation to AS-249's healer positioning, and
+/// no seed of 1-10 held it; a stage holds it by construction.
 #[test]
 fn a_paladin_walks_to_a_feared_teammate_and_cleanses_it() {
     use arenasim::headless::runner::TraceConfig;
-    use arenasim::headless::{run_headless_match_with, HeadlessMatchConfig};
+    use arenasim::headless::{run_headless_match_staged, HeadlessMatchConfig, Stage, Unit};
 
-    let mut walks_ending_in_a_cleanse = 0;
-    for seed in [1, 3] {
+    const MAGE: Unit = Unit::new(1, 0);
+    const PRIEST: Unit = Unit::new(1, 1);
+    const ROGUE: Unit = Unit::new(2, 0);
+    const PALADIN: Unit = Unit::new(2, 1);
+    for seed in [1, 2] {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let path = tmp.path().to_path_buf();
         drop(tmp);
-        run_headless_match_with(
+        let stage = Stage::new()
+            .place(PALADIN, 20.0, 0.0)
+            .place(ROGUE, -20.0, 0.0)
+            .clear_auras(ROGUE)
+            .combatant(ROGUE, |c| c.stealthed = false)
+            .land(ROGUE, AbilityType::PsychicScream, PRIEST)
+            .place(PRIEST, -30.0, 10.0)
+            .place(MAGE, -30.0, -10.0);
+        run_headless_match_staged(
             HeadlessMatchConfig {
                 team1: vec!["Mage".into(), "Priest".into()],
                 team2: vec!["Rogue".into(), "Paladin".into()],
-                max_duration_secs: 40.0,
+                max_duration_secs: 15.0,
                 random_seed: Some(seed),
                 ..Default::default()
             },
@@ -613,6 +623,8 @@ fn a_paladin_walks_to_a_feared_teammate_and_cleanses_it() {
             Some(TraceConfig {
                 output_path: path.clone(),
             }),
+            stage,
+            |_| {},
         )
         .expect("headless match");
         let events: Vec<serde_json::Value> = std::fs::read_to_string(&path)
@@ -621,26 +633,31 @@ fn a_paladin_walks_to_a_feared_teammate_and_cleanses_it() {
             .filter_map(|l| serde_json::from_str(l).ok())
             .collect();
 
-        for walk in events.iter().filter(|e| e["trigger"] == "DispelChase") {
+        let walks: Vec<&serde_json::Value> = events
+            .iter()
+            .filter(|e| e["trigger"] == "DispelChase" && e["actor"]["class"] == "Paladin")
+            .collect();
+        assert!(
+            !walks.is_empty(),
+            "seed {seed}: the Paladin never walked to its feared Rogue"
+        );
+        let ended_in_a_cleanse = walks.iter().any(|walk| {
             let (start, ally) = (
                 walk["sim_time"].as_f64().unwrap(),
                 walk["target"]["entity_id"].as_u64(),
             );
-            let cleansed = events.iter().any(|e| {
+            events.iter().any(|e| {
                 e["actor"]["class"] == "Paladin"
                     && e["outcome"]["ability"] == "PaladinCleanse"
                     && e["outcome"]["target_id"].as_u64() == ally
                     && (start..=start + 5.0).contains(&e["sim_time"].as_f64().unwrap())
-            });
-            if cleansed {
-                walks_ending_in_a_cleanse += 1;
-            }
-        }
+            })
+        });
+        assert!(
+            ended_in_a_cleanse,
+            "seed {seed}: no dispel walk ended in a Cleanse on the walked-to ally"
+        );
     }
-    assert!(
-        walks_ending_in_a_cleanse >= 1,
-        "no dispel walk ended in a Cleanse on the walked-to ally"
-    );
 }
 
 // ============================================================================

@@ -249,3 +249,17 @@ then `scripts/paired_sweep.py --affects Rogue,Warrior,Shaman,Warlock --tier
 directional` and `2026-10-12-as293-oriented.py` on the two CSVs. The
 interrupt counts (`2026-10-12-as293-<map>-<arm>-interrupts.txt`) come from
 arms instrumented by `2026-10-12-as293-interrupt-sight-counter.py`.
+
+## `2026-10-13-as249-*`
+
+Behind `2026-10-13-as249-healer-positioning.md` (card AS-249). Two sweeps:
+
+- **`Legacy` before/after** — `2026-10-13-as249-legacy-{basicarena,pillaredarena}.jsonl.gz`,
+  8,080 configs each, run by `main` @ `51b5c046` (`-before.csv.gz`) and the
+  branch (`-after.csv.gz`). Analyse with `scripts/paired_sweep.py --affects
+  Priest,Paladin,Shaman,Druid --tier directional` and, scored from each
+  healer's side, `2026-10-13-as249-healer-side.py before.csv.gz after.csv.gz`.
+- **TakeCover three-arm** — `2026-10-13-as249-cover.jsonl.gz`
+  (`2026-10-13-as249-gen.py cover 3`, both teams `TeamPlan`, the play withheld
+  per arm), results `2026-10-13-as249-cover.csv.gz`, analysed by
+  `2026-10-13-as249-cover.py`.

@@ -851,22 +851,48 @@ fn results_and_report_do_not_depend_on_the_display_rate() {
 /// the Rogue's stun and a Mage's Frost Nova among them. With it the three
 /// default matches field all nine classes, and between them change every one
 /// of `FRAME_CLOCK_VISUALS`.
-const CROWD_CONTROL: &str = r#"{"team1":["Druid","Paladin","Mage"],"team2":["Rogue","Shaman","Warrior"],"map":"BasicArena","random_seed":0}"#;
+///
+/// Played over a small SEED BANK rather than one seed, and the visuals pinned
+/// as the bank's union: which crowd control one seed happens to land moves
+/// with any change to the AI's choices (AS-249's healer positioning took the
+/// Polymorph and the Travel Form out of seed 0), and the claim this match
+/// carries is the frame-rate independence of each seed, not the luck of one.
+const CROWD_CONTROL_BANK: [&str; 5] = [
+    r#"{"team1":["Druid","Paladin","Mage"],"team2":["Rogue","Shaman","Warrior"],"map":"BasicArena","random_seed":0}"#,
+    r#"{"team1":["Druid","Paladin","Mage"],"team2":["Rogue","Shaman","Warrior"],"map":"BasicArena","random_seed":1}"#,
+    r#"{"team1":["Druid","Paladin","Mage"],"team2":["Rogue","Shaman","Warrior"],"map":"BasicArena","random_seed":2}"#,
+    r#"{"team1":["Druid","Paladin","Mage"],"team2":["Rogue","Shaman","Warrior"],"map":"BasicArena","random_seed":3}"#,
+    r#"{"team1":["Druid","Paladin","Mage"],"team2":["Rogue","Shaman","Warrior"],"map":"BasicArena","random_seed":4}"#,
+];
+const CROWD_CONTROL: &str = CROWD_CONTROL_BANK[0];
 
 #[test]
 fn crowd_control_visuals_stay_off_the_tables() {
-    let schedules = vec![
-        (
-            "16667us frames".to_string(),
-            run(CROWD_CONTROL, fixed_rate(16_667)),
-        ),
-        (
-            "40000us frames".to_string(),
-            run(CROWD_CONTROL, fixed_rate(40_000)),
-        ),
-    ];
-    assert_exercised(CROWD_CONTROL, &schedules, &CROWD_CONTROL_VISUALS);
-    assert_frame_rate_independent(CROWD_CONTROL, schedules);
+    let mut union: BTreeSet<String> = BTreeSet::new();
+    for cfg in CROWD_CONTROL_BANK {
+        let schedules = vec![
+            ("16667us frames".to_string(), run(cfg, fixed_rate(16_667))),
+            ("40000us frames".to_string(), run(cfg, fixed_rate(40_000))),
+        ];
+        let seen = |ticks: &Ticks| -> BTreeSet<String> {
+            ticks.changed_off_tick.iter().cloned().collect()
+        };
+        assert_eq!(
+            seen(&schedules[0].1),
+            seen(&schedules[1].1),
+            "{cfg}: the two schedules changed different visuals on the combatants"
+        );
+        union.extend(seen(&schedules[0].1));
+        assert_frame_rate_independent(cfg, schedules);
+    }
+    let expected: BTreeSet<String> = CROWD_CONTROL_VISUALS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        union, expected,
+        "the crowd-control bank changed a different set of visuals on the combatants than it pins"
+    );
 }
 
 /// The frame-clock visuals each default match changes on its combatants —

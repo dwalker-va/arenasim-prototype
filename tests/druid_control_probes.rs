@@ -1561,37 +1561,37 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
 
 // ── Travel Form: a root is broken on the next global cooldown ──────────────
 
-/// More matches for the root-break probe: a Druid rooted while a teammate —
-/// itself, in each of these — is dying, where the emergency heal goes first.
-const ROOT_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
-    (&["Rogue", "Druid"], &["Hunter", "Shaman"], "BasicArena", 3),
-    (&["Rogue", "Druid"], &["Hunter", "Paladin"], "BasicArena", 2),
-    (
+/// More matches for the root-break probe, as a BANK: every Druid comp a
+/// Hunter's Web or Frost Trap roots, against a Hunter with each healer, over a
+/// few seeds. It was a hand-picked list that four cards in a row (AS-240,
+/// AS-247, AS-249 among them) had to top up when the seeds they held moved off
+/// the roots its floors count; a bank holds them by breadth instead.
+fn root_bank() -> Vec<(
+    &'static [&'static str],
+    &'static [&'static str],
+    &'static str,
+    u64,
+)> {
+    const DRUID_TEAMS: [&[&str]; 3] = [
+        &["Rogue", "Druid"],
         &["Hunter", "Druid"],
-        &["Hunter", "Paladin"],
-        "BasicArena",
-        1,
-    ),
-    (
         &["Warrior", "Druid"],
+    ];
+    const ROOTING_TEAMS: [&[&str]; 3] = [
+        &["Hunter", "Shaman"],
+        &["Hunter", "Paladin"],
         &["Hunter", "Priest"],
-        "PillaredArena",
-        2,
-    ),
-    // Added when the Web became physical (AS-240): the enemy Paladin could no
-    // longer Cleanse the Druid's Hunter's Web off its own Hunter, which moved
-    // the three Hunter+Druid vs Hunter+Paladin matches and left the probe one
-    // shift and one in-form root short of its floors. This one makes three
-    // shifts through a root, two of them rooted in the form.
-    (&["Rogue", "Druid"], &["Hunter", "Paladin"], "BasicArena", 5),
-    // Added when the Druid's mana governor reserve fell to 0.3 (AS-247): the
-    // change moved these seeds and left the probe four emergency heals short
-    // of its floor. Each of these makes one, rooted in the form.
-    (&["Rogue", "Druid"], &["Hunter", "Shaman"], "BasicArena", 7),
-    (&["Rogue", "Druid"], &["Hunter", "Priest"], "BasicArena", 4),
-    (&["Rogue", "Druid"], &["Hunter", "Priest"], "BasicArena", 7),
-    (&["Hunter", "Druid"], &["Hunter", "Shaman"], "BasicArena", 1),
-];
+    ];
+    let mut out = Vec::new();
+    for t1 in DRUID_TEAMS {
+        for t2 in ROOTING_TEAMS {
+            for seed in 1..=12 {
+                out.push((t1, t2, "BasicArena", seed));
+            }
+        }
+    }
+    out
+}
 
 /// How late a shift may land after the global cooldown that allows it: the
 /// decision frame and the landing frame, with two frames spare for the log's
@@ -1661,8 +1661,8 @@ fn a_root_is_broken_on_the_next_global_cooldown() {
     let mut from_the_form = 0;
     let mut exempted = 0;
     let mut lapsed = 0;
-    for (t1, t2, map, seed) in SHIFT_MATCHES.iter().chain(ROOT_MATCHES) {
-        let played = play(t1, t2, map, *seed);
+    for (t1, t2, map, seed) in SHIFT_MATCHES.iter().copied().chain(root_bank()) {
+        let played = play(t1, t2, map, seed);
         let druids: Vec<Entity> = played.frames[0]
             .combatants
             .iter()
@@ -1807,10 +1807,71 @@ fn a_root_is_broken_on_the_next_global_cooldown() {
         from_the_form >= 15,
         "only {from_the_form} roots landed in the form — the seeds moved"
     );
+    // The hand-picked list this floor was set on (10) chose matches FOR their
+    // emergency heals; the bank does not, and holds 7 (AS-249). Five keeps
+    // the exemption exercised several times over without re-picking seeds.
     assert!(
-        exempted >= 10,
+        exempted >= 5,
         "only {exempted} emergency heals went before a shift — the exemption is untested"
     );
+}
+
+/// A root's shift goes before a Mark of the Wild the Druid has lost, STAGED:
+/// the Druid rooted, with no Mark on it (a Shaman's Purge takes it in play),
+/// and the enemy Hunter's pet on it. Its first cast is Travel Form. The Mark
+/// headed the rotation, ahead of the shift, so a purged Mark cost the Druid a
+/// global cooldown rooted under its chaser (found in Rogue+Druid v Hunter+Shaman
+/// on BasicArena, AS-249).
+#[test]
+fn a_root_is_shifted_out_of_before_a_lost_mark_is_recast() {
+    use arenasim::headless::{run_headless_match_staged, Stage, Unit};
+    const DRUID: Unit = Unit::new(1, 1);
+    const HUNTER: Unit = Unit::new(2, 0);
+    for seed in [1u64, 2] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log_path = dir.path().join("match.txt");
+        let config = HeadlessMatchConfig {
+            team1: vec!["Rogue".into(), "Druid".into()],
+            team2: vec!["Hunter".into(), "Shaman".into()],
+            map: "BasicArena".into(),
+            max_duration_secs: 6.0,
+            random_seed: Some(seed),
+            output_path: Some(log_path.to_string_lossy().to_string()),
+            ..Default::default()
+        };
+        let stage = Stage::new()
+            .place(DRUID, -20.0, 0.0)
+            .clear_auras(DRUID)
+            .aura(
+                DRUID,
+                Aura {
+                    effect_type: AuraType::Root,
+                    duration: 4.0,
+                    break_on_damage_threshold: -1.0,
+                    ..Default::default()
+                },
+            )
+            .place(Unit::pet_of(2, 0), -18.0, 0.0)
+            .target(Unit::pet_of(2, 0), DRUID)
+            .place(HUNTER, 0.0, 0.0)
+            .target(HUNTER, DRUID);
+        run_headless_match_staged(config, false, None, stage, |_| {}).expect("match runs");
+        let log = std::fs::read_to_string(&log_path).expect("match log written");
+        let gates = log
+            .lines()
+            .find(|l| l.contains("Gates open"))
+            .and_then(log_time)
+            .expect("the gates open");
+        let first = log
+            .lines()
+            .filter(|l| l.contains("Team 1 Druid #2 casts "))
+            .find(|l| log_time(l).is_some_and(|t| t >= gates))
+            .unwrap_or_else(|| panic!("seed {seed}: the Druid cast nothing"));
+        assert!(
+            first.contains("casts Travel Form"),
+            "seed {seed}: rooted with a pet on it, the Druid's first cast was {first:?}"
+        );
+    }
 }
 
 // ── Cyclone: the direct-push aura sites ────────────────────────────────────

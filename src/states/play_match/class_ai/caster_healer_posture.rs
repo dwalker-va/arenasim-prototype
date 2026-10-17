@@ -16,8 +16,9 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::movement_config::{CasterHealerMovementConfig, MovementConfig};
 
 use super::healer_postures::{
-    compound_pressure_trigger, escape_tick, escape_window_from, healer_pressured_tick_shared,
-    medic_chase_override, medic_chase_tick, start_movement_event,
+    compound_pressure_onset, compound_pressure_trigger, escape_tick, escape_window_from,
+    healer_pressured_tick_shared, medic_chase_override, medic_chase_tick, start_movement_event,
+    take_cover_tick,
 };
 use super::CombatContext;
 
@@ -91,8 +92,11 @@ pub fn evaluate_caster_healer_posture(
 
     let shared = &movement.shared;
 
-    // PRESSURED compound trigger (shared with the Priest/Paladin).
+    // PRESSURED compound trigger (shared with the Priest/Paladin): `onset`
+    // enters the posture, `trigger` holds it — the hysteresis gap that keeps a
+    // threat on a boundary from strobing it.
     let trigger = compound_pressure_trigger(entity, ctx);
+    let onset = compound_pressure_onset(entity, ctx);
 
     let prev = state.posture;
 
@@ -118,7 +122,7 @@ pub fn evaluate_caster_healer_posture(
         Posture::Pressured if !trigger && now >= state.hold_until => Posture::Free,
         Posture::Pressured if escape_window_secs.is_some() => Posture::Escape,
         Posture::Pressured => Posture::Pressured,
-        _ if trigger => Posture::Pressured,
+        _ if onset => Posture::Pressured,
         _ => Posture::Free,
     };
 
@@ -153,10 +157,31 @@ pub fn evaluate_caster_healer_posture(
     // The walk wins over a movement-locking cast that is not itself critical,
     // exactly as an ESCAPE window does: a hardcast heal on a less-hurt ally in
     // sight would root the healer short of the dying one.
-    let medic_chase =
-        medic_chase_override(entity, my_pos, next, ctx, shared, state, directive, now);
+    //
+    // A healer left alone against two or more enemies takes cover instead
+    // (`TeamPlan`'s TakeCover play); with no teammate there is no medic chase
+    // for it to pre-empt.
+    let cover = take_cover_tick(
+        commands,
+        entity,
+        my_pos,
+        next,
+        ctx,
+        state,
+        directive,
+        shared,
+        now,
+        decision_trace,
+    );
+    let medic_chase = if cover.is_some() {
+        None
+    } else {
+        medic_chase_override(entity, my_pos, next, ctx, shared, state, directive, now)
+    };
     let medic_walk = medic_chase.map(|ally| ally.entity);
-    if let Some(ally) = medic_chase {
+    if cover.is_some() {
+        // The play holds the legs this tick.
+    } else if let Some(ally) = medic_chase {
         medic_chase_tick(
             commands,
             entity,
@@ -248,11 +273,12 @@ pub fn evaluate_caster_healer_posture(
         commands.entity(entity).try_insert(*state);
     }
 
-    let escape_defer = if medic_walk.is_some() || state.posture == Posture::Escape {
-        Some(shared.urgency_hp_threshold)
-    } else {
-        None
-    };
+    let escape_defer =
+        if medic_walk.is_some() || state.posture == Posture::Escape || cover == Some(true) {
+            Some(shared.urgency_hp_threshold)
+        } else {
+            None
+        };
 
     CasterHealerPlan {
         escape_defer,

@@ -124,6 +124,14 @@ pub struct AnchorConstraint {
     pub pos: Vec3,
     /// Maximum allowed XZ distance from the anchor (heal range, 40).
     pub heal_range: f32,
+    /// When no candidate keeps the anchor in reach (the healer is already
+    /// out of heal range or sight of it), CLOSE on it rather than drop the
+    /// constraint: the fallback ladder keeps only the candidates that end
+    /// nearer the anchor before it lets the anchor go (`score_directions`).
+    /// Set for a teammate the enemy is focusing (AS-249) — without it a healer
+    /// pushed out of reach by a threat fled freely, every step carrying it
+    /// further from the teammate it existed to heal.
+    pub close_when_out: bool,
 }
 
 /// Caller-built context for one scoring pass. Build from BTree-ordered
@@ -399,9 +407,20 @@ fn argmax_interest(
     weights: &MovementWeights,
     allowed: u16,
 ) -> Option<Vec2> {
+    argmax_interest_where(candidates, inputs, weights, allowed, |_| true)
+}
+
+/// [`argmax_interest`] over the candidates `keep` also accepts.
+fn argmax_interest_where(
+    candidates: &[Vec2],
+    inputs: &ScorerInputs,
+    weights: &MovementWeights,
+    allowed: u16,
+    keep: impl Fn(Vec2) -> bool,
+) -> Option<Vec2> {
     let mut best: Option<(Vec2, f32)> = None;
     for &candidate in candidates {
-        if candidate_mask(candidate, inputs) & !allowed != 0 {
+        if candidate_mask(candidate, inputs) & !allowed != 0 || !keep(candidate) {
             continue; // violates a mask the caller did not allow — skip
         }
         let score = score_direction(candidate, inputs, weights);
@@ -467,7 +486,10 @@ pub fn mask_and_los_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> (u16,
 /// [`compass_directions_16`]).
 ///
 /// Fallback ladder when every candidate is masked, lifting constraints in
-/// increasing order of harm so a unit is never stranded: (1) allow ally-anchor
+/// increasing order of harm so a unit is never stranded: (0) for an anchor
+/// that asks it ([`AnchorConstraint::close_when_out`]), relax reach to
+/// "closing": keep the candidates that end nearer the anchor than the unit
+/// stands now; (1) allow ally-anchor
 /// violations (heal range/sight become a preference once unsatisfiable); (2) if
 /// still none, also allow the obstacle mask (a step into a wall the collision
 /// resolver will then slide); (3) finally lift the boundary mask too and run the
@@ -481,6 +503,18 @@ pub fn score_directions(
     // Mask pass: no hard violations allowed.
     if let Some(dir) = argmax_interest(candidates, inputs, weights, 0) {
         return dir;
+    }
+    // Fallback rung 0: no step keeps the anchor in reach, so the healer is
+    // already out of it — close on it instead of letting it go.
+    if let Some(anchor) = inputs.anchor.filter(|a| a.close_when_out) {
+        let here = xz(inputs.my_pos).distance(xz(anchor.pos));
+        let closes = |c: Vec2| {
+            let next = inputs.my_pos + Vec3::new(c.x, 0.0, c.y) * inputs.lookahead;
+            xz(next).distance(xz(anchor.pos)) < here
+        };
+        if let Some(dir) = argmax_interest_where(candidates, inputs, weights, MASK_ANCHOR, closes) {
+            return dir;
+        }
     }
     // Fallback rung 1: drop the anchor mask.
     if let Some(dir) = argmax_interest(candidates, inputs, weights, MASK_ANCHOR) {
@@ -560,6 +594,7 @@ mod tests {
         let anchor = AnchorConstraint {
             pos: Vec3::new(-30.0, 1.0, 0.0),
             heal_range: 40.0,
+            close_when_out: false,
         };
         let my_pos = Vec3::new(9.7, 1.0, 0.0); // 39.7 from anchor — at the edge
         let inputs = ScorerInputs {
@@ -593,6 +628,58 @@ mod tests {
         assert!(
             outward_dist > anchor.heal_range,
             "test setup: +X must violate heal range"
+        );
+    }
+
+    /// The closing rung (AS-249): already out of heal range of an anchor that
+    /// asks it, with a threat between the two, the healer steps NEARER the
+    /// anchor — round the threat, not through it. The plain ladder drops the
+    /// anchor there and the healer flees straight away from both.
+    #[test]
+    fn an_anchor_out_of_reach_is_closed_on_when_it_asks() {
+        let my_pos = Vec3::new(0.0, 1.0, 0.0);
+        let anchor_pos = Vec3::new(46.0, 1.0, 0.0);
+        let inputs = |close_when_out| ScorerInputs {
+            my_pos,
+            lookahead: 2.0,
+            // A melee on the healer, between it and the anchor.
+            threats: vec![Vec3::new(3.0, 1.0, 0.0)],
+            anchor: Some(AnchorConstraint {
+                pos: anchor_pos,
+                heal_range: 40.0,
+                close_when_out,
+            }),
+            wand_range: 30.0,
+            ..Default::default()
+        };
+        let weights = priest_weights();
+        let step = |i: &ScorerInputs| {
+            let c = score_directions(&compass_directions_16(), i, &weights);
+            let next = my_pos + Vec3::new(c.x, 0.0, c.y) * 2.0;
+            (
+                xz(next).distance(xz(anchor_pos)),
+                xz(next).distance(Vec2::new(3.0, 0.0)),
+            )
+        };
+        let here = xz(my_pos).distance(xz(anchor_pos));
+        assert_eq!(
+            mask_bitmask(&compass_directions_16(), &inputs(true)),
+            u16::MAX,
+            "every step is out of reach: the ladder runs"
+        );
+        let (closing, from_threat) = step(&inputs(true));
+        assert!(
+            closing < here,
+            "closing rung: {closing} not nearer than {here}"
+        );
+        assert!(
+            from_threat > 2.5,
+            "closing rung walked into the threat ({from_threat})"
+        );
+        let (plain, _) = step(&inputs(false));
+        assert!(
+            plain > here,
+            "plain ladder: {plain} — the fixture must flee"
         );
     }
 
@@ -861,6 +948,7 @@ mod tests {
         let anchor = AnchorConstraint {
             pos: Vec3::new(34.0, 1.0, 0.0),
             heal_range: 40.0,
+            close_when_out: false,
         };
         let threat = Vec3::new(0.0, 1.0, 0.0);
 
@@ -946,6 +1034,7 @@ mod tests {
             anchor: Some(AnchorConstraint {
                 pos: Vec3::new(0.0, 1.0, -50.0),
                 heal_range: 10.0,
+                close_when_out: false,
             }),
             wand_range: 30.0,
             ..Default::default()
@@ -1279,6 +1368,7 @@ mod tests {
             anchor: Some(AnchorConstraint {
                 pos: Vec3::new(-10.0, 1.0, 0.0),
                 heal_range: 11.0,
+                close_when_out: false,
             }),
             obstacles: vec![pillar(-2.0, 0.0, 1.0)],
             ..Default::default()
@@ -1365,6 +1455,7 @@ mod tests {
         let anchor = AnchorConstraint {
             pos: Vec3::new(0.0, 1.0, -5.0),
             heal_range: 40.0,
+            close_when_out: false,
         };
         let candidate = Vec2::new(0.0, 1.0); // +Z: steps to (0, 2), 7yd from anchor (in range)
         let occluded = ScorerInputs {
@@ -1400,6 +1491,7 @@ mod tests {
             anchor: Some(AnchorConstraint {
                 pos: Vec3::new(0.0, 1.0, -50.0),
                 heal_range: 10.0,
+                close_when_out: false,
             }),
             obstacles: vec![], // clear sight
             ..Default::default()
@@ -1470,6 +1562,7 @@ mod tests {
             anchor: Some(AnchorConstraint {
                 pos: Vec3::new(-20.0, 1.0, 0.0),
                 heal_range: 18.0,
+                close_when_out: false,
             }),
             obstacles: vec![pillar(0.0, 0.0, 5.0), pillar(-10.0, 4.0, 2.0)],
             ..Default::default()

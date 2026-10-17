@@ -1295,6 +1295,82 @@ pub fn solve_position(
     (spot.distance(unit.pos) > 1e-3).then_some(spot)
 }
 
+/// Where a healer standing ALONE against two or more enemies takes cover —
+/// the [`TakeCover`](super::situation::Play::TakeCover) play (AS-249). `None`
+/// when the map has no obstacles (nothing to hide behind: the healer's ordinary
+/// movement stands) or `entity` is not in `world`.
+///
+/// It is `OccupyCover` with no ally to keep: there is nobody left to heal but
+/// itself, and a heal on itself needs no sight line, so the only things worth
+/// a position are the enemy casters' lines to it and the distance to the
+/// enemies that close. Lexicographic, as every solve here is:
+///
+/// 1. the fewest enemy CASTERS (ranged units, as [`SolveWorld::enemy_casters_of`]
+///    reads them) that can see the spot — a pillar between it and both of them
+///    is the point;
+/// 2. then the least depth inside `threat_radius` of the nearest enemy of any
+///    kind — a melee or pet reaches a hidden healer anyway, so among equally
+///    hidden spots it takes the one furthest out of its reach;
+/// 3. then the nearest — standing still wins a tie, so a healer in cover stays
+///    in it.
+///
+/// The candidates are `OccupyCover`'s: the healer's spot, every (obstacle,
+/// caster) shadow along its centre line ([`SHADOW_DEPTHS`]), and the local
+/// ring. No peek shoulders: peeking is for keeping an ally in sight, and there
+/// is none. The winner is moved onto standable ground, as [`solve_unit`]'s is.
+pub fn last_stand_cover(entity: Entity, world: &SolveWorld) -> Option<Vec2> {
+    if world.obstacles.is_empty() {
+        return None;
+    }
+    let unit = *world.unit(entity)?;
+    let mut candidates = vec![unit.pos];
+    for obstacle in &world.obstacles {
+        let (center, radius) = obstacle.footprint_disc();
+        let ring = radius + MOVER_RADIUS + COVER_STANDOFF;
+        for caster in world.enemy_casters_of(unit.team) {
+            let away = (center - caster.pos).normalize_or_zero();
+            if away == Vec2::ZERO {
+                continue;
+            }
+            for depth in SHADOW_DEPTHS {
+                candidates.push(center + away * (ring + depth));
+            }
+        }
+    }
+    for i in 0..SOLVE_DIRECTIONS {
+        let a = (i as f32) * std::f32::consts::TAU / SOLVE_DIRECTIONS as f32;
+        candidates.push(unit.pos + Vec2::from_angle(a) * SOLVE_LOOKAHEAD);
+    }
+    let usable = |c: &Vec2| {
+        world
+            .bounds
+            .as_ref()
+            .is_none_or(|b| b.contains(Vec3::new(c.x, 0.0, c.y)))
+    };
+    let key = |c: Vec2| {
+        let seen = world
+            .enemy_casters_of(unit.team)
+            .filter(|e| world.sees(c, e.pos))
+            .count();
+        let depth = world
+            .enemies_of(unit.team)
+            .map(|e| (world.threat_radius - c.distance(e.pos)).max(0.0))
+            .fold(0.0f32, f32::max);
+        (seen, depth, c.distance(unit.pos))
+    };
+    let mut best: Option<((usize, f32, f32), Vec2)> = None;
+    for c in candidates.into_iter().filter(usable) {
+        let k = key(c);
+        if best.is_none_or(|(bk, _)| k < bk) {
+            best = Some((k, c));
+        }
+    }
+    let spot = best.map_or(unit.pos, |(_, p)| {
+        nearest_standable(&world.obstacles, p, unit.y).unwrap_or(unit.pos)
+    });
+    Some(spot)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1357,6 +1433,60 @@ mod tests {
             rotation: 0.0,
             base_y: 0.0,
             height: 5.0,
+        }
+    }
+
+    // --- last stand ---
+
+    /// The lone healer in the open, two enemy casters east of a pillar: the
+    /// spot it picks is behind that pillar from both — and it is a real spot,
+    /// not one inside the footprint. With no obstacles there is nothing to
+    /// pick.
+    #[test]
+    fn a_last_stand_takes_the_spot_both_casters_lose_sight_of() {
+        let me = healer(1, 1, 0, -20.0, 10.0);
+        let mut w = world(vec![
+            me,
+            unit(2, 2, 0, 25.0, 3.0),
+            unit(3, 2, 1, 25.0, -3.0),
+        ]);
+        assert_eq!(last_stand_cover(e(1), &w), None, "no obstacles, no cover");
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        assert!(
+            w.sees(me.pos, Vec2::new(25.0, 3.0)),
+            "the healer starts in the open"
+        );
+        let spot = last_stand_cover(e(1), &w).expect("a map with cover");
+        for caster in [Vec2::new(25.0, 3.0), Vec2::new(25.0, -3.0)] {
+            assert!(!w.sees(spot, caster), "{spot:?} is seen from {caster:?}");
+        }
+        assert!(
+            nearest_standable(&w.obstacles, spot, 1.0) == Some(spot),
+            "{spot:?} lies inside the pillar"
+        );
+    }
+
+    /// Among spots equally hidden, a closer melee pushes the choice out of
+    /// its reach; with nobody close, standing still in cover wins.
+    #[test]
+    fn a_last_stand_in_cover_holds_and_steps_out_of_a_melees_reach() {
+        let mut w = world(vec![
+            healer(1, 1, 0, -9.0, 0.0),
+            unit(2, 2, 0, 25.0, 0.0),
+            unit(3, 2, 1, 30.0, 0.0),
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        // Hidden already, nobody near: it holds.
+        assert_eq!(last_stand_cover(e(1), &w), Some(Vec2::new(-9.0, 0.0)));
+        // A melee arrives at its shoulder: it moves deeper into the shadow.
+        w.units.push(melee(4, 2, 2, -9.0, 4.0));
+        let spot = last_stand_cover(e(1), &w).unwrap();
+        assert!(
+            spot.distance(Vec2::new(-9.0, 4.0)) > 4.0,
+            "{spot:?} stays at the melee's feet"
+        );
+        for caster in [Vec2::new(25.0, 0.0), Vec2::new(30.0, 0.0)] {
+            assert!(!w.sees(spot, caster), "{spot:?} left cover from {caster:?}");
         }
     }
 

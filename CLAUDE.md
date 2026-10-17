@@ -682,6 +682,39 @@ with the context-steering mask refactor.
 - `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (tempo, `press_advantage_margin` / `press_release_margin`)
 - `trap_setup` (Hunter 3.0, 0.0 for everyone else) — while Freezing Trap is ready and an enemy healer would be caught by it (`hunter_dip::trap_setup_healer`), pull toward that healer once a KITE step would leave it beyond throw range (the trap's `range` less its trigger radius); zero inside that range, absent while the trap is on cooldown. Kept below `flee` so the kite still escapes the melee, bent toward the healer. Disengage bends its leap by the same two weights (`hunter_dip::trap_setup_disengage`) and names the healer as the Disengage's `target_id` in the trace when it did; KITE decisions carry the term as a `trap_setup` scorer term
 
+**PRESSURED onset (`Legacy`)** — no RON knob; reuses `danger_edge_margin`. A
+caster targeting a healer pressures it only while CLOSING: between its own
+preferred range and `threat_intent_radius`, a 2yd band for a 28yd caster. Under
+`Legacy` a FREE healer ENTERS PRESSURED only when that branch holds
+`danger_edge_margin` inside both its edges (`situation::AllyStanding::pressure_onset`,
+`healer_postures::compound_pressure_onset`); it stays PRESSURED on the plain
+test. Proximity, melee and pets onset exactly as before. Without the gap a
+caster pursuing the healer flipped PRESSURED on for a frame, `pressured_hold`
+backed the healer off, and its formation point walked it back in: a ~3s
+in-and-out bob (AS-249; `tests/healer_positioning.rs` pins the reversal rate).
+`TeamPlan` enters on the plain trigger: there PRESSURED is the team solve's,
+which holds cover in reach of the ally, and the gap measurably cost its heal line.
+
+**Out of reach of a focused teammate (`Legacy` PRESSURED)** — the scorer's
+anchor mask keeps a PRESSURED healer in heal range and sight of its anchor ally.
+When the healer is already out of reach, so every step is masked, the fallback
+ladder used to drop the anchor and let the healer flee freely. For an anchor
+the enemy is targeting it now first keeps the steps that end NEARER it
+(`AnchorConstraint::close_when_out`, rung 0 in `score_directions`), so a melee
+between the healer and its focused teammate is walked round, not fled from.
+ESCAPE windows keep the plain ladder.
+
+**Last stand: take cover (`TeamPlan` play)** — a healer that is its team's last
+living non-pet unit against two or more enemies it can see (the `last_stand`
+situation) runs the `TakeCover` play: it walks to the spot
+`team_solve::last_stand_cover` picks — the fewest enemy casters in sight, then
+furthest out of the nearest closer's reach, then nearest — and, once there,
+holds it `COVER_HOLD_SECS` (2s, longer than a Frostbolt) unless an enemy is
+inside `danger_radius`. Overrides FREE and PRESSURED (not ESCAPE or a dip);
+movement-locking casts defer while it walks; withheld per team as `"TakeCover"`.
+Inert with no obstacles. Measured: it moves no wins and adds ~0.7pt of draws
+on Nagrand (`docs/design/balance/2026-10-13-as249-healer-positioning.md`).
+
 **Medic chase (heal-seeking movement)** — shared across Priest/Paladin/Shaman
 (`healer_postures::medic_chase_override` / `medic_chase_tick`; no RON knob,
 reuses `urgency_hp_threshold`). When a living non-pet teammate is below
@@ -861,6 +894,10 @@ rules in `docs/design/wow-mechanics.md` (Travel Form). A shift that breaks a
 root or snare takes the Druid's next global cooldown: an emergency heal may
 take ONE first (`Combatant::druid_emergency_heal_spent` remembers it until the
 Druid is free), pinned by `a_root_is_broken_on_the_next_global_cooldown`.
+Mark of the Wild waits behind a shift owed to break a root or snare, as it
+waits behind a dying teammate's heals: a Mark purged off the Druid is not
+recast while it stands rooted under a chaser (`DruidTurn::take`, pinned by
+`a_root_is_shifted_out_of_before_a_lost_mark_is_recast`).
 
 **Tangent steering (goal-directed pillar rounding)** — `map_geometry::steer_toward_goal`
 (pure, unit-tested; no RON knob). When a mover with a DESTINATION has the

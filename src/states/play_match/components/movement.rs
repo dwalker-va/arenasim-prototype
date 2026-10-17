@@ -151,6 +151,11 @@ pub struct HealerPosture {
     /// owed, rather than handing movement back to a posture that can step it
     /// out of range while the GCD runs. `Off` otherwise.
     pub dispel_walk: DispelWalkPhase,
+    /// `TeamPlan` only: the cover spot a healer standing alone against two or
+    /// more enemies is walking to or holding (the TakeCover play, AS-249).
+    /// `Some` while the play drives the healer's position, `None` otherwise; a
+    /// new spot (or `None` → `Some`) is what emits its `TakeCover` trace event.
+    pub cover_spot: Option<Vec2>,
 }
 
 /// Phase of a healer's `Legacy` dispel walk ([`HealerPosture::dispel_walk`]).
@@ -180,6 +185,7 @@ impl HealerPosture {
             medic_target: None,
             solve_dispel: None,
             dispel_walk: DispelWalkPhase::Off,
+            cover_spot: None,
         }
     }
 }

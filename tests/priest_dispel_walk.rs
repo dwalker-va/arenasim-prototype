@@ -1018,19 +1018,27 @@ struct Walk {
 
 /// Every `DispelChase` a team-1 Priest traced in `config`'s match.
 fn priest_walks(config: arenasim::headless::HeadlessMatchConfig) -> Vec<Walk> {
-    use arenasim::headless::run_headless_match_with;
+    priest_walks_staged(config, None)
+}
+
+/// [`priest_walks`], with `stage` landed on the match when one is given.
+fn priest_walks_staged(
+    config: arenasim::headless::HeadlessMatchConfig,
+    stage: Option<arenasim::headless::Stage>,
+) -> Vec<Walk> {
     use arenasim::headless::runner::TraceConfig;
+    use arenasim::headless::{run_headless_match_staged, run_headless_match_with};
 
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let path = tmp.path().to_path_buf();
     drop(tmp);
-    run_headless_match_with(
-        config,
-        true,
-        Some(TraceConfig {
-            output_path: path.clone(),
-        }),
-    )
+    let trace = Some(TraceConfig {
+        output_path: path.clone(),
+    });
+    match stage {
+        Some(stage) => run_headless_match_staged(config, true, trace, stage, |_| {}),
+        None => run_headless_match_with(config, true, trace),
+    }
     .expect("headless match");
     let events: Vec<serde_json::Value> = std::fs::read_to_string(&path)
         .expect("read trace")
@@ -1062,32 +1070,48 @@ fn priest_walks(config: arenasim::headless::HeadlessMatchConfig) -> Vec<Walk> {
         .collect()
 }
 
-/// The walk in a real `Legacy` match: `Warrior+Priest vs Warlock+Priest`, where
-/// the Warlock fears the Warrior out of Dispel Magic's range in the opening.
-/// Asserted over seeds rather than pinned to one, with a floor so the probe
-/// cannot pass by never walking: at least one walk (begun beyond reach by
-/// construction) must end with a Dispel Magic on that same teammate, which the
-/// rotation only casts once it reaches.
+/// The walk in a real `Legacy` match, STAGED (tier 3): `Mage+Priest vs
+/// Warlock+Priest`, the Mage feared by the Warlock 40yd from its Priest,
+/// beyond Dispel Magic's 30yd. A walk (begun beyond reach by construction)
+/// must end with a Dispel Magic on that same teammate, which the rotation only
+/// casts once it reaches. The seeded matches this replaced (the Warlock's Fear
+/// landing on a Warrior in the opening, seeds 1 and 3) lost the situation to
+/// AS-249's healer positioning, and no seed of 1-10 held it. A Mage, not a
+/// Warrior: a Warrior's Berserker Rage would break the fear itself.
 #[test]
 fn a_priest_walks_to_a_feared_teammate_and_dispels_it() {
-    use arenasim::headless::HeadlessMatchConfig;
-    let mut ended_in_a_dispel = 0;
-    for seed in [1, 3] {
-        ended_in_a_dispel += priest_walks(HeadlessMatchConfig {
-            team1: vec!["Warrior".into(), "Priest".into()],
-            team2: vec!["Warlock".into(), "Priest".into()],
-            max_duration_secs: 40.0,
-            random_seed: Some(seed),
-            ..Default::default()
-        })
-        .iter()
-        .filter(|w| w.ended_in_a_dispel)
-        .count();
+    use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
+    use arenasim::states::play_match::AbilityType;
+    const MAGE: Unit = Unit::new(1, 0);
+    const PRIEST: Unit = Unit::new(1, 1);
+    const WARLOCK: Unit = Unit::new(2, 0);
+    const ENEMY_PRIEST: Unit = Unit::new(2, 1);
+    for seed in [1, 2] {
+        let stage = Stage::new()
+            .place(PRIEST, -20.0, 0.0)
+            .place(MAGE, 20.0, 0.0)
+            .land(MAGE, AbilityType::Fear, WARLOCK)
+            .place(WARLOCK, 30.0, 12.0)
+            .place(ENEMY_PRIEST, 34.0, -12.0);
+        let walks = priest_walks_staged(
+            HeadlessMatchConfig {
+                team1: vec!["Mage".into(), "Priest".into()],
+                team2: vec!["Warlock".into(), "Priest".into()],
+                max_duration_secs: 15.0,
+                random_seed: Some(seed),
+                ..Default::default()
+            },
+            Some(stage),
+        );
+        assert!(
+            !walks.is_empty(),
+            "seed {seed}: the Priest never walked to its feared Mage"
+        );
+        assert!(
+            walks.iter().any(|w| w.ended_in_a_dispel),
+            "seed {seed}: no dispel walk ended in a Dispel Magic on the walked-to teammate"
+        );
     }
-    assert!(
-        ended_in_a_dispel >= 1,
-        "no dispel walk ended in a Dispel Magic on the walked-to teammate"
-    );
 }
 
 /// The walk end to end under `TeamPlan`, both sides: `Rogue+Priest vs

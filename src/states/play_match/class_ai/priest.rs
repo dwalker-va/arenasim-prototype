@@ -33,9 +33,10 @@ use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{cast_gate, pre_cast_ok, unreached_reason, Cleared, PreCastOpts};
 use super::healer_postures::{
-    compound_pressure_trigger, dispel_chase_override, dispel_walk_tick, escape_tick,
-    escape_window_from, healer_pressured_tick_shared, medic_chase_override, medic_chase_tick,
-    release_ally_walk, start_movement_event, start_movement_event_with_target, HealerDispel,
+    compound_pressure_onset, compound_pressure_trigger, dispel_chase_override, dispel_walk_tick,
+    escape_tick, escape_window_from, healer_pressured_tick_shared, medic_chase_override,
+    medic_chase_tick, release_ally_walk, start_movement_event, start_movement_event_with_target,
+    take_cover_tick, HealerDispel,
 };
 
 use super::{CombatContext, CombatantInfo};
@@ -1780,6 +1781,10 @@ pub fn evaluate_priest_posture(
     // --- PRESSURED compound trigger (R6) --- see
     // `healer_postures::compound_pressure_trigger` (shared with the Paladin).
     let trigger = compound_pressure_trigger(entity, ctx);
+    // Its onset half: FREE (and a dip) enter PRESSURED only on the onset test,
+    // which under `Legacy` gives a closing caster's band width, so a caster at
+    // its edge cannot strobe the posture (AS-249).
+    let onset = compound_pressure_onset(entity, ctx);
 
     let prev = state.posture;
 
@@ -1830,11 +1835,11 @@ pub fn evaluate_priest_posture(
         // DIP (U4): becoming focused preempts UNCONDITIONALLY (→ PRESSURED,
         // never DipAbort — the defensive self-peel takes over). Otherwise the
         // abort conditions apply; else hold the dip.
-        Posture::Dip if trigger => Posture::Pressured,
+        Posture::Dip if onset => Posture::Pressured,
         Posture::Dip if dip_aborts => Posture::Free,
         Posture::Dip => Posture::Dip,
         // FREE: pressure first, then the offensive dip opportunity.
-        _ if trigger => Posture::Pressured,
+        _ if onset => Posture::Pressured,
         _ if dip_entry.is_some() => Posture::Dip,
         _ => Posture::Free,
     };
@@ -1898,7 +1903,25 @@ pub fn evaluate_priest_posture(
     // The walk wins over a movement-locking cast that is not itself critical:
     // a Flash Heal on a less-hurt ally in sight would root the Priest short of
     // the dying one, so it defers, while a heal on a dying ally in sight fires.
-    if let Some(ally) =
+    if let Some(walking) = take_cover_tick(
+        commands,
+        entity,
+        my_pos,
+        next,
+        ctx,
+        state,
+        directive,
+        shared,
+        now,
+        decision_trace,
+    ) {
+        // A healer left alone against two or more enemies takes cover
+        // (`TeamPlan`'s TakeCover play): the one positioning authority while it
+        // lasts, and casts that would root it in the open wait until it is in.
+        if walking {
+            cast_defer = true;
+        }
+    } else if let Some(ally) =
         medic_chase_override(entity, my_pos, next, ctx, shared, state, directive, now)
     {
         medic_chase_tick(

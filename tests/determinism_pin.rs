@@ -109,10 +109,17 @@ fn seeded_2v2_matches_its_recorded_identity() {
     // Pummel put on it at 31.95s. Ice Barrier is a Frost spell, so it now waits
     // for the lockout to end, and the Warrior's Rend tick at 32.83s lands on
     // the Mage unabsorbed.
+    //
+    // Re-recorded for AS-249, the `Legacy` healers' PRESSURED onset gap. Took
+    // this cell to Some(2) @ 49.549416s from Some(1) @ 42.69952s. The first
+    // line that differs from `main` @ 51b5c046 is at 13.92s (log clock): on
+    // `main` each Priest entered PRESSURED as the other closed into the
+    // 28-30yd closing band, and both opened with Mind Blast; with the gap
+    // neither enters PRESSURED there, and neither casts it.
     assert_pinned(
         &result,
-        Some(1),
-        1_110_101_071,
+        Some(2),
+        1_111_896_730,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }

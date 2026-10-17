@@ -22,6 +22,8 @@
 
 use std::collections::BTreeMap;
 
+mod common;
+
 use arenasim::headless::runner::TraceConfig;
 use arenasim::headless::{run_headless_match_observed, FrameObservation, HeadlessMatchConfig};
 use arenasim::states::play_match::{AbilityDefinitions, AbilityType, AuraType};
@@ -302,33 +304,6 @@ fn probe(team1: &[&str], team2: &[&str], map: &str, seed: u64) -> Played {
 }
 
 impl Played {
-    /// Frames on which a free `class` healer could not cast its dispel while a
-    /// teammate sat in urgent crowd control at least `min_distance` away — the
-    /// moments a walk would have to be refused. The non-vacuity count for
-    /// rule 1. (Out of REACH is range or sight; the observer has positions,
-    /// not sightlines, so the probe bounds distance from below instead.)
-    fn unable_while_owed(&self, class: CharacterClass, min_distance: f32) -> usize {
-        self.frames
-            .iter()
-            .filter(|f| {
-                f.units.values().any(|h| {
-                    h.class == class
-                        && !h.is_pet
-                        && h.alive
-                        && !h.has(HEALER_HELD)
-                        && h.has(PALADIN_CANNOT_CLEANSE)
-                        && f.units.values().any(|a| {
-                            a.team == h.team
-                                && !a.is_pet
-                                && a.alive
-                                && a.has(URGENT_CC)
-                                && xz(a.pos).distance(xz(h.pos)) >= min_distance
-                        })
-                })
-            })
-            .count()
-    }
-
     /// Walks a `class` healer traced that carried it into reach of the
     /// teammate while the dispel was still owed — the non-vacuity count for
     /// rule 2.
@@ -356,30 +331,68 @@ impl Played {
     }
 }
 
-/// Rule 1, played: `Warrior+Paladin vs Warlock+Priest` on Nagrand, seed 3. The
-/// Felhunter Spell Locks the Paladin's Flash of Light (Holy locked 3s, from
-/// 22.75s) as the Warlock's Death Coil sends the Warrior off ~30yd round a
-/// pillar; before AS-197 the Paladin walked for the Cleanse it could not cast
-/// (three `DispelChase`s, 23.3-24.7s). It must not walk while it cannot cast.
+/// Rule 1, STAGED (tier 3): the Paladin Holy-locked for 3s while its Mage
+/// sits feared 45yd off, beyond Cleanse's 30yd (a Mage: a Warrior's Berserker
+/// Rage would break the fear itself). Before AS-197 a Paladin in
+/// that spot walked for the Cleanse it could not cast (the seeded match this
+/// replaced: `Warrior+Paladin vs Warlock+Priest`, Nagrand, seed 3, where a
+/// Spell Lock landed as Death Coil sent the Warrior off round a pillar —
+/// AS-249 moved that seed off the situation). It must not walk while it
+/// cannot cast; once the lockout runs out the walk is owed and goes, so the
+/// probe is not vacuous.
 #[test]
 fn a_paladin_that_cannot_cleanse_does_not_walk_for_it() {
-    let played = probe(
-        &["Warrior", "Paladin"],
-        &["Warlock", "Priest"],
-        "PillaredArena",
-        3,
-    );
-    let unable = played.unable_while_owed(CharacterClass::Paladin, 25.0);
-    assert!(
-        unable >= 30,
-        "vacuous: the Paladin could not Cleanse a CC'd teammate 25yd+ off on only {unable} frames"
-    );
-    let b = played.breaches(urgency_hp());
-    assert!(
-        b.walked_unable_to_cast.is_empty(),
-        "the Paladin walked for Cleanse while it could not cast it, at {:?}",
-        b.walked_unable_to_cast
-    );
+    use arenasim::headless::{Stage, Unit};
+    use arenasim::states::play_match::{Aura, SpellSchool};
+    use common::staged::{of_class, play, sim_time};
+
+    const MAGE: Unit = Unit::new(1, 0);
+    const PALADIN: Unit = Unit::new(1, 1);
+    const WARLOCK: Unit = Unit::new(2, 0);
+    const PRIEST: Unit = Unit::new(2, 1);
+    const LOCKOUT: f32 = 3.0;
+    for seed in [1, 2] {
+        let config = HeadlessMatchConfig {
+            max_duration_secs: 12.0,
+            ..legacy(
+                &["Mage", "Paladin"],
+                &["Warlock", "Priest"],
+                "BasicArena",
+                seed,
+            )
+        };
+        let stage = Stage::new()
+            .place(PALADIN, -20.0, 0.0)
+            .aura(
+                PALADIN,
+                Aura {
+                    effect_type: AuraType::SpellSchoolLockout,
+                    duration: LOCKOUT,
+                    magnitude: SpellSchool::Holy.to_lockout_magnitude(),
+                    break_on_damage_threshold: -1.0,
+                    ..Default::default()
+                },
+            )
+            .place(MAGE, 25.0, 0.0)
+            .land(MAGE, AbilityType::Fear, WARLOCK)
+            .place(WARLOCK, 30.0, 12.0)
+            .place(PRIEST, 34.0, -12.0);
+        let played = play(config, stage);
+        let start = played.landed().combat;
+        let walks: Vec<f32> = of_class(played.staged_trace(), "Paladin")
+            .filter(|e| e["kind"] == "movement_decision" && e["trigger"] == "DispelChase")
+            .map(|e| sim_time(e) - start)
+            .collect();
+        assert!(
+            // A frame's slack: the lockout's last tick and the walk can share it.
+            walks.iter().all(|&t| t >= LOCKOUT - 1.0 / 60.0),
+            "seed {seed}: the Paladin walked for Cleanse at {walks:?}s, inside its {LOCKOUT}s Holy lockout"
+        );
+        assert!(
+            !walks.is_empty(),
+            "seed {seed}: the Paladin never walked to its feared Mage, so the walk was never owed on this stage"
+        );
+    }
 }
 
 /// Rule 2, played, for each walk: a healer that walked into reach of a teammate
@@ -423,68 +436,11 @@ fn a_healer_that_walked_into_dispel_reach_holds_there_while_the_dispel_is_owed()
     }
 }
 
-impl Played {
-    /// Frames on which a `class` healer free to act had a teammate in urgent
-    /// crowd control beyond its dispel's range while ANOTHER teammate was below
-    /// `urgency_hp` — the non-vacuity count for rule 3.
-    fn dying_while_owed(&self, class: CharacterClass) -> usize {
-        let range = AbilityDefinitions::default()
-            .get(&dispel_of(class).unwrap())
-            .unwrap()
-            .range;
-        let urgency = urgency_hp();
-        self.frames
-            .iter()
-            .enumerate()
-            .filter(|(i, f)| {
-                f.units.iter().any(|(&hid, h)| {
-                    h.class == class
-                        && !h.is_pet
-                        && h.alive
-                        && !h.has(HEALER_HELD)
-                        && f.units.iter().any(|(&aid, a)| {
-                            aid != hid
-                                && a.team == h.team
-                                && !a.is_pet
-                                && a.alive
-                                && a.has(URGENT_CC)
-                                && xz(a.pos).distance(xz(h.pos)) > range
-                                && self.someone_else_dying(*i, hid, aid, urgency)
-                        })
-                })
-            })
-            .count()
-    }
-}
-
-/// Rule 3, played, for each walk: no dispel walk while another teammate is
-/// dying. Before AS-197 the `Legacy` walk yielded only to a dying teammate the
-/// healer could not SEE (the medic chase), so on an open map it walked off a
-/// sighted one: the Priest in `Warrior+Mage+Priest vs Mage+Rogue+Priest`
-/// (BasicArena, seed 4) at 21.5s and 22.1s. The Paladin's half is the staged
-/// match in `tests/dispel_walk_dying_first.rs`.
-#[test]
-fn a_healer_does_not_walk_for_a_dispel_while_another_teammate_is_dying() {
-    for (class, team1, team2, seed) in [(
-        CharacterClass::Priest,
-        ["Warrior", "Mage", "Priest"],
-        ["Mage", "Rogue", "Priest"],
-        4,
-    )] {
-        let played = probe(&team1, &team2, "BasicArena", seed);
-        let dying = played.dying_while_owed(class);
-        assert!(
-            dying >= 30,
-            "vacuous: a {class:?} teammate was dying while another sat in CC beyond reach on only {dying} frames"
-        );
-        let b = played.breaches(urgency_hp());
-        assert!(
-            b.walked_off_the_dying.is_empty(),
-            "the {class:?} walked for a dispel while another teammate was dying, at {:?}",
-            b.walked_off_the_dying
-        );
-    }
-}
+// Rule 3 (no dispel walk while another teammate is dying) is the staged match
+// in `tests/dispel_walk_dying_first.rs`, for the Priest — free and pressed —
+// and the Paladin, under both profiles. Its seeded probe here (`Warrior+Mage+
+// Priest vs Mage+Rogue+Priest`, BasicArena, seed 4) lost the situation to
+// AS-249's seed shift, and no seed of a ten-seed bank held it.
 
 /// Exploratory: every healer comp below against every CC comp, on two maps,
 /// over a few seeds — prints each match that breaks a rule. How the probes'

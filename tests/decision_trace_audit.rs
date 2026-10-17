@@ -132,6 +132,7 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
     "FlareWait",
     "FlareCommit",
     "ShiftEscape",
+    "TakeCover",
 ];
 
 /// `situation_change` names (`SituationName`) and change kinds
@@ -140,6 +141,7 @@ const EXPECTED_SITUATION_NAMES: &[&str] = &[
     "enemy_healer_locked",
     "ally_in_danger",
     "kill_window",
+    "last_stand",
     "tempo",
     "phase",
 ];
