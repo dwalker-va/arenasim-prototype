@@ -885,7 +885,16 @@ teammate), Travel Form, Innervate and the heals are never held. The rule lives
 in the Druid's rotation order (`class_ai/druid.rs`, `DruidTurn::take` /
 `try_dying_heal` / `try_roots_peel` / `held_for_medic_walk`; the walk's
 teammate reaches it as `CasterHealerPlan::medic_walk`), so no other healer's
-deferral changes (`tests/druid_dying_heal.rs`).
+deferral changes (`tests/druid_dying_heal.rs`). Under `TeamPlan` PRESSURED,
+where the medic chase is retired, the walk is the team solve's: the dying
+teammate its last re-solve owed reach to (`C_DYING`, and the sight fallback
+that walks straight at it — `team_solve::dying_anchor`), kept on
+`HealerPosture::solve_dying` and read through
+`healer_postures::solve_dying_walk`, which drops it outside PRESSURED, while
+the healer is hard-CC'd, and once the teammate is dead or no longer dying. Unlike
+the `Legacy` walk it covers a dying teammate in sight but beyond heal range,
+since the solve walks into range too. It feeds only the Druid's hold; any other
+healer may read it (`tests/druid_teamplan_dying_walk.rs`).
 
 **Travel Form escape (Druid)** — `druid.weights.flee`. A shifted Druid is in
 ESCAPE for as long as it stays shifted (`evaluate_caster_healer_posture`'s

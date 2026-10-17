@@ -435,7 +435,9 @@ fn own_aura<'c>(
 /// Druid AI: decides and executes one ability per global cooldown.
 ///
 /// `medic_walk` is the teammate a live medic walk is walking to (the posture
-/// plan's): see the dying-teammate rule in the module docs.
+/// plan's — `Legacy`'s medic chase, or under `TeamPlan` PRESSURED the team
+/// solve's walk to a dying teammate): see the dying-teammate rule in the
+/// module docs.
 /// The mana governor reads the match phase from `ctx.situation()`.
 /// `gates_opened` holds every
 /// combat action until the gates open; only Mark of the Wild is cast before.
