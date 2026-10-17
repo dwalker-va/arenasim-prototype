@@ -254,3 +254,34 @@ fn every_control_reaches_its_own_play_on_its_own_team() {
         );
     }
 }
+
+/// A unit with no peel tool is passed by the Peel stage even with a teammate
+/// in danger: a Warrior beside its dying Priest, with an enemy Mage low and no
+/// enemy healer (a kill window), runs the Burst play, not Peel. The scene
+/// opens both windows, so the walk reached Peel and passed it.
+#[test]
+fn a_warrior_with_no_peel_tool_bursts_past_a_teammate_in_danger() {
+    const ENEMY_MAGE: &str = "enemy mage";
+    let mut s = Scene::new()
+        .ai_profile(1, AiProfile::TeamPlan)
+        .unit(ME, 1, Warrior)
+        .at(0.0, 0.0)
+        .targeting(ENEMY_MAGE)
+        .unit(ALLY, 1, Priest)
+        .at(3.0, 0.0)
+        .health(0.3)
+        .targeting(ENEMY)
+        .unit(ENEMY, 2, Warrior)
+        .at(4.5, 0.0)
+        .targeting(ALLY)
+        .unit(ENEMY_MAGE, 2, Mage)
+        .at(1.5, 0.0)
+        .health(0.2)
+        .targeting(ME);
+    s.combatant_mut(ME).stealthed = false;
+    let view = s.decide(ME);
+    let situation = view.situation.as_ref().expect("a situation");
+    assert!(situation.ally_in_danger.is_some(), "no teammate in danger");
+    assert!(situation.kill_window.is_some(), "no kill window");
+    assert_eq!(played(&view), Some(PlayId::Burst));
+}

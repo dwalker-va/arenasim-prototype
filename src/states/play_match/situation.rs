@@ -336,8 +336,10 @@ pub enum Play {
     Burst,
     /// `ally` is in danger: the PEEL step — crowd control on one of its
     /// [`danger_attackers`](TeamSituation::danger_attackers) — heads the
-    /// chain. When it does not fire, the chain below it runs as the stages
-    /// after it order it ([`TeamSituation::play_after`]). Gated under
+    /// chain. When it does not fire, the class's own chain runs below it,
+    /// led by a burst step when the Burst stage applies to the unit
+    /// (`CombatContext::burst_window`); never by a chain step, which runs
+    /// only under the Chain play (`CombatContext::chain_window`). Gated under
     /// `AiProfile::TeamPlan`.
     Peel { ally: Entity },
     /// The unit is its team's [`last_stand`](TeamSituation::last_stand), and
@@ -351,9 +353,10 @@ pub enum Play {
     /// class's own crowd control onto the subject, landing in the lock's last
     /// moments
     /// (`class_ai::chain`) — heads the chain. When it does not fire, or
-    /// holds the global cooldown for a hand-off still to come, the chain
-    /// below runs as the stages after it order it
-    /// ([`TeamSituation::play_after`]). Gated under `AiProfile::TeamPlan`.
+    /// holds the global cooldown for a hand-off still to come, the class's
+    /// own chain runs below it, led by a burst step when the Burst stage
+    /// applies to the unit (`CombatContext::burst_window`). Gated under
+    /// `AiProfile::TeamPlan`.
     Chain { subject: Entity },
 }
 
@@ -459,8 +462,9 @@ impl TeamSituation {
 
     /// The play the unit `me`, playing `role`, runs when the stage `id` and
     /// every stage before it do not apply: the same walk, from the stage
-    /// after `id`. A gated peeler's play is `play_after(PlayId::Peel, ..)` —
-    /// a TakeCover, a Chain or a Burst, never straight to the fallback.
+    /// after `id`, as the team sees it. Test-only: it pins the walk's
+    /// composition from the team's side; the AI reads `CombatContext::play`.
+    #[cfg(test)]
     pub fn play_after(&self, id: PlayId, role: Role, me: Entity) -> Play {
         plays::walk(self, role, me, Some(id), |_, _| true)
     }

@@ -1396,14 +1396,17 @@ exceptions included), and a stage that does not apply passes it to the NEXT
 stage — a gated peeler still chains, and a unit with nothing to hand off
 still bursts. `plays::tests` pins the order and the walk.
 
-**Adding a play is a new module plus one line in `PLAY_ORDER`.** The module
-holds the stage and its exceptions table; the play gets its `Play` and
-`PlayId` variant (the compiler then asks for its trace tag, `PlayTag::of`).
-Withholding (`team{1,2}_withheld_plays`), exceptions overrides
+**Adding a play.** A new play is: a new module holding its stage and its
+exceptions table; its step in each class's chain that runs it; its enum arms
+(`Play`, `PlayId`, `PlayId::ALL`, `Play::id`, and the trace's `PlayTag`, which
+the compiler asks for); usually a window accessor on `CombatContext` for its
+step to read (as `burst_window` and `chain_window` are); the pinned order
+tests (`plays::tests`); and ONE line in `PLAY_ORDER`. What needs no change:
+withholding (`team{1,2}_withheld_plays`), exceptions overrides
 (`team{1,2}_exceptions`), `situation::WithheldPlays`, the scene builder
-(`Scene::withhold` / `lift` / `exceptions`) and the walk are keyed by the
-play's id, so a new play touches none of them — and a play card that edits
-another play's stage, or the walk, is a composition change, not an addition.
+(`Scene::withhold` / `lift` / `exceptions`) and the walk, all keyed by the
+play's id. A play card that edits another play's stage, or the walk, is a
+composition change, not an addition.
 
 **Exceptions (user ruling, 2026-10-12).** A play that measures negative in a
 context is not used there: not every behaviour suits every composition. An

@@ -285,6 +285,69 @@ mod tests {
         assert_eq!(every.play_for(Role::MeleeDps, me), peel);
     }
 
+    /// The lock-window rule runs for a unit the Burst stage does NOT admit:
+    /// under `Legacy`, and under `TeamPlan` for a class the Burst play's
+    /// exceptions name — not for one they do not. With the enemy Priest
+    /// stunned, a Warrior named a Burst exception by override runs the rule;
+    /// one with a Mage named instead, or the shipped table, does not.
+    #[test]
+    fn a_burst_exception_hands_its_class_back_the_lock_window() {
+        use super::super::reach_fixture::{ctx, roster, unit};
+        use crate::states::match_config::CharacterClass::{Mage, Priest, Warrior};
+        use crate::states::play_match::ai_profile::AiProfile;
+        use crate::states::play_match::components::{Aura, AuraType};
+        use crate::states::play_match::situation::{
+            ClassSet, MatchClock, SituationConfig, WithheldPlays,
+        };
+        use std::collections::BTreeMap;
+
+        let mut world = World::new();
+        let me = world.spawn_empty().id();
+        let healer = world.spawn_empty().id();
+        let mage = world.spawn_empty().id();
+        let roster = roster(vec![
+            unit(me, 1, Warrior, Vec3::ZERO, 1.0),
+            unit(healer, 2, Priest, Vec3::new(0.0, 0.0, 10.0), 1.0),
+            unit(mage, 2, Mage, Vec3::new(5.0, 0.0, 0.0), 1.0),
+        ]);
+        let auras: BTreeMap<Entity, Vec<Aura>> = [(
+            healer,
+            vec![Aura {
+                effect_type: AuraType::Stun,
+                duration: 3.0,
+                ..Default::default()
+            }],
+        )]
+        .into_iter()
+        .collect();
+        let lock_window = |profile: AiProfile, excepted: Option<CharacterClass>| {
+            let mut withheld = WithheldPlays::default();
+            if let Some(class) = excepted {
+                withheld
+                    .exceptions_mut(1)
+                    .set(PlayId::Burst, ClassSet::of(&[class]).into());
+            }
+            let cfg = SituationConfig {
+                withheld,
+                ..SituationConfig::default()
+            }
+            .for_team(1, profile);
+            let c = ctx(me, &roster, &auras, &[]).classified(&cfg, MatchClock::after_gates(30.0));
+            assert!(c.situation().enemy_healer_locked.is_some());
+            c.lock_window()
+        };
+        assert!(lock_window(AiProfile::Legacy, None), "Legacy");
+        assert!(!lock_window(AiProfile::TeamPlan, None), "TeamPlan bursts");
+        assert!(
+            lock_window(AiProfile::TeamPlan, Some(Warrior)),
+            "an excepted Warrior"
+        );
+        assert!(
+            !lock_window(AiProfile::TeamPlan, Some(Mage)),
+            "another class excepted"
+        );
+    }
+
     /// [`PLAY_ORDER`]'s ids, for the walk test.
     const PLAY_ORDER_IDS: [PlayId; 4] = [
         PlayId::Peel,
