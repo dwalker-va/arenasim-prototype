@@ -1,0 +1,565 @@
+<title>Divine Shield Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#13120f; --panel:#1c1a15; --panel2:#25221b; --line:#39332a;
+  --text:#ede7da; --muted:#a29785; --accent:#f2d65a; --blue:#8fa4ff; --warn:#e8b04a; --bad:#ff6b5a; --good:#9fd17a;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --sans:"IBM Plex Sans", system-ui, -apple-system, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+body{padding-inline:16px;padding-block:16px 32px}
+h1{font-size:18px;font-weight:600;margin:0;letter-spacing:.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:12.5px;margin-top:2px;max-width:82ch;line-height:1.45}
+.sub b{color:var(--text);font-weight:500}
+code{font-family:var(--mono);font-size:.92em}
+header{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:end;justify-content:space-between;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:12px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.stage{background:#0b0a08;border:1px solid var(--line);border-radius:8px;position:relative;overflow:hidden}
+canvas{display:block;width:100%;height:auto;max-width:100%}
+#cv{aspect-ratio:16/10;cursor:grab}
+.hud{position:absolute;left:10px;top:8px;font-family:var(--mono);font-size:11.5px;color:var(--muted);pointer-events:none;line-height:1.5;font-variant-numeric:tabular-nums}
+.transport{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;border-top:1px solid var(--line);background:var(--panel)}
+.transport label{display:flex;gap:6px;align-items:center;font-size:13px}
+button.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+button.btn.primary{border-color:var(--accent);color:var(--accent)}
+button.btn.blue{border-color:var(--blue);color:var(--blue)}
+button.btn:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:4px;font:inherit}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
+.card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:600}
+.layer{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line)}
+.layer:first-of-type{border-top:0}
+.layer label{flex:1;cursor:pointer}
+.layer .nm{font-weight:500}
+.layer .ds{display:block;color:var(--muted);font-size:12px;line-height:1.35}
+.layer select{margin-top:4px}
+.tag{font-family:var(--mono);font-size:10.5px;color:var(--warn);margin-left:6px}
+.tag.new{color:var(--blue)}
+.knob{display:grid;grid-template-columns:112px minmax(0,1fr) 46px;gap:8px;align-items:center;padding:3px 0}
+.knob span{font-size:12.5px;color:var(--muted)}
+.knob output{font-family:var(--mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+.knobgroup{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:10px 0 2px;border-top:1px solid var(--line);padding-top:8px}
+.knobgroup:first-child{margin-top:0;border-top:0;padding-top:0}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.notes{color:var(--muted);font-size:12.5px;line-height:1.5;margin:0;padding-left:16px}
+.notes li{margin:3px 0}
+.notes b{color:var(--text);font-weight:500}
+pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:#0b0a08;border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;margin:0;color:#f3e3b0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+</style>
+
+<header>
+  <div>
+    <h1>Divine Shield Bench <span style="color:var(--muted);font-weight:400">· AS-359</span></h1>
+    <div class="sub">The client's bubble is <code>divineshield_low_base.m2</code> (fdid 165961, kit 252, SpellVisual 154, byte-identical in Era 1.15.9 and TBC 2.5.6). It is Power Word: Shield's skeleton and timing, plus three things PW:S lacks: a <b>blue glow that fills the body</b>, one streak ring recoloured <b>cyan</b>, and <b>gold star sparkles</b> thrown off at 60 a second. <b>Left:</b> the sphere we ship today. <b>Centre:</b> the client model on a Paladin (×1.229 rig). <b>Right:</b> the shipped Power Word: Shield for contrast. Tick <i>PW:S overlay</i> to put both on the centre Paladin at once. Playback is real time.</div>
+  </div>
+  <div class="legend"><span>drag = orbit</span><span>wheel = zoom</span><span>capsules ±1.25 about y=1.0</span></div>
+</header>
+
+<div class="grid">
+  <div>
+    <div class="stage">
+      <canvas id="cv" width="1280" height="800" aria-label="Shipped Divine Shield sphere, the client-faithful Divine Shield, and Power Word: Shield side by side"></canvas>
+      <div class="hud" id="hud"></div>
+      <div class="transport">
+        <button class="btn primary" id="cast">Cast Divine Shield</button>
+        <button class="btn" id="expire">End (expire)</button>
+        <button class="btn blue" id="castpws">Cast PW:S</button>
+        <button class="btn" id="pause">Pause</button>
+        <label><input type="checkbox" id="auto" checked> auto cycle</label>
+        <label>camera
+          <select id="camsel">
+            <option value="match" selected>match (60 yd)</option>
+            <option value="close">sandbox (14 yd)</option>
+          </select></label>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="row"><h2 style="margin:0">Client weights: birth · loop ×2 · death (shared with PW:S)</h2>
+        <div class="legend"><span><i class="sw" style="background:#ffe851"></i>rim + blue fill</span><span><i class="sw" style="background:#ffd23c"></i>streak B (gold)</span><span><i class="sw" style="background:#51e8ff"></i>streak A (cyan)</span><span><i class="sw" style="background:#c9a0ff"></i>sparkle rate /30</span><span>white = centre unit now</span></div></div>
+      <canvas id="gr" width="1200" height="190" aria-label="Texture weight and sparkle rate tracks over the shield's life"></canvas>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="row"><h2 style="margin:0">Rust constants</h2><button class="btn" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+  <div class="side">
+    <div class="card"><h2>Layers</h2><div id="layers"></div></div>
+    <div class="card"><h2>Knobs</h2>
+      <div class="presets"><button class="btn" id="pre_client">Client values</button><button class="btn" id="pre_hard">Harder read (suggestion)</button></div>
+      <div id="knobs"></div></div>
+    <div class="card"><h2>What the client data says</h2>
+      <ul class="notes">
+        <li><b>Same skeleton as PW:S.</b> The rim card, both streak cards, all three sequences (birth 700, loop 633, death 1100 ms), every scale key and every texture-weight key are identical to <code>holydivineshield_state_base.m2</code>. Both attach at the feet.</li>
+        <li><b>Blue fill</b> <code>genericglow64</code>: a soft filled disc on two cards (rim-sized and streak-sized), colour <code>(0.318, 0.396, 1.0)</code>, on the rim's weight track. It tints the body blue-white. PW:S is hollow.</li>
+        <li><b>Streak A</b> <code>shockwave10d</code> is cyan <code>(0.318, 0.91, 1.0)</code> here and yellow on PW:S. Streak B stays gold.</li>
+        <li><b>Sparkles:</b> two <code>star5a</code> emitters (X-shaped glints), 30/s each, spinning ±3 rad/s, thrown out of a ~1 yd sphere at waist height at 1.67 client yd/s for 0.4 s. Orange to pale to yellow. They start 300 ms into the birth and ramp to zero across the death.</li>
+        <li><b>Halo fall</b> <code>genericglow2c</code>: a ring sprite dropping from the crown to the feet at 15/s, swelling at the chest. Its <code>enabled</code> track has keys only in the death (on, then off at 300 ms). <span class="tag">ambiguous</span> Read per sequence, it falls for the whole shield; read literally, only 4-5 rings fall at the end. Its texture peaks near 8% and its alpha at 0.37, so either way it is near invisible.</li>
+        <li><b>Caster:</b> kit 417, the same Holy two-hand launch PW:S plays (kit 270), plus a sound.</li>
+        <li><b>Shipped today:</b> a solid gold egg 1.17 × 1.82 × 1.17 at emissive 3.0, pulsing ±5% every 2.1 s, on and off in one frame. It is 1.2× wider and 1.46× taller than the client rim, and its only difference from the old PW:S sphere was size and brightness.</li>
+        <li><b>Bench limits:</b> the canvas adds in sRGB with no bloom; Bevy adds in linear HDR and blooms, so the game reads hotter. Cards are drawn in front of the body, which is how the shipped PW:S sorts. The sparkle spawn sphere and the particle scale (read as half-size) are best readings of the emitter record.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const TAU=Math.PI*2;
+const lerp=(a,b,t)=>a+(b-a)*t, clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function keys(k,t){
+  if(t<=k[0][0]) return k[0][1];
+  for(let i=1;i<k.length;i++){ if(t<=k[i][0]){const a=k[i-1],b=k[i],u=(t-a[0])/(b[0]-a[0]||1);
+    return Array.isArray(a[1])?a[1].map((x,j)=>lerp(x,b[1][j],u)):lerp(a[1],b[1],u);} }
+  return k[k.length-1][1];
+}
+const rgb=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const smooth=u=>{u=clamp(u,0,1);return u*u*(3-2*u)};
+function hash(n){let s=(Math.imul(n,747796405)+2891336453)>>>0;s=Math.imul(((s>>>((s>>>28)+4))^s)>>>0,277803737)>>>0;return (((s>>>22)^s)>>>0)/4294967295;}
+
+// ---------- client data: divineshield_low_base.m2 (fdid 165961), identical bytes in 1.15.9.69547 and 2.5.6.69795 ----------
+const CLIENT_TO_RIG=2.5/2.034;
+const RIM_QUAD=[3.18,4.08,-0.91,3.17];     // bone 1 rim; bone 3 outer blue fill
+const STREAK_QUAD=[2.26,2.90,-0.12,2.78];  // bone 2 inner blue fill; bones 4, 5 streaks
+const PIVOT_Z=1.11;
+const RIM_RGB=[1.0,0.91,0.318], FILL_RGB=[0.318,0.396,1.0], DS_A_RGB=[0.318,0.91,1.0], B_RGB=[1.0,0.976,0.318];
+const PWS_A_RGB=[0.969,0.992,0.318];       // holydivineshield_state_base.m2 streak A (yellow)
+const SEQ={birth:700, loop:633, death:1100};
+const W={
+  rim:{birth:[[0,0],[200,0],[300,1],[500,0.12],[700,0.15]], loop:[[0,0.15],[300,0.06],[633,0.15]], death:[[0,0.15],[1000,0],[1100,0]]},
+  a:  {birth:[[0,0],[200,0],[300,1],[400,0.12],[500,0],[600,0.12],[700,0]], loop:[[0,0],[100,0.12],[200,0],[300,0.12],[400,0],[533,0.2],[633,0]],
+       death:[[0,0],[100,0.12],[234,0],[334,0.12],[434,0],[567,0.2],[667,0],[800,0.12],[900,0],[1100,0]]},
+  b:  {birth:[[0,0],[200,0],[300,1],[400,0],[500,0.12],[600,0],[700,0.12]], loop:[[0,0.12],[100,0],[200,0.2],[300,0],[400,0.12],[533,0],[633,0.12]],
+       death:[[0,0.12],[100,0],[234,0.2],[334,0],[434,0.12],[567,0],[667,0.12],[800,0],[900,0.12],[1000,0],[1100,0]]},
+};
+const S={
+  birth:[[0,[0,0]],[200,[0,0]],[300,[0.522,1.11]],[500,[1.09,1.0]],[700,[0.901,1.123]]],
+  loop:[[0,[0.901,1.123]],[300,[1.04,1.0]],[633,[0.901,1.123]]],
+  death:[[0,[0.901,1.123]],[334,[1.04,1.0]],[1000,[1.271,1.158]],[1100,[1.271,1.158]]],
+};
+// Measured radial profiles (angular mean of decoded BLPs; additive blend 4 adds rgb x alpha).
+const RIM_PROFILE=[[0,0],[0.47,0],[0.50,0.93],[0.55,0.74],[0.60,0.46],[0.65,0.20],[0.70,0.03],[0.75,0],[1,0]];
+const A_PROFILE=[[0,0],[0.40,0],[0.50,0.009],[0.55,0.037],[0.60,0.105],[0.65,0.166],[0.70,0.177],[0.75,0.154],[0.80,0.114],[0.85,0.072],[0.90,0.029],[0.95,0.006],[1,0]];
+const B_PROFILE=[[0,0],[0.45,0],[0.50,0.005],[0.55,0.018],[0.60,0.060],[0.65,0.134],[0.70,0.173],[0.75,0.163],[0.80,0.133],[0.85,0.097],[0.90,0.058],[0.95,0.020],[1,0.005]];
+const FILL_PROFILE=[[0,0.903],[0.05,0.883],[0.10,0.846],[0.15,0.785],[0.20,0.712],[0.25,0.630],[0.30,0.548],[0.35,0.468],[0.40,0.382],[0.45,0.306],[0.50,0.241],[0.55,0.184],[0.60,0.130],[0.65,0.086],[0.70,0.053],[0.75,0.029],[0.80,0.015],[0.85,0.006],[0.90,0.001],[0.95,0],[1,0]];
+const HALO_PROFILE=[[0,0],[0.55,0],[0.60,0.060],[0.65,0.083],[0.70,0.055],[0.75,0.033],[0.80,0.018],[0.85,0.007],[0.90,0.0015],[1,0]];
+// Sparkle emitters P1/P2 (bones 7, 8): sphere emitter, client units.
+const SPARK={z:0.775, area:0.80, speed:1.667, speedVar:0.3, life:0.4, spin:3.0,
+  rate:{birth:[[0,0],[300,0],[500,30],[700,30]], loop:[[0,30],[633,30]], death:[[0,30],[1100,0]]},
+  colour:[[0,[255,186,77]],[0.75,[253,255,200]],[1,[246,255,0]]], alpha:[[0,0],[0.75,1],[1,0]], scale:[[0,0.056],[0.75,0.083],[1,0]]};
+// Halo fall P0 (bone 6): plane emitter at the crown, speed -1.914 (down), 15.1/s.
+const HALO={z:2.641, speed:-1.914, life:1.355, rate:15.1, deathOffMs:300,
+  colour:[[0,[255,255,255]],[0.5,[255,226,112]],[1,[255,255,255]]], alpha:[[0,0],[0.5,0.37],[1,0]], scale:[[0,0.139],[0.5,1.389],[1,0.139]]};
+
+// ---------- shipped today ----------
+const SHIPPED_DS_SCALE=[0.9*1.3,1.4*1.3,0.9*1.3];          // shield_bubbles.rs, is_immunity
+const SHIPPED_DS_RGB=[255,226,128], SHIPPED_DS_ALPHA=0.55;  // approx. base (1,.85,.3,.4) + emissive (3,2.5,.8), Add
+
+// ---------- knobs and layers ----------
+const KNOBS=[
+  {g:'Shape'},
+  {key:'size',      label:'size ×',       min:0.5,max:1.5,step:0.01,def:1.0, rust:'DS_SIZE'},
+  {key:'spread',    label:'spread ×',     min:0,  max:2,  step:0.05,def:1.0, rust:'DS_SPREAD', note:'× the bone-scale swing (pop, wobble, swell)'},
+  {key:'lift',      label:'lift',         min:-0.5,max:0.8,step:0.01,def:0.0,rust:'DS_LIFT'},
+  {g:'Brightness'},
+  {key:'rimGain',   label:'rim gain',     min:0,  max:4,  step:0.05,def:1.0, rust:'DS_RIM_GAIN'},
+  {key:'fillGain',  label:'fill gain',    min:0,  max:4,  step:0.05,def:1.0, rust:'DS_FILL_GAIN', note:'× the blue fill weight; client 1'},
+  {key:'streakGain',label:'streak gain',  min:0,  max:4,  step:0.05,def:1.0, rust:'DS_STREAK_GAIN'},
+  {key:'birthGain', label:'birth gain',   min:0,  max:1.5,step:0.05,def:1.0, rust:'DS_BIRTH_GAIN'},
+  {g:'Particles'},
+  {key:'sparkRate', label:'sparkle rate ×',min:0, max:2,  step:0.05,def:1.0, rust:'DS_SPARKLE_RATE', note:'× 30/s per emitter'},
+  {key:'sparkSize', label:'sparkle size ×',min:0.5,max:4, step:0.05,def:1.0, rust:'DS_SPARKLE_SIZE'},
+  {key:'sparkGain', label:'sparkle gain', min:0,  max:2,  step:0.05,def:1.0, rust:'DS_SPARKLE_GAIN'},
+  {key:'haloSize',  label:'halo size ×',  min:0.25,max:2, step:0.05,def:1.0, rust:'DS_HALO_SIZE'},
+  {key:'haloGain',  label:'halo gain',    min:0,  max:8,  step:0.1, def:1.0, rust:'DS_HALO_GAIN'},
+  {g:'Time'},
+  {key:'time',      label:'duration ×',   min:0.5,max:2,  step:0.05,def:1.0, rust:'DS_TIME_SCALE'},
+  {g:'Bench only'},
+  {key:'hold',      label:'hold secs',    min:1,  max:12, step:0.5, def:4.0, bench:true, note:'auto cycle hold (the real shield is 12 s)'},
+];
+const LAYERS=[
+  {id:'rim',    nm:'Rim glow',       ds:'genericglow2b1, gold. The same card PW:S wears.', on:true, rust:'DS_RIM_LAYER'},
+  {id:'fill',   nm:'Blue fill',      ds:'genericglow64 on two cards, blue (0.32, 0.40, 1.0). Fills and tints the body.', on:true, rust:'DS_FILL_LAYER', isnew:true},
+  {id:'a',      nm:'Streak A, cyan', ds:'shockwave10d, (0.32, 0.91, 1.0). Yellow on PW:S.', on:true, rust:'DS_STREAK_A_LAYER', isnew:true},
+  {id:'b',      nm:'Streak B, gold', ds:'shockwave10b. As PW:S.', on:true, rust:'DS_STREAK_B_LAYER'},
+  {id:'spark',  nm:'Star sparkles',  ds:'Two star5a emitters, 60/s together, spinning out from the waist.', on:true, rust:'DS_SPARKLES', isnew:true},
+  {id:'halo',   nm:'Halo fall',      ds:'genericglow2c rings falling crown to feet.', mode:true, isnew:true, rust:'DS_HALO_MODE'},
+  {id:'pop',    nm:'Birth pop',      ds:'200 ms delay, then the full-strength tall pop.', on:true, rust:'DS_BIRTH_POP'},
+  {id:'swell',  nm:'Death swell',    ds:'Swell 1.27× and fade over 1.1 s.', on:true, rust:'DS_DEATH_SWELL'},
+  {id:'hands',  nm:'Caster hands',   ds:'Kit 417: the Holy two-hand launch, on the Paladin itself (self-cast).', on:true, rust:'DS_CAST_HANDS'},
+  {id:'pwsover',nm:'PW:S overlay',   ds:'Bench: also shield the centre Paladin with the shipped PW:S, on its own clock.', on:false, bench:true},
+  {id:'pwsref', nm:'PW:S reference', ds:'Bench: the shipped PW:S alone on the right unit.', on:true, bench:true},
+  {id:'shipped',nm:'Shipped sphere', ds:'Bench: today\'s Divine Shield sphere on the left unit.', on:true, bench:true},
+];
+const HALO_MODES=[['off','Off'],['death','Death only (literal reading)'],['always','Whole shield (per-sequence reading)']];
+const K={}; for(const k of KNOBS) if(k.key) K[k.key]=k.def;
+const ON={}; for(const L of LAYERS) ON[L.id]=L.mode?'death':L.on;
+const PRESETS={client:{}, hard:{rimGain:2.0,fillGain:2.5,streakGain:1.5,sparkSize:1.5}};
+
+// ---------- procedural textures ----------
+function makeTex(size,fn){
+  const c=document.createElement('canvas');c.width=c.height=size;const x=c.getContext('2d');const im=x.createImageData(size,size);
+  for(let j=0;j<size;j++)for(let i=0;i<size;i++){
+    const dx=(i+0.5)/size*2-1, dy=(j+0.5)/size*2-1, r=Math.hypot(dx,dy), th=Math.atan2(dy,dx);
+    const v=clamp(fn(r,th,dx,dy),0,1), o=4*(j*size+i);
+    im.data[o]=im.data[o+1]=im.data[o+2]=255; im.data[o+3]=Math.round(v*255);
+  }
+  x.putImageData(im,0,0);return c;
+}
+function streakFn(profile,n,seed){
+  const st=[];for(let i=0;i<n;i++)st.push({th:(i+hash(seed+i*3)*0.7)/n*TAU,w:0.05+0.07*hash(seed+i*3+1),amp:0.5+hash(seed+i*3+2),dr:(hash(seed+i*7)-0.5)*0.08});
+  const ang=(th,r)=>{let s=0.12;for(const q of st){let d=Math.abs(th-q.th);d=Math.min(d,TAU-d);s+=q.amp*Math.exp(-((d/q.w)**2))*(1+q.dr*(r-0.7)*10);}return s;};
+  let mean=0;for(let k=0;k<720;k++)mean+=ang(k/720*TAU,0.7);mean/=720;
+  return (r,th)=>Math.min(0.58,keys(profile,r)*ang(th<0?th+TAU:th,r)/mean);
+}
+/** star5a: a bright core and two diagonal glints (an X). */
+const starFn=(r,th,dx,dy)=>{const d1=Math.abs(dx-dy)/Math.SQRT2,d2=Math.abs(dx+dy)/Math.SQRT2;
+  const core=Math.exp(-((r/0.2)**2)), glint=Math.max(Math.exp(-((d1/0.045)**2)),Math.exp(-((d2/0.045)**2)))*Math.pow(Math.max(0,1-r),1.4);
+  return Math.max(core,0.85*glint);};
+function tint(tex,c){const t=document.createElement('canvas');t.width=tex.width;t.height=tex.height;const x=t.getContext('2d');
+  x.drawImage(tex,0,0);x.globalCompositeOperation='source-in';x.fillStyle=rgb(c.map(v=>v*255),1);x.fillRect(0,0,t.width,t.height);return t;}
+const TEX={};
+function buildTextures(){
+  TEX.rim=tint(makeTex(256,r=>keys(RIM_PROFILE,r)),RIM_RGB);
+  TEX.fill=tint(makeTex(128,r=>keys(FILL_PROFILE,r)),FILL_RGB);
+  TEX.dsA=tint(makeTex(256,streakFn(A_PROFILE,17,101)),DS_A_RGB);
+  TEX.pwsA=tint(makeTex(256,streakFn(A_PROFILE,17,101)),PWS_A_RGB);
+  TEX.b=tint(makeTex(256,streakFn(B_PROFILE,15,577)),B_RGB);
+  const star=makeTex(64,starFn), halo=makeTex(128,r=>keys(HALO_PROFILE,r));
+  // colour ramps baked into 16 tints along each particle's life
+  TEX.star=[];TEX.halo=[];
+  for(let i=0;i<16;i++){const u=i/15;
+    TEX.star.push(tint(star,keys(SPARK.colour,u).map(v=>v/255)));
+    TEX.halo.push(tint(halo,keys(HALO.colour,u).map(v=>v/255)));}
+  const glow=makeTex(128,r=>Math.pow(Math.max(0,1-r),2.2));
+  TEX.glowGold=tint(glow,[0.988,0.863,0.165]); TEX.glowCore=tint(glow,[1.0,0.97,0.8]);
+}
+
+// ---------- camera ----------
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const CAMS={match:{dist:60,pitch:(90-38.7)*Math.PI/180},close:{dist:14,pitch:0.42}};
+const cam={yaw:0.0,pitch:CAMS.match.pitch,dist:CAMS.match.dist,target:[0,1,0]};
+let dragP=null;
+cv.addEventListener('pointerdown',e=>{dragP=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'});
+cv.addEventListener('pointermove',e=>{if(!dragP)return;cam.yaw-=(e.clientX-dragP[0])*0.008;cam.pitch=clamp(cam.pitch+(e.clientY-dragP[1])*0.006,0.02,1.45);dragP=[e.clientX,e.clientY]});
+cv.addEventListener('pointerup',()=>{dragP=null;cv.style.cursor='grab'});
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.dist=clamp(cam.dist*(1+e.deltaY*0.001),5,120)},{passive:false});
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]], sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], mul=(a,s)=>[a[0]*s,a[1]*s,a[2]*s];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const norm=a=>{const l=Math.hypot(...a)||1;return[a[0]/l,a[1]/l,a[2]/l]};
+let VIEW;
+function setupView(){
+  const cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
+  const eye=[cam.target[0]+cam.dist*cp*Math.sin(cam.yaw),cam.target[1]+cam.dist*sp,cam.target[2]+cam.dist*cp*Math.cos(cam.yaw)];
+  const f=norm(sub(cam.target,eye)), r=norm(cross(f,[0,1,0])), u=cross(r,f);
+  VIEW={eye,f,r,u,fl:(cv.height/2)/Math.tan(Math.PI/8)};
+}
+function proj(p){const d=sub(p,VIEW.eye),z=dot(d,VIEW.f); if(z<0.1) return null;
+  const s=VIEW.fl/z; return {x:cv.width/2+dot(d,VIEW.r)*s,y:cv.height/2-dot(d,VIEW.u)*s,s,z};}
+
+// ---------- scene ----------
+const FLOOR=[0.79*255,0.66*255,0.46*255];
+function line3(a,b){const p=proj(a),q=proj(b);if(!p||!q)return;g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();}
+function drawFloor(){
+  const pts=[];for(let i=0;i<72;i++){const a=i/72*TAU;const q=proj([30*Math.cos(a),0,30*Math.sin(a)]);if(q)pts.push(q)}
+  g.fillStyle=rgb(FLOOR.map(c=>c*0.82),1);g.beginPath();pts.forEach((q,i)=>i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y));g.closePath();g.fill();
+  g.strokeStyle='rgba(0,0,0,0.06)';g.lineWidth=1;
+  for(let i=-28;i<=28;i+=4){line3([i,0,-28],[i,0,28]);line3([-28,0,i],[28,0,i]);}
+}
+function drawCapsule(c,col){
+  const top=proj([c[0],c[1]+0.75,c[2]]),bot=proj([c[0],c[1]-0.75,c[2]]);if(!top||!bot)return;
+  const w=0.5*top.s;
+  const gr=g.createLinearGradient(top.x-w,0,top.x+w,0);
+  gr.addColorStop(0,rgb(col.map(x=>x*0.55),1));gr.addColorStop(0.45,rgb(col,1));gr.addColorStop(1,rgb(col.map(x=>x*0.45),1));
+  g.fillStyle=gr;g.beginPath();g.arc(top.x,top.y,w,Math.PI,0);g.lineTo(bot.x+w,bot.y);g.arc(bot.x,bot.y,w,0,Math.PI);g.closePath();g.fill();
+}
+function card(center,halfW,halfH,tex,alpha){
+  if(alpha<=0.002||halfW<=0||halfH<=0)return;
+  const c=proj(center),px=proj(add(center,mul(VIEW.r,halfW))),py=proj(add(center,[0,halfH,0]));
+  if(!c||!px||!py)return;
+  // weights above 1 (gains) are drawn as stacked passes so additive brightness keeps rising
+  let a=alpha;
+  while(a>0.002){g.save();g.globalAlpha=Math.min(1,a);g.setTransform(px.x-c.x,px.y-c.y,c.x-py.x,c.y-py.y,c.x,c.y);
+    g.drawImage(tex,-1,-1,2,2);g.restore();a-=1;}
+}
+function sprite(p,half,tex,alpha,rot){
+  const q=proj(p);if(!q||alpha<=0.003||half<=0)return;const r=half*q.s;
+  let a=alpha;
+  while(a>0.003){g.save();g.globalAlpha=Math.min(1,a);g.translate(q.x,q.y);if(rot)g.rotate(rot);g.drawImage(tex,-r,-r,2*r,2*r);g.restore();a-=1;}
+}
+
+// ---------- rig ----------
+const SHIPPED=[-3.8,1,0], DS=[0,1,0], PWSREF=[3.8,1,0];
+const PALADIN_RGB=[0.96*255,0.55*255,0.73*255], ALLY_RGB=[198,155,109];
+const HAND_X=0.72, HAND_Y=0.05, HAND_Z=0.30, HOLY_FLARE_SECS=0.45, HOLY_GLOW=[0.88,0.54];
+let clock=0, paused=false, autoT=0, autoStep=0;
+
+/** One shield instance on one clock: phase idle|birth|loop|death, t seconds. */
+function Shield(){return {phase:'idle',t:0,from:[0.901,1.123],fromW:[0.15,0,0.12,0.15]};}
+const ds=Shield(), pwsOver=Shield(), pwsRef=Shield();
+let shippedUp=false, dsHandsT=-1, pwsHandsT=-1;
+const spreadKey=(v,sp)=>v===0?0:1+(v-1)*sp;
+/** PW:S as shipped (pw_shield.rs, every PWS_* knob at 1.0, pop and swell on). */
+const PWS_P={time:1,spread:1,rimGain:1,fillGain:0,streakGain:1,birthGain:1,pop:true,swell:true};
+const dsP=()=>({time:K.time,spread:K.spread,rimGain:K.rimGain,fillGain:K.fillGain,streakGain:K.streakGain,birthGain:K.birthGain,pop:ON.pop,swell:ON.swell});
+function begin(sh){sh.phase='birth';sh.t=0;}
+function finish(sh,p){
+  if(sh.phase==='idle'||sh.phase==='death')return;
+  const st=sample(sh,p);sh.from=st.scale;sh.fromW=st.w;sh.phase=p.swell?'death':'idle';sh.t=0;
+}
+function sample(sh,p){
+  const ms=sh.t/p.time*1000, ph=sh.phase, gain=[p.rimGain,p.streakGain,p.streakGain,p.fillGain], TR=['rim','a','b','rim'];
+  if(ph==='idle') return {scale:[0,0],w:[0,0,0,0],ms:0};
+  if(ph==='birth'){
+    if(!p.pop){const u=smooth((ms-200)/100);return {scale:S.loop[0][1].map(v=>spreadKey(v,p.spread)),w:TR.map((k,i)=>keys(W[k].loop,0)*gain[i]*u),ms};}
+    const blend=clamp((ms-300)/400,0,1);
+    return {scale:keys(S.birth,ms).map(v=>spreadKey(v,p.spread)),w:TR.map((k,i)=>keys(W[k].birth,ms)*(gain[i]>0?lerp(p.birthGain,gain[i],blend):0)),ms};
+  }
+  if(ph==='loop'){const m=ms%SEQ.loop;return {scale:keys(S.loop,m).map(v=>spreadKey(v,p.spread)),w:TR.map((k,i)=>keys(W[k].loop,m)*gain[i]),ms:m};}
+  const sk=S.death.map(([t,v],i)=>[t,i===0?sh.from:v.map(x=>spreadKey(x,p.spread))]);
+  const w=TR.map((k,i)=>keys(W[k].death,ms)*gain[i]);
+  w[0]=sh.fromW[0]*Math.max(0,1-ms/1000); w[3]=sh.fromW[3]*Math.max(0,1-ms/1000);
+  return {scale:keys(sk,ms),w,ms};
+}
+function advance(sh,p,dt){
+  if(sh.phase==='idle')return;
+  sh.t+=dt;
+  if(sh.phase==='birth'&&sh.t>=SEQ.birth/1000*p.time){sh.phase='loop';sh.t-=SEQ.birth/1000*p.time;}
+  else if(sh.phase==='death'&&sh.t>=SEQ.death/1000*p.time){sh.phase='idle';sh.t=0;}
+}
+
+// ---------- particles (centre unit only) ----------
+const parts=[]; let sparkAcc=0, haloAcc=0, seed=1;
+const rnd=()=>hash(seed++);
+function sparkRateNow(){ // per emitter, client track
+  const ms=ds.t/K.time*1000;
+  if(ds.phase==='birth') return keys(SPARK.rate.birth,ms);
+  if(ds.phase==='loop') return 30;
+  if(ds.phase==='death') return keys(SPARK.rate.death,ms);
+  return 0;
+}
+function haloOnNow(){
+  const m=ON.halo, ms=ds.t/K.time*1000;
+  if(m==='off'||ds.phase==='idle') return false;
+  if(ds.phase==='death') return ms<HALO.deathOffMs;
+  return m==='always';
+}
+function emit(dt){
+  const R=CLIENT_TO_RIG*K.size, feet=[DS[0],DS[1]-1.25+K.lift,DS[2]];
+  if(ON.spark){
+    sparkAcc+=2*sparkRateNow()*K.sparkRate*dt;
+    while(sparkAcc>=1){sparkAcc-=1;
+      const u=rnd()*2-1, th=rnd()*TAU, s=Math.sqrt(1-u*u), dir=[s*Math.cos(th),u,s*Math.sin(th)];
+      const rad=rnd()*SPARK.area*R, v=SPARK.speed*R*(1+(rnd()*2-1)*SPARK.speedVar);
+      parts.push({k:'spark',p:add(add(feet,[0,SPARK.z*R,0]),mul(dir,rad)),v:mul(dir,v),age:0,life:SPARK.life,rot:rnd()*TAU,spin:(rnd()<0.5?1:-1)*SPARK.spin});
+    }
+  } else sparkAcc=0;
+  if(haloOnNow()){
+    haloAcc+=HALO.rate*dt;
+    while(haloAcc>=1){haloAcc-=1;parts.push({k:'halo',p:add(feet,[0,HALO.z*R,0]),v:[0,HALO.speed*R,0],age:0,life:HALO.life});}
+  } else haloAcc=0;
+}
+function stepParts(dt){
+  for(const q of parts){q.age+=dt;q.p=add(q.p,mul(q.v,dt));if(q.rot!==undefined)q.rot+=q.spin*dt;}
+  for(let i=parts.length-1;i>=0;i--) if(parts[i].age>=parts[i].life) parts.splice(i,1);
+}
+function drawParts(front){
+  const R=CLIENT_TO_RIG*K.size, toEye=norm(sub(VIEW.eye,DS));
+  for(const q of parts){
+    const isFront=dot(sub(q.p,DS),toEye)>0; if(isFront!==front)continue;
+    const u=q.age/q.life, ti=Math.min(15,Math.round(u*15));
+    if(q.k==='spark') sprite(q.p,keys(SPARK.scale,u)*R*K.sparkSize,TEX.star[ti],keys(SPARK.alpha,u)*K.sparkGain,q.rot);
+    else sprite(q.p,keys(HALO.scale,u)*R*K.haloSize,TEX.halo[ti],keys(HALO.alpha,u)*K.haloGain,0);
+  }
+}
+
+// ---------- drawing ----------
+function cards(unit,st,size,lift){
+  const feet=[unit[0],unit[1]-1.25+lift,unit[2]], R=CLIENT_TO_RIG*size, pivot=PIVOT_Z*R, out={};
+  for(const [id,q] of [['rim',RIM_QUAD],['streak',STREAK_QUAD]]){
+    const cz=(q[2]+q[3])/2*R, cy=pivot+(cz-pivot)*st.scale[1];
+    out[id]={c:add(feet,[0,cy,0]),hw:q[0]/2*R*st.scale[0],hh:q[1]/2*R*st.scale[1]};
+  }
+  return out;
+}
+function drawDS(unit,st){
+  const cs=cards(unit,st,K.size,K.lift);
+  if(ON.fill){const f=st.w[3];
+    card(cs.rim.c,cs.rim.hw,cs.rim.hh,TEX.fill,f); card(cs.streak.c,cs.streak.hw,cs.streak.hh,TEX.fill,f);}
+  if(ON.rim) card(cs.rim.c,cs.rim.hw,cs.rim.hh,TEX.rim,st.w[0]);
+  if(ON.a) card(cs.streak.c,cs.streak.hw,cs.streak.hh,TEX.dsA,st.w[1]);
+  if(ON.b) card(cs.streak.c,cs.streak.hw,cs.streak.hh,TEX.b,st.w[2]);
+}
+function drawPWS(unit,st){
+  const cs=cards(unit,st,1,0);
+  card(cs.rim.c,cs.rim.hw,cs.rim.hh,TEX.rim,st.w[0]);
+  card(cs.streak.c,cs.streak.hw,cs.streak.hh,TEX.pwsA,st.w[1]);
+  card(cs.streak.c,cs.streak.hw,cs.streak.hh,TEX.b,st.w[2]);
+}
+function drawShipped(unit){
+  const c=proj(unit);if(!c)return;
+  const pulse=1+0.05*Math.sin(clock*3.0);
+  const hx=SHIPPED_DS_SCALE[0]*pulse*c.s, uy=VIEW.u[1], uh=Math.hypot(VIEW.u[0],VIEW.u[2]);
+  const hy=Math.hypot(SHIPPED_DS_SCALE[1]*uy,SHIPPED_DS_SCALE[0]*uh)*pulse*c.s;
+  g.save();g.fillStyle=rgb(SHIPPED_DS_RGB,SHIPPED_DS_ALPHA);g.beginPath();g.ellipse(c.x,c.y,hx,hy,0,0,TAU);g.fill();g.restore();
+}
+function drawHands(unit,t,facing){
+  if(t<0)return;
+  const u=t/HOLY_FLARE_SECS, env=u<0.15?u/0.15:Math.pow(1-(u-0.15)/0.85,1.6);
+  const fwd=norm([facing[0],0,facing[2]]), right=[fwd[2],0,-fwd[0]];
+  for(const side of [1,-1]){
+    const h=add(add(unit,mul(right,HAND_X*side)),add([0,HAND_Y,0],mul(fwd,HAND_Z)));
+    sprite(h,HOLY_GLOW[0]/2,TEX.glowGold,0.7*env,0);
+    sprite(h,HOLY_GLOW[1]/2,TEX.glowCore,env,0);
+    for(let k=0;k<3;k++){const a=clock*TAU+k*TAU/3;sprite(add(h,[0.2*Math.cos(a),0.2*Math.sin(a)*0.6,0.2*Math.sin(a)]),0.15,TEX.glowGold,0.8*env,0);}
+  }
+}
+function label(p,txt){const q=proj(p);if(!q)return;g.font='600 22px IBM Plex Mono, monospace';g.textAlign='center';g.fillStyle='rgba(255,255,255,0.85)';g.fillText(txt,q.x,q.y);g.textAlign='start';}
+
+function step(dt){
+  clock+=dt;
+  if(dsHandsT>=0){dsHandsT+=dt;if(dsHandsT>HOLY_FLARE_SECS)dsHandsT=-1;}
+  if(pwsHandsT>=0){pwsHandsT+=dt;if(pwsHandsT>HOLY_FLARE_SECS)pwsHandsT=-1;}
+  advance(ds,dsP(),dt); advance(pwsOver,PWS_P,dt); advance(pwsRef,PWS_P,dt);
+  emit(dt); stepParts(dt);
+  if(document.getElementById('auto').checked){
+    autoT+=dt;
+    // script: DS up; 1.5 s later PW:S lands (overlay + reference); hold; both end, DS first.
+    if(autoStep===0&&ds.phase==='idle'&&autoT>2.0){castDS();autoStep=1;}
+    else if(autoStep===1&&autoT>1.5){castPWS();autoStep=2;}
+    else if(autoStep===2&&autoT>K.hold){endDS();autoStep=3;}
+    else if(autoStep===3&&autoT>1.6){finish(pwsOver,PWS_P);finish(pwsRef,PWS_P);autoStep=0;autoT=0;}
+  }
+}
+function castDS(){begin(ds);shippedUp=true;if(ON.hands)dsHandsT=0;autoT=0;}
+function endDS(){finish(ds,dsP());shippedUp=false;autoT=0;}
+function castPWS(){if(ON.pwsover)begin(pwsOver);if(ON.pwsref)begin(pwsRef);pwsHandsT=0;autoT=0;}
+
+function render(){
+  setupView();
+  g.setTransform(1,0,0,1,0,0);
+  g.fillStyle='#0b0a08';g.fillRect(0,0,cv.width,cv.height);
+  drawFloor();
+  const st=sample(ds,dsP()), so=sample(pwsOver,PWS_P), sr=sample(pwsRef,PWS_P);
+  const units=[[SHIPPED,PALADIN_RGB,'shipped'],[DS,PALADIN_RGB,'ds'],[PWSREF,ALLY_RGB,'pws']];
+  units.sort((a,b)=>proj(b[0]).z-proj(a[0]).z);
+  for(const [p,c,id] of units){
+    if(id==='ds'){g.globalCompositeOperation='lighter';drawParts(false);g.globalCompositeOperation='source-over';}
+    drawCapsule(p,c);
+    g.globalCompositeOperation='lighter';
+    if(id==='shipped'&&ON.shipped&&shippedUp) drawShipped(p);
+    if(id==='ds'){drawDS(p,st); if(ON.pwsover) drawPWS(p,so); drawParts(true); drawHands(p,dsHandsT,sub(VIEW.eye,p));}
+    if(id==='pws'&&ON.pwsref){drawPWS(p,sr);}
+    g.globalCompositeOperation='source-over';
+  }
+  label([SHIPPED[0],3.2,SHIPPED[2]],'shipped');
+  label([DS[0],3.2,DS[2]],ON.pwsover?'client DS + PW:S':'client DS');
+  label([PWSREF[0],3.2,PWSREF[2]],'PW:S');
+  const R=CLIENT_TO_RIG*K.size, minW=Math.min(...S.loop.map(k=>spreadKey(k[1][0],K.spread)));
+  const rimInner=0.5*RIM_QUAD[0]/2*R*minW, ok=rimInner>=0.6;
+  const nS=parts.filter(q=>q.k==='spark').length, nH=parts.length-nS;
+  document.getElementById('hud').innerHTML=
+    `DS ${ds.phase.padEnd(5)} ${st.ms.toFixed(0).padStart(4)} ms · PW:S overlay ${pwsOver.phase}<br>`+
+    `scale w ${st.scale[0].toFixed(3)} h ${st.scale[1].toFixed(3)} · rim ${st.w[0].toFixed(3)} A ${st.w[1].toFixed(3)} B ${st.w[2].toFixed(3)} · live sparkles ${nS} halos ${nH}<br>`+
+    `rim inner edge ${rimInner.toFixed(2)} yd at the narrowest wobble · body radius 0.50 `+
+    `<span style="color:${ok?'#9fd17a':'#ff6b5a'}">${ok?'clears the body':'RIM WITHIN 0.1 YD OF THE BODY'}</span>`;
+}
+
+function drawGraph(){
+  const c=document.getElementById('gr'),q=c.getContext('2d'),Wd=c.width,H=c.height;
+  q.setTransform(1,0,0,1,0,0);q.fillStyle='#0b0a08';q.fillRect(0,0,Wd,H);
+  const span=SEQ.birth+2*SEQ.loop+SEQ.death;
+  const x=t=>40+(Wd-56)*t/span, y=w=>H-22-(H-44)*w/1.0;
+  q.font='20px IBM Plex Mono, monospace';q.fillStyle='#a29785';q.strokeStyle='#39332a';q.lineWidth=1;
+  for(const [t,n] of [[0,'birth'],[SEQ.birth,'loop'],[SEQ.birth+SEQ.loop,'loop'],[SEQ.birth+2*SEQ.loop,'death'],[span,'']]){q.beginPath();q.moveTo(x(t),8);q.lineTo(x(t),H-22);q.stroke();if(n)q.fillText(n,x(t)+6,28);}
+  for(const w of [0,0.2,1]){q.beginPath();q.moveTo(40,y(w));q.lineTo(Wd-16,y(w));q.stroke();q.fillText(w.toFixed(1),2,y(w)+6);}
+  const seg=t=>t<SEQ.birth?['birth',t]:t<SEQ.birth+2*SEQ.loop?['loop',(t-SEQ.birth)%SEQ.loop]:['death',t-SEQ.birth-2*SEQ.loop];
+  for(const [k,col] of [['rim','#ffe851'],['b','#ffd23c'],['a','#51e8ff'],['rate','#c9a0ff']]){
+    q.strokeStyle=col;q.lineWidth=2.5;q.beginPath();
+    for(let i=0;i<=1200;i++){const t=i/1200*span,[s,m]=seg(t),v=k==='rate'?keys(SPARK.rate[s],m)/30:keys(W[k][s],m);i?q.lineTo(x(t),y(v)):q.moveTo(x(t),y(v));}
+    q.stroke();
+  }
+  const ms=ds.t/K.time*1000; let t=null;
+  if(ds.phase==='birth')t=ms; else if(ds.phase==='loop')t=SEQ.birth+(ms%(2*SEQ.loop)); else if(ds.phase==='death')t=SEQ.birth+2*SEQ.loop+ms;
+  if(t!==null){q.strokeStyle='#ede7da';q.lineWidth=2;q.beginPath();q.moveTo(x(t),8);q.lineTo(x(t),H-22);q.stroke();}
+}
+
+// ---------- UI ----------
+function setKnob(key,v){K[key]=v;const i=document.getElementById('K_'+key);if(i){i.value=v;document.getElementById('O_'+key).textContent=v;}}
+function buildUI(){
+  const L=document.getElementById('layers');
+  for(const l of LAYERS){
+    const d=document.createElement('div');d.className='layer';
+    const tags=(l.isnew?'<span class="tag new">not on PW:S</span>':'')+(l.bench?'<span class="tag">bench</span>':'');
+    if(l.mode){
+      d.innerHTML=`<label for="L_${l.id}"><span class="nm">${l.nm}</span>${tags}<span class="ds">${l.ds}</span>`+
+        `<select id="L_${l.id}">${HALO_MODES.map(([v,n])=>`<option value="${v}" ${v===ON[l.id]?'selected':''}>${n}</option>`).join('')}</select></label>`;
+      L.appendChild(d);d.querySelector('select').addEventListener('change',e=>{ON[l.id]=e.target.value;emitConsts();});
+      continue;
+    }
+    d.innerHTML=`<input type="checkbox" id="L_${l.id}" ${l.on?'checked':''}><label for="L_${l.id}"><span class="nm">${l.nm}</span>${tags}<span class="ds">${l.ds}</span></label>`;
+    L.appendChild(d);
+    d.querySelector('input').addEventListener('change',e=>{ON[l.id]=e.target.checked;emitConsts();});
+  }
+  const KN=document.getElementById('knobs');
+  for(const k of KNOBS){
+    if(k.g){const h=document.createElement('div');h.className='knobgroup';h.textContent=k.g;KN.appendChild(h);continue;}
+    const d=document.createElement('div');d.className='knob';
+    d.innerHTML=`<span title="${k.note||''}">${k.label}</span><input type="range" id="K_${k.key}" min="${k.min}" max="${k.max}" step="${k.step}" value="${k.def}" aria-label="${k.label}"><output id="O_${k.key}">${k.def}</output>`;
+    KN.appendChild(d);
+    d.querySelector('input').addEventListener('input',e=>{K[k.key]=parseFloat(e.target.value);document.getElementById('O_'+k.key).textContent=e.target.value;emitConsts();});
+  }
+  const applyPreset=p=>{for(const k of KNOBS) if(k.key&&!k.bench) setKnob(k.key,p[k.key]??k.def);emitConsts();};
+  document.getElementById('pre_client').onclick=()=>applyPreset(PRESETS.client);
+  document.getElementById('pre_hard').onclick=()=>applyPreset(PRESETS.hard);
+  document.getElementById('cast').onclick=()=>castDS();
+  document.getElementById('expire').onclick=()=>endDS();
+  document.getElementById('castpws').onclick=()=>{if(pwsOver.phase==='loop'||pwsOver.phase==='birth'||pwsRef.phase==='loop'){finish(pwsOver,PWS_P);finish(pwsRef,PWS_P);}else castPWS();};
+  document.getElementById('pause').onclick=e=>{paused=!paused;e.target.textContent=paused?'Play':'Pause';};
+  document.getElementById('camsel').addEventListener('change',e=>{const c=CAMS[e.target.value];cam.dist=c.dist;cam.pitch=c.pitch;});
+  document.getElementById('copy').onclick=async()=>{const t=document.getElementById('out').textContent;
+    try{await navigator.clipboard.writeText(t);document.getElementById('copy').textContent='Copied';}
+    catch(_){const r=document.createRange();r.selectNodeContents(document.getElementById('out'));const s=getSelection();s.removeAllRanges();s.addRange(r);}
+    setTimeout(()=>document.getElementById('copy').textContent='Copy',1200);};
+  emitConsts();
+}
+function fmt(v){const s=String(v);return s.includes('.')?s:s+'.0';}
+function emitConsts(){
+  const R=CLIENT_TO_RIG*K.size;
+  const lines=['// AS-359 Divine Shield Bench: divineshield_low_base.m2 (fdid 165961), kit 252, SpellVisual 154'];
+  const off=LAYERS.filter(l=>!l.bench&&!l.mode&&!ON[l.id]).map(l=>l.nm);
+  if(off.length) lines.push('// layers off: '+off.join(', '));
+  for(const l of LAYERS){ if(!l.rust)continue;
+    if(l.mode) lines.push(`pub const ${l.rust}: HaloMode = HaloMode::${{off:'Off',death:'DeathOnly',always:'WholeShield'}[ON[l.id]]};`);
+    else lines.push(`pub const ${l.rust}: bool = ${ON[l.id]};`);}
+  lines.push('/// Client units to our rig: humanmale.m2 stands 2.034, our capsule 2.5.');
+  lines.push(`pub const DS_CLIENT_TO_RIG: f32 = ${CLIENT_TO_RIG.toFixed(3)};`);
+  for(const k of KNOBS) if(k.key&&!k.bench) lines.push(`pub const ${k.rust}: f32 = ${fmt(K[k.key])};`);
+  lines.push(`// derived at DS_SIZE: rim and outer fill ${(RIM_QUAD[0]*R).toFixed(2)} x ${(RIM_QUAD[1]*R).toFixed(2)} yd, streaks and inner fill ${(STREAK_QUAD[0]*R).toFixed(2)} x ${(STREAK_QUAD[1]*R).toFixed(2)} yd`);
+  lines.push(`// sparkles ${(60*K.sparkRate).toFixed(0)}/s, peak half-size ${(SPARK.scale[1][1]*R*K.sparkSize).toFixed(3)} yd; halo peak half-size ${(HALO.scale[1][1]*R*K.haloSize).toFixed(2)} yd`);
+  document.getElementById('out').textContent=lines.join('\n');
+}
+
+buildTextures();
+const reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if(reduce){paused=true;document.getElementById('pause').textContent='Play';}
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  if(!paused) step(dt);
+  render(); drawGraph();
+  requestAnimationFrame(frame);
+}
+buildUI();castDS();autoStep=1;requestAnimationFrame(frame);
+</script>
