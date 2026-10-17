@@ -1505,7 +1505,7 @@ pub fn is_priority_interrupt(ability: AbilityType) -> bool {
 
 /// Whether an interrupt can take this cast: the ability can be interrupted
 /// ([`AbilityConfig::can_be_interrupted`](super::ability_config::AbilityConfig::can_be_interrupted)
-/// — a cast bar, and not `uninterruptible`) and the cast is not already
+/// — a cast bar, and Silence-prevented) and the cast is not already
 /// interrupted. An instant routed through a zero-length `CastingState` (the
 /// Druid's heals, Frost Shock) is no target, and neither is an uninterruptible
 /// cast (Aimed Shot): every interrupter's candidate scan (`check_interrupts`
@@ -1518,7 +1518,7 @@ pub fn cast_is_interruptible(cast: &CastingState, abilities: &AbilityDefinitions
 }
 
 /// Why an interrupter passes over a cast it can see: the cast is
-/// [`uninterruptible`](super::ability_config::AbilityConfig::uninterruptible)
+/// [uninterruptible](super::ability_config::AbilityConfig::is_uninterruptible_cast)
 /// (Aimed Shot). `None` for every other cast — an interruptible one, an
 /// instant routed through a zero-length cast (nothing to trace: no cast bar
 /// was ever up), or one already interrupted. Each interrupter traces a `Some`
@@ -1528,7 +1528,7 @@ pub fn uninterruptible_cast(
     abilities: &AbilityDefinitions,
 ) -> Option<AbilityType> {
     let def = abilities.get_unchecked(&cast.ability);
-    (!cast.interrupted && def.has_cast_bar() && def.uninterruptible).then_some(cast.ability)
+    (!cast.interrupted && def.is_uninterruptible_cast()).then_some(cast.ability)
 }
 
 /// An enemy mid-cast that an interrupter can reach: in its interrupt's range,
@@ -1861,7 +1861,11 @@ pub fn can_cast_dispel(
         return false;
     };
     let auras = ctx.active_auras.get(&entity);
-    if auras.is_some_and(|a| a.iter().any(|aura| aura.effect_type == AuraType::Silence)) {
+    let uses_mana = ctx
+        .combatants
+        .get(&entity)
+        .is_some_and(|c| c.class.uses_mana());
+    if def.silence_stops() && super::abilities::silence_holds(uses_mana, auras.map(Vec::as_slice)) {
         return false;
     }
     // `is_spell_school_locked` takes `ActiveAuras`; the context stores the aura

@@ -272,26 +272,29 @@ impl AbilityType {
 
 /// Helper function to check if a combatant is currently silenced.
 ///
-/// Silence prevents the combatant from using any mana-cost ability, but ONLY
-/// applies to combatants whose resource type is Mana. Warriors (Rage) and Rogues
-/// (Energy) are never blocked by this helper, even if they somehow received a
-/// Silence aura. This matches the design intent from the brainstorm: silence is
-/// a caster-class counter, not a universal CC.
+/// The CASTER's half of the silence rule; the ability's half is
+/// [`AbilityConfig::silence_stops`](super::ability_config::AbilityConfig::silence_stops)
+/// (Silence-prevented and costing mana), and every silence check asks both.
+/// Only applies to combatants whose resource type is Mana. Warriors (Rage) and
+/// Rogues (Energy) are never blocked by this helper, even if they somehow
+/// received a Silence aura: silence is a caster-class counter, not a universal
+/// CC.
 ///
 /// Applied by Unstable Affliction dispel backlash.
 pub fn is_silenced(caster: &super::components::Combatant, auras: Option<&ActiveAuras>) -> bool {
     use super::components::ResourceType;
-    if caster.resource_type != ResourceType::Mana {
-        return false;
-    }
-    if let Some(auras) = auras {
-        auras
-            .auras
-            .iter()
-            .any(|aura| aura.effect_type == AuraType::Silence)
-    } else {
-        false
-    }
+    silence_holds(
+        caster.resource_type == ResourceType::Mana,
+        auras.map(|a| a.auras.as_slice()),
+    )
+}
+
+/// [`is_silenced`] for a caster known only by whether it uses mana and by its
+/// aura list — the shape the AI's `CombatContext` stores (`CombatantInfo`'s
+/// class, `active_auras`). The one definition of the caster's half of the
+/// silence rule; `is_silenced` asks it too.
+pub fn silence_holds(uses_mana: bool, auras: Option<&[super::components::Aura]>) -> bool {
+    uses_mana && auras.is_some_and(|a| a.iter().any(|aura| aura.effect_type == AuraType::Silence))
 }
 
 /// Helper function to check if a spell school is currently locked out for a combatant

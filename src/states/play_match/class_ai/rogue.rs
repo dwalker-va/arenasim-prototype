@@ -440,11 +440,11 @@ fn plan_kidney_shot(
         .and_then(|i| i.casting_ability)
         .map(|ab| abilities.get_unchecked(&ab));
     let casting_school = casting.map(|def| def.spell_school);
-    // Kick takes the cast only if it is not `uninterruptible`; against one that
+    // Kick takes the cast only if it can be interrupted; against one that
     // is, the stun is the only denial there is.
     let kick_ready = !combatant.ability_cooldowns.contains_key(&AbilityType::Kick)
         && my_pos.distance(tgt_pos) <= MELEE_RANGE
-        && casting.is_none_or(|def| !def.uninterruptible);
+        && casting.is_none_or(|def| !def.is_uninterruptible_cast());
 
     if let Some(cast_school) = casting_school {
         // Target is casting right now.

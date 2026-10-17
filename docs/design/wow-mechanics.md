@@ -50,11 +50,10 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   so a caster behind a pillar yields to one in sight and is never interrupted
   through it; `process_interrupts` refuses one that reaches it anyway, spent
   and cutting nothing.
-- **An `uninterruptible` cast takes no interrupt** (AS-287): Aimed Shot, the
-  one cast-time ability TBC gives `PreventionType` Pacify rather than Silence
-  (`docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py`
-  re-derives that from the client data for every cast in the book). Its RON
-  flag folds into the same rule (`AbilityConfig::can_be_interrupted`), so every
+- **Only a Silence-prevented cast takes an interrupt** (AS-287): Aimed Shot is
+  the one cast-time ability TBC gives `PreventionType` Pacify rather than
+  Silence, so it is uninterruptible. Its RON `prevention` folds into the same
+  rule (`AbilityConfig::can_be_interrupted`), so every
   interrupter passes it by unspent, tracing the pass as `Uninterruptible`, and
   `process_interrupts` cuts and locks nothing if one reaches it. The Hunter's
   own timing model (`hunter::aimed_shot_has_time`) counts an enemy's interrupt
@@ -197,6 +196,33 @@ Death Coil), `SHEEPED`, `FROZEN` (Freezing Trap; any other incapacitate reads
 Silence keep their labels, a snare never gets one.
 `rendering/status_labels.rs` holds the mapping as an exhaustive match, and its
 tests fail if a full-CC type or spell is left unlabelled.
+
+### Silence
+- A silence stops what TBC's `SpellCategories.PreventionType` says it stops
+  (AS-291). Every ability declares that type as `prevention` in
+  `abilities.ron` — `Silence` (spells), `Pacify` (physical attacks and shots)
+  or `None` (Travel Form, Berserker Rage) — and
+  `docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py` checks
+  the whole book against the client. Four abilities have no TBC spell of
+  their own name (Web, Boar Charge, Master's Call, Wind Shear); the script
+  names the spells and client build each is read from instead.
+- A silence stops a `Silence`-prevented ability that costs mana, cast by a
+  mana user (`AbilityConfig::silence_stops`, `abilities::is_silenced`): the
+  AI's pre-cast guard (`cast_guard::pre_cast_ok`) refuses to begin one, traced
+  `SilencedOrLocked`, and `process_casting` stops one already being cast or
+  channelled ("interrupted by Silence"). A silence locks out no school.
+- So a silenced Hunter still begins and finishes an Aimed Shot, and fires
+  Arcane Shot, Concussive Shot, Serpent Sting and Disengage, which are Pacify;
+  its traps and Flare are spells, and are stopped. A silenced Druid still
+  shifts into Travel Form (`None`), and is stopped from everything else.
+- Two conditions are the sim's own, not TBC's: a silence never stops a free
+  ability (Divine Shield, the Paladin auras, the Mage armors, the Felhunter's
+  Spell Lock and Devour Magic, the Spider's Web), and
+  it never touches a Warrior's or Rogue's kit.
+- Nothing in the sim pacifies, so `Pacify` stops nothing today; a pacify
+  effect would stop exactly those abilities.
+- Loss of control (stun, fear, polymorph, cyclone) stops every cast, whatever
+  its prevention.
 
 ### Root
 - Prevents movement only

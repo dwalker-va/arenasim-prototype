@@ -20,7 +20,8 @@ use crate::states::play_match::map_geometry::has_line_of_sight;
 /// Opt-in guards layered on top of the universal pre-cast checks.
 ///
 /// The universal checks (always applied) are: spell-school lockout, silence
-/// (gated on `mana_cost > 0` and caster's resource type via [`is_silenced`]),
+/// (for an ability a silence stops, [`AbilityConfig::silence_stops`], on a
+/// caster [`is_silenced`]),
 /// per-ability cooldown, and `can_cast_config` (mana / range / min-range /
 /// stealth) for targeted casts or a bare mana check for self-targeted casts.
 #[derive(Debug, Clone, Copy, Default)]
@@ -69,8 +70,9 @@ pub const SHAPESHIFTED_NOTE: &str = "shapeshifted: nothing is cast in Travel For
 /// 3. target damage immunity (opt-in)
 /// 4. shapeshift: nothing is cast in Travel Form
 /// 5. spell-school lockout
-/// 6. silence (skipped when `bypass_silence`; otherwise auto-gated on
-///    `mana_cost > 0` and caster resource type)
+/// 6. silence (skipped when `bypass_silence`; otherwise only for an ability
+///    a silence stops, [`AbilityConfig::silence_stops`] — so a silenced Hunter
+///    still shoots and a silenced Druid still shifts — on a silenced mana user)
 /// 7. per-ability cooldown
 /// 8. mana / range / min-range / stealth (via `can_cast_config` for
 ///    targeted casts; mana-only for self-targeted)
@@ -212,7 +214,7 @@ pub fn own_state_ok(
     // Nothing is cast in Travel Form: the Druid shifts back first.
     !auras.is_some_and(ActiveAuras::is_shapeshifted)
         && !is_spell_school_locked(def.spell_school, auras)
-        && (opts.bypass_silence || def.mana_cost <= 0.0 || !is_silenced(caster, auras))
+        && (opts.bypass_silence || !def.silence_stops() || !is_silenced(caster, auras))
         && !caster.ability_cooldowns.contains_key(&ability)
 }
 
@@ -370,7 +372,7 @@ pub fn classify_pre_cast_failure(
             school: def.spell_school,
         };
     }
-    if !opts.bypass_silence && def.mana_cost > 0.0 && is_silenced(caster, auras) {
+    if !opts.bypass_silence && def.silence_stops() && is_silenced(caster, auras) {
         return RejectionReason::SilencedOrLocked {
             school: def.spell_school,
         };

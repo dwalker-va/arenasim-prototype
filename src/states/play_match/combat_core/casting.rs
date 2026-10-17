@@ -219,12 +219,14 @@ pub fn process_casting(
             continue;
         }
 
-        // Silence interrupts in-flight mana-cost casts (UA backlash). Note: Silence is a
-        // separate gate from is_incapacitated — silenced combatants can still move,
-        // auto-attack, and use rage/energy abilities. Only mana casts are interrupted.
+        // A silence stops a cast in progress only when the ability is one a
+        // silence stops (`AbilityConfig::silence_stops`: Silence-prevented and
+        // costing mana). A Pacify-prevented cast (Aimed Shot) goes on through
+        // it, as in TBC. Silence is a separate gate from is_incapacitated —
+        // silenced combatants can still move, auto-attack, shoot and shift.
         let ability_def = abilities.get_unchecked(&casting.ability);
         if super::super::abilities::is_silenced(&caster, caster_auras.as_deref())
-            && ability_def.mana_cost > 0.0
+            && ability_def.silence_stops()
         {
             let caster_id = combatant_id(caster.team, caster.slot, caster.class);
             combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
@@ -1186,11 +1188,12 @@ pub fn process_channeling(
             continue;
         }
 
-        // Silence interrupts mana-cost channels (UA backlash). Channels like Drain Life
-        // count as mana-cost; rage/energy channels (none today) would not be affected.
+        // A silence stops a channel the same way it stops a cast
+        // (`AbilityConfig::silence_stops`). Every channel is Silence-prevented
+        // (`validate()`), so this is Drain Life.
         let channel_def = abilities.get_unchecked(&channeling.ability);
         if super::super::abilities::is_silenced(&caster, caster_auras.as_deref())
-            && channel_def.mana_cost > 0.0
+            && channel_def.silence_stops()
         {
             let caster_id = combatant_id(caster.team, caster.slot, caster.class);
             combat_log.mark_cast_interrupted(&caster_id, &channel_def.name);

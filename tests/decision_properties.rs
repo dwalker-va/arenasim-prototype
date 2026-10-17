@@ -91,7 +91,9 @@ use bevy::prelude::{Entity, Vec2, Vec3};
 use arenasim::states::match_config::{
     CharacterClass, MageArmor, PaladinAura, RogueOpener, WarlockCurse, WarriorShout,
 };
-use arenasim::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
+use arenasim::states::play_match::ability_config::{
+    load_ability_definitions, AbilityConfig, AbilityDefinitions, Prevention,
+};
 use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::TrapType;
@@ -1811,7 +1813,7 @@ fn not_silenced() -> Finding {
         let blocked = match r.point.situation.my_aura {
             SelfLock::Free => continue,
             SelfLock::Silence => {
-                mana_user && def.mana_cost > 0.0 && ability != AbilityType::DivineShield
+                mana_user && silence_stops(def) && ability != AbilityType::DivineShield
             }
             SelfLock::SchoolLockout => {
                 Some(def.spell_school) == main_school(&g.defs, r.point.class)
@@ -1826,13 +1828,67 @@ fn not_silenced() -> Finding {
     Finding { judged, violations }
 }
 
-/// A silenced caster casts nothing that costs mana (`is_silenced`: mana
-/// users only; Divine Shield is the one ability that bypasses it), a
-/// locked-out school casts nothing of that school, and a Druid in Travel
-/// Form casts nothing — the shift out is not a cast.
+/// A silenced caster casts nothing a silence stops ([`silence_stops`]; mana
+/// users only, and Divine Shield bypasses it), a locked-out school casts
+/// nothing of that school, and a Druid in Travel Form casts nothing — the
+/// shift out is not a cast.
 #[test]
 fn never_casts_through_a_silence_lockout_or_shapeshift() {
     verdict(Property::NotSilenced, Scope::Guard, not_silenced());
+}
+
+/// What a silence stops, restated from the data: a Silence-prevented ability
+/// that costs mana. Read from the RON fields, not from
+/// `AbilityConfig::silence_stops`, so the properties check the engine's rule
+/// rather than repeat it.
+fn silence_stops(def: &AbilityConfig) -> bool {
+    def.prevention == Prevention::Silence && def.mana_cost > 0.0
+}
+
+/// The other half: a silenced caster is never REFUSED an ability a silence
+/// does not stop. A Pacify shot (Aimed Shot, Arcane Shot, Concussive Shot,
+/// Serpent Sting, Disengage) or an unpreventable shift (Travel Form) that the
+/// grid's silenced scenes consider is never rejected `SilencedOrLocked`.
+/// Judged over every such candidate, chosen or rejected, so a grid whose
+/// silenced Hunters and Druids stopped reaching those abilities fails as
+/// vacuous rather than passing.
+#[test]
+fn never_refuses_for_a_silence_what_a_silence_does_not_stop() {
+    let g = grid();
+    let mut judged = 0;
+    let mut v = Vec::new();
+    for (r, view) in g
+        .records
+        .iter()
+        .filter(|r| r.point.situation.my_aura == SelfLock::Silence)
+        .flat_map(|r| decisions(r).map(|view| (r, view)))
+    {
+        let mana_user = !matches!(
+            r.point.class,
+            CharacterClass::Warrior | CharacterClass::Rogue
+        );
+        for c in &view.candidates {
+            // Only what a silence that ignored `prevention` would refuse: a
+            // mana user's mana-costing ability that a silence does not stop.
+            let def = g.defs.get(&c.ability).unwrap();
+            if !mana_user || def.mana_cost <= 0.0 || silence_stops(def) {
+                continue;
+            }
+            judged += 1;
+            if matches!(c.reason, Some(RejectionReason::SilencedOrLocked { .. })) {
+                v.push(describe(r, c.ability, None));
+            }
+        }
+    }
+    eprintln!("silence-free mana abilities judged in silenced scenes: {judged}");
+    assert!(
+        judged > 0,
+        "no silenced scene considered an ability a silence does not stop"
+    );
+    assert!(
+        v.is_empty(),
+        "refused for a silence that does not stop it: {v:#?}"
+    );
 }
 
 /// The trace never contradicts the choice: an ability the decision rejected
@@ -1946,7 +2002,7 @@ fn owed_heal(g: &Grid, r: &Record, guarantee: &HealGuarantee) -> Option<&'static
     let mana_user = !matches!(p.class, CharacterClass::Warrior | CharacterClass::Rogue);
     let caster_free = match p.situation.my_aura {
         SelfLock::Free => true,
-        SelfLock::Silence => !(mana_user && def.mana_cost > 0.0),
+        SelfLock::Silence => !(mana_user && silence_stops(def)),
         SelfLock::SchoolLockout => Some(def.spell_school) != main_school(&g.defs, p.class),
         SelfLock::TravelForm => false,
     };

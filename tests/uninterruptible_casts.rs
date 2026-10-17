@@ -1,6 +1,6 @@
 //! An uninterruptible cast (AS-287): Aimed Shot.
 //!
-//! No interrupt takes a cast whose ability is `uninterruptible` — Kick,
+//! No interrupt takes a cast whose `prevention` is not Silence — Kick,
 //! Pummel, Wind Shear and Spell Lock pass it by, and are not spent on it. Loss
 //! of control still stops it: a stun, fear or polymorph cancels the cast, as
 //! it cancels any cast, and that is not an interrupt, so it locks out no
@@ -55,10 +55,10 @@ const INTERRUPTIBLE: AbilityType = AbilityType::Frostbolt;
 fn aimed_shot_is_the_flagged_cast() {
     let defs = AbilityDefinitions::default();
     let aimed = defs.get_unchecked(&UNINTERRUPTIBLE);
-    assert!(aimed.uninterruptible && aimed.has_cast_bar());
+    assert!(aimed.is_uninterruptible_cast() && aimed.has_cast_bar());
     assert!(!aimed.can_be_interrupted());
     let frostbolt = defs.get_unchecked(&INTERRUPTIBLE);
-    assert!(!frostbolt.uninterruptible && frostbolt.can_be_interrupted());
+    assert!(!frostbolt.is_uninterruptible_cast() && frostbolt.can_be_interrupted());
 }
 
 // ── resolution ──────────────────────────────────────────────────────────────

@@ -187,15 +187,15 @@ pub struct AbilityConfig {
     /// Cast time in seconds (0.0 = instant)
     #[serde(default)]
     pub cast_time: f32,
-    /// The cast cannot be INTERRUPTED: Kick, Pummel, Spell Lock, Wind Shear
-    /// and every other interrupt pass it by, and its cast bar is grey. Loss of
-    /// control (a stun, fear, polymorph, cyclone, ...) still stops it, which is
-    /// not an interrupt and locks out no school. TBC's rule: a cast an
-    /// interrupt takes has `PreventionType` Silence, and this flag marks one
-    /// with Pacify (Aimed Shot). Read through
-    /// [`AbilityConfig::can_be_interrupted`].
-    #[serde(default)]
-    pub uninterruptible: bool,
+    /// What stops this ability being used: TBC's
+    /// `SpellCategories.PreventionType`. REQUIRED, with no serde default, so a
+    /// new ability states it rather than inheriting a guess. A silence stops
+    /// only a [`Prevention::Silence`] ability
+    /// ([`AbilityConfig::silence_stops`]), and an interrupt takes only a
+    /// Silence-prevented cast bar ([`AbilityConfig::can_be_interrupted`]).
+    /// Checked against the TBC client by
+    /// `docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py`.
+    pub prevention: Prevention,
     /// Maximum range in units
     pub range: f32,
     /// Minimum range in units (Hunter dead zone). None = no minimum range.
@@ -350,6 +350,25 @@ pub enum CooldownCategory {
     Trap,
 }
 
+/// What stops an ability being used ([`AbilityConfig::prevention`]): TBC's
+/// `SpellCategories.PreventionType` (wago.tools build 2.5.6.69795), the column
+/// TrinityCore's `CheckCasterAuras` and silence handler read. A silence stops
+/// a Silence-prevented cast, whether starting or in progress, and nothing else.
+/// A pacify would stop a Pacify-prevented one, but nothing in the sim pacifies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Prevention {
+    /// PreventionType 1: a spell. A silence stops it, and an interrupt takes
+    /// its cast bar.
+    Silence,
+    /// PreventionType 2: a physical attack or shot (Aimed Shot, Arcane Shot,
+    /// Disengage, Mortal Strike). A silence does not stop it, and no interrupt
+    /// takes its cast bar, which is grey.
+    Pacify,
+    /// PreventionType 0: neither a silence nor a pacify stops it (Travel Form,
+    /// Berserker Rage). Loss of control still does.
+    None,
+}
+
 fn default_scaling_none() -> ScalingStat {
     ScalingStat::None
 }
@@ -386,12 +405,32 @@ impl AbilityConfig {
     }
 
     /// Whether an interrupt can take a cast of this ability in progress: it
-    /// has a cast bar ([`Self::has_cast_bar`]) and is not
-    /// [`uninterruptible`](Self::uninterruptible). The one rule every
+    /// has a cast bar ([`Self::has_cast_bar`]) and its
+    /// [`prevention`](Self::prevention) is Silence. The one rule every
     /// interrupter's scan and `process_interrupts` ask, through
     /// `class_ai::cast_is_interruptible`.
     pub fn can_be_interrupted(&self) -> bool {
-        self.has_cast_bar() && !self.uninterruptible
+        self.has_cast_bar() && self.prevention == Prevention::Silence
+    }
+
+    /// A cast bar no interrupt takes (Aimed Shot): its bar is grey, and every
+    /// interrupter passes it by. Loss of control still stops it.
+    pub fn is_uninterruptible_cast(&self) -> bool {
+        self.has_cast_bar() && !self.can_be_interrupted()
+    }
+
+    /// Whether a silence stops this ability, whether it is being begun or is
+    /// already being cast or channelled: its [`prevention`](Self::prevention)
+    /// is Silence and it costs mana. A Pacify-prevented shot (Aimed Shot,
+    /// Arcane Shot, Disengage) and an unpreventable shift (Travel Form) go on
+    /// through a silence, as in TBC. The mana condition is the sim's own: a
+    /// free ability is not silenced (Divine Shield, the Felhunter's Spell
+    /// Lock). [`is_silenced`](super::abilities::is_silenced) answers the
+    /// caster's half — a silenced MANA user — and every silence check asks
+    /// both: the AI's `pre_cast_ok` and `process_casting`, for a cast and a
+    /// channel.
+    pub fn silence_stops(&self) -> bool {
+        self.prevention == Prevention::Silence && self.mana_cost > 0.0
     }
 
     /// Returns true if this is a channeled ability
@@ -691,17 +730,15 @@ impl AbilityDefinitions {
             }
         }
 
-        // `uninterruptible` describes a cast bar. On an instant or a channel it
-        // would be a flag nothing reads, so a RON edit setting it there would
-        // silently no-op.
+        // A channel is interrupted by its own path, which does not read
+        // `prevention`, so a channel declaring anything but Silence would be
+        // a value the interrupt silently ignores.
         for (ability, def) in &self.definitions {
-            if def.uninterruptible && (!def.has_cast_bar() || def.is_channel()) {
+            if def.is_channel() && def.prevention != Prevention::Silence {
                 panic!(
-                    "abilities.ron: {:?} is `uninterruptible` but has no cast bar to \
-                     interrupt (cast_time {}, channel {}). The flag applies to a cast.",
-                    ability,
-                    def.cast_time,
-                    def.is_channel()
+                    "abilities.ron: {:?} is a channel with `prevention: {:?}`. A channel's \
+                     interrupt does not read `prevention`; only a Silence channel is modelled.",
+                    ability, def.prevention
                 );
             }
         }
@@ -850,7 +887,7 @@ mod tests {
             icon: String::new(),
             description: String::new(),
             cast_time: 0.0,
-            uninterruptible: false,
+            prevention: Prevention::Silence,
             range: 40.0,
             min_range: None,
             mana_cost: 0.0,
