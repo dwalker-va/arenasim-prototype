@@ -817,6 +817,48 @@ fn ice_barrier_wears_its_own_model_beside_power_word_shield() {
     );
 }
 
+/// The streak rings swap textures against Power Word: Shield's, as the client
+/// does: Ice Barrier's bright ring A wears the `shockwave10b` ring PW:S wears
+/// as B, and its B wears PW:S's A. The rim wears the same rim.
+#[test]
+fn the_streak_rings_wear_the_clients_textures() {
+    let (mut h, mage, _) = standard_harness();
+    let (priest_target, _) = h.bearer(Vec3::new(4.0, 1.0, 0.0));
+    h.give(mage, ICE_BARRIER_AURA_NAME);
+    h.give(priest_target, PW_SHIELD_AURA_NAME);
+    h.tick(3);
+    let world = h.app.world();
+    let materials = world.resource::<Assets<StandardMaterial>>();
+    let mut q = world.try_query::<(&PwShieldVisual, &Children)>().unwrap();
+    let rigs: Vec<(ShieldKind, Vec<Entity>)> = q
+        .iter(world)
+        .map(|(r, kids)| (r.kind, kids.iter().collect()))
+        .collect();
+    let texture = |kind: ShieldKind, layer: PwsLayer| {
+        let (_, kids) = rigs
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .expect("no rig of that kind");
+        kids.iter()
+            .copied()
+            .find_map(|k| {
+                let card = world.get::<PwShieldCard>(k)?;
+                (card.layer == layer).then(|| {
+                    let m = world.get::<MeshMaterial3d<StandardMaterial>>(k).unwrap();
+                    materials.get(&m.0).unwrap().base_color_texture.clone()
+                })
+            })
+            .expect("no card of that layer")
+    };
+    let ib = |l| texture(ShieldKind::IceBarrier, l);
+    let pws = |l| texture(ShieldKind::PowerWordShield, l);
+    assert!(ib(PwsLayer::StreakA).is_some());
+    assert_eq!(ib(PwsLayer::StreakA), pws(PwsLayer::StreakB));
+    assert_eq!(ib(PwsLayer::StreakB), pws(PwsLayer::StreakA));
+    assert_eq!(ib(PwsLayer::Rim), pws(PwsLayer::Rim));
+    assert_ne!(ib(PwsLayer::StreakA), ib(PwsLayer::StreakB));
+}
+
 // --- the bearer going away ---------------------------------------------------
 
 /// A bearer removed from the world takes its barrier with it on the next
