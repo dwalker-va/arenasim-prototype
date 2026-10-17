@@ -271,15 +271,10 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 4.5: Mana Burn — held for the premium window, exactly like a
-    // human Priest: the enemy healer sitting in CC (our burn deals no damage,
-    // so it can NEVER break the CC — a stunned/feared/polymorphed healer is a
-    // free burn) while the partner doesn't need healing. Sits ABOVE Flash
-    // Heal because its internal health floor is two-tier: during a CC window
-    // it burns unless an ally is in real danger (<70%); outside one it
-    // requires a topped team (<90% floor, i.e. only surplus GCDs — Flash
-    // Heal's own trigger), so ordering is safe. Safety gates (escape/
-    // pressured/focus/stealth) live inside and are traced.
+    // Priority 4.5: Mana Burn on the enemy healer, with surplus GCDs only.
+    // Sits ABOVE Flash Heal because it requires a topped team (its 0.90
+    // floor is Flash Heal's own trigger), so ordering is safe. Safety gates
+    // (escape/pressured/focus/stealth) live inside and are traced.
     if try_mana_burn(
         commands,
         combat_log,
@@ -1256,14 +1251,12 @@ const MANA_BURN_MIN_TARGET_MANA: f32 = 10.0;
 /// doesn't flicker the cast in and out of OutOfRange.
 const MANA_BURN_RANGE_BUFFER: f32 = 2.0;
 
-/// Health floor for burning during a premium window (enemy healer in
-/// cast-preventing CC): burn unless an ally is in real danger.
-const MANA_BURN_CC_WINDOW_HEALTH_FLOOR: f32 = 0.70;
-
-/// Health floor outside a CC window: only surplus GCDs — 0.90 is Flash
-/// Heal's own trigger threshold, so this rung sitting above Flash Heal
-/// cannot steal a needed heal.
-const MANA_BURN_SURPLUS_HEALTH_FLOOR: f32 = 0.90;
+/// Health floor for a burn: only surplus GCDs — 0.90 is Flash Heal's own
+/// trigger threshold, so this rung sitting above Flash Heal cannot steal a
+/// needed heal. The same whether or not the enemy healer is locked: a burn
+/// can never break crowd control, and burned mana stays burned after the
+/// lock ends, so a lock adds nothing a burn could spend.
+const MANA_BURN_HEALTH_FLOOR: f32 = 0.90;
 
 /// Cast/attack-preventing CC on an entity (Stun/Fear/Polymorph/Incapacitate —
 /// deliberately NOT Root: a rooted caster still casts). The set
@@ -1328,10 +1321,11 @@ fn mana_burn_pull_target(
 /// target is usually a DPS, but mana pressure only converts against the class
 /// whose mana gates the enemy team's survival. Deliberately does NOT check
 /// friendly CC on the target — Mana Burn deals no damage, so burning a feared
-/// or screamed healer cannot break the CC and is in fact the ideal window.
+/// or screamed healer cannot break the CC.
 ///
-/// No explicit team-health gate: the heal rungs above this one fire first
-/// whenever a heal is needed, so reaching this rung implies a surplus GCD.
+/// Spends surplus GCDs only: it holds while any ally is below
+/// `MANA_BURN_HEALTH_FLOOR`, Flash Heal's own trigger, so the heal rung
+/// below it keeps every GCD a heal needs.
 ///
 /// The escape/pressured/focus/stealth gates protect the STANDSTILL of a
 /// hard cast (sweeps proved a Priest rooted mid-burn dies to ranged trains
@@ -1408,26 +1402,13 @@ fn try_mana_burn(
         return false;
     }
 
-    // Two-tier health floor (the rung sits ABOVE Flash Heal): during a
-    // premium window — the enemy healer in cast-preventing CC, which our
-    // zero-damage burn can never break — burn unless an ally is in real
-    // danger. Outside one, require a topped team (90% is Flash Heal's own
-    // trigger), i.e. only surplus GCDs.
-    let cc_window = ctx.situation().enemy_healer_locked.is_some();
-    let health_floor = if cc_window {
-        MANA_BURN_CC_WINDOW_HEALTH_FLOOR
-    } else {
-        MANA_BURN_SURPLUS_HEALTH_FLOOR
-    };
-    if !ctx.is_team_healthy(health_floor, my_pos) {
+    // Surplus GCDs only (the rung sits ABOVE Flash Heal): a team below
+    // Flash Heal's own trigger gets the heal.
+    if !ctx.is_team_healthy(MANA_BURN_HEALTH_FLOOR, my_pos) {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
-                note: if cc_window {
-                    "ally in danger: heal wins even the CC window".to_string()
-                } else {
-                    "no surplus GCD: team not topped and no CC window".to_string()
-                },
+                note: "no surplus GCD: team not topped".to_string(),
             },
         );
         return false;

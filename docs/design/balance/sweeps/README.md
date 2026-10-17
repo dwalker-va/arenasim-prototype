@@ -263,3 +263,17 @@ Behind `2026-10-13-as249-healer-positioning.md` (card AS-249). Two sweeps:
   (`2026-10-13-as249-gen.py cover 3`, both teams `TeamPlan`, the play withheld
   per arm), results `2026-10-13-as249-cover.csv.gz`, analysed by
   `2026-10-13-as249-cover.py`.
+
+## `2026-10-17-as325-*`
+
+Behind `../2026-10-17-as325-mana-burn-cc-window.md` (card AS-325). Two paired
+directional sweeps, 2,830 configs each: `gen_sweep.py --full 2
+--exclude-double-healer --affects Priest --control-cells 8 --n 10 --extra
+'{"ai_profile":"Legacy"}' --label-suffix Legacy` (`-legacy-basicarena`) and
+the same with `'{"ai_profile":"TeamPlan","map":"PillaredArena"}'
+--label-suffix TeamPlan` (`-teamplan-pillaredarena`). Run by `main` @
+`5ca3e72d` (`-before.csv.gz`) and the branch (`-after.csv.gz`) with `--jobs 6
+--trace-mode off`, analysed with `scripts/paired_sweep.py --affects Priest
+--tier directional --expect nothing`. The log-identity seed bank is
+`2026-10-17-as325-bank.py --before <main binary> --after <branch binary>
+--work <dir>`; its docstring says how each binary must be placed.
