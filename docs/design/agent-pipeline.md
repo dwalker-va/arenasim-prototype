@@ -92,6 +92,7 @@ the protocol reads as it always has:
   "agent": {"status": "working | done", "started": "ISO", "finished": "ISO", "name": "Engineer-AS-1"} | null,
   "released": "v0.2.0" | absent (release tag; set by the orchestrator when a release bundles the card),
   "cancelled": {"t": "ISO", "by": "user", "reason": "superseded by AS-190"} | absent (set by cancel_card only),
+  "blocked_by": ["AS-276"] | absent (the cards this one waits on; reads add "waiting_on", the ones not yet merged),
   "milestone": "0.7" | null | absent, "iteration": 1 | 2 | ...,
   "area": "combat | visuals | ai | ui | tooling" | null,
   "summary": "<what changed, in a player's words>", "human_testing": "<the PR's steps, one per line>",
@@ -111,7 +112,7 @@ Stored as these tables:
 |---|---|
 | `cards` | one row per card: the document above minus `activity`, its `version`, and `column`/`role` as indexed generated columns. Every write bumps `version` by one. |
 | `activity` | one row per activity entry, **append-only** (triggers refuse UPDATE and DELETE). |
-| `events` | one row per write — `cursor` (monotonic), `t`, `actor`, `kind` (`created`, `moved`, `edited`, `answered`, `claimed`, `claim_released`, `claim_finished`, `activity`, `body_appended`, `deleted`, `ruling`, `merged`, `cancelled`, `milestone_created`, `milestone_updated`, `milestone_sweep`, `milestone_guide`, `milestone_closed`, `review_submitted`, `feedback_triaged`, `migrated`), `card`, `data` (a milestone's name in `data.milestone`). The wake-up feed. |
+| `events` | one row per write — `cursor` (monotonic), `t`, `actor`, `kind` (`created`, `moved`, `edited`, `answered`, `claimed`, `claim_released`, `claim_finished`, `activity`, `body_appended`, `deleted`, `ruling`, `merged`, `cancelled`, `unblocked`, `milestone_created`, `milestone_updated`, `milestone_sweep`, `milestone_guide`, `milestone_closed`, `review_submitted`, `feedback_triaged`, `migrated`), `card`, `data` (a milestone's name in `data.milestone`). The wake-up feed. |
 | `meta` | `next_id` and the id prefix — id allocation is the daemon's, so no caller keeps `nextId` — the board id, and `schema` (2; the daemon refuses any other until `migrate` has run). |
 | `milestones` | one row per milestone: `name`, `status` (`open`, `in_review`, `released`), `created`, `released_at`, `tag`, `release_url`, `review_sha`, `sweep`, `submissions` (rounds submitted before feedback batches, with the cards each auto-filed), `first_id`/`end_id` (the card ids issued while it was open), `review_guide` (the review units `set_review_guide` wrote; part of the milestone document, so no schema change), and its own `version`. |
 | `review_items` | one row per review-page tick (a checklist step, or a guide check keyed `guide:<unit>:<check>`) or feedback comment (also on a guide unit, `guide:<unit>`), keyed by milestone and item, each with its own `version`. |
@@ -165,11 +166,19 @@ schema 1 database, and importing a schema 1 export applies the same move.
 
 **Reading it costs little.** `list_cards` returns **summaries** — id, title,
 column, role, priority, agent, pr, worktree, links, updated, released,
-cancelled, milestone, iteration, area, version — never a body or activity, and leaves
+cancelled, milestone, iteration, area, blocked_by, version — never a body or activity, and leaves
 `archived` out unless asked; `milestone` and `iteration` filter it. `get_card` is the
-one call that returns a body, and `activity_limit` trims its log. That is the
-context fix: the artifact put ~15k tokens of page into the orchestrator on
-every read.
+one call that returns a body, and `activity_limit` trims its log; `fields` picks
+what it returns (`fields: ["activity"], activity_limit: 1` is the version and the
+latest log line, without the body). That is the context fix: the artifact put
+~15k tokens of page into the orchestrator on every read.
+
+**Writing it costs little too.** A card write returns a **receipt** — `{id,
+version, column, agent, updated}` plus only what that write produced (`mark_merged`
+its `merge_sha`, `record_ruling` the ruling, `cancel_card` the cancellation,
+`claim_card` the `worktree` it recorded) — never the body. The receipt's
+`version` is what the next versioned write passes. `full: true` on any write
+returns the whole card instead; read with `get_card` when you need the body.
 
 ### Column semantics
 
@@ -390,8 +399,9 @@ write below is an `mcp__dispatch-board__*` tool call with `actor:
 CWD flaps — see *Worktree discipline* — so never rely on a relative one).
 
 **Refusals are answers, not errors to retry blindly.** `stale_version` means
-the card changed since you read it: the refusal carries the current card —
-re-apply your change to that version. `claim_refused` means another claim holds the card:
+the card changed since you read it: the refusal carries the current card's
+receipt (its `version`, `column`, `agent`) — re-read what you need with
+`get_card` and re-apply your change to that version. `claim_refused` means another claim holds the card:
 do not spawn. `gate_refused` means a non-pm card is missing its own `pr`.
 
 ### Merging: rebase only when it buys something
@@ -414,8 +424,11 @@ Cards run in parallel. A PR does not rebase just because main moved.
   of a milestone's changes belongs to the milestone sweep. Re-sweeping each card on
   every new base is not the job of its PR.
 - **A dependency that remains goes on the board, not in the orchestrator's head.** The
-  waiting card gets a `links` entry naming the card it waits on, plus one activity line
-  saying why. Where cards keep colliding in one seam, fix the seam so that work there
+  waiting card names the card it waits on in `blocked_by` (`update_card` patch
+  `{blocked_by: ["AS-276"]}`), plus one activity line saying why. The board shows the
+  card as blocked, and when the last card it waits on merges it records an
+  `unblocked` event on it (actor `board-rules`, so it wakes the orchestrator's own
+  monitor even though the orchestrator wrote the merge): its dependency is met. Where cards keep colliding in one seam, fix the seam so that work there
   can run in parallel (for example, the play pipeline). Don't serialize the cards.
 
 ### Waking the orchestrator
@@ -440,8 +453,9 @@ Monitor({
 - Each event is one JSON line: `{"cursor": 42, "t": "...", "actor": "board",
   "kind": "moved", "card": "AS-7", "data": {"from": "backlog", "to":
   "in_progress"}}`. The orchestrator's own writes never appear
-  (`--ignore-actor orchestrator`); user gestures (`actor: "board"`) and other
-  sessions' writes (a PM's `create_card`) do.
+  (`--ignore-actor orchestrator`); user gestures (`actor: "board"`), other
+  sessions' writes (a PM's `create_card`) and the events the board derives
+  itself (`actor: "board-rules"`: `unblocked`) do.
 - **On expiry, re-arm** with `--since` set to the `cursor` of the last line it
   printed (or the cursor you armed it with, if it printed none), and the same
   `--board`. Nothing is lost across the gap: events wait in the database, and
@@ -530,7 +544,7 @@ workers from card state, and open PRs are re-discovered via `gh pr list`.
 
 **On each wake** (a monitor notification, or a worker's completion). Every
 versioned write passes the `version` of the card as you last read it — from
-`list_cards`, `get_card`, or the previous write's result:
+`list_cards`, `get_card`, or the previous write's receipt:
 
 1. `list_cards()` — summaries of every non-archived card. `get_card(id)` only
    for a card you are about to spawn for (its body is the spec) or whose

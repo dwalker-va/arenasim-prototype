@@ -7,7 +7,7 @@ import { request } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { lockPath, packagingIconDir } from "../dist/paths.js";
-import { spawnDaemon, mcpClient, call, post, tempDir, runWait, sleep, CLI, PKG } from "./helpers.mjs";
+import { spawnDaemon, mcpClient, call, post, tempDir, runWait, sleep, CLI, PKG, receiptOf } from "./helpers.mjs";
 
 test("MCP: tools are served and list_cards returns summaries only", async (t) => {
   const d = await spawnDaemon(t);
@@ -30,12 +30,17 @@ test("MCP: tools are served and list_cards returns summaries only", async (t) =>
 test("MCP: a stale version is refused as a tool error carrying the current card", async (t) => {
   const d = await spawnDaemon(t);
   const client = await mcpClient(t, d.base);
-  const c = (await call(client, "create_card", { title: "v", role: "engineer", actor: "o" })).value;
+  const c = (await call(client, "create_card", { title: "v", body: "a long spec", role: "engineer", actor: "o" })).value;
   assert.ok((await call(client, "update_card", { id: c.id, patch: { priority: "P1" }, expected_version: c.version, actor: "o" })).ok);
   const stale = await call(client, "update_card", { id: c.id, patch: { priority: "P3" }, expected_version: c.version, actor: "o" });
   assert.equal(stale.ok, false);
   assert.equal(stale.value.error, "stale_version");
-  assert.equal(stale.value.card.priority, "P1");
+  // The refusal carries the card's receipt as it is now — the version to re-apply on — not its body.
+  assert.deepEqual(stale.value.card, receiptOf((await call(client, "get_card", { id: c.id })).value));
+  // full: true carries the whole current card, as before.
+  const whole = await call(client, "update_card", { id: c.id, patch: { priority: "P3" }, expected_version: c.version, full: true, actor: "o" });
+  assert.equal(whole.value.error, "stale_version");
+  assert.deepEqual([whole.value.card.priority, whole.value.card.body], ["P1", "a long spec"]);
 });
 
 test("MCP: concurrent claims from separate clients resolve to exactly one winner", async (t) => {
@@ -222,7 +227,8 @@ test("MCP: move_card with append is the one-write REJECT", async (t) => {
   });
   assert.ok(r.ok, JSON.stringify(r.value));
   assert.deepEqual([r.value.version, r.value.column, r.value.agent], [c.version + 1, "in_progress", null]);
-  assert.match(r.value.body, /## Tester findings — 2026-09-25\n\n1\. broken$/);
+  assert.equal(r.value.body, undefined, "the write echoed the body");
+  assert.match((await call(client, "get_card", { id: c.id })).value.body, /## Tester findings — 2026-09-25\n\n1\. broken$/);
 });
 
 test("wake-up: a cursor past head is printed and resumed from head, never waited on silently", async (t) => {
