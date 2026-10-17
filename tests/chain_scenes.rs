@@ -472,19 +472,28 @@ fn no_second_hand_off_while_a_teammates_is_mid_cast() {
 }
 
 /// A healer does not chain while a teammate of its own is dying: its heals
-/// come first.
+/// come first. The dying ally is under no attack (the enemy Warrior is on
+/// the Paladin), so no ally is in danger and the play is not a Peel: the
+/// dying rule alone keeps the Chain off. With the ally healthy, it chains.
 #[test]
 fn a_healer_does_not_chain_while_a_teammate_is_dying() {
-    let layout = Layout {
-        ally_health: 0.3,
-        ..LAYOUT
+    let build = |ally_health| {
+        let layout = Layout {
+            ally_health,
+            ..LAYOUT
+        };
+        laid_out(Paladin, 6.0, 0.2, AiProfile::TeamPlan, layout).target(TARGET, ME)
     };
-    let with = laid_out(Paladin, 6.0, 0.2, AiProfile::TeamPlan, layout).decide(ME);
+    let healthy = build(1.0).decide(ME);
     assert!(
-        !matches!(with.situation.unwrap().play, Some(PlayTag::Chain { .. })),
+        matches!(healthy.situation.unwrap().play, Some(PlayTag::Chain { .. })),
         "{}",
-        describe(&with)
+        describe(&healthy)
     );
+    let with = build(0.3).decide(ME);
+    let situation = with.situation.unwrap();
+    assert_eq!(situation.ally_in_danger, None, "{}", describe(&with));
+    assert_eq!(situation.play, None, "{}", describe(&with));
     assert_ne!(
         with.chose(),
         Some((AbilityType::HammerOfJustice, Some(HEALER))),
@@ -598,6 +607,64 @@ fn a_class_with_no_hand_off_runs_its_fallback_play() {
             !matches!(with.situation.unwrap().play, Some(PlayTag::Chain { .. })),
             "{class:?}: {}",
             describe(&with)
+        );
+    }
+}
+
+/// Every class with a hand-off HOLDS its global cooldown when its hand-off's
+/// moment is within one: no cast at all, traced as the chain step, its tool
+/// rejected `MissesHandoff` with the moment one second away. Without the play
+/// the same unit acts. An instant hand-off (Hammer of Justice, Kidney Shot)
+/// with 1.25s of the lock left; a 1.5s one (Fear, Cyclone) with 2.75s. (The
+/// Mage's is [`a_hand_off_due_within_one_global_cooldown_holds_it`].)
+#[test]
+fn every_class_holds_its_global_cooldown_for_a_hand_off_within_one() {
+    // The Rogue's target in reach, so without the play it has a strike; the
+    // others' far off, so no self-peel (a Warlock's Death Coil on a melee)
+    // comes ahead of the chain step.
+    let cases = [
+        (
+            Paladin,
+            AbilityType::HammerOfJustice,
+            6.0,
+            0.0,
+            LAYOUT.target_at,
+        ),
+        (Rogue, AbilityType::KidneyShot, 2.0, 0.0, (1.5, -1.0)),
+        (Warlock, AbilityType::Fear, 20.0, 1.5, LAYOUT.target_at),
+        (Druid, AbilityType::Cyclone, 15.0, 1.5, LAYOUT.target_at),
+    ];
+    for (class, tool, dist, cast, target_at) in cases {
+        assert!(chain_tools(class).contains(&tool));
+        let left = cast + HANDOFF_LEAD + 1.0;
+        let layout = Layout {
+            target_at,
+            ..LAYOUT
+        };
+        let build = || laid_out(class, dist, left, AiProfile::TeamPlan, layout);
+        let with = build().decide(ME);
+        assert_eq!(with.chose(), None, "{class:?} holds: {}", describe(&with));
+        assert!(with.choices.is_empty(), "{class:?}");
+        assert_eq!(
+            with.situation.unwrap().play_step,
+            Some(PlayStep::Chain),
+            "{class:?}: {}",
+            describe(&with)
+        );
+        assert!(
+            matches!(
+                with.rejected(tool),
+                Some(RejectionReason::MissesHandoff { lands_at, until })
+                    if (until - HANDOFF_LEAD - lands_at - 1.0).abs() < 1e-3
+            ),
+            "{class:?}: {}",
+            describe(&with)
+        );
+        let without = withheld(build()).decide(ME);
+        assert!(
+            without.chose().is_some(),
+            "{class:?} without the play acts: {}",
+            describe(&without)
         );
     }
 }

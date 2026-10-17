@@ -11,8 +11,9 @@
 //!   a stun, a fear or horror, a polymorph, an incapacitate, a cyclone);
 //! - **healer-locked seconds** — seconds its healer spent locked;
 //! - **counterplay-free seconds** — seconds with two or more of its members
-//!   locked at once, one of them its healer: nothing on that side can answer.
-//!   In a 2v2 that is the whole team;
+//!   locked at once, one of them its healer: its healer cannot answer, nor
+//!   can at least one other member. In a 2v2 that is the whole team; in a
+//!   3v3 a third member may still act;
 //! - **longest healer lockout** — the longest unbroken run of the healer
 //!   locked: a chain is the only thing that grows it past one crowd
 //!   control's duration;
