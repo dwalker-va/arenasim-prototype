@@ -21,6 +21,45 @@ board and serves, on `127.0.0.1:7453`,
 
 The protocol it implements is `docs/design/agent-pipeline.md`.
 
+## Writes return a receipt
+
+A card write over MCP (`create_card`, `update_card`, `move_card`,
+`claim_card`, `release_claim`, `finish_claim`, `append_activity`,
+`append_to_body`, `answer_question`, `cancel_card`, `record_ruling`,
+`mark_merged`) returns `{id, version, column, agent, updated}` plus only what
+that write produced: `claim_card` its `worktree` (when given), `answer_question`
+the `question`, `cancel_card` the `cancelled` record, `record_ruling` the
+`ruling` it appended, `mark_merged` the `pr`, `merge_sha` and `merged_at`.
+Never the body: a standing card's runs to tens of thousands of tokens. Pass
+`full: true` for the whole card, as before. A refusal (`stale_version`,
+`claim_refused`, `gate_refused`, …) carries `error`, `message` and the card's
+receipt as it is now — again the whole card under `full: true`.
+
+Reads are unchanged. `get_card` takes `fields` to read only some fields
+(`id` and `version` always): `fields: ["activity"], activity_limit: 1` reads
+the version and the latest log line without the body. The web UI's `/api` is
+not the MCP surface and still returns whole cards.
+
+## Dependencies (`blocked_by`)
+
+A card names the cards it waits on: `blocked_by: ["AS-276"]`, set with
+`create_card`, `update_card` or a `move_card` patch (`[]` clears it). Each id
+must be a live card, not the card itself, named once, and closing no cycle.
+The card is **blocked** until every one is finished — merged, done, or
+archived as released; a cancelled blocker never ships, so it holds the card
+until someone takes it off the list. `list_cards` and `get_card` carry
+`waiting_on`, the blockers still open, beside `blocked_by`. When a write
+finishes a card's last blocker, the board records one `unblocked` event on
+the waiting card (`data: {blocked_by, last}`), with the actor `board-rules` —
+never a session's tag, so the orchestrator's own `mark_merged` still wakes the
+orchestrator's own wait. The web UI marks a blocked card's face (dashed, with
+"blocked by AS-…") and an unblocked one's ("unblocked"), and the drawer lists
+each blocker with where it stands.
+
+`blocked_by` is a field of the card document, like `cancelled`: no schema
+change and no migration. Existing cards have no `blocked_by` and read exactly
+as before.
+
 ## Milestones
 
 A milestone ("0.7") is a release's worth of cards, reviewed by the user once
@@ -245,7 +284,8 @@ mutant names must pass there, or no kill is counted. The copies live under
 npm test                 # the suite: concurrency, rules, round trip, daemon, wake-up, UI drawer (jsdom),
                          # milestones, the review page and its guide, the replay button (an injected
                          # spawn or a stub script — never the game), feedback batches and triage,
-                         # the review page's escaping, the schema 1 -> 2 migration
+                         # the review page's escaping, the schema 1 -> 2 migration,
+                         # write receipts, and blocked_by with its unblocked event
 npm run test:mutation    # removes each guard from dist/ and proves the suite fails
 ```
 

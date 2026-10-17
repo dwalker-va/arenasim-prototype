@@ -59,7 +59,8 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, root_style_for,
-    DotStateVisual, InterruptLanding, SlowTint, PW_SHIELD_AURA_NAME,
+    DotStateVisual, InterruptLanding, SlowTint, DIVINE_SHIELD_AURA_NAME, ICE_BARRIER_AURA_NAME,
+    PW_SHIELD_AURA_NAME,
 };
 
 use AbilityType::*;
@@ -664,13 +665,16 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             _ if HealImpact::kind_for(a).is_some() => {
                 Some("heal-kit landing on cast (heal_impact.rs)")
             }
-            // Power Word: Shield wears the client's cards, keyed on the aura's
-            // name; every other absorb (and immunity) keeps the sphere.
+            // Each client shield wears its model's cards, keyed on the aura's
+            // name. An absorb with no model of its own draws nothing.
             AuraType::Absorb if c.name == PW_SHIELD_AURA_NAME => {
                 Some("client shield cards (pw_shield.rs)")
             }
-            AuraType::Absorb | AuraType::DamageImmunity => {
-                Some("shield bubble (shield_bubbles.rs)")
+            AuraType::DamageImmunity if c.name == DIVINE_SHIELD_AURA_NAME => {
+                Some("client Divine Shield cards and sparkles (pw_shield.rs)")
+            }
+            AuraType::Absorb if c.name == ICE_BARRIER_AURA_NAME => {
+                Some("client Ice Barrier cards, icicles and mist (pw_shield.rs)")
             }
             AuraType::HealingReduction => Some("heal-refused tell (mortal_wounds.rs)"),
             // A heal over time routes by its name: a per-tick pulse (Healing

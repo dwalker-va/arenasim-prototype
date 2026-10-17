@@ -3,6 +3,13 @@ use bevy::prelude::*;
 use std::f32::consts::TAU;
 
 use super::heal_impact::{emissive_of, heal_jitter, holy_gold_pale, nature_green};
+use super::ice_barrier::{
+    ib_hand_envelope, ib_hand_glow_texture, ib_hand_pulse, ib_hand_ring_texture,
+    ib_hand_spark_local, IB_HAND_GLOW, IB_HAND_GLOW_RGB, IB_HAND_RING, IB_HAND_RING_ALPHA,
+    IB_HAND_RING_RGB, IB_HAND_SECS, IB_HAND_SPARKS, IB_HAND_SPARK_ALPHA, IB_HAND_SPARK_RGB,
+    IB_HAND_SPARK_SIZE,
+};
+use super::pw_shield::PWS_CLIENT_TO_RIG;
 use super::spell_bolts::{soft_dot_texture, star_flash_texture};
 use crate::states::play_match::components::*;
 
@@ -36,6 +43,9 @@ use crate::states::play_match::components::*;
 // the third family, Arcane: a 1000 ms one-shot sparkle with no precast. Most
 // Druid casts are instants, which play the launch alone as they land
 // (`spawn_instant_cast_hands`) — there is no cast window to loop through.
+// Ice Barrier's kit 207 (`ice_precast_high_hand.m2`) is the fourth, Frost: a
+// 1000 ms deep-blue glow and pulsing ring with sparks, also an instant's
+// launch only (`docs/design/2026-10-17-ice-barrier-client-data.md`).
 //
 // Timing is event-edge-driven in the source: the precast loop lives from the
 // cast-start edge to the cast-end edge — its duration IS the actual cast
@@ -316,6 +326,29 @@ fn arcane_piece_state(role: HealCastPieceRole, age: f32) -> (Vec3, f32, [f32; 3]
     }
 }
 
+/// A Frost piece's pose and look at `age` on the hand at `side`: rig-local
+/// translation, quad diameter and alpha (its colour is fixed). Pure, the
+/// bench's drawing code ported: the glow card and ring pulse together, the
+/// sparks circle the hand, and all of it rides one envelope.
+pub fn frost_piece_state(role: HealCastPieceRole, age: f32, side: f32) -> (Vec3, f32, f32) {
+    let env = ib_hand_envelope(age);
+    let pulse = ib_hand_pulse(age);
+    match role {
+        HealCastPieceRole::FrostGlow => (Vec3::ZERO, IB_HAND_GLOW * PWS_CLIENT_TO_RIG * pulse, env),
+        HealCastPieceRole::FrostRing => (
+            Vec3::ZERO,
+            IB_HAND_RING * PWS_CLIENT_TO_RIG * pulse,
+            IB_HAND_RING_ALPHA * env,
+        ),
+        HealCastPieceRole::FrostSpark { index } => (
+            ib_hand_spark_local(index, age, side),
+            IB_HAND_SPARK_SIZE,
+            IB_HAND_SPARK_ALPHA * env,
+        ),
+        _ => (Vec3::ZERO, 0.0, 0.0),
+    }
+}
+
 // --- Pure geometry (probed directly) ------------------------------------------
 
 /// How long a family's launch flare runs.
@@ -324,24 +357,26 @@ pub fn heal_cast_flare_secs(kind: HealCastKind) -> f32 {
         HealCastKind::Holy => HOLY_LAUNCH_FLARE_SECS,
         HealCastKind::Nature => NATURE_LAUNCH_BURST_SECS,
         HealCastKind::Arcane => MOONFIRE_HAND_SECS,
+        HealCastKind::Frost => IB_HAND_SECS,
     }
 }
 
-/// The glow quad sizes (outer, core) for a family. Arcane hands draw no glow
-/// ball; they share Nature's numbers only so the table stays total.
+/// The glow quad sizes (outer, core) for a family. Arcane and Frost hands draw
+/// no glow ball of this kind; they share Nature's numbers only so the table
+/// stays total.
 pub fn heal_cast_glow_sizes(kind: HealCastKind) -> [f32; 2] {
     let sizes = match kind {
         HealCastKind::Holy => HOLY_CAST_GLOW_SIZES,
-        HealCastKind::Nature | HealCastKind::Arcane => NATURE_CAST_GLOW_SIZES,
+        HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => NATURE_CAST_GLOW_SIZES,
     };
     [sizes[0] * GLOW_SCALE, sizes[1] * GLOW_SCALE]
 }
 
-/// A family's wisp width (Arcane draws no wisps; see above).
+/// A family's wisp width (Arcane and Frost draw no wisps; see above).
 pub fn heal_cast_wisp_width(kind: HealCastKind) -> f32 {
     match kind {
         HealCastKind::Holy => HOLY_CAST_WISP_WIDTH,
-        HealCastKind::Nature | HealCastKind::Arcane => NATURE_CAST_WISP_WIDTH,
+        HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => NATURE_CAST_WISP_WIDTH,
     }
 }
 
@@ -430,7 +465,7 @@ fn water_ring_blue() -> Color {
 fn glow_color(kind: HealCastKind) -> Color {
     match kind {
         HealCastKind::Holy => holy_gold_pale(),
-        HealCastKind::Nature | HealCastKind::Arcane => nature_green(),
+        HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => nature_green(),
     }
 }
 
@@ -438,7 +473,7 @@ fn glow_color(kind: HealCastKind) -> Color {
 fn wisp_alpha(kind: HealCastKind) -> f32 {
     match kind {
         HealCastKind::Holy => 0.80,
-        HealCastKind::Nature | HealCastKind::Arcane => 0.70,
+        HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => 0.70,
     }
 }
 
@@ -453,6 +488,9 @@ pub struct HealCastAssets {
     arcane_ring: Handle<Mesh>,
     star: Handle<Image>,
     dot: Handle<Image>,
+    /// Ice Barrier's glow card and ring sprites.
+    frost_glow: Handle<Image>,
+    frost_ring: Handle<Image>,
 }
 
 impl HealCastAssets {
@@ -465,6 +503,8 @@ impl HealCastAssets {
             arcane_ring: meshes.add(Annulus::new(0.77, 0.93).mesh().resolution(40)),
             star: images.add(star_flash_texture()),
             dot: images.add(soft_dot_texture()),
+            frost_glow: images.add(ib_hand_glow_texture()),
+            frost_ring: images.add(ib_hand_ring_texture()),
         }
     }
 }
@@ -567,18 +607,22 @@ pub fn spawn_heal_cast_glows(
 /// state at all, so its shift into the form plays it the same way.
 ///
 /// Scoped by [`HealCastKind::for_ability`], not by the instant: only the
-/// Druid's instants and Power Word: Shield are routed, so every other
-/// instant (Frost Shock among them) still draws no hands. Runs in `FixedUpdate` after
+/// Druid's instants, Power Word: Shield and Ice Barrier are routed, so every
+/// other instant (Frost Shock among them) still draws no hands. Runs in `FixedUpdate` after
 /// `CombatResolution` and before `consume_cast_ending_signals`, which
 /// despawns the marker; a shift is read the tick it is queued, before
 /// `process_travel_form` resolves it the next tick.
 ///
-/// Power Word: Shield is applied inline by the Priest AI with no cast state,
-/// so its hands play off its [`InstantAbilityFired`] marker instead (read
+/// Power Word: Shield and Ice Barrier are applied inline by their class AIs
+/// with no cast state, so their hands play off their [`InstantAbilityFired`]
+/// markers instead (read
 /// before `consume_instant_ability_signals` despawns it). An ability that
 /// announces itself through that marker never plays through a `Landed`
 /// marker as well: the animation sandbox lands such an entry through a
 /// zero-length cast AND spawns its marker, and the hands must flash once.
+///
+/// Divine Shield plays its hands elsewhere, in
+/// [`spawn_divine_shield_cast_hands`], off its own pending component.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_instant_cast_hands(
     mut commands: Commands,
@@ -601,6 +645,10 @@ pub fn spawn_instant_cast_hands(
             ending.kind == CastEndingKind::Landed
                 && abilities.get_unchecked(&cast.ability).cast_time <= 0.0
                 && !InstantAbilityFired::is_spawned_for(cast.ability)
+                // Divine Shield's hands come off its own pending component
+                // (`spawn_divine_shield_cast_hands`), never a `Landed` marker,
+                // so they play once per cast.
+                && cast.ability != AbilityType::DivineShield
         })
         .map(|(ending, cast)| (ending.caster, cast.ability));
     let marked = fired.iter().map(|signal| (signal.caster, signal.ability));
@@ -610,38 +658,103 @@ pub fn spawn_instant_cast_hands(
         .map(|pending| (pending.caster, AbilityType::TravelForm));
 
     for (caster, ability) in instants.chain(shifts_in).chain(marked) {
-        let Some(kind) = HealCastKind::for_ability(ability) else {
-            continue;
-        };
-        if kind == HealCastKind::Arcane && !MOONFIRE_CAST_HANDS {
-            continue;
-        }
-        let Some(body) = casters
-            .get(caster)
-            .ok()
-            .and_then(|children| children.iter().find(|&child| bodies.get(child).is_ok()))
-        else {
-            continue; // headless-shaped caster with no rendered body
-        };
-        let assets = assets.get_or_insert_with(|| HealCastAssets::build(&mut meshes, &mut images));
-        for side in [1.0_f32, -1.0] {
-            spawn_hand_rig(
-                &mut commands,
-                &mut materials,
-                assets,
-                HandRig {
-                    caster,
-                    body,
-                    kind,
-                    side,
-                    phase: HealCastPhase::Flare {
-                        remaining: heal_cast_flare_secs(kind),
-                    },
-                    has_launch_flash: true,
-                    drives_posture: false,
+        flash_instant_hands(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut images,
+            &mut assets,
+            &casters,
+            &bodies,
+            caster,
+            ability,
+        );
+    }
+}
+
+/// FixedUpdate (graphical-only), BEFORE `CombatSystemPhase::ResourcesAndAuras`:
+/// Divine Shield's hands (kit 417, the Holy launch), off its
+/// `DivineShieldPending`.
+///
+/// Divine Shield has no cast state and no `InstantAbilityFired`: the Paladin AI
+/// queues a `DivineShieldPending` (both paths, `try_divine_shield` and the
+/// while-CC break) and `process_divine_shield` resolves it in Phase 1 of the
+/// next sim tick, despawning it. The animation sandbox spawns the same pending
+/// from `Update`. So the one place both are still alive and newly added is the
+/// head of the NEXT fixed tick, ahead of Phase 1: an AI pending queued in
+/// Phase 2 and a sandbox pending queued in `Update` are both read here once.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_divine_shield_cast_hands(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut assets: Local<Option<HealCastAssets>>,
+    bubbles: Query<&DivineShieldPending, Added<DivineShieldPending>>,
+    casters: Query<&Children>,
+    bodies: Query<(), With<VisualBody>>,
+) {
+    for pending in bubbles.iter() {
+        flash_instant_hands(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut images,
+            &mut assets,
+            &casters,
+            &bodies,
+            pending.caster,
+            crate::states::play_match::abilities::AbilityType::DivineShield,
+        );
+    }
+}
+
+/// The launch alone on both of `caster`'s spell hands, in the family
+/// [`HealCastKind::for_ability`] routes `ability` to (nothing if unrouted, or
+/// for a caster with no rendered body).
+#[allow(clippy::too_many_arguments)]
+fn flash_instant_hands(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+    assets: &mut Option<HealCastAssets>,
+    casters: &Query<&Children>,
+    bodies: &Query<(), With<VisualBody>>,
+    caster: Entity,
+    ability: crate::states::play_match::abilities::AbilityType,
+) {
+    let Some(kind) = HealCastKind::for_ability(ability) else {
+        return;
+    };
+    if kind == HealCastKind::Arcane && !MOONFIRE_CAST_HANDS {
+        return;
+    }
+    let Some(body) = casters
+        .get(caster)
+        .ok()
+        .and_then(|children| children.iter().find(|&child| bodies.get(child).is_ok()))
+    else {
+        return; // headless-shaped caster with no rendered body
+    };
+    let assets = assets.get_or_insert_with(|| HealCastAssets::build(meshes, images));
+    for side in [1.0_f32, -1.0] {
+        spawn_hand_rig(
+            commands,
+            materials,
+            assets,
+            HandRig {
+                caster,
+                body,
+                kind,
+                side,
+                phase: HealCastPhase::Flare {
+                    remaining: heal_cast_flare_secs(kind),
                 },
-            );
-        }
+                has_launch_flash: true,
+                drives_posture: false,
+            },
+        );
     }
 }
 
@@ -736,6 +849,49 @@ fn spawn_hand_rig(
             .id()
     };
     let mut parts: Vec<Entity> = Vec::new();
+
+    if kind == HealCastKind::Frost {
+        let mut frost = |role: HealCastPieceRole, rgb: [f32; 3], texture: Handle<Image>| {
+            let (at, _, _) = frost_piece_state(role, 0.0, side);
+            let material = materials.add(StandardMaterial {
+                base_color: Color::srgb(rgb[0], rgb[1], rgb[2]).with_alpha(0.0),
+                base_color_texture: Some(texture),
+                // The kit adds colour × texture × weight and nothing else.
+                unlit: true,
+                alpha_mode: AlphaMode::Add,
+                cull_mode: None,
+                double_sided: true,
+                ..default()
+            });
+            piece(
+                role,
+                1.0,
+                assets.quad.clone(),
+                material,
+                at,
+                Vec3::splat(1e-3),
+            )
+        };
+        parts.push(frost(
+            HealCastPieceRole::FrostGlow,
+            IB_HAND_GLOW_RGB,
+            assets.frost_glow.clone(),
+        ));
+        parts.push(frost(
+            HealCastPieceRole::FrostRing,
+            IB_HAND_RING_RGB,
+            assets.frost_ring.clone(),
+        ));
+        for index in 0..IB_HAND_SPARKS {
+            parts.push(frost(
+                HealCastPieceRole::FrostSpark { index },
+                IB_HAND_SPARK_RGB,
+                assets.frost_glow.clone(),
+            ));
+        }
+        commands.entity(rig).add_children(&parts);
+        return;
+    }
 
     if kind == HealCastKind::Arcane {
         let mut arcane = |role: HealCastPieceRole, mesh: Handle<Mesh>, texture| {
@@ -1009,6 +1165,21 @@ pub fn update_heal_cast_glows(
                     }
                     continue;
                 }
+                if matches!(
+                    piece.role,
+                    HealCastPieceRole::FrostGlow
+                        | HealCastPieceRole::FrostRing
+                        | HealCastPieceRole::FrostSpark { .. }
+                ) {
+                    // Ice Barrier's kit runs on its own envelope and pulse.
+                    let (at, size, alpha) = frost_piece_state(piece.role, age, rig.side);
+                    part.translation = at;
+                    part.scale = Vec3::splat(if alpha > 0.0 { size.max(1e-3) } else { 1e-3 });
+                    if let Some(material) = materials.get_mut(&material.0) {
+                        material.base_color.set_alpha(alpha * piece.base_alpha);
+                    }
+                    continue;
+                }
                 let alpha = piece.base_alpha * bloom * flare_alpha;
                 match piece.role {
                     HealCastPieceRole::GlowOuter => {
@@ -1028,7 +1199,10 @@ pub fn update_heal_cast_glows(
                     }
                     HealCastPieceRole::ArcaneMote { .. }
                     | HealCastPieceRole::ArcaneStar { .. }
-                    | HealCastPieceRole::ArcaneRing => {}
+                    | HealCastPieceRole::ArcaneRing
+                    | HealCastPieceRole::FrostGlow
+                    | HealCastPieceRole::FrostRing
+                    | HealCastPieceRole::FrostSpark { .. } => {}
                 }
                 if let Some(material) = materials.get_mut(&material.0) {
                     material.base_color.set_alpha(alpha);

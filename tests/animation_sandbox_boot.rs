@@ -348,6 +348,90 @@ fn every_interrupt_entry_cuts_a_cast_and_heroic_strike_swings_its_blow() {
     }
 }
 
+/// Ice Barrier previews through the real registration: the entry lands the
+/// absorb on the Mage itself, which wears the client's five cards (placed, not
+/// just spawned) and sheds its frost mist, and the Mage's two hands flash the
+/// Frost launch exactly once (the zero-length cast and the marker both land,
+/// and only the marker may draw the hands).
+#[test]
+fn ice_barrier_previews_its_cards_mist_and_both_hands() {
+    use arenasim::states::animation_sandbox::playback::{
+        EntryFamily, SandboxEntry, SandboxPlayback,
+    };
+    use arenasim::states::animation_sandbox::SandboxConfig;
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::components::{
+        ClientParticle, HealCastHand, HealCastKind, PwShieldCard, PwShieldVisual, ShieldKind,
+    };
+    use bevy::time::TimeUpdateStrategy;
+    use std::time::Duration;
+
+    let mut app = boot_app();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+        16,
+    )));
+    app.update();
+    app.insert_resource(SandboxConfig {
+        caster_class: CharacterClass::Mage,
+        ..Default::default()
+    });
+    app.world_mut()
+        .resource_mut::<NextState<GameState>>()
+        .set(GameState::AnimationSandbox);
+    for _ in 0..4 {
+        app.update();
+    }
+    {
+        let mut playback = app.world_mut().resource_mut::<SandboxPlayback>();
+        playback.select(
+            SandboxEntry::Ability(AbilityType::IceBarrier),
+            EntryFamily::Residue,
+        );
+        playback.restart_requested = true;
+    }
+    let (mut most_hands, mut cards_seen, mut placed, mut mist) = (0, 0, false, 0);
+    let mut caster = None;
+    for _ in 0..60 {
+        app.update();
+        let mut hands = app.world_mut().query::<&HealCastHand>();
+        let now: Vec<(HealCastKind, Entity)> = hands
+            .iter(app.world())
+            .map(|h| (h.kind, h.caster))
+            .collect();
+        assert!(
+            now.iter().all(|(k, _)| *k == HealCastKind::Frost),
+            "{now:?}"
+        );
+        if let Some((_, c)) = now.first() {
+            caster = Some(*c);
+        }
+        most_hands = most_hands.max(now.len());
+        let mut cards = app.world_mut().query::<(&PwShieldCard, &Transform)>();
+        let scales: Vec<f32> = cards.iter(app.world()).map(|(_, t)| t.scale.y).collect();
+        cards_seen = cards_seen.max(scales.len());
+        placed |= scales.iter().any(|s| *s > 1.0);
+        let mut puffs = app.world_mut().query::<&ClientParticle>();
+        mist = mist.max(puffs.iter(app.world()).count());
+    }
+    assert_eq!(
+        most_hands, 2,
+        "the Frost launch must flash both hands, once"
+    );
+    assert_eq!(cards_seen, 5, "the Mage must wear the five cards");
+    assert!(placed, "the cards were spawned but never placed");
+    assert!(mist > 5, "the barrier shed no frost mist ({mist} puffs)");
+    let mut rigs = app.world_mut().query::<&PwShieldVisual>();
+    let rig = *rigs.iter(app.world()).next().expect("no barrier");
+    assert_eq!(rig.kind, ShieldKind::IceBarrier);
+    let bearer = rig.bearer;
+    assert_eq!(
+        Some(bearer),
+        caster,
+        "the barrier is not on the casting Mage"
+    );
+}
+
 /// Power Word: Shield previews through the real registration: the entry lands
 /// the absorb on the dummy, which wears the client's three cards (placed, not
 /// just spawned), and the Priest's two hands flash the Holy launch exactly
@@ -409,6 +493,84 @@ fn power_word_shield_previews_its_cards_and_both_hands() {
         placed,
         "the cards were spawned but never placed on the dummy"
     );
+}
+
+/// Divine Shield previews as it plays in a match: the Paladin's own two Holy
+/// hands flash once (kit 417) and the bubble's five cards stand on it.
+///
+/// The sandbox queues the entry's `DivineShieldPending` from `Update`, and
+/// Phase 1's `process_divine_shield` consumes it at the head of the next fixed
+/// tick — so a hand reader placed after combat resolution, where the match's
+/// AI-queued pending is still alive, never saw it here and the preview lit no
+/// hands. Driven through the real `StatesPlugin`, as the panel drives it.
+#[test]
+fn divine_shield_previews_its_cards_and_both_hands() {
+    use arenasim::states::animation_sandbox::playback::{
+        EntryFamily, SandboxEntry, SandboxPlayback,
+    };
+    use arenasim::states::animation_sandbox::SandboxConfig;
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::components::{
+        Combatant, HealCastHand, HealCastKind, PwShieldCard, PwShieldVisual, ShieldKind,
+    };
+    use bevy::time::TimeUpdateStrategy;
+    use std::time::Duration;
+
+    let mut app = boot_app();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+        16,
+    )));
+    app.update();
+    app.insert_resource(SandboxConfig {
+        caster_class: CharacterClass::Paladin,
+        ..Default::default()
+    });
+    app.world_mut()
+        .resource_mut::<NextState<GameState>>()
+        .set(GameState::AnimationSandbox);
+    for _ in 0..4 {
+        app.update();
+    }
+    {
+        let mut playback = app.world_mut().resource_mut::<SandboxPlayback>();
+        playback.select(
+            SandboxEntry::Ability(AbilityType::DivineShield),
+            EntryFamily::Component,
+        );
+        playback.restart_requested = true;
+    }
+    let (mut most_hands, mut cards_seen) = (0, 0);
+    let mut on_paladin = false;
+    for _ in 0..60 {
+        app.update();
+        let mut hands = app.world_mut().query::<&HealCastHand>();
+        let kinds: Vec<HealCastKind> = hands.iter(app.world()).map(|h| h.kind).collect();
+        assert!(kinds.iter().all(|k| *k == HealCastKind::Holy), "{kinds:?}");
+        most_hands = most_hands.max(kinds.len());
+        let mut cards = app.world_mut().query::<&PwShieldCard>();
+        cards_seen = cards_seen.max(cards.iter(app.world()).count());
+        let mut rigs = app.world_mut().query::<&PwShieldVisual>();
+        let bearers: Vec<_> = rigs
+            .iter(app.world())
+            .filter(|r| r.kind == ShieldKind::DivineShield)
+            .map(|r| r.bearer)
+            .collect();
+        on_paladin |= bearers.iter().any(|&b| {
+            app.world()
+                .get::<Combatant>(b)
+                .is_some_and(|c| c.class == CharacterClass::Paladin)
+        });
+    }
+    assert_eq!(
+        most_hands, 2,
+        "the bubble's Holy launch must flash both of the Paladin's hands, once"
+    );
+    assert_eq!(
+        cards_seen, 5,
+        "the bubbled Paladin must wear the five cards"
+    );
+    assert!(on_paladin, "the bubble is not on the Paladin");
 }
 
 /// The shield's cards stand on the RENDERED body after every writer of it,

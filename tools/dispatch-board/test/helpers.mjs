@@ -113,6 +113,15 @@ export async function mcpClient(t, base) {
   return client;
 }
 
+/**
+ * A card write's default response, spelled out here rather than imported, so
+ * a change to the board's own definition is caught rather than agreed with.
+ */
+export const RECEIPT = ["id", "version", "column", "agent", "updated"];
+export function receiptOf(card) {
+  return Object.fromEntries(RECEIPT.map((k) => [k, card[k] ?? null]));
+}
+
 /** Call a tool; returns {ok, value} with the JSON payload parsed. */
 export async function call(client, name, args) {
   const r = await client.callTool({ name, arguments: args });

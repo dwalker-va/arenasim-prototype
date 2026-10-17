@@ -85,6 +85,15 @@
 .rulerow input{flex:1;min-width:0;font:inherit;font-size:13px;color:var(--ink);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
 .kv{font-size:12.5px;color:var(--muted);margin-top:6px}
 .tag.cxl{color:var(--p1);font-weight:500}
+.tag.blk{color:var(--c-input);font-weight:600}
+.tag.unblk{color:var(--c-merged);font-weight:500}
+.card.blocked{border-style:dashed;opacity:.82}
+.blockers{margin-top:12px}
+.blockers h3{font:600 12px "Barlow Semi Condensed",sans-serif;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 2px}
+.blockers .brow{display:flex;gap:8px;align-items:baseline;font-size:12.5px;padding:3px 0}
+.blockers .brow .bid{font:500 11.5px "IBM Plex Mono",monospace}
+.blockers .brow .bst{color:var(--muted);margin-left:auto;white-space:nowrap}
+.blockers .brow.open .bst{color:var(--c-input);font-weight:600}
 .closex{position:sticky;top:0;float:right;border:none;background:none;color:var(--muted);font-size:20px;line-height:1;padding:2px 6px}
 @media (prefers-reduced-motion: no-preference){.card{transition:box-shadow .12s}.card:hover{box-shadow:0 2px 6px rgba(20,26,33,.16),0 8px 20px rgba(20,26,33,.10)}}
 </style></head><body><div id="app"></div><script id="code">
@@ -253,8 +262,25 @@ function moveCard(id, col, why, patch, expected, from){
   return api("POST", "/api/cards/" + encodeURIComponent(id) + "/move", body).then(function(r){ return afterWrite(r); });
 }
 
+// A card's own work is on main: the columns past merge, and never a cancelled card.
+function finished(c){ return !!c && ["merged","done","archived"].indexOf(c.column) >= 0 && !c.cancelled; }
+// Waiting on other cards: blocked_by names them; the board says which are not yet merged (waiting_on).
+function blockState(c){
+  if(!c.blocked_by || !c.blocked_by.length || finished(c)) return null;
+  var waiting = c.waiting_on || [];
+  return waiting.length ? {blocked: true, waiting: waiting} : {blocked: false, waiting: []};
+}
+function blockerStatus(id){
+  var b = card(id);
+  if(!b) return "not on the board";
+  if(b.cancelled) return "cancelled — will never merge";
+  return finished(b) ? "merged" : b.column.replace("_", " ");
+}
+
 function cardHtml(c){
-  var tags = "";
+  var tags = "", bs = blockState(c);
+  if(bs && bs.blocked) tags += "<span class=\"tag blk\" title=\"Waits on " + esc(bs.waiting.join(", ")) + " to merge\">blocked by " + esc(bs.waiting.join(", ")) + "</span>";
+  else if(bs) tags += "<span class=\"tag unblk\" title=\"Every card it waited on has merged: " + esc(c.blocked_by.join(", ")) + "\">unblocked</span>";
   if(c.column === "needs_input" && c.question && c.question.text) tags += "<span class=\"tag q\">? waiting on answer</span>";
   if(c.milestone) tags += "<span class=\"tag ms\">" + esc(c.milestone) + (c.iteration > 1 ? " · it " + esc(c.iteration) : "") + "</span>";
   if(c.column === "merged") tags += "<span class=\"tag hum\">" + (c.merge_sha ? "merged " + esc(String(c.merge_sha).slice(0,7)) : "merge not recorded") + "</span>";
@@ -265,7 +291,7 @@ function cardHtml(c){
   for(var i=0;i<(c.links||[]).length;i++){
     tags += "<span class=\"tag\"><a href=\"" + esc(c.links[i].url) + "\" target=\"_blank\" rel=\"noopener\">" + esc(c.links[i].label) + "</a></span>";
   }
-  return "<div class=\"card p-" + esc(c.priority) + "\" draggable=\"" + connected + "\" tabindex=\"0\" data-id=\"" + esc(c.id) + "\">"
+  return "<div class=\"card p-" + esc(c.priority) + (bs && bs.blocked ? " blocked" : "") + "\" draggable=\"" + connected + "\" tabindex=\"0\" data-id=\"" + esc(c.id) + "\">"
     + "<div class=\"top\"><span class=\"cid\">" + esc(c.id) + "</span><span class=\"pri\">" + esc(c.priority) + "</span></div>"
     + "<div class=\"ttl\">" + esc(c.title) + "</div>"
     + "<div class=\"foot\"><span class=\"chip " + (c.role==="engineer"?"engineer":"") + "\">" + esc(c.role) + "</span>" + tags + "</div>"
@@ -291,6 +317,16 @@ function drawerHtml(s, edits){
   }
   var links = "";
   for(var i=0;i<(c.links||[]).length;i++) links += "<a href=\"" + esc(c.links[i].url) + "\" target=\"_blank\" rel=\"noopener\">" + esc(c.links[i].label) + "</a>";
+  // The cards this one waits on, each with where it stands now.
+  var blockers = "";
+  if(c.blocked_by && c.blocked_by.length){
+    var dbs = blockState(c), waitingOn = c.waiting_on || [];
+    blockers = "<div class=\"blockers\" id=\"d-blockers\"><h3>Blocked by" + (dbs ? (dbs.blocked ? " — waiting on " + waitingOn.length : " — unblocked") : "") + "</h3>"
+      + c.blocked_by.map(function(id){
+          var b = card(id), open = waitingOn.indexOf(id) >= 0;
+          return "<div class=\"brow" + (open ? " open" : "") + "\"><span class=\"bid\">" + esc(id) + "</span><span>" + esc(b ? b.title : "") + "</span><span class=\"bst\">" + esc(blockerStatus(id)) + "</span></div>";
+        }).join("") + "</div>";
+  }
   var ownPr = hasPr(c) ? "<div class=\"ownpr\"><h3>Pull request</h3><a href=\"" + esc(c.pr.url) + "\" target=\"_blank\" rel=\"noopener\">PR #" + esc(c.pr.number) + "</a>"
     + (c.merge_sha ? " <span class=\"stat\">merged at " + esc(String(c.merge_sha).slice(0,10)) + "</span>" : (c.column === "merged" ? " <span class=\"stat\">merge not recorded</span>" : "")) + "</div>" : "";
   // The milestone fields: what the milestone review page is assembled from.
@@ -374,7 +410,7 @@ function drawerHtml(s, edits){
     + "<button class=\"closex\" id=\"d-close\" aria-label=\"Close\">×</button>"
     + "<div class=\"cid\" style=\"font:500 11px 'IBM Plex Mono',monospace;color:var(--muted)\">" + esc(c.id) + " · created " + esc(fmt(c.created)) + " · v" + esc(c.version) + (c.source ? " · review feedback on " + esc(c.source.card || "milestone " + c.source.milestone) : "")
     + (c.from_feedback && c.from_feedback.length ? " · from review feedback " + c.from_feedback.map(function(f){ return esc(f.batch + "/" + f.comment); }).join(", ") : "") + "</div>"
-    + stale + cancelled + claim + wt
+    + stale + cancelled + claim + wt + blockers
     + "<div class=\"mrow\"><label for=\"d-title\">Title</label><input id=\"d-title\" value=\"" + esc(c.title) + "\" " + (ro?"disabled":"") + "></div>"
     + "<div class=\"tworow\">"
     + "<div class=\"mrow\"><label for=\"d-col\">Column</label><select id=\"d-col\" " + (ro?"disabled":"") + ">" + colOpts + "</select></div>"

@@ -24,7 +24,7 @@ const WINDFURY_SPIN_RATE: f32 = 14.0; // fast — a tornado, not a gentle coil
 const WINDFURY_FEET_OFFSET: f32 = 1.25;
 // Storm-grey dust funnel, NOT white — `Blend` (not `Add`) so it can actually
 // read dark, keeping it distinct from the bright additive shields (Ice
-// Barrier's sphere, Power Word: Shield's gold cards). Like the dispel ribbon,
+// Barrier's blue cards, Power Word: Shield's gold ones). Like the dispel ribbon,
 // the helix coils are vertically separated, so coplanar Z-fighting risk is low.
 const WINDFURY_RGB: (f32, f32, f32) = (0.34, 0.36, 0.40);
 const WINDFURY_ALPHA: f32 = 0.62;

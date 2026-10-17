@@ -7,7 +7,7 @@ import { request } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { lockPath, packagingIconDir } from "../dist/paths.js";
-import { spawnDaemon, mcpClient, call, post, tempDir, runWait, sleep, CLI, PKG } from "./helpers.mjs";
+import { spawnDaemon, mcpClient, call, post, tempDir, runWait, sleep, CLI, PKG, receiptOf } from "./helpers.mjs";
 
 test("MCP: tools are served and list_cards returns summaries only", async (t) => {
   const d = await spawnDaemon(t);
@@ -30,12 +30,17 @@ test("MCP: tools are served and list_cards returns summaries only", async (t) =>
 test("MCP: a stale version is refused as a tool error carrying the current card", async (t) => {
   const d = await spawnDaemon(t);
   const client = await mcpClient(t, d.base);
-  const c = (await call(client, "create_card", { title: "v", role: "engineer", actor: "o" })).value;
+  const c = (await call(client, "create_card", { title: "v", body: "a long spec", role: "engineer", actor: "o" })).value;
   assert.ok((await call(client, "update_card", { id: c.id, patch: { priority: "P1" }, expected_version: c.version, actor: "o" })).ok);
   const stale = await call(client, "update_card", { id: c.id, patch: { priority: "P3" }, expected_version: c.version, actor: "o" });
   assert.equal(stale.ok, false);
   assert.equal(stale.value.error, "stale_version");
-  assert.equal(stale.value.card.priority, "P1");
+  // The refusal carries the card's receipt as it is now — the version to re-apply on — not its body.
+  assert.deepEqual(stale.value.card, receiptOf((await call(client, "get_card", { id: c.id })).value));
+  // full: true carries the whole current card, as before.
+  const whole = await call(client, "update_card", { id: c.id, patch: { priority: "P3" }, expected_version: c.version, full: true, actor: "o" });
+  assert.equal(whole.value.error, "stale_version");
+  assert.deepEqual([whole.value.card.priority, whole.value.card.body], ["P1", "a long spec"]);
 });
 
 test("MCP: concurrent claims from separate clients resolve to exactly one winner", async (t) => {
@@ -222,7 +227,8 @@ test("MCP: move_card with append is the one-write REJECT", async (t) => {
   });
   assert.ok(r.ok, JSON.stringify(r.value));
   assert.deepEqual([r.value.version, r.value.column, r.value.agent], [c.version + 1, "in_progress", null]);
-  assert.match(r.value.body, /## Tester findings — 2026-09-25\n\n1\. broken$/);
+  assert.equal(r.value.body, undefined, "the write echoed the body");
+  assert.match((await call(client, "get_card", { id: c.id })).value.body, /## Tester findings — 2026-09-25\n\n1\. broken$/);
 });
 
 test("wake-up: a cursor past head is printed and resumed from head, never waited on silently", async (t) => {
@@ -255,7 +261,12 @@ test("wake-up: a re-created board behind the same port is printed, not delivered
   for (let i = 0; i < 3; i++) await call(client, "create_card", { title: `old ${i}`, role: "engineer", actor: "pm" });
   const w = runWait(["--follow", "--since", "3", "--port", String(d.port)]);
   t.after(() => w.child.kill());
-  await sleep(300);
+  // The waiter learns its board on first contact: wait until it has, by seeing
+  // it deliver one event from the old board (a fixed sleep lost that race on a loaded box).
+  const c0 = (await call(client, "list_cards", {})).value[0];
+  await call(client, "append_activity", { id: c0.id, msg: "the waiter has this board", actor: "pm" });
+  for (let i = 0; i < 100 && !/"activity"/.test(w.stdoutSoFar()); i++) await sleep(100);
+  assert.match(w.stdoutSoFar(), /"activity"/, "the waiter never made first contact with the old board");
   await d.stop();
 
   // A different database on the same port, which already has MORE events than
