@@ -1,0 +1,599 @@
+<title>Warlock Talent Visuals Bench</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one stage + a control rail; single dark theme by choice (an effects bench reads against the arena floor). */
+:root{
+  color-scheme: dark;
+  --bg:#141317; --panel:#1c1a21; --panel2:#25222c; --line:#353140;
+  --text:#e7e4ec; --muted:#968fa3; --accent:#9482c9; --warn:#e8b04a; --stage:#0d0c10;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --sans:"IBM Plex Sans", system-ui, -apple-system, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+body{padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:16px 32px}
+h1{font-size:18px;font-weight:600;margin:0;letter-spacing:.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:12.5px;margin-top:2px;max-width:72ch}
+header{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:end;justify-content:space-between;margin-bottom:12px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tab{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+.tab[aria-selected="true"]{border-color:var(--accent);color:var(--accent);background:var(--panel2)}
+.tab:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+.stage{background:var(--stage);border:1px solid var(--line);border-radius:8px;position:relative;overflow:hidden}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;max-width:100%;cursor:grab}
+.hud{position:absolute;left:10px;top:8px;font-family:var(--mono);font-size:11.5px;color:var(--muted);pointer-events:none;white-space:pre}
+.transport{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;border-top:1px solid var(--line);background:var(--panel)}
+button.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+button.btn.primary{border-color:var(--accent);color:var(--accent)}
+select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:4px;font:inherit}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0}
+.card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:600}
+.layer{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line)}
+.layer:first-of-type{border-top:0}
+.layer label{flex:1;cursor:pointer;min-width:0}
+.layer .nm{font-weight:500}
+.layer .ds{display:block;color:var(--muted);font-size:12px;line-height:1.35}
+.layer.aid .nm::after{content:" · viewing aid";color:var(--muted);font-weight:400;font-size:12px}
+.layer.authored .nm::after{content:" · authored, not client";color:var(--warn);font-weight:400;font-size:12px}
+.sw{width:10px;height:10px;border-radius:2px;margin-top:5px;flex:none}
+.knob{display:grid;grid-template-columns:118px minmax(0,1fr) 86px;gap:8px;align-items:center;padding:3px 0}
+.knob span{font-size:12.5px;color:var(--muted)}
+.knob output{font-family:var(--mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.notes{color:var(--muted);font-size:12.5px;line-height:1.5;margin:0;padding-left:16px}
+.notes li{margin:3px 0}
+.notes b{color:var(--text);font-weight:500}
+.inferred{color:var(--warn)}
+.ask{color:var(--text);border-left:2px solid var(--accent);padding-left:8px;margin:6px 0 0;font-size:12.5px;line-height:1.5}
+pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:var(--stage);border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;margin:0;color:#d9d0ec}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+</style>
+
+<header>
+  <div>
+    <h1>Warlock Talent Visuals Bench <span style="color:var(--muted);font-weight:400">· AS-334</span></h1>
+    <div class="sub">Client values from Classic Era 1.15.9 (TBC 2.5.6 matches unless a note says otherwise), parsed from each model's M2 file. Each slider starts at the client value (×1.0), and playback starts at real time. Untick the layers you don't want, then copy the constants block. Layers marked "authored" are not in the client. They are proposals for you to rule on.</div>
+  </div>
+  <div class="legend"><span>drag = orbit</span><span>wheel = zoom</span><span>body: capsule ±1.25 about y=1.0</span></div>
+</header>
+
+<nav class="tabs" role="tablist" id="tabs"></nav>
+
+<div class="grid">
+  <div style="min-width:0">
+    <div class="stage">
+      <canvas id="cv" width="1280" height="800" aria-label="Effect preview"></canvas>
+      <div class="hud" id="hud"></div>
+      <div class="transport">
+        <button class="btn primary" id="replay">Replay</button>
+        <button class="btn" id="pause">Pause</button>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="loop" checked> loop</label>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px">speed
+          <select id="speed"><option value="1" selected>1.0× (real)</option><option value="0.5">0.5×</option><option value="0.25">0.25×</option></select></label>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="moving"> victim moving</label>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="row"><h2 style="margin:0">Rust constants for this effect</h2><button class="btn" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+  <div class="side">
+    <div class="card"><h2>Layers</h2><div id="layers"></div></div>
+    <div class="card"><h2>Multipliers over client</h2><div id="knobs"></div></div>
+    <div class="card"><h2>What the client data says</h2><ul class="notes" id="notes"></ul><div id="asks"></div></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---------- small math ----------
+const TAU=Math.PI*2, rnd=Math.random;
+const lerp=(a,b,t)=>a+(b-a)*t, clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function keys(k,t){ if(t<=k[0][0]) return k[0][1];
+  for(let i=1;i<k.length;i++){ if(t<=k[i][0]){const a=k[i-1],b=k[i],u=(t-a[0])/(b[0]-a[0]||1);
+    return Array.isArray(a[1])?a[1].map((x,j)=>lerp(x,b[1][j],u)):lerp(a[1],b[1],u);} }
+  return k[k.length-1][1]; }
+function windowOn(win,ms){ if(!win) return true; let on=win[0][1]; for(const [t,v] of win){ if(ms>=t) on=v; } return !!on; }
+const rgb=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const norm=a=>{const l=Math.hypot(...a)||1;return[a[0]/l,a[1]/l,a[2]/l]};
+
+// ---------- camera ----------
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const cam={yaw:0.65,pitch:0.42,dist:12,target:[0,1.2,0]};
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'});
+cv.addEventListener('pointermove',e=>{if(!drag)return;cam.yaw-=(e.clientX-drag[0])*0.008;cam.pitch=clamp(cam.pitch+(e.clientY-drag[1])*0.006,0.05,1.35);drag=[e.clientX,e.clientY]});
+cv.addEventListener('pointerup',()=>{drag=null;cv.style.cursor='grab'});
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.dist=clamp(cam.dist*(1+e.deltaY*0.001),3,60)},{passive:false});
+let VIEW;
+function setupView(){
+  const cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
+  const eye=[cam.target[0]+cam.dist*cp*Math.sin(cam.yaw),cam.target[1]+cam.dist*sp,cam.target[2]+cam.dist*cp*Math.cos(cam.yaw)];
+  const f=norm(sub(cam.target,eye)), r=norm(cross(f,[0,1,0])), u=cross(r,f);
+  VIEW={eye,f,r,u,fl:cv.height*1.25};
+}
+function proj(p){const d=sub(p,VIEW.eye),z=dot(d,VIEW.f); if(z<0.1) return null;
+  const s=VIEW.fl/z; return {x:cv.width/2+dot(d,VIEW.r)*s,y:cv.height/2-dot(d,VIEW.u)*s,s,z};}
+
+// ---------- scene primitives ----------
+const FLOOR=[0.79*255,0.66*255,0.46*255];
+const CLASS={warlock:[148,130,201],priest:[235,235,235],rogue:[255,245,105],warrior:[199,156,110],victim:[150,160,175]};
+function drawFloor(){
+  const pts=[];for(let i=0;i<48;i++){const a=i/48*TAU;const q=proj([9*Math.cos(a),0,9*Math.sin(a)]);if(q)pts.push(q)}
+  g.fillStyle=rgb(FLOOR.map(c=>c*0.82),1);g.beginPath();pts.forEach((q,i)=>i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y));g.closePath();g.fill();
+  g.strokeStyle='rgba(0,0,0,0.08)';g.lineWidth=1;
+  for(let i=-8;i<=8;i+=2){line3([i,0,-8],[i,0,8]);line3([-8,0,i],[8,0,i]);}
+}
+function line3(a,b){const p=proj(a),q=proj(b);if(!p||!q)return;g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();}
+function drawCapsule(c,col,alpha=1){
+  const top=proj([c[0],c[1]+0.75,c[2]]),bot=proj([c[0],c[1]-0.75,c[2]]);if(!top||!bot)return;
+  const w=0.5*top.s;
+  g.globalAlpha=alpha;
+  const gr=g.createLinearGradient(top.x-w,0,top.x+w,0);
+  gr.addColorStop(0,rgb(col.map(x=>x*0.55),1));gr.addColorStop(0.45,rgb(col,1));gr.addColorStop(1,rgb(col.map(x=>x*0.45),1));
+  g.fillStyle=gr;g.beginPath();
+  g.arc(top.x,top.y,w,Math.PI,0);g.lineTo(bot.x+w,bot.y);g.arc(bot.x,bot.y,w,0,Math.PI);g.closePath();g.fill();
+  g.globalAlpha=1;
+}
+function shadow(c,r=0.55){const p=proj([c[0],0.01,c[2]]);if(!p)return;g.fillStyle='rgba(0,0,0,0.22)';g.beginPath();g.ellipse(p.x,p.y,r*p.s,r*p.s*Math.max(0.15,Math.sin(cam.pitch)),0,0,TAU);g.fill();}
+
+function sprite(kind,p,size,col,a,ang=0,streak=null){
+  const q=proj(p);if(!q||a<=0.003)return;const r=Math.max(0.6,size*q.s*0.5);
+  g.save();g.translate(q.x,q.y);
+  if(kind==='glow'||kind==='cloud'||kind==='smoke'||kind==='dust'||kind==='flame'){
+    const gr=g.createRadialGradient(0,0,0,0,0,r);
+    const soft=kind==='glow'?[1,0.45,0]:kind==='cloud'?[0.9,0.6,0]:kind==='flame'?[0.8,0.55,0]:[0.85,0.5,0];
+    gr.addColorStop(0,rgb(col,a*soft[0]));gr.addColorStop(0.45,rgb(col,a*soft[1]));gr.addColorStop(1,rgb(col,0));
+    g.fillStyle=gr;g.beginPath();
+    if(kind==='flame'){g.ellipse(0,-r*0.25,r*0.6,r,0,0,TAU);}else g.arc(0,0,r,0,TAU);
+    g.fill();
+  } else if(kind==='star'){
+    g.rotate(ang);g.fillStyle=rgb(col,a);
+    for(let k=0;k<2;k++){g.rotate(Math.PI/4*k*2);g.beginPath();g.ellipse(0,0,r,r*0.12,0,0,TAU);g.fill();g.beginPath();g.ellipse(0,0,r*0.12,r,0,0,TAU);g.fill();}
+    const gr=g.createRadialGradient(0,0,0,0,0,r*0.45);gr.addColorStop(0,rgb([255,255,255],a));gr.addColorStop(1,rgb(col,0));g.fillStyle=gr;g.beginPath();g.arc(0,0,r*0.45,0,TAU);g.fill();
+  } else if(kind==='blob'){
+    g.fillStyle=rgb(col,a);g.beginPath();g.arc(0,0,r*0.7,0,TAU);g.fill();
+  }
+  g.restore();
+  if(streak){const q2=proj(streak);if(!q2)return;
+    g.strokeStyle=rgb(col,a*0.85);g.lineCap='round';g.lineWidth=Math.max(1,r*0.7);
+    g.beginPath();g.moveTo(q.x,q.y);g.lineTo(q2.x,q2.y);g.stroke();}
+}
+
+// ---------- particle emitter (M2-shaped) ----------
+// spec: anchor, pos:[x,z,y], vRange (0 = straight up, >=3.1 = sphere), speed, life, rate, win:[[ms,on]],
+//  color/alpha/scale keyed over life 0..1, gravity (negative rises), drag, tail, kind, blend 'add'|'alpha',
+//  area (xz box), areaY, inward: shell radius (yd) the particle starts on, moving toward the anchor,
+//  trig: name of the fx trigger list that (re)starts this emitter's timeline.
+class Emitter{
+  constructor(s,fx){this.s=s;this.fx=fx;this.ps=[];this.acc=0;}
+  reset(){this.ps=[];this.acc=0;}
+  update(dt,ms,origin){
+    const s=this.s,K=this.fx.knobs,dmul=K.density??1;
+    const add=lm=>{ if(windowOn(s.win,lm)){ const rate=Array.isArray(s.rate)?keys(s.rate,lm):s.rate; this.acc+=rate*dt*dmul; } };
+    const tl=this.fx.trig && this.fx.trig[s.trig||'main'];
+    if(tl){ const span=(s.span||this.fx.durMs)*(K.duration??1);
+      for(const t of tl){ const lm=ms-t; if(lm>=0 && lm<=span) add(lm/(K.duration??1)); } }
+    else { const lm=s.loopMs?(ms%s.loopMs):ms; if(!this.fx.loopFx || true) add(s.loopMs?lm:ms/(K.duration??1)); }
+    while(this.acc>=1){this.acc-=1;this.spawn(origin);}
+    const gy=-(s.gravity||0);
+    for(const p of this.ps){
+      p.age+=dt; p.v[1]+=gy*dt; const dr=Math.max(0,1-(s.drag||0)*dt*3); p.v=p.v.map(x=>x*dr);
+      p.x=[p.x[0]+p.v[0]*dt,p.x[1]+p.v[1]*dt,p.x[2]+p.v[2]*dt];
+      if(s.follow){p.x[0]+=origin[0]-p.o[0];p.x[2]+=origin[2]-p.o[2];p.o=[...origin];}
+      if(s.floorKill&&p.x[1]<0.02){p.x[1]=0.02;p.v=[0,0,0];}
+      p.ang+=(s.spin||0)*TAU*dt;
+    }
+    this.ps=this.ps.filter(p=>p.age<p.life);
+  }
+  spawn(origin){
+    const s=this.s,K=this.fx.knobs,spread=K.spread??1;
+    const off=s.pos||[0,0,0], area=(s.area||0)*spread, areaY=(s.areaY||0)*spread;
+    const c=[origin[0]+off[0]*spread,origin[1]+this.fx.anchorY(s.anchor)+off[2],origin[2]+off[1]*spread];
+    if(s.orbit){const k=(rnd()*3)|0, ang=(simMs/1000)*(this.fx.knobs.spin??s.orbitRevS??1)*TAU+k*TAU/3, R=s.orbit*spread; c[0]+=R*Math.cos(ang); c[2]+=R*Math.sin(ang);}
+    let start,v;
+    if(s.inward){ const d=norm([rnd()*2-1,(rnd()*2-1)*(s.inwardFlat??1),rnd()*2-1]), R=s.inward*spread*(0.6+0.4*rnd());
+      start=[c[0]+d[0]*R,c[1]+d[1]*R,c[2]+d[2]*R]; v=d.map(x=>-x*Math.abs(s.speed)*spread); }
+    else {
+      let dir; if((s.vRange||0)>=3.1) dir=norm([rnd()*2-1,rnd()*2-1,rnd()*2-1]);
+      else {const pol=(rnd()*2-1)*(s.vRange||0), az=rnd()*TAU; dir=[Math.sin(pol)*Math.cos(az),Math.cos(pol),Math.sin(pol)*Math.sin(az)];}
+      start=[c[0]+(rnd()-0.5)*area,c[1]+(rnd()-0.5)*areaY,c[2]+(rnd()-0.5)*area];
+      const sp=s.speed*spread*(1+(s.speedVar||0)*(rnd()*2-1)); v=dir.map(d=>d*sp); }
+    this.ps.push({x:start,v,age:0,life:s.life*(K.duration??1),ang:rnd()*TAU,o:[...origin]});
+  }
+  draw(){
+    const s=this.s,K=this.fx.knobs,size=K.size??1;
+    g.globalCompositeOperation=s.blend==='alpha'?'source-over':'lighter';
+    for(const p of this.ps){
+      const t=p.age/p.life; let col=keys(s.color,t); if(this.fx.colorMap) col=this.fx.colorMap(col,s);
+      const a=keys(s.alpha,t)*(K.opacity??1), sc=keys(s.scale,t)*size*2;
+      let streak=null;
+      if(s.tail){const sp=Math.hypot(...p.v);if(sp>0.2){const L=Math.min(s.tail*0.12,sp*0.06)*size;const vv=norm(p.v);streak=[p.x[0]-vv[0]*L,p.x[1]-vv[1]*L,p.x[2]-vv[2]*L];}}
+      sprite(s.kind||'glow',p.x,sc,col,a,p.ang,streak);
+    }
+    g.globalCompositeOperation='source-over';
+  }
+}
+
+// ---------- floating combat text (matches floating_text.rs: rise 1.5 yd/s, 1.5 s life, fade over the last 0.5 s) ----------
+let FCT=[];
+function fct(text,col,px,pos,bold=true){FCT.push({text,col,px,pos:[...pos],age:0,bold});}
+function drawFct(dt){
+  for(const f of FCT){f.age+=dt;}
+  FCT=FCT.filter(f=>f.age<1.5);
+  for(const f of FCT){
+    const q=proj([f.pos[0],f.pos[1]+1.5*f.age,f.pos[2]]); if(!q) continue;
+    const a=f.age>1.0?(1.5-f.age)/0.5:1;
+    const px=f.px*1.6;
+    g.font=`${f.bold?700:600} ${px}px "IBM Plex Sans", system-ui, sans-serif`;g.textAlign='center';g.textBaseline='middle';
+    g.lineWidth=Math.max(2,px*0.14);g.strokeStyle=`rgba(0,0,0,${a})`;g.strokeText(f.text,q.x,q.y);
+    g.fillStyle=rgb(f.col,a);g.fillText(f.text,q.x,q.y);
+  }
+}
+
+// ---------- effect registry ----------
+const ANCH={feet:0.0,origin:0.0,chest:1.45,head:2.25,hands:1.35};
+function mkFx(def){
+  const fx={...def,knobs:{},layersOn:{},emitters:[]};
+  for(const k of def.knobDefs) fx.knobs[k.key]=k.def;
+  for(const L of def.layers) fx.layersOn[L.id]=L.on!==false;
+  fx.anchorY=a=>ANCH[a]??0;
+  for(const L of def.layers) if(L.emitter) fx.emitters.push({id:L.id,e:new Emitter(L.emitter,fx)});
+  return fx;
+}
+const STD=[
+  {key:'size',label:'size ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'spread',label:'spread ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'duration',label:'duration ×',min:0.3,max:2,step:0.05,def:1},
+  {key:'density',label:'density ×',min:0.1,max:2,step:0.05,def:1},
+];
+const on=(l,id)=>l.layersOn[id];
+const b=(v)=>v?'true':'false', f2=v=>(+v).toFixed(2), f3=v=>(+v).toFixed(3);
+const hex=c=>'0x'+c.map(x=>(x|0).toString(16).padStart(2,'0')).join('').toUpperCase();
+
+// ---------- AS-334 helpers ----------
+// A flat additive disc on the ground (or at height y), drawn as a projected ellipse with a soft radial falloff.
+function groundDisc(c,y,r,col,a){ if(a<=0.003||r<=0.001) return;
+  const pts=[];for(let i=0;i<40;i++){const t=i/40*TAU;const q=proj([c[0]+r*Math.cos(t),y,c[2]+r*Math.sin(t)]);if(!q)return;pts.push(q);}
+  const ctr=proj([c[0],y,c[2]]); if(!ctr) return;
+  g.save();g.globalCompositeOperation='lighter';
+  const rx=Math.max(...pts.map(p=>Math.abs(p.x-ctr.x)))||1;
+  const gr=g.createRadialGradient(ctr.x,ctr.y,0,ctr.x,ctr.y,rx);
+  gr.addColorStop(0,rgb(col,a));gr.addColorStop(0.55,rgb(col,a*0.55));gr.addColorStop(1,rgb(col,0));
+  g.fillStyle=gr;g.beginPath();pts.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y));g.closePath();g.fill();g.restore(); }
+// A rune ring: a thin circle with eight tick marks, flat at height y.
+function runeRing(c,y,r,col,a){ if(a<=0.003) return;
+  g.save();g.globalCompositeOperation='lighter';g.strokeStyle=rgb(col,a);g.lineWidth=2;
+  g.beginPath();for(let i=0;i<=48;i++){const t=i/48*TAU;const q=proj([c[0]+r*Math.cos(t),y,c[2]+r*Math.sin(t)]);if(!q){g.restore();return;}i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y);}g.stroke();
+  for(let k=0;k<8;k++){const t=k/8*TAU;const p=proj([c[0]+r*0.82*Math.cos(t),y,c[2]+r*0.82*Math.sin(t)]),q=proj([c[0]+r*Math.cos(t),y,c[2]+r*Math.sin(t)]);if(p&&q){g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();}}
+  g.restore(); }
+// presenceofmind_cast_base.m2: three concentric ground quads, scale 0.613 -> 3.243 at 467 ms -> 0.613, alpha 0 -> 0.6 at 133 ms -> 0 at 467 ms.
+function pomFlash(c,ms,K){ if(ms<0||ms>1500) return;
+  const sc=keys([[0,0.613],[467,3.243],[1500,0.613]],ms), a=keys([[0,0],[133,0.6],[467,0],[1500,0]],ms)*(K.opacity??1);
+  const col=keys([[0,[38,97,91]],[467,[0,97,255]]],ms);
+  for(const hw of [0.63,0.51,0.41]) groundDisc(c,0.03,hw*sc*(K.size??1)*(K.spread??1),col,a*0.8); }
+const SHIPPED='<span class="inferred">shipped</span>';
+
+const EFFECTS=[
+// ================================================================ Amplify Curse
+mkFx({id:'amplify',name:'Amplify Curse',sub:'cast + state · presenceofmind_cast_base.m2 @Base · 1500 ms',durMs:1500,frame:{dist:8,ty:0.8},loopTotal:4500,
+ notes:[
+  'Visual 4600 is shared with Presence of Mind and Fel Domination: the client\'s generic "empowered next cast" flash. The cast is <b>this ground flash only</b>, with no hands and no body animation.',
+  'Three concentric additive quads on the ground (half-widths 0.63 / 0.51 / 0.41 yd) scale 0.613 → 3.243 at 467 ms → 0.613. The outer one goes from 0.8 yd to <b>4.1 yd across</b>. Colour is teal (38,97,91) → blue (0,97,255). Alpha peaks at 0.6 at 133 ms and is gone by 467 ms.',
+  'The buff also has a <b>sustained (7,8) state</b> with the same model on the Warlock. <span class="inferred">Whether the client loops the 1500 ms sequence for a state is unresolved.</span> If it loops, the flash repeats every 1.5 s while the buff is up; if not, the state is invisible after the first flash, because its alpha is 0 after 467 ms in both builds.'],
+ asks:['<b>Once, or repeating while the buff waits?</b> Client-faithful reading: once on cast; the loop is unconfirmed. Toggle "repeat while buffed" to see the alternative: a quiet pulse at the Warlock\'s feet every 1.5 s until the next curse uses it.'],
+ knobDefs:[...STD.filter(k=>k.key!=='density'),{key:'opacity',label:'opacity ×',min:0.1,max:2,step:0.05,def:1}],
+ layers:[
+  {id:'flash',name:'Ground flash (3 quads)',desc:'genericglow2b, teal → blue, 0.8 → 4.1 yd, peak 133 ms',sw:[0,97,255],custom:true},
+  {id:'repeat',name:'Repeat while buffed',desc:'(7,8) state looping every 1.5 s, if the client loops it',sw:[38,97,91],custom:true,on:false,cls:'authored'},
+ ],
+ bodies(fx,vp){drawCapsule(vp,CLASS.warlock);},
+ customDraw(fx,ms,vp){ if(!on(fx,'flash')) return; const t=ms/(fx.knobs.duration??1);
+  if(on(fx,'repeat')) pomFlash(vp,t%1500,fx.knobs); else pomFlash(vp,t,fx.knobs); },
+ constants(fx){const K=fx.knobs;return [
+  `// Amplify Curse: presenceofmind_cast_base.m2 (kits 4012 / 4013) at the Warlock's feet. AS-334 bench.`,
+  `pub const AMPLIFY_FLASH_SECS: f32 = ${f2(1.5*K.duration)}; // visible 0-0.467 s, peak alpha 0.6 at 0.133 s`,
+  `pub const AMPLIFY_FLASH_MAX_DIAMETER: f32 = ${f2(4.1*K.size*K.spread)};`,
+  `pub const AMPLIFY_REPEAT_WHILE_BUFFED: bool = ${b(on(fx,'repeat'))};`,
+  `pub const AMPLIFY_OPACITY_MUL: f32 = ${f2(K.opacity)};`,
+  `// Shared with Shadow Trance's proc flash (one helper).`];}
+}),
+// ================================================================ Shadow Trance
+mkFx({id:'trance',name:'Shadow Trance',sub:'proc · kit 4569: presenceofmind flash @Base + shadow_impactdot_med_head.m2 @Head',durMs:4500,frame:{dist:7,ty:1.4},
+ notes:[
+  'Nightfall\'s proc (17941) plays <b>once</b> on the Warlock and leaves only the buff icon. There is no sustained state.',
+  'The same teal ground flash as Amplify Curse, plus a sparse ring of tiny <b>near-black specks</b> around the head drifting inward at 0.28 yd/s. There are 6/s from each of two emitters, each living 4 s, alpha-blended (2,2,2).',
+  '<b>The instant Shadow Bolt is the ordinary one</b> (visual 64, the same missile and impact we ship). Only the precast phase is missing, and our cast orb already disappears for an instant cast.',
+  'Era and TBC are byte-identical.'],
+ asks:['Client-faithful is a subtle tell: the specks are tiny (0.003 / 0.028 yd), so the flash carries the moment. Keep it as is, or raise "size ×" so the halo reads at arena distance?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:2,step:0.05,def:1}],
+ layers:[
+  {id:'flash',name:'Ground flash',desc:'shared with Amplify Curse',sw:[0,97,255],custom:true},
+  {id:'specks',name:'Dark speck halo (P0 + P1)',desc:'flare, 2 × 6/s, 4 s life, inward 0.28 yd/s, 1.39 yd plane at the head',sw:[40,40,40],emitter:{anchor:'head',inward:0.7,inwardFlat:0.15,speed:-0.28,life:4.0,rate:12,win:[[0,1],[4500,0]],blend:'alpha',gravity:0.139,
+    color:[[0,[2,2,2]],[1,[2,2,2]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.028],[1,0.028]],kind:'blob',follow:true}},
+ ],
+ bodies(fx,vp){drawCapsule(vp,CLASS.warlock);},
+ customDraw(fx,ms,vp){ if(on(fx,'flash')) pomFlash(vp,ms/(fx.knobs.duration??1),fx.knobs); },
+ constants(fx){const K=fx.knobs;return [
+  `// Shadow Trance proc: kit 4569, one-shot on the Warlock. AS-334 bench.`,
+  `pub const SHADOW_TRANCE_FLASH: bool = ${b(on(fx,'flash'))}; // the Amplify Curse helper`,
+  `pub const SHADOW_TRANCE_SPECKS: bool = ${b(on(fx,'specks'))};`,
+  `pub const SHADOW_TRANCE_SPECK_SIZE: f32 = ${f3(0.028*K.size)};`,
+  `pub const SHADOW_TRANCE_SPECK_LIFE_SECS: f32 = ${f2(4.0*K.duration)};`,
+  `// The instant Shadow Bolt: unchanged (shipped missile and impact).`];}
+}),
+// ================================================================ Siphon Life
+mkFx({id:'siphon',name:'Siphon Life',sub:'state · TBC kit 234 corruption_impactdot_med_base.m2 @Chest (Era: Corruption\'s state)',durMs:6000,loopFx:true,frame:{dist:10,ty:1.3},
+ notes:[
+  '<b>Era</b>: Siphon Life <b>is Corruption\'s whole visual</b> (visual 381): the same apply and the same state, both '+SHIPPED+'. A victim with both shows the same state twice, which cannot be told apart.',
+  '<b>TBC</b> gives it its own state (visual 8687, kit 234), which this tab draws: violet rings and flares burst out from the chest and shrink as they fly (30/s each, 1.67 yd/s, 1.39 → 0.28 yd). Dark streaks are pulled inward from a 2.2 yd shell at 3.89 yd/s. It is additive and constant.',
+  'In TBC kit 234 is also Unstable Affliction\'s state. Our UA uses an authored "glow plus crackle" instead (the AS-37 ruling), so nothing we ship uses kit 234.',
+  '<b>The heal back to the Warlock has no client visual</b>: no missile, beam or caster row. Our green heal numbers on the Warlock already carry it.'],
+ asks:['<b>Which Siphon Life?</b> <b>TBC</b> (its own violet chest glow; a new victim state, but you can tell it apart from Corruption), <b>Era</b> (identical to Corruption, so no new state but indistinguishable), or <b>icon only</b> (the Moonfire ruling). TBC rules are our guide, and the recommendation is TBC.'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'rings',name:'Violet rings (P0)',desc:'shockwave4white, 30/s, 1.5 s life, 1.67 yd/s out, 1.39 → 0.28 yd',sw:[83,0,186],emitter:{anchor:'chest',vRange:3.14,speed:1.67,life:1.5,rate:30,
+    color:[[0,[22,0,133]],[0.5,[83,0,186]],[1,[112,0,183]]],alpha:[[0,0.55],[0.5,0.7],[1,0.4]],scale:[[0,1.39],[0.5,0.56],[1,0.28]],kind:'glow',follow:true}},
+  {id:'flares',name:'Violet flares (P1)',desc:'flare, the same motion as P0',sw:[112,0,183],emitter:{anchor:'chest',vRange:3.14,speed:1.67,life:1.5,rate:30,
+    color:[[0,[22,0,133]],[0.5,[83,0,186]],[1,[112,0,183]]],alpha:[[0,0.78],[0.5,1],[1,0.78]],scale:[[0,0.3],[0.5,0.15],[1,0.06]],kind:'star',follow:true}},
+  {id:'streaks',name:'Inward dark streaks (P2)',desc:'flare, 25/s, from a 2.22 yd shell, −3.89 yd/s, tail 1.5',sw:[37,0,82],emitter:{anchor:'chest',inward:2.22,speed:-3.89,life:0.55,rate:25,tail:1.5,blend:'alpha',
+    color:[[0,[0,0,0]],[0.5,[37,0,82]],[1,[112,0,183]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.139],[1,0.139]],kind:'glow',follow:true}},
+  {id:'heal',name:'Heal ticks on the Warlock',desc:'shipped green heal numbers every 3 s',sw:[100,255,100],custom:true,cls:'aid'},
+ ],
+ reset(fx){fx.st={next:1000};},
+ tick(fx,ms){ if(ms>=fx.st.next){fx.st.next+=3000; if(on(fx,'heal')) fct('+'+(4+((rnd()*2)|0)),[100,255,100],24,[-4,2.6,0]); fct(String(4+((rnd()*2)|0)),[255,255,0],24,[cur.vp[0]+0.3,2.6,cur.vp[2]]);} },
+ bodies(fx,vp){drawCapsule([-4,1.0,0],CLASS.warlock);drawCapsule(vp,CLASS.victim);},
+ constants(fx){const K=fx.knobs;return [
+  `// Siphon Life DoT state: TBC kit 234 (corruption_impactdot_med_base.m2) on the victim's chest. AS-334 bench.`,
+  `// DotStateVisual::for_dot("Siphon Life") -> SiphonLifeGlow (new route)`,
+  `pub const SIPHON_LIFE_RINGS: bool = ${b(on(fx,'rings'))};`,
+  `pub const SIPHON_LIFE_FLARES: bool = ${b(on(fx,'flares'))};`,
+  `pub const SIPHON_LIFE_INWARD_STREAKS: bool = ${b(on(fx,'streaks'))};`,
+  `pub const SIPHON_LIFE_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const SIPHON_LIFE_DENSITY_MUL: f32 = ${f2(K.density)};`,
+  `pub const SIPHON_LIFE_OPACITY_MUL: f32 = ${f2(K.opacity)};`,
+  `// Landing: Corruption's shipped apply (kit 117). Heal back: floating text only.`];}
+}),
+// ================================================================ Shadowburn
+mkFx({id:'shadowburn',name:'Shadowburn',sub:'landing · mindblast_head.m2 @Head (kit 2709, shipped as Mind Blast)',durMs:2000,frame:{dist:10,ty:1.6},
+ notes:[
+  '<b>Shadowburn is Mind Blast\'s whole visual</b> (visual 3057): the shadow cast hands with the Omni animation, and the head landing we already ship as Mind Blast (`client_landings.rs`, MINDBLAST_HEAD). Being client-faithful needs no new asset.',
+  'Shown here for reference: violet flame licks rising off the head 200–1400 ms (75/s), a few violet lumps, and smoke.',
+  'Nothing persists. The Era 5 s shard debuff draws nothing.'],
+ asks:['Recommended: reuse the shipped Mind Blast landing as is. It is a Warlock spell reusing a Priest spell\'s look, exactly as the client does.'],
+ knobDefs:[...STD],
+ layers:[
+  {id:'flames',name:'Violet flame licks (P0)',desc:'flamelick_purple, 75/s 200–1400 ms, rising',sw:[126,55,255],emitter:{anchor:'head',vRange:3.14,speed:0.3,gravity:-1.25,life:1.0,rate:75,win:[[0,0],[200,1],[1400,0]],area:0.3,
+    color:[[0,[79,55,255]],[0.5,[126,55,255]],[1,[210,0,255]]],alpha:[[0,0.9],[1,0]],scale:[[0,0.11],[0.5,0.28],[1,0.03]],kind:'flame'}},
+  {id:'lumps',name:'Violet lumps (P1)',desc:'lavalump2, 2.5/s, 2.25 s life',sw:[90,60,220],emitter:{anchor:'head',vRange:3.14,speed:0.3,gravity:-1.25,life:2.25,rate:2.5,spin:0.5,
+    color:[[0,[150,60,255]],[1,[60,60,255]]],alpha:[[0,1],[1,0]],scale:[[0,0.03],[1,0.06]],kind:'star'}},
+  {id:'smoke',name:'Smoke (P2)',desc:'toonsmoke16, 5/s, 2.25 s life, alpha-blended',sw:[58,35,84],emitter:{anchor:'head',vRange:3.14,speed:0.3,gravity:-1.25,life:2.25,rate:5,blend:'alpha',
+    color:[[0,[60,0,255]],[0.5,[58,35,84]],[1,[120,120,120]]],alpha:[[0,0.6],[1,0]],scale:[[0,0.17],[0.5,0.35],[1,0.69]],kind:'smoke'}},
+ ],
+ bodies(fx,vp){drawCapsule([-4,1.0,0],CLASS.warlock);drawCapsule(vp,CLASS.victim);},
+ constants(fx){return [
+  `// Shadowburn landing: reuse the shipped Mind Blast landing (mindblast_head.m2, kit 2709). AS-334 bench.`,
+  `// landing_style(Shadowburn) => the MINDBLAST_HEAD client landing; cast hands: shipped shadow hands.`,
+  `pub const SHADOWBURN_REUSES_MIND_BLAST_LANDING: bool = ${b(on(fx,'flames')||on(fx,'lumps')||on(fx,'smoke'))};`];}
+}),
+// ================================================================ Conflagrate
+mkFx({id:'conflag',name:'Conflagrate',sub:'landing · fire_impactdd_high_chest.m2 @Chest (kit 4551) · Immolate ends at impact',durMs:3200,frame:{dist:10,ty:1.3},
+ notes:[
+  'A <b>hard fire detonation</b> at the victim\'s chest with the CombatWound flinch we already draw. Plumes and sparks jet out at 2.8–4.4 yd/s in the first 0.17–0.33 s. A fire ring (to 0.97 yd) and a <b>shock ring (to 2.22 yd)</b> flash at 0.13–0.23 s. Yellow-orange puffs and pale smoke linger to about 2 s.',
+  '<b>"Immolate is consumed" is just Immolate\'s burn switching off</b> as the burst lands. The client adds no consumption visual, and ours already despawns the burn when the aura goes. In this bench the burn (a viewing aid) runs for 1 s, then Conflagrate lands.',
+  'Cast hands: the client\'s fire hands (the same models as Immolate, with the Directed animation). We ship neither, and our cast orb stands in.'],
+ asks:['Recommended: client-faithful, all eight layers. Is anything to trim?'],
+ knobDefs:[...STD],
+ layers:[
+  {id:'burn',name:'Immolate burn before impact',desc:'stand-in for our shipped burn; ends at Conflagrate',sw:[231,86,65],cls:'aid',emitter:{anchor:'feet',vRange:0.3,speed:0.6,gravity:-1,life:0.8,rate:40,area:0.7,win:[[0,1],[1000,0]],
+    color:[[0,[255,200,60]],[0.5,[231,86,65]],[1,[120,20,10]]],alpha:[[0,0.8],[1,0]],scale:[[0,0.3],[1,0.12]],kind:'flame',follow:true}},
+  {id:'p3',name:'Spark spray (P3)',desc:'flare, 125/s for 0–333 ms, 2.78 yd/s',sw:[255,159,35],emitter:{anchor:'chest',vRange:3.14,speed:2.78,spin:-0.3,life:1.0,rate:125,win:[[0,0],[1000,1],[1333,0]],
+    color:[[0,[255,209,0]],[0.5,[255,159,35]],[1,[101,0,0]]],alpha:[[0,1],[1,0]],scale:[[0,0.03],[0.5,0.07],[1,0.03]],kind:'star'}},
+  {id:'p45',name:'Plume jets (P4 + P5)',desc:'fireplume64, 200/s for 0–167 ms, 3.9–4.4 yd/s',sw:[205,106,0],emitter:{anchor:'chest',vRange:3.14,speed:4.1,life:0.7,rate:200,win:[[0,0],[1000,1],[1167,0]],tail:3,
+    color:[[0,[78,0,0]],[0.5,[221,180,120]],[1,[213,95,0]]],alpha:[[0,1],[1,0]],scale:[[0,0.03],[0.5,0.1],[1,0.03]],kind:'glow'}},
+  {id:'p0',name:'Glow puffs (P0)',desc:'tooncloud64_soft, 50/s for 0–833 ms, rising',sw:[255,222,0],emitter:{anchor:'chest',vRange:3.14,speed:0.33,gravity:-0.56,life:1.2,rate:50,win:[[0,0],[1000,1],[1833,0]],
+    color:[[0,[255,222,0]],[0.5,[206,129,47]],[1,[91,91,91]]],alpha:[[0,0.8],[1,0]],scale:[[0,0.22],[0.5,0.22],[1,0.03]],kind:'cloud'}},
+  {id:'p2',name:'Opaque flame puffs (P2)',desc:'tooncloud64, 30/s for 0–667 ms',sw:[236,148,54],emitter:{anchor:'chest',vRange:3.14,speed:0.28,gravity:-0.56,life:1.25,rate:30,win:[[0,0],[1000,1],[1667,0]],blend:'alpha',
+    color:[[0,[255,222,0]],[0.5,[236,148,54]],[1,[120,120,120]]],alpha:[[0,0.9],[1,0]],scale:[[0,0.28],[0.5,0.28],[1,0.03]],kind:'cloud'}},
+  {id:'p7',name:'Pale smoke (P7)',desc:'toonsmoke16, 20/s for 0–667 ms, 2 s life',sw:[235,220,174],emitter:{anchor:'chest',vRange:1.2,speed:0.56,life:2.0,rate:20,area:0.56,win:[[0,0],[1000,1],[1667,0]],blend:'alpha',
+    color:[[0,[235,220,174]],[1,[245,245,240]]],alpha:[[0,0.6],[1,0]],scale:[[0,0.33],[0.5,0.44],[1,0.03]],kind:'smoke'}},
+  {id:'rings',name:'Fire ring + shock ring (P1 + P6)',desc:'firering128 to 0.97 yd; shockwave10 to 2.22 yd, at 133–233 ms',sw:[255,162,0],custom:true},
+ ],
+ bodies(fx,vp,ms){drawCapsule([-4,1.0,0],CLASS.warlock); const fl=ms>1000&&ms<1300?Math.sin((ms-1000)/300*Math.PI)*0.12:0; drawCapsule([vp[0]+fl,1.0,vp[2]],CLASS.victim);},
+ customDraw(fx,ms,vp){ if(!on(fx,'rings')) return; const K=fx.knobs, t=(ms-1000)/(K.duration??1); if(t<120||t>1300) return;
+  const fire=keys([[120,0],[167,0.03],[400,0.83],[900,0.97]],t), fa=keys([[120,0],[167,1],[600,0.6],[900,0]],t);
+  const shock=keys([[120,0],[133,0.03],[600,1.39],[1200,2.22]],t), sa=keys([[120,0],[133,0.9],[700,0.5],[1200,0]],t);
+  const c=[vp[0],0,vp[2]];
+  groundDisc(c,1.45,fire*K.size*K.spread,[245,150,0],fa*0.6);
+  runeRing(c,1.45,shock*K.size*K.spread,[255,120,0],sa); },
+ constants(fx){const K=fx.knobs;return [
+  `// Conflagrate landing: fire_impactdd_high_chest.m2 (kit 4551) on the victim's chest, plus the CombatWound flinch. AS-334 bench.`,
+  `pub const CONFLAGRATE_SPARKS: bool = ${b(on(fx,'p3'))};`,
+  `pub const CONFLAGRATE_PLUMES: bool = ${b(on(fx,'p45'))};`,
+  `pub const CONFLAGRATE_GLOW_PUFFS: bool = ${b(on(fx,'p0'))};`,
+  `pub const CONFLAGRATE_FLAME_PUFFS: bool = ${b(on(fx,'p2'))};`,
+  `pub const CONFLAGRATE_SMOKE: bool = ${b(on(fx,'p7'))};`,
+  `pub const CONFLAGRATE_RINGS: bool = ${b(on(fx,'rings'))}; // fire ring 0.97 yd, shock ring 2.22 yd`,
+  `pub const CONFLAGRATE_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const CONFLAGRATE_DENSITY_MUL: f32 = ${f2(K.density)};`,
+  `// Immolate consumed: the shipped burn despawns with the aura; no extra visual.`];}
+}),
+// ================================================================ Aftermath
+mkFx({id:'aftermath',name:'Aftermath daze',sub:'proc · fire_impactdd_chest.m2 + firenova_state.m2 @Base + tint #FF5155 · 5 s',durMs:5000,frame:{dist:8,ty:1.1},loopTotal:6500,moverDefault:true,
+ notes:[
+  'The proc (18118, −50% speed for 5 s) plays a <b>small fire hit</b> with a flinch (kit 728), then holds the <b>client\'s fire-slow state</b> (kit 985, shared with Blast Wave and Fire Nova) for 5 s: a red-to-gold heat haze at the feet, an occasional ember tossed up, and the <b>whole body tinted red #FF5155</b>.',
+  'It does <b>not</b> use kit 360, the generic slow our shipped slow ring is based on. The slow-state research found every school has its own client state. The shipped design deliberately unified them all into one ring at the feet, tinted by school.',
+  'A new slow name gets <b>no ring</b> today: `SlowTint::for_slow` matches Frost, Physical and Nature by name, and has no Fire or Shadow arm. The audit fails until it is given one.',
+  '<span class="inferred">Which sequence the client loops for the state decides the haze density. The bench uses sequence 158 (20/s each dust emitter). The Stand sequence alone has no haze, only about 1.7 embers a second.</span>'],
+ asks:['<b>Client fire-slow, or our slow ring?</b> Client-faithful: the heat haze plus a red body tint. Our ring: what every other slow in the game shows (Frost Nova, Concussive Shot, Crippling Poison), here with a new Fire tint. The ring keeps all slows consistent with your earlier slow ruling; the client state is more distinctive, and its tint would compete with other body tints (Shadowform, stealth). The recommendation is the <b>ring with a Fire tint, plus the client\'s one-shot fire hit</b>.'],
+ knobDefs:[...STD,{key:'tint',label:'tint strength',min:0,max:1,step:0.05,def:1}],
+ layers:[
+  {id:'hit',name:'Fire hit (kit 728)',desc:'fire_impactdd_chest.m2: red-orange burst, falling embers, grey smoke',sw:[250,149,18],emitter:{anchor:'chest',vRange:3.14,speed:1.67,gravity:1.39,life:1.0,rate:60,win:[[0,0],[67,1],[700,0]],
+    color:[[0,[214,0,0]],[0.5,[250,149,18]],[1,[214,0,0]]],alpha:[[0,1],[1,0]],scale:[[0,0.22],[0.5,0.08],[1,0.03]],kind:'star',follow:true}},
+  {id:'hitsmoke',name:'Fire hit smoke',desc:'alphacloud grey + gold glow, 50/s',sw:[248,128,30],emitter:{anchor:'chest',vRange:3.14,speed:0.5,life:0.9,rate:50,win:[[0,0],[67,1],[700,0]],
+    color:[[0,[249,234,64]],[0.5,[248,128,30]],[1,[255,25,25]]],alpha:[[0,0],[0.5,0.6],[1,0]],scale:[[0,0.03],[0.5,0.42],[1,0.14]],kind:'cloud',follow:true}},
+  {id:'haze',name:'Heat haze (P1 + P2)',desc:'dust1_a, 2 × 20/s, rising, red → gold',sw:[255,144,0],emitter:{anchor:'feet',vRange:3.14,speed:0.28,gravity:-0.69,life:1.5,rate:40,area:0.44,areaY:0.14,spin:0.08,win:[[0,1],[5000,0]],
+    color:[[0,[255,15,15]],[0.5,[255,144,0]],[1,[255,205,54]]],alpha:[[0,0],[0.5,0.39],[1,0]],scale:[[0,0.05],[0.5,0.22],[1,0.28]],kind:'cloud',follow:true}},
+  {id:'embers',name:'Tossed embers (P0)',desc:'ember, ~1.7/s, 4.44 yd/s up, falling back',sw:[255,164,45],emitter:{anchor:'feet',vRange:0.175,speed:4.44,gravity:13.9,life:0.8,rate:1.7,area:0.69,win:[[0,1],[5000,0]],
+    color:[[0,[255,37,37]],[0.5,[255,164,45]],[1,[255,219,109]]],alpha:[[0,0.39],[0.5,0.71],[1,0]],scale:[[0,0.028],[0.5,0.042],[1,0.028]],kind:'star',follow:true}},
+  {id:'tintL',name:'Body tint #FF5155',desc:'procedural type 1, held for the 5 s',sw:[255,81,85],custom:true},
+  {id:'ring',name:'Our slow ring, Fire tint',desc:'the shipped slow look: ring at the feet while moving',sw:[255,110,40],custom:true,on:false,cls:'authored'},
+ ],
+ bodies(fx,vp,ms){ const K=fx.knobs, up=ms<5000*(K.duration??1); const T=[255,81,85];
+  const col=on(fx,'tintL')&&up?CLASS.victim.map((x,i)=>lerp(x,T[i],0.55*K.tint)):CLASS.victim; drawCapsule(vp,col); },
+ customDraw(fx,ms,vp){ if(!on(fx,'ring')||ms>5000*(fx.knobs.duration??1)) return; const ph=(ms%1000)/1000;
+  runeRing([vp[0],0,vp[2]],0.04,0.55+0.25*ph,[255,110,40],0.7*(1-ph)); runeRing([vp[0],0,vp[2]],0.04,0.5,[255,110,40],0.5); },
+ constants(fx){const K=fx.knobs; const client=on(fx,'haze')||on(fx,'embers')||on(fx,'tintL');return [
+  `// Aftermath daze (18118): one-shot fire hit (kit 728) + ${client?'client fire-slow state (kit 985)':'shipped slow ring'}. AS-334 bench.`,
+  `pub const AFTERMATH_FIRE_HIT: bool = ${b(on(fx,'hit')||on(fx,'hitsmoke'))};`,
+  `pub const AFTERMATH_HEAT_HAZE: bool = ${b(on(fx,'haze'))};`,
+  `pub const AFTERMATH_EMBERS: bool = ${b(on(fx,'embers'))};`,
+  `pub const AFTERMATH_BODY_TINT: bool = ${b(on(fx,'tintL'))}; // #FF5155, strength ${f2(K.tint)}`,
+  `pub const AFTERMATH_SLOW_RING_FIRE: bool = ${b(on(fx,'ring'))}; // SlowTint::Fire arm`,
+  `pub const AFTERMATH_SIZE_MUL: f32 = ${f2(K.size)};`];}
+}),
+// ================================================================ Soul Link
+mkFx({id:'soullink',name:'Soul Link',sub:'landing · amplifymagic_impact_base.m2 @Base (kit 991) · 2.5 s · no link, no beam',durMs:2500,frame:{dist:10,ty:1.4},
+ notes:[
+  'Visual 969 is the client\'s arcane buff visual, shared with Amplify Magic and 28 others. The cast hands are the arcane hands we already ship for Moonfire.',
+  'The landing is a <b>column of red rune circles</b> that rises off the ground and fans upward, each fainter than the last (1.0, then 0.45 → 0.05), with red sparks spiralling out. It is gone by 2.5 s.',
+  '<b>There is no sustained state, link or beam</b> on the Warlock or the demon. The design\'s "the Felhunter\'s bar drops when the Warlock is hit" is HUD and log, and needs no world visual.',
+  '<span class="inferred">Which body draws the column (Warlock, demon or both) is unresolved. The bench draws it on both. The disc spacing and the rise are approximations of the bone keys.</span>'],
+ asks:['Recommended: client-faithful. The rune column plays at the gates when the link forms, with no persistent tether. <b>Do you want the column on the Warlock, the Felhunter, or both?</b>'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'column',name:'Red rune column (11 discs)',desc:'aurarune_a, pure red, fading in 100 ms apart, rising to ~5 yd',sw:[255,0,0],custom:true},
+  {id:'sparks',name:'Spiralling red sparks (P0–P2)',desc:'ribbonne1_red, 20/s + 20/s + 16/s for 0–1 s',sw:[255,105,105],emitter:{anchor:'feet',vRange:0.6,speed:2.4,spin:3,life:1.0,rate:56,area:0.8,win:[[0,1],[1000,0]],
+    color:[[0,[255,190,170]],[0.5,[255,40,40]],[1,[255,150,140]]],alpha:[[0,1],[1,0]],scale:[[0,0.08],[1,0.01]],kind:'star'}},
+  {id:'onpet',name:'Also on the Felhunter',desc:'draw the column on the demon too',sw:[180,90,90],custom:true},
+ ],
+ bodies(fx,vp){drawCapsule(vp,CLASS.warlock); const pc=[vp[0]+2.2,0.6,vp[2]+0.6]; drawCapsule(pc,[120,96,80]);},
+ customDraw(fx,ms,vp){ if(!on(fx,'column')) return; const K=fx.knobs, t=ms/(K.duration??1);
+  const draw=(c)=>{ for(let i=0;i<11;i++){ const t0=334+100*i; if(t<t0) continue; const peak=i===0?1:Math.max(0.05,0.45-0.04*(i-1));
+    const a=keys([[0,0],[80,peak],[850,peak],[1600+i*80,0]],t-t0)*(K.opacity??1);
+    const rise=keys([[0,0],[2500,5.06]],t)*(i/10), r=(1.76-0.05*i)*0.5*K.size*K.spread*keys([[0,2.48],[200,0.91],[400,0.98]],t)/0.98;
+    runeRing(c,0.05+rise,r,[255,i%3?0:105,i%3?0:105],a); } };
+  draw([vp[0],0,vp[2]]); if(on(fx,'onpet')) draw([vp[0]+2.2,0,vp[2]+0.6]); },
+ constants(fx){const K=fx.knobs;return [
+  `// Soul Link landing: amplifymagic_impact_base.m2 (kit 991) at the feet, once when the link forms. AS-334 bench.`,
+  `pub const SOUL_LINK_RUNE_COLUMN: bool = ${b(on(fx,'column'))};`,
+  `pub const SOUL_LINK_SPARKS: bool = ${b(on(fx,'sparks'))};`,
+  `pub const SOUL_LINK_ON_DEMON: bool = ${b(on(fx,'onpet'))};`,
+  `pub const SOUL_LINK_SECS: f32 = ${f2(2.5*K.duration)};`,
+  `pub const SOUL_LINK_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `// No sustained link or beam (client has none).`];}
+}),
+// ================================================================ Demonic Sacrifice
+mkFx({id:'sacrifice',name:'Demonic Sacrifice',sub:'buff landing · demonicsacrifice_<demon>_chest.m2 @Chest · 2.37 s',durMs:2400,frame:{dist:8,ty:1.5},
+ notes:[
+  '<b>Nothing lands on the demon</b>: the client\'s sacrifice is an instakill on the pet (visual 1305, Banish\'s, whose only victim row is a state on a spell with no aura). The demon simply dies.',
+  'The visible moment is the buff\'s one-shot on the Warlock: <b>three glowing orbs spin round the chest</b> (0.83 yd out, one turn per 1067 ms), each trailing two ribbons. Then motes stream up off three outer points (1.75 yd) from 1.0 to 1.67 s. There is no sustained state; afterwards only the buff icon remains.',
+  '<b>Colour:</b> the client gives each demon its own colour on one rig. Our design gives the Felhunter <b>Touch of Shadow</b>, which is the <b>Succubus\'s</b> buff in the client (violet, with green-tipped motes). The Felhunter\'s own client buff, Fel Energy, is <b>blue</b>.',
+  '<span class="inferred">The orb rotation is inferred from 5 bone keys; the ribbons are approximated as trails.</span>'],
+ asks:['<b>Blue (the Felhunter\'s) or violet (Touch of Shadow\'s)?</b> Violet matches the buff\'s name and its +15% Shadow; blue matches the demon being given up. Also: what happens to the Felhunter at the gates is AS-299\'s call (play our normal death, or never spawn it). The client draws only the death.'],
+ knobDefs:[...STD,{key:'demon',label:'colour',min:0,max:1,step:1,def:1,names:['Felhunter blue','Succubus violet']},{key:'spin',label:'orb rev/s',min:0.3,max:2,step:0.05,def:0.94}],
+ layers:[
+  {id:'orbs',name:'Spinning orbs + ribbons',desc:'3 glows at 0.83 yd, ribbons 0.33 / 0.17 yd wide, alpha 0.8 from 334 to 1000 ms',sw:[107,142,255],custom:true},
+  {id:'inner',name:'Inner mote spray',desc:'100/s from 334 to 1000 ms, at the orbs',sw:[126,172,255],emitter:{anchor:'chest',orbit:0.83,orbitRevS:0.94,vRange:3.14,speed:0.83,life:0.6,rate:[[0,0],[334,100],[1000,100],[2367,0]],
+    color:[[0,[0,30,255]],[0.5,[107,142,255]],[1,[126,172,255]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0],[0.5,0.07],[1,0]],kind:'glow'}},
+  {id:'outer',name:'Outer rising motes',desc:'50/s from 1000 to 1667 ms at 1.75 yd, rising fast',sw:[105,140,255],emitter:{anchor:'chest',orbit:1.75,orbitRevS:0.94,vRange:0,speed:0,gravity:-6.94,life:0.8,rate:50,area:0.42,win:[[0,0],[1000,1],[1667,0]],
+    color:[[0,[220,229,246]],[0.5,[105,140,255]],[1,[0,25,213]]],alpha:[[0,1],[1,0]],scale:[[0,0.07],[0.5,0.03],[1,0.01]],kind:'star'}},
+ ],
+ colorMap(col,s){ if(this.knobs.demon!=1) return col; // Succubus violet: shift blue toward violet, outer motes end green
+   if(s.orbit===1.75&&col[1]<60&&col[2]>150) return [25,213,0];
+   return [Math.min(255,col[0]*0.9+col[2]*0.35),col[1]*0.8,col[2]]; },
+ bodies(fx,vp){drawCapsule(vp,CLASS.warlock);},
+ customDraw(fx,ms,vp){ if(!on(fx,'orbs')) return; const K=fx.knobs, t=ms/(K.duration??1); if(t>2367) return;
+  const a=keys([[0,0],[334,0.8],[1000,0.8],[2367,0]],t), vi=K.demon==1;
+  const col=vi?[150,120,255]:[107,142,255];
+  g.globalCompositeOperation='lighter';g.lineCap='round';
+  for(let k=0;k<3;k++){ let prev=null;
+    for(let s=0;s<=16;s++){ const tt=t/1000-0.65*s/16; if(tt<0) break;
+      const ang=tt*K.spin*TAU+k*TAU/3, r=(0.83+0.28*Math.sin(tt*2.7))*K.spread;
+      const p=proj([vp[0]+r*Math.cos(ang),1.45+0.1*Math.sin(tt*4+k),vp[2]+r*Math.sin(ang)]); if(!p) continue;
+      if(prev){ g.strokeStyle=rgb(col,a*(1-s/16)); g.lineWidth=Math.max(1,0.33*K.size*p.s*(1-s/16)); g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke(); }
+      if(s===0) sprite('glow',[vp[0]+r*Math.cos(ang),1.45,vp[2]+r*Math.sin(ang)],0.35*K.size,col,a);
+      prev=p; } }
+  g.globalCompositeOperation='source-over'; },
+ constants(fx){const K=fx.knobs;return [
+  `// Demonic Sacrifice buff landing: demonicsacrifice_${K.demon==1?'succubus':'felhunter'}_chest.m2 on the Warlock's chest. AS-334 bench.`,
+  `pub const SACRIFICE_PALETTE: SacrificePalette = SacrificePalette::${K.demon==1?'SuccubusViolet':'FelhunterBlue'};`,
+  `pub const SACRIFICE_ORBS_AND_RIBBONS: bool = ${b(on(fx,'orbs'))};`,
+  `pub const SACRIFICE_INNER_MOTES: bool = ${b(on(fx,'inner'))};`,
+  `pub const SACRIFICE_OUTER_MOTES: bool = ${b(on(fx,'outer'))};`,
+  `pub const SACRIFICE_ORB_REV_PER_SEC: f32 = ${f2(K.spin)};`,
+  `pub const SACRIFICE_SECS: f32 = ${f2(2.367*K.duration)};`,
+  `pub const SACRIFICE_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `// Nothing on the demon (client: instakill). Touch of Shadow buff: icon only after the landing.`];}
+}),
+];
+
+// ---------- UI wiring ----------
+let cur=EFFECTS[0], simMs=0, paused=false, lastNow=performance.now();
+const $=id=>document.getElementById(id);
+function buildTabs(){const nav=$('tabs');nav.innerHTML='';
+  for(const fx of EFFECTS){const bt=document.createElement('button');bt.className='tab';bt.role='tab';bt.id='tab-'+fx.id;bt.textContent=fx.name;bt.setAttribute('aria-selected',fx===cur);
+    bt.onclick=()=>{cur=fx;try{localStorage.setItem('as334bench.tab',fx.id)}catch(e){};select();};nav.appendChild(bt);} }
+const knobText=(k,v)=>k.names?k.names[v|0]:(+v).toFixed(2);
+function select(){
+  document.querySelectorAll('.tab').forEach(bt=>bt.setAttribute('aria-selected',bt.id==='tab-'+cur.id));
+  cam.dist=cur.frame.dist;cam.target=[0,cur.frame.ty,0];
+  $('moving').checked=!!cur.moverDefault;
+  const L=$('layers');L.innerHTML='';
+  for(const l of cur.layers){const d=document.createElement('div');d.className='layer'+(l.cls?' '+l.cls:'');const id='ly-'+cur.id+'-'+l.id;
+    d.innerHTML=`<input type="checkbox" id="${id}" ${cur.layersOn[l.id]?'checked':''}><span class="sw" style="background:${rgb(l.sw,1)}"></span><label for="${id}"><span class="nm">${l.name}</span><span class="ds">${l.desc}</span></label>`;
+    d.querySelector('input').onchange=e=>{cur.layersOn[l.id]=e.target.checked;renderOut();};L.appendChild(d);}
+  const Kn=$('knobs');Kn.innerHTML='';
+  for(const k of cur.knobDefs){const d=document.createElement('div');d.className='knob';const id='kn-'+cur.id+'-'+k.key;
+    d.innerHTML=`<span>${k.label}</span><input type="range" id="${id}" min="${k.min}" max="${k.max}" step="${k.step}" value="${cur.knobs[k.key]}"><output for="${id}">${knobText(k,cur.knobs[k.key])}</output>`;
+    const inp=d.querySelector('input'),o=d.querySelector('output');inp.oninput=()=>{cur.knobs[k.key]=+inp.value;o.textContent=knobText(k,+inp.value);renderOut();if(k.names)restart();};Kn.appendChild(d);}
+  const rs=document.createElement('button');rs.className='btn';rs.textContent='Reset to client values';rs.style.marginTop='8px';
+  rs.onclick=()=>{for(const k of cur.knobDefs)cur.knobs[k.key]=k.def;for(const l of cur.layers)cur.layersOn[l.id]=l.on!==false;select();};Kn.appendChild(rs);
+  $('notes').innerHTML=cur.notes.map(n=>`<li>${n}</li>`).join('');
+  $('asks').innerHTML=(cur.asks||[]).map(a=>`<p class="ask">${a}</p>`).join('');
+  restart();renderOut();
+}
+function renderOut(){$('out').textContent=cur.constants(cur).join('\n');}
+function restart(){simMs=0;FCT=[];cur.emitters.forEach(x=>x.e.reset());cur.swingAt=null;if(cur.reset)cur.reset(cur);}
+$('replay').onclick=restart;
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Play':'Pause';};
+$('copy').onclick=()=>{const txt=$('out').textContent;const done=()=>{$('copy').textContent='Copied';setTimeout(()=>$('copy').textContent='Copy',1200)};
+  const sel=()=>{const r=document.createRange();r.selectNodeContents($('out'));const s=getSelection();s.removeAllRanges();s.addRange(r);};
+  try{navigator.clipboard.writeText(txt).then(done,sel);}catch(e){sel();}};
+
+// ---------- main loop ----------
+function victimPos(ms){ if(!$('moving').checked) return [0,1.0,0];
+  const R=3.2, a=(ms/1000)*3/R; return [R*Math.cos(a)-R,1.0,R*Math.sin(a)]; }
+function frame(now){
+  const dt=Math.min(0.05,(now-lastNow)/1000)*(+$('speed').value); lastNow=now;
+  const step=paused?0:dt; simMs+=step*1000;
+  const total=cur.loopFx?Infinity:(cur.loopTotal??(cur.durMs*(cur.knobs.duration??1)+1200));
+  if(simMs>total){ if($('loop').checked) restart(); else simMs=total; }
+  setupView();
+  g.fillStyle='#0d0c10';g.fillRect(0,0,cv.width,cv.height);
+  drawFloor();
+  const vp=victimPos(simMs); cur.vp=vp; const origin=[vp[0],0,vp[2]];
+  if(!paused && cur.tick) cur.tick(cur,simMs);
+  for(const {id,e} of cur.emitters){ if(!cur.layersOn[id]){e.ps=[];continue;} if(!paused) e.update(step,simMs,origin); }
+  shadow(vp);
+  cur.bodies(cur,vp,simMs);
+  if(cur.customDraw) cur.customDraw(cur,simMs,vp);
+  for(const {id,e} of cur.emitters) if(cur.layersOn[id]) e.draw();
+  drawFct(step);
+  $('hud').textContent=`${cur.name} — ${cur.sub}\nt = ${(simMs/1000).toFixed(2)} s${cur.hud?'\n'+cur.hud(cur):''}`;
+  requestAnimationFrame(frame);
+}
+buildTabs();
+try{const saved=localStorage.getItem('as334bench.tab');const fx=EFFECTS.find(x=>x.id===saved);if(fx)cur=fx;}catch(e){}
+select();
+requestAnimationFrame(frame);
+</script>
