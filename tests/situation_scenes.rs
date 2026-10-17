@@ -173,8 +173,9 @@ fn hunter_does_not_burst_the_locked_healer_itself() {
 }
 
 // ---------------------------------------------------------------------------
-// Priest: a locked enemy healer lowers Mana Burn's health floor from 0.90 to
-// 0.70, so a team at 80% burns instead of healing.
+// Priest: Mana Burn spends surplus GCDs only, and a locked enemy healer does
+// not change that: a team at 80% is healed, locked or not, and a topped team
+// burns, locked or not.
 // ---------------------------------------------------------------------------
 
 /// Fortitude already up on both allies, Weakened Soul on both (no Shield to
@@ -199,8 +200,45 @@ fn priest_scene() -> Scene {
 }
 
 #[test]
-fn priest_burns_mana_on_a_locked_healer_and_heals_otherwise() {
+fn priest_heals_before_burning_whether_or_not_the_enemy_healer_is_locked() {
     let mut scene = priest_scene();
+    let locked = scene.decide(PRIEST);
+    assert!(
+        locked
+            .situation
+            .is_some_and(|s| s.enemy_healer_locked.is_some()),
+        "{}",
+        describe(&locked)
+    );
+    assert_eq!(
+        locked.chose(),
+        Some((AbilityType::FlashHeal, Some(ALLY))),
+        "{}",
+        describe(&locked)
+    );
+
+    scene.clear_auras(ENEMY_PRIEST);
+    let free = scene.decide(PRIEST);
+    assert!(
+        free.situation
+            .is_some_and(|s| s.enemy_healer_locked.is_none()),
+        "{}",
+        describe(&free)
+    );
+    assert_eq!(
+        free.chose(),
+        Some((AbilityType::FlashHeal, Some(ALLY))),
+        "{}",
+        describe(&free)
+    );
+}
+
+/// The control: the same scene with the team topped burns, locked or not, so
+/// the heal above is the health floor's doing and not an unreachable burn.
+#[test]
+fn priest_burns_mana_with_a_topped_team_whether_or_not_the_enemy_healer_is_locked() {
+    let mut scene = priest_scene();
+    scene.set_health(ALLY, 1.0);
     let locked = scene.decide(PRIEST);
     assert_eq!(
         locked.chose(),
@@ -213,7 +251,7 @@ fn priest_burns_mana_on_a_locked_healer_and_heals_otherwise() {
     let free = scene.decide(PRIEST);
     assert_eq!(
         free.chose(),
-        Some((AbilityType::FlashHeal, Some(ALLY))),
+        Some((AbilityType::ManaBurn, Some(ENEMY_PRIEST))),
         "{}",
         describe(&free)
     );
