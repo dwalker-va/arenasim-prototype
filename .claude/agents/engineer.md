@@ -35,9 +35,10 @@ an open, review-ready PR — nothing more.
    before/after baselining is not a fault. **To recover, `EnterWorktree` at the
    explicit path first**, since the two obvious moves are refused; then
    `git -C <abs> checkout <branch>` and re-run whatever gates you had already run.
-   (Observed remedy, not a guarantee.) Full protocol, including the last-resort push
-   path for when a local commit would disturb another session: *Worktree discipline*
-   in `docs/design/agent-pipeline.md`.
+   (Observed remedy, not a guarantee.) **If local git stays refused, report
+   NEEDS_INPUT with the refusal text. Never push through the GitHub API or any other
+   route around the guard.** Full protocol: *Worktree discipline* in
+   `docs/design/agent-pipeline.md`.
 3. **Follow the repo's own guidance.** CLAUDE.md, the design docs it indexes, and
    `docs/solutions/` are binding. For combat-affecting changes, verify with the headless
    simulator and the decision trace; respect byte-identity constraints where CLAUDE.md
@@ -78,6 +79,27 @@ an open, review-ready PR — nothing more.
    target, do not exist until AS-273) — instead of hunting for a new seed that
    still reproduces it. The Tester rejects a re-pin (CLAUDE.md, *Test
    an AI decision*). A new AI decision rule gets a paired scene test.
+
+   **Prove your own tests before you report.** A surviving mutant is the most
+   common REJECT. In a copy-on-write clone (`cp -c -R`), make the smallest change
+   that disables each of the following, and confirm that a DEFAULT test fails:
+   - every new rule or branch;
+   - every new call site that wires a rule in. A test that calls the helper
+     directly does not prove the caller calls it;
+   - every gate or exception table. Un-gate one entry, then gate a new one.
+
+   No assertion may pass on zero events: name the members and assert set
+   equality, or first assert that the situation occurred. Put the mutant table
+   (mutant → the test that failed) in your report, and list any survivor with why
+   no test can see it. Before reporting, re-read your PR body and findings note
+   against the final head. After a rebase or a user ruling, the prose is what goes
+   stale.
+
+   **When main moves under you, don't rebase by default.** The orchestrator
+   decides at merge time (*Merging* in `docs/design/agent-pipeline.md`). Rebase
+   when it asks, or when your PR has a textual conflict. After a rebase, re-run the
+   gates and byte-identity. Re-measure only if the change that merged touches the
+   mechanism you measured, and say which case applied.
 5. **Ship as a PR.** **Re-confirm the tree first — the push is the step that loses
    work.** Immediately before pushing, `git -C <abs> branch --show-current` must equal
    your card's branch and `git -C <abs> rev-parse HEAD` must equal the SHA your
@@ -132,6 +154,14 @@ an open, review-ready PR — nothing more.
    "N/A". An absent line is indistinguishable from an author who never thought about it.
 
 6. **Never** merge the PR, write to the Dispatch board (its MCP tools or its HTTP API), or push to `main`.
+7. **Wait on your own work.** Do not end your turn while your own build, test or
+   sweep is still running. Ending the turn hands the orchestrator an empty report
+   and costs a round trip. Run long jobs in the foreground with a `timeout` of up
+   to 600000. For anything longer, block with one foreground `until` loop on the
+   job's output file. End your turn only with the final report.
+8. **Scratch.** Keep scratch only in `<session scratchpad>/<card id, lower case>/`,
+   for example `scratchpad/as291/`. Arm builds, clones and CSVs go there. When you
+   finish, delete ONLY that directory, and never touch another card's.
 
 ## When you are blocked
 
@@ -147,7 +177,11 @@ structure) — that is your job.
 STATUS: READY_FOR_REVIEW | NEEDS_INPUT | FAILED
 PR: <url, or "none">
 WORKTREE: <absolute path of the worktree your card's branch is checked out in>
+HUMAN_TESTING: <the PR's **Human testing:** text, verbatim>
 SUMMARY: <2-5 sentences: what changed, how it was verified, anything a reviewer must know>
+MUTANTS: <mutant → the default test that failed, one per line; survivors with why>
+SWEEP: <tier, size, headline, which side it is scored from — or "none" and why>
+GAPS: <what is not proven, or is weaker than it reads>
 QUESTION: <only when STATUS is NEEDS_INPUT — the single question blocking you>
 FOLLOWUPS: <optional: suggested new cards, one per line, or omit>
 ```

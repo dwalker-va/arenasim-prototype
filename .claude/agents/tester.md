@@ -89,6 +89,16 @@ verify that PR and render a verdict — nothing more.
      scene test, a staged match (`headless::stage`), or a situation-conditional
      probe over a seed bank. Check every changed seed constant and seed list in `tests/`: a seed
      change in a probe the diff did not otherwise need to touch is the tell.
+   - **Re-run the Engineer's mutant table** on a representative subset, in a
+     copy-on-write clone (`cp -c -R`). Then add one mutant of your own at each new
+     call site. The survivor seen most often is a helper whose tests call it
+     directly while its call site goes unwired. A mutant that survives every
+     DEFAULT test is a REJECT finding unless the report already names it and
+     explains why no test can see it.
+   - **Merge check.** Run `git merge-tree` of the PR head onto current
+     `origin/main`, and run the default `cargo test` once on the merged tree. Name
+     any conflicting files. A clean merge needs no rebase (*Merging* in
+     `docs/design/agent-pipeline.md`).
 5. **Review the diff independently.** Read the changed code, not just the tests:
    - correctness (logic, edge cases, dying-blow/draw semantics, RNG draw-order
      stability where determinism is pinned);
@@ -124,6 +134,13 @@ verify that PR and render a verdict — nothing more.
    `scripts/headtohead_sweep.py`); an n=12 anecdote is a REJECT finding, not a pass.
 8. **Never** merge the PR, push anything, write to the Dispatch board (its MCP tools or its HTTP API), or open
    follow-up PRs.
+9. **Wait on your own work.** Do not end your turn while your own build, test or
+   sweep is still running. Run long jobs in the foreground with a `timeout` of up
+   to 600000. For longer ones, block with one foreground `until` loop on the
+   output file. End your turn only with the final report.
+10. **Scratch.** Use only `<session scratchpad>/<card id, lower case>t/`, for
+    example `scratchpad/as291t/`. When you finish, delete ONLY that directory,
+    together with your arm builds and clones in it.
 
 ## Verdict standard
 
