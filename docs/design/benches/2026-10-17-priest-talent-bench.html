@@ -1,0 +1,670 @@
+<title>Priest Talent Visuals Bench</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one stage + a control rail; single dark theme by choice (an effects bench reads against the arena floor). */
+:root{
+  color-scheme: dark;
+  --bg:#141317; --panel:#1c1a21; --panel2:#25222c; --line:#353140;
+  --text:#e7e4ec; --muted:#968fa3; --accent:#9482c9; --warn:#e8b04a; --stage:#0d0c10;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --sans:"IBM Plex Sans", system-ui, -apple-system, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+body{padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:16px 32px}
+h1{font-size:18px;font-weight:600;margin:0;letter-spacing:.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:12.5px;margin-top:2px;max-width:72ch}
+header{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:end;justify-content:space-between;margin-bottom:12px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tab{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+.tab[aria-selected="true"]{border-color:var(--accent);color:var(--accent);background:var(--panel2)}
+.tab:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+.stage{background:var(--stage);border:1px solid var(--line);border-radius:8px;position:relative;overflow:hidden}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;max-width:100%;cursor:grab}
+.hud{position:absolute;left:10px;top:8px;font-family:var(--mono);font-size:11.5px;color:var(--muted);pointer-events:none;white-space:pre}
+.transport{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;border-top:1px solid var(--line);background:var(--panel)}
+button.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+button.btn.primary{border-color:var(--accent);color:var(--accent)}
+select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:4px;font:inherit}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0}
+.card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:600}
+.layer{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line)}
+.layer:first-of-type{border-top:0}
+.layer label{flex:1;cursor:pointer;min-width:0}
+.layer .nm{font-weight:500}
+.layer .ds{display:block;color:var(--muted);font-size:12px;line-height:1.35}
+.layer.aid .nm::after{content:" · viewing aid";color:var(--muted);font-weight:400;font-size:12px}
+.layer.authored .nm::after{content:" · authored, not client";color:var(--warn);font-weight:400;font-size:12px}
+.sw{width:10px;height:10px;border-radius:2px;margin-top:5px;flex:none}
+.knob{display:grid;grid-template-columns:118px minmax(0,1fr) 86px;gap:8px;align-items:center;padding:3px 0}
+.knob span{font-size:12.5px;color:var(--muted)}
+.knob output{font-family:var(--mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.notes{color:var(--muted);font-size:12.5px;line-height:1.5;margin:0;padding-left:16px}
+.notes li{margin:3px 0}
+.notes b{color:var(--text);font-weight:500}
+.inferred{color:var(--warn)}
+.ask{color:var(--text);border-left:2px solid var(--accent);padding-left:8px;margin:6px 0 0;font-size:12.5px;line-height:1.5}
+pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:var(--stage);border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;margin:0;color:#d9d0ec}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+</style>
+
+<header>
+  <div>
+    <h1>Priest Talent Visuals Bench <span style="color:var(--muted);font-weight:400">· AS-335</span></h1>
+    <div class="sub">Client values from Classic Era 1.15.9 and TBC 2.5.6 (Guardian Spirit from Wrath Classic 3.4.5), parsed from each model's M2 file. Each slider starts at the client value (×1.0), and playback starts at real time. Untick the layers you don't want, then copy the constants block. Layers marked "authored" are not in the client. They are proposals for you to rule on.</div>
+  </div>
+  <div class="legend"><span>drag = orbit</span><span>wheel = zoom</span><span>body: capsule ±1.25 about y=1.0</span></div>
+</header>
+
+<nav class="tabs" role="tablist" id="tabs"></nav>
+
+<div class="grid">
+  <div style="min-width:0">
+    <div class="stage">
+      <canvas id="cv" width="1280" height="800" aria-label="Effect preview"></canvas>
+      <div class="hud" id="hud"></div>
+      <div class="transport">
+        <button class="btn primary" id="replay">Replay</button>
+        <button class="btn" id="pause">Pause</button>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="loop" checked> loop</label>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px">speed
+          <select id="speed"><option value="1" selected>1.0× (real)</option><option value="0.5">0.5×</option><option value="0.25">0.25×</option></select></label>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="moving"> victim moving</label>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="row"><h2 style="margin:0">Rust constants for this effect</h2><button class="btn" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+  <div class="side">
+    <div class="card"><h2>Layers</h2><div id="layers"></div></div>
+    <div class="card"><h2>Multipliers over client</h2><div id="knobs"></div></div>
+    <div class="card"><h2>What the client data says</h2><ul class="notes" id="notes"></ul><div id="asks"></div></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---------- small math ----------
+const TAU=Math.PI*2, rnd=Math.random;
+const lerp=(a,b,t)=>a+(b-a)*t, clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function keys(k,t){ if(t<=k[0][0]) return k[0][1];
+  for(let i=1;i<k.length;i++){ if(t<=k[i][0]){const a=k[i-1],b=k[i],u=(t-a[0])/(b[0]-a[0]||1);
+    return Array.isArray(a[1])?a[1].map((x,j)=>lerp(x,b[1][j],u)):lerp(a[1],b[1],u);} }
+  return k[k.length-1][1]; }
+function windowOn(win,ms){ if(!win) return true; let on=win[0][1]; for(const [t,v] of win){ if(ms>=t) on=v; } return !!on; }
+const rgb=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const norm=a=>{const l=Math.hypot(...a)||1;return[a[0]/l,a[1]/l,a[2]/l]};
+
+// ---------- camera ----------
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const cam={yaw:0.65,pitch:0.42,dist:12,target:[0,1.2,0]};
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'});
+cv.addEventListener('pointermove',e=>{if(!drag)return;cam.yaw-=(e.clientX-drag[0])*0.008;cam.pitch=clamp(cam.pitch+(e.clientY-drag[1])*0.006,0.05,1.35);drag=[e.clientX,e.clientY]});
+cv.addEventListener('pointerup',()=>{drag=null;cv.style.cursor='grab'});
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.dist=clamp(cam.dist*(1+e.deltaY*0.001),3,60)},{passive:false});
+let VIEW;
+function setupView(){
+  const cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
+  const eye=[cam.target[0]+cam.dist*cp*Math.sin(cam.yaw),cam.target[1]+cam.dist*sp,cam.target[2]+cam.dist*cp*Math.cos(cam.yaw)];
+  const f=norm(sub(cam.target,eye)), r=norm(cross(f,[0,1,0])), u=cross(r,f);
+  VIEW={eye,f,r,u,fl:cv.height*1.25};
+}
+function proj(p){const d=sub(p,VIEW.eye),z=dot(d,VIEW.f); if(z<0.1) return null;
+  const s=VIEW.fl/z; return {x:cv.width/2+dot(d,VIEW.r)*s,y:cv.height/2-dot(d,VIEW.u)*s,s,z};}
+
+// ---------- scene primitives ----------
+const FLOOR=[0.79*255,0.66*255,0.46*255];
+const CLASS={warlock:[148,130,201],priest:[235,235,235],rogue:[255,245,105],warrior:[199,156,110],victim:[150,160,175]};
+function drawFloor(){
+  const pts=[];for(let i=0;i<48;i++){const a=i/48*TAU;const q=proj([9*Math.cos(a),0,9*Math.sin(a)]);if(q)pts.push(q)}
+  g.fillStyle=rgb(FLOOR.map(c=>c*0.82),1);g.beginPath();pts.forEach((q,i)=>i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y));g.closePath();g.fill();
+  g.strokeStyle='rgba(0,0,0,0.08)';g.lineWidth=1;
+  for(let i=-8;i<=8;i+=2){line3([i,0,-8],[i,0,8]);line3([-8,0,i],[8,0,i]);}
+}
+function line3(a,b){const p=proj(a),q=proj(b);if(!p||!q)return;g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();}
+function drawCapsule(c,col,alpha=1){
+  const top=proj([c[0],c[1]+0.75,c[2]]),bot=proj([c[0],c[1]-0.75,c[2]]);if(!top||!bot)return;
+  const w=0.5*top.s;
+  g.globalAlpha=alpha;
+  const gr=g.createLinearGradient(top.x-w,0,top.x+w,0);
+  gr.addColorStop(0,rgb(col.map(x=>x*0.55),1));gr.addColorStop(0.45,rgb(col,1));gr.addColorStop(1,rgb(col.map(x=>x*0.45),1));
+  g.fillStyle=gr;g.beginPath();
+  g.arc(top.x,top.y,w,Math.PI,0);g.lineTo(bot.x+w,bot.y);g.arc(bot.x,bot.y,w,0,Math.PI);g.closePath();g.fill();
+  g.globalAlpha=1;
+}
+function shadow(c,r=0.55){const p=proj([c[0],0.01,c[2]]);if(!p)return;g.fillStyle='rgba(0,0,0,0.22)';g.beginPath();g.ellipse(p.x,p.y,r*p.s,r*p.s*Math.max(0.15,Math.sin(cam.pitch)),0,0,TAU);g.fill();}
+
+function sprite(kind,p,size,col,a,ang=0,streak=null){
+  const q=proj(p);if(!q||a<=0.003)return;const r=Math.max(0.6,size*q.s*0.5);
+  g.save();g.translate(q.x,q.y);
+  if(kind==='glow'||kind==='cloud'||kind==='smoke'||kind==='dust'||kind==='flame'){
+    const gr=g.createRadialGradient(0,0,0,0,0,r);
+    const soft=kind==='glow'?[1,0.45,0]:kind==='cloud'?[0.9,0.6,0]:kind==='flame'?[0.8,0.55,0]:[0.85,0.5,0];
+    gr.addColorStop(0,rgb(col,a*soft[0]));gr.addColorStop(0.45,rgb(col,a*soft[1]));gr.addColorStop(1,rgb(col,0));
+    g.fillStyle=gr;g.beginPath();
+    if(kind==='flame'){g.ellipse(0,-r*0.25,r*0.6,r,0,0,TAU);}else g.arc(0,0,r,0,TAU);
+    g.fill();
+  } else if(kind==='star'){
+    g.rotate(ang);g.fillStyle=rgb(col,a);
+    for(let k=0;k<2;k++){g.rotate(Math.PI/4*k*2);g.beginPath();g.ellipse(0,0,r,r*0.12,0,0,TAU);g.fill();g.beginPath();g.ellipse(0,0,r*0.12,r,0,0,TAU);g.fill();}
+    const gr=g.createRadialGradient(0,0,0,0,0,r*0.45);gr.addColorStop(0,rgb([255,255,255],a));gr.addColorStop(1,rgb(col,0));g.fillStyle=gr;g.beginPath();g.arc(0,0,r*0.45,0,TAU);g.fill();
+  } else if(kind==='blob'){
+    g.fillStyle=rgb(col,a);g.beginPath();g.arc(0,0,r*0.7,0,TAU);g.fill();
+  }
+  g.restore();
+  if(streak){const q2=proj(streak);if(!q2)return;
+    g.strokeStyle=rgb(col,a*0.85);g.lineCap='round';g.lineWidth=Math.max(1,r*0.7);
+    g.beginPath();g.moveTo(q.x,q.y);g.lineTo(q2.x,q2.y);g.stroke();}
+}
+
+// ---------- particle emitter (M2-shaped) ----------
+// spec: anchor, pos:[x,z,y], vRange (0 = straight up, >=3.1 = sphere), speed, life, rate, win:[[ms,on]],
+//  color/alpha/scale keyed over life 0..1, gravity (negative rises), drag, tail, kind, blend 'add'|'alpha',
+//  area (xz box), areaY, inward: shell radius (yd) the particle starts on, moving toward the anchor,
+//  trig: name of the fx trigger list that (re)starts this emitter's timeline.
+class Emitter{
+  constructor(s,fx){this.s=s;this.fx=fx;this.ps=[];this.acc=0;}
+  reset(){this.ps=[];this.acc=0;}
+  update(dt,ms,origin){
+    const s=this.s,K=this.fx.knobs,dmul=K.density??1;
+    const add=lm=>{ if(windowOn(s.win,lm)){ const rate=Array.isArray(s.rate)?keys(s.rate,lm):s.rate; this.acc+=rate*dt*dmul; } };
+    const tl=this.fx.trig && this.fx.trig[s.trig||'main'];
+    if(tl){ const span=(s.span||this.fx.durMs)*(K.duration??1);
+      for(const t of tl){ const lm=ms-t; if(lm>=0 && lm<=span) add(lm/(K.duration??1)); } }
+    else { const lm=s.loopMs?(ms%s.loopMs):ms; if(!this.fx.loopFx || true) add(s.loopMs?lm:ms/(K.duration??1)); }
+    while(this.acc>=1){this.acc-=1;this.spawn(origin);}
+    const gy=-(s.gravity||0);
+    for(const p of this.ps){
+      p.age+=dt; p.v[1]+=gy*dt; const dr=Math.max(0,1-(s.drag||0)*dt*3); p.v=p.v.map(x=>x*dr);
+      p.x=[p.x[0]+p.v[0]*dt,p.x[1]+p.v[1]*dt,p.x[2]+p.v[2]*dt];
+      if(s.follow){p.x[0]+=origin[0]-p.o[0];p.x[2]+=origin[2]-p.o[2];p.o=[...origin];}
+      if(s.floorKill&&p.x[1]<0.02){p.x[1]=0.02;p.v=[0,0,0];}
+      p.ang+=(s.spin||0)*TAU*dt;
+    }
+    this.ps=this.ps.filter(p=>p.age<p.life);
+  }
+  spawn(origin){
+    if(this.s.at){const k=Array.isArray(this.s.at)?this.s.at[(rnd()*this.s.at.length)|0]:this.s.at; if(AT[k]) origin=AT[k];}
+    const s=this.s,K=this.fx.knobs,spread=K.spread??1;
+    const off=s.pos||[0,0,0], area=(s.area||0)*spread, areaY=(s.areaY||0)*spread;
+    const c=[origin[0]+off[0]*spread,origin[1]+this.fx.anchorY(s.anchor)+off[2],origin[2]+off[1]*spread];
+    if(s.orbit){const k=(rnd()*3)|0, ang=(simMs/1000)*(this.fx.knobs.spin??s.orbitRevS??1)*TAU+k*TAU/3, R=s.orbit*spread; c[0]+=R*Math.cos(ang); c[2]+=R*Math.sin(ang);}
+    let start,v;
+    if(s.inward){ const d=norm([rnd()*2-1,(rnd()*2-1)*(s.inwardFlat??1),rnd()*2-1]), R=s.inward*spread*(0.6+0.4*rnd());
+      start=[c[0]+d[0]*R,c[1]+d[1]*R,c[2]+d[2]*R]; v=d.map(x=>-x*Math.abs(s.speed)*spread); }
+    else {
+      let dir; if((s.vRange||0)>=3.1) dir=norm([rnd()*2-1,rnd()*2-1,rnd()*2-1]);
+      else {const pol=(rnd()*2-1)*(s.vRange||0), az=rnd()*TAU; dir=[Math.sin(pol)*Math.cos(az),Math.cos(pol),Math.sin(pol)*Math.sin(az)];}
+      start=[c[0]+(rnd()-0.5)*area,c[1]+(rnd()-0.5)*areaY,c[2]+(rnd()-0.5)*area];
+      const sp=s.speed*spread*(1+(s.speedVar||0)*(rnd()*2-1)); v=dir.map(d=>d*sp); }
+    this.ps.push({x:start,v,age:0,life:s.life*(K.duration??1),ang:rnd()*TAU,o:[...origin]});
+  }
+  draw(){
+    const s=this.s,K=this.fx.knobs,size=K.size??1;
+    g.globalCompositeOperation=s.blend==='alpha'?'source-over':'lighter';
+    for(const p of this.ps){
+      const t=p.age/p.life; let col=keys(s.color,t); if(this.fx.colorMap) col=this.fx.colorMap(col,s);
+      const a=keys(s.alpha,t)*(K.opacity??1), sc=keys(s.scale,t)*size*2;
+      let streak=null;
+      if(s.tail){const sp=Math.hypot(...p.v);if(sp>0.2){const L=Math.min(s.tail*0.12,sp*0.06)*size;const vv=norm(p.v);streak=[p.x[0]-vv[0]*L,p.x[1]-vv[1]*L,p.x[2]-vv[2]*L];}}
+      sprite(s.kind||'glow',p.x,sc,col,a,p.ang,streak);
+    }
+    g.globalCompositeOperation='source-over';
+  }
+}
+
+// ---------- floating combat text (matches floating_text.rs: rise 1.5 yd/s, 1.5 s life, fade over the last 0.5 s) ----------
+let FCT=[];
+function fct(text,col,px,pos,bold=true){FCT.push({text,col,px,pos:[...pos],age:0,bold});}
+function drawFct(dt){
+  for(const f of FCT){f.age+=dt;}
+  FCT=FCT.filter(f=>f.age<1.5);
+  for(const f of FCT){
+    const q=proj([f.pos[0],f.pos[1]+1.5*f.age,f.pos[2]]); if(!q) continue;
+    const a=f.age>1.0?(1.5-f.age)/0.5:1;
+    const px=f.px*1.6;
+    g.font=`${f.bold?700:600} ${px}px "IBM Plex Sans", system-ui, sans-serif`;g.textAlign='center';g.textBaseline='middle';
+    g.lineWidth=Math.max(2,px*0.14);g.strokeStyle=`rgba(0,0,0,${a})`;g.strokeText(f.text,q.x,q.y);
+    g.fillStyle=rgb(f.col,a);g.fillText(f.text,q.x,q.y);
+  }
+}
+
+// ---------- effect registry ----------
+const ANCH={feet:0.0,origin:0.0,chest:1.45,head:2.25,hands:1.35};
+function mkFx(def){
+  const fx={...def,knobs:{},layersOn:{},emitters:[]};
+  for(const k of def.knobDefs) fx.knobs[k.key]=k.def;
+  for(const L of def.layers) fx.layersOn[L.id]=L.on!==false;
+  fx.anchorY=a=>ANCH[a]??0;
+  for(const L of def.layers) if(L.emitter) fx.emitters.push({id:L.id,e:new Emitter(L.emitter,fx)});
+  return fx;
+}
+const STD=[
+  {key:'size',label:'size ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'spread',label:'spread ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'duration',label:'duration ×',min:0.3,max:2,step:0.05,def:1},
+  {key:'density',label:'density ×',min:0.1,max:2,step:0.05,def:1},
+];
+const on=(l,id)=>l.layersOn[id];
+const b=(v)=>v?'true':'false', f2=v=>(+v).toFixed(2), f3=v=>(+v).toFixed(3);
+const hex=c=>'0x'+c.map(x=>(x|0).toString(16).padStart(2,'0')).join('').toUpperCase();
+
+// ---------- AS-335 helpers ----------
+const AT={caster:[-4,0,0],ally:[-3,0,2.6],e1:[3.6,0,1.2],e2:[1.8,0,-3.4]};
+function groundDisc(c,y,r,col,a){ if(a<=0.003||r<=0.001) return;
+  const pts=[];for(let i=0;i<40;i++){const t=i/40*TAU;const q=proj([c[0]+r*Math.cos(t),y,c[2]+r*Math.sin(t)]);if(!q)return;pts.push(q);}
+  const ctr=proj([c[0],y,c[2]]); if(!ctr) return;
+  g.save();g.globalCompositeOperation='lighter';
+  const rx=Math.max(...pts.map(p=>Math.abs(p.x-ctr.x)))||1;
+  const gr=g.createRadialGradient(ctr.x,ctr.y,0,ctr.x,ctr.y,rx);
+  gr.addColorStop(0,rgb(col,a));gr.addColorStop(0.55,rgb(col,a*0.55));gr.addColorStop(1,rgb(col,0));
+  g.fillStyle=gr;g.beginPath();pts.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y));g.closePath();g.fill();g.restore(); }
+function ring3(c,y,r,col,a,lw=2){ if(a<=0.003||r<=0.001) return;
+  g.save();g.globalCompositeOperation='lighter';g.strokeStyle=rgb(col,a);g.lineWidth=lw;g.beginPath();
+  for(let i=0;i<=48;i++){const t=i/48*TAU;const q=proj([c[0]+r*Math.cos(t),y,c[2]+r*Math.sin(t)]);if(!q){g.restore();return;}i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y);}
+  g.stroke();g.restore(); }
+// A camera-facing soft glow panel w x h yd centred on p (the client's billboard quads).
+function bbGlow(p,w,h,col,a){ if(a<=0.003) return; const q=proj(p); if(!q) return;
+  const rx=Math.max(1,w*0.5*q.s), ry=Math.max(1,h*0.5*q.s);
+  g.save();g.globalCompositeOperation='lighter';g.translate(q.x,q.y);g.scale(1,ry/rx);
+  const gr=g.createRadialGradient(0,0,0,0,0,rx);gr.addColorStop(0,rgb(col,a));gr.addColorStop(0.5,rgb(col,a*0.45));gr.addColorStop(1,rgb(col,0));
+  g.fillStyle=gr;g.beginPath();g.arc(0,0,rx,0,TAU);g.fill();g.restore(); }
+const hands=c=>[[c[0]+0.45,1.3,c[2]+0.15],[c[0]-0.45,1.3,c[2]+0.15]];
+const SHIP='<span class="inferred">shipped</span>';
+
+const EFFECTS=[
+// ================================================================ Inner Focus
+mkFx({id:'innerfocus',name:'Inner Focus',sub:'cast: innerfocus_impact_chest.m2 (400 ms) · state: magic_precast_hand.m2 on both hands until spent',durMs:6000,loopFx:true,frame:{dist:6,ty:1.3},
+ notes:[
+  'The cast uses Moonfire\'s arcane hands ('+SHIP+'), then a <b>0.4 s blue converging flash</b> at the chest: four comets streak in from (±0.74, ±0.74) yd and cross, each trailing a blue ribbon and flares (0.33 → 0.03 yd). A small spark pops at the end.',
+  '<b>State until spent:</b> a violet-cyan glow in each palm, about 0.74 yd across, pulsing twice a second (533 ms loop), shedding motes and small rings (0.14 → 0.56 yd). In our design the next cast spends it.',
+  'The bench repeats the flash every 6 s and holds the hand glow in between.'],
+ asks:['Recommended: client-faithful. The hand glow sits on the hands every cast already uses, so it costs no body channel.'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'comets',name:'Converging comets',desc:'4 blue comets + ribbons crossing at the chest in 400 ms',sw:[0,121,198],custom:true},
+  {id:'pop',name:'Centre spark pop',desc:'gradient64flipa 200–400 ms + flare burst at 340 ms',sw:[98,181,239],emitter:{anchor:'chest',vRange:3.14,speed:2.6,life:0.6,rate:[[0,0],[200,60],[400,60],[401,0]],loopMs:6000,
+    color:[[0,[88,0,248]],[0.5,[255,60,60]],[1,[98,181,239]]],alpha:[[0,1],[1,0]],scale:[[0,0.02],[0.5,0.12],[1,0.03]],kind:'star',follow:true}},
+  {id:'palm',name:'Palm glow (state)',desc:'cyan_glow3, ~0.74 yd, 533 ms pulse, both hands',sw:[162,42,231],custom:true},
+  {id:'palmmotes',name:'Palm motes and rings',desc:'11/s motes + 10/s rings 0.14 → 0.56 yd',sw:[170,84,237],emitter:{anchor:'hands',vRange:3.14,speed:0.19,life:0.6,rate:21,area:0.9,areaY:0.1,
+    color:[[0,[255,255,255]],[0.5,[200,160,255]],[1,[162,42,231]]],alpha:[[0,0.25],[0.5,1],[1,0.04]],scale:[[0,0.03],[0.5,0.14],[1,0.3]],kind:'glow',follow:true}},
+ ],
+ bodies(fx,vp){drawCapsule(vp,CLASS.priest);},
+ customDraw(fx,ms,vp){ const K=fx.knobs, t=(ms%6000)/(K.duration??1);
+  if(on(fx,'comets')&&t<900){ const u=Math.min(1,t/400), a=(t<400?1:Math.max(0,1-(t-400)/500))*(K.opacity??1);
+    for(const [sx,sy] of [[1,1],[-1,1],[1,-1],[-1,-1]]){ const x=lerp(0.74*sx,-0.37*sx,u)*K.spread, y=lerp(0.74*sy,-0.37*sy,u)*K.spread;
+      const p=[vp[0]+x,1.45+y,vp[2]+0.3]; sprite('star',p,0.33*(1-u*0.6)*K.size*2,[44,155,225],a);
+      for(let k=1;k<6;k++){const uu=Math.max(0,u-k*0.06);const pp=[vp[0]+lerp(0.74*sx,-0.37*sx,uu)*K.spread,1.45+lerp(0.74*sy,-0.37*sy,uu)*K.spread,vp[2]+0.3];sprite('glow',pp,0.17*K.size,[0,121,198],a*(1-k/6));} } }
+  if(on(fx,'palm')){ const pulse=keys([[0,1.15],[266,0.95],[533,1.15]],ms%533);
+    for(const h of hands(vp)){ bbGlow(h,0.74*pulse*K.size,0.74*pulse*K.size,[150,90,240],0.7*(K.opacity??1)); bbGlow(h,0.4*pulse*K.size,0.4*pulse*K.size,[120,220,255],0.6*(K.opacity??1)); } } },
+ constants(fx){const K=fx.knobs;return [
+  `// Inner Focus: innerfocus_impact_chest.m2 (kit 3772) on cast; magic_precast_hand.m2 (kit 3773) on both hands until spent. AS-335 bench.`,
+  `pub const INNER_FOCUS_COMETS: bool = ${b(on(fx,'comets'))}; // 400 ms`,
+  `pub const INNER_FOCUS_SPARK_POP: bool = ${b(on(fx,'pop'))};`,
+  `pub const INNER_FOCUS_PALM_GLOW: bool = ${b(on(fx,'palm'))}; // 0.74 yd, 533 ms pulse`,
+  `pub const INNER_FOCUS_PALM_MOTES: bool = ${b(on(fx,'palmmotes'))};`,
+  `pub const INNER_FOCUS_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const INNER_FOCUS_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+// ================================================================ Power Infusion
+mkFx({id:'pi',name:'Power Infusion',sub:'state on the ally · arcanepower_state_chest.m2 @Chest · 15 s',durMs:15000,loopFx:true,frame:{dist:9,ty:1.4},
+ notes:[
+  'The cast is gold "high" holy hands on the Priest. <b>Nothing lands</b>: the ally shows only the state, for 15 s.',
+  'The state is <b>Arcane Power\'s</b> (we ship neither). A crackling blue-white electric lattice (about 1.7 yd) flickers three times every 1.1 s. Pale-blue glow discs <b>3.2 yd and 4.6 yd across</b> throb (weight 0.1 ↔ 0.5 on 1 s), plus a 2.2 yd disc. White sparks fly out at 3.3 yd/s (60/s, 0.42 → 0.03 yd).',
+  'In the first 1.33 s only, a star disc (3.4 yd) and a <b>horizontal streak 6.1 × 0.3 yd</b> flash. That is the onset.',
+  'It is loud: the discs alone are wider than the ally is tall. The Priest stands at left.'],
+ asks:['<b>Client size, or trimmed?</b> Faithful is a big blue electric aura for 15 s, the loudest state on any body so far. "size ×" and "opacity ×" trim the amount without changing the look. It is also blue and arcane rather than holy, which is the client\'s choice.'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'discs',name:'Glow discs (3.2 / 4.6 / 2.2 yd)',desc:'blue_glow2, weight 0.1 ↔ 0.5 on 1000 ms',sw:[120,170,255],custom:true},
+  {id:'lattice',name:'Electric lattice',desc:'zap1, ~1.7 yd, flickers 3× per 1.1 s',sw:[200,230,255],custom:true},
+  {id:'onset',name:'Onset star and streak',desc:'star7b 3.4 yd + star6 streak 6.1 × 0.3 yd, first 1.33 s',sw:[230,240,255],custom:true},
+  {id:'sparks',name:'Zap sparks',desc:'60/s, 0.2 s life, 3.3 yd/s, 0.42 → 0.03 yd, white',sw:[255,255,255],emitter:{anchor:'chest',vRange:3.14,speed:3.3,life:0.2,rate:60,
+    color:[[0,[255,255,255]],[1,[200,220,255]]],alpha:[[0,1],[1,0]],scale:[[0,0.42],[0.5,0.28],[1,0.03]],kind:'star',follow:true}},
+ ],
+ bodies(fx,vp){drawCapsule(AT.caster,CLASS.priest);drawCapsule(vp,CLASS.warrior);},
+ customDraw(fx,ms,vp){ const K=fx.knobs, op=K.opacity??1, s=K.size*K.spread, c=[vp[0],1.45,vp[2]];
+  if(on(fx,'discs')){ const w=keys([[0,0.1],[500,0.5],[1000,0.1]],ms%1000); const pa=keys([[0,1],[108,0.62],[216,1.16],[324,0.5],[433,1]],ms%433);
+    bbGlow(c,4.6*s*(0.85+0.15*pa),4.6*s*(0.85+0.15*pa),[110,150,255],w*0.55*op); bbGlow(c,3.2*s,3.2*s,[140,180,255],w*0.6*op); bbGlow(c,2.2*s,2.2*s,[190,215,255],0.35*op); }
+  if(on(fx,'lattice')){ const f=keys([[0,0],[183,0.73],[366,0],[550,0.73],[733,0],[916,0.73],[1100,0]],ms%1100);
+    if(f>0.05){ g.save();g.globalCompositeOperation='lighter';g.strokeStyle=rgb([210,235,255],f*op);g.lineWidth=1.5;
+      for(let k=0;k<7;k++){ let prev=null; for(let j=0;j<6;j++){ const a=k*0.9+j*0.5+Math.floor(ms/67)*0.37, r=0.85*s*(0.6+0.4*Math.sin(a*3+j));
+        const q=proj([c[0]+r*Math.cos(a*2.1),c[1]+(j/5-0.5)*1.5*s,c[2]+r*Math.sin(a*1.7)]); if(q&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(q.x,q.y);g.stroke();} prev=q; } }
+      g.restore(); } }
+  if(on(fx,'onset')&&ms<1334){ const a=Math.sin(ms/1334*Math.PI)*op; bbGlow(c,3.4*s,3.4*s,[235,240,255],a*0.5); bbGlow(c,6.1*s,0.3*s,[240,245,255],a*0.9); } },
+ constants(fx){const K=fx.knobs;return [
+  `// Power Infusion: arcanepower_state_chest.m2 (kit 3769) on the ally's chest for the buff. AS-335 bench.`,
+  `pub const POWER_INFUSION_DISCS: bool = ${b(on(fx,'discs'))}; // 3.2 / 4.6 / 2.2 yd x size`,
+  `pub const POWER_INFUSION_LATTICE: bool = ${b(on(fx,'lattice'))};`,
+  `pub const POWER_INFUSION_ONSET_FLASH: bool = ${b(on(fx,'onset'))};`,
+  `pub const POWER_INFUSION_SPARKS: bool = ${b(on(fx,'sparks'))};`,
+  `pub const POWER_INFUSION_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const POWER_INFUSION_OPACITY_MUL: f32 = ${f2(K.opacity)};`,
+  `// Cast: holy_precast_high_hand.m2 on the Priest (gold, 0.88 yd glow + 3 ribbons).`];}
+}),
+// ================================================================ Pain Suppression
+mkFx({id:'ps',name:'Pain Suppression',sub:'state on the ally · painsuppression_state.m2 @Base · 8 s (TBC)',durMs:8000,loopFx:true,frame:{dist:9,ty:1.5},
+ notes:[
+  'TBC-only, so Era has no Pain Suppression. The cast is gold high hands plus <b>Consecration\'s gold ground swirl</b> at the Priest\'s feet. Nothing lands.',
+  '<b>The state is a tall gold-and-teal shell</b> standing in front of the ally. Three upright glow quads, about 1.3 yd up:',
+  'gold 2.3 × 2.9 yd, pale yellow 2.4 × 3.1 yd and teal <b>3.4 × 4.4 yd</b>. Each flashes to full at 467 ms, settles at 0.12–0.15, then flickers 0 ↔ 0.4 on an 867 ms loop, squashing and stretching.',
+  'Bubbles swell to 2.2 yd (10/s), and light streaks are drawn inward (50/s at −3.9 and −5.6 yd/s).',
+  'The research flags that <b>enclosing the body</b> is this game\'s incapacitate language (Polymorph, Cyclone).'],
+ asks:['<b>Faithful shell, or trimmed?</b> At client size it encloses the ally, which could read like crowd control. "size ×" and "opacity ×" trim it. The recommendation is to keep it faithful: it is gold and teal and in front of the body, unlike our violet or green CC.'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'shell',name:'Shell quads (gold / yellow / teal)',desc:'2.3 × 2.9, 2.4 × 3.1, 3.4 × 4.4 yd; flash, then flicker',sw:[34,236,219],custom:true},
+  {id:'bubbles',name:'Swelling bubbles',desc:'beerbubble, 10/s, growing to 2.2 yd',sw:[200,240,230],emitter:{anchor:'feet',pos:[0,0,1.3],vRange:3.14,speed:0.15,life:1.6,rate:10,area:1.0,areaY:1.2,
+    color:[[0,[255,250,200]],[1,[180,240,230]]],alpha:[[0,0.61],[1,0]],scale:[[0,0.2],[1,1.1]],kind:'glow',follow:true}},
+  {id:'streaks',name:'Inward light streaks',desc:'glow, 2 × 50/s, pulled in from 2.8 and 1.4 yd',sw:[120,200,255],emitter:{anchor:'feet',pos:[0,0,1.3],inward:2.1,inwardFlat:1.3,speed:-4.7,life:0.45,rate:100,tail:2,
+    color:[[0,[255,240,120]],[0.5,[80,230,230]],[1,[60,120,255]]],alpha:[[0,0],[0.5,0.9],[1,0]],scale:[[0,0.05],[1,0.03]],kind:'glow',follow:true}},
+  {id:'cast',name:'Cast: Consecration\'s gold swirl',desc:'at the Priest\'s feet: contracting ring 2.4 → 1.4 yd + gold sparks',sw:[255,216,0],custom:true},
+ ],
+ bodies(fx,vp){drawCapsule(AT.caster,CLASS.priest);drawCapsule(vp,CLASS.warrior);},
+ customDraw(fx,ms,vp){ const K=fx.knobs, op=K.opacity??1, s=K.size*K.spread;
+  if(on(fx,'cast')&&ms<1067){ const r=keys([[0,2.4],[833,1.4]],ms)*s/2, a=keys([[0,0],[333,1],[833,0]],ms)*op;
+    ring3(AT.caster,0.04,r,keys([[0,[255,132,0]],[333,[255,216,0]],[833,[160,80,255]]],ms),a,3); groundDisc(AT.caster,0.03,1.05*s,[255,200,60],a*0.5); }
+  if(on(fx,'shell')){ const onset=ms<867, sq=keys([[0,0.52],[300,1.09],[600,0.9],[867,1]],ms%867);
+    const fl=onset?keys([[0,0],[467,1],[867,0.14]],ms):keys([[0,0.05],[217,0.4],[433,0.1],[650,0.35],[867,0.05]],ms%867);
+    const p=[vp[0],1.3,vp[2]+0.4];
+    for(const [w,h,col] of [[3.4,4.4,[34,236,219]],[2.4,3.1,[254,240,81]],[2.3,2.9,[212,176,34]]]) bbGlow(p,w*s,h*s*sq,col,fl*0.55*op); } },
+ constants(fx){const K=fx.knobs;return [
+  `// Pain Suppression: painsuppression_state.m2 (kit 6915) on the ally for 8 s; cast adds holy_precast_uber_base.m2 at the Priest's feet. AS-335 bench.`,
+  `pub const PAIN_SUPPRESSION_SHELL: bool = ${b(on(fx,'shell'))}; // 3.4 x 4.4 yd largest quad x size`,
+  `pub const PAIN_SUPPRESSION_BUBBLES: bool = ${b(on(fx,'bubbles'))};`,
+  `pub const PAIN_SUPPRESSION_STREAKS: bool = ${b(on(fx,'streaks'))};`,
+  `pub const PAIN_SUPPRESSION_CAST_SWIRL: bool = ${b(on(fx,'cast'))};`,
+  `pub const PAIN_SUPPRESSION_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const PAIN_SUPPRESSION_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+// ================================================================ Holy Nova
+mkFx({id:'nova',name:'Holy Nova',sub:'cast: holynova_impact_base.m2 @Priest\'s feet · per enemy: holy_impactdd_high_chest.m2 · per ally: heal landing',durMs:2600,frame:{dist:13,ty:1.0},
+ notes:[
+  '<b>The nova is the cast kit.</b> A gold hemisphere shell bursts out from the Priest\'s feet to a <b>6.22 yd radius in 767 ms</b>, brightest in its first 0.13 s, trailed by gold stars (rate 0 → 500/s at 300 ms, from an area growing to 7.2 yd).',
+  'Each enemy hit gets <b>Holy Wrath\'s gold starburst</b> at the chest: about 3.3 yd at peak, with sparks falling, gone by 0.93 s.',
+  'Each healed ally gets a heal landing, and here the builds differ. <b>Era</b> uses kit 232, the Heal / Holy Shock landing we '+SHIP+'. <b>TBC</b> uses Prayer of Healing\'s 2.5 s fall of gold stars and faint cloud from the head.',
+  'Our Holy Nova reaches 10 yd; the client shell is 6.2 yd. <span class="inferred">The dome\'s orientation is unresolved; the bench stands it up as a dome.</span>'],
+ asks:['<b>Which heal landing, Era or TBC?</b> Era reuses our shipped Heal landing; TBC is a new gentle star fall. And should the shell <b>show the true 10 yd reach</b> ("spread ×" 1.6) or keep the client\'s 6.2 yd?'],
+ knobDefs:[...STD,{key:'heal',label:'heal landing',min:0,max:1,step:1,def:1,names:['Era (shipped Heal)','TBC (PoH star fall)']}],
+ layers:[
+  {id:'dome',name:'Gold dome shell',desc:'radius 0 → 6.22 yd over 767 ms, white8x8 0.2 + armorreflect 0.5',sw:[255,216,0],custom:true},
+  {id:'stars',name:'Trailing gold stars',desc:'glowstar, 0 → 500/s at 300 ms, area to 7.2 yd, 0.56 → 0.03 yd',sw:[255,249,98],emitter:{anchor:'feet',pos:[0,0,0.4],vRange:1.4,speed:1.67,spin:0.6,life:1.0,rate:[[0,0],[300,500],[767,0]],win:[[0,1],[767,0]],area:6.5,areaY:0.4,
+    color:[[0,[255,252,222]],[0.5,[255,249,98]],[1,[255,222,39]]],alpha:[[0,0.39],[0.5,1],[1,0]],scale:[[0,0.56],[0.5,0.28],[1,0.03]],kind:'star'}},
+  {id:'burst',name:'Enemy starburst (Holy Wrath)',desc:'flare to 3.3 yd + falling sparks at each enemy\'s chest',sw:[255,241,200],emitter:{anchor:'chest',at:['e1','e2'],vRange:3.14,speed:2.6,gravity:6.9,life:0.75,rate:[[0,0],[200,250],[267,250],[400,0]],win:[[0,0],[200,1],[600,0]],
+    color:[[0,[255,255,255]],[1,[255,220,90]]],alpha:[[0,1],[1,0]],scale:[[0,0.11],[1,0.03]],kind:'star'}},
+  {id:'burstflash',name:'Enemy flash',desc:'glowstar_yellow, 0.83 → 3.33 yd',sw:[255,230,120],custom:true},
+  {id:'heals',name:'Ally heal landing',desc:'Era: rising gold motes · TBC: gold stars falling from the head',sw:[255,186,77],custom:true},
+ ],
+ bodies(fx,vp){drawCapsule(vp,CLASS.priest);drawCapsule(AT.e1,CLASS.rogue);drawCapsule(AT.e2,CLASS.warrior);drawCapsule(AT.ally,CLASS.warlock);},
+ customDraw(fx,ms,vp){ const K=fx.knobs, t=ms/(K.duration??1), s=K.size*K.spread;
+  if(on(fx,'dome')&&t<767){ const r=6.22*(t/767)*s, a=keys([[0,0],[134,0.7],[767,0]],t);
+    for(let k=0;k<9;k++){ const h=k/9; ring3([vp[0],0,vp[2]],r*h,r*Math.sqrt(1-h*h),[255,216,0],a*(1-h*0.5),2); } groundDisc([vp[0],0,vp[2]],0.03,r,[255,216,0],a*0.25); }
+  if(on(fx,'burstflash')&&t>150&&t<900) for(const e of [AT.e1,AT.e2]){ const sz=keys([[150,0.83],[300,3.33],[500,0.03]],t), a=keys([[150,0],[220,1],[500,0]],t); bbGlow([e[0],1.45,e[2]],sz*K.size,sz*K.size,[255,241,200],a*0.7); }
+  if(on(fx,'heals')&&t>150){ const al=AT.ally, u=t-150;
+    if(K.heal==0){ if(u<1867) for(let k=0;k<10;k++){ const ph=((u/1000)*1.4+k/10)%1; sprite('glow',[al[0]+0.2*Math.sin(k*2.3),0.2+ph*2.2,al[2]+0.2*Math.cos(k*1.7)],0.12,[255,215,90],(1-ph)*keys([[0,0],[200,1],[1867,0]],u)); } }
+    else { if(u<2500){ const a=keys([[0,0],[300,1],[1234,1],[1667,0]],u); groundDisc(al,0.03,0.7*K.size,[255,210,60],a*0.6);
+      for(let k=0;k<12;k++){ const ph=((u/1000)*0.9+k/12)%1; sprite('star',[al[0]+0.5*Math.sin(k*2.1),2.3-ph*2.1,al[2]+0.5*Math.cos(k*1.3)],0.14,[253,255,170],keys([[0,0],[300,1],[1500,0]],u)*(1-ph*0.5)); } } } } },
+ constants(fx){const K=fx.knobs;return [
+  `// Holy Nova: holynova_impact_base.m2 (kit 3154) at the Priest's feet; holy_impactdd_high_chest.m2 (kit 3153) on each enemy hit. AS-335 bench.`,
+  `pub const HOLY_NOVA_DOME: bool = ${b(on(fx,'dome'))};`,
+  `pub const HOLY_NOVA_DOME_RADIUS: f32 = ${f2(6.22*K.size*K.spread)}; // client 6.22; our reach is 10`,
+  `pub const HOLY_NOVA_STARS: bool = ${b(on(fx,'stars'))};`,
+  `pub const HOLY_NOVA_ENEMY_STARBURST: bool = ${b(on(fx,'burst')||on(fx,'burstflash'))};`,
+  `pub const HOLY_NOVA_HEAL_LANDING: HealLanding = HealLanding::${K.heal==0?'ShippedHealLowBase':'PrayerOfHealingStarFall'};`,
+  `pub const HOLY_NOVA_SIZE_MUL: f32 = ${f2(K.size)};`];}
+}),
+// ================================================================ Guardian Spirit
+mkFx({id:'gs',name:'Guardian Spirit',sub:'state on the ally · priest_guardianspirit.m2 above the shoulders · 10 s (Wrath 3.4.5)',durMs:10000,loopFx:true,frame:{dist:7,ty:1.7},
+ notes:[
+  'Guardian Spirit is a Wrath spell, read from <b>Wrath Classic 3.4.5.63697</b>; neither the Era nor the TBC client has it. The cast is the holy hands we '+SHIP+'.',
+  '<b>State</b>, 1.7–2.0 yd above the ally\'s feet, behind and above the shoulders: a gold halo with a <b>wide pair of wings</b> (2.2 → 2.8 yd), a dark circle behind it, rings (0.28 → 1.04 yd), a widening horizontal aura band (up to 3.9 yd), long gold flares and sparks.',
+  'The onset (1.8 s) flashes rings and long flares at about 0.55 s. The loop then re-emits calmly every 0.47 s.',
+  '<b>The save itself is just the ordinary Heal landing</b> (kit 232, '+SHIP+'). The client marks the prevented death with nothing special. Press <b>Replay</b> to see the onset; the "Save" layer plays the heal at 6 s.',
+  'These are Wrath textures (t_vfx_*), newer than the rest of our set.'],
+ asks:['<b>Is the plain heal enough for the save?</b> Client-faithful, the moment Guardian Spirit cheats death looks like any heal. The Rogue\'s Cheat Death (AS-336) is the same kind of moment. Keep both plain, or give both an authored "saved" cue (for example a "Saved" floating text in the invulnerable gold)?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'wings',name:'Wings',desc:'wings3, 2.2 × 0.48 → 2.8 × 0.53 yd, white → gold',sw:[255,170,2],custom:true},
+  {id:'halo',name:'Halo, dark circle, rings',desc:'flare halo 1.65 yd (dark), ring_bow 0.28 → 1.04 yd',sw:[253,221,8],custom:true},
+  {id:'band',name:'Aura band and long flares',desc:'hero_aura band widening to 3.9 yd; long flares to 1.4 yd at onset',sw:[249,240,170],custom:true},
+  {id:'sparks',name:'Gold sparks',desc:'200/s onset → 100/s, 0.5 s life, 2.8 yd/s',sw:[235,210,0],emitter:{anchor:'feet',pos:[0,-0.25,1.85],vRange:3.14,speed:2.8,life:0.5,rate:100,area:0.8,areaY:0.3,
+    color:[[0,[255,255,255]],[0.5,[235,210,0]],[1,[183,183,0]]],alpha:[[0,1],[1,0]],scale:[[0,0.06],[1,0.03]],kind:'star',follow:true}},
+  {id:'save',name:'Save: shipped Heal landing at 6 s',desc:'kit 232 heal_low_base, drawn as rising gold motes',sw:[100,255,100],custom:true},
+ ],
+ bodies(fx,vp){drawCapsule(AT.caster,CLASS.priest);drawCapsule(vp,CLASS.warrior);},
+ customDraw(fx,ms,vp){ const K=fx.knobs, op=K.opacity??1, s=K.size*K.spread, top=[vp[0],1.9,vp[2]-0.25];
+  const onset=ms<1800, lp=(ms%466)/466;
+  if(on(fx,'halo')){ bbGlow(top,1.68*s,1.68*s,[40,36,30],0.0); // dark circle (alpha-blended in client; additive here reads as nothing)
+    g.save();g.globalCompositeOperation='source-over';const q=proj(top);if(q){g.fillStyle=`rgba(60,55,40,${0.25*op})`;g.beginPath();g.arc(q.x,q.y,0.8*s*q.s,0,TAU);g.fill();}g.restore();
+    ring3([top[0],0,top[2]],top[1]+0.15,0.35*s,[253,221,8],0.9*op,3);
+    const rr=onset&&ms>533&&ms<1100?keys([[533,0.28],[1100,1.04]],ms):0.28+0.76*lp; bbGlow(top,rr*s,rr*s,[255,255,127],(onset?0.6:0.35)*op); }
+  if(on(fx,'wings')){ const w=lerp(2.2,2.8,onset?Math.min(1,ms/1800):0.5+0.5*Math.sin(ms/466*Math.PI)), a=(onset?Math.min(1,ms/400):1)*op;
+    for(const sd of [-1,1]){ bbGlow([top[0]+sd*w*0.32*s,top[1]+0.05,top[2]],w*0.6*s,0.5*s,[255,200,70],0.55*a); } }
+  if(on(fx,'band')){ const bw=lerp(0.96,3.9,lp); bbGlow([top[0],top[1]-0.1,top[2]],bw*s,0.8*s,[249,240,170],(0.25+(onset?0.2:0))*op);
+    if(onset&&ms>540&&ms<1100){ const fa=Math.sin((ms-540)/560*Math.PI); for(const sd of [-1,1]) bbGlow([top[0]+sd*0.6*s,top[1],top[2]],1.4*s,0.14*s,[255,211,107],fa*op); } }
+  if(on(fx,'save')&&ms>6000&&ms<7900){ const u=ms-6000; for(let k=0;k<10;k++){ const ph=((u/1000)*1.4+k/10)%1; sprite('glow',[vp[0]+0.2*Math.sin(k*2.3),0.2+ph*2.2,vp[2]+0.2*Math.cos(k*1.7)],0.12,[255,215,90],(1-ph)*keys([[0,0],[200,1],[1867,0]],u)); }
+    if(u<40) fct('+'+(260+((rnd()*20)|0)),[100,255,100],24,[vp[0],2.6,vp[2]]); } },
+ constants(fx){const K=fx.knobs;return [
+  `// Guardian Spirit: priest_guardianspirit.m2 (Wrath kit 11186) above the ally's shoulders for 10 s. AS-335 bench.`,
+  `pub const GUARDIAN_SPIRIT_WINGS: bool = ${b(on(fx,'wings'))};`,
+  `pub const GUARDIAN_SPIRIT_HALO: bool = ${b(on(fx,'halo'))};`,
+  `pub const GUARDIAN_SPIRIT_BAND: bool = ${b(on(fx,'band'))};`,
+  `pub const GUARDIAN_SPIRIT_SPARKS: bool = ${b(on(fx,'sparks'))};`,
+  `pub const GUARDIAN_SPIRIT_ONSET_SECS: f32 = 1.8; pub const GUARDIAN_SPIRIT_LOOP_SECS: f32 = 0.466;`,
+  `pub const GUARDIAN_SPIRIT_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const GUARDIAN_SPIRIT_OPACITY_MUL: f32 = ${f2(K.opacity)};`,
+  `// The save: the shipped Heal landing (kit 232).`];}
+}),
+// ================================================================ Mind Flay
+mkFx({id:'flay',name:'Mind Flay',sub:'channel · manafunnel_impact_chest.m2 at hand + chest, joined by a manabeam chain · 3 s',durMs:3000,frame:{dist:11,ty:1.3},loopTotal:4000,
+ notes:[
+  '<b>Mind Flay is Drain Mana\'s whole visual</b> (visual 277). A <b>flickering pale-blue star</b> sits at the Priest\'s casting hand and on the victim\'s chest. It is two quads, 2.38 yd and 1.1 yd across, with scale flickering 0.99 ↔ 1.25 in eight steps every 267 ms, throwing dark wisps and a few blue sparks.',
+  'A <b>beam</b> joins them: manabeam.blp, 0.25 yd wide, 2.78 yd segments, flip-frame every 66 ms, white, additive. Our Drain Life beam is an authored purple cylinder. The client\'s channel beams share one shape and differ only in texture.',
+  'All three pieces hold for the 3 s channel.',
+  '<b>The slow has no client visual.</b> Our audit needs a slow to be drawn or named, and the Aftermath ruling (AS-334) added a school tint to our shipped slow ring. A Shadow arm would do the same here.'],
+ asks:['Recommended: <b>client-faithful</b> (blue star at both ends plus the beam), and our slow ring with a new <b>Shadow tint</b>, consistent with Aftermath. Is that right?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ moverDefault:true,
+ layers:[
+  {id:'stars',name:'Flickering blue stars (hand + chest)',desc:'starflash 2.38 / 1.1 yd, (49,180,255) + white, 267 ms flicker',sw:[49,180,255],custom:true},
+  {id:'beam',name:'Mana beam',desc:'manabeam chain, 0.25 yd, 2.78 yd segments, 66 ms flip',sw:[220,240,255],custom:true},
+  {id:'wisps',name:'Dark wisps (victim)',desc:'gradient64flipa, 30/s, black, alpha-blended',sw:[20,20,30],emitter:{anchor:'chest',vRange:3.14,speed:2.2,spin:-0.3,life:0.5,rate:30,win:[[0,1],[3000,0]],blend:'alpha',
+    color:[[0,[0,0,0]],[1,[0,0,0]]],alpha:[[0,1],[1,0]],scale:[[0,0.01],[0.5,0.14],[1,0.03]],kind:'glow',follow:true}},
+  {id:'sparks',name:'Blue sparks (victim)',desc:'flare, 20/s, 1.67 yd/s',sw:[0,42,255],emitter:{anchor:'chest',vRange:3.14,speed:1.67,life:0.7,rate:20,win:[[0,1],[3000,0]],
+    color:[[0,[45,20,139]],[0.5,[0,42,255]],[1,[0,0,0]]],alpha:[[0,1],[1,0]],scale:[[0,0.08],[0.5,0.06],[1,0.003]],kind:'star',follow:true}},
+  {id:'ring',name:'Our slow ring, Shadow tint',desc:'the shipped slow look at the feet while moving',sw:[130,70,200],custom:true,cls:'authored'},
+ ],
+ bodies(fx,vp){drawCapsule(AT.caster,CLASS.priest);drawCapsule(vp,CLASS.victim);},
+ customDraw(fx,ms,vp){ const K=fx.knobs, op=K.opacity??1, s=K.size, live=ms<3000*(K.duration??1);
+  const hand=[AT.caster[0]+0.45,1.35,AT.caster[2]+0.2], chest=[vp[0],1.45,vp[2]];
+  if(on(fx,'ring')&&live){ const ph=(ms%1000)/1000; ring3([vp[0],0,vp[2]],0.04,(0.55+0.25*ph),[130,70,200],0.7*(1-ph),2); ring3([vp[0],0,vp[2]],0.04,0.5,[130,70,200],0.5,2); }
+  if(!live) return;
+  const fl=[0.99,1.1,1.25,1.05,1.2,0.99,1.15,1.02][Math.floor(ms/33.4)%8];
+  if(on(fx,'stars')) for(const p of [hand,chest]){ bbGlow(p,2.38*s*fl,2.38*s*fl,[49,180,255],0.45*op); bbGlow(p,1.1*s*fl,1.1*s*fl,[255,255,255],0.55*op); }
+  if(on(fx,'beam')){ const A=proj(hand),B=proj(chest); if(A&&B){ const seed=Math.floor(ms/66);
+    g.save();g.globalCompositeOperation='lighter';g.lineCap='round';
+    for(const [w,a,col] of [[0.25,0.35,[150,210,255]],[0.1,0.9,[240,250,255]]]){ g.strokeStyle=rgb(col,a*op);g.lineWidth=Math.max(1.5,w*s*(A.s+B.s)/2);g.beginPath();g.moveTo(A.x,A.y);
+      const n=8; for(let i=1;i<n;i++){ const u=i/n, j=Math.sin(seed*1.7+i*2.3)*6; g.lineTo(lerp(A.x,B.x,u)+j,lerp(A.y,B.y,u)+Math.cos(seed*1.3+i)*6); } g.lineTo(B.x,B.y);g.stroke(); }
+    g.restore(); } } },
+ constants(fx){const K=fx.knobs;return [
+  `// Mind Flay channel: Drain Mana's visual (277). manafunnel_impact_chest.m2 at the casting hand and the victim's chest + manabeam chain. AS-335 bench.`,
+  `pub const MIND_FLAY_STARS: bool = ${b(on(fx,'stars'))}; // 2.38 / 1.1 yd, 267 ms flicker`,
+  `pub const MIND_FLAY_BEAM: bool = ${b(on(fx,'beam'))}; // 0.25 yd wide, 2.78 yd segments, 66 ms flip`,
+  `pub const MIND_FLAY_WISPS: bool = ${b(on(fx,'wisps'))};`,
+  `pub const MIND_FLAY_SPARKS: bool = ${b(on(fx,'sparks'))};`,
+  `pub const MIND_FLAY_SLOW_RING_SHADOW: bool = ${b(on(fx,'ring'))}; // SlowTint::Shadow arm`,
+  `pub const MIND_FLAY_SIZE_MUL: f32 = ${f2(K.size)};`];}
+}),
+// ================================================================ Vampiric Embrace
+mkFx({id:'ve',name:'Vampiric Embrace',sub:'cast: soothingkiss_impact_head.m2 (2 s) · party heal: violet heal_low_base per damage event',durMs:6000,loopFx:true,frame:{dist:11,ty:1.3},
+ notes:[
+  'The cast uses the shadow hands we '+SHIP+'. The target gets a <b>2 s ball of blue-to-magenta dust collapsing into the chest</b>: 80/s, moving inward at 1.67 yd/s, 0.83 → 0.14 yd.',
+  '<b>The 60-second debuff draws nothing after that.</b> Only its icon remains.',
+  '<b>Each party heal does have a visual</b>: our shipped Heal landing\'s rig <b>recoloured violet</b>, a narrow stream of motes rising through the healed ally, slightly busier. It fires on every healed ally <b>once per Priest damage event</b>, so with Mind Flay ticking it plays about once a second.',
+  'The bench lands the debuff at 0 s, then heals the Warlock ally once a second.'],
+ asks:['Client-faithful means a violet heal stream on each ally <b>about once a second</b> while the Priest deals damage. Keep that cadence, or <b>limit it</b> (for example to once every 3 s per ally)?'],
+ knobDefs:[...STD,{key:'every',label:'heal visual every s',min:0.5,max:4,step:0.5,def:1}],
+ layers:[
+  {id:'implode',name:'Dust implosion (debuff landing)',desc:'tail_dust3, 80/s for 2 s, inward 1.67 yd/s, blue → magenta',sw:[212,5,195],emitter:{anchor:'chest',inward:1.0,speed:-1.67,life:0.5,rate:80,win:[[0,1],[1967,0]],loopMs:6000,
+    color:[[0,[0,0,196]],[0.5,[101,22,198]],[1,[212,5,195]]],alpha:[[0,0],[0.5,1],[1,0.78]],scale:[[0,0.83],[0.5,0.42],[1,0.14]],kind:'dust',follow:true}},
+  {id:'heals',name:'Violet heal stream on the ally',desc:'heal_low_base recoloured (47,0,179) → (138,90,238), per heal event',sw:[138,90,238],emitter:{anchor:'feet',at:'ally',trig:'heal',span:633,vRange:0.15,speed:1.4,life:1.1,rate:[[0,20],[100,40],[633,0]],area:0.69,
+    color:[[0,[47,0,179]],[0.5,[74,0,225]],[1,[138,90,238]]],alpha:[[0,0.9],[1,0]],scale:[[0,0.09],[1,0.05]],kind:'glow'}},
+ ],
+ reset(fx){fx.trig={heal:[]};fx.st={next:500};},
+ tick(fx,ms){ const st=fx.st; while(ms>=st.next){ st.next+=1000; fct(String(9+((rnd()*4)|0)),[255,255,0],24,[cur.vp[0],2.6,cur.vp[2]]);
+   fct('+2',[100,255,100],24,[AT.ally[0],2.6,AT.ally[2]]); const ev=fx.knobs.every*1000; if(!fx.lastHeal||ms-fx.lastHeal>=ev-1){fx.trig.heal.push(ms);fx.lastHeal=ms;} }
+   fx.trig.heal=fx.trig.heal.filter(t=>ms-t<2500); },
+ bodies(fx,vp){drawCapsule(AT.caster,CLASS.priest);drawCapsule(vp,CLASS.victim);drawCapsule(AT.ally,CLASS.warlock);},
+ constants(fx){const K=fx.knobs;return [
+  `// Vampiric Embrace: soothingkiss_impact_head.m2 (kit 3109) on the target; violet heal_low_base (kit 3072) on each healed ally. AS-335 bench.`,
+  `pub const VAMPIRIC_EMBRACE_IMPLOSION: bool = ${b(on(fx,'implode'))}; // 2 s`,
+  `pub const VAMPIRIC_EMBRACE_HEAL_STREAM: bool = ${b(on(fx,'heals'))};`,
+  `pub const VAMPIRIC_EMBRACE_HEAL_VISUAL_MIN_INTERVAL_SECS: f32 = ${f2(K.every)}; // per ally; client = every heal event`,
+  `// No debuff state (client has none).`];}
+}),
+// ================================================================ Silence
+mkFx({id:'silence',name:'Silence',sub:'state at the mouth · shadowwordsilence_breath.m2 · 5 s',durMs:5000,frame:{dist:6,ty:1.9},loopTotal:6000,
+ notes:[
+  'The cast uses the shadow hands we '+SHIP+'. Nothing lands. <b>The victim carries a state at the mouth for 5 s.</b>',
+  '<b>Onset (inhale):</b> violet, magenta and green motes are sucked into the mouth (80/s × 3 for 0.17 s, −3.3 yd/s). Smoke puffs (0.56 → 0.03 yd) are pulled in with dark specks and sparkles to 0.87 s.',
+  '<b>Loop:</b> every 4.2 s a small puff of grey-magenta smoke (0.03 → 0.28 yd) and sparkles is <b>breathed out</b>. A 5 s silence shows one exhale.',
+  'Counterspell\'s and Spell Lock\'s silences have no client state, so this does not set a pattern for Kick or Spell Lock.',
+  'Engine note: our only silence today is Unstable Affliction\'s backlash, and new silences are routed to its burst. Priest Silence needs its own route, a build-card detail.'],
+ asks:['Recommended: client-faithful. It is small (the smoke tops out at 0.28 yd) and mostly idle.'],
+ knobDefs:[...STD],
+ layers:[
+  {id:'inhale',name:'Inhale motes',desc:'gradient64flipb, 3 × 80/s for 0–167 ms, inward 3.3 yd/s',sw:[200,40,220],emitter:{anchor:'head',pos:[0,0.3,-0.15],inward:0.75,speed:-3.3,life:0.25,rate:240,win:[[0,1],[167,0]],
+    color:[[0,[150,60,255]],[0.5,[255,40,200]],[1,[60,220,120]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.02],[1,0.035]],kind:'glow',follow:true}},
+  {id:'insmoke',name:'Inhaled smoke and specks',desc:'toonsmoke16 2 × 50/s 233–867 ms, pulled in, 0.56 → 0.03 yd',sw:[163,0,175],emitter:{anchor:'head',pos:[0,0.3,-0.15],inward:0.6,speed:-0.83,life:0.6,rate:100,win:[[0,0],[233,1],[867,0]],blend:'alpha',
+    color:[[0,[120,120,120]],[1,[163,0,175]]],alpha:[[0,0.7],[1,0]],scale:[[0,0.56],[1,0.03]],kind:'smoke',follow:true}},
+  {id:'exhale',name:'Exhaled smoke and sparkles',desc:'loop: 2 × 50/s 233–800 ms after 1167 ms, 0.03 → 0.28 yd',sw:[150,170,230],emitter:{anchor:'head',pos:[0,0.3,-0.15],vRange:0.8,speed:0.28,life:1.5,rate:100,win:[[0,0],[1400,1],[1967,0]],blend:'alpha',
+    color:[[0,[130,130,130]],[0.5,[163,0,175]],[1,[160,190,240]]],alpha:[[0,0.8],[1,0]],scale:[[0,0.03],[0.5,0.08],[1,0.28]],kind:'smoke',follow:true}},
+  {id:'sparkle',name:'Sparkles',desc:'star5a 2 × 30/s, spin ±7, green → magenta → blue',sw:[60,220,120],emitter:{anchor:'head',pos:[0,0.3,-0.15],vRange:3.14,speed:0.4,spin:1.1,life:0.8,rate:60,win:[[0,0],[233,1],[867,0],[1534,1],[2334,0]],
+    color:[[0,[60,220,120]],[0.5,[255,40,200]],[1,[30,40,160]]],alpha:[[0,1],[1,0]],scale:[[0,0.05],[1,0.03]],kind:'star',follow:true}},
+ ],
+ bodies(fx,vp){drawCapsule(vp,CLASS.mage||[105,204,240]);},
+ constants(fx){return [
+  `// Silence: shadowwordsilence_breath.m2 (kit 297) at the victim's mouth for the silence. AS-335 bench.`,
+  `pub const SILENCE_INHALE: bool = ${b(on(fx,'inhale')||on(fx,'insmoke'))};`,
+  `pub const SILENCE_EXHALE: bool = ${b(on(fx,'exhale'))}; // every 4.167 s`,
+  `pub const SILENCE_SPARKLES: bool = ${b(on(fx,'sparkle'))};`,
+  `// Route: Priest Silence gets this state, not UA's BacklashBurst.`];}
+}),
+// ================================================================ Blessed Recovery
+mkFx({id:'recovery',name:'Blessed Recovery',sub:'proc · renew_chest.m2 @Chest (Renew\'s impact) · 0.7 s',durMs:1900,frame:{dist:6,ty:1.3},
+ notes:[
+  'When the proc fires, a one-shot of <b>Renew\'s impact</b> plays on the Priest. A few soft amber rings swell from the chest (0.28 → 1.09 yd) with orange-to-white glows, 9.2/s each for 0.7 s.',
+  '<b>The 6 s heal-over-time has no state</b>, and its ticks draw nothing.'],
+ asks:['Recommended: client-faithful.'],
+ knobDefs:[...STD],
+ layers:[
+  {id:'rings',name:'Amber rings',desc:'shockwavewater1, 9.2/s to 700 ms, 0.28 → 1.09 yd',sw:[250,219,8],emitter:{anchor:'chest',vRange:3.14,speed:0.18,drag:0.3,life:0.76,rate:9.2,win:[[0,1],[700,0]],
+    color:[[0,[255,157,3]],[0.5,[250,219,8]],[1,[253,179,20]]],alpha:[[0,0.15],[0.5,0.57],[1,0]],scale:[[0,0.28],[0.5,0.49],[1,1.09]],kind:'glow',follow:true}},
+  {id:'glows',name:'Orange-white glows',desc:'yellow_glow3a, 9.2/s, to 0.7 yd',sw:[255,200,120],emitter:{anchor:'chest',vRange:3.14,speed:0.18,drag:0.3,life:0.76,rate:9.2,win:[[0,1],[700,0]],
+    color:[[0,[255,150,40]],[1,[255,250,240]]],alpha:[[0,0.3],[0.5,0.45],[1,0]],scale:[[0,0.22],[0.5,0.7],[1,0.56]],kind:'glow',follow:true}},
+ ],
+ bodies(fx,vp){drawCapsule(vp,CLASS.priest);},
+ constants(fx){return [
+  `// Blessed Recovery proc: renew_chest.m2 (kit 435) one-shot on the Priest. AS-335 bench.`,
+  `pub const BLESSED_RECOVERY_RINGS: bool = ${b(on(fx,'rings'))};`,
+  `pub const BLESSED_RECOVERY_GLOWS: bool = ${b(on(fx,'glows'))};`,
+  `// HoT ticks: no visual.`];}
+}),
+// ================================================================ Reflective Shield
+mkFx({id:'reflect',name:'Reflective Shield',sub:'on the attacker · holy_impactdd_low_chest.m2 @Chest + flinch · 0.93 s (TBC)',durMs:1000,frame:{dist:8,ty:1.3},loopTotal:2200,
+ notes:[
+  'TBC-only. Each time damage is reflected, the <b>attacker</b> gets a 2.5 yd gold starburst at the chest and a flinch. Nothing ties it to the Priest\'s shield; the reflected damage number is the link.',
+  'It is the <b>small sibling of Holy Nova\'s enemy starburst</b>, so the two can share one implementation at two scales.',
+  'The Warrior here hits the shielded Priest, and the burst plays on the Warrior.'],
+ asks:['Recommended: client-faithful, sharing Holy Nova\'s starburst at the smaller scale.'],
+ knobDefs:[...STD],
+ layers:[
+  {id:'flash',name:'Gold flash',desc:'glowstar_yellow, 0.83 → 2.5 yd',sw:[255,230,120],custom:true},
+  {id:'showers',name:'Spark showers',desc:'starflashyellow, up to 100/s, falling',sw:[255,255,220],emitter:{anchor:'chest',at:'e1',vRange:3.14,speed:2.4,gravity:6.9,life:0.75,rate:[[0,0],[150,100],[300,0]],win:[[0,1],[400,0]],
+    color:[[0,[255,255,255]],[1,[255,220,90]]],alpha:[[0,1],[1,0]],scale:[[0,0.09],[1,0.03]],kind:'star'}},
+  {id:'streaks',name:'Gold streaks and dust',desc:'ribbon streaks (tail 4) + brown-gold puffs',sw:[212,131,58],emitter:{anchor:'chest',at:'e1',vRange:3.14,speed:2.0,life:0.6,rate:[[0,0],[150,150],[300,0]],win:[[0,1],[400,0]],tail:4,
+    color:[[0,[255,240,150]],[1,[212,131,58]]],alpha:[[0,1],[1,0]],scale:[[0,0.05],[1,0.03]],kind:'glow'}},
+ ],
+ bodies(fx,vp,ms){ drawCapsule(vp,CLASS.priest); const fl=ms>80&&ms<380?Math.sin((ms-80)/300*Math.PI)*0.12:0; drawCapsule([AT.e1[0]+fl,1.0,AT.e1[2]],CLASS.warrior); },
+ customDraw(fx,ms,vp){ if(!on(fx,'flash')) return; const K=fx.knobs, t=ms/(K.duration??1); if(t>800) return;
+  const sz=keys([[0,0.83],[150,2.5],[400,0.03]],t), a=keys([[0,0],[80,1],[400,0]],t); bbGlow([AT.e1[0],1.45,AT.e1[2]],sz*K.size,sz*K.size,[255,241,200],a*0.75);
+  ring3([vp[0],0,vp[2]],1.45,0.62,[255,220,120],0.35,2); },
+ constants(fx){const K=fx.knobs;return [
+  `// Reflective Shield: holy_impactdd_low_chest.m2 (kit 121) on the ATTACKER per reflect, plus the CombatWound flinch. AS-335 bench.`,
+  `pub const REFLECTIVE_SHIELD_BURST: bool = ${b(on(fx,'flash')||on(fx,'showers')||on(fx,'streaks'))}; // shares Holy Nova's starburst at 2.5 yd`,
+  `pub const REFLECTIVE_SHIELD_SIZE_MUL: f32 = ${f2(K.size)};`];}
+}),
+];
+
+// ---------- UI wiring ----------
+let cur=EFFECTS[0], simMs=0, paused=false, lastNow=performance.now();
+const $=id=>document.getElementById(id);
+function buildTabs(){const nav=$('tabs');nav.innerHTML='';
+  for(const fx of EFFECTS){const bt=document.createElement('button');bt.className='tab';bt.role='tab';bt.id='tab-'+fx.id;bt.textContent=fx.name;bt.setAttribute('aria-selected',fx===cur);
+    bt.onclick=()=>{cur=fx;try{localStorage.setItem('as335bench.tab',fx.id)}catch(e){};select();};nav.appendChild(bt);} }
+const knobText=(k,v)=>k.names?k.names[v|0]:(+v).toFixed(2);
+function select(){
+  document.querySelectorAll('.tab').forEach(bt=>bt.setAttribute('aria-selected',bt.id==='tab-'+cur.id));
+  cam.dist=cur.frame.dist;cam.target=[0,cur.frame.ty,0];
+  $('moving').checked=!!cur.moverDefault;
+  const L=$('layers');L.innerHTML='';
+  for(const l of cur.layers){const d=document.createElement('div');d.className='layer'+(l.cls?' '+l.cls:'');const id='ly-'+cur.id+'-'+l.id;
+    d.innerHTML=`<input type="checkbox" id="${id}" ${cur.layersOn[l.id]?'checked':''}><span class="sw" style="background:${rgb(l.sw,1)}"></span><label for="${id}"><span class="nm">${l.name}</span><span class="ds">${l.desc}</span></label>`;
+    d.querySelector('input').onchange=e=>{cur.layersOn[l.id]=e.target.checked;renderOut();};L.appendChild(d);}
+  const Kn=$('knobs');Kn.innerHTML='';
+  for(const k of cur.knobDefs){const d=document.createElement('div');d.className='knob';const id='kn-'+cur.id+'-'+k.key;
+    d.innerHTML=`<span>${k.label}</span><input type="range" id="${id}" min="${k.min}" max="${k.max}" step="${k.step}" value="${cur.knobs[k.key]}"><output for="${id}">${knobText(k,cur.knobs[k.key])}</output>`;
+    const inp=d.querySelector('input'),o=d.querySelector('output');inp.oninput=()=>{cur.knobs[k.key]=+inp.value;o.textContent=knobText(k,+inp.value);renderOut();if(k.names)restart();};Kn.appendChild(d);}
+  const rs=document.createElement('button');rs.className='btn';rs.textContent='Reset to client values';rs.style.marginTop='8px';
+  rs.onclick=()=>{for(const k of cur.knobDefs)cur.knobs[k.key]=k.def;for(const l of cur.layers)cur.layersOn[l.id]=l.on!==false;select();};Kn.appendChild(rs);
+  $('notes').innerHTML=cur.notes.map(n=>`<li>${n}</li>`).join('');
+  $('asks').innerHTML=(cur.asks||[]).map(a=>`<p class="ask">${a}</p>`).join('');
+  restart();renderOut();
+}
+function renderOut(){$('out').textContent=cur.constants(cur).join('\n');}
+function restart(){simMs=0;FCT=[];cur.emitters.forEach(x=>x.e.reset());cur.swingAt=null;if(cur.reset)cur.reset(cur);}
+$('replay').onclick=restart;
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Play':'Pause';};
+$('copy').onclick=()=>{const txt=$('out').textContent;const done=()=>{$('copy').textContent='Copied';setTimeout(()=>$('copy').textContent='Copy',1200)};
+  const sel=()=>{const r=document.createRange();r.selectNodeContents($('out'));const s=getSelection();s.removeAllRanges();s.addRange(r);};
+  try{navigator.clipboard.writeText(txt).then(done,sel);}catch(e){sel();}};
+
+// ---------- main loop ----------
+function victimPos(ms){ if(!$('moving').checked) return [0,1.0,0];
+  const R=3.2, a=(ms/1000)*3/R; return [R*Math.cos(a)-R,1.0,R*Math.sin(a)]; }
+function frame(now){
+  const dt=Math.min(0.05,(now-lastNow)/1000)*(+$('speed').value); lastNow=now;
+  const step=paused?0:dt; simMs+=step*1000;
+  const total=cur.loopFx?Infinity:(cur.loopTotal??(cur.durMs*(cur.knobs.duration??1)+1200));
+  if(simMs>total){ if($('loop').checked) restart(); else simMs=total; }
+  setupView();
+  g.fillStyle='#0d0c10';g.fillRect(0,0,cv.width,cv.height);
+  drawFloor();
+  const vp=victimPos(simMs); cur.vp=vp; const origin=[vp[0],0,vp[2]];
+  if(!paused && cur.tick) cur.tick(cur,simMs);
+  for(const {id,e} of cur.emitters){ if(!cur.layersOn[id]){e.ps=[];continue;} if(!paused) e.update(step,simMs,origin); }
+  shadow(vp);
+  cur.bodies(cur,vp,simMs);
+  if(cur.customDraw) cur.customDraw(cur,simMs,vp);
+  for(const {id,e} of cur.emitters) if(cur.layersOn[id]) e.draw();
+  drawFct(step);
+  $('hud').textContent=`${cur.name} — ${cur.sub}\nt = ${(simMs/1000).toFixed(2)} s${cur.hud?'\n'+cur.hud(cur):''}`;
+  requestAnimationFrame(frame);
+}
+buildTabs();
+try{const saved=localStorage.getItem('as335bench.tab');const fx=EFFECTS.find(x=>x.id===saved);if(fx)cur=fx;}catch(e){}
+select();
+requestAnimationFrame(frame);
+</script>
